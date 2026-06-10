@@ -260,6 +260,12 @@ const newReportRoutes = () => [
     name: 'Reports Label',
     label: t('SIDEBAR.REPORTS_LABEL'),
     to: accountScopedRoute('label_reports_index'),
+    activeOn: ['label_reports_show'],
+  },
+  {
+    name: 'Label Dashboard',
+    label: t('SIDEBAR.LABEL_DASHBOARD'),
+    to: accountScopedRoute('label_dashboard'),
   },
   {
     name: 'Reports Inbox',
@@ -564,6 +570,12 @@ const menuItems = computed(() => {
           to: accountScopedRoute('bot_reports'),
         },
       ],
+    },
+    {
+      name: 'CRM',
+      label: t('SIDEBAR.CRM'),
+      icon: 'i-lucide-rocket',
+      to: accountScopedRoute('crm_board'),
     },
     {
       name: 'Campaigns',

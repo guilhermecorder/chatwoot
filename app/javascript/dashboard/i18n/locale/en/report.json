@@ -646,5 +646,16 @@
     "AVG_REPLY_TIME": "Avg. Customer Waiting Time",
     "RESOLUTION_COUNT": "Resolution Count",
     "CONVERSATIONS": "No. of conversations"
+  },
+  "LABEL_DASHBOARD": {
+    "HEADER": "Label Dashboard",
+    "DESCRIPTION": "Visual overview of conversation distribution across labels and inboxes.",
+    "TOP_LABELS": "Top Labels by Volume",
+    "CONVERSATIONS": "conversations",
+    "NO_DATA": "No data available for the selected period.",
+    "CHART_TITLE": "Conversations per Label",
+    "CHART_LABEL": "Conversations",
+    "MATRIX_TITLE": "Inbox × Label Matrix",
+    "MATRIX_INBOX": "Inbox"
   }
 }

@@ -108,6 +108,17 @@ class ReportsAPI extends ApiClient {
       },
     });
   }
+
+  getInboxLabelMatrix({ from, to, inboxIds, labelIds } = {}) {
+    return axios.get(`${this.url}/inbox_label_matrix`, {
+      params: {
+        since: from,
+        until: to,
+        inbox_ids: inboxIds,
+        label_ids: labelIds,
+      },
+    });
+  }
 }
 
 export default new ReportsAPI();

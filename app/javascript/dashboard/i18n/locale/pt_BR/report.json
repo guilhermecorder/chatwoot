@@ -636,6 +636,17 @@
       "VIEW_DETAILS": "Ver detalhes"
     }
   },
+  "LABEL_DASHBOARD": {
+    "HEADER": "Dashboard de Etiquetas",
+    "DESCRIPTION": "Visão geral da distribuição de conversas por etiquetas e caixas de entrada.",
+    "TOP_LABELS": "Principais Etiquetas por Volume",
+    "CONVERSATIONS": "conversas",
+    "NO_DATA": "Nenhum dado disponível para o período selecionado.",
+    "CHART_TITLE": "Conversas por Etiqueta",
+    "CHART_LABEL": "Conversas",
+    "MATRIX_TITLE": "Matriz Caixa de Entrada × Etiqueta",
+    "MATRIX_INBOX": "Caixa de Entrada"
+  },
   "SUMMARY_REPORTS": {
     "INBOX": "Caixa de Entrada",
     "AGENT": "Agente",

@@ -23,6 +23,7 @@ import CsatResponses from './CsatResponses.vue';
 import BotReports from './BotReports.vue';
 import LiveReports from './LiveReports.vue';
 import SLAReports from './SLAReports.vue';
+import LabelDashboard from './LabelDashboard.vue';
 
 const meta = {
   featureFlag: FEATURE_FLAGS.REPORTS,
@@ -121,6 +122,14 @@ const revisedReportRoutes = [
       permissions: ['administrator', 'report_manage'],
     },
     component: LabelReportsShow,
+  },
+  {
+    path: 'labels_dashboard',
+    name: 'label_dashboard',
+    meta: {
+      permissions: ['administrator', 'report_manage'],
+    },
+    component: LabelDashboard,
   },
 ];
 

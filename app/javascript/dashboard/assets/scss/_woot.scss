@@ -146,3 +146,32 @@ body {
     letter-spacing: -0.24px;
   }
 }
+
+/* CRM Kanban scrollbars */
+.kanban-board-scroll::-webkit-scrollbar {
+  height: 5px;
+}
+.kanban-board-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.kanban-board-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 10px;
+}
+.kanban-board-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.75);
+}
+
+.column-cards-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.column-cards-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.column-cards-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+}
+.column-cards-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
+}
