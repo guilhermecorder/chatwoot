@@ -3,6 +3,12 @@ import CrmAPI from 'dashboard/api/crm';
 const state = {
   pipelines: [],
   contacts: [],
+  settings: {
+    n8n_base_url:             '',
+    n8n_api_key_configured:   false,
+    n8n_workflows:            [],
+    n8n_workflows_fetched_at: null,
+  },
   uiFlags: {
     isFetchingPipelines: false,
     isFetchingContacts: false,
@@ -11,10 +17,12 @@ const state = {
 };
 
 const getters = {
-  getPipelines: s => s.pipelines,
-  getContacts: s => s.contacts,
+  getPipelines:    s => s.pipelines,
+  getContacts:     s => s.contacts,
   getContactsByStage: s => stageId => s.contacts.filter(c => c.stage_id === stageId),
-  getUIFlags: s => s.uiFlags,
+  getUIFlags:      s => s.uiFlags,
+  getSettings:     s => s.settings,
+  getN8nWorkflows: s => s.settings.n8n_workflows || [],
 };
 
 const actions = {
@@ -94,6 +102,85 @@ const actions = {
     await CrmAPI.removeContact(pipelineId, id);
     commit('deleteContact', id);
   },
+
+  async fetchContactHistory(_, { pipelineId, contactId }) {
+    const { data } = await CrmAPI.getContactHistory(pipelineId, contactId);
+    return data;
+  },
+
+  async fetchDashboard(_, { pipelineId, period }) {
+    const { data } = await CrmAPI.getDashboard(pipelineId, period);
+    return data;
+  },
+
+  async triggerLabelChange(_, { pipelineId, contactId, added, removed }) {
+    if (!added.length && !removed.length) return;
+    await CrmAPI.triggerLabelChange(pipelineId, contactId, { added, removed });
+  },
+
+  // ── Settings / Integrations ──────────────────────────────────────
+  async fetchSettings({ commit }) {
+    const { data } = await CrmAPI.getSettings();
+    commit('setSettings', data);
+    return data;
+  },
+
+  async updateSettings({ commit }, params) {
+    const { data } = await CrmAPI.updateSettings(params);
+    commit('setSettings', data);
+    return data;
+  },
+
+  async testN8n() {
+    const { data } = await CrmAPI.testN8n();
+    return data;
+  },
+
+  async fetchN8nWorkflows({ commit }) {
+    const { data } = await CrmAPI.fetchN8nWorkflows();
+    if (data.success) commit('setN8nWorkflows', data.workflows);
+    return data;
+  },
+
+  async updateMetaAds({ commit }, params) {
+    const { data } = await CrmAPI.updateMetaAds(params);
+    commit('setSettings', { meta_ads: data });
+    return data;
+  },
+  async testMetaAds() {
+    const { data } = await CrmAPI.testMetaAds();
+    return data;
+  },
+
+  async updateGoogleAds({ commit }, params) {
+    const { data } = await CrmAPI.updateGoogleAds(params);
+    commit('setSettings', { google_ads: data });
+    return data;
+  },
+  async testGoogleAds() {
+    const { data } = await CrmAPI.testGoogleAds();
+    return data;
+  },
+
+  // ── Automations ──────────────────────────────────────────────────
+  async fetchAutomations(_, { pipelineId, stageId }) {
+    const { data } = await CrmAPI.getAutomations(pipelineId, stageId);
+    return data;
+  },
+
+  async createAutomation(_, { pipelineId, stageId, ...automationData }) {
+    const { data } = await CrmAPI.createAutomation(pipelineId, stageId, automationData);
+    return data;
+  },
+
+  async updateAutomation(_, { pipelineId, stageId, id, ...automationData }) {
+    const { data } = await CrmAPI.updateAutomation(pipelineId, stageId, id, automationData);
+    return data;
+  },
+
+  async deleteAutomation(_, { pipelineId, stageId, id }) {
+    await CrmAPI.deleteAutomation(pipelineId, stageId, id);
+  },
 };
 
 const mutations = {
@@ -119,6 +206,8 @@ const mutations = {
     const p = s.pipelines.find(x => x.id === pipelineId);
     if (p) p.stages = p.stages.filter(x => x.id !== stageId);
   },
+  setSettings(s, data) { s.settings = { ...s.settings, ...data }; },
+  setN8nWorkflows(s, workflows) { s.settings.n8n_workflows = workflows; },
   setContacts(s, data) { s.contacts = data; },
   addContact(s, c) { s.contacts.push(c); },
   editContact(s, c) {

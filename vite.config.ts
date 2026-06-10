@@ -79,6 +79,9 @@ export default defineConfig({
         }
       : undefined,
   },
+  server: {
+    allowedHosts: true,
+  },
   resolve: {
     alias: {
       vue: 'vue/dist/vue.esm-bundler.js',

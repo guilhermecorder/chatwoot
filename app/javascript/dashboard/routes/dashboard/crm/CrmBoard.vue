@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import KanbanColumn from './components/KanbanColumn.vue';
 import ContactModal from './components/ContactModal.vue';
+import CrmIntegrationsModal from './components/CrmIntegrationsModal.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import ContactAPI from 'dashboard/api/contacts';
 
@@ -203,8 +204,10 @@ const alreadyInPipelineResults = computed(() =>
   contactSearchResults.value.filter(c => alreadyAddedContactIds.value.has(c.id))
 );
 
-// ── Edit mode ─────────────────────────────────────────────
-const isEditMode = ref(false);
+// ── Edit mode & Programming mode ──────────────────────────
+const isEditMode           = ref(false);
+const isProgrammingMode    = ref(false);
+const showIntegrationsModal = ref(false);
 // ──────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -222,6 +225,7 @@ const selectPipeline = async (id) => {
   isRenamingPipeline.value = false;
   showDeletePipelineConfirm.value = false;
   isEditMode.value = false;
+  isProgrammingMode.value = false;
   clearFilters();
   await store.dispatch('crm/fetchContacts', id);
 };
@@ -414,12 +418,32 @@ const addContactToStage = async (contact) => {
 
         <!-- Edit mode toggle -->
         <button
-          v-if="selectedPipeline && !isEditMode"
+          v-if="selectedPipeline && !isEditMode && !isProgrammingMode"
           class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
           @click="isEditMode = true"
         >
           <span class="i-lucide-layout-template text-sm" />
           {{ $t('CRM.EDIT_MODE') }}
+        </button>
+
+        <!-- Programming mode toggle -->
+        <button
+          v-if="selectedPipeline && !isProgrammingMode && !isEditMode"
+          class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-yellow-400/60 text-yellow-600 hover:bg-yellow-500/10 transition-colors"
+          @click="isProgrammingMode = true"
+        >
+          <span class="i-lucide-zap text-sm" />
+          {{ $t('CRM.PROGRAMMING_MODE') }}
+        </button>
+
+        <!-- Integrações -->
+        <button
+          class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+          title="Integrações (n8n, Meta, Google...)"
+          @click="showIntegrationsModal = true"
+        >
+          <span class="i-lucide-plug text-sm" />
+          Integrações
         </button>
 
         <button
@@ -447,6 +471,24 @@ const addContactToStage = async (contact) => {
       >
         <span class="i-lucide-x text-sm" />
         {{ $t('CRM.EXIT_EDIT_MODE') }}
+      </button>
+    </div>
+
+    <!-- Programming mode banner -->
+    <div
+      v-if="isProgrammingMode"
+      class="flex items-center gap-3 px-6 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-700 flex-shrink-0"
+    >
+      <span class="i-lucide-zap text-yellow-600 dark:text-yellow-400 text-sm" />
+      <span class="text-sm font-medium text-yellow-700 dark:text-yellow-300 flex-1">
+        {{ $t('CRM.PROGRAMMING_MODE_ACTIVE') }}
+      </span>
+      <button
+        class="flex items-center gap-1.5 text-sm px-3 py-1 rounded-lg bg-yellow-600 text-white hover:bg-yellow-700 transition-colors"
+        @click="isProgrammingMode = false"
+      >
+        <span class="i-lucide-x text-sm" />
+        {{ $t('CRM.EXIT_PROGRAMMING_MODE') }}
       </button>
     </div>
 
@@ -666,6 +708,7 @@ const addContactToStage = async (contact) => {
           :pipeline-id="selectedPipelineId"
           :contacts="contactsByStage[stage.id] ?? []"
           :edit-mode="isEditMode"
+          :programming-mode="isProgrammingMode"
           :all-stages="selectedPipeline.stages"
           @card-click="selectedContact = $event"
           @stage-drop="onStageDrop"
@@ -714,6 +757,12 @@ const addContactToStage = async (contact) => {
       @close="selectedContact = null"
       @updated="onContactUpdated"
       @removed="selectedContact = null"
+    />
+
+    <!-- Integrations modal -->
+    <CrmIntegrationsModal
+      v-if="showIntegrationsModal"
+      @close="showIntegrationsModal = false"
     />
 
     <!-- Add contact modal -->

@@ -24,6 +24,7 @@ import BotReports from './BotReports.vue';
 import LiveReports from './LiveReports.vue';
 import SLAReports from './SLAReports.vue';
 import LabelDashboard from './LabelDashboard.vue';
+import CrmDashboardReport from './CrmDashboardReport.vue';
 
 const meta = {
   featureFlag: FEATURE_FLAGS.REPORTS,
@@ -176,6 +177,14 @@ export default {
           name: 'bot_reports',
           meta,
           component: BotReports,
+        },
+        {
+          path: 'crm_dashboard',
+          name: 'crm_dashboard_reports',
+          meta: {
+            permissions: ['administrator', 'report_manage'],
+          },
+          component: CrmDashboardReport,
         },
       ],
     },

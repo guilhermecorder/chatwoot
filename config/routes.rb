@@ -126,11 +126,28 @@ Rails.application.routes.draw do
           end
           resources :campaigns, only: [:index, :create, :show, :update, :destroy]
           namespace :crm do
+            resource :settings, only: [:show, :update] do
+              post :test_n8n
+              post :fetch_workflows
+              post :update_meta_ads
+              post :test_meta_ads
+              post :update_google_ads
+              post :test_google_ads
+            end
             resources :pipelines, only: [:index, :show, :create, :update, :destroy] do
               resources :stages, only: [:index, :create, :update, :destroy] do
                 collection { post :reorder }
+                resources :automations, only: [:index, :create, :update, :destroy] do
+                  member { post :trigger }
+                end
               end
-              resources :contacts, only: [:index, :create, :update, :destroy]
+              resources :contacts, only: [:index, :create, :update, :destroy] do
+                member do
+                  get  :history
+                  post :trigger_label_change
+                end
+              end
+              resource :dashboard, only: [:show]
             end
           end
           resources :dashboard_apps, only: [:index, :show, :create, :update, :destroy]

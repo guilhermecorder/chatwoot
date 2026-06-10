@@ -1,6 +1,6 @@
 class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseController
   before_action :pipeline
-  before_action :crm_contact, only: [:update, :destroy]
+  before_action :crm_contact, only: [:update, :destroy, :history]
 
   def index
     crm_contacts = @pipeline.crm_contacts.includes(:contact, :stage, :assignee)
@@ -23,13 +23,78 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   end
 
   def update
+    previous_stage = @crm_contact.stage
     @crm_contact.update!(crm_contact_params)
+
+    # Dispara automações se o card mudou de coluna
+    if @crm_contact.saved_change_to_stage_id?
+      new_stage = @crm_contact.stage
+      CrmAutomationTriggerService.new(
+        crm_contact:    @crm_contact,
+        new_stage:      new_stage,
+        previous_stage: previous_stage,
+        event_type:     'card_entered'
+      ).call
+
+      CrmAutomationTriggerService.new(
+        crm_contact:    @crm_contact,
+        new_stage:      previous_stage,
+        previous_stage: previous_stage,
+        event_type:     'card_left'
+      ).call
+    end
+
     render json: contact_json(@crm_contact)
   end
 
   def destroy
     @crm_contact.destroy!
     head :no_content
+  end
+
+  def history
+    logs = @crm_contact.stage_logs.order(entered_at: :asc)
+    render json: logs.map { |log|
+      {
+        id:               log.id,
+        stage_id:         log.stage_id,
+        stage_name:       log.stage_name,
+        stage_color:      log.stage_color,
+        event_type:       log.event_type,
+        entered_at:       log.entered_at,
+        left_at:          log.left_at,
+        duration_minutes: log.duration_minutes,
+      }
+    }
+  end
+
+  # POST /crm/pipelines/:pipeline_id/contacts/:id/trigger_label_change
+  # Chamado pelo frontend após salvar etiquetas — recebe diff e dispara automações
+  def trigger_label_change
+    added   = Array(params[:added])
+    removed = Array(params[:removed])
+
+    added.each do |label|
+      CrmAutomationTriggerService.new(
+        crm_contact:    @crm_contact,
+        new_stage:      @crm_contact.stage,
+        previous_stage: @crm_contact.stage,
+        event_type:     'label_added',
+        label:          label
+      ).call
+    end
+
+    removed.each do |label|
+      CrmAutomationTriggerService.new(
+        crm_contact:    @crm_contact,
+        new_stage:      @crm_contact.stage,
+        previous_stage: @crm_contact.stage,
+        event_type:     'label_removed',
+        label:          label
+      ).call
+    end
+
+    head :ok
   end
 
   private

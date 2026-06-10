@@ -24,7 +24,8 @@ class Crm::Stage < ApplicationRecord
   self.table_name = 'crm_stages'
 
   belongs_to :pipeline, class_name: 'Crm::Pipeline'
-  has_many :crm_contacts, class_name: 'Crm::Contact', foreign_key: :stage_id, dependent: :nullify
+  has_many :crm_contacts,  class_name: 'Crm::Contact',    foreign_key: :stage_id, dependent: :nullify
+  has_many :automations,   class_name: 'Crm::Automation',  foreign_key: :stage_id, dependent: :destroy
 
   validates :name, presence: true
   validates :color, presence: true

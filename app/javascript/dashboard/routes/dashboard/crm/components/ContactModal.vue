@@ -27,6 +27,11 @@ const isSaving = ref(false);
 const isRemoving = ref(false);
 const showRemoveConfirm = ref(false);
 
+// History tab state
+const historyLogs = ref([]);
+const historyLoading = ref(false);
+const historyError = ref(false);
+
 // Label picker state
 const labelSearch = ref('');
 const showLabelPicker = ref(false);
@@ -52,6 +57,8 @@ watch(() => props.contact, (c) => {
   showRemoveConfirm.value = false;
   labelSearch.value = '';
   showLabelPicker.value = false;
+  historyLogs.value = [];
+  historyError.value = false;
   form.value = {
     stage_id: c.stage_id,
     assignee_id: c.assignee?.id ?? null,
@@ -62,6 +69,44 @@ watch(() => props.contact, (c) => {
     labels: [...(c.labels ?? [])],
   };
 }, { immediate: true });
+
+watch(activeTab, async (tab) => {
+  if (tab === 'history' && props.contact && !historyLogs.value.length) {
+    await loadHistory();
+  }
+});
+
+const loadHistory = async () => {
+  if (!props.contact) return;
+  historyLoading.value = true;
+  historyError.value = false;
+  try {
+    historyLogs.value = await store.dispatch('crm/fetchContactHistory', {
+      pipelineId: props.pipeline.id,
+      contactId: props.contact.id,
+    });
+  } catch {
+    historyError.value = true;
+  } finally {
+    historyLoading.value = false;
+  }
+};
+
+// Tempo total no funil (soma dos durations)
+const totalMinutes = computed(() =>
+  historyLogs.value.reduce((sum, l) => sum + (l.duration_minutes ?? 0), 0)
+);
+
+const formatDuration = (minutes) => {
+  if (!minutes || minutes <= 0) return null;
+  if (minutes < 60) return `${minutes}min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h < 24) return m > 0 ? `${h}h ${m}min` : `${h}h`;
+  const d = Math.floor(h / 24);
+  const rh = h % 24;
+  return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
+};
 
 const filteredAvailableLabels = computed(() =>
   accountLabels.value.filter(l =>
@@ -129,6 +174,9 @@ const save = async () => {
   isSaving.value = true;
   try {
     const { labels, ...crmFields } = form.value;
+    const previousLabels = props.contact.labels ?? [];
+
+    // Salva campos CRM e etiquetas em paralelo
     await Promise.all([
       store.dispatch('crm/updateContact', {
         pipelineId: props.pipeline.id,
@@ -140,6 +188,19 @@ const save = async () => {
         labels,
       }),
     ]);
+
+    // Calcula diff de etiquetas e dispara automações label_added/label_removed
+    const added   = labels.filter(l => !previousLabels.includes(l));
+    const removed = previousLabels.filter(l => !labels.includes(l));
+    if (added.length || removed.length) {
+      store.dispatch('crm/triggerLabelChange', {
+        pipelineId: props.pipeline.id,
+        contactId:  props.contact.id,
+        added,
+        removed,
+      }).catch(() => {}); // não bloqueia o save se falhar
+    }
+
     useAlert(t('CRM.SUCCESS.CONTACT_SAVED'));
     emit('updated');
   } catch {
@@ -550,9 +611,117 @@ const openConversation = () => {
         </div>
 
         <!-- ── Tab: Histórico ── -->
-        <div v-else-if="activeTab === 'history'" class="flex flex-col items-center justify-center py-16 text-n-slate-10">
-          <span class="i-lucide-clock-4 text-4xl mb-3" />
-          <p class="text-sm text-center px-8">{{ $t('CRM.MODAL.HISTORY_SOON') }}</p>
+        <div v-else-if="activeTab === 'history'" class="p-6">
+
+          <!-- Loading -->
+          <div v-if="historyLoading" class="flex items-center justify-center py-12 text-n-slate-10">
+            <span class="i-lucide-loader-2 text-2xl animate-spin mr-2" />
+            <span class="text-sm">{{ $t('CRM.MODAL.LOADING') }}</span>
+          </div>
+
+          <!-- Error -->
+          <div v-else-if="historyError" class="flex flex-col items-center justify-center py-12 text-n-slate-10">
+            <span class="i-lucide-alert-circle text-3xl mb-2 text-red-400" />
+            <p class="text-sm">{{ $t('CRM.ERROR.GENERIC') }}</p>
+            <button
+              class="mt-3 text-xs text-n-brand hover:underline"
+              @click="loadHistory"
+            >
+              {{ $t('CRM.RETRY') }}
+            </button>
+          </div>
+
+          <!-- Empty state -->
+          <div
+            v-else-if="!historyLogs.length"
+            class="flex flex-col items-center justify-center py-12 text-n-slate-10"
+          >
+            <span class="i-lucide-clock-4 text-4xl mb-3" />
+            <p class="text-sm text-center">{{ $t('CRM.MODAL.NO_HISTORY') }}</p>
+          </div>
+
+          <!-- Timeline -->
+          <div v-else>
+            <!-- Summary card -->
+            <div class="bg-n-alpha-1 rounded-xl p-4 mb-6 flex items-center justify-between">
+              <div>
+                <p class="text-xs text-n-slate-10 mb-0.5">{{ $t('CRM.MODAL.HISTORY_TOTAL_TIME') }}</p>
+                <p class="text-lg font-semibold text-n-slate-12">
+                  {{ formatDuration(totalMinutes) ?? '—' }}
+                </p>
+              </div>
+              <div class="text-right">
+                <p class="text-xs text-n-slate-10 mb-0.5">{{ $t('CRM.MODAL.HISTORY_STAGES') }}</p>
+                <p class="text-lg font-semibold text-n-slate-12">{{ historyLogs.length }}</p>
+              </div>
+            </div>
+
+            <!-- Stage entries -->
+            <div class="relative pl-6">
+              <!-- Vertical line -->
+              <div class="absolute left-2 top-2 bottom-2 w-0.5 bg-n-weak" />
+
+              <div
+                v-for="(log, idx) in historyLogs"
+                :key="log.id"
+                class="relative mb-5 last:mb-0"
+              >
+                <!-- Dot on timeline -->
+                <div
+                  class="absolute -left-4 top-1.5 w-3 h-3 rounded-full border-2 border-white dark:border-n-solid-1 shadow-sm flex-shrink-0"
+                  :style="{ backgroundColor: log.stage_color || '#6B7280' }"
+                />
+
+                <!-- Card -->
+                <div class="bg-n-solid-2 rounded-xl p-3.5 border border-n-weak hover:border-n-alpha-3 transition-colors">
+                  <div class="flex items-start justify-between gap-2">
+                    <!-- Stage name + pill -->
+                    <div class="flex items-center gap-2 flex-wrap min-w-0">
+                      <span
+                        class="text-xs font-medium px-2 py-0.5 rounded-full text-white flex-shrink-0"
+                        :style="{ backgroundColor: log.stage_color || '#6B7280' }"
+                      >
+                        {{ log.stage_name }}
+                      </span>
+                      <!-- Current stage indicator -->
+                      <span
+                        v-if="!log.left_at"
+                        class="text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full"
+                      >
+                        {{ $t('CRM.MODAL.HISTORY_CURRENT') }}
+                      </span>
+                    </div>
+
+                    <!-- Duration badge -->
+                    <span
+                      v-if="log.duration_minutes"
+                      class="text-xs font-mono bg-n-alpha-2 text-n-slate-11 px-2 py-0.5 rounded-full flex-shrink-0"
+                    >
+                      {{ formatDuration(log.duration_minutes) }}
+                    </span>
+                    <span
+                      v-else-if="!log.left_at"
+                      class="text-xs bg-n-alpha-2 text-n-slate-11 px-2 py-0.5 rounded-full flex-shrink-0 animate-pulse"
+                    >
+                      {{ $t('CRM.MODAL.HISTORY_IN_PROGRESS') }}
+                    </span>
+                  </div>
+
+                  <!-- Dates -->
+                  <div class="mt-2 flex items-center gap-3 text-xs text-n-slate-10 flex-wrap">
+                    <span class="flex items-center gap-1">
+                      <span class="i-lucide-log-in text-[11px]" />
+                      {{ new Date(log.entered_at).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) }}
+                    </span>
+                    <span v-if="log.left_at" class="flex items-center gap-1">
+                      <span class="i-lucide-log-out text-[11px]" />
+                      {{ new Date(log.left_at).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
       </div>

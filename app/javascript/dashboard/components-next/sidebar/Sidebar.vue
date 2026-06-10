@@ -263,11 +263,6 @@ const newReportRoutes = () => [
     activeOn: ['label_reports_show'],
   },
   {
-    name: 'Label Dashboard',
-    label: t('SIDEBAR.LABEL_DASHBOARD'),
-    to: accountScopedRoute('label_dashboard'),
-  },
-  {
     name: 'Reports Inbox',
     label: t('SIDEBAR.REPORTS_INBOX'),
     to: accountScopedRoute('inbox_reports_index'),
@@ -543,6 +538,16 @@ const menuItems = computed(() => {
       label: t('SIDEBAR.REPORTS'),
       icon: 'i-lucide-chart-spline',
       children: [
+        {
+          name: 'CRM Dashboard',
+          label: 'Dashboard CRM',
+          to: accountScopedRoute('crm_dashboard_reports'),
+        },
+        {
+          name: 'Label Dashboard',
+          label: t('SIDEBAR.LABEL_DASHBOARD'),
+          to: accountScopedRoute('label_dashboard'),
+        },
         {
           name: 'Report Overview',
           label: t('SIDEBAR.REPORTS_OVERVIEW'),

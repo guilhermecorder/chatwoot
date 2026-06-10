@@ -9,6 +9,9 @@ import Slack from './Slack.vue';
 import Linear from './Linear.vue';
 import Notion from './Notion.vue';
 import Shopify from './Shopify.vue';
+import MetaAds from './MetaAds.vue';
+import GoogleAds from './GoogleAds.vue';
+import N8n from './N8n.vue';
 
 export default {
   routes: [
@@ -99,6 +102,24 @@ export default {
           props: route => ({
             integrationId: route.params.integration_id,
           }),
+        },
+        {
+          path: 'n8n',
+          name: 'settings_integrations_n8n',
+          component: N8n,
+          meta: { permissions: ['administrator'] },
+        },
+        {
+          path: 'meta-ads',
+          name: 'settings_integrations_meta_ads',
+          component: MetaAds,
+          meta: { permissions: ['administrator'] },
+        },
+        {
+          path: 'google-ads',
+          name: 'settings_integrations_google_ads',
+          component: GoogleAds,
+          meta: { permissions: ['administrator'] },
         },
       ],
     },

@@ -1,18 +1,20 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useStore } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import draggable from 'vuedraggable';
 import ContactCard from './ContactCard.vue';
 import StageEditModal from './StageEditModal.vue';
+import ColumnAutomationsModal from './ColumnAutomationsModal.vue';
 
 const props = defineProps({
-  stage: { type: Object, required: true },
-  contacts: { type: Array, default: () => [] },
-  pipelineId: { type: Number, required: true },
-  editMode: { type: Boolean, default: false },
-  allStages: { type: Array, default: () => [] },
+  stage:           { type: Object, required: true },
+  contacts:        { type: Array, default: () => [] },
+  pipelineId:      { type: Number, required: true },
+  editMode:        { type: Boolean, default: false },
+  programmingMode: { type: Boolean, default: false },
+  allStages:       { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['cardClick', 'stageDrop', 'addContact']);
@@ -20,14 +22,74 @@ const emit = defineEmits(['cardClick', 'stageDrop', 'addContact']);
 const store = useStore();
 const { t } = useI18n();
 
-// Edit modal
-const showEditModal = ref(false);
+// ── Modals ────────────────────────────────────────────────────────
+const showEditModal         = ref(false);
+const showAutomationForm    = ref(false);
+const editingAutomation     = ref(null);  // null = create, object = edit
 
-// Delete flow
+// ── Delete flow ───────────────────────────────────────────────────
 const showDeleteConfirm = ref(false);
-const moveToStageId = ref('');
-const isDeleting = ref(false);
+const moveToStageId     = ref('');
+const isDeleting        = ref(false);
 
+// ── Automations (loaded when programming mode is ON) ──────────────
+const automations         = ref([]);
+const isLoadingAutomations = ref(false);
+const deleteConfirmAutoId  = ref(null);
+
+const TRIGGER_ICONS = {
+  card_entered:  'i-lucide-log-in',
+  card_left:     'i-lucide-log-out',
+  card_stalled:  'i-lucide-clock',
+  label_added:   'i-lucide-tag',
+  label_removed: 'i-lucide-tag',
+};
+
+const TRIGGER_LABELS = {
+  card_entered:  'Entrou na coluna',
+  card_left:     'Saiu da coluna',
+  card_stalled:  'Parado por X tempo',
+  label_added:   'Etiqueta adicionada',
+  label_removed: 'Etiqueta removida',
+};
+
+const ACTION_ICONS = {
+  webhook:      'i-lucide-globe',
+  n8n_flow:     'i-lucide-workflow',
+  apply_label:  'i-lucide-tag',
+  move_card:    'i-lucide-arrow-right-circle',
+  log_timeline: 'i-lucide-clock',
+  notify_team:  'i-lucide-bell',
+};
+
+const ACTION_LABELS = {
+  webhook:      'Webhook',
+  n8n_flow:     'n8n',
+  apply_label:  'Etiqueta',
+  move_card:    'Mover card',
+  log_timeline: 'Timeline',
+  notify_team:  'Notificar',
+};
+
+const loadAutomations = async () => {
+  isLoadingAutomations.value = true;
+  try {
+    const list = await store.dispatch('crm/fetchAutomations', {
+      pipelineId: props.pipelineId,
+      stageId:    props.stage.id,
+    });
+    automations.value = list || [];
+  } finally {
+    isLoadingAutomations.value = false;
+  }
+};
+
+watch(() => props.programmingMode, (on) => {
+  if (on) loadAutomations();
+  else automations.value = [];
+}, { immediate: true });
+
+// ── Kanban helpers ────────────────────────────────────────────────
 const otherStages = computed(() =>
   props.allStages.filter(s => s.id !== props.stage.id)
 );
@@ -77,17 +139,80 @@ const deleteStage = async () => {
     showDeleteConfirm.value = false;
   }
 };
+
+// ── Automation actions ─────────────────────────────────────────────
+const openCreateAutomation = () => {
+  editingAutomation.value = null;
+  showAutomationForm.value = true;
+};
+
+const openEditAutomation = (auto) => {
+  editingAutomation.value = auto;
+  showAutomationForm.value = true;
+};
+
+const onAutomationSaved = async () => {
+  showAutomationForm.value = false;
+  editingAutomation.value = null;
+  await loadAutomations();
+};
+
+const toggleAutomationActive = async (auto) => {
+  try {
+    await store.dispatch('crm/updateAutomation', {
+      pipelineId:    props.pipelineId,
+      stageId:       props.stage.id,
+      id:            auto.id,
+      name:          auto.name,
+      trigger_type:  auto.trigger_type,
+      delay_minutes: auto.delay_minutes,
+      action_type:   auto.action_type,
+      action_config: auto.action_config,
+      active:        !auto.active,
+    });
+    await loadAutomations();
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  }
+};
+
+const deleteAutomation = async (id) => {
+  try {
+    await store.dispatch('crm/deleteAutomation', {
+      pipelineId: props.pipelineId,
+      stageId:    props.stage.id,
+      id,
+    });
+    deleteConfirmAutoId.value = null;
+    await loadAutomations();
+    useAlert('Automação excluída');
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  }
+};
+
+const delayLabel = (minutes) => {
+  if (minutes === 0)    return 'Imediatamente';
+  if (minutes < 60)     return `${minutes}min`;
+  if (minutes < 1440)   return `${Math.round(minutes / 60)}h`;
+  return `${Math.round(minutes / 1440)}d`;
+};
 </script>
 
 <template>
-  <div class="flex flex-col bg-n-alpha-1 rounded-xl min-w-64 w-64 flex-shrink-0 h-full">
+  <div
+    class="flex flex-col bg-n-alpha-1 rounded-xl min-w-64 w-64 flex-shrink-0 h-full transition-all"
+    :class="programmingMode ? 'ring-2 ring-yellow-400/50' : ''"
+  >
 
-    <!-- Header -->
-    <div class="px-3 py-2.5 border-b border-n-weak">
+    <!-- ── Header ────────────────────────────────────────────── -->
+    <div
+      class="px-3 py-2.5 border-b border-n-weak flex-shrink-0"
+      :class="programmingMode ? 'bg-yellow-500/5' : ''"
+    >
 
       <!-- Delete confirmation -->
       <div v-if="showDeleteConfirm" class="space-y-2">
-        <!-- Has cards: show move-to selector -->
         <template v-if="hasCards">
           <p class="text-xs text-n-slate-11">
             {{ $t('CRM.DELETE_STAGE_HAS_CARDS', { count: contacts.length }) }}
@@ -103,19 +228,13 @@ const deleteStage = async () => {
               class="flex-1 bg-red-500 text-white rounded-lg py-1.5 text-xs disabled:opacity-50"
               :disabled="isDeleting || !moveToStageId"
               @click="deleteStage"
-            >
-              {{ isDeleting ? '...' : $t('CRM.DELETE_MOVE_AND_DELETE') }}
-            </button>
+            >{{ isDeleting ? '...' : $t('CRM.DELETE_MOVE_AND_DELETE') }}</button>
             <button
               class="flex-1 border border-n-weak rounded-lg py-1.5 text-xs text-n-slate-11"
               @click="cancelDelete"
-            >
-              {{ $t('CRM.CANCEL') }}
-            </button>
+            >{{ $t('CRM.CANCEL') }}</button>
           </div>
         </template>
-
-        <!-- No cards: simple confirmation -->
         <template v-else>
           <p class="text-xs text-n-slate-11">{{ $t('CRM.DELETE_STAGE_CONFIRM') }}</p>
           <div class="flex gap-2">
@@ -123,21 +242,17 @@ const deleteStage = async () => {
               class="flex-1 bg-red-500 text-white rounded-lg py-1.5 text-xs disabled:opacity-50"
               :disabled="isDeleting"
               @click="deleteStage"
-            >
-              {{ isDeleting ? '...' : $t('CRM.DELETE_STAGE') }}
-            </button>
+            >{{ isDeleting ? '...' : $t('CRM.DELETE_STAGE') }}</button>
             <button
               class="flex-1 border border-n-weak rounded-lg py-1.5 text-xs text-n-slate-11"
               @click="cancelDelete"
-            >
-              {{ $t('CRM.CANCEL') }}
-            </button>
+            >{{ $t('CRM.CANCEL') }}</button>
           </div>
         </template>
       </div>
 
       <!-- Normal header -->
-      <div v-else class="space-y-2">
+      <div v-else>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2 min-w-0">
             <span
@@ -145,30 +260,161 @@ const deleteStage = async () => {
               :style="{ backgroundColor: stage.color }"
             />
             <span class="text-sm font-semibold text-n-slate-12 truncate">{{ stage.name }}</span>
-            <span class="text-xs text-n-slate-10 bg-n-alpha-2 rounded px-1.5 py-0.5 flex-shrink-0">
-              {{ contacts.length }}
+            <!-- No modo programação: mostra nº de automações em vez de cards -->
+            <span
+              class="text-xs rounded px-1.5 py-0.5 flex-shrink-0"
+              :class="programmingMode
+                ? 'text-yellow-600 bg-yellow-500/15'
+                : 'text-n-slate-10 bg-n-alpha-2'"
+            >
+              {{ programmingMode ? automations.length : contacts.length }}
             </span>
           </div>
-          <!-- Edit mode actions -->
-          <div v-if="editMode" class="flex items-center gap-1 flex-shrink-0 ml-1">
-            <button
-              class="text-n-slate-10 hover:text-n-slate-12 i-lucide-pencil text-sm"
-              @click="showEditModal = true"
-            />
-            <button
-              class="text-n-slate-10 hover:text-red-500 i-lucide-trash-2 text-sm"
-              @click="confirmDelete"
-            />
+
+          <div class="flex items-center gap-1 flex-shrink-0 ml-1">
+            <!-- Modo Edição -->
+            <template v-if="editMode">
+              <button
+                class="text-n-slate-10 hover:text-n-slate-12 i-lucide-pencil text-sm"
+                @click="showEditModal = true"
+              />
+              <button
+                class="text-n-slate-10 hover:text-red-500 i-lucide-trash-2 text-sm"
+                @click="confirmDelete"
+              />
+            </template>
           </div>
         </div>
-        <p v-if="totalValue > 0" class="text-sm font-semibold text-green-600 text-center">
+
+        <!-- Subtítulo no modo programação -->
+        <p v-if="programmingMode" class="text-[11px] text-yellow-600/80 mt-1">
+          ⚡ Automações da coluna
+        </p>
+        <!-- Valor total no modo normal -->
+        <p v-else-if="totalValue > 0" class="text-sm font-semibold text-green-600 text-center mt-1.5">
           R$ {{ totalValue.toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}
         </p>
       </div>
     </div>
 
-    <!-- Cards -->
+    <!-- ── Body: MODO PROGRAMAÇÃO → lista de automações ──────── -->
     <div
+      v-if="programmingMode"
+      class="flex-1 overflow-y-auto p-2 space-y-2 min-h-0"
+      style="scrollbar-width:thin;scrollbar-color:rgba(148,163,184,0.35) transparent;"
+    >
+
+      <!-- Loading -->
+      <div v-if="isLoadingAutomations" class="flex justify-center pt-6">
+        <span class="i-lucide-loader-2 animate-spin text-yellow-500 text-lg" />
+      </div>
+
+      <!-- Empty state -->
+      <div
+        v-else-if="automations.length === 0"
+        class="flex flex-col items-center justify-center py-8 text-center"
+      >
+        <span class="i-lucide-zap text-2xl text-yellow-400/50 mb-2" />
+        <p class="text-xs text-n-slate-10 leading-relaxed">
+          Nenhuma automação.<br/>Clique em "+ Automação" para criar.
+        </p>
+      </div>
+
+      <!-- Automation cards -->
+      <template v-else>
+        <div
+          v-for="auto in automations"
+          :key="auto.id"
+          class="rounded-lg border bg-n-solid-1 transition-all"
+          :class="auto.active
+            ? 'border-yellow-400/30 hover:border-yellow-400/60'
+            : 'border-n-weak opacity-50 hover:opacity-70'"
+        >
+          <!-- Delete confirm inline -->
+          <div v-if="deleteConfirmAutoId === auto.id" class="p-2.5 space-y-2">
+            <p class="text-xs text-n-slate-11">Excluir <strong>{{ auto.name }}</strong>?</p>
+            <div class="flex gap-1.5">
+              <button
+                class="flex-1 bg-red-500 text-white rounded py-1 text-xs"
+                @click="deleteAutomation(auto.id)"
+              >Excluir</button>
+              <button
+                class="flex-1 border border-n-weak rounded py-1 text-xs text-n-slate-11"
+                @click="deleteConfirmAutoId = null"
+              >Cancelar</button>
+            </div>
+          </div>
+
+          <template v-else>
+            <!-- Card body — clicável para editar -->
+            <div
+              class="p-2.5 cursor-pointer"
+              @click="openEditAutomation(auto)"
+            >
+              <!-- Nome + status badge -->
+              <div class="flex items-start justify-between gap-1 mb-1.5">
+                <span class="text-xs font-semibold text-n-slate-12 leading-tight line-clamp-2">
+                  {{ auto.name }}
+                </span>
+                <span
+                  class="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 font-medium"
+                  :class="auto.active
+                    ? 'bg-green-500/15 text-green-600'
+                    : 'bg-n-alpha-2 text-n-slate-9'"
+                >
+                  {{ auto.active ? 'Ativa' : 'Off' }}
+                </span>
+              </div>
+
+              <!-- Trigger → Action pills -->
+              <div class="flex items-center gap-1 flex-wrap">
+                <span class="flex items-center gap-1 bg-n-alpha-2 rounded px-1.5 py-0.5 text-[10px] text-n-slate-10">
+                  <span :class="TRIGGER_ICONS[auto.trigger_type]" class="text-xs" />
+                  {{ TRIGGER_LABELS[auto.trigger_type] }}
+                </span>
+                <span class="i-lucide-arrow-right text-[10px] text-n-slate-8" />
+                <span class="flex items-center gap-1 bg-n-brand/10 rounded px-1.5 py-0.5 text-[10px] text-n-brand">
+                  <span :class="ACTION_ICONS[auto.action_type]" class="text-xs" />
+                  {{ ACTION_LABELS[auto.action_type] }}
+                </span>
+              </div>
+
+              <!-- Delay tag -->
+              <div v-if="auto.delay_minutes > 0" class="mt-1.5">
+                <span class="flex items-center gap-1 text-[10px] text-n-slate-9">
+                  <span class="i-lucide-clock text-xs" />
+                  {{ delayLabel(auto.delay_minutes) }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Footer actions -->
+            <div class="flex items-center border-t border-n-weak/50 divide-x divide-n-weak/50">
+              <!-- Toggle active -->
+              <button
+                class="flex-1 flex items-center justify-center gap-1 py-1.5 text-[11px] hover:bg-n-alpha-1 transition-colors rounded-bl-lg"
+                :class="auto.active ? 'text-yellow-600' : 'text-green-600'"
+                @click.stop="toggleAutomationActive(auto)"
+              >
+                <span :class="auto.active ? 'i-lucide-pause' : 'i-lucide-play'" class="text-xs" />
+                {{ auto.active ? 'Pausar' : 'Ativar' }}
+              </button>
+              <!-- Delete -->
+              <button
+                class="px-3 py-1.5 text-n-slate-9 hover:text-red-500 hover:bg-red-500/5 transition-colors rounded-br-lg"
+                @click.stop="deleteConfirmAutoId = auto.id"
+              >
+                <span class="i-lucide-trash-2 text-xs" />
+              </button>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- ── Body: MODO NORMAL → cards ────────────────────────── -->
+    <div
+      v-else
       class="column-cards-scroll p-2"
       style="flex:1;overflow-y:scroll;min-height:0;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,0.35) transparent;"
     >
@@ -189,9 +435,21 @@ const deleteStage = async () => {
       </draggable>
     </div>
 
-    <!-- Footer: Add contact (always visible) -->
-    <div class="px-2 pb-2">
+    <!-- ── Footer ─────────────────────────────────────────────── -->
+    <div class="px-2 pb-2 flex-shrink-0">
+      <!-- Modo programação: botão nova automação -->
       <button
+        v-if="programmingMode"
+        class="w-full flex items-center justify-center gap-1.5 text-xs text-yellow-600 hover:text-yellow-700 py-2 rounded-lg hover:bg-yellow-500/10 border border-dashed border-yellow-400/50 hover:border-yellow-500 transition-colors"
+        @click="openCreateAutomation"
+      >
+        <span class="i-lucide-plus text-sm" />
+        Nova automação
+      </button>
+
+      <!-- Modo normal: botão adicionar contato -->
+      <button
+        v-else
         class="w-full flex items-center justify-center gap-1 text-xs text-n-slate-10 hover:text-n-brand py-1.5 rounded-lg hover:bg-n-alpha-1 transition-colors"
         @click="emit('addContact', stage.id)"
       >
@@ -202,11 +460,22 @@ const deleteStage = async () => {
 
   </div>
 
-  <!-- Stage edit modal (teleported outside column) -->
+  <!-- Stage edit modal -->
   <StageEditModal
     :stage="showEditModal ? stage : null"
     :pipeline-id="pipelineId"
     @close="showEditModal = false"
     @saved="showEditModal = false"
+  />
+
+  <!-- Automation create/edit modal -->
+  <ColumnAutomationsModal
+    v-if="showAutomationForm"
+    :stage="stage"
+    :pipeline-id="pipelineId"
+    :all-stages="allStages"
+    :initial-automation="editingAutomation"
+    @close="showAutomationForm = false"
+    @saved="onAutomationSaved"
   />
 </template>

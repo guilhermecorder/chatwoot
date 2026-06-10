@@ -74,3 +74,10 @@ remove_orphan_conversations_job:
   cron: '0 */12 * * *'
   class: 'Internal::RemoveOrphanConversationsJob'
   queue: housekeeping
+
+
+# executado a cada 30 minutos para verificar leads parados nas colunas do CRM
+crm_stalled_cards_job:
+  cron: '*/30 * * * *'
+  class: 'CrmStalledCardsJob'
+  queue: scheduled_jobs

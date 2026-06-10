@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_06_09_000004) do
+ActiveRecord::Schema[7.1].define(version: 2026_06_10_000005) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -750,6 +750,50 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_09_000004) do
     t.index ["user_id"], name: "index_copilot_threads_on_user_id"
   end
 
+  create_table "crm_automation_logs", force: :cascade do |t|
+    t.bigint "automation_id", null: false
+    t.bigint "contact_id", null: false
+    t.string "status", default: "pending", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.text "error_message"
+    t.datetime "scheduled_at"
+    t.datetime "fired_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["automation_id"], name: "index_crm_automation_logs_on_automation_id"
+    t.index ["contact_id"], name: "index_crm_automation_logs_on_contact_id"
+    t.index ["scheduled_at"], name: "index_crm_automation_logs_on_scheduled_at"
+    t.index ["status"], name: "index_crm_automation_logs_on_status"
+  end
+
+  create_table "crm_automations", force: :cascade do |t|
+    t.bigint "stage_id", null: false
+    t.string "name", null: false
+    t.string "trigger_type", null: false
+    t.integer "delay_minutes", default: 0, null: false
+    t.string "action_type", null: false
+    t.jsonb "action_config", default: {}, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["stage_id"], name: "index_crm_automations_on_stage_id"
+  end
+
+  create_table "crm_contact_stage_logs", force: :cascade do |t|
+    t.bigint "crm_contact_id", null: false
+    t.bigint "stage_id", null: false
+    t.string "stage_name", null: false
+    t.string "stage_color"
+    t.string "event_type", default: "entered", null: false
+    t.datetime "entered_at", null: false
+    t.datetime "left_at"
+    t.integer "duration_minutes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["crm_contact_id", "entered_at"], name: "index_crm_contact_stage_logs_on_crm_contact_id_and_entered_at"
+    t.index ["crm_contact_id"], name: "index_crm_contact_stage_logs_on_crm_contact_id"
+  end
+
   create_table "crm_contacts", force: :cascade do |t|
     t.bigint "contact_id", null: false
     t.bigint "pipeline_id", null: false
@@ -761,6 +805,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_09_000004) do
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "stage_moved_at"
     t.index ["assignee_id"], name: "index_crm_contacts_on_assignee_id"
     t.index ["contact_id", "pipeline_id"], name: "index_crm_contacts_on_contact_id_and_pipeline_id", unique: true
     t.index ["contact_id"], name: "index_crm_contacts_on_contact_id"
@@ -777,6 +822,19 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_09_000004) do
     t.datetime "updated_at", null: false
     t.index ["account_id", "position"], name: "index_crm_pipelines_on_account_id_and_position"
     t.index ["account_id"], name: "index_crm_pipelines_on_account_id"
+  end
+
+  create_table "crm_settings", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "n8n_base_url"
+    t.string "n8n_api_key"
+    t.jsonb "n8n_workflows", default: [], null: false
+    t.datetime "n8n_workflows_fetched_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "meta_ads_config", default: {}, null: false
+    t.jsonb "google_ads_config", default: {}, null: false
+    t.index ["account_id"], name: "index_crm_settings_on_account_id", unique: true
   end
 
   create_table "crm_stages", force: :cascade do |t|
@@ -1364,11 +1422,14 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_09_000004) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "crm_automation_logs", "crm_automations", column: "automation_id"
+  add_foreign_key "crm_automations", "crm_stages", column: "stage_id"
   add_foreign_key "crm_contacts", "contacts"
   add_foreign_key "crm_contacts", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "crm_contacts", "crm_stages", column: "stage_id"
   add_foreign_key "crm_contacts", "users", column: "assignee_id"
   add_foreign_key "crm_pipelines", "accounts"
+  add_foreign_key "crm_settings", "accounts"
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "inboxes", "portals"
   create_trigger("accounts_after_insert_row_tr", :generated => true, :compatibility => 1).
