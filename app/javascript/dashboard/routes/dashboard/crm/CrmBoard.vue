@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
+import draggable from 'vuedraggable';
 import KanbanColumn from './components/KanbanColumn.vue';
 import ContactModal from './components/ContactModal.vue';
 import CrmIntegrationsModal from './components/CrmIntegrationsModal.vue';
@@ -302,6 +303,19 @@ const createStage = async () => {
     newStageColor.value = '#6B7280';
     showNewStageForm.value = false;
     useAlert(t('CRM.SUCCESS.STAGE_CREATED'));
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  }
+};
+
+const onColumnReorder = async () => {
+  if (!selectedPipeline.value) return;
+  const stageIds = selectedPipeline.value.stages.map(s => s.id);
+  try {
+    await store.dispatch('crm/reorderStages', {
+      pipelineId: selectedPipelineId.value,
+      stageIds,
+    });
   } catch {
     useAlert(t('CRM.ERROR.GENERIC'));
   }
@@ -700,20 +714,31 @@ const addContactToStage = async (contact) => {
         </button>
       </div>
 
-      <div v-else style="display:flex;gap:16px;height:100%;min-width:max-content;">
-        <KanbanColumn
-          v-for="stage in selectedPipeline.stages"
-          :key="stage.id"
-          :stage="stage"
-          :pipeline-id="selectedPipelineId"
-          :contacts="contactsByStage[stage.id] ?? []"
-          :edit-mode="isEditMode"
-          :programming-mode="isProgrammingMode"
-          :all-stages="selectedPipeline.stages"
-          @card-click="selectedContact = $event"
-          @stage-drop="onStageDrop"
-          @add-contact="openAddContact"
-        />
+      <draggable
+        v-else
+        v-model="selectedPipeline.stages"
+        item-key="id"
+        :disabled="!isEditMode"
+        :animation="150"
+        handle=".column-drag-handle"
+        style="display:flex;gap:16px;height:100%;min-width:max-content;"
+        @end="onColumnReorder"
+      >
+        <template #item="{ element: stage }">
+          <KanbanColumn
+            :key="stage.id"
+            :stage="stage"
+            :pipeline-id="selectedPipelineId"
+            :contacts="contactsByStage[stage.id] ?? []"
+            :edit-mode="isEditMode"
+            :programming-mode="isProgrammingMode"
+            :all-stages="selectedPipeline.stages"
+            @card-click="selectedContact = $event"
+            @stage-drop="onStageDrop"
+            @add-contact="openAddContact"
+          />
+        </template>
+      </draggable>
 
         <!-- Add stage column — only in edit mode -->
         <div v-if="isEditMode" class="flex-shrink-0 w-64">

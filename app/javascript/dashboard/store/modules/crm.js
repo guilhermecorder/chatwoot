@@ -70,6 +70,11 @@ const actions = {
     commit('removeStage', { pipelineId, stageId });
   },
 
+  async reorderStages({ commit }, { pipelineId, stageIds }) {
+    const { data } = await CrmAPI.reorderStages(pipelineId, stageIds);
+    commit('setStages', { pipelineId, stages: data });
+  },
+
   async fetchContacts({ commit }, pipelineId) {
     commit('setUIFlag', { isFetchingContacts: true });
     try {
@@ -205,6 +210,10 @@ const mutations = {
   removeStage(s, { pipelineId, stageId }) {
     const p = s.pipelines.find(x => x.id === pipelineId);
     if (p) p.stages = p.stages.filter(x => x.id !== stageId);
+  },
+  setStages(s, { pipelineId, stages }) {
+    const p = s.pipelines.find(x => x.id === pipelineId);
+    if (p) p.stages = stages;
   },
   setSettings(s, data) { s.settings = { ...s.settings, ...data }; },
   setN8nWorkflows(s, workflows) { s.settings.n8n_workflows = workflows; },
