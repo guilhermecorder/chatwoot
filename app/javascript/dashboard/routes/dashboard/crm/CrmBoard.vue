@@ -42,6 +42,9 @@ const addContactStageId = ref(null);
 const contactSearchQuery = ref('');
 const contactSearchResults = ref([]);
 const isSearching = ref(false);
+const addContactTab = ref('search'); // 'search' | 'create'
+const newContact = ref({ name: '', phone_number: '', email: '' });
+const isCreatingContact = ref(false);
 
 // ── Filters ──────────────────────────────────────────────
 const showFilters = ref(false);
@@ -339,12 +342,15 @@ const openAddContact = (stageId) => {
   addContactStageId.value = stageId;
   contactSearchQuery.value = '';
   contactSearchResults.value = [];
+  addContactTab.value = 'search';
+  newContact.value = { name: '', phone_number: '', email: '' };
 };
 
 const closeAddContact = () => {
   addContactStageId.value = null;
   contactSearchQuery.value = '';
   contactSearchResults.value = [];
+  newContact.value = { name: '', phone_number: '', email: '' };
 };
 
 let searchTimer = null;
@@ -376,6 +382,29 @@ const addContactToStage = async (contact) => {
     closeAddContact();
   } catch {
     useAlert(t('CRM.ERROR.GENERIC'));
+  }
+};
+
+const canCreateContact = computed(
+  () => newContact.value.name.trim() && (newContact.value.phone_number.trim() || newContact.value.email.trim())
+);
+
+const createAndAddContact = async () => {
+  if (!canCreateContact.value || isCreatingContact.value) return;
+  isCreatingContact.value = true;
+  try {
+    const payload = { name: newContact.value.name.trim() };
+    if (newContact.value.phone_number.trim()) payload.phone_number = newContact.value.phone_number.trim();
+    if (newContact.value.email.trim()) payload.email = newContact.value.email.trim();
+
+    const { data } = await ContactAPI.create(payload);
+    const contact = data.payload?.contact ?? data.contact ?? data;
+    await addContactToStage(contact);
+  } catch (error) {
+    const message = error?.response?.data?.message;
+    useAlert(message || t('CRM.ERROR.GENERIC'));
+  } finally {
+    isCreatingContact.value = false;
   }
 };
 </script>
@@ -813,7 +842,55 @@ const addContactToStage = async (contact) => {
           <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="closeAddContact" />
         </div>
 
-        <div class="p-4">
+        <!-- Tabs -->
+        <div class="flex items-center gap-1 px-4 pt-3">
+          <button
+            class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+            :class="addContactTab === 'search' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            @click="addContactTab = 'search'"
+          >Buscar existente</button>
+          <button
+            class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+            :class="addContactTab === 'create' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            @click="addContactTab = 'create'"
+          >Criar novo contato</button>
+        </div>
+
+        <div v-if="addContactTab === 'create'" class="p-4 space-y-3">
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1">Nome</label>
+            <input
+              v-model="newContact.name"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              placeholder="Nome do contato"
+            />
+          </div>
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1">Telefone</label>
+            <input
+              v-model="newContact.phone_number"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              placeholder="+55 11 99999-9999"
+            />
+          </div>
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1">
+              Email <span class="text-n-slate-9">(opcional se tiver telefone)</span>
+            </label>
+            <input
+              v-model="newContact.email"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              placeholder="email@exemplo.com"
+            />
+          </div>
+          <button
+            class="w-full bg-n-brand text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+            :disabled="!canCreateContact || isCreatingContact"
+            @click="createAndAddContact"
+          >{{ isCreatingContact ? 'Criando…' : 'Criar e adicionar ao funil' }}</button>
+        </div>
+
+        <div v-else class="p-4">
           <div class="relative">
             <span class="absolute left-3 top-1/2 -translate-y-1/2 i-lucide-search text-n-slate-10 text-sm" />
             <input
