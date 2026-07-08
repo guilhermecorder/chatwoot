@@ -5,12 +5,13 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import ChipPicker from './components/ChipPicker.vue';
+import InboxesAPI from 'dashboard/api/inboxes';
 import { relativeTime } from './helpers';
 
 const store = useStore();
 const router = useRouter();
 
-const activeTab = ref('campaigns'); // campaigns | automations
+const activeTab = ref('campaigns'); // campaigns | automations | panel
 const campaigns = ref([]);
 const automations = ref([]);
 const isLoading = ref(false);
@@ -60,6 +61,72 @@ const isLoadingTemplates = ref(false);
 const resultsCampaign = ref(null);
 const results = ref(null);
 const isResultsLoading = ref(false);
+
+// ── Painel de controle (saúde dos números na Meta) ────────────────────
+const healthByInbox = ref({});
+const isHealthLoading = ref(false);
+
+const QUALITY_META = {
+  GREEN:   { label: 'Alta',        cls: 'bg-green-500/15 text-green-600',  dot: '#22C55E' },
+  YELLOW:  { label: 'Média',       cls: 'bg-amber-500/15 text-amber-600',  dot: '#F59E0B' },
+  RED:     { label: 'Baixa',       cls: 'bg-red-500/15 text-red-600',      dot: '#EF4444' },
+  UNKNOWN: { label: 'Sem dados',   cls: 'bg-n-alpha-2 text-n-slate-10',    dot: '#9CA3AF' },
+};
+
+const TIER_LABELS = {
+  TIER_50: '50 conversas/24h',
+  TIER_250: '250 conversas/24h',
+  TIER_1K: '1.000 conversas/24h',
+  TIER_10K: '10.000 conversas/24h',
+  TIER_100K: '100.000 conversas/24h',
+  TIER_UNLIMITED: 'Ilimitado',
+};
+
+const qualityMeta = h =>
+  QUALITY_META[h?.quality_rating?.toUpperCase?.()] ?? QUALITY_META.UNKNOWN;
+
+const tierLabel = h => TIER_LABELS[h?.messaging_limit_tier] ?? h?.messaging_limit_tier ?? '—';
+
+const webhookOk = h => {
+  const configured = h?.webhook_configuration?.application ?? '';
+  const expected = h?.expected_webhook_url ?? '';
+  if (!expected) return null;
+  return configured.startsWith(expected.split('/webhooks')[0]);
+};
+
+const loadHealth = async () => {
+  if (isHealthLoading.value) return;
+  isHealthLoading.value = true;
+  const result = {};
+  await Promise.all(
+    whatsappInboxes.value.map(async inbox => {
+      try {
+        const { data } = await InboxesAPI.getHealth(inbox.id);
+        result[inbox.id] = { ok: true, ...data };
+      } catch (error) {
+        result[inbox.id] = { ok: false, error: error?.response?.data?.error ?? 'Erro ao consultar a Meta' };
+      }
+    })
+  );
+  healthByInbox.value = result;
+  isHealthLoading.value = false;
+};
+
+watch(activeTab, tab => {
+  if (tab === 'panel' && !Object.keys(healthByInbox.value).length) loadHealth();
+});
+
+// KPIs agregados do painel
+const panelStats = computed(() => {
+  const sentByCampaigns = campaigns.value.reduce((sum, c) => sum + (c.stats?.sent ?? 0), 0);
+  const sentByAutomations = automations.value.reduce((sum, a) => sum + (a.stats?.sent ?? 0), 0);
+  return {
+    totalSent: sentByCampaigns + sentByAutomations,
+    completedCampaigns: campaigns.value.filter(c => c.status === 'completed').length,
+    scheduledCampaigns: campaigns.value.filter(c => c.status === 'scheduled').length,
+    activeAutomations: automations.value.filter(a => a.active).length,
+  };
+});
 
 // ── Dados de apoio ────────────────────────────────────────────────────
 const inboxes = useMapGetter('inboxes/getInboxes');
@@ -464,6 +531,11 @@ const statsLine = c => {
           :class="activeTab === 'automations' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           @click="activeTab = 'automations'"
         >Automações</button>
+        <button
+          class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+          :class="activeTab === 'panel' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          @click="activeTab = 'panel'"
+        >Painel</button>
       </div>
 
       <div class="flex-1" />
@@ -476,12 +548,21 @@ const statsLine = c => {
         Nova campanha
       </button>
       <button
-        v-else
+        v-else-if="activeTab === 'automations'"
         class="flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg bg-n-brand text-white hover:opacity-90 transition-opacity"
         @click="openAutomationComposer"
       >
         <span class="i-lucide-plus" />
         Nova automação
+      </button>
+      <button
+        v-else
+        class="flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors disabled:opacity-50"
+        :disabled="isHealthLoading"
+        @click="loadHealth"
+      >
+        <span class="i-lucide-refresh-cw" :class="isHealthLoading ? 'animate-spin' : ''" />
+        Atualizar
       </button>
     </div>
 
@@ -555,7 +636,7 @@ const statsLine = c => {
       </template>
 
       <!-- ══ ABA AUTOMAÇÕES: réguas de mensagens ══ -->
-      <template v-else>
+      <template v-else-if="activeTab === 'automations'">
         <div v-if="!automations.length" class="flex flex-col items-center justify-center py-20 text-n-slate-9">
           <span class="i-lucide-timer text-5xl mb-4" />
           <p class="text-sm">Nenhuma automação ainda.</p>
@@ -617,6 +698,114 @@ const statsLine = c => {
             </div>
           </div>
         </div>
+      </template>
+
+      <!-- ══ ABA PAINEL: saúde dos números + visão geral ══ -->
+      <template v-else>
+        <!-- KPIs gerais -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-4xl mb-6">
+          <div class="bg-n-solid-2 border border-n-weak rounded-xl p-4">
+            <p class="text-xs text-n-slate-10">Mensagens enviadas</p>
+            <p class="text-2xl font-bold text-n-slate-12">{{ panelStats.totalSent }}</p>
+            <p class="text-xs text-n-slate-9 mt-0.5">campanhas + automações</p>
+          </div>
+          <div class="bg-n-solid-2 border border-n-weak rounded-xl p-4">
+            <p class="text-xs text-n-slate-10">Campanhas concluídas</p>
+            <p class="text-2xl font-bold text-green-600">{{ panelStats.completedCampaigns }}</p>
+          </div>
+          <div class="bg-n-solid-2 border border-n-weak rounded-xl p-4">
+            <p class="text-xs text-n-slate-10">Campanhas agendadas</p>
+            <p class="text-2xl font-bold text-n-gold">{{ panelStats.scheduledCampaigns }}</p>
+          </div>
+          <div class="bg-n-solid-2 border border-n-weak rounded-xl p-4">
+            <p class="text-xs text-n-slate-10">Automações ativas</p>
+            <p class="text-2xl font-bold text-n-brand">{{ panelStats.activeAutomations }}</p>
+          </div>
+        </div>
+
+        <!-- Saúde dos números -->
+        <p class="text-xs font-semibold text-n-slate-11 mb-3 flex items-center gap-1.5">
+          <span class="i-lucide-activity text-n-brand" />
+          Saúde dos números conectados (dados da Meta)
+        </p>
+
+        <div v-if="isHealthLoading" class="flex justify-center py-10"><Spinner /></div>
+
+        <div v-else-if="!whatsappInboxes.length" class="text-sm text-n-slate-10 py-6">
+          Nenhuma caixa WhatsApp API oficial conectada.
+        </div>
+
+        <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-4xl">
+          <div
+            v-for="inbox in whatsappInboxes"
+            :key="inbox.id"
+            class="bg-n-solid-2 border border-n-weak rounded-xl p-5"
+          >
+            <template v-if="healthByInbox[inbox.id]?.ok">
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <p class="text-sm font-semibold text-n-slate-12">
+                    {{ healthByInbox[inbox.id].verified_name || inbox.name }}
+                  </p>
+                  <p class="text-xs text-n-slate-10">{{ healthByInbox[inbox.id].display_phone_number }}</p>
+                </div>
+                <span
+                  class="text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium"
+                  :class="qualityMeta(healthByInbox[inbox.id]).cls"
+                >
+                  <span
+                    class="w-2 h-2 rounded-full"
+                    :style="{ backgroundColor: qualityMeta(healthByInbox[inbox.id]).dot }"
+                  />
+                  Qualidade {{ qualityMeta(healthByInbox[inbox.id]).label }}
+                </span>
+              </div>
+
+              <div class="space-y-2 text-xs">
+                <div class="flex items-center justify-between">
+                  <span class="text-n-slate-10">Limite de envio</span>
+                  <span class="text-n-slate-12 font-medium">{{ tierLabel(healthByInbox[inbox.id]) }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-n-slate-10">Nome verificado</span>
+                  <span
+                    class="font-medium"
+                    :class="healthByInbox[inbox.id].name_status === 'APPROVED' ? 'text-green-600' : 'text-amber-600'"
+                  >{{ healthByInbox[inbox.id].name_status === 'APPROVED' ? 'Aprovado' : healthByInbox[inbox.id].name_status }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-n-slate-10">Modo da conta</span>
+                  <span class="text-n-slate-12 font-medium">{{ healthByInbox[inbox.id].account_mode ?? '—' }}</span>
+                </div>
+                <div v-if="healthByInbox[inbox.id].throughput?.level" class="flex items-center justify-between">
+                  <span class="text-n-slate-10">Velocidade (throughput)</span>
+                  <span class="text-n-slate-12 font-medium">{{ healthByInbox[inbox.id].throughput.level }}</span>
+                </div>
+                <div v-if="webhookOk(healthByInbox[inbox.id]) !== null" class="flex items-center justify-between">
+                  <span class="text-n-slate-10">Webhook</span>
+                  <span
+                    class="font-medium"
+                    :class="webhookOk(healthByInbox[inbox.id]) ? 'text-green-600' : 'text-red-500'"
+                  >{{ webhookOk(healthByInbox[inbox.id]) ? 'Configurado ✓' : 'Verificar!' }}</span>
+                </div>
+              </div>
+            </template>
+
+            <template v-else-if="healthByInbox[inbox.id]">
+              <p class="text-sm font-semibold text-n-slate-12 mb-1">{{ inbox.name }}</p>
+              <p class="text-xs text-red-500">{{ healthByInbox[inbox.id].error }}</p>
+            </template>
+
+            <div v-else class="flex justify-center py-4"><Spinner :size="16" /></div>
+          </div>
+        </div>
+
+        <p class="text-xs text-n-slate-9 mt-4 max-w-2xl">
+          A qualidade é a nota que a Meta dá ao seu número com base em denúncias e bloqueios
+          dos destinatários. Verde = saudável; amarelo = atenção (reduza volume); vermelho =
+          risco de restrição. O limite de envio sobe automaticamente conforme o número mantém
+          boa qualidade.
+        </p>
       </template>
     </div>
 
