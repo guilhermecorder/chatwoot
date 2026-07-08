@@ -208,6 +208,25 @@ const loadTemplates = async inboxId => {
   }
 };
 
+const isSyncingTemplates = ref(false);
+
+// A Meta demora alguns segundos para o Chatwoot puxar o template novo —
+// dispara a sincronização e espera antes de recarregar a lista
+const syncTemplates = async inboxId => {
+  if (!inboxId || isSyncingTemplates.value) return;
+  isSyncingTemplates.value = true;
+  try {
+    await store.dispatch('inboxes/syncTemplates', inboxId);
+    useAlert('Sincronizando com a Meta… aguarde alguns segundos');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    await loadTemplates(inboxId);
+  } catch {
+    useAlert('Erro ao sincronizar templates');
+  } finally {
+    isSyncingTemplates.value = false;
+  }
+};
+
 const buildTemplateParams = () => ({
   name: selectedTemplate.value.name,
   namespace: selectedTemplate.value.namespace ?? '',
@@ -656,10 +675,21 @@ const statsLine = c => {
 
           <!-- Template -->
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">
-              Mensagem modelo (aprovada pelo Meta)
-              <Spinner v-if="isLoadingTemplates" :size="12" class="ml-1" />
-            </label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-xs font-medium text-n-slate-11 flex items-center gap-1">
+                Mensagem modelo (aprovada pelo Meta)
+                <Spinner v-if="isLoadingTemplates" :size="12" class="ml-1" />
+              </label>
+              <button
+                type="button"
+                class="text-xs text-n-brand hover:underline flex items-center gap-1 disabled:opacity-50 disabled:no-underline"
+                :disabled="!form.inbox_id || isSyncingTemplates"
+                @click="syncTemplates(form.inbox_id)"
+              >
+                <span class="i-lucide-refresh-cw text-xs" :class="isSyncingTemplates ? 'animate-spin' : ''" />
+                {{ isSyncingTemplates ? 'Sincronizando…' : 'Buscar novos templates' }}
+              </button>
+            </div>
             <select
               v-model="selectedTemplateName"
               class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -958,10 +988,21 @@ const statsLine = c => {
 
           <!-- Template -->
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">
-              Mensagem modelo (aprovada pelo Meta)
-              <Spinner v-if="isLoadingTemplates" :size="12" class="ml-1" />
-            </label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-xs font-medium text-n-slate-11 flex items-center gap-1">
+                Mensagem modelo (aprovada pelo Meta)
+                <Spinner v-if="isLoadingTemplates" :size="12" class="ml-1" />
+              </label>
+              <button
+                type="button"
+                class="text-xs text-n-brand hover:underline flex items-center gap-1 disabled:opacity-50 disabled:no-underline"
+                :disabled="!aForm.inbox_id || isSyncingTemplates"
+                @click="syncTemplates(aForm.inbox_id)"
+              >
+                <span class="i-lucide-refresh-cw text-xs" :class="isSyncingTemplates ? 'animate-spin' : ''" />
+                {{ isSyncingTemplates ? 'Sincronizando…' : 'Buscar novos templates' }}
+              </button>
+            </div>
             <select
               v-model="selectedTemplateName"
               class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
