@@ -4,9 +4,9 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     period   = [[params[:period].to_i, 7].max, 365].min  # entre 7 e 365 dias
     since    = period.days.ago.beginning_of_day
 
+    # sem ORDER BY na base: as consultas agrupadas (group/count/sum) do
+    # dashboard quebram no Postgres se herdarem a ordenação
     contacts = pipeline.crm_contacts
-                       .includes(:stage, :contact, :stage_logs)
-                       .order(:created_at)
 
     render json: {
       pipeline_id:        pipeline.id,
