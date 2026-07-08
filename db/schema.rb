@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_08_000003) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_08_000004) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -857,7 +857,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_08_000003) do
     t.bigint "inbox_id", null: false
     t.bigint "sender_id"
     t.string "name", null: false
-    t.string "trigger_label", null: false
+    t.string "trigger_label"
     t.integer "delay_days", default: 7, null: false
     t.jsonb "required_labels", default: [], null: false
     t.jsonb "exclude_labels", default: [], null: false
@@ -868,10 +868,12 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_08_000003) do
     t.jsonb "stats", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "trigger_stage_id"
     t.index ["account_id", "active"], name: "index_crm_message_automations_on_account_id_and_active"
     t.index ["account_id"], name: "index_crm_message_automations_on_account_id"
     t.index ["inbox_id"], name: "index_crm_message_automations_on_inbox_id"
     t.index ["sender_id"], name: "index_crm_message_automations_on_sender_id"
+    t.index ["trigger_stage_id"], name: "index_crm_message_automations_on_trigger_stage_id"
   end
 
   create_table "crm_pipelines", force: :cascade do |t|
@@ -1496,6 +1498,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_08_000003) do
   add_foreign_key "crm_contacts", "crm_stages", column: "stage_id"
   add_foreign_key "crm_contacts", "users", column: "assignee_id"
   add_foreign_key "crm_message_automations", "accounts"
+  add_foreign_key "crm_message_automations", "crm_stages", column: "trigger_stage_id"
   add_foreign_key "crm_message_automations", "inboxes"
   add_foreign_key "crm_message_automations", "users", column: "sender_id"
   add_foreign_key "crm_pipelines", "accounts"

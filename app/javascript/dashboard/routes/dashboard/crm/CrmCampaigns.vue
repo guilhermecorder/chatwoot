@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import ChipPicker from './components/ChipPicker.vue';
 import { relativeTime } from './helpers';
 
 const store = useStore();
@@ -24,8 +25,7 @@ const form = ref({
   inbox_id: null,
   apply_label: '',
 });
-const sendMode = ref('now'); // now | schedule
-const scheduledAt = ref('');
+const scheduledAt = ref(''); // vazio = publica agora; preenchido = agenda
 const includeLabelIds = ref([]);
 const excludeLabelIds = ref([]);
 const includeStageIds = ref([]);
@@ -44,6 +44,7 @@ const aForm = ref({
   name: '',
   inbox_id: null,
   trigger_label: '',
+  trigger_stage_id: null,
   delay_days: 7,
   required_labels: [],
   exclude_labels: [],
@@ -73,6 +74,21 @@ const allStages = computed(() =>
   pipelines.value.flatMap(p =>
     (p.stages ?? []).map(s => ({ ...s, pipeline_name: p.name }))
   )
+);
+
+// Opções para os seletores de chips
+const labelOptions = computed(() =>
+  labels.value.map(l => ({ id: l.id, label: l.title, color: l.color }))
+);
+const labelTitleOptions = computed(() =>
+  labels.value.map(l => ({ id: l.title, label: l.title, color: l.color }))
+);
+const stageOptions = computed(() =>
+  allStages.value.map(s => ({
+    id: s.id,
+    label: `${s.pipeline_name} › ${s.name}`,
+    color: s.color,
+  }))
 );
 
 const selectedTemplate = computed(
@@ -116,17 +132,24 @@ const canSubmit = computed(
     form.value.name.trim() &&
     form.value.inbox_id &&
     templateReady.value &&
-    hasAudience.value &&
-    (sendMode.value !== 'schedule' || scheduledAt.value)
+    hasAudience.value
 );
 
 const canSubmitAutomation = computed(
   () =>
     aForm.value.name.trim() &&
     aForm.value.inbox_id &&
-    aForm.value.trigger_label &&
+    (aForm.value.trigger_label || aForm.value.trigger_stage_id) &&
     aForm.value.delay_days >= 0 &&
     templateReady.value
+);
+
+// qualquer mudança no público invalida a prévia calculada
+watch(
+  [includeLabelIds, excludeLabelIds, includeStageIds, excludeStageIds, periodField, periodFrom, periodTo],
+  () => {
+    audiencePreview.value = null;
+  }
 );
 
 // Chaves literais não podem aparecer dentro de interpolação no template
@@ -196,7 +219,6 @@ const buildTemplateParams = () => ({
 // ── Composer de campanha ──────────────────────────────────────────────
 const openComposer = () => {
   form.value = { name: '', inbox_id: whatsappInboxes.value[0]?.id ?? null, apply_label: '' };
-  sendMode.value = 'now';
   scheduledAt.value = '';
   templates.value = [];
   selectedTemplateName.value = '';
@@ -213,13 +235,6 @@ const openComposer = () => {
   audiencePreview.value = null;
   showComposer.value = true;
   if (form.value.inbox_id) loadTemplates(form.value.inbox_id);
-};
-
-const toggle = (list, id) => {
-  const idx = list.indexOf(id);
-  if (idx === -1) list.push(id);
-  else list.splice(idx, 1);
-  audiencePreview.value = null;
 };
 
 const audiencePayload = () => ({
@@ -244,8 +259,8 @@ const previewAudience = async () => {
 };
 
 const submit = async mode => {
-  // mode: draft | send | schedule
-  if (!canSubmit.value && mode !== 'draft') return;
+  // mode: 'create' (salva sem enviar) | 'publish' (agenda se tiver data, senão envia agora)
+  if (mode === 'publish' && !canSubmit.value) return;
   isSubmitting.value = true;
   try {
     const created = await store.dispatch('crm/createCampaign', {
@@ -258,17 +273,17 @@ const submit = async mode => {
       audience: audiencePayload(),
       template_params: buildTemplateParams(),
     });
-    if (mode === 'send') {
-      await store.dispatch('crm/sendCampaign', created.id);
-      useAlert('Campanha enviada! Acompanhe o progresso na lista.');
-    } else if (mode === 'schedule') {
+    if (mode === 'publish' && scheduledAt.value) {
       await store.dispatch('crm/scheduleCampaign', {
         id: created.id,
         scheduledAt: scheduledAt.value,
       });
-      useAlert('Campanha agendada!');
+      useAlert(`Campanha agendada para ${formatDateTime(scheduledAt.value)}!`);
+    } else if (mode === 'publish') {
+      await store.dispatch('crm/sendCampaign', created.id);
+      useAlert('Campanha publicada! Acompanhe o progresso na lista.');
     } else {
-      useAlert('Rascunho salvo.');
+      useAlert('Campanha criada. Publique quando quiser.');
     }
     showComposer.value = false;
     await loadCampaigns();
@@ -285,6 +300,7 @@ const openAutomationComposer = () => {
     name: '',
     inbox_id: whatsappInboxes.value[0]?.id ?? null,
     trigger_label: '',
+    trigger_stage_id: null,
     delay_days: 7,
     required_labels: [],
     exclude_labels: [],
@@ -294,12 +310,6 @@ const openAutomationComposer = () => {
   varValues.value = {};
   showAutomationComposer.value = true;
   if (aForm.value.inbox_id) loadTemplates(aForm.value.inbox_id);
-};
-
-const toggleLabelTitle = (list, title) => {
-  const idx = list.indexOf(title);
-  if (idx === -1) list.push(title);
-  else list.splice(idx, 1);
 };
 
 const submitAutomation = async () => {
@@ -551,8 +561,10 @@ const statsLine = c => {
                 >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
               </div>
               <p class="text-xs text-n-slate-10 mt-1">
-                Etiqueta <span class="font-mono">{{ a.trigger_label }}</span> há
-                <b>{{ a.delay_days }} dias</b> → template
+                <template v-if="a.trigger_label">Etiqueta <span class="font-mono">{{ a.trigger_label }}</span></template>
+                <template v-if="a.trigger_label && a.trigger_stage_name"> + </template>
+                <template v-if="a.trigger_stage_name">Coluna <span class="font-mono">{{ a.trigger_stage_name }}</span></template>
+                há <b>{{ a.delay_days }} dias</b> → template
                 <span class="font-mono">{{ a.template_params?.name }}</span> ({{ a.inbox_name }})
               </p>
               <p v-if="a.required_labels?.length" class="text-xs text-n-slate-10 mt-0.5">
@@ -605,14 +617,26 @@ const statsLine = c => {
         </div>
 
         <div class="p-5 space-y-5">
-          <!-- Nome -->
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">Nome da campanha</label>
-            <input
-              v-model="form.name"
-              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
-              placeholder="Ex: Reativação consultas julho"
-            />
+          <!-- Nome + quando publicar -->
+          <div class="flex flex-wrap gap-3">
+            <div class="flex-1 min-w-48">
+              <label class="text-xs font-medium text-n-slate-11 block mb-1">Nome da campanha</label>
+              <input
+                v-model="form.name"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                placeholder="Ex: Reativação consultas julho"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1">
+                Publicar em <span class="text-n-slate-9">(vazio = agora)</span>
+              </label>
+              <input
+                v-model="scheduledAt"
+                type="datetime-local"
+                class="border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              />
+            </div>
           </div>
 
           <!-- Inbox -->
@@ -668,37 +692,27 @@ const statsLine = c => {
           </div>
 
           <!-- Público: incluir -->
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-2">
-              Público — quem VAI receber <span class="text-n-slate-9">(etiquetas e/ou colunas do CRM)</span>
-            </label>
-            <div class="flex flex-wrap gap-1.5 mb-2">
-              <button
-                v-for="l in labels"
-                :key="`il-${l.id}`"
-                class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
-                :class="includeLabelIds.includes(l.id)
-                  ? 'bg-n-brand/10 border-n-brand text-n-brand'
-                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                @click="toggle(includeLabelIds, l.id)"
-              >
-                <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: l.color }" />
-                {{ l.title }}
-              </button>
+          <div class="bg-n-alpha-1 border border-n-weak rounded-xl p-4 space-y-3">
+            <p class="text-xs font-semibold text-n-slate-11 flex items-center gap-1">
+              <span class="i-lucide-users text-n-brand" /> Público — quem VAI receber
+            </p>
+            <div>
+              <p class="text-xs text-n-slate-10 mb-1.5">Etiquetas:</p>
+              <ChipPicker
+                v-model="includeLabelIds"
+                :options="labelOptions"
+                placeholder="Etiqueta"
+                accent="brand"
+              />
             </div>
-            <div class="flex flex-wrap gap-1.5">
-              <button
-                v-for="s in allStages"
-                :key="`is-${s.id}`"
-                class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
-                :class="includeStageIds.includes(s.id)
-                  ? 'bg-n-brand/10 border-n-brand text-n-brand'
-                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                @click="toggle(includeStageIds, s.id)"
-              >
-                <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: s.color }" />
-                {{ s.pipeline_name }} › {{ s.name }}
-              </button>
+            <div>
+              <p class="text-xs text-n-slate-10 mb-1.5">Colunas do CRM:</p>
+              <ChipPicker
+                v-model="includeStageIds"
+                :options="stageOptions"
+                placeholder="Coluna"
+                accent="brand"
+              />
             </div>
           </div>
 
@@ -739,40 +753,31 @@ const statsLine = c => {
           </div>
 
           <!-- Público: excluir -->
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-2">
-              Exclusões — quem NÃO deve receber <span class="text-n-slate-9">(opcional)</span>
-            </label>
-            <div class="flex flex-wrap gap-1.5 mb-2">
-              <button
-                v-for="l in labels"
-                :key="`el-${l.id}`"
-                class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
-                :class="excludeLabelIds.includes(l.id)
-                  ? 'bg-red-500/10 border-red-500 text-red-600'
-                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                @click="toggle(excludeLabelIds, l.id)"
-              >
-                <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: l.color }" />
-                {{ l.title }}
-              </button>
+          <div class="bg-n-alpha-1 border border-n-weak rounded-xl p-4 space-y-3">
+            <p class="text-xs font-semibold text-n-slate-11 flex items-center gap-1">
+              <span class="i-lucide-user-x text-red-500" /> Exclusões — quem NÃO deve receber
+              <span class="text-n-slate-9 font-normal">(opcional)</span>
+            </p>
+            <div>
+              <p class="text-xs text-n-slate-10 mb-1.5">Etiquetas:</p>
+              <ChipPicker
+                v-model="excludeLabelIds"
+                :options="labelOptions"
+                placeholder="Etiqueta"
+                accent="red"
+              />
             </div>
-            <div class="flex flex-wrap gap-1.5">
-              <button
-                v-for="s in allStages"
-                :key="`es-${s.id}`"
-                class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
-                :class="excludeStageIds.includes(s.id)
-                  ? 'bg-red-500/10 border-red-500 text-red-600'
-                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                @click="toggle(excludeStageIds, s.id)"
-              >
-                <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: s.color }" />
-                {{ s.pipeline_name }} › {{ s.name }}
-              </button>
+            <div>
+              <p class="text-xs text-n-slate-10 mb-1.5">Colunas do CRM:</p>
+              <ChipPicker
+                v-model="excludeStageIds"
+                :options="stageOptions"
+                placeholder="Coluna"
+                accent="red"
+              />
             </div>
 
-            <div class="mt-3 flex items-center gap-3">
+            <div class="flex items-center gap-3 pt-1">
               <button
                 class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1"
                 :disabled="!hasAudience || isPreviewLoading"
@@ -800,60 +805,27 @@ const statsLine = c => {
           </div>
 
           <!-- Conversões -->
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-2">
-              O que conta como CONVERSÃO
-              <span class="text-n-slate-9">(colunas do CRM e/ou etiquetas — ex: Cirurgia Realizada, consulta-agendada)</span>
-            </label>
-            <div class="flex flex-wrap gap-1.5 mb-2">
-              <button
-                v-for="s in allStages"
-                :key="`cs-${s.id}`"
-                class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
-                :class="conversionStageIds.includes(s.id)
-                  ? 'bg-green-500/10 border-green-500 text-green-600'
-                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                @click="toggle(conversionStageIds, s.id)"
-              >
-                <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: s.color }" />
-                {{ s.pipeline_name }} › {{ s.name }}
-              </button>
+          <div class="bg-n-alpha-1 border border-n-weak rounded-xl p-4 space-y-3">
+            <p class="text-xs font-semibold text-n-slate-11 flex items-center gap-1">
+              <span class="i-lucide-trending-up text-green-600" /> O que conta como CONVERSÃO
+              <span class="text-n-slate-9 font-normal">(para o painel de resultados)</span>
+            </p>
+            <div>
+              <p class="text-xs text-n-slate-10 mb-1.5">Colunas do CRM (ex: Cirurgia Realizada):</p>
+              <ChipPicker
+                v-model="conversionStageIds"
+                :options="stageOptions"
+                placeholder="Coluna"
+                accent="green"
+              />
             </div>
-            <div class="flex flex-wrap gap-1.5">
-              <button
-                v-for="l in labels"
-                :key="`cl-${l.id}`"
-                class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
-                :class="conversionLabelIds.includes(l.id)
-                  ? 'bg-green-500/10 border-green-500 text-green-600'
-                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                @click="toggle(conversionLabelIds, l.id)"
-              >
-                <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: l.color }" />
-                {{ l.title }}
-              </button>
-            </div>
-          </div>
-
-          <!-- Quando enviar -->
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-2">Quando enviar</label>
-            <div class="flex flex-wrap items-center gap-2">
-              <button
-                class="text-xs px-3 py-1.5 rounded-lg border transition-colors"
-                :class="sendMode === 'now' ? 'bg-n-brand/10 border-n-brand text-n-brand' : 'border-n-weak text-n-slate-11'"
-                @click="sendMode = 'now'"
-              >Agora</button>
-              <button
-                class="text-xs px-3 py-1.5 rounded-lg border transition-colors"
-                :class="sendMode === 'schedule' ? 'bg-purple-500/10 border-purple-500 text-purple-600' : 'border-n-weak text-n-slate-11'"
-                @click="sendMode = 'schedule'"
-              >Agendar</button>
-              <input
-                v-if="sendMode === 'schedule'"
-                v-model="scheduledAt"
-                type="datetime-local"
-                class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
+            <div>
+              <p class="text-xs text-n-slate-10 mb-1.5">Etiquetas (ex: consulta-agendada):</p>
+              <ChipPicker
+                v-model="conversionLabelIds"
+                :options="labelOptions"
+                placeholder="Etiqueta"
+                accent="green"
               />
             </div>
           </div>
@@ -868,25 +840,18 @@ const statsLine = c => {
           <button
             class="text-sm px-4 py-2 rounded-lg border border-n-brand text-n-brand hover:bg-n-brand/10 disabled:opacity-50"
             :disabled="isSubmitting || !form.name.trim() || !form.inbox_id || !templateReady"
-            @click="submit('draft')"
-          >Salvar rascunho</button>
+            @click="submit('create')"
+          >Criar</button>
           <button
-            v-if="sendMode === 'schedule'"
-            class="text-sm px-4 py-2 rounded-lg bg-purple-600 text-white hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+            class="text-sm px-4 py-2 rounded-lg text-white hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+            :class="scheduledAt ? 'bg-purple-600' : 'bg-n-brand'"
             :disabled="!canSubmit || isSubmitting"
-            @click="submit('schedule')"
+            @click="submit('publish')"
           >
-            <span class="i-lucide-clock" />
-            {{ isSubmitting ? 'Agendando…' : 'Agendar envio' }}
-          </button>
-          <button
-            v-else
-            class="text-sm px-4 py-2 rounded-lg bg-n-brand text-white hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
-            :disabled="!canSubmit || isSubmitting"
-            @click="submit('send')"
-          >
-            <span class="i-lucide-send" />
-            {{ isSubmitting ? 'Enviando…' : 'Criar e enviar' }}
+            <span :class="scheduledAt ? 'i-lucide-clock' : 'i-lucide-send'" />
+            <template v-if="isSubmitting">Publicando…</template>
+            <template v-else-if="scheduledAt">Publicar em {{ formatDateTime(scheduledAt) }}</template>
+            <template v-else>Publicar agora</template>
           </button>
         </div>
       </div>
@@ -928,8 +893,18 @@ const statsLine = c => {
                 v-model="aForm.trigger_label"
                 class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
               >
-                <option value="" disabled>selecione…</option>
+                <option value="">(nenhuma)</option>
                 <option v-for="l in labels" :key="l.id" :value="l.title">{{ l.title }}</option>
+              </select>
+              <span>e/ou estiver na coluna</span>
+              <select
+                v-model="aForm.trigger_stage_id"
+                class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
+              >
+                <option :value="null">(nenhuma)</option>
+                <option v-for="s in allStages" :key="s.id" :value="s.id">
+                  {{ s.pipeline_name }} › {{ s.name }}
+                </option>
               </select>
               <span>há</span>
               <input
@@ -940,41 +915,28 @@ const statsLine = c => {
               />
               <span>dias → envia a mensagem</span>
             </div>
+            <p v-if="!aForm.trigger_label && !aForm.trigger_stage_id" class="text-xs text-amber-600">
+              Escolha pelo menos um gatilho: etiqueta ou coluna.
+            </p>
 
             <div>
               <p class="text-xs text-n-slate-10 mb-1.5">E que TAMBÉM tenha estas etiquetas (opcional):</p>
-              <div class="flex flex-wrap gap-1.5">
-                <button
-                  v-for="l in labels"
-                  :key="`ar-${l.id}`"
-                  class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
-                  :class="aForm.required_labels.includes(l.title)
-                    ? 'bg-n-brand/10 border-n-brand text-n-brand'
-                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  @click="toggleLabelTitle(aForm.required_labels, l.title)"
-                >
-                  <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: l.color }" />
-                  {{ l.title }}
-                </button>
-              </div>
+              <ChipPicker
+                v-model="aForm.required_labels"
+                :options="labelTitleOptions"
+                placeholder="Etiqueta"
+                accent="brand"
+              />
             </div>
 
             <div>
               <p class="text-xs text-n-slate-10 mb-1.5">E que NÃO tenha estas (opcional):</p>
-              <div class="flex flex-wrap gap-1.5">
-                <button
-                  v-for="l in labels"
-                  :key="`ae-${l.id}`"
-                  class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
-                  :class="aForm.exclude_labels.includes(l.title)
-                    ? 'bg-red-500/10 border-red-500 text-red-600'
-                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  @click="toggleLabelTitle(aForm.exclude_labels, l.title)"
-                >
-                  <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: l.color }" />
-                  {{ l.title }}
-                </button>
-              </div>
+              <ChipPicker
+                v-model="aForm.exclude_labels"
+                :options="labelTitleOptions"
+                placeholder="Etiqueta"
+                accent="red"
+              />
             </div>
 
             <p class="text-xs text-n-slate-9">

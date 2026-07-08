@@ -40,7 +40,7 @@ class Api::V1::Accounts::Crm::MessageAutomationsController < Api::V1::Accounts::
 
   def automation_params
     params.require(:automation).permit(
-      :name, :inbox_id, :trigger_label, :delay_days, :marker_label,
+      :name, :inbox_id, :trigger_label, :trigger_stage_id, :delay_days, :marker_label,
       :message_preview, :active,
       template_params: {}, required_labels: [], exclude_labels: []
     )
@@ -53,6 +53,8 @@ class Api::V1::Accounts::Crm::MessageAutomationsController < Api::V1::Accounts::
       inbox_id: a.inbox_id,
       inbox_name: a.inbox&.name,
       trigger_label: a.trigger_label,
+      trigger_stage_id: a.trigger_stage_id,
+      trigger_stage_name: a.trigger_stage&.name,
       delay_days: a.delay_days,
       required_labels: a.required_labels,
       exclude_labels: a.exclude_labels,

@@ -54,21 +54,23 @@ const TRIGGER_LABELS = {
 };
 
 const ACTION_ICONS = {
-  webhook:      'i-lucide-globe',
-  n8n_flow:     'i-lucide-workflow',
-  apply_label:  'i-lucide-tag',
-  move_card:    'i-lucide-arrow-right-circle',
-  log_timeline: 'i-lucide-clock',
-  notify_team:  'i-lucide-bell',
+  webhook:          'i-lucide-globe',
+  n8n_flow:         'i-lucide-workflow',
+  apply_label:      'i-lucide-tag',
+  move_card:        'i-lucide-arrow-right-circle',
+  log_timeline:     'i-lucide-clock',
+  notify_team:      'i-lucide-bell',
+  template_message: 'i-lucide-megaphone',
 };
 
 const ACTION_LABELS = {
-  webhook:      'Webhook',
-  n8n_flow:     'n8n',
-  apply_label:  'Etiqueta',
-  move_card:    'Mover card',
-  log_timeline: 'Timeline',
-  notify_team:  'Notificar',
+  webhook:          'Webhook',
+  n8n_flow:         'n8n',
+  apply_label:      'Etiqueta',
+  move_card:        'Mover card',
+  log_timeline:     'Timeline',
+  notify_team:      'Notificar',
+  template_message: 'Mensagem Meta',
 };
 
 const loadAutomations = async () => {
@@ -147,6 +149,8 @@ const openCreateAutomation = () => {
 };
 
 const openEditAutomation = (auto) => {
+  // réguas de mensagem são gerenciadas na central Campanha WhatsApp
+  if (auto.kind === 'message_automation') return;
   editingAutomation.value = auto;
   showAutomationForm.value = true;
 };
@@ -159,30 +163,41 @@ const onAutomationSaved = async () => {
 
 const toggleAutomationActive = async (auto) => {
   try {
-    await store.dispatch('crm/updateAutomation', {
-      pipelineId:    props.pipelineId,
-      stageId:       props.stage.id,
-      id:            auto.id,
-      name:          auto.name,
-      trigger_type:  auto.trigger_type,
-      delay_minutes: auto.delay_minutes,
-      action_type:   auto.action_type,
-      action_config: auto.action_config,
-      active:        !auto.active,
-    });
+    if (auto.kind === 'message_automation') {
+      await store.dispatch('crm/updateMessageAutomation', {
+        id: auto.id,
+        active: !auto.active,
+      });
+    } else {
+      await store.dispatch('crm/updateAutomation', {
+        pipelineId:    props.pipelineId,
+        stageId:       props.stage.id,
+        id:            auto.id,
+        name:          auto.name,
+        trigger_type:  auto.trigger_type,
+        delay_minutes: auto.delay_minutes,
+        action_type:   auto.action_type,
+        action_config: auto.action_config,
+        active:        !auto.active,
+      });
+    }
     await loadAutomations();
   } catch {
     useAlert(t('CRM.ERROR.GENERIC'));
   }
 };
 
-const deleteAutomation = async (id) => {
+const deleteAutomation = async (auto) => {
   try {
-    await store.dispatch('crm/deleteAutomation', {
-      pipelineId: props.pipelineId,
-      stageId:    props.stage.id,
-      id,
-    });
+    if (auto.kind === 'message_automation') {
+      await store.dispatch('crm/deleteMessageAutomation', auto.id);
+    } else {
+      await store.dispatch('crm/deleteAutomation', {
+        pipelineId: props.pipelineId,
+        stageId:    props.stage.id,
+        id: auto.id,
+      });
+    }
     deleteConfirmAutoId.value = null;
     await loadAutomations();
     useAlert('Automação excluída');
@@ -340,7 +355,7 @@ const delayLabel = (minutes) => {
             <div class="flex gap-1.5">
               <button
                 class="flex-1 bg-red-500 text-white rounded py-1 text-xs"
-                @click="deleteAutomation(auto.id)"
+                @click="deleteAutomation(auto)"
               >Excluir</button>
               <button
                 class="flex-1 border border-n-weak rounded py-1 text-xs text-n-slate-11"
@@ -390,6 +405,10 @@ const delayLabel = (minutes) => {
                   {{ delayLabel(auto.delay_minutes) }}
                 </span>
               </div>
+
+              <p v-if="auto.kind === 'message_automation'" class="text-[10px] text-n-slate-9 mt-1 italic">
+                Gerenciada em Campanha WhatsApp
+              </p>
             </div>
 
             <!-- Footer actions -->

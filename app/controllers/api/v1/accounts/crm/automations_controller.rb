@@ -4,7 +4,9 @@ class Api::V1::Accounts::Crm::AutomationsController < Api::V1::Accounts::BaseCon
   before_action :automation, only: [:update, :destroy, :trigger]
 
   def index
-    render json: @stage.automations.order(:created_at).map { |a| automation_json(a) }
+    items = @stage.automations.order(:created_at).map { |a| automation_json(a) }
+    items += message_automation_items
+    render json: items
   end
 
   def create
@@ -48,6 +50,26 @@ class Api::V1::Accounts::Crm::AutomationsController < Api::V1::Accounts::BaseCon
       :name, :trigger_type, :delay_minutes, :action_type, :active,
       action_config: {}
     )
+  end
+
+  # Réguas de mensagem (Campanha WhatsApp) desta coluna aparecem no modo
+  # programação como itens somente leitura — gerenciadas na central
+  def message_automation_items
+    Crm::MessageAutomation.where(account_id: Current.account.id, trigger_stage_id: @stage.id)
+                          .order(:created_at).map do |a|
+      {
+        id: a.id,
+        kind: 'message_automation',
+        stage_id: @stage.id,
+        name: a.name,
+        trigger_type: 'card_stalled',
+        delay_minutes: a.delay_days * 24 * 60,
+        action_type: 'template_message',
+        action_config: { 'template' => a.template_params['name'] },
+        active: a.active,
+        created_at: a.created_at
+      }
+    end
   end
 
   def automation_json(a)
