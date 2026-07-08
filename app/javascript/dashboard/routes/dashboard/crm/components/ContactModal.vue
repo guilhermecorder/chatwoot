@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAlert } from 'dashboard/composables';
-import { dynamicTime } from 'shared/helpers/timeHelper';
+import { relativeTime } from '../helpers';
 
 const props = defineProps({
   contact: { type: Object, default: null },
@@ -498,7 +498,7 @@ const openConversation = () => {
               <div>
                 <p class="text-xs text-n-slate-10">{{ $t('CRM.MODAL.LAST_ACTIVITY') }}</p>
                 <p class="text-sm text-n-slate-12">
-                  {{ contact.last_activity_at ? dynamicTime(contact.last_activity_at) : '—' }}
+                  {{ relativeTime(contact.last_activity_at) ?? '—' }}
                 </p>
               </div>
             </div>
@@ -589,7 +589,7 @@ const openConversation = () => {
                 {{ $t('CRM.MODAL.NO_MESSAGES') }}
               </p>
               <p v-if="contact.last_conversation.last_message_at" class="text-xs text-n-slate-9 mt-2">
-                {{ dynamicTime(contact.last_conversation.last_message_at) }}
+                {{ relativeTime(contact.last_conversation.last_message_at) }}
               </p>
             </div>
 

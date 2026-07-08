@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useMapGetter } from 'dashboard/composables/store';
-import { dynamicTime } from 'shared/helpers/timeHelper';
+import { relativeTime } from '../helpers';
 
 const props = defineProps({
   contact: { type: Object, required: true },
@@ -32,10 +32,7 @@ const entryDate = computed(() => {
   });
 });
 
-const lastActivity = computed(() => {
-  if (!props.contact.last_activity_at) return null;
-  return dynamicTime(props.contact.last_activity_at);
-});
+const lastActivity = computed(() => relativeTime(props.contact.last_activity_at));
 
 const channelIcon = (channelType) => {
   const map = {
