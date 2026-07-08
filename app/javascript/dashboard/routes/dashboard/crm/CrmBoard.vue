@@ -748,41 +748,42 @@ const addContactToStage = async (contact) => {
             @add-contact="openAddContact"
           />
         </template>
-      </draggable>
 
-        <!-- Add stage column — only in edit mode -->
-        <div v-if="isEditMode" class="flex-shrink-0 w-64">
-          <div v-if="!showNewStageForm">
-            <button
-              class="w-full border-2 border-dashed border-n-weak rounded-xl py-3 text-sm text-n-slate-10 hover:border-n-brand hover:text-n-brand transition-colors flex items-center justify-center gap-1"
-              @click="showNewStageForm = true"
-            >
-              <span class="i-lucide-plus" />
-              {{ $t('CRM.NEW_STAGE') }}
-            </button>
-          </div>
-          <div v-else class="bg-n-alpha-1 rounded-xl p-3 space-y-2">
-            <input
-              v-model="newStageName"
-              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
-              :placeholder="$t('CRM.STAGE_NAME')"
-              @keyup.enter="createStage"
-            />
-            <div class="flex items-center gap-2">
-              <label class="text-xs text-n-slate-10">{{ $t('CRM.STAGE_COLOR') }}</label>
-              <input v-model="newStageColor" type="color" class="w-8 h-8 rounded cursor-pointer border-0" />
-            </div>
-            <div class="flex gap-2">
-              <button class="flex-1 bg-n-brand text-white rounded-lg py-1.5 text-xs" @click="createStage">
-                {{ $t('CRM.CREATE') }}
-              </button>
-              <button class="flex-1 border border-n-weak rounded-lg py-1.5 text-xs text-n-slate-11" @click="showNewStageForm = false">
-                {{ $t('CRM.CANCEL') }}
+        <template #footer>
+          <!-- Add stage column — only in edit mode -->
+          <div v-if="isEditMode" class="flex-shrink-0 w-64">
+            <div v-if="!showNewStageForm">
+              <button
+                class="w-full border-2 border-dashed border-n-weak rounded-xl py-3 text-sm text-n-slate-10 hover:border-n-brand hover:text-n-brand transition-colors flex items-center justify-center gap-1"
+                @click="showNewStageForm = true"
+              >
+                <span class="i-lucide-plus" />
+                {{ $t('CRM.NEW_STAGE') }}
               </button>
             </div>
+            <div v-else class="bg-n-alpha-1 rounded-xl p-3 space-y-2">
+              <input
+                v-model="newStageName"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                :placeholder="$t('CRM.STAGE_NAME')"
+                @keyup.enter="createStage"
+              />
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-n-slate-10">{{ $t('CRM.STAGE_COLOR') }}</label>
+                <input v-model="newStageColor" type="color" class="w-8 h-8 rounded cursor-pointer border-0" />
+              </div>
+              <div class="flex gap-2">
+                <button class="flex-1 bg-n-brand text-white rounded-lg py-1.5 text-xs" @click="createStage">
+                  {{ $t('CRM.CREATE') }}
+                </button>
+                <button class="flex-1 border border-n-weak rounded-lg py-1.5 text-xs text-n-slate-11" @click="showNewStageForm = false">
+                  {{ $t('CRM.CANCEL') }}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </template>
+      </draggable>
     </div>
 
     <!-- Contact detail modal -->

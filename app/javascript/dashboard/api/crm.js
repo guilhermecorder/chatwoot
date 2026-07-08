@@ -65,6 +65,35 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/campaigns/${id}/results`);
   }
 
+  scheduleCampaign(id, scheduledAt) {
+    return axios.post(`${this.url}/campaigns/${id}/schedule`, {
+      scheduled_at: scheduledAt,
+    });
+  }
+
+  // ── Réguas de mensagens (automações) ──────────────────────────────
+  getMessageAutomations() {
+    return axios.get(`${this.url}/message_automations`);
+  }
+
+  createMessageAutomation(data) {
+    return axios.post(`${this.url}/message_automations`, { automation: data });
+  }
+
+  updateMessageAutomation(id, data) {
+    return axios.put(`${this.url}/message_automations/${id}`, {
+      automation: data,
+    });
+  }
+
+  deleteMessageAutomation(id) {
+    return axios.delete(`${this.url}/message_automations/${id}`);
+  }
+
+  previewEligible(id) {
+    return axios.get(`${this.url}/message_automations/${id}/preview_eligible`);
+  }
+
   previewAudience(audience) {
     return axios.post(`${this.url}/campaigns/preview_audience`, { audience });
   }

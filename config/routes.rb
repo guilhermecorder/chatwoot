@@ -129,12 +129,16 @@ Rails.application.routes.draw do
             resources :campaigns, only: [:index, :show, :create, :destroy] do
               member do
                 post :send_now
+                post :schedule
                 get :results
               end
               collection do
                 post :preview_audience
                 get :templates
               end
+            end
+            resources :message_automations, only: [:index, :create, :update, :destroy] do
+              member { get :preview_eligible }
             end
             resource :settings, only: [:show, :update] do
               post :test_n8n

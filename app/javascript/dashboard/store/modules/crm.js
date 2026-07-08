@@ -99,6 +99,29 @@ const actions = {
     const { data } = await CrmAPI.getCampaignResults(id);
     return data;
   },
+  async scheduleCampaign(_, { id, scheduledAt }) {
+    const { data } = await CrmAPI.scheduleCampaign(id, scheduledAt);
+    return data;
+  },
+  async fetchMessageAutomations() {
+    const { data } = await CrmAPI.getMessageAutomations();
+    return data;
+  },
+  async createMessageAutomation(_, automationData) {
+    const { data } = await CrmAPI.createMessageAutomation(automationData);
+    return data;
+  },
+  async updateMessageAutomation(_, { id, ...automationData }) {
+    const { data } = await CrmAPI.updateMessageAutomation(id, automationData);
+    return data;
+  },
+  async deleteMessageAutomation(_, id) {
+    await CrmAPI.deleteMessageAutomation(id);
+  },
+  async previewEligible(_, id) {
+    const { data } = await CrmAPI.previewEligible(id);
+    return data;
+  },
   async previewAudience(_, audience) {
     const { data } = await CrmAPI.previewAudience(audience);
     return data;

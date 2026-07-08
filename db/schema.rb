@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_06_10_000005) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_08_000003) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -779,6 +779,45 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_10_000005) do
     t.index ["stage_id"], name: "index_crm_automations_on_stage_id"
   end
 
+  create_table "crm_campaign_contacts", force: :cascade do |t|
+    t.bigint "campaign_id", null: false
+    t.bigint "contact_id", null: false
+    t.bigint "conversation_id"
+    t.datetime "sent_at"
+    t.string "delivery_status", default: "sent", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_id", "contact_id"], name: "index_crm_campaign_contacts_on_campaign_id_and_contact_id", unique: true
+    t.index ["campaign_id"], name: "index_crm_campaign_contacts_on_campaign_id"
+    t.index ["contact_id"], name: "index_crm_campaign_contacts_on_contact_id"
+    t.index ["conversation_id"], name: "index_crm_campaign_contacts_on_conversation_id"
+  end
+
+  create_table "crm_campaigns", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "inbox_id", null: false
+    t.bigint "sender_id"
+    t.string "name", null: false
+    t.jsonb "template_params", default: {}, null: false
+    t.text "message_preview"
+    t.jsonb "audience", default: {}, null: false
+    t.string "apply_label"
+    t.integer "status", default: 0, null: false
+    t.jsonb "stats", default: {}, null: false
+    t.datetime "started_at"
+    t.datetime "finished_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "conversion_stage_ids", default: [], null: false
+    t.datetime "scheduled_at"
+    t.jsonb "conversion_label_ids", default: [], null: false
+    t.index ["account_id", "status"], name: "index_crm_campaigns_on_account_id_and_status"
+    t.index ["account_id"], name: "index_crm_campaigns_on_account_id"
+    t.index ["inbox_id"], name: "index_crm_campaigns_on_inbox_id"
+    t.index ["scheduled_at"], name: "index_crm_campaigns_on_scheduled_at"
+    t.index ["sender_id"], name: "index_crm_campaigns_on_sender_id"
+  end
+
   create_table "crm_contact_stage_logs", force: :cascade do |t|
     t.bigint "crm_contact_id", null: false
     t.bigint "stage_id", null: false
@@ -811,6 +850,28 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_10_000005) do
     t.index ["contact_id"], name: "index_crm_contacts_on_contact_id"
     t.index ["pipeline_id"], name: "index_crm_contacts_on_pipeline_id"
     t.index ["stage_id"], name: "index_crm_contacts_on_stage_id"
+  end
+
+  create_table "crm_message_automations", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "inbox_id", null: false
+    t.bigint "sender_id"
+    t.string "name", null: false
+    t.string "trigger_label", null: false
+    t.integer "delay_days", default: 7, null: false
+    t.jsonb "required_labels", default: [], null: false
+    t.jsonb "exclude_labels", default: [], null: false
+    t.string "marker_label"
+    t.jsonb "template_params", default: {}, null: false
+    t.text "message_preview"
+    t.boolean "active", default: true, null: false
+    t.jsonb "stats", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "active"], name: "index_crm_message_automations_on_account_id_and_active"
+    t.index ["account_id"], name: "index_crm_message_automations_on_account_id"
+    t.index ["inbox_id"], name: "index_crm_message_automations_on_inbox_id"
+    t.index ["sender_id"], name: "index_crm_message_automations_on_sender_id"
   end
 
   create_table "crm_pipelines", force: :cascade do |t|
@@ -1424,10 +1485,19 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_10_000005) do
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "crm_automation_logs", "crm_automations", column: "automation_id"
   add_foreign_key "crm_automations", "crm_stages", column: "stage_id"
+  add_foreign_key "crm_campaign_contacts", "contacts"
+  add_foreign_key "crm_campaign_contacts", "conversations"
+  add_foreign_key "crm_campaign_contacts", "crm_campaigns", column: "campaign_id"
+  add_foreign_key "crm_campaigns", "accounts"
+  add_foreign_key "crm_campaigns", "inboxes"
+  add_foreign_key "crm_campaigns", "users", column: "sender_id"
   add_foreign_key "crm_contacts", "contacts"
   add_foreign_key "crm_contacts", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "crm_contacts", "crm_stages", column: "stage_id"
   add_foreign_key "crm_contacts", "users", column: "assignee_id"
+  add_foreign_key "crm_message_automations", "accounts"
+  add_foreign_key "crm_message_automations", "inboxes"
+  add_foreign_key "crm_message_automations", "users", column: "sender_id"
   add_foreign_key "crm_pipelines", "accounts"
   add_foreign_key "crm_settings", "accounts"
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"

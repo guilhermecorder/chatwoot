@@ -100,7 +100,7 @@ const fetchWorkflows = async () => {
             ? 'bg-green-500/8 border-green-500/20 text-green-700'
             : 'bg-n-alpha-1 border-n-weak text-n-slate-10'"
         >
-          <img :src="'/dashboard/images/integrations/n8n.png'" alt="n8n" class="w-6 h-6 rounded flex-shrink-0" />
+          <span class="i-lucide-workflow w-6 h-6 flex-shrink-0" />
           <span class="text-sm font-medium">
             {{ isConfigured ? 'Conectado — n8n configurado' : 'Não configurado' }}
           </span>
@@ -112,10 +112,8 @@ const fetchWorkflows = async () => {
         <!-- Credenciais -->
         <div class="bg-n-solid-2 rounded-2xl border border-n-weak p-6 space-y-5">
           <div class="flex items-center gap-3 mb-1">
-            <img
-              :src="'/dashboard/images/integrations/n8n.png'"
-              alt="n8n"
-              class="w-10 h-10 rounded-xl object-contain border border-n-weak flex-shrink-0"
+            <span
+              class="i-lucide-workflow w-10 h-10 rounded-xl border border-n-weak flex-shrink-0 text-n-brand p-2"
             />
             <div>
               <h3 class="text-sm font-semibold text-n-slate-12">Credenciais n8n</h3>
