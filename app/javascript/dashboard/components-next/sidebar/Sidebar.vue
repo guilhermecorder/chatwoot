@@ -549,6 +549,16 @@ const menuItems = computed(() => {
           to: accountScopedRoute('label_dashboard'),
         },
         {
+          name: 'Traffic Funnel',
+          label: 'Funil de Tráfego',
+          to: accountScopedRoute('traffic_funnel_reports'),
+        },
+        {
+          name: 'WhatsApp Health',
+          label: 'Saúde do WhatsApp',
+          to: accountScopedRoute('whatsapp_health_reports'),
+        },
+        {
           name: 'Report Overview',
           label: t('SIDEBAR.REPORTS_OVERVIEW'),
           to: accountScopedRoute('account_overview_reports'),

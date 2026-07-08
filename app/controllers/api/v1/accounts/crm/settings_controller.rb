@@ -73,6 +73,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg = crm_settings.meta_ads_config || {}
     cfg['pixel_id']          = params[:pixel_id]          if params[:pixel_id].present?
     cfg['access_token']      = params[:access_token]      if params[:access_token].present?
+    cfg['ad_account_id']     = params[:ad_account_id]     if params.key?(:ad_account_id)
     cfg['test_event_code']   = params[:test_event_code]   # pode ser blank
     crm_settings.update!(meta_ads_config: cfg)
     render json: meta_ads_json(crm_settings)
@@ -131,8 +132,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     {
       pixel_id:              cfg['pixel_id'],
       access_token_set:      cfg['access_token'].present?,
+      ad_account_id:         cfg['ad_account_id'],
       test_event_code:       cfg['test_event_code'],
       configured:            cfg['pixel_id'].present? && cfg['access_token'].present?,
+      insights_configured:   cfg['ad_account_id'].present? && cfg['access_token'].present?,
     }
   end
 

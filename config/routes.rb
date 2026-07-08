@@ -140,6 +140,7 @@ Rails.application.routes.draw do
             resources :message_automations, only: [:index, :create, :update, :destroy] do
               member { get :preview_eligible }
             end
+            resource :traffic_report, only: [:show]
             resource :settings, only: [:show, :update] do
               post :test_n8n
               post :fetch_workflows

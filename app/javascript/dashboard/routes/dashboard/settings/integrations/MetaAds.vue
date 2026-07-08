@@ -10,6 +10,7 @@ const settings = useMapGetter('crm/getSettings');
 
 const pixelId       = ref('');
 const accessToken   = ref('');
+const adAccountId   = ref('');
 const testEventCode = ref('');
 const isSaving      = ref(false);
 const isTesting     = ref(false);
@@ -21,6 +22,7 @@ const isConfigured = computed(() => metaConfig.value.configured);
 onMounted(async () => {
   await store.dispatch('crm/fetchSettings');
   pixelId.value       = metaConfig.value.pixel_id       || '';
+  adAccountId.value   = metaConfig.value.ad_account_id  || '';
   testEventCode.value = metaConfig.value.test_event_code || '';
   // access_token nunca é pré-preenchido por segurança
 });
@@ -33,7 +35,11 @@ const save = async () => {
   isSaving.value = true;
   testResult.value = null;
   try {
-    const payload = { pixel_id: pixelId.value.trim(), test_event_code: testEventCode.value.trim() };
+    const payload = {
+      pixel_id: pixelId.value.trim(),
+      test_event_code: testEventCode.value.trim(),
+      ad_account_id: adAccountId.value.trim(),
+    };
     if (accessToken.value.trim()) payload.access_token = accessToken.value.trim();
     await store.dispatch('crm/updateMetaAds', payload);
     accessToken.value = '';
@@ -129,6 +135,23 @@ const testConnection = async () => {
             />
             <p class="text-xs text-n-slate-9 mt-1">
               Meta Business Suite → Gerenciador de Eventos → seu Pixel → Configurações → API de Conversões → Gerar token de acesso
+            </p>
+          </div>
+
+          <!-- Ad Account ID (para o Funil de Tráfego) -->
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+              ID da conta de anúncios
+              <span class="text-n-slate-9 font-normal">(para o relatório Funil de Tráfego)</span>
+            </label>
+            <input
+              v-model="adAccountId"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
+              placeholder="Ex: act_1234567890 ou 1234567890"
+            />
+            <p class="text-xs text-n-slate-9 mt-1">
+              Gerenciador de Anúncios → Configurações da conta. Com isso preenchido, o relatório
+              Funil de Tráfego mostra investimento, alcance e cliques automaticamente.
             </p>
           </div>
 

@@ -25,6 +25,8 @@ import LiveReports from './LiveReports.vue';
 import SLAReports from './SLAReports.vue';
 import LabelDashboard from './LabelDashboard.vue';
 import CrmDashboardReport from './CrmDashboardReport.vue';
+import WhatsappHealth from './WhatsappHealth.vue';
+import TrafficFunnel from './TrafficFunnel.vue';
 
 const meta = {
   featureFlag: FEATURE_FLAGS.REPORTS,
@@ -185,6 +187,22 @@ export default {
             permissions: ['administrator', 'report_manage'],
           },
           component: CrmDashboardReport,
+        },
+        {
+          path: 'whatsapp_health',
+          name: 'whatsapp_health_reports',
+          meta: {
+            permissions: ['administrator', 'report_manage'],
+          },
+          component: WhatsappHealth,
+        },
+        {
+          path: 'traffic_funnel',
+          name: 'traffic_funnel_reports',
+          meta: {
+            permissions: ['administrator', 'report_manage'],
+          },
+          component: TrafficFunnel,
         },
       ],
     },

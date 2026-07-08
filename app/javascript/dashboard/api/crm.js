@@ -94,6 +94,10 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/message_automations/${id}/preview_eligible`);
   }
 
+  getTrafficReport(params) {
+    return axios.get(`${this.url}/traffic_report`, { params });
+  }
+
   previewAudience(audience) {
     return axios.post(`${this.url}/campaigns/preview_audience`, { audience });
   }
