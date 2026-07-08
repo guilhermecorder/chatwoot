@@ -53,6 +53,7 @@ class Crm::CampaignRunJob < ApplicationJob
       additional_attributes: { template_params: processed, crm_campaign_id: campaign.id }
     )
 
+    record_recipient(campaign, contact, conversation)
     apply_label(campaign, contact)
     stats['sent'] += 1
   rescue StandardError => e
@@ -80,6 +81,17 @@ class Crm::CampaignRunJob < ApplicationJob
     body = campaign.message_preview.presence || campaign.name
     params = processed.dig('processed_params', 'body') || {}
     body.gsub(/\{\{\s*(\d+)\s*\}\}/) { params[Regexp.last_match(1)].to_s }
+  end
+
+  def record_recipient(campaign, contact, conversation)
+    Crm::CampaignContact.create!(
+      campaign: campaign,
+      contact: contact,
+      conversation: conversation,
+      sent_at: Time.current
+    )
+  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+    nil
   end
 
   def apply_label(campaign, contact)

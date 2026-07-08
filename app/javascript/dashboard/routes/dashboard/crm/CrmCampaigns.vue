@@ -27,6 +27,12 @@ const includeLabelIds = ref([]);
 const excludeLabelIds = ref([]);
 const includeStageIds = ref([]);
 const excludeStageIds = ref([]);
+const conversionStageIds = ref([]);
+
+// ── Painel de resultados ──────────────────────────────────────────────
+const resultsCampaign = ref(null);
+const results = ref(null);
+const isResultsLoading = ref(false);
 const audiencePreview = ref(null);
 const isPreviewLoading = ref(false);
 const isSubmitting = ref(false);
@@ -123,6 +129,7 @@ const openComposer = () => {
   excludeLabelIds.value = [];
   includeStageIds.value = [];
   excludeStageIds.value = [];
+  conversionStageIds.value = [];
   audiencePreview.value = null;
   showComposer.value = true;
   if (form.value.inbox_id) loadTemplates();
@@ -173,6 +180,7 @@ const buildPayload = () => ({
   inbox_id: form.value.inbox_id,
   apply_label: form.value.apply_label,
   message_preview: bodyText.value,
+  conversion_stage_ids: conversionStageIds.value,
   audience: audiencePayload(),
   template_params: {
     name: selectedTemplate.value.name,
@@ -198,6 +206,24 @@ const submit = async (sendNow) => {
     isSubmitting.value = false;
   }
 };
+
+// ── Painel de resultados ──────────────────────────────────────────────
+const openResults = async (c) => {
+  resultsCampaign.value = c;
+  results.value = null;
+  isResultsLoading.value = true;
+  try {
+    results.value = await store.dispatch('crm/fetchCampaignResults', c.id);
+  } catch {
+    useAlert('Erro ao carregar resultados');
+    resultsCampaign.value = null;
+  } finally {
+    isResultsLoading.value = false;
+  }
+};
+
+const formatCurrency = (v) =>
+  'R$ ' + Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 
 // ── Ações da lista ────────────────────────────────────────────────────
 const sendDraft = async (c) => {
@@ -303,6 +329,15 @@ const statsLine = (c) => {
               class="text-xs px-3 py-1.5 rounded-lg bg-n-brand text-white hover:opacity-90"
               @click="sendDraft(c)"
             >Enviar agora</button>
+
+            <button
+              v-if="c.status === 'completed' || c.status === 'processing'"
+              class="text-xs px-3 py-1.5 rounded-lg border border-green-500/60 text-green-600 hover:bg-green-500/10 flex items-center gap-1"
+              @click="openResults(c)"
+            >
+              <span class="i-lucide-trending-up" />
+              Resultados
+            </button>
 
             <template v-if="c.status !== 'processing'">
               <button
@@ -497,6 +532,28 @@ const statsLine = (c) => {
               placeholder="Ex: campanha-julho-2026"
             />
           </div>
+
+          <!-- Colunas de conversão -->
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-2">
+              Colunas que contam como CONVERSÃO
+              <span class="text-n-slate-9">(para o painel de resultados — ex: Cirurgia Realizada)</span>
+            </label>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="s in allStages"
+                :key="`cs-${s.id}`"
+                class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
+                :class="conversionStageIds.includes(s.id)
+                  ? 'bg-green-500/10 border-green-500 text-green-600'
+                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                @click="toggle(conversionStageIds, s.id)"
+              >
+                <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: s.color }" />
+                {{ s.pipeline_name }} › {{ s.name }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Footer -->
@@ -518,6 +575,97 @@ const statsLine = (c) => {
             <span class="i-lucide-send" />
             {{ isSubmitting ? 'Enviando…' : 'Criar e enviar' }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Painel de Resultados ──────────────────────────────────── -->
+    <div
+      v-if="resultsCampaign"
+      class="fixed inset-0 z-40 bg-black/50 flex items-start justify-center overflow-y-auto py-8"
+      @click.self="resultsCampaign = null"
+    >
+      <div class="bg-n-solid-1 rounded-2xl w-full max-w-2xl mx-4 shadow-xl border border-n-weak">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak">
+          <h2 class="text-sm font-semibold text-n-slate-12 flex items-center gap-2">
+            <span class="i-lucide-trending-up text-green-600" />
+            Resultados — {{ resultsCampaign.name }}
+          </h2>
+          <button class="i-lucide-x text-n-slate-10 hover:text-n-slate-12" @click="resultsCampaign = null" />
+        </div>
+
+        <div v-if="isResultsLoading" class="flex justify-center py-16"><Spinner /></div>
+
+        <div v-else-if="results" class="p-5 space-y-5">
+          <!-- KPIs -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div class="bg-n-alpha-1 border border-n-weak rounded-xl p-3">
+              <p class="text-xs text-n-slate-10">Receberam</p>
+              <p class="text-xl font-bold text-n-slate-12">{{ results.recipients }}</p>
+            </div>
+            <div class="bg-n-alpha-1 border border-n-weak rounded-xl p-3">
+              <p class="text-xs text-n-slate-10">Conversões</p>
+              <p class="text-xl font-bold text-green-600">{{ results.conversions.count }}</p>
+            </div>
+            <div class="bg-n-alpha-1 border border-n-weak rounded-xl p-3">
+              <p class="text-xs text-n-slate-10">Taxa</p>
+              <p class="text-xl font-bold text-n-slate-12">{{ results.conversions.rate }}%</p>
+            </div>
+            <div class="bg-n-alpha-1 border border-n-weak rounded-xl p-3">
+              <p class="text-xs text-n-slate-10">Valor total</p>
+              <p class="text-xl font-bold text-green-600">{{ formatCurrency(results.conversions.total_value) }}</p>
+            </div>
+          </div>
+
+          <p v-if="!resultsCampaign.conversion_stage_ids?.length" class="text-xs text-amber-600 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+            Esta campanha não tem colunas de conversão definidas — as conversões aparecem zeradas.
+            Nas próximas campanhas, selecione as colunas (ex: Cirurgia Realizada) ao criar.
+          </p>
+
+          <!-- Por procedimento -->
+          <div v-if="results.by_procedure.length">
+            <p class="text-xs font-medium text-n-slate-11 mb-2">Procedimentos fechados</p>
+            <div class="border border-n-weak rounded-xl overflow-hidden">
+              <div
+                v-for="p in results.by_procedure"
+                :key="p.procedure"
+                class="flex items-center justify-between px-4 py-2.5 border-b border-n-weak last:border-b-0 bg-n-solid-2"
+              >
+                <span class="text-sm text-n-slate-12">{{ p.procedure }}</span>
+                <span class="text-xs text-n-slate-10">{{ p.count }}x</span>
+                <span class="text-sm font-semibold text-green-600">{{ formatCurrency(p.total_value) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Contatos convertidos -->
+          <div v-if="results.converted_contacts.length">
+            <p class="text-xs font-medium text-n-slate-11 mb-2">Quem converteu</p>
+            <div class="space-y-1.5 max-h-64 overflow-y-auto">
+              <div
+                v-for="c in results.converted_contacts"
+                :key="c.contact_id"
+                class="flex items-center justify-between bg-n-alpha-1 rounded-lg px-3 py-2"
+              >
+                <div class="min-w-0">
+                  <p class="text-sm text-n-slate-12 truncate">{{ c.name }}</p>
+                  <p class="text-xs text-n-slate-10">{{ c.procedure || 'Procedimento não informado' }}</p>
+                </div>
+                <div class="text-right flex-shrink-0 ml-3">
+                  <p class="text-sm font-semibold text-green-600">{{ c.value ? formatCurrency(c.value) : '—' }}</p>
+                  <span
+                    class="text-[10px] px-1.5 py-0.5 rounded-full"
+                    :style="{ backgroundColor: (c.stage_color || '#6B7280') + '22', color: c.stage_color || '#6B7280' }"
+                  >{{ c.stage_name }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-xs text-n-slate-9">
+            As conversões são calculadas cruzando quem recebeu a campanha com os cards
+            que chegaram nas colunas de conversão do CRM. Em breve: dados em tempo real do Oftalmofácil.
+          </p>
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseController
-  before_action :campaign, only: [:show, :destroy, :send_now]
+  before_action :campaign, only: [:show, :destroy, :send_now, :results]
 
   def index
     campaigns = Current.account.crm_campaigns.order(created_at: :desc)
@@ -32,6 +32,43 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
     render json: campaign_json(@campaign)
   end
 
+  # GET results — painel de resultados: destinatários x conversões no CRM
+  def results
+    recipients_count = @campaign.campaign_contacts.count
+    converted = @campaign.converted_crm_contacts.to_a
+
+    total_value = converted.sum { |c| c.value.to_f }
+    by_procedure = converted.group_by { |c| c.procedure_of_interest.presence || 'Não informado' }
+                            .map do |procedure, cards|
+      {
+        procedure: procedure,
+        count: cards.size,
+        total_value: cards.sum { |c| c.value.to_f }
+      }
+    end.sort_by { |p| -p[:total_value] }
+
+    render json: {
+      recipients: recipients_count,
+      conversions: {
+        count: converted.size,
+        rate: recipients_count.positive? ? (converted.size.to_f / recipients_count * 100).round(1) : 0,
+        total_value: total_value
+      },
+      by_procedure: by_procedure,
+      converted_contacts: converted.map do |c|
+        {
+          contact_id: c.contact_id,
+          name: c.contact.name,
+          phone_number: c.contact.phone_number,
+          procedure: c.procedure_of_interest,
+          value: c.value,
+          stage_name: c.stage&.name,
+          stage_color: c.stage&.color
+        }
+      end
+    }
+  end
+
   # POST preview_audience — recebe o audience e devolve contagem + amostra
   def preview_audience
     preview = Crm::Campaign.new(account: Current.account, audience: audience_params)
@@ -62,7 +99,7 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
   def campaign_params
     params.require(:campaign).permit(
       :name, :inbox_id, :apply_label, :message_preview,
-      template_params: {}, audience: {}
+      template_params: {}, audience: {}, conversion_stage_ids: []
     )
   end
 
@@ -83,6 +120,7 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
       message_preview: c.message_preview,
       audience: c.audience,
       apply_label: c.apply_label,
+      conversion_stage_ids: c.conversion_stage_ids,
       status: c.status,
       stats: c.stats,
       sender_name: c.sender&.name,

@@ -583,6 +583,12 @@ const menuItems = computed(() => {
       to: accountScopedRoute('crm_board'),
     },
     {
+      name: 'Campanha WhatsApp',
+      label: 'Campanha WhatsApp',
+      icon: 'i-lucide-megaphone',
+      to: accountScopedRoute('crm_campaigns'),
+    },
+    {
       name: 'Campaigns',
       label: t('SIDEBAR.CAMPAIGNS'),
       icon: 'i-lucide-megaphone',

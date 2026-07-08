@@ -95,6 +95,10 @@ const actions = {
     const { data } = await CrmAPI.sendCampaign(id);
     return data;
   },
+  async fetchCampaignResults(_, id) {
+    const { data } = await CrmAPI.getCampaignResults(id);
+    return data;
+  },
   async previewAudience(_, audience) {
     const { data } = await CrmAPI.previewAudience(audience);
     return data;
