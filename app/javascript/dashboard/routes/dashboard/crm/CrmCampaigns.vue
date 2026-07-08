@@ -418,7 +418,7 @@ const removeCampaign = async c => {
 
 const STATUS_META = {
   draft:      { label: 'Rascunho',   cls: 'bg-n-alpha-2 text-n-slate-11' },
-  scheduled:  { label: 'Agendada',   cls: 'bg-purple-500/15 text-purple-600' },
+  scheduled:  { label: 'Agendada',   cls: 'bg-n-gold-soft text-n-gold' },
   processing: { label: 'Enviando…',  cls: 'bg-blue-500/15 text-blue-600' },
   completed:  { label: 'Concluída',  cls: 'bg-green-500/15 text-green-600' },
   failed:     { label: 'Falhou',     cls: 'bg-red-500/15 text-red-600' },
@@ -516,7 +516,7 @@ const statsLine = c => {
               {{ c.inbox_name }} · <span class="font-mono">{{ c.template_params?.name }}</span>
             </p>
 
-            <p v-if="c.status === 'scheduled' && c.scheduled_at" class="text-xs text-purple-600 flex items-center gap-1">
+            <p v-if="c.status === 'scheduled' && c.scheduled_at" class="text-xs text-n-gold flex items-center gap-1">
               <span class="i-lucide-clock" /> Envia em {{ formatDateTime(c.scheduled_at) }}
             </p>
             <p v-if="statsLine(c)" class="text-xs text-n-slate-11">{{ statsLine(c) }}</p>
@@ -874,7 +874,7 @@ const statsLine = c => {
           >Criar</button>
           <button
             class="text-sm px-4 py-2 rounded-lg text-white hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
-            :class="scheduledAt ? 'bg-purple-600' : 'bg-n-brand'"
+            :class="scheduledAt ? 'bg-n-gold' : 'bg-n-brand'"
             :disabled="!canSubmit || isSubmitting"
             @click="submit('publish')"
           >

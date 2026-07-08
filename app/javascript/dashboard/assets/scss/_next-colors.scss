@@ -145,6 +145,10 @@
     --black-alpha-2: 0, 0, 0, 0.04;
     --border-blue: 39, 129, 246, 0.5;
     --white-alpha: 255, 255, 255, 0.8;
+
+    // CEVICO — dourado (marca)
+    --gold: 191 149 63;
+    --gold-soft: 250 244 227;
   }
 
   .dark {
@@ -291,6 +295,10 @@
     --border-blue: 39, 129, 246, 0.5;
     --border-container: 255, 255, 255, 0;
     --white-alpha: 255, 255, 255, 0.1;
+
+    // CEVICO — dourado (marca), mais claro para contraste no escuro
+    --gold: 229 193 88;
+    --gold-soft: 56 48 27;
   }
 }
 // NEXT COLORS END
