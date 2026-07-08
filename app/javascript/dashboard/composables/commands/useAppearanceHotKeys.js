@@ -8,7 +8,7 @@ import {
 } from 'dashboard/helper/commandbar/icons';
 import { LocalStorage } from 'shared/helpers/localStorage';
 import { LOCAL_STORAGE_KEYS } from 'dashboard/constants/localStorage';
-import { setColorTheme } from 'dashboard/helper/themeHelper.js';
+import { setColorTheme, setBrandTheme } from 'dashboard/helper/themeHelper.js';
 
 const getThemeOptions = t => [
   {
@@ -28,12 +28,24 @@ const getThemeOptions = t => [
   },
 ];
 
+// Temas de cor CEVICO — mudam a cor de destaque (e o efeito de vidro no iOS)
+const BRAND_THEME_OPTIONS = [
+  { key: 'default', label: 'Tema CEVICO Azul (padrão)' },
+  { key: 'gold', label: 'Tema CEVICO Dourado' },
+  { key: 'ios', label: 'Tema iOS Glass (transparências)' },
+];
+
 const setAppearance = theme => {
   LocalStorage.set(LOCAL_STORAGE_KEYS.COLOR_SCHEME, theme);
   const isOSOnDarkMode = window.matchMedia(
     '(prefers-color-scheme: dark)'
   ).matches;
   setColorTheme(isOSOnDarkMode);
+};
+
+const setBrandAppearance = themeKey => {
+  LocalStorage.set(LOCAL_STORAGE_KEYS.BRAND_THEME, themeKey);
+  setBrandTheme();
 };
 
 export function useAppearanceHotKeys() {
@@ -52,15 +64,31 @@ export function useAppearanceHotKeys() {
         setAppearance(theme.key);
       },
     }));
+
+    const brandOptions = BRAND_THEME_OPTIONS.map(theme => ({
+      id: `brand_theme_${theme.key}`,
+      title: theme.label,
+      parent: 'appearance_settings',
+      section: t('COMMAND_BAR.SECTIONS.APPEARANCE'),
+      icon: ICON_APPEARANCE,
+      handler: () => {
+        setBrandAppearance(theme.key);
+      },
+    }));
+
     return [
       {
         id: 'appearance_settings',
         title: t('COMMAND_BAR.COMMANDS.CHANGE_APPEARANCE'),
         section: t('COMMAND_BAR.SECTIONS.APPEARANCE'),
         icon: ICON_APPEARANCE,
-        children: options.map(option => option.id),
+        children: [
+          ...options.map(option => option.id),
+          ...brandOptions.map(option => option.id),
+        ],
       },
       ...options,
+      ...brandOptions,
     ];
   });
 

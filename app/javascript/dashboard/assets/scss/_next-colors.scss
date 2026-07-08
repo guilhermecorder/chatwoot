@@ -146,7 +146,8 @@
     --border-blue: 39, 129, 246, 0.5;
     --white-alpha: 255, 255, 255, 0.8;
 
-    // CEVICO — dourado (marca)
+    // CEVICO — cor de destaque (brand) e dourado da marca
+    --brand: 15 95 166;
     --gold: 191 149 63;
     --gold-soft: 250 244 227;
   }
@@ -296,9 +297,52 @@
     --border-container: 255, 255, 255, 0;
     --white-alpha: 255, 255, 255, 0.1;
 
-    // CEVICO — dourado (marca), mais claro para contraste no escuro
+    // CEVICO — cor de destaque e dourado, ajustados para o escuro
+    --brand: 39 129 246;
     --gold: 229 193 88;
     --gold-soft: 56 48 27;
   }
+
+  // ── Temas de cor CEVICO (classe aplicada no <body>) ─────────────
+  // Dourado: botões, links e seleções em dourado da marca
+  .theme-gold {
+    --brand: 166 124 46;
+  }
+
+  .dark.theme-gold {
+    --brand: 199 155 74;
+  }
+
+  // iOS Glass: azul iOS + fundo com gradiente suave
+  .theme-ios {
+    --brand: 10 132 255;
+  }
 }
 // NEXT COLORS END
+
+// ── iOS Glass: efeito de vidro fosco (fora do @layer para vencer utilitários)
+body.theme-ios {
+  background:
+    radial-gradient(1200px 800px at 85% -10%, rgba(10, 132, 255, 0.14), transparent 60%),
+    radial-gradient(1000px 700px at -10% 110%, rgba(191, 149, 63, 0.12), transparent 55%),
+    rgb(var(--background-color));
+  background-attachment: fixed;
+
+  aside.bg-n-background {
+    background-color: rgba(255, 255, 255, 0.55) !important;
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  }
+
+  &.dark {
+    background:
+      radial-gradient(1200px 800px at 85% -10%, rgba(10, 132, 255, 0.12), transparent 60%),
+      radial-gradient(1000px 700px at -10% 110%, rgba(191, 149, 63, 0.08), transparent 55%),
+      rgb(var(--background-color));
+    background-attachment: fixed;
+
+    aside.bg-n-background {
+      background-color: rgba(17, 17, 19, 0.5) !important;
+    }
+  }
+}
