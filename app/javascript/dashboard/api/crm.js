@@ -40,6 +40,35 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/pipelines/${pipelineId}/stages/reorder`, { stage_ids: stageIds });
   }
 
+  // ── Campanhas (mensagens em massa) ────────────────────────────────
+  getCampaigns() {
+    return axios.get(`${this.url}/campaigns`);
+  }
+
+  getCampaign(id) {
+    return axios.get(`${this.url}/campaigns/${id}`);
+  }
+
+  createCampaign(data) {
+    return axios.post(`${this.url}/campaigns`, { campaign: data });
+  }
+
+  deleteCampaign(id) {
+    return axios.delete(`${this.url}/campaigns/${id}`);
+  }
+
+  sendCampaign(id) {
+    return axios.post(`${this.url}/campaigns/${id}/send_now`);
+  }
+
+  previewAudience(audience) {
+    return axios.post(`${this.url}/campaigns/preview_audience`, { audience });
+  }
+
+  getWhatsappTemplates(inboxId) {
+    return axios.get(`${this.url}/campaigns/templates`, { params: { inbox_id: inboxId } });
+  }
+
   // ── Contacts ──────────────────────────────────────────────────────
   getContacts(pipelineId) {
     return axios.get(`${this.url}/pipelines/${pipelineId}/contacts`);

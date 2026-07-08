@@ -1,5 +1,6 @@
 import { frontendURL } from '../../../helper/URLHelper';
 import CrmBoard from './CrmBoard.vue';
+import CrmCampaigns from './CrmCampaigns.vue';
 
 export default {
   routes: [
@@ -8,6 +9,12 @@ export default {
       name: 'crm_board',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmBoard,
+    },
+    {
+      path: frontendURL('accounts/:accountId/crm/campaigns'),
+      name: 'crm_campaigns',
+      meta: { permissions: ['administrator'] },
+      component: CrmCampaigns,
     },
   ],
 };

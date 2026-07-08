@@ -126,6 +126,13 @@ Rails.application.routes.draw do
           end
           resources :campaigns, only: [:index, :create, :show, :update, :destroy]
           namespace :crm do
+            resources :campaigns, only: [:index, :show, :create, :destroy] do
+              member { post :send_now }
+              collection do
+                post :preview_audience
+                get :templates
+              end
+            end
             resource :settings, only: [:show, :update] do
               post :test_n8n
               post :fetch_workflows

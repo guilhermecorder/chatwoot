@@ -460,6 +460,16 @@ const addContactToStage = async (contact) => {
           Integrações
         </button>
 
+        <!-- Mensagens em massa -->
+        <button
+          class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+          title="Central de mensagens em massa (templates WhatsApp)"
+          @click="$router.push({ name: 'crm_campaigns' })"
+        >
+          <span class="i-lucide-megaphone text-sm" />
+          Mensagens em massa
+        </button>
+
         <button
           class="text-sm text-n-slate-11 hover:text-n-slate-12 flex items-center gap-1 ml-1"
           @click="showNewPipelineForm = !showNewPipelineForm; showDeletePipelineConfirm = false"

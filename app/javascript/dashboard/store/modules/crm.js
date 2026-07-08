@@ -75,6 +75,35 @@ const actions = {
     commit('setStages', { pipelineId, stages: data });
   },
 
+  // ── Campanhas (sem estado no store — dados vivem na página) ────────
+  async fetchCampaigns() {
+    const { data } = await CrmAPI.getCampaigns();
+    return data;
+  },
+  async fetchCampaign(_, id) {
+    const { data } = await CrmAPI.getCampaign(id);
+    return data;
+  },
+  async createCampaign(_, campaignData) {
+    const { data } = await CrmAPI.createCampaign(campaignData);
+    return data;
+  },
+  async deleteCampaign(_, id) {
+    await CrmAPI.deleteCampaign(id);
+  },
+  async sendCampaign(_, id) {
+    const { data } = await CrmAPI.sendCampaign(id);
+    return data;
+  },
+  async previewAudience(_, audience) {
+    const { data } = await CrmAPI.previewAudience(audience);
+    return data;
+  },
+  async fetchWhatsappTemplates(_, inboxId) {
+    const { data } = await CrmAPI.getWhatsappTemplates(inboxId);
+    return data;
+  },
+
   async fetchContacts({ commit }, pipelineId) {
     commit('setUIFlag', { isFetchingContacts: true });
     try {
