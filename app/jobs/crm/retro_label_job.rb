@@ -40,10 +40,23 @@ class Crm::RetroLabelJob < ApplicationJob
     Rails.logger.info "[Crm::RetroLabelJob] '#{term}': #{processed} conversas processadas"
   end
 
-  # Busca ignorando acento e caixa. Aceita vários termos separados por
-  # vírgula, ponto-e-vírgula ou quebra de linha — casa qualquer um (OR).
+  # Interpreta o campo de busca:
+  #   - "entre aspas"  → frase exata, tratada como UMA peça (vírgula dentro ok)
+  #   - sem aspas      → termos separados por vírgula/;/quebra de linha
+  # Qualquer um dos termos casa a conversa (OR).
+  def self.parse_terms(raw)
+    terms = []
+    rest = raw.to_s.gsub(/"([^"]+)"|'([^']+)'|“([^”]+)”/) do
+      terms << (Regexp.last_match(1) || Regexp.last_match(2) || Regexp.last_match(3))
+      ' '
+    end
+    terms += rest.split(/[,;\n]+/)
+    terms.map(&:strip).reject(&:blank?)
+  end
+
+  # Busca ignorando acento e caixa.
   def self.matching_scope(account, term, options = {})
-    terms = term.to_s.split(/[,;\n]+/).map(&:strip).reject(&:blank?)
+    terms = parse_terms(term)
 
     # reorder(nil) remove a ordenação padrão do Message, que quebra o DISTINCT
     scope = Message.reorder(nil).where(account_id: account.id)

@@ -671,7 +671,8 @@ const statsLine = c => {
                   @input="retroPreview = null"
                 />
                 <p class="text-[11px] text-n-slate-9 mt-1">
-                  Ignora acentos e maiúsculas. Separe alternativas por vírgula para casar qualquer uma.
+                  Ignora acentos e maiúsculas. Separe alternativas por vírgula; use
+                  "aspas" para uma frase exata ser tratada como uma peça só.
                 </p>
               </div>
               <div class="flex-1 min-w-48">
