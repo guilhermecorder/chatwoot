@@ -65,26 +65,31 @@ telas CUSTOMIZADAS foram desenhadas para desktop e precisam de adaptação:
 - **Academia**: grid já responsivo, conferir hero.
 - Testar tudo com viewport ~390px.
 
-## 6. Corte final com RESSINCRONIZAÇÃO (prioridade — fazer em sessão acompanhada)
+## 6. ~~Corte final~~ — CONCLUÍDO (2026-07-10, via Henrique, fora do processo planejado)
 
-Leads novos chegaram no Robomaster depois da migração. O corte final deve
-ressincronizar + virar o webhook NUMA JANELA SÓ (noite/domingo, ~30min):
+Henrique desconectou o número do Robomaster e conectou direto no CEVICO,
+e conectou o N8N (automação de atendimento IA). **Não foi feita a
+ressincronização planejada** — 42 conversas que chegaram no Robomaster
+entre a migração e a troca ficaram só lá. Decisão do Guilherme: aceitar a
+perda (o agendamento dessas pessoas já tinha sido feito manualmente) —
+NÃO importar. Robomaster permanece como backup, pode ser mantido rodando
+ou parado (opcional, economiza recursos da VPS já que não recebe mais nada).
 
-1. Pausar atendimento no Robomaster
-2. Novo dump completo → banco `chatwoot_v2` no postgres do CEVICO
-3. Copiar tabelas `crm_*` do `chatwoot_migrado` para o v2 (preserva funil,
-   campanhas, automações, cards — contact_ids são idênticos entre os dois).
-   ATENÇÃO no script: também inserir em schema_migrations do v2 as versions
-   das NOSSAS migrations (senão o boot tenta recriar tabelas crm_* e falha)
-   + `CREATE EXTENSION IF NOT EXISTS unaccent;` (a migration constará como
-   executada). Labels custom (cores) e tags do tratamento não vêm na cópia —
-   re-rodar o Tratamento recria.
-4. Trocar POSTGRES_DATABASE=chatwoot_v2 em web+sidekiq → Implantar
-5. Re-rodar as regras do Tratamento de dados (re-etiqueta tudo, incl. novos)
-6. Clicar "Cadastrar Webhook" (Saúde da Conta) → número passa ao CEVICO;
-   Robomaster vira backup permanente
-- Regra até lá: NADA de trabalho manual pesado em cards no CEVICO (se perde
-  no v2); trabalho por regras é seguro (re-executável).
+**Implicação técnica importante:** CEVICO agora é o banco vivo de produção.
+Não fazer mais nenhum "dump-and-replace" geral — qualquer recuperação de
+dados do Robomaster daqui pra frente precisa ser importação cirúrgica
+(registros específicos), nunca substituição do banco inteiro.
+
+## 8. Backup periódico automatizado do banco CEVICO (produção)
+
+Script para colar no Terminal do navegador da Hostinger: cron no host que
+roda `pg_dump` dentro do container postgres do sistema_cevico, salva no
+disco da VPS (fora dos volumes docker, sobrevive a deploys), rotaciona
+mantendo os últimos N dias. Robomaster continua sendo o backup "ponto no
+tempo" da migração; este é o backup contínuo do banco vivo.
+- Perguntar/confirmar: horário (sugestão 3h) e retenção (sugestão 14 dias).
+- Considerar depois: cópia off-VPS (ex. rclone para Drive/S3) — não
+  implementado ainda, é só local ao disco da VPS por enquanto.
 
 ## 7. Caixas de entrada por atendente ("selecionar e ocultar")
 
@@ -97,10 +102,10 @@ por usuária de mostrar/ocultar caixas na sidebar.
 ---
 
 ## Estado atual (para retomar)
-- Sistema migrado e no ar (4.15.1). 20.279 contatos, 10.848 conversas,
-  428.829 mensagens no banco `chatwoot_migrado`.
-- WhatsApp principal (GREEN) migrado; webhook AINDA aponta para o Robomaster
-  (corte final = clicar "Cadastrar Webhook" quando for virar de vez).
+- Sistema migrado e no ar (4.15.1), banco `chatwoot_migrado` em produção.
+  Corte final CONCLUÍDO (2026-07-10): número WhatsApp e N8N já apontam pro
+  CEVICO. 42 conversas do intervalo pós-migração ficaram só no Robomaster
+  (perda aceita). CEVICO é agora o banco vivo — sem mais resync geral.
 - Feito recentemente: board rápido (N+1 resolvido), Tratamento de dados leve
   (sem saturar CPU), busca sem acento + aspas + multi-termo, mover colunas
   sem modo edição, dashboard com data histórica real + períodos até 3 anos,
