@@ -65,6 +65,35 @@ telas CUSTOMIZADAS foram desenhadas para desktop e precisam de adaptação:
 - **Academia**: grid já responsivo, conferir hero.
 - Testar tudo com viewport ~390px.
 
+## 6. Corte final com RESSINCRONIZAÇÃO (prioridade — fazer em sessão acompanhada)
+
+Leads novos chegaram no Robomaster depois da migração. O corte final deve
+ressincronizar + virar o webhook NUMA JANELA SÓ (noite/domingo, ~30min):
+
+1. Pausar atendimento no Robomaster
+2. Novo dump completo → banco `chatwoot_v2` no postgres do CEVICO
+3. Copiar tabelas `crm_*` do `chatwoot_migrado` para o v2 (preserva funil,
+   campanhas, automações, cards — contact_ids são idênticos entre os dois).
+   ATENÇÃO no script: também inserir em schema_migrations do v2 as versions
+   das NOSSAS migrations (senão o boot tenta recriar tabelas crm_* e falha)
+   + `CREATE EXTENSION IF NOT EXISTS unaccent;` (a migration constará como
+   executada). Labels custom (cores) e tags do tratamento não vêm na cópia —
+   re-rodar o Tratamento recria.
+4. Trocar POSTGRES_DATABASE=chatwoot_v2 em web+sidekiq → Implantar
+5. Re-rodar as regras do Tratamento de dados (re-etiqueta tudo, incl. novos)
+6. Clicar "Cadastrar Webhook" (Saúde da Conta) → número passa ao CEVICO;
+   Robomaster vira backup permanente
+- Regra até lá: NADA de trabalho manual pesado em cards no CEVICO (se perde
+  no v2); trabalho por regras é seguro (re-executável).
+
+## 7. Caixas de entrada por atendente ("selecionar e ocultar")
+
+Primeiro testar o NATIVO: atendentes como papel Agente + colaboradores por
+caixa (Config → Caixas → Colaboradores). Agente só vê as caixas em que está;
+para "cobrir a parceira", ambas nas duas caixas e cada uma filtra clicando
+na sua na sidebar. Se o fluxo nativo não bastar, construir preferência
+por usuária de mostrar/ocultar caixas na sidebar.
+
 ---
 
 ## Estado atual (para retomar)
