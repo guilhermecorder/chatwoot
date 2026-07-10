@@ -20,13 +20,11 @@ class Crm::RetroLabelJob < ApplicationJob
     conversation_ids = matching_conversation_ids(account, term, options)
     processed = 0
 
-    conversation_ids.each_slice(100) do |batch|
+    conversation_ids.each_slice(200) do |batch|
       account.conversations.where(id: batch).includes(:contact).each do |conversation|
         if label_title
-          conversation.add_labels([label_title]) unless conversation.label_list.include?(label_title)
-          if apply_to_contact && conversation.contact && !conversation.contact.label_list.include?(label_title)
-            conversation.contact.add_labels([label_title])
-          end
+          fast_add_label(conversation, label_title)
+          fast_add_label(conversation.contact, label_title) if apply_to_contact && conversation.contact
         end
 
         place_in_stage(stage, conversation.contact) if stage && conversation.contact
@@ -35,6 +33,9 @@ class Crm::RetroLabelJob < ApplicationJob
       rescue StandardError => e
         Rails.logger.error "[Crm::RetroLabelJob] conversa #{conversation.id}: #{e.message}"
       end
+
+      # respira entre lotes para não saturar a CPU em bases grandes
+      sleep 0.05
     end
 
     Rails.logger.info "[Crm::RetroLabelJob] '#{term}': #{processed} conversas processadas"
@@ -80,6 +81,31 @@ class Crm::RetroLabelJob < ApplicationJob
     Crm::Stage.joins(:pipeline)
               .where(crm_pipelines: { account_id: account.id })
               .find_by(id: options['target_stage_id'])
+  end
+
+  # Etiquetagem retroativa LEVE: escreve direto na tabela de taggings e
+  # atualiza o cache, sem disparar update! (que geraria webhook, automação,
+  # evento de relatório e ActionCable para cada registro — o que saturava a
+  # CPU ao processar milhares de leads). Para dados históricos isso é o certo.
+  def fast_add_label(taggable, tag_name)
+    return if taggable.blank?
+
+    tag = ActsAsTaggableOn::Tag.find_or_create_by!(name: tag_name)
+    ActsAsTaggableOn::Tagging.find_or_create_by!(
+      tag_id: tag.id,
+      taggable_type: taggable.class.name,
+      taggable_id: taggable.id,
+      context: 'labels'
+    )
+
+    return unless taggable.has_attribute?(:cached_label_list)
+
+    list = (taggable.cached_label_list || '').split(',').map(&:strip).reject(&:blank?)
+    return if list.include?(tag_name)
+
+    taggable.update_column(:cached_label_list, (list + [tag_name]).join(', '))
+  rescue ActiveRecord::RecordNotUnique
+    nil
   end
 
   # cria o card na coluna, ou move se já existir (sem duplicar no pipeline)
