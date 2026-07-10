@@ -667,9 +667,12 @@ const statsLine = c => {
                 <input
                   v-model="retro.term"
                   class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
-                  placeholder='Ex: 3900'
+                  placeholder='Ex: 3900  ou  orçamento, orcamento, valor'
                   @input="retroPreview = null"
                 />
+                <p class="text-[11px] text-n-slate-9 mt-1">
+                  Ignora acentos e maiúsculas. Separe alternativas por vírgula para casar qualquer uma.
+                </p>
               </div>
               <div class="flex-1 min-w-48">
                 <label class="text-xs font-medium text-n-slate-11 block mb-1">

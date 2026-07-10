@@ -40,11 +40,20 @@ class Crm::RetroLabelJob < ApplicationJob
     Rails.logger.info "[Crm::RetroLabelJob] '#{term}': #{processed} conversas processadas"
   end
 
+  # Busca ignorando acento e caixa. Aceita vários termos separados por
+  # vírgula, ponto-e-vírgula ou quebra de linha — casa qualquer um (OR).
   def self.matching_scope(account, term, options = {})
+    terms = term.to_s.split(/[,;\n]+/).map(&:strip).reject(&:blank?)
+
     # reorder(nil) remove a ordenação padrão do Message, que quebra o DISTINCT
-    scope = Message.reorder(nil)
-                   .where(account_id: account.id)
-                   .where('messages.content ILIKE ?', "%#{ActiveRecord::Base.sanitize_sql_like(term)}%")
+    scope = Message.reorder(nil).where(account_id: account.id)
+
+    if terms.any?
+      clauses = terms.map { 'unaccent(messages.content) ILIKE unaccent(?)' }
+      values  = terms.map { |t| "%#{ActiveRecord::Base.sanitize_sql_like(t)}%" }
+      scope = scope.where(clauses.join(' OR '), *values)
+    end
+
     scope = scope.where('messages.created_at >= ?', Date.parse(options['period_from']).beginning_of_day) if options['period_from'].present?
     scope = scope.where('messages.created_at <= ?', Date.parse(options['period_to']).end_of_day) if options['period_to'].present?
     scope
