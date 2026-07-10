@@ -757,7 +757,6 @@ const createAndAddContact = async () => {
         v-else
         v-model="selectedPipeline.stages"
         item-key="id"
-        :disabled="!isEditMode"
         :animation="150"
         handle=".column-drag-handle"
         style="display:flex;gap:16px;height:100%;min-width:max-content;"

@@ -287,12 +287,13 @@ const delayLabel = (minutes) => {
           </div>
 
           <div class="flex items-center gap-1 flex-shrink-0 ml-1">
+            <!-- Arrastar coluna — sempre disponível -->
+            <span
+              class="column-drag-handle i-lucide-grip-vertical text-sm text-n-slate-9 hover:text-n-slate-12 cursor-grab active:cursor-grabbing"
+              title="Arrastar para reordenar a coluna"
+            />
             <!-- Modo Edição -->
             <template v-if="editMode">
-              <span
-                class="column-drag-handle i-lucide-grip-vertical text-sm text-n-slate-9 hover:text-n-slate-12 cursor-grab active:cursor-grabbing"
-                title="Arrastar coluna"
-              />
               <button
                 class="text-n-slate-10 hover:text-n-slate-12 i-lucide-pencil text-sm"
                 @click="showEditModal = true"
