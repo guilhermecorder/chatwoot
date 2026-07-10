@@ -390,6 +390,7 @@ const retro = ref({
   term: '',
   labelChoice: '',
   newLabel: '',
+  target_stage_id: '',
   period_from: '',
   period_to: '',
   apply_to_contact: true,
@@ -408,10 +409,16 @@ const showRetroPanel = ref(false);
 const retroPayload = () => ({
   term: retro.value.term.trim(),
   label: retroLabel.value,
+  target_stage_id: retro.value.target_stage_id || undefined,
   period_from: retro.value.period_from,
   period_to: retro.value.period_to,
   apply_to_contact: retro.value.apply_to_contact,
 });
+
+// precisa de pelo menos uma ação: etiqueta ou coluna
+const retroHasAction = computed(
+  () => !!retroLabel.value || !!retro.value.target_stage_id
+);
 
 const previewRetro = async () => {
   if (!retro.value.term.trim()) return;
@@ -427,19 +434,20 @@ const previewRetro = async () => {
 };
 
 const applyRetro = async () => {
-  if (!retro.value.term.trim() || !retroLabel.value) return;
+  if (!retro.value.term.trim() || !retroHasAction.value) return;
   isRetroApplying.value = true;
   try {
     await store.dispatch('crm/applyRetroLabel', retroPayload());
     useAlert(
-      `Aplicando a etiqueta "${retroLabel.value}" em segundo plano — em alguns minutos as conversas estarão etiquetadas.`
+      'Processando em segundo plano — em alguns minutos as conversas estarão organizadas.'
     );
     retroPreview.value = null;
     retro.value.term = '';
     retro.value.labelChoice = '';
     retro.value.newLabel = '';
+    retro.value.target_stage_id = '';
   } catch {
-    useAlert('Erro ao aplicar a etiqueta');
+    useAlert('Erro ao aplicar');
   } finally {
     isRetroApplying.value = false;
   }
@@ -664,12 +672,14 @@ const statsLine = c => {
                 />
               </div>
               <div class="flex-1 min-w-48">
-                <label class="text-xs font-medium text-n-slate-11 block mb-1">Recebe a etiqueta</label>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">
+                  Recebe a etiqueta <span class="text-n-slate-9">(opcional)</span>
+                </label>
                 <select
                   v-model="retro.labelChoice"
                   class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
                 >
-                  <option value="" disabled>Selecione uma etiqueta…</option>
+                  <option value="">Sem etiqueta</option>
                   <option v-for="l in labels" :key="l.id" :value="l.title">{{ l.title }}</option>
                   <option value="__nova__">➕ Criar nova etiqueta…</option>
                 </select>
@@ -680,7 +690,25 @@ const statsLine = c => {
                   placeholder="nome-da-nova-etiqueta"
                 />
               </div>
+              <div class="flex-1 min-w-48">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">
+                  E move para a coluna do CRM <span class="text-n-slate-9">(opcional)</span>
+                </label>
+                <select
+                  v-model="retro.target_stage_id"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                >
+                  <option value="">Não mover</option>
+                  <option v-for="s in allStages" :key="s.id" :value="s.id">
+                    {{ s.pipeline_name }} › {{ s.name }}
+                  </option>
+                </select>
+              </div>
             </div>
+            <p class="text-xs text-n-slate-9 -mt-1">
+              Escolha uma etiqueta, uma coluna, ou as duas. Ex: conversa contém "orçamento" →
+              coluna "Envio de Orçamento".
+            </p>
 
             <div class="flex flex-wrap items-center gap-3">
               <label class="text-xs text-n-slate-10">Período (opcional):</label>
@@ -724,15 +752,15 @@ const statsLine = c => {
               <div class="flex-1" />
               <button
                 class="text-xs px-4 py-2 rounded-lg bg-n-brand text-white hover:opacity-90 flex items-center gap-1.5 disabled:opacity-50"
-                :disabled="!retro.term.trim() || !retroLabel || !retroPreview || isRetroApplying"
+                :disabled="!retro.term.trim() || !retroHasAction || !retroPreview || isRetroApplying"
                 @click="applyRetro"
               >
-                <span class="i-lucide-tag" />
-                {{ isRetroApplying ? 'Aplicando…' : `Aplicar etiqueta` }}
+                <span class="i-lucide-wand-2" />
+                {{ isRetroApplying ? 'Aplicando…' : 'Aplicar' }}
               </button>
             </div>
-            <p v-if="retroPreview && !retroLabel" class="text-xs text-amber-600">
-              Preencha a etiqueta para aplicar.
+            <p v-if="retroPreview && !retroHasAction" class="text-xs text-amber-600">
+              Escolha uma etiqueta e/ou uma coluna para aplicar.
             </p>
           </div>
         </div>

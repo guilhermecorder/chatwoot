@@ -20,7 +20,9 @@ class Api::V1::Accounts::Crm::RetroLabelsController < Api::V1::Accounts::BaseCon
   # POST apply — dispara o job em segundo plano
   def apply
     return render_could_not_create_error('Informe o texto de busca') if params[:term].blank?
-    return render_could_not_create_error('Informe a etiqueta') if params[:label].blank?
+    if params[:label].blank? && params[:target_stage_id].blank?
+      return render_could_not_create_error('Escolha uma etiqueta e/ou uma coluna do CRM')
+    end
 
     Crm::RetroLabelJob.perform_later(
       Current.account.id,
@@ -36,7 +38,8 @@ class Api::V1::Accounts::Crm::RetroLabelsController < Api::V1::Accounts::BaseCon
   def options_params
     {
       'period_from' => params[:period_from].presence,
-      'period_to' => params[:period_to].presence
+      'period_to' => params[:period_to].presence,
+      'target_stage_id' => params[:target_stage_id].presence
     }.compact
   end
 end

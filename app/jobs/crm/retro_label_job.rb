@@ -1,27 +1,35 @@
-# Tratamento de dados: aplica uma etiqueta em todas as conversas (de todo o
-# período ou de um intervalo) cujo conteúdo das mensagens contém um texto.
-# Ex: etiqueta "orcamento-refrativa" em toda conversa que contém "3900".
+# Tratamento de dados: varre conversas cujo conteúdo das mensagens contém um
+# texto (todo o período ou um intervalo) e, para cada uma, pode:
+#   - aplicar uma etiqueta na conversa e no contato
+#   - colocar/mover o card do contato numa coluna (stage) do CRM
+# Ex: conversa contém "3900" → etiqueta "orcamento-refrativa" + coluna "Envio de Orçamento".
 class Crm::RetroLabelJob < ApplicationJob
   queue_as :low
 
   def perform(account_id, term, label_title, options = {})
     account = Account.find_by(id: account_id)
-    return if account.blank? || term.blank? || label_title.blank?
+    return if account.blank? || term.blank?
 
-    label_title = label_title.to_s.strip.downcase
-    account.labels.find_or_create_by!(title: label_title)
+    label_title = label_title.to_s.strip.downcase.presence
+    account.labels.find_or_create_by!(title: label_title) if label_title
+
+    stage = resolve_stage(account, options)
+    return if label_title.blank? && stage.blank?
+
     apply_to_contact = options['apply_to_contact'] != false
-
     conversation_ids = matching_conversation_ids(account, term, options)
     processed = 0
 
     conversation_ids.each_slice(100) do |batch|
       account.conversations.where(id: batch).includes(:contact).each do |conversation|
-        conversation.add_labels([label_title]) unless conversation.label_list.include?(label_title)
-
-        if apply_to_contact && conversation.contact && !conversation.contact.label_list.include?(label_title)
-          conversation.contact.add_labels([label_title])
+        if label_title
+          conversation.add_labels([label_title]) unless conversation.label_list.include?(label_title)
+          if apply_to_contact && conversation.contact && !conversation.contact.label_list.include?(label_title)
+            conversation.contact.add_labels([label_title])
+          end
         end
+
+        place_in_stage(stage, conversation.contact) if stage && conversation.contact
 
         processed += 1
       rescue StandardError => e
@@ -29,7 +37,7 @@ class Crm::RetroLabelJob < ApplicationJob
       end
     end
 
-    Rails.logger.info "[Crm::RetroLabelJob] '#{term}' → '#{label_title}': #{processed} conversas etiquetadas"
+    Rails.logger.info "[Crm::RetroLabelJob] '#{term}': #{processed} conversas processadas"
   end
 
   def self.matching_scope(account, term, options = {})
@@ -43,6 +51,25 @@ class Crm::RetroLabelJob < ApplicationJob
   end
 
   private
+
+  def resolve_stage(account, options)
+    return nil if options['target_stage_id'].blank?
+
+    Crm::Stage.joins(:pipeline)
+              .where(crm_pipelines: { account_id: account.id })
+              .find_by(id: options['target_stage_id'])
+  end
+
+  # cria o card na coluna, ou move se já existir (sem duplicar no pipeline)
+  def place_in_stage(stage, contact)
+    card = Crm::Contact.find_or_initialize_by(contact_id: contact.id, pipeline_id: stage.pipeline_id)
+    return if card.persisted? && card.stage_id == stage.id
+
+    card.stage_id = stage.id
+    card.save!
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  end
 
   def matching_conversation_ids(account, term, options)
     self.class.matching_scope(account, term, options).distinct.pluck(:conversation_id).compact
