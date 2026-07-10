@@ -5,6 +5,19 @@
 > projeto `sistema_cevico`), banco migrado do Robomaster (~20k contatos).
 > Fluxo: código → push `develop` → GitHub Actions build → Implantar web+sidekiq.
 
+## ⚠️ PROTOCOLO DE PRODUÇÃO (desde 2026-07-10 — sistema atende leads REAIS)
+O sistema NÃO é mais ambiente de teste: há atendimento humano ao vivo.
+Regras para toda mudança daqui pra frente:
+1. Testar SEMPRE no Docker local antes de push. Inegociável.
+2. Deploy só em janela de baixo movimento — o Guilherme controla o botão
+   Implantar e decide a hora. Nunca apressar.
+3. Backup do banco ANTES de deploy sensível (migration/core). Por isso o
+   backup automático (item 8) é PRÉ-REQUISITO das próximas features.
+4. Mudanças pequenas e isoladas, uma de cada vez (fácil reverter/diagnosticar).
+5. Sempre informar o plano de reversão em 1 linha antes do deploy
+   (geralmente: reimplantar imagem anterior no histórico do EasyPanel).
+6. Experimentos ousados → branch separada/staging, nunca no que atende.
+
 ## 1. Automação "quem NÃO tem etiqueta X → coluna Y"
 
 Regra de segmentação por condição negativa, no Tratamento de dados (ou nova
