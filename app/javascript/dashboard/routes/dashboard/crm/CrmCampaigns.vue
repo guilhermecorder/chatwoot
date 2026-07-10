@@ -388,11 +388,18 @@ const removeAutomation = async a => {
 // ── Tratamento de dados: etiqueta retroativa por conteúdo ─────────────
 const retro = ref({
   term: '',
-  label: '',
+  labelChoice: '',
+  newLabel: '',
   period_from: '',
   period_to: '',
   apply_to_contact: true,
 });
+
+const retroLabel = computed(() =>
+  retro.value.labelChoice === '__nova__'
+    ? retro.value.newLabel.trim()
+    : retro.value.labelChoice
+);
 const retroPreview = ref(null);
 const isRetroLoading = ref(false);
 const isRetroApplying = ref(false);
@@ -400,7 +407,7 @@ const showRetroPanel = ref(false);
 
 const retroPayload = () => ({
   term: retro.value.term.trim(),
-  label: retro.value.label.trim(),
+  label: retroLabel.value,
   period_from: retro.value.period_from,
   period_to: retro.value.period_to,
   apply_to_contact: retro.value.apply_to_contact,
@@ -420,16 +427,17 @@ const previewRetro = async () => {
 };
 
 const applyRetro = async () => {
-  if (!retro.value.term.trim() || !retro.value.label.trim()) return;
+  if (!retro.value.term.trim() || !retroLabel.value) return;
   isRetroApplying.value = true;
   try {
     await store.dispatch('crm/applyRetroLabel', retroPayload());
     useAlert(
-      `Aplicando a etiqueta "${retro.value.label.trim()}" em segundo plano — em alguns minutos as conversas estarão etiquetadas.`
+      `Aplicando a etiqueta "${retroLabel.value}" em segundo plano — em alguns minutos as conversas estarão etiquetadas.`
     );
     retroPreview.value = null;
     retro.value.term = '';
-    retro.value.label = '';
+    retro.value.labelChoice = '';
+    retro.value.newLabel = '';
   } catch {
     useAlert('Erro ao aplicar a etiqueta');
   } finally {
@@ -657,10 +665,19 @@ const statsLine = c => {
               </div>
               <div class="flex-1 min-w-48">
                 <label class="text-xs font-medium text-n-slate-11 block mb-1">Recebe a etiqueta</label>
-                <input
-                  v-model="retro.label"
+                <select
+                  v-model="retro.labelChoice"
                   class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
-                  placeholder="Ex: orcamento-refrativa"
+                >
+                  <option value="" disabled>Selecione uma etiqueta…</option>
+                  <option v-for="l in labels" :key="l.id" :value="l.title">{{ l.title }}</option>
+                  <option value="__nova__">➕ Criar nova etiqueta…</option>
+                </select>
+                <input
+                  v-if="retro.labelChoice === '__nova__'"
+                  v-model="retro.newLabel"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12 mt-2"
+                  placeholder="nome-da-nova-etiqueta"
                 />
               </div>
             </div>
@@ -707,14 +724,14 @@ const statsLine = c => {
               <div class="flex-1" />
               <button
                 class="text-xs px-4 py-2 rounded-lg bg-n-brand text-white hover:opacity-90 flex items-center gap-1.5 disabled:opacity-50"
-                :disabled="!retro.term.trim() || !retro.label.trim() || !retroPreview || isRetroApplying"
+                :disabled="!retro.term.trim() || !retroLabel || !retroPreview || isRetroApplying"
                 @click="applyRetro"
               >
                 <span class="i-lucide-tag" />
                 {{ isRetroApplying ? 'Aplicando…' : `Aplicar etiqueta` }}
               </button>
             </div>
-            <p v-if="retroPreview && !retro.label.trim()" class="text-xs text-amber-600">
+            <p v-if="retroPreview && !retroLabel" class="text-xs text-amber-600">
               Preencha a etiqueta para aplicar.
             </p>
           </div>

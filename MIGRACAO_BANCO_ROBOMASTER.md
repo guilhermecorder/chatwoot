@@ -30,6 +30,42 @@
 4. **Anexos**: verificar se o Robomaster usa storage local (volume
    `/app/storage`). Se sim, os arquivos também precisam ser copiados.
 
+## ⚡ Caminho rápido — UM COLAR SÓ (recomendado)
+
+No painel da Hostinger → VPS → **Terminal do navegador** (abre já logado como
+root, sem senha). Cole o bloco inteiro abaixo e aperte Enter:
+
+```bash
+set -e
+echo "== Duplicando banco Robomaster -> Sistema CEVICO =="
+SRC=$(docker ps --format '{{.Names}}' | grep -i 'robomaster_chatwoot-db' | head -1)
+DST=$(docker ps --format '{{.Names}}' | grep -i 'sistema_cevico_postgres' | head -1)
+[ -z "$SRC" ] && { echo "ERRO: banco do robomaster nao encontrado"; exit 1; }
+[ -z "$DST" ] && { echo "ERRO: postgres do cevico nao encontrado"; exit 1; }
+echo "Origem:  $SRC"
+echo "Destino: $DST"
+echo "== 1/4 Exportando (nao altera nada no original)..."
+docker exec "$SRC" sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -F c -f /tmp/robomaster.dump'
+echo "== 2/4 Transferindo..."
+docker cp "$SRC":/tmp/robomaster.dump /root/robomaster.dump
+docker cp /root/robomaster.dump "$DST":/tmp/robomaster.dump
+echo "== 3/4 Criando banco novo chatwoot_migrado..."
+docker exec "$DST" sh -c 'createdb -U "$POSTGRES_USER" chatwoot_migrado'
+echo "== 4/4 Importando (pode demorar alguns minutos)..."
+docker exec "$DST" sh -c 'pg_restore -U "$POSTGRES_USER" -d chatwoot_migrado --no-owner --no-acl /tmp/robomaster.dump'
+echo ""
+echo "✅ PRONTO! Banco duplicado como 'chatwoot_migrado' no postgres do CEVICO."
+echo "Proximo passo: no EasyPanel, mude POSTGRES_DATABASE=chatwoot_migrado"
+echo "nos servicos web e sidekiq e clique Implantar."
+```
+
+Depois do ✅: EasyPanel → `web` e `sidekiq` → **Ambiente** →
+`POSTGRES_DATABASE=chatwoot_migrado` → **Implantar** nos dois.
+Rollback: voltar a variável para o valor antigo e implantar.
+
+> Pré-requisito: o fork precisa estar na v4.15.1 (mesma versão do
+> Robomaster) — feito em 09/07/2026.
+
 ## Janela de migração (passo a passo)
 
 > Combinar horário de baixo movimento. O Robomaster continua no ar durante
