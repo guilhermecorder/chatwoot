@@ -93,16 +93,17 @@ Não fazer mais nenhum "dump-and-replace" geral — qualquer recuperação de
 dados do Robomaster daqui pra frente precisa ser importação cirúrgica
 (registros específicos), nunca substituição do banco inteiro.
 
-## 8. Backup periódico automatizado do banco CEVICO (produção)
+## 8. Backup periódico do banco CEVICO — ✅ FEITO (2026-07-10)
 
-Script para colar no Terminal do navegador da Hostinger: cron no host que
-roda `pg_dump` dentro do container postgres do sistema_cevico, salva no
-disco da VPS (fora dos volumes docker, sobrevive a deploys), rotaciona
-mantendo os últimos N dias. Robomaster continua sendo o backup "ponto no
-tempo" da migração; este é o backup contínuo do banco vivo.
-- Perguntar/confirmar: horário (sugestão 3h) e retenção (sugestão 14 dias).
-- Considerar depois: cópia off-VPS (ex. rclone para Drive/S3) — não
-  implementado ainda, é só local ao disco da VPS por enquanto.
+Configurado na VPS: `/root/backup_cevico.sh` + cron `0 6 * * *` (3h BRT).
+pg_dump do `chatwoot_migrado` (resolve o container dinamicamente pelo nome
+sistema_cevico_postgres, que muda a cada deploy), gzip, salvo em
+`/root/backups/cevico/`, retenção 14 dias, log em backup.log. Primeiro
+backup validado (~39MB). Restore: `gunzip -c ARQUIVO.sql.gz | docker exec
+-i CONTAINER psql -U postgres -d BANCO_DESTINO`.
+- PENDENTE (próximo passo de resiliência): cópia off-VPS automática (rclone
+  → Google Drive/S3) para proteger contra falha total da VPS. Hoje o backup
+  é só local ao disco da VPS.
 
 ## 7. Caixas de entrada por atendente ("selecionar e ocultar")
 
