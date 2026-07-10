@@ -3,7 +3,10 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   before_action :crm_contact, only: [:update, :destroy, :history]
 
   def index
-    crm_contacts = @pipeline.crm_contacts.includes(:contact, :stage, :assignee)
+    crm_contacts = @pipeline.crm_contacts
+                            .includes(:stage, :assignee, contact: { avatar_attachment: :blob })
+                            .to_a
+    preload_card_data(crm_contacts)
     render json: crm_contacts.map { |c| contact_json(c) }
   end
 
@@ -111,9 +114,42 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     params.permit(:stage_id, :assignee_id, :value, :origin, :procedure_of_interest, :notes)
   end
 
+  # Carrega em ~6 consultas tudo que a listagem precisa, evitando o N+1 que
+  # travava o board com muitos cards (antes eram ~4 queries por card).
+  def preload_card_data(cards)
+    contact_ids = cards.map(&:contact_id).uniq
+    return if contact_ids.empty?
+
+    # última conversa por contato (+ inbox)
+    @last_conv_by_contact = {}
+    Conversation.where(contact_id: contact_ids)
+                .includes(:inbox)
+                .order(last_activity_at: :desc)
+                .each { |cv| @last_conv_by_contact[cv.contact_id] ||= cv }
+
+    # total de conversas por contato
+    @conv_count_by_contact = Conversation.where(contact_id: contact_ids).group(:contact_id).count
+
+    # última mensagem (não-atividade) da última conversa de cada contato
+    conv_ids = @last_conv_by_contact.values.map(&:id)
+    @last_msg_by_conv = {}
+    if conv_ids.any?
+      max_ids = Message.reorder(nil).where(conversation_id: conv_ids).where.not(message_type: 2)
+                       .group(:conversation_id).maximum(:id)
+      Message.where(id: max_ids.values).each { |m| @last_msg_by_conv[m.conversation_id] = m }
+    end
+
+    # etiquetas por contato (uma consulta só na tabela de taggings)
+    @labels_by_contact = Hash.new { |h, k| h[k] = [] }
+    ActsAsTaggableOn::Tagging
+      .where(taggable_type: 'Contact', taggable_id: contact_ids, context: 'labels')
+      .includes(:tag)
+      .each { |t| @labels_by_contact[t.taggable_id] << t.tag.name }
+  end
+
   def contact_json(c)
     contact = c.contact
-    last_conversation = contact.conversations.includes(:inbox).order(last_activity_at: :desc).first
+    last_conversation = @last_conv_by_contact&.[](contact.id)
     last_conv_data = build_conversation_data(last_conversation)
 
     {
@@ -132,9 +168,9 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       origin: c.origin,
       procedure_of_interest: c.procedure_of_interest,
       notes: c.notes,
-      labels: contact.label_list,
+      labels: @labels_by_contact ? @labels_by_contact[contact.id] : contact.label_list,
       last_activity_at: contact.last_activity_at,
-      conversations_count: contact.conversations.count,
+      conversations_count: @conv_count_by_contact ? (@conv_count_by_contact[contact.id] || 0) : contact.conversations.count,
       last_conversation_id: last_conversation&.id,
       last_conversation: last_conv_data,
     }
@@ -143,10 +179,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   def build_conversation_data(conversation)
     return nil unless conversation
 
-    last_msg = conversation.messages
-                           .where.not(message_type: 2)
-                           .order(created_at: :desc)
-                           .first
+    last_msg = @last_msg_by_conv ? @last_msg_by_conv[conversation.id] : nil
 
     {
       id: conversation.id,
