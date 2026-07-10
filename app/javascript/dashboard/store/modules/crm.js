@@ -122,6 +122,14 @@ const actions = {
     const { data } = await CrmAPI.previewEligible(id);
     return data;
   },
+  async previewRetroLabel(_, payload) {
+    const { data } = await CrmAPI.previewRetroLabel(payload);
+    return data;
+  },
+  async applyRetroLabel(_, payload) {
+    const { data } = await CrmAPI.applyRetroLabel(payload);
+    return data;
+  },
   async previewAudience(_, audience) {
     const { data } = await CrmAPI.previewAudience(audience);
     return data;

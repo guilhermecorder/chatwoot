@@ -98,6 +98,15 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/traffic_report`, { params });
   }
 
+  // ── Tratamento de dados (etiqueta retroativa) ─────────────────────
+  previewRetroLabel(data) {
+    return axios.post(`${this.url}/retro_labels/preview`, data);
+  }
+
+  applyRetroLabel(data) {
+    return axios.post(`${this.url}/retro_labels/apply`, data);
+  }
+
   previewAudience(audience) {
     return axios.post(`${this.url}/campaigns/preview_audience`, { audience });
   }

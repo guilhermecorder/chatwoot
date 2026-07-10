@@ -141,6 +141,10 @@ Rails.application.routes.draw do
               member { get :preview_eligible }
             end
             resource :traffic_report, only: [:show]
+            resource :retro_labels, only: [] do
+              post :preview
+              post :apply
+            end
             resource :settings, only: [:show, :update] do
               post :test_n8n
               post :fetch_workflows

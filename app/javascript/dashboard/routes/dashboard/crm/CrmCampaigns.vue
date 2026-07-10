@@ -385,6 +385,58 @@ const removeAutomation = async a => {
   }
 };
 
+// ── Tratamento de dados: etiqueta retroativa por conteúdo ─────────────
+const retro = ref({
+  term: '',
+  label: '',
+  period_from: '',
+  period_to: '',
+  apply_to_contact: true,
+});
+const retroPreview = ref(null);
+const isRetroLoading = ref(false);
+const isRetroApplying = ref(false);
+const showRetroPanel = ref(false);
+
+const retroPayload = () => ({
+  term: retro.value.term.trim(),
+  label: retro.value.label.trim(),
+  period_from: retro.value.period_from,
+  period_to: retro.value.period_to,
+  apply_to_contact: retro.value.apply_to_contact,
+});
+
+const previewRetro = async () => {
+  if (!retro.value.term.trim()) return;
+  isRetroLoading.value = true;
+  retroPreview.value = null;
+  try {
+    retroPreview.value = await store.dispatch('crm/previewRetroLabel', retroPayload());
+  } catch {
+    useAlert('Erro ao calcular as conversas');
+  } finally {
+    isRetroLoading.value = false;
+  }
+};
+
+const applyRetro = async () => {
+  if (!retro.value.term.trim() || !retro.value.label.trim()) return;
+  isRetroApplying.value = true;
+  try {
+    await store.dispatch('crm/applyRetroLabel', retroPayload());
+    useAlert(
+      `Aplicando a etiqueta "${retro.value.label.trim()}" em segundo plano — em alguns minutos as conversas estarão etiquetadas.`
+    );
+    retroPreview.value = null;
+    retro.value.term = '';
+    retro.value.label = '';
+  } catch {
+    useAlert('Erro ao aplicar a etiqueta');
+  } finally {
+    isRetroApplying.value = false;
+  }
+};
+
 // ── Resultados ────────────────────────────────────────────────────────
 const openResults = async c => {
   if (c.status === 'draft' || c.status === 'scheduled') return;
@@ -573,6 +625,101 @@ const statsLine = c => {
 
       <!-- ══ ABA AUTOMAÇÕES: réguas de mensagens ══ -->
       <template v-else-if="activeTab === 'automations'">
+        <!-- Tratamento de dados: etiqueta retroativa -->
+        <div class="max-w-3xl mb-5 bg-n-solid-2 border border-n-weak rounded-xl overflow-hidden">
+          <button
+            class="w-full flex items-center gap-3 p-4 text-left hover:bg-n-alpha-1 transition-colors"
+            @click="showRetroPanel = !showRetroPanel"
+          >
+            <span class="i-lucide-database text-xl text-n-gold flex-shrink-0" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-n-slate-12">Tratamento de dados — etiquetar conversas antigas</p>
+              <p class="text-xs text-n-slate-10">
+                Aplica uma etiqueta em todas as conversas que contêm um texto. Ex: "3900" → orçamento-refrativa
+              </p>
+            </div>
+            <span
+              class="text-n-slate-10 flex-shrink-0"
+              :class="showRetroPanel ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+            />
+          </button>
+
+          <div v-if="showRetroPanel" class="px-4 pb-4 space-y-3 border-t border-n-weak pt-4">
+            <div class="flex flex-wrap gap-3">
+              <div class="flex-1 min-w-48">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">A conversa contém o texto</label>
+                <input
+                  v-model="retro.term"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  placeholder='Ex: 3900'
+                  @input="retroPreview = null"
+                />
+              </div>
+              <div class="flex-1 min-w-48">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">Recebe a etiqueta</label>
+                <input
+                  v-model="retro.label"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  placeholder="Ex: orcamento-refrativa"
+                />
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <label class="text-xs text-n-slate-10">Período (opcional):</label>
+              <input
+                v-model="retro.period_from"
+                type="date"
+                class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12"
+                @change="retroPreview = null"
+              />
+              <span class="text-xs text-n-slate-10">até</span>
+              <input
+                v-model="retro.period_to"
+                type="date"
+                class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12"
+                @change="retroPreview = null"
+              />
+              <label class="flex items-center gap-1.5 text-xs text-n-slate-11 ml-2 cursor-pointer">
+                <input v-model="retro.apply_to_contact" type="checkbox" class="rounded" />
+                Etiquetar também o contato (para usar em campanhas)
+              </label>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1 disabled:opacity-50"
+                :disabled="!retro.term.trim() || isRetroLoading"
+                @click="previewRetro"
+              >
+                <span class="i-lucide-search" />
+                {{ isRetroLoading ? 'Buscando…' : 'Calcular conversas' }}
+              </button>
+
+              <span v-if="retroPreview" class="text-sm text-n-slate-12">
+                <b>{{ retroPreview.conversations }}</b> conversa(s) ·
+                <b>{{ retroPreview.contacts }}</b> contato(s)
+                <span v-if="retroPreview.sample?.length" class="text-xs text-n-slate-9">
+                  (ex: {{ retroPreview.sample.map(s => s.contact_name).filter(Boolean).slice(0, 3).join(', ') }})
+                </span>
+              </span>
+
+              <div class="flex-1" />
+              <button
+                class="text-xs px-4 py-2 rounded-lg bg-n-brand text-white hover:opacity-90 flex items-center gap-1.5 disabled:opacity-50"
+                :disabled="!retro.term.trim() || !retro.label.trim() || !retroPreview || isRetroApplying"
+                @click="applyRetro"
+              >
+                <span class="i-lucide-tag" />
+                {{ isRetroApplying ? 'Aplicando…' : `Aplicar etiqueta` }}
+              </button>
+            </div>
+            <p v-if="retroPreview && !retro.label.trim()" class="text-xs text-amber-600">
+              Preencha a etiqueta para aplicar.
+            </p>
+          </div>
+        </div>
+
         <div v-if="!automations.length" class="flex flex-col items-center justify-center py-20 text-n-slate-9">
           <span class="i-lucide-timer text-5xl mb-4" />
           <p class="text-sm">Nenhuma automação ainda.</p>
