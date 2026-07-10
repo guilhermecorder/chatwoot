@@ -58,6 +58,8 @@ const filters = ref({
   stageId: '',
   createdAt: '',
   lastActivity: '',
+  dateFrom: '',    // período do lead (data real do contato) — De
+  dateTo: '',      // período do lead — Até
 });
 
 const datePresets = computed(() => [
@@ -118,9 +120,16 @@ const filteredContacts = computed(() => {
     if (filters.value.stageId !== '' && c.stage_id !== Number(filters.value.stageId)) {
       return false;
     }
-    // Created at (entry in CRM)
-    if (filters.value.createdAt && !matchesDatePreset(c.crm_created_at, filters.value.createdAt)) {
+    // Created at — usa a data real do lead (contato), não a de importação
+    if (filters.value.createdAt && !matchesDatePreset(c.contact_created_at, filters.value.createdAt)) {
       return false;
+    }
+    // Período customizado De/Até (data real do lead)
+    if (filters.value.dateFrom || filters.value.dateTo) {
+      const d = c.contact_created_at ? new Date(c.contact_created_at) : null;
+      if (!d) return false;
+      if (filters.value.dateFrom && d < new Date(filters.value.dateFrom + 'T00:00:00')) return false;
+      if (filters.value.dateTo && d > new Date(filters.value.dateTo + 'T23:59:59')) return false;
     }
     // Last activity
     if (filters.value.lastActivity) {
@@ -161,6 +170,7 @@ const activeFilterCount = computed(() => {
   if (filters.value.stageId !== '')    n++;
   if (filters.value.createdAt)         n++;
   if (filters.value.lastActivity)      n++;
+  if (filters.value.dateFrom || filters.value.dateTo) n++;
   return n;
 });
 
@@ -171,7 +181,7 @@ const allFilteredOut = computed(() =>
 );
 
 const clearFilters = () => {
-  filters.value = { search: '', assigneeId: '', labels: [], inboxName: '', stageId: '', createdAt: '', lastActivity: '' };
+  filters.value = { search: '', assigneeId: '', labels: [], inboxName: '', stageId: '', createdAt: '', lastActivity: '', dateFrom: '', dateTo: '' };
 };
 
 const labelsButtonText = computed(() => {
@@ -723,6 +733,24 @@ const createAndAddContact = async () => {
             <option v-for="p in datePresets" :key="p.value" :value="p.value">{{ p.label }}</option>
             <option value="none">{{ $t('CRM.FILTER.NO_INTERACTION') }}</option>
           </select>
+        </div>
+
+        <!-- Período do lead: De / Até (data real do contato) -->
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-n-slate-9">Período do lead (De / Até)</label>
+          <div class="flex items-center gap-1.5">
+            <input
+              v-model="filters.dateFrom"
+              type="date"
+              class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            />
+            <span class="text-xs text-n-slate-9">até</span>
+            <input
+              v-model="filters.dateTo"
+              type="date"
+              class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            />
+          </div>
         </div>
       </div>
     </div>

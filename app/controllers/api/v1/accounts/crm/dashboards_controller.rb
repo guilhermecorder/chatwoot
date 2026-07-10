@@ -1,7 +1,7 @@
 class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseController
   def show
     pipeline = Current.account.crm_pipelines.includes(:stages).find(params[:pipeline_id])
-    period   = [[params[:period].to_i, 7].max, 365].min  # entre 7 e 365 dias
+    period   = [[params[:period].to_i, 7].max, 1825].min  # entre 7 dias e 5 anos
     since    = period.days.ago.beginning_of_day
 
     # sem ORDER BY na base: as consultas agrupadas (group/count/sum) do
@@ -27,7 +27,9 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
 
   def build_kpis(pipeline, contacts, since)
     total         = contacts.count
-    new_in_period = contacts.where('crm_contacts.created_at >= ?', since).count
+    # data do lead = quando o contato surgiu (histórico real), não quando o
+    # card foi criado no CRM (que pode ter sido hoje, na importação)
+    new_in_period = contacts.joins(:contact).where('contacts.created_at >= ?', since).count
     total_value   = contacts.sum('COALESCE(value, 0)').to_f.round(2)
 
     # Última etapa (maior position) = etapa de fechamento
@@ -131,10 +133,11 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
   # ── Leads criados ao longo do tempo ──────────────────────────────
 
   def build_created_over_time(contacts, since, period)
-    # Agrupa por dia
+    # Usa a data de criação do CONTATO (histórico real), não a do card
     by_day = contacts
-      .where('crm_contacts.created_at >= ?', since)
-      .group("DATE(crm_contacts.created_at AT TIME ZONE 'UTC')")
+      .joins(:contact)
+      .where('contacts.created_at >= ?', since)
+      .group("DATE(contacts.created_at AT TIME ZONE 'UTC')")
       .count
 
     # Preenche os dias sem dados com 0

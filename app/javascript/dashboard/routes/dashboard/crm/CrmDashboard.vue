@@ -22,16 +22,17 @@ const props = defineProps({
 });
 
 const store   = useStore();
-const period  = ref(30);
+const period  = ref(365);
 const data    = ref(null);
 const loading = ref(false);
 const error   = ref(false);
 
 const PERIODS = [
-  { value: 7,   label: '7 dias' },
-  { value: 30,  label: '30 dias' },
-  { value: 90,  label: '90 dias' },
-  { value: 180, label: '6 meses' },
+  { value: 30,   label: '30 dias' },
+  { value: 90,   label: '90 dias' },
+  { value: 180,  label: '6 meses' },
+  { value: 365,  label: '1 ano' },
+  { value: 1095, label: '3 anos' },
 ];
 
 // ── Load ─────────────────────────────────────────────────────────────
