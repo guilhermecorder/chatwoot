@@ -2,12 +2,34 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   before_action :pipeline
   before_action :crm_contact, only: [:update, :destroy, :history]
 
+  # scope=recent (padrão): só cards "ativos no último mês" — lead novo OU
+  # card criado/movido nos últimos 30 dias. Deixa o board leve (mobile!).
+  # scope=all: tudo desde o início, sob demanda.
   def index
-    crm_contacts = @pipeline.crm_contacts
-                            .includes(:stage, :assignee, contact: { avatar_attachment: :blob })
-                            .to_a
+    base = @pipeline.crm_contacts
+    total = base.count
+
+    scoped = if params[:scope] == 'all'
+               base
+             else
+               cutoff = 30.days.ago
+               base.joins(:contact).where(
+                 'contacts.created_at >= :cutoff OR crm_contacts.updated_at >= :cutoff',
+                 cutoff: cutoff
+               )
+             end
+
+    crm_contacts = scoped.includes(:stage, :assignee, contact: { avatar_attachment: :blob }).to_a
     preload_card_data(crm_contacts)
-    render json: crm_contacts.map { |c| contact_json(c) }
+
+    render json: {
+      payload: crm_contacts.map { |c| contact_json(c) },
+      meta: {
+        total: total,
+        shown: crm_contacts.size,
+        scope: params[:scope] == 'all' ? 'all' : 'recent'
+      }
+    }
   end
 
   def create

@@ -216,7 +216,7 @@ const delayLabel = (minutes) => {
 
 <template>
   <div
-    class="flex flex-col bg-n-alpha-1 rounded-xl min-w-64 w-64 flex-shrink-0 h-full transition-all"
+    class="flex flex-col bg-n-alpha-1 rounded-xl w-[86vw] min-w-[86vw] snap-center md:w-64 md:min-w-64 md:snap-align-none flex-shrink-0 h-full transition-all"
     :class="programmingMode ? 'ring-2 ring-yellow-400/50' : ''"
   >
 

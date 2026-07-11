@@ -3,6 +3,7 @@ import CrmAPI from 'dashboard/api/crm';
 const state = {
   pipelines: [],
   contacts: [],
+  contactsMeta: { total: 0, shown: 0, scope: 'recent' },
   settings: {
     n8n_base_url:             '',
     n8n_api_key_configured:   false,
@@ -19,6 +20,7 @@ const state = {
 const getters = {
   getPipelines:    s => s.pipelines,
   getContacts:     s => s.contacts,
+  getContactsMeta: s => s.contactsMeta,
   getContactsByStage: s => stageId => s.contacts.filter(c => c.stage_id === stageId),
   getUIFlags:      s => s.uiFlags,
   getSettings:     s => s.settings,
@@ -139,11 +141,18 @@ const actions = {
     return data;
   },
 
-  async fetchContacts({ commit }, pipelineId) {
+  async fetchContacts({ commit }, payload) {
+    const pipelineId = typeof payload === 'object' ? payload.pipelineId : payload;
+    const scope = typeof payload === 'object' ? payload.scope : undefined;
     commit('setUIFlag', { isFetchingContacts: true });
     try {
-      const { data } = await CrmAPI.getContacts(pipelineId);
-      commit('setContacts', data);
+      const { data } = await CrmAPI.getContacts(
+        pipelineId,
+        scope ? { scope } : {}
+      );
+      // formato novo { payload, meta }; aceita o antigo (array) por segurança
+      commit('setContacts', data.payload ?? data);
+      if (data.meta) commit('setContactsMeta', data.meta);
     } finally {
       commit('setUIFlag', { isFetchingContacts: false });
     }
@@ -282,6 +291,7 @@ const mutations = {
   setSettings(s, data) { s.settings = { ...s.settings, ...data }; },
   setN8nWorkflows(s, workflows) { s.settings.n8n_workflows = workflows; },
   setContacts(s, data) { s.contacts = data; },
+  setContactsMeta(s, meta) { s.contactsMeta = meta; },
   addContact(s, c) { s.contacts.push(c); },
   editContact(s, c) {
     const idx = s.contacts.findIndex(x => x.id === c.id);

@@ -15,6 +15,7 @@ const { t } = useI18n();
 
 const pipelines = useMapGetter('crm/getPipelines');
 const allContacts = useMapGetter('crm/getContacts');
+const contactsMeta = useMapGetter('crm/getContactsMeta');
 const uiFlags = useMapGetter('crm/getUIFlags');
 const agents = useMapGetter('agents/getAgents');
 
@@ -38,6 +39,8 @@ const newStageName = ref('');
 const newStageColor = ref('#6B7280');
 
 // Add contact modal
+const contactsScope = ref('recent'); // recent = leads ativos no último mês
+const isLoadingAll = ref(false);
 const addContactStageId = ref(null);
 const contactSearchQuery = ref('');
 const contactSearchResults = ref([]);
@@ -180,6 +183,20 @@ const allFilteredOut = computed(() =>
   hasActiveFilters.value && filteredCount.value === 0
 );
 
+const loadAllContacts = async () => {
+  if (isLoadingAll.value) return;
+  isLoadingAll.value = true;
+  contactsScope.value = 'all';
+  try {
+    await store.dispatch('crm/fetchContacts', {
+      pipelineId: selectedPipelineId.value,
+      scope: 'all',
+    });
+  } finally {
+    isLoadingAll.value = false;
+  }
+};
+
 const clearFilters = () => {
   filters.value = { search: '', assigneeId: '', labels: [], inboxName: '', stageId: '', createdAt: '', lastActivity: '', dateFrom: '', dateTo: '' };
 };
@@ -229,7 +246,7 @@ onMounted(async () => {
   await store.dispatch('crm/fetchPipelines');
   if (pipelines.value.length) {
     selectedPipelineId.value = pipelines.value[0].id;
-    await store.dispatch('crm/fetchContacts', selectedPipelineId.value);
+    await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, scope: contactsScope.value });
   }
 });
 
@@ -241,13 +258,13 @@ const selectPipeline = async (id) => {
   isEditMode.value = false;
   isProgrammingMode.value = false;
   clearFilters();
-  await store.dispatch('crm/fetchContacts', id);
+  await store.dispatch('crm/fetchContacts', { pipelineId: id, scope: contactsScope.value });
 };
 
 const onContactUpdated = async () => {
   selectedContact.value = null;
   if (selectedPipelineId.value) {
-    await store.dispatch('crm/fetchContacts', selectedPipelineId.value);
+    await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, scope: contactsScope.value });
   }
 };
 
@@ -260,7 +277,7 @@ const createPipeline = async () => {
     newPipelineName.value = '';
     showNewPipelineForm.value = false;
     selectedPipelineId.value = p.id;
-    await store.dispatch('crm/fetchContacts', p.id);
+    await store.dispatch('crm/fetchContacts', { pipelineId: p.id, scope: contactsScope.value });
     useAlert(t('CRM.SUCCESS.PIPELINE_CREATED'));
   } catch {
     useAlert(t('CRM.ERROR.GENERIC'));
@@ -294,7 +311,7 @@ const deletePipeline = async () => {
     const remaining = pipelines.value;
     selectedPipelineId.value = remaining.length ? remaining[0].id : null;
     if (selectedPipelineId.value) {
-      await store.dispatch('crm/fetchContacts', selectedPipelineId.value);
+      await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, scope: contactsScope.value });
     }
     useAlert(t('CRM.SUCCESS.PIPELINE_DELETED'));
   } catch {
@@ -517,6 +534,22 @@ const createAndAddContact = async () => {
           {{ $t('CRM.NEW_PIPELINE') }}
         </button>
       </div>
+    </div>
+
+    <!-- Escopo recente: aviso + carregar todos -->
+    <div
+      v-if="contactsMeta.scope === 'recent' && contactsMeta.total > contactsMeta.shown"
+      class="flex items-center gap-2 px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-wrap"
+    >
+      <span class="i-lucide-zap text-n-gold" />
+      Mostrando os leads ativos dos últimos 30 dias ({{ contactsMeta.shown }} de {{ contactsMeta.total }}) — mais leve e rápido.
+      <button
+        class="text-n-brand font-medium hover:underline disabled:opacity-50"
+        :disabled="isLoadingAll"
+        @click="loadAllContacts"
+      >
+        {{ isLoadingAll ? 'Carregando…' : 'Carregar todos desde o início' }}
+      </button>
     </div>
 
     <!-- Edit mode banner -->
@@ -769,8 +802,8 @@ const createAndAddContact = async () => {
     <!-- Kanban board -->
     <div
       v-else
-      class="kanban-board-scroll"
-      style="flex:1;min-height:0;overflow-x:scroll;overflow-y:auto;padding:24px;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,0.45) transparent;"
+      class="kanban-board-scroll snap-x snap-mandatory md:snap-none"
+      style="flex:1;min-height:0;overflow-x:scroll;overflow-y:auto;padding:24px;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,0.45) transparent;scroll-behavior:smooth;"
     >
       <!-- All-filtered-out empty state -->
       <div v-if="allFilteredOut" class="flex flex-col items-center justify-center h-full text-n-slate-9">

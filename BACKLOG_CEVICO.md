@@ -113,6 +113,40 @@ para "cobrir a parceira", ambas nas duas caixas e cada uma filtra clicando
 na sua na sidebar. Se o fluxo nativo não bastar, construir preferência
 por usuária de mostrar/ocultar caixas na sidebar.
 
+## 9. DASHBOARD DO NEGÓCIO (grande — arquitetura completa)
+
+Redesenhar o Dashboard CRM como cockpit do negócio: gráficos clean/modernos,
+barra E pizza (redundância proposital para clareza). Arquitetura deve prever
+TODOS os números abaixo, mesmo os sem fonte ainda (placeholder "conectar
+fonte"), para a estrutura já existir:
+
+KPIs/víses pedidas pelo Guilherme:
+- CAC (investimento ÷ novos clientes) — investimento vem do Meta (já temos
+  insights via ad_account_id), Google e TikTok (futuros)
+- Ranking de campanhas: quais geram mais/menos resultado (otimizar verba)
+- Visão de anúncios por plataforma: Meta ✅(API pronta), Google (precisa
+  developer token — processo), TikTok (Business API — avaliar)
+- Desempenho de conteúdos (fonte a definir — talvez TACOH/social)
+- Volume de leads, responsividade (% que respondem), % conversão etapa a
+  etapa do funil
+- Recordes (melhor mês/dia de leads, faturamento, cirurgias)
+- Faturamento e volume de cirurgias vindos da PLANILHA DE FECHAMENTO:
+  https://docs.google.com/spreadsheets/d/1CjA1P8Hh0Ca0dhasDTVWEsUgzqXrZL58yNrAsTNeY-0
+  Estrutura confirmada (CSV export funciona sem auth):
+  colunas Status (Ativa/Cancelada/Não Compareceu), Data (DD/MM/YYYY),
+  Paciente, Procedimento, Olho, Valor total (R$). 1 linha = 1 procedimento.
+  → dá para importar por URL CSV (job periódico) e calcular: faturamento
+  por período, volume de cirurgias, mix de procedimentos, taxa de
+  não-comparecimento, ticket médio real por procedimento.
+
+## 10. MOBILE — fase 1 ✅ FEITA (2026-07-11, aguarda deploy)
+- CRM carrega por padrão só leads ativos dos últimos 30 dias (leve!) com
+  botão "Carregar todos desde o início" (scope=all); meta {total, shown}.
+- Colunas em carrossel no celular: 1 coluna por tela (86vw) com scroll-snap,
+  desliza pro lado; desktop inalterado (md:).
+Próximas fases mobile: composers de campanha empilhados, revisar dashboards
+em 390px.
+
 ---
 
 ## Estado atual (para retomar)

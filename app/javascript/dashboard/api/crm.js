@@ -116,8 +116,10 @@ class CrmAPI extends ApiClient {
   }
 
   // ── Contacts ──────────────────────────────────────────────────────
-  getContacts(pipelineId) {
-    return axios.get(`${this.url}/pipelines/${pipelineId}/contacts`);
+  getContacts(pipelineId, params = {}) {
+    return axios.get(`${this.url}/pipelines/${pipelineId}/contacts`, {
+      params,
+    });
   }
 
   addContact(pipelineId, data) {
