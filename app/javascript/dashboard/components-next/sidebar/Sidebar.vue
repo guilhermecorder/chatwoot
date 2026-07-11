@@ -314,6 +314,61 @@ const newReportRoutes = () => [
 
 const reportRoutes = computed(() => newReportRoutes());
 
+// ── CEVICO: acessos por agente (admin bloqueia) + itens ocultos (pessoal) ──
+const crmSettings = useMapGetter('crm/getSettings');
+
+// seções controláveis do menu (name do item → chave de feature)
+const FEATURE_BY_ITEM_NAME = {
+  Captain: 'captain',
+  Companies: 'companies',
+  Reports: 'reports',
+  CRM: 'crm',
+  'Campanha WhatsApp': 'crm_campaigns',
+  Tasks: 'tasks',
+  Academy: 'academy',
+};
+
+const blockedFeatures = computed(() => {
+  const perms = crmSettings.value?.agent_permissions ?? {};
+  return perms[String(currentUserId.value)] ?? [];
+});
+
+const hiddenFeatures = ref(
+  JSON.parse(localStorage.getItem('cevico_hidden_menu') ?? '[]')
+);
+
+const showCustomizeMenu = ref(false);
+
+const toggleHiddenFeature = key => {
+  const idx = hiddenFeatures.value.indexOf(key);
+  if (idx === -1) hiddenFeatures.value.push(key);
+  else hiddenFeatures.value.splice(idx, 1);
+  localStorage.setItem('cevico_hidden_menu', JSON.stringify(hiddenFeatures.value));
+};
+
+const customizableItems = computed(() =>
+  menuItems.value
+    .filter(item => FEATURE_BY_ITEM_NAME[item.name])
+    .filter(item => !blockedFeatures.value.includes(FEATURE_BY_ITEM_NAME[item.name]))
+    .map(item => ({ key: FEATURE_BY_ITEM_NAME[item.name], label: item.label }))
+);
+
+const visibleMenuItems = computed(() =>
+  menuItems.value.filter(item => {
+    const key = FEATURE_BY_ITEM_NAME[item.name];
+    if (!key) return true;
+    return (
+      !blockedFeatures.value.includes(key) && !hiddenFeatures.value.includes(key)
+    );
+  })
+);
+
+onMounted(() => {
+  // carrega agent_permissions (e presets do CRM) para filtrar o menu
+  store.dispatch('crm/fetchSettings').catch(() => {});
+});
+// ──────────────────────────────────────────────────────────────────────────
+
 const menuItems = computed(() => {
   return [
     {
@@ -599,6 +654,12 @@ const menuItems = computed(() => {
       to: accountScopedRoute('crm_campaigns'),
     },
     {
+      name: 'Tasks',
+      label: 'Tarefas',
+      icon: 'i-lucide-list-checks',
+      to: accountScopedRoute('tasks_board'),
+    },
+    {
       name: 'Academy',
       label: 'Academia CEVICO',
       icon: 'i-lucide-graduation-cap',
@@ -865,12 +926,67 @@ const menuItems = computed(() => {
         :class="{ 'items-center': isEffectivelyCollapsed }"
       >
         <SidebarGroup
-          v-for="item in menuItems"
+          v-for="item in visibleMenuItems"
           :key="item.name"
           v-bind="item"
         />
+        <!-- Personalizar menu (ocultar/mostrar seções — preferência pessoal) -->
+        <li class="list-none mt-1">
+          <button
+            class="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-n-slate-9 hover:text-n-slate-11 rounded-lg hover:bg-n-alpha-1 transition-colors"
+            :class="{ 'justify-center': isEffectivelyCollapsed }"
+            title="Personalizar menu"
+            @click="showCustomizeMenu = true"
+          >
+            <span class="i-lucide-eye-off text-sm flex-shrink-0" />
+            <span v-if="!isEffectivelyCollapsed">Personalizar menu</span>
+          </button>
+        </li>
       </ul>
     </nav>
+
+    <!-- Modal: personalizar menu -->
+    <Teleport to="body">
+      <div
+        v-if="showCustomizeMenu"
+        class="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"
+        @click.self="showCustomizeMenu = false"
+      >
+        <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-sm">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak">
+            <div>
+              <h2 class="text-base font-semibold text-n-slate-12">Personalizar menu</h2>
+              <p class="text-xs text-n-slate-10 mt-0.5">
+                Oculte seções que você não usa. Dá para reativar quando quiser.
+              </p>
+            </div>
+            <button
+              class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl"
+              @click="showCustomizeMenu = false"
+            />
+          </div>
+          <div class="p-4 space-y-1 max-h-[60vh] overflow-y-auto">
+            <label
+              v-for="item in customizableItems"
+              :key="item.key"
+              class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-n-alpha-1 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                class="rounded accent-n-brand"
+                :checked="!hiddenFeatures.includes(item.key)"
+                @change="toggleHiddenFeature(item.key)"
+              />
+              <span class="text-sm text-n-slate-12">{{ item.label }}</span>
+              <span
+                v-if="hiddenFeatures.includes(item.key)"
+                class="text-[10px] text-n-slate-9 ml-auto"
+              >oculto</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </Teleport>
     <section
       class="flex relative flex-col flex-shrink-0 gap-1 justify-between items-center"
     >

@@ -149,6 +149,10 @@ Rails.application.routes.draw do
               post :preview
               post :apply
             end
+            resource :contact_unification, only: [], controller: 'contact_unifications' do
+              post :preview
+              post :apply
+            end
             resource :settings, only: [:show, :update] do
               post :test_n8n
               post :fetch_workflows
@@ -326,6 +330,7 @@ Rails.application.routes.draw do
             end
           end
           resources :labels, only: [:index, :show, :create, :update, :destroy]
+          resources :tasks, only: [:index, :create, :update, :destroy]
 
           resources :notifications, only: [:index, :update, :destroy] do
             collection do

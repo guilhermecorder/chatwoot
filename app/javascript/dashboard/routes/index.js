@@ -10,6 +10,26 @@ import AnalyticsHelper from '../helper/AnalyticsHelper';
 const ONBOARDING_STEPS = ['account_details', 'enrichment'];
 const routes = [...dashboard.routes];
 
+// CEVICO: seções bloqueáveis por agente (crm_settings.agent_permissions).
+// Fail-open: se as settings ainda não carregaram, deixa passar — a sidebar
+// já esconde os itens; isto só barra acesso por URL direta.
+const CEVICO_BLOCKED_ROUTE_CHECKS = {
+  crm: name => name === 'crm_board',
+  crm_campaigns: name => name === 'crm_campaigns',
+  tasks: name => name === 'tasks_board',
+  academy: name => name?.startsWith('academy'),
+  reports: name => name?.includes('_reports') || name === 'label_dashboard',
+  companies: name => name?.startsWith('companies_'),
+  captain: name => name?.startsWith('captain_'),
+};
+
+const isCevicoBlockedRoute = to => {
+  const settings = store.getters['crm/getSettings'];
+  const userId = store.getters.getCurrentUserID;
+  const blocked = settings?.agent_permissions?.[String(userId)] ?? [];
+  return blocked.some(key => CEVICO_BLOCKED_ROUTE_CHECKS[key]?.(to.name));
+};
+
 export const router = createRouter({ history: createWebHistory(), routes });
 
 export const validateAuthenticateRoutePermission = async (to, next) => {
@@ -47,6 +67,10 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
     return next(frontendURL(`accounts/${routeAccountId}/onboarding`));
   }
   if (!needsOnboarding && isOnOnboardingView(to)) {
+    return next(frontendURL(`accounts/${routeAccountId}/dashboard`));
+  }
+
+  if (isCevicoBlockedRoute(to)) {
     return next(frontendURL(`accounts/${routeAccountId}/dashboard`));
   }
 

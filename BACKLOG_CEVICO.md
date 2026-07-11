@@ -165,6 +165,56 @@ KPIs/víses pedidas pelo Guilherme:
 Próximas fases mobile: composers de campanha empilhados, revisar dashboards
 em 390px.
 
+## 11. AUDITORIA GUILHERME+HENRIQUE (2026-07-11) — 6 blocos
+
+Implementados de uma vez no Docker local (blocos 1,2,3,4,6; bloco 5 fica p/ depois):
+
+**Bloco 1 — UX das atendentes (CRM)** ✅ código pronto
+- Backend manda unread_count/awaiting_reply/waiting_since por card (1 query extra).
+- CRM: chip "Sem resposta (N)", ordenação (aguardando/antigo→novo/novo→antigo),
+  seletor de caixa na barra principal, prévia da última msg do paciente em card
+  com não lidas, popup de conversa completa com RESPOSTA oficial
+  (ConversationChatModal — Enter envia, marca como lida), presets de colunas
+  nomeados (Vaneide/Elizangela/Gabriela/Natália — crm_settings.column_presets,
+  livres para todas, gerenciáveis no seletor "Visualização").
+- Caixa de entrada: usar o sort NATIVO "Aguardando há mais tempo" (já traduzido).
+
+**Bloco 2 — Unificação de contatos/etiquetas** ✅ código pronto
+- Etiqueta de conversa agora propaga ADITIVAMENTE para o contato
+  (Conversation#update_labels override).
+- Auto-merge por telefone/e-mail: Crm::ContactUnificationService (+Job/rotas
+  crm/contact_unification/preview|apply, admin-only) com dry-run; UI em
+  Campanha WhatsApp → aba Automações → card "Unificar contatos duplicados".
+- Merge manual: botão "Mesclar com contato duplicado" no ContactModal do CRM
+  (aba Contato) usando ContactMergeAction do core.
+- ⚠ Antes do apply em produção: backup do banco. Mesclagem é irreversível.
+
+**Bloco 3 — Tarefas (kanban)** ✅ código pronto
+- Model Task (tasks: title, description, task_type, priority enum, status enum
+  todo/doing/done, due_at, creator/assignee) + API /api/v1/accounts/:id/tasks.
+- Página "Tarefas" na sidebar: kanban 3 colunas com drag, modal criar/editar,
+  filtro minhas/todas/por pessoa, mini-dashboard (a fazer/fazendo/feito/atrasadas).
+
+**Bloco 4 — Integrações Meta/Google completas** ✅ código pronto
+- CrmIntegrationsModal ganhou seções completas Meta e Google (substituiu "Em breve"):
+  Meta = pixel_id, token, ad_account_id, test_event_code + requisitos + testar envio
+  (CAPI já existia e JÁ ESTÁ ligado às automações do CRM via CrmAutomationFireJob).
+  Google = GA4 measurement_id/api_secret + developer_token/customer_id (Ads API,
+  aguardando aprovação do token pelo Google — tela pronta).
+- Status badges Envio/Recebimento por plataforma.
+
+**Bloco 6 — Permissões/visualização de agentes** ✅ código pronto
+- crm_settings.agent_permissions {user_id: [features bloqueadas]} — só admin altera
+  (403 caso contrário). Config em Configurações → Agentes → botão escudo "Acessos".
+- Sidebar filtra seções bloqueadas + "Personalizar menu" (ocultar/mostrar pessoal,
+  localStorage). Guard de rota barra URL direta (fail-open se settings não carregou).
+- Features: crm, crm_campaigns, tasks, reports, academy, companies, captain.
+
+**Bloco 5 — Automação Instagram (direct/comentário via API oficial)** ⏳ NÃO iniciado (decisão: depois).
+
+Migrations novas: 20260711000001 (column_presets), 20260711000002 (tasks),
+20260711000003 (agent_permissions). Todas aditivas, rodaram limpas no Docker.
+
 ---
 
 ## Estado atual (para retomar)

@@ -12,6 +12,7 @@ import {
 
 import AddAgent from './AddAgent.vue';
 import EditAgent from './EditAgent.vue';
+import AgentAccessModal from './AgentAccessModal.vue';
 import BaseSettingsHeader from '../components/BaseSettingsHeader.vue';
 import SettingsLayout from '../SettingsLayout.vue';
 import Button from 'dashboard/components-next/button/Button.vue';
@@ -119,6 +120,15 @@ const openEditPopup = agent => {
 };
 const hideEditPopup = () => {
   showEditPopup.value = false;
+};
+
+const showAccessPopup = ref(false);
+const openAccessPopup = agent => {
+  showAccessPopup.value = true;
+  currentAgent.value = agent;
+};
+const hideAccessPopup = () => {
+  showAccessPopup.value = false;
 };
 
 const openDeletePopup = agent => {
@@ -256,6 +266,14 @@ const confirmDeletion = () => {
           <div class="flex justify-end gap-3">
             <Button
               v-if="showEditAction(agent)"
+              v-tooltip.top="'Acessos (o que pode ver)'"
+              icon="i-lucide-shield"
+              slate
+              sm
+              @click="openAccessPopup(agent)"
+            />
+            <Button
+              v-if="showEditAction(agent)"
               v-tooltip.top="$t('AGENT_MGMT.EDIT.BUTTON_TEXT')"
               icon="i-woot-edit-pen"
               slate
@@ -279,6 +297,14 @@ const confirmDeletion = () => {
 
     <woot-modal v-model:show="showAddPopup" :on-close="hideAddPopup">
       <AddAgent @close="hideAddPopup" />
+    </woot-modal>
+
+    <woot-modal v-model:show="showAccessPopup" :on-close="hideAccessPopup">
+      <AgentAccessModal
+        v-if="showAccessPopup"
+        :agent="currentAgent"
+        @close="hideAccessPopup"
+      />
     </woot-modal>
 
     <woot-modal v-model:show="showEditPopup" :on-close="hideEditPopup">
