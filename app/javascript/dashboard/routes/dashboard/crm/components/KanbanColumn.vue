@@ -17,7 +17,7 @@ const props = defineProps({
   allStages:       { type: Array, default: () => [] },
 });
 
-const emit = defineEmits(['cardClick', 'stageDrop', 'addContact']);
+const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat']);
 
 const store = useStore();
 const { t } = useI18n();
@@ -454,6 +454,7 @@ const delayLabel = (minutes) => {
           <ContactCard
             :contact="element"
             @click="emit('cardClick', element)"
+            @open-chat="emit('openChat', $event)"
           />
         </template>
       </draggable>

@@ -3,6 +3,8 @@
 # Table name: crm_settings
 #
 #  id                       :bigint           not null, primary key
+#  agent_permissions        :jsonb            not null
+#  column_presets           :jsonb            not null
 #  google_ads_config        :jsonb            not null
 #  meta_ads_config          :jsonb            not null
 #  n8n_api_key              :string

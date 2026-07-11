@@ -9,6 +9,8 @@ const state = {
     n8n_api_key_configured:   false,
     n8n_workflows:            [],
     n8n_workflows_fetched_at: null,
+    column_presets:           [],
+    agent_permissions:        {},
   },
   uiFlags: {
     isFetchingPipelines: false,
@@ -130,6 +132,14 @@ const actions = {
   },
   async applyRetroLabel(_, payload) {
     const { data } = await CrmAPI.applyRetroLabel(payload);
+    return data;
+  },
+  async previewContactUnification() {
+    const { data } = await CrmAPI.previewContactUnification();
+    return data;
+  },
+  async applyContactUnification() {
+    const { data } = await CrmAPI.applyContactUnification();
     return data;
   },
   async previewAudience(_, audience) {
@@ -298,6 +308,11 @@ const mutations = {
     if (idx !== -1) s.contacts.splice(idx, 1, c);
   },
   deleteContact(s, id) { s.contacts = s.contacts.filter(c => c.id !== id); },
+  // Atualiza dados da última conversa de um card sem refetch do board
+  patchContactConversation(s, { id, data }) {
+    const c = s.contacts.find(x => x.id === id);
+    if (c?.last_conversation) c.last_conversation = { ...c.last_conversation, ...data };
+  },
 };
 
 export default { namespaced: true, state, getters, actions, mutations };

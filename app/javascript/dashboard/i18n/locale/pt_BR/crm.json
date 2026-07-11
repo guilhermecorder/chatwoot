@@ -75,7 +75,13 @@
       "THIS_YEAR": "Este ano",
       "NO_INTERACTION": "Sem interação recente",
       "EMPTY": "Nenhum contato encontrado com os filtros selecionados.",
-      "CLEAR_FILTERS": "Limpar filtros"
+      "CLEAR_FILTERS": "Limpar filtros",
+      "AWAITING_REPLY": "Sem resposta",
+      "SORT": "Ordenar",
+      "SORT_DEFAULT": "Ordem padrão",
+      "SORT_WAITING": "Aguardando há mais tempo",
+      "SORT_OLDEST": "Mais antigo → mais novo",
+      "SORT_NEWEST": "Mais novo → mais antigo"
     },
     "MODAL": {
       "TAB_CRM": "CRM",
@@ -116,6 +122,39 @@
         "pending": "Pendente",
         "snoozed": "Adiada"
       }
+    },
+    "CARD": {
+      "UNREAD": "{count} não lida(s)",
+      "AWAITING_REPLY": "aguardando resposta"
+    },
+    "CHAT": {
+      "OPEN": "Abrir conversa rápida",
+      "REPLY_HERE": "Responder aqui",
+      "REPLY_PLACEHOLDER": "Digite sua resposta... (Enter envia, Shift+Enter quebra linha)",
+      "SEND": "Enviar",
+      "SEND_ERROR": "Não foi possível enviar. Verifique a janela de 24h do WhatsApp.",
+      "LOAD_MORE": "Carregar mensagens anteriores",
+      "OFFICIAL_NOTE": "A resposta sai oficialmente pela caixa \"{inbox}\"."
+    },
+    "PRESETS": {
+      "TITLE": "Visualizações de colunas",
+      "SUBTITLE": "Crie atalhos com as colunas de cada pessoa (ex.: Vaneide, Elizangela...).",
+      "ALL_COLUMNS": "Todas as colunas",
+      "MANAGE": "Gerenciar visualizações",
+      "EMPTY": "Nenhuma visualização criada ainda.",
+      "ADD": "Nova visualização",
+      "REMOVE": "Remover visualização",
+      "NAME_PLACEHOLDER": "Nome (ex.: Vaneide)",
+      "SAVED": "Visualizações salvas!"
+    },
+    "MERGE": {
+      "BUTTON": "Mesclar com contato duplicado",
+      "TITLE": "Mesclar contato duplicado",
+      "HINT": "Use quando a mesma pessoa chamou por outro canal (ex: Instagram). As conversas e etiquetas do duplicado passam para este contato.",
+      "SEARCH_PLACEHOLDER": "Buscar o contato duplicado por nome ou telefone...",
+      "CONFIRM": "\"{mergee}\" será absorvido por \"{base}\". Isso não pode ser desfeito.",
+      "APPLY": "Mesclar contatos",
+      "SUCCESS": "Contatos mesclados!"
     }
   }
 }

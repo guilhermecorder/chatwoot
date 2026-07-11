@@ -55,17 +55,17 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     if @crm_contact.saved_change_to_stage_id?
       new_stage = @crm_contact.stage
       CrmAutomationTriggerService.new(
-        crm_contact:    @crm_contact,
-        new_stage:      new_stage,
+        crm_contact: @crm_contact,
+        new_stage: new_stage,
         previous_stage: previous_stage,
-        event_type:     'card_entered'
+        event_type: 'card_entered'
       ).call
 
       CrmAutomationTriggerService.new(
-        crm_contact:    @crm_contact,
-        new_stage:      previous_stage,
+        crm_contact: @crm_contact,
+        new_stage: previous_stage,
         previous_stage: previous_stage,
-        event_type:     'card_left'
+        event_type: 'card_left'
       ).call
     end
 
@@ -81,14 +81,14 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     logs = @crm_contact.stage_logs.order(entered_at: :asc)
     render json: logs.map { |log|
       {
-        id:               log.id,
-        stage_id:         log.stage_id,
-        stage_name:       log.stage_name,
-        stage_color:      log.stage_color,
-        event_type:       log.event_type,
-        entered_at:       log.entered_at,
-        left_at:          log.left_at,
-        duration_minutes: log.duration_minutes,
+        id: log.id,
+        stage_id: log.stage_id,
+        stage_name: log.stage_name,
+        stage_color: log.stage_color,
+        event_type: log.event_type,
+        entered_at: log.entered_at,
+        left_at: log.left_at,
+        duration_minutes: log.duration_minutes
       }
     }
   end
@@ -101,21 +101,21 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
 
     added.each do |label|
       CrmAutomationTriggerService.new(
-        crm_contact:    @crm_contact,
-        new_stage:      @crm_contact.stage,
+        crm_contact: @crm_contact,
+        new_stage: @crm_contact.stage,
         previous_stage: @crm_contact.stage,
-        event_type:     'label_added',
-        label:          label
+        event_type: 'label_added',
+        label: label
       ).call
     end
 
     removed.each do |label|
       CrmAutomationTriggerService.new(
-        crm_contact:    @crm_contact,
-        new_stage:      @crm_contact.stage,
+        crm_contact: @crm_contact,
+        new_stage: @crm_contact.stage,
         previous_stage: @crm_contact.stage,
-        event_type:     'label_removed',
-        label:          label
+        event_type: 'label_removed',
+        label: label
       ).call
     end
 
@@ -155,10 +155,18 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     # última mensagem (não-atividade) da última conversa de cada contato
     conv_ids = @last_conv_by_contact.values.map(&:id)
     @last_msg_by_conv = {}
+    @unread_by_conv = {}
     if conv_ids.any?
       max_ids = Message.reorder(nil).where(conversation_id: conv_ids).where.not(message_type: 2)
                        .group(:conversation_id).maximum(:id)
       Message.where(id: max_ids.values).each { |m| @last_msg_by_conv[m.conversation_id] = m }
+
+      # mensagens recebidas ainda não vistas pela atendente (uma consulta só)
+      @unread_by_conv = Message.reorder(nil)
+                               .where(conversation_id: conv_ids, message_type: :incoming)
+                               .joins(:conversation)
+                               .where("messages.created_at > COALESCE(conversations.agent_last_seen_at, 'epoch')")
+                               .group(:conversation_id).count
     end
 
     # etiquetas por contato (uma consulta só na tabela de taggings)
@@ -194,7 +202,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       last_activity_at: contact.last_activity_at,
       conversations_count: @conv_count_by_contact ? (@conv_count_by_contact[contact.id] || 0) : contact.conversations.count,
       last_conversation_id: last_conversation&.id,
-      last_conversation: last_conv_data,
+      last_conversation: last_conv_data
     }
   end
 
@@ -202,6 +210,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     return nil unless conversation
 
     last_msg = @last_msg_by_conv ? @last_msg_by_conv[conversation.id] : nil
+    awaiting_reply = last_msg&.incoming? || false
 
     {
       id: conversation.id,
@@ -210,6 +219,10 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       channel_type: conversation.inbox&.channel_type,
       last_message: last_msg&.content&.slice(0, 120),
       last_message_at: last_msg&.created_at,
+      last_message_type: last_msg&.message_type,
+      unread_count: @unread_by_conv ? (@unread_by_conv[conversation.id] || 0) : 0,
+      awaiting_reply: awaiting_reply,
+      waiting_since: awaiting_reply ? last_msg.created_at : nil
     }
   end
 end

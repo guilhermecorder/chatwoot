@@ -7,6 +7,8 @@ import draggable from 'vuedraggable';
 import KanbanColumn from './components/KanbanColumn.vue';
 import ContactModal from './components/ContactModal.vue';
 import CrmIntegrationsModal from './components/CrmIntegrationsModal.vue';
+import ConversationChatModal from './components/ConversationChatModal.vue';
+import ColumnPresetsModal from './components/ColumnPresetsModal.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import ContactAPI from 'dashboard/api/contacts';
 
@@ -18,9 +20,11 @@ const allContacts = useMapGetter('crm/getContacts');
 const contactsMeta = useMapGetter('crm/getContactsMeta');
 const uiFlags = useMapGetter('crm/getUIFlags');
 const agents = useMapGetter('agents/getAgents');
+const crmSettings = useMapGetter('crm/getSettings');
 
 const selectedPipelineId = ref(null);
 const selectedContact = ref(null);
+const chatContact = ref(null); // popup de conversa oficial
 
 // New pipeline form
 const showNewPipelineForm = ref(false);
@@ -63,7 +67,39 @@ const filters = ref({
   lastActivity: '',
   dateFrom: '',    // período do lead (data real do contato) — De
   dateTo: '',      // período do lead — Até
+  awaitingOnly: false, // só pacientes sem resposta
 });
+
+// Ordenação dos cards dentro das colunas
+// '' = manual (posição) | 'waiting' = aguardando há mais tempo |
+// 'oldest' = mais antigo → mais novo | 'newest' = mais novo → mais antigo
+const sortOrder = ref('');
+
+// Preset de visualização de colunas (nome do preset ativo; '' = todas)
+const activePresetName = ref(localStorage.getItem('cevico_crm_column_preset') ?? '');
+const showPresetsModal = ref(false);
+
+const columnPresets = computed(() => crmSettings.value.column_presets ?? []);
+
+const activePreset = computed(() =>
+  columnPresets.value.find(p => p.name === activePresetName.value) ?? null
+);
+
+const selectPreset = name => {
+  activePresetName.value = name;
+  localStorage.setItem('cevico_crm_column_preset', name);
+};
+
+const isStageVisible = stageId => {
+  if (isEditMode.value || !activePreset.value) return true;
+  return activePreset.value.stage_ids.includes(stageId);
+};
+
+const onPresetsSaved = () => {
+  showPresetsModal.value = false;
+  // se o preset ativo foi renomeado/removido, volta para "todas"
+  if (activePresetName.value && !activePreset.value) selectPreset('');
+};
 
 const datePresets = computed(() => [
   { value: '',         label: t('CRM.FILTER.ALL_PERIODS') },
@@ -143,9 +179,18 @@ const filteredContacts = computed(() => {
         return false;
       }
     }
+    // Sem resposta (paciente aguardando)
+    if (filters.value.awaitingOnly && !c.last_conversation?.awaiting_reply) {
+      return false;
+    }
     return true;
   });
 });
+
+// Total de pacientes sem resposta (independente do toggle)
+const awaitingCount = computed(() =>
+  allContacts.value.filter(c => c.last_conversation?.awaiting_reply).length
+);
 
 const availableLabels = computed(() => {
   const set = new Set();
@@ -174,6 +219,7 @@ const activeFilterCount = computed(() => {
   if (filters.value.createdAt)         n++;
   if (filters.value.lastActivity)      n++;
   if (filters.value.dateFrom || filters.value.dateTo) n++;
+  if (filters.value.awaitingOnly)      n++;
   return n;
 });
 
@@ -198,7 +244,7 @@ const loadAllContacts = async () => {
 };
 
 const clearFilters = () => {
-  filters.value = { search: '', assigneeId: '', labels: [], inboxName: '', stageId: '', createdAt: '', lastActivity: '', dateFrom: '', dateTo: '' };
+  filters.value = { search: '', assigneeId: '', labels: [], inboxName: '', stageId: '', createdAt: '', lastActivity: '', dateFrom: '', dateTo: '', awaitingOnly: false };
 };
 
 const labelsButtonText = computed(() => {
@@ -213,11 +259,28 @@ const selectedPipeline = computed(() =>
   pipelines.value.find(p => p.id === selectedPipelineId.value) ?? null
 );
 
+const sortCards = cards => {
+  if (!sortOrder.value) return cards;
+  const byLeadDate = c => (c.contact_created_at ? new Date(c.contact_created_at).getTime() : 0);
+  const sorted = [...cards];
+  if (sortOrder.value === 'oldest') sorted.sort((a, b) => byLeadDate(a) - byLeadDate(b));
+  if (sortOrder.value === 'newest') sorted.sort((a, b) => byLeadDate(b) - byLeadDate(a));
+  if (sortOrder.value === 'waiting') {
+    // aguardando há mais tempo primeiro; quem não aguarda vai para o fim
+    const waitKey = c => {
+      const w = c.last_conversation?.awaiting_reply && c.last_conversation?.waiting_since;
+      return w ? new Date(w).getTime() : Infinity;
+    };
+    sorted.sort((a, b) => waitKey(a) - waitKey(b));
+  }
+  return sorted;
+};
+
 const contactsByStage = computed(() => {
   const map = {};
   if (!selectedPipeline.value) return map;
   for (const stage of selectedPipeline.value.stages) {
-    map[stage.id] = filteredContacts.value.filter(c => c.stage_id === stage.id);
+    map[stage.id] = sortCards(filteredContacts.value.filter(c => c.stage_id === stage.id));
   }
   return map;
 });
@@ -243,12 +306,32 @@ const showIntegrationsModal = ref(false);
 
 onMounted(async () => {
   if (!agents.value.length) store.dispatch('agents/get');
+  store.dispatch('crm/fetchSettings'); // presets de colunas
   await store.dispatch('crm/fetchPipelines');
   if (pipelines.value.length) {
     selectedPipelineId.value = pipelines.value[0].id;
     await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, scope: contactsScope.value });
   }
 });
+
+// ── Chat popup (conversa oficial) ─────────────────────────
+const openChat = contact => {
+  if (!contact?.last_conversation_id) return;
+  chatContact.value = contact;
+  // abrir o popup marca a conversa como lida
+  store.commit('crm/patchContactConversation', {
+    id: contact.id,
+    data: { unread_count: 0 },
+  });
+};
+
+const onChatReplied = () => {
+  if (!chatContact.value) return;
+  store.commit('crm/patchContactConversation', {
+    id: chatContact.value.id,
+    data: { unread_count: 0, awaiting_reply: false, waiting_since: null },
+  });
+};
 
 const selectPipeline = async (id) => {
   if (selectedPipelineId.value === id) return;
@@ -473,6 +556,26 @@ const createAndAddContact = async () => {
 
       <!-- Right actions -->
       <div class="flex items-center gap-2 ml-auto">
+        <!-- Visualização de colunas (presets) -->
+        <div v-if="selectedPipeline" class="flex items-center gap-1">
+          <select
+            :value="activePresetName"
+            class="h-8 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand max-w-[180px]"
+            :title="$t('CRM.PRESETS.TITLE')"
+            @change="selectPreset($event.target.value)"
+          >
+            <option value="">{{ $t('CRM.PRESETS.ALL_COLUMNS') }}</option>
+            <option v-for="p in columnPresets" :key="p.name" :value="p.name">
+              👤 {{ p.name }}
+            </option>
+          </select>
+          <button
+            class="text-n-slate-10 hover:text-n-slate-12 i-lucide-settings-2 text-base transition-colors"
+            :title="$t('CRM.PRESETS.MANAGE')"
+            @click="showPresetsModal = true"
+          />
+        </div>
+
         <template v-if="selectedPipeline && !isRenamingPipeline">
           <button
             class="text-n-slate-10 hover:text-n-slate-12 i-lucide-pencil text-base transition-colors"
@@ -632,6 +735,47 @@ const createAndAddContact = async () => {
           />
         </div>
 
+        <!-- Sem resposta (paciente aguardando) -->
+        <button
+          class="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors whitespace-nowrap"
+          :class="filters.awaitingOnly
+            ? 'bg-amber-500/15 border-amber-500 text-amber-700 dark:text-amber-400 font-medium'
+            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+          @click="filters.awaitingOnly = !filters.awaitingOnly"
+        >
+          <span class="i-lucide-clock text-sm" />
+          {{ $t('CRM.FILTER.AWAITING_REPLY') }}
+          <span
+            v-if="awaitingCount > 0"
+            class="inline-flex items-center justify-center min-w-[16px] h-4 px-1 text-[10px] font-bold rounded-full"
+            :class="filters.awaitingOnly ? 'bg-amber-500 text-white' : 'bg-n-alpha-2 text-n-slate-10'"
+          >
+            {{ awaitingCount }}
+          </span>
+        </button>
+
+        <!-- Ordenação -->
+        <select
+          v-model="sortOrder"
+          class="h-[34px] text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+          :title="$t('CRM.FILTER.SORT')"
+        >
+          <option value="">{{ $t('CRM.FILTER.SORT_DEFAULT') }}</option>
+          <option value="waiting">{{ $t('CRM.FILTER.SORT_WAITING') }}</option>
+          <option value="oldest">{{ $t('CRM.FILTER.SORT_OLDEST') }}</option>
+          <option value="newest">{{ $t('CRM.FILTER.SORT_NEWEST') }}</option>
+        </select>
+
+        <!-- Caixa de entrada -->
+        <select
+          v-model="filters.inboxName"
+          class="h-[34px] text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand max-w-[170px]"
+          :title="$t('CRM.MODAL.INBOX')"
+        >
+          <option value="">{{ $t('CRM.FILTER.ALL_INBOXES') }}</option>
+          <option v-for="inbox in availableInboxes" :key="inbox" :value="inbox">{{ inbox }}</option>
+        </select>
+
         <!-- Filters toggle button -->
         <button
           class="relative flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors"
@@ -719,18 +863,6 @@ const createAndAddContact = async () => {
               {{ label }}
             </label>
           </div>
-        </div>
-
-        <!-- Inbox -->
-        <div class="flex flex-col gap-1 min-w-[140px]">
-          <label class="text-xs text-n-slate-9">{{ $t('CRM.MODAL.INBOX') }}</label>
-          <select
-            v-model="filters.inboxName"
-            class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-          >
-            <option value="">{{ $t('CRM.FILTER.ALL_INBOXES') }}</option>
-            <option v-for="inbox in availableInboxes" :key="inbox" :value="inbox">{{ inbox }}</option>
-          </select>
         </div>
 
         <!-- Stage -->
@@ -825,6 +957,7 @@ const createAndAddContact = async () => {
       >
         <template #item="{ element: stage }">
           <KanbanColumn
+            v-show="isStageVisible(stage.id)"
             :key="stage.id"
             :stage="stage"
             :pipeline-id="selectedPipelineId"
@@ -835,6 +968,7 @@ const createAndAddContact = async () => {
             @card-click="selectedContact = $event"
             @stage-drop="onStageDrop"
             @add-contact="openAddContact"
+            @open-chat="openChat"
           />
         </template>
 
@@ -882,6 +1016,24 @@ const createAndAddContact = async () => {
       @close="selectedContact = null"
       @updated="onContactUpdated"
       @removed="selectedContact = null"
+      @open-chat="openChat"
+    />
+
+    <!-- Chat popup (conversa oficial) -->
+    <ConversationChatModal
+      v-if="chatContact"
+      :contact="chatContact"
+      @close="chatContact = null"
+      @replied="onChatReplied"
+    />
+
+    <!-- Column presets modal -->
+    <ColumnPresetsModal
+      v-if="showPresetsModal && selectedPipeline"
+      :stages="selectedPipeline.stages"
+      :presets="columnPresets"
+      @close="showPresetsModal = false"
+      @saved="onPresetsSaved"
     />
 
     <!-- Integrations modal -->

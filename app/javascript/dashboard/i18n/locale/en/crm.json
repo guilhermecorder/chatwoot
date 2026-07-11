@@ -75,7 +75,13 @@
       "THIS_YEAR": "This year",
       "NO_INTERACTION": "No recent interaction",
       "EMPTY": "No contacts found with the selected filters.",
-      "CLEAR_FILTERS": "Clear filters"
+      "CLEAR_FILTERS": "Clear filters",
+      "AWAITING_REPLY": "Awaiting reply",
+      "SORT": "Sort",
+      "SORT_DEFAULT": "Default order",
+      "SORT_WAITING": "Longest waiting",
+      "SORT_OLDEST": "Oldest → newest",
+      "SORT_NEWEST": "Newest → oldest"
     },
     "MODAL": {
       "TAB_CRM": "CRM",
@@ -116,6 +122,39 @@
         "pending": "Pending",
         "snoozed": "Snoozed"
       }
+    },
+    "CARD": {
+      "UNREAD": "{count} unread",
+      "AWAITING_REPLY": "awaiting reply"
+    },
+    "CHAT": {
+      "OPEN": "Open quick chat",
+      "REPLY_HERE": "Reply here",
+      "REPLY_PLACEHOLDER": "Type your reply... (Enter sends, Shift+Enter new line)",
+      "SEND": "Send",
+      "SEND_ERROR": "Could not send. Check the WhatsApp 24h window.",
+      "LOAD_MORE": "Load previous messages",
+      "OFFICIAL_NOTE": "The reply is sent officially through \"{inbox}\"."
+    },
+    "PRESETS": {
+      "TITLE": "Column views",
+      "SUBTITLE": "Create shortcuts with each person's columns.",
+      "ALL_COLUMNS": "All columns",
+      "MANAGE": "Manage views",
+      "EMPTY": "No views created yet.",
+      "ADD": "New view",
+      "REMOVE": "Remove view",
+      "NAME_PLACEHOLDER": "Name (e.g. Vaneide)",
+      "SAVED": "Views saved!"
+    },
+    "MERGE": {
+      "BUTTON": "Merge with duplicate contact",
+      "TITLE": "Merge duplicate contact",
+      "HINT": "Use when the same person reached out on another channel (e.g. Instagram). The duplicate's conversations and labels move into this contact.",
+      "SEARCH_PLACEHOLDER": "Search the duplicate by name or phone...",
+      "CONFIRM": "\"{mergee}\" will be absorbed into \"{base}\". This cannot be undone.",
+      "APPLY": "Merge contacts",
+      "SUCCESS": "Contacts merged!"
     }
   }
 }
