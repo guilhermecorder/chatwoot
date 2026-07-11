@@ -16,11 +16,115 @@ const isTesting = ref(false);
 const isFetching = ref(false);
 const testResult = ref(null);   // { success, message }
 
+// ── Meta (Facebook/Instagram Ads) ──────────────────────────
+const meta = ref({ pixel_id: '', access_token: '', ad_account_id: '', test_event_code: '' });
+const isMetaSaving = ref(false);
+const isMetaTesting = ref(false);
+const metaTestResult = ref(null);
+const showMetaRequirements = ref(false);
+
+// ── Google ─────────────────────────────────────────────────
+const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '' });
+const isGoogleSaving = ref(false);
+const isGoogleTesting = ref(false);
+const googleTestResult = ref(null);
+const showGoogleRequirements = ref(false);
+
 onMounted(async () => {
   await store.dispatch('crm/fetchSettings');
   n8nUrl.value    = settings.value.n8n_base_url || '';
   n8nApiKey.value = '';  // nunca pré-preenche a key por segurança
+
+  const m = settings.value.meta_ads || {};
+  meta.value = {
+    pixel_id: m.pixel_id || '',
+    access_token: '', // nunca pré-preenche
+    ad_account_id: m.ad_account_id || '',
+    test_event_code: m.test_event_code || '',
+  };
+
+  const g = settings.value.google_ads || {};
+  google.value = {
+    measurement_id: g.measurement_id || '',
+    api_secret: '',
+    client_id: g.client_id || '',
+    developer_token: '',
+    customer_id: g.customer_id || '',
+  };
 });
+
+const metaStatus = computed(() => settings.value.meta_ads || {});
+const googleStatus = computed(() => settings.value.google_ads || {});
+
+const saveMeta = async () => {
+  isMetaSaving.value = true;
+  metaTestResult.value = null;
+  try {
+    const payload = {};
+    if (meta.value.pixel_id.trim()) payload.pixel_id = meta.value.pixel_id.trim();
+    if (meta.value.access_token.trim()) payload.access_token = meta.value.access_token.trim();
+    payload.ad_account_id = meta.value.ad_account_id.trim();
+    payload.test_event_code = meta.value.test_event_code.trim();
+    await store.dispatch('crm/updateMetaAds', payload);
+    meta.value.access_token = '';
+    useAlert('Configurações da Meta salvas');
+  } catch {
+    useAlert('Erro ao salvar configurações da Meta.');
+  } finally {
+    isMetaSaving.value = false;
+  }
+};
+
+const testMeta = async () => {
+  isMetaTesting.value = true;
+  metaTestResult.value = null;
+  try {
+    const result = await store.dispatch('crm/testMetaAds');
+    metaTestResult.value = result.success
+      ? { success: true, message: `Evento de teste enviado! (${result.events_received ?? 1} recebido pela Meta)` }
+      : { success: false, message: result.error || 'Falha no envio.' };
+  } catch {
+    metaTestResult.value = { success: false, message: 'Erro inesperado ao testar.' };
+  } finally {
+    isMetaTesting.value = false;
+  }
+};
+
+const saveGoogle = async () => {
+  isGoogleSaving.value = true;
+  googleTestResult.value = null;
+  try {
+    const payload = {};
+    if (google.value.measurement_id.trim()) payload.measurement_id = google.value.measurement_id.trim();
+    if (google.value.api_secret.trim()) payload.api_secret = google.value.api_secret.trim();
+    if (google.value.client_id.trim()) payload.client_id = google.value.client_id.trim();
+    if (google.value.developer_token.trim()) payload.developer_token = google.value.developer_token.trim();
+    payload.customer_id = google.value.customer_id.trim();
+    await store.dispatch('crm/updateGoogleAds', payload);
+    google.value.api_secret = '';
+    google.value.developer_token = '';
+    useAlert('Configurações do Google salvas');
+  } catch {
+    useAlert('Erro ao salvar configurações do Google.');
+  } finally {
+    isGoogleSaving.value = false;
+  }
+};
+
+const testGoogle = async () => {
+  isGoogleTesting.value = true;
+  googleTestResult.value = null;
+  try {
+    const result = await store.dispatch('crm/testGoogleAds');
+    googleTestResult.value = result.success
+      ? { success: true, message: 'Evento de teste enviado ao GA4!' }
+      : { success: false, message: result.error || 'Falha no envio.' };
+  } catch {
+    googleTestResult.value = { success: false, message: 'Erro inesperado ao testar.' };
+  } finally {
+    isGoogleTesting.value = false;
+  }
+};
 
 const isConfigured = computed(() => settings.value.n8n_api_key_configured && settings.value.n8n_base_url);
 const workflowCount = computed(() => workflows.value?.length ?? 0);
@@ -243,19 +347,237 @@ const fetchWorkflows = async () => {
           </div>
         </div>
 
-        <!-- Placeholder para integrações futuras -->
+        <!-- ══ Meta (Facebook / Instagram Ads) ══ -->
         <div class="border-t border-n-weak pt-5">
-          <h3 class="text-xs font-semibold text-n-slate-10 uppercase tracking-wide mb-3">Em breve</h3>
-          <div class="space-y-2">
-            <div
-              v-for="item in ['Meta Ads (Conversions API)', 'Google Ads (Enhanced Conversions)', 'WhatsApp Business API']"
-              :key="item"
-              class="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-dashed border-n-weak opacity-50"
-            >
-              <span class="i-lucide-link text-sm text-n-slate-9" />
-              <span class="text-sm text-n-slate-10">{{ item }}</span>
-              <span class="ml-auto text-[10px] bg-n-alpha-2 text-n-slate-9 px-1.5 py-0.5 rounded">Em breve</span>
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-9 h-9 rounded-xl bg-[#1877F2]/10 flex items-center justify-center flex-shrink-0">
+              <span class="i-lucide-facebook text-lg text-[#1877F2]" />
             </div>
+            <div class="min-w-0">
+              <h3 class="text-sm font-semibold text-n-slate-12">Meta — Facebook e Instagram Ads</h3>
+              <p class="text-xs text-n-slate-10">Envia conversões (CAPI) e recebe dados das campanhas (Insights)</p>
+            </div>
+            <div class="ml-auto flex flex-col items-end gap-1 flex-shrink-0">
+              <span
+                class="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                :class="metaStatus.configured ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
+              >
+                {{ metaStatus.configured ? '✓ Envio (CAPI)' : 'Envio: pendente' }}
+              </span>
+              <span
+                class="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                :class="metaStatus.insights_configured ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
+              >
+                {{ metaStatus.insights_configured ? '✓ Recebimento (Insights)' : 'Recebimento: pendente' }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Requisitos -->
+          <button
+            class="w-full flex items-center gap-2 text-xs text-n-brand mb-3"
+            @click="showMetaRequirements = !showMetaRequirements"
+          >
+            <span :class="showMetaRequirements ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" />
+            O que é necessário para integrar com a Meta
+          </button>
+          <div v-if="showMetaRequirements" class="bg-n-alpha-1 rounded-xl p-3.5 mb-4 text-xs text-n-slate-11 space-y-2">
+            <p><b>1. Business Manager</b> da clínica com acesso ao Pixel e à conta de anúncios.</p>
+            <p><b>2. ID do Pixel</b> — Gerenciador de Eventos → Fontes de dados → seu Pixel (número de ~15 dígitos).</p>
+            <p><b>3. Token de acesso do sistema</b> — Configurações do negócio → Usuários → Usuários do sistema → gerar token com permissões <code class="bg-n-alpha-2 px-1 rounded">ads_read</code> e <code class="bg-n-alpha-2 px-1 rounded">ads_management</code>.</p>
+            <p><b>4. ID da conta de anúncios</b> (para RECEBER insights) — formato <code class="bg-n-alpha-2 px-1 rounded">act_1234567890</code>.</p>
+            <p><b>5. Código de evento de teste</b> (opcional) — Gerenciador de Eventos → Testar eventos.</p>
+            <p class="text-n-slate-9">Com isso o sistema ENVIA eventos (lead, agendamento, cirurgia — via automações do CRM) e RECEBE investimento/resultados das campanhas para o Funil de Tráfego e Dashboard.</p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">ID do Pixel</label>
+              <input
+                v-model="meta.pixel_id"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                placeholder="123456789012345"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                Token de acesso
+                <span v-if="metaStatus.access_token_set" class="text-green-600 font-normal">(já configurado)</span>
+              </label>
+              <input
+                v-model="meta.access_token"
+                type="password"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                :placeholder="metaStatus.access_token_set ? 'Digite para substituir' : 'EAAxxxx...'"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">ID da conta de anúncios</label>
+              <input
+                v-model="meta.ad_account_id"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                placeholder="act_1234567890"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Código de teste <span class="text-n-slate-9">(opcional)</span></label>
+              <input
+                v-model="meta.test_event_code"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                placeholder="TEST12345"
+              />
+            </div>
+          </div>
+
+          <div class="flex gap-2 mt-3">
+            <button
+              class="flex-1 bg-n-brand text-white rounded-lg py-2 text-sm font-medium hover:bg-n-brand/90 disabled:opacity-50 transition-colors"
+              :disabled="isMetaSaving"
+              @click="saveMeta"
+            >
+              {{ isMetaSaving ? 'Salvando...' : 'Salvar' }}
+            </button>
+            <button
+              class="px-4 py-2 border border-n-weak rounded-lg text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              :disabled="isMetaTesting || !metaStatus.configured"
+              @click="testMeta"
+            >
+              <span :class="isMetaTesting ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-zap'" class="text-sm" />
+              {{ isMetaTesting ? 'Testando...' : 'Testar envio' }}
+            </button>
+          </div>
+
+          <div
+            v-if="metaTestResult"
+            class="mt-3 flex items-start gap-2 px-3 py-2.5 rounded-lg text-sm"
+            :class="metaTestResult.success
+              ? 'bg-green-500/10 text-green-700 border border-green-500/20'
+              : 'bg-red-500/10 text-red-700 border border-red-500/20'"
+          >
+            <span
+              class="text-base flex-shrink-0 mt-0.5"
+              :class="metaTestResult.success ? 'i-lucide-check-circle' : 'i-lucide-alert-circle'"
+            />
+            {{ metaTestResult.message }}
+          </div>
+        </div>
+
+        <!-- ══ Google (GA4 + Google Ads) ══ -->
+        <div class="border-t border-n-weak pt-5">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-9 h-9 rounded-xl bg-[#4285F4]/10 flex items-center justify-center flex-shrink-0">
+              <span class="i-lucide-chrome text-lg text-[#4285F4]" />
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-sm font-semibold text-n-slate-12">Google — GA4 e Google Ads</h3>
+              <p class="text-xs text-n-slate-10">Envia conversões (Measurement Protocol) e prepara os Insights do Google Ads</p>
+            </div>
+            <div class="ml-auto flex flex-col items-end gap-1 flex-shrink-0">
+              <span
+                class="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                :class="googleStatus.configured ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
+              >
+                {{ googleStatus.configured ? '✓ Envio (GA4)' : 'Envio: pendente' }}
+              </span>
+              <span
+                class="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                :class="googleStatus.insights_configured ? 'bg-green-500/15 text-green-600' : 'bg-amber-500/15 text-amber-600'"
+              >
+                {{ googleStatus.insights_configured ? '✓ Recebimento (Ads API)' : 'Recebimento: aguarda token' }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Requisitos -->
+          <button
+            class="w-full flex items-center gap-2 text-xs text-n-brand mb-3"
+            @click="showGoogleRequirements = !showGoogleRequirements"
+          >
+            <span :class="showGoogleRequirements ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" />
+            O que é necessário para integrar com o Google
+          </button>
+          <div v-if="showGoogleRequirements" class="bg-n-alpha-1 rounded-xl p-3.5 mb-4 text-xs text-n-slate-11 space-y-2">
+            <p><b>Para ENVIAR conversões (GA4):</b></p>
+            <p><b>1. Measurement ID</b> — GA4 → Administrador → Fluxos de dados → seu site (formato <code class="bg-n-alpha-2 px-1 rounded">G-XXXXXXX</code>).</p>
+            <p><b>2. API Secret</b> — no mesmo fluxo de dados → Measurement Protocol → Criar chave secreta.</p>
+            <p class="pt-1"><b>Para RECEBER dados do Google Ads (investimento/campanhas):</b></p>
+            <p><b>3. Developer Token</b> — Google Ads → Ferramentas → Central de API. ⚠ Aprovação do Google pode levar semanas; a tela já está pronta para quando chegar.</p>
+            <p><b>4. Customer ID</b> — número da conta Google Ads (formato <code class="bg-n-alpha-2 px-1 rounded">123-456-7890</code>).</p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Measurement ID (GA4)</label>
+              <input
+                v-model="google.measurement_id"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                placeholder="G-XXXXXXXXXX"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                API Secret
+                <span v-if="googleStatus.api_secret_set" class="text-green-600 font-normal">(já configurada)</span>
+              </label>
+              <input
+                v-model="google.api_secret"
+                type="password"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                :placeholder="googleStatus.api_secret_set ? 'Digite para substituir' : 'xxxxxxx'"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                Developer Token <span class="text-n-slate-9">(Google Ads)</span>
+                <span v-if="googleStatus.developer_token_set" class="text-green-600 font-normal">(já configurado)</span>
+              </label>
+              <input
+                v-model="google.developer_token"
+                type="password"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                :placeholder="googleStatus.developer_token_set ? 'Digite para substituir' : 'Aguardando aprovação do Google'"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Customer ID <span class="text-n-slate-9">(Google Ads)</span></label>
+              <input
+                v-model="google.customer_id"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                placeholder="123-456-7890"
+              />
+            </div>
+          </div>
+
+          <div class="flex gap-2 mt-3">
+            <button
+              class="flex-1 bg-n-brand text-white rounded-lg py-2 text-sm font-medium hover:bg-n-brand/90 disabled:opacity-50 transition-colors"
+              :disabled="isGoogleSaving"
+              @click="saveGoogle"
+            >
+              {{ isGoogleSaving ? 'Salvando...' : 'Salvar' }}
+            </button>
+            <button
+              class="px-4 py-2 border border-n-weak rounded-lg text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              :disabled="isGoogleTesting || !googleStatus.configured"
+              @click="testGoogle"
+            >
+              <span :class="isGoogleTesting ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-zap'" class="text-sm" />
+              {{ isGoogleTesting ? 'Testando...' : 'Testar envio' }}
+            </button>
+          </div>
+
+          <div
+            v-if="googleTestResult"
+            class="mt-3 flex items-start gap-2 px-3 py-2.5 rounded-lg text-sm"
+            :class="googleTestResult.success
+              ? 'bg-green-500/10 text-green-700 border border-green-500/20'
+              : 'bg-red-500/10 text-red-700 border border-red-500/20'"
+          >
+            <span
+              class="text-base flex-shrink-0 mt-0.5"
+              :class="googleTestResult.success ? 'i-lucide-check-circle' : 'i-lucide-alert-circle'"
+            />
+            {{ googleTestResult.message }}
           </div>
         </div>
 
