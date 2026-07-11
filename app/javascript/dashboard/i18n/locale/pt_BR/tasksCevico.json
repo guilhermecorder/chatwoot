@@ -1,0 +1,46 @@
+{
+  "TASKS": {
+    "TITLE": "Tarefas",
+    "NEW": "Nova tarefa",
+    "EDIT": "Editar tarefa",
+    "SAVE": "Salvar",
+    "SAVING": "Salvando...",
+    "CANCEL": "Cancelar",
+    "DELETE": "Excluir tarefa",
+    "DELETE_CONFIRM": "Excluir esta tarefa?",
+    "SAVED": "Tarefa salva!",
+    "CREATED": "Tarefa criada!",
+    "DELETED": "Tarefa excluída.",
+    "ERROR": "Algo deu errado. Tente novamente.",
+    "BY": "por",
+    "CREATED_BY": "Criada por {name}",
+    "COLUMNS": {
+      "TODO": "A fazer",
+      "DOING": "Fazendo",
+      "DONE": "Feito"
+    },
+    "PRIORITY": {
+      "LOW": "Baixa",
+      "MEDIUM": "Média",
+      "HIGH": "Alta",
+      "URGENT": "Urgente"
+    },
+    "STATS": {
+      "OVERDUE": "Atrasadas"
+    },
+    "FILTER": {
+      "MINE": "Minhas tarefas",
+      "ALL": "Todas"
+    },
+    "FORM": {
+      "TITLE": "Tarefa",
+      "TITLE_PLACEHOLDER": "O que precisa ser feito?",
+      "DESCRIPTION": "Descrição",
+      "TYPE": "Tipo",
+      "PRIORITY": "Prioridade (impacto)",
+      "ASSIGNEE": "Responsável",
+      "DUE_AT": "Prazo",
+      "STATUS": "Status"
+    }
+  }
+}

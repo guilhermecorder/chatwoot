@@ -1,0 +1,46 @@
+{
+  "TASKS": {
+    "TITLE": "Tasks",
+    "NEW": "New task",
+    "EDIT": "Edit task",
+    "SAVE": "Save",
+    "SAVING": "Saving...",
+    "CANCEL": "Cancel",
+    "DELETE": "Delete task",
+    "DELETE_CONFIRM": "Delete this task?",
+    "SAVED": "Task saved!",
+    "CREATED": "Task created!",
+    "DELETED": "Task deleted.",
+    "ERROR": "Something went wrong. Try again.",
+    "BY": "by",
+    "CREATED_BY": "Created by {name}",
+    "COLUMNS": {
+      "TODO": "To do",
+      "DOING": "Doing",
+      "DONE": "Done"
+    },
+    "PRIORITY": {
+      "LOW": "Low",
+      "MEDIUM": "Medium",
+      "HIGH": "High",
+      "URGENT": "Urgent"
+    },
+    "STATS": {
+      "OVERDUE": "Overdue"
+    },
+    "FILTER": {
+      "MINE": "My tasks",
+      "ALL": "All"
+    },
+    "FORM": {
+      "TITLE": "Task",
+      "TITLE_PLACEHOLDER": "What needs to be done?",
+      "DESCRIPTION": "Description",
+      "TYPE": "Type",
+      "PRIORITY": "Priority (impact)",
+      "ASSIGNEE": "Assignee",
+      "DUE_AT": "Due date",
+      "STATUS": "Status"
+    }
+  }
+}

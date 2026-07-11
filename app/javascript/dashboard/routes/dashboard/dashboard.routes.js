@@ -11,6 +11,7 @@ import campaignsRoutes from './campaigns/campaigns.routes';
 import { routes as captainRoutes } from './captain/captain.routes';
 import crmRoutes from './crm/routes';
 import academyRoutes from './academy/routes';
+import tasksRoutes from './tasks/routes';
 import AppContainer from './Dashboard.vue';
 import Suspended from './suspended/Index.vue';
 import NoAccounts from './noAccounts/Index.vue';
@@ -34,6 +35,7 @@ export default {
         ...campaignsRoutes.routes,
         ...crmRoutes.routes,
         ...academyRoutes.routes,
+        ...tasksRoutes.routes,
       ],
     },
     {

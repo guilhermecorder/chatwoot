@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_10_000001) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_11_000003) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -900,6 +900,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_10_000001) do
     t.datetime "updated_at", null: false
     t.jsonb "meta_ads_config", default: {}, null: false
     t.jsonb "google_ads_config", default: {}, null: false
+    t.jsonb "column_presets", default: [], null: false
+    t.jsonb "agent_permissions", default: {}, null: false
     t.index ["account_id"], name: "index_crm_settings_on_account_id", unique: true
   end
 
@@ -1396,6 +1398,25 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_10_000001) do
     t.index ["name"], name: "index_tags_on_name", unique: true
   end
 
+  create_table "tasks", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "creator_id", null: false
+    t.bigint "assignee_id"
+    t.string "title", null: false
+    t.text "description"
+    t.string "task_type"
+    t.integer "priority", default: 1, null: false
+    t.integer "status", default: 0, null: false
+    t.datetime "due_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
+    t.index ["account_id"], name: "index_tasks_on_account_id"
+    t.index ["assignee_id"], name: "index_tasks_on_assignee_id"
+    t.index ["creator_id"], name: "index_tasks_on_creator_id"
+  end
+
   create_table "team_members", force: :cascade do |t|
     t.bigint "team_id", null: false
     t.bigint "user_id", null: false
@@ -1528,6 +1549,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_10_000001) do
   add_foreign_key "crm_settings", "accounts"
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "inboxes", "portals"
+  add_foreign_key "tasks", "accounts"
+  add_foreign_key "tasks", "users", column: "assignee_id"
+  add_foreign_key "tasks", "users", column: "creator_id"
   add_foreign_key "user_sessions", "users"
   create_trigger("accounts_after_insert_row_tr", :generated => true, :compatibility => 1).
       on("accounts").
