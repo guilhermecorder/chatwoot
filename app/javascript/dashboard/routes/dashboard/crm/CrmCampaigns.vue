@@ -453,6 +453,40 @@ const applyRetro = async () => {
   }
 };
 
+// ── Unificação de contatos duplicados ─────────────────────────────────
+const showUnifyPanel = ref(false);
+const unifyPreview = ref(null);
+const isUnifyLoading = ref(false);
+const isUnifyApplying = ref(false);
+const showUnifyConfirm = ref(false);
+
+const previewUnify = async () => {
+  isUnifyLoading.value = true;
+  unifyPreview.value = null;
+  showUnifyConfirm.value = false;
+  try {
+    unifyPreview.value = await store.dispatch('crm/previewContactUnification');
+  } catch {
+    useAlert('Erro ao calcular os duplicados');
+  } finally {
+    isUnifyLoading.value = false;
+  }
+};
+
+const applyUnify = async () => {
+  isUnifyApplying.value = true;
+  try {
+    await store.dispatch('crm/applyContactUnification');
+    useAlert('Unificação em andamento — os contatos serão mesclados em segundo plano.');
+    unifyPreview.value = null;
+    showUnifyConfirm.value = false;
+  } catch {
+    useAlert('Erro ao iniciar a unificação');
+  } finally {
+    isUnifyApplying.value = false;
+  }
+};
+
 // ── Resultados ────────────────────────────────────────────────────────
 const openResults = async c => {
   if (c.status === 'draft' || c.status === 'scheduled') return;
@@ -765,6 +799,99 @@ const statsLine = c => {
             </div>
             <p v-if="retroPreview && !retroHasAction" class="text-xs text-amber-600">
               Escolha uma etiqueta e/ou uma coluna para aplicar.
+            </p>
+          </div>
+        </div>
+
+        <!-- Unificação de contatos duplicados -->
+        <div class="max-w-3xl mb-5 bg-n-solid-2 border border-n-weak rounded-xl overflow-hidden">
+          <button
+            class="w-full flex items-center gap-3 p-4 text-left hover:bg-n-alpha-1 transition-colors"
+            @click="showUnifyPanel = !showUnifyPanel"
+          >
+            <span class="i-lucide-merge text-xl text-n-brand flex-shrink-0" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-n-slate-12">Unificar contatos duplicados</p>
+              <p class="text-xs text-n-slate-10">
+                Mescla contatos com o mesmo telefone ou e-mail (ex: chamou pelo Instagram e pelo WhatsApp).
+                Conversas, etiquetas e notas são preservadas no contato unificado.
+              </p>
+            </div>
+            <span
+              class="text-n-slate-10 flex-shrink-0"
+              :class="showUnifyPanel ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+            />
+          </button>
+
+          <div v-if="showUnifyPanel" class="px-4 pb-4 space-y-3 border-t border-n-weak pt-4">
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1 disabled:opacity-50"
+                :disabled="isUnifyLoading"
+                @click="previewUnify"
+              >
+                <span class="i-lucide-search" />
+                {{ isUnifyLoading ? 'Calculando…' : 'Calcular duplicados' }}
+              </button>
+
+              <span v-if="unifyPreview" class="text-sm text-n-slate-12">
+                <b>{{ unifyPreview.groups }}</b> grupo(s) de duplicados ·
+                <b>{{ unifyPreview.contacts_to_merge }}</b> contato(s) serão mesclados
+              </span>
+            </div>
+
+            <!-- Exemplos -->
+            <div v-if="unifyPreview?.examples?.length" class="bg-n-alpha-1 rounded-lg p-3 space-y-1 max-h-48 overflow-y-auto">
+              <p class="text-[11px] text-n-slate-9 mb-1">Exemplos do que será unificado:</p>
+              <div
+                v-for="(ex, i) in unifyPreview.examples"
+                :key="i"
+                class="text-xs text-n-slate-11 flex items-center gap-2"
+              >
+                <span class="i-lucide-users text-[11px] text-n-slate-9 flex-shrink-0" />
+                <span class="truncate">
+                  {{ ex.names.join(' + ') }}
+                  <span class="text-n-slate-9">({{ ex.phone_number || ex.email }} · {{ ex.duplicates }} contatos → 1)</span>
+                </span>
+              </div>
+            </div>
+
+            <div v-if="unifyPreview && unifyPreview.contacts_to_merge > 0" class="flex items-center gap-3">
+              <template v-if="!showUnifyConfirm">
+                <button
+                  class="text-xs px-4 py-2 rounded-lg bg-n-brand text-white hover:opacity-90 flex items-center gap-1.5"
+                  @click="showUnifyConfirm = true"
+                >
+                  <span class="i-lucide-merge" />
+                  Unificar contatos
+                </button>
+              </template>
+              <template v-else>
+                <span class="text-xs text-amber-600 font-medium">
+                  ⚠ A mesclagem não pode ser desfeita. Confirma?
+                </span>
+                <button
+                  class="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white disabled:opacity-50"
+                  :disabled="isUnifyApplying"
+                  @click="applyUnify"
+                >
+                  {{ isUnifyApplying ? 'Iniciando…' : 'Sim, unificar' }}
+                </button>
+                <button
+                  class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11"
+                  @click="showUnifyConfirm = false"
+                >
+                  Cancelar
+                </button>
+              </template>
+            </div>
+
+            <p v-if="unifyPreview && unifyPreview.contacts_to_merge === 0" class="text-xs text-green-600">
+              ✓ Nenhum duplicado por telefone/e-mail encontrado.
+            </p>
+            <p class="text-[11px] text-n-slate-9">
+              Contatos sem telefone (ex: só Instagram) não são unificados automaticamente —
+              use o botão "Mesclar" no card do CRM para esses casos.
             </p>
           </div>
         </div>

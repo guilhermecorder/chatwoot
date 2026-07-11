@@ -107,6 +107,15 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/retro_labels/apply`, data);
   }
 
+  // ── Unificação de contatos duplicados ─────────────────────────────
+  previewContactUnification() {
+    return axios.post(`${this.url}/contact_unification/preview`);
+  }
+
+  applyContactUnification() {
+    return axios.post(`${this.url}/contact_unification/apply`);
+  }
+
   previewAudience(audience) {
     return axios.post(`${this.url}/campaigns/preview_audience`, { audience });
   }

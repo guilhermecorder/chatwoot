@@ -185,6 +185,15 @@ class Conversation < ApplicationRecord
     (cached_label_list || '').split(',').map(&:strip)
   end
 
+  # CEVICO: etiquetas aplicadas na conversa passam a valer também no contato
+  # (aditivo — remover da conversa não remove do contato), para campanhas e
+  # CRM enxergarem o paciente unificado mesmo com conversas em várias caixas.
+  def update_labels(labels = nil)
+    result = super
+    contact&.add_labels(labels)
+    result
+  end
+
   def notifiable_assignee_change?
     return false unless saved_change_to_assignee_id?
     return false if assignee_id.blank?

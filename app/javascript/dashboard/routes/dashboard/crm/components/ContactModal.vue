@@ -6,13 +6,15 @@ import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAlert } from 'dashboard/composables';
 import { relativeTime } from '../helpers';
+import ContactAPI from 'dashboard/api/contacts';
+import AccountActionsAPI from 'dashboard/api/accountActions';
 
 const props = defineProps({
   contact: { type: Object, default: null },
   pipeline: { type: Object, required: true },
 });
 
-const emit = defineEmits(['close', 'updated', 'removed']);
+const emit = defineEmits(['close', 'updated', 'removed', 'openChat']);
 
 const store = useStore();
 const { t } = useI18n();
@@ -237,6 +239,54 @@ const openConversation = () => {
     },
   });
   emit('close');
+};
+
+// ── Mesclar contato duplicado (ex: Instagram + WhatsApp) ──
+const showMergeSection = ref(false);
+const mergeSearch = ref('');
+const mergeResults = ref([]);
+const isMergeSearching = ref(false);
+const mergeCandidate = ref(null);
+const isMerging = ref(false);
+
+let mergeTimer = null;
+const onMergeSearchInput = () => {
+  clearTimeout(mergeTimer);
+  mergeCandidate.value = null;
+  if (!mergeSearch.value.trim()) {
+    mergeResults.value = [];
+    return;
+  }
+  mergeTimer = setTimeout(async () => {
+    isMergeSearching.value = true;
+    try {
+      const { data } = await ContactAPI.search(mergeSearch.value, 1);
+      mergeResults.value = (data.payload ?? []).filter(
+        c => c.id !== props.contact.contact_id
+      );
+    } finally {
+      isMergeSearching.value = false;
+    }
+  }, 300);
+};
+
+const doMerge = async () => {
+  if (!mergeCandidate.value || isMerging.value) return;
+  isMerging.value = true;
+  try {
+    // o card atual é o contato principal; o selecionado é absorvido
+    await AccountActionsAPI.merge(props.contact.contact_id, mergeCandidate.value.id);
+    useAlert(t('CRM.MERGE.SUCCESS'));
+    showMergeSection.value = false;
+    mergeSearch.value = '';
+    mergeResults.value = [];
+    mergeCandidate.value = null;
+    emit('updated');
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  } finally {
+    isMerging.value = false;
+  }
 };
 </script>
 
@@ -549,6 +599,78 @@ const openConversation = () => {
               <span class="text-sm text-n-slate-12">{{ contact.assignee.name }}</span>
             </div>
           </div>
+
+          <!-- Mesclar contato duplicado -->
+          <div class="border-t border-n-weak pt-4">
+            <button
+              v-if="!showMergeSection"
+              class="w-full flex items-center justify-center gap-2 border border-n-weak text-n-slate-11 rounded-xl py-2.5 text-sm font-medium hover:bg-n-alpha-1 transition-colors"
+              @click="showMergeSection = true"
+            >
+              <span class="i-lucide-merge text-base" />
+              {{ $t('CRM.MERGE.BUTTON') }}
+            </button>
+
+            <div v-else class="space-y-3">
+              <div>
+                <p class="text-sm font-medium text-n-slate-12 flex items-center gap-1.5">
+                  <span class="i-lucide-merge text-base text-n-brand" />
+                  {{ $t('CRM.MERGE.TITLE') }}
+                </p>
+                <p class="text-xs text-n-slate-10 mt-1">{{ $t('CRM.MERGE.HINT') }}</p>
+              </div>
+
+              <input
+                v-model="mergeSearch"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+                :placeholder="$t('CRM.MERGE.SEARCH_PLACEHOLDER')"
+                @input="onMergeSearchInput"
+              />
+
+              <div v-if="isMergeSearching" class="text-xs text-n-slate-10 py-1">{{ $t('CRM.MODAL.LOADING') }}</div>
+
+              <div v-else-if="mergeResults.length" class="max-h-40 overflow-y-auto space-y-0.5">
+                <button
+                  v-for="c in mergeResults"
+                  :key="c.id"
+                  class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition-colors"
+                  :class="mergeCandidate?.id === c.id ? 'bg-n-brand/10 border border-n-brand' : 'hover:bg-n-alpha-1 border border-transparent'"
+                  @click="mergeCandidate = c"
+                >
+                  <div class="w-6 h-6 rounded-full bg-n-slate-9 flex items-center justify-center text-white text-[10px] font-semibold flex-shrink-0 overflow-hidden">
+                    <img v-if="c.avatar_url" :src="c.avatar_url" class="w-6 h-6 object-cover" />
+                    <span v-else>{{ c.name?.[0]?.toUpperCase() ?? '?' }}</span>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-medium text-n-slate-12 truncate">{{ c.name }}</p>
+                    <p class="text-[11px] text-n-slate-10 truncate">{{ c.phone_number ?? c.email ?? '—' }}</p>
+                  </div>
+                </button>
+              </div>
+
+              <div v-if="mergeCandidate" class="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">
+                <p class="text-xs text-amber-700 dark:text-amber-400">
+                  {{ $t('CRM.MERGE.CONFIRM', { mergee: mergeCandidate.name, base: contact.name }) }}
+                </p>
+              </div>
+
+              <div class="flex gap-2">
+                <button
+                  class="flex-1 bg-n-brand text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+                  :disabled="!mergeCandidate || isMerging"
+                  @click="doMerge"
+                >
+                  {{ isMerging ? $t('CRM.MODAL.SAVING') : $t('CRM.MERGE.APPLY') }}
+                </button>
+                <button
+                  class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11"
+                  @click="showMergeSection = false; mergeCandidate = null"
+                >
+                  {{ $t('CRM.CANCEL') }}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- ── Tab: Conversa ── -->
@@ -593,9 +715,16 @@ const openConversation = () => {
               </p>
             </div>
 
-            <!-- Open conversation button -->
+            <!-- Reply here (popup) + open conversation -->
             <button
               class="w-full flex items-center justify-center gap-2 bg-n-brand text-white rounded-xl py-3 text-sm font-medium hover:bg-n-brand/90 transition-colors"
+              @click="emit('openChat', contact); emit('close')"
+            >
+              <span class="i-lucide-message-circle-more text-base" />
+              {{ $t('CRM.CHAT.REPLY_HERE') }}
+            </button>
+            <button
+              class="w-full flex items-center justify-center gap-2 border border-n-weak text-n-slate-11 rounded-xl py-2.5 text-sm font-medium hover:bg-n-alpha-1 transition-colors"
               @click="openConversation"
             >
               <span class="i-lucide-external-link text-base" />
