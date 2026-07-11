@@ -115,10 +115,28 @@ por usuária de mostrar/ocultar caixas na sidebar.
 
 ## 9. DASHBOARD DO NEGÓCIO (grande — arquitetura completa)
 
-Redesenhar o Dashboard CRM como cockpit do negócio: gráficos clean/modernos,
-barra E pizza (redundância proposital para clareza). Arquitetura deve prever
-TODOS os números abaixo, mesmo os sem fonte ainda (placeholder "conectar
-fonte"), para a estrutura já existir:
+**FORMATO: página VIVA dentro de Relatórios** (Vue, como CrmDashboard/
+TrafficFunnel/WhatsappHealth), interativa, com filtro de datas. NÃO é site
+externo. Fontes "plugáveis" via CRM → Integrações (padrão já existente):
+o usuário conecta e o painel acende. Maquete de layout aprovada (artifact
+publicado — 6 painéis + selos de fonte). Gráficos clean, barra E pizza.
+
+**Oftalmofácil (ERP) = fonte da JORNADA COMPLETA do paciente** (substitui a
+planilha manual quando conectado). PENDENTE: confirmar se o Oftalmofácil
+oferece API/webhook/export automático — perguntar ao suporte deles. Até lá,
+planilha de fechamento é a ponte (CSV por URL já testado). Trocar planilha→
+ERP depois sem refazer o dashboard.
+
+Decisão pendente p/ Fase A: quais stages do CRM = "Agendamento" e "Cirurgia"
+(provável: "Agendamento de Consulta" e "Cirurgia") — confirmar com Guilherme.
+
+Ordem: Fase A (só CRM: funil, leads, origem, recordes, metas, filtro datas —
+sem dep. externa, seguro) → Fase B (planilha/Oftalmofácil: faturamento,
+cirurgias, ticket, procedimentos, status) → Fase C (Meta pronto/falta
+ad_account_id; Google/TikTok futuros).
+
+Arquitetura deve prever TODOS os números abaixo, mesmo os sem fonte ainda
+(placeholder "conectar fonte"), para a estrutura já existir:
 
 KPIs/víses pedidas pelo Guilherme:
 - CAC (investimento ÷ novos clientes) — investimento vem do Meta (já temos

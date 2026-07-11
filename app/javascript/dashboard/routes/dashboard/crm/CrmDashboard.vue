@@ -236,6 +236,20 @@ const timelineChart = computed(() => {
     },
   };
 });
+
+// ── Responsividade: quem avançou vs. quem ficou parado no início ──────
+const resp = computed(() => data.value?.responsiveness ?? null);
+
+const respMilestones = computed(() => {
+  if (!resp.value?.stages?.length) return [];
+  // pula a 1ª etapa (todos "chegam" nela = 100%); mostra o avanço real
+  return resp.value.stages.slice(1).map(s => ({
+    name: s.stage_name,
+    color: s.stage_color || '#6B7280',
+    reached: s.reached,
+    pct: s.reached_pct,
+  }));
+});
 </script>
 
 <template>
@@ -325,6 +339,56 @@ const timelineChart = computed(() => {
             {{ formatDuration(data.kpis.avg_conversion_minutes) }}
           </p>
           <p class="text-xs text-n-slate-9 mt-1">de conversão</p>
+        </div>
+      </div>
+
+      <!-- Responsividade dos leads -->
+      <div v-if="resp && resp.total > 0" class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-4">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
+          <h3 class="text-sm font-semibold text-n-slate-12 flex items-center gap-2">
+            <span class="i-lucide-activity text-n-brand" />
+            Responsividade dos leads
+          </h3>
+          <span class="text-xs text-n-slate-10">quanto do total avançou em cada etapa</span>
+        </div>
+
+        <!-- barras de "chegaram até" -->
+        <div class="space-y-2.5">
+          <div v-for="m in respMilestones" :key="m.name" class="flex items-center gap-3">
+            <div class="w-40 text-right flex-shrink-0">
+              <p class="text-xs text-n-slate-12 font-medium truncate">{{ m.name }}</p>
+            </div>
+            <div class="flex-1 flex items-center gap-2">
+              <div class="flex-1 h-6 rounded-lg bg-n-alpha-1 overflow-hidden">
+                <div
+                  class="h-full rounded-lg transition-all flex items-center justify-end px-2"
+                  :style="{ width: Math.max(m.pct, 4) + '%', backgroundColor: (m.color || '#6B7280') + 'CC' }"
+                >
+                  <span class="text-[11px] font-bold text-white drop-shadow">{{ m.pct }}%</span>
+                </div>
+              </div>
+              <span class="text-xs text-n-slate-10 w-24 flex-shrink-0">{{ m.reached }} leads</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- destaque: pouco responsivos (parados no início) -->
+        <div class="mt-4 flex items-center gap-3 bg-amber-500/10 border border-amber-500/25 rounded-xl p-3.5 flex-wrap">
+          <span class="i-lucide-user-x text-amber-600 text-xl flex-shrink-0" />
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-n-slate-12">
+              {{ resp.stuck.count }} leads pouco responsivos ({{ resp.stuck.pct }}%)
+            </p>
+            <p class="text-xs text-n-slate-10">
+              parados em "{{ resp.stuck.stage_name }}" — não avançaram no funil. Público ideal para uma campanha de reativação.
+            </p>
+          </div>
+          <button
+            class="text-xs font-medium px-3 py-1.5 rounded-lg bg-n-brand text-white hover:opacity-90 flex-shrink-0"
+            @click="$router.push({ name: 'crm_campaigns' })"
+          >
+            Criar campanha →
+          </button>
         </div>
       </div>
 

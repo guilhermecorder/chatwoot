@@ -18,10 +18,59 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       avg_time_by_stage:  build_avg_time_by_stage(pipeline, contacts),
       by_origin:          build_by_origin(contacts),
       created_over_time:  build_created_over_time(contacts, since, period),
+      responsiveness:     build_responsiveness(pipeline, contacts),
     }
   end
 
   private
+
+  # ── Responsividade ────────────────────────────────────────────────
+  # Funil ACUMULADO: quantos leads "chegaram até cada etapa ou além".
+  # É o que revela quem avançou vs. quem ficou parado no começo — base
+  # para campanhas de reativação.
+  def build_responsiveness(pipeline, contacts)
+    total = contacts.count
+    return { total: 0, stages: [], stuck: { count: 0, pct: 0.0 } } if total.zero?
+
+    counts_by_stage = contacts.group(:stage_id).count
+    ordered = pipeline.stages.order(:position).to_a
+
+    # de trás pra frente: cards "nesta etapa ou além"
+    cumulative = 0
+    reached = {}
+    ordered.reverse_each do |stage|
+      cumulative += (counts_by_stage[stage.id] || 0)
+      reached[stage.id] = cumulative
+    end
+
+    stages = ordered.each_with_index.map do |stage, idx|
+      count_here = counts_by_stage[stage.id] || 0
+      reached_here = reached[stage.id]
+      {
+        stage_id:    stage.id,
+        stage_name:  stage.name,
+        stage_color: stage.color,
+        position:    idx,
+        count_here:  count_here,                                       # exatamente nesta etapa
+        reached:     reached_here,                                     # nesta ou além
+        reached_pct: ((reached_here.to_f / total) * 100).round(1),     # % que chegou até aqui
+      }
+    end
+
+    # "pouco responsivo" = parado na primeira etapa (não avançou de lugar)
+    first = ordered.first
+    stuck_count = first ? (counts_by_stage[first.id] || 0) : 0
+
+    {
+      total: total,
+      stages: stages,
+      stuck: {
+        count: stuck_count,
+        pct:   ((stuck_count.to_f / total) * 100).round(1),
+        stage_name: first&.name,
+      },
+    }
+  end
 
   # ── KPIs ─────────────────────────────────────────────────────────
 
