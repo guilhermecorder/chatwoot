@@ -157,6 +157,14 @@ const actions = {
     const { data } = await CrmAPI.applyLabelReplace(payload);
     return data;
   },
+  async previewLabelRemove(_, payload) {
+    const { data } = await CrmAPI.previewLabelRemove(payload);
+    return data;
+  },
+  async applyLabelRemove(_, payload) {
+    const { data } = await CrmAPI.applyLabelRemove(payload);
+    return data;
+  },
   async previewContactUnification() {
     const { data } = await CrmAPI.previewContactUnification();
     return data;
@@ -350,6 +358,11 @@ const mutations = {
   patchContactValue(s, { id, value }) {
     const c = s.contacts.find(x => x.id === id);
     if (c) c.value = value;
+  },
+  // Merge raso de campos do card (ex.: labels após salvar) sem refetch
+  patchContact(s, { id, data }) {
+    const idx = s.contacts.findIndex(x => x.id === id);
+    if (idx !== -1) s.contacts.splice(idx, 1, { ...s.contacts[idx], ...data });
   },
 };
 

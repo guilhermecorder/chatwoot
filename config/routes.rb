@@ -154,6 +154,10 @@ Rails.application.routes.draw do
               post :preview
               post :apply
             end
+            resource :label_removals, only: [] do
+              post :preview
+              post :apply
+            end
             resource :contact_unification, only: [], controller: 'contact_unifications' do
               post :preview
               post :apply

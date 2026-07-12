@@ -132,6 +132,14 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/label_replacements/apply`, data);
   }
 
+  previewLabelRemove(data) {
+    return axios.post(`${this.url}/label_removals/preview`, data);
+  }
+
+  applyLabelRemove(data) {
+    return axios.post(`${this.url}/label_removals/apply`, data);
+  }
+
   // ── Unificação de contatos duplicados ─────────────────────────────
   previewContactUnification() {
     return axios.post(`${this.url}/contact_unification/preview`);

@@ -520,6 +520,51 @@ const applyReplace = async () => {
   }
 };
 
+// ── Remover etiqueta em massa ─────────────────────────────────────────
+const showRemovePanel = ref(false);
+const removeLabel = ref('');
+const removeStageId = ref('');
+const removePreview = ref(null);
+const isRemoveLoading = ref(false);
+const isRemoveApplying = ref(false);
+const showRemoveConfirm = ref(false);
+
+const previewRemove = async () => {
+  if (!removeLabel.value) return;
+  isRemoveLoading.value = true;
+  removePreview.value = null;
+  showRemoveConfirm.value = false;
+  try {
+    removePreview.value = await store.dispatch('crm/previewLabelRemove', {
+      label: removeLabel.value,
+      stage_id: removeStageId.value || undefined,
+    });
+  } catch {
+    useAlert('Erro ao calcular');
+  } finally {
+    isRemoveLoading.value = false;
+  }
+};
+
+const applyRemove = async () => {
+  isRemoveApplying.value = true;
+  try {
+    await store.dispatch('crm/applyLabelRemove', {
+      label: removeLabel.value,
+      stage_id: removeStageId.value || undefined,
+    });
+    useAlert('Remoção em andamento — as etiquetas serão removidas em segundo plano.');
+    removePreview.value = null;
+    showRemoveConfirm.value = false;
+    removeLabel.value = '';
+    removeStageId.value = '';
+  } catch {
+    useAlert('Erro ao iniciar a remoção');
+  } finally {
+    isRemoveApplying.value = false;
+  }
+};
+
 // ── Unificação de contatos duplicados ─────────────────────────────────
 const showUnifyPanel = ref(false);
 const unifyPreview = ref(null);
@@ -957,6 +1002,98 @@ const statsLine = c => {
             </div>
             <p v-if="replacePreview && replacePreview.contacts === 0 && replacePreview.conversations === 0" class="text-xs text-n-slate-9">
               Ninguém com a etiqueta "{{ replaceFrom }}".
+            </p>
+          </div>
+        </div>
+
+        <!-- Tratamento de dados: remover etiqueta em massa -->
+        <div class="max-w-3xl mb-5 bg-n-solid-2 border border-n-weak rounded-xl overflow-hidden">
+          <button
+            class="w-full flex items-center gap-3 p-4 text-left hover:bg-n-alpha-1 transition-colors"
+            @click="showRemovePanel = !showRemovePanel"
+          >
+            <span class="i-lucide-tag-off text-xl text-red-500 flex-shrink-0" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-n-slate-12">Tratamento de dados — remover etiqueta em massa</p>
+              <p class="text-xs text-n-slate-10">
+                Remove uma etiqueta de todo mundo que a tem — opcionalmente só de quem está numa coluna do CRM.
+              </p>
+            </div>
+            <span
+              class="text-n-slate-10 flex-shrink-0"
+              :class="showRemovePanel ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+            />
+          </button>
+
+          <div v-if="showRemovePanel" class="px-4 pb-4 space-y-3 border-t border-n-weak pt-4">
+            <div class="flex flex-wrap items-end gap-3">
+              <div class="flex-1 min-w-40">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">Etiqueta a remover</label>
+                <select
+                  v-model="removeLabel"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  @change="removePreview = null"
+                >
+                  <option value="">Escolha a etiqueta…</option>
+                  <option v-for="l in labels" :key="l.id" :value="l.title">{{ l.title }}</option>
+                </select>
+              </div>
+              <div class="flex-1 min-w-40">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">
+                  Só de quem está na coluna <span class="text-n-slate-9">(opcional)</span>
+                </label>
+                <select
+                  v-model="removeStageId"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  @change="removePreview = null"
+                >
+                  <option value="">Todas as pessoas</option>
+                  <option v-for="s in allStages" :key="s.id" :value="s.id">
+                    {{ s.pipeline_name }} › {{ s.name }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1 disabled:opacity-50"
+                :disabled="!removeLabel || isRemoveLoading"
+                @click="previewRemove"
+              >
+                <span class="i-lucide-search" />
+                {{ isRemoveLoading ? 'Calculando…' : 'Calcular' }}
+              </button>
+              <span v-if="removePreview" class="text-sm text-n-slate-12">
+                <b>{{ removePreview.contacts }}</b> contato(s) perderão a etiqueta
+                <span v-if="removePreview.sample?.length" class="text-xs text-n-slate-9">
+                  (ex: {{ removePreview.sample.map(s => s.name).filter(Boolean).slice(0, 3).join(', ') }})
+                </span>
+              </span>
+            </div>
+
+            <div v-if="removePreview && removePreview.contacts > 0" class="flex items-center gap-3">
+              <template v-if="!showRemoveConfirm">
+                <button
+                  class="text-xs px-4 py-2 rounded-lg bg-red-500 text-white hover:opacity-90 flex items-center gap-1.5"
+                  @click="showRemoveConfirm = true"
+                >
+                  <span class="i-lucide-tag-off" />
+                  Remover etiqueta
+                </button>
+              </template>
+              <template v-else>
+                <span class="text-xs text-amber-600 font-medium">Confirma remover "{{ removeLabel }}" de {{ removePreview.contacts }} contato(s)?</span>
+                <button
+                  class="text-xs px-3 py-1.5 rounded-lg bg-red-600 text-white disabled:opacity-50"
+                  :disabled="isRemoveApplying"
+                  @click="applyRemove"
+                >{{ isRemoveApplying ? 'Iniciando…' : 'Sim, remover' }}</button>
+                <button class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11" @click="showRemoveConfirm = false">Cancelar</button>
+              </template>
+            </div>
+            <p v-if="removePreview && removePreview.contacts === 0" class="text-xs text-n-slate-9">
+              Ninguém encontrado com esse critério.
             </p>
           </div>
         </div>
