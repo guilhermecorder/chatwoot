@@ -83,7 +83,8 @@
       "SORT_OLDEST": "Mais antigo → mais novo",
       "SORT_NEWEST": "Mais novo → mais antigo",
       "APPLY": "Aplicar filtros",
-      "SORT_LAST_MESSAGE": "Última mensagem (não lidas no topo)"
+      "SORT_LAST_MESSAGE": "Última mensagem (não lidas no topo)",
+      "LOADING_REST": "carregando todos os leads…"
     },
     "MODAL": {
       "TAB_CRM": "CRM",
@@ -151,7 +152,11 @@
       "NO_CONVERSATION_HINT": "Escolha a caixa do WhatsApp para criar a conversa. Depois envie uma mensagem modelo para iniciar o papo.",
       "START_BUTTON": "Iniciar conversa",
       "START_TEMPLATE_NOTE": "Dica: para contato novo, o WhatsApp só entrega mensagem MODELO — texto livre só depois que a pessoa responder.",
-      "NO_WHATSAPP_INBOX": "Nenhuma caixa WhatsApp disponível."
+      "NO_WHATSAPP_INBOX": "Nenhuma caixa WhatsApp disponível.",
+      "CARD_PANEL": "Mover card / etiquetas",
+      "CARD_MOVED": "Card movido!",
+      "COPY_PHONE": "Copiar telefone",
+      "PHONE_COPIED": "Telefone copiado!"
     },
     "PRESETS": {
       "TITLE": "Visualizações de colunas",

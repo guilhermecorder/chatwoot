@@ -264,16 +264,21 @@ const delayLabel = (minutes) => {
 </script>
 
 <template>
+  <!-- RAIZ ÚNICA: o vuedraggable exige um único nó raiz por item (o drag de
+       colunas quebra com multi-root) — os modais vivem DENTRO desta div. -->
   <div
     v-show="!hidden"
     class="flex flex-col bg-n-alpha-1 rounded-xl w-[86vw] min-w-[86vw] snap-center md:w-64 md:min-w-64 md:snap-align-none flex-shrink-0 h-full transition-all"
     :class="programmingMode ? 'ring-2 ring-yellow-400/50' : ''"
   >
 
-    <!-- ── Header ────────────────────────────────────────────── -->
+    <!-- ── Header (no modo edição, o header inteiro arrasta a coluna) ── -->
     <div
       class="px-3 py-2.5 border-b border-n-weak flex-shrink-0"
-      :class="programmingMode ? 'bg-yellow-500/5' : ''"
+      :class="[
+        programmingMode ? 'bg-yellow-500/5' : '',
+        editMode ? 'column-drag-handle cursor-grab active:cursor-grabbing' : '',
+      ]"
     >
 
       <!-- Delete confirmation -->
@@ -598,34 +603,33 @@ const delayLabel = (minutes) => {
       </button>
     </div>
 
+    <!-- Stage edit modal (overlay fixed — dentro da raiz p/ manter raiz única) -->
+    <StageEditModal
+      :stage="showEditModal ? stage : null"
+      :pipeline-id="pipelineId"
+      @close="showEditModal = false"
+      @saved="showEditModal = false"
+    />
+
+    <!-- Automation create/edit modal -->
+    <ColumnAutomationsModal
+      v-if="showAutomationForm"
+      :stage="stage"
+      :pipeline-id="pipelineId"
+      :all-stages="allStages"
+      :initial-automation="editingAutomation"
+      @close="showAutomationForm = false"
+      @saved="onAutomationSaved"
+    />
+
+    <!-- Robô de follow-up da coluna -->
+    <FollowupBotModal
+      v-if="showBotModal"
+      :bot="editingBot"
+      :stage-id="stage.id"
+      :pipeline-id="pipelineId"
+      @close="showBotModal = false"
+      @saved="onBotSaved"
+    />
   </div>
-
-  <!-- Stage edit modal -->
-  <StageEditModal
-    :stage="showEditModal ? stage : null"
-    :pipeline-id="pipelineId"
-    @close="showEditModal = false"
-    @saved="showEditModal = false"
-  />
-
-  <!-- Automation create/edit modal -->
-  <ColumnAutomationsModal
-    v-if="showAutomationForm"
-    :stage="stage"
-    :pipeline-id="pipelineId"
-    :all-stages="allStages"
-    :initial-automation="editingAutomation"
-    @close="showAutomationForm = false"
-    @saved="onAutomationSaved"
-  />
-
-  <!-- Robô de follow-up da coluna -->
-  <FollowupBotModal
-    v-if="showBotModal"
-    :bot="editingBot"
-    :stage-id="stage.id"
-    :pipeline-id="pipelineId"
-    @close="showBotModal = false"
-    @saved="onBotSaved"
-  />
 </template>

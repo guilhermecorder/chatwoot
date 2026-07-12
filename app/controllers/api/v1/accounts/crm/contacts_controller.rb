@@ -2,15 +2,21 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   before_action :pipeline
   before_action :crm_contact, only: [:update, :destroy, :history, :trigger_label_change, :detect_value, :start_conversation]
 
-  # scope=recent (padrão): só cards "ativos no último mês" — lead novo OU
-  # card criado/movido nos últimos 30 dias. Deixa o board leve (mobile!).
-  # scope=all: tudo desde o início, sob demanda.
+  # scope=preview: os N cards mais recentes de CADA coluna (carga inicial
+  #   instantânea — o board completa em background com scope=all).
+  # scope=all: tudo desde o início.
+  # scope=recent (legado): ativos nos últimos 30 dias.
+  PREVIEW_PER_STAGE = 15
+
   def index
     base = @pipeline.crm_contacts
     total = base.count
 
-    scoped = if params[:scope] == 'all'
+    scoped = case params[:scope]
+             when 'all'
                base
+             when 'preview'
+               base.where(id: preview_ids(base))
              else
                cutoff = 30.days.ago
                base.joins(:contact).where(
@@ -27,7 +33,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       meta: {
         total: total,
         shown: crm_contacts.size,
-        scope: params[:scope] == 'all' ? 'all' : 'recent'
+        scope: %w[all preview].include?(params[:scope]) ? params[:scope] : 'recent'
       }
     }
   end
@@ -164,6 +170,17 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
 
   def pipeline
     @pipeline ||= Current.account.crm_pipelines.find(params[:pipeline_id])
+  end
+
+  # IDs dos N cards mais recentes (por última atividade do contato) de cada
+  # coluna — window function, uma consulta só.
+  def preview_ids(base)
+    ranked = base.joins(:contact).select(
+      'crm_contacts.id AS cid, ' \
+      'ROW_NUMBER() OVER (PARTITION BY crm_contacts.stage_id ' \
+      'ORDER BY contacts.last_activity_at DESC NULLS LAST, crm_contacts.id DESC) AS rn'
+    )
+    Crm::Contact.from(ranked, :ranked).where('ranked.rn <= ?', PREVIEW_PER_STAGE).pluck('ranked.cid')
   end
 
   def crm_contact

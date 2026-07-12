@@ -45,10 +45,20 @@ const newStageName = ref('');
 const newStageColor = ref('#6B7280');
 
 // Add contact modal
-// O CRM é a visão principal de atendimento: carrega TODOS os contatos
-// desde o início, ordenados pela última mensagem (não lidas no topo).
+// Carga em DUAS FASES: primeiro os 15 cards mais recentes de cada coluna
+// (abertura instantânea), depois o restante completa em background.
 const contactsScope = ref('all');
 const isLoadingAll = ref(false);
+const isBackgroundLoading = ref(false);
+
+const loadBoard = async pipelineId => {
+  await store.dispatch('crm/fetchContacts', { pipelineId, scope: 'preview' });
+  isBackgroundLoading.value = true;
+  store
+    .dispatch('crm/fetchContacts', { pipelineId, scope: 'all', silent: true })
+    .catch(() => {})
+    .finally(() => { isBackgroundLoading.value = false; });
+};
 const addContactStageId = ref(null);
 const contactSearchQuery = ref('');
 const contactSearchResults = ref([]);
@@ -328,13 +338,14 @@ const clearFilters = () => {
   showFilters.value = false;
 };
 
-// Buscar precisa enxergar a base toda: se só os recentes estão carregados,
-// carrega o histórico completo automaticamente na primeira busca.
+// Buscar precisa enxergar a base toda: se ela ainda não terminou de carregar,
+// dispara o carregamento completo na primeira busca.
 watch(() => filters.value.search, term => {
   if (
     term &&
-    contactsMeta.value.scope === 'recent' &&
-    contactsMeta.value.total > contactsMeta.value.shown
+    contactsMeta.value.scope !== 'all' &&
+    contactsMeta.value.total > contactsMeta.value.shown &&
+    !isBackgroundLoading.value
   ) {
     loadAllContacts();
   }
@@ -410,7 +421,7 @@ onMounted(async () => {
   await store.dispatch('crm/fetchPipelines');
   if (pipelines.value.length) {
     selectedPipelineId.value = pipelines.value[0].id;
-    await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, scope: contactsScope.value });
+    await loadBoard(selectedPipelineId.value);
   }
 });
 
@@ -454,8 +465,8 @@ const selectPipeline = async (id) => {
   showDeletePipelineConfirm.value = false;
   isEditMode.value = false;
   isProgrammingMode.value = false;
-  filters.value = makeDefaultFilters(); // volta ao padrão (mês atual)
-  await store.dispatch('crm/fetchContacts', { pipelineId: id, scope: contactsScope.value });
+  filters.value = makeDefaultFilters(); // volta ao padrão
+  await loadBoard(id);
 };
 
 // Save normal é LEVE: o store já foi atualizado (updateContact + patch de
@@ -955,6 +966,15 @@ const createAndAddContact = async () => {
           {{ $t('CRM.FILTER.SHOWING', { count: filteredCount, total: totalContacts }) }}
         </span>
 
+        <!-- Completando em background -->
+        <span
+          v-if="isBackgroundLoading"
+          class="flex items-center gap-1 text-xs text-n-slate-9 whitespace-nowrap"
+        >
+          <span class="i-lucide-loader-2 animate-spin text-xs" />
+          {{ $t('CRM.FILTER.LOADING_REST') }}
+        </span>
+
         <!-- Clear filters button -->
         <button
           v-if="hasActiveFilters"
@@ -1223,6 +1243,7 @@ const createAndAddContact = async () => {
       v-if="chatContact"
       :contact="chatContact"
       :pipeline-id="selectedPipelineId"
+      :stages="selectedPipeline?.stages ?? []"
       @close="chatContact = null"
       @replied="onChatReplied"
       @resolved="onChatResolved"

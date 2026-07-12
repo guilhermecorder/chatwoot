@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
@@ -14,6 +14,7 @@ import { onClickOutside } from '@vueuse/core';
 const props = defineProps({
   contact: { type: Object, required: true }, // card do CRM (contact_json)
   pipelineId: { type: Number, default: null },
+  stages: { type: Array, default: () => [] }, // colunas do funil (mover card)
 });
 
 const emit = defineEmits(['close', 'replied', 'resolved', 'conversationStarted']);
@@ -111,7 +112,12 @@ const attachmentLabel = fileType => {
 
 const scrollToBottom = async () => {
   await nextTick();
-  if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight;
+  const el = messagesEl.value;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+  // garante o fundo mesmo com anexos/imagens que renderizam depois
+  setTimeout(() => { el.scrollTop = el.scrollHeight; }, 120);
+  setTimeout(() => { el.scrollTop = el.scrollHeight; }, 400);
 };
 
 const loadMessages = async () => {
@@ -149,6 +155,102 @@ const loadMore = async () => {
   } finally {
     isLoadingMore.value = false;
   }
+};
+
+// ── Chat vivo: busca mensagens novas a cada 4s enquanto o balão está aberto ──
+let pollTimer = null;
+
+const pollNewMessages = async () => {
+  if (!conversationId.value || isLoading.value) return;
+  const lastId = messages.value[messages.value.length - 1]?.id;
+  if (!lastId) return;
+  try {
+    const { data } = await MessageApi.getPreviousMessages({
+      conversationId: conversationId.value,
+      after: lastId,
+    });
+    const incoming = (data.payload ?? []).filter(
+      m => !m.private && m.id > lastId && !messages.value.some(x => x.id === m.id)
+    );
+    if (incoming.length) {
+      messages.value.push(...incoming);
+      await scrollToBottom();
+      // paciente respondeu → some o "aguardando resposta" e marca como lida
+      ConversationApi.markMessageRead({ id: conversationId.value }).catch(() => {});
+      emit('replied');
+    }
+  } catch { /* silencioso — tenta de novo no próximo tick */ }
+};
+
+const stopPolling = () => {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+};
+const startPolling = () => {
+  stopPolling();
+  pollTimer = setInterval(pollNewMessages, 4000);
+};
+
+onBeforeUnmount(stopPolling);
+
+// ── Painel do card: mover de coluna + etiquetas rápidas ──
+const showCardPanel = ref(false);
+const isMovingStage = ref(false);
+const isSavingLabels = ref(false);
+const accountLabels = useMapGetter('labels/getLabels');
+
+const moveToStage = async stageId => {
+  if (!stageId || Number(stageId) === Number(props.contact.stage_id) || isMovingStage.value) return;
+  isMovingStage.value = true;
+  try {
+    await store.dispatch('crm/moveContact', {
+      pipelineId: props.pipelineId,
+      id: props.contact.id,
+      stageId: Number(stageId),
+    });
+    useAlert(t('CRM.CHAT.CARD_MOVED'));
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  } finally {
+    isMovingStage.value = false;
+  }
+};
+
+const toggleLabel = async label => {
+  if (isSavingLabels.value) return;
+  const current = [...(props.contact.labels ?? [])];
+  const idx = current.indexOf(label);
+  const added = idx === -1;
+  if (added) current.push(label);
+  else current.splice(idx, 1);
+
+  isSavingLabels.value = true;
+  try {
+    await store.dispatch('contactLabels/update', {
+      contactId: props.contact.contact_id,
+      labels: current,
+    });
+    store.commit('crm/patchContact', { id: props.contact.id, data: { labels: current } });
+    store.dispatch('crm/triggerLabelChange', {
+      pipelineId: props.pipelineId,
+      contactId: props.contact.id,
+      added: added ? [label] : [],
+      removed: added ? [] : [label],
+    }).catch(() => {});
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  } finally {
+    isSavingLabels.value = false;
+  }
+};
+
+// telefone copiável ao lado do nome
+const copyPhone = async () => {
+  if (!props.contact.phone_number) return;
+  try {
+    await navigator.clipboard.writeText(props.contact.phone_number);
+    useAlert(t('CRM.CHAT.PHONE_COPIED'));
+  } catch { /* clipboard bloqueado — o texto continua selecionável */ }
 };
 
 const sendReply = async () => {
@@ -240,8 +342,10 @@ const onTemplateSend = async payload => {
 };
 
 onMounted(() => {
+  if (!accountLabels.value.length) store.dispatch('labels/fetch');
   if (hasConversation.value) {
     loadMessages();
+    startPolling();
   } else {
     isLoading.value = false;
     if (!inboxes.value.length) store.dispatch('inboxes/get');
@@ -253,6 +357,7 @@ watch(conversationId, id => {
   if (id) {
     convStatus.value = props.contact.last_conversation?.status || 'open';
     loadMessages();
+    startPolling();
   }
 });
 </script>
@@ -270,7 +375,19 @@ watch(conversationId, id => {
           <span v-else>{{ contact.name?.[0]?.toUpperCase() ?? '?' }}</span>
         </div>
         <div class="flex-1 min-w-0">
-          <p class="text-sm font-semibold text-n-slate-12 truncate">{{ contact.name }}</p>
+          <div class="flex items-center gap-2 min-w-0">
+            <p class="text-sm font-semibold text-n-slate-12 truncate">{{ contact.name }}</p>
+            <!-- telefone copiável ao lado do nome -->
+            <button
+              v-if="contact.phone_number"
+              class="flex items-center gap-1 text-xs text-n-slate-10 hover:text-n-brand select-text flex-shrink-0"
+              :title="$t('CRM.CHAT.COPY_PHONE')"
+              @click="copyPhone"
+            >
+              {{ contact.phone_number }}
+              <span class="i-lucide-copy text-[11px]" />
+            </button>
+          </div>
           <p class="text-xs text-n-slate-10 truncate">
             {{ contact.last_conversation?.inbox_name }} · #{{ conversationId }}
           </p>
@@ -282,10 +399,53 @@ watch(conversationId, id => {
         >
           {{ $t('CRM.CHAT.STATUS_RESOLVED') }}
         </span>
+        <!-- Painel do card (mover coluna / etiquetas) -->
+        <button
+          v-if="stages.length"
+          class="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0 transition-colors"
+          :class="showCardPanel ? 'bg-n-brand text-white' : 'text-n-slate-10 hover:text-n-brand hover:bg-n-brand/10'"
+          :title="$t('CRM.CHAT.CARD_PANEL')"
+          @click="showCardPanel = !showCardPanel"
+        >
+          <span class="i-lucide-kanban text-base" />
+        </button>
         <button
           class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl flex-shrink-0"
           @click="emit('close')"
         />
+      </div>
+
+      <!-- ── Painel do card: mover de coluna + etiquetas ── -->
+      <div v-if="showCardPanel" class="px-4 py-3 border-b border-n-weak flex-shrink-0 space-y-2.5 bg-n-alpha-1">
+        <div class="flex items-center gap-2">
+          <label class="text-xs font-medium text-n-slate-11 flex-shrink-0">{{ $t('CRM.MODAL.STAGE') }}:</label>
+          <select
+            :value="contact.stage_id"
+            :disabled="isMovingStage"
+            class="flex-1 border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-60"
+            @change="moveToStage($event.target.value)"
+          >
+            <option v-for="s in stages" :key="s.id" :value="s.id">{{ s.name }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-n-slate-11 block mb-1.5">{{ $t('CRM.MODAL.LABELS') }}</label>
+          <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+            <button
+              v-for="l in accountLabels"
+              :key="l.id"
+              class="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors disabled:opacity-50"
+              :class="(contact.labels ?? []).includes(l.title)
+                ? 'bg-n-brand/15 border-n-brand text-n-brand font-medium'
+                : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+              :disabled="isSavingLabels"
+              @click="toggleLabel(l.title)"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: l.color ?? '#6B7280' }" />
+              {{ l.title }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- ── Sem conversa ainda: iniciar pelo WhatsApp ── -->
@@ -447,19 +607,6 @@ watch(conversationId, id => {
         </div>
 
         <div class="flex items-end gap-2">
-          <!-- Emoji -->
-          <div ref="emojiWrap" class="relative flex-shrink-0">
-            <button
-              class="flex items-center justify-center w-10 h-10 rounded-xl border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
-              :title="$t('CRM.CHAT.EMOJI')"
-              @click="showEmoji = !showEmoji"
-            >
-              <span class="i-lucide-smile text-base" />
-            </button>
-            <div v-if="showEmoji" class="absolute bottom-12 left-0 z-20">
-              <EmojiPicker @select="onInsertEmoji" />
-            </div>
-          </div>
           <textarea
             v-model="replyText"
             rows="2"
@@ -467,14 +614,30 @@ watch(conversationId, id => {
             :placeholder="$t('CRM.CHAT.REPLY_PLACEHOLDER')"
             @keydown="onKeydown"
           />
-          <button
-            class="flex items-center justify-center w-10 h-10 rounded-xl bg-n-brand text-white hover:bg-n-brand/90 transition-colors disabled:opacity-50 flex-shrink-0"
-            :disabled="!replyText.trim() || isSending"
-            :title="$t('CRM.CHAT.SEND')"
-            @click="sendReply"
-          >
-            <span :class="isSending ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-send'" class="text-base" />
-          </button>
+          <!-- Emoji | Enviar (alinhados juntos, à direita) -->
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <div ref="emojiWrap" class="relative">
+              <button
+                class="flex items-center justify-center w-10 h-10 rounded-xl border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+                :class="showEmoji ? 'border-n-brand text-n-brand' : ''"
+                :title="$t('CRM.CHAT.EMOJI')"
+                @click="showEmoji = !showEmoji"
+              >
+                <span class="i-lucide-smile text-base" />
+              </button>
+              <div v-if="showEmoji" class="absolute bottom-12 right-0 z-20">
+                <EmojiPicker @select="onInsertEmoji" />
+              </div>
+            </div>
+            <button
+              class="flex items-center justify-center w-10 h-10 rounded-xl bg-n-brand text-white hover:bg-n-brand/90 transition-colors disabled:opacity-50"
+              :disabled="!replyText.trim() || isSending"
+              :title="$t('CRM.CHAT.SEND')"
+              @click="sendReply"
+            >
+              <span :class="isSending ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-send'" class="text-base" />
+            </button>
+          </div>
         </div>
         <p class="text-[10px] text-n-slate-9 mt-1.5">
           {{ $t('CRM.CHAT.OFFICIAL_NOTE', { inbox: contact.last_conversation?.inbox_name ?? '' }) }}

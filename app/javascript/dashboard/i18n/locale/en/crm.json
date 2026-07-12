@@ -83,7 +83,8 @@
       "SORT_OLDEST": "Oldest → newest",
       "SORT_NEWEST": "Newest → oldest",
       "APPLY": "Apply filters",
-      "SORT_LAST_MESSAGE": "Last message (unread first)"
+      "SORT_LAST_MESSAGE": "Last message (unread first)",
+      "LOADING_REST": "loading all leads…"
     },
     "MODAL": {
       "TAB_CRM": "CRM",
@@ -151,7 +152,11 @@
       "NO_CONVERSATION_HINT": "Pick the WhatsApp inbox to create the conversation, then send a template message.",
       "START_BUTTON": "Start conversation",
       "START_TEMPLATE_NOTE": "Tip: for new contacts WhatsApp only delivers TEMPLATE messages until the person replies.",
-      "NO_WHATSAPP_INBOX": "No WhatsApp inbox available."
+      "NO_WHATSAPP_INBOX": "No WhatsApp inbox available.",
+      "CARD_PANEL": "Move card / labels",
+      "CARD_MOVED": "Card moved!",
+      "COPY_PHONE": "Copy phone",
+      "PHONE_COPIED": "Phone copied!"
     },
     "PRESETS": {
       "TITLE": "Column views",

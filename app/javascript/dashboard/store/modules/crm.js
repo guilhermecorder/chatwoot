@@ -185,7 +185,9 @@ const actions = {
   async fetchContacts({ commit }, payload) {
     const pipelineId = typeof payload === 'object' ? payload.pipelineId : payload;
     const scope = typeof payload === 'object' ? payload.scope : undefined;
-    commit('setUIFlag', { isFetchingContacts: true });
+    // silent: completa em background sem spinner (board continua usável)
+    const silent = typeof payload === 'object' ? payload.silent : false;
+    if (!silent) commit('setUIFlag', { isFetchingContacts: true });
     try {
       const { data } = await CrmAPI.getContacts(
         pipelineId,
@@ -195,7 +197,7 @@ const actions = {
       commit('setContacts', data.payload ?? data);
       if (data.meta) commit('setContactsMeta', data.meta);
     } finally {
-      commit('setUIFlag', { isFetchingContacts: false });
+      if (!silent) commit('setUIFlag', { isFetchingContacts: false });
     }
   },
 
