@@ -12,6 +12,8 @@ import { routes as captainRoutes } from './captain/captain.routes';
 import crmRoutes from './crm/routes';
 import academyRoutes from './academy/routes';
 import tasksRoutes from './tasks/routes';
+import agendaRoutes from './agenda/routes';
+import cevicoAutomationsRoutes from './cevicoAutomations/routes';
 import AppContainer from './Dashboard.vue';
 import Suspended from './suspended/Index.vue';
 import NoAccounts from './noAccounts/Index.vue';
@@ -36,6 +38,8 @@ export default {
         ...crmRoutes.routes,
         ...academyRoutes.routes,
         ...tasksRoutes.routes,
+        ...agendaRoutes.routes,
+        ...cevicoAutomationsRoutes.routes,
       ],
     },
     {

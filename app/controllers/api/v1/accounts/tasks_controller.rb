@@ -3,7 +3,16 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
 
   def index
     tasks = Current.account.tasks.includes(:creator, :assignee)
+
+    # Privacidade: agente comum só vê as próprias tarefas (criadas por/para ele)
+    # e as das UNIDADES (agenda compartilhada). Admin vê tudo.
+    unless Current.account_user.administrator?
+      uid = Current.user.id
+      tasks = tasks.where('assignee_id = :uid OR creator_id = :uid OR unit IS NOT NULL', uid: uid)
+    end
+
     tasks = tasks.where(assignee_id: params[:assignee_id]) if params[:assignee_id].present?
+    tasks = tasks.where(unit: params[:unit]) if params[:unit].present?
     tasks = tasks.order(Arel.sql('priority DESC, due_at ASC NULLS LAST, created_at DESC'))
     render json: tasks.map { |t| task_json(t) }
   end
@@ -35,7 +44,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
   end
 
   def task_params
-    params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id)
+    params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id, :unit)
   end
 
   def task_json(t)
@@ -49,6 +58,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
       due_at: t.due_at,
       completed_at: t.completed_at,
       created_at: t.created_at,
+      unit: t.unit,
       creator: { id: t.creator.id, name: t.creator.name },
       assignee: t.assignee ? { id: t.assignee.id, name: t.assignee.name } : nil
     }

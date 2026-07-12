@@ -26,7 +26,8 @@
       "URGENT": "Urgente"
     },
     "STATS": {
-      "OVERDUE": "Atrasadas"
+      "OVERDUE": "Atrasadas",
+      "DUE_SOON": "Perto do prazo"
     },
     "FILTER": {
       "MINE": "Minhas tarefas",
@@ -41,6 +42,19 @@
       "ASSIGNEE": "Responsável",
       "DUE_AT": "Prazo",
       "STATUS": "Status"
+    },
+    "DASHBOARD": {
+      "TITLE": "Resumo",
+      "SUBTITLE": "Distribuição das tarefas",
+      "EMPTY": "Sem tarefas para exibir"
     }
+  },
+  "AGENDA": {
+    "TITLE": "Agenda",
+    "TODAY": "Hoje",
+    "UNITS": "Unidades",
+    "PEOPLE": "Pessoas",
+    "UNIT": "Unidade",
+    "PERSONAL": "Pessoal"
   }
 }

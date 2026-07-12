@@ -3,12 +3,21 @@ import { ref, computed, reactive, onMounted, watch } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import draggable from 'vuedraggable';
+import {
+  Chart as ChartJS,
+  Title, Tooltip, Legend, ArcElement,
+} from 'chart.js';
+import { Doughnut } from 'vue-chartjs';
 import TasksAPI from 'dashboard/api/tasks';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 
+ChartJS.register(Title, Tooltip, Legend, ArcElement);
+
 const store = useStore();
 const { t } = useI18n();
+const { isAdmin } = useAdmin();
 
 const agents = useMapGetter('agents/getAgents');
 const currentUser = useMapGetter('getCurrentUser');
@@ -56,13 +65,58 @@ watch([visibleTasks], rebuildLists);
 const isOverdue = task =>
   task.status !== 'done' && task.due_at && new Date(task.due_at) < new Date();
 
+// prazo próximo: vence nas próximas 24h e ainda não está atrasada nem feita
+const isDueSoon = task => {
+  if (task.status === 'done' || !task.due_at) return false;
+  const due = new Date(task.due_at).getTime();
+  const now = Date.now();
+  return due >= now && due - now <= 24 * 60 * 60 * 1000;
+};
+
 // ── Mini dashboard ─────────────────────────────────────────
 const stats = computed(() => ({
   todo: visibleTasks.value.filter(x => x.status === 'todo').length,
   doing: visibleTasks.value.filter(x => x.status === 'doing').length,
   done: visibleTasks.value.filter(x => x.status === 'done').length,
   overdue: visibleTasks.value.filter(isOverdue).length,
+  dueSoon: visibleTasks.value.filter(isDueSoon).length,
 }));
+
+// tarefas em aberto (não feitas) por status, para o donut
+const donutChart = computed(() => {
+  const openTodo = visibleTasks.value.filter(x => x.status === 'todo' && !isOverdue(x)).length;
+  const openDoing = visibleTasks.value.filter(x => x.status === 'doing' && !isOverdue(x)).length;
+  const overdue = stats.value.overdue;
+  const done = stats.value.done;
+  const total = openTodo + openDoing + overdue + done;
+  if (total === 0) return null;
+  return {
+    total,
+    data: {
+      labels: [
+        t('TASKS.COLUMNS.TODO'),
+        t('TASKS.COLUMNS.DOING'),
+        t('TASKS.STATS.OVERDUE'),
+        t('TASKS.COLUMNS.DONE'),
+      ],
+      datasets: [{
+        data: [openTodo, openDoing, overdue, done],
+        backgroundColor: ['#94A3B8', '#3B82F6', '#EF4444', '#10B981'],
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { padding: 10, boxWidth: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.raw} (${ctx.label})` } },
+      },
+      cutout: '62%',
+      animation: { duration: 400 },
+    },
+  };
+});
 
 // ── Fetch ──────────────────────────────────────────────────
 const fetchTasks = async () => {
@@ -70,6 +124,7 @@ const fetchTasks = async () => {
   try {
     const { data } = await TasksAPI.get();
     tasks.value = data;
+    store.commit('tasks/setTasks', data); // mantém o badge da sidebar em dia
   } catch {
     useAlert(t('TASKS.ERROR'));
   } finally {
@@ -92,6 +147,7 @@ const onColumnChange = async (statusKey, evt) => {
     const { data } = await TasksAPI.update(moved.id, { status: statusKey });
     const idx = tasks.value.findIndex(x => x.id === moved.id);
     if (idx !== -1) tasks.value.splice(idx, 1, data);
+    store.commit('tasks/upsertTask', data);
   } catch {
     moved.status = previous;
     rebuildLists();
@@ -159,10 +215,12 @@ const save = async () => {
       const { data } = await TasksAPI.update(editingTask.value.id, payload);
       const idx = tasks.value.findIndex(x => x.id === data.id);
       if (idx !== -1) tasks.value.splice(idx, 1, data);
+      store.commit('tasks/upsertTask', data);
       useAlert(t('TASKS.SAVED'));
     } else {
       const { data } = await TasksAPI.create(payload);
       tasks.value.push(data);
+      store.commit('tasks/upsertTask', data);
       useAlert(t('TASKS.CREATED'));
     }
     showModal.value = false;
@@ -177,6 +235,7 @@ const removeTask = async () => {
   if (!editingTask.value) return;
   try {
     await TasksAPI.delete(editingTask.value.id);
+    store.commit('tasks/removeTask', editingTask.value.id);
     tasks.value = tasks.value.filter(x => x.id !== editingTask.value.id);
     showModal.value = false;
     useAlert(t('TASKS.DELETED'));
@@ -216,6 +275,12 @@ const formatDue = iso => {
         >
           ⚠ {{ $t('TASKS.STATS.OVERDUE') }}: <strong>{{ stats.overdue }}</strong>
         </span>
+        <span
+          v-if="stats.dueSoon > 0"
+          class="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded-full px-2.5 py-1 font-medium"
+        >
+          ⏰ {{ $t('TASKS.STATS.DUE_SOON') }}: <strong>{{ stats.dueSoon }}</strong>
+        </span>
       </div>
 
       <div class="flex items-center gap-2 ml-auto">
@@ -226,7 +291,9 @@ const formatDue = iso => {
         >
           <option value="me">{{ $t('TASKS.FILTER.MINE') }}</option>
           <option value="">{{ $t('TASKS.FILTER.ALL') }}</option>
-          <option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option>
+          <template v-if="isAdmin">
+            <option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option>
+          </template>
         </select>
 
         <button
@@ -244,13 +311,14 @@ const formatDue = iso => {
       <Spinner :size="32" class="text-n-brand" />
     </div>
 
-    <!-- Kanban -->
+    <!-- Kanban + dashboard -->
     <div v-else class="flex-1 min-h-0 overflow-x-auto p-6">
-      <div class="flex gap-4 h-full min-w-max md:min-w-0 md:grid md:grid-cols-3">
+      <div class="flex gap-4 h-full min-w-max">
+        <!-- Colunas de largura fixa (padrão, igual CRM) -->
         <div
           v-for="statusKey in STATUSES"
           :key="statusKey"
-          class="flex flex-col bg-n-alpha-1 rounded-xl w-[80vw] md:w-auto flex-shrink-0 h-full min-h-0"
+          class="flex flex-col bg-n-alpha-1 rounded-xl w-[86vw] min-w-[86vw] snap-center md:w-72 md:min-w-72 flex-shrink-0 h-full min-h-0"
         >
           <!-- Column header -->
           <div class="flex items-center gap-2 px-3 py-2.5 border-b border-n-weak flex-shrink-0">
@@ -273,7 +341,7 @@ const formatDue = iso => {
               <template #item="{ element: task }">
                 <div
                   class="bg-n-solid-2 border rounded-xl p-3 mb-2 cursor-pointer hover:border-n-brand hover:shadow-sm transition-all select-none"
-                  :class="isOverdue(task) ? 'border-red-400/60' : 'border-n-weak'"
+                  :class="isOverdue(task) ? 'border-red-400/60' : (isDueSoon(task) ? 'border-amber-400/60' : 'border-n-weak')"
                   @click="openEdit(task)"
                 >
                   <p
@@ -301,10 +369,11 @@ const formatDue = iso => {
                   <div v-if="task.due_at" class="mt-2">
                     <span
                       class="inline-flex items-center gap-1 text-[11px]"
-                      :class="isOverdue(task) ? 'text-red-500 font-medium' : 'text-n-slate-9'"
+                      :class="isOverdue(task) ? 'text-red-500 font-medium' : (isDueSoon(task) ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-n-slate-9')"
                     >
                       <span class="i-lucide-calendar-clock text-[11px]" />
                       {{ formatDue(task.due_at) }}
+                      <span v-if="isDueSoon(task)" class="ml-0.5">· {{ $t('TASKS.STATS.DUE_SOON') }}</span>
                     </span>
                   </div>
 
@@ -324,6 +393,43 @@ const formatDue = iso => {
                 </div>
               </template>
             </draggable>
+          </div>
+        </div>
+
+        <!-- Painel de resumo (donut) — só desktop -->
+        <div class="hidden lg:flex flex-col w-72 min-w-72 flex-shrink-0 bg-n-alpha-1 rounded-xl p-4 h-full">
+          <p class="text-sm font-semibold text-n-slate-12 mb-1">{{ $t('TASKS.DASHBOARD.TITLE') }}</p>
+          <p class="text-xs text-n-slate-10 mb-3">{{ $t('TASKS.DASHBOARD.SUBTITLE') }}</p>
+
+          <div v-if="donutChart" class="h-56">
+            <Doughnut :data="donutChart.data" :options="donutChart.options" />
+          </div>
+          <div v-else class="h-56 flex flex-col items-center justify-center text-n-slate-10 gap-2">
+            <span class="i-lucide-pie-chart text-3xl" />
+            <span class="text-xs">{{ $t('TASKS.DASHBOARD.EMPTY') }}</span>
+          </div>
+
+          <!-- Números-chave -->
+          <div class="grid grid-cols-2 gap-2 mt-4">
+            <div class="bg-n-solid-2 rounded-lg p-2.5 text-center">
+              <p class="text-lg font-semibold text-n-slate-12">{{ stats.done }}</p>
+              <p class="text-[11px] text-n-slate-10">{{ $t('TASKS.COLUMNS.DONE') }}</p>
+            </div>
+            <div class="bg-n-solid-2 rounded-lg p-2.5 text-center">
+              <p class="text-lg font-semibold text-blue-500">{{ stats.doing }}</p>
+              <p class="text-[11px] text-n-slate-10">{{ $t('TASKS.COLUMNS.DOING') }}</p>
+            </div>
+            <div class="bg-n-solid-2 rounded-lg p-2.5 text-center">
+              <p class="text-lg font-semibold text-n-slate-11">{{ stats.todo }}</p>
+              <p class="text-[11px] text-n-slate-10">{{ $t('TASKS.COLUMNS.TODO') }}</p>
+            </div>
+            <div
+              class="rounded-lg p-2.5 text-center"
+              :class="stats.overdue > 0 ? 'bg-red-500/10' : 'bg-n-solid-2'"
+            >
+              <p class="text-lg font-semibold" :class="stats.overdue > 0 ? 'text-red-600' : 'text-n-slate-12'">{{ stats.overdue }}</p>
+              <p class="text-[11px] text-n-slate-10">{{ $t('TASKS.STATS.OVERDUE') }}</p>
+            </div>
           </div>
         </div>
       </div>

@@ -26,7 +26,8 @@
       "URGENT": "Urgent"
     },
     "STATS": {
-      "OVERDUE": "Overdue"
+      "OVERDUE": "Overdue",
+      "DUE_SOON": "Due soon"
     },
     "FILTER": {
       "MINE": "My tasks",
@@ -41,6 +42,19 @@
       "ASSIGNEE": "Assignee",
       "DUE_AT": "Due date",
       "STATUS": "Status"
+    },
+    "DASHBOARD": {
+      "TITLE": "Summary",
+      "SUBTITLE": "Task distribution",
+      "EMPTY": "No tasks to show"
     }
+  },
+  "AGENDA": {
+    "TITLE": "Calendar",
+    "TODAY": "Today",
+    "UNITS": "Units",
+    "PEOPLE": "People",
+    "UNIT": "Unit",
+    "PERSONAL": "Personal"
   }
 }

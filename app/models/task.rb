@@ -10,6 +10,7 @@
 #  status       :integer          default("todo"), not null
 #  task_type    :string
 #  title        :string           not null
+#  unit         :string
 #  created_at   :datetime         not null
 #  updated_at   :datetime         not null
 #  account_id   :bigint           not null
@@ -20,6 +21,7 @@
 #
 #  index_tasks_on_account_id             (account_id)
 #  index_tasks_on_account_id_and_status  (account_id,status)
+#  index_tasks_on_account_id_and_unit    (account_id,unit)
 #  index_tasks_on_assignee_id            (assignee_id)
 #  index_tasks_on_creator_id             (creator_id)
 #

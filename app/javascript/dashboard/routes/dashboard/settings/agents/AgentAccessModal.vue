@@ -16,6 +16,7 @@ const FEATURES = [
   { key: 'crm',           label: 'CRM (funil de leads)' },
   { key: 'crm_campaigns', label: 'Campanha WhatsApp (mensagens em massa)' },
   { key: 'tasks',         label: 'Tarefas' },
+  { key: 'agenda',        label: 'Agenda' },
   { key: 'reports',       label: 'Relatórios (dashboards)' },
   { key: 'academy',       label: 'Academia CEVICO' },
   { key: 'companies',     label: 'Empresas' },
