@@ -44,6 +44,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       procedure_of_interest: params[:procedure_of_interest],
       notes: params[:notes]
     )
+    preload_card_data([@crm_contact]) # resposta completa (conversa, etiquetas)
     render json: contact_json(@crm_contact), status: :created
   end
 
@@ -69,6 +70,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       ).call
     end
 
+    preload_card_data([@crm_contact]) # resposta completa (conversa, etiquetas)
     render json: contact_json(@crm_contact)
   end
 
@@ -224,7 +226,9 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     return nil unless conversation
 
     last_msg = @last_msg_by_conv ? @last_msg_by_conv[conversation.id] : nil
-    awaiting_reply = last_msg&.incoming? || false
+    # Conversa RESOLVIDA conta como respondida — só fica "aguardando resposta"
+    # se a última mensagem é do paciente E a conversa ainda está aberta.
+    awaiting_reply = (last_msg&.incoming? && conversation.open?) || false
 
     {
       id: conversation.id,

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useMapGetter } from 'dashboard/composables/store';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import { relativeTime } from '../helpers';
 
 const props = defineProps({
@@ -9,6 +10,7 @@ const props = defineProps({
 
 const emit = defineEmits(['click', 'openChat']);
 
+const { isAdmin } = useAdmin();
 const accountLabels = useMapGetter('labels/getLabels');
 
 const unreadCount = computed(() => props.contact.last_conversation?.unread_count ?? 0);
@@ -115,8 +117,8 @@ const channelIcon = (channelType) => {
       <span v-if="extraLabels > 0" class="text-xs text-n-slate-9 px-1 py-0.5">+{{ extraLabels }}</span>
     </div>
 
-    <!-- Value -->
-    <div v-if="contact.value" class="mt-1.5">
+    <!-- Value (só admin vê valores) -->
+    <div v-if="isAdmin && contact.value" class="mt-1.5">
       <span class="text-xs font-semibold text-green-600">
         R$&nbsp;{{ Number(contact.value).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}
       </span>

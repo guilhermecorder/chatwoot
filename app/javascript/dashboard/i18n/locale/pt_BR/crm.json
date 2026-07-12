@@ -81,7 +81,8 @@
       "SORT_DEFAULT": "Ordem padrão",
       "SORT_WAITING": "Aguardando há mais tempo",
       "SORT_OLDEST": "Mais antigo → mais novo",
-      "SORT_NEWEST": "Mais novo → mais antigo"
+      "SORT_NEWEST": "Mais novo → mais antigo",
+      "APPLY": "Aplicar filtros"
     },
     "MODAL": {
       "TAB_CRM": "CRM",

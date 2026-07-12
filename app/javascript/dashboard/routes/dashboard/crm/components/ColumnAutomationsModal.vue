@@ -19,12 +19,14 @@ const { t } = useI18n();
 const isSaving     = ref(false);
 const n8nWorkflows = useMapGetter('crm/getN8nWorkflows');
 const agents       = useMapGetter('agents/getAgents');
+const accountLabels = useMapGetter('labels/getLabels');
 const hasN8nWorkflows = computed(() => n8nWorkflows.value?.length > 0);
 
-// Carrega settings e agentes ao abrir
+// Carrega settings, agentes e etiquetas ao abrir
 store.dispatch('crm/fetchSettings').catch(() => {});
 onMounted(() => {
   if (!agents.value.length) store.dispatch('agents/get');
+  if (!accountLabels.value.length) store.dispatch('labels/fetch');
 });
 
 const isEditing = computed(() => !!props.initialAutomation);
@@ -233,6 +235,23 @@ const save = async () => {
               <span :class="tr.icon" class="text-base flex-shrink-0" />
               {{ tr.label }}
             </button>
+          </div>
+
+          <!-- Qual etiqueta dispara (para gatilhos de etiqueta) -->
+          <div
+            v-if="['label_added', 'label_removed'].includes(form.trigger_type)"
+            class="mt-2 bg-n-brand/5 border border-n-brand/20 rounded-lg p-3 space-y-1.5"
+          >
+            <label class="text-xs font-medium text-n-slate-11 block">
+              Qual etiqueta {{ form.trigger_type === 'label_added' ? 'adicionada' : 'removida' }} dispara?
+            </label>
+            <select
+              v-model="form.action_config.label_filter"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            >
+              <option value="">Qualquer etiqueta</option>
+              <option v-for="l in accountLabels" :key="l.id" :value="l.title">{{ l.title }}</option>
+            </select>
           </div>
         </div>
 
@@ -455,21 +474,6 @@ const save = async () => {
             </div>
           </div>
           <p class="text-xs text-n-slate-9">Configure o Measurement ID e API Secret em Configurações → Integrações → Google Ads.</p>
-        </div>
-
-        <!-- Config extra: filtro de etiqueta para triggers label_added/label_removed -->
-        <div
-          v-if="['label_added','label_removed'].includes(form.trigger_type)"
-          class="space-y-1.5 border-t border-n-weak pt-4"
-        >
-          <label class="text-xs font-medium text-n-slate-11 block">
-            Etiqueta específica <span class="text-n-slate-9 font-normal">(opcional — deixe vazio para qualquer etiqueta)</span>
-          </label>
-          <input
-            v-model="form.action_config.label_filter"
-            class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-            placeholder="Ex: vip, follow-up, cirurgia"
-          />
         </div>
 
         <!-- Status -->

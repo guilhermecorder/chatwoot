@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
@@ -56,6 +56,7 @@ const isCreatingContact = ref(false);
 // ── Filters ──────────────────────────────────────────────
 const showFilters = ref(false);
 const showLabelsDropdown = ref(false);
+const showStagesDropdown = ref(false);
 
 // Estado inicial dos filtros — CRM abre no MÊS ATUAL (leve) por padrão.
 const makeDefaultFilters = () => ({
@@ -63,7 +64,7 @@ const makeDefaultFilters = () => ({
   assigneeId: '',  // '' = all, 'none' = no assignee, number = agent id
   labels: [],      // array of label strings
   inboxName: '',
-  stageId: '',
+  stageIds: [],    // etapas selecionadas (multi)
   createdAt: 'month', // padrão: leads do mês atual (mais leve e dinâmico)
   lastActivity: '',
   dateFrom: '',    // período do lead (data real do contato) — De
@@ -72,6 +73,35 @@ const makeDefaultFilters = () => ({
 });
 
 const filters = ref(makeDefaultFilters());
+
+// Painel expandido usa RASCUNHO — só refiltra ao clicar em "Aplicar"
+// (com milhares de cards, refiltrar a cada clique pesa).
+const panelDraft = ref(null);
+
+const openFiltersPanel = () => {
+  const f = filters.value;
+  panelDraft.value = {
+    assigneeId: f.assigneeId,
+    labels: [...f.labels],
+    stageIds: [...f.stageIds],
+    createdAt: f.createdAt,
+    lastActivity: f.lastActivity,
+    dateFrom: f.dateFrom,
+    dateTo: f.dateTo,
+  };
+  showFilters.value = true;
+};
+
+const applyFiltersPanel = () => {
+  Object.assign(filters.value, {
+    ...panelDraft.value,
+    labels: [...panelDraft.value.labels],
+    stageIds: [...panelDraft.value.stageIds],
+  });
+  showFilters.value = false;
+  showLabelsDropdown.value = false;
+  showStagesDropdown.value = false;
+};
 
 // Ordenação dos cards dentro das colunas
 // '' = manual (posição) | 'waiting' = aguardando há mais tempo |
@@ -96,7 +126,7 @@ const selectPreset = name => {
 
 const isStageVisible = stageId => {
   if (isEditMode.value || !activePreset.value) return true;
-  return activePreset.value.stage_ids.includes(stageId);
+  return (activePreset.value.stage_ids ?? []).map(Number).includes(Number(stageId));
 };
 
 const onPresetsSaved = () => {
@@ -132,9 +162,12 @@ const matchesDatePreset = (dateStr, preset) => {
 };
 
 const filteredContacts = computed(() => {
+  // Busca ativa IGNORA o filtro de período — quem busca um nome quer achar
+  // o paciente mesmo que ele seja de outro mês (o padrão é "mês atual").
+  const searching = !!filters.value.search;
   return allContacts.value.filter(c => {
     // Search: name, phone, labels, notes
-    if (filters.value.search) {
+    if (searching) {
       const q = filters.value.search.toLowerCase();
       const hit = (c.name?.toLowerCase().includes(q)) ||
                   (c.phone_number?.includes(q)) ||
@@ -159,16 +192,16 @@ const filteredContacts = computed(() => {
     if (filters.value.inboxName && c.last_conversation?.inbox_name !== filters.value.inboxName) {
       return false;
     }
-    // Stage
-    if (filters.value.stageId !== '' && c.stage_id !== Number(filters.value.stageId)) {
+    // Etapas (multi)
+    if (filters.value.stageIds.length > 0 && !filters.value.stageIds.map(Number).includes(Number(c.stage_id))) {
       return false;
     }
     // Created at — usa a data real do lead (contato), não a de importação
-    if (filters.value.createdAt && !matchesDatePreset(c.contact_created_at, filters.value.createdAt)) {
+    if (!searching && filters.value.createdAt && !matchesDatePreset(c.contact_created_at, filters.value.createdAt)) {
       return false;
     }
     // Período customizado De/Até (data real do lead)
-    if (filters.value.dateFrom || filters.value.dateTo) {
+    if (!searching && (filters.value.dateFrom || filters.value.dateTo)) {
       const d = c.contact_created_at ? new Date(c.contact_created_at) : null;
       if (!d) return false;
       if (filters.value.dateFrom && d < new Date(filters.value.dateFrom + 'T00:00:00')) return false;
@@ -219,7 +252,7 @@ const activeFilterCount = computed(() => {
   if (filters.value.assigneeId !== '') n++;
   if (filters.value.labels.length > 0) n++;
   if (filters.value.inboxName)         n++;
-  if (filters.value.stageId !== '')    n++;
+  if (filters.value.stageIds.length > 0) n++;
   if (filters.value.createdAt)         n++;
   if (filters.value.lastActivity)      n++;
   if (filters.value.dateFrom || filters.value.dateTo) n++;
@@ -248,15 +281,23 @@ const loadAllContacts = async () => {
 };
 
 const clearFilters = () => {
-  filters.value = { search: '', assigneeId: '', labels: [], inboxName: '', stageId: '', createdAt: '', lastActivity: '', dateFrom: '', dateTo: '', awaitingOnly: false };
+  filters.value = { ...makeDefaultFilters(), createdAt: '' }; // limpar = ver tudo
+  panelDraft.value = null;
+  showFilters.value = false;
 };
 
-const labelsButtonText = computed(() => {
-  const n = filters.value.labels.length;
-  if (n === 0) return t('CRM.FILTER.ALL_LABELS');
-  if (n === 1) return filters.value.labels[0];
-  return `${n} etiquetas`;
+// Buscar precisa enxergar a base toda: se só os recentes estão carregados,
+// carrega o histórico completo automaticamente na primeira busca.
+watch(() => filters.value.search, term => {
+  if (
+    term &&
+    contactsMeta.value.scope === 'recent' &&
+    contactsMeta.value.total > contactsMeta.value.shown
+  ) {
+    loadAllContacts();
+  }
 });
+
 // ─────────────────────────────────────────────────────────
 
 const selectedPipeline = computed(() =>
@@ -339,9 +380,13 @@ const onChatReplied = () => {
 
 const onChatResolved = ({ status }) => {
   if (!chatContact.value) return;
+  // resolvida conta como respondida
+  const data = status === 'resolved'
+    ? { status, awaiting_reply: false, waiting_since: null }
+    : { status };
   store.commit('crm/patchContactConversation', {
     id: chatContact.value.id,
-    data: { status },
+    data,
   });
 };
 
@@ -356,7 +401,14 @@ const selectPipeline = async (id) => {
   await store.dispatch('crm/fetchContacts', { pipelineId: id, scope: contactsScope.value });
 };
 
-const onContactUpdated = async () => {
+// Save normal é LEVE: o store já foi atualizado (updateContact + patch de
+// etiquetas) — só fecha o modal, sem recarregar o board.
+const onContactUpdated = () => {
+  selectedContact.value = null;
+};
+
+// Merge de contatos muda vários cards → refetch completo.
+const onContactMerged = async () => {
   selectedContact.value = null;
   if (selectedPipelineId.value) {
     await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, scope: contactsScope.value });
@@ -532,7 +584,7 @@ const createAndAddContact = async () => {
 </script>
 
 <template>
-  <div class="bg-n-surface-1" style="display:flex;flex-direction:column;height:100%;width:100%;" @click="showLabelsDropdown = false">
+  <div class="bg-n-surface-1" style="display:flex;flex-direction:column;height:100%;width:100%;" @click="showLabelsDropdown = false; showStagesDropdown = false">
     <!-- Top bar -->
     <div class="flex items-center gap-3 px-6 py-4 border-b border-n-weak flex-shrink-0 flex-wrap">
       <h1 class="text-lg font-semibold text-n-slate-12">{{ $t('CRM.TITLE') }}</h1>
@@ -794,7 +846,7 @@ const createAndAddContact = async () => {
           :class="showFilters || activeFilterCount > 0
             ? 'bg-n-brand/10 border-n-brand text-n-brand'
             : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-          @click="showFilters = !showFilters"
+          @click="showFilters ? (showFilters = false) : openFiltersPanel()"
         >
           <span class="i-lucide-sliders-horizontal text-sm" />
           {{ $t('CRM.FILTER.FILTERS') }}
@@ -822,112 +874,154 @@ const createAndAddContact = async () => {
         </button>
       </div>
 
-      <!-- Expanded filter panel -->
+      <!-- Expanded filter panel (rascunho — só filtra ao Aplicar) -->
       <div
-        v-if="showFilters"
-        class="flex items-start gap-3 px-4 py-3 bg-n-alpha-1 border-b border-n-weak flex-wrap"
+        v-if="showFilters && panelDraft"
+        class="px-4 py-3 bg-n-alpha-1 border-b border-n-weak"
       >
-        <!-- Assignee -->
-        <div class="flex flex-col gap-1 min-w-[140px]">
-          <label class="text-xs text-n-slate-9">{{ $t('CRM.MODAL.ASSIGNEE') }}</label>
-          <select
-            v-model="filters.assigneeId"
-            class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-          >
-            <option value="">{{ $t('CRM.FILTER.ALL_ASSIGNEES') }}</option>
-            <option value="none">{{ $t('CRM.FILTER.NO_ASSIGNEE') }}</option>
-            <option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option>
-          </select>
-        </div>
-
-        <!-- Labels multi-select -->
-        <div class="flex flex-col gap-1 min-w-[140px] relative">
-          <label class="text-xs text-n-slate-9">{{ $t('CRM.FILTER.ALL_LABELS') }}</label>
-          <button
-            class="h-9 w-full flex items-center justify-between text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none"
-            :class="showLabelsDropdown ? 'border-n-brand' : ''"
-            @click.stop="showLabelsDropdown = !showLabelsDropdown"
-          >
-            <span class="truncate min-w-0 flex-1 text-left" :class="filters.labels.length === 0 ? 'text-n-slate-12' : ''">
-              {{ labelsButtonText }}
-            </span>
-            <span class="i-lucide-chevron-down text-xs ml-1 text-n-slate-9 flex-shrink-0" />
-          </button>
-          <div
-            v-if="showLabelsDropdown"
-            class="absolute top-full left-0 z-20 mt-1 bg-n-solid-1 border border-n-weak rounded-lg shadow-lg min-w-full max-h-48 overflow-y-auto"
-            @click.stop
-          >
-            <div v-if="availableLabels.length === 0" class="px-3 py-2 text-xs text-n-slate-9">
-              {{ $t('CRM.NO_CONTACTS_FOUND') }}
-            </div>
-            <label
-              v-for="label in availableLabels"
-              :key="label"
-              class="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-n-alpha-1 text-n-slate-12"
+        <div class="flex items-start gap-3 flex-wrap">
+          <!-- Assignee -->
+          <div class="flex flex-col gap-1 min-w-[140px]">
+            <label class="text-xs text-n-slate-9">{{ $t('CRM.MODAL.ASSIGNEE') }}</label>
+            <select
+              v-model="panelDraft.assigneeId"
+              class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
             >
+              <option value="">{{ $t('CRM.FILTER.ALL_ASSIGNEES') }}</option>
+              <option value="none">{{ $t('CRM.FILTER.NO_ASSIGNEE') }}</option>
+              <option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option>
+            </select>
+          </div>
+
+          <!-- Labels multi-select -->
+          <div class="flex flex-col gap-1 min-w-[140px] relative">
+            <label class="text-xs text-n-slate-9">{{ $t('CRM.FILTER.ALL_LABELS') }}</label>
+            <button
+              class="h-9 w-full flex items-center justify-between text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none"
+              :class="showLabelsDropdown ? 'border-n-brand' : ''"
+              @click.stop="showLabelsDropdown = !showLabelsDropdown; showStagesDropdown = false"
+            >
+              <span class="truncate min-w-0 flex-1 text-left">
+                {{ panelDraft.labels.length === 0 ? $t('CRM.FILTER.ALL_LABELS') : (panelDraft.labels.length === 1 ? panelDraft.labels[0] : `${panelDraft.labels.length} etiquetas`) }}
+              </span>
+              <span class="i-lucide-chevron-down text-xs ml-1 text-n-slate-9 flex-shrink-0" />
+            </button>
+            <div
+              v-if="showLabelsDropdown"
+              class="absolute top-full left-0 z-20 mt-1 bg-n-solid-1 border border-n-weak rounded-lg shadow-lg min-w-full max-h-48 overflow-y-auto"
+              @click.stop
+            >
+              <div v-if="availableLabels.length === 0" class="px-3 py-2 text-xs text-n-slate-9">
+                {{ $t('CRM.NO_CONTACTS_FOUND') }}
+              </div>
+              <label
+                v-for="label in availableLabels"
+                :key="label"
+                class="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-n-alpha-1 text-n-slate-12"
+              >
+                <input
+                  v-model="panelDraft.labels"
+                  type="checkbox"
+                  :value="label"
+                  class="rounded accent-n-brand"
+                />
+                {{ label }}
+              </label>
+            </div>
+          </div>
+
+          <!-- Etapas multi-select -->
+          <div class="flex flex-col gap-1 min-w-[160px] relative">
+            <label class="text-xs text-n-slate-9">{{ $t('CRM.MODAL.STAGE') }}</label>
+            <button
+              class="h-9 w-full flex items-center justify-between text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none"
+              :class="showStagesDropdown ? 'border-n-brand' : ''"
+              @click.stop="showStagesDropdown = !showStagesDropdown; showLabelsDropdown = false"
+            >
+              <span class="truncate min-w-0 flex-1 text-left">
+                {{ panelDraft.stageIds.length === 0 ? $t('CRM.FILTER.ALL_STAGES') : `${panelDraft.stageIds.length} etapa(s)` }}
+              </span>
+              <span class="i-lucide-chevron-down text-xs ml-1 text-n-slate-9 flex-shrink-0" />
+            </button>
+            <div
+              v-if="showStagesDropdown"
+              class="absolute top-full left-0 z-20 mt-1 bg-n-solid-1 border border-n-weak rounded-lg shadow-lg min-w-full max-h-48 overflow-y-auto"
+              @click.stop
+            >
+              <label
+                v-for="stage in selectedPipeline.stages"
+                :key="stage.id"
+                class="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-n-alpha-1 text-n-slate-12"
+              >
+                <input
+                  v-model="panelDraft.stageIds"
+                  type="checkbox"
+                  :value="stage.id"
+                  class="rounded accent-n-brand"
+                />
+                <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ backgroundColor: stage.color }" />
+                {{ stage.name }}
+              </label>
+            </div>
+          </div>
+
+          <!-- Created at (entry in CRM) -->
+          <div class="flex flex-col gap-1 min-w-[140px]">
+            <label class="text-xs text-n-slate-9">{{ $t('CRM.FILTER.CREATED_AT') }}</label>
+            <select
+              v-model="panelDraft.createdAt"
+              class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            >
+              <option v-for="p in datePresets" :key="p.value" :value="p.value">{{ p.label }}</option>
+            </select>
+          </div>
+
+          <!-- Last activity -->
+          <div class="flex flex-col gap-1 min-w-[140px]">
+            <label class="text-xs text-n-slate-9">{{ $t('CRM.FILTER.LAST_ACTIVITY') }}</label>
+            <select
+              v-model="panelDraft.lastActivity"
+              class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            >
+              <option v-for="p in datePresets" :key="p.value" :value="p.value">{{ p.label }}</option>
+              <option value="none">{{ $t('CRM.FILTER.NO_INTERACTION') }}</option>
+            </select>
+          </div>
+
+          <!-- Período do lead: De / Até (data real do contato) -->
+          <div class="flex flex-col gap-1">
+            <label class="text-xs text-n-slate-9">Período do lead (De / Até)</label>
+            <div class="flex items-center gap-1.5">
               <input
-                v-model="filters.labels"
-                type="checkbox"
-                :value="label"
-                class="rounded accent-n-brand"
+                v-model="panelDraft.dateFrom"
+                type="date"
+                class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
               />
-              {{ label }}
-            </label>
+              <span class="text-xs text-n-slate-9">até</span>
+              <input
+                v-model="panelDraft.dateTo"
+                type="date"
+                class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+              />
+            </div>
           </div>
         </div>
 
-        <!-- Stage -->
-        <div class="flex flex-col gap-1 min-w-[140px]">
-          <label class="text-xs text-n-slate-9">{{ $t('CRM.MODAL.STAGE') }}</label>
-          <select
-            v-model="filters.stageId"
-            class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+        <!-- Aplicar / cancelar -->
+        <div class="flex items-center gap-2 mt-3">
+          <button
+            class="flex items-center gap-1.5 text-sm px-4 py-1.5 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 transition-colors"
+            @click="applyFiltersPanel"
           >
-            <option value="">{{ $t('CRM.FILTER.ALL_STAGES') }}</option>
-            <option v-for="stage in selectedPipeline.stages" :key="stage.id" :value="stage.id">{{ stage.name }}</option>
-          </select>
-        </div>
-
-        <!-- Created at (entry in CRM) -->
-        <div class="flex flex-col gap-1 min-w-[140px]">
-          <label class="text-xs text-n-slate-9">{{ $t('CRM.FILTER.CREATED_AT') }}</label>
-          <select
-            v-model="filters.createdAt"
-            class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            <span class="i-lucide-check text-sm" />
+            {{ $t('CRM.FILTER.APPLY') }}
+          </button>
+          <button
+            class="text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
+            @click="showFilters = false"
           >
-            <option v-for="p in datePresets" :key="p.value" :value="p.value">{{ p.label }}</option>
-          </select>
-        </div>
-
-        <!-- Last activity -->
-        <div class="flex flex-col gap-1 min-w-[140px]">
-          <label class="text-xs text-n-slate-9">{{ $t('CRM.FILTER.LAST_ACTIVITY') }}</label>
-          <select
-            v-model="filters.lastActivity"
-            class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-          >
-            <option v-for="p in datePresets" :key="p.value" :value="p.value">{{ p.label }}</option>
-            <option value="none">{{ $t('CRM.FILTER.NO_INTERACTION') }}</option>
-          </select>
-        </div>
-
-        <!-- Período do lead: De / Até (data real do contato) -->
-        <div class="flex flex-col gap-1">
-          <label class="text-xs text-n-slate-9">Período do lead (De / Até)</label>
-          <div class="flex items-center gap-1.5">
-            <input
-              v-model="filters.dateFrom"
-              type="date"
-              class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-            />
-            <span class="text-xs text-n-slate-9">até</span>
-            <input
-              v-model="filters.dateTo"
-              type="date"
-              class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-            />
-          </div>
+            {{ $t('CRM.CANCEL') }}
+          </button>
         </div>
       </div>
     </div>
@@ -969,8 +1063,8 @@ const createAndAddContact = async () => {
       >
         <template #item="{ element: stage }">
           <KanbanColumn
-            v-show="isStageVisible(stage.id)"
             :key="stage.id"
+            :hidden="!isStageVisible(stage.id)"
             :stage="stage"
             :pipeline-id="selectedPipelineId"
             :contacts="contactsByStage[stage.id] ?? []"
@@ -1027,6 +1121,7 @@ const createAndAddContact = async () => {
       :pipeline="selectedPipeline ?? { stages: [] }"
       @close="selectedContact = null"
       @updated="onContactUpdated"
+      @merged="onContactMerged"
       @removed="selectedContact = null"
       @open-chat="openChat"
     />

@@ -4,6 +4,7 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
 import { relativeTime } from '../helpers';
 import ContactAPI from 'dashboard/api/contacts';
@@ -14,12 +15,13 @@ const props = defineProps({
   pipeline: { type: Object, required: true },
 });
 
-const emit = defineEmits(['close', 'updated', 'removed', 'openChat']);
+const emit = defineEmits(['close', 'updated', 'removed', 'openChat', 'merged']);
 
 const store = useStore();
 const { t } = useI18n();
 const router = useRouter();
 const { accountId } = useAccount();
+const { isAdmin } = useAdmin();
 
 const agents = useMapGetter('agents/getAgents');
 const accountLabels = useMapGetter('labels/getLabels');
@@ -203,6 +205,13 @@ const save = async () => {
       }).catch(() => {}); // não bloqueia o save se falhar
     }
 
+    // Atualização LEVE: patch das etiquetas no card (o resto veio na resposta
+    // do updateContact) — sem recarregar o board inteiro.
+    store.commit('crm/patchContact', {
+      id: props.contact.id,
+      data: { labels: [...labels] },
+    });
+
     useAlert(t('CRM.SUCCESS.CONTACT_SAVED'));
     emit('updated');
   } catch {
@@ -304,7 +313,7 @@ const doMerge = async () => {
     mergeSearch.value = '';
     mergeResults.value = [];
     mergeCandidate.value = null;
-    emit('updated');
+    emit('merged'); // merge muda dados de vários cards — refetch completo
   } catch {
     useAlert(t('CRM.ERROR.GENERIC'));
   } finally {
@@ -404,8 +413,8 @@ const doMerge = async () => {
               </select>
             </div>
 
-            <!-- Value -->
-            <div>
+            <!-- Value (só admin) -->
+            <div v-if="isAdmin">
               <div class="flex items-center justify-between mb-1">
                 <label class="text-xs font-medium text-n-slate-11">{{ $t('CRM.MODAL.VALUE') }}</label>
                 <button
@@ -614,7 +623,7 @@ const doMerge = async () => {
 
           <!-- CRM snapshot (read-only) -->
           <div class="border-t border-n-weak pt-4 space-y-2">
-            <div v-if="contact.value" class="flex items-center justify-between">
+            <div v-if="isAdmin && contact.value" class="flex items-center justify-between">
               <span class="text-xs text-n-slate-10">{{ $t('CRM.MODAL.VALUE') }}</span>
               <span class="text-sm font-medium text-green-600">
                 R$ {{ Number(contact.value).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}

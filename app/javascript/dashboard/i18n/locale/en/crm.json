@@ -81,7 +81,8 @@
       "SORT_DEFAULT": "Default order",
       "SORT_WAITING": "Longest waiting",
       "SORT_OLDEST": "Oldest → newest",
-      "SORT_NEWEST": "Newest → oldest"
+      "SORT_NEWEST": "Newest → oldest",
+      "APPLY": "Apply filters"
     },
     "MODAL": {
       "TAB_CRM": "CRM",

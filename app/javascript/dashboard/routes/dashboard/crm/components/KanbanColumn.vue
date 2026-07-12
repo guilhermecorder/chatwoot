@@ -17,6 +17,9 @@ const props = defineProps({
   editMode:        { type: Boolean, default: false },
   programmingMode: { type: Boolean, default: false },
   allStages:       { type: Array, default: () => [] },
+  // preset de visualização: coluna fora do preset fica oculta
+  // (v-show externo não funciona em componente multi-root)
+  hidden:          { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat']);
@@ -260,6 +263,7 @@ const delayLabel = (minutes) => {
 
 <template>
   <div
+    v-show="!hidden"
     class="flex flex-col bg-n-alpha-1 rounded-xl w-[86vw] min-w-[86vw] snap-center md:w-64 md:min-w-64 md:snap-align-none flex-shrink-0 h-full transition-all"
     :class="programmingMode ? 'ring-2 ring-yellow-400/50' : ''"
   >
@@ -354,8 +358,8 @@ const delayLabel = (minutes) => {
         <p v-if="programmingMode" class="text-[11px] text-yellow-600/80 mt-1">
           ⚡ Automações da coluna
         </p>
-        <!-- Valor total no modo normal -->
-        <p v-else-if="totalValue > 0" class="text-sm font-semibold text-green-600 text-center mt-1.5">
+        <!-- Valor total no modo normal (só admin vê valores) -->
+        <p v-else-if="isAdmin && totalValue > 0" class="text-sm font-semibold text-green-600 text-center mt-1.5">
           R$ {{ totalValue.toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}
         </p>
       </div>
