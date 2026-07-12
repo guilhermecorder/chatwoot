@@ -134,7 +134,16 @@
       "SEND": "Send",
       "SEND_ERROR": "Could not send. Check the WhatsApp 24h window.",
       "LOAD_MORE": "Load previous messages",
-      "OFFICIAL_NOTE": "The reply is sent officially through \"{inbox}\"."
+      "OFFICIAL_NOTE": "The reply is sent officially through \"{inbox}\".",
+      "RESOLVE": "Resolve",
+      "REOPEN": "Reopen",
+      "RESOLVED": "Conversation resolved ✓",
+      "REOPENED": "Conversation reopened",
+      "STATUS_RESOLVED": "Resolved",
+      "TEMPLATES": "Templates",
+      "TEMPLATES_TITLE": "Template messages (remarketing)",
+      "TEMPLATE_FILL": "Fill template",
+      "EMOJI": "Emojis"
     },
     "PRESETS": {
       "TITLE": "Column views",
@@ -155,6 +164,17 @@
       "CONFIRM": "\"{mergee}\" will be absorbed into \"{base}\". This cannot be undone.",
       "APPLY": "Merge contacts",
       "SUCCESS": "Contacts merged!"
+    },
+    "VALUE_DETECT": {
+      "BUTTON": "Detect value",
+      "HINT": "Finds the largest R$ amount mentioned in conversations and fills the card",
+      "FOUND": "Detected value: R$ {value}",
+      "NOT_FOUND": "No R$ value found in conversations.",
+      "BULK_TITLE": "Fill values from conversation budgets",
+      "BULK_DESC": "Scans each card conversations for the largest R$ mentioned and fills the value.",
+      "BULK_ONLY_EMPTY": "Only cards without value (recommended)",
+      "BULK_RUN": "Fill values",
+      "BULK_RUNNING": "Processing in background — values appear shortly."
     }
   }
 }

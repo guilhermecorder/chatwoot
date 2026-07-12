@@ -270,6 +270,29 @@ const onMergeSearchInput = () => {
   }, 300);
 };
 
+// ── Detectar valor do orçamento na conversa ──
+const isDetectingValue = ref(false);
+const detectValue = async () => {
+  if (!props.contact || isDetectingValue.value) return;
+  isDetectingValue.value = true;
+  try {
+    const data = await store.dispatch('crm/detectCardValue', {
+      pipelineId: props.pipeline.id,
+      id: props.contact.id,
+    });
+    if (data.updated) {
+      form.value.value = data.value;
+      useAlert(t('CRM.VALUE_DETECT.FOUND', { value: Number(data.value).toLocaleString('pt-BR') }));
+    } else {
+      useAlert(t('CRM.VALUE_DETECT.NOT_FOUND'));
+    }
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  } finally {
+    isDetectingValue.value = false;
+  }
+};
+
 const doMerge = async () => {
   if (!mergeCandidate.value || isMerging.value) return;
   isMerging.value = true;
@@ -383,7 +406,18 @@ const doMerge = async () => {
 
             <!-- Value -->
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ $t('CRM.MODAL.VALUE') }}</label>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-xs font-medium text-n-slate-11">{{ $t('CRM.MODAL.VALUE') }}</label>
+                <button
+                  class="text-[11px] text-n-brand hover:underline flex items-center gap-1 disabled:opacity-50"
+                  :disabled="isDetectingValue"
+                  :title="$t('CRM.VALUE_DETECT.HINT')"
+                  @click="detectValue"
+                >
+                  <span :class="isDetectingValue ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-wand-2'" class="text-xs" />
+                  {{ $t('CRM.VALUE_DETECT.BUTTON') }}
+                </button>
+              </div>
               <input
                 v-model="form.value"
                 type="number"

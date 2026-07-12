@@ -122,6 +122,20 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     head :ok
   end
 
+  # POST detect_value — extrai o maior orçamento (R$) das conversas e grava no card
+  def detect_value
+    value = Crm::BudgetValueExtractor.new(account: Current.account, contact: @crm_contact.contact).max_value
+    @crm_contact.update!(value: value) if value
+    render json: { value: value, updated: value.present? }
+  end
+
+  # POST detect_values_bulk — roda a detecção para todos os cards do pipeline (background)
+  def detect_values_bulk
+    only_empty = params[:only_empty].to_s != 'false'
+    Crm::BulkDetectValuesJob.perform_later(@pipeline.id, only_empty)
+    render json: { enqueued: true }
+  end
+
   private
 
   def pipeline
@@ -215,6 +229,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     {
       id: conversation.id,
       status: conversation.status,
+      inbox_id: conversation.inbox_id,
       inbox_name: conversation.inbox&.name,
       channel_type: conversation.inbox&.channel_type,
       last_message: last_msg&.content&.slice(0, 120),

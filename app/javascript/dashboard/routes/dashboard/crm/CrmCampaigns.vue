@@ -453,6 +453,73 @@ const applyRetro = async () => {
   }
 };
 
+// ── Preencher valores pelo orçamento ──────────────────────────────────
+const showValuePanel = ref(false);
+const valueOnlyEmpty = ref(true);
+const isValueRunning = ref(false);
+
+const runBulkValues = async () => {
+  if (isValueRunning.value || !pipelines.value.length) return;
+  isValueRunning.value = true;
+  try {
+    await Promise.all(
+      pipelines.value.map(p =>
+        store.dispatch('crm/detectValuesBulk', { pipelineId: p.id, onlyEmpty: valueOnlyEmpty.value })
+      )
+    );
+    useAlert('Processando em segundo plano — os valores aparecem em instantes.');
+    showValuePanel.value = false;
+  } catch {
+    useAlert('Erro ao iniciar o preenchimento de valores');
+  } finally {
+    isValueRunning.value = false;
+  }
+};
+
+// ── Substituir etiquetas ──────────────────────────────────────────────
+const showReplacePanel = ref(false);
+const replaceFrom = ref('');
+const replaceTo = ref('');
+const replacePreview = ref(null);
+const isReplaceLoading = ref(false);
+const isReplaceApplying = ref(false);
+const showReplaceConfirm = ref(false);
+
+const replaceLabelOptions = computed(() => (labels.value || []).map(l => l.title));
+
+const previewReplace = async () => {
+  if (!replaceFrom.value || !replaceTo.value || replaceFrom.value === replaceTo.value) return;
+  isReplaceLoading.value = true;
+  replacePreview.value = null;
+  showReplaceConfirm.value = false;
+  try {
+    replacePreview.value = await store.dispatch('crm/previewLabelReplace', {
+      from: replaceFrom.value,
+      to: replaceTo.value,
+    });
+  } catch {
+    useAlert('Erro ao calcular a substituição');
+  } finally {
+    isReplaceLoading.value = false;
+  }
+};
+
+const applyReplace = async () => {
+  isReplaceApplying.value = true;
+  try {
+    await store.dispatch('crm/applyLabelReplace', { from: replaceFrom.value, to: replaceTo.value });
+    useAlert('Substituição em andamento — as etiquetas serão trocadas em segundo plano.');
+    replacePreview.value = null;
+    showReplaceConfirm.value = false;
+    replaceFrom.value = '';
+    replaceTo.value = '';
+  } catch {
+    useAlert('Erro ao iniciar a substituição');
+  } finally {
+    isReplaceApplying.value = false;
+  }
+};
+
 // ── Unificação de contatos duplicados ─────────────────────────────────
 const showUnifyPanel = ref(false);
 const unifyPreview = ref(null);
@@ -800,6 +867,132 @@ const statsLine = c => {
             <p v-if="retroPreview && !retroHasAction" class="text-xs text-amber-600">
               Escolha uma etiqueta e/ou uma coluna para aplicar.
             </p>
+          </div>
+        </div>
+
+        <!-- Tratamento de dados: substituir etiquetas -->
+        <div class="max-w-3xl mb-5 bg-n-solid-2 border border-n-weak rounded-xl overflow-hidden">
+          <button
+            class="w-full flex items-center gap-3 p-4 text-left hover:bg-n-alpha-1 transition-colors"
+            @click="showReplacePanel = !showReplacePanel"
+          >
+            <span class="i-lucide-replace text-xl text-n-brand flex-shrink-0" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-n-slate-12">Tratamento de dados — substituir etiquetas</p>
+              <p class="text-xs text-n-slate-10">
+                Troca uma etiqueta por outra em todo mundo. Ex.: "refrativa" → "orçamento-refrativa".
+              </p>
+            </div>
+            <span
+              class="text-n-slate-10 flex-shrink-0"
+              :class="showReplacePanel ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+            />
+          </button>
+
+          <div v-if="showReplacePanel" class="px-4 pb-4 space-y-3 border-t border-n-weak pt-4">
+            <div class="flex flex-wrap items-end gap-3">
+              <div class="flex-1 min-w-40">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">Etiqueta atual (será removida)</label>
+                <input
+                  v-model="replaceFrom"
+                  list="replace-from-list"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  placeholder="ex: refrativa"
+                  @input="replacePreview = null"
+                />
+                <datalist id="replace-from-list">
+                  <option v-for="l in replaceLabelOptions" :key="l" :value="l" />
+                </datalist>
+              </div>
+              <span class="i-lucide-arrow-right text-n-slate-9 pb-2.5" />
+              <div class="flex-1 min-w-40">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">Nova etiqueta (será adicionada)</label>
+                <input
+                  v-model="replaceTo"
+                  list="replace-to-list"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  placeholder="ex: orçamento-refrativa"
+                  @input="replacePreview = null"
+                />
+                <datalist id="replace-to-list">
+                  <option v-for="l in replaceLabelOptions" :key="l" :value="l" />
+                </datalist>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1 disabled:opacity-50"
+                :disabled="!replaceFrom || !replaceTo || replaceFrom === replaceTo || isReplaceLoading"
+                @click="previewReplace"
+              >
+                <span class="i-lucide-search" />
+                {{ isReplaceLoading ? 'Calculando…' : 'Calcular' }}
+              </button>
+              <span v-if="replacePreview" class="text-sm text-n-slate-12">
+                <b>{{ replacePreview.contacts }}</b> contato(s) ·
+                <b>{{ replacePreview.conversations }}</b> conversa(s)
+              </span>
+            </div>
+
+            <div v-if="replacePreview && (replacePreview.contacts > 0 || replacePreview.conversations > 0)" class="flex items-center gap-3">
+              <template v-if="!showReplaceConfirm">
+                <button
+                  class="text-xs px-4 py-2 rounded-lg bg-n-brand text-white hover:opacity-90 flex items-center gap-1.5"
+                  @click="showReplaceConfirm = true"
+                >
+                  <span class="i-lucide-replace" />
+                  Substituir etiqueta
+                </button>
+              </template>
+              <template v-else>
+                <span class="text-xs text-amber-600 font-medium">Confirma trocar "{{ replaceFrom }}" por "{{ replaceTo }}"?</span>
+                <button
+                  class="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white disabled:opacity-50"
+                  :disabled="isReplaceApplying"
+                  @click="applyReplace"
+                >{{ isReplaceApplying ? 'Iniciando…' : 'Sim, substituir' }}</button>
+                <button class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11" @click="showReplaceConfirm = false">Cancelar</button>
+              </template>
+            </div>
+            <p v-if="replacePreview && replacePreview.contacts === 0 && replacePreview.conversations === 0" class="text-xs text-n-slate-9">
+              Ninguém com a etiqueta "{{ replaceFrom }}".
+            </p>
+          </div>
+        </div>
+
+        <!-- Tratamento de dados: preencher valores pelo orçamento -->
+        <div class="max-w-3xl mb-5 bg-n-solid-2 border border-n-weak rounded-xl overflow-hidden">
+          <button
+            class="w-full flex items-center gap-3 p-4 text-left hover:bg-n-alpha-1 transition-colors"
+            @click="showValuePanel = !showValuePanel"
+          >
+            <span class="i-lucide-badge-dollar-sign text-xl text-green-600 flex-shrink-0" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-n-slate-12">Tratamento de dados — preencher valores pelo orçamento</p>
+              <p class="text-xs text-n-slate-10">
+                Varre as conversas de cada card procurando o maior R$ mencionado e preenche o valor.
+              </p>
+            </div>
+            <span
+              class="text-n-slate-10 flex-shrink-0"
+              :class="showValuePanel ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+            />
+          </button>
+
+          <div v-if="showValuePanel" class="px-4 pb-4 space-y-3 border-t border-n-weak pt-4">
+            <label class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer">
+              <input v-model="valueOnlyEmpty" type="checkbox" class="rounded accent-n-brand" />
+              Só cards sem valor (recomendado)
+            </label>
+            <button
+              class="text-xs px-4 py-2 rounded-lg bg-n-brand text-white hover:opacity-90 flex items-center gap-1.5 disabled:opacity-50"
+              :disabled="isValueRunning"
+              @click="runBulkValues"
+            >
+              <span :class="isValueRunning ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-wand-2'" />
+              Preencher valores
+            </button>
           </div>
         </div>
 

@@ -134,7 +134,16 @@
       "SEND": "Enviar",
       "SEND_ERROR": "Não foi possível enviar. Verifique a janela de 24h do WhatsApp.",
       "LOAD_MORE": "Carregar mensagens anteriores",
-      "OFFICIAL_NOTE": "A resposta sai oficialmente pela caixa \"{inbox}\"."
+      "OFFICIAL_NOTE": "A resposta sai oficialmente pela caixa \"{inbox}\".",
+      "RESOLVE": "Resolver",
+      "REOPEN": "Reabrir",
+      "RESOLVED": "Conversa resolvida ✓",
+      "REOPENED": "Conversa reaberta",
+      "STATUS_RESOLVED": "Resolvida",
+      "TEMPLATES": "Modelos",
+      "TEMPLATES_TITLE": "Mensagens modelo (remarketing)",
+      "TEMPLATE_FILL": "Preencher modelo",
+      "EMOJI": "Emojis"
     },
     "PRESETS": {
       "TITLE": "Visualizações de colunas",
@@ -155,6 +164,17 @@
       "CONFIRM": "\"{mergee}\" será absorvido por \"{base}\". Isso não pode ser desfeito.",
       "APPLY": "Mesclar contatos",
       "SUCCESS": "Contatos mesclados!"
+    },
+    "VALUE_DETECT": {
+      "BUTTON": "Detectar valor",
+      "HINT": "Procura o maior valor em R$ mencionado nas conversas e preenche o card",
+      "FOUND": "Valor detectado: R$ {value}",
+      "NOT_FOUND": "Nenhum valor em R$ encontrado nas conversas.",
+      "BULK_TITLE": "Preencher valores pelo orçamento das conversas",
+      "BULK_DESC": "Varre as conversas de cada card procurando o maior R$ mencionado e preenche o valor. Ótimo para dar visão de faturamento potencial.",
+      "BULK_ONLY_EMPTY": "Só cards sem valor (recomendado)",
+      "BULK_RUN": "Preencher valores",
+      "BULK_RUNNING": "Processando em segundo plano — os valores aparecem em instantes."
     }
   }
 }
