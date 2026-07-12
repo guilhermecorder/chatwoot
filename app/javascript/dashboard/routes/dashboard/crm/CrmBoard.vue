@@ -57,23 +57,27 @@ const isCreatingContact = ref(false);
 const showFilters = ref(false);
 const showLabelsDropdown = ref(false);
 
-const filters = ref({
+// Estado inicial dos filtros — CRM abre no MÊS ATUAL (leve) por padrão.
+const makeDefaultFilters = () => ({
   search: '',
   assigneeId: '',  // '' = all, 'none' = no assignee, number = agent id
   labels: [],      // array of label strings
   inboxName: '',
   stageId: '',
-  createdAt: '',
+  createdAt: 'month', // padrão: leads do mês atual (mais leve e dinâmico)
   lastActivity: '',
   dateFrom: '',    // período do lead (data real do contato) — De
   dateTo: '',      // período do lead — Até
   awaitingOnly: false, // só pacientes sem resposta
 });
 
+const filters = ref(makeDefaultFilters());
+
 // Ordenação dos cards dentro das colunas
 // '' = manual (posição) | 'waiting' = aguardando há mais tempo |
 // 'oldest' = mais antigo → mais novo | 'newest' = mais novo → mais antigo
-const sortOrder = ref('');
+// Padrão: mais novo → mais antigo (config mais usada).
+const sortOrder = ref('newest');
 
 // Preset de visualização de colunas (nome do preset ativo; '' = todas)
 const activePresetName = ref(localStorage.getItem('cevico_crm_column_preset') ?? '');
@@ -333,6 +337,14 @@ const onChatReplied = () => {
   });
 };
 
+const onChatResolved = ({ status }) => {
+  if (!chatContact.value) return;
+  store.commit('crm/patchContactConversation', {
+    id: chatContact.value.id,
+    data: { status },
+  });
+};
+
 const selectPipeline = async (id) => {
   if (selectedPipelineId.value === id) return;
   selectedPipelineId.value = id;
@@ -340,7 +352,7 @@ const selectPipeline = async (id) => {
   showDeletePipelineConfirm.value = false;
   isEditMode.value = false;
   isProgrammingMode.value = false;
-  clearFilters();
+  filters.value = makeDefaultFilters(); // volta ao padrão (mês atual)
   await store.dispatch('crm/fetchContacts', { pipelineId: id, scope: contactsScope.value });
 };
 
@@ -1025,6 +1037,7 @@ const createAndAddContact = async () => {
       :contact="chatContact"
       @close="chatContact = null"
       @replied="onChatReplied"
+      @resolved="onChatResolved"
     />
 
     <!-- Column presets modal -->
