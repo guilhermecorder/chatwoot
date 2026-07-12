@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
 import draggable from 'vuedraggable';
 import KanbanColumn from './components/KanbanColumn.vue';
@@ -13,6 +14,7 @@ import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import ContactAPI from 'dashboard/api/contacts';
 
 const store = useStore();
+const { isAdmin } = useAdmin();
 const { t } = useI18n();
 
 const pipelines = useMapGetter('crm/getPipelines');
@@ -43,7 +45,9 @@ const newStageName = ref('');
 const newStageColor = ref('#6B7280');
 
 // Add contact modal
-const contactsScope = ref('recent'); // recent = leads ativos no último mês
+// O CRM é a visão principal de atendimento: carrega TODOS os contatos
+// desde o início, ordenados pela última mensagem (não lidas no topo).
+const contactsScope = ref('all');
 const isLoadingAll = ref(false);
 const addContactStageId = ref(null);
 const contactSearchQuery = ref('');
@@ -65,7 +69,7 @@ const makeDefaultFilters = () => ({
   labels: [],      // array of label strings
   inboxName: '',
   stageIds: [],    // etapas selecionadas (multi)
-  createdAt: 'month', // padrão: leads do mês atual (mais leve e dinâmico)
+  createdAt: '', // todo o período — a ordenação por última mensagem prioriza o que importa
   lastActivity: '',
   dateFrom: '',    // período do lead (data real do contato) — De
   dateTo: '',      // período do lead — Até
@@ -104,35 +108,73 @@ const applyFiltersPanel = () => {
 };
 
 // Ordenação dos cards dentro das colunas
-// '' = manual (posição) | 'waiting' = aguardando há mais tempo |
-// 'oldest' = mais antigo → mais novo | 'newest' = mais novo → mais antigo
-// Padrão: mais novo → mais antigo (config mais usada).
-const sortOrder = ref('newest');
+// 'lastMessage' (padrão) = não lidas no topo, depois última mensagem recente→antiga
+// 'waiting' = aguardando há mais tempo | 'oldest'/'newest' = data de entrada
+// '' = manual (posição)
+const sortOrder = ref('lastMessage');
 
-// Preset de visualização de colunas (nome do preset ativo; '' = todas)
-const activePresetName = ref(localStorage.getItem('cevico_crm_column_preset') ?? '');
+// Presets de visualização de colunas — pode selecionar VÁRIOS ao mesmo
+// tempo (união das colunas); nenhum selecionado = todas as colunas.
+const loadStoredPresets = () => {
+  try {
+    const multi = JSON.parse(localStorage.getItem('cevico_crm_column_presets') ?? 'null');
+    if (Array.isArray(multi)) return multi;
+  } catch { /* ignora valor corrompido */ }
+  const legacy = localStorage.getItem('cevico_crm_column_preset');
+  return legacy ? [legacy] : [];
+};
+
+const activePresetNames = ref(loadStoredPresets());
+const showPresetsDropdown = ref(false);
 const showPresetsModal = ref(false);
 
 const columnPresets = computed(() => crmSettings.value.column_presets ?? []);
 
-const activePreset = computed(() =>
-  columnPresets.value.find(p => p.name === activePresetName.value) ?? null
+const activePresets = computed(() =>
+  columnPresets.value.filter(p => activePresetNames.value.includes(p.name))
 );
 
-const selectPreset = name => {
-  activePresetName.value = name;
-  localStorage.setItem('cevico_crm_column_preset', name);
+const persistPresetSelection = () => {
+  localStorage.setItem('cevico_crm_column_presets', JSON.stringify(activePresetNames.value));
 };
 
+const togglePreset = name => {
+  const idx = activePresetNames.value.indexOf(name);
+  if (idx === -1) activePresetNames.value.push(name);
+  else activePresetNames.value.splice(idx, 1);
+  persistPresetSelection();
+};
+
+const clearPresets = () => {
+  activePresetNames.value = [];
+  persistPresetSelection();
+};
+
+const visibleStageIdSet = computed(() => {
+  if (!activePresets.value.length) return null; // null = todas
+  const ids = new Set();
+  activePresets.value.forEach(p => (p.stage_ids ?? []).forEach(id => ids.add(Number(id))));
+  return ids;
+});
+
+const presetsButtonText = computed(() => {
+  const n = activePresetNames.value.length;
+  if (n === 0) return t('CRM.PRESETS.ALL_COLUMNS');
+  if (n === 1) return activePresetNames.value[0];
+  return `${n} visualizações`;
+});
+
 const isStageVisible = stageId => {
-  if (isEditMode.value || !activePreset.value) return true;
-  return (activePreset.value.stage_ids ?? []).map(Number).includes(Number(stageId));
+  if (isEditMode.value || !visibleStageIdSet.value) return true;
+  return visibleStageIdSet.value.has(Number(stageId));
 };
 
 const onPresetsSaved = () => {
   showPresetsModal.value = false;
-  // se o preset ativo foi renomeado/removido, volta para "todas"
-  if (activePresetName.value && !activePreset.value) selectPreset('');
+  // remove seleções de presets renomeados/apagados
+  const names = columnPresets.value.map(p => p.name);
+  activePresetNames.value = activePresetNames.value.filter(n => names.includes(n));
+  persistPresetSelection();
 };
 
 const datePresets = computed(() => [
@@ -308,6 +350,19 @@ const sortCards = cards => {
   if (!sortOrder.value) return cards;
   const byLeadDate = c => (c.contact_created_at ? new Date(c.contact_created_at).getTime() : 0);
   const sorted = [...cards];
+  if (sortOrder.value === 'lastMessage') {
+    // não lidas no topo; dentro de cada grupo, última mensagem recente→antiga
+    const hasUnread = c => ((c.last_conversation?.unread_count ?? 0) > 0 ? 1 : 0);
+    const lastMsgAt = c => {
+      const ts = c.last_conversation?.last_message_at || c.last_activity_at;
+      return ts ? new Date(ts).getTime() : 0;
+    };
+    sorted.sort((a, b) => {
+      const unreadDiff = hasUnread(b) - hasUnread(a);
+      if (unreadDiff !== 0) return unreadDiff;
+      return lastMsgAt(b) - lastMsgAt(a);
+    });
+  }
   if (sortOrder.value === 'oldest') sorted.sort((a, b) => byLeadDate(a) - byLeadDate(b));
   if (sortOrder.value === 'newest') sorted.sort((a, b) => byLeadDate(b) - byLeadDate(a));
   if (sortOrder.value === 'waiting') {
@@ -361,13 +416,15 @@ onMounted(async () => {
 
 // ── Chat popup (conversa oficial) ─────────────────────────
 const openChat = contact => {
-  if (!contact?.last_conversation_id) return;
+  if (!contact) return;
   chatContact.value = contact;
-  // abrir o popup marca a conversa como lida
-  store.commit('crm/patchContactConversation', {
-    id: contact.id,
-    data: { unread_count: 0 },
-  });
+  // abrir o popup marca a conversa como lida (se houver conversa)
+  if (contact.last_conversation_id) {
+    store.commit('crm/patchContactConversation', {
+      id: contact.id,
+      data: { unread_count: 0 },
+    });
+  }
 };
 
 const onChatReplied = () => {
@@ -584,7 +641,7 @@ const createAndAddContact = async () => {
 </script>
 
 <template>
-  <div class="bg-n-surface-1" style="display:flex;flex-direction:column;height:100%;width:100%;" @click="showLabelsDropdown = false; showStagesDropdown = false">
+  <div class="bg-n-surface-1" style="display:flex;flex-direction:column;height:100%;width:100%;" @click="showLabelsDropdown = false; showStagesDropdown = false; showPresetsDropdown = false">
     <!-- Top bar -->
     <div class="flex items-center gap-3 px-6 py-4 border-b border-n-weak flex-shrink-0 flex-wrap">
       <h1 class="text-lg font-semibold text-n-slate-12">{{ $t('CRM.TITLE') }}</h1>
@@ -620,27 +677,58 @@ const createAndAddContact = async () => {
 
       <!-- Right actions -->
       <div class="flex items-center gap-2 ml-auto">
-        <!-- Visualização de colunas (presets) -->
-        <div v-if="selectedPipeline" class="flex items-center gap-1">
-          <select
-            :value="activePresetName"
-            class="h-8 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand max-w-[180px]"
-            :title="$t('CRM.PRESETS.TITLE')"
-            @change="selectPreset($event.target.value)"
-          >
-            <option value="">{{ $t('CRM.PRESETS.ALL_COLUMNS') }}</option>
-            <option v-for="p in columnPresets" :key="p.name" :value="p.name">
-              👤 {{ p.name }}
-            </option>
-          </select>
+        <!-- Visualizações de colunas (multi-seleção) -->
+        <div v-if="selectedPipeline" class="flex items-center gap-1 relative">
           <button
+            class="h-8 flex items-center gap-1.5 text-sm border rounded-lg px-2.5 bg-n-solid-2 text-n-slate-12 focus:outline-none max-w-[200px]"
+            :class="showPresetsDropdown || activePresetNames.length ? 'border-n-brand' : 'border-n-weak'"
+            :title="$t('CRM.PRESETS.TITLE')"
+            @click.stop="showPresetsDropdown = !showPresetsDropdown"
+          >
+            <span class="i-lucide-layout-template text-sm text-n-slate-10 flex-shrink-0" />
+            <span class="truncate">{{ presetsButtonText }}</span>
+            <span class="i-lucide-chevron-down text-xs text-n-slate-9 flex-shrink-0" />
+          </button>
+          <div
+            v-if="showPresetsDropdown"
+            class="absolute top-full right-0 z-30 mt-1 bg-n-solid-1 border border-n-weak rounded-lg shadow-lg min-w-[220px] max-h-64 overflow-y-auto py-1"
+            @click.stop
+          >
+            <button
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-n-alpha-1"
+              :class="activePresetNames.length === 0 ? 'text-n-brand font-medium' : 'text-n-slate-12'"
+              @click="clearPresets"
+            >
+              <span class="i-lucide-columns-3 text-sm" />
+              {{ $t('CRM.PRESETS.ALL_COLUMNS') }}
+            </button>
+            <div v-if="columnPresets.length" class="border-t border-n-weak my-1" />
+            <label
+              v-for="p in columnPresets"
+              :key="p.name"
+              class="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-n-alpha-1 text-n-slate-12"
+            >
+              <input
+                type="checkbox"
+                class="rounded accent-n-brand"
+                :checked="activePresetNames.includes(p.name)"
+                @change="togglePreset(p.name)"
+              />
+              👤 {{ p.name }}
+            </label>
+            <div v-if="!columnPresets.length" class="px-3 py-2 text-xs text-n-slate-9">
+              {{ $t('CRM.PRESETS.EMPTY') }}
+            </div>
+          </div>
+          <button
+            v-if="isAdmin"
             class="text-n-slate-10 hover:text-n-slate-12 i-lucide-settings-2 text-base transition-colors"
             :title="$t('CRM.PRESETS.MANAGE')"
             @click="showPresetsModal = true"
           />
         </div>
 
-        <template v-if="selectedPipeline && !isRenamingPipeline">
+        <template v-if="isAdmin && selectedPipeline && !isRenamingPipeline">
           <button
             class="text-n-slate-10 hover:text-n-slate-12 i-lucide-pencil text-base transition-colors"
             :title="$t('CRM.RENAME_PIPELINE')"
@@ -653,53 +741,56 @@ const createAndAddContact = async () => {
           />
         </template>
 
-        <!-- Edit mode toggle -->
-        <button
-          v-if="selectedPipeline && !isEditMode && !isProgrammingMode"
-          class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
-          @click="isEditMode = true"
-        >
-          <span class="i-lucide-layout-template text-sm" />
-          {{ $t('CRM.EDIT_MODE') }}
-        </button>
+        <!-- Ferramentas de edição — só admin -->
+        <template v-if="isAdmin">
+          <!-- Edit mode toggle -->
+          <button
+            v-if="selectedPipeline && !isEditMode && !isProgrammingMode"
+            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+            @click="isEditMode = true"
+          >
+            <span class="i-lucide-layout-template text-sm" />
+            {{ $t('CRM.EDIT_MODE') }}
+          </button>
 
-        <!-- Programming mode toggle -->
-        <button
-          v-if="selectedPipeline && !isProgrammingMode && !isEditMode"
-          class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-yellow-400/60 text-yellow-600 hover:bg-yellow-500/10 transition-colors"
-          @click="isProgrammingMode = true"
-        >
-          <span class="i-lucide-zap text-sm" />
-          {{ $t('CRM.PROGRAMMING_MODE') }}
-        </button>
+          <!-- Programming mode toggle -->
+          <button
+            v-if="selectedPipeline && !isProgrammingMode && !isEditMode"
+            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-yellow-400/60 text-yellow-600 hover:bg-yellow-500/10 transition-colors"
+            @click="isProgrammingMode = true"
+          >
+            <span class="i-lucide-zap text-sm" />
+            {{ $t('CRM.PROGRAMMING_MODE') }}
+          </button>
 
-        <!-- Integrações -->
-        <button
-          class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
-          title="Integrações (n8n, Meta, Google...)"
-          @click="showIntegrationsModal = true"
-        >
-          <span class="i-lucide-plug text-sm" />
-          Integrações
-        </button>
+          <!-- Integrações -->
+          <button
+            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+            title="Integrações (n8n, Meta, Google...)"
+            @click="showIntegrationsModal = true"
+          >
+            <span class="i-lucide-plug text-sm" />
+            Integrações
+          </button>
 
-        <!-- Mensagens em massa -->
-        <button
-          class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
-          title="Central de mensagens em massa (templates WhatsApp)"
-          @click="$router.push({ name: 'crm_campaigns' })"
-        >
-          <span class="i-lucide-megaphone text-sm" />
-          Mensagens em massa
-        </button>
+          <!-- Mensagens em massa -->
+          <button
+            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+            title="Central de mensagens em massa (templates WhatsApp)"
+            @click="$router.push({ name: 'crm_campaigns' })"
+          >
+            <span class="i-lucide-megaphone text-sm" />
+            Mensagens em massa
+          </button>
 
-        <button
-          class="text-sm text-n-slate-11 hover:text-n-slate-12 flex items-center gap-1 ml-1"
-          @click="showNewPipelineForm = !showNewPipelineForm; showDeletePipelineConfirm = false"
-        >
-          <span class="i-lucide-plus text-base" />
-          {{ $t('CRM.NEW_PIPELINE') }}
-        </button>
+          <button
+            class="text-sm text-n-slate-11 hover:text-n-slate-12 flex items-center gap-1 ml-1"
+            @click="showNewPipelineForm = !showNewPipelineForm; showDeletePipelineConfirm = false"
+          >
+            <span class="i-lucide-plus text-base" />
+            {{ $t('CRM.NEW_PIPELINE') }}
+          </button>
+        </template>
       </div>
     </div>
 
@@ -789,12 +880,12 @@ const createAndAddContact = async () => {
     <div v-if="selectedPipeline && !uiFlags.isFetchingPipelines && !uiFlags.isFetchingContacts" class="flex-shrink-0">
       <!-- Main filter row -->
       <div class="flex items-center gap-2 px-4 py-2 border-b border-n-weak">
-        <!-- Search input -->
-        <div class="relative flex-1 max-w-xs">
-          <span class="absolute left-2.5 top-1/2 -translate-y-1/2 i-lucide-search text-n-slate-9 text-sm pointer-events-none" />
+        <!-- Search input (protagonista da barra) -->
+        <div class="relative flex-1 min-w-[220px]">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 i-lucide-search text-n-slate-9 text-base pointer-events-none" />
           <input
             v-model="filters.search"
-            class="w-full pl-8 pr-3 py-1.5 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12 placeholder-n-slate-9 focus:outline-none focus:border-n-brand"
+            class="w-full pl-9 pr-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12 placeholder-n-slate-9 focus:outline-none focus:border-n-brand"
             :placeholder="$t('CRM.FILTER.SEARCH_PLACEHOLDER')"
           />
         </div>
@@ -818,16 +909,17 @@ const createAndAddContact = async () => {
           </span>
         </button>
 
-        <!-- Ordenação -->
+        <!-- Ordenação (compacto — a busca é quem manda no espaço) -->
         <select
           v-model="sortOrder"
-          class="h-[34px] text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+          class="h-[34px] text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand w-auto max-w-[210px] flex-shrink-0"
           :title="$t('CRM.FILTER.SORT')"
         >
-          <option value="">{{ $t('CRM.FILTER.SORT_DEFAULT') }}</option>
+          <option value="lastMessage">{{ $t('CRM.FILTER.SORT_LAST_MESSAGE') }}</option>
           <option value="waiting">{{ $t('CRM.FILTER.SORT_WAITING') }}</option>
           <option value="oldest">{{ $t('CRM.FILTER.SORT_OLDEST') }}</option>
           <option value="newest">{{ $t('CRM.FILTER.SORT_NEWEST') }}</option>
+          <option value="">{{ $t('CRM.FILTER.SORT_DEFAULT') }}</option>
         </select>
 
         <!-- Caixa de entrada -->
@@ -1130,9 +1222,11 @@ const createAndAddContact = async () => {
     <ConversationChatModal
       v-if="chatContact"
       :contact="chatContact"
+      :pipeline-id="selectedPipelineId"
       @close="chatContact = null"
       @replied="onChatReplied"
       @resolved="onChatResolved"
+      @conversation-started="chatContact = $event"
     />
 
     <!-- Column presets modal -->

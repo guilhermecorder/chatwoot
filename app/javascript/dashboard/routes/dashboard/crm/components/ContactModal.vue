@@ -250,6 +250,35 @@ const openConversation = () => {
   emit('close');
 };
 
+// ── Editar nome do contato ──
+const isEditingName = ref(false);
+const nameEdit = ref('');
+const isSavingName = ref(false);
+
+const startEditName = () => {
+  nameEdit.value = props.contact.name ?? '';
+  isEditingName.value = true;
+};
+
+const saveName = async () => {
+  const newName = nameEdit.value.trim();
+  if (!newName || isSavingName.value) return;
+  isSavingName.value = true;
+  try {
+    await ContactAPI.update(props.contact.contact_id, { name: newName });
+    store.commit('crm/patchContact', {
+      id: props.contact.id,
+      data: { name: newName },
+    });
+    isEditingName.value = false;
+    useAlert(t('CRM.SUCCESS.CONTACT_SAVED'));
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  } finally {
+    isSavingName.value = false;
+  }
+};
+
 // ── Mesclar contato duplicado (ex: Instagram + WhatsApp) ──
 const showMergeSection = ref(false);
 const mergeSearch = ref('');
@@ -340,7 +369,32 @@ const doMerge = async () => {
           </div>
           <!-- Info -->
           <div class="min-w-0">
-            <h2 class="text-base font-semibold text-n-slate-12 truncate">{{ contact.name }}</h2>
+            <div v-if="isEditingName" class="flex items-center gap-1.5">
+              <input
+                v-model="nameEdit"
+                class="border border-n-brand rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12 w-52"
+                @keyup.enter="saveName"
+                @keyup.escape="isEditingName = false"
+              />
+              <button
+                class="text-n-brand i-lucide-check text-lg disabled:opacity-50"
+                :disabled="isSavingName || !nameEdit.trim()"
+                :title="$t('CRM.MODAL.SAVE')"
+                @click="saveName"
+              />
+              <button
+                class="text-n-slate-10 i-lucide-x text-lg"
+                @click="isEditingName = false"
+              />
+            </div>
+            <div v-else class="flex items-center gap-1.5 min-w-0">
+              <h2 class="text-base font-semibold text-n-slate-12 truncate">{{ contact.name }}</h2>
+              <button
+                class="text-n-slate-9 hover:text-n-brand i-lucide-pencil text-sm flex-shrink-0"
+                title="Editar nome do contato"
+                @click="startEditName"
+              />
+            </div>
             <div class="flex items-center gap-3 mt-0.5 flex-wrap">
               <span v-if="contact.phone_number" class="text-sm text-n-slate-10 flex items-center gap-1">
                 <span class="i-lucide-phone text-xs" />{{ contact.phone_number }}

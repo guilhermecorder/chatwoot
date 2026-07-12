@@ -67,11 +67,13 @@ const deleteBot = async bot => {
   } catch { useAlert(t('CRM.ERROR.GENERIC')); }
 };
 
-const botDelayLabel = h => {
-  const n = Number(h);
-  if (n < 1) return `${Math.round(n * 60)}min`;
-  if (n < 24) return `${n}h`;
-  return `${Math.round(n / 24)}d`;
+const botDelayLabel = step => {
+  const hours = step.delay_value != null
+    ? Number(step.delay_value) * (step.delay_unit === 'days' ? 24 : 1)
+    : Number(step.delay_hours);
+  if (hours < 1) return `${Math.round(hours * 60)}min`;
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 };
 
 // ── Delete flow ───────────────────────────────────────────────────
@@ -335,8 +337,9 @@ const delayLabel = (minutes) => {
           </div>
 
           <div class="flex items-center gap-1 flex-shrink-0 ml-1">
-            <!-- Arrastar coluna — sempre disponível -->
+            <!-- Arrastar coluna — só admin reorganiza o kanban -->
             <span
+              v-if="isAdmin"
               class="column-drag-handle i-lucide-grip-vertical text-sm text-n-slate-9 hover:text-n-slate-12 cursor-grab active:cursor-grabbing"
               title="Arrastar para reordenar a coluna"
             />
@@ -518,7 +521,7 @@ const delayLabel = (minutes) => {
                   v-for="(s, i) in bot.steps"
                   :key="i"
                   class="text-[10px] bg-n-alpha-2 text-n-slate-10 rounded px-1.5 py-0.5"
-                >{{ botDelayLabel(s.delay_hours) }}: "{{ s.message }}"</span>
+                >{{ botDelayLabel(s) }}: {{ s.template_params ? `📋 ${s.template_params.name}` : `"${s.message}"` }}</span>
               </div>
             </div>
             <div class="flex items-center border-t border-n-weak/50 divide-x divide-n-weak/50">

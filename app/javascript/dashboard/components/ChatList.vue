@@ -309,9 +309,12 @@ function filterByAssigneeTab(conversations) {
 }
 
 function sortByUnreadStatus(conversations) {
+  // Não lidas no topo; dentro de cada grupo, da conversa mais RECENTE
+  // para a mais antiga (recência manda, não a quantidade de não lidas).
   return [...conversations].sort((a, b) => {
-    const unreadCountDiff = (b.unread_count || 0) - (a.unread_count || 0);
-    if (unreadCountDiff !== 0) return unreadCountDiff;
+    const aUnread = (a.unread_count || 0) > 0 ? 1 : 0;
+    const bUnread = (b.unread_count || 0) > 0 ? 1 : 0;
+    if (bUnread !== aUnread) return bUnread - aUnread;
 
     return (b.last_activity_at || 0) - (a.last_activity_at || 0);
   });
