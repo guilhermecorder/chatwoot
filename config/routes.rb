@@ -182,6 +182,7 @@ Rails.application.routes.draw do
                   get  :history
                   post :trigger_label_change
                   post :detect_value
+                  post :start_conversation
                 end
                 collection do
                   post :detect_values_bulk

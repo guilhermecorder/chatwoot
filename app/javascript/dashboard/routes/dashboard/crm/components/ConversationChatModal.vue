@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue';
-import { useStore } from 'dashboard/composables/store';
+import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import MessageApi from 'dashboard/api/inbox/message';
@@ -13,18 +13,49 @@ import { onClickOutside } from '@vueuse/core';
 
 const props = defineProps({
   contact: { type: Object, required: true }, // card do CRM (contact_json)
+  pipelineId: { type: Number, default: null },
 });
 
-const emit = defineEmits(['close', 'replied', 'resolved']);
+const emit = defineEmits(['close', 'replied', 'resolved', 'conversationStarted']);
 
 const { t } = useI18n();
 const store = useStore();
 
 const conversationId = computed(() => props.contact.last_conversation_id);
+const hasConversation = computed(() => !!conversationId.value);
 const inboxId = computed(() => props.contact.last_conversation?.inbox_id);
 const isWhatsapp = computed(
   () => props.contact.last_conversation?.channel_type === 'Channel::Whatsapp'
 );
+
+// ── Iniciar conversa (cards criados à mão, sem conversa ainda) ──
+const inboxes = useMapGetter('inboxes/getInboxes');
+const whatsappInboxes = computed(() =>
+  inboxes.value.filter(i => i.channel_type === 'Channel::Whatsapp')
+);
+const startInboxId = ref(null);
+const isStarting = ref(false);
+
+watch(whatsappInboxes, list => {
+  if (!startInboxId.value && list.length) startInboxId.value = list[0].id;
+}, { immediate: true });
+
+const startConversation = async () => {
+  if (!startInboxId.value || isStarting.value) return;
+  isStarting.value = true;
+  try {
+    const data = await store.dispatch('crm/startConversation', {
+      pipelineId: props.pipelineId,
+      id: props.contact.id,
+      inboxId: startInboxId.value,
+    });
+    emit('conversationStarted', data);
+  } catch (error) {
+    useAlert(error?.response?.data?.error || t('CRM.ERROR.GENERIC'));
+  } finally {
+    isStarting.value = false;
+  }
+};
 
 const messages = ref([]);
 const isLoading = ref(true);
@@ -208,7 +239,22 @@ const onTemplateSend = async payload => {
   }
 };
 
-onMounted(loadMessages);
+onMounted(() => {
+  if (hasConversation.value) {
+    loadMessages();
+  } else {
+    isLoading.value = false;
+    if (!inboxes.value.length) store.dispatch('inboxes/get');
+  }
+});
+
+// conversa criada agora há pouco → carrega o (vazio) histórico e segue o fluxo
+watch(conversationId, id => {
+  if (id) {
+    convStatus.value = props.contact.last_conversation?.status || 'open';
+    loadMessages();
+  }
+});
 </script>
 
 <template>
@@ -242,8 +288,40 @@ onMounted(loadMessages);
         />
       </div>
 
+      <!-- ── Sem conversa ainda: iniciar pelo WhatsApp ── -->
+      <div
+        v-if="!hasConversation"
+        class="flex-1 flex flex-col items-center justify-center gap-4 px-6 py-8 bg-n-alpha-1"
+      >
+        <span class="i-lucide-message-square-plus text-4xl text-n-slate-9" />
+        <div class="text-center">
+          <p class="text-sm font-medium text-n-slate-12">{{ $t('CRM.CHAT.NO_CONVERSATION_TITLE') }}</p>
+          <p class="text-xs text-n-slate-10 mt-1 max-w-xs">{{ $t('CRM.CHAT.NO_CONVERSATION_HINT') }}</p>
+        </div>
+
+        <div v-if="whatsappInboxes.length" class="w-full max-w-xs space-y-2">
+          <select
+            v-model="startInboxId"
+            class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+          >
+            <option v-for="i in whatsappInboxes" :key="i.id" :value="i.id">{{ i.name }}</option>
+          </select>
+          <button
+            class="w-full flex items-center justify-center gap-2 bg-n-brand text-white rounded-xl py-2.5 text-sm font-medium hover:bg-n-brand/90 disabled:opacity-50 transition-colors"
+            :disabled="!startInboxId || isStarting"
+            @click="startConversation"
+          >
+            <span :class="isStarting ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-message-circle-more'" class="text-base" />
+            {{ isStarting ? $t('CRM.MODAL.LOADING') : $t('CRM.CHAT.START_BUTTON') }}
+          </button>
+          <p class="text-[10px] text-n-slate-9 text-center">{{ $t('CRM.CHAT.START_TEMPLATE_NOTE') }}</p>
+        </div>
+        <p v-else class="text-xs text-n-slate-10">{{ $t('CRM.CHAT.NO_WHATSAPP_INBOX') }}</p>
+      </div>
+
       <!-- Messages -->
       <div
+        v-else
         ref="messagesEl"
         class="flex-1 overflow-y-auto px-4 py-3 space-y-2 min-h-0 bg-n-alpha-1"
         style="scrollbar-width:thin;"
@@ -311,7 +389,7 @@ onMounted(loadMessages);
       </div>
 
       <!-- ── Painel de Templates (remarketing) ── -->
-      <div v-if="showTemplates" class="border-t border-n-weak p-3 flex-shrink-0 max-h-[55%] overflow-y-auto">
+      <div v-if="hasConversation && showTemplates" class="border-t border-n-weak p-3 flex-shrink-0 max-h-[55%] overflow-y-auto">
         <div class="flex items-center justify-between mb-2">
           <p class="text-sm font-semibold text-n-slate-12 flex items-center gap-1.5">
             <span class="i-lucide-message-square-text text-base text-n-brand" />
@@ -340,7 +418,7 @@ onMounted(loadMessages);
       </div>
 
       <!-- Reply box -->
-      <div v-else class="border-t border-n-weak p-3 flex-shrink-0">
+      <div v-else-if="hasConversation" class="border-t border-n-weak p-3 flex-shrink-0">
         <!-- Ações: resolver + templates -->
         <div class="flex items-center gap-2 mb-2">
           <button

@@ -78,11 +78,12 @@
       "CLEAR_FILTERS": "Clear filters",
       "AWAITING_REPLY": "Awaiting reply",
       "SORT": "Sort",
-      "SORT_DEFAULT": "Default order",
+      "SORT_DEFAULT": "Manual order",
       "SORT_WAITING": "Longest waiting",
       "SORT_OLDEST": "Oldest → newest",
       "SORT_NEWEST": "Newest → oldest",
-      "APPLY": "Apply filters"
+      "APPLY": "Apply filters",
+      "SORT_LAST_MESSAGE": "Last message (unread first)"
     },
     "MODAL": {
       "TAB_CRM": "CRM",
@@ -144,7 +145,13 @@
       "TEMPLATES": "Templates",
       "TEMPLATES_TITLE": "Template messages (remarketing)",
       "TEMPLATE_FILL": "Fill template",
-      "EMOJI": "Emojis"
+      "EMOJI": "Emojis",
+      "START_TITLE": "Start a conversation with this contact",
+      "NO_CONVERSATION_TITLE": "This contact has no conversation yet",
+      "NO_CONVERSATION_HINT": "Pick the WhatsApp inbox to create the conversation, then send a template message.",
+      "START_BUTTON": "Start conversation",
+      "START_TEMPLATE_NOTE": "Tip: for new contacts WhatsApp only delivers TEMPLATE messages until the person replies.",
+      "NO_WHATSAPP_INBOX": "No WhatsApp inbox available."
     },
     "PRESETS": {
       "TITLE": "Column views",

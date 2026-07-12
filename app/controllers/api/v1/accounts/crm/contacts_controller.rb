@@ -1,6 +1,6 @@
 class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseController
   before_action :pipeline
-  before_action :crm_contact, only: [:update, :destroy, :history]
+  before_action :crm_contact, only: [:update, :destroy, :history, :trigger_label_change, :detect_value, :start_conversation]
 
   # scope=recent (padrão): só cards "ativos no último mês" — lead novo OU
   # card criado/movido nos últimos 30 dias. Deixa o board leve (mobile!).
@@ -122,6 +122,28 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     end
 
     head :ok
+  end
+
+  # POST start_conversation — cria a primeira conversa do contato numa caixa
+  # escolhida (cards adicionados à mão não têm conversa; o balão precisa dela).
+  def start_conversation
+    contact = @crm_contact.contact
+    inbox = Current.account.inboxes.find(params[:inbox_id])
+
+    contact_inbox = ContactInboxBuilder.new(contact: contact, inbox: inbox).perform
+    if contact_inbox.blank?
+      return render json: { error: 'Não foi possível vincular o contato a esta caixa (confira o telefone).' },
+                    status: :unprocessable_entity
+    end
+
+    Current.account.conversations.create!(
+      inbox_id: inbox.id,
+      contact_id: contact.id,
+      contact_inbox_id: contact_inbox.id
+    )
+
+    preload_card_data([@crm_contact])
+    render json: contact_json(@crm_contact)
   end
 
   # POST detect_value — extrai o maior orçamento (R$) das conversas e grava no card

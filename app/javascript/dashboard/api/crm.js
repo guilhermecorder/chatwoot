@@ -187,6 +187,13 @@ class CrmAPI extends ApiClient {
     );
   }
 
+  startConversation(pipelineId, contactId, inboxId) {
+    return axios.post(
+      `${this.url}/pipelines/${pipelineId}/contacts/${contactId}/start_conversation`,
+      { inbox_id: inboxId }
+    );
+  }
+
   detectCardValue(pipelineId, contactId) {
     return axios.post(
       `${this.url}/pipelines/${pipelineId}/contacts/${contactId}/detect_value`

@@ -78,11 +78,12 @@
       "CLEAR_FILTERS": "Limpar filtros",
       "AWAITING_REPLY": "Sem resposta",
       "SORT": "Ordenar",
-      "SORT_DEFAULT": "Ordem padrão",
+      "SORT_DEFAULT": "Ordem manual",
       "SORT_WAITING": "Aguardando há mais tempo",
       "SORT_OLDEST": "Mais antigo → mais novo",
       "SORT_NEWEST": "Mais novo → mais antigo",
-      "APPLY": "Aplicar filtros"
+      "APPLY": "Aplicar filtros",
+      "SORT_LAST_MESSAGE": "Última mensagem (não lidas no topo)"
     },
     "MODAL": {
       "TAB_CRM": "CRM",
@@ -144,7 +145,13 @@
       "TEMPLATES": "Modelos",
       "TEMPLATES_TITLE": "Mensagens modelo (remarketing)",
       "TEMPLATE_FILL": "Preencher modelo",
-      "EMOJI": "Emojis"
+      "EMOJI": "Emojis",
+      "START_TITLE": "Iniciar conversa com este contato",
+      "NO_CONVERSATION_TITLE": "Este contato ainda não tem conversa",
+      "NO_CONVERSATION_HINT": "Escolha a caixa do WhatsApp para criar a conversa. Depois envie uma mensagem modelo para iniciar o papo.",
+      "START_BUTTON": "Iniciar conversa",
+      "START_TEMPLATE_NOTE": "Dica: para contato novo, o WhatsApp só entrega mensagem MODELO — texto livre só depois que a pessoa responder.",
+      "NO_WHATSAPP_INBOX": "Nenhuma caixa WhatsApp disponível."
     },
     "PRESETS": {
       "TITLE": "Visualizações de colunas",

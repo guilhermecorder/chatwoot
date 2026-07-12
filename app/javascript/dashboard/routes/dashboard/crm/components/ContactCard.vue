@@ -145,12 +145,14 @@ const channelIcon = (channelType) => {
       <span class="flex items-center gap-1.5 ml-auto">
         <span v-if="lastActivity" class="text-xs text-n-slate-9">{{ lastActivity }}</span>
         <button
-          v-if="contact.last_conversation_id"
-          class="flex items-center justify-center w-6 h-6 rounded-lg text-n-slate-9 hover:text-n-brand hover:bg-n-brand/10 transition-colors"
-          :title="$t('CRM.CHAT.OPEN')"
+          class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors"
+          :class="contact.last_conversation_id
+            ? 'text-n-brand bg-n-brand/10 hover:bg-n-brand hover:text-white'
+            : 'text-n-slate-9 border border-dashed border-n-weak hover:text-n-brand hover:border-n-brand'"
+          :title="contact.last_conversation_id ? $t('CRM.CHAT.OPEN') : $t('CRM.CHAT.START_TITLE')"
           @click.stop="emit('openChat', contact)"
         >
-          <span class="i-lucide-message-circle-more text-sm" />
+          <span class="i-lucide-message-circle-more text-lg" />
         </button>
       </span>
     </div>

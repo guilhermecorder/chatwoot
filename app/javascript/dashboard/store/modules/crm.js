@@ -237,6 +237,12 @@ const actions = {
     await CrmAPI.triggerLabelChange(pipelineId, contactId, { added, removed });
   },
 
+  async startConversation({ commit }, { pipelineId, id, inboxId }) {
+    const { data } = await CrmAPI.startConversation(pipelineId, id, inboxId);
+    commit('editContact', data); // card volta completo, com a conversa criada
+    return data;
+  },
+
   async detectCardValue({ commit }, { pipelineId, id }) {
     const { data } = await CrmAPI.detectCardValue(pipelineId, id);
     if (data.updated) commit('patchContactValue', { id, value: data.value });
