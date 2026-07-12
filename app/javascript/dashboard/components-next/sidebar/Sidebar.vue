@@ -321,6 +321,8 @@ const crmSettings = useMapGetter('crm/getSettings');
 
 // seções controláveis do menu (name do item → chave de feature)
 const FEATURE_BY_ITEM_NAME = {
+  Inbox: 'inbox',
+  Conversation: 'conversation',
   Captain: 'captain',
   Companies: 'companies',
   Reports: 'reports',
@@ -329,6 +331,7 @@ const FEATURE_BY_ITEM_NAME = {
   Tasks: 'tasks',
   Agenda: 'agenda',
   Academy: 'academy',
+  Settings: 'settings',
 };
 
 const blockedFeatures = computed(() => {

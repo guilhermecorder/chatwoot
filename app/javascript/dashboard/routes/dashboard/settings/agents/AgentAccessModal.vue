@@ -13,6 +13,8 @@ const store = useStore();
 
 // seções do sistema que o admin pode bloquear por agente
 const FEATURES = [
+  { key: 'inbox',         label: 'Caixa de entrada' },
+  { key: 'conversation',  label: 'Conversas' },
   { key: 'crm',           label: 'CRM (funil de leads)' },
   { key: 'crm_campaigns', label: 'Campanha WhatsApp (mensagens em massa)' },
   { key: 'tasks',         label: 'Tarefas' },
@@ -21,6 +23,7 @@ const FEATURES = [
   { key: 'academy',       label: 'Academia CEVICO' },
   { key: 'companies',     label: 'Empresas' },
   { key: 'captain',       label: 'Captain (IA)' },
+  { key: 'settings',      label: 'Configurações' },
 ];
 
 const crmSettings = useMapGetter('crm/getSettings');
