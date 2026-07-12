@@ -97,6 +97,10 @@ export const AUTOMATIONS = {
         name: 'ASSIGN_TEAM',
       },
       {
+        key: 'move_crm_card',
+        name: 'MOVE_CRM_CARD',
+      },
+      {
         key: 'remove_assigned_agent',
         name: 'REMOVE_ASSIGNED_AGENT',
       },
@@ -237,6 +241,10 @@ export const AUTOMATIONS = {
       {
         key: 'assign_team',
         name: 'ASSIGN_TEAM',
+      },
+      {
+        key: 'move_crm_card',
+        name: 'MOVE_CRM_CARD',
       },
       {
         key: 'remove_assigned_agent',
@@ -385,6 +393,10 @@ export const AUTOMATIONS = {
         name: 'ASSIGN_TEAM',
       },
       {
+        key: 'move_crm_card',
+        name: 'MOVE_CRM_CARD',
+      },
+      {
         key: 'remove_assigned_agent',
         name: 'REMOVE_ASSIGNED_AGENT',
       },
@@ -525,6 +537,10 @@ export const AUTOMATIONS = {
         name: 'ASSIGN_TEAM',
       },
       {
+        key: 'move_crm_card',
+        name: 'MOVE_CRM_CARD',
+      },
+      {
         key: 'remove_assigned_agent',
         name: 'REMOVE_ASSIGNED_AGENT',
       },
@@ -655,6 +671,10 @@ export const AUTOMATIONS = {
         name: 'ASSIGN_TEAM',
       },
       {
+        key: 'move_crm_card',
+        name: 'MOVE_CRM_CARD',
+      },
+      {
         key: 'remove_assigned_agent',
         name: 'REMOVE_ASSIGNED_AGENT',
       },
@@ -718,6 +738,11 @@ export const AUTOMATION_ACTION_TYPES = [
   {
     key: 'assign_team',
     label: 'ASSIGN_TEAM',
+    inputType: 'search_select',
+  },
+  {
+    key: 'move_crm_card',
+    label: 'MOVE_CRM_CARD',
     inputType: 'search_select',
   },
   {

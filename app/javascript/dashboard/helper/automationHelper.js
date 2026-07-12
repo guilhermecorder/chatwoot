@@ -102,6 +102,7 @@ export const getActionOptions = ({
   type,
   addNoneToListFn,
   priorityOptions,
+  crmStages,
 }) => {
   const actionsMap = {
     assign_agent: addNoneToListFn ? addNoneToListFn(agents) : agents,
@@ -111,6 +112,7 @@ export const getActionOptions = ({
     remove_label: generateConditionOptions(labels, 'title'),
     change_priority: priorityOptions,
     add_sla: slaPolicies,
+    move_crm_card: crmStages,
   };
   return actionsMap[type];
 };

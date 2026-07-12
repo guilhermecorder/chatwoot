@@ -2,7 +2,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import languages from 'dashboard/components/widgets/conversation/advancedFilterItems/languages';
 import countries from 'shared/constants/countries';
-import { useStoreGetters, useMapGetter } from 'dashboard/composables/store';
+import { useStoreGetters, useMapGetter, useStore } from 'dashboard/composables/store';
 
 import {
   getActionOptions,
@@ -19,6 +19,7 @@ import {
  */
 export default function useAutomationValues() {
   const getters = useStoreGetters();
+  const store = useStore();
   const { t } = useI18n();
   const agents = useMapGetter('agents/getVerifiedAgents');
   const campaigns = useMapGetter('campaigns/getAllCampaigns');
@@ -27,6 +28,15 @@ export default function useAutomationValues() {
   const labels = useMapGetter('labels/getLabels');
   const teams = useMapGetter('teams/getTeams');
   const slaPolicies = useMapGetter('sla/getSLA');
+
+  // CEVICO: colunas do CRM para a ação "mover card para coluna"
+  const crmPipelines = useMapGetter('crm/getPipelines');
+  if (!crmPipelines.value.length) store.dispatch('crm/fetchPipelines').catch(() => {});
+  const crmStages = computed(() =>
+    crmPipelines.value.flatMap(p =>
+      (p.stages ?? []).map(s => ({ id: s.id, name: `${p.name} › ${s.name}` }))
+    )
+  );
 
   const booleanFilterOptions = computed(() => [
     { id: true, name: t('FILTER.ATTRIBUTE_LABELS.TRUE') },
@@ -141,6 +151,7 @@ export default function useAutomationValues() {
       type,
       addNoneToListFn: addNoneToList,
       priorityOptions: priorityOptions.value,
+      crmStages: crmStages.value,
     });
   };
 
