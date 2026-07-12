@@ -69,6 +69,7 @@ class Account < ApplicationRecord
   has_many :crm_pipelines, class_name: 'Crm::Pipeline', dependent: :destroy_async
   has_many :crm_campaigns, class_name: 'Crm::Campaign', dependent: :destroy_async
   has_many :crm_message_automations, class_name: 'Crm::MessageAutomation', dependent: :destroy_async
+  has_many :crm_followup_bots, class_name: 'Crm::FollowupBot', dependent: :destroy_async
   has_many :canned_responses, dependent: :destroy_async
   has_many :categories, dependent: :destroy_async, class_name: '::Category'
   has_many :contacts, dependent: :destroy_async

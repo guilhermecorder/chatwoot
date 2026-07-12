@@ -3,10 +3,12 @@ import { ref, computed, watch } from 'vue';
 import { useStore } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import draggable from 'vuedraggable';
 import ContactCard from './ContactCard.vue';
 import StageEditModal from './StageEditModal.vue';
 import ColumnAutomationsModal from './ColumnAutomationsModal.vue';
+import FollowupBotModal from './FollowupBotModal.vue';
 
 const props = defineProps({
   stage:           { type: Object, required: true },
@@ -21,11 +23,53 @@ const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat']);
 
 const store = useStore();
 const { t } = useI18n();
+const { isAdmin } = useAdmin();
 
 // ── Modals ────────────────────────────────────────────────────────
 const showEditModal         = ref(false);
 const showAutomationForm    = ref(false);
 const editingAutomation     = ref(null);  // null = create, object = edit
+
+// ── Robôs de follow-up desta coluna ───────────────────────────────
+const followupBots      = ref([]);
+const showBotModal      = ref(false);
+const editingBot        = ref(null);
+const deleteBotConfirmId = ref(null);
+
+const loadFollowupBots = async () => {
+  if (!isAdmin.value) return;
+  try {
+    followupBots.value = await store.dispatch('crm/fetchFollowupBots', { stage_id: props.stage.id });
+  } catch {
+    followupBots.value = [];
+  }
+};
+
+const openCreateBot = () => { editingBot.value = null; showBotModal.value = true; };
+const openEditBot = bot => { editingBot.value = bot; showBotModal.value = true; };
+const onBotSaved = async () => { showBotModal.value = false; editingBot.value = null; await loadFollowupBots(); };
+
+const toggleBot = async bot => {
+  try {
+    await store.dispatch('crm/updateFollowupBot', { id: bot.id, active: !bot.active });
+    bot.active = !bot.active;
+  } catch { useAlert(t('CRM.ERROR.GENERIC')); }
+};
+
+const deleteBot = async bot => {
+  try {
+    await store.dispatch('crm/deleteFollowupBot', bot.id);
+    followupBots.value = followupBots.value.filter(b => b.id !== bot.id);
+    deleteBotConfirmId.value = null;
+  } catch { useAlert(t('CRM.ERROR.GENERIC')); }
+};
+
+const botDelayLabel = h => {
+  const n = Number(h);
+  if (n < 1) return `${Math.round(n * 60)}min`;
+  if (n < 24) return `${n}h`;
+  return `${Math.round(n / 24)}d`;
+};
 
 // ── Delete flow ───────────────────────────────────────────────────
 const showDeleteConfirm = ref(false);
@@ -87,8 +131,8 @@ const loadAutomations = async () => {
 };
 
 watch(() => props.programmingMode, (on) => {
-  if (on) loadAutomations();
-  else automations.value = [];
+  if (on) { loadAutomations(); loadFollowupBots(); }
+  else { automations.value = []; followupBots.value = []; }
 }, { immediate: true });
 
 // ── Kanban helpers ────────────────────────────────────────────────
@@ -434,6 +478,70 @@ const delayLabel = (minutes) => {
           </template>
         </div>
       </template>
+
+      <!-- Robôs de follow-up desta coluna (só admin) -->
+      <div v-if="isAdmin" class="mt-3 pt-3 border-t border-yellow-400/20">
+        <p class="text-[11px] font-semibold text-yellow-600/90 mb-2 flex items-center gap-1">
+          <span class="i-lucide-bot text-xs" /> Robôs de follow-up
+        </p>
+        <div v-if="!followupBots.length" class="text-[11px] text-n-slate-9 mb-2">
+          Cutucadas automáticas para os cards parados nesta coluna.
+        </div>
+        <div
+          v-for="bot in followupBots"
+          :key="bot.id"
+          class="rounded-lg border bg-n-solid-1 mb-2"
+          :class="bot.active ? 'border-yellow-400/30' : 'border-n-weak opacity-50'"
+        >
+          <div v-if="deleteBotConfirmId === bot.id" class="p-2.5 space-y-2">
+            <p class="text-xs text-n-slate-11">Excluir <strong>{{ bot.name }}</strong>?</p>
+            <div class="flex gap-1.5">
+              <button class="flex-1 bg-red-500 text-white rounded py-1 text-xs" @click="deleteBot(bot)">Excluir</button>
+              <button class="flex-1 border border-n-weak rounded py-1 text-xs text-n-slate-11" @click="deleteBotConfirmId = null">Cancelar</button>
+            </div>
+          </div>
+          <template v-else>
+            <div class="p-2.5 cursor-pointer" @click="openEditBot(bot)">
+              <div class="flex items-start justify-between gap-1 mb-1.5">
+                <span class="text-xs font-semibold text-n-slate-12 leading-tight">{{ bot.name }}</span>
+                <span
+                  class="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 font-medium"
+                  :class="bot.active ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
+                >{{ bot.active ? 'Ativo' : 'Off' }}</span>
+              </div>
+              <div class="flex flex-wrap gap-1">
+                <span
+                  v-for="(s, i) in bot.steps"
+                  :key="i"
+                  class="text-[10px] bg-n-alpha-2 text-n-slate-10 rounded px-1.5 py-0.5"
+                >{{ botDelayLabel(s.delay_hours) }}: "{{ s.message }}"</span>
+              </div>
+            </div>
+            <div class="flex items-center border-t border-n-weak/50 divide-x divide-n-weak/50">
+              <button
+                class="flex-1 flex items-center justify-center gap-1 py-1.5 text-[11px] hover:bg-n-alpha-1 rounded-bl-lg"
+                :class="bot.active ? 'text-yellow-600' : 'text-green-600'"
+                @click.stop="toggleBot(bot)"
+              >
+                <span :class="bot.active ? 'i-lucide-pause' : 'i-lucide-play'" class="text-xs" />
+                {{ bot.active ? 'Pausar' : 'Ativar' }}
+              </button>
+              <button
+                class="px-3 py-1.5 text-n-slate-9 hover:text-red-500 hover:bg-red-500/5 rounded-br-lg"
+                @click.stop="deleteBotConfirmId = bot.id"
+              >
+                <span class="i-lucide-trash-2 text-xs" />
+              </button>
+            </div>
+          </template>
+        </div>
+        <button
+          class="w-full flex items-center justify-center gap-1.5 text-[11px] text-yellow-600 hover:text-yellow-700 py-1.5 rounded-lg hover:bg-yellow-500/10 border border-dashed border-yellow-400/40"
+          @click="openCreateBot"
+        >
+          <span class="i-lucide-plus text-xs" /> Robô de follow-up
+        </button>
+      </div>
     </div>
 
     <!-- ── Body: MODO NORMAL → cards ────────────────────────── -->
@@ -502,5 +610,15 @@ const delayLabel = (minutes) => {
     :initial-automation="editingAutomation"
     @close="showAutomationForm = false"
     @saved="onAutomationSaved"
+  />
+
+  <!-- Robô de follow-up da coluna -->
+  <FollowupBotModal
+    v-if="showBotModal"
+    :bot="editingBot"
+    :stage-id="stage.id"
+    :pipeline-id="pipelineId"
+    @close="showBotModal = false"
+    @saved="onBotSaved"
   />
 </template>
