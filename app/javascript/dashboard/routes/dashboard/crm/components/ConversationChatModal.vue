@@ -1,20 +1,30 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue';
+import { useStore } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import MessageApi from 'dashboard/api/inbox/message';
 import ConversationApi from 'dashboard/api/inbox/conversation';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import TemplatesPicker from 'dashboard/components/widgets/conversation/WhatsappTemplates/TemplatesPicker.vue';
+import WhatsAppTemplateReply from 'dashboard/components/widgets/conversation/WhatsappTemplates/WhatsAppTemplateReply.vue';
+import EmojiPicker from 'shared/components/emoji/EmojiPicker.vue';
+import { onClickOutside } from '@vueuse/core';
 
 const props = defineProps({
   contact: { type: Object, required: true }, // card do CRM (contact_json)
 });
 
-const emit = defineEmits(['close', 'replied']);
+const emit = defineEmits(['close', 'replied', 'resolved']);
 
 const { t } = useI18n();
+const store = useStore();
 
 const conversationId = computed(() => props.contact.last_conversation_id);
+const inboxId = computed(() => props.contact.last_conversation?.inbox_id);
+const isWhatsapp = computed(
+  () => props.contact.last_conversation?.channel_type === 'Channel::Whatsapp'
+);
 
 const messages = ref([]);
 const isLoading = ref(true);
@@ -23,6 +33,22 @@ const hasMore = ref(false);
 const isSending = ref(false);
 const replyText = ref('');
 const messagesEl = ref(null);
+
+// status da conversa (open/resolved/pending/snoozed)
+const convStatus = ref(props.contact.last_conversation?.status || 'open');
+const isResolving = ref(false);
+
+// templates (remarketing)
+const showTemplates = ref(false);
+const selectedTemplate = ref(null);
+
+// emoji picker
+const showEmoji = ref(false);
+const emojiWrap = ref(null);
+onClickOutside(emojiWrap, () => { showEmoji.value = false; });
+const onInsertEmoji = e => {
+  replyText.value += e.emoji ?? e.value ?? '';
+};
 
 // message_type: 0 incoming | 1 outgoing | 2 activity | 3 template
 const isIncoming = m => m.message_type === 0;
@@ -122,6 +148,66 @@ const onKeydown = e => {
   }
 };
 
+// ── Resolver / reabrir conversa ────────────────────────────
+const isResolved = computed(() => convStatus.value === 'resolved');
+
+const toggleResolve = async () => {
+  if (isResolving.value) return;
+  isResolving.value = true;
+  const nextStatus = isResolved.value ? 'open' : 'resolved';
+  try {
+    await ConversationApi.toggleStatus({
+      conversationId: conversationId.value,
+      status: nextStatus,
+    });
+    convStatus.value = nextStatus;
+    useAlert(
+      nextStatus === 'resolved' ? t('CRM.CHAT.RESOLVED') : t('CRM.CHAT.REOPENED')
+    );
+    emit('resolved', { conversationId: conversationId.value, status: nextStatus });
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  } finally {
+    isResolving.value = false;
+  }
+};
+
+// ── Templates (remarketing) ────────────────────────────────
+const openTemplates = () => {
+  selectedTemplate.value = null;
+  showTemplates.value = true;
+  // garante que as inboxes/templates estão carregadas para o picker
+  store.dispatch('inboxes/get').catch(() => {});
+};
+
+const onTemplateSelect = template => {
+  selectedTemplate.value = template;
+};
+
+const onTemplateSend = async payload => {
+  if (isSending.value) return;
+  isSending.value = true;
+  try {
+    const { data } = await MessageApi.create({
+      conversationId: conversationId.value,
+      message: payload.message,
+      templateParams: payload.templateParams,
+      private: false,
+    });
+    messages.value.push(data);
+    showTemplates.value = false;
+    selectedTemplate.value = null;
+    await scrollToBottom();
+    // enviar template reabre a conversa no fluxo de atendimento
+    if (isResolved.value) convStatus.value = 'open';
+    emit('replied');
+  } catch {
+    useAlert(t('CRM.CHAT.SEND_ERROR'));
+  } finally {
+    isSending.value = false;
+  }
+};
+
 onMounted(loadMessages);
 </script>
 
@@ -143,6 +229,13 @@ onMounted(loadMessages);
             {{ contact.last_conversation?.inbox_name }} · #{{ conversationId }}
           </p>
         </div>
+        <!-- Status resolvido -->
+        <span
+          v-if="isResolved"
+          class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 flex-shrink-0"
+        >
+          {{ $t('CRM.CHAT.STATUS_RESOLVED') }}
+        </span>
         <button
           class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl flex-shrink-0"
           @click="emit('close')"
@@ -217,9 +310,78 @@ onMounted(loadMessages);
         </template>
       </div>
 
+      <!-- ── Painel de Templates (remarketing) ── -->
+      <div v-if="showTemplates" class="border-t border-n-weak p-3 flex-shrink-0 max-h-[55%] overflow-y-auto">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-sm font-semibold text-n-slate-12 flex items-center gap-1.5">
+            <span class="i-lucide-message-square-text text-base text-n-brand" />
+            {{ selectedTemplate ? $t('CRM.CHAT.TEMPLATE_FILL') : $t('CRM.CHAT.TEMPLATES_TITLE') }}
+          </p>
+          <button
+            class="text-xs text-n-slate-10 hover:text-n-slate-12 flex items-center gap-1"
+            @click="showTemplates = false; selectedTemplate = null"
+          >
+            <span class="i-lucide-x text-sm" />
+            {{ $t('CRM.CANCEL') }}
+          </button>
+        </div>
+
+        <WhatsAppTemplateReply
+          v-if="selectedTemplate"
+          :template="selectedTemplate"
+          @send-message="onTemplateSend"
+          @reset-template="selectedTemplate = null"
+        />
+        <TemplatesPicker
+          v-else
+          :inbox-id="inboxId"
+          @on-select="onTemplateSelect"
+        />
+      </div>
+
       <!-- Reply box -->
-      <div class="border-t border-n-weak p-3 flex-shrink-0">
+      <div v-else class="border-t border-n-weak p-3 flex-shrink-0">
+        <!-- Ações: resolver + templates -->
+        <div class="flex items-center gap-2 mb-2">
+          <button
+            class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors"
+            :class="isResolved
+              ? 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
+              : 'border-green-500/40 text-green-600 hover:bg-green-500/10'"
+            :disabled="isResolving"
+            @click="toggleResolve"
+          >
+            <span
+              :class="isResolving ? 'i-lucide-loader-2 animate-spin' : (isResolved ? 'i-lucide-rotate-ccw' : 'i-lucide-check-check')"
+              class="text-sm"
+            />
+            {{ isResolved ? $t('CRM.CHAT.REOPEN') : $t('CRM.CHAT.RESOLVE') }}
+          </button>
+
+          <button
+            v-if="isWhatsapp"
+            class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+            @click="openTemplates"
+          >
+            <span class="i-lucide-message-square-text text-sm" />
+            {{ $t('CRM.CHAT.TEMPLATES') }}
+          </button>
+        </div>
+
         <div class="flex items-end gap-2">
+          <!-- Emoji -->
+          <div ref="emojiWrap" class="relative flex-shrink-0">
+            <button
+              class="flex items-center justify-center w-10 h-10 rounded-xl border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+              :title="$t('CRM.CHAT.EMOJI')"
+              @click="showEmoji = !showEmoji"
+            >
+              <span class="i-lucide-smile text-base" />
+            </button>
+            <div v-if="showEmoji" class="absolute bottom-12 left-0 z-20">
+              <EmojiPicker @select="onInsertEmoji" />
+            </div>
+          </div>
           <textarea
             v-model="replyText"
             rows="2"
