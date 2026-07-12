@@ -39,6 +39,8 @@ class Crm::FollowupBotJob < ApplicationJob
       # cards que estão na coluna → conversas desses contatos
       contact_ids = Crm::Contact.where(stage_id: bot.stage_id).select(:contact_id)
       scope = scope.where(contact_id: contact_ids)
+      # caixa escolhida no robô de coluna → restringe a esse número
+      scope = scope.where(inbox_id: bot.inbox_id) if bot.inbox_id.present?
     else
       scope = scope.where(inbox_id: bot.inbox_id)
     end

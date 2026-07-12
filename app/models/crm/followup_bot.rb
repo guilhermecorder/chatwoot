@@ -59,13 +59,15 @@ class Crm::FollowupBot < ApplicationRecord
   end
 
   # Atraso da etapa em HORAS. Aceita o formato novo {delay_value, delay_unit}
-  # (unit: 'hours' | 'days') e o legado {delay_hours}.
+  # (unit: 'minutes' | 'hours' | 'days') e o legado {delay_hours}.
   def self.step_delay_hours(step)
-    if step['delay_value'].present?
-      value = step['delay_value'].to_f
-      step['delay_unit'] == 'days' ? value * 24 : value
-    else
-      step['delay_hours'].to_f
+    return step['delay_hours'].to_f if step['delay_value'].blank?
+
+    value = step['delay_value'].to_f
+    case step['delay_unit']
+    when 'days' then value * 24
+    when 'minutes' then value / 60.0
+    else value
     end
   end
 

@@ -158,11 +158,10 @@ const save = async () => {
       starts_at: form.value.starts_at ? new Date(form.value.starts_at).toISOString() : null,
       ends_at: form.value.ends_at ? new Date(form.value.ends_at).toISOString() : null,
     };
+    payload.inbox_id = form.value.inbox_id; // no robô de coluna é opcional
     if (isStageBot.value) {
       payload.stage_id = props.stageId;
       payload.pipeline_id = props.pipelineId;
-    } else {
-      payload.inbox_id = form.value.inbox_id;
     }
     if (props.bot) {
       await store.dispatch('crm/updateFollowupBot', { id: props.bot.id, ...payload });
@@ -242,14 +241,18 @@ const save = async () => {
 
         <div v-if="isStageBot" class="bg-n-brand/5 border border-n-brand/20 rounded-lg px-3 py-2 text-xs text-n-slate-11">
           <span class="i-lucide-info text-n-brand" />
-          Este robô roda para os cards <strong>desta coluna</strong>. As mensagens saem na caixa da própria conversa do paciente.
+          Este robô roda para os cards <strong>desta coluna</strong>.
         </div>
-        <div v-else>
-          <label class="text-xs font-medium text-n-slate-11 block mb-1">Caixa de entrada (WhatsApp)</label>
+        <div>
+          <label class="text-xs font-medium text-n-slate-11 block mb-1">
+            Caixa de entrada (WhatsApp)
+            <span v-if="isStageBot" class="text-n-slate-9 font-normal">— define o número e os modelos corretos</span>
+          </label>
           <select
             v-model="form.inbox_id"
             class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
           >
+            <option v-if="isStageBot" :value="null">Qualquer caixa (usa a da conversa)</option>
             <option v-for="i in whatsappInboxes" :key="i.id" :value="i.id">{{ i.name }}</option>
           </select>
         </div>
@@ -282,6 +285,7 @@ const save = async () => {
                   v-model="step.delay_unit"
                   class="border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
                 >
+                  <option value="minutes">minuto(s)</option>
                   <option value="hours">hora(s)</option>
                   <option value="days">dia(s)</option>
                 </select>
