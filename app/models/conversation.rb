@@ -185,13 +185,34 @@ class Conversation < ApplicationRecord
     (cached_label_list || '').split(',').map(&:strip)
   end
 
-  # CEVICO: etiquetas aplicadas na conversa passam a valer também no contato
-  # (aditivo — remover da conversa não remove do contato), para campanhas e
-  # CRM enxergarem o paciente unificado mesmo com conversas em várias caixas.
+  # CEVICO: o contato é a "hierarquia maior" das etiquetas. Toda etiqueta
+  # posta/removida em QUALQUER conversa (mesmo de caixas diferentes) reflete
+  # no contato. Na remoção, só tira do contato se nenhuma conversa irmã ainda
+  # tiver aquela etiqueta — assim o contato agrega o que veio de todos os canais.
   def update_labels(labels = nil)
+    previous = label_list.to_a
     result = super
-    contact&.add_labels(labels)
+    sync_labels_to_contact(previous, Array(labels).map(&:to_s))
     result
+  end
+
+  def sync_labels_to_contact(previous_labels, current_labels)
+    return unless contact
+
+    added   = current_labels - previous_labels
+    removed = previous_labels - current_labels
+    contact.add_labels(added) if added.any?
+
+    return if removed.empty?
+
+    sibling_labels = contact.conversations
+                            .where.not(id: id)
+                            .flat_map(&:label_list)
+                            .map(&:to_s).uniq
+    to_remove = removed - sibling_labels
+    return if to_remove.empty?
+
+    contact.update_labels(contact.label_list.map(&:to_s) - to_remove)
   end
 
   def notifiable_assignee_change?

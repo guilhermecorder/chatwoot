@@ -17,6 +17,7 @@ const CEVICO_BLOCKED_ROUTE_CHECKS = {
   crm: name => name === 'crm_board',
   crm_campaigns: name => name === 'crm_campaigns',
   tasks: name => name === 'tasks_board',
+  agenda: name => name === 'agenda_board',
   academy: name => name?.startsWith('academy'),
   reports: name => name?.includes('_reports') || name === 'label_dashboard',
   companies: name => name?.startsWith('companies_'),

@@ -623,6 +623,17 @@ function onBasicFilterChange(value, type) {
   resetAndFetchData();
 }
 
+// Toggle "não lidas no topo" — usa o sort nativo 'unread'
+const isUnreadFirst = computed(
+  () => activeSortBy.value === wootConstants.SORT_BY_TYPE.UNREAD
+);
+function toggleUnreadFirst() {
+  const next = isUnreadFirst.value
+    ? wootConstants.SORT_BY_TYPE.LAST_ACTIVITY_AT_DESC
+    : wootConstants.SORT_BY_TYPE.UNREAD;
+  onBasicFilterChange(next, 'sort');
+}
+
 function openLastSavedItemInFolder() {
   const lastItemOfFolder = folders.value[folders.value.length - 1];
   const lastItemId = lastItemOfFolder.id;
@@ -934,6 +945,24 @@ watch(conversationFilters, (newVal, oldVal) => {
       is-compact
       @chat-tab-change="updateAssigneeTab"
     />
+
+    <!-- Toggle: não lidas no topo -->
+    <button
+      v-if="!hasAppliedFiltersOrActiveFolders"
+      class="flex items-center gap-2 mx-3 mt-1 mb-0.5 px-2 py-1 rounded-lg text-xs transition-colors"
+      :class="isUnreadFirst
+        ? 'bg-n-brand/10 text-n-brand'
+        : 'text-n-slate-11 hover:bg-n-alpha-1'"
+      @click="toggleUnreadFirst"
+    >
+      <span
+        class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0"
+        :class="isUnreadFirst ? 'bg-n-brand border-n-brand' : 'border-n-slate-8'"
+      >
+        <span v-if="isUnreadFirst" class="i-lucide-check text-white text-[10px]" />
+      </span>
+      {{ $t('CHAT_LIST.UNREAD_FIRST') }}
+    </button>
 
     <p
       v-if="!chatListLoading && !conversationList.length"

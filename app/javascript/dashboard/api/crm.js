@@ -94,6 +94,23 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/message_automations/${id}/preview_eligible`);
   }
 
+  // ── Robôs de follow-up ────────────────────────────────────────────
+  getFollowupBots(params = {}) {
+    return axios.get(`${this.url}/followup_bots`, { params });
+  }
+
+  createFollowupBot(data) {
+    return axios.post(`${this.url}/followup_bots`, { followup_bot: data });
+  }
+
+  updateFollowupBot(id, data) {
+    return axios.put(`${this.url}/followup_bots/${id}`, { followup_bot: data });
+  }
+
+  deleteFollowupBot(id) {
+    return axios.delete(`${this.url}/followup_bots/${id}`);
+  }
+
   getTrafficReport(params) {
     return axios.get(`${this.url}/traffic_report`, { params });
   }
@@ -105,6 +122,14 @@ class CrmAPI extends ApiClient {
 
   applyRetroLabel(data) {
     return axios.post(`${this.url}/retro_labels/apply`, data);
+  }
+
+  previewLabelReplace(data) {
+    return axios.post(`${this.url}/label_replacements/preview`, data);
+  }
+
+  applyLabelReplace(data) {
+    return axios.post(`${this.url}/label_replacements/apply`, data);
   }
 
   // ── Unificação de contatos duplicados ─────────────────────────────
@@ -151,6 +176,19 @@ class CrmAPI extends ApiClient {
     return axios.post(
       `${this.url}/pipelines/${pipelineId}/contacts/${contactId}/trigger_label_change`,
       { added, removed }
+    );
+  }
+
+  detectCardValue(pipelineId, contactId) {
+    return axios.post(
+      `${this.url}/pipelines/${pipelineId}/contacts/${contactId}/detect_value`
+    );
+  }
+
+  detectValuesBulk(pipelineId, onlyEmpty = true) {
+    return axios.post(
+      `${this.url}/pipelines/${pipelineId}/contacts/detect_values_bulk`,
+      { only_empty: onlyEmpty }
     );
   }
 

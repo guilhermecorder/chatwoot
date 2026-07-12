@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_11_000003) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_12_000003) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -855,6 +855,25 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_11_000003) do
     t.index ["stage_id"], name: "index_crm_contacts_on_stage_id"
   end
 
+  create_table "crm_followup_bots", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "inbox_id"
+    t.bigint "sender_id"
+    t.string "name", null: false
+    t.boolean "active", default: true, null: false
+    t.jsonb "steps", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "pipeline_id"
+    t.bigint "stage_id"
+    t.index ["account_id", "active"], name: "index_crm_followup_bots_on_account_id_and_active"
+    t.index ["account_id"], name: "index_crm_followup_bots_on_account_id"
+    t.index ["inbox_id"], name: "index_crm_followup_bots_on_inbox_id"
+    t.index ["pipeline_id"], name: "index_crm_followup_bots_on_pipeline_id"
+    t.index ["sender_id"], name: "index_crm_followup_bots_on_sender_id"
+    t.index ["stage_id"], name: "index_crm_followup_bots_on_stage_id"
+  end
+
   create_table "crm_message_automations", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.bigint "inbox_id", null: false
@@ -1411,7 +1430,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_11_000003) do
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "unit"
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
+    t.index ["account_id", "unit"], name: "index_tasks_on_account_id_and_unit"
     t.index ["account_id"], name: "index_tasks_on_account_id"
     t.index ["assignee_id"], name: "index_tasks_on_assignee_id"
     t.index ["creator_id"], name: "index_tasks_on_creator_id"
@@ -1541,6 +1562,11 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_11_000003) do
   add_foreign_key "crm_contacts", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "crm_contacts", "crm_stages", column: "stage_id"
   add_foreign_key "crm_contacts", "users", column: "assignee_id"
+  add_foreign_key "crm_followup_bots", "accounts"
+  add_foreign_key "crm_followup_bots", "crm_pipelines", column: "pipeline_id"
+  add_foreign_key "crm_followup_bots", "crm_stages", column: "stage_id"
+  add_foreign_key "crm_followup_bots", "inboxes"
+  add_foreign_key "crm_followup_bots", "users", column: "sender_id"
   add_foreign_key "crm_message_automations", "accounts"
   add_foreign_key "crm_message_automations", "crm_stages", column: "trigger_stage_id"
   add_foreign_key "crm_message_automations", "inboxes"

@@ -111,6 +111,21 @@ const actions = {
     const { data } = await CrmAPI.getMessageAutomations();
     return data;
   },
+  async fetchFollowupBots(_, params = {}) {
+    const { data } = await CrmAPI.getFollowupBots(params);
+    return data;
+  },
+  async createFollowupBot(_, payload) {
+    const { data } = await CrmAPI.createFollowupBot(payload);
+    return data;
+  },
+  async updateFollowupBot(_, { id, ...payload }) {
+    const { data } = await CrmAPI.updateFollowupBot(id, payload);
+    return data;
+  },
+  async deleteFollowupBot(_, id) {
+    await CrmAPI.deleteFollowupBot(id);
+  },
   async createMessageAutomation(_, automationData) {
     const { data } = await CrmAPI.createMessageAutomation(automationData);
     return data;
@@ -132,6 +147,14 @@ const actions = {
   },
   async applyRetroLabel(_, payload) {
     const { data } = await CrmAPI.applyRetroLabel(payload);
+    return data;
+  },
+  async previewLabelReplace(_, payload) {
+    const { data } = await CrmAPI.previewLabelReplace(payload);
+    return data;
+  },
+  async applyLabelReplace(_, payload) {
+    const { data } = await CrmAPI.applyLabelReplace(payload);
     return data;
   },
   async previewContactUnification() {
@@ -204,6 +227,17 @@ const actions = {
   async triggerLabelChange(_, { pipelineId, contactId, added, removed }) {
     if (!added.length && !removed.length) return;
     await CrmAPI.triggerLabelChange(pipelineId, contactId, { added, removed });
+  },
+
+  async detectCardValue({ commit }, { pipelineId, id }) {
+    const { data } = await CrmAPI.detectCardValue(pipelineId, id);
+    if (data.updated) commit('patchContactValue', { id, value: data.value });
+    return data;
+  },
+
+  async detectValuesBulk(_, { pipelineId, onlyEmpty }) {
+    const { data } = await CrmAPI.detectValuesBulk(pipelineId, onlyEmpty);
+    return data;
   },
 
   // ── Settings / Integrations ──────────────────────────────────────
@@ -312,6 +346,10 @@ const mutations = {
   patchContactConversation(s, { id, data }) {
     const c = s.contacts.find(x => x.id === id);
     if (c?.last_conversation) c.last_conversation = { ...c.last_conversation, ...data };
+  },
+  patchContactValue(s, { id, value }) {
+    const c = s.contacts.find(x => x.id === id);
+    if (c) c.value = value;
   },
 };
 

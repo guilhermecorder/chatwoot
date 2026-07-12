@@ -2,6 +2,7 @@
 import { h, ref, computed, onMounted, watch } from 'vue';
 import { provideSidebarContext, useSidebarResize } from './provider';
 import { useAccount } from 'dashboard/composables/useAccount';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useKbd } from 'dashboard/composables/utils/useKbd';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useStore } from 'vuex';
@@ -43,6 +44,7 @@ const emit = defineEmits([
 ]);
 
 const { accountScopedRoute, isOnChatwootCloud } = useAccount();
+const { isAdmin } = useAdmin();
 const store = useStore();
 const searchShortcut = useKbd([`$mod`, 'k']);
 const { t } = useI18n();
@@ -325,6 +327,7 @@ const FEATURE_BY_ITEM_NAME = {
   CRM: 'crm',
   'Campanha WhatsApp': 'crm_campaigns',
   Tasks: 'tasks',
+  Agenda: 'agenda',
   Academy: 'academy',
 };
 
@@ -366,6 +369,8 @@ const visibleMenuItems = computed(() =>
 onMounted(() => {
   // carrega agent_permissions (e presets do CRM) para filtrar o menu
   store.dispatch('crm/fetchSettings').catch(() => {});
+  // carrega tarefas para o aviso de prazo na sidebar (badge em Tarefas)
+  store.dispatch('tasks/fetch').catch(() => {});
 });
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -658,6 +663,13 @@ const menuItems = computed(() => {
       label: 'Tarefas',
       icon: 'i-lucide-list-checks',
       to: accountScopedRoute('tasks_board'),
+      getterKeys: { count: 'tasks/getAlertCount' },
+    },
+    {
+      name: 'Agenda',
+      label: 'Agenda',
+      icon: 'i-lucide-calendar-days',
+      to: accountScopedRoute('agenda_board'),
     },
     {
       name: 'Academy',
@@ -723,6 +735,18 @@ const menuItems = computed(() => {
               },
             ]
           : []),
+        {
+          name: 'CEVICO Automations',
+          label: 'Automações',
+          icon: 'i-lucide-workflow',
+          to: accountScopedRoute('cevico_automations', {}, { tab: 'reguas' }),
+        },
+        {
+          name: 'CEVICO Robots',
+          label: 'Robôs',
+          icon: 'i-lucide-bot',
+          to: accountScopedRoute('cevico_automations', {}, { tab: 'robos' }),
+        },
         {
           name: 'Settings Inboxes',
           label: t('SIDEBAR.INBOXES'),
@@ -930,8 +954,8 @@ const menuItems = computed(() => {
           :key="item.name"
           v-bind="item"
         />
-        <!-- Personalizar menu (ocultar/mostrar seções — preferência pessoal) -->
-        <li class="list-none mt-1">
+        <!-- Personalizar menu (só admin) -->
+        <li v-if="isAdmin" class="list-none mt-1">
           <button
             class="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-n-slate-9 hover:text-n-slate-11 rounded-lg hover:bg-n-alpha-1 transition-colors"
             :class="{ 'justify-center': isEffectivelyCollapsed }"

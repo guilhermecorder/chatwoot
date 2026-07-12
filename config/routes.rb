@@ -144,8 +144,13 @@ Rails.application.routes.draw do
             resources :message_automations, only: [:index, :create, :update, :destroy] do
               member { get :preview_eligible }
             end
+            resources :followup_bots, only: [:index, :create, :update, :destroy]
             resource :traffic_report, only: [:show]
             resource :retro_labels, only: [] do
+              post :preview
+              post :apply
+            end
+            resource :label_replacements, only: [] do
               post :preview
               post :apply
             end
@@ -172,6 +177,10 @@ Rails.application.routes.draw do
                 member do
                   get  :history
                   post :trigger_label_change
+                  post :detect_value
+                end
+                collection do
+                  post :detect_values_bulk
                 end
               end
               resource :dashboard, only: [:show]
