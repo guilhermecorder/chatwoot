@@ -2,6 +2,8 @@
 import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
+import TemplatesPicker from 'dashboard/components/widgets/conversation/WhatsappTemplates/TemplatesPicker.vue';
+import WhatsAppTemplateParser from 'dashboard/components-next/whatsapp/WhatsAppTemplateParser.vue';
 
 const props = defineProps({
   bot: { type: Object, default: null },       // editar
@@ -13,6 +15,7 @@ const emit = defineEmits(['close', 'saved']);
 
 const store = useStore();
 const inboxes = useMapGetter('inboxes/getInboxes');
+const accountLabels = useMapGetter('labels/getLabels');
 const whatsappInboxes = computed(() =>
   inboxes.value.filter(i => i.channel_type === 'Channel::Whatsapp')
 );
@@ -20,39 +23,120 @@ const whatsappInboxes = computed(() =>
 const isStageBot = computed(() => !!props.stageId);
 const isSaving = ref(false);
 
+const newStep = () => ({
+  delay_value: 3,
+  delay_unit: 'hours',
+  kind: 'text',
+  message: 'Oi, pode falar?',
+  template_params: null,
+});
+
+// aceita etapas legadas ({delay_hours}) e as novas
+const normalizeStep = s => ({
+  delay_value: s.delay_value ?? s.delay_hours ?? 3,
+  delay_unit: s.delay_unit ?? 'hours',
+  kind: s.template_params ? 'template' : 'text',
+  message: s.message ?? '',
+  template_params: s.template_params ?? null,
+});
+
+const toLocalInput = iso => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 const form = ref({
   name: '',
   inbox_id: null,
   active: true,
-  steps: [{ delay_hours: 3, message: 'Oi, pode falar?' }],
+  steps: [newStep()],
+  required_labels: [],
+  exclude_labels: [],
+  starts_at: '',
+  ends_at: '',
 });
 
 onMounted(() => {
   if (!inboxes.value.length) store.dispatch('inboxes/get');
+  if (!accountLabels.value.length) store.dispatch('labels/fetch');
   if (props.bot) {
     form.value = {
       name: props.bot.name,
       inbox_id: props.bot.inbox_id,
       active: props.bot.active,
-      steps: props.bot.steps.length ? props.bot.steps.map(s => ({ ...s })) : [{ delay_hours: 3, message: '' }],
+      steps: props.bot.steps.length ? props.bot.steps.map(normalizeStep) : [newStep()],
+      required_labels: [...(props.bot.required_labels ?? [])],
+      exclude_labels: [...(props.bot.exclude_labels ?? [])],
+      starts_at: toLocalInput(props.bot.starts_at),
+      ends_at: toLocalInput(props.bot.ends_at),
     };
   } else if (!isStageBot.value) {
     form.value.inbox_id = whatsappInboxes.value[0]?.id ?? null;
   }
 });
 
+const toggleListItem = (list, value) => {
+  const idx = list.indexOf(value);
+  if (idx === -1) list.push(value);
+  else list.splice(idx, 1);
+};
+
 const addStep = () => {
   const last = form.value.steps[form.value.steps.length - 1];
-  form.value.steps.push({ delay_hours: (last?.delay_hours ?? 0) + 7, message: '' });
+  form.value.steps.push({
+    ...newStep(),
+    delay_value: (Number(last?.delay_value) || 0) + (last?.delay_unit === 'days' ? 1 : 7),
+    delay_unit: last?.delay_unit ?? 'hours',
+    message: '',
+  });
 };
 const removeStep = i => form.value.steps.splice(i, 1);
+
+const setStepKind = (step, kind) => {
+  step.kind = kind;
+  if (kind === 'text') step.template_params = null;
+};
+
+// ── Escolha de mensagem modelo para uma etapa ──
+const templateStepIndex = ref(null); // índice da etapa escolhendo modelo
+const pickerTemplate = ref(null);    // template selecionado (aguardando variáveis)
+
+const templatePickerInboxId = computed(
+  () => form.value.inbox_id ?? whatsappInboxes.value[0]?.id
+);
+
+const openTemplatePicker = i => {
+  templateStepIndex.value = i;
+  pickerTemplate.value = null;
+};
+
+const closeTemplatePicker = () => {
+  templateStepIndex.value = null;
+  pickerTemplate.value = null;
+};
+
+const useTemplate = payload => {
+  const step = form.value.steps[templateStepIndex.value];
+  if (step) {
+    step.kind = 'template';
+    step.message = payload.message;
+    step.template_params = payload.templateParams;
+  }
+  closeTemplatePicker();
+};
+
+const stepValid = s =>
+  Number(s.delay_value) >= 0 &&
+  (s.kind === 'template' ? !!s.template_params : !!s.message?.trim());
 
 const canSave = computed(
   () =>
     form.value.name?.trim() &&
     (isStageBot.value || form.value.inbox_id) &&
     form.value.steps?.length &&
-    form.value.steps.every(s => s.message?.trim() && Number(s.delay_hours) >= 0)
+    form.value.steps.every(stepValid)
 );
 
 const save = async () => {
@@ -62,7 +146,17 @@ const save = async () => {
     const payload = {
       name: form.value.name.trim(),
       active: form.value.active,
-      steps: form.value.steps.map(s => ({ delay_hours: Number(s.delay_hours), message: s.message.trim() })),
+      steps: form.value.steps.map(s => ({
+        delay_value: Number(s.delay_value),
+        delay_unit: s.delay_unit,
+        kind: s.kind,
+        message: s.kind === 'template' ? s.message : s.message.trim(),
+        template_params: s.kind === 'template' ? s.template_params : null,
+      })),
+      required_labels: form.value.required_labels,
+      exclude_labels: form.value.exclude_labels,
+      starts_at: form.value.starts_at ? new Date(form.value.starts_at).toISOString() : null,
+      ends_at: form.value.ends_at ? new Date(form.value.ends_at).toISOString() : null,
     };
     if (isStageBot.value) {
       payload.stage_id = props.stageId;
@@ -90,13 +184,53 @@ const save = async () => {
     class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
     @click.self="emit('close')"
   >
-    <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+    <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col">
       <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
         <h2 class="text-base font-semibold text-n-slate-12">{{ bot ? 'Editar robô' : 'Novo robô de follow-up' }}</h2>
         <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="emit('close')" />
       </div>
 
-      <div class="flex-1 overflow-y-auto p-5 space-y-4">
+      <!-- ── Sub-painel: escolher mensagem modelo ── -->
+      <div v-if="templateStepIndex !== null" class="flex-1 overflow-y-auto p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <p class="text-sm font-semibold text-n-slate-12">
+            {{ pickerTemplate ? 'Preencher variáveis do modelo' : 'Escolher mensagem modelo' }}
+          </p>
+          <button class="text-xs text-n-slate-10 hover:text-n-slate-12 flex items-center gap-1" @click="closeTemplatePicker">
+            <span class="i-lucide-arrow-left text-sm" /> Voltar
+          </button>
+        </div>
+
+        <WhatsAppTemplateParser
+          v-if="pickerTemplate"
+          :template="pickerTemplate"
+          @send-message="useTemplate"
+          @reset-template="pickerTemplate = null"
+        >
+          <template #actions="{ sendMessage, resetTemplate, disabled }">
+            <footer class="flex gap-2 justify-end">
+              <button class="px-3 py-1.5 text-sm border border-n-weak rounded-lg text-n-slate-11" @click="resetTemplate">
+                Trocar modelo
+              </button>
+              <button
+                class="px-4 py-1.5 text-sm bg-n-brand text-white rounded-lg disabled:opacity-50"
+                :disabled="disabled"
+                @click="sendMessage"
+              >
+                Usar este modelo
+              </button>
+            </footer>
+          </template>
+        </WhatsAppTemplateParser>
+        <TemplatesPicker
+          v-else
+          :inbox-id="templatePickerInboxId"
+          @on-select="pickerTemplate = $event"
+        />
+      </div>
+
+      <!-- ── Formulário principal ── -->
+      <div v-else class="flex-1 overflow-y-auto p-5 space-y-4">
         <div>
           <label class="text-xs font-medium text-n-slate-11 block mb-1">Nome do robô</label>
           <input
@@ -108,7 +242,7 @@ const save = async () => {
 
         <div v-if="isStageBot" class="bg-n-brand/5 border border-n-brand/20 rounded-lg px-3 py-2 text-xs text-n-slate-11">
           <span class="i-lucide-info text-n-brand" />
-          Este robô roda para os cards <strong>desta coluna</strong>. As cutucadas saem na caixa da própria conversa do paciente.
+          Este robô roda para os cards <strong>desta coluna</strong>. As mensagens saem na caixa da própria conversa do paciente.
         </div>
         <div v-else>
           <label class="text-xs font-medium text-n-slate-11 block mb-1">Caixa de entrada (WhatsApp)</label>
@@ -120,41 +254,162 @@ const save = async () => {
           </select>
         </div>
 
+        <!-- Etapas -->
         <div>
           <div class="flex items-center justify-between mb-2">
-            <label class="text-xs font-medium text-n-slate-11">Cadência de cutucadas</label>
+            <label class="text-xs font-medium text-n-slate-11">Cadência de mensagens</label>
             <button class="text-xs text-n-brand hover:underline flex items-center gap-1" @click="addStep">
               <span class="i-lucide-plus text-xs" /> Adicionar etapa
             </button>
           </div>
-          <div class="space-y-2">
-            <div v-for="(step, i) in form.steps" :key="i" class="flex items-start gap-2">
-              <div class="flex items-center gap-1 flex-shrink-0">
+
+          <div class="space-y-2.5">
+            <div
+              v-for="(step, i) in form.steps"
+              :key="i"
+              class="border border-n-weak rounded-xl p-3 space-y-2"
+            >
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs text-n-slate-10">Após</span>
                 <input
-                  v-model.number="step.delay_hours"
+                  v-model.number="step.delay_value"
                   type="number"
                   min="0"
                   step="1"
-                  class="w-16 border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                  class="w-16 border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
                 />
-                <span class="text-xs text-n-slate-10">h</span>
+                <select
+                  v-model="step.delay_unit"
+                  class="border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+                >
+                  <option value="hours">hora(s)</option>
+                  <option value="days">dia(s)</option>
+                </select>
+                <span class="text-xs text-n-slate-10">sem resposta, enviar:</span>
+
+                <!-- Tipo da etapa -->
+                <div class="flex rounded-lg border border-n-weak overflow-hidden ml-auto">
+                  <button
+                    class="px-2.5 py-1 text-xs"
+                    :class="step.kind === 'text' ? 'bg-n-brand text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
+                    @click="setStepKind(step, 'text')"
+                  >Texto</button>
+                  <button
+                    class="px-2.5 py-1 text-xs"
+                    :class="step.kind === 'template' ? 'bg-n-brand text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
+                    @click="setStepKind(step, 'template')"
+                  >Modelo</button>
+                </div>
+
+                <button
+                  v-if="form.steps.length > 1"
+                  class="text-n-slate-9 hover:text-red-500 i-lucide-x text-base flex-shrink-0"
+                  @click="removeStep(i)"
+                />
               </div>
+
+              <!-- Texto simples -->
               <input
+                v-if="step.kind === 'text'"
                 v-model="step.message"
-                class="flex-1 border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
                 placeholder='Ex.: [nome], no seu tempo ok?'
               />
-              <button
-                v-if="form.steps.length > 1"
-                class="text-n-slate-9 hover:text-red-500 i-lucide-x text-base mt-2.5 flex-shrink-0"
-                @click="removeStep(i)"
-              />
+
+              <!-- Mensagem modelo -->
+              <div v-else class="flex items-center gap-2">
+                <div class="flex-1 min-w-0">
+                  <p v-if="step.template_params" class="text-xs text-n-slate-12 truncate">
+                    📋 {{ step.template_params.name }}
+                    <span class="text-n-slate-9">— "{{ step.message?.slice(0, 60) }}…"</span>
+                  </p>
+                  <p v-else class="text-xs text-amber-600">Nenhum modelo escolhido ainda.</p>
+                </div>
+                <button
+                  class="text-xs px-2.5 py-1.5 rounded-lg border border-n-brand text-n-brand hover:bg-n-brand/10 flex-shrink-0"
+                  @click="openTemplatePicker(i)"
+                >
+                  {{ step.template_params ? 'Trocar modelo' : 'Escolher modelo' }}
+                </button>
+              </div>
             </div>
           </div>
           <p class="text-[11px] text-n-slate-9 mt-2">
             Use <code class="bg-n-alpha-2 px-1 rounded">[nome]</code> para o primeiro nome do paciente.
-            O tempo conta a partir da sua última mensagem sem resposta; para sozinho se o paciente responder.
+            Após 24h de silêncio, o WhatsApp só entrega mensagem MODELO — use etapas de modelo para prazos em dias.
           </p>
+        </div>
+
+        <!-- Janela de funcionamento -->
+        <div class="border-t border-n-weak pt-4">
+          <p class="text-xs font-semibold text-n-slate-12 mb-2">Quando funciona?</p>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1">Começa em <span class="text-n-slate-9">(opcional)</span></label>
+              <input
+                v-model="form.starts_at"
+                type="datetime-local"
+                class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1">Para em <span class="text-n-slate-9">(opcional)</span></label>
+              <input
+                v-model="form.ends_at"
+                type="datetime-local"
+                class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+              />
+            </div>
+          </div>
+          <p class="text-[11px] text-n-slate-9 mt-2">
+            O robô também para quando: você clicar em <strong>Pausar</strong>, o paciente <strong>responder</strong>
+            (a cadência daquela conversa é interrompida), ou o contato ganhar uma etiqueta da lista "NÃO TEM".
+          </p>
+        </div>
+
+        <!-- Filtros de etiqueta: quem recebe a cadência -->
+        <div class="border-t border-n-weak pt-4 space-y-3">
+          <p class="text-xs font-semibold text-n-slate-12">Quem recebe? (filtros de etiqueta)</p>
+
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+              TEM as etiquetas <span class="text-n-slate-9 font-normal">(precisa ter todas — vazio ignora)</span>
+            </label>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="l in accountLabels"
+                :key="`req-${l.id}`"
+                class="flex items-center gap-1 text-xs px-2 py-1 rounded-full border transition-colors"
+                :class="form.required_labels.includes(l.title)
+                  ? 'bg-green-500/15 border-green-500 text-green-700 dark:text-green-400 font-medium'
+                  : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                @click="toggleListItem(form.required_labels, l.title)"
+              >
+                <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: l.color ?? '#6B7280' }" />
+                {{ l.title }}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+              NÃO TEM as etiquetas <span class="text-n-slate-9 font-normal">(quem tiver alguma fica de fora)</span>
+            </label>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="l in accountLabels"
+                :key="`exc-${l.id}`"
+                class="flex items-center gap-1 text-xs px-2 py-1 rounded-full border transition-colors"
+                :class="form.exclude_labels.includes(l.title)
+                  ? 'bg-red-500/15 border-red-500 text-red-600 font-medium line-through'
+                  : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                @click="toggleListItem(form.exclude_labels, l.title)"
+              >
+                <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: l.color ?? '#6B7280' }" />
+                {{ l.title }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <label class="flex items-center gap-2 text-sm text-n-slate-11 cursor-pointer">
@@ -163,7 +418,7 @@ const save = async () => {
         </label>
       </div>
 
-      <div class="px-5 py-4 border-t border-n-weak flex-shrink-0 flex gap-2">
+      <div v-if="templateStepIndex === null" class="px-5 py-4 border-t border-n-weak flex-shrink-0 flex gap-2">
         <button
           class="flex-1 bg-n-brand text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
           :disabled="!canSave || isSaving"

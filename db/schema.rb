@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_12_000003) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_12_000005) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -866,6 +866,10 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_12_000003) do
     t.datetime "updated_at", null: false
     t.bigint "pipeline_id"
     t.bigint "stage_id"
+    t.jsonb "required_labels", default: [], null: false
+    t.jsonb "exclude_labels", default: [], null: false
+    t.datetime "starts_at"
+    t.datetime "ends_at"
     t.index ["account_id", "active"], name: "index_crm_followup_bots_on_account_id_and_active"
     t.index ["account_id"], name: "index_crm_followup_bots_on_account_id"
     t.index ["inbox_id"], name: "index_crm_followup_bots_on_inbox_id"

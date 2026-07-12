@@ -97,11 +97,13 @@ const deleteBot = async bot => {
   }
 };
 
-const delayLabel = h => {
-  const n = Number(h);
-  if (n < 1) return `${Math.round(n * 60)}min`;
-  if (n < 24) return `${n}h`;
-  return `${Math.round(n / 24)}d`;
+const delayLabel = step => {
+  const hours = step.delay_value != null
+    ? Number(step.delay_value) * (step.delay_unit === 'days' ? 24 : 1)
+    : Number(step.delay_hours);
+  if (hours < 1) return `${Math.round(hours * 60)}min`;
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 };
 
 onMounted(() => {
@@ -228,7 +230,7 @@ onMounted(() => {
                 :key="i"
                 class="text-[11px] bg-n-alpha-2 text-n-slate-11 rounded-full px-2 py-0.5"
               >
-                {{ delayLabel(s.delay_hours) }}: "{{ s.message }}"
+                {{ delayLabel(s) }}: {{ s.template_params ? `📋 ${s.template_params.name}` : `"${s.message}"` }}
               </span>
             </div>
           </div>

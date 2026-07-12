@@ -2,17 +2,21 @@
 #
 # Table name: crm_followup_bots
 #
-#  id          :bigint           not null, primary key
-#  active      :boolean          default(TRUE), not null
-#  name        :string           not null
-#  steps       :jsonb            not null
-#  created_at  :datetime         not null
-#  updated_at  :datetime         not null
-#  account_id  :bigint           not null
-#  inbox_id    :bigint
-#  pipeline_id :bigint
-#  sender_id   :bigint
-#  stage_id    :bigint
+#  id              :bigint           not null, primary key
+#  active          :boolean          default(TRUE), not null
+#  ends_at         :datetime
+#  exclude_labels  :jsonb            not null
+#  name            :string           not null
+#  required_labels :jsonb            not null
+#  starts_at       :datetime
+#  steps           :jsonb            not null
+#  created_at      :datetime         not null
+#  updated_at      :datetime         not null
+#  account_id      :bigint           not null
+#  inbox_id        :bigint
+#  pipeline_id     :bigint
+#  sender_id       :bigint
+#  stage_id        :bigint
 #
 # Indexes
 #
@@ -54,9 +58,28 @@ class Crm::FollowupBot < ApplicationRecord
     stage_id.present?
   end
 
+  # Atraso da etapa em HORAS. Aceita o formato novo {delay_value, delay_unit}
+  # (unit: 'hours' | 'days') e o legado {delay_hours}.
+  def self.step_delay_hours(step)
+    if step['delay_value'].present?
+      value = step['delay_value'].to_f
+      step['delay_unit'] == 'days' ? value * 24 : value
+    else
+      step['delay_hours'].to_f
+    end
+  end
+
   # steps ordenados por atraso
   def ordered_steps
-    Array(steps).sort_by { |s| s['delay_hours'].to_f }
+    Array(steps).sort_by { |s| self.class.step_delay_hours(s) }
+  end
+
+  # janela de funcionamento: só age entre starts_at e ends_at (quando definidos)
+  def within_window?(now = Time.current)
+    return false if starts_at.present? && now < starts_at
+    return false if ends_at.present? && now > ends_at
+
+    true
   end
 
   private
@@ -71,7 +94,9 @@ class Crm::FollowupBot < ApplicationRecord
     return errors.add(:steps, 'defina ao menos uma etapa') if Array(steps).blank?
 
     Array(steps).each do |s|
-      errors.add(:steps, 'cada etapa precisa de tempo e mensagem') if s['message'].blank? || s['delay_hours'].blank?
+      delay_missing = s['delay_hours'].blank? && s['delay_value'].blank?
+      content_missing = s['message'].blank? && s['template_params'].blank?
+      errors.add(:steps, 'cada etapa precisa de tempo e mensagem (texto ou modelo)') if delay_missing || content_missing
     end
   end
 end

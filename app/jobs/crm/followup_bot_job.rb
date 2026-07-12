@@ -18,6 +18,8 @@ class Crm::FollowupBotJob < ApplicationJob
   private
 
   def process_bot(bot)
+    return unless bot.within_window? # janela "começa em / para em"
+
     steps = bot.ordered_steps
     return if steps.blank?
 
@@ -44,6 +46,8 @@ class Crm::FollowupBotJob < ApplicationJob
   end
 
   def process_conversation(bot, conversation, steps)
+    return unless labels_match?(bot, conversation.contact)
+
     anchor = silence_anchor(conversation)
     return if anchor.nil? # paciente falou por último (ou sem mensagens do agente)
 
@@ -52,13 +56,29 @@ class Crm::FollowupBotJob < ApplicationJob
 
     steps.each_with_index do |step, index|
       next if state['sent'].include?(index)
-      next if hours < step['delay_hours'].to_f
+      next if hours < Crm::FollowupBot.step_delay_hours(step)
 
       send_nudge(bot, conversation, step)
       state['sent'] << index
     end
 
     persist_state(conversation, bot, anchor, state)
+  end
+
+  # Filtros "tem / não tem": só cutuca quem TEM todas as etiquetas exigidas
+  # e NÃO TEM nenhuma das excluídas (etiquetas do contato).
+  def labels_match?(bot, contact)
+    return false if contact.blank?
+
+    required = Array(bot.required_labels).map(&:to_s)
+    excluded = Array(bot.exclude_labels).map(&:to_s)
+    return true if required.empty? && excluded.empty?
+
+    contact_labels = contact.label_list.map(&:to_s)
+    return false if required.any? && (required - contact_labels).any?
+    return false if excluded.any? && contact_labels.intersect?(excluded)
+
+    true
   end
 
   # primeira outgoing depois da última incoming; nil se a última msg for do paciente
@@ -86,13 +106,18 @@ class Crm::FollowupBotJob < ApplicationJob
   end
 
   def send_nudge(bot, conversation, step)
+    attrs = { cevico_followup_bot_id: bot.id }
+    # etapa de MENSAGEM MODELO: envia o template oficial (funciona fora da
+    # janela de 24h do WhatsApp — ideal para cadências em dias)
+    attrs[:template_params] = render_template_params(step['template_params'], conversation) if step['template_params'].present?
+
     conversation.messages.create!(
       account_id: bot.account_id,
       inbox_id: conversation.inbox_id, # robô por coluna envia na caixa da própria conversa
       message_type: :outgoing,
       content: render_message(step['message'], conversation),
       sender: bot.sender,
-      additional_attributes: { cevico_followup_bot_id: bot.id }
+      additional_attributes: attrs
     )
   end
 
@@ -100,5 +125,12 @@ class Crm::FollowupBotJob < ApplicationJob
   def render_message(text, conversation)
     name = conversation.contact&.name.to_s.split.first || ''
     text.to_s.gsub(/\[nome\]/i, name)
+  end
+
+  # substitui [nome] também nos parâmetros preenchidos do modelo
+  def render_template_params(params, conversation)
+    JSON.parse(render_message(params.to_json, conversation))
+  rescue JSON::ParserError
+    params
   end
 end
