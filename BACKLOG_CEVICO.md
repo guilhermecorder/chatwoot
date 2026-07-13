@@ -262,6 +262,47 @@ crm_followup_bots + label filters + janela + stage).
 9227 = cards no funil (inclui migrados sem conversa), 2333 = conversas
 ABERTAS — métricas diferentes, ambas corretas.
 
+## 13. RODADA 2026-07-13 — Atribuição de anúncios Meta (estilo Tintim) ⏳ AGUARDA TESTE DO GUILHERME
+
+**Objetivo: saber QUAL ANÚNCIO gerou cada lead e cada cirurgia.**
+
+**Como funciona (CTWA — click-to-WhatsApp):** a Meta manda um bloco `referral`
+na primeira mensagem de quem clica em anúncio (id do anúncio, título, texto,
+URL, ctwa_clid). O Chatwoot core já guardava isso no content_attributes da
+mensagem — agora o sistema usa:
+
+- `Crm::AdAttributionService`: carimba `additional_attributes.meta_ads` no
+  CONTATO (primeiro toque — nunca sobrescreve) e na CONVERSA. Hook no
+  webhook do WhatsApp (IncomingMessageBaseService#stamp_ad_attribution).
+- `Crm::AdAttributionBackfillJob` (fila low): retroativo — varre mensagens
+  antigas com referral e carimba os contatos. Botão "Processar histórico"
+  no relatório de anúncios.
+- **Exibição "muito evidente" (SÓ ADMIN — agente tem painel simples):** card
+  azul "Veio de anúncio (Meta)" no painel do contato dentro da conversa
+  (AdOriginCard.vue no ContactPanel) + linha "Anúncio: …" no cabeçalho do
+  balão do CRM. contact_json só envia meta_ads para admin (backend também).
+- **Relatórios → Anúncios (Meta)** (`/reports/ads`, admin): tabela por anúncio
+  juntando Marketing API (investimento/impressões/cliques, level=ad,
+  Crm::MetaAdsReportService) × leads atribuídos × conversões do CRM.
+  KPIs: investimento, leads, CPL, conversões, CAC, receita, ROAS.
+  Etapas de conversão configuráveis (meta_ads_config.conversion_stage_ids,
+  padrão: etapas com "cirurgia" no nome). Anúncio pausado com lead aparece.
+- **CAPI agora envia ctwa_clid** (action_source=business_messaging +
+  messaging_channel=whatsapp) quando o contato veio de anúncio — a Meta
+  atribui a conversão DIRETO ao anúncio, do lado deles também.
+- Endpoints: GET/POST `crm/ads_report[/backfill]` (admin). Sem migration.
+
+**Também nesta rodada:**
+- Agente (não-admin) não vê mais Menções/Participantes/Não atendidas em Conversas.
+- Balão do CRM: digitar "/" abre as mensagens rápidas (CannedResponse/MentionBox
+  do core; Enter escolhe, setas navegam).
+
+**Testado no Docker:** serviço de atribuição (carimbo+primeiro toque), payload
+CAPI com ctwa_clid, endpoint do relatório (detectou etapa Cirurgia id=5,
+lead+conversão+receita corretos), backfill enfileira, Vite compila tudo.
+Contato de teste no banco local (account 3) ficou carimbado de propósito para
+ver a UI. Falta: teste visual do Guilherme + deploy.
+
 ---
 
 ## Estado atual (para retomar)
