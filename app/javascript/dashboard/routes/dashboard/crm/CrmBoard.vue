@@ -699,8 +699,8 @@ const createAndAddContact = async () => {
         </template>
       </div>
 
-      <!-- Right actions -->
-      <div class="flex items-center gap-2 ml-auto">
+      <!-- Right actions (grupo sempre alinhado à direita, mesmo quebrando linha) -->
+      <div class="flex items-center gap-2 ml-auto justify-end flex-wrap">
         <!-- Visualizações de colunas (multi-seleção) -->
         <div v-if="selectedPipeline" class="flex items-center gap-1 relative">
           <button
@@ -746,23 +746,29 @@ const createAndAddContact = async () => {
           </div>
           <button
             v-if="isAdmin"
-            class="text-n-slate-10 hover:text-n-slate-12 i-lucide-settings-2 text-base transition-colors"
+            class="h-8 w-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
             :title="$t('CRM.PRESETS.MANAGE')"
             @click="showPresetsModal = true"
-          />
+          >
+            <span class="i-lucide-settings-2 text-base" />
+          </button>
         </div>
 
         <template v-if="isAdmin && selectedPipeline && !isRenamingPipeline">
           <button
-            class="text-n-slate-10 hover:text-n-slate-12 i-lucide-pencil text-base transition-colors"
+            class="h-8 w-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
             :title="$t('CRM.RENAME_PIPELINE')"
             @click="startRenamePipeline"
-          />
+          >
+            <span class="i-lucide-pencil text-base" />
+          </button>
           <button
-            class="text-n-slate-10 hover:text-red-500 i-lucide-trash-2 text-base transition-colors"
+            class="h-8 w-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:text-red-500 hover:bg-n-alpha-1 transition-colors"
             :title="$t('CRM.DELETE_PIPELINE')"
             @click="showDeletePipelineConfirm = !showDeletePipelineConfirm"
-          />
+          >
+            <span class="i-lucide-trash-2 text-base" />
+          </button>
         </template>
 
         <!-- Ferramentas de edição — só admin -->
@@ -770,7 +776,7 @@ const createAndAddContact = async () => {
           <!-- Edit mode toggle (clica de novo para SAIR) -->
           <button
             v-if="selectedPipeline && !isProgrammingMode"
-            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors"
+            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border transition-colors"
             :class="isEditMode
               ? 'bg-amber-500 border-amber-500 text-white hover:bg-amber-600'
               : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
@@ -783,7 +789,7 @@ const createAndAddContact = async () => {
           <!-- Programming mode toggle -->
           <button
             v-if="selectedPipeline && !isProgrammingMode && !isEditMode"
-            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-yellow-400/60 text-yellow-600 hover:bg-yellow-500/10 transition-colors"
+            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border border-yellow-400/60 text-yellow-600 hover:bg-yellow-500/10 transition-colors"
             @click="isProgrammingMode = true"
           >
             <span class="i-lucide-zap text-sm" />
@@ -792,7 +798,7 @@ const createAndAddContact = async () => {
 
           <!-- Integrações -->
           <button
-            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
             title="Integrações (n8n, Meta, Google...)"
             @click="showIntegrationsModal = true"
           >
@@ -802,7 +808,7 @@ const createAndAddContact = async () => {
 
           <!-- Mensagens em massa -->
           <button
-            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
             title="Central de mensagens em massa (templates WhatsApp)"
             @click="$router.push({ name: 'crm_campaigns' })"
           >
@@ -811,7 +817,7 @@ const createAndAddContact = async () => {
           </button>
 
           <button
-            class="text-sm text-n-slate-11 hover:text-n-slate-12 flex items-center gap-1 ml-1"
+            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border border-n-weak text-n-slate-11 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
             @click="showNewPipelineForm = !showNewPipelineForm; showDeletePipelineConfirm = false"
           >
             <span class="i-lucide-plus text-base" />
