@@ -21,8 +21,9 @@ crm_scheduler_job:
   queue: scheduled_jobs
 
 # CEVICO: robôs de follow-up (cutucadas para reabrir a conversa)
+# roda a cada 2 min para cadências em minutos serem pontuais
 crm_followup_bot_job:
-  cron: '*/15 * * * *'
+  cron: '*/2 * * * *'
   class: 'Crm::FollowupBotJob'
   queue: scheduled_jobs
 

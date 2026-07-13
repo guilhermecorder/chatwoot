@@ -23,7 +23,14 @@ class Crm::FollowupBotJob < ApplicationJob
     steps = bot.ordered_steps
     return if steps.blank?
 
-    conversations(bot).find_each do |conversation|
+    # UMA conversa por contato: a de última atividade (caixa prioritária) —
+    # evita cutucar o mesmo paciente em várias caixas de entrada ao mesmo tempo.
+    ids = conversations(bot)
+          .select('DISTINCT ON (conversations.contact_id) conversations.id')
+          .order('conversations.contact_id, conversations.last_activity_at DESC')
+          .map(&:id)
+
+    Conversation.where(id: ids).find_each do |conversation|
       process_conversation(bot, conversation, steps)
     rescue StandardError => e
       Rails.logger.error("[CEVICO followup] conversa #{conversation.id}: #{e.message}")
