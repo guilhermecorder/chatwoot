@@ -567,15 +567,28 @@ const onColumnReorder = async () => {
 };
 
 const onStageDrop = async ({ stageId, contacts }) => {
-  for (const contact of contacts) {
-    if (contact.stage_id !== stageId) {
+  // otimista: o card ASSENTA na coluna nova imediatamente; a API confirma em
+  // background e, se falhar, o card volta para a coluna de origem.
+  const moves = contacts
+    .filter(c => c.stage_id !== stageId)
+    .map(c => ({ id: c.id, from: c.stage_id }));
+
+  moves.forEach(m =>
+    store.commit('crm/patchContact', { id: m.id, data: { stage_id: stageId } })
+  );
+
+  moves.forEach(async m => {
+    try {
       await store.dispatch('crm/moveContact', {
         pipelineId: selectedPipelineId.value,
-        id: contact.id,
+        id: m.id,
         stageId,
       });
+    } catch {
+      store.commit('crm/patchContact', { id: m.id, data: { stage_id: m.from } });
+      useAlert(t('CRM.ERROR.GENERIC'));
     }
-  }
+  });
 };
 
 // --- Add contact modal ---
@@ -754,14 +767,17 @@ const createAndAddContact = async () => {
 
         <!-- Ferramentas de edição — só admin -->
         <template v-if="isAdmin">
-          <!-- Edit mode toggle -->
+          <!-- Edit mode toggle (clica de novo para SAIR) -->
           <button
-            v-if="selectedPipeline && !isEditMode && !isProgrammingMode"
-            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
-            @click="isEditMode = true"
+            v-if="selectedPipeline && !isProgrammingMode"
+            class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors"
+            :class="isEditMode
+              ? 'bg-amber-500 border-amber-500 text-white hover:bg-amber-600'
+              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            @click="isEditMode = !isEditMode"
           >
-            <span class="i-lucide-layout-template text-sm" />
-            {{ $t('CRM.EDIT_MODE') }}
+            <span :class="isEditMode ? 'i-lucide-x' : 'i-lucide-layout-template'" class="text-sm" />
+            {{ isEditMode ? $t('CRM.EXIT_EDIT_MODE') : $t('CRM.EDIT_MODE') }}
           </button>
 
           <!-- Programming mode toggle -->
@@ -891,8 +907,8 @@ const createAndAddContact = async () => {
     <div v-if="selectedPipeline && !uiFlags.isFetchingPipelines && !uiFlags.isFetchingContacts" class="flex-shrink-0">
       <!-- Main filter row -->
       <div class="flex items-center gap-2 px-4 py-2 border-b border-n-weak">
-        <!-- Search input (protagonista da barra) -->
-        <div class="relative flex-1 min-w-[220px]">
+        <!-- Search input -->
+        <div class="relative flex-none w-72">
           <span class="absolute left-3 top-1/2 -translate-y-1/2 i-lucide-search text-n-slate-9 text-base pointer-events-none" />
           <input
             v-model="filters.search"
@@ -963,7 +979,10 @@ const createAndAddContact = async () => {
 
         <!-- Counter -->
         <span class="text-xs text-n-slate-9 whitespace-nowrap">
-          {{ $t('CRM.FILTER.SHOWING', { count: filteredCount, total: totalContacts }) }}
+          {{ $t('CRM.FILTER.SHOWING', { count: filteredCount, total: contactsMeta.total ?? totalContacts }) }}
+          <template v-if="contactsMeta.with_conversations">
+            · {{ $t('CRM.FILTER.WITH_CONVERSATION', { count: contactsMeta.with_conversations }) }}
+          </template>
         </span>
 
         <!-- Completando em background -->

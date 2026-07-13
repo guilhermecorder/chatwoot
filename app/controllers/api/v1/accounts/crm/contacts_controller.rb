@@ -33,6 +33,9 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       meta: {
         total: total,
         shown: crm_contacts.size,
+        # leads do funil que têm pelo menos uma conversa (o total inclui
+        # contatos migrados/cadastrados que nunca conversaram)
+        with_conversations: base.joins(contact: :conversations).distinct.count,
         scope: %w[all preview].include?(params[:scope]) ? params[:scope] : 'recent'
       }
     }

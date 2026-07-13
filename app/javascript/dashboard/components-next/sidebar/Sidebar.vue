@@ -363,6 +363,8 @@ const visibleMenuItems = computed(() =>
   menuItems.value.filter(item => {
     const key = FEATURE_BY_ITEM_NAME[item.name];
     if (!key) return true;
+    // Caixa de Entrada é visão de admin — atendimento acontece pelo CRM
+    if (key === 'inbox' && !isAdmin.value) return false;
     return (
       !blockedFeatures.value.includes(key) && !hiddenFeatures.value.includes(key)
     );

@@ -567,8 +567,9 @@ const delayLabel = (minutes) => {
         group="crm-contacts"
         item-key="id"
         :animation="150"
+        :empty-insert-threshold="120"
         ghost-class="opacity-40"
-        class="min-h-12"
+        class="min-h-full"
       >
         <template #item="{ element }">
           <ContactCard

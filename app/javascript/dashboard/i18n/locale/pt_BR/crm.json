@@ -84,7 +84,8 @@
       "SORT_NEWEST": "Mais novo → mais antigo",
       "APPLY": "Aplicar filtros",
       "SORT_LAST_MESSAGE": "Última mensagem (não lidas no topo)",
-      "LOADING_REST": "carregando todos os leads…"
+      "LOADING_REST": "carregando todos os leads…",
+      "WITH_CONVERSATION": "{count} com conversa"
     },
     "MODAL": {
       "TAB_CRM": "CRM",
