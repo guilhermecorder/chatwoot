@@ -42,9 +42,17 @@ const capturedAt = computed(() => {
         {{ capturedAt }}
       </span>
     </div>
+    <!-- nome interno do anúncio (nomenclatura do Gerenciador) em destaque -->
+    <p
+      v-if="adData.ad_name"
+      class="text-sm font-semibold text-n-slate-12 mb-0.5"
+    >
+      {{ adData.ad_name }}
+    </p>
     <p
       v-if="adData.headline"
-      class="text-sm font-medium text-n-slate-12 mb-0.5"
+      class="text-xs text-n-slate-11 mb-0.5"
+      :class="{ 'text-sm font-medium text-n-slate-12': !adData.ad_name }"
     >
       {{ adData.headline }}
     </p>

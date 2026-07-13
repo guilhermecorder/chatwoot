@@ -24,6 +24,18 @@ class Crm::AdAttributionBackfillJob < ApplicationJob
     end
 
     Rails.logger.info "[Crm::AdAttributionBackfill] account=#{account_id} messages=#{stamped}"
+
+    enqueue_name_enrichment(account)
+  end
+
+  # segunda passada: contatos já carimbados mas ainda sem o nome interno do
+  # anúncio (nomenclatura do Gerenciador) — busca em background com cache
+  def enqueue_name_enrichment(account)
+    account.contacts
+           .where("additional_attributes -> 'meta_ads' ->> 'source_id' IS NOT NULL")
+           .where("additional_attributes -> 'meta_ads' ->> 'ad_name' IS NULL")
+           .pluck(:id)
+           .each { |contact_id| Crm::AdAttributionEnrichJob.perform_later(contact_id) }
   end
 
   # mensagens de entrada com referral, da mais antiga pra mais nova

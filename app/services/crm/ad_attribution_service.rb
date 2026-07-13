@@ -18,6 +18,11 @@ class Crm::AdAttributionService
 
     stamp(@conversation) if @conversation
     stamp(@contact) if @contact
+
+    # nome interno do anúncio (nomenclatura) vem da Marketing API em background
+    return if @contact.blank? || @referral['source_id'].blank?
+
+    Crm::AdAttributionEnrichJob.perform_later(@contact.id, @conversation&.id)
   end
 
   private

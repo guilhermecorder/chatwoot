@@ -416,11 +416,11 @@ watch(conversationId, id => {
             rel="noopener noreferrer"
             class="flex items-center gap-1 text-[11px] text-blue-600 truncate"
             :class="contact.meta_ads.source_url ? 'hover:underline' : 'pointer-events-none'"
-            :title="contact.meta_ads.headline || contact.meta_ads.source_id"
+            :title="contact.meta_ads.ad_name || contact.meta_ads.headline || contact.meta_ads.source_id"
           >
             <span class="i-lucide-megaphone text-[11px] flex-shrink-0" />
             <span class="truncate">
-              Anúncio: {{ contact.meta_ads.headline || contact.meta_ads.source_id }}
+              Anúncio: {{ contact.meta_ads.ad_name || contact.meta_ads.headline || contact.meta_ads.source_id }}
             </span>
           </a>
         </div>
