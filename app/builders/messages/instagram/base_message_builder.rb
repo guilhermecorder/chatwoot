@@ -106,6 +106,48 @@ class Messages::Instagram::BaseMessageBuilder < Messages::Messenger::MessageBuil
     attachments.each do |attachment|
       process_attachment(attachment)
     end
+
+    stamp_ad_attribution
+  end
+
+  # Anúncio click-to-Instagram-Direct: a Meta manda "referral" com ad_id no
+  # evento de mensagem — carimba a origem no contato (primeiro toque) e na
+  # conversa, igual ao CTWA do WhatsApp.
+  def stamp_ad_attribution
+    return if @outgoing_echo || ad_referral_attributes.blank?
+
+    Crm::AdAttributionService.new(
+      contact: contact,
+      conversation: conversation,
+      referral: ad_referral_attributes
+    ).call
+  rescue StandardError => e
+    Rails.logger.error "[AdAttribution][Instagram] #{e.message}"
+  end
+
+  # normaliza para as mesmas chaves do referral do WhatsApp (CTWA)
+  def ad_referral_attributes
+    @ad_referral_attributes ||= begin
+      referral = @messaging[:referral] || {}
+      if referral[:ad_id].blank?
+        {}
+      else
+        ads_context = referral[:ads_context_data] || {}
+        media_type = if ads_context[:photo_url].present?
+                       'image'
+                     elsif ads_context[:video_url].present?
+                       'video'
+                     end
+        {
+          'source_id' => referral[:ad_id].to_s,
+          'source_type' => 'ad',
+          'source_url' => referral[:ref].presence,
+          'headline' => ads_context[:ad_title],
+          'media_type' => media_type,
+          'image_url' => ads_context[:photo_url] || ads_context[:video_url]
+        }.compact
+      end
+    end
   end
 
   def save_story_id
@@ -169,6 +211,9 @@ class Messages::Instagram::BaseMessageBuilder < Messages::Messenger::MessageBuil
 
     params[:content_attributes][:external_echo] = true if @outgoing_echo
     params[:content_attributes][:is_unsupported] = true if message_is_unsupported?
+    # guarda o referral do anúncio na mensagem (mesma chave do WhatsApp/CTWA,
+    # assim o backfill de atribuição cobre Instagram também)
+    params[:content_attributes][:referral] = ad_referral_attributes if !@outgoing_echo && ad_referral_attributes.present?
     params
   end
 
