@@ -446,6 +446,11 @@ class Message < ApplicationRecord
   end
 
   def set_conversation_activity
+    # CEVICO: mensagem de atividade (sistema — "resolvida automaticamente",
+    # automações, registros internos) NÃO muda a ordem das conversas.
+    # Só mensagem real (paciente/atendente) atualiza last_activity_at.
+    return if activity?
+
     # rubocop:disable Rails/SkipsModelValidations
     conversation.update_columns(last_activity_at: created_at, updated_at: Time.current)
     # rubocop:enable Rails/SkipsModelValidations
