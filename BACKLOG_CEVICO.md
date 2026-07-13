@@ -215,15 +215,67 @@ Implementados de uma vez no Docker local (blocos 1,2,3,4,6; bloco 5 fica p/ depo
 Migrations novas: 20260711000001 (column_presets), 20260711000002 (tasks),
 20260711000003 (agent_permissions). Todas aditivas, rodaram limpas no Docker.
 
+## 12. MARATONA 2026-07-11→13 (rodadas 1–9) — CRM vira o hub de atendimento ✅ TUDO NO GITHUB
+
+Depois da auditoria (item 11), mais 5 rodadas de refinamento guiadas por teste
+em produção. Estado: **tudo commitado e buildado** (último: `8935f3cde`).
+
+**CRM como central de atendimento:**
+- Balão de conversa nos cards: chat completo com resposta oficial, POLLING a
+  cada 4s (chat "vivo"), emojis, templates WhatsApp (remarketing), resolver/
+  reabrir, telefone copiável, painel mover-card+etiquetas dentro do balão,
+  scroll abre no fim. Contato sem conversa → botão "Iniciar conversa" (cria
+  conversation na caixa WhatsApp escolhida).
+- Carga em 2 fases: 15 cards/coluna na abertura (window function) + resto em
+  background. Ordenação padrão: não lidas no topo, depois última msg desc.
+- Drag de cards OTIMISTA (assenta na hora, API confirma; reverte se falhar);
+  coluna inteira é alvo de drop. Drag de coluna consertado (bug: componente
+  multi-root quebra vuedraggable — TODO componente em draggable precisa de
+  raiz única!).
+- Presets de colunas por atendente (multi-seleção, união); filtros com
+  rascunho + botão Aplicar; etapas multi-select; busca ignora filtro de
+  período e carrega base completa; "sem resposta" (resolvida = respondida).
+- Não-admin: sem ferramentas de edição, sem valores R$, sem Caixa de Entrada
+  na sidebar, sem Personalizar menu.
+
+**Robô de follow-up (crm_followup_bots):**
+- Cadência texto OU mensagem modelo; minutos/horas/dias; janela começa/para;
+  filtros TEM/NÃO-TEM etiqueta; por caixa OU por coluna (modo programação);
+  1 conversa por contato (a mais recente = caixa prioritária); cron */2min.
+- Para quando: pausado, paciente responde, ou etiqueta NÃO-TEM aparece.
+
+**Outros módulos novos:** Tarefas (kanban+donut+avisos de prazo), Agenda
+(calendário mensal, unidades Tatuapé=azul/Paulista=laranja, admin vê todas),
+Automações & Robôs em Configurações, ação nativa "Mover card do CRM" nas
+Automation Rules, acessos por agente (11 categorias), Tratamento de dados
+(substituir/remover etiqueta em massa, valor pelo orçamento, unificação de
+contatos), etiquetas de conversa sincronizam com o contato (add+remove),
+integrações Meta/Google completas na UI.
+
+**Migrations do período (todas aditivas):** 20260711000001-3 e
+20260712000001-5 (column_presets, tasks+unit, agent_permissions,
+crm_followup_bots + label filters + janela + stage).
+
+**Lições técnicas:** (1) componente multi-root quebra v-show E vuedraggable;
+(2) before_action com `only:` desatualizado = 500 silencioso (fronts com
+.catch vazio escondem); (3) cron 15min ≠ cadência em minutos; (4) contadores:
+9227 = cards no funil (inclui migrados sem conversa), 2333 = conversas
+ABERTAS — métricas diferentes, ambas corretas.
+
 ---
 
 ## Estado atual (para retomar)
 - Sistema migrado e no ar (4.15.1), banco `chatwoot_migrado` em produção.
   Corte final CONCLUÍDO (2026-07-10): número WhatsApp e N8N já apontam pro
-  CEVICO. 42 conversas do intervalo pós-migração ficaram só no Robomaster
-  (perda aceita). CEVICO é agora o banco vivo — sem mais resync geral.
-- Feito recentemente: board rápido (N+1 resolvido), Tratamento de dados leve
-  (sem saturar CPU), busca sem acento + aspas + multi-termo, mover colunas
-  sem modo edição, dashboard com data histórica real + períodos até 3 anos,
-  filtro De/Até no CRM, Academia com card TACOH.
+  CEVICO. CEVICO é o banco vivo — sem mais resync geral.
+- **2026-07-13: rodadas 1–9 completas (ver item 12).** Último build verde:
+  `8935f3cde`. Guilherme implanta pelo EasyPanel (web+sidekiq juntos — o
+  sidekiq precisa reiniciar pro cron */2 do robô valer).
+- Fluxo de trabalho: mudança → teste no Docker local (docker compose up
+  rails sidekiq vite) → Guilherme testa em localhost:3000 → aprova → commits
+  temáticos → push develop (--no-verify, hooks exigem npx que não há no host)
+  → Actions builda (~10min) → Guilherme implanta.
+- Pendências conhecidas: Bloco 5 da auditoria (automação Instagram direct/
+  comentário, decidido deixar p/ depois); Dashboard do Negócio fases B/C
+  (item 9); ferramenta opcional "arquivar cards sem conversa/inativos".
 - SMTP (Gmail) configurado para convites de equipe.
