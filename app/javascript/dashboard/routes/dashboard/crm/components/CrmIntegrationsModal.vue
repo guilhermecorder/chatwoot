@@ -460,6 +460,25 @@ const fetchWorkflows = async () => {
             />
             {{ metaTestResult.message }}
           </div>
+
+          <!-- Atribuição de anúncio (CTWA) — automática -->
+          <div class="mt-3 bg-n-alpha-1 rounded-xl p-3.5 text-xs text-n-slate-11 space-y-1.5">
+            <p class="flex items-center gap-1.5 font-medium text-n-slate-12">
+              <span class="i-lucide-megaphone text-blue-500" />
+              Atribuição de anúncio (click-to-WhatsApp) — automática
+            </p>
+            <p>
+              Quando o paciente chega clicando em um anúncio, a Meta manda os dados
+              do anúncio junto com a primeira mensagem. O sistema grava isso no
+              contato ("Veio de anúncio") e usa nas conversões enviadas (ctwa_clid) —
+              não precisa configurar nada.
+            </p>
+            <p>
+              O ranking completo (qual anúncio gerou cirurgia, CPL, CAC, ROAS) fica
+              em <b>Relatórios → Anúncios (Meta)</b>, onde também dá para processar
+              o histórico de mensagens antigas.
+            </p>
+          </div>
         </div>
 
         <!-- ══ Google (GA4 + Google Ads) ══ -->

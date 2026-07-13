@@ -115,6 +115,15 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/traffic_report`, { params });
   }
 
+  // ── Relatório de anúncios (Meta, atribuição CTWA) ─────────────────
+  getAdsReport(params) {
+    return axios.get(`${this.url}/ads_report`, { params });
+  }
+
+  backfillAdAttribution() {
+    return axios.post(`${this.url}/ads_report/backfill`);
+  }
+
   // ── Tratamento de dados (etiqueta retroativa) ─────────────────────
   previewRetroLabel(data) {
     return axios.post(`${this.url}/retro_labels/preview`, data);

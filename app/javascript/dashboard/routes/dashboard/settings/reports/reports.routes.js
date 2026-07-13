@@ -27,6 +27,7 @@ import LabelDashboard from './LabelDashboard.vue';
 import CrmDashboardReport from './CrmDashboardReport.vue';
 import WhatsappHealth from './WhatsappHealth.vue';
 import TrafficFunnel from './TrafficFunnel.vue';
+import AdsReport from './AdsReport.vue';
 
 const meta = {
   featureFlag: FEATURE_FLAGS.REPORTS,
@@ -203,6 +204,14 @@ export default {
             permissions: ['administrator', 'report_manage'],
           },
           component: TrafficFunnel,
+        },
+        {
+          path: 'ads',
+          name: 'ads_reports',
+          meta: {
+            permissions: ['administrator', 'report_manage'],
+          },
+          component: AdsReport,
         },
       ],
     },
