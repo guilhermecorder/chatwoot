@@ -185,14 +185,15 @@ const actions = {
   async fetchContacts({ commit }, payload) {
     const pipelineId = typeof payload === 'object' ? payload.pipelineId : payload;
     const scope = typeof payload === 'object' ? payload.scope : undefined;
+    const days = typeof payload === 'object' ? payload.days : undefined;
     // silent: completa em background sem spinner (board continua usável)
     const silent = typeof payload === 'object' ? payload.silent : false;
     if (!silent) commit('setUIFlag', { isFetchingContacts: true });
     try {
-      const { data } = await CrmAPI.getContacts(
-        pipelineId,
-        scope ? { scope } : {}
-      );
+      const params = {};
+      if (scope) params.scope = scope;
+      if (days) params.days = days;
+      const { data } = await CrmAPI.getContacts(pipelineId, params);
       // formato novo { payload, meta }; aceita o antigo (array) por segurança
       commit('setContacts', data.payload ?? data);
       if (data.meta) commit('setContactsMeta', data.meta);

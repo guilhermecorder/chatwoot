@@ -3,8 +3,10 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   before_action :crm_contact, only: [:update, :destroy, :history, :trigger_label_change, :detect_value, :start_conversation]
 
   # scope=preview: os N cards mais recentes de CADA coluna (carga inicial
-  #   instantânea — o board completa em background com scope=all).
-  # scope=all: tudo desde o início.
+  #   instantânea — o board completa em background com a janela de trabalho).
+  # scope=days&days=N: leads com atividade nos últimos N dias (janela de
+  #   trabalho — leve para máquinas fracas; padrão do board).
+  # scope=all: tudo desde o início (sob demanda: busca ou "Carregar todos").
   # scope=recent (legado): ativos nos últimos 30 dias.
   PREVIEW_PER_STAGE = 15
 
@@ -17,6 +19,14 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
                base
              when 'preview'
                base.where(id: preview_ids(base))
+             when 'days'
+               cutoff = params[:days].to_i.clamp(1, 365).days.ago
+               # última mensagem (contacts.last_activity_at), card mexido ou
+               # card criado dentro da janela
+               base.joins(:contact).where(
+                 'contacts.last_activity_at >= :cutoff OR crm_contacts.updated_at >= :cutoff OR crm_contacts.created_at >= :cutoff',
+                 cutoff: cutoff
+               )
              else
                cutoff = 30.days.ago
                base.joins(:contact).where(
@@ -36,7 +46,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
         # leads do funil que têm pelo menos uma conversa (o total inclui
         # contatos migrados/cadastrados que nunca conversaram)
         with_conversations: base.joins(contact: :conversations).distinct.count,
-        scope: %w[all preview].include?(params[:scope]) ? params[:scope] : 'recent'
+        scope: %w[all preview days].include?(params[:scope]) ? params[:scope] : 'recent'
       }
     }
   end

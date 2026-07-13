@@ -46,18 +46,41 @@ const newStageColor = ref('#6B7280');
 
 // Add contact modal
 // Carga em DUAS FASES: primeiro os 15 cards mais recentes de cada coluna
-// (abertura instantânea), depois o restante completa em background.
-const contactsScope = ref('all');
+// (abertura instantânea), depois a JANELA DE TRABALHO completa em background.
+// A base inteira (9k+ cards) só entra sob demanda (busca / botão "Tudo") —
+// carregar tudo sempre travava máquinas fracas (i3/celular).
+const WINDOW_OPTIONS = [7, 15, 30];
+const windowDays = ref(
+  Number(localStorage.getItem('cevico_crm_window_days')) || 7
+);
+const contactsScope = ref('days');
 const isLoadingAll = ref(false);
 const isBackgroundLoading = ref(false);
+
+// payload de escopo atual (janela de N dias ou base completa)
+const scopePayload = () =>
+  contactsScope.value === 'days'
+    ? { scope: 'days', days: windowDays.value }
+    : { scope: contactsScope.value };
 
 const loadBoard = async pipelineId => {
   await store.dispatch('crm/fetchContacts', { pipelineId, scope: 'preview' });
   isBackgroundLoading.value = true;
   store
-    .dispatch('crm/fetchContacts', { pipelineId, scope: 'all', silent: true })
+    .dispatch('crm/fetchContacts', { pipelineId, ...scopePayload(), silent: true })
     .catch(() => {})
     .finally(() => { isBackgroundLoading.value = false; });
+};
+
+const setWindowDays = async d => {
+  windowDays.value = d;
+  localStorage.setItem('cevico_crm_window_days', String(d));
+  contactsScope.value = 'days';
+  if (!selectedPipelineId.value) return;
+  await store.dispatch('crm/fetchContacts', {
+    pipelineId: selectedPipelineId.value,
+    ...scopePayload(),
+  });
 };
 const addContactStageId = ref(null);
 const contactSearchQuery = ref('');
@@ -338,14 +361,14 @@ const clearFilters = () => {
   showFilters.value = false;
 };
 
-// Buscar precisa enxergar a base toda: se ela ainda não terminou de carregar,
-// dispara o carregamento completo na primeira busca.
+// Buscar precisa enxergar a base toda: se ela ainda não foi carregada,
+// dispara o carregamento completo na primeira busca (o loadAllContacts
+// já se protege contra chamadas duplicadas).
 watch(() => filters.value.search, term => {
   if (
     term &&
     contactsMeta.value.scope !== 'all' &&
-    contactsMeta.value.total > contactsMeta.value.shown &&
-    !isBackgroundLoading.value
+    contactsMeta.value.total > contactsMeta.value.shown
   ) {
     loadAllContacts();
   }
@@ -479,7 +502,7 @@ const onContactUpdated = () => {
 const onContactMerged = async () => {
   selectedContact.value = null;
   if (selectedPipelineId.value) {
-    await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, scope: contactsScope.value });
+    await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, ...scopePayload() });
   }
 };
 
@@ -492,7 +515,7 @@ const createPipeline = async () => {
     newPipelineName.value = '';
     showNewPipelineForm.value = false;
     selectedPipelineId.value = p.id;
-    await store.dispatch('crm/fetchContacts', { pipelineId: p.id, scope: contactsScope.value });
+    await store.dispatch('crm/fetchContacts', { pipelineId: p.id, ...scopePayload() });
     useAlert(t('CRM.SUCCESS.PIPELINE_CREATED'));
   } catch {
     useAlert(t('CRM.ERROR.GENERIC'));
@@ -526,7 +549,7 @@ const deletePipeline = async () => {
     const remaining = pipelines.value;
     selectedPipelineId.value = remaining.length ? remaining[0].id : null;
     if (selectedPipelineId.value) {
-      await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, scope: contactsScope.value });
+      await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, ...scopePayload() });
     }
     useAlert(t('CRM.SUCCESS.PIPELINE_DELETED'));
   } catch {
@@ -827,19 +850,31 @@ const createAndAddContact = async () => {
       </div>
     </div>
 
-    <!-- Escopo recente: aviso + carregar todos -->
+    <!-- Janela de trabalho: aviso + seletor de período + carregar tudo -->
     <div
-      v-if="contactsMeta.scope === 'recent' && contactsMeta.total > contactsMeta.shown"
+      v-if="['days', 'recent'].includes(contactsMeta.scope) && contactsMeta.total > contactsMeta.shown"
       class="flex items-center gap-2 px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-wrap"
     >
       <span class="i-lucide-zap text-n-gold" />
-      Mostrando os leads ativos dos últimos 30 dias ({{ contactsMeta.shown }} de {{ contactsMeta.total }}) — mais leve e rápido.
+      Leads ativos dos últimos {{ windowDays }} dias ({{ contactsMeta.shown }} de {{ contactsMeta.total }}) — leve e rápido. A busca enxerga a base toda.
+      <span class="ml-1">Janela:</span>
       <button
-        class="text-n-brand font-medium hover:underline disabled:opacity-50"
+        v-for="d in WINDOW_OPTIONS"
+        :key="d"
+        class="px-1.5 py-0.5 rounded border transition-colors"
+        :class="windowDays === d && contactsScope === 'days'
+          ? 'border-n-brand text-n-brand font-medium'
+          : 'border-n-weak hover:bg-n-alpha-1'"
+        @click="setWindowDays(d)"
+      >
+        {{ d }}d
+      </button>
+      <button
+        class="px-1.5 py-0.5 rounded border border-n-weak hover:bg-n-alpha-1 disabled:opacity-50"
         :disabled="isLoadingAll"
         @click="loadAllContacts"
       >
-        {{ isLoadingAll ? 'Carregando…' : 'Carregar todos desde o início' }}
+        {{ isLoadingAll ? 'Carregando…' : 'Tudo' }}
       </button>
     </div>
 
