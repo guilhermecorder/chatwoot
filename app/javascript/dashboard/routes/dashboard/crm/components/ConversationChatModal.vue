@@ -3,10 +3,12 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import MessageApi from 'dashboard/api/inbox/message';
 import ConversationApi from 'dashboard/api/inbox/conversation';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import TemplatesPicker from 'dashboard/components/widgets/conversation/WhatsappTemplates/TemplatesPicker.vue';
+import CannedResponse from 'dashboard/components/widgets/conversation/CannedResponse.vue';
 import WhatsAppTemplateReply from 'dashboard/components/widgets/conversation/WhatsappTemplates/WhatsAppTemplateReply.vue';
 import EmojiPicker from 'shared/components/emoji/EmojiPicker.vue';
 import { onClickOutside } from '@vueuse/core';
@@ -21,6 +23,7 @@ const emit = defineEmits(['close', 'replied', 'resolved', 'conversationStarted']
 
 const { t } = useI18n();
 const store = useStore();
+const { isAdmin } = useAdmin();
 
 const conversationId = computed(() => props.contact.last_conversation_id);
 const hasConversation = computed(() => !!conversationId.value);
@@ -274,9 +277,23 @@ const sendReply = async () => {
   }
 };
 
+// mensagens rápidas: texto começando com "/" abre a lista (como na
+// caixa de resposta nativa); Enter/clique substitui o texto pelo conteúdo
+const cannedResponses = useMapGetter('getCannedResponses');
+const showCannedMenu = computed(() => replyText.value.startsWith('/'));
+const cannedSearchKey = computed(() =>
+  showCannedMenu.value ? replyText.value.slice(1) : ''
+);
+const replaceTextWithCanned = message => {
+  replyText.value = message;
+};
+
 const onKeydown = e => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
+    // com a lista de mensagens rápidas aberta, Enter escolhe o item
+    // (o MentionBox escuta o teclado no documento)
+    if (showCannedMenu.value && cannedResponses.value.length) return;
     sendReply();
   }
 };
@@ -391,6 +408,21 @@ watch(conversationId, id => {
           <p class="text-xs text-n-slate-10 truncate">
             {{ contact.last_conversation?.inbox_name }} · #{{ conversationId }}
           </p>
+          <!-- atribuição CTWA: por qual anúncio o lead chegou (visão de admin) -->
+          <a
+            v-if="isAdmin && contact.meta_ads"
+            :href="contact.meta_ads.source_url || undefined"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-1 text-[11px] text-blue-600 truncate"
+            :class="contact.meta_ads.source_url ? 'hover:underline' : 'pointer-events-none'"
+            :title="contact.meta_ads.headline || contact.meta_ads.source_id"
+          >
+            <span class="i-lucide-megaphone text-[11px] flex-shrink-0" />
+            <span class="truncate">
+              Anúncio: {{ contact.meta_ads.headline || contact.meta_ads.source_id }}
+            </span>
+          </a>
         </div>
         <!-- Status resolvido -->
         <span
@@ -606,7 +638,12 @@ watch(conversationId, id => {
           </button>
         </div>
 
-        <div class="flex items-end gap-2">
+        <div class="flex items-end gap-2 relative">
+          <CannedResponse
+            v-if="showCannedMenu"
+            :search-key="cannedSearchKey"
+            @replace="replaceTextWithCanned"
+          />
           <textarea
             v-model="replyText"
             rows="2"

@@ -404,27 +404,33 @@ const menuItems = computed(() => {
           activeOn: ['inbox_conversation'],
           to: accountScopedRoute('home'),
         },
-        {
-          name: 'Mentions',
-          label: t('SIDEBAR.MENTIONED_CONVERSATIONS'),
-          icon: 'i-lucide-at-sign',
-          activeOn: ['conversation_through_mentions'],
-          to: accountScopedRoute('conversation_mentions'),
-        },
-        {
-          name: 'Participating',
-          label: t('SIDEBAR.PARTICIPATING_CONVERSATIONS'),
-          icon: 'i-lucide-user-round-check',
-          activeOn: ['conversation_through_participating'],
-          to: accountScopedRoute('conversation_participating'),
-        },
-        {
-          name: 'Unattended',
-          activeOn: ['conversation_through_unattended'],
-          label: t('SIDEBAR.UNATTENDED_CONVERSATIONS'),
-          icon: 'i-lucide-clock-alert',
-          to: accountScopedRoute('conversation_unattended'),
-        },
+        // Menções/Participantes/Não atendidas são visão de admin —
+        // atendente trabalha por "Todas as conversas" e pelo CRM
+        ...(isAdmin.value
+          ? [
+              {
+                name: 'Mentions',
+                label: t('SIDEBAR.MENTIONED_CONVERSATIONS'),
+                icon: 'i-lucide-at-sign',
+                activeOn: ['conversation_through_mentions'],
+                to: accountScopedRoute('conversation_mentions'),
+              },
+              {
+                name: 'Participating',
+                label: t('SIDEBAR.PARTICIPATING_CONVERSATIONS'),
+                icon: 'i-lucide-user-round-check',
+                activeOn: ['conversation_through_participating'],
+                to: accountScopedRoute('conversation_participating'),
+              },
+              {
+                name: 'Unattended',
+                activeOn: ['conversation_through_unattended'],
+                label: t('SIDEBAR.UNATTENDED_CONVERSATIONS'),
+                icon: 'i-lucide-clock-alert',
+                to: accountScopedRoute('conversation_unattended'),
+              },
+            ]
+          : []),
         {
           name: 'Folders',
           label: t('SIDEBAR.CUSTOM_VIEWS_FOLDER'),
@@ -607,6 +613,11 @@ const menuItems = computed(() => {
           name: 'Traffic Funnel',
           label: 'Funil de Tráfego',
           to: accountScopedRoute('traffic_funnel_reports'),
+        },
+        {
+          name: 'Ads Report',
+          label: 'Anúncios (Meta)',
+          to: accountScopedRoute('ads_reports'),
         },
         {
           name: 'WhatsApp Health',
