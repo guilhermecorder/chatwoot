@@ -65,9 +65,12 @@ class MetaAdsConversionsService
       event_name:       @event_name,
       event_time:       Time.current.to_i,
       event_id:         @event_id,
-      action_source:    'system_generated',
+      action_source:    ctwa_clid.present? ? 'business_messaging' : 'system_generated',
       user_data:        build_user_data,
     }
+    # ctwa_clid = clique no anúncio click-to-WhatsApp: com ele a Meta
+    # atribui a conversão DIRETO ao anúncio que trouxe o contato
+    data[:messaging_channel] = 'whatsapp' if ctwa_clid.present?
     data[:custom_data] = @custom_data if @custom_data.present?
     data
   end
@@ -83,7 +86,14 @@ class MetaAdsConversionsService
     ud[:fn] = [hash_value(name_parts&.first&.downcase)] if name_parts&.first.present?
     ud[:ln] = [hash_value(name_parts&.last&.downcase)]  if name_parts&.last.present?
 
+    ud[:ctwa_clid] = ctwa_clid if ctwa_clid.present?
+
     ud
+  end
+
+  # gravado pelo Crm::AdAttributionService quando o lead chega por anúncio
+  def ctwa_clid
+    @ctwa_clid ||= @contact&.additional_attributes&.dig('meta_ads', 'ctwa_clid').to_s
   end
 
   def normalize_phone(phone)

@@ -44,6 +44,25 @@ class Whatsapp::IncomingMessageBaseService
       set_conversation
       create_messages
     end
+
+    stamp_ad_attribution
+  end
+
+  # Mensagem vinda de clique em anúncio (CTWA) chega com "referral" —
+  # carimba a origem do anúncio no contato (primeiro toque) e na conversa.
+  def stamp_ad_attribution
+    return if outgoing_echo
+
+    referral = messages_data.first[:referral]
+    return if referral.blank?
+
+    Crm::AdAttributionService.new(
+      contact: @contact,
+      conversation: @conversation,
+      referral: referral.to_h
+    ).call
+  rescue StandardError => e
+    Rails.logger.error "[AdAttribution] #{e.message}"
   end
 
   def process_statuses

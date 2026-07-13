@@ -146,6 +146,9 @@ Rails.application.routes.draw do
             end
             resources :followup_bots, only: [:index, :create, :update, :destroy]
             resource :traffic_report, only: [:show]
+            resource :ads_report, only: [:show], controller: 'ads_reports' do
+              post :backfill
+            end
             resource :retro_labels, only: [] do
               post :preview
               post :apply

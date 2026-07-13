@@ -257,6 +257,8 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       procedure_of_interest: c.procedure_of_interest,
       notes: c.notes,
       labels: @labels_by_contact ? @labels_by_contact[contact.id] : contact.label_list,
+      # atribuição de anúncio é visão de gestor — agente tem painel simples
+      meta_ads: Current.account_user&.administrator? ? contact.additional_attributes&.[]('meta_ads') : nil,
       last_activity_at: contact.last_activity_at,
       conversations_count: @conv_count_by_contact ? (@conv_count_by_contact[contact.id] || 0) : contact.conversations.count,
       last_conversation_id: last_conversation&.id,

@@ -80,6 +80,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg['access_token']      = params[:access_token]      if params[:access_token].present?
     cfg['ad_account_id']     = params[:ad_account_id]     if params.key?(:ad_account_id)
     cfg['test_event_code']   = params[:test_event_code]   # pode ser blank
+    # etapas do CRM que contam como conversão no relatório de anúncios
+    cfg['conversion_stage_ids'] = Array(params[:conversion_stage_ids]).map(&:to_i) if params.key?(:conversion_stage_ids)
     crm_settings.update!(meta_ads_config: cfg)
     render json: meta_ads_json(crm_settings)
   end
