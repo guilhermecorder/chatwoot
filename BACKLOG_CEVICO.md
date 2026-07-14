@@ -711,6 +711,36 @@ do médico. Sem migration, sem mudança de backend.
 
 ---
 
+## 25. RODADA 2026-07-14 (pós-deploy) — Ajustes do feedback de produção ⏳ AGUARDA TESTE
+
+Lote 14–24 FOI PRO AR (deploy EasyPanel ok, backup manual feito antes,
+build ~26min por recompilação sem cache — gem nova). Ajustes pedidos pelo
+Guilherme olhando produção:
+
+1. **Responsividade (Dashboard CRM):** barras em GRADIENTE (paleta oficial)
+   com largura proporcional à MAIOR etapa (não ao total) — cheias e
+   legíveis, "X% · N conversas" escrito dentro (ou ao lado quando curta).
+2. **Conversas ao longo do tempo:** séries de agendamento/cirurgia viraram
+   COORTE — leads distribuídos pela data REAL de chegada (contacts
+   .created_at), contando quantos avançaram até a etapa. Antes usava
+   entered_at do stage_log → pico artificial de 2k no dia do tratamento
+   em massa. Séries renomeadas: "Chegaram a agendar/à cirurgia".
+3. **Meu Painel:** "Consultas agendadas" = max(Agenda tasks, entradas em
+   etapa %agendamento% no CRM via StageLog) — produção agenda no CRM.
+   CUTOFF 2026-07-14 00:00 BRT ignora o retro em massa (constante
+   CRM_TRACKING_START no home_controller). + auto-refresh: 2 min +
+   visibilitychange.
+4. **CRM board:** pílulas DOURADAS de período do lead (Hoje|Ontem|Essa
+   semana|Últimos 7 dias|Este mês) à direita das pílulas de colunas —
+   preenchem o De/Até; re-clique desliga; edição manual no painel de
+   filtros desliga a pílula.
+5. **Agenda:** botão "Nova consulta" movido pra ESQUERDA (ao lado do
+   título) em verde contrastante (#059669→#34D399).
+
+Sem migration. Testado no Docker local (dashboard, board, agenda, painel).
+
+---
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
 **ONDE ESTAMOS:** existe um LOTE GIGANTE NÃO COMMITADO no working tree
