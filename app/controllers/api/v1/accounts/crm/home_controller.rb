@@ -8,7 +8,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     since, until_at = resolve_range
 
     new_conversations = account.conversations.where(created_at: since..until_at).count
-    appointments_created = consultas.where(created_at: since..until_at).count
+    appointments_created = appointments_in(since, until_at)
 
     render json: {
       period: params[:preset].presence || 'today',
@@ -25,7 +25,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       unanswered: account.conversations.open.where.not(waiting_since: nil).count,
       appointments_today: active_consultas.where(due_at: TZ.now.all_day).count,
       new_contacts_30d: account.contacts.where(created_at: 30.days.ago..Time.current).count,
-      appointments_30d: consultas.where(created_at: 30.days.ago..Time.current).count,
+      appointments_30d: appointments_in(30.days.ago, Time.current),
       next_appointments: next_appointments_json,
       opportunity_alerts: opportunity_alerts_json
     }
@@ -50,6 +50,35 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
 
   def consultas
     account.tasks.where(task_type: 'consulta')
+  end
+
+  # "Consultas agendadas" = o MAIOR entre a Agenda (tasks tipo consulta) e
+  # os cards que ENTRARAM numa etapa de Agendamento no CRM no período —
+  # em produção os agendamentos vivem no CRM até a Agenda ser adotada.
+  # Movimentos de CRM só contam a partir do CUTOFF: antes disso houve
+  # tratamento retroativo em massa que moveu milhares de cards num dia só.
+  CRM_TRACKING_START = Time.zone.parse('2026-07-14 00:00:00 -03:00').freeze
+
+  def appointments_in(since, until_at)
+    from_agenda = consultas.where(created_at: since..until_at).count
+    from_crm = agendamento_entries([since, CRM_TRACKING_START].max, until_at)
+    [from_agenda, from_crm].max
+  end
+
+  def agendamento_entries(since, until_at)
+    return 0 if until_at < since
+
+    stage_ids = Crm::Stage.joins(:pipeline)
+                          .where(crm_pipelines: { account_id: account.id })
+                          .where('crm_stages.name ILIKE ?', '%agendamento%')
+                          .pluck(:id)
+    return 0 if stage_ids.empty?
+
+    Crm::StageLog.joins(:crm_contact)
+                 .where(crm_contacts: { pipeline_id: account.crm_pipelines.select(:id) })
+                 .where(stage_id: stage_ids, entered_at: since..until_at)
+                 .distinct
+                 .count(:crm_contact_id)
   end
 
   def active_consultas

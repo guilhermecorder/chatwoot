@@ -2,7 +2,7 @@
 // Meu Painel (tela inicial) — visível para admin E atendentes.
 // Boas-vindas, avisos do Radar, indicadores por período (hoje/ontem/semana/
 // mês/mês passado) e a saúde da agenda — com atalhos para agir rápido.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAccount } from 'dashboard/composables/useAccount';
@@ -153,10 +153,27 @@ const shortcuts = [
 ];
 const go = route => router.push({ name: route, params: { accountId: accountId.value } });
 
-onMounted(() => {
+// mantém o painel VIVO: atualiza sozinho a cada 2 min e sempre que a
+// pessoa volta para a aba (sem precisar recarregar a página)
+let refreshTimer = null;
+const refreshAll = () => {
   store.dispatch('tasks/fetch').catch(() => {});
-  store.dispatch('crm/fetchSettings').catch(() => {});
   fetchData();
+};
+const onVisible = () => {
+  if (document.visibilityState === 'visible') refreshAll();
+};
+
+onMounted(() => {
+  store.dispatch('crm/fetchSettings').catch(() => {});
+  refreshAll();
+  refreshTimer = setInterval(refreshAll, 120000);
+  document.addEventListener('visibilitychange', onVisible);
+});
+
+onUnmounted(() => {
+  clearInterval(refreshTimer);
+  document.removeEventListener('visibilitychange', onVisible);
 });
 </script>
 
