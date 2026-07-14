@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_12_000005) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_14_000007) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -753,6 +753,20 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_12_000005) do
     t.index ["user_id"], name: "index_copilot_threads_on_user_id"
   end
 
+  create_table "crm_ai_usages", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "agent_key", null: false
+    t.string "model", null: false
+    t.integer "input_tokens", default: 0, null: false
+    t.integer "output_tokens", default: 0, null: false
+    t.decimal "cost_usd", precision: 12, scale: 6, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "agent_key"], name: "index_crm_ai_usages_on_account_id_and_agent_key"
+    t.index ["account_id", "created_at"], name: "index_crm_ai_usages_on_account_id_and_created_at"
+    t.index ["account_id"], name: "index_crm_ai_usages_on_account_id"
+  end
+
   create_table "crm_automation_logs", force: :cascade do |t|
     t.bigint "automation_id", null: false
     t.bigint "contact_id", null: false
@@ -878,6 +892,35 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_12_000005) do
     t.index ["stage_id"], name: "index_crm_followup_bots_on_stage_id"
   end
 
+  create_table "crm_form_responses", force: :cascade do |t|
+    t.bigint "crm_form_id", null: false
+    t.bigint "account_id", null: false
+    t.bigint "contact_id"
+    t.jsonb "answers", default: [], null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_crm_form_responses_on_account_id"
+    t.index ["contact_id"], name: "index_crm_form_responses_on_contact_id"
+    t.index ["crm_form_id"], name: "index_crm_form_responses_on_crm_form_id"
+  end
+
+  create_table "crm_forms", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.boolean "active", default: true, null: false
+    t.string "intro_title"
+    t.text "intro_text"
+    t.text "thank_you_text"
+    t.jsonb "questions", default: [], null: false
+    t.jsonb "ai_insight", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_crm_forms_on_account_id"
+    t.index ["slug"], name: "index_crm_forms_on_slug", unique: true
+  end
+
   create_table "crm_message_automations", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.bigint "inbox_id", null: false
@@ -925,6 +968,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_12_000005) do
     t.jsonb "google_ads_config", default: {}, null: false
     t.jsonb "column_presets", default: [], null: false
     t.jsonb "agent_permissions", default: {}, null: false
+    t.jsonb "ai_config", default: {}, null: false
+    t.jsonb "sheets_config", default: {}, null: false
+    t.jsonb "agenda_config", default: {}, null: false
     t.index ["account_id"], name: "index_crm_settings_on_account_id", unique: true
   end
 
@@ -1435,6 +1481,11 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_12_000005) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "unit"
+    t.string "phone"
+    t.string "procedure"
+    t.string "doctor"
+    t.datetime "canceled_at"
+    t.integer "rescheduled_count", default: 0, null: false
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
     t.index ["account_id", "unit"], name: "index_tasks_on_account_id_and_unit"
     t.index ["account_id"], name: "index_tasks_on_account_id"
@@ -1554,6 +1605,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_12_000005) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "crm_ai_usages", "accounts"
   add_foreign_key "crm_automation_logs", "crm_automations", column: "automation_id"
   add_foreign_key "crm_automations", "crm_stages", column: "stage_id"
   add_foreign_key "crm_campaign_contacts", "contacts"
@@ -1571,6 +1623,10 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_12_000005) do
   add_foreign_key "crm_followup_bots", "crm_stages", column: "stage_id"
   add_foreign_key "crm_followup_bots", "inboxes"
   add_foreign_key "crm_followup_bots", "users", column: "sender_id"
+  add_foreign_key "crm_form_responses", "accounts"
+  add_foreign_key "crm_form_responses", "contacts"
+  add_foreign_key "crm_form_responses", "crm_forms"
+  add_foreign_key "crm_forms", "accounts"
   add_foreign_key "crm_message_automations", "accounts"
   add_foreign_key "crm_message_automations", "crm_stages", column: "trigger_stage_id"
   add_foreign_key "crm_message_automations", "inboxes"
