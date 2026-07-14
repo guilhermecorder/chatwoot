@@ -741,10 +741,38 @@ Sem migration. Testado no Docker local (dashboard, board, agenda, painel).
 
 ---
 
+---
+
+## 26. RODADA 2026-07-14 (dia) — Interruptor definitivo dos agentes de IA ⏳ AGUARDA TESTE
+
+Pedido do Guilherme (receio de "ligar a IA e não conseguir desligar"):
+
+**Interruptor definitivo (kill switch) em 3 camadas:**
+1. `Crm::AiAgentConfig#agent_paused?` agora exige `enabled == true` GRAVADO
+   — padrão (sem config) = DESLIGADO. Vale para TODOS os caminhos: botão
+   na conversa, automação de coluna e cron do Radar (job também opt-in).
+2. Toggle na tela dos agentes grava NA HORA (updateAi com merge por
+   agente — não apaga prompt/modelo/vigias; endpoint agora faz deep-merge
+   em vez de substituir cfg["agents"] inteiro). Chips "Ligado/Desligado",
+   selo "vale na hora".
+3. Automação de coluna com agente desligado = serviço recusa e nada roda
+   (sem custo, sem chamada à API).
+
+**Modal "Nova automação" (Modo Programação):** ações "Analisar com IA" e
+"Agendar consulta (IA)" viraram UMA ação "🤖 Adicionar agente de IA" com
+seletor "Qual agente?" (por baixo continua ai_analyze/schedule_appointment
+— zero mudança de backend) + aviso âmbar de que só roda com o agente
+LIGADO. ACTION_LABELS do painel panorâmico atualizados.
+
+Testado no Docker local: 3 estados do interruptor (ausente/false→pausado,
+true→roda), clique liga/desliga gravando na hora preservando vigias e os
+demais agentes, modal com a ação nova. PENDENTE: Guilherme vai enviar o
+JSON do fluxo N8N do agente de agendamento p/ mapear o comportamento.
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
 **ONDE ESTAMOS:** existe um LOTE GIGANTE NÃO COMMITADO no working tree
-(~67 arquivos entre modificados e novos), cobrindo os itens 14 a 24 deste
+(~67 arquivos entre modificados e novos), cobrindo os itens 14 a 26 deste
 backlog (o item 13/anúncios Meta já foi pushado antes — build `f9e8cae8c`).
 TUDO testado no Docker local (rails/sidekiq/vite de pé, migrations
 aplicadas, Vite compilando, smoke tests ok). AGUARDA: teste visual do

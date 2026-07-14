@@ -22,7 +22,8 @@ class Crm::OpportunityRadarJob < ApplicationJob
     CrmSetting.find_each do |settings|
       agents = (settings.ai_config || {})['agents'] || {}
       radar = agents['opportunity'] || {}
-      next if radar['enabled'] == false
+      # opt-in explícito: só roda com o interruptor LIGADO (enabled == true)
+      next unless radar['enabled'] == true
       # sem vigia (formato novo) nem coluna (formato antigo) = radar desligado
       next if Array(radar['watchers']).empty? && Array(radar['stage_ids']).empty?
 

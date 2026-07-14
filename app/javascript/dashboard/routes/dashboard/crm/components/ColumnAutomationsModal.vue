@@ -58,6 +58,11 @@ const DELAY_PRESETS = [
   { value: -1,   label: 'Personalizado' },
 ];
 
+// "Adicionar agente de IA" agrupa as ações de IA num botão só — o agente
+// específico é escolhido num seletor (por baixo continua sendo
+// ai_analyze / schedule_appointment, sem mudança no backend)
+const AI_ACTION_TYPES = ['ai_analyze', 'schedule_appointment'];
+
 const ACTIONS = [
   { value: 'webhook',              label: 'Disparar webhook',        icon: 'i-lucide-globe' },
   { value: 'n8n_flow',             label: 'Acionar fluxo n8n',       icon: 'i-lucide-workflow' },
@@ -68,8 +73,7 @@ const ACTIONS = [
   { value: 'meta_ads_event',       label: 'Evento Meta Ads',         icon: 'i-lucide-bar-chart-2' },
   { value: 'google_ads_conversion',label: 'Conversão Google Ads',    icon: 'i-lucide-trending-up' },
   { value: 'send_form',            label: 'Enviar formulário',       icon: 'i-lucide-clipboard-list' },
-  { value: 'ai_analyze',           label: 'Analisar com IA',         icon: 'i-lucide-sparkles' },
-  { value: 'schedule_appointment', label: 'Agendar consulta (IA)',   icon: 'i-lucide-calendar-plus' },
+  { value: 'ai_agent',             label: 'Adicionar agente de IA',  icon: 'i-lucide-bot' },
 ];
 
 const emptyForm = () => ({
@@ -139,6 +143,14 @@ watch(() => props.initialAutomation, (auto) => {
 }, { immediate: true });
 
 const isCustomDelay = computed(() => form.value.delay_minutes === -1);
+
+// o botão "Adicionar agente de IA" fica aceso para qualquer ação de IA
+const isAiAction = computed(() => AI_ACTION_TYPES.includes(form.value.action_type));
+const selectAction = value => {
+  form.value.action_type = value === 'ai_agent' ? 'ai_analyze' : value;
+};
+const actionSelected = action =>
+  action.value === 'ai_agent' ? isAiAction.value : form.value.action_type === action.value;
 
 const otherStages = computed(() =>
   props.allStages.filter(s => s.id !== props.stage?.id)
@@ -302,10 +314,10 @@ const save = async () => {
               v-for="action in ACTIONS"
               :key="action.value"
               class="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm transition-colors text-left"
-              :class="form.action_type === action.value
+              :class="actionSelected(action)
                 ? 'border-n-brand bg-n-brand/10 text-n-brand font-medium'
                 : 'border-n-weak bg-n-solid-2 text-n-slate-11 hover:border-n-brand/40'"
-              @click="form.action_type = action.value"
+              @click="selectAction(action.value)"
             >
               <span :class="action.icon" class="text-base flex-shrink-0" />
               {{ action.label }}
@@ -485,9 +497,30 @@ const save = async () => {
           </div>
         </div>
 
-        <!-- Analisar com IA -->
-        <div v-else-if="form.action_type === 'ai_analyze'" class="space-y-3">
-          <div class="bg-n-alpha-1 rounded-xl p-3.5 text-xs text-n-slate-11 space-y-1.5">
+        <!-- Adicionar agente de IA (escolhe qual agente roda na coluna) -->
+        <div v-else-if="isAiAction" class="space-y-3">
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Qual agente?</label>
+            <select
+              v-model="form.action_type"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+            >
+              <option value="ai_analyze">✨ Analista de Conversas — lê a conversa e dá o parecer de interesse</option>
+              <option value="schedule_appointment">📅 Agente de Agendamento — cria a consulta na Agenda</option>
+            </select>
+          </div>
+
+          <!-- interruptor de segurança: sem agente LIGADO, nada roda -->
+          <div class="rounded-xl p-3 text-xs border-2 flex items-start gap-2" style="border-color: rgba(212,160,23,0.4); background: rgba(212,160,23,0.08)">
+            <span class="i-lucide-power text-sm flex-shrink-0 mt-0.5" style="color: #B8860B" />
+            <p class="text-n-slate-11">
+              Esta automação <b>só roda se o agente estiver LIGADO</b> no interruptor em
+              Automações → Agentes de IA (o padrão é desligado). Desligar o agente lá
+              para esta automação na hora — ela fica aqui, mas não faz nada.
+            </p>
+          </div>
+
+          <div v-if="form.action_type === 'ai_analyze'" class="bg-n-alpha-1 rounded-xl p-3.5 text-xs text-n-slate-11 space-y-1.5">
             <p class="flex items-center gap-1.5 font-medium text-n-slate-12">
               <span class="i-lucide-sparkles" style="color: #D97706" />
               Analista de Conversas (Claude)
@@ -496,47 +529,40 @@ const save = async () => {
               Quando o card entrar aqui, a IA lê a conversa e salva o parecer
               (interesse alto/médio/baixo/perdido + resumo + próximo passo) —
               visível no painel da conversa e no balão do CRM. Cada análise
-              custa centavos.
-            </p>
-            <p class="text-n-slate-9">
-              Prompt e pausa do agente: Automações → Agentes de IA. Chave: Integrações → Claude.
+              custa centavos. Nunca fala com o paciente.
             </p>
           </div>
-        </div>
 
-        <!-- Agendar consulta (IA) -->
-        <div v-else-if="form.action_type === 'schedule_appointment'" class="space-y-3">
-          <div class="bg-n-alpha-1 rounded-xl p-3.5 text-xs text-n-slate-11 space-y-1.5">
-            <p class="flex items-center gap-1.5 font-medium text-n-slate-12">
-              <span class="i-lucide-calendar-plus" style="color: #7C3AED" />
-              Agente de Agendamento (Claude)
-            </p>
-            <p>
-              Quando o card entrar aqui (ex.: coluna "Consulta agendada"), a IA lê a
-              conversa, extrai <b>nome, telefone, dia, hora e unidade</b> e cria o
-              compromisso na <b>Agenda</b> automaticamente.
-            </p>
-            <p>
-              Se dia e hora não estiverem confirmados na conversa, ela cria uma tarefa
-              "⚠️ Confirmar consulta" para a equipe completar — nada se perde.
-            </p>
-            <p class="text-n-slate-9">
-              Prompt e pausa do agente: Automações → Agentes de IA. Chave: Integrações → Claude.
-            </p>
-          </div>
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
-              Unidade padrão <span class="text-n-slate-9 font-normal">(usada quando a conversa não diz a unidade)</span>
-            </label>
-            <select
-              v-model="form.action_config.default_unit"
-              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
-            >
-              <option value="">Deixar sem unidade</option>
-              <option value="tatuape">Tatuapé</option>
-              <option value="paulista">Av. Paulista</option>
-            </select>
-          </div>
+          <template v-else>
+            <div class="bg-n-alpha-1 rounded-xl p-3.5 text-xs text-n-slate-11 space-y-1.5">
+              <p class="flex items-center gap-1.5 font-medium text-n-slate-12">
+                <span class="i-lucide-calendar-plus" style="color: #7C3AED" />
+                Agente de Agendamento (Claude)
+              </p>
+              <p>
+                Quando o card entrar aqui (ex.: coluna "Consulta agendada"), a IA lê a
+                conversa, extrai <b>nome, telefone, dia, hora e unidade</b> e cria o
+                compromisso na <b>Agenda</b> automaticamente. Nunca fala com o paciente.
+              </p>
+              <p>
+                Se dia e hora não estiverem confirmados na conversa, ela cria uma tarefa
+                "⚠️ Confirmar consulta" para a equipe completar — nada se perde.
+              </p>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                Unidade padrão <span class="text-n-slate-9 font-normal">(usada quando a conversa não diz a unidade)</span>
+              </label>
+              <select
+                v-model="form.action_config.default_unit"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option value="">Deixar sem unidade</option>
+                <option value="tatuape">Tatuapé</option>
+                <option value="paulista">Av. Paulista</option>
+              </select>
+            </div>
+          </template>
         </div>
 
         <!-- Google Ads -->

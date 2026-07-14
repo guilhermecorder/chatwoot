@@ -121,17 +121,23 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg['effort']  = params[:effort]  if params.key?(:effort)
     # agentes internos: ligar/pausar, prompt, modelo e esforço por agente
     # (o Radar de Oportunidades ainda tem as vigias: coluna + painel do
-    # atendente + janela de tempo, além dos minutos de espera)
+    # atendente + janela de tempo, além dos minutos de espera).
+    # MERGE por agente: dá para mandar só { opportunity: { enabled: true } }
+    # (o interruptor da tela) sem apagar prompt/modelo/vigias já salvos.
     if params[:agents].present?
       agent_fields = [:enabled, :prompt, :model, :effort]
-      cfg['agents'] = params.require(:agents)
-                            .permit(conversation: agent_fields,
-                                    form: agent_fields,
-                                    scheduler: agent_fields,
-                                    opportunity: agent_fields + [:wait_minutes, :lookback_hours,
-                                                                 { stage_ids: [],
-                                                                   watchers: %i[stage_id user_id lookback_hours] }])
-                            .to_h
+      permitted = params.require(:agents)
+                        .permit(conversation: agent_fields,
+                                form: agent_fields,
+                                scheduler: agent_fields,
+                                opportunity: agent_fields + [:wait_minutes, :lookback_hours,
+                                                             { stage_ids: [],
+                                                               watchers: %i[stage_id user_id lookback_hours] }])
+                        .to_h
+      existing = cfg['agents'] || {}
+      cfg['agents'] = existing.merge(permitted) do |_key, old_agent, new_agent|
+        (old_agent || {}).merge(new_agent || {})
+      end
     end
     crm_settings.update!(ai_config: cfg)
     render json: ai_json(crm_settings)
@@ -318,7 +324,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agents: default_prompts.to_h do |key, default_prompt|
         recommended = Crm::AiAgentConfig::RECOMMENDED[key] || {}
         [key, {
-          enabled: agents.dig(key, 'enabled') != false,
+          # opt-in: sem enabled true gravado, o agente está DESLIGADO
+          enabled: agents.dig(key, 'enabled') == true,
           prompt: agents.dig(key, 'prompt').presence,
           model: agents.dig(key, 'model').presence,
           effort: agents.dig(key, 'effort').presence,

@@ -63,8 +63,11 @@ module Crm::AiAgentConfig
     (ai_config['agents'] || {})[self.class::AGENT_KEY] || {}
   end
 
+  # INTERRUPTOR DEFINITIVO: agente só roda com enabled == true gravado.
+  # Padrão (sem config) = DESLIGADO — ninguém liga IA sem querer. Vale para
+  # TODOS os caminhos: botão na tela, automação de coluna e cron do Radar.
   def agent_paused?
-    agent_config['enabled'] == false
+    agent_config['enabled'] != true
   end
 
   # prompt do agente (custom ou padrão) SEMPRE com a trava operacional no fim

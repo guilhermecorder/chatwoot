@@ -80,6 +80,31 @@ const runSweep = async () => {
 const radarLastRun = () => settings.value?.ai?.opportunity_last_run || null;
 const isSavingAgents = ref(false);
 
+// ── Interruptor DEFINITIVO do agente ──
+// Liga/desliga NA HORA (grava direto no banco, sem depender do botão
+// "Salvar agentes"). Desligado = o agente não roda por nenhum caminho:
+// botão da conversa, automação de coluna ou cron do Radar.
+const togglingAgent = ref('');
+const toggleAgent = async key => {
+  if (togglingAgent.value) return;
+  const agent = aiAgents.value[key];
+  const next = !agent.enabled;
+  togglingAgent.value = key;
+  try {
+    await CrmAPI.updateAi({ agents: { [key]: { enabled: next } } });
+    agent.enabled = next;
+    useAlert(
+      next
+        ? `✅ ${AGENT_META[key].title} LIGADO — já está valendo.`
+        : `⏹ ${AGENT_META[key].title} DESLIGADO — parou em todos os caminhos.`
+    );
+  } catch {
+    useAlert('Erro ao mudar o interruptor do agente.');
+  } finally {
+    togglingAgent.value = '';
+  }
+};
+
 // uso/custo dos agentes (relatório)
 const aiUsage = ref(null);
 const usageByAgent = key =>
@@ -208,7 +233,8 @@ const loadAgents = async () => {
   await store.dispatch('crm/fetchSettings');
   const a = settings.value?.ai?.agents || {};
   const load = key => ({
-    enabled: a[key]?.enabled !== false,
+    // opt-in: agente só aparece LIGADO se foi ligado de propósito
+    enabled: a[key]?.enabled === true,
     prompt: a[key]?.prompt || '',
     model: a[key]?.model || '',
     effort: a[key]?.effort || '',
@@ -312,7 +338,8 @@ const ACTION_LABELS = {
   meta_ads_event: 'Evento Meta Ads',
   google_ads_conversion: 'Conversão Google Ads',
   send_form: 'Enviar formulário',
-  ai_analyze: 'Analisar com IA',
+  ai_analyze: 'Agente de IA: Analista de Conversas',
+  schedule_appointment: 'Agente de IA: Agendamento',
 };
 
 const openProgrammingMode = () => {
@@ -610,24 +637,37 @@ onMounted(async () => {
                   </span>
                   <span
                     class="text-[10px] px-2 py-0.5 rounded-full font-medium"
-                    :class="agent.enabled ? 'bg-green-500/15 text-green-600' : 'bg-red-500/15 text-red-500'"
+                    :class="agent.enabled ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-10'"
                   >
-                    ● {{ agent.enabled ? 'Ativo' : 'Parado' }}
+                    ● {{ agent.enabled ? 'Ligado' : 'Desligado' }}
                   </span>
                 </div>
                 <p class="text-xs text-n-slate-10 mt-1">{{ AGENT_META[key].description }}</p>
               </div>
-              <!-- botão parar/ativar -->
-              <button
-                class="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl flex-shrink-0 transition-colors"
-                :class="agent.enabled
-                  ? 'bg-red-500/10 text-red-600 border-2 border-red-500/30 hover:bg-red-500/20'
-                  : 'bg-green-500/10 text-green-600 border-2 border-green-500/30 hover:bg-green-500/20'"
-                @click="agent.enabled = !agent.enabled"
-              >
-                <span :class="agent.enabled ? 'i-lucide-square' : 'i-lucide-play'" class="text-xs" />
-                {{ agent.enabled ? 'Parar' : 'Ativar' }}
-              </button>
+              <!-- INTERRUPTOR definitivo: grava na hora, sem "Salvar" -->
+              <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                <button
+                  class="relative w-14 h-7 rounded-full transition-colors disabled:opacity-50"
+                  :class="agent.enabled ? 'bg-green-500' : 'bg-n-alpha-3'"
+                  :title="agent.enabled
+                    ? 'Desligar este agente agora (para tudo: botões, automações e cron)'
+                    : 'Ligar este agente agora'"
+                  :disabled="togglingAgent === key"
+                  @click="toggleAgent(key)"
+                >
+                  <span
+                    class="absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-all flex items-center justify-center"
+                    :class="agent.enabled ? 'left-7' : 'left-0.5'"
+                  >
+                    <span
+                      :class="togglingAgent === key ? 'i-lucide-loader-2 animate-spin' : (agent.enabled ? 'i-lucide-check' : 'i-lucide-power')"
+                      class="text-[11px]"
+                      :style="{ color: agent.enabled ? '#16A34A' : '#94A3B8' }"
+                    />
+                  </span>
+                </button>
+                <span class="text-[9px] text-n-slate-9">vale na hora</span>
+              </div>
             </div>
 
             <!-- Onde se aplica -->
@@ -854,8 +894,8 @@ onMounted(async () => {
                   <p class="text-sm font-semibold text-n-slate-12 truncate">{{ AGENT_META[key].title }}</p>
                   <span
                     class="text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0"
-                    :class="agent.enabled ? 'bg-green-500/15 text-green-600' : 'bg-red-500/15 text-red-500'"
-                  >● {{ agent.enabled ? 'Ativo' : 'Parado' }}</span>
+                    :class="agent.enabled ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-10'"
+                  >● {{ agent.enabled ? 'Ligado' : 'Desligado' }}</span>
                 </div>
                 <p class="text-[11px] text-n-slate-10 truncate">
                   {{ resolvedModel(key, agent) }}<template v-if="key === 'opportunity'"> · {{ agent.watchers.length }} coluna(s) vigiada(s)</template>
