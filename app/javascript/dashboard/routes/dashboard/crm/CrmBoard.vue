@@ -130,6 +130,13 @@ const openFiltersPanel = () => {
 };
 
 const applyFiltersPanel = () => {
+  // datas mudadas à mão no painel desligam a pílula de preset de período
+  if (
+    panelDraft.value.dateFrom !== filters.value.dateFrom ||
+    panelDraft.value.dateTo !== filters.value.dateTo
+  ) {
+    activeDatePreset.value = '';
+  }
   Object.assign(filters.value, {
     ...panelDraft.value,
     labels: [...panelDraft.value.labels],
@@ -349,8 +356,56 @@ const loadAllContacts = async () => {
 
 const clearFilters = () => {
   filters.value = { ...makeDefaultFilters(), createdAt: '' }; // limpar = ver tudo
+  activeDatePreset.value = '';
   panelDraft.value = null;
   showFilters.value = false;
+};
+
+// ── Presets de período (data real do lead) — pílulas douradas ─────────
+// Atalhos que preenchem o De/Até do filtro; clicar de novo desliga.
+const DATE_PRESETS = [
+  { key: 'today', label: 'Hoje' },
+  { key: 'yesterday', label: 'Ontem' },
+  { key: 'week', label: 'Essa semana' },
+  { key: 'last7', label: 'Últimos 7 dias' },
+  { key: 'month', label: 'Este mês' },
+];
+const activeDatePreset = ref('');
+
+const localDateStr = d => {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const applyDatePreset = key => {
+  if (activeDatePreset.value === key) {
+    activeDatePreset.value = '';
+    filters.value.dateFrom = '';
+    filters.value.dateTo = '';
+    return;
+  }
+  const now = new Date();
+  const today = localDateStr(now);
+  let from = today;
+  let to = today;
+  if (key === 'yesterday') {
+    const y = new Date(now);
+    y.setDate(y.getDate() - 1);
+    from = to = localDateStr(y);
+  } else if (key === 'week') {
+    const s = new Date(now);
+    s.setDate(s.getDate() - s.getDay()); // domingo
+    from = localDateStr(s);
+  } else if (key === 'last7') {
+    const s = new Date(now);
+    s.setDate(s.getDate() - 6);
+    from = localDateStr(s);
+  } else if (key === 'month') {
+    from = localDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
+  }
+  activeDatePreset.value = key;
+  filters.value.dateFrom = from;
+  filters.value.dateTo = to;
 };
 
 // Buscar precisa enxergar a base toda: se ela ainda não foi carregada,
@@ -997,6 +1052,25 @@ const createAndAddContact = async () => {
               <span class="i-lucide-settings-2 text-sm" />
             </button>
           </div>
+        </div>
+
+        <!-- Período do lead (pílulas douradas — atalhos de data) -->
+        <div
+          class="flex items-center bg-n-solid-2 rounded-xl p-0.5 gap-0.5 flex-wrap border"
+          style="border-color: rgba(212, 160, 23, 0.45)"
+        >
+          <span class="i-lucide-calendar-clock text-sm ml-2 mr-0.5" style="color: #B8860B" />
+          <button
+            v-for="p in DATE_PRESETS"
+            :key="p.key"
+            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+            :class="activeDatePreset === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="activeDatePreset === p.key ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
+            :title="`Só leads que chegaram: ${p.label.toLowerCase()} (clique de novo para limpar)`"
+            @click="applyDatePreset(p.key)"
+          >
+            {{ p.label }}
+          </button>
         </div>
 
         <!-- Clear filters button -->
