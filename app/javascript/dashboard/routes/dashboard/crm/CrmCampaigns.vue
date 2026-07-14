@@ -10,7 +10,13 @@ import { relativeTime } from './helpers';
 const store = useStore();
 const router = useRouter();
 
-const activeTab = ref('campaigns'); // campaigns | automations | panel
+// aba inicial pode vir da URL (?tab=automations) — usada pelo hub de Automações
+const initialTab = ['campaigns', 'automations', 'panel'].includes(
+  new URLSearchParams(window.location.search).get('tab')
+)
+  ? new URLSearchParams(window.location.search).get('tab')
+  : 'campaigns';
+const activeTab = ref(initialTab); // campaigns | automations | panel
 const campaigns = ref([]);
 const automations = ref([]);
 const isLoading = ref(false);

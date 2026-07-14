@@ -91,9 +91,9 @@ const cpl = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full overflow-y-auto p-6 bg-n-surface-1">
+  <div class="flex flex-col h-full overflow-y-auto p-8 bg-n-surface-1">
     <!-- Header -->
-    <div class="flex items-center gap-3 mb-6 flex-wrap">
+    <div class="flex items-center gap-4 mb-8 flex-wrap">
       <div>
         <h1 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
           <span class="i-lucide-filter text-n-brand" />
@@ -125,7 +125,7 @@ const cpl = computed(() => {
       <!-- Aviso de configuração dos anúncios -->
       <div
         v-if="!data.ads?.configured"
-        class="mb-5 text-xs text-amber-700 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 max-w-3xl"
+        class="mb-5 text-xs text-amber-700 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 max-w-3xl"
       >
         <p class="font-semibold mb-1">Meta Ads não conectado ao funil</p>
         <p>
@@ -136,34 +136,34 @@ const cpl = computed(() => {
       </div>
       <div
         v-else-if="data.ads?.error"
-        class="mb-5 text-xs text-red-600 bg-red-500/10 border border-red-500/30 rounded-xl p-4 max-w-3xl"
+        class="mb-5 text-xs text-red-600 bg-red-500/10 border border-red-500/30 rounded-2xl p-5 max-w-3xl"
       >
         <p class="font-semibold mb-1">Erro ao consultar o Meta Ads</p>
         <p>{{ data.ads.error }}</p>
       </div>
 
       <!-- KPIs de investimento -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-4xl mb-6">
-        <div class="bg-n-solid-2 border border-n-weak rounded-xl p-4">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-4xl mb-6">
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
           <p class="text-xs text-n-slate-10">Investimento</p>
           <p class="text-xl font-bold text-n-slate-12">
             {{ data.ads?.configured && !data.ads?.error ? formatCurrency(data.ads.spend) : '—' }}
           </p>
           <p class="text-xs text-n-slate-9 mt-0.5">Meta Ads no período</p>
         </div>
-        <div class="bg-n-solid-2 border border-n-weak rounded-xl p-4">
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
           <p class="text-xs text-n-slate-10">Alcance</p>
           <p class="text-xl font-bold text-n-slate-12">
             {{ data.ads?.configured && !data.ads?.error ? formatNumber(data.ads.reach) : '—' }}
           </p>
           <p class="text-xs text-n-slate-9 mt-0.5">pessoas alcançadas</p>
         </div>
-        <div class="bg-n-solid-2 border border-n-weak rounded-xl p-4">
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
           <p class="text-xs text-n-slate-10">Conversas iniciadas</p>
           <p class="text-xl font-bold text-n-brand">{{ formatNumber(data.conversations_started) }}</p>
           <p class="text-xs text-n-slate-9 mt-0.5">no período</p>
         </div>
-        <div class="bg-n-solid-2 border border-n-weak rounded-xl p-4">
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
           <p class="text-xs text-n-slate-10">Custo por conversa</p>
           <p class="text-xl font-bold text-n-gold">{{ cpl ? formatCurrency(cpl) : '—' }}</p>
           <p class="text-xs text-n-slate-9 mt-0.5">investimento ÷ conversas</p>
@@ -172,9 +172,9 @@ const cpl = computed(() => {
 
       <!-- Funil -->
       <div class="bg-n-solid-2 border border-n-weak rounded-xl p-5 max-w-4xl mb-6">
-        <p class="text-xs font-semibold text-n-slate-11 mb-4">Funil completo</p>
+        <p class="text-xs font-semibold text-n-slate-11 mb-6">Funil completo</p>
         <div class="space-y-2">
-          <div v-for="row in funnelRows" :key="row.key" class="flex items-center gap-3">
+          <div v-for="row in funnelRows" :key="row.key" class="flex items-center gap-4">
             <div class="w-44 text-right flex-shrink-0">
               <p class="text-xs text-n-slate-12 font-medium truncate">{{ row.name }}</p>
               <p class="text-[10px] text-n-slate-9">{{ row.source }}</p>

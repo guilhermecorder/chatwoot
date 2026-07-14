@@ -1,8 +1,7 @@
 class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseController
   def show
     pipeline = Current.account.crm_pipelines.includes(:stages).find(params[:pipeline_id])
-    period   = [[params[:period].to_i, 7].max, 1825].min  # entre 7 dias e 5 anos
-    since    = period.days.ago.beginning_of_day
+    since, until_at = resolve_range
 
     # sem ORDER BY na base: as consultas agrupadas (group/count/sum) do
     # dashboard quebram no Postgres se herdarem a ordenação
@@ -11,18 +10,71 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     render json: {
       pipeline_id:        pipeline.id,
       pipeline_name:      pipeline.name,
-      period_days:        period,
-      kpis:               build_kpis(pipeline, contacts, since),
+      period_days:        ((until_at - since) / 1.day).ceil,
+      kpis:               build_kpis(pipeline, contacts, since, until_at),
       funnel:             build_funnel(pipeline, contacts),
       value_by_stage:     build_value_by_stage(pipeline, contacts),
       avg_time_by_stage:  build_avg_time_by_stage(pipeline, contacts),
-      by_origin:          build_by_origin(contacts),
-      created_over_time:  build_created_over_time(contacts, since, period),
+      by_inbox:           build_by_inbox(since, until_at),
+      created_over_time:  build_created_over_time(contacts, since, until_at),
       responsiveness:     build_responsiveness(pipeline, contacts),
+      agents:             build_agents(since, until_at),
+      sheet_surgeries:    build_sheet_surgeries(since, until_at),
+      by_label:           build_by_label(contacts),
+      radar:              build_radar(since, until_at),
     }
   end
 
   private
+
+  # período: presets hoje/ontem/semana ou N dias (comportamento antigo)
+  def resolve_range
+    case params[:preset]
+    when 'today'     then [Date.current.beginning_of_day, Time.current]
+    when 'yesterday' then [1.day.ago.beginning_of_day, 1.day.ago.end_of_day]
+    when 'week'      then [Date.current.beginning_of_week.beginning_of_day, Time.current]
+    else
+      period = [[params[:period].to_i, 7].max, 1825].min
+      [period.days.ago.beginning_of_day, Time.current]
+    end
+  end
+
+  # ── Indicadores por agente (atendimento) ──────────────────────────
+  # abertas, sem resposta (última msg é do paciente) e tempo médio de
+  # primeira resposta no período — dá para ver o time e cada atendente
+  def build_agents(since, until_at)
+    open_by_agent = Current.account.conversations.open.group(:assignee_id).count
+
+    unanswered_by_agent = Current.account.conversations
+                                 .open
+                                 .where.not(waiting_since: nil)
+                                 .group(:assignee_id)
+                                 .count
+
+    avg_first_response = Current.account.reporting_events
+                                .where(name: 'first_response')
+                                .where(created_at: since..until_at)
+                                .group(:user_id)
+                                .average(:value)
+
+    rows = Current.account.users.map do |u|
+      {
+        id: u.id,
+        name: u.available_name,
+        open: open_by_agent[u.id] || 0,
+        unanswered: unanswered_by_agent[u.id] || 0,
+        avg_first_response_seconds: avg_first_response[u.id]&.to_f&.round(0),
+      }
+    end
+
+    {
+      rows: rows.sort_by { |r| -r[:open] },
+      unassigned: {
+        open: open_by_agent[nil] || 0,
+        unanswered: unanswered_by_agent[nil] || 0,
+      },
+    }
+  end
 
   # ── Responsividade ────────────────────────────────────────────────
   # Funil ACUMULADO: quantos leads "chegaram até cada etapa ou além".
@@ -74,11 +126,11 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
 
   # ── KPIs ─────────────────────────────────────────────────────────
 
-  def build_kpis(pipeline, contacts, since)
+  def build_kpis(pipeline, contacts, since, until_at)
     total         = contacts.count
     # data do lead = quando o contato surgiu (histórico real), não quando o
     # card foi criado no CRM (que pode ter sido hoje, na importação)
-    new_in_period = contacts.joins(:contact).where('contacts.created_at >= ?', since).count
+    new_in_period = contacts.joins(:contact).where(contacts: { created_at: since..until_at }).count
     total_value   = contacts.sum('COALESCE(value, 0)').to_f.round(2)
 
     # Última etapa (maior position) = etapa de fechamento
@@ -167,32 +219,136 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     end
   end
 
-  # ── Por origem ────────────────────────────────────────────────────
+  # ── Origem = volume de conversas por caixa de entrada ─────────────
 
-  def build_by_origin(contacts)
-    contacts
-      .where.not(origin: [nil, ''])
-      .group(:origin)
-      .count
-      .sort_by { |_, v| -v }
-      .first(8)  # máximo 8 origens no gráfico
-      .map { |origin, count| { origin: origin, count: count } }
+  def build_by_inbox(since, until_at)
+    Current.account.conversations
+           .where(created_at: since..until_at)
+           .joins(:inbox)
+           .group('inboxes.name')
+           .count
+           .sort_by { |_, v| -v }
+           .first(8)
+           .map { |name, count| { inbox: name, count: count } }
   end
 
-  # ── Leads criados ao longo do tempo ──────────────────────────────
+  # ── Conversas ao longo do tempo + marcos da jornada ──────────────
+  # séries sobrepostas: conversas novas, entradas em Agendamento e em
+  # Cirurgia (via stage_logs — o momento em que o card ENTROU na etapa)
 
-  def build_created_over_time(contacts, since, period)
+  def build_created_over_time(contacts, since, until_at)
+    days = [((until_at.to_date - since.to_date).to_i + 1), 1].max
+
     # Usa a data de criação do CONTATO (histórico real), não a do card
     by_day = contacts
       .joins(:contact)
-      .where('contacts.created_at >= ?', since)
+      .where(contacts: { created_at: since..until_at })
       .group("DATE(contacts.created_at AT TIME ZONE 'UTC')")
       .count
 
-    # Preenche os dias sem dados com 0
-    (0...period).map do |days_ago|
-      date = (Date.today - (period - 1 - days_ago).days)
-      { date: date.iso8601, count: by_day[date] || 0 }
+    schedule_by_day = stage_entries_by_day(contacts, since, until_at, '%agendamento%')
+    surgery_by_day  = stage_entries_by_day(contacts, since, until_at, '%cirurgia%')
+
+    (0...days).map do |i|
+      date = since.to_date + i
+      {
+        date: date.iso8601,
+        count: by_day[date] || 0,
+        agendamentos: schedule_by_day[date] || 0,
+        cirurgias: surgery_by_day[date] || 0,
+      }
     end
+  end
+
+  # ── Etiquetas: volume e proporção entre os leads do funil ─────────
+
+  def build_by_label(contacts)
+    counts = ActsAsTaggableOn::Tagging
+             .joins(:tag)
+             .where(taggable_type: 'Contact', context: 'labels')
+             .where(taggable_id: contacts.select(:contact_id))
+             .group('tags.name')
+             .count
+
+    total = counts.values.sum
+    items = counts.sort_by { |_, v| -v }.first(12).map do |name, count|
+      {
+        label: name,
+        count: count,
+        pct: total.positive? ? (count.to_f / total * 100).round(1) : 0.0,
+      }
+    end
+    { total: total, items: items }
+  end
+
+  # ── Radar de Oportunidades × Consultas agendadas ──────────────────
+
+  def build_radar(since, until_at)
+    settings = CrmSetting.find_by(account: Current.account)
+    history = Array(settings&.ai_config&.dig('opportunity_state', 'history'))
+    detected = history.count do |h|
+      t = begin
+        Time.zone.parse(h['detected_at'].to_s)
+      rescue StandardError
+        nil
+      end
+      t.present? && t >= since && t <= until_at
+    end
+
+    appointments = Current.account.tasks
+                          .where(task_type: 'consulta')
+                          .where(created_at: since..until_at)
+                          .count
+
+    { opportunities: detected, appointments: appointments }
+  end
+
+  # ── Cirurgias da planilha (Google Sheets) ─────────────────────────
+  # dados reais de fechamento que o Guilherme mantém na planilha —
+  # filtrados pelo mesmo período do dashboard
+
+  def build_sheet_surgeries(since, until_at)
+    service = Crm::SheetsSurgeryService.new(account: Current.account)
+    return { configured: false } unless service.configured?
+
+    range = since.to_date..until_at.to_date
+    rows = service.rows.select do |r|
+      r['date'].present? && range.cover?(Date.parse(r['date']))
+    rescue StandardError
+      false
+    end
+
+    by_procedure = rows.group_by { |r| r['procedure'].presence || 'Não informado' }
+                       .map { |name, list| { name: name, count: list.size, value: list.sum { |r| r['value_number'].to_f }.round(2) } }
+                       .sort_by { |p| -p[:count] }
+    by_unit = rows.group_by { |r| r['unit'].presence || 'Não informado' }
+                  .map { |name, list| { name: name, count: list.size, value: list.sum { |r| r['value_number'].to_f }.round(2) } }
+                  .sort_by { |u| -u[:count] }
+
+    {
+      configured: true,
+      count: rows.size,
+      revenue: rows.sum { |r| r['value_number'].to_f }.round(2),
+      by_procedure: by_procedure.first(8),
+      by_unit: by_unit,
+    }
+  rescue StandardError => e
+    Rails.logger.error "[CrmDashboard] sheet_surgeries: #{e.message}"
+    { configured: true, error: 'Não consegui ler a planilha agora.' }
+  end
+
+  def stage_entries_by_day(contacts, since, until_at, name_pattern)
+    stage_ids = Crm::Stage.joins(:pipeline)
+                          .where(crm_pipelines: { account_id: Current.account.id })
+                          .where('crm_stages.name ILIKE ?', name_pattern)
+                          .where.not('crm_stages.name ILIKE ?', '%pós%')
+                          .pluck(:id)
+    return {} if stage_ids.empty?
+
+    Crm::StageLog
+      .where(crm_contact_id: contacts.select(:id), stage_id: stage_ids)
+      .where(entered_at: since..until_at)
+      .group("DATE(entered_at AT TIME ZONE 'UTC')")
+      .count
   end
 end

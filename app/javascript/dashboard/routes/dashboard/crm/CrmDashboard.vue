@@ -1,4 +1,7 @@
 <script setup>
+// Dashboard CEVICO — paleta oficial: azul #0F5FA6, branco, roxo #7C3AED,
+// dourado #D4A017; verde-limão #84CC16 reservado para o que é MUITO bom
+// (valor em pipeline, cirurgias). "Conversa" no lugar de "lead".
 import { ref, computed, watch, onMounted } from 'vue';
 import { useStore } from 'dashboard/composables/store';
 import {
@@ -8,7 +11,7 @@ import {
   ArcElement,
   PointElement, LineElement, Filler,
 } from 'chart.js';
-import { Bar, Doughnut, Line } from 'vue-chartjs';
+import { Bar, Doughnut } from 'vue-chartjs';
 
 ChartJS.register(
   Title, Tooltip, Legend,
@@ -21,19 +24,28 @@ const props = defineProps({
   pipeline: { type: Object, required: true },
 });
 
+const AZUL = '#0F5FA6';
+const ROXO = '#7C3AED';
+const OURO = '#D4A017';
+const LIME = '#84CC16';
+const PALETTE = [AZUL, ROXO, OURO, LIME, '#3B82F6', '#A78BFA', '#F0C420', '#22D3EE', '#EA580C', '#10B981', '#F472B6', '#94A3B8'];
+
 const store   = useStore();
-const period  = ref(365);
 const data    = ref(null);
 const loading = ref(false);
 const error   = ref(false);
 
 const PERIODS = [
-  { value: 30,   label: '30 dias' },
-  { value: 90,   label: '90 dias' },
-  { value: 180,  label: '6 meses' },
-  { value: 365,  label: '1 ano' },
-  { value: 1095, label: '3 anos' },
+  { key: 'today',     preset: 'today',     label: 'Hoje' },
+  { key: 'yesterday', preset: 'yesterday', label: 'Ontem' },
+  { key: 'week',      preset: 'week',      label: 'Essa semana' },
+  { key: '30',        period: 30,          label: '30 dias' },
+  { key: '90',        period: 90,          label: '90 dias' },
+  { key: '365',       period: 365,         label: '1 ano' },
+  { key: '1095',      period: 1095,        label: '3 anos' },
 ];
+const selectedPeriodKey = ref('30');
+const selectedPeriod = computed(() => PERIODS.find(p => p.key === selectedPeriodKey.value));
 
 // ── Load ─────────────────────────────────────────────────────────────
 
@@ -43,7 +55,8 @@ const load = async () => {
   try {
     data.value = await store.dispatch('crm/fetchDashboard', {
       pipelineId: props.pipeline.id,
-      period: period.value,
+      period: selectedPeriod.value?.period,
+      preset: selectedPeriod.value?.preset,
     });
   } catch {
     error.value = true;
@@ -53,7 +66,7 @@ const load = async () => {
 };
 
 onMounted(load);
-watch(period, load);
+watch(selectedPeriodKey, load);
 watch(() => props.pipeline?.id, load);
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -69,12 +82,18 @@ const formatDuration = (mins) => {
   return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
 };
 
+const formatSeconds = (secs) => {
+  if (!secs || secs <= 0) return '—';
+  if (secs < 60) return `${Math.round(secs)}s`;
+  return formatDuration(Math.round(secs / 60));
+};
+
 const formatCurrency = (val) =>
   val > 0
     ? 'R$ ' + Number(val).toLocaleString('pt-BR', { maximumFractionDigits: 0 })
     : 'R$ 0';
 
-// ── Computed charts ───────────────────────────────────────────────────
+// ── Charts ────────────────────────────────────────────────────────────
 
 const CHART_OPTIONS_BASE = {
   responsive: true,
@@ -83,7 +102,100 @@ const CHART_OPTIONS_BASE = {
   animation: { duration: 400 },
 };
 
-// Funil: leads por etapa (horizontal bar)
+// Conversas ao longo do tempo — colunas arredondadas, 3 séries sobrepostas
+const timelineChart = computed(() => {
+  if (!data.value?.created_over_time) return null;
+  const t = data.value.created_over_time;
+  const labels = t.map(d => {
+    const dt = new Date(d.date + 'T12:00:00');
+    return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  });
+  const barBase = { borderRadius: 8, borderSkipped: false, maxBarThickness: 26 };
+  return {
+    data: {
+      labels,
+      datasets: [
+        { label: 'Novas conversas', data: t.map(d => d.count), backgroundColor: AZUL + 'E6', ...barBase },
+        { label: 'Agendamentos de consulta', data: t.map(d => d.agendamentos), backgroundColor: OURO + 'E6', ...barBase },
+        { label: 'Cirurgias', data: t.map(d => d.cirurgias), backgroundColor: LIME + 'E6', ...barBase },
+      ],
+    },
+    options: {
+      ...CHART_OPTIONS_BASE,
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { boxWidth: 12, padding: 14, font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw}` } },
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: 'rgba(120,140,180,0.12)' } },
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 12 } },
+      },
+    },
+  };
+});
+
+// Conversas por caixa de entrada (doughnut)
+const inboxChart = computed(() => {
+  if (!data.value?.by_inbox?.length) return null;
+  const o = data.value.by_inbox;
+  return {
+    data: {
+      labels: o.map(x => x.inbox),
+      datasets: [{
+        data: o.map(x => x.count),
+        backgroundColor: PALETTE.slice(0, o.length),
+        borderWidth: 2,
+        borderColor: 'rgba(255,255,255,0.08)',
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { padding: 12, boxWidth: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.raw} conversas (${ctx.label})` } },
+      },
+      cutout: '65%',
+      animation: { duration: 400 },
+    },
+  };
+});
+
+// Etiquetas (doughnut com volume e %)
+const labelChart = computed(() => {
+  const items = data.value?.by_label?.items || [];
+  if (!items.length) return null;
+  return {
+    data: {
+      labels: items.map(x => x.label),
+      datasets: [{
+        data: items.map(x => x.count),
+        backgroundColor: PALETTE.slice(0, items.length),
+        borderWidth: 2,
+        borderColor: 'rgba(255,255,255,0.08)',
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const item = items[ctx.dataIndex];
+              return ` ${item.label}: ${item.count} (${item.pct}%)`;
+            },
+          },
+        },
+      },
+      cutout: '65%',
+      animation: { duration: 400 },
+    },
+  };
+});
+
+// Conversas por etapa (horizontal)
 const funnelChart = computed(() => {
   if (!data.value?.funnel) return null;
   const f = data.value.funnel;
@@ -92,8 +204,8 @@ const funnelChart = computed(() => {
       labels: f.map(s => s.stage_name),
       datasets: [{
         data: f.map(s => s.count),
-        backgroundColor: f.map(s => s.stage_color || '#6B7280'),
-        borderRadius: 6,
+        backgroundColor: f.map((_, i) => PALETTE[i % PALETTE.length] + 'DD'),
+        borderRadius: 8,
         borderSkipped: false,
       }],
     },
@@ -102,17 +214,17 @@ const funnelChart = computed(() => {
       indexAxis: 'y',
       plugins: {
         ...CHART_OPTIONS_BASE.plugins,
-        tooltip: { callbacks: { label: ctx => ` ${ctx.raw} leads` } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.raw} conversas` } },
       },
       scales: {
-        x: { ticks: { stepSize: 1 }, grid: { color: 'rgba(0,0,0,0.05)' } },
+        x: { ticks: { stepSize: 1 }, grid: { color: 'rgba(120,140,180,0.12)' } },
         y: { grid: { display: false } },
       },
     },
   };
 });
 
-// Valor por etapa (bar vertical)
+// Valor em cada etapa do pipeline
 const valueChart = computed(() => {
   if (!data.value?.value_by_stage) return null;
   const v = data.value.value_by_stage.filter(s => s.value > 0);
@@ -122,10 +234,10 @@ const valueChart = computed(() => {
       labels: v.map(s => s.stage_name),
       datasets: [{
         data: v.map(s => s.value),
-        backgroundColor: v.map(s => (s.stage_color || '#6B7280') + 'CC'),
-        borderColor: v.map(s => s.stage_color || '#6B7280'),
-        borderWidth: 1,
-        borderRadius: 6,
+        backgroundColor: v.map((_, i) => [AZUL, ROXO, OURO, LIME][i % 4] + 'E6'),
+        borderRadius: 10,
+        borderSkipped: false,
+        maxBarThickness: 56,
       }],
     },
     options: {
@@ -135,14 +247,14 @@ const valueChart = computed(() => {
         tooltip: { callbacks: { label: ctx => ' R$ ' + Number(ctx.raw).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) } },
       },
       scales: {
-        y: { grid: { color: 'rgba(0,0,0,0.05)' } },
+        y: { grid: { color: 'rgba(120,140,180,0.12)' } },
         x: { grid: { display: false } },
       },
     },
   };
 });
 
-// Tempo médio por etapa (bar vertical)
+// Tempo médio por etapa
 const timeChart = computed(() => {
   if (!data.value?.avg_time_by_stage) return null;
   const t = data.value.avg_time_by_stage.filter(s => s.avg_minutes > 0);
@@ -152,10 +264,10 @@ const timeChart = computed(() => {
       labels: t.map(s => s.stage_name),
       datasets: [{
         data: t.map(s => s.avg_minutes),
-        backgroundColor: t.map(s => (s.stage_color || '#6B7280') + '99'),
-        borderColor: t.map(s => s.stage_color || '#6B7280'),
-        borderWidth: 1,
-        borderRadius: 6,
+        backgroundColor: t.map((_, i) => PALETTE[i % PALETTE.length] + 'B3'),
+        borderRadius: 10,
+        borderSkipped: false,
+        maxBarThickness: 56,
       }],
     },
     options: {
@@ -165,112 +277,67 @@ const timeChart = computed(() => {
         tooltip: { callbacks: { label: ctx => ' ' + formatDuration(ctx.raw) } },
       },
       scales: {
-        y: {
-          grid: { color: 'rgba(0,0,0,0.05)' },
-          ticks: { callback: v => formatDuration(v) },
-        },
+        y: { grid: { color: 'rgba(120,140,180,0.12)' }, ticks: { callback: v => formatDuration(v) } },
         x: { grid: { display: false } },
       },
     },
   };
 });
 
-// Origem (doughnut)
-const originChart = computed(() => {
-  if (!data.value?.by_origin?.length) return null;
-  const o = data.value.by_origin;
-  const COLORS = ['#6366F1','#F59E0B','#10B981','#EF4444','#3B82F6','#8B5CF6','#EC4899','#14B8A6'];
-  return {
-    data: {
-      labels: o.map(x => x.origin),
-      datasets: [{
-        data: o.map(x => x.count),
-        backgroundColor: COLORS.slice(0, o.length),
-        borderWidth: 0,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: true, position: 'bottom', labels: { padding: 12, boxWidth: 12, font: { size: 11 } } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.raw} leads (${ctx.label})` } },
-      },
-      cutout: '65%',
-      animation: { duration: 400 },
-    },
-  };
-});
-
-// Linha do tempo (line chart)
-const timelineChart = computed(() => {
-  if (!data.value?.created_over_time) return null;
-  const t = data.value.created_over_time;
-  return {
-    data: {
-      labels: t.map(d => {
-        const dt = new Date(d.date + 'T12:00:00');
-        return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-      }),
-      datasets: [{
-        data: t.map(d => d.count),
-        fill: true,
-        backgroundColor: 'rgba(99,102,241,0.12)',
-        borderColor: '#6366F1',
-        borderWidth: 2,
-        pointRadius: 3,
-        pointBackgroundColor: '#6366F1',
-        tension: 0.4,
-      }],
-    },
-    options: {
-      ...CHART_OPTIONS_BASE,
-      plugins: {
-        ...CHART_OPTIONS_BASE.plugins,
-        tooltip: { callbacks: { label: ctx => ` ${ctx.raw} leads` } },
-      },
-      scales: {
-        y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: 'rgba(0,0,0,0.05)' } },
-        x: { grid: { display: false }, ticks: { maxTicksLimit: 10 } },
-      },
-    },
-  };
-});
-
-// ── Responsividade: quem avançou vs. quem ficou parado no início ──────
+// ── Responsividade ────────────────────────────────────────────────────
 const resp = computed(() => data.value?.responsiveness ?? null);
 
 const respMilestones = computed(() => {
   if (!resp.value?.stages?.length) return [];
-  // pula a 1ª etapa (todos "chegam" nela = 100%); mostra o avanço real
-  return resp.value.stages.slice(1).map(s => ({
+  return resp.value.stages.slice(1).map((s, i) => ({
     name: s.stage_name,
-    color: s.stage_color || '#6B7280',
+    color: PALETTE[i % PALETTE.length],
     reached: s.reached,
     pct: s.reached_pct,
   }));
 });
+
+// ── Atendimento por agente ────────────────────────────────────────────
+const selectedAgentId = ref('all');
+
+const agentRows = computed(() => data.value?.agents?.rows ?? []);
+
+const agentView = computed(() => {
+  if (selectedAgentId.value === 'all') {
+    return {
+      name: 'Todos os agentes',
+      open: agentRows.value.reduce((a, r) => a + r.open, 0) + (data.value?.agents?.unassigned?.open || 0),
+      unanswered: agentRows.value.reduce((a, r) => a + r.unanswered, 0) + (data.value?.agents?.unassigned?.unanswered || 0),
+      avg_first_response_seconds: (() => {
+        const vals = agentRows.value.map(r => r.avg_first_response_seconds).filter(v => v);
+        return vals.length ? vals.reduce((a, v) => a + v, 0) / vals.length : null;
+      })(),
+    };
+  }
+  return agentRows.value.find(r => r.id === selectedAgentId.value) || null;
+});
 </script>
 
 <template>
-  <div class="bg-n-solid-1 p-6 min-h-full">
+  <div class="bg-n-solid-1 p-8 min-h-full">
 
     <!-- Header do dashboard -->
-    <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+    <div class="flex items-center justify-between mb-8 flex-wrap gap-4">
       <div>
-        <h2 class="text-base font-semibold text-n-slate-12">Dashboard — {{ pipeline.name }}</h2>
-        <p class="text-xs text-n-slate-10 mt-0.5">Métricas automáticas com base nos leads do funil</p>
+        <h2 class="text-lg font-bold text-n-slate-12">Dashboard — {{ pipeline.name }}</h2>
+        <p class="text-xs text-n-slate-10 mt-0.5">Métricas automáticas com base nas conversas do funil</p>
       </div>
       <!-- Seletor de período -->
-      <div class="flex items-center gap-1.5 bg-n-solid-2 border border-n-weak rounded-xl p-1">
+      <div class="flex items-center gap-1.5 bg-n-solid-2 border border-n-weak rounded-xl p-1 flex-wrap">
         <button
           v-for="p in PERIODS"
-          :key="p.value"
+          :key="p.key"
           class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
-          :class="period === p.value
-            ? 'bg-n-brand text-white'
+          :class="selectedPeriodKey === p.key
+            ? 'text-white shadow'
             : 'text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1'"
-          @click="period = p.value"
+          :style="selectedPeriodKey === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+          @click="selectedPeriodKey = p.key"
         >
           {{ p.label }}
         </button>
@@ -294,97 +361,136 @@ const respMilestones = computed(() => {
     <div v-else-if="data">
 
       <!-- KPIs -->
-      <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
-        <!-- Total de leads -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-4">
-          <p class="text-xs text-n-slate-10 mb-1">Total no funil</p>
-          <p class="text-2xl font-bold text-n-slate-12">{{ data.kpis.total_leads }}</p>
-          <p class="text-xs text-n-slate-9 mt-1">leads</p>
+      <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5 mb-10">
+        <!-- Total — azul -->
+        <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #0F5FA6, #0B4A82)">
+          <p class="text-xs opacity-80 mb-1.5">Total no funil</p>
+          <p class="text-3xl font-bold">{{ data.kpis.total_leads }}</p>
+          <p class="text-xs opacity-70 mt-1">conversas</p>
         </div>
 
-        <!-- Novos no período -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-4">
-          <p class="text-xs text-n-slate-10 mb-1">Novos ({{ period }}d)</p>
-          <p class="text-2xl font-bold text-n-brand">{{ data.kpis.new_in_period }}</p>
-          <p class="text-xs text-n-slate-9 mt-1">leads</p>
+        <!-- Novos — branco contraste -->
+        <div class="rounded-2xl p-5 bg-white dark:bg-n-solid-2 border-2 border-n-weak shadow-sm">
+          <p class="text-xs text-n-slate-10 mb-1.5">Novas no período</p>
+          <p class="text-3xl font-bold" style="color: #0F5FA6">{{ data.kpis.new_in_period }}</p>
+          <p class="text-xs text-n-slate-9 mt-1">conversas</p>
         </div>
 
-        <!-- Valor em pipeline -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-4">
-          <p class="text-xs text-n-slate-10 mb-1">Valor em pipeline</p>
-          <p class="text-xl font-bold text-green-600 leading-tight mt-0.5">{{ formatCurrency(data.kpis.total_value) }}</p>
-          <p class="text-xs text-n-slate-9 mt-1">total</p>
+        <!-- Valor em pipeline — verde limão (o número mais positivo) -->
+        <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #65A30D, #84CC16)">
+          <p class="text-xs opacity-85 mb-1.5">Valor em pipeline</p>
+          <p class="text-2xl font-bold leading-tight">{{ formatCurrency(data.kpis.total_value) }}</p>
+          <p class="text-xs opacity-75 mt-1">total</p>
         </div>
 
-        <!-- Fechamentos -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-4">
-          <p class="text-xs text-n-slate-10 mb-1">Fechamentos</p>
-          <p class="text-2xl font-bold text-n-slate-12">{{ data.kpis.closed_count }}</p>
-          <p class="text-xs text-n-slate-9 mt-1">leads</p>
+        <!-- Fechamentos — dourado -->
+        <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
+          <p class="text-xs opacity-85 mb-1.5">Fechamentos</p>
+          <p class="text-3xl font-bold">{{ data.kpis.closed_count }}</p>
+          <p class="text-xs opacity-75 mt-1">conversas</p>
         </div>
 
-        <!-- Taxa de fechamento -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-4">
-          <p class="text-xs text-n-slate-10 mb-1">Taxa de fechamento</p>
-          <p class="text-2xl font-bold" :class="data.kpis.close_rate > 20 ? 'text-green-600' : 'text-n-slate-12'">
-            {{ data.kpis.close_rate }}%
-          </p>
-          <p class="text-xs text-n-slate-9 mt-1">conversão</p>
+        <!-- Taxa — roxo -->
+        <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
+          <p class="text-xs opacity-80 mb-1.5">Taxa de fechamento</p>
+          <p class="text-3xl font-bold">{{ data.kpis.close_rate }}%</p>
+          <p class="text-xs opacity-70 mt-1">conversão</p>
         </div>
 
-        <!-- Tempo médio de conversão -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-4">
-          <p class="text-xs text-n-slate-10 mb-1">Tempo médio</p>
-          <p class="text-xl font-bold text-n-slate-12 leading-tight mt-0.5">
+        <!-- Tempo médio — branco -->
+        <div class="rounded-2xl p-5 bg-white dark:bg-n-solid-2 border-2 border-n-weak shadow-sm">
+          <p class="text-xs text-n-slate-10 mb-1.5">Tempo médio</p>
+          <p class="text-2xl font-bold text-n-slate-12 leading-tight">
             {{ formatDuration(data.kpis.avg_conversion_minutes) }}
           </p>
           <p class="text-xs text-n-slate-9 mt-1">de conversão</p>
         </div>
       </div>
 
-      <!-- Responsividade dos leads -->
-      <div v-if="resp && resp.total > 0" class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-4">
-        <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
-          <h3 class="text-sm font-semibold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-activity text-n-brand" />
-            Responsividade dos leads
+      <!-- Atendimento por agente -->
+      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-10">
+        <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+          <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
+              <span class="i-lucide-headset text-white text-sm" />
+            </span>
+            Atendimento por agente
+          </h3>
+          <select
+            v-model="selectedAgentId"
+            class="h-9 text-sm border border-n-weak rounded-xl px-3 bg-n-solid-1 text-n-slate-12 focus:outline-none focus:border-n-brand"
+          >
+            <option value="all">Todos os agentes</option>
+            <option v-for="a in agentRows" :key="a.id" :value="a.id">{{ a.name }}</option>
+          </select>
+        </div>
+
+        <div v-if="agentView" class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+          <div class="rounded-xl p-4 bg-n-alpha-1" style="border-left: 4px solid #0F5FA6">
+            <p class="text-xs text-n-slate-10 mb-1">Conversas em aberto</p>
+            <p class="text-2xl font-bold text-n-slate-12">{{ agentView.open }}</p>
+          </div>
+          <div class="rounded-xl p-4 bg-n-alpha-1" style="border-left: 4px solid #D4A017">
+            <p class="text-xs text-n-slate-10 mb-1">Sem resposta (paciente aguardando)</p>
+            <p class="text-2xl font-bold" :style="{ color: agentView.unanswered > 0 ? '#B8860B' : undefined }">
+              {{ agentView.unanswered }}
+            </p>
+          </div>
+          <div class="rounded-xl p-4 bg-n-alpha-1" style="border-left: 4px solid #7C3AED">
+            <p class="text-xs text-n-slate-10 mb-1">Tempo de 1ª resposta (período)</p>
+            <p class="text-2xl font-bold text-n-slate-12">{{ formatSeconds(agentView.avg_first_response_seconds) }}</p>
+          </div>
+        </div>
+
+        <p v-if="selectedAgentId === 'all' && data.agents?.unassigned?.open" class="text-[11px] text-n-slate-9 mt-3">
+          Inclui {{ data.agents.unassigned.open }} conversas abertas sem agente atribuído.
+        </p>
+      </div>
+
+      <!-- Responsividade das conversas -->
+      <div v-if="resp && resp.total > 0" class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-10">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-5">
+          <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
+              <span class="i-lucide-activity text-white text-sm" />
+            </span>
+            Responsividade das conversas
           </h3>
           <span class="text-xs text-n-slate-10">quanto do total avançou em cada etapa</span>
         </div>
 
-        <!-- barras de "chegaram até" -->
-        <div class="space-y-2.5">
+        <div class="space-y-3">
           <div v-for="m in respMilestones" :key="m.name" class="flex items-center gap-3">
             <div class="w-40 text-right flex-shrink-0">
               <p class="text-xs text-n-slate-12 font-medium truncate">{{ m.name }}</p>
             </div>
             <div class="flex-1 flex items-center gap-2">
-              <div class="flex-1 h-6 rounded-lg bg-n-alpha-1 overflow-hidden">
+              <div class="flex-1 h-7 rounded-lg bg-n-alpha-1 overflow-hidden">
                 <div
                   class="h-full rounded-lg transition-all flex items-center justify-end px-2"
-                  :style="{ width: Math.max(m.pct, 4) + '%', backgroundColor: (m.color || '#6B7280') + 'CC' }"
+                  :style="{ width: Math.max(m.pct, 4) + '%', background: `linear-gradient(90deg, ${m.color}, ${m.color}CC)` }"
                 >
                   <span class="text-[11px] font-bold text-white drop-shadow">{{ m.pct }}%</span>
                 </div>
               </div>
-              <span class="text-xs text-n-slate-10 w-24 flex-shrink-0">{{ m.reached }} leads</span>
+              <span class="text-xs text-n-slate-10 w-28 flex-shrink-0">{{ m.reached }} conversas</span>
             </div>
           </div>
         </div>
 
-        <!-- destaque: pouco responsivos (parados no início) -->
-        <div class="mt-4 flex items-center gap-3 bg-amber-500/10 border border-amber-500/25 rounded-xl p-3.5 flex-wrap">
-          <span class="i-lucide-user-x text-amber-600 text-xl flex-shrink-0" />
+        <div class="mt-5 flex items-center gap-3 rounded-xl p-4 flex-wrap border-2" style="background: rgba(212,160,23,0.08); border-color: rgba(212,160,23,0.35)">
+          <span class="i-lucide-user-x text-xl flex-shrink-0" style="color: #B8860B" />
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-semibold text-n-slate-12">
-              {{ resp.stuck.count }} leads pouco responsivos ({{ resp.stuck.pct }}%)
+            <p class="text-sm font-bold text-n-slate-12">
+              {{ resp.stuck.count }} conversas pouco responsivas ({{ resp.stuck.pct }}%)
             </p>
             <p class="text-xs text-n-slate-10">
-              parados em "{{ resp.stuck.stage_name }}" — não avançaram no funil. Público ideal para uma campanha de reativação.
+              paradas em "{{ resp.stuck.stage_name }}" — não avançaram no funil. Público ideal para uma campanha de reativação.
             </p>
           </div>
           <button
-            class="text-xs font-medium px-3 py-1.5 rounded-lg bg-n-brand text-white hover:opacity-90 flex-shrink-0"
+            class="text-xs font-bold px-4 py-2 rounded-xl text-white hover:opacity-90 flex-shrink-0 shadow"
+            style="background: linear-gradient(135deg, #B8860B, #D4A017)"
             @click="$router.push({ name: 'crm_campaigns' })"
           >
             Criar campanha →
@@ -392,14 +498,14 @@ const respMilestones = computed(() => {
         </div>
       </div>
 
-      <!-- Linha do tempo + Origem -->
-      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
+      <!-- Linha do tempo + Caixas de entrada -->
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-10">
 
-        <!-- Leads por dia (line) -->
-        <div class="xl:col-span-2 bg-n-solid-2 border border-n-weak rounded-2xl p-5">
-          <h3 class="text-sm font-semibold text-n-slate-12 mb-4">Leads ao longo do tempo</h3>
-          <div class="h-52">
-            <Line
+        <!-- Conversas ao longo do tempo (colunas arredondadas, 3 séries) -->
+        <div class="xl:col-span-2 bg-n-solid-2 border border-n-weak rounded-2xl p-6">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Conversas ao longo do tempo</h3>
+          <div class="h-64">
+            <Bar
               v-if="timelineChart"
               :data="timelineChart.data"
               :options="timelineChart.options"
@@ -410,30 +516,151 @@ const respMilestones = computed(() => {
           </div>
         </div>
 
-        <!-- Por origem (doughnut) -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
-          <h3 class="text-sm font-semibold text-n-slate-12 mb-4">Origem dos leads</h3>
-          <div class="h-52">
+        <!-- Conversas por caixa de entrada -->
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Conversas por caixa de entrada</h3>
+          <div class="h-64">
             <Doughnut
-              v-if="originChart"
-              :data="originChart.data"
-              :options="originChart.options"
+              v-if="inboxChart"
+              :data="inboxChart.data"
+              :options="inboxChart.options"
             />
             <div v-else class="flex flex-col items-center justify-center h-full text-n-slate-10 text-sm gap-2">
               <span class="i-lucide-pie-chart text-2xl" />
-              <span>Nenhuma origem cadastrada</span>
+              <span>Sem conversas no período</span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Funil + Valor + Tempo -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <!-- Etiquetas + Radar de Oportunidades -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- Etiquetas (volume e proporção) -->
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
+          <div class="flex items-center gap-2 mb-5">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
+              <span class="i-lucide-tags text-white text-sm" />
+            </span>
+            <h3 class="text-sm font-bold text-n-slate-12">Etiquetas dos leads</h3>
+            <span v-if="data.by_label?.total" class="text-[11px] text-n-slate-9 ml-auto">
+              {{ data.by_label.total }} etiquetas aplicadas
+            </span>
+          </div>
+          <div v-if="!labelChart" class="flex flex-col items-center justify-center h-64 text-n-slate-10 text-sm gap-2">
+            <span class="i-lucide-tags text-2xl" />
+            <span>Nenhuma etiqueta aplicada nos leads deste funil</span>
+          </div>
+          <div v-else class="flex flex-col sm:flex-row items-center gap-5">
+            <div class="h-52 w-52 flex-shrink-0">
+              <Doughnut :data="labelChart.data" :options="labelChart.options" />
+            </div>
+            <div class="flex-1 w-full space-y-1.5 max-h-52 overflow-y-auto" style="scrollbar-width: thin;">
+              <div
+                v-for="(item, i) in data.by_label.items"
+                :key="item.label"
+                class="flex items-center gap-2 text-xs"
+              >
+                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: PALETTE[i % PALETTE.length] }" />
+                <span class="text-n-slate-12 flex-1 truncate">{{ item.label }}</span>
+                <span class="font-semibold text-n-slate-12">{{ item.count }}</span>
+                <span class="text-n-slate-9 w-12 text-right">{{ item.pct }}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
-        <!-- Funil de leads (horizontal bar) -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
-          <h3 class="text-sm font-semibold text-n-slate-12 mb-4">Leads por etapa</h3>
-          <div class="h-52">
+        <!-- Radar de Oportunidades × Consultas -->
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
+          <div class="flex items-center gap-2 mb-5">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #DC2626, #F59E0B)">
+              <span class="i-lucide-radar text-white text-sm" />
+            </span>
+            <h3 class="text-sm font-bold text-n-slate-12">Radar de Oportunidades</h3>
+            <span class="text-[11px] text-n-slate-9 ml-auto">no período selecionado</span>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #DC2626, #F59E0B)">
+              <p class="text-xs font-medium text-white/80 mb-1">Oportunidades detectadas</p>
+              <p class="text-3xl font-bold">{{ data.radar?.opportunities ?? 0 }}</p>
+              <p class="text-[11px] text-white/70 mt-1">pacientes quentes sem atendimento</p>
+            </div>
+            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
+              <p class="text-xs font-medium text-white/80 mb-1">Consultas agendadas</p>
+              <p class="text-3xl font-bold">{{ data.radar?.appointments ?? 0 }}</p>
+              <p class="text-[11px] text-white/70 mt-1">criadas na Agenda no período</p>
+            </div>
+          </div>
+          <p class="text-[11px] text-n-slate-9 mt-4 flex items-center gap-1.5">
+            <span class="i-lucide-info text-xs" />
+            O Radar audita as colunas vigiadas (07:30–18h a cada 10 min; madrugada a cada 4h)
+            e avisa no Meu Painel — configure em Automações → Agentes de IA.
+          </p>
+        </div>
+      </div>
+
+      <!-- Cirurgias da planilha (Google Sheets) -->
+      <div
+        v-if="data.sheet_surgeries?.configured"
+        class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-6"
+      >
+        <div class="flex items-center gap-2 mb-5">
+          <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F9D58, #34A853)">
+            <span class="i-lucide-sheet text-white text-sm" />
+          </span>
+          <h3 class="text-sm font-bold text-n-slate-12">Cirurgias — planilha (Google Sheets)</h3>
+          <span class="text-[11px] text-n-slate-9 ml-auto">mesmo período selecionado acima</span>
+        </div>
+
+        <p v-if="data.sheet_surgeries.error" class="text-sm text-n-slate-10">
+          {{ data.sheet_surgeries.error }}
+        </p>
+        <template v-else>
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
+            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #0F9D58, #34A853)">
+              <p class="text-xs font-medium text-white/80 mb-1">Cirurgias no período</p>
+              <p class="text-3xl font-bold">{{ data.sheet_surgeries.count }}</p>
+            </div>
+            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #65A30D, #84CC16)">
+              <p class="text-xs font-medium text-white/80 mb-1">Receita (planilha)</p>
+              <p class="text-2xl font-bold leading-tight">{{ formatCurrency(data.sheet_surgeries.revenue) }}</p>
+            </div>
+            <div class="col-span-2 bg-n-solid-1 border border-n-weak rounded-2xl p-5">
+              <p class="text-xs font-medium text-n-slate-10 mb-2">Por unidade</p>
+              <div v-if="data.sheet_surgeries.by_unit?.length" class="space-y-1.5">
+                <div v-for="u in data.sheet_surgeries.by_unit" :key="u.name" class="flex items-center gap-2 text-sm">
+                  <span class="text-n-slate-12 flex-1 truncate">{{ u.name }}</span>
+                  <span class="font-semibold text-n-slate-12">{{ u.count }}</span>
+                  <span class="text-xs text-n-slate-10 w-24 text-right">{{ formatCurrency(u.value) }}</span>
+                </div>
+              </div>
+              <p v-else class="text-xs text-n-slate-10">Sem coluna "Unidade" na planilha.</p>
+            </div>
+          </div>
+
+          <div v-if="data.sheet_surgeries.by_procedure?.length">
+            <p class="text-xs font-medium text-n-slate-10 mb-2">Por procedimento</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1.5">
+              <div v-for="p in data.sheet_surgeries.by_procedure" :key="p.name" class="flex items-center gap-2 text-sm">
+                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background: #0F9D58" />
+                <span class="text-n-slate-12 flex-1 truncate">{{ p.name }}</span>
+                <span class="font-semibold text-n-slate-12">{{ p.count }}</span>
+                <span class="text-xs text-n-slate-10 w-24 text-right">{{ formatCurrency(p.value) }}</span>
+              </div>
+            </div>
+          </div>
+          <p v-if="!data.sheet_surgeries.count" class="text-sm text-n-slate-10">
+            Nenhuma cirurgia na planilha dentro do período selecionado.
+          </p>
+        </template>
+      </div>
+
+      <!-- Funil + Valor + Tempo -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Conversas por etapa -->
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Conversas por etapa</h3>
+          <div class="h-56">
             <Bar
               v-if="funnelChart"
               :data="funnelChart.data"
@@ -445,10 +672,13 @@ const respMilestones = computed(() => {
           </div>
         </div>
 
-        <!-- Valor por etapa -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
-          <h3 class="text-sm font-semibold text-n-slate-12 mb-4">Valor por etapa</h3>
-          <div class="h-52">
+        <!-- Valor em cada etapa do pipeline -->
+        <div class="rounded-2xl p-6 border-2" style="border-color: rgba(132,204,22,0.35); background: rgba(132,204,22,0.05)">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5 flex items-center gap-2">
+            <span class="i-lucide-circle-dollar-sign" style="color: #65A30D" />
+            Valor em cada etapa do pipeline
+          </h3>
+          <div class="h-56">
             <Bar
               v-if="valueChart"
               :data="valueChart.data"
@@ -456,15 +686,15 @@ const respMilestones = computed(() => {
             />
             <div v-else class="flex flex-col items-center justify-center h-full text-n-slate-10 text-sm gap-2">
               <span class="i-lucide-dollar-sign text-2xl" />
-              <span>Preencha o valor dos leads</span>
+              <span>Preencha o valor das conversas</span>
             </div>
           </div>
         </div>
 
         <!-- Tempo médio por etapa -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
-          <h3 class="text-sm font-semibold text-n-slate-12 mb-4">Tempo médio por etapa</h3>
-          <div class="h-52">
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Tempo médio por etapa</h3>
+          <div class="h-56">
             <Bar
               v-if="timeChart"
               :data="timeChart.data"
@@ -472,7 +702,7 @@ const respMilestones = computed(() => {
             />
             <div v-else class="flex flex-col items-center justify-center h-full text-n-slate-10 text-sm gap-2">
               <span class="i-lucide-clock text-2xl" />
-              <span>Mova leads entre etapas para gerar dados</span>
+              <span>Mova conversas entre etapas para gerar dados</span>
             </div>
           </div>
         </div>
@@ -481,11 +711,11 @@ const respMilestones = computed(() => {
 
     </div>
 
-    <!-- Empty state (pipeline sem leads) -->
+    <!-- Empty state -->
     <div v-else class="flex flex-col items-center justify-center py-24 text-n-slate-10">
       <span class="i-lucide-layout-dashboard text-4xl mb-3" />
       <p class="text-sm">Nenhum dado disponível ainda.</p>
-      <p class="text-xs mt-1">Adicione leads ao funil para ver as métricas.</p>
+      <p class="text-xs mt-1">Adicione conversas ao funil para ver as métricas.</p>
     </div>
 
   </div>
