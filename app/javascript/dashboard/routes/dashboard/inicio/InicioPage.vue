@@ -255,15 +255,18 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <!-- Indicadores do período -->
+        <!-- Indicadores do período — espelham as colunas do CRM (coorte
+             pelo dia em que o lead chegou) -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <div class="rounded-2xl p-4 sm:p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #0F5FA6, #0B4A82)">
-            <div class="flex items-center gap-1.5 mb-1 text-white/80"><span class="i-lucide-message-circle text-sm" /><p class="text-xs font-medium">Novas conversas</p></div>
-            <p class="text-3xl font-bold">{{ data.new_conversations ?? 0 }}</p>
+            <div class="flex items-center gap-1.5 mb-1 text-white/80"><span class="i-lucide-user-plus text-sm" /><p class="text-xs font-medium">Novos contatos (leads)</p></div>
+            <p class="text-3xl font-bold">{{ data.new_leads ?? 0 }}</p>
+            <p class="text-[10px] text-white/70">caixas Google + Instagram</p>
           </div>
           <div class="rounded-2xl p-4 sm:p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
             <div class="flex items-center gap-1.5 mb-1 text-white/80"><span class="i-lucide-calendar-check text-sm" /><p class="text-xs font-medium">Consultas agendadas</p></div>
             <p class="text-3xl font-bold">{{ data.appointments_created ?? 0 }}</p>
+            <p class="text-[10px] text-white/70">chegaram à coluna Agendamento</p>
           </div>
           <div class="rounded-2xl p-4 sm:p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
             <div class="flex items-center gap-1.5 mb-1 text-white/80"><span class="i-lucide-percent text-sm" /><p class="text-xs font-medium">Taxa de agendamento</p></div>
@@ -272,25 +275,21 @@ onUnmounted(() => {
           </div>
           <div class="rounded-2xl p-4 sm:p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #65A30D, #84CC16)">
             <div class="flex items-center gap-1.5 mb-1 text-white/80"><span class="i-lucide-heart-pulse text-sm" /><p class="text-xs font-medium">Cirurgias fechadas</p></div>
-            <p class="text-3xl font-bold">{{ data.surgeries_closed ?? '—' }}</p>
-            <p class="text-[10px] text-white/70">{{ data.surgeries_closed === null ? 'conecte a planilha em Integrações' : 'pela planilha (Sheets)' }}</p>
+            <p class="text-3xl font-bold">{{ data.surgeries_closed ?? 0 }}</p>
+            <p class="text-[10px] text-white/70">coluna Cirurgia Agendada (CRM)</p>
           </div>
         </div>
 
-        <!-- Linha 2: movimentações -->
-        <div class="grid grid-cols-3 gap-4 mb-6">
-          <div class="bg-n-solid-2 border border-n-weak rounded-2xl px-4 py-3">
-            <p class="text-[11px] text-n-slate-10 flex items-center gap-1"><span class="i-lucide-calendar-sync text-xs" /> Reagendadas</p>
-            <p class="text-2xl font-bold text-n-slate-12">{{ data.rescheduled ?? 0 }}</p>
+        <!-- Indicações de cirurgia (coluna do CRM) -->
+        <div class="bg-n-solid-2 border border-n-weak rounded-2xl px-4 py-3 mb-6 flex items-center gap-3">
+          <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: rgba(234, 88, 12, 0.12)">
+            <span class="i-lucide-stethoscope text-lg" style="color: #EA580C" />
+          </span>
+          <div class="flex-1">
+            <p class="text-xs font-medium text-n-slate-11">Indicações de cirurgia</p>
+            <p class="text-[10px] text-n-slate-9">leads do período que chegaram à coluna "Indicação de Cirurgia"</p>
           </div>
-          <div class="bg-n-solid-2 border border-n-weak rounded-2xl px-4 py-3">
-            <p class="text-[11px] text-n-slate-10 flex items-center gap-1"><span class="i-lucide-calendar-x text-xs" /> Canceladas</p>
-            <p class="text-2xl font-bold" :class="(data.canceled ?? 0) > 0 ? 'text-red-500' : 'text-n-slate-12'">{{ data.canceled ?? 0 }}</p>
-          </div>
-          <div class="bg-n-solid-2 border border-n-weak rounded-2xl px-4 py-3">
-            <p class="text-[11px] text-n-slate-10 flex items-center gap-1"><span class="i-lucide-stethoscope text-xs" /> Indicações de cirurgia</p>
-            <p class="text-2xl font-bold text-n-slate-12">{{ data.surgery_indications ?? 0 }}</p>
-          </div>
+          <p class="text-2xl font-bold text-n-slate-12">{{ data.surgery_indications ?? 0 }}</p>
         </div>
 
         <!-- Saúde da Agenda -->
@@ -348,7 +347,7 @@ onUnmounted(() => {
                 <span v-else class="text-n-slate-9 text-xs">sem dados</span>
               </div>
               <div v-if="booking30Verdict" class="flex items-center justify-between mt-1 flex-wrap gap-1">
-                <span class="text-[10px] text-n-slate-9">{{ data.appointments_30d || 0 }} consultas ÷ {{ data.new_contacts_30d || 0 }} novos contatos</span>
+                <span class="text-[10px] text-n-slate-9">{{ data.appointments_30d || 0 }} consultas ÷ {{ data.new_contacts_30d || 0 }} leads (Google+Instagram)</span>
                 <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold text-white" :style="{ background: booking30Verdict.color }">{{ booking30Verdict.label }}</span>
               </div>
               <p class="text-[9px] text-n-slate-9 mt-1">Referência: 15% muito bom · 10% bom · 5% fraco</p>

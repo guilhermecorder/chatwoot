@@ -1,31 +1,37 @@
 # Meu Painel: boas-vindas + indicadores com preset de período
 # (hoje/ontem/essa semana/este mês/mês passado) + avisos do Radar.
 # Tudo no fuso da clínica (São Paulo).
+#
+# Os indicadores ESPELHAM O CRM (é onde a operação vive), em visão de
+# coorte: leads que chegaram no período e até onde avançaram no funil.
+# - Novos contatos (leads) = contatos novos das caixas Google + Instagram
+# - Consultas agendadas    = leads que chegaram à coluna "Agendamento..."
+# - Taxa de agendamento    = consultas ÷ leads × 100
+# - Cirurgias fechadas     = leads que chegaram à coluna "Cirurgia Agendada"
+# - Indicações de cirurgia = leads que chegaram à "Indicação de Cirurgia"
 class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show
     since, until_at = resolve_range
 
-    new_conversations = account.conversations.where(created_at: since..until_at).count
-    appointments_created = appointments_in(since, until_at)
+    leads = leads_count(since, until_at)
+    agendadas = reached_stage_count(/agendamento/i, since, until_at)
 
     render json: {
       period: params[:preset].presence || 'today',
-      # indicadores do período selecionado
-      new_conversations: new_conversations,
-      appointments_created: appointments_created,
-      booking_conversion: pct(appointments_created, new_conversations),
-      rescheduled: consultas.where('rescheduled_count > 0').where(updated_at: since..until_at).count,
-      canceled: consultas.where(canceled_at: since..until_at).count,
-      surgery_indications: surgery_entries(since..until_at),
-      surgeries_closed: surgeries_closed(since, until_at),
+      # indicadores do período selecionado (coorte pelo dia em que o lead chegou)
+      new_leads: leads,
+      appointments_created: agendadas,
+      booking_conversion: pct(agendadas, leads),
+      surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i),
+      surgery_indications: reached_stage_count(/indica/i, since, until_at),
       # termômetros de agora (independem do período)
       open_conversations: account.conversations.open.count,
       unanswered: account.conversations.open.where.not(waiting_since: nil).count,
       appointments_today: active_consultas.where(due_at: TZ.now.all_day).count,
-      new_contacts_30d: account.contacts.where(created_at: 30.days.ago..Time.current).count,
-      appointments_30d: appointments_in(30.days.ago, Time.current),
+      new_contacts_30d: leads_count(30.days.ago, Time.current),
+      appointments_30d: reached_stage_count(/agendamento/i, 30.days.ago, Time.current),
       next_appointments: next_appointments_json,
       opportunity_alerts: opportunity_alerts_json
     }
@@ -48,37 +54,39 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     end
   end
 
+  # leads = contatos novos vindos das caixas de marketing (Google/Instagram).
+  # Se a conta não tiver caixas com esses nomes (ex.: ambiente local),
+  # conta todos os contatos novos para o painel não ficar zerado.
+  def leads_count(since, until_at)
+    scope = account.contacts.where(created_at: since..until_at)
+    inbox_ids = account.inboxes
+                       .where('name ILIKE :g OR name ILIKE :i', g: '%google%', i: '%instagram%')
+                       .pluck(:id)
+    return scope.count if inbox_ids.empty?
+
+    scope.joins(:conversations).where(conversations: { inbox_id: inbox_ids }).distinct.count
+  end
+
+  # cards do CRM que CHEGARAM à etapa alvo (ou seguiram além dela), só de
+  # leads que surgiram no período — espelha as colunas do funil sem sofrer
+  # com movimentações em massa (a data usada é a do LEAD, não a do card)
+  def reached_stage_count(pattern, since, until_at, exclude: /pós/i)
+    account.crm_pipelines.includes(:stages).sum do |pipeline|
+      ordered = pipeline.stages.sort_by(&:position)
+      target = ordered.find { |s| s.name.match?(pattern) && !s.name.match?(exclude) }
+      next 0 unless target
+
+      stage_ids = ordered.select { |s| s.position >= target.position }.map(&:id)
+      pipeline.crm_contacts
+              .joins(:contact)
+              .where(stage_id: stage_ids)
+              .where(contacts: { created_at: since..until_at })
+              .count
+    end
+  end
+
   def consultas
     account.tasks.where(task_type: 'consulta')
-  end
-
-  # "Consultas agendadas" = o MAIOR entre a Agenda (tasks tipo consulta) e
-  # os cards que ENTRARAM numa etapa de Agendamento no CRM no período —
-  # em produção os agendamentos vivem no CRM até a Agenda ser adotada.
-  # Movimentos de CRM só contam a partir do CUTOFF: antes disso houve
-  # tratamento retroativo em massa que moveu milhares de cards num dia só.
-  CRM_TRACKING_START = Time.zone.parse('2026-07-14 00:00:00 -03:00').freeze
-
-  def appointments_in(since, until_at)
-    from_agenda = consultas.where(created_at: since..until_at).count
-    from_crm = agendamento_entries([since, CRM_TRACKING_START].max, until_at)
-    [from_agenda, from_crm].max
-  end
-
-  def agendamento_entries(since, until_at)
-    return 0 if until_at < since
-
-    stage_ids = Crm::Stage.joins(:pipeline)
-                          .where(crm_pipelines: { account_id: account.id })
-                          .where('crm_stages.name ILIKE ?', '%agendamento%')
-                          .pluck(:id)
-    return 0 if stage_ids.empty?
-
-    Crm::StageLog.joins(:crm_contact)
-                 .where(crm_contacts: { pipeline_id: account.crm_pipelines.select(:id) })
-                 .where(stage_id: stage_ids, entered_at: since..until_at)
-                 .distinct
-                 .count(:crm_contact_id)
   end
 
   def active_consultas
@@ -117,35 +125,6 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       last_run_at: state['last_run_at'],
       alerts: alerts.first(10)
     }
-  end
-
-  # indicações de cirurgia = cards que ENTRARAM na(s) etapa(s) Cirurgia
-  def surgery_entries(range)
-    stage_ids = Crm::Stage.joins(:pipeline)
-                          .where(crm_pipelines: { account_id: account.id })
-                          .where('crm_stages.name ILIKE ?', '%cirurgia%')
-                          .where.not('crm_stages.name ILIKE ?', '%pós%')
-                          .pluck(:id)
-    return 0 if stage_ids.empty?
-
-    Crm::StageLog.joins(:crm_contact)
-                 .where(crm_contacts: { pipeline_id: account.crm_pipelines.select(:id) })
-                 .where(stage_id: stage_ids, entered_at: range)
-                 .distinct
-                 .count(:crm_contact_id)
-  end
-
-  # cirurgias fechadas = linhas da planilha do Google Sheets no período
-  def surgeries_closed(since, until_at)
-    service = Crm::SheetsSurgeryService.new(account: account)
-    return nil unless service.configured?
-
-    range = since.to_date..until_at.to_date
-    service.rows.count do |r|
-      r['date'].present? && range.cover?(Date.parse(r['date']))
-    rescue StandardError
-      false
-    end
   end
 
   def pct(part, total)
