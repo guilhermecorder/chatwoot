@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
+import CrmAPI from 'dashboard/api/crm';
 
 const props = defineProps({
   stage:              { type: Object, required: true },
@@ -18,6 +19,15 @@ const { t } = useI18n();
 
 const isSaving     = ref(false);
 const n8nWorkflows = useMapGetter('crm/getN8nWorkflows');
+
+// formulários ativos para a ação "Enviar formulário"
+const availableForms = ref([]);
+onMounted(async () => {
+  try {
+    const { data } = await CrmAPI.getForms();
+    availableForms.value = data.filter(f => f.active);
+  } catch { /* sem permissão ou sem formulários — o seletor fica vazio */ }
+});
 const agents       = useMapGetter('agents/getAgents');
 const accountLabels = useMapGetter('labels/getLabels');
 const hasN8nWorkflows = computed(() => n8nWorkflows.value?.length > 0);
@@ -57,6 +67,9 @@ const ACTIONS = [
   { value: 'notify_team',          label: 'Notificar equipe',        icon: 'i-lucide-bell' },
   { value: 'meta_ads_event',       label: 'Evento Meta Ads',         icon: 'i-lucide-bar-chart-2' },
   { value: 'google_ads_conversion',label: 'Conversão Google Ads',    icon: 'i-lucide-trending-up' },
+  { value: 'send_form',            label: 'Enviar formulário',       icon: 'i-lucide-clipboard-list' },
+  { value: 'ai_analyze',           label: 'Analisar com IA',         icon: 'i-lucide-sparkles' },
+  { value: 'schedule_appointment', label: 'Agendar consulta (IA)',   icon: 'i-lucide-calendar-plus' },
 ];
 
 const emptyForm = () => ({
@@ -82,6 +95,10 @@ const emptyForm = () => ({
     ga4_event_name:     'generate_lead',
     conversion_value:   '',
     currency:           'BRL',
+    // Formulário
+    form_id:            '',
+    // Agendar consulta (IA)
+    default_unit:       '',
   },
 });
 
@@ -115,6 +132,8 @@ watch(() => props.initialAutomation, (auto) => {
       ga4_event_name:     auto.action_config?.ga4_event_name   ?? 'generate_lead',
       conversion_value:   auto.action_config?.conversion_value ?? '',
       currency:           auto.action_config?.currency         ?? 'BRL',
+      form_id:            auto.action_config?.form_id          ?? '',
+      default_unit:       auto.action_config?.default_unit     ?? '',
     },
   };
 }, { immediate: true });
@@ -436,6 +455,87 @@ const save = async () => {
               <option value="Schedule">Schedule (Agendamento)</option>
             </select>
             <p class="text-xs text-n-slate-9 mt-1">Configure o Pixel e Access Token em Configurações → Integrações → Meta Ads.</p>
+          </div>
+        </div>
+
+        <!-- Enviar formulário -->
+        <div v-else-if="form.action_type === 'send_form'" class="space-y-3">
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Formulário</label>
+            <select
+              v-model="form.action_config.form_id"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            >
+              <option value="">Selecione...</option>
+              <option v-for="f in availableForms" :key="f.id" :value="f.id">{{ f.name }}</option>
+            </select>
+            <p class="text-xs text-n-slate-9 mt-1">
+              Cada contato recebe um link único na conversa mais recente. Quem já
+              respondeu não recebe de novo. Crie formulários na página "Formulários".
+            </p>
+          </div>
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Mensagem <span class="text-n-slate-9 font-normal">(use {{ '\{\{nome\}\}' }} e {{ '\{\{link\}\}' }})</span></label>
+            <textarea
+              v-model="form.action_config.message"
+              rows="3"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+              placeholder="Oi {{nome}}! Para agilizar sua consulta, responda nosso formulário (2 minutinhos): {{link}}"
+            />
+          </div>
+        </div>
+
+        <!-- Analisar com IA -->
+        <div v-else-if="form.action_type === 'ai_analyze'" class="space-y-3">
+          <div class="bg-n-alpha-1 rounded-xl p-3.5 text-xs text-n-slate-11 space-y-1.5">
+            <p class="flex items-center gap-1.5 font-medium text-n-slate-12">
+              <span class="i-lucide-sparkles" style="color: #D97706" />
+              Analista de Conversas (Claude)
+            </p>
+            <p>
+              Quando o card entrar aqui, a IA lê a conversa e salva o parecer
+              (interesse alto/médio/baixo/perdido + resumo + próximo passo) —
+              visível no painel da conversa e no balão do CRM. Cada análise
+              custa centavos.
+            </p>
+            <p class="text-n-slate-9">
+              Prompt e pausa do agente: Automações → Agentes de IA. Chave: Integrações → Claude.
+            </p>
+          </div>
+        </div>
+
+        <!-- Agendar consulta (IA) -->
+        <div v-else-if="form.action_type === 'schedule_appointment'" class="space-y-3">
+          <div class="bg-n-alpha-1 rounded-xl p-3.5 text-xs text-n-slate-11 space-y-1.5">
+            <p class="flex items-center gap-1.5 font-medium text-n-slate-12">
+              <span class="i-lucide-calendar-plus" style="color: #7C3AED" />
+              Agente de Agendamento (Claude)
+            </p>
+            <p>
+              Quando o card entrar aqui (ex.: coluna "Consulta agendada"), a IA lê a
+              conversa, extrai <b>nome, telefone, dia, hora e unidade</b> e cria o
+              compromisso na <b>Agenda</b> automaticamente.
+            </p>
+            <p>
+              Se dia e hora não estiverem confirmados na conversa, ela cria uma tarefa
+              "⚠️ Confirmar consulta" para a equipe completar — nada se perde.
+            </p>
+            <p class="text-n-slate-9">
+              Prompt e pausa do agente: Automações → Agentes de IA. Chave: Integrações → Claude.
+            </p>
+          </div>
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+              Unidade padrão <span class="text-n-slate-9 font-normal">(usada quando a conversa não diz a unidade)</span>
+            </label>
+            <select
+              v-model="form.action_config.default_unit"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+            >
+              <option value="">Deixar sem unidade</option>
+              <option value="tatuape">Tatuapé</option>
+              <option value="paulista">Av. Paulista</option>
+            </select>
           </div>
         </div>
 

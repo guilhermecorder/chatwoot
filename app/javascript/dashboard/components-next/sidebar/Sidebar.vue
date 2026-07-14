@@ -1,5 +1,5 @@
 <script setup>
-import { h, ref, computed, onMounted, watch } from 'vue';
+import { h, ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { provideSidebarContext, useSidebarResize } from './provider';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
@@ -359,8 +359,46 @@ const customizableItems = computed(() =>
     .map(item => ({ key: FEATURE_BY_ITEM_NAME[item.name], label: item.label }))
 );
 
-const visibleMenuItems = computed(() =>
-  menuItems.value.filter(item => {
+// ── Ícones em gradiente: do Início (azul CEVICO) até Configurações
+// (dourado), passando pelo roxo — cada item recebe a cor interpolada
+// da sua posição no menu.
+const GRADIENT_STOPS = ['#0F5FA6', '#7C3AED', '#D4A017'];
+
+const hexToRgb = hex => [
+  parseInt(hex.slice(1, 3), 16),
+  parseInt(hex.slice(3, 5), 16),
+  parseInt(hex.slice(5, 7), 16),
+];
+
+const gradientColorAt = ratio => {
+  const segments = GRADIENT_STOPS.length - 1;
+  const pos = Math.min(Math.max(ratio, 0), 1) * segments;
+  const i = Math.min(Math.floor(pos), segments - 1);
+  const localT = pos - i;
+  const from = hexToRgb(GRADIENT_STOPS[i]);
+  const to = hexToRgb(GRADIENT_STOPS[i + 1]);
+  const mix = from.map((c, idx) => Math.round(c + (to[idx] - c) * localT));
+  return `rgb(${mix[0]}, ${mix[1]}, ${mix[2]})`;
+};
+
+// Agente (não-admin) vê o menu enxuto: Meu Painel | CRM | Conversas |
+// Agenda | Tarefas | Configurações (só o perfil: nome, e-mail, foto, senha)
+const menuItemsForRole = computed(() => {
+  if (isAdmin.value) return menuItems.value;
+  const allow = ['Inicio', 'CRM', 'Conversation', 'Agenda', 'Tasks'];
+  return [
+    ...menuItems.value.filter(i => allow.includes(i.name)),
+    {
+      name: 'Settings',
+      label: 'Configurações',
+      icon: 'i-lucide-bolt',
+      to: accountScopedRoute('profile_settings_index'),
+    },
+  ];
+});
+
+const visibleMenuItems = computed(() => {
+  const items = menuItemsForRole.value.filter(item => {
     const key = FEATURE_BY_ITEM_NAME[item.name];
     if (!key) return true;
     // Caixa de Entrada é visão de admin — atendimento acontece pelo CRM
@@ -368,19 +406,47 @@ const visibleMenuItems = computed(() =>
     return (
       !blockedFeatures.value.includes(key) && !hiddenFeatures.value.includes(key)
     );
-  })
-);
+  });
+  const denominator = Math.max(items.length - 1, 1);
+  return items.map((item, index) => ({
+    ...item,
+    iconColor: gradientColorAt(index / denominator),
+  }));
+});
 
 onMounted(() => {
   // carrega agent_permissions (e presets do CRM) para filtrar o menu
   store.dispatch('crm/fetchSettings').catch(() => {});
   // carrega tarefas para o aviso de prazo na sidebar (badge em Tarefas)
   store.dispatch('tasks/fetch').catch(() => {});
+  // badge do Radar de Oportunidades no "Meu Painel" — atualiza a cada 5 min
+  radarBadgeTimer = setInterval(() => {
+    store.dispatch('crm/fetchSettings').catch(() => {});
+  }, 5 * 60 * 1000);
 });
+
+let radarBadgeTimer = null;
+onUnmounted(() => clearInterval(radarBadgeTimer));
 // ──────────────────────────────────────────────────────────────────────────
 
 const menuItems = computed(() => {
   return [
+    // Meu Painel: boas-vindas + resumo do dia + avisos do Radar
+    // (badge = pacientes quentes sem atendimento detectados pelo Radar)
+    {
+      name: 'Inicio',
+      label: 'Meu Painel',
+      icon: 'i-lucide-house',
+      to: accountScopedRoute('inicio_home'),
+      getterKeys: { count: 'crm/getRadarAlertCount' },
+    },
+    // CRM em primeiro — é o hub de atendimento
+    {
+      name: 'CRM',
+      label: t('SIDEBAR.CRM'),
+      icon: 'i-lucide-rocket',
+      to: accountScopedRoute('crm_board'),
+    },
     {
       name: 'Inbox',
       label: t('SIDEBAR.INBOX'),
@@ -605,6 +671,11 @@ const menuItems = computed(() => {
           to: accountScopedRoute('crm_dashboard_reports'),
         },
         {
+          name: 'Campaigns Dashboard',
+          label: 'Dashboard Campanhas',
+          to: accountScopedRoute('crm_campaigns_dashboard'),
+        },
+        {
           name: 'Label Dashboard',
           label: t('SIDEBAR.LABEL_DASHBOARD'),
           to: accountScopedRoute('label_dashboard'),
@@ -663,17 +734,22 @@ const menuItems = computed(() => {
       ],
     },
     {
-      name: 'CRM',
-      label: t('SIDEBAR.CRM'),
-      icon: 'i-lucide-rocket',
-      to: accountScopedRoute('crm_board'),
-    },
-    {
       name: 'Campanha WhatsApp',
       label: 'Campanha WhatsApp',
       icon: 'i-lucide-megaphone',
       to: accountScopedRoute('crm_campaigns'),
     },
+    // Formulários (pré-operatório etc.) — visão de gestão, só admin
+    ...(isAdmin.value
+      ? [
+          {
+            name: 'Forms',
+            label: 'Formulários',
+            icon: 'i-lucide-clipboard-list',
+            to: accountScopedRoute('crm_forms'),
+          },
+        ]
+      : []),
     {
       name: 'Tasks',
       label: 'Tarefas',
@@ -693,6 +769,54 @@ const menuItems = computed(() => {
       icon: 'i-lucide-graduation-cap',
       to: accountScopedRoute('academy_home'),
     },
+    // Automações e Integrações — logo acima de Configurações (só admin)
+    ...(isAdmin.value
+      ? [
+          {
+            name: 'Automations Hub',
+            label: 'Automações',
+            icon: 'i-lucide-workflow',
+            children: [
+              {
+                name: 'Automations Robos',
+                label: 'Robôs de follow-up',
+                icon: 'i-lucide-bot',
+                to: accountScopedRoute('cevico_automations', {}, { tab: 'robos' }),
+              },
+              {
+                name: 'Automations Rules',
+                label: 'Regras da caixa de entrada',
+                icon: 'i-lucide-repeat',
+                to: accountScopedRoute('automation_list'),
+              },
+              {
+                name: 'Automations AI Agents',
+                label: 'Agentes de IA',
+                icon: 'i-lucide-sparkles',
+                to: accountScopedRoute('cevico_automations', {}, { tab: 'agentes' }),
+              },
+              {
+                name: 'Automations Programming',
+                label: 'Modo Programação',
+                icon: 'i-lucide-zap',
+                to: accountScopedRoute('cevico_automations', {}, { tab: 'programacao' }),
+              },
+              {
+                name: 'Automations Treatment',
+                label: 'Tratamento de dados',
+                icon: 'i-lucide-database',
+                to: accountScopedRoute('cevico_automations', {}, { tab: 'tratamento' }),
+              },
+            ],
+          },
+          {
+            name: 'Integrations Hub',
+            label: 'Integrações',
+            icon: 'i-lucide-plug',
+            to: accountScopedRoute('crm_integrations'),
+          },
+        ]
+      : []),
     {
       name: 'Settings',
       label: t('SIDEBAR.SETTINGS'),
@@ -752,18 +876,6 @@ const menuItems = computed(() => {
             ]
           : []),
         {
-          name: 'CEVICO Automations',
-          label: 'Automações',
-          icon: 'i-lucide-workflow',
-          to: accountScopedRoute('cevico_automations', {}, { tab: 'reguas' }),
-        },
-        {
-          name: 'CEVICO Robots',
-          label: 'Robôs',
-          icon: 'i-lucide-bot',
-          to: accountScopedRoute('cevico_automations', {}, { tab: 'robos' }),
-        },
-        {
           name: 'Settings Inboxes',
           label: t('SIDEBAR.INBOXES'),
           icon: 'i-lucide-inbox',
@@ -788,12 +900,6 @@ const menuItems = computed(() => {
           label: t('SIDEBAR.CUSTOM_ATTRIBUTES'),
           icon: 'i-lucide-code',
           to: accountScopedRoute('attributes_list'),
-        },
-        {
-          name: 'Settings Automation',
-          label: t('SIDEBAR.AUTOMATION'),
-          icon: 'i-lucide-repeat',
-          to: accountScopedRoute('automation_list'),
         },
         {
           name: 'Settings Agent Bots',

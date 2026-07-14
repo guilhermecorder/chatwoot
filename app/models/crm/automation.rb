@@ -28,7 +28,8 @@ class Crm::Automation < ApplicationRecord
   has_many :logs, class_name: 'Crm::AutomationLog', foreign_key: :automation_id, dependent: :destroy
 
   TRIGGER_TYPES = %w[card_entered card_left card_stalled label_added label_removed].freeze
-  ACTION_TYPES  = %w[webhook n8n_flow apply_label move_card log_timeline notify_team meta_ads_event google_ads_conversion].freeze
+  ACTION_TYPES  = %w[webhook n8n_flow apply_label move_card log_timeline notify_team meta_ads_event google_ads_conversion send_form ai_analyze
+                     schedule_appointment].freeze
 
   validates :name,         presence: true
   validates :trigger_type, inclusion: { in: TRIGGER_TYPES }

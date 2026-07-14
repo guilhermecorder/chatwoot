@@ -27,6 +27,8 @@ const getters = {
   getUIFlags:      s => s.uiFlags,
   getSettings:     s => s.settings,
   getN8nWorkflows: s => s.settings.n8n_workflows || [],
+  // avisos ativos do Radar de Oportunidades (badge no "Meu Painel")
+  getRadarAlertCount: s => s.settings.ai?.opportunity_alerts_count || 0,
 };
 
 const actions = {
@@ -230,8 +232,11 @@ const actions = {
     return data;
   },
 
-  async fetchDashboard(_, { pipelineId, period }) {
-    const { data } = await CrmAPI.getDashboard(pipelineId, period);
+  async fetchDashboard(_, { pipelineId, period, preset }) {
+    const params = {};
+    if (preset) params.preset = preset;
+    else if (period) params.period = period;
+    const { data } = await CrmAPI.getDashboard(pipelineId, params);
     return data;
   },
 

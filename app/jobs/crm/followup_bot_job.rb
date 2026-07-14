@@ -49,7 +49,9 @@ class Crm::FollowupBotJob < ApplicationJob
       # caixa escolhida no robô de coluna → restringe a esse número
       scope = scope.where(inbox_id: bot.inbox_id) if bot.inbox_id.present?
     else
-      scope = scope.where(inbox_id: bot.inbox_id)
+      # caixa automática: sem inbox definida, roda em todas as conversas
+      # abertas — a mensagem sai pelo número da própria conversa
+      scope = scope.where(inbox_id: bot.inbox_id) if bot.inbox_id.present?
     end
     scope
   end
@@ -61,17 +63,34 @@ class Crm::FollowupBotJob < ApplicationJob
     return if anchor.nil? # paciente falou por último (ou sem mensagens do agente)
 
     state = followup_state(conversation, bot, anchor)
-    hours = (Time.current - anchor) / 3600.0
+    silence_hours = (Time.current - anchor) / 3600.0
+    stage_hours = stage_entry_hours(bot, conversation) # nil se não for robô de coluna
 
     steps.each_with_index do |step, index|
       next if state['sent'].include?(index)
-      next if hours < Crm::FollowupBot.step_delay_hours(step)
+
+      # tipo da contagem: 'silence' (padrão — tempo sem resposta) ou
+      # 'stage_entry' (desde que o card entrou na coluna)
+      base_hours = step['delay_from'] == 'stage_entry' ? stage_hours : silence_hours
+      next if base_hours.nil? || base_hours < Crm::FollowupBot.step_delay_hours(step)
 
       send_nudge(bot, conversation, step)
       state['sent'] << index
     end
 
     persist_state(conversation, bot, anchor, state)
+  end
+
+  # horas desde que o card entrou na coluna do robô (só robô de coluna)
+  def stage_entry_hours(bot, conversation)
+    return nil unless bot.stage_scoped? && conversation.contact_id
+
+    crm = Crm::Contact.find_by(pipeline_id: bot.stage.pipeline_id, contact_id: conversation.contact_id)
+    return nil unless crm
+
+    entered = Crm::StageLog.where(crm_contact_id: crm.id, stage_id: bot.stage_id).maximum(:entered_at)
+    entered ||= crm.updated_at
+    (Time.current - entered) / 3600.0
   end
 
   # Filtros "tem / não tem": só cutuca quem TEM todas as etiquetas exigidas

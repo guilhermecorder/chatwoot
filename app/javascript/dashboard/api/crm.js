@@ -124,6 +124,76 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/ads_report/backfill`);
   }
 
+  // ── Resumo da conversa (painel lateral) + análise de IA ───────────
+  getConversationSummary(conversationId) {
+    return axios.get(`${this.url}/conversation_summary`, {
+      params: { conversation_id: conversationId },
+    });
+  }
+
+  analyzeConversation(conversationId) {
+    return axios.post(`${this.url}/conversation_summary/analyze`, {
+      conversation_id: conversationId,
+    });
+  }
+
+  updateAi(data) {
+    return axios.post(`${this.url}/settings/update_ai`, data);
+  }
+
+  testAi() {
+    return axios.post(`${this.url}/settings/test_ai`);
+  }
+
+  getAiUsage() {
+    return axios.get(`${this.url}/settings/ai_usage`);
+  }
+
+  updateAgendaWindows(windows) {
+    return axios.post(`${this.url}/settings/update_agenda`, { windows });
+  }
+
+  updateAgendaBlocked(blocked) {
+    return axios.post(`${this.url}/settings/update_agenda`, { blocked });
+  }
+
+  updateAgendaBlockedDays(blockedDays) {
+    return axios.post(`${this.url}/settings/update_agenda`, { blocked_days: blockedDays });
+  }
+
+  radarScan(params) {
+    return axios.post(`${this.url}/settings/radar_scan`, params);
+  }
+
+  // ── Formulários (pré-operatório etc.) ─────────────────────────────
+  getForms() {
+    return axios.get(`${this.url}/forms`);
+  }
+
+  createForm(data) {
+    return axios.post(`${this.url}/forms`, data);
+  }
+
+  updateForm(id, data) {
+    return axios.put(`${this.url}/forms/${id}`, data);
+  }
+
+  deleteForm(id) {
+    return axios.delete(`${this.url}/forms/${id}`);
+  }
+
+  getFormSummary(id, params = {}) {
+    return axios.get(`${this.url}/forms/${id}/summary`, { params });
+  }
+
+  generateFormInsights(id) {
+    return axios.post(`${this.url}/forms/${id}/generate_insights`);
+  }
+
+  getFormPreviewLink(id) {
+    return axios.get(`${this.url}/forms/${id}/preview_link`);
+  }
+
   // ── Tratamento de dados (etiqueta retroativa) ─────────────────────
   previewRetroLabel(data) {
     return axios.post(`${this.url}/retro_labels/preview`, data);
@@ -251,9 +321,28 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/test_google_ads`);
   }
 
+  // ── Google Sheets (planilha de cirurgias) ─────────────────────────
+  updateSheets(data) {
+    return axios.post(`${this.url}/settings/update_sheets`, data);
+  }
+
+  testSheets() {
+    return axios.post(`${this.url}/settings/test_sheets`);
+  }
+
+  // ── Meu Painel ────────────────────────────────────────────────────
+  getHome(params = {}) {
+    return axios.get(`${this.url}/home`, { params });
+  }
+
+  // ── Dashboard de Campanhas ────────────────────────────────────────
+  getCampaignsDashboard(params = {}) {
+    return axios.get(`${this.url}/campaigns_dashboard`, { params });
+  }
+
   // ── Dashboard ─────────────────────────────────────────────────────
-  getDashboard(pipelineId, period = 30) {
-    return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard`, { params: { period } });
+  getDashboard(pipelineId, params = {}) {
+    return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard`, { params });
   }
 
   // ── Automations ───────────────────────────────────────────────────

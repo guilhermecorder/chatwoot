@@ -30,6 +30,12 @@ class CrmAutomationFireJob < ApplicationJob
       fire_meta_ads(automation, contact, pipeline)
     when 'google_ads_conversion'
       fire_google_ads(automation, contact, pipeline)
+    when 'send_form'
+      send_form(automation, contact, pipeline)
+    when 'ai_analyze'
+      ai_analyze(contact)
+    when 'schedule_appointment'
+      schedule_appointment(automation, contact, pipeline)
     end
 
     # Registra log de sucesso
@@ -182,6 +188,114 @@ class CrmAutomationFireJob < ApplicationJob
       contact:    contact,
       params:     extra,
     ).call
+  end
+
+  # Roda o Analista de Conversas (Claude) na conversa mais recente do
+  # contato e salva o parecer — aparece no painel da conversa e no balão.
+  def ai_analyze(contact)
+    conversation = contact.conversations.order(created_at: :desc).first
+    return unless conversation
+
+    result = Crm::ConversationInsightService.new(conversation: conversation).call
+    return if result[:error]
+
+    attrs = conversation.additional_attributes || {}
+    conversation.update!(additional_attributes: attrs.merge('ai_insight' => result.stringify_keys))
+  end
+
+  # Agente de Agendamento: lê a conversa, extrai nome/telefone/dia/hora/unidade
+  # e cria o compromisso na Agenda (tarefa com unidade). Se a IA não confirmar
+  # dia e hora, cria uma tarefa de revisão para a equipe completar.
+  def schedule_appointment(automation, contact, pipeline)
+    conversation = contact.conversations.order(created_at: :desc).first
+    return unless conversation
+
+    result = Crm::AppointmentExtractionService.new(conversation: conversation).call
+    if result[:error]
+      Rails.logger.warn("[CrmAutomation] schedule_appointment: #{result[:error]}")
+      return
+    end
+
+    account = pipeline.account
+    name    = result[:name].presence || contact.name.presence || 'Paciente'
+    phone   = result[:phone].presence || contact.phone_number
+    unit    = result[:unit].presence || automation.action_config['default_unit'].presence
+    creator = account.administrators.first || account.users.first
+    return unless creator
+
+    notes = [result[:notes].presence, "Conversa ##{conversation.display_id} — agendado pela IA"].compact.join("\n")
+
+    if result[:found] && result[:starts_at].present?
+      # não duplica: mesmo paciente, mesmo horário
+      return if account.tasks.exists?(due_at: result[:starts_at], title: "Consulta: #{name}")
+
+      account.tasks.create!(
+        title: "Consulta: #{name}",
+        description: notes,
+        due_at: result[:starts_at],
+        unit: unit,
+        phone: phone,
+        procedure: result[:procedure].presence,
+        doctor: result[:doctor].presence,
+        task_type: 'consulta',
+        priority: :medium,
+        status: :todo,
+        creator: creator
+      )
+      when_str = result[:starts_at].in_time_zone('America/Sao_Paulo').strftime('%d/%m/%Y às %H:%M')
+      note = "📅 Consulta agendada pela IA: #{name} — #{when_str}" \
+             "#{unit ? " (#{unit == 'tatuape' ? 'Tatuapé' : 'Av. Paulista'})" : ''}. Registrada na Agenda."
+    else
+      # sem dia/hora confirmados → tarefa de revisão para a equipe
+      return if account.tasks.where(status: %i[todo doing]).exists?(title: "⚠️ Confirmar consulta: #{name}")
+
+      account.tasks.create!(
+        title: "⚠️ Confirmar consulta: #{name}",
+        description: "A IA não encontrou dia e hora confirmados na conversa.\n#{notes}",
+        unit: unit,
+        phone: phone,
+        procedure: result[:procedure].presence,
+        doctor: result[:doctor].presence,
+        task_type: 'consulta',
+        priority: :high,
+        status: :todo,
+        creator: creator
+      )
+      note = "📅 A IA não conseguiu confirmar dia e hora da consulta de #{name} — criei uma tarefa de revisão para a equipe."
+    end
+
+    conversation.messages.create!(
+      account: account,
+      message_type: :activity,
+      content: note,
+      private: true
+    )
+  end
+
+  # Envia o link do formulário (ex: perguntas pré-operatórias) na conversa
+  # mais recente do contato. Cada contato recebe seu link único (assinado).
+  def send_form(automation, contact, pipeline)
+    form = Crm::Form.find_by(id: automation.action_config['form_id'], account: pipeline.account)
+    return unless form&.active
+
+    # não reenvia para quem já respondeu este formulário
+    return if form.responses.where(contact_id: contact.id).where.not(completed_at: nil).exists?
+
+    conversation = contact.conversations.order(created_at: :desc).first
+    return unless conversation
+
+    link = form.public_link_for(contact)
+    template = automation.action_config['message'].presence ||
+               'Para agilizar seu atendimento, responda nosso formulário (leva 2 minutinhos): {{link}}'
+    content = template.gsub('{{link}}', link)
+                      .gsub('{{nome}}', contact.name.to_s.split(' ').first.to_s)
+
+    conversation.messages.create!(
+      account: pipeline.account,
+      inbox: conversation.inbox,
+      message_type: :outgoing,
+      content: content
+    )
   end
 
   def fire_n8n(automation, payload)

@@ -26,6 +26,7 @@ const isSaving = ref(false);
 const newStep = () => ({
   delay_value: 3,
   delay_unit: 'hours',
+  delay_from: 'silence',
   kind: 'text',
   message: 'Oi, pode falar?',
   template_params: null,
@@ -35,6 +36,7 @@ const newStep = () => ({
 const normalizeStep = s => ({
   delay_value: s.delay_value ?? s.delay_hours ?? 3,
   delay_unit: s.delay_unit ?? 'hours',
+  delay_from: s.delay_from ?? 'silence',
   kind: s.template_params ? 'template' : 'text',
   message: s.message ?? '',
   template_params: s.template_params ?? null,
@@ -72,9 +74,8 @@ onMounted(() => {
       starts_at: toLocalInput(props.bot.starts_at),
       ends_at: toLocalInput(props.bot.ends_at),
     };
-  } else if (!isStageBot.value) {
-    form.value.inbox_id = whatsappInboxes.value[0]?.id ?? null;
   }
+  // novo robô nasce em modo AUTOMÁTICO (caixa da conversa do card)
 });
 
 const toggleListItem = (list, value) => {
@@ -134,7 +135,6 @@ const stepValid = s =>
 const canSave = computed(
   () =>
     form.value.name?.trim() &&
-    (isStageBot.value || form.value.inbox_id) &&
     form.value.steps?.length &&
     form.value.steps.every(stepValid)
 );
@@ -149,6 +149,7 @@ const save = async () => {
       steps: form.value.steps.map(s => ({
         delay_value: Number(s.delay_value),
         delay_unit: s.delay_unit,
+        delay_from: s.delay_from || 'silence',
         kind: s.kind,
         message: s.kind === 'template' ? s.message : s.message.trim(),
         template_params: s.kind === 'template' ? s.template_params : null,
@@ -245,16 +246,19 @@ const save = async () => {
         </div>
         <div>
           <label class="text-xs font-medium text-n-slate-11 block mb-1">
-            Caixa de entrada (WhatsApp)
-            <span v-if="isStageBot" class="text-n-slate-9 font-normal">— define o número e os modelos corretos</span>
+            Caixa de entrada
           </label>
           <select
             v-model="form.inbox_id"
             class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
           >
-            <option v-if="isStageBot" :value="null">Qualquer caixa (usa a da conversa)</option>
-            <option v-for="i in whatsappInboxes" :key="i.id" :value="i.id">{{ i.name }}</option>
+            <option :value="null">🔁 Automática — número da conversa do card (recomendado)</option>
+            <option v-for="i in whatsappInboxes" :key="i.id" :value="i.id">Somente {{ i.name }}</option>
           </select>
+          <p class="text-[11px] text-n-slate-9 mt-1">
+            No modo automático, cada paciente recebe o follow-up pelo mesmo número em que já conversa.
+            Escolha uma caixa específica só se quiser limitar o robô a um número.
+          </p>
         </div>
 
         <!-- Etapas -->
@@ -289,7 +293,16 @@ const save = async () => {
                   <option value="hours">hora(s)</option>
                   <option value="days">dia(s)</option>
                 </select>
-                <span class="text-xs text-n-slate-10">sem resposta, enviar:</span>
+                <!-- Tipo da contagem -->
+                <select
+                  v-model="step.delay_from"
+                  class="border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+                  title="A partir de quando o tempo é contado"
+                >
+                  <option value="silence">sem resposta do paciente</option>
+                  <option v-if="isStageBot" value="stage_entry">desde a entrada na coluna</option>
+                </select>
+                <span class="text-xs text-n-slate-10">→ enviar:</span>
 
                 <!-- Tipo da etapa -->
                 <div class="flex rounded-lg border border-n-weak overflow-hidden ml-auto">

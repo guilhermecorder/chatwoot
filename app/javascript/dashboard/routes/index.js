@@ -33,6 +33,10 @@ const isCevicoBlockedRoute = to => {
 
 export const router = createRouter({ history: createWebHistory(), routes });
 
+// CEVICO: a primeira navegação após abrir/logar cai no Meu Painel (inicio),
+// e não em Conversas. Depois disso, clicar em "Conversas" funciona normal.
+let initialLandingDone = false;
+
 export const validateAuthenticateRoutePermission = async (to, next) => {
   const { isLoggedIn, getCurrentUser: user } = store.getters;
 
@@ -74,6 +78,13 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
   if (isCevicoBlockedRoute(to)) {
     return next(frontendURL(`accounts/${routeAccountId}/dashboard`));
   }
+
+  // tela inicial do sistema = Meu Painel
+  if (!initialLandingDone && to.name === 'home') {
+    initialLandingDone = true;
+    return next(frontendURL(`accounts/${routeAccountId}/inicio`));
+  }
+  initialLandingDone = true;
 
   const nextRoute = validateLoggedInRoutes(to, store.getters.getCurrentUser);
   return nextRoute ? next(frontendURL(nextRoute)) : next();

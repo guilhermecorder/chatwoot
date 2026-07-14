@@ -49,7 +49,6 @@ class Crm::FollowupBot < ApplicationRecord
 
   validates :name, presence: true
   validate :steps_must_be_valid
-  validate :scope_must_be_present
 
   scope :active, -> { where(active: true) }
 
@@ -86,11 +85,9 @@ class Crm::FollowupBot < ApplicationRecord
 
   private
 
-  def scope_must_be_present
-    return if inbox_id.present? || stage_id.present?
-
-    errors.add(:base, 'Defina uma caixa de entrada ou uma coluna do CRM')
-  end
+  # caixa é OPCIONAL: sem caixa (modo automático) o follow-up sai pelo
+  # número da própria conversa do card — cada paciente é cutucado pelo
+  # mesmo número em que já conversa
 
   def steps_must_be_valid
     return errors.add(:steps, 'defina ao menos uma etapa') if Array(steps).blank?

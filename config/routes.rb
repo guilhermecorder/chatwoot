@@ -38,6 +38,10 @@ Rails.application.routes.draw do
     resource :slack_uploads, only: [:show]
   end
 
+  # Formulário público CEVICO (paciente responde pelo link do WhatsApp, sem login)
+  get 'forms/:slug/:token', to: 'cevico_forms#show', as: :cevico_form
+  post 'forms/:slug/:token', to: 'cevico_forms#submit'
+
   get '/health', to: 'health#show'
   get '/api', to: 'api#index'
   namespace :api, defaults: { format: 'json' } do
@@ -149,6 +153,16 @@ Rails.application.routes.draw do
             resource :ads_report, only: [:show], controller: 'ads_reports' do
               post :backfill
             end
+            resource :conversation_summary, only: [:show], controller: 'conversation_summaries' do
+              post :analyze
+            end
+            resources :forms, only: [:index, :create, :update, :destroy] do
+              member do
+                get :summary
+                post :generate_insights
+                get :preview_link
+              end
+            end
             resource :retro_labels, only: [] do
               post :preview
               post :apply
@@ -170,9 +184,18 @@ Rails.application.routes.draw do
               post :fetch_workflows
               post :update_meta_ads
               post :test_meta_ads
+              post :update_ai
+              post :test_ai
               post :update_google_ads
               post :test_google_ads
+              post :update_sheets
+              post :test_sheets
+              post :update_agenda
+              post :radar_scan
+              get :ai_usage
             end
+            resource :home, only: [:show], controller: 'home'
+            resource :campaigns_dashboard, only: [:show], controller: 'campaigns_dashboards'
             resources :pipelines, only: [:index, :show, :create, :update, :destroy] do
               resources :stages, only: [:index, :create, :update, :destroy] do
                 collection { post :reorder }

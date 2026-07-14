@@ -158,7 +158,6 @@ const loadStoredPresets = () => {
 };
 
 const activePresetNames = ref(loadStoredPresets());
-const showPresetsDropdown = ref(false);
 const showPresetsModal = ref(false);
 
 const columnPresets = computed(() => crmSettings.value.column_presets ?? []);
@@ -188,13 +187,6 @@ const visibleStageIdSet = computed(() => {
   const ids = new Set();
   activePresets.value.forEach(p => (p.stage_ids ?? []).forEach(id => ids.add(Number(id))));
   return ids;
-});
-
-const presetsButtonText = computed(() => {
-  const n = activePresetNames.value.length;
-  if (n === 0) return t('CRM.PRESETS.ALL_COLUMNS');
-  if (n === 1) return activePresetNames.value[0];
-  return `${n} visualizações`;
 });
 
 const isStageVisible = stageId => {
@@ -446,6 +438,10 @@ onMounted(async () => {
     selectedPipelineId.value = pipelines.value[0].id;
     await loadBoard(selectedPipelineId.value);
   }
+  // ?programming=1 abre direto no Modo Programação (link do hub de Automações)
+  if (new URLSearchParams(window.location.search).get('programming') === '1' && isAdmin.value) {
+    isProgrammingMode.value = true;
+  }
 });
 
 // ── Chat popup (conversa oficial) ─────────────────────────
@@ -688,10 +684,15 @@ const createAndAddContact = async () => {
 </script>
 
 <template>
-  <div class="bg-n-surface-1" style="display:flex;flex-direction:column;height:100%;width:100%;" @click="showLabelsDropdown = false; showStagesDropdown = false; showPresetsDropdown = false">
+  <div class="bg-n-surface-1" style="display:flex;flex-direction:column;height:100%;width:100%;" @click="showLabelsDropdown = false; showStagesDropdown = false">
     <!-- Top bar -->
     <div class="flex items-center gap-3 px-6 py-4 border-b border-n-weak flex-shrink-0 flex-wrap">
-      <h1 class="text-lg font-semibold text-n-slate-12">{{ $t('CRM.TITLE') }}</h1>
+      <h1 class="text-lg font-bold text-n-slate-12 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
+          <span class="i-lucide-rocket text-white text-base" />
+        </span>
+        {{ $t('CRM.TITLE') }}
+      </h1>
 
       <!-- Pipeline tabs -->
       <div class="flex items-center gap-2 ml-2 flex-wrap">
@@ -711,10 +712,11 @@ const createAndAddContact = async () => {
           <!-- Normal tab -->
           <button
             v-else
-            class="px-3 py-1.5 rounded-lg text-sm transition-colors"
+            class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
             :class="selectedPipelineId === p.id
-              ? 'bg-n-brand text-white'
+              ? 'text-white shadow'
               : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="selectedPipelineId === p.id ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
             @click="selectPipeline(p.id)"
           >
             {{ p.name }}
@@ -722,116 +724,59 @@ const createAndAddContact = async () => {
         </template>
       </div>
 
-      <!-- Right actions (grupo sempre alinhado à direita, mesmo quebrando linha) -->
+      <!-- Right actions — design novo: grupos de pílulas alinhados -->
       <div class="flex items-center gap-2 ml-auto justify-end flex-wrap">
-        <!-- Visualizações de colunas (multi-seleção) -->
-        <div v-if="selectedPipeline" class="flex items-center gap-1 relative">
+        <!-- Renomear funil (excluir foi ocultado a pedido do Guilherme) -->
+        <div
+          v-if="isAdmin && selectedPipeline && !isRenamingPipeline"
+          class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5"
+        >
           <button
-            class="h-8 flex items-center gap-1.5 text-sm border rounded-lg px-2.5 bg-n-solid-2 text-n-slate-12 focus:outline-none max-w-[200px]"
-            :class="showPresetsDropdown || activePresetNames.length ? 'border-n-brand' : 'border-n-weak'"
-            :title="$t('CRM.PRESETS.TITLE')"
-            @click.stop="showPresetsDropdown = !showPresetsDropdown"
-          >
-            <span class="i-lucide-layout-template text-sm text-n-slate-10 flex-shrink-0" />
-            <span class="truncate">{{ presetsButtonText }}</span>
-            <span class="i-lucide-chevron-down text-xs text-n-slate-9 flex-shrink-0" />
-          </button>
-          <div
-            v-if="showPresetsDropdown"
-            class="absolute top-full right-0 z-30 mt-1 bg-n-solid-1 border border-n-weak rounded-lg shadow-lg min-w-[220px] max-h-64 overflow-y-auto py-1"
-            @click.stop
-          >
-            <button
-              class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-n-alpha-1"
-              :class="activePresetNames.length === 0 ? 'text-n-brand font-medium' : 'text-n-slate-12'"
-              @click="clearPresets"
-            >
-              <span class="i-lucide-columns-3 text-sm" />
-              {{ $t('CRM.PRESETS.ALL_COLUMNS') }}
-            </button>
-            <div v-if="columnPresets.length" class="border-t border-n-weak my-1" />
-            <label
-              v-for="p in columnPresets"
-              :key="p.name"
-              class="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-n-alpha-1 text-n-slate-12"
-            >
-              <input
-                type="checkbox"
-                class="rounded accent-n-brand"
-                :checked="activePresetNames.includes(p.name)"
-                @change="togglePreset(p.name)"
-              />
-              👤 {{ p.name }}
-            </label>
-            <div v-if="!columnPresets.length" class="px-3 py-2 text-xs text-n-slate-9">
-              {{ $t('CRM.PRESETS.EMPTY') }}
-            </div>
-          </div>
-          <button
-            v-if="isAdmin"
-            class="h-8 w-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
-            :title="$t('CRM.PRESETS.MANAGE')"
-            @click="showPresetsModal = true"
-          >
-            <span class="i-lucide-settings-2 text-base" />
-          </button>
-        </div>
-
-        <template v-if="isAdmin && selectedPipeline && !isRenamingPipeline">
-          <button
-            class="h-8 w-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
+            class="h-7 w-7 flex items-center justify-center rounded-lg text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
             :title="$t('CRM.RENAME_PIPELINE')"
             @click="startRenamePipeline"
           >
-            <span class="i-lucide-pencil text-base" />
+            <span class="i-lucide-pencil text-sm" />
           </button>
-          <button
-            class="h-8 w-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:text-red-500 hover:bg-n-alpha-1 transition-colors"
-            :title="$t('CRM.DELETE_PIPELINE')"
-            @click="showDeletePipelineConfirm = !showDeletePipelineConfirm"
-          >
-            <span class="i-lucide-trash-2 text-base" />
-          </button>
-        </template>
+        </div>
 
-        <!-- Ferramentas de edição — só admin -->
-        <template v-if="isAdmin">
-          <!-- Edit mode toggle (clica de novo para SAIR) -->
+        <!-- Ferramentas — grupo único de pílulas (só admin) -->
+        <div
+          v-if="isAdmin"
+          class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 flex-wrap"
+        >
           <button
             v-if="selectedPipeline && !isProgrammingMode"
-            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border transition-colors"
+            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg transition-colors whitespace-nowrap"
             :class="isEditMode
-              ? 'bg-amber-500 border-amber-500 text-white hover:bg-amber-600'
-              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+              ? 'bg-amber-500 text-white hover:bg-amber-600'
+              : 'text-n-slate-11 hover:bg-n-alpha-1'"
             @click="isEditMode = !isEditMode"
           >
             <span :class="isEditMode ? 'i-lucide-x' : 'i-lucide-layout-template'" class="text-sm" />
             {{ isEditMode ? $t('CRM.EXIT_EDIT_MODE') : $t('CRM.EDIT_MODE') }}
           </button>
 
-          <!-- Programming mode toggle -->
           <button
             v-if="selectedPipeline && !isProgrammingMode && !isEditMode"
-            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border border-yellow-400/60 text-yellow-600 hover:bg-yellow-500/10 transition-colors"
+            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-yellow-600 hover:bg-yellow-500/10 transition-colors whitespace-nowrap"
             @click="isProgrammingMode = true"
           >
             <span class="i-lucide-zap text-sm" />
             {{ $t('CRM.PROGRAMMING_MODE') }}
           </button>
 
-          <!-- Integrações -->
           <button
-            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
-            title="Integrações (n8n, Meta, Google...)"
-            @click="showIntegrationsModal = true"
+            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-n-alpha-1 transition-colors whitespace-nowrap"
+            title="Integrações (n8n, Meta, Google, Claude)"
+            @click="$router.push({ name: 'crm_integrations' })"
           >
             <span class="i-lucide-plug text-sm" />
             Integrações
           </button>
 
-          <!-- Mensagens em massa -->
           <button
-            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-n-alpha-1 transition-colors whitespace-nowrap"
             title="Central de mensagens em massa (templates WhatsApp)"
             @click="$router.push({ name: 'crm_campaigns' })"
           >
@@ -840,13 +785,13 @@ const createAndAddContact = async () => {
           </button>
 
           <button
-            class="h-8 flex items-center gap-1.5 text-sm px-3 rounded-lg border border-n-weak text-n-slate-11 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
+            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-n-alpha-1 transition-colors whitespace-nowrap"
             @click="showNewPipelineForm = !showNewPipelineForm; showDeletePipelineConfirm = false"
           >
-            <span class="i-lucide-plus text-base" />
+            <span class="i-lucide-plus text-sm" />
             {{ $t('CRM.NEW_PIPELINE') }}
           </button>
-        </template>
+        </div>
       </div>
     </div>
 
@@ -947,7 +892,7 @@ const createAndAddContact = async () => {
     <!-- Filter bar (only when a pipeline is selected) -->
     <div v-if="selectedPipeline && !uiFlags.isFetchingPipelines && !uiFlags.isFetchingContacts" class="flex-shrink-0">
       <!-- Main filter row -->
-      <div class="flex items-center gap-2 px-4 py-2 border-b border-n-weak">
+      <div class="flex items-center gap-2 px-4 py-2 border-b border-n-weak flex-wrap">
         <!-- Search input -->
         <div class="relative flex-none w-72">
           <span class="absolute left-3 top-1/2 -translate-y-1/2 i-lucide-search text-n-slate-9 text-base pointer-events-none" />
@@ -957,6 +902,8 @@ const createAndAddContact = async () => {
             :placeholder="$t('CRM.FILTER.SEARCH_PLACEHOLDER')"
           />
         </div>
+
+
 
         <!-- Sem resposta (paciente aguardando) -->
         <button
@@ -1018,8 +965,52 @@ const createAndAddContact = async () => {
           </span>
         </button>
 
-        <!-- Counter -->
-        <span class="text-xs text-n-slate-9 whitespace-nowrap">
+        <!-- Visualizações pré-configuradas (colunas) -->
+        <div class="flex items-center gap-1">
+          <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 flex-wrap">
+            <button
+              class="h-7 flex items-center gap-1.5 px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+              :class="activePresetNames.length === 0 ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="activePresetNames.length === 0 ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+              @click="clearPresets"
+            >
+              <span class="i-lucide-columns-3 text-sm" />
+              Todas as colunas
+            </button>
+            <button
+              v-for="p in columnPresets"
+              :key="p.name"
+              class="h-7 px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap max-w-[160px] truncate"
+              :class="activePresetNames.includes(p.name) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="activePresetNames.includes(p.name) ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+              :title="`Mostrar só as colunas de ${p.name} (dá para combinar mais de uma)`"
+              @click="togglePreset(p.name)"
+            >
+              {{ p.name }}
+            </button>
+            <button
+              v-if="isAdmin"
+              class="h-7 w-7 flex items-center justify-center rounded-lg text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
+              :title="$t('CRM.PRESETS.MANAGE')"
+              @click="showPresetsModal = true"
+            >
+              <span class="i-lucide-settings-2 text-sm" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Clear filters button -->
+        <button
+          v-if="hasActiveFilters"
+          class="flex items-center gap-1 text-xs text-red-500 hover:text-red-600 ml-1"
+          @click="clearFilters"
+        >
+          <span class="i-lucide-x text-sm" />
+          {{ $t('CRM.FILTER.CLEAR') }}
+        </button>
+
+        <!-- Counter (fim da linha) -->
+        <span class="text-xs text-n-slate-9 whitespace-nowrap ml-auto">
           {{ $t('CRM.FILTER.SHOWING', { count: filteredCount, total: contactsMeta.total ?? totalContacts }) }}
           <template v-if="contactsMeta.with_conversations">
             · {{ $t('CRM.FILTER.WITH_CONVERSATION', { count: contactsMeta.with_conversations }) }}
@@ -1035,15 +1026,6 @@ const createAndAddContact = async () => {
           {{ $t('CRM.FILTER.LOADING_REST') }}
         </span>
 
-        <!-- Clear filters button -->
-        <button
-          v-if="hasActiveFilters"
-          class="flex items-center gap-1 text-xs text-red-500 hover:text-red-600 ml-1"
-          @click="clearFilters"
-        >
-          <span class="i-lucide-x text-sm" />
-          {{ $t('CRM.FILTER.CLEAR') }}
-        </button>
       </div>
 
       <!-- Expanded filter panel (rascunho — só filtra ao Aplicar) -->

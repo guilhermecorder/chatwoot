@@ -7,6 +7,7 @@ const props = defineProps({
   to: { type: [Object, String], default: '' },
   label: { type: String, default: '' },
   icon: { type: [String, Object], default: '' },
+  iconColor: { type: String, default: null },
   expandable: { type: Boolean, default: false },
   isExpanded: { type: Boolean, default: false },
   isActive: { type: Boolean, default: false },
@@ -39,7 +40,12 @@ const count = computed(() =>
     @click.stop="emit('toggle')"
   >
     <div v-if="icon" class="relative flex items-center gap-2">
-      <Icon v-if="icon" :icon="icon" class="size-4" />
+      <Icon
+        v-if="icon"
+        :icon="icon"
+        class="size-4"
+        :style="iconColor ? { color: iconColor } : {}"
+      />
       <span
         v-if="showBadge"
         class="size-2 -top-px ltr:-right-px rtl:-left-px bg-n-brand absolute rounded-full border border-n-solid-2"
