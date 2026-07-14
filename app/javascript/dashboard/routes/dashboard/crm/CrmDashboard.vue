@@ -116,8 +116,8 @@ const timelineChart = computed(() => {
       labels,
       datasets: [
         { label: 'Novas conversas', data: t.map(d => d.count), backgroundColor: AZUL + 'E6', ...barBase },
-        { label: 'Agendamentos de consulta', data: t.map(d => d.agendamentos), backgroundColor: OURO + 'E6', ...barBase },
-        { label: 'Cirurgias', data: t.map(d => d.cirurgias), backgroundColor: LIME + 'E6', ...barBase },
+        { label: 'Chegaram a agendar', data: t.map(d => d.agendamentos), backgroundColor: OURO + 'E6', ...barBase },
+        { label: 'Chegaram à cirurgia', data: t.map(d => d.cirurgias), backgroundColor: LIME + 'E6', ...barBase },
       ],
     },
     options: {
@@ -287,13 +287,31 @@ const timeChart = computed(() => {
 // ── Responsividade ────────────────────────────────────────────────────
 const resp = computed(() => data.value?.responsiveness ?? null);
 
+// gradientes harmônicos (azul → roxo → dourado → laranja → verde → ciano),
+// seguindo a paleta oficial do dashboard
+const RESP_GRADS = [
+  ['#0F5FA6', '#3B82F6'],
+  ['#5B21B6', '#7C3AED'],
+  ['#7C3AED', '#A78BFA'],
+  ['#B8860B', '#D4A017'],
+  ['#D97706', '#F59E0B'],
+  ['#EA580C', '#FB923C'],
+  ['#059669', '#84CC16'],
+  ['#0891B2', '#22D3EE'],
+];
+
 const respMilestones = computed(() => {
   if (!resp.value?.stages?.length) return [];
-  return resp.value.stages.slice(1).map((s, i) => ({
+  const rows = resp.value.stages.slice(1);
+  // largura relativa à MAIOR etapa (não ao total) — barras cheias e
+  // legíveis, com o % real do total escrito dentro
+  const max = Math.max(...rows.map(s => s.reached), 1);
+  return rows.map((s, i) => ({
     name: s.stage_name,
-    color: PALETTE[i % PALETTE.length],
+    grad: RESP_GRADS[i % RESP_GRADS.length],
     reached: s.reached,
     pct: s.reached_pct,
+    width: Math.max((s.reached / max) * 100, 5),
   }));
 });
 
@@ -456,24 +474,34 @@ const agentView = computed(() => {
             </span>
             Responsividade das conversas
           </h3>
-          <span class="text-xs text-n-slate-10">quanto do total avançou em cada etapa</span>
+          <span class="text-xs text-n-slate-10">% = quanto do total chegou até a etapa · barras proporcionais entre si</span>
         </div>
 
-        <div class="space-y-3">
+        <div class="space-y-2.5">
           <div v-for="m in respMilestones" :key="m.name" class="flex items-center gap-3">
             <div class="w-40 text-right flex-shrink-0">
               <p class="text-xs text-n-slate-12 font-medium truncate">{{ m.name }}</p>
             </div>
-            <div class="flex-1 flex items-center gap-2">
-              <div class="flex-1 h-7 rounded-lg bg-n-alpha-1 overflow-hidden">
-                <div
-                  class="h-full rounded-lg transition-all flex items-center justify-end px-2"
-                  :style="{ width: Math.max(m.pct, 4) + '%', background: `linear-gradient(90deg, ${m.color}, ${m.color}CC)` }"
+            <div class="flex-1 h-9 rounded-xl bg-n-alpha-1 relative overflow-hidden">
+              <div
+                class="absolute inset-y-0 left-0 rounded-xl transition-all shadow-sm"
+                :style="{ width: m.width + '%', background: `linear-gradient(90deg, ${m.grad[0]}, ${m.grad[1]})` }"
+              />
+              <div class="absolute inset-0 flex items-center">
+                <span
+                  v-if="m.width >= 34"
+                  class="text-[11px] font-bold text-white drop-shadow pl-3"
                 >
-                  <span class="text-[11px] font-bold text-white drop-shadow">{{ m.pct }}%</span>
-                </div>
+                  {{ m.pct }}% · {{ m.reached.toLocaleString('pt-BR') }} conversas
+                </span>
+                <span
+                  v-else
+                  class="text-[11px] font-bold whitespace-nowrap"
+                  :style="{ marginLeft: `calc(${m.width}% + 10px)`, color: m.grad[0] }"
+                >
+                  {{ m.pct }}% · {{ m.reached.toLocaleString('pt-BR') }} conversas
+                </span>
               </div>
-              <span class="text-xs text-n-slate-10 w-28 flex-shrink-0">{{ m.reached }} conversas</span>
             </div>
           </div>
         </div>
@@ -503,7 +531,10 @@ const agentView = computed(() => {
 
         <!-- Conversas ao longo do tempo (colunas arredondadas, 3 séries) -->
         <div class="xl:col-span-2 bg-n-solid-2 border border-n-weak rounded-2xl p-6">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Conversas ao longo do tempo</h3>
+          <h3 class="text-sm font-bold text-n-slate-12 mb-1">Conversas ao longo do tempo</h3>
+          <p class="text-[11px] text-n-slate-10 mb-4">
+            pela data em que o lead chegou — e, desses leads, quantos avançaram até agendar ou operar
+          </p>
           <div class="h-64">
             <Bar
               v-if="timelineChart"

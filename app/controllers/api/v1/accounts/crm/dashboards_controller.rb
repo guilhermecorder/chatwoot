@@ -16,7 +16,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       value_by_stage:     build_value_by_stage(pipeline, contacts),
       avg_time_by_stage:  build_avg_time_by_stage(pipeline, contacts),
       by_inbox:           build_by_inbox(since, until_at),
-      created_over_time:  build_created_over_time(contacts, since, until_at),
+      created_over_time:  build_created_over_time(pipeline, contacts, since, until_at),
       responsiveness:     build_responsiveness(pipeline, contacts),
       agents:             build_agents(since, until_at),
       sheet_surgeries:    build_sheet_surgeries(since, until_at),
@@ -233,10 +233,12 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
   end
 
   # ── Conversas ao longo do tempo + marcos da jornada ──────────────
-  # séries sobrepostas: conversas novas, entradas em Agendamento e em
-  # Cirurgia (via stage_logs — o momento em que o card ENTROU na etapa)
+  # séries sobrepostas por COORTE: leads que chegaram naquele dia, e desses
+  # quantos avançaram até Agendamento / Cirurgia. Tudo distribuído pela
+  # data REAL do lead (contacts.created_at) — usar a data em que o card foi
+  # movido criava picos artificiais nos dias de tratamento em massa.
 
-  def build_created_over_time(contacts, since, until_at)
+  def build_created_over_time(pipeline, contacts, since, until_at)
     days = [((until_at.to_date - since.to_date).to_i + 1), 1].max
 
     # Usa a data de criação do CONTATO (histórico real), não a do card
@@ -246,8 +248,8 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       .group("DATE(contacts.created_at AT TIME ZONE 'UTC')")
       .count
 
-    schedule_by_day = stage_entries_by_day(contacts, since, until_at, '%agendamento%')
-    surgery_by_day  = stage_entries_by_day(contacts, since, until_at, '%cirurgia%')
+    schedule_by_day = reached_stage_by_day(pipeline, contacts, since, until_at, /agendamento/i)
+    surgery_by_day  = reached_stage_by_day(pipeline, contacts, since, until_at, /cirurgia/i, exclude: /pós|indica/i)
 
     (0...days).map do |i|
       date = since.to_date + i
@@ -337,18 +339,20 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     { configured: true, error: 'Não consegui ler a planilha agora.' }
   end
 
-  def stage_entries_by_day(contacts, since, until_at, name_pattern)
-    stage_ids = Crm::Stage.joins(:pipeline)
-                          .where(crm_pipelines: { account_id: Current.account.id })
-                          .where('crm_stages.name ILIKE ?', name_pattern)
-                          .where.not('crm_stages.name ILIKE ?', '%pós%')
-                          .pluck(:id)
-    return {} if stage_ids.empty?
+  # leads que chegaram ATÉ a etapa alvo (ou além), agrupados pela data em
+  # que o LEAD surgiu — visão de coorte, imune a movimentações em massa
+  def reached_stage_by_day(pipeline, contacts, since, until_at, pattern, exclude: /pós/i)
+    ordered = pipeline.stages.order(:position).to_a
+    target = ordered.find { |s| s.name.match?(pattern) && !s.name.match?(exclude) }
+    return {} unless target
 
-    Crm::StageLog
-      .where(crm_contact_id: contacts.select(:id), stage_id: stage_ids)
-      .where(entered_at: since..until_at)
-      .group("DATE(entered_at AT TIME ZONE 'UTC')")
+    reached_ids = ordered.select { |s| s.position >= target.position }.map(&:id)
+
+    contacts
+      .joins(:contact)
+      .where(stage_id: reached_ids)
+      .where(contacts: { created_at: since..until_at })
+      .group("DATE(contacts.created_at AT TIME ZONE 'UTC')")
       .count
   end
 end
