@@ -131,6 +131,10 @@ GEM
     annotaterb (4.20.0)
       activerecord (>= 6.0.0)
       activesupport (>= 6.0.0)
+    anthropic (1.55.0)
+      cgi
+      connection_pool
+      standardwebhooks
     ast (2.4.3)
     attr_extras (7.1.0)
     audited (5.4.1)
@@ -964,6 +968,7 @@ GEM
     squasher (0.7.2)
     ssrf_filter (1.5.0)
     stackprof (0.2.25)
+    standardwebhooks (1.1.0)
     statsd-ruby (1.5.0)
     stripe (18.0.1)
     telephone_number (1.4.20)
@@ -1060,6 +1065,7 @@ DEPENDENCIES
   administrate-field-belongs_to_search (>= 0.9.0)
   ai-agents (>= 0.10.0)
   annotaterb
+  anthropic (~> 1.55)
   attr_extras
   audited (~> 5.4, >= 5.4.1)
   aws-actionmailbox-ses (~> 0)

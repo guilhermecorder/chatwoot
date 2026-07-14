@@ -278,3 +278,5 @@ group :development, :test do
   gem 'spring'
   gem 'spring-watcher-listen'
 end
+
+gem "anthropic", "~> 1.55"
