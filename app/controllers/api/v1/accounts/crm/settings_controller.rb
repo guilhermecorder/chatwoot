@@ -108,6 +108,56 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: google_ads_json(crm_settings)
   end
 
+  # ── IA (análise de conversas — Anthropic) ──────────────────────────────────
+
+  def update_ai
+    unless Current.account_user.administrator?
+      return render json: { error: 'Apenas administradores podem configurar a IA.' }, status: :forbidden
+    end
+
+    cfg = crm_settings.ai_config || {}
+    cfg['api_key'] = params[:api_key] if params[:api_key].present?
+    cfg['model']   = params[:model]   if params.key?(:model)
+    cfg['effort']  = params[:effort]  if params.key?(:effort)
+    # agentes internos: ligar/pausar, prompt, modelo e esforço por agente
+    # (o Radar de Oportunidades ainda tem as vigias: coluna + painel do
+    # atendente + janela de tempo, além dos minutos de espera)
+    if params[:agents].present?
+      agent_fields = [:enabled, :prompt, :model, :effort]
+      cfg['agents'] = params.require(:agents)
+                            .permit(conversation: agent_fields,
+                                    form: agent_fields,
+                                    scheduler: agent_fields,
+                                    opportunity: agent_fields + [:wait_minutes, :lookback_hours,
+                                                                 { stage_ids: [],
+                                                                   watchers: %i[stage_id user_id lookback_hours] }])
+                            .to_h
+    end
+    crm_settings.update!(ai_config: cfg)
+    render json: ai_json(crm_settings)
+  end
+
+  # testa a conexão com a Claude de verdade (mini-chamada à API)
+  def test_ai
+    cfg = crm_settings.ai_config || {}
+    return render json: { success: false, message: 'Configure a chave da API primeiro.' } if cfg['api_key'].blank?
+
+    model = cfg['model'].presence || Crm::ConversationInsightService::DEFAULT_MODEL
+    client = Anthropic::Client.new(api_key: cfg['api_key'], timeout: 30)
+    client.messages.create(
+      model: model,
+      max_tokens: 16,
+      messages: [{ role: 'user', content: 'Responda apenas: ok' }]
+    )
+    render json: { success: true, message: "Claude conectada! Modelo #{model} respondendo. ✓" }
+  rescue Anthropic::Errors::AuthenticationError
+    render json: { success: false, message: 'Chave da API inválida.' }
+  rescue Anthropic::Errors::NotFoundError
+    render json: { success: false, message: "Modelo #{cfg['model']} indisponível para esta chave." }
+  rescue StandardError => e
+    render json: { success: false, message: "Erro de conexão: #{e.message}" }
+  end
+
   def test_google_ads
     result = GoogleAdsConversionsService.new(
       account: Current.account,
@@ -116,7 +166,101 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: result
   end
 
+  # ── Google Sheets (planilha de cirurgias → Dashboard) ──────────────────────
+
+  def update_sheets
+    cfg = crm_settings.sheets_config || {}
+    if params.key?(:sheet_url)
+      cfg['sheet_url'] = params[:sheet_url].to_s.strip
+      # link novo = cache antigo não vale mais
+      cfg.delete('cache_rows')
+      cfg.delete('cache_headers')
+      cfg.delete('fetched_at')
+    end
+    crm_settings.update!(sheets_config: cfg)
+    render json: sheets_json(crm_settings)
+  end
+
+  # ── Agenda: janelas de avaliação dos médicos ────────────────────────────────
+
+  def update_agenda
+    cfg = crm_settings.agenda_config || {}
+    if params.key?(:windows)
+      cfg['windows'] = Array(params[:windows]).map do |w|
+        w.permit(:dow, :unit, :doctor, :turno, :start, :end, :block).to_h
+      end
+    end
+    # horários fechados com o cadeado (almoço, ausência do médico...)
+    if params.key?(:blocked)
+      cfg['blocked'] = Array(params[:blocked]).map do |b|
+        b.permit(:date, :time, :unit, :doctor).to_h
+      end
+    end
+    # dias inteiros fechados (feriado, congresso, folga...)
+    cfg['blocked_days'] = Array(params[:blocked_days]).map(&:to_s) if params.key?(:blocked_days)
+    crm_settings.update!(agenda_config: cfg)
+    render json: {
+      agenda_windows: cfg['windows'] || [],
+      agenda_blocked: cfg['blocked'] || [],
+      agenda_blocked_days: cfg['blocked_days'] || []
+    }
+  end
+
+  # Radar PONTUAL: varredura única (coluna/etiqueta/período/atendente),
+  # roda uma vez e não fica ativa
+  def radar_scan
+    overrides = {
+      stage_ids: Array(params[:stage_ids]).map(&:to_i).reject(&:zero?),
+      label: params[:label].presence,
+      since_hours: params[:since_hours].to_i,
+      user_id: params[:user_id].presence&.to_i
+    }
+    Crm::OpportunityRadarJob.perform_later(Current.account.id, overrides)
+    render json: { success: true, message: 'Radar pontual iniciado! Os avisos aparecem no Meu Painel em alguns minutos.' }
+  end
+
+  # ── Relatório de uso/custo dos agentes de IA ────────────────────────────────
+
+  def ai_usage
+    scope = Crm::AiUsage.where(account: Current.account)
+    render json: {
+      by_agent: usage_breakdown(scope, :agent_key),
+      by_model: usage_breakdown(scope, :model),
+      periods: {
+        today: usage_totals(scope.where(created_at: Date.current.all_day)),
+        last7: usage_totals(scope.where(created_at: 7.days.ago..Time.current)),
+        last30: usage_totals(scope.where(created_at: 30.days.ago..Time.current)),
+        all: usage_totals(scope)
+      }
+    }
+  end
+
+  # baixa a planilha agora e devolve uma prévia das primeiras linhas
+  def test_sheets
+    result = Crm::SheetsSurgeryService.new(account: Current.account).fetch!
+    if result[:success]
+      render json: result.merge(preview: result[:rows].first(5), rows: nil, count: result[:rows].size)
+    else
+      render json: result
+    end
+  end
+
   private
+
+  def usage_breakdown(scope, column)
+    last30 = scope.where(created_at: 30.days.ago..Time.current)
+    last30.group(column)
+          .pluck(column, Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'))
+          .map do |key, calls, input, output, cost|
+            { key: key, calls: calls, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4) }
+          end
+          .sort_by { |r| -r[:cost_usd] }
+  end
+
+  def usage_totals(scope)
+    calls, input, output, cost = scope.pick(Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'))
+    { calls: calls.to_i, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4) }
+  end
 
   def crm_settings
     @crm_settings ||= CrmSetting.find_or_create_by!(account: Current.account)
@@ -135,8 +279,74 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       column_presets: s.column_presets || [],
       agent_permissions: s.agent_permissions || {},
       meta_ads: meta_ads_json(s),
-      google_ads: google_ads_json(s)
+      google_ads: google_ads_json(s),
+      ai: ai_json(s),
+      sheets: sheets_json(s),
+      agenda_windows: (s.agenda_config || {})['windows'] || [],
+      agenda_blocked: (s.agenda_config || {})['blocked'] || [],
+      agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || []
     }
+  end
+
+  def sheets_json(s)
+    cfg = s.sheets_config || {}
+    {
+      sheet_url: cfg['sheet_url'],
+      configured: cfg['sheet_url'].present?,
+      fetched_at: cfg['fetched_at'],
+      cached_count: (cfg['cache_rows'] || []).size
+    }
+  end
+
+  def ai_json(s)
+    cfg = s.ai_config || {}
+    agents = cfg['agents'] || {}
+    default_prompts = {
+      'conversation' => Crm::ConversationInsightService::SYSTEM_PROMPT,
+      'form' => Crm::FormInsightService::SYSTEM_PROMPT,
+      'scheduler' => Crm::AppointmentExtractionService::SYSTEM_PROMPT,
+      'opportunity' => Crm::OpportunityRadarService::SYSTEM_PROMPT
+    }
+    {
+      api_key_set: cfg['api_key'].present?,
+      model: cfg['model'].presence || Crm::AiAgentConfig::DEFAULT_MODEL,
+      effort: cfg['effort'].presence || 'high',
+      configured: cfg['api_key'].present?,
+      opportunity_last_run_at: cfg.dig('opportunity_state', 'last_run_at'),
+      opportunity_alerts_count: visible_alerts_count(cfg),
+      opportunity_last_run: cfg.dig('opportunity_state', 'last_run'),
+      agents: default_prompts.to_h do |key, default_prompt|
+        recommended = Crm::AiAgentConfig::RECOMMENDED[key] || {}
+        [key, {
+          enabled: agents.dig(key, 'enabled') != false,
+          prompt: agents.dig(key, 'prompt').presence,
+          model: agents.dig(key, 'model').presence,
+          effort: agents.dig(key, 'effort').presence,
+          recommended_model: recommended['model'],
+          recommended_effort: recommended['effort'],
+          stage_ids: Array(agents.dig(key, 'stage_ids')).map(&:to_i),
+          wait_minutes: agents.dig(key, 'wait_minutes').presence&.to_i,
+          lookback_hours: agents.dig(key, 'lookback_hours').presence&.to_i,
+          watchers: Array(agents.dig(key, 'watchers')).map do |w|
+            {
+              stage_id: w['stage_id'].to_i,
+              user_id: w['user_id'].presence&.to_i,
+              lookback_hours: w['lookback_hours'].presence&.to_i || 24
+            }
+          end,
+          default_prompt: default_prompt
+        }]
+      end
+    }
+  end
+
+  # badge do Radar na sidebar: admin vê tudo; atendente só vê os avisos
+  # do próprio painel + os sem direcionamento
+  def visible_alerts_count(cfg)
+    alerts = Array(cfg.dig('opportunity_state', 'alerts'))
+    return alerts.size if Current.account_user.administrator?
+
+    alerts.count { |a| a['user_id'].blank? || a['user_id'].to_i == Current.user.id }
   end
 
   def meta_ads_json(s)

@@ -1,0 +1,139 @@
+# Agente de Agendamento: lê a conversa e extrai os dados da consulta marcada
+# (nome, telefone, dia, hora e unidade). Usado pela ação de coluna
+# "Agendar consulta (IA)" — quando o card entra em "Consulta agendada", o
+# sistema cria o compromisso na Agenda (Tatuapé / Av. Paulista) sozinho.
+class Crm::AppointmentExtractionService
+  include Crm::AiAgentConfig
+
+  AGENT_KEY = 'scheduler'.freeze
+  MAX_MESSAGES = 60
+  TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
+
+  OUTPUT_SCHEMA = {
+    type: 'object',
+    properties: {
+      encontrado: {
+        type: 'boolean',
+        description: 'true somente se a conversa confirma dia E hora da consulta'
+      },
+      nome: { type: 'string', description: 'Nome do paciente como aparece na conversa' },
+      telefone: { type: 'string', description: 'Telefone do paciente, se mencionado (senão vazio)' },
+      data: { type: 'string', description: 'Data da consulta no formato YYYY-MM-DD (vazio se não confirmada)' },
+      hora: { type: 'string', description: 'Hora da consulta no formato HH:MM 24h (vazio se não confirmada)' },
+      unidade: {
+        type: 'string',
+        enum: %w[tatuape paulista nao_identificada],
+        description: 'Unidade da clínica combinada na conversa: Tatuapé, Av. Paulista, ou nao_identificada'
+      },
+      problema: {
+        type: 'string',
+        description: 'Motivo da consulta em 1-3 palavras: catarata, refrativa, ceratocone, lentes fácicas, exames, pós-operatório, consulta geral... Vazio se não ficar claro.'
+      },
+      medico: { type: 'string', description: 'Nome do médico combinado na conversa, se mencionado (senão vazio)' },
+      observacoes: { type: 'string', description: 'Detalhes úteis para a recepção em 1 frase (convênio, pedido especial). Vazio se não houver.' }
+    },
+    required: %w[encontrado nome telefone data hora unidade problema medico observacoes],
+    additionalProperties: false
+  }.freeze
+
+  SYSTEM_PROMPT = <<~PROMPT.freeze
+    Você lê conversas de atendimento da CEVICO (clínica oftalmológica com duas
+    unidades: Tatuapé e Av. Paulista) e extrai os dados da CONSULTA AGENDADA
+    para registrar na agenda da clínica.
+
+    Regras:
+    - Só marque encontrado=true se a conversa CONFIRMA dia e hora (a atendente
+      propôs e o paciente aceitou, ou vice-versa). Proposta sem confirmação não vale.
+    - Se houver mais de um agendamento, use o MAIS RECENTE confirmado.
+    - Datas relativas ("amanhã", "quinta que vem") devem ser convertidas usando a
+      data de hoje informada no início da conversa.
+    - unidade: identifique pela menção a Tatuapé ou Paulista/Av. Paulista/Bela Vista.
+      Na dúvida, nao_identificada.
+    - Não invente dados: campo não confirmado fica vazio.
+  PROMPT
+
+  WEEKDAYS_PT = %w[domingo segunda-feira terça-feira quarta-feira quinta-feira sexta-feira sábado].freeze
+
+  def initialize(conversation:)
+    @conversation = conversation
+    @account = conversation.account
+  end
+
+  def call
+    return { error: 'IA não configurada. Adicione a chave da API em Integrações → Claude.' } if api_key.blank?
+    return { error: 'O Agente de Agendamento está pausado. Reative em Automações → Agentes de IA.' } if agent_paused?
+
+    transcript = build_transcript
+    return { error: 'Conversa sem mensagens para analisar.' } if transcript.blank?
+
+    message = client.messages.create(
+      model: model,
+      max_tokens: 1024,
+      system_: system_prompt,
+      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      messages: [{ role: 'user', content: transcript }]
+    )
+    record_usage(message)
+
+    text = message.content.find { |block| block.type == :text }&.text
+    return { error: 'A IA não retornou os dados do agendamento.' } if text.blank?
+
+    parsed = JSON.parse(text)
+    {
+      found: parsed['encontrado'] == true,
+      name: parsed['nome'].to_s.strip,
+      phone: parsed['telefone'].to_s.strip,
+      starts_at: parse_datetime(parsed['data'], parsed['hora']),
+      unit: %w[tatuape paulista].include?(parsed['unidade']) ? parsed['unidade'] : nil,
+      procedure: parsed['problema'].to_s.strip,
+      doctor: parsed['medico'].to_s.strip,
+      notes: parsed['observacoes'].to_s.strip,
+      model: model
+    }
+  rescue Anthropic::Errors::AuthenticationError
+    { error: 'Chave da API inválida. Confira em CRM → Integrações → IA.' }
+  rescue Anthropic::Errors::RateLimitError
+    { error: 'Limite de uso da IA atingido. Tente novamente em instantes.' }
+  rescue StandardError => e
+    Rails.logger.error "[Crm::AppointmentExtraction] #{e.class}: #{e.message}"
+    { error: 'Erro na extração do agendamento.' }
+  end
+
+  private
+
+  # horário salvo no fuso da clínica (São Paulo)
+  def parse_datetime(date, time)
+    return nil if date.blank? || time.blank?
+
+    TZ.parse("#{date} #{time}")
+  rescue StandardError
+    nil
+  end
+
+  def build_transcript
+    messages = @conversation.messages
+                            .where(message_type: [:incoming, :outgoing])
+                            .where(private: false)
+                            .where.not(content: [nil, ''])
+                            .order(created_at: :desc)
+                            .limit(MAX_MESSAGES)
+                            .reverse
+
+    return nil if messages.empty?
+
+    lines = messages.map do |m|
+      author = m.incoming? ? 'PACIENTE' : 'CLÍNICA'
+      "[#{stamp(m.created_at.in_time_zone(TZ))}] #{author}: #{m.content.to_s.strip.truncate(600)}"
+    end
+
+    contact = @conversation.contact
+    header = "Hoje é #{stamp(TZ.now)}.\n" \
+             "Contato cadastrado: #{contact&.name || 'sem nome'} — telefone #{contact&.phone_number || 'não informado'}.\n" \
+             "Extraia os dados da consulta agendada nesta conversa:\n\n"
+    header + lines.join("\n")
+  end
+
+  def stamp(time)
+    "#{time.strftime('%d/%m/%Y')} (#{WEEKDAYS_PT[time.wday]}) #{time.strftime('%H:%M')}"
+  end
+end

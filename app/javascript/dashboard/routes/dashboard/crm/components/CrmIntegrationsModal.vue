@@ -2,6 +2,17 @@
 import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
+import CrmAPI from 'dashboard/api/crm';
+
+// inline: renderiza como PÁGINA em vez de modal flutuante
+// only: mostra só uma seção ('n8n' | 'meta' | 'google' | 'ai') — usado
+// pelos cards "Configurar" da página de Integrações
+const props = defineProps({
+  inline: { type: Boolean, default: false },
+  only: { type: String, default: null },
+});
+
+const showSection = s => !props.only || props.only === s;
 
 const emit = defineEmits(['close']);
 
@@ -23,6 +34,94 @@ const isMetaTesting = ref(false);
 const metaTestResult = ref(null);
 const showMetaRequirements = ref(false);
 
+// ── Claude (IA nativa) ─────────────────────────────────────
+const ai = ref({ api_key: '', model: '', effort: '' });
+const isAiSaving = ref(false);
+const isAiTesting = ref(false);
+const aiTestResult = ref(null);
+
+const testAi = async () => {
+  isAiTesting.value = true;
+  aiTestResult.value = null;
+  try {
+    const { data } = await CrmAPI.testAi();
+    aiTestResult.value = data;
+  } catch {
+    aiTestResult.value = { success: false, message: 'Erro ao testar a conexão.' };
+  } finally {
+    isAiTesting.value = false;
+  }
+};
+
+const AI_MODELS = [
+  { value: 'claude-opus-4-8', label: 'Claude Opus 4.8 — melhor análise (padrão)' },
+  { value: 'claude-sonnet-5', label: 'Claude Sonnet 5 — equilíbrio' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 — mais barato e rápido' },
+];
+
+// Esforço = quanto a IA "pensa" antes de responder (mais esforço =
+// análise melhor e um pouco mais cara/lenta). O Haiku ignora este campo.
+const AI_EFFORTS = [
+  { value: 'low', label: 'Baixo — rápido e econômico' },
+  { value: 'medium', label: 'Médio — equilíbrio' },
+  { value: 'high', label: 'Alto — padrão recomendado' },
+  { value: 'max', label: 'Máximo — melhor análise possível' },
+];
+
+const saveAi = async () => {
+  isAiSaving.value = true;
+  try {
+    const payload = { model: ai.value.model, effort: ai.value.effort };
+    if (ai.value.api_key.trim()) payload.api_key = ai.value.api_key.trim();
+    await CrmAPI.updateAi(payload);
+    ai.value.api_key = '';
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Configurações de IA salvas');
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao salvar configurações de IA.');
+  } finally {
+    isAiSaving.value = false;
+  }
+};
+
+// ── Google Sheets (planilha de cirurgias) ──────────────────
+const sheets = ref({ sheet_url: '' });
+const isSheetsSaving = ref(false);
+const isSheetsTesting = ref(false);
+const sheetsTestResult = ref(null);
+const sheetsPreview = ref(null);
+
+const saveSheets = async () => {
+  isSheetsSaving.value = true;
+  sheetsTestResult.value = null;
+  sheetsPreview.value = null;
+  try {
+    await CrmAPI.updateSheets({ sheet_url: sheets.value.sheet_url.trim() });
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Planilha salva');
+  } catch {
+    useAlert('Erro ao salvar a planilha.');
+  } finally {
+    isSheetsSaving.value = false;
+  }
+};
+
+const testSheets = async () => {
+  isSheetsTesting.value = true;
+  sheetsTestResult.value = null;
+  sheetsPreview.value = null;
+  try {
+    const { data } = await CrmAPI.testSheets();
+    sheetsTestResult.value = data;
+    if (data.success) sheetsPreview.value = data.preview || [];
+    await store.dispatch('crm/fetchSettings');
+  } catch {
+    sheetsTestResult.value = { success: false, message: 'Erro ao testar a planilha.' };
+  } finally {
+    isSheetsTesting.value = false;
+  }
+};
+
 // ── Google ─────────────────────────────────────────────────
 const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '' });
 const isGoogleSaving = ref(false);
@@ -43,6 +142,9 @@ onMounted(async () => {
     test_event_code: m.test_event_code || '',
   };
 
+  const a = settings.value.ai || {};
+  ai.value = { api_key: '', model: a.model || 'claude-opus-4-8', effort: a.effort || 'high' };
+
   const g = settings.value.google_ads || {};
   google.value = {
     measurement_id: g.measurement_id || '',
@@ -51,10 +153,14 @@ onMounted(async () => {
     developer_token: '',
     customer_id: g.customer_id || '',
   };
+
+  sheets.value = { sheet_url: settings.value.sheets?.sheet_url || '' };
 });
 
 const metaStatus = computed(() => settings.value.meta_ads || {});
 const googleStatus = computed(() => settings.value.google_ads || {});
+const aiStatus = computed(() => settings.value.ai || {});
+const sheetsStatus = computed(() => settings.value.sheets || {});
 
 const saveMeta = async () => {
   isMetaSaving.value = true;
@@ -183,10 +289,17 @@ const fetchWorkflows = async () => {
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-    @click.self="emit('close')"
+    :class="props.inline
+      ? 'w-full flex justify-center'
+      : 'fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4'"
+    @click.self="!props.inline && emit('close')"
   >
-    <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[88vh]">
+    <div
+      class="bg-n-solid-1 rounded-2xl flex flex-col w-full"
+      :class="props.inline
+        ? 'max-w-2xl border border-n-weak shadow-sm'
+        : 'shadow-2xl max-w-lg max-h-[88vh]'"
+    >
 
       <!-- Header -->
       <div class="flex items-center justify-between px-5 pt-5 pb-4 border-b border-n-weak flex-shrink-0">
@@ -195,6 +308,7 @@ const fetchWorkflows = async () => {
           <h2 class="text-base font-semibold text-n-slate-12">Integrações</h2>
         </div>
         <button
+          v-if="!props.inline"
           class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl"
           @click="emit('close')"
         />
@@ -204,7 +318,7 @@ const fetchWorkflows = async () => {
       <div class="flex-1 overflow-y-auto p-5 space-y-6">
 
         <!-- n8n Section -->
-        <div>
+        <div v-if="showSection('n8n')">
           <!-- Section header -->
           <div class="flex items-center gap-3 mb-4">
             <div class="w-9 h-9 rounded-xl bg-[#EA4B71]/10 flex items-center justify-center flex-shrink-0">
@@ -348,7 +462,7 @@ const fetchWorkflows = async () => {
         </div>
 
         <!-- ══ Meta (Facebook / Instagram Ads) ══ -->
-        <div class="border-t border-n-weak pt-5">
+        <div v-if="showSection('meta')" :class="props.only ? '' : 'border-t border-n-weak pt-5'">
           <div class="flex items-center gap-3 mb-4">
             <div class="w-9 h-9 rounded-xl bg-[#1877F2]/10 flex items-center justify-center flex-shrink-0">
               <span class="i-lucide-facebook text-lg text-[#1877F2]" />
@@ -482,7 +596,7 @@ const fetchWorkflows = async () => {
         </div>
 
         <!-- ══ Google (GA4 + Google Ads) ══ -->
-        <div class="border-t border-n-weak pt-5">
+        <div v-if="showSection('google')" :class="props.only ? '' : 'border-t border-n-weak pt-5'">
           <div class="flex items-center gap-3 mb-4">
             <div class="w-9 h-9 rounded-xl bg-[#4285F4]/10 flex items-center justify-center flex-shrink-0">
               <span class="i-lucide-chrome text-lg text-[#4285F4]" />
@@ -598,6 +712,199 @@ const fetchWorkflows = async () => {
             />
             {{ googleTestResult.message }}
           </div>
+        </div>
+
+        <!-- ══ Claude (IA nativa do sistema) ══ -->
+        <div v-if="showSection('ai')" :class="props.only ? '' : 'border-t border-n-weak pt-5'">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-9 h-9 rounded-xl bg-[#D97706]/10 flex items-center justify-center flex-shrink-0">
+              <span class="i-lucide-sparkles text-lg text-[#D97706]" />
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-sm font-semibold text-n-slate-12">Claude — IA nativa do sistema</h3>
+              <p class="text-xs text-n-slate-10">Análise de conversas (interesse do paciente) e insights de marketing dos formulários</p>
+            </div>
+            <span
+              class="ml-auto text-[10px] px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+              :class="aiStatus.configured ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
+            >
+              {{ aiStatus.configured ? '✓ Conectada' : 'Pendente' }}
+            </span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                Chave da API (Anthropic)
+                <span v-if="aiStatus.api_key_set" class="text-green-600 font-normal">(já configurada)</span>
+              </label>
+              <input
+                v-model="ai.api_key"
+                type="password"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                :placeholder="aiStatus.api_key_set ? 'Digite para substituir' : 'sk-ant-...'"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Modelo padrão</label>
+              <select
+                v-model="ai.model"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option v-for="m in AI_MODELS" :key="m.value" :value="m.value">{{ m.label }}</option>
+              </select>
+            </div>
+            <div class="col-span-2">
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                Esforço padrão
+                <span class="text-n-slate-9 font-normal">(quanto a IA pensa antes de responder)</span>
+              </label>
+              <select
+                v-model="ai.effort"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option v-for="e in AI_EFFORTS" :key="e.value" :value="e.value">{{ e.label }}</option>
+              </select>
+            </div>
+          </div>
+
+          <p class="text-[11px] text-n-slate-9 mt-2">
+            Crie a chave em console.anthropic.com → API Keys. Modelo e esforço aqui são o
+            PADRÃO — cada agente pode usar valores próprios em Automações → Agentes de IA.
+            O Haiku ignora o campo de esforço.
+          </p>
+
+          <div class="flex gap-2 mt-3">
+            <button
+              class="flex-1 bg-n-brand text-white rounded-lg py-2 text-sm font-medium hover:bg-n-brand/90 disabled:opacity-50 transition-colors"
+              :disabled="isAiSaving"
+              @click="saveAi"
+            >
+              {{ isAiSaving ? 'Salvando...' : 'Salvar' }}
+            </button>
+            <button
+              class="px-4 py-2 border border-n-weak rounded-lg text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              :disabled="isAiTesting || !aiStatus.configured"
+              @click="testAi"
+            >
+              <span :class="isAiTesting ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-zap'" class="text-sm" />
+              {{ isAiTesting ? 'Testando...' : 'Testar conexão' }}
+            </button>
+          </div>
+
+          <div
+            v-if="aiTestResult"
+            class="mt-3 flex items-start gap-2 px-3 py-2.5 rounded-lg text-sm"
+            :class="aiTestResult.success
+              ? 'bg-green-500/10 text-green-700 border border-green-500/20'
+              : 'bg-red-500/10 text-red-700 border border-red-500/20'"
+          >
+            <span
+              class="text-base flex-shrink-0 mt-0.5"
+              :class="aiTestResult.success ? 'i-lucide-check-circle' : 'i-lucide-alert-circle'"
+            />
+            {{ aiTestResult.message }}
+          </div>
+        </div>
+
+        <!-- ══ Google Sheets (planilha de cirurgias) ══ -->
+        <div v-if="showSection('sheets')" :class="props.only ? '' : 'border-t border-n-weak pt-5'">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-9 h-9 rounded-xl bg-[#0F9D58]/10 flex items-center justify-center flex-shrink-0">
+              <span class="i-lucide-sheet text-lg text-[#0F9D58]" />
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-sm font-semibold text-n-slate-12">Google Sheets — planilha de cirurgias</h3>
+              <p class="text-xs text-n-slate-10">Os dados da planilha entram no Dashboard CEVICO (bloco Cirurgias)</p>
+            </div>
+            <span
+              class="ml-auto text-[10px] px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+              :class="sheetsStatus.configured ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
+            >
+              {{ sheetsStatus.configured ? '✓ Conectada' : 'Pendente' }}
+            </span>
+          </div>
+
+          <div class="bg-n-alpha-1 rounded-xl p-3.5 mb-4 text-xs text-n-slate-11 space-y-1.5">
+            <p class="font-medium text-n-slate-12">Como preparar a planilha (2 passos):</p>
+            <p><b>1.</b> No Google Sheets: Compartilhar → Acesso geral → <b>"Qualquer pessoa com o link"</b> (Leitor) → copiar o link.</p>
+            <p><b>2.</b> A primeira linha precisa ter os títulos das colunas. O sistema reconhece:
+              <b>Data</b>, <b>Nome</b> (ou Paciente), <b>Telefone</b>, <b>Procedimento</b> (ou Cirurgia), <b>Valor</b> e <b>Unidade</b>.</p>
+            <p class="text-n-slate-9">Só Data e Nome são obrigatórias — as demais enriquecem o Dashboard. A planilha é relida automaticamente a cada 1 hora.</p>
+          </div>
+
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Link da planilha</label>
+            <input
+              v-model="sheets.sheet_url"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+            />
+          </div>
+
+          <div class="flex gap-2 mt-3">
+            <button
+              class="flex-1 bg-n-brand text-white rounded-lg py-2 text-sm font-medium hover:bg-n-brand/90 disabled:opacity-50 transition-colors"
+              :disabled="isSheetsSaving"
+              @click="saveSheets"
+            >
+              {{ isSheetsSaving ? 'Salvando...' : 'Salvar' }}
+            </button>
+            <button
+              class="px-4 py-2 border border-n-weak rounded-lg text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              :disabled="isSheetsTesting || !sheetsStatus.configured"
+              @click="testSheets"
+            >
+              <span :class="isSheetsTesting ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-download'" class="text-sm" />
+              {{ isSheetsTesting ? 'Importando...' : 'Importar agora' }}
+            </button>
+          </div>
+
+          <div
+            v-if="sheetsTestResult"
+            class="mt-3 flex items-start gap-2 px-3 py-2.5 rounded-lg text-sm"
+            :class="sheetsTestResult.success
+              ? 'bg-green-500/10 text-green-700 border border-green-500/20'
+              : 'bg-red-500/10 text-red-700 border border-red-500/20'"
+          >
+            <span
+              class="text-base flex-shrink-0 mt-0.5"
+              :class="sheetsTestResult.success ? 'i-lucide-check-circle' : 'i-lucide-alert-circle'"
+            />
+            {{ sheetsTestResult.message }}
+          </div>
+
+          <!-- Prévia das primeiras linhas -->
+          <div v-if="sheetsPreview?.length" class="mt-3 border border-n-weak rounded-xl overflow-hidden">
+            <p class="text-[11px] font-medium text-n-slate-10 px-3 pt-2.5 pb-1">Prévia (primeiras linhas):</p>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="text-left text-n-slate-10">
+                    <th class="px-3 py-1.5 font-medium">Data</th>
+                    <th class="px-3 py-1.5 font-medium">Nome</th>
+                    <th class="px-3 py-1.5 font-medium">Procedimento</th>
+                    <th class="px-3 py-1.5 font-medium">Valor</th>
+                    <th class="px-3 py-1.5 font-medium">Unidade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, i) in sheetsPreview" :key="i" class="border-t border-n-weak text-n-slate-12">
+                    <td class="px-3 py-1.5 whitespace-nowrap">{{ row.date || '—' }}</td>
+                    <td class="px-3 py-1.5">{{ row.name || '—' }}</td>
+                    <td class="px-3 py-1.5">{{ row.procedure || '—' }}</td>
+                    <td class="px-3 py-1.5 whitespace-nowrap">{{ row.value || '—' }}</td>
+                    <td class="px-3 py-1.5">{{ row.unit || '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <p v-if="sheetsStatus.fetched_at" class="text-[11px] text-n-slate-9 mt-2">
+            Última importação: {{ new Date(sheetsStatus.fetched_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) }}
+            — {{ sheetsStatus.cached_count }} linha(s) em uso no Dashboard.
+          </p>
         </div>
 
       </div>

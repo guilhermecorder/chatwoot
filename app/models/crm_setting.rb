@@ -3,7 +3,9 @@
 # Table name: crm_settings
 #
 #  id                       :bigint           not null, primary key
+#  agenda_config            :jsonb            not null
 #  agent_permissions        :jsonb            not null
+#  ai_config                :jsonb            not null
 #  column_presets           :jsonb            not null
 #  google_ads_config        :jsonb            not null
 #  meta_ads_config          :jsonb            not null
@@ -11,6 +13,7 @@
 #  n8n_base_url             :string
 #  n8n_workflows            :jsonb            not null
 #  n8n_workflows_fetched_at :datetime
+#  sheets_config            :jsonb            not null
 #  created_at               :datetime         not null
 #  updated_at               :datetime         not null
 #  account_id               :bigint           not null

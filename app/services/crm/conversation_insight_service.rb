@@ -1,0 +1,120 @@
+# Analisa a conversa com a Claude e devolve o indicador de interesse do
+# paciente + um parágrafo de observações para a atendente. Usado pelo card
+# de resumo no painel da conversa (botão "Analisar com IA").
+#
+# Config em CRM → Integrações → IA: api_key (Anthropic) e modelo (padrão
+# claude-opus-4-8 — pode trocar por claude-haiku-4-5 para reduzir custo).
+class Crm::ConversationInsightService
+  include Crm::AiAgentConfig
+
+  AGENT_KEY = 'conversation'.freeze
+  MAX_MESSAGES = 60
+  DEFAULT_MODEL = Crm::AiAgentConfig::DEFAULT_MODEL
+
+  OUTPUT_SCHEMA = {
+    type: 'object',
+    properties: {
+      interesse: {
+        type: 'string',
+        enum: %w[alto medio baixo perdido],
+        description: 'Nível de interesse do paciente em fechar consulta/cirurgia'
+      },
+      resumo: {
+        type: 'string',
+        description: 'Um parágrafo (3-5 frases) com a análise da conversa: o que o paciente quer, objeções, responsividade e momento da jornada'
+      },
+      proximo_passo: {
+        type: 'string',
+        description: 'Sugestão curta e prática do próximo passo para a atendente (1 frase)'
+      }
+    },
+    required: %w[interesse resumo proximo_passo],
+    additionalProperties: false
+  }.freeze
+
+  SYSTEM_PROMPT = <<~PROMPT.freeze
+    Você analisa conversas de atendimento da CEVICO, uma clínica oftalmológica
+    (cirurgias refrativas, catarata, ceratocone, lentes fácicas). Sua análise é
+    lida pela atendente para decidir como conduzir o paciente.
+
+    Avalie o nível de interesse do paciente:
+    - alto: engajado, pergunta valores/datas, quer agendar ou avançar
+    - medio: interessado mas com objeções (preço, medo, tempo) ou respondendo devagar
+    - baixo: respostas curtas/frias, adiando, sem sinal de avanço
+    - perdido: disse que não quer, fechou com concorrente ou parou de responder há muito tempo
+
+    No resumo, seja concreto: o que a pessoa procura, objeções levantadas,
+    como está a responsividade e em que ponto da jornada ela está.
+    Escreva em português do Brasil, direto e sem jargão.
+  PROMPT
+
+  def initialize(conversation:)
+    @conversation = conversation
+    @account = conversation.account
+  end
+
+  def call
+    return { error: 'IA não configurada. Adicione a chave da API em Integrações → Claude.' } if api_key.blank?
+    return { error: 'O Analista de Conversas está pausado. Reative em Automações → Agentes de IA.' } if agent_paused?
+
+    transcript = build_transcript
+    return { error: 'Conversa sem mensagens para analisar.' } if transcript.blank?
+
+    message = client.messages.create(
+      model: model,
+      max_tokens: 2048,
+      system_: system_prompt,
+      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      messages: [{ role: 'user', content: transcript }]
+    )
+    record_usage(message)
+
+    text = message.content.find { |block| block.type == :text }&.text
+    return { error: 'A IA não retornou análise.' } if text.blank?
+
+    parsed = JSON.parse(text)
+    {
+      level: parsed['interesse'],
+      summary: parsed['resumo'],
+      next_step: parsed['proximo_passo'],
+      model: model,
+      analyzed_at: Time.current.iso8601
+    }
+  rescue Anthropic::Errors::AuthenticationError
+    { error: 'Chave da API inválida. Confira em CRM → Integrações → IA.' }
+  rescue Anthropic::Errors::RateLimitError
+    { error: 'Limite de uso da IA atingido. Tente novamente em instantes.' }
+  rescue Anthropic::Errors::APIStatusError => e
+    Rails.logger.error "[Crm::ConversationInsight] API #{e.class}: #{e.message}"
+    { error: 'Erro na análise de IA. Tente novamente.' }
+  rescue StandardError => e
+    Rails.logger.error "[Crm::ConversationInsight] #{e.class}: #{e.message}"
+    { error: 'Erro na análise de IA. Tente novamente.' }
+  end
+
+  private
+
+  # transcript legível: só mensagens reais (paciente/atendente), da mais
+  # antiga pra mais nova, limitado às últimas MAX_MESSAGES
+  def build_transcript
+    messages = @conversation.messages
+                            .where(message_type: [:incoming, :outgoing])
+                            .where(private: false)
+                            .where.not(content: [nil, ''])
+                            .order(created_at: :desc)
+                            .limit(MAX_MESSAGES)
+                            .reverse
+
+    return nil if messages.empty?
+
+    lines = messages.map do |m|
+      author = m.incoming? ? 'PACIENTE' : 'CLÍNICA'
+      "[#{m.created_at.strftime('%d/%m %H:%M')}] #{author}: #{m.content.to_s.strip.truncate(600)}"
+    end
+
+    header = "Conversa com #{@conversation.contact&.name || 'paciente'} " \
+             "(iniciada em #{@conversation.created_at.strftime('%d/%m/%Y')}, " \
+             "hoje é #{Date.current.strftime('%d/%m/%Y')}):\n\n"
+    header + lines.join("\n")
+  end
+end

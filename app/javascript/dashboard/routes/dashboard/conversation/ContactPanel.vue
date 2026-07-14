@@ -15,6 +15,7 @@ import ConversationAction from './ConversationAction.vue';
 import ConversationParticipant from './ConversationParticipant.vue';
 import ContactInfo from './contact/ContactInfo.vue';
 import AdOriginCard from './contact/AdOriginCard.vue';
+import ConversationSummaryCard from './contact/ConversationSummaryCard.vue';
 import ContactNotes from './contact/ContactNotes.vue';
 import ConversationInfo from './ConversationInfo.vue';
 import CustomAttributes from './customAttributes/CustomAttributes.vue';
@@ -123,8 +124,14 @@ const closeContactPanel = () => {
   });
 };
 
+// CEVICO: painel enxuto — Macros e Atributos do contato saem da lista
+// (as informações importantes ficam no card-resumo no topo)
+const HIDDEN_SIDEBAR_ITEMS = ['macros', 'contact_attributes'];
+
 onMounted(() => {
-  conversationSidebarItems.value = conversationSidebarItemsOrder.value;
+  conversationSidebarItems.value = conversationSidebarItemsOrder.value.filter(
+    item => !HIDDEN_SIDEBAR_ITEMS.includes(item.name)
+  );
   getContactDetails();
   store.dispatch('attributes/get', 0);
   // Load integrations to ensure linear integration state is available
@@ -142,6 +149,10 @@ onMounted(() => {
     <AdOriginCard
       :contact="contact"
       :conversation-attributes="conversationAdditionalAttributes"
+    />
+    <ConversationSummaryCard
+      :conversation-id="conversationId"
+      :contact="contact"
     />
     <div class="px-2 pb-8 list-group">
       <Draggable
