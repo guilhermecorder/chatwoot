@@ -255,7 +255,7 @@ const formatDue = iso => {
 <template>
   <div class="bg-n-surface-1 flex flex-col h-full w-full">
     <!-- Top bar -->
-    <div class="flex items-center gap-3 px-6 py-4 border-b border-n-weak flex-shrink-0 flex-wrap">
+    <div class="flex items-center gap-3 px-8 py-5 border-b border-n-weak flex-shrink-0 flex-wrap">
       <h1 class="text-lg font-semibold text-n-slate-12">{{ $t('TASKS.TITLE') }}</h1>
 
       <!-- Mini dashboard -->
@@ -312,7 +312,7 @@ const formatDue = iso => {
     </div>
 
     <!-- Kanban + dashboard -->
-    <div v-else class="flex-1 min-h-0 overflow-x-auto p-6">
+    <div v-else class="flex-1 min-h-0 overflow-x-auto p-8">
       <div class="flex gap-4 h-full min-w-max">
         <!-- Colunas de largura fixa (padrão, igual CRM) -->
         <div
@@ -340,7 +340,7 @@ const formatDue = iso => {
             >
               <template #item="{ element: task }">
                 <div
-                  class="bg-n-solid-2 border rounded-xl p-3 mb-2 cursor-pointer hover:border-n-brand hover:shadow-sm transition-all select-none"
+                  class="bg-n-solid-2 border rounded-xl p-4 mb-2 cursor-pointer hover:border-n-brand hover:shadow-sm transition-all select-none"
                   :class="isOverdue(task) ? 'border-red-400/60' : (isDueSoon(task) ? 'border-amber-400/60' : 'border-n-weak')"
                   @click="openEdit(task)"
                 >
@@ -468,7 +468,7 @@ const formatDue = iso => {
             />
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-2 gap-5">
             <div>
               <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ $t('TASKS.FORM.TYPE') }}</label>
               <select

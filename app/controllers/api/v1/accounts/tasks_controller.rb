@@ -28,6 +28,14 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
   end
 
   def update
+    # consulta com dia/horário alterado = reagendamento (indicador do painel)
+    if task.task_type == 'consulta' && params[:due_at].present? && task.due_at.present? &&
+       Time.zone.parse(params[:due_at].to_s) != task.due_at
+      task.rescheduled_count += 1
+    end
+    # cancelar/reativar consulta
+    task.canceled_at = params[:canceled] ? Time.current : nil if params.key?(:canceled)
+
     task.update!(task_params)
     render json: task_json(task)
   end
@@ -44,7 +52,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
   end
 
   def task_params
-    params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id, :unit)
+    params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id, :unit,
+                  :phone, :procedure, :doctor)
   end
 
   def task_json(t)
@@ -59,6 +68,11 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
       completed_at: t.completed_at,
       created_at: t.created_at,
       unit: t.unit,
+      phone: t.phone,
+      procedure: t.procedure,
+      doctor: t.doctor,
+      canceled_at: t.canceled_at,
+      rescheduled_count: t.rescheduled_count,
       creator: { id: t.creator.id, name: t.creator.name },
       assignee: t.assignee ? { id: t.assignee.id, name: t.assignee.name } : nil
     }
