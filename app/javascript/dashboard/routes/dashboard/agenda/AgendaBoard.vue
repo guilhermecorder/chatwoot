@@ -485,12 +485,23 @@ const removeTask = async () => {
     <!-- Top bar — visual alinhado ao Dashboard CRM -->
     <div class="px-6 pt-5 pb-4 border-b border-n-weak flex-shrink-0">
       <div class="flex items-center gap-3 flex-wrap">
-        <h1 class="text-lg font-bold text-n-slate-12 flex items-center gap-2">
-          <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-            <span class="i-lucide-calendar-days text-white text-base" />
-          </span>
-          Agenda de Consultas
-        </h1>
+        <!-- Título com a ação principal logo abaixo (verde contrastante) -->
+        <div class="flex flex-col gap-2">
+          <h1 class="text-lg font-bold text-n-slate-12 flex items-center gap-2">
+            <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
+              <span class="i-lucide-calendar-days text-white text-base" />
+            </span>
+            Agenda de Consultas
+          </h1>
+          <button
+            class="flex items-center justify-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-white hover:opacity-90 transition-opacity shadow w-fit"
+            style="background: linear-gradient(135deg, #059669, #34D399)"
+            @click="openCreateOnDay(new Date())"
+          >
+            <span class="i-lucide-plus text-sm" />
+            Nova consulta
+          </button>
+        </div>
 
         <!-- Navegação -->
         <div class="flex items-center gap-1 ml-2">
@@ -552,14 +563,6 @@ const removeTask = async () => {
               <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
             </optgroup>
           </select>
-          <button
-            class="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg text-white hover:opacity-90 transition-opacity"
-            style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)"
-            @click="openCreateOnDay(new Date())"
-          >
-            <span class="i-lucide-plus text-sm" />
-            Nova consulta
-          </button>
         </div>
       </div>
 
