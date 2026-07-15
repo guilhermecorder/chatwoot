@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_14_000007) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_15_000001) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -884,6 +884,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_14_000007) do
     t.jsonb "exclude_labels", default: [], null: false
     t.datetime "starts_at"
     t.datetime "ends_at"
+    t.jsonb "activity_log", default: {}, null: false
+    t.datetime "last_run_at"
     t.index ["account_id", "active"], name: "index_crm_followup_bots_on_account_id_and_active"
     t.index ["account_id"], name: "index_crm_followup_bots_on_account_id"
     t.index ["inbox_id"], name: "index_crm_followup_bots_on_inbox_id"
@@ -982,6 +984,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_14_000007) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.text "description"
+    t.jsonb "settings", default: {}, null: false
     t.index ["pipeline_id", "position"], name: "index_crm_stages_on_pipeline_id_and_position"
     t.index ["pipeline_id"], name: "index_crm_stages_on_pipeline_id"
   end
@@ -1486,6 +1489,10 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_14_000007) do
     t.string "doctor"
     t.datetime "canceled_at"
     t.integer "rescheduled_count", default: 0, null: false
+    t.string "attendance"
+    t.string "surgery_indication"
+    t.string "indicated_procedure"
+    t.jsonb "comments", default: [], null: false
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
     t.index ["account_id", "unit"], name: "index_tasks_on_account_id_and_unit"
     t.index ["account_id"], name: "index_tasks_on_account_id"
