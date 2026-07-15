@@ -39,10 +39,18 @@ class Api::V1::Accounts::Crm::StagesController < Api::V1::Accounts::BaseControll
   end
 
   def stage_params
-    params.require(:stage).permit(:name, :color, :position, :description)
+    # settings.main_inbox_ids = caixas de entrada PRINCIPAIS da coluna
+    permitted = params.require(:stage).permit(:name, :color, :position, :description, settings: { main_inbox_ids: [] })
+    if permitted[:settings]
+      permitted[:settings] = (@stage&.settings || {}).merge(
+        'main_inbox_ids' => Array(permitted[:settings][:main_inbox_ids]).map(&:to_i).reject(&:zero?)
+      )
+    end
+    permitted
   end
 
   def stage_json(s)
-    { id: s.id, name: s.name, color: s.color, position: s.position, pipeline_id: s.pipeline_id, description: s.description }
+    { id: s.id, name: s.name, color: s.color, position: s.position, pipeline_id: s.pipeline_id, description: s.description,
+      main_inbox_ids: Array(s.settings&.[]('main_inbox_ids')).map(&:to_i) }
   end
 end

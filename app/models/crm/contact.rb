@@ -43,6 +43,7 @@ class Crm::Contact < ApplicationRecord
 
   after_create  :log_initial_stage
   after_update  :log_stage_change, if: :saved_change_to_stage_id?
+  after_update  :fire_value_automations, if: :saved_change_to_value?
 
   private
 
@@ -76,5 +77,27 @@ class Crm::Contact < ApplicationRecord
     )
 
     update_column(:stage_moved_at, now)
+  end
+
+  # Gatilho "Valor adicionado no card": quando o card GANHA valor (> 0),
+  # dispara as automações desse gatilho na coluna atual — vale para todos os
+  # caminhos que preenchem valor (board, orçamento detectado, ação set_value).
+  # Uso típico: "recebeu orçamento em Novos Contatos → mover p/ Envio de Orçamento".
+  def fire_value_automations
+    return unless value.to_f.positive?
+
+    Crm::Automation.where(stage_id: stage_id, active: true, trigger_type: 'value_added').find_each do |automation|
+      # trava anti-loop: valor que muda não pode disparar outra escrita de valor
+      next if automation.action_type == 'set_value'
+
+      delay = automation.delay_minutes.to_i
+      job = delay.positive? ? CrmAutomationFireJob.set(wait: delay.minutes) : CrmAutomationFireJob
+      job.perform_later(automation.id, contact_id, {
+                          event_type: 'value_added',
+                          value: value.to_f
+                        })
+    end
+  rescue StandardError => e
+    Rails.logger.error "[Crm::Contact] value_added automations: #{e.message}"
   end
 end

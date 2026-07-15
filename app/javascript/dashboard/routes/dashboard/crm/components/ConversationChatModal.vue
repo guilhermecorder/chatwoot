@@ -40,8 +40,16 @@ const whatsappInboxes = computed(() =>
 const startInboxId = ref(null);
 const isStarting = ref(false);
 
+// pré-seleção: caixa PRINCIPAL da coluna do card (config da coluna) > 1ª caixa
+const stageMainInboxIds = computed(() => {
+  const stage = (props.stages || []).find(s => s.id === props.contact.stage_id);
+  return stage?.main_inbox_ids || [];
+});
+
 watch(whatsappInboxes, list => {
-  if (!startInboxId.value && list.length) startInboxId.value = list[0].id;
+  if (startInboxId.value || !list.length) return;
+  const main = list.find(i => stageMainInboxIds.value.includes(i.id));
+  startInboxId.value = (main || list[0]).id;
 }, { immediate: true });
 
 const startConversation = async () => {

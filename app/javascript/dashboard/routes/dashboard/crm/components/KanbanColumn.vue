@@ -9,6 +9,7 @@ import ContactCard from './ContactCard.vue';
 import StageEditModal from './StageEditModal.vue';
 import ColumnAutomationsModal from './ColumnAutomationsModal.vue';
 import FollowupBotModal from './FollowupBotModal.vue';
+import CrmAPI from 'dashboard/api/crm';
 
 const props = defineProps({
   stage:           { type: Object, required: true },
@@ -27,6 +28,61 @@ const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat']);
 const store = useStore();
 const { t } = useI18n();
 const { isAdmin } = useAdmin();
+
+// ── Agentes de IA nas automações: card destacado + edição rápida dali ──
+const AI_AGENT_ACTIONS = {
+  ai_analyze: { key: 'conversation', title: 'Analista de Conversas', grad: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' },
+  schedule_appointment: { key: 'scheduler', title: 'Secretário da Agenda', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+  closing_extract: { key: 'closing', title: 'Monitor de Fechamento', grad: 'linear-gradient(135deg, #065F46, #10B981)' },
+  nps_score: { key: 'nps', title: 'Agente de NPS', grad: 'linear-gradient(135deg, #0D9488, #2DD4BF)' },
+};
+const agentOf = auto => AI_AGENT_ACTIONS[auto.action_type] || null;
+const agentEnabled = auto => {
+  const meta = agentOf(auto);
+  if (!meta) return false;
+  return store.getters['crm/getSettings']?.ai?.agents?.[meta.key]?.enabled === true;
+};
+
+const showAgentModal = ref(false);
+const agentModal = ref(null); // { key, title, grad }
+const agentForm = ref({ enabled: false, prompt: '', model: '', default_prompt: '' });
+const isSavingAgent = ref(false);
+const openAgentModal = async auto => {
+  const meta = agentOf(auto);
+  if (!meta) return;
+  agentModal.value = meta;
+  await store.dispatch('crm/fetchSettings').catch(() => {});
+  const a = store.getters['crm/getSettings']?.ai?.agents?.[meta.key] || {};
+  agentForm.value = {
+    enabled: a.enabled === true,
+    prompt: a.prompt || '',
+    model: a.model || '',
+    default_prompt: a.default_prompt || '',
+  };
+  showAgentModal.value = true;
+};
+const saveAgentModal = async () => {
+  if (isSavingAgent.value) return;
+  isSavingAgent.value = true;
+  try {
+    await CrmAPI.updateAi({
+      agents: {
+        [agentModal.value.key]: {
+          enabled: agentForm.value.enabled,
+          prompt: agentForm.value.prompt,
+          model: agentForm.value.model,
+        },
+      },
+    });
+    await store.dispatch('crm/fetchSettings').catch(() => {});
+    showAgentModal.value = false;
+    useAlert(`${agentModal.value.title} atualizado — vale a partir das próximas análises.`);
+  } catch {
+    useAlert('Erro ao salvar o agente.');
+  } finally {
+    isSavingAgent.value = false;
+  }
+};
 
 // ── Modals ────────────────────────────────────────────────────────
 const showEditModal         = ref(false);
@@ -67,12 +123,19 @@ const deleteBot = async bot => {
   } catch { useAlert(t('CRM.ERROR.GENERIC')); }
 };
 
+// unidade correta por etapa: minutos ÷ 60, dias × 24 (igual ao backend)
 const botDelayLabel = step => {
-  const hours = step.delay_value != null
-    ? Number(step.delay_value) * (step.delay_unit === 'days' ? 24 : 1)
-    : Number(step.delay_hours);
+  let hours;
+  if (step.delay_value != null) {
+    const v = Number(step.delay_value);
+    if (step.delay_unit === 'days') hours = v * 24;
+    else if (step.delay_unit === 'minutes') hours = v / 60;
+    else hours = v;
+  } else {
+    hours = Number(step.delay_hours);
+  }
   if (hours < 1) return `${Math.round(hours * 60)}min`;
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return `${Math.round(hours * 10) / 10}h`;
   return `${Math.round(hours / 24)}d`;
 };
 
@@ -87,19 +150,23 @@ const isLoadingAutomations = ref(false);
 const deleteConfirmAutoId  = ref(null);
 
 const TRIGGER_ICONS = {
-  card_entered:  'i-lucide-log-in',
-  card_left:     'i-lucide-log-out',
-  card_stalled:  'i-lucide-clock',
-  label_added:   'i-lucide-tag',
-  label_removed: 'i-lucide-tag',
+  card_entered:    'i-lucide-log-in',
+  card_left:       'i-lucide-log-out',
+  card_stalled:    'i-lucide-clock',
+  label_added:     'i-lucide-tag',
+  label_removed:   'i-lucide-tag',
+  message_created: 'i-lucide-message-circle',
+  value_added:     'i-lucide-circle-dollar-sign',
 };
 
 const TRIGGER_LABELS = {
-  card_entered:  'Entrou na coluna',
-  card_left:     'Saiu da coluna',
-  card_stalled:  'Parado por X tempo',
-  label_added:   'Etiqueta adicionada',
-  label_removed: 'Etiqueta removida',
+  card_entered:    'Entrou na coluna',
+  card_left:       'Saiu da coluna',
+  card_stalled:    'Parado por X tempo',
+  label_added:     'Etiqueta adicionada',
+  label_removed:   'Etiqueta removida',
+  message_created: 'Mensagem criada',
+  value_added:     'Valor adicionado',
 };
 
 const ACTION_ICONS = {
@@ -110,6 +177,12 @@ const ACTION_ICONS = {
   log_timeline:     'i-lucide-clock',
   notify_team:      'i-lucide-bell',
   template_message: 'i-lucide-megaphone',
+  meta_ads_event:   'i-lucide-megaphone',
+  google_ads_conversion: 'i-lucide-megaphone',
+  send_form:        'i-lucide-clipboard-list',
+  ai_analyze:       'i-lucide-sparkles',
+  schedule_appointment: 'i-lucide-calendar-plus',
+  set_value:        'i-lucide-circle-dollar-sign',
 };
 
 const ACTION_LABELS = {
@@ -120,6 +193,12 @@ const ACTION_LABELS = {
   log_timeline:     'Timeline',
   notify_team:      'Notificar',
   template_message: 'Mensagem Meta',
+  meta_ads_event:   'Evento Meta',
+  google_ads_conversion: 'Conversão Google',
+  send_form:        'Enviar formulário',
+  ai_analyze:       'IA: Analista',
+  schedule_appointment: 'IA: Secretário da Agenda',
+  set_value:        'Preço no card',
 };
 
 const loadAutomations = async () => {
@@ -455,6 +534,29 @@ const delayLabel = (minutes) => {
                 </span>
               </div>
 
+              <!-- 🤖 agente de IA: faixa com edição rápida dali mesmo -->
+              <div
+                v-if="agentOf(auto)"
+                class="mt-1.5 rounded-lg px-2 py-1.5 text-white flex items-center gap-1.5"
+                :style="{ background: agentOf(auto).grad }"
+              >
+                <span class="i-lucide-sparkles text-xs flex-shrink-0" />
+                <span class="text-[10px] font-bold flex-1 truncate">{{ agentOf(auto).title }}</span>
+                <span
+                  class="text-[9px] px-1.5 py-px rounded-full font-semibold flex-shrink-0"
+                  :class="agentEnabled(auto) ? 'bg-white/25' : 'bg-black/30'"
+                >
+                  {{ agentEnabled(auto) ? 'LIGADO' : 'desligado' }}
+                </span>
+                <button
+                  class="text-[10px] underline font-semibold flex-shrink-0"
+                  title="Abrir a edição rápida do agente de IA"
+                  @click.stop="openAgentModal(auto)"
+                >
+                  editar
+                </button>
+              </div>
+
               <!-- Delay tag -->
               <div v-if="auto.delay_minutes > 0" class="mt-1.5">
                 <span class="flex items-center gap-1 text-[10px] text-n-slate-9">
@@ -622,6 +724,74 @@ const delayLabel = (minutes) => {
       @close="showAutomationForm = false"
       @saved="onAutomationSaved"
     />
+
+    <!-- Edição rápida do agente de IA (dali mesmo, sem sair do board) -->
+    <Teleport to="body">
+      <div
+        v-if="showAgentModal"
+        class="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"
+        @click.self="showAgentModal = false"
+      >
+        <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden">
+          <div class="h-1.5 w-full flex-shrink-0" :style="{ background: agentModal.grad }" />
+          <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
+            <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
+              <span class="i-lucide-sparkles" />
+              {{ agentModal.title }}
+            </h2>
+            <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showAgentModal = false" />
+          </div>
+          <div class="flex-1 overflow-y-auto p-5 space-y-3">
+            <button
+              class="w-full flex items-center justify-between rounded-xl border px-3 py-2.5"
+              :class="agentForm.enabled ? 'border-green-500/40 bg-green-500/5' : 'border-n-weak bg-n-solid-2'"
+              @click="agentForm.enabled = !agentForm.enabled"
+            >
+              <span class="text-sm font-medium text-n-slate-12">{{ agentForm.enabled ? '✅ Agente LIGADO' : '⏹ Agente desligado' }}</span>
+              <span class="text-[10px] text-n-slate-9">clique para {{ agentForm.enabled ? 'desligar' : 'ligar' }}</span>
+            </button>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1">Modelo</label>
+              <select v-model="agentForm.model" class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12">
+                <option value="">⭐ Recomendado do agente</option>
+                <option value="claude-opus-4-8">Opus 4.8 — melhor análise</option>
+                <option value="claude-sonnet-5">Sonnet 5 — equilíbrio</option>
+                <option value="claude-haiku-4-5">Haiku 4.5 — mais barato e rápido</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1">
+                Instruções (prompt)
+                <span class="text-n-slate-9 font-normal">— vazio = padrão do agente</span>
+              </label>
+              <textarea
+                v-model="agentForm.prompt"
+                rows="7"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-xs bg-n-solid-2 text-n-slate-12 resize-none focus:outline-none focus:border-n-brand font-mono"
+                :placeholder="agentForm.default_prompt ? agentForm.default_prompt.slice(0, 400) + '…' : 'Instruções personalizadas do agente'"
+              />
+            </div>
+            <p class="text-[10px] text-n-slate-9">
+              A configuração completa (colunas de atuação, rascunhos, registro) fica em
+              Automações → Agentes de IA. Salvar aqui PUBLICA na hora.
+            </p>
+          </div>
+          <div class="px-5 py-4 border-t border-n-weak flex gap-2 flex-shrink-0">
+            <button
+              class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+              :style="{ background: agentModal.grad }"
+              :disabled="isSavingAgent"
+              @click="saveAgentModal"
+            >
+              {{ isSavingAgent ? 'Salvando…' : 'Salvar e publicar' }}
+            </button>
+            <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showAgentModal = false">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Robô de follow-up da coluna -->
     <FollowupBotModal

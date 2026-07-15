@@ -7,6 +7,7 @@
 #  description :text
 #  name        :string           not null
 #  position    :integer          default(0), not null
+#  settings    :jsonb            not null
 #  created_at  :datetime         not null
 #  updated_at  :datetime         not null
 #  pipeline_id :bigint           not null

@@ -210,18 +210,34 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     contact_ids = cards.map(&:contact_id).uniq
     return if contact_ids.empty?
 
-    # última conversa por contato (+ inbox)
-    @last_conv_by_contact = {}
+    # caixas de entrada PRINCIPAIS por coluna (settings.main_inbox_ids)
+    @main_inboxes_by_stage = Crm::Stage.where(id: cards.map(&:stage_id).uniq)
+                                       .pluck(:id, :settings).to_h
+                                       .transform_values { |s| Array((s || {})['main_inbox_ids']).map(&:to_i) }
+
+    # conversas por contato, mais recente primeiro (+ inbox)
+    convs_by_contact = Hash.new { |h, k| h[k] = [] }
     Conversation.where(contact_id: contact_ids)
                 .includes(:inbox)
                 .order(last_activity_at: :desc)
-                .each { |cv| @last_conv_by_contact[cv.contact_id] ||= cv }
+                .each { |cv| convs_by_contact[cv.contact_id] << cv }
 
-    # total de conversas por contato
-    @conv_count_by_contact = Conversation.where(contact_id: contact_ids).group(:contact_id).count
+    # total de conversas por contato (da lista já carregada — sem query extra)
+    @conv_count_by_contact = convs_by_contact.transform_values(&:size)
+    @conv_count_by_contact.default = 0
 
-    # última mensagem (não-atividade) da última conversa de cada contato
-    conv_ids = @last_conv_by_contact.values.map(&:id)
+    # conversa do balão POR CARD: se a coluna tem caixas principais, a mais
+    # recente NESSAS caixas ganha; senão (ou sem conversa nelas), a mais recente
+    @last_conv_by_card = {}
+    cards.each do |card|
+      convs = convs_by_contact[card.contact_id]
+      main_ids = @main_inboxes_by_stage[card.stage_id] || []
+      chosen = main_ids.any? ? convs.find { |cv| main_ids.include?(cv.inbox_id) } : nil
+      @last_conv_by_card[card.id] = chosen || convs.first
+    end
+
+    # última mensagem (não-atividade) da conversa escolhida de cada card
+    conv_ids = @last_conv_by_card.values.compact.map(&:id).uniq
     @last_msg_by_conv = {}
     @unread_by_conv = {}
     if conv_ids.any?
@@ -247,7 +263,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
 
   def contact_json(c)
     contact = c.contact
-    last_conversation = @last_conv_by_contact&.[](contact.id)
+    last_conversation = @last_conv_by_card&.[](c.id)
     last_conv_data = build_conversation_data(last_conversation)
 
     {

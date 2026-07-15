@@ -42,11 +42,13 @@ onMounted(() => {
 const isEditing = computed(() => !!props.initialAutomation);
 
 const TRIGGERS = [
-  { value: 'card_entered',  label: 'Card entrou nesta coluna',     icon: 'i-lucide-log-in' },
-  { value: 'card_left',     label: 'Card saiu desta coluna',       icon: 'i-lucide-log-out' },
-  { value: 'card_stalled',  label: 'Card parado por X tempo',      icon: 'i-lucide-clock' },
-  { value: 'label_added',   label: 'Etiqueta adicionada',          icon: 'i-lucide-tag' },
-  { value: 'label_removed', label: 'Etiqueta removida',            icon: 'i-lucide-tag' },
+  { value: 'card_entered',    label: 'Card entrou nesta coluna',     icon: 'i-lucide-log-in' },
+  { value: 'card_left',       label: 'Card saiu desta coluna',       icon: 'i-lucide-log-out' },
+  { value: 'card_stalled',    label: 'Card parado por X tempo',      icon: 'i-lucide-clock' },
+  { value: 'label_added',     label: 'Etiqueta adicionada',          icon: 'i-lucide-tag' },
+  { value: 'label_removed',   label: 'Etiqueta removida',            icon: 'i-lucide-tag' },
+  { value: 'message_created', label: 'Mensagem criada na conversa',  icon: 'i-lucide-message-circle' },
+  { value: 'value_added',     label: 'Valor adicionado no card',     icon: 'i-lucide-circle-dollar-sign' },
 ];
 
 const DELAY_PRESETS = [
@@ -61,7 +63,7 @@ const DELAY_PRESETS = [
 // "Adicionar agente de IA" agrupa as ações de IA num botão só — o agente
 // específico é escolhido num seletor (por baixo continua sendo
 // ai_analyze / schedule_appointment, sem mudança no backend)
-const AI_ACTION_TYPES = ['ai_analyze', 'schedule_appointment'];
+const AI_ACTION_TYPES = ['ai_analyze', 'schedule_appointment', 'closing_extract', 'nps_score'];
 
 const ACTIONS = [
   { value: 'webhook',              label: 'Disparar webhook',        icon: 'i-lucide-globe' },
@@ -74,6 +76,7 @@ const ACTIONS = [
   { value: 'google_ads_conversion',label: 'Conversão Google Ads',    icon: 'i-lucide-trending-up' },
   { value: 'send_form',            label: 'Enviar formulário',       icon: 'i-lucide-clipboard-list' },
   { value: 'ai_agent',             label: 'Adicionar agente de IA',  icon: 'i-lucide-bot' },
+  { value: 'set_value',            label: 'Adicionar preço no card', icon: 'i-lucide-circle-dollar-sign' },
 ];
 
 const emptyForm = () => ({
@@ -103,6 +106,13 @@ const emptyForm = () => ({
     form_id:            '',
     // Agendar consulta (IA)
     default_unit:       '',
+    // Gatilho "Mensagem criada"
+    message_direction:  'incoming',
+    message_contains:   '',
+    throttle_minutes:   0,
+    // Adicionar preço no card
+    value:              '',
+    value_mode:         'always',
   },
 });
 
@@ -138,6 +148,11 @@ watch(() => props.initialAutomation, (auto) => {
       currency:           auto.action_config?.currency         ?? 'BRL',
       form_id:            auto.action_config?.form_id          ?? '',
       default_unit:       auto.action_config?.default_unit     ?? '',
+      message_direction:  auto.action_config?.message_direction ?? 'incoming',
+      message_contains:   auto.action_config?.message_contains  ?? '',
+      throttle_minutes:   auto.action_config?.throttle_minutes ?? 0,
+      value:              auto.action_config?.value            ?? '',
+      value_mode:         auto.action_config?.value_mode       ?? 'always',
     },
   };
 }, { immediate: true });
@@ -283,6 +298,70 @@ const save = async () => {
               <option value="">Qualquer etiqueta</option>
               <option v-for="l in accountLabels" :key="l.id" :value="l.title">{{ l.title }}</option>
             </select>
+          </div>
+
+          <!-- Config do gatilho "Mensagem criada" -->
+          <div
+            v-if="form.trigger_type === 'message_created'"
+            class="mt-2 bg-n-brand/5 border border-n-brand/20 rounded-lg p-3 space-y-3"
+          >
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Mensagem de quem dispara?</label>
+              <select
+                v-model="form.action_config.message_direction"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option value="incoming">💬 Do paciente (recomendado)</option>
+                <option value="outgoing">👤 Da atendente</option>
+                <option value="both">Ambas</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                A mensagem contém as frases-chave <span class="text-n-slate-9 font-normal">(opcional — vazio = qualquer mensagem)</span>
+              </label>
+              <input
+                v-model="form.action_config.message_contains"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                placeholder='Ex: quero agendar, pode marcar, "qual o valor"'
+              />
+              <p class="text-[11px] text-n-slate-9 mt-1">
+                Separe alternativas por vírgula (qualquer uma dispara); use "aspas" para
+                frase exata. Ignora acentos e maiúsculas — igual ao Tratamento de dados.
+              </p>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                Frequência <span class="text-n-slate-9 font-normal">(proteção contra disparo em rajada)</span>
+              </label>
+              <select
+                v-model.number="form.action_config.throttle_minutes"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option :value="0">Toda mensagem (sem limite — ex.: fluxo n8n)</option>
+                <option :value="5">No máximo 1 vez a cada 5 min por paciente</option>
+                <option :value="30">No máximo 1 vez a cada 30 min por paciente</option>
+                <option :value="60">No máximo 1 vez por hora por paciente</option>
+                <option :value="1440">No máximo 1 vez por dia por paciente</option>
+              </select>
+            </div>
+            <p class="text-xs text-n-slate-9">
+              Dispara quando uma mensagem chega na conversa de um card que está NESTA coluna.
+              Notas internas não contam.
+            </p>
+          </div>
+
+          <!-- Explicação do gatilho "Valor adicionado" -->
+          <div
+            v-if="form.trigger_type === 'value_added'"
+            class="mt-2 bg-n-brand/5 border border-n-brand/20 rounded-lg p-3"
+          >
+            <p class="text-xs text-n-slate-9">
+              💰 Dispara quando um card NESTA coluna <b>ganha valor</b> (R$ &gt; 0) — vale para
+              valor digitado no card, detectado pelo orçamento ou aplicado por outra automação.
+              Uso típico: card recebeu orçamento em "Novos Contatos" → ação "Mover para coluna:
+              Envio de Orçamento". Assim nenhum card com valor fica parado na coluna errada.
+            </p>
           </div>
         </div>
 
@@ -506,7 +585,9 @@ const save = async () => {
               class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
             >
               <option value="ai_analyze">✨ Analista de Conversas — lê a conversa e dá o parecer de interesse</option>
-              <option value="schedule_appointment">📅 Agente de Agendamento — cria a consulta na Agenda</option>
+              <option value="schedule_appointment">📅 Secretário da Agenda — cria a consulta na Agenda</option>
+              <option value="closing_extract">💰 Monitor de Fechamento — valor fechado, forma de pagamento e data da cirurgia</option>
+              <option value="nps_score">🌟 Agente de NPS — lê a nota 0-10 e etiqueta o paciente (9-10 / 7-8 / 0-6)</option>
             </select>
           </div>
 
@@ -563,6 +644,34 @@ const save = async () => {
               </select>
             </div>
           </template>
+        </div>
+
+        <!-- Adicionar preço no card -->
+        <div v-else-if="form.action_type === 'set_value'" class="space-y-3">
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Valor (R$)</label>
+            <input
+              v-model="form.action_config.value"
+              type="number" min="0" step="0.01"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+              placeholder="Ex: 5000"
+            />
+          </div>
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Como aplicar?</label>
+            <select
+              v-model="form.action_config.value_mode"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+            >
+              <option value="always">Substituir o valor do card</option>
+              <option value="if_empty">Só preencher se o card estiver sem valor</option>
+              <option value="add">Somar ao valor atual do card</option>
+            </select>
+          </div>
+          <p class="text-xs text-n-slate-9">
+            O valor alimenta o "Valor em pipeline" e o "valor por etapa" do Dashboard.
+            Ex.: card entrou em "Envio de Orçamento" com etiqueta refrativa → R$ 5.000.
+          </p>
         </div>
 
         <!-- Google Ads -->

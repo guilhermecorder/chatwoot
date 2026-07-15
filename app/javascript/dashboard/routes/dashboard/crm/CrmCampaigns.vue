@@ -5,6 +5,7 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import ChipPicker from './components/ChipPicker.vue';
+import CrmAPI from 'dashboard/api/crm';
 import { relativeTime } from './helpers';
 
 const store = useStore();
@@ -459,6 +460,84 @@ const applyRetro = async () => {
   }
 };
 
+// ── Mover e etiquetar em LOTE (coluna/valor/caixa/etiqueta) ───────────
+const showBatchPanel = ref(false);
+const batch = ref({
+  stage_id: '',
+  value_filter: '',
+  inbox_id: '',
+  label: '',
+  target_stage_id: '',
+  addLabelChoice: '',
+  newAddLabel: '',
+});
+const batchPreview = ref(null);
+const isBatchLoading = ref(false);
+const isBatchApplying = ref(false);
+
+const batchAddLabel = computed(() =>
+  batch.value.addLabelChoice === '__nova__'
+    ? batch.value.newAddLabel.trim()
+    : batch.value.addLabelChoice
+);
+
+const batchHasFilter = computed(
+  () =>
+    !!batch.value.stage_id ||
+    !!batch.value.value_filter ||
+    !!batch.value.inbox_id ||
+    !!batch.value.label
+);
+const batchHasAction = computed(
+  () => !!batch.value.target_stage_id || !!batchAddLabel.value
+);
+
+const batchPayload = () => ({
+  stage_id: batch.value.stage_id || undefined,
+  value_filter: batch.value.value_filter || undefined,
+  inbox_id: batch.value.inbox_id || undefined,
+  label: batch.value.label || undefined,
+  target_stage_id: batch.value.target_stage_id || undefined,
+  add_label: batchAddLabel.value || undefined,
+});
+
+const previewBatch = async () => {
+  if (!batchHasFilter.value) return;
+  isBatchLoading.value = true;
+  batchPreview.value = null;
+  try {
+    const { data } = await CrmAPI.previewBatchUpdate(batchPayload());
+    batchPreview.value = data;
+  } catch {
+    useAlert('Erro ao calcular os cards.');
+  } finally {
+    isBatchLoading.value = false;
+  }
+};
+
+const applyBatch = async () => {
+  if (!batchHasFilter.value || !batchHasAction.value) return;
+  isBatchApplying.value = true;
+  try {
+    await CrmAPI.applyBatchUpdate(batchPayload());
+    useAlert('Processando em segundo plano — os cards serão movidos/etiquetados em alguns minutos.');
+    batchPreview.value = null;
+    batch.value = {
+      stage_id: '',
+      value_filter: '',
+      inbox_id: '',
+      label: '',
+      target_stage_id: '',
+      addLabelChoice: '',
+      newAddLabel: '',
+    };
+  } catch (error) {
+    useAlert(error?.response?.data?.message || 'Erro ao aplicar.');
+  } finally {
+    isBatchApplying.value = false;
+  }
+};
+
 // ── Preencher valores pelo orçamento ──────────────────────────────────
 const showValuePanel = ref(false);
 const valueOnlyEmpty = ref(true);
@@ -801,9 +880,10 @@ const statsLine = c => {
           >
             <span class="i-lucide-database text-xl text-n-gold flex-shrink-0" />
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-n-slate-12">Tratamento de dados — etiquetar conversas antigas</p>
+              <p class="text-sm font-semibold text-n-slate-12">Tratamento de dados — etiquetar e/ou MOVER por conteúdo</p>
               <p class="text-xs text-n-slate-10">
-                Aplica uma etiqueta em todas as conversas que contêm um texto. Ex: "3900" → orçamento-refrativa
+                Se a conversa contém X, ou Y, ou Z (separe por vírgula) → aplica etiqueta e/ou move o card
+                de coluna. A etiqueta é opcional: dá para SÓ mover. Ex: "quero agendar, pode marcar" → coluna Agendamento
               </p>
             </div>
             <span
@@ -917,6 +997,152 @@ const statsLine = c => {
             </div>
             <p v-if="retroPreview && !retroHasAction" class="text-xs text-amber-600">
               Escolha uma etiqueta e/ou uma coluna para aplicar.
+            </p>
+          </div>
+        </div>
+
+        <!-- Tratamento de dados: mover e etiquetar em LOTE -->
+        <div class="max-w-3xl mb-5 bg-n-solid-2 border border-n-weak rounded-xl overflow-hidden">
+          <button
+            class="w-full flex items-center gap-3 p-4 text-left hover:bg-n-alpha-1 transition-colors"
+            @click="showBatchPanel = !showBatchPanel"
+          >
+            <span class="i-lucide-move text-xl text-n-brand flex-shrink-0" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-n-slate-12">Tratamento de dados — mover e etiquetar em LOTE</p>
+              <p class="text-xs text-n-slate-10">
+                Filtre os cards por coluna, valor, caixa de entrada ou etiqueta → mova todos para outra
+                coluna e/ou adicione uma etiqueta (nunca duplica). Ex: cards COM valor em "Novos Contatos"
+                → coluna "Envio de Orçamento"; caixa GOOGLE → etiqueta "consulta_google".
+              </p>
+            </div>
+            <span
+              class="text-n-slate-10 flex-shrink-0"
+              :class="showBatchPanel ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+            />
+          </button>
+
+          <div v-if="showBatchPanel" class="px-4 pb-4 space-y-3 border-t border-n-weak pt-4">
+            <p class="text-[11px] font-semibold text-n-slate-9 uppercase tracking-wide">1 · Quais cards? (combine os filtros que quiser)</p>
+            <div class="flex flex-wrap gap-3">
+              <div class="flex-1 min-w-44">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">Estão na coluna</label>
+                <select
+                  v-model="batch.stage_id"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  @change="batchPreview = null"
+                >
+                  <option value="">Qualquer coluna</option>
+                  <option v-for="s in allStages" :key="s.id" :value="s.id">
+                    {{ s.pipeline_name }} › {{ s.name }}
+                  </option>
+                </select>
+              </div>
+              <div class="flex-1 min-w-44">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">Valor no card</label>
+                <select
+                  v-model="batch.value_filter"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  @change="batchPreview = null"
+                >
+                  <option value="">Tanto faz</option>
+                  <option value="with">COM valor (R$ &gt; 0)</option>
+                  <option value="without">SEM valor</option>
+                </select>
+              </div>
+              <div class="flex-1 min-w-44">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">Chegou pela caixa de entrada</label>
+                <select
+                  v-model="batch.inbox_id"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  @change="batchPreview = null"
+                >
+                  <option value="">Qualquer caixa</option>
+                  <option v-for="i in inboxes" :key="i.id" :value="i.id">{{ i.name }}</option>
+                </select>
+              </div>
+              <div class="flex-1 min-w-44">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">Contato TEM a etiqueta</label>
+                <select
+                  v-model="batch.label"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  @change="batchPreview = null"
+                >
+                  <option value="">Qualquer etiqueta</option>
+                  <option v-for="l in labels" :key="l.id" :value="l.title">{{ l.title }}</option>
+                </select>
+              </div>
+            </div>
+
+            <p class="text-[11px] font-semibold text-n-slate-9 uppercase tracking-wide pt-1">2 · O que fazer com eles?</p>
+            <div class="flex flex-wrap gap-3">
+              <div class="flex-1 min-w-48">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">
+                  Mover para a coluna <span class="text-n-slate-9">(opcional)</span>
+                </label>
+                <select
+                  v-model="batch.target_stage_id"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                >
+                  <option value="">Não mover</option>
+                  <option v-for="s in allStages" :key="s.id" :value="s.id">
+                    {{ s.pipeline_name }} › {{ s.name }}
+                  </option>
+                </select>
+              </div>
+              <div class="flex-1 min-w-48">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1">
+                  Adicionar a etiqueta <span class="text-n-slate-9">(opcional — quem já tem, mantém)</span>
+                </label>
+                <select
+                  v-model="batch.addLabelChoice"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                >
+                  <option value="">Não etiquetar</option>
+                  <option v-for="l in labels" :key="l.id" :value="l.title">{{ l.title }}</option>
+                  <option value="__nova__">➕ Criar nova etiqueta…</option>
+                </select>
+                <input
+                  v-if="batch.addLabelChoice === '__nova__'"
+                  v-model="batch.newAddLabel"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12 mt-2"
+                  placeholder="nome-da-nova-etiqueta"
+                />
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1 disabled:opacity-50"
+                :disabled="!batchHasFilter || isBatchLoading"
+                @click="previewBatch"
+              >
+                <span class="i-lucide-search" />
+                {{ isBatchLoading ? 'Calculando…' : 'Calcular cards' }}
+              </button>
+
+              <span v-if="batchPreview" class="text-sm text-n-slate-12">
+                <b>{{ batchPreview.cards }}</b> card(s)
+                <span v-if="batchPreview.sample?.length" class="text-xs text-n-slate-9">
+                  (ex: {{ batchPreview.sample.map(s => s.name).filter(Boolean).slice(0, 3).join(', ') }})
+                </span>
+              </span>
+
+              <div class="flex-1" />
+              <button
+                class="text-xs px-4 py-2 rounded-lg bg-n-brand text-white hover:opacity-90 flex items-center gap-1.5 disabled:opacity-50"
+                :disabled="!batchHasFilter || !batchHasAction || !batchPreview || isBatchApplying"
+                @click="applyBatch"
+              >
+                <span class="i-lucide-wand-2" />
+                {{ isBatchApplying ? 'Aplicando…' : 'Aplicar no lote' }}
+              </button>
+            </div>
+            <p v-if="!batchHasFilter" class="text-xs text-n-slate-9">
+              Escolha pelo menos um filtro — sem filtro o lote não roda (proteção contra mexer na base inteira sem querer).
+            </p>
+            <p v-else-if="batchPreview && !batchHasAction" class="text-xs text-amber-600">
+              Escolha uma coluna de destino e/ou uma etiqueta para aplicar.
             </p>
           </div>
         </div>

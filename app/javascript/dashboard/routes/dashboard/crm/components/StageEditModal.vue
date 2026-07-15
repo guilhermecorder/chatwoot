@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue';
-import { useStore } from 'dashboard/composables/store';
+import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 
@@ -14,10 +14,12 @@ const emit = defineEmits(['close', 'saved']);
 const store = useStore();
 const { t } = useI18n();
 
+const inboxes = useMapGetter('inboxes/getInboxes');
+
 const activeSection = ref('general');
 const isSaving = ref(false);
 
-const form = ref({ name: '', color: '#6B7280', description: '' });
+const form = ref({ name: '', color: '#6B7280', description: '', main_inbox_ids: [] });
 
 watch(() => props.stage, (s) => {
   if (!s) return;
@@ -25,8 +27,16 @@ watch(() => props.stage, (s) => {
     name: s.name ?? '',
     color: s.color ?? '#6B7280',
     description: s.description ?? '',
+    main_inbox_ids: [...(s.main_inbox_ids ?? [])],
   };
+  if (!inboxes.value.length) store.dispatch('inboxes/get');
 }, { immediate: true });
+
+const toggleMainInbox = id => {
+  const idx = form.value.main_inbox_ids.indexOf(id);
+  if (idx >= 0) form.value.main_inbox_ids.splice(idx, 1);
+  else form.value.main_inbox_ids.push(id);
+};
 
 const save = async () => {
   if (!form.value.name.trim() || !props.stage) return;
@@ -38,6 +48,7 @@ const save = async () => {
       name: form.value.name,
       color: form.value.color,
       description: form.value.description,
+      settings: { main_inbox_ids: form.value.main_inbox_ids },
     });
     useAlert(t('CRM.SUCCESS.STAGE_RENAMED'));
     emit('saved');
@@ -146,10 +157,47 @@ const sections = [
         <!-- ── Configurações ── -->
         <template v-else-if="activeSection === 'settings'">
           <div class="space-y-4">
+            <!-- Caixas de entrada PRINCIPAIS desta coluna -->
+            <div>
+              <p class="text-sm font-medium text-n-slate-12 mb-1">
+                📥 Caixas de entrada principais desta coluna
+              </p>
+              <p class="text-xs text-n-slate-10 mb-2.5 leading-relaxed">
+                Marque o(s) número(s)/canal(is) que atendem os pacientes NESTA etapa.
+                O balão do card abre a conversa dessas caixas primeiro, e o
+                "Iniciar conversa" já vem com a caixa certa. Sem marcação = usa a
+                conversa mais recente, como hoje.
+              </p>
+              <div class="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                <label
+                  v-for="inbox in inboxes"
+                  :key="inbox.id"
+                  class="flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors"
+                  :class="form.main_inbox_ids.includes(inbox.id)
+                    ? 'border-n-brand/60 bg-n-brand/5'
+                    : 'border-n-weak hover:bg-n-alpha-1'"
+                >
+                  <input
+                    type="checkbox"
+                    class="rounded"
+                    :checked="form.main_inbox_ids.includes(inbox.id)"
+                    @change="toggleMainInbox(inbox.id)"
+                  />
+                  <span class="text-sm text-n-slate-12 truncate">{{ inbox.name }}</span>
+                  <span
+                    v-if="form.main_inbox_ids.includes(inbox.id)"
+                    class="ml-auto text-[10px] font-semibold text-n-brand flex-shrink-0"
+                  >principal</span>
+                </label>
+                <p v-if="!inboxes.length" class="text-xs text-n-slate-9">Carregando caixas…</p>
+              </div>
+            </div>
+            <div class="border-t border-n-weak" />
+
             <!-- Coming soon badge -->
             <div class="flex items-center gap-2 text-xs text-n-slate-9 bg-n-alpha-1 rounded-lg px-3 py-2">
               <span class="i-lucide-clock-4 text-sm" />
-              <span>Algumas configurações serão salvas em versões futuras.</span>
+              <span>As configurações abaixo serão salvas em versões futuras.</span>
             </div>
 
             <!-- Allow drag -->
@@ -229,8 +277,8 @@ const sections = [
 
       </div>
 
-      <!-- Footer (only on general tab) -->
-      <div v-if="activeSection === 'general'" class="flex gap-2 px-5 py-4 border-t border-n-weak flex-shrink-0">
+      <!-- Footer (abas com campos salvos de verdade) -->
+      <div v-if="['general', 'settings'].includes(activeSection)" class="flex gap-2 px-5 py-4 border-t border-n-weak flex-shrink-0">
         <button
           class="flex-1 bg-n-brand text-white rounded-lg py-2 text-sm font-medium hover:bg-n-brand/90 transition-colors disabled:opacity-50"
           :disabled="isSaving || !form.name.trim()"

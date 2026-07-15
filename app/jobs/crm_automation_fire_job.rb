@@ -36,6 +36,12 @@ class CrmAutomationFireJob < ApplicationJob
       ai_analyze(contact)
     when 'schedule_appointment'
       schedule_appointment(automation, contact, pipeline)
+    when 'closing_extract'
+      closing_extract(contact, pipeline)
+    when 'nps_score'
+      nps_score(contact)
+    when 'set_value'
+      set_value(automation, contact, pipeline)
     end
 
     # Registra log de sucesso
@@ -192,6 +198,76 @@ class CrmAutomationFireJob < ApplicationJob
 
   # Roda o Analista de Conversas (Claude) na conversa mais recente do
   # contato e salva o parecer — aparece no painel da conversa e no balão.
+  # Adiciona/define o preço (value) do card do contato neste funil.
+  # Modos: always (substitui) | if_empty (só se o card não tem valor) |
+  # add (soma ao valor atual)
+  def set_value(automation, contact, pipeline)
+    amount = automation.action_config&.dig('value').to_f
+    return if amount <= 0
+
+    card = Crm::Contact.find_by(contact_id: contact.id, pipeline_id: pipeline.id)
+    return unless card
+
+    case automation.action_config&.dig('value_mode').presence || 'always'
+    when 'if_empty'
+      card.update!(value: amount) if card.value.to_f.zero?
+    when 'add'
+      card.update!(value: card.value.to_f + amount)
+    else
+      card.update!(value: amount)
+    end
+  end
+
+  # Monitor de Fechamento: extrai valor/forma de pagamento/data da cirurgia
+  # e grava no contato + preenche o valor do card se estiver vazio.
+  def closing_extract(contact, pipeline)
+    conversation = contact.conversations.order(created_at: :desc).first
+    return unless conversation
+
+    result = Crm::SurgeryClosingService.new(conversation: conversation).call
+    if result[:error]
+      Rails.logger.warn("[CrmAutomation] closing_extract: #{result[:error]}")
+      return
+    end
+    return unless result[:closed]
+
+    attrs = contact.additional_attributes || {}
+    attrs['surgery_closing'] = {
+      'value' => result[:value].positive? ? result[:value] : nil,
+      'payment' => result[:payment].presence,
+      'surgery_date' => result[:surgery_date]&.iso8601,
+      'note' => result[:note].presence,
+      'at' => Time.current.iso8601
+    }.compact
+    contact.update!(additional_attributes: attrs)
+
+    # valor do card: preenche se ainda estiver vazio (não sobrescreve o manual)
+    card = Crm::Contact.find_by(pipeline_id: pipeline.id, contact_id: contact.id)
+    card.update!(value: result[:value]) if card && result[:value].positive? && card.value.to_f.zero?
+  end
+
+  # Agente de NPS: identifica a nota 0-10 e etiqueta o contato com a faixa
+  # (nps-9-10 / nps-7-8 / nps-0-6) — alimenta o bloco de NPS do Dashboard CRM.
+  def nps_score(contact)
+    conversation = contact.conversations.order(created_at: :desc).first
+    return unless conversation
+
+    result = Crm::NpsService.new(conversation: conversation).call
+    if result[:error]
+      Rails.logger.warn("[CrmAutomation] nps_score: #{result[:error]}")
+      return
+    end
+    return unless result[:answered]
+
+    label = Crm::NpsService.label_for(result[:score])
+    kept = contact.label_list.reject { |l| Crm::NpsService::NPS_LABELS.include?(l.to_s) }
+    contact.update_labels(kept + [label])
+
+    attrs = contact.additional_attributes || {}
+    attrs['nps'] = { 'score' => result[:score], 'comment' => result[:comment].presence, 'at' => Time.current.iso8601 }.compact
+    contact.update!(additional_attributes: attrs)
+  end
+
   def ai_analyze(contact)
     conversation = contact.conversations.order(created_at: :desc).first
     return unless conversation
@@ -226,24 +302,16 @@ class CrmAutomationFireJob < ApplicationJob
     notes = [result[:notes].presence, "Conversa ##{conversation.display_id} — agendado pela IA"].compact.join("\n")
 
     if result[:found] && result[:starts_at].present?
-      # não duplica: mesmo paciente, mesmo horário
-      return if account.tasks.exists?(due_at: result[:starts_at], title: "Consulta: #{name}")
-
-      account.tasks.create!(
-        title: "Consulta: #{name}",
-        description: notes,
-        due_at: result[:starts_at],
-        unit: unit,
-        phone: phone,
-        procedure: result[:procedure].presence,
-        doctor: result[:doctor].presence,
-        task_type: 'consulta',
-        priority: :medium,
-        status: :todo,
-        creator: creator
+      # cria OU reagenda (consulta futura do mesmo paciente vira o novo horário)
+      outcome = Crm::AppointmentRecorder.record(
+        account: account, result: result, contact: contact,
+        conversation: conversation, default_unit: automation.action_config['default_unit'].presence
       )
+      return if outcome == :already
+
       when_str = result[:starts_at].in_time_zone('America/Sao_Paulo').strftime('%d/%m/%Y às %H:%M')
-      note = "📅 Consulta agendada pela IA: #{name} — #{when_str}" \
+      verb = outcome == :rescheduled ? 'REAGENDADA' : 'agendada'
+      note = "📅 Consulta #{verb} pela IA: #{name} — #{when_str}" \
              "#{unit ? " (#{unit == 'tatuape' ? 'Tatuapé' : 'Av. Paulista'})" : ''}. Registrada na Agenda."
     else
       # sem dia/hora confirmados → tarefa de revisão para a equipe
