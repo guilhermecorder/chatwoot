@@ -12,6 +12,7 @@ import {
 import { Doughnut } from 'vue-chartjs';
 import TasksAPI from 'dashboard/api/tasks';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import { resolveTheme } from 'dashboard/helper/cevicoThemes';
 
 ChartJS.register(Title, Tooltip, Legend, ArcElement);
 
@@ -43,6 +44,89 @@ const COLUMN_STYLES = {
   doing: { icon: 'i-lucide-loader',        color: 'text-blue-500' },
   done:  { icon: 'i-lucide-check-circle-2', color: 'text-green-500' },
 };
+
+// topo das colunas em GRADIENTE — segue o TEMA escolhido pelo admin
+// (Santorini, Flor del Mar... — Agenda → botão 🎨). No tema padrão fica
+// o visual original azul→roxo / dourado / verde.
+const crmSettings = useMapGetter('crm/getSettings');
+const theme = computed(() => resolveTheme(crmSettings.value));
+// board 100% FEITO = a tela inteira assume o DOURADO do anel
+const GOLD_GRAD = 'linear-gradient(135deg, #B8860B, #D4A017)';
+const COLUMN_GRADIENTS = computed(() =>
+  allDone.value
+    ? { todo: GOLD_GRAD, doing: GOLD_GRAD, done: GOLD_GRAD }
+    : { todo: theme.value.primary, doing: theme.value.accent, done: theme.value.action }
+);
+const uiGrad = computed(() => ({
+  primary: allDone.value ? GOLD_GRAD : theme.value.primary,
+  action: allDone.value ? GOLD_GRAD : theme.value.action,
+  accent: allDone.value ? GOLD_GRAD : theme.value.accent,
+}));
+
+// ── Celebração: EXPLOSÃO DE EMOJIS (sempre diferente) perto do painel ──
+// Nada de troféu: emojis aleatórios do set oficial voam do centro pra fora.
+const CELEBRATION_EMOJIS = ['❤️', '😧', '🥳', '👏', '⭐️', '🔥', '🥇', '🚀', '❤️‍🔥', '💖', '✅', '🔝', '💎'];
+const showCelebration = ref(false);
+const burstPieces = ref([]);
+const burstOrigin = ref('float'); // 'ring' = do centro do anel · 'float' = perto do painel
+// 1 TIPO de emoji por explosão (sorteado do set) — cada festa é diferente;
+// o sorteado também fica no CENTRO do donut durante a fase dourada
+const centerEmoji = ref('');
+const makeBurst = count => {
+  const emoji = CELEBRATION_EMOJIS[Math.floor(Math.random() * CELEBRATION_EMOJIS.length)];
+  centerEmoji.value = emoji;
+  return Array.from({ length: count }, (_, i) => {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 70 + Math.random() * 260;
+    return {
+      id: i,
+      emoji,
+      dx: Math.cos(angle) * dist,
+      dy: Math.sin(angle) * dist - 50, // tende pra cima, como explosão
+      rot: Math.random() * 540 - 270,
+      delay: Math.random() * 0.25,
+      size: 14 + Math.random() * 16,
+    };
+  });
+};
+let celebrationTimer = null;
+const explodeEmojis = (count, origin = 'float') => {
+  burstOrigin.value = origin;
+  burstPieces.value = makeBurst(count);
+  showCelebration.value = false; // reinicia a animação se já estava rodando
+  requestAnimationFrame(() => { showCelebration.value = true; });
+  clearTimeout(celebrationTimer);
+  celebrationTimer = setTimeout(() => { showCelebration.value = false; }, 2800);
+};
+const celebrateIfEarly = task => {
+  if (!task.due_at || new Date() >= new Date(task.due_at)) return;
+  explodeEmojis(3); // sutil no dia a dia; a festa de verdade é no board zerado
+};
+
+// ── Solicitações/ajuda dentro da tarefa (executor ↔ criador) ──
+const commentText = ref('');
+const isSendingComment = ref(false);
+
+const sendComment = async () => {
+  const text = commentText.value.trim();
+  if (!text || !editingTask.value || isSendingComment.value) return;
+  isSendingComment.value = true;
+  try {
+    const { data } = await TasksAPI.comment(editingTask.value.id, text);
+    const idx = tasks.value.findIndex(x => x.id === data.id);
+    if (idx !== -1) tasks.value.splice(idx, 1, data);
+    editingTask.value = data;
+    store.commit('tasks/upsertTask', data);
+    commentText.value = '';
+  } catch {
+    useAlert(t('TASKS.ERROR'));
+  } finally {
+    isSendingComment.value = false;
+  }
+};
+
+const fmtCommentAt = iso =>
+  new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 const visibleTasks = computed(() => {
   if (filterAssignee.value === 'me') {
@@ -82,8 +166,50 @@ const stats = computed(() => ({
   dueSoon: visibleTasks.value.filter(isDueSoon).length,
 }));
 
+// board zerado (tudo FEITO): o anel TREME (tremor que antecede a explosão),
+// os emojis explodem do centro e o anel fica pulsando VERDE.
+// (declarado DEPOIS de stats: o watch avalia o computed já na montagem)
+const allDone = computed(
+  () => stats.value.todo === 0 && stats.value.doing === 0 && stats.value.done > 0
+);
+const ringPhase = ref(''); // '' | 'tremor' | 'gold'
+let ringTimer = null;
+watch(
+  allDone,
+  (now, before) => {
+    clearTimeout(ringTimer);
+    if (now && before === false) {
+      ringPhase.value = 'tremor'; // treme quando o verde fecha...
+      ringTimer = setTimeout(() => {
+        explodeEmojis(150, 'ring'); // ...explode do centro...
+        ringPhase.value = 'gold'; // ...e fica DOURADO pulsante
+      }, 750);
+    } else if (now) {
+      ringPhase.value = 'gold'; // já abriu completo: sem explosão de novo
+      if (!centerEmoji.value)
+        centerEmoji.value = CELEBRATION_EMOJIS[Math.floor(Math.random() * CELEBRATION_EMOJIS.length)];
+    } else {
+      ringPhase.value = '';
+    }
+  },
+  { immediate: true }
+);
+
+// legenda própria do donut (alinhada, e DOURADA junto com a explosão)
+const donutLegend = computed(() => {
+  const gold = ringPhase.value === 'gold';
+  const item = (label, color) => ({ label, color: gold ? '#D4A017' : color });
+  return [
+    item(t('TASKS.COLUMNS.TODO'), '#94A3B8'),
+    item(t('TASKS.COLUMNS.DOING'), '#3B82F6'),
+    item(t('TASKS.STATS.OVERDUE'), '#EF4444'),
+    item(t('TASKS.COLUMNS.DONE'), '#10B981'),
+  ];
+});
+
 // tarefas em aberto (não feitas) por status, para o donut
 const donutChart = computed(() => {
+  const phase = ringPhase.value; // repinta o donut quando vira DOURADO
   const openTodo = visibleTasks.value.filter(x => x.status === 'todo' && !isOverdue(x)).length;
   const openDoing = visibleTasks.value.filter(x => x.status === 'doing' && !isOverdue(x)).length;
   const overdue = stats.value.overdue;
@@ -101,19 +227,39 @@ const donutChart = computed(() => {
       ],
       datasets: [{
         data: [openTodo, openDoing, overdue, done],
-        backgroundColor: ['#94A3B8', '#3B82F6', '#EF4444', '#10B981'],
+        // gradiente por fatia = aspecto brilhante/vítreo; quando o board
+        // completa, a fatia "Feito" (o anel inteiro) vira DOURADA
+        backgroundColor: ctx => {
+          const gold = phase === 'gold';
+          const pairs = [
+            ['#94A3B8', '#D8E0EA'],
+            ['#3B82F6', '#93E3FD'],
+            ['#EF4444', '#FCA5A5'],
+            gold ? ['#B8860B', '#FFD700'] : ['#10B981', '#86EFC9'],
+          ];
+          const { chartArea, ctx: c } = ctx.chart;
+          const pair = pairs[ctx.dataIndex % pairs.length];
+          if (!chartArea) return pair[0];
+          const g = c.createLinearGradient(chartArea.left, chartArea.top, chartArea.left, chartArea.bottom);
+          g.addColorStop(0, pair[1]);
+          g.addColorStop(1, pair[0]);
+          return g;
+        },
         borderWidth: 0,
+        borderRadius: 14, // pontas arredondadas até na parte "reta" das fatias
+        spacing: 3,
+        hoverOffset: 6,
       }],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { display: true, position: 'bottom', labels: { padding: 10, boxWidth: 12, font: { size: 11 } } },
+        legend: { display: false }, // legenda própria em HTML, alinhada abaixo
         tooltip: { callbacks: { label: ctx => ` ${ctx.raw} (${ctx.label})` } },
       },
-      cutout: '62%',
-      animation: { duration: 400 },
+      cutout: '66%',
+      animation: { duration: 500, easing: 'easeOutQuart' },
     },
   };
 });
@@ -134,6 +280,7 @@ const fetchTasks = async () => {
 
 onMounted(() => {
   if (!agents.value.length) store.dispatch('agents/get');
+  store.dispatch('crm/fetchSettings').catch(() => {}); // tema do ambiente
   fetchTasks();
 });
 
@@ -148,6 +295,7 @@ const onColumnChange = async (statusKey, evt) => {
     const idx = tasks.value.findIndex(x => x.id === moved.id);
     if (idx !== -1) tasks.value.splice(idx, 1, data);
     store.commit('tasks/upsertTask', data);
+    if (statusKey === 'done' && previous !== 'done') celebrateIfEarly(data);
   } catch {
     moved.status = previous;
     rebuildLists();
@@ -212,10 +360,12 @@ const save = async () => {
       due_at: form.value.due_at ? new Date(form.value.due_at).toISOString() : null,
     };
     if (editingTask.value) {
+      const wasDone = editingTask.value.status === 'done';
       const { data } = await TasksAPI.update(editingTask.value.id, payload);
       const idx = tasks.value.findIndex(x => x.id === data.id);
       if (idx !== -1) tasks.value.splice(idx, 1, data);
       store.commit('tasks/upsertTask', data);
+      if (data.status === 'done' && !wasDone) celebrateIfEarly(data);
       useAlert(t('TASKS.SAVED'));
     } else {
       const { data } = await TasksAPI.create(payload);
@@ -256,7 +406,22 @@ const formatDue = iso => {
   <div class="bg-n-surface-1 flex flex-col h-full w-full">
     <!-- Top bar -->
     <div class="flex items-center gap-3 px-8 py-5 border-b border-n-weak flex-shrink-0 flex-wrap">
-      <h1 class="text-lg font-semibold text-n-slate-12">{{ $t('TASKS.TITLE') }}</h1>
+      <div class="flex flex-col gap-2">
+        <h1 class="text-lg font-bold text-n-slate-12 flex items-center gap-2">
+          <span class="w-8 h-8 rounded-lg flex items-center justify-center transition-all" :style="{ background: uiGrad.primary }">
+            <span class="i-lucide-list-checks text-white text-base" />
+          </span>
+          {{ $t('TASKS.TITLE') }}
+        </h1>
+        <button
+          class="flex items-center justify-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-white hover:opacity-90 transition-opacity shadow w-fit"
+          :style="{ background: uiGrad.action }"
+          @click="openCreate"
+        >
+          <span class="i-lucide-plus text-sm" />
+          {{ $t('TASKS.NEW') }}
+        </button>
+      </div>
 
       <!-- Mini dashboard -->
       <div class="flex items-center gap-2 ml-2 flex-wrap">
@@ -295,14 +460,6 @@ const formatDue = iso => {
             <option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option>
           </template>
         </select>
-
-        <button
-          class="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 transition-colors"
-          @click="openCreate"
-        >
-          <span class="i-lucide-plus text-sm" />
-          {{ $t('TASKS.NEW') }}
-        </button>
       </div>
     </div>
 
@@ -318,13 +475,17 @@ const formatDue = iso => {
         <div
           v-for="statusKey in STATUSES"
           :key="statusKey"
-          class="flex flex-col bg-n-alpha-1 rounded-xl w-[86vw] min-w-[86vw] snap-center md:w-72 md:min-w-72 flex-shrink-0 h-full min-h-0"
+          class="flex flex-col bg-n-alpha-1 rounded-2xl w-[86vw] min-w-[86vw] snap-center md:w-72 md:min-w-72 flex-shrink-0 h-full min-h-0 overflow-hidden border border-n-weak"
         >
-          <!-- Column header -->
-          <div class="flex items-center gap-2 px-3 py-2.5 border-b border-n-weak flex-shrink-0">
-            <span :class="[COLUMN_STYLES[statusKey].icon, COLUMN_STYLES[statusKey].color]" class="text-sm" />
-            <span class="text-sm font-semibold text-n-slate-12">{{ $t(`TASKS.COLUMNS.${statusKey.toUpperCase()}`) }}</span>
-            <span class="text-xs text-n-slate-10 bg-n-alpha-2 rounded px-1.5 py-0.5">{{ lists[statusKey].length }}</span>
+          <!-- Topo da coluna em gradiente -->
+          <div
+            class="flex items-center gap-2 px-3.5 py-2.5 flex-shrink-0 text-white"
+            :style="{ background: COLUMN_GRADIENTS[statusKey] }"
+            :class="theme.glass ? 'cevico-glass' : ''"
+          >
+            <span :class="COLUMN_STYLES[statusKey].icon" class="text-sm" />
+            <span class="text-sm font-bold">{{ $t(`TASKS.COLUMNS.${statusKey.toUpperCase()}`) }}</span>
+            <span class="text-xs bg-white/25 rounded-full px-2 py-0.5 font-semibold ml-auto">{{ lists[statusKey].length }}</span>
           </div>
 
           <!-- Cards -->
@@ -397,42 +558,130 @@ const formatDue = iso => {
         </div>
 
         <!-- Painel de resumo (donut) — só desktop -->
-        <div class="hidden lg:flex flex-col w-72 min-w-72 flex-shrink-0 bg-n-alpha-1 rounded-xl p-4 h-full">
-          <p class="text-sm font-semibold text-n-slate-12 mb-1">{{ $t('TASKS.DASHBOARD.TITLE') }}</p>
-          <p class="text-xs text-n-slate-10 mb-3">{{ $t('TASKS.DASHBOARD.SUBTITLE') }}</p>
+        <div
+          class="hidden lg:flex flex-col w-72 min-w-72 flex-shrink-0 rounded-2xl p-4 h-full min-h-0 overflow-y-auto cevico-no-scrollbar border-2 transition-all"
+          :class="allDone ? 'cevico-all-done-ring bg-amber-500/5' : 'bg-n-alpha-1 border-n-weak'"
+        >
+          <p class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-1.5">
+            <span class="w-6 h-6 rounded-lg flex items-center justify-center transition-all" :style="{ background: uiGrad.primary }">
+              <span class="i-lucide-pie-chart text-white text-xs" />
+            </span>
+            {{ $t('TASKS.DASHBOARD.TITLE') }}
+          </p>
+          <p class="text-xs text-n-slate-10 mb-4">{{ $t('TASKS.DASHBOARD.SUBTITLE') }}</p>
 
-          <div v-if="donutChart" class="h-56">
-            <Doughnut :data="donutChart.data" :options="donutChart.options" />
+          <!-- O DONUT é o anel: fecha verde → TREME → explosão do centro →
+               fica DOURADO pulsando (como os ícones da sidebar) -->
+          <div
+            v-if="donutChart"
+            class="h-48 cevico-donut-glow relative"
+            :class="{ 'cevico-ring-tremor': ringPhase === 'tremor', 'cevico-donut-gold': ringPhase === 'gold' }"
+          >
+            <!-- só o anel gira (sentido horário); os emojis ficam parados -->
+            <div class="h-full" :class="ringPhase === 'gold' ? 'cevico-donut-spin' : ''">
+              <Doughnut :data="donutChart.data" :options="donutChart.options" />
+            </div>
+            <!-- o emoji da explosão mora no CENTRO do donut -->
+            <span
+              v-if="ringPhase === 'gold' && centerEmoji"
+              class="absolute inset-0 flex items-center justify-center text-4xl pointer-events-none"
+            >{{ centerEmoji }}</span>
+            <!-- explosão a partir do CENTRO do anel -->
+            <span
+              v-for="c in (showCelebration && burstOrigin === 'ring' ? burstPieces : [])"
+              :key="'ring' + c.id"
+              class="cevico-burst-emoji"
+              :style="{
+                '--dx': c.dx + 'px',
+                '--dy': c.dy + 'px',
+                '--rot': c.rot + 'deg',
+                fontSize: c.size + 'px',
+                animationDelay: c.delay + 's',
+              }"
+            >{{ c.emoji }}</span>
           </div>
-          <div v-else class="h-56 flex flex-col items-center justify-center text-n-slate-10 gap-2">
+          <!-- legenda própria: 2 de cada lado, dourada junto com a explosão -->
+          <div v-if="donutChart" class="grid grid-cols-2 gap-x-5 gap-y-1.5 w-fit mx-auto mt-3">
+            <span
+              v-for="item in donutLegend"
+              :key="item.label"
+              class="flex items-center gap-1.5 text-[11px] transition-colors"
+              :style="{ color: ringPhase === 'gold' ? '#D4A017' : 'var(--n-slate-11, #94A3B8)' }"
+            >
+              <span class="w-2.5 h-2.5 rounded-full transition-colors" :style="{ backgroundColor: item.color }" />
+              {{ item.label }}
+            </span>
+          </div>
+          <div v-if="!donutChart" class="h-56 flex flex-col items-center justify-center text-n-slate-10 gap-2">
             <span class="i-lucide-pie-chart text-3xl" />
             <span class="text-xs">{{ $t('TASKS.DASHBOARD.EMPTY') }}</span>
           </div>
+          <div v-if="allDone" class="text-center mt-3 space-y-0.5 flex-shrink-0">
+            <p class="text-xs font-semibold leading-snug" style="color: #D4A017">
+              Parabéns, 100% das tarefas concluídas.
+            </p>
+            <p class="text-sm font-extrabold tracking-wide" style="color: #B8860B">
+              Você desenrola mesmo! ✨
+            </p>
+          </div>
 
-          <!-- Números-chave -->
-          <div class="grid grid-cols-2 gap-2 mt-4">
-            <div class="bg-n-solid-2 rounded-lg p-2.5 text-center">
-              <p class="text-lg font-semibold text-n-slate-12">{{ stats.done }}</p>
-              <p class="text-[11px] text-n-slate-10">{{ $t('TASKS.COLUMNS.DONE') }}</p>
-            </div>
-            <div class="bg-n-solid-2 rounded-lg p-2.5 text-center">
-              <p class="text-lg font-semibold text-blue-500">{{ stats.doing }}</p>
-              <p class="text-[11px] text-n-slate-10">{{ $t('TASKS.COLUMNS.DOING') }}</p>
-            </div>
-            <div class="bg-n-solid-2 rounded-lg p-2.5 text-center">
-              <p class="text-lg font-semibold text-n-slate-11">{{ stats.todo }}</p>
-              <p class="text-[11px] text-n-slate-10">{{ $t('TASKS.COLUMNS.TODO') }}</p>
+          <!-- Números-chave: no modo 100%, só o FEITO fica dourado (pulsando);
+               as caixinhas zeradas ficam escuras -->
+          <div class="grid grid-cols-2 gap-2.5 mt-4 flex-shrink-0">
+            <div
+              class="rounded-xl p-2.5 text-center text-white shadow transition-all"
+              :class="allDone ? 'cevico-tile-gold-pulse' : ''"
+              :style="{ background: uiGrad.action }"
+            >
+              <p class="text-lg font-bold leading-tight">{{ stats.done }}</p>
+              <p class="text-[11px] text-white/85">{{ $t('TASKS.COLUMNS.DONE') }}</p>
             </div>
             <div
-              class="rounded-lg p-2.5 text-center"
-              :class="stats.overdue > 0 ? 'bg-red-500/10' : 'bg-n-solid-2'"
+              class="rounded-xl p-2.5 text-center shadow transition-all"
+              :class="allDone && stats.doing === 0 ? 'bg-n-solid-2' : 'text-white'"
+              :style="allDone && stats.doing === 0 ? {} : { background: uiGrad.accent }"
             >
-              <p class="text-lg font-semibold" :class="stats.overdue > 0 ? 'text-red-600' : 'text-n-slate-12'">{{ stats.overdue }}</p>
-              <p class="text-[11px] text-n-slate-10">{{ $t('TASKS.STATS.OVERDUE') }}</p>
+              <p class="text-lg font-bold leading-tight" :class="allDone && stats.doing === 0 ? 'text-n-slate-12' : ''">{{ stats.doing }}</p>
+              <p class="text-[11px]" :class="allDone && stats.doing === 0 ? 'text-n-slate-10' : 'text-white/85'">{{ $t('TASKS.COLUMNS.DOING') }}</p>
+            </div>
+            <div
+              class="rounded-xl p-2.5 text-center shadow transition-all"
+              :class="allDone && stats.todo === 0 ? 'bg-n-solid-2' : 'text-white'"
+              :style="allDone && stats.todo === 0 ? {} : { background: uiGrad.primary }"
+            >
+              <p class="text-lg font-bold leading-tight" :class="allDone && stats.todo === 0 ? 'text-n-slate-12' : ''">{{ stats.todo }}</p>
+              <p class="text-[11px]" :class="allDone && stats.todo === 0 ? 'text-n-slate-10' : 'text-white/85'">{{ $t('TASKS.COLUMNS.TODO') }}</p>
+            </div>
+            <div
+              class="rounded-xl p-2.5 text-center shadow"
+              :class="stats.overdue > 0 ? 'text-white' : 'bg-n-solid-2'"
+              :style="stats.overdue > 0 ? { background: 'linear-gradient(135deg, #DC2626, #F59E0B)' } : {}"
+            >
+              <p class="text-lg font-bold leading-tight" :class="stats.overdue > 0 ? '' : 'text-n-slate-12'">{{ stats.overdue }}</p>
+              <p class="text-[11px]" :class="stats.overdue > 0 ? 'text-white/85' : 'text-n-slate-10'">{{ $t('TASKS.STATS.OVERDUE') }}</p>
             </div>
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- 🎉 Celebração: EXPLOSÃO DE EMOJIS localizada perto do painel -->
+    <div
+      v-if="showCelebration && burstOrigin === 'float'"
+      class="fixed z-[60] pointer-events-none top-1/3 left-1/2 -translate-x-1/2 lg:left-auto lg:translate-x-0 lg:right-44"
+    >
+      <span
+        v-for="c in burstPieces"
+        :key="c.id"
+        class="cevico-burst-emoji"
+        :style="{
+          '--dx': c.dx + 'px',
+          '--dy': c.dy + 'px',
+          '--rot': c.rot + 'deg',
+          fontSize: c.size + 'px',
+          animationDelay: c.delay + 's',
+        }"
+      >{{ c.emoji }}</span>
     </div>
 
     <!-- Modal criar/editar -->
@@ -528,12 +777,57 @@ const formatDue = iso => {
               <option value="done">{{ $t('TASKS.COLUMNS.DONE') }}</option>
             </select>
           </div>
+
+          <!-- Solicitações / ajuda: conversa entre quem criou e quem executa -->
+          <div v-if="editingTask" class="border-t border-n-weak pt-3">
+            <p class="text-xs font-semibold text-n-slate-11 mb-1.5 flex items-center gap-1.5">
+              <span class="i-lucide-messages-square text-sm" style="color: #B8860B" />
+              Solicitações e ajuda
+              <span class="text-n-slate-9 font-normal">(entre {{ editingTask.creator?.name?.split(' ')[0] }} e {{ editingTask.assignee?.name?.split(' ')[0] || 'o responsável' }})</span>
+            </p>
+            <div v-if="editingTask.comments?.length" class="space-y-1.5 max-h-40 overflow-y-auto mb-2 pr-1">
+              <div
+                v-for="(c, i) in editingTask.comments"
+                :key="i"
+                class="rounded-lg px-2.5 py-1.5 text-xs border"
+                :class="c.user_id === currentUser.id
+                  ? 'bg-n-brand/5 border-n-brand/20'
+                  : 'bg-n-solid-2 border-n-weak'"
+              >
+                <p class="flex items-center gap-2 mb-0.5">
+                  <span class="font-semibold text-n-slate-12">{{ c.name?.split(' ')[0] }}</span>
+                  <span class="text-[10px] text-n-slate-9 ml-auto">{{ fmtCommentAt(c.at) }}</span>
+                </p>
+                <p class="text-n-slate-11 leading-snug">{{ c.text }}</p>
+              </div>
+            </div>
+            <p v-else class="text-[11px] text-n-slate-9 mb-2">
+              Precisa de esclarecimento ou quer avisar algo? Escreva aqui — fica registrado na tarefa.
+            </p>
+            <div class="flex gap-1.5">
+              <input
+                v-model="commentText"
+                class="flex-1 border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+                placeholder="Ex: consigo os telefones atualizados?"
+                @keyup.enter="sendComment"
+              />
+              <button
+                class="px-3 rounded-lg text-white text-sm font-medium disabled:opacity-50"
+                style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+                :disabled="!commentText.trim() || isSendingComment"
+                @click="sendComment"
+              >
+                <span :class="isSendingComment ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-send'" class="text-sm" />
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="px-5 py-4 border-t border-n-weak flex-shrink-0 space-y-2">
           <div class="flex gap-2">
             <button
-              class="flex-1 bg-n-brand text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+              class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+              :style="{ background: theme.primary }"
               :disabled="!form.title.trim() || isSaving"
               @click="save"
             >
@@ -571,3 +865,104 @@ const formatDue = iso => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* EXPLOSÃO DE EMOJIS: cada emoji voa do centro pra fora, gira e some
+   (GPU: só transform/opacity — leve mesmo com 150 peças, roda 1 vez) */
+.cevico-burst-emoji {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  opacity: 0;
+  line-height: 1;
+  animation: cevico-burst-fly 1.4s cubic-bezier(0.16, 0.84, 0.44, 1) forwards;
+}
+@keyframes cevico-burst-fly {
+  0% { transform: translate(0, 0) rotate(0deg) scale(0.4); opacity: 1; }
+  70% { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.1); opacity: 0; }
+}
+
+/* painel de resumo rola por dentro SEM mostrar a barra */
+.cevico-no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.cevico-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* caixinha FEITO pulsando dourada no modo 100% */
+.cevico-tile-gold-pulse {
+  animation: cevico-tile-gold 2.2s ease-in-out infinite;
+}
+@keyframes cevico-tile-gold {
+  0%, 100% { box-shadow: 0 0 6px rgba(212, 160, 23, 0.35); }
+  50% { box-shadow: 0 0 18px rgba(255, 200, 40, 0.7); }
+}
+
+/* board 100% feito: a CAIXA pulsa DOURADA (cor do anel) */
+.cevico-all-done-ring {
+  border-color: #d4a017 !important;
+  animation: cevico-ring-pulse 2.2s ease-in-out infinite;
+}
+@keyframes cevico-ring-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(212, 160, 23, 0.35); }
+  50% { box-shadow: 0 0 22px rgba(255, 200, 40, 0.75); }
+}
+
+/* TREMOR que antecede a explosão (o donut sacode rapidinho) */
+.cevico-ring-tremor {
+  animation: cevico-ring-tremor 0.12s linear infinite;
+}
+@keyframes cevico-ring-tremor {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(-2px, 1px) rotate(-1.5deg); }
+  50% { transform: translate(2px, -1px) rotate(1.5deg); }
+  75% { transform: translate(-1px, -2px) rotate(-1deg); }
+}
+
+/* depois da explosão: o donut dourado GIRA em sentido horário e pulsa
+   suave, no ritmo dos ícones da sidebar (2.2s) */
+.cevico-donut-gold {
+  animation: cevico-donut-gold-pulse 2.2s ease-in-out infinite;
+}
+.cevico-donut-spin {
+  /* 3 tempos FLUIDOS: volta 1 rápida, volta 2 mais lenta, e da volta 3 em
+     diante estabiliza. A curva do arranque termina exatamente na velocidade
+     do giro contínuo (45°/s) — o movimento emenda sem freio brusco. */
+  animation:
+    cevico-donut-spin-burst 3.2s cubic-bezier(0.15, 0.6, 0.5, 0.9) 1,
+    cevico-donut-spin 8s linear 3.2s infinite;
+}
+@keyframes cevico-donut-spin-burst {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(720deg); }
+}
+@keyframes cevico-donut-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes cevico-donut-gold-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 5px rgba(212, 160, 23, 0.35));
+    opacity: 1;
+  }
+  50% {
+    filter: drop-shadow(0 0 14px rgba(255, 200, 40, 0.65));
+    opacity: 0.92;
+  }
+}
+
+/* efeito "vidro" leve dos temas (Santorini etc.) */
+.cevico-glass {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.15);
+}
+
+/* brilho macio por trás do donut */
+.cevico-donut-glow {
+  filter: drop-shadow(0 6px 14px rgba(15, 95, 166, 0.2));
+}
+</style>

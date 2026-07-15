@@ -9,6 +9,11 @@ class TasksAPI extends ApiClient {
   get(params = {}) {
     return axios.get(this.url, { params });
   }
+
+  // solicitação/ajuda dentro da tarefa (executor ↔ criador)
+  comment(id, text) {
+    return axios.post(`${this.url}/${id}/comment`, { text });
+  }
 }
 
 export default new TasksAPI();

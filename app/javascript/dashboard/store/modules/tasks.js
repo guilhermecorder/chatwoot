@@ -17,11 +17,14 @@ const state = {
 
 const getters = {
   getTasks: s => s.tasks,
-  // tarefas do usuário atual atrasadas ou perto do prazo (para o badge)
+  // badge da sidebar: tarefas do usuário atual AGUARDANDO ele (a fazer),
+  // mais as atrasadas/perto do prazo em andamento
   getAlertCount: (s, _g, rootState, rootGetters) => {
     const userId = rootGetters.getCurrentUserID;
     return s.tasks.filter(
-      t => t.assignee?.id === userId && (isOverdue(t) || isDueSoon(t))
+      t =>
+        t.assignee?.id === userId &&
+        (t.status === 'todo' || isOverdue(t) || isDueSoon(t))
     ).length;
   },
 };
