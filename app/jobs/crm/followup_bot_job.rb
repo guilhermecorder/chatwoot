@@ -13,8 +13,15 @@
 class Crm::FollowupBotJob < ApplicationJob
   queue_as :scheduled_jobs
 
+  TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   LOOKBACK = 3.days # não cutuca conversas antigas demais
   EVENTS_CAP = 60   # histórico de envios/erros guardado por robô
+  # EXPEDIENTE: cutucada só entre 08h e 20h (SP) — nada de mensagem às 6h
+  BUSINESS_HOURS = (8...20)
+  # etapa que venceu há mais de N horas PERDEU O MOMENTO: é marcada como
+  # tratada SEM enviar (evita rajada após deploy/queda — o robô não manda
+  # 4 cutucadas atrasadas de uma vez)
+  STALE_HOURS = 3
 
   def perform
     Crm::FollowupBot.active.includes(:inbox).find_each { |bot| process_bot(bot) }
@@ -25,6 +32,11 @@ class Crm::FollowupBotJob < ApplicationJob
   def process_bot(bot)
     unless bot.within_window? # janela "começa em / para em"
       record_run(bot, status: 'fora_da_janela')
+      return
+    end
+
+    unless BUSINESS_HOURS.cover?(TZ.now.hour) # expediente 08h–20h SP
+      record_run(bot, status: 'fora_do_expediente')
       return
     end
 
@@ -81,8 +93,9 @@ class Crm::FollowupBotJob < ApplicationJob
     stage_entered = stage_entry_at(bot, conversation) # nil se não for robô de coluna
     state = followup_state(conversation, bot, anchor, stage_entered)
     silence_hours = (Time.current - anchor) / 3600.0
-    sent_now = 0
 
+    # etapas VENCIDAS ainda não tratadas (com quanto tempo de atraso cada uma)
+    due = []
     steps.each_with_index do |step, index|
       from_stage = step['delay_from'] == 'stage_entry'
       # etapas "desde a entrada na coluna" têm marcador PRÓPRIO, amarrado à
@@ -91,21 +104,47 @@ class Crm::FollowupBotJob < ApplicationJob
       next if sent_list.include?(index)
 
       base_hours = from_stage ? hours_since(stage_entered) : silence_hours
-      next if base_hours.nil? || base_hours < Crm::FollowupBot.step_delay_hours(step)
+      delay = Crm::FollowupBot.step_delay_hours(step)
+      next if base_hours.nil? || base_hours < delay
 
-      send_nudge(bot, conversation, step)
-      sent_list << index
-      sent_now += 1
-      events << event_for(conversation, 'sent', note: step_label(step))
+      due << { step: step, index: index, from_stage: from_stage, overdue: base_hours - delay }
     end
 
-    if sent_now.positive?
-      run[:sent] += sent_now
+    if due.empty?
+      if (state['sent'] + state['stage_sent']).size >= steps.size
+        run[:reasons]['cadencia_completa'] += 1
+      else
+        run[:reasons]['aguardando_prazo'] += 1
+      end
+      return
+    end
+
+    # ANTI-RAJADA: manda no máximo UMA cutucada por conversa por rodada —
+    # a de maior prazo entre as vencidas (as anteriores perderam a vez).
+    chosen = due.max_by { |d| Crm::FollowupBot.step_delay_hours(d[:step]) }
+
+    if chosen[:overdue] > STALE_HOURS
+      # venceu há horas (deploy/queda/madrugada): marca como tratada SEM
+      # enviar — cutucada velha às 6h da manhã não ajuda ninguém
+      mark_steps(state, due)
       persist_state(conversation, bot, anchor, state)
-    elsif (state['sent'] + state['stage_sent']).size >= steps.size
-      run[:reasons]['cadencia_completa'] += 1
-    else
-      run[:reasons]['aguardando_prazo'] += 1
+      run[:reasons]['momento_perdido'] += 1
+      events << event_for(conversation, 'skipped',
+                          note: "#{step_label(chosen[:step])} venceu há #{chosen[:overdue].round}h — não enviada")
+      return
+    end
+
+    send_nudge(bot, conversation, chosen[:step])
+    mark_steps(state, due) # as vencidas anteriores são absorvidas pela enviada
+    persist_state(conversation, bot, anchor, state)
+    run[:sent] += 1
+    events << event_for(conversation, 'sent', note: step_label(chosen[:step]))
+  end
+
+  def mark_steps(state, due)
+    due.each do |d|
+      list = d[:from_stage] ? state['stage_sent'] : state['sent']
+      list << d[:index] unless list.include?(d[:index])
     end
   end
 

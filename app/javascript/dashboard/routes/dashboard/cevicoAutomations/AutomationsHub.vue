@@ -731,6 +731,7 @@ const REASON_LABELS = {
   paciente_falou_ultimo: 'paciente falou por último (vez do atendimento)',
   cadencia_completa: 'já recebeu todas as cutucadas',
   etiquetas: 'barrado pelo filtro de etiquetas',
+  momento_perdido: 'cutucada vencida há horas — descartada (anti-rajada)',
   erro: 'erro ao enviar',
 };
 const reasonLine = run =>
@@ -880,6 +881,7 @@ onMounted(async () => {
                 <span>
                   Última rodada {{ fmtLogDate(bot.activity.last_run.at) }} ·
                   <template v-if="bot.activity.last_run.status === 'fora_da_janela'">fora da janela (não enviou)</template>
+                  <template v-else-if="bot.activity.last_run.status === 'fora_do_expediente'">fora do expediente 08h–20h (não envia de madrugada)</template>
                   <template v-else>
                     {{ bot.activity.last_run.candidates }} conversa(s) na mira ·
                     <b :class="bot.activity.last_run.sent ? 'text-green-600' : ''">{{ bot.activity.last_run.sent }} enviada(s)</b>
@@ -898,10 +900,10 @@ onMounted(async () => {
             </div>
             <div v-if="expandedBotLog === bot.id && bot.activity?.events?.length" class="mt-2 rounded-lg bg-n-alpha-1 divide-y divide-n-weak">
               <div v-for="(ev, i) in bot.activity.events" :key="i" class="px-3 py-1.5 text-[11px] flex items-center gap-2">
-                <span>{{ ev.type === 'sent' ? '✉️' : '⚠️' }}</span>
+                <span>{{ ev.type === 'sent' ? '✉️' : (ev.type === 'skipped' ? '⏭️' : '⚠️') }}</span>
                 <span class="text-n-slate-9 flex-shrink-0">{{ fmtLogDate(ev.at) }}</span>
                 <span class="text-n-slate-11 truncate">{{ ev.contact || 'Contato' }} · conversa #{{ ev.conversation_id }}</span>
-                <span class="text-n-slate-10 truncate">{{ ev.type === 'sent' ? ev.note : `erro: ${ev.note}` }}</span>
+                <span class="text-n-slate-10 truncate">{{ ev.type === 'error' ? `erro: ${ev.note}` : ev.note }}</span>
               </div>
             </div>
           </div>
