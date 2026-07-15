@@ -30,6 +30,18 @@ export const resolveWindows = settings => {
 export const resolveBlocked = settings =>
   Array.isArray(settings?.agenda_blocked) ? settings.agenda_blocked : [];
 
+// janelas da SALA CIRÚRGICA (trilho de cirurgias) — unit recebe a key do
+// local para reusar slotsFor/scanAgenda/blockKey sem mudança
+export const resolveSurgeryWindows = settings =>
+  Array.isArray(settings?.surgery_windows)
+    ? settings.surgery_windows.map(w => ({
+        ...w,
+        dow: Number(w.dow),
+        block: Number(w.block) || 60,
+        unit: w.location,
+      }))
+    : [];
+
 export const resolveBlockedDays = settings =>
   Array.isArray(settings?.agenda_blocked_days) ? settings.agenda_blocked_days : [];
 

@@ -2,25 +2,29 @@
 #
 # Table name: tasks
 #
-#  id                :bigint           not null, primary key
-#  canceled_at       :datetime
-#  completed_at      :datetime
-#  description       :text
-#  doctor            :string
-#  due_at            :datetime
-#  phone             :string
-#  priority          :integer          default("medium"), not null
-#  procedure         :string
-#  rescheduled_count :integer          default(0), not null
-#  status            :integer          default("todo"), not null
-#  task_type         :string
-#  title             :string           not null
-#  unit              :string
-#  created_at        :datetime         not null
-#  updated_at        :datetime         not null
-#  account_id        :bigint           not null
-#  assignee_id       :bigint
-#  creator_id        :bigint           not null
+#  id                  :bigint           not null, primary key
+#  attendance          :string
+#  canceled_at         :datetime
+#  comments            :jsonb            not null
+#  completed_at        :datetime
+#  description         :text
+#  doctor              :string
+#  due_at              :datetime
+#  indicated_procedure :string
+#  phone               :string
+#  priority            :integer          default("medium"), not null
+#  procedure           :string
+#  rescheduled_count   :integer          default(0), not null
+#  status              :integer          default("todo"), not null
+#  surgery_indication  :string
+#  task_type           :string
+#  title               :string           not null
+#  unit                :string
+#  created_at          :datetime         not null
+#  updated_at          :datetime         not null
+#  account_id          :bigint           not null
+#  assignee_id         :bigint
+#  creator_id          :bigint           not null
 #
 # Indexes
 #

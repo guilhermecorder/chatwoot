@@ -27,6 +27,12 @@ crm_followup_bot_job:
   class: 'Crm::FollowupBotJob'
   queue: scheduled_jobs
 
+# CEVICO: prazo da conferência do dia (tarefa automática p/ a responsável)
+crm_attendance_reminder_job:
+  cron: '*/30 * * * *'
+  class: 'Crm::AttendanceReminderJob'
+  queue: scheduled_jobs
+
 # CEVICO: Radar de Oportunidades (cards quentes sem atendimento → aviso no Meu Painel)
 crm_opportunity_radar_job:
   cron: '*/10 * * * *'

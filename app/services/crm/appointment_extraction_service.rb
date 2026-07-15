@@ -30,9 +30,21 @@ class Crm::AppointmentExtractionService
         description: 'Motivo da consulta em 1-3 palavras: catarata, refrativa, ceratocone, lentes fácicas, exames, pós-operatório, consulta geral... Vazio se não ficar claro.'
       },
       medico: { type: 'string', description: 'Nome do médico combinado na conversa, se mencionado (senão vazio)' },
-      observacoes: { type: 'string', description: 'Detalhes úteis para a recepção em 1 frase (convênio, pedido especial). Vazio se não houver.' }
+      observacoes: {
+        type: 'string',
+        description: 'Observação IMPORTANTE que o paciente falou na conversa e a recepção precisa saber ' \
+                     '(convênio, medo, acompanhante, urgência, pedido especial, condição de saúde). 1-2 frases. Vazio se não houver.'
+      },
+      valor_consulta: {
+        type: 'string',
+        description: 'Valor da consulta combinado na conversa, ex "R$ 150" ou "R$ 300" (glaucoma). Vazio se não foi mencionado.'
+      },
+      reagendamento: {
+        type: 'boolean',
+        description: 'true se esta confirmação é um REAGENDAMENTO (o paciente já tinha consulta e mudou dia/horário)'
+      }
     },
-    required: %w[encontrado nome telefone data hora unidade problema medico observacoes],
+    required: %w[encontrado nome telefone data hora unidade problema medico observacoes valor_consulta reagendamento],
     additionalProperties: false
   }.freeze
 
@@ -49,6 +61,13 @@ class Crm::AppointmentExtractionService
       data de hoje informada no início da conversa.
     - unidade: identifique pela menção a Tatuapé ou Paulista/Av. Paulista/Bela Vista.
       Na dúvida, nao_identificada.
+    - observacoes: registre o que a RECEPÇÃO precisa saber sobre o paciente
+      (convênio, medo de cirurgia, acompanhante, urgência, condição de saúde,
+      pedido especial). Não repita dia/hora aqui.
+    - valor_consulta: se a conversa mencionou o valor da consulta (ex.: R$ 150,
+      R$ 300 para glaucoma), registre; senão deixe vazio.
+    - reagendamento=true quando a conversa mostra que o paciente JÁ TINHA uma
+      consulta e trocou o dia/horário ("preciso remarcar", "mudar o horário").
     - Não invente dados: campo não confirmado fica vazio.
   PROMPT
 
@@ -61,7 +80,7 @@ class Crm::AppointmentExtractionService
 
   def call
     return { error: 'IA não configurada. Adicione a chave da API em Integrações → Claude.' } if api_key.blank?
-    return { error: 'O Agente de Agendamento está pausado. Reative em Automações → Agentes de IA.' } if agent_paused?
+    return { error: 'O Secretário da Agenda está pausado. Reative em Automações → Agentes de IA.' } if agent_paused?
 
     transcript = build_transcript
     return { error: 'Conversa sem mensagens para analisar.' } if transcript.blank?
@@ -88,6 +107,8 @@ class Crm::AppointmentExtractionService
       procedure: parsed['problema'].to_s.strip,
       doctor: parsed['medico'].to_s.strip,
       notes: parsed['observacoes'].to_s.strip,
+      price: parsed['valor_consulta'].to_s.strip,
+      reschedule: parsed['reagendamento'] == true,
       model: model
     }
   rescue Anthropic::Errors::AuthenticationError
