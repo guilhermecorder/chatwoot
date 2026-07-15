@@ -137,6 +137,18 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // Consultor Comercial ao vivo: objeção + respostas prontas p/ a vendedora
+  salesHelp(conversationId) {
+    return axios.post(`${this.url}/conversation_summary/sales_help`, {
+      conversation_id: conversationId,
+    });
+  }
+
+  // Consultor Comercial: gerar insights das conversas fechadas (gestão)
+  generateSalesInsights() {
+    return axios.post(`${this.url}/settings/sales_insights`);
+  }
+
   updateAi(data) {
     return axios.post(`${this.url}/settings/update_ai`, data);
   }
@@ -159,6 +171,51 @@ class CrmAPI extends ApiClient {
 
   updateAgendaBlockedDays(blockedDays) {
     return axios.post(`${this.url}/settings/update_agenda`, { blocked_days: blockedDays });
+  }
+
+  // locais de cirurgia (clínicas parceiras — IOP etc.) do trilho de cirurgias
+  updateSurgeryLocations(surgeryLocations) {
+    return axios.post(`${this.url}/settings/update_agenda`, { surgery_locations: surgeryLocations });
+  }
+
+  // janelas da sala cirúrgica (clínica + dia + horário + bloco)
+  updateSurgeryWindows(surgeryWindows) {
+    return axios.post(`${this.url}/settings/update_agenda`, { surgery_windows: surgeryWindows });
+  }
+
+  // tema visual dos ambientes (Santorini, Flor del Mar...) — admin
+  updateTheme(theme) {
+    return axios.post(`${this.url}/settings/update_agenda`, { theme });
+  }
+
+  // qual versão do Meu Painel cada agente vê — admin
+  updatePanelAssignments(panelAssignments) {
+    return axios.post(`${this.url}/settings/update_agenda`, { panel_assignments: panelAssignments });
+  }
+
+  // conferência do dia → colunas do CRM (compareceu/faltou/cirurgia indicada)
+  updateAttendanceStages(attendanceStages) {
+    return axios.post(`${this.url}/settings/update_agenda`, { attendance_stages: attendanceStages });
+  }
+
+  // responsáveis pela conferência do dia (consultas/cirurgias) + prazo
+  updateAttendanceOwners(attendanceOwners) {
+    return axios.post(`${this.url}/settings/update_agenda`, { attendance_owners: attendanceOwners });
+  }
+
+  // preencher a Agenda com o histórico de confirmações das conversas
+  agendaBackfill(params) {
+    return axios.post(`${this.url}/settings/agenda_backfill`, params);
+  }
+
+  // colunas onde o Secretário da Agenda atua (sincroniza as automações)
+  syncSchedulerStages(stageIds) {
+    return axios.post(`${this.url}/settings/sync_scheduler_stages`, { stage_ids: stageIds });
+  }
+
+  // colunas de atuação de qualquer agente de coluna (conversation/closing/nps)
+  syncAgentStages(agent, stageIds) {
+    return axios.post(`${this.url}/settings/sync_agent_stages`, { agent, stage_ids: stageIds });
   }
 
   radarScan(params) {
@@ -201,6 +258,33 @@ class CrmAPI extends ApiClient {
 
   applyRetroLabel(data) {
     return axios.post(`${this.url}/retro_labels/apply`, data);
+  }
+
+  // mover o card do CRM direto da conversa
+  moveConversationStage(conversationId, stageId) {
+    return axios.post(`${this.url}/conversation_summary/move_stage`, {
+      conversation_id: conversationId,
+      stage_id: stageId,
+    });
+  }
+
+  // dashboard de resultados das automações de coluna
+  getAutomationsDashboard(params = {}) {
+    return axios.get(`${this.url}/automations_dashboard`, { params });
+  }
+
+  // dashboard dos médicos (conversão consulta→cirurgia, NPS, clínicas)
+  getDoctorsDashboard(params = {}) {
+    return axios.get(`${this.url}/doctors_dashboard`, { params });
+  }
+
+  // mover e etiquetar cards em lote (coluna/valor/caixa/etiqueta)
+  previewBatchUpdate(data) {
+    return axios.post(`${this.url}/batch_updates/preview`, data);
+  }
+
+  applyBatchUpdate(data) {
+    return axios.post(`${this.url}/batch_updates/apply`, data);
   }
 
   previewLabelReplace(data) {

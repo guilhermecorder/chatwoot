@@ -769,10 +769,657 @@ true→roda), clique liga/desliga gravando na hora preservando vigias e os
 demais agentes, modal com a ação nova. PENDENTE: Guilherme vai enviar o
 JSON do fluxo N8N do agente de agendamento p/ mapear o comportamento.
 
+---
+
+## 27. RODADA 2026-07-14 (tarde) — Gatilho "Mensagem criada" + preço no card + N8N mapeado ⏳ NÃO COMMITADO, AGUARDA APROVAÇÃO
+
+⚠️ REGRA REFORÇADA PELO GUILHERME: NUNCA commit/push sem aprovação
+explícita dele. Este lote está SÓ no working tree local.
+
+**1. Gatilho "Mensagem criada na conversa" (automações de coluna):**
+- CrmListener#message_created (async dispatcher): mensagem não-privada
+  incoming/outgoing → dispara automações trigger_type=message_created da
+  coluna onde o card está AGORA. 2 consultas indexadas por mensagem.
+- Config (action_config): message_direction incoming(padrão)/outgoing/both
+  + throttle_minutes (0=toda mensagem p/ n8n; 5/30/60/1440 = no máx 1 por
+  período POR CONTATO, via AutomationLog). Notas internas não disparam.
+- Testado: mensagem → set_value aplicou; 2ª mensagem segurada pela trava.
+
+**2. Ação "Adicionar preço no card" (set_value):**
+- action_config: value + value_mode (always substitui | if_empty só se
+  vazio | add soma). Alimenta valor em pipeline/valor por etapa.
+- Uso combinado c/ item 2 do backlog antigo (ticket médio por etiqueta):
+  gatilho etiqueta adicionada + set_value já cobre parte do caso.
+
+**3. Tratamento "contém X, ou Y, ou Z → mover coluna":** JÁ EXISTIA no
+motor (RetroLabelJob: etiqueta OPCIONAL, multi-termo por vírgula = OR,
+place_in_stage) — só o texto da tela escondia. Títulos/descrições
+atualizados ("Etiquetar e/ou MOVER por conteúdo").
+
+**FLUXO N8N "AGENTE DE AGENDAMENTO" MAPEADO (JSON recebido, 102 nós):**
+- Gatilho: webhook message_created do Chatwoot (Robomaster).
+- Pausa: msg da atendente pausa IA; emoji 😊 na msg do bot pausa
+  (confirmação de agendamento tem 😊 → pausa sozinho); 👍 reativa;
+  estado em Supabase dados_cliente.atendimento_ia.
+- Fila: mensagens do paciente acumulam no Redis, espera 10s, junta tudo
+  e processa 1 vez (anti-mensagem-picada); compara com última pra dedup.
+- Mídia: áudio → Whisper transcreve; imagem → gpt-4o-mini OCR.
+- Supervisor (gpt-5-mini + memória Postgres 20 msgs + RAG + calculator):
+  prompt 44k chars "Guilherme, atendente da CEVICO" — 5 contextos (novo/
+  agendado/pós-consulta/pós-cirúrgico/reagendamento), fluxo 6 etapas
+  (recepção→sondagem→autoridade→orçamento→agendamento→confirmação),
+  máx 3 frases/150 chars por msg, sem emoji (exceto 😊 confirmação),
+  sem travessão/markdown. Scripts de autoridade (Schwind Amaris 1050RS,
+  Dr Jorge Haddad 30k cirurgias, unidades Paulista/Tatuapé c/ links).
+- calendar_agent (sub-agente): Google Calendar por unidade (2 agendas),
+  blocos 15min (manhã 9h-11h, tarde 13h30-16h), Tatuapé 10min,
+  description obrigatória "Telefone/Nome/Valor" (consulta ~R$150).
+- Saída: resposta fatiada em msgs humanizadas de 150-250 chars
+  (gpt-4.1-mini) com intervalo entre envios.
+- Prompt completo salvo em /tmp/supervisor_prompt.txt (local).
+- PRÓXIMO PASSO combinado: usar esse mapa p/ calibrar os agentes internos
+  (interiorização gradual), começando pelos agentes de leitura.
+
+---
+
+## 28. RODADA 2026-07-14 (tarde 2) — Analista de Conversas com frases sugeridas (script CEVICO) ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Pedido do Guilherme (2026-07-14): o Analista de Conversas deve, além do
+parecer de interesse, dar RECOMENDAÇÕES DE FRASES para a atendente falar
+e formas de conduzir, seguindo a lógica do script de agendamento do N8N
+(item 27 — prompt em /tmp/supervisor_prompt.txt e no JSON em ~/Downloads).
+
+IMPLEMENTADO (working tree, junto com o lote 27 — sem migration):
+1. conversation_insight_service.rb: SYSTEM_PROMPT ganhou o resumo do
+   script CEVICO (10 etapas: recepcao/sondagem/autoridade/orcamento/
+   objecoes/agendamento/pos_agendamento/pos_consulta/pos_cirurgico/
+   reagendamento), regras de tom (≤150 chars, sem emoji/travessão/listas,
+   "investimento" no lugar de "preço", consultivo, terminar com pergunta,
+   máx 2 convites de agendamento) e DADOS OFICIAIS (valores, médicos,
+   Schwind Amaris, unidades, dias de consulta, Vaneide). Novos campos
+   OBRIGATÓRIOS no JSON de saída: etapa_do_script (enum 10 etapas) e
+   frases_sugeridas (array 2-3 frases). Prompt+guardrail = ~4,1k chars.
+   Controller/job salvam o hash inteiro → persistência automática em
+   additional_attributes.ai_insight (script_stage/suggested_phrases).
+2. Guardrail (ai_agent_config.rb): agora PERMITE sugerir frases prontas
+   PARA A ATENDENTE (quando o formato de saída tiver campo pra isso);
+   continua proibido enviar/interagir com o paciente. Vale p/ os 4 agentes.
+3. ConversationSummaryCard.vue: chip "Etapa do script: X" (📍) + bloco
+   "Frases sugeridas" — cada frase é um botão que COPIA ao clicar, com
+   nota "Revise antes de enviar — quem decide é você".
+
+Testado no Docker local: sintaxe Ruby ok, schema/prompt/guardrail
+validados no Rails do container, Vite serve o componente sem erro,
+insight SIMULADO com os campos novos na conversa #3 (conta 3) para o
+teste visual. Prompt custom salvo pelo Guilherme na tela continua
+substituindo o padrão — para usar o script novo, o campo custom do
+Analista deve estar VAZIO (ou atualizado).
+
+---
+
+## 29. RODADA 2026-07-14 (tarde 3) — Editar/Salvar/Publicar nos agentes + lote no Tratamento + gatilho de valor ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Pedidos do Guilherme. Sem migration. Tudo no working tree com 27–28.
+
+**1. Agentes de IA — Editar | Salvar | Publicar + Ativar/Desativar:**
+- Cards abrem TRAVADOS (leitura). "Editar" destrava; "Salvar rascunho"
+  grava draft que NÃO muda o agente no ar; "Publicar" aplica de verdade
+  (e limpa o rascunho); "Descartar mudanças" volta atrás. Chip âmbar
+  "📝 Rascunho não publicado" + botão "Publicar rascunho" fora da edição.
+  Interruptor Ativar/Desativar continua gravando NA HORA (kill switch).
+- Backend: update_ai aceita agents.{key}.draft (deep-merge; draft vazio
+  = limpar), ai_json devolve draft. Services leem SÓ o publicado.
+- Botão global "Salvar agentes" removido (agora é por agente).
+- Testado: round-trip salvar/publicar/toggle/vigias no container (4 ✓).
+
+**2. Tratamento de dados — "Mover e etiquetar em LOTE":**
+- Crm::BatchUpdateJob (fila low, modo leve): filtros combináveis
+  stage_id (coluna atual) + value_filter with/without + inbox_id
+  (contato com conversa na caixa) + label (contato TEM etiqueta);
+  ações target_stage_id (mover; StageLog normal) e/ou add_label
+  (direto em taggings, NUNCA duplica — find_or_create_by).
+- Endpoints POST crm/batch_updates/preview|apply (admin-only; apply
+  exige ≥1 filtro — proteção contra varrer a base inteira sem querer).
+- Painel novo na aba Automações (CrmCampaigns) com prévia; card no
+  hub de Tratamento. Casos do Guilherme: "COM valor em Novos Contatos
+  → Envio de Orçamento" e "caixa GOOGLE → etiqueta consulta_google".
+- Testado no banco local: achou card com valor, moveu Novos Contatos→
+  Envio de Orçamento, não duplicou etiqueta, filtros caixa/etiqueta ok.
+
+**3. Gatilho "Valor adicionado no card" (value_added) — o "SEMPRE":**
+- Crm::Contact after_update (value mudou para > 0) dispara automações
+  trigger value_added da coluna ATUAL — cobre valor digitado no board,
+  detectado do orçamento e ação set_value. Anti-loop: automação
+  value_added não pode ter ação set_value.
+- Opção no modal Nova automação (Modo Programação) com explicação.
+- Config recomendada p/ produção: coluna Novos Contatos → gatilho
+  "Valor adicionado" → ação "Mover para coluna: Envio de Orçamento".
+- Testado ponta a ponta com sidekiq real: valor aplicado → card moveu
+  sozinho → log fired; mesmo valor de novo NÃO redispara.
+
+---
+
+## 30. RODADA 2026-07-14 (noite) — Frases-chave, dashboard de automações, caixa por coluna, pílulas em Conversas ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Pedidos do Guilherme (prints). ⚠️ Traz a migration **20260714000008**
+(crm_stages.settings jsonb, aditiva) — 1ª migration do lote 27-30.
+
+**1. Fix: unidade de tempo nos passos do robô (AutomationsHub):**
+delayLabel tratava 'minutes' como horas ("60 min" virava "60h") —
+agora minutos÷60, dias×24 (igual ao backend step_delay_hours).
+
+**2. Frases-chave no gatilho "Mensagem criada":**
+- action_config.message_contains no CrmListener: vírgula = OU, "aspas" =
+  frase exata, ignora acento/caixa (Crm::RetroLabelJob.parse_terms +
+  transliterate). Vazio = qualquer mensagem (como era).
+- Campo no modal Nova automação, entre direção e frequência.
+- Testado: 4 cenários ✓ (acento/caixa, sem match, frase exata, vazio).
+
+**3. Dashboard de resultados das automações (aba 📊 Resultados no hub):**
+- GET crm/automations_dashboard?preset= (mesmos presets do Meu Painel,
+  fuso SP): KPIs disparos/pacientes alcançados/automações ativas/falhas,
+  disparos por dia (barras), ranking automação por automação (coluna,
+  gatilho→ação, contatos, falhas, último disparo). Fonte:
+  crm_automation_logs. Réguas continuam na Campanha WhatsApp.
+
+**4. Caixa de entrada PRINCIPAL por coluna (migration 20260714000008):**
+- crm_stages.settings.main_inbox_ids (multi). Config: modal da coluna
+  (lápis) → aba Configurações → "Caixas de entrada principais" com
+  checkboxes (agora salva de verdade; os toggles fake ficaram abaixo).
+- EFEITOS: balão do card abre a conversa mais recente DAS CAIXAS
+  PRINCIPAIS da coluna (fallback: mais recente geral); "Iniciar
+  conversa" pré-seleciona a caixa principal. Sem marcação = como era.
+- preload_card_data refatorado: conversa escolhida POR CARD (uma query
+  a menos); board smoke-testado via API real (200, balão populado).
+- Uso combinado: Novos Contatos→Orçamento = google+instagram;
+  colunas pós-agendamento = caixa Confirmação de Consulta.
+
+**5. Pílulas de caixa de entrada no topo de CONVERSAS (ChatList core):**
+- Barra "Todas | caixa1 | caixa2..." no estilo dos presets do Meu Painel
+  (gradiente azul→roxo na ativa), só nas visões puras (não em times/
+  etiquetas/menções/pastas). Clique navega home/inbox_dashboard.
+- PRÉ-SELEÇÃO: escolha salva no navegador (localStorage
+  cevico_conversas_inbox); abrir Conversas volta pra última caixa.
+
+**6. Fixes visuais:** pílula da coluna no card-resumo do contato em 1
+linha com truncate (funil embaixo) — não quebra mais em 2 linhas;
+KanbanColumn ganhou ícones/labels dos gatilhos e ações novos
+(message_created, value_added, set_value, IA, formulário, Meta/Google).
+
+Testado no Docker: Vite compila os 9 arquivos, migration ok, board via
+API real ok, dashboard agregando certo, prioridade de caixa no balão ✓.
+⚠️ Deploy do lote 27-30: rodar migration (aditiva) — backup antes.
+
+---
+
+## 31. RODADA 2026-07-14 (noite 2) — Agenda operacional completa + mover card na conversa ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Pedidos do Guilherme (prints). Migration **20260714000009** (tasks:
+attendance, surgery_indication, indicated_procedure — aditiva).
+Lote 27-31 agora tem 2 migrations (…08 e …09).
+
+**1. Mover card do CRM DE DENTRO DA CONVERSA:**
+- Card-resumo do painel: pílula da coluna atual + botão "Mover" → botões
+  de todas as colunas do funil (mobile-friendly). POST
+  crm/conversation_summary/move_stage dispara card_entered/card_left
+  (mesmas automações do board). Testado via API real ✓.
+
+**2. Agenda — conferência do dia (visão Dia):**
+- Cada consulta na linha do tempo ganhou botões ✓ Compareceu | ✗ Faltou;
+  compareceu abre 🎯 Cirurgia indicada (escolhe o procedimento numa
+  lista: Catarata, PRK, Lasik, Fácica, Foco Estendido, Trifocal, Anel,
+  Pterígio, YAG, Outro) | Sem indicação. Re-clique desfaz. Chips de
+  status no card. Compareceu marca a consulta como concluída.
+- REFLEXO NO CRM: tasks_controller move o card do paciente (match por
+  telefone, últimos 8 dígitos) p/ colunas configuráveis e dispara as
+  automações da coluna destino (régua de conversão/reagendamento).
+  Config: Agenda → "Janelas dos médicos" → seção "Conferência do dia →
+  CRM" (3 selects: compareceu/faltou/indicada; agenda_config
+  .attendance_stages). Testado via API real: faltou moveu o card ✓.
+
+**3. Encaixe:** bloco ocupado da visão Dia mostra "+N" quando há mais de
+um paciente e ganhou botão "+" (hover) p/ agendar OUTRO no mesmo horário.
+
+**4. Lista do dia p/ IMPRIMIR (PDF):** botão dourado "Imprimir lista
+(PDF)" na visão Dia → janela de impressão com tabela (hora, paciente,
+telefone, problema, médico, unidade, obs + colunas ☐ Compareceu ☐ Faltou
+☐ Cirurgia indicada p/ marcar no papel). window.print() = salvar em PDF.
+
+**5. Agente de Agendamento turbinado:**
+- Extração ganhou: observação IMPORTANTE do paciente (recepção precisa
+  saber) + valor_consulta (ex. R\$ 150) + flag reagendamento — tudo vai
+  pra descrição da consulta.
+- Crm::AppointmentRecorder (novo service): cria OU REAGENDA — consulta
+  futura do mesmo telefone vira o novo horário (rescheduled_count++,
+  sem duplicar). Usado pela ação de coluna e pelo backfill. Testado:
+  criar→already→reagendar ✓.
+- **Preencher agenda com o HISTÓRICO** (migração de agendas SEM mexer no
+  N8N): Crm::AgendaBackfillJob varre conversas com "consulta confirmada/
+  consulta agendada/agendamento confirmado" (outgoing) no período e roda
+  o agente em cada uma (teto 300; para sozinho sem chave/agente
+  desligado; resultado em agenda_config.backfill_last_run). Botão
+  dourado no card do agente (modal: período 7/30/90/180d + teto + aviso
+  de custo). POST crm/settings/agenda_backfill (admin).
+- Fluxo contínuo (sem código novo): automação de coluna gatilho
+  "Mensagem criada" (da atendente/bot, frases-chave "consulta
+  confirmada") → ação "Agendar consulta (IA)".
+
+**6. Agenda UX (tablet/notebook/mobile):**
+- Conteúdo centralizado (max-w 1440px) c/ respiros; visão Dia max-w-4xl.
+- Semana: grid responsivo (2/4/7 colunas), horários LIVRES clicáveis em
+  cada dia (4 primeiros + "+N livres →" abre a visão Dia) e ARRASTAR
+  consulta p/ outro dia = reagendar (abre o modal com a nova data pra
+  confirmar; ring dourado no dia alvo).
+
+**7. Pílulas de Conversas** em gradiente DOURADO (pedido de ajuste).
+
+Dados de teste local: consultas hoje 14h ×2 (encaixe) e 15h (botões).
+Testado: migration ✓, recorder ✓, reflexo no CRM via API ✓, move_stage
+via API ✓, backfill acha conversa e para sem chave ✓, Vite 5 arquivos ✓.
+
+---
+
+## 32. RODADA 2026-07-15 (madrugada) — Secretário v2, Agenda de Cirurgias, Tarefas v2, CRM mês ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Pedidos do Guilherme. Migration **20260714000010** (tasks.comments
+jsonb). Lote 27-32 tem 3 migrations aditivas (08/09/10).
+
+**NOMENCLATURA OFICIAL (aprovada):** agente interno = "Secretário da
+Agenda" (só lê e anota, nunca fala com paciente); bot do N8N =
+"Atendente IA (N8N)" (quem conversa). Renomeado em toda a UI/textos.
+
+**1. Secretário da Agenda v2:**
+- 📒 REGISTRO DE ATIVIDADE no card do agente: cada leitura vira linha
+  (data · paciente · consulta · criada/reagendada/já existia/sem dia-hora)
+  — agenda_config.scheduler_log cap 100, serializado (30) no settings.
+  É onde se ENTENDE os números da IA de agendamento.
+- COLUNAS DE ATUAÇÃO (multi): pílulas no card; salvar sincroniza
+  automações marcadas "Secretário da Agenda (automático)" via POST
+  crm/settings/sync_scheduler_stages (cria/remove só as gerenciadas;
+  manuais do Modo Programação intactas). FUNCIONAMENTO: por EVENTO
+  (card entra na coluna → 1 leitura), não por varredura/cron.
+- Impressão da lista do dia pré-configurada A4 retrato (@page).
+
+**2. Agenda de Cirurgias (trilho paralelo):**
+- Toggle Consultas | 🔪 Cirurgias no cabeçalho (dourado, faixa "AGENDA
+  DE CIRURGIAS" + anel — impossível confundir). task_type='cirurgia'.
+- Consulta com indicação ganha botão "📅 Agendar cirurgia" (abre o
+  trilho dourado pré-preenchido: nome/fone/procedimento indicado).
+- Conferência da cirurgia: ✓ Realizada | ✗ Não veio → move card p/
+  colunas próprias (surgery_done/missed_stage_id na config Conferência
+  do dia). Jornada completa: consulta → indicação → cirurgia → pós, tudo
+  refletindo no CRM. Janelas/ocupação só no trilho de consultas.
+
+**3. Agenda vertical (tablet):** cabeçalho FIXO enxuto (título/Nova/
+navegação/visões/trilho/filtro); KPIs+ocupação rolam com o conteúdo.
+Visão Dia: 4 horários por linha (blocos maiores, mais comprida). Visão
+SEMANA reescrita: grade horária estilo Google (horas à esquerda 07-20h,
+célula vazia = 1 clique agenda naquela hora, arrastar consulta p/ outra
+célula = reagendar confirmando no modal). Mês com células min-h fixa.
+
+**4. Conversas:** pílulas aceitam MAIS DE UMA caixa (1 = rota nativa;
+2+ = filtro local na visão geral; "Todas" limpa) — localStorage
+cevico_conversas_inboxes, pré-seleção mantida.
+
+**5. CRM:** padrão da janela = ESTE MÊS (dias desde o dia 1º — mais
+leve); seletor Este mês|7d|15d|30d|Personalizado… (carrega tudo + abre
+De/Até)|Tudo. Pílulas de período saíram do dourado (ruim no tema claro)
+→ gradiente azul→roxo.
+
+**6. Tarefas v2:**
+- Solicitações/ajuda: thread dentro da tarefa (executor ↔ criador,
+  POST tasks/:id/comment, admin também; tasks.comments jsonb).
+- Visual: topo das colunas em GRADIENTE (A fazer azul→roxo, Fazendo
+  dourado, Feito verde), painel de resumo com tiles em gradiente.
+- 🏆 Concluir ANTES do prazo = troféu + confete (CSS puro, 2,6s).
+- Board 100% FEITO = anel dourado brilhante e pulsante no painel.
+- Badge da sidebar: Tarefas = DOURADO com brilho animado (conta a fazer
+  + atrasadas do usuário); Meu Painel/Radar = VERDE (coisa boa).
+  (countVariant em SidebarGroup/Header; CSS shimmer leve.)
+- Meu Painel: bloco dourado "N tarefa(s) esperando você" (top 5 c/
+  prioridade/criador/prazo/💬, botão Abrir Tarefas; my_tasks no home).
+
+Testado no Docker: 3 migrations ok, comentário via API real ✓, my_tasks
+no home ✓, sync de colunas do Secretário (add/remove) via API ✓,
+scheduler_log gravando ✓, Vite compila os 13 arquivos ✓. Tarefa "Teste
+solicitações" criada no local p/ ver aviso dourado + thread.
+
+## 33. RODADA 2026-07-15 — Follow-up CONSERTADO + painéis por pessoa + Cirurgias azul vítreo ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Migration **20260715000001** (crm_followup_bots: activity_log jsonb +
+last_run_at — aditiva). Lote 27-33 tem **4 migrations** (…08/09/10 + esta).
+
+**1. 🐛 BUG DE PRODUÇÃO DO FOLLOW-UP ACHADO E CORRIGIDO:**
+- Causa: Message tem default_scope por created_at ASC, que VENCE o
+  .order(desc) do job — a checagem "última mensagem é do atendimento?"
+  olhava a PRIMEIRA mensagem da conversa. Robô só funcionava quando a
+  conversa começava com msg do atendimento (caso do teste do Guilherme) e
+  NUNCA nas conversas reais (paciente fala primeiro). Fix: comparação por
+  maximum(created_at) de incoming vs outgoing (imune a ordenação).
+- Fixes extras: estado por robô ({bots: {id: ...}} — 2 robôs ativos não
+  apagam mais o marcador um do outro; formato legado migra sozinho);
+  etapas "desde a entrada na coluna" têm marcador próprio amarrado à
+  entrada (resposta do paciente não as redispara).
+- **[nome] inteligente**: limpa emojis/números/símbolos do nome do
+  WhatsApp, usa só o primeiro nome capitalizado; sem nome aproveitável →
+  "oi" no lugar (e "Oi oi" vira "Oi"). Dica atualizada no modal.
+- **📒 Registro de atividade por robô** (activity_log): cada rodada grava
+  status, candidatos, enviados e MOTIVOS de quem não recebeu (aguardando
+  prazo / paciente falou por último / cadência completa / etiquetas /
+  erro) + histórico dos envios (cap 60). Aba Robôs mostra: aviso âmbar
+  quando a janela "para em" já passou (causa silenciosa nº 1), linha da
+  última rodada e o registro expandível.
+- Testado no Docker: envio real com nome limpo ("Oi Maria..."), sem
+  reenvio (cadência completa), fora_da_janela logado, legado sem reenvio.
+
+**2. Meu Painel — preset "Este ano" + PAINÉIS POR PESSOA (?panel=):**
+- Mesmo layout, cores e indicadores da função; escolha fica no navegador
+  (localStorage) — cada pessoa abre no seu. Banner/pílulas seguem o tema.
+- Agendamento (Vaneide, padrão azul→roxo): igual ao atual (coorte CRM).
+- Condução (Elisangela, teal): consultas do período, compareceram, %
+  comparecimento, indicações + destaque "consultas sem conferência".
+- Cirurgias (Gabriela, vinho/rosa): indicações, cirurgias agendadas, taxa
+  de fechamento, realizadas + "indicados aguardando fechamento".
+- Médicos (azul céu): pílulas por médico (?doctor=) — consultas,
+  presença, faltas, indicações + cirurgias do médico.
+- Painéis da Agenda contam o período-calendário INTEIRO (consulta de hoje
+  à tarde conta em "Hoje"); o de leads corta em "agora" (coorte).
+- Testado via API real: 4 painéis × presets today/year respondendo.
+
+**3. Tarefas — visual:**
+- Donut macio/brilhante: borderRadius 14 (pontas arredondadas até na
+  parte reta), gradiente por fatia, spacing, glow suave atrás.
+- Board 100% FEITO: anel dourado GIRANDO (conic-gradient + mask, estilo
+  anel do Sonic) com brilho; coluna iluminada continua.
+- Troféu: movimento 3D (rotateY 720°) + EXPLOSÃO de confetes localizada
+  (radial, perto do painel de resumo — não chove mais na tela inteira).
+- Badge da sidebar mais sutil: só o círculo dourado com o número + pulso
+  suave em volta (shimmer removido).
+
+**4. Agenda de Cirurgias — azul claro vítreo:**
+- Tema trocado: dourado → azul claro vítreo (SURGERY_GRAD #0284C7→#7DD3FC,
+  classe .cevico-glass com brilho interno; cores dos médicos intactas).
+- Faixa "🔪 trilho paralelo" REMOVIDA; título "Agenda de Cirurgias" em
+  destaque (maior, texto em gradiente azul).
+- Modal do trilho = "Agendar cirurgia" (título, botão salvar e botão do
+  topo); Editar/Excluir também no vocabulário certo.
+- **Local da cirurgia** (clínicas parceiras): campo no lugar de Unidade no
+  trilho de cirurgias; cadastro em modal próprio (admin, "gerenciar") —
+  agenda_config.surgery_locations (padrão IOP); KPI "no mês" por local;
+  update_agenda aceita surgery_locations (testado via API real).
+
+Testado no Docker: migration ok, Vite compila os 7 arquivos, follow-up
+ponta a ponta, home 4 painéis via API, locais round-trip via API.
+
+## 34. RODADA 2026-07-15 (2) — TEMAS de lugares + sala cirúrgica + blocos proporcionais + Gestor + agentes Fechamento/NPS ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Sem migration nova (lote 27-34 segue com 4). Pedidos do Guilherme (refs Santorini).
+
+**1. 🎨 SISTEMA DE TEMAS (ideia do Guilherme — lugares maravilhosos):**
+- helper cevicoThemes.js: CEVICO (padrão) + Santorini 🇬🇷 (azul cristalino/
+  branco/cinza) + Flor del Mar 🌺 (fúcsia+azul) + Flamingo 🦩 (rosa-coral) +
+  Praia do Caribe 🏝️ (turquesa) + Aloe Vera 🌿 (verde). Cada tema define
+  primary/action/accent/pill/soft/ring/glass (efeito vítreo .cevico-glass).
+- Admin escolhe no botão 🎨 (header da Agenda) → agenda_config.theme →
+  Agenda (título, Hoje, visões, trilhos, KPIs, círculos de hoje, modais) e
+  Tarefas (colunas, tiles, ícone) seguem o tema. Tema padrão = visual atual.
+- Round-trip testado via API (theme:'santorini' salva e devolve).
+
+**2. Agenda de Cirurgias completada:**
+- OCUPAÇÃO % no trilho de cirurgias (dia/semana/mês + chip por dia), a
+  partir das JANELAS DA SALA CIRÚRGICA — modal próprio (substitui "Janelas
+  dos médicos" no trilho): clínica (locais) + dia + início/fim + bloco
+  (30/60/90/120 min); agenda_config.surgery_windows; scanAgenda reaproveitado
+  (window.unit = key do local). Visão Dia mostra os blocos da sala como os
+  dos médicos (livre clica-agenda / ocupado / cadeado).
+- Header realinhado em 2 LINHAS: título+ação | navegação; visões·trilho·
+  janelas·filtro·tema numa linha só com scroll lateral (mobile/tablet/desktop).
+- Pré-definições com cores do tema (pill).
+
+**3. Blocos PROPORCIONAIS ao tempo (semana e dia):**
+- consulta = 15 min (25% da hora) · cirurgia = 60 min. Semana: célula da
+  hora relativa, bloco posicionado por minuto com altura proporcional.
+- Dia: "Linha do tempo do dia" virou grade estilo Google (1h = 88px, bloco
+  mede o tempo, clique no vazio agenda de 15 em 15) + seção "Conferência do
+  dia" com os cards completos (botões que o Guilherme elogiou, intactos).
+
+**4. Meu Painel — GESTOR + atribuição por pessoa:**
+- 5º painel "Gestor" (grafite): leads, taxa de agendamento, comparecimento,
+  fechamento de cirurgias + destaque Satisfação (NPS).
+- Admin (engrenagem nas pílulas): define o painel de CADA agente
+  (agenda_config.panel_assignments); agente atribuído fica TRAVADO nele
+  (frontend só mostra o painel dele; backend força também).
+
+**5. Cirurgia — conferência ampliada + 💰 (admin):**
+- Botão "⚠️ Veio e não fez" (só cirurgia): abre campo de MOTIVO → grava
+  attendance='attended_not_done' + motivo na descrição. Chips novos.
+- 💰 valor da cirurgia SÓ ADMIN no card da conferência: valor do card do
+  CRM (match por telefone) + forma de pagamento captada pela IA
+  (contact.surgery_closing). Testado via API real (5000 · PIX à vista).
+
+**6. Agentes de IA novos (6 no total):**
+- 💰 MONITOR DE FECHAMENTO (key 'closing', Sonnet/médio): ação de coluna →
+  extrai valor fechado/forma de pagamento/data da cirurgia (structured
+  output), grava no contato + preenche o valor do card se vazio.
+- 🌟 AGENTE DE NPS (key 'nps', Haiku): ação de coluna (ex. Pós-Operatório)
+  → lê a nota 0-10 e ETIQUETA o contato (nps-9-10/nps-7-8/nps-0-6) +
+  grava contact.nps. Ambos nos cards de Agentes, no seletor "Adicionar
+  agente de IA" (closing_extract/nps_score no fire job) e no kill switch.
+- Dashboard CRM: bloco "Satisfação dos pacientes (NPS)" — % satisfação,
+  NPS score e barras 9-10/7-8/0-6, recorte nos cards que chegaram ao
+  pós-operatório. Testado: 1 promotor → 100% ✓.
+
+**7. Dashboard CRM — visual:**
+- Doughnuts (caixas + etiquetas) no estilo do donut de Tarefas: pontas
+  arredondadas (borderRadius 14), gradiente por fatia, spacing.
+- Etiquetas: lista virou COLUNAS arredondadas em gradiente (mín. 33%).
+- Responsividade: barras com mínimo 33% preenchido + gradientes tema
+  "Flor del Mar" (fúcsia/azul-mar).
+
+Dados de teste local (conta 3): card no Pós Operatório c/ nps-9-10 e
+surgery_closing 5000/PIX, cirurgia "Cirurgia Teste NPS" hoje 16h no local
+IOP c/ attended_not_done + motivo, janela da sala ter 08-12h IOP, tema
+santorini APLICADO (volte pro 'cevico' no 🎨 se quiser o visual padrão).
+Testado: Vite 8 arquivos ✓, tema/sala/painéis round-trip ✓, gestor ✓,
+NPS dashboard ✓, valor admin ✓, attended_not_done ✓.
+
+## 35. RODADA 2026-07-15 (3) — Feedback dos temas + Dashboard dos Médicos + NPS 5 faixas + celebração de emojis ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Sem migration (lote 27-35 segue com 4). Feedback do Guilherme sobre a rodada 34.
+
+**1. Temas — Consultas × Cirurgias bem mais evidente:**
+- Cada tema ganhou surgeryGrad/surgeryText: o trilho de cirurgias usa a
+  MESMA cor do tema "puxando para o branco", com texto na cor escura
+  (classe .cevico-surgery-ink força a tinta nos filhos). Padrão CEVICO
+  continua com o azul vítreo próprio.
+- Tema agora em TODOS os botões do ambiente: Imprimir lista (accent),
+  modal janelas dos médicos, Nova tarefa/Salvar das Tarefas, calendário.
+- Locais padrão: IOP (geralmente PRK) + Ocular Surgery (geralmente Lasik)
+  — atualizados também no banco local.
+
+**2. 📅 Calendário INTERATIVO:** clicar no rótulo do período (ex. "Julho de
+2026") abre popover arredondado com o mês navegável — clicou no dia, o
+calendário vai pra lá (funciona nos dois trilhos; botão Hoje incluso).
+
+**3. Duração configurável dos blocos:** a duração do agendamento vem do
+BLOCO da janela onde o horário cai (médicos ou sala cirúrgica) — é só
+editar as janelas; sem janela: consulta 15 min / cirurgia 60. Sala
+cirúrgica ganhou opções de 10/15/20 min. 💰 forma de pagamento foi para a
+DIREITA da linha na conferência.
+
+**4. Agentes closing/nps APARECENDO:** bug — loadAgents reconstruía a lista
+só com os 4 antigos; agora Monitor de Fechamento e Agente de NPS têm card
+completo em Automações → Agentes de IA (Editar/Salvar/Publicar/interruptor).
+
+**5. CRM board:** janela de carga ganhou "Este ano"; "Tudo" virou "Desde o
+início"; pílulas de período ganharam "Este ano" e "Desde o início".
+
+**6. NPS em 5 FAIXAS oficiais:** 9-10 promotores · 7-8 · 5-6 · 3-4 · 1-2
+detratores (0 conta em 1-2). NpsService etiqueta nps-9-10/7-8/5-6/3-4/1-2;
+Dashboard CRM mostra as 5 barras; nps_score = promotores − (notas ≤6).
+
+**7. Meu Painel:**
+- Banner com letras SEMPRE brancas (independe de tema claro/escuro).
+- Saúde da "Agenda de Cirurgias" (sala cheia 7d + aproveitamento 7d, das
+  janelas da sala) nos painéis Médicos, Condução, Cirurgias e Gestor.
+- Painel do médico: tiles novos — Conversão em cirurgia (indicados que
+  viraram cirurgia marcada, match por telefone) e NPS médio dos pacientes.
+
+**8. 📊 DASHBOARD DOS MÉDICOS (Relatórios → Dashboard dos Médicos, admin):**
+- Ranking 🥇 de conversão consulta→cirurgia por médico (consultas,
+  comparecimento, indicações + taxa, conversões, cirurgias realizadas,
+  NPS médio dos pacientes dele — rastreado pelo telefone do contato).
+- Volume de cirurgias por clínica (IOP / Ocular Surgery) com realizadas.
+- Presets semana/mês/mês passado/ano/desde o início.
+- Backend: GET crm/doctors_dashboard (doctors_dashboards_controller).
+
+**9. Tarefas — celebração v2 (tchau troféus):**
+- EXPLOSÃO DE EMOJIS aleatórios do set ❤️😧🥳👏⭐️🔥🥇🚀❤️‍🔥💖✅🔝💎 —
+  60 no "antes do prazo", 150 quando o board zera (sempre diferente).
+- Board 100%: ANEL DOURADO 3D (sombreado metálico, gira em torno do
+  próprio eixo — referência das argolas) + "Parabéns, 100% das tarefas
+  concluídas. Você desenrola mesmo!".
+
+Testado: Vite 10 arquivos ✓, doctors_dashboard via API (ranking + IOP) ✓,
+painel médico c/ conversão ✓, NPS 5 faixas ✓, locais IOP+Ocular Surgery ✓.
+
+## 36. RODADA 2026-07-15 (4) — Prazo da conferência, Consultor Comercial, colunas nos agentes, fix Tarefas ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Sem migration (lote 27-36 segue com 4). ⚠️ cron NOVO no schedule.yml
+(crm_attendance_reminder_job */30) — produção: reimplantar sidekiq.
+
+**1. 🐛 FIX "Tarefas não abre":** o watch da explosão avaliava o computed
+allDone na montagem, antes de `stats` existir (TDZ) → página quebrava.
+Movido para depois de stats. + celebração "antes do prazo" = só 3 emojis
+(board zerado continua 150).
+
+**2. ⏰ PRAZO DA CONFERÊNCIA DO DIA (Crm::AttendanceReminderJob, cron */30):**
+- Config no modal Janelas dos médicos → seção Conferência: responsável das
+  CONSULTAS (Elisangela), responsável das CIRURGIAS (Gabriela) e horário
+  limite (padrão 19:00) — agenda_config.attendance_owners.
+- Passou do prazo com agendamento do dia sem ✓/✗ → tarefa automática
+  "✅ Concluir a conferência do dia — Consultas/Cirurgias (dd/mm)" pra
+  pessoa certa (prioridade alta, 1 por tipo/dia, sem duplicar) → badge
+  dourado na sidebar + aviso "esperando você" no Meu Painel dela.
+- Testado: criou p/ responsável, 2ª rodada não duplicou ✓.
+- Seção da visão Dia destacada: "✅ Conferência das Consultas/Cirurgias do
+  dia" + chip "N pendente(s)" / "tudo conferido ✓".
+
+**3. Colunas de atuação em TODOS os agentes de coluna:**
+- Endpoint genérico sync_agent_stages (marker "Agente de IA: X (automático)")
+  p/ Analista/Monitor de Fechamento/NPS — pills de colunas no card de cada
+  agente (sugestões: closing → "Indicação de Cirurgia"; nps → Pós-Operatório).
+- MODO PROGRAMAÇÃO: automação com agente de IA ganhou FAIXA colorida no
+  card da coluna (nome do agente + LIGADO/desligado + botão "editar") que
+  abre modal de EDIÇÃO RÁPIDA dali mesmo (liga/desliga, modelo, prompt —
+  salva e publica na hora; Teleport p/ manter raiz única do componente).
+
+**4. 💼 CONSULTOR COMERCIAL (7º agente, key 'sales', Opus/alto):**
+- AO VIVO: botão "💼 Ajuda com objeção (IA)" no painel da conversa —
+  identifica a objeção (preço/medo/vou pensar/família...), leitura do
+  paciente, 2-3 respostas prontas (clique copia) e próximo passo.
+  POST crm/conversation_summary/sales_help (Crm::SalesCoachService#coach).
+- GESTÃO: botão "Gerar insights comerciais" no card do agente — analisa
+  as conversas que FECHARAM cirurgia (contatos com surgery_closing do
+  Monitor de Fechamento) e grava relatório (o que funciona / objeções
+  vencidas / melhorias / recomendações) em ai_config.agents.sales.insights
+  (Crm::SalesInsightsJob, fila low; POST crm/settings/sales_insights).
+- PROMPTS MELHORADOS de todos os agentes novos: closing e nps ganharam
+  contexto CEVICO completo (unidades, IOP=PRK/Ocular Surgery=Lasik,
+  valores de referência, "investimento" não "preço", regras anti-invenção);
+  sales tem script de objeções e tom ≤150 chars sem emoji.
+
+**5. Sidebar — Radar:** badge do Meu Painel saiu do verde → LARANJA-
+AVERMELHADO (cor do agente) pulsando; o ÍCONE do menu pulsa junto, no
+mesmo ritmo (countVariant 'radar').
+
+**6. Agenda de Cirurgias — cores:** IOP = azul claro (#38BDF8), Ocular
+Surgery = PRATEADO (#94A3B8) — cards, KPIs, janelas da sala e pontinhos
+seguem a cor da clínica. KPI "Nesta semana" agora também "puxa pro branco"
+no trilho (surgerySoft por tema — meio-termo, menos claro que o "hoje").
+
+**7. Dashboard dos Médicos — mais indicadores:**
+- 💰 FATURAMENTO GERADO pela indicação de cada médico (soma dos fechamentos
+  dos indicados que viraram cirurgia; fallback: valor do card).
+- Consultas por UNIDADE (Tatuapé/Paulista): volume + taxa de comparecimento.
+- NPS dos pacientes que operaram em CADA CLÍNICA (IOP × Ocular Surgery).
+
+Testado: Vite 9 arquivos ✓, job do prazo ✓ (cria 1x, não duplica),
+doctors_dashboard c/ unidades+revenue via API ✓, sidekiq local reiniciado
+(cron novo). Produção: lembrar de reimplantar SIDEKIQ junto (cron novo).
+
+**Ajuste fino pós-feedback (mesma rodada):** anel das Tarefas agora fica
+PARADO — quem gira (sentido horário) é o BRILHO do conic-gradient, com
+pulso dourado junto (sem rotateY); explosão de emojis nasce do CENTRO do
+anel quando o board completa; cada explosão usa 1 TIPO só de emoji
+(sorteado do set — 150 no board zerado, 3 no antes-do-prazo); botão "Nova
+tarefa" reposicionado abaixo do título com ícone (mesmo padrão da Agenda);
+título da conferência sem o emoji ✅.
+
+**Ajuste fino 2 (mesma rodada):** legenda do donut de Tarefas ARREDONDADA
+(usePointStyle); sequência do board zerado = anel TREME (0,75s) → explosão
+de emojis do centro → anel vira VERDE pulsante com brilho horário, e TODA
+a tela (colunas, botão Nova tarefa, ícones, tiles do resumo) assume o
+verde do anel enquanto o board estiver 100%; Saúde da Agenda do Meu Painel
+reorganizada em 2 RETÂNGULOS SIMÉTRICOS (Consultas: 3 barras + vagas
+livres + próxima consulta · Cirurgias: sala cheia + aproveitamento +
+🎯 META DO ANO de 100 cirurgias com barra de progresso + próxima
+cirurgia); % de agendamento virou linha compacta abaixo; painel do
+MÉDICO ganhou "Com indicação" (nº + % de quem compareceu) e "Sem
+indicação" (nº + %) — backend medico_metrics c/ indication_rate/
+no_indication/no_indication_rate.
+
+**Ajuste fino 3 (mesma rodada):** meta de cirurgias virou MENSAL ("Meta do
+mês: 100 cirurgias", conta as realizadas no mês corrente); anel custom
+DESCARTADO — o anel oficial é o PRÓPRIO DONUT do Resumo: fecha verde →
+treme (0,75s) → explosão de emojis do centro → a fatia vira DOURADA e o
+donut PULSA forte em dourado no ritmo dos ícones da sidebar (2,2s);
+donutChart rastreia ringPhase p/ repintar.
+
+**Ajuste final do donut (fechado ✅):** após a explosão o donut dourado
+GIRA em sentido horário (8s, só o canvas — emojis não giram) com pulso
+REDUZIDO (drop-shadow 14px, opacidade 0,92); legenda do chart.js
+substituída por legenda PRÓPRIA em HTML, centralizada/alinhada abaixo do
+anel, que fica toda DOURADA junto com a explosão; a CAIXA do painel pulsa
+DOURADA (não mais verde) e o modo 100% da tela (colunas/botões/tiles)
+também virou dourado, acompanhando o anel.
+**+ retoque:** o emoji sorteado da explosão fica morando no CENTRO do
+donut durante a fase dourada (abriu já completo = sorteia um); o giro
+arranca RÁPIDO (2 voltas desacelerando em 1,8s) e estabiliza no ritmo
+lento de 8s.
+**+ polish do painel de resumo:** no modo 100% só a caixinha FEITO fica
+dourada (pulsando); as zeradas ficam escuras; legenda do donut em grade
+2×2 (2 de cada lado); respiros maiores (p-5, gap-3); parabéns em 2 linhas
+com destaques próprios ("Parabéns..." dourado claro + "Você desenrola
+mesmo! ✨" maior, dourado escuro).
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
-**ONDE ESTAMOS:** existe um LOTE GIGANTE NÃO COMMITADO no working tree
-(~67 arquivos entre modificados e novos), cobrindo os itens 14 a 26 deste
+**ONDE ESTAMOS (2026-07-15):** itens 14-26 JÁ ESTÃO EM PRODUÇÃO.
+PENDENTE NO WORKING TREE (itens 27 a 36, testados, AGUARDAM "pode
+subir") — ⚠️ **4 migrations aditivas** (20260714000008/09/10 +
+20260715000001); backup antes do deploy, inegociável. Item 33 = fix do
+bug do follow-up (default_scope!) + registro de atividade do robô +
+[nome] limpo + painéis por pessoa no Meu Painel + "Este ano" + Tarefas
+(donut brilhante/anel Sonic/troféu 3D/badge sutil) + Agenda de Cirurgias
+azul vítreo com locais (IOP). Itens 27-32: 27 = gatilho Mensagem criada + preço no card; 28 =
+Analista c/ script + frases; 29 = Editar/Salvar/Publicar + lote no
+Tratamento + valor→coluna; 30 = frases-chave + 📊 Resultados + caixa
+por coluna + pílulas Conversas; 31 = Agenda operacional (conferência→
+CRM, encaixe, PDF, backfill, reagendamento IA) + mover card na
+conversa; 32 = Secretário v2 (registro de atividade + colunas de
+atuação), Agenda de Cirurgias (trilho dourado), Agenda vertical
+(semana em grade horária), multi-caixas em Conversas, CRM "Este mês"
+padrão, Tarefas v2 (solicitações + troféu/confete + anel dourado +
+badges verde/dourado + aviso no Meu Painel). **3 migrations aditivas:
+…08 (crm_stages.settings), …09 (tasks attendance), …10 (tasks
+comments)** — backup antes do deploy. NOMENCLATURA: interno =
+"Secretário da Agenda"; N8N = "Atendente IA". Teste visual em
+localhost:3000 (conversa #3 conta 3 = insight simulado; Agenda hoje
+14h ×2 + 15h; tarefa "Teste solicitações"). Lembrete antigo (histórico):
+
+**ONDE ESTÁVAMOS:** existe um LOTE GIGANTE NÃO COMMITADO no working tree
+(~67 arquivos entre modificados e novos), cobrindo os itens 14 a 28 deste
 backlog (o item 13/anúncios Meta já foi pushado antes — build `f9e8cae8c`).
 TUDO testado no Docker local (rails/sidekiq/vite de pé, migrations
 aplicadas, Vite compilando, smoke tests ok). AGUARDA: teste visual do

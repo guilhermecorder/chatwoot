@@ -155,6 +155,8 @@ Rails.application.routes.draw do
             end
             resource :conversation_summary, only: [:show], controller: 'conversation_summaries' do
               post :analyze
+                post :sales_help
+              post :move_stage
             end
             resources :forms, only: [:index, :create, :update, :destroy] do
               member do
@@ -164,6 +166,10 @@ Rails.application.routes.draw do
               end
             end
             resource :retro_labels, only: [] do
+              post :preview
+              post :apply
+            end
+            resource :batch_updates, only: [] do
               post :preview
               post :apply
             end
@@ -191,11 +197,17 @@ Rails.application.routes.draw do
               post :update_sheets
               post :test_sheets
               post :update_agenda
+              post :agenda_backfill
+              post :sync_scheduler_stages
+                post :sync_agent_stages
+                post :sales_insights
               post :radar_scan
               get :ai_usage
             end
             resource :home, only: [:show], controller: 'home'
             resource :campaigns_dashboard, only: [:show], controller: 'campaigns_dashboards'
+            resource :automations_dashboard, only: [:show], controller: 'automations_dashboards'
+            resource :doctors_dashboard, only: [:show], controller: 'doctors_dashboards'
             resources :pipelines, only: [:index, :show, :create, :update, :destroy] do
               resources :stages, only: [:index, :create, :update, :destroy] do
                 collection { post :reorder }
@@ -370,7 +382,9 @@ Rails.application.routes.draw do
             end
           end
           resources :labels, only: [:index, :show, :create, :update, :destroy]
-          resources :tasks, only: [:index, :create, :update, :destroy]
+          resources :tasks, only: [:index, :create, :update, :destroy] do
+            member { post :comment }
+          end
 
           resources :notifications, only: [:index, :update, :destroy] do
             collection do

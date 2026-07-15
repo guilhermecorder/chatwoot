@@ -124,19 +124,28 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # atendente + janela de tempo, além dos minutos de espera).
     # MERGE por agente: dá para mandar só { opportunity: { enabled: true } }
     # (o interruptor da tela) sem apagar prompt/modelo/vigias já salvos.
+    # "draft" = RASCUNHO (botão Salvar): fica guardado mas os services só
+    # leem os campos publicados — Publicar copia o rascunho pros campos
+    # de verdade e manda draft: {} para limpar.
     if params[:agents].present?
-      agent_fields = [:enabled, :prompt, :model, :effort]
+      agent_fields = [:enabled, :prompt, :model, :effort, { draft: {} }]
       permitted = params.require(:agents)
                         .permit(conversation: agent_fields,
                                 form: agent_fields,
                                 scheduler: agent_fields,
+                                closing: agent_fields,
+                                nps: agent_fields,
+                                sales: agent_fields,
                                 opportunity: agent_fields + [:wait_minutes, :lookback_hours,
                                                              { stage_ids: [],
                                                                watchers: %i[stage_id user_id lookback_hours] }])
                         .to_h
       existing = cfg['agents'] || {}
       cfg['agents'] = existing.merge(permitted) do |_key, old_agent, new_agent|
-        (old_agent || {}).merge(new_agent || {})
+        merged = (old_agent || {}).merge(new_agent || {})
+        # draft vazio = limpar o rascunho (acontece no Publicar)
+        merged.delete('draft') if merged['draft'].blank?
+        merged
       end
     end
     crm_settings.update!(ai_config: cfg)
@@ -204,12 +213,154 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
     # dias inteiros fechados (feriado, congresso, folga...)
     cfg['blocked_days'] = Array(params[:blocked_days]).map(&:to_s) if params.key?(:blocked_days)
+    # locais de cirurgia (clínicas parceiras — IOP etc.) do trilho de cirurgias
+    if params.key?(:surgery_locations)
+      cfg['surgery_locations'] = Array(params[:surgery_locations]).map do |l|
+        l.permit(:key, :label).to_h
+      end.select { |l| l['label'].present? }
+    end
+    # janelas da SALA CIRÚRGICA (clínica parceira + dia + horário + bloco)
+    if params.key?(:surgery_windows)
+      cfg['surgery_windows'] = Array(params[:surgery_windows]).map do |w|
+        w.permit(:dow, :location, :start, :end, :block).to_h
+      end
+    end
+    # tema visual dos ambientes (Santorini, Flor del Mar...) — escolha do admin
+    cfg['theme'] = params[:theme].to_s if params.key?(:theme)
+    # qual versão do Meu Painel cada agente vê ({user_id => panel_key})
+    if params.key?(:panel_assignments)
+      cfg['panel_assignments'] = params.require(:panel_assignments)
+                                       .permit!.to_h.transform_values(&:to_s)
+    end
+    # conferência do dia: RESPONSÁVEIS (consultas/cirurgias) + prazo — se
+    # passar do horário sem conferir, nasce a tarefa "Concluir a conferência"
+    if params.key?(:attendance_owners)
+      cfg['attendance_owners'] = params.require(:attendance_owners)
+                                       .permit(:consulta_user_id, :cirurgia_user_id, :deadline)
+                                       .to_h
+                                       .transform_values(&:presence)
+    end
+    # conferência do dia → CRM: para onde vai o card em cada caso
+    if params.key?(:attendance_stages)
+      cfg['attendance_stages'] = params.require(:attendance_stages)
+                                       .permit(:attended_stage_id, :missed_stage_id, :indicated_stage_id,
+                                               :surgery_done_stage_id, :surgery_missed_stage_id)
+                                       .to_h.transform_values { |v| v.presence&.to_i }
+    end
     crm_settings.update!(agenda_config: cfg)
     render json: {
       agenda_windows: cfg['windows'] || [],
       agenda_blocked: cfg['blocked'] || [],
-      agenda_blocked_days: cfg['blocked_days'] || []
+      agenda_blocked_days: cfg['blocked_days'] || [],
+      attendance_stages: cfg['attendance_stages'] || {},
+      attendance_owners: cfg['attendance_owners'] || {},
+      surgery_locations: cfg['surgery_locations'] || [],
+      surgery_windows: cfg['surgery_windows'] || [],
+      agenda_theme: cfg['theme'],
+      panel_assignments: cfg['panel_assignments'] || {}
     }
+  end
+
+  # Colunas onde o Secretário da Agenda atua: a tela manda a lista de
+  # colunas e aqui as automações (card entrou → anotar na Agenda) são
+  # criadas/removidas de acordo. Só mexe nas automações com o nome-marcador —
+  # automações criadas à mão no Modo Programação ficam intactas.
+  SCHEDULER_MARKER = 'Secretário da Agenda (automático)'.freeze
+
+  def sync_scheduler_stages
+    unless Current.account_user.administrator?
+      return render json: { error: 'Apenas administradores.' }, status: :forbidden
+    end
+
+    wanted = Array(params[:stage_ids]).map(&:to_i).reject(&:zero?).uniq
+    managed = Crm::Automation.joins(stage: :pipeline)
+                             .where(crm_pipelines: { account_id: Current.account.id })
+                             .where(action_type: 'schedule_appointment', name: SCHEDULER_MARKER)
+
+    managed.where.not(stage_id: wanted).destroy_all
+    existing_ids = managed.pluck(:stage_id)
+    (wanted - existing_ids).each do |stage_id|
+      stage = Crm::Stage.joins(:pipeline)
+                        .where(crm_pipelines: { account_id: Current.account.id })
+                        .find_by(id: stage_id)
+      next if stage.blank?
+
+      Crm::Automation.create!(stage_id: stage.id, name: SCHEDULER_MARKER,
+                              trigger_type: 'card_entered', action_type: 'schedule_appointment',
+                              action_config: {}, active: true)
+    end
+
+    render json: { scheduler_stage_ids: managed.reload.pluck(:stage_id) }
+  end
+
+  # Insights comerciais do Consultor Comercial: analisa as conversas que
+  # geraram fechamento e grava o relatório p/ a gestão (job assíncrono).
+  def sales_insights
+    unless Current.account_user.administrator?
+      return render json: { error: 'Apenas administradores.' }, status: :forbidden
+    end
+
+    Crm::SalesInsightsJob.perform_later(Current.account.id)
+    render json: { success: true, message: 'Análise iniciada! Os insights aparecem aqui em 1-2 minutos.' }
+  end
+
+  # Colunas de atuação de QUALQUER agente de coluna (Analista, Monitor de
+  # Fechamento, NPS...): a tela manda agent + stage_ids e as automações
+  # marcadas são criadas/removidas — as manuais do Modo Programação ficam.
+  AGENT_STAGE_ACTIONS = {
+    'conversation' => 'ai_analyze',
+    'scheduler' => 'schedule_appointment',
+    'closing' => 'closing_extract',
+    'nps' => 'nps_score'
+  }.freeze
+
+  def agent_marker(agent)
+    agent == 'scheduler' ? SCHEDULER_MARKER : "Agente de IA: #{agent} (automático)"
+  end
+
+  def sync_agent_stages
+    unless Current.account_user.administrator?
+      return render json: { error: 'Apenas administradores.' }, status: :forbidden
+    end
+
+    agent = params[:agent].to_s
+    action = AGENT_STAGE_ACTIONS[agent]
+    return render json: { error: 'Agente desconhecido.' }, status: :unprocessable_entity if action.blank?
+
+    marker = agent_marker(agent)
+    wanted = Array(params[:stage_ids]).map(&:to_i).reject(&:zero?).uniq
+    managed = Crm::Automation.joins(stage: :pipeline)
+                             .where(crm_pipelines: { account_id: Current.account.id })
+                             .where(action_type: action, name: marker)
+
+    managed.where.not(stage_id: wanted).destroy_all
+    existing_ids = managed.pluck(:stage_id)
+    (wanted - existing_ids).each do |stage_id|
+      stage = Crm::Stage.joins(:pipeline)
+                        .where(crm_pipelines: { account_id: Current.account.id })
+                        .find_by(id: stage_id)
+      next if stage.blank?
+
+      Crm::Automation.create!(stage_id: stage.id, name: marker,
+                              trigger_type: 'card_entered', action_type: action,
+                              action_config: {}, active: true)
+    end
+
+    render json: { agent: agent, stage_ids: managed.reload.pluck(:stage_id) }
+  end
+
+  # Preencher a Agenda com o histórico: varre conversas com confirmação de
+  # agendamento e registra as consultas (Agente de Agendamento). Admin-only.
+  def agenda_backfill
+    unless Current.account_user.administrator?
+      return render json: { error: 'Apenas administradores.' }, status: :forbidden
+    end
+
+    Crm::AgendaBackfillJob.perform_later(Current.account.id, {
+                                           'since_days' => params[:since_days].to_i,
+                                           'limit' => params[:limit].to_i
+                                         })
+    render json: { success: true, message: 'Preenchimento da agenda iniciado! As consultas aparecem na Agenda conforme as conversas são lidas.' }
   end
 
   # Radar PONTUAL: varredura única (coluna/etiqueta/período/atendente),
@@ -290,7 +441,25 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       sheets: sheets_json(s),
       agenda_windows: (s.agenda_config || {})['windows'] || [],
       agenda_blocked: (s.agenda_config || {})['blocked'] || [],
-      agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || []
+      agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || [],
+      attendance_stages: (s.agenda_config || {})['attendance_stages'] || {},
+      attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},
+      surgery_locations: (s.agenda_config || {})['surgery_locations'] || [],
+      surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
+      agenda_theme: (s.agenda_config || {})['theme'],
+      panel_assignments: (s.agenda_config || {})['panel_assignments'] || {},
+      agenda_backfill_last_run: (s.agenda_config || {})['backfill_last_run'],
+      scheduler_log: Array((s.agenda_config || {})['scheduler_log']).first(30),
+      scheduler_stage_ids: Crm::Automation.joins(stage: :pipeline)
+                                          .where(crm_pipelines: { account_id: Current.account.id })
+                                          .where(action_type: 'schedule_appointment', name: SCHEDULER_MARKER)
+                                          .pluck(:stage_id),
+      agent_stage_ids: AGENT_STAGE_ACTIONS.to_h do |agent, action|
+        [agent, Crm::Automation.joins(stage: :pipeline)
+                               .where(crm_pipelines: { account_id: Current.account.id })
+                               .where(action_type: action, name: agent_marker(agent))
+                               .pluck(:stage_id)]
+      end
     }
   end
 
@@ -311,7 +480,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'conversation' => Crm::ConversationInsightService::SYSTEM_PROMPT,
       'form' => Crm::FormInsightService::SYSTEM_PROMPT,
       'scheduler' => Crm::AppointmentExtractionService::SYSTEM_PROMPT,
-      'opportunity' => Crm::OpportunityRadarService::SYSTEM_PROMPT
+      'opportunity' => Crm::OpportunityRadarService::SYSTEM_PROMPT,
+      'closing' => Crm::SurgeryClosingService::SYSTEM_PROMPT,
+      'nps' => Crm::NpsService::SYSTEM_PROMPT,
+      'sales' => Crm::SalesCoachService::SYSTEM_PROMPT
     }
     {
       api_key_set: cfg['api_key'].present?,
@@ -321,6 +493,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       opportunity_last_run_at: cfg.dig('opportunity_state', 'last_run_at'),
       opportunity_alerts_count: visible_alerts_count(cfg),
       opportunity_last_run: cfg.dig('opportunity_state', 'last_run'),
+      sales_insights: cfg.dig('agents', 'sales', 'insights'),
       agents: default_prompts.to_h do |key, default_prompt|
         recommended = Crm::AiAgentConfig::RECOMMENDED[key] || {}
         [key, {
@@ -341,6 +514,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
               lookback_hours: w['lookback_hours'].presence&.to_i || 24
             }
           end,
+          draft: agents.dig(key, 'draft').presence,
           default_prompt: default_prompt
         }]
       end
