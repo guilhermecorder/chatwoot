@@ -35,10 +35,11 @@ class Crm::ConversationInsightService
       },
       frases_sugeridas: {
         type: 'array',
-        minItems: 2,
-        maxItems: 3,
+        # a API de structured outputs só aceita minItems 0 ou 1 — a
+        # quantidade (2 a 3) é garantida pela description + prompt
+        minItems: 1,
         items: { type: 'string' },
-        description: 'Frases prontas, no tom do script CEVICO, para a atendente enviar agora (2 a 3 opções)'
+        description: 'EXATAMENTE 2 a 3 frases prontas, no tom do script CEVICO, para a atendente enviar agora'
       }
     },
     required: %w[interesse resumo proximo_passo etapa_do_script frases_sugeridas],
