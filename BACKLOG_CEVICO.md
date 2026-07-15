@@ -1395,14 +1395,19 @@ mesmo! ✨" maior, dourado escuro).
 
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
-**ONDE ESTAMOS (2026-07-15, noite):** itens 14-26 EM PRODUÇÃO. Itens
-27-36 APROVADOS ("pode subir" 15/07) → 9 commits temáticos PUSHADOS na
-develop (bbbaf2d86..1d3e78b6f + docs c038fde96). BUILD VERDE ✅ (run
-29402847885). FALTA CONFIRMAR (Guilherme estava fazendo ao encerrar a
-sessão de 15/07): Implantar WEB + SIDEKIQ no EasyPanel (sidekiq é
-obrigatório: cron novo crm_attendance_reminder_job) e colar a chave da
-Anthropic em CRM → Integrações → Claude (ele estava com o modal aberto;
-modelo da integração é só fallback — cada agente usa o recomendado). Reversão: reimplantar a imagem
+**ONDE ESTAMOS (2026-07-15, manhã — TUDO NO AR ✅):** itens 14-36 EM
+PRODUÇÃO (deploy web+sidekiq confirmado pelo Guilherme). Chave da
+Anthropic CONECTADA (US$ 20 em créditos; "Testar conexão" ok) e o
+Analista de Conversas TESTADO E FUNCIONANDO em produção. Dois hotfixes
+pós-deploy já no ar (commits 8443b4563 + fe36ebc53): (1) schema do
+Analista — API de structured outputs não aceita minItems>1; validador
+rodado nos 7 agentes, todos ok; (2) robô de follow-up DOMESTICADO após
+rajada das 6h13 (fix destravou âncoras antigas): expediente 08h-20h SP,
+etapa vencida há +3h = descartada sem enviar ("momento perdido" ⏭️ no
+registro), máx 1 cutucada por conversa por rodada. PRÓXIMOS PASSOS
+sugeridos: configurar responsáveis/prazo da conferência, ligar demais
+agentes gradualmente (colunas de atuação), acompanhar "Gasto com os
+agentes", escolher tema no 🎨. Reversão: reimplantar a imagem
 anterior no histórico do EasyPanel (migrations aditivas). Pós-deploy:
 configurar responsáveis/prazo da conferência (Agenda → Janelas →
 Conferência), ligar os agentes novos (opt-in, nascem desligados) e
