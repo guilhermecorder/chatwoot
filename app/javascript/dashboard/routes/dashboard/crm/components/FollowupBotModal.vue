@@ -352,7 +352,9 @@ const save = async () => {
             </div>
           </div>
           <p class="text-[11px] text-n-slate-9 mt-2">
-            Use <code class="bg-n-alpha-2 px-1 rounded">[nome]</code> para o primeiro nome do paciente.
+            Use <code class="bg-n-alpha-2 px-1 rounded">[nome]</code> para o primeiro nome do paciente —
+            o robô limpa emojis e símbolos do nome do WhatsApp e, se o contato não tiver nome aproveitável,
+            escreve "oi" no lugar (sem "Oi oi").
             Após 24h de silêncio, o WhatsApp só entrega mensagem MODELO — use etapas de modelo para prazos em dias.
           </p>
         </div>

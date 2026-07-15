@@ -57,7 +57,24 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
       exclude_labels: b.exclude_labels || [],
       starts_at: b.starts_at,
       ends_at: b.ends_at,
-      created_at: b.created_at
+      created_at: b.created_at,
+      last_run_at: b.last_run_at,
+      window_status: window_status(b),
+      activity: activity_json(b)
     }
+  end
+
+  # por que o robô pode estar parado — pra tela avisar em vez de falhar em silêncio
+  def window_status(bot)
+    return 'pausado' unless bot.active
+    return 'janela_encerrada' if bot.ends_at.present? && Time.current > bot.ends_at
+    return 'ainda_nao_comecou' if bot.starts_at.present? && Time.current < bot.starts_at
+
+    'ok'
+  end
+
+  def activity_json(bot)
+    log = bot.activity_log.presence || {}
+    { last_run: log['last_run'], events: Array(log['events']).first(30) }
   end
 end

@@ -1,4 +1,4 @@
-# Roda a cada 15 min (schedule.yml). Para cada robô ativo, procura conversas
+# Roda a cada 2 min (schedule.yml). Para cada robô ativo, procura conversas
 # em que o PACIENTE ficou em silêncio (última mensagem foi do atendimento) e
 # envia as "cutucadas" da cadência conforme o tempo decorrido.
 #
@@ -6,10 +6,15 @@
 # Assim, enviar uma cutucada (nova outgoing) NÃO reinicia o cronômetro.
 # Se o paciente responder (nova incoming), a âncora deixa de existir e o
 # marcador é limpo — a cadência para sozinha.
+#
+# Cada robô guarda seu REGISTRO DE ATIVIDADE (activity_log): resumo da última
+# rodada com os motivos de cada conversa não cutucada + histórico dos envios.
+# É onde se entende, em produção, por que o robô está (ou não) enviando.
 class Crm::FollowupBotJob < ApplicationJob
   queue_as :scheduled_jobs
 
   LOOKBACK = 3.days # não cutuca conversas antigas demais
+  EVENTS_CAP = 60   # histórico de envios/erros guardado por robô
 
   def perform
     Crm::FollowupBot.active.includes(:inbox).find_each { |bot| process_bot(bot) }
@@ -18,10 +23,13 @@ class Crm::FollowupBotJob < ApplicationJob
   private
 
   def process_bot(bot)
-    return unless bot.within_window? # janela "começa em / para em"
+    unless bot.within_window? # janela "começa em / para em"
+      record_run(bot, status: 'fora_da_janela')
+      return
+    end
 
     steps = bot.ordered_steps
-    return if steps.blank?
+    return record_run(bot, status: 'sem_etapas') if steps.blank?
 
     # UMA conversa por contato: a de última atividade (caixa prioritária) —
     # evita cutucar o mesmo paciente em várias caixas de entrada ao mesmo tempo.
@@ -30,11 +38,18 @@ class Crm::FollowupBotJob < ApplicationJob
           .order('conversations.contact_id, conversations.last_activity_at DESC')
           .map(&:id)
 
+    run = { status: 'ok', candidates: ids.size, sent: 0, reasons: Hash.new(0) }
+    events = []
+
     Conversation.where(id: ids).find_each do |conversation|
-      process_conversation(bot, conversation, steps)
+      process_conversation(bot, conversation, steps, run, events)
     rescue StandardError => e
+      run[:reasons]['erro'] += 1
+      events << event_for(conversation, 'error', note: e.message.truncate(120))
       Rails.logger.error("[CEVICO followup] conversa #{conversation.id}: #{e.message}")
     end
+
+    record_run(bot, **run, events: events)
   end
 
   def conversations(bot)
@@ -56,41 +71,58 @@ class Crm::FollowupBotJob < ApplicationJob
     scope
   end
 
-  def process_conversation(bot, conversation, steps)
-    return unless labels_match?(bot, conversation.contact)
+  def process_conversation(bot, conversation, steps, run, events)
+    return run[:reasons]['etiquetas'] += 1 unless labels_match?(bot, conversation.contact)
 
     anchor = silence_anchor(conversation)
-    return if anchor.nil? # paciente falou por último (ou sem mensagens do agente)
+    # paciente falou por último → quem deve responder é o atendimento, não o robô
+    return run[:reasons]['paciente_falou_ultimo'] += 1 if anchor.nil?
 
-    state = followup_state(conversation, bot, anchor)
+    stage_entered = stage_entry_at(bot, conversation) # nil se não for robô de coluna
+    state = followup_state(conversation, bot, anchor, stage_entered)
     silence_hours = (Time.current - anchor) / 3600.0
-    stage_hours = stage_entry_hours(bot, conversation) # nil se não for robô de coluna
+    sent_now = 0
 
     steps.each_with_index do |step, index|
-      next if state['sent'].include?(index)
+      from_stage = step['delay_from'] == 'stage_entry'
+      # etapas "desde a entrada na coluna" têm marcador PRÓPRIO, amarrado à
+      # entrada na coluna — resposta do paciente não as redispara.
+      sent_list = from_stage ? state['stage_sent'] : state['sent']
+      next if sent_list.include?(index)
 
-      # tipo da contagem: 'silence' (padrão — tempo sem resposta) ou
-      # 'stage_entry' (desde que o card entrou na coluna)
-      base_hours = step['delay_from'] == 'stage_entry' ? stage_hours : silence_hours
+      base_hours = from_stage ? hours_since(stage_entered) : silence_hours
       next if base_hours.nil? || base_hours < Crm::FollowupBot.step_delay_hours(step)
 
       send_nudge(bot, conversation, step)
-      state['sent'] << index
+      sent_list << index
+      sent_now += 1
+      events << event_for(conversation, 'sent', note: step_label(step))
     end
 
-    persist_state(conversation, bot, anchor, state)
+    if sent_now.positive?
+      run[:sent] += sent_now
+      persist_state(conversation, bot, anchor, state)
+    elsif (state['sent'] + state['stage_sent']).size >= steps.size
+      run[:reasons]['cadencia_completa'] += 1
+    else
+      run[:reasons]['aguardando_prazo'] += 1
+    end
   end
 
-  # horas desde que o card entrou na coluna do robô (só robô de coluna)
-  def stage_entry_hours(bot, conversation)
+  # quando o card entrou na coluna do robô (só robô de coluna)
+  def stage_entry_at(bot, conversation)
     return nil unless bot.stage_scoped? && conversation.contact_id
 
     crm = Crm::Contact.find_by(pipeline_id: bot.stage.pipeline_id, contact_id: conversation.contact_id)
     return nil unless crm
 
-    entered = Crm::StageLog.where(crm_contact_id: crm.id, stage_id: bot.stage_id).maximum(:entered_at)
-    entered ||= crm.updated_at
-    (Time.current - entered) / 3600.0
+    Crm::StageLog.where(crm_contact_id: crm.id, stage_id: bot.stage_id).maximum(:entered_at) || crm.updated_at
+  end
+
+  def hours_since(time)
+    return nil if time.nil?
+
+    (Time.current - time) / 3600.0
   end
 
   # Filtros "tem / não tem": só cutuca quem TEM todas as etiquetas exigidas
@@ -109,27 +141,55 @@ class Crm::FollowupBotJob < ApplicationJob
     true
   end
 
-  # primeira outgoing depois da última incoming; nil se a última msg for do paciente
+  # primeira outgoing depois da última incoming; nil se a última msg for do paciente.
+  #
+  # ⚠️ BUG HISTÓRICO (corrigido 2026-07-15): Message tem default_scope
+  # ordenando por created_at ASC, que vence o .order(desc) — "última mensagem"
+  # vinha a PRIMEIRA da conversa. O robô só funcionava quando a conversa
+  # começava com mensagem do atendimento (caso do teste) e nunca nas conversas
+  # reais (paciente fala primeiro). Comparação por maximum() não sofre disso.
   def silence_anchor(conversation)
     msgs = conversation.messages.where(message_type: [:incoming, :outgoing])
-    last = msgs.order(created_at: :desc).first
-    return nil unless last&.outgoing?
-
     last_incoming_at = msgs.incoming.maximum(:created_at)
+    last_outgoing_at = msgs.outgoing.maximum(:created_at)
+    return nil if last_outgoing_at.nil? # atendimento nunca falou
+    return nil if last_incoming_at && last_incoming_at >= last_outgoing_at # paciente falou por último
+
     scope = msgs.outgoing
     scope = scope.where('created_at > ?', last_incoming_at) if last_incoming_at
     scope.minimum(:created_at)
   end
 
-  def followup_state(conversation, bot, anchor)
+  # Estado POR ROBÔ (formato novo: {'bots' => {bot_id => {...}}}) — dois robôs
+  # ativos não apagam mais o marcador um do outro. Migra o formato antigo.
+  #
+  # 'sent' (etapas por silêncio) zera quando a âncora muda (paciente respondeu
+  # → nova cadência). 'stage_sent' (etapas por entrada na coluna) zera só
+  # quando o card ENTRA DE NOVO na coluna — resposta do paciente não redispara.
+  def followup_state(conversation, bot, anchor, stage_entered)
     stored = conversation.additional_attributes&.dig('cevico_followup') || {}
-    same = stored['bot_id'] == bot.id && stored['anchor'] == anchor.iso8601
-    same ? { 'sent' => Array(stored['sent']) } : { 'sent' => [] }
+    stored = { 'bots' => { stored['bot_id'].to_s => stored } } if stored['bot_id'].present? # legado
+    mine = stored.dig('bots', bot.id.to_s) || {}
+    stage_key = stage_entered&.iso8601
+
+    {
+      'sent' => mine['anchor'] == anchor.iso8601 ? Array(mine['sent']) : [],
+      'stage_sent' => mine['stage_key'] == stage_key ? Array(mine['stage_sent']) : [],
+      'stage_key' => stage_key
+    }
   end
 
   def persist_state(conversation, bot, anchor, state)
     attrs = conversation.additional_attributes || {}
-    attrs['cevico_followup'] = { 'bot_id' => bot.id, 'anchor' => anchor.iso8601, 'sent' => state['sent'] }
+    stored = attrs['cevico_followup'] || {}
+    stored = { 'bots' => { stored['bot_id'].to_s => stored } } if stored['bot_id'].present? # legado
+    stored['bots'] ||= {}
+
+    stored['bots'][bot.id.to_s] = {
+      'anchor' => anchor.iso8601, 'sent' => state['sent'],
+      'stage_key' => state['stage_key'], 'stage_sent' => state['stage_sent']
+    }
+    attrs['cevico_followup'] = stored
     conversation.update_column(:additional_attributes, attrs)
   end
 
@@ -149,10 +209,23 @@ class Crm::FollowupBotJob < ApplicationJob
     )
   end
 
-  # variáveis simples: [nome] → primeiro nome do paciente
+  # [nome] → primeiro nome do paciente, LIMPO: sem emojis/números/símbolos
+  # (nomes de WhatsApp vêm sujos). Sem nome aproveitável → "oi" no lugar,
+  # evitando "Oi oi" quando a mensagem já cumprimenta antes.
   def render_message(text, conversation)
-    name = conversation.contact&.name.to_s.split.first || ''
-    text.to_s.gsub(/\[nome\]/i, name)
+    name = sanitized_first_name(conversation.contact)
+    out = text.to_s.gsub(/\[nome\]/i) { name.presence || 'oi' }
+    out = out.gsub(/\b(oi|olá|ola|opa)([\s,]+)oi\b/i, '\1') if name.blank?
+    out.gsub(/ {2,}/, ' ')
+  end
+
+  def sanitized_first_name(contact)
+    raw = contact&.name.to_s
+    cleaned = raw.gsub(/[^\p{L}\p{M}\s'-]/, ' ').squish # só letras (emoji/nº fora)
+    first = cleaned.split.first.to_s
+    return '' if first.length < 2 # sobra de símbolo/letra solta não é nome
+
+    first.capitalize
   end
 
   # substitui [nome] também nos parâmetros preenchidos do modelo
@@ -160,5 +233,32 @@ class Crm::FollowupBotJob < ApplicationJob
     JSON.parse(render_message(params.to_json, conversation))
   rescue JSON::ParserError
     params
+  end
+
+  # ── registro de atividade ──
+  def step_label(step)
+    value = step['delay_value'].presence || step['delay_hours']
+    unit = { 'minutes' => 'min', 'days' => 'd' }.fetch(step['delay_unit'], 'h')
+    "cutucada de #{value}#{unit}"
+  end
+
+  def event_for(conversation, type, note: nil)
+    {
+      'at' => Time.current.iso8601,
+      'type' => type,
+      'conversation_id' => conversation.display_id,
+      'contact' => conversation.contact&.name.to_s.truncate(40),
+      'note' => note
+    }.compact
+  end
+
+  def record_run(bot, status:, candidates: 0, sent: 0, reasons: {}, events: [])
+    log = bot.activity_log.presence || {}
+    log['last_run'] = {
+      'at' => Time.current.iso8601, 'status' => status,
+      'candidates' => candidates, 'sent' => sent, 'reasons' => reasons.to_h
+    }
+    log['events'] = (Array(events) + Array(log['events'])).first(EVENTS_CAP)
+    bot.update_columns(activity_log: log, last_run_at: Time.current) # rubocop:disable Rails/SkipsModelValidations
   end
 end

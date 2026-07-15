@@ -4,8 +4,10 @@
 #
 #  id              :bigint           not null, primary key
 #  active          :boolean          default(TRUE), not null
+#  activity_log    :jsonb            not null
 #  ends_at         :datetime
 #  exclude_labels  :jsonb            not null
+#  last_run_at     :datetime
 #  name            :string           not null
 #  required_labels :jsonb            not null
 #  starts_at       :datetime
