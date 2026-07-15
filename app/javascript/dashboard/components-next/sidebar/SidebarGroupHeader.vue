@@ -13,6 +13,9 @@ const props = defineProps({
   isActive: { type: Boolean, default: false },
   hasActiveChild: { type: Boolean, default: false },
   getterKeys: { type: Object, default: () => ({}) },
+  // CEVICO: cor do contador por tipo de aviso — 'green' (oportunidade,
+  // coisa boa) | 'gold' (tarefa, dourado brilhante) | null (neutro)
+  countVariant: { type: String, default: null },
 });
 
 const emit = defineEmits(['toggle']);
@@ -44,7 +47,8 @@ const count = computed(() =>
         v-if="icon"
         :icon="icon"
         class="size-4"
-        :style="iconColor ? { color: iconColor } : {}"
+        :class="countVariant === 'radar' && dynamicCount ? 'cevico-radar-icon' : ''"
+        :style="countVariant === 'radar' && dynamicCount ? { color: '#EA3E23' } : (iconColor ? { color: iconColor } : {})"
       />
       <span
         v-if="showBadge"
@@ -65,7 +69,13 @@ const count = computed(() =>
       </span>
       <span
         v-if="dynamicCount && !expandable"
-        class="inline-grid h-5 min-w-5 place-items-center rounded-full bg-n-slate-4 px-1 text-xxs font-medium leading-3 text-n-slate-12 dark:bg-n-slate-5 flex-shrink-0"
+        class="inline-grid h-5 min-w-5 place-items-center rounded-full px-1 text-xxs font-medium leading-3 flex-shrink-0"
+        :class="{
+          'bg-n-slate-4 text-n-slate-12 dark:bg-n-slate-5': !countVariant,
+          'bg-green-500 text-white': countVariant === 'green',
+          'cevico-gold-badge text-white font-semibold': countVariant === 'gold',
+          'cevico-radar-badge text-white font-semibold': countVariant === 'radar',
+        }"
       >
         {{ count }}
       </span>
@@ -78,3 +88,51 @@ const count = computed(() =>
     />
   </component>
 </template>
+
+<style scoped>
+/* dourado SUTIL: só o círculo com o número + um pulso dourado suave em volta
+   (pedido: sem brilho passando — apenas o círculo pulsante) */
+.cevico-gold-badge {
+  position: relative;
+  background: linear-gradient(135deg, #b8860b, #d4a017);
+}
+.cevico-gold-badge::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 2px solid rgba(212, 160, 23, 0.65);
+  animation: cevico-gold-pulse 2.2s ease-out infinite;
+}
+@keyframes cevico-gold-pulse {
+  0% { transform: scale(0.85); opacity: 0.8; }
+  70%, 100% { transform: scale(1.45); opacity: 0; }
+}
+
+/* Radar de Oportunidades: laranja-avermelhado (cor do agente) PULSANDO —
+   o ícone do menu pulsa junto, no mesmo ritmo */
+.cevico-radar-badge {
+  position: relative;
+  background: linear-gradient(135deg, #dc2626, #f59e0b);
+  animation: cevico-radar-throb 2.2s ease-in-out infinite;
+}
+.cevico-radar-badge::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 2px solid rgba(234, 62, 35, 0.65);
+  animation: cevico-radar-ring 2.2s ease-out infinite;
+}
+.cevico-radar-icon {
+  animation: cevico-radar-throb 2.2s ease-in-out infinite;
+}
+@keyframes cevico-radar-throb {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@keyframes cevico-radar-ring {
+  0% { transform: scale(0.85); opacity: 0.8; }
+  70%, 100% { transform: scale(1.5); opacity: 0; }
+}
+</style>

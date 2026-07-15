@@ -50,9 +50,19 @@ const newStageColor = ref('#6B7280');
 // A base inteira (9k+ cards) só entra sob demanda (busca / botão "Tudo") —
 // carregar tudo sempre travava máquinas fracas (i3/celular).
 const WINDOW_OPTIONS = [7, 15, 30];
-const windowDays = ref(
-  Number(localStorage.getItem('cevico_crm_window_days')) || 7
+// padrão: ESTE MÊS (leve e cobre o trabalho corrente); 7/15/30d e "Tudo"
+// continuam; "Personalizado" abre o De/Até dos filtros com a base completa
+const savedWindow = localStorage.getItem('cevico_crm_window_days') || 'month';
+const windowMode = ref(
+  ['7', '15', '30', 'month', 'year'].includes(String(savedWindow)) ? String(savedWindow) : 'month'
 );
+const dayOfYear = () =>
+  Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
+const windowDays = computed(() => {
+  if (windowMode.value === 'month') return new Date().getDate();
+  if (windowMode.value === 'year') return dayOfYear();
+  return Number(windowMode.value);
+});
 const contactsScope = ref('days');
 const isLoadingAll = ref(false);
 const isBackgroundLoading = ref(false);
@@ -72,9 +82,9 @@ const loadBoard = async pipelineId => {
     .finally(() => { isBackgroundLoading.value = false; });
 };
 
-const setWindowDays = async d => {
-  windowDays.value = d;
-  localStorage.setItem('cevico_crm_window_days', String(d));
+const setWindowDays = async mode => {
+  windowMode.value = String(mode);
+  localStorage.setItem('cevico_crm_window_days', String(mode));
   contactsScope.value = 'days';
   if (!selectedPipelineId.value) return;
   await store.dispatch('crm/fetchContacts', {
@@ -369,6 +379,8 @@ const DATE_PRESETS = [
   { key: 'week', label: 'Essa semana' },
   { key: 'last7', label: 'Últimos 7 dias' },
   { key: 'month', label: 'Este mês' },
+  { key: 'year', label: 'Este ano' },
+  { key: 'all', label: 'Desde o início' },
 ];
 const activeDatePreset = ref('');
 
@@ -402,6 +414,10 @@ const applyDatePreset = key => {
     from = localDateStr(s);
   } else if (key === 'month') {
     from = localDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
+  } else if (key === 'year') {
+    from = localDateStr(new Date(now.getFullYear(), 0, 1));
+  } else if (key === 'all') {
+    from = ''; // sem "De" = desde o primeiro lead da base
   }
   activeDatePreset.value = key;
   filters.value.dateFrom = from;
@@ -856,13 +872,32 @@ const createAndAddContact = async () => {
       class="flex items-center gap-2 px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-wrap"
     >
       <span class="i-lucide-zap text-n-gold" />
-      Leads ativos dos últimos {{ windowDays }} dias ({{ contactsMeta.shown }} de {{ contactsMeta.total }}) — leve e rápido. A busca enxerga a base toda.
+      {{ windowMode === 'month' ? 'Leads ativos deste mês' : (windowMode === 'year' ? 'Leads ativos deste ano' : `Leads ativos dos últimos ${windowDays} dias`) }}
+      ({{ contactsMeta.shown }} de {{ contactsMeta.total }}) — leve e rápido. A busca enxerga a base toda.
       <span class="ml-1">Janela:</span>
+      <button
+        class="px-1.5 py-0.5 rounded border transition-colors"
+        :class="windowMode === 'month' && contactsScope === 'days'
+          ? 'border-n-brand text-n-brand font-medium'
+          : 'border-n-weak hover:bg-n-alpha-1'"
+        @click="setWindowDays('month')"
+      >
+        Este mês
+      </button>
+      <button
+        class="px-1.5 py-0.5 rounded border transition-colors"
+        :class="windowMode === 'year' && contactsScope === 'days'
+          ? 'border-n-brand text-n-brand font-medium'
+          : 'border-n-weak hover:bg-n-alpha-1'"
+        @click="setWindowDays('year')"
+      >
+        Este ano
+      </button>
       <button
         v-for="d in WINDOW_OPTIONS"
         :key="d"
         class="px-1.5 py-0.5 rounded border transition-colors"
-        :class="windowDays === d && contactsScope === 'days'
+        :class="windowMode === String(d) && contactsScope === 'days'
           ? 'border-n-brand text-n-brand font-medium'
           : 'border-n-weak hover:bg-n-alpha-1'"
         @click="setWindowDays(d)"
@@ -872,9 +907,18 @@ const createAndAddContact = async () => {
       <button
         class="px-1.5 py-0.5 rounded border border-n-weak hover:bg-n-alpha-1 disabled:opacity-50"
         :disabled="isLoadingAll"
+        title="Carrega a base completa e abre o De/Até para escolher qualquer intervalo"
+        @click="loadAllContacts(); openFiltersPanel()"
+      >
+        {{ isLoadingAll ? 'Carregando…' : 'Personalizado…' }}
+      </button>
+      <button
+        class="px-1.5 py-0.5 rounded border border-n-weak hover:bg-n-alpha-1 disabled:opacity-50"
+        :disabled="isLoadingAll"
+        title="Carrega a base completa, do primeiro lead até hoje"
         @click="loadAllContacts"
       >
-        {{ isLoadingAll ? 'Carregando…' : 'Tudo' }}
+        Desde o início
       </button>
     </div>
 
@@ -1054,18 +1098,15 @@ const createAndAddContact = async () => {
           </div>
         </div>
 
-        <!-- Período do lead (pílulas douradas — atalhos de data) -->
-        <div
-          class="flex items-center bg-n-solid-2 rounded-xl p-0.5 gap-0.5 flex-wrap border"
-          style="border-color: rgba(212, 160, 23, 0.45)"
-        >
-          <span class="i-lucide-calendar-clock text-sm ml-2 mr-0.5" style="color: #B8860B" />
+        <!-- Período do lead (atalhos de data — azul/roxo, melhor no tema claro) -->
+        <div class="flex items-center bg-n-solid-2 rounded-xl p-0.5 gap-0.5 flex-wrap border border-n-weak">
+          <span class="i-lucide-calendar-clock text-sm ml-2 mr-0.5" style="color: #7C3AED" />
           <button
             v-for="p in DATE_PRESETS"
             :key="p.key"
             class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
             :class="activeDatePreset === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="activeDatePreset === p.key ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
+            :style="activeDatePreset === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
             :title="`Só leads que chegaram: ${p.label.toLowerCase()} (clique de novo para limpar)`"
             @click="applyDatePreset(p.key)"
           >

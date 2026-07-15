@@ -439,6 +439,7 @@ const menuItems = computed(() => {
       icon: 'i-lucide-house',
       to: accountScopedRoute('inicio_home'),
       getterKeys: { count: 'crm/getRadarAlertCount' },
+      countVariant: 'radar', // cor do Radar (laranja-avermelhado), pulsando
     },
     // CRM em primeiro — é o hub de atendimento
     {
@@ -684,6 +685,10 @@ const menuItems = computed(() => {
           name: 'Traffic Funnel',
           label: 'Funil de Tráfego',
           to: accountScopedRoute('traffic_funnel_reports'),
+        },{
+          name: 'Doctors Dashboard',
+          label: 'Dashboard dos Médicos',
+          to: accountScopedRoute('doctors_reports'),
         },
         {
           name: 'Ads Report',
@@ -756,6 +761,7 @@ const menuItems = computed(() => {
       icon: 'i-lucide-list-checks',
       to: accountScopedRoute('tasks_board'),
       getterKeys: { count: 'tasks/getAlertCount' },
+      countVariant: 'gold', // tarefa esperando você — dourado brilhante
     },
     {
       name: 'Agenda',

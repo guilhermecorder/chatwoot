@@ -19,6 +19,7 @@ const props = defineProps({
   activeOn: { type: Array, default: () => [] },
   children: { type: Array, default: undefined },
   getterKeys: { type: Object, default: () => ({}) },
+  countVariant: { type: String, default: null },
 });
 
 const {
@@ -301,6 +302,7 @@ watch(
         :label
         :to
         :getter-keys="getterKeys"
+        :count-variant="countVariant"
         :is-active="isActive"
         :has-active-child="hasActiveChild"
         :expandable="hasChildren"

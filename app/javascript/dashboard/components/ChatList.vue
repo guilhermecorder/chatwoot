@@ -70,6 +70,95 @@ const router = useRouter();
 const route = useRoute();
 const store = useStore();
 
+// ── CEVICO: pílulas de caixa de entrada no topo (estilo presets do Meu
+// Painel). Só nas visões "puras" (Conversas/caixa) — não em times/etiquetas/
+// menções/pastas. Aceita MAIS DE UMA caixa ao mesmo tempo: 1 caixa usa a
+// rota nativa; 2+ ficam na visão geral com filtro local. A escolha fica
+// salva no navegador e é pré-selecionada ao abrir Conversas.
+const INBOX_PILLS_KEY = 'cevico_conversas_inboxes';
+const pillInboxes = computed(() => store.getters['inboxes/getInboxes'] || []);
+const showInboxPills = computed(
+  () =>
+    !props.teamId && !props.label && !props.conversationType && !props.foldersId
+);
+const routeInboxId = computed(() => Number(props.conversationInbox) || 0);
+
+const loadSavedInboxPills = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(INBOX_PILLS_KEY) || '[]');
+    return Array.isArray(raw) ? raw.map(Number).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+};
+const multiInboxIds = ref(loadSavedInboxPills());
+
+// caixas "acesas": a seleção múltipla, ou a caixa da rota (vinda da sidebar)
+const activeInboxSet = computed(() => {
+  if (multiInboxIds.value.length) return new Set(multiInboxIds.value);
+  return routeInboxId.value ? new Set([routeInboxId.value]) : new Set();
+});
+
+const goHomeIfNeeded = () => {
+  if (route.name !== 'home') {
+    router.push({ name: 'home', params: { accountId: route.params.accountId } });
+  }
+};
+
+const selectInboxPill = id => {
+  if (!id) {
+    // "Todas": limpa a seleção
+    multiInboxIds.value = [];
+  } else {
+    const base = multiInboxIds.value.length
+      ? [...multiInboxIds.value]
+      : (routeInboxId.value ? [routeInboxId.value] : []);
+    const idx = base.indexOf(id);
+    if (idx >= 0) base.splice(idx, 1);
+    else base.push(id);
+    multiInboxIds.value = base;
+  }
+  localStorage.setItem(INBOX_PILLS_KEY, JSON.stringify(multiInboxIds.value));
+
+  if (multiInboxIds.value.length === 1) {
+    // 1 caixa = rota nativa (mais leve, carrega tudo daquela caixa)
+    const only = multiInboxIds.value[0];
+    if (routeInboxId.value !== only) {
+      router.push({
+        name: 'inbox_dashboard',
+        params: { accountId: route.params.accountId, inbox_id: only },
+      });
+    }
+  } else {
+    // 0 ou 2+ caixas = visão geral (o filtro local faz o resto)
+    goHomeIfNeeded();
+  }
+};
+
+// pré-seleção: abrir "Conversas" volta para a última escolha
+onMounted(() => {
+  if (route.name !== 'home' || !showInboxPills.value) return;
+  const saved = multiInboxIds.value;
+  if (saved.length !== 1) return; // 0 = todas; 2+ = filtro local já aplica
+  const applySaved = () => {
+    // caixa pode ter sido apagada — só aplica se ainda existe
+    if (pillInboxes.value.some(i => i.id === saved[0])) {
+      router.replace({
+        name: 'inbox_dashboard',
+        params: { accountId: route.params.accountId, inbox_id: saved[0] },
+      });
+    }
+  };
+  if (pillInboxes.value.length) applySaved();
+  else {
+    const stop = watch(pillInboxes, list => {
+      if (!list.length) return;
+      applySaved();
+      stop();
+    });
+  }
+});
+
 const resolveAttributesModalRef = ref(null);
 
 const activeAssigneeTab = ref(wootConstants.ASSIGNEE_TYPE.ME);
@@ -356,6 +445,15 @@ const conversationList = computed(() => {
     activeSortBy.value === wootConstants.SORT_BY_TYPE.UNREAD
   ) {
     localConversationList = sortByUnreadStatus(localConversationList);
+  }
+
+  // CEVICO: 2+ caixas escolhidas nas pílulas = filtra a lista aqui mesmo
+  // (1 caixa usa a rota nativa; a combinação de caixas o core não tem)
+  if (showInboxPills.value && multiInboxIds.value.length > 1) {
+    const wanted = new Set(multiInboxIds.value);
+    localConversationList = localConversationList.filter(c =>
+      wanted.has(c.inbox_id)
+    );
   }
 
   return localConversationList;
@@ -921,6 +1019,32 @@ watch(conversationFilters, (newVal, oldVal) => {
       @reset-filters="resetAndFetchData"
       @basic-filter-change="onBasicFilterChange"
     />
+
+    <!-- CEVICO: escolha das caixas de entrada (aceita várias; salva no navegador) -->
+    <div
+      v-if="showInboxPills && pillInboxes.length"
+      class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 mx-2 mb-1.5 overflow-x-auto flex-shrink-0"
+    >
+      <button
+        class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
+        :class="activeInboxSet.size === 0 ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+        :style="activeInboxSet.size === 0 ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
+        @click="selectInboxPill(0)"
+      >
+        Todas
+      </button>
+      <button
+        v-for="ib in pillInboxes"
+        :key="ib.id"
+        class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
+        :class="activeInboxSet.has(ib.id) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+        :style="activeInboxSet.has(ib.id) ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
+        :title="activeInboxSet.has(ib.id) ? 'Clique para tirar esta caixa da seleção' : 'Clique para somar esta caixa à seleção'"
+        @click="selectInboxPill(ib.id)"
+      >
+        {{ ib.name }}
+      </button>
+    </div>
 
     <TeleportWithDirection
       v-if="showAddFoldersModal"
