@@ -1395,9 +1395,15 @@ mesmo! ✨" maior, dourado escuro).
 
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
-**ONDE ESTAMOS (2026-07-15):** itens 14-26 JÁ ESTÃO EM PRODUÇÃO.
-PENDENTE NO WORKING TREE (itens 27 a 36, testados, AGUARDAM "pode
-subir") — ⚠️ **4 migrations aditivas** (20260714000008/09/10 +
+**ONDE ESTAMOS (2026-07-15, noite):** itens 14-26 EM PRODUÇÃO. Itens
+27-36 APROVADOS ("pode subir" 15/07) → 9 commits temáticos PUSHADOS na
+develop (bbbaf2d86..1d3e78b6f), build Actions disparado. FALTA: backup
+do banco → Implantar WEB + SIDEKIQ no EasyPanel (sidekiq é obrigatório:
+cron novo crm_attendance_reminder_job). Reversão: reimplantar a imagem
+anterior no histórico do EasyPanel (migrations aditivas). Pós-deploy:
+configurar responsáveis/prazo da conferência (Agenda → Janelas →
+Conferência), ligar os agentes novos (opt-in, nascem desligados) e
+escolher o tema no 🎨. — ⚠️ **4 migrations aditivas** (20260714000008/09/10 +
 20260715000001); backup antes do deploy, inegociável. Item 33 = fix do
 bug do follow-up (default_scope!) + registro de atividade do robô +
 [nome] limpo + painéis por pessoa no Meu Painel + "Este ano" + Tarefas
