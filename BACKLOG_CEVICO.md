@@ -1397,9 +1397,12 @@ mesmo! ✨" maior, dourado escuro).
 
 **ONDE ESTAMOS (2026-07-15, noite):** itens 14-26 EM PRODUÇÃO. Itens
 27-36 APROVADOS ("pode subir" 15/07) → 9 commits temáticos PUSHADOS na
-develop (bbbaf2d86..1d3e78b6f), build Actions disparado. FALTA: backup
-do banco → Implantar WEB + SIDEKIQ no EasyPanel (sidekiq é obrigatório:
-cron novo crm_attendance_reminder_job). Reversão: reimplantar a imagem
+develop (bbbaf2d86..1d3e78b6f + docs c038fde96). BUILD VERDE ✅ (run
+29402847885). FALTA CONFIRMAR (Guilherme estava fazendo ao encerrar a
+sessão de 15/07): Implantar WEB + SIDEKIQ no EasyPanel (sidekiq é
+obrigatório: cron novo crm_attendance_reminder_job) e colar a chave da
+Anthropic em CRM → Integrações → Claude (ele estava com o modal aberto;
+modelo da integração é só fallback — cada agente usa o recomendado). Reversão: reimplantar a imagem
 anterior no histórico do EasyPanel (migrations aditivas). Pós-deploy:
 configurar responsáveis/prazo da conferência (Agenda → Janelas →
 Conferência), ligar os agentes novos (opt-in, nascem desligados) e
