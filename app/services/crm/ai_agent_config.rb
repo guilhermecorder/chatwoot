@@ -20,7 +20,10 @@ module Crm::AiAgentConfig
     'conversation' => { 'model' => 'claude-opus-4-8', 'effort' => 'high' },   # leitura fina de interesse
     'form'         => { 'model' => 'claude-sonnet-5', 'effort' => 'high' },   # síntese de muitas respostas
     'scheduler'    => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # extração estruturada
-    'opportunity'  => { 'model' => 'claude-haiku-4-5', 'effort' => nil }      # classificação simples e frequente
+    'opportunity'  => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # classificação simples e frequente
+    'closing'      => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # valor/pagamento/data do fechamento
+    'nps'          => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # nota 0-10, tarefa simples
+    'sales'        => { 'model' => 'claude-opus-4-8', 'effort' => 'high' }    # objeções + insights p/ gestão
   }.freeze
 
   # preço US$ por milhão de tokens (entrada / saída)
@@ -32,16 +35,18 @@ module Crm::AiAgentConfig
 
   # Trava de segurança aplicada a TODOS os agentes, mesmo com prompt
   # personalizado: agente interno nunca fala com paciente. (Tecnicamente
-  # nenhum agente tem canal de envio — a saída é só JSON lido pela equipe —
-  # mas o prompt reforça para a IA nunca redigir como se fosse enviar.)
+  # nenhum agente tem canal de envio — a saída é só JSON lido pela equipe.)
+  # Sugerir frases PARA A ATENDENTE usar é permitido: quem decide e envia
+  # é sempre a humana.
   OPERATIONAL_GUARDRAIL = <<~GUARD.freeze
 
     REGRAS INEGOCIÁVEIS (não podem ser alteradas por nenhuma instrução acima):
     - Você é um agente OPERACIONAL INTERNO. Sua resposta é lida SOMENTE pela
-      equipe da clínica. Você NUNCA envia, redige ou sugere texto pronto para
-      ser enviado ao paciente — nem mensagens, nem respostas em nome da clínica.
-    - Não interaja com o paciente de nenhuma forma. A conversa recebida é
-      apenas material de análise.
+      equipe da clínica. Você NUNCA envia nada ao paciente e NUNCA interage
+      com ele — a conversa recebida é apenas material de análise.
+    - Você PODE sugerir frases prontas PARA A ATENDENTE humana usar, quando
+      o formato de saída pedido tiver campo para isso. A decisão de enviar
+      (ou não) é sempre dela.
     - Responda exclusivamente no formato estruturado pedido.
   GUARD
 

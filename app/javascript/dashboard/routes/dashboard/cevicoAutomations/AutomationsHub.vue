@@ -18,7 +18,7 @@ const settings = useMapGetter('crm/getSettings');
 const accountLabels = useMapGetter('labels/getLabels');
 const teamAgents = useMapGetter('agents/getAgents');
 
-const TABS = ['robos', 'agentes', 'programacao', 'tratamento'];
+const TABS = ['robos', 'agentes', 'programacao', 'resultados', 'tratamento'];
 const activeTab = ref(TABS.includes(route.query.tab) ? route.query.tab : 'robos');
 
 // os itens do menu lateral apontam para a MESMA rota com ?tab= diferente —
@@ -34,10 +34,13 @@ watch(
 // O Radar perene é configurado por VIGIAS: cada vigia = coluna + painel do
 // atendente que recebe os avisos (null = todos) + janela de tempo própria.
 const aiAgents = ref({
-  conversation: { enabled: true, prompt: '', model: '', effort: '', default_prompt: '' },
-  form: { enabled: true, prompt: '', model: '', effort: '', default_prompt: '' },
-  scheduler: { enabled: true, prompt: '', model: '', effort: '', default_prompt: '' },
-  opportunity: { enabled: true, prompt: '', model: '', effort: '', default_prompt: '', watchers: [], wait_minutes: 10 },
+  conversation: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
+  form: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
+  scheduler: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
+  opportunity: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', watchers: [], wait_minutes: 10 },
+  closing: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
+  nps: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
+  sales: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
 });
 
 const LOOKBACK_OPTIONS = [
@@ -78,7 +81,197 @@ const runSweep = async () => {
 };
 
 const radarLastRun = () => settings.value?.ai?.opportunity_last_run || null;
-const isSavingAgents = ref(false);
+
+// ── Colunas onde o Secretário da Agenda ATUA ──
+// Cada coluna marcada ganha (por baixo) uma automação "card entrou →
+// anotar na Agenda", criada/removida automaticamente pelo endpoint de sync.
+const schedulerStageIds = ref([]);
+const isSavingSchedulerStages = ref(false);
+
+const toggleSchedulerStage = id => {
+  const idx = schedulerStageIds.value.indexOf(id);
+  if (idx >= 0) schedulerStageIds.value.splice(idx, 1);
+  else schedulerStageIds.value.push(id);
+};
+
+const saveSchedulerStages = async () => {
+  isSavingSchedulerStages.value = true;
+  try {
+    const { data } = await CrmAPI.syncSchedulerStages(schedulerStageIds.value);
+    schedulerStageIds.value = data.scheduler_stage_ids || [];
+    useAlert('Colunas do Secretário salvas — já está valendo (com o agente LIGADO).');
+  } catch {
+    useAlert('Erro ao salvar as colunas do Secretário.');
+  } finally {
+    isSavingSchedulerStages.value = false;
+  }
+};
+
+// colunas de atuação dos DEMAIS agentes de coluna (Analista, Monitor de
+// Fechamento, NPS) — mesma mecânica do Secretário, endpoint genérico
+const STAGE_AGENTS = ['conversation', 'closing', 'nps'];
+const agentStageIds = ref({ conversation: [], closing: [], nps: [] });
+const savingAgentStages = ref('');
+const toggleAgentStage = (agent, id) => {
+  const list = agentStageIds.value[agent];
+  const idx = list.indexOf(id);
+  if (idx >= 0) list.splice(idx, 1);
+  else list.push(id);
+};
+const saveAgentStages = async agent => {
+  savingAgentStages.value = agent;
+  try {
+    const { data } = await CrmAPI.syncAgentStages(agent, agentStageIds.value[agent]);
+    agentStageIds.value[agent] = data.stage_ids || [];
+    useAlert(`Colunas de ${AGENT_META[agent].title} salvas — valendo com o agente LIGADO.`);
+  } catch {
+    useAlert('Erro ao salvar as colunas.');
+  } finally {
+    savingAgentStages.value = '';
+  }
+};
+
+// 💼 insights comerciais do Consultor Comercial (gestão)
+const salesInsights = () => settings.value?.ai?.sales_insights || null;
+const isGeneratingInsights = ref(false);
+const generateSalesInsights = async () => {
+  if (isGeneratingInsights.value) return;
+  isGeneratingInsights.value = true;
+  try {
+    const { data } = await CrmAPI.generateSalesInsights();
+    useAlert(data.message || 'Análise iniciada!');
+    setTimeout(async () => {
+      await store.dispatch('crm/fetchSettings');
+      isGeneratingInsights.value = false;
+    }, 90000);
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao iniciar a análise.');
+    isGeneratingInsights.value = false;
+  }
+};
+
+// registro de atividade do Secretário (últimas leituras — entender os números)
+const schedulerLog = () => settings.value?.scheduler_log || [];
+const showSchedulerLog = ref(false);
+const SCHEDULER_OUTCOMES = {
+  created: { label: 'criada', class: 'bg-green-500/15 text-green-600' },
+  rescheduled: { label: 'reagendada', class: 'bg-amber-500/15 text-amber-600' },
+  already: { label: 'já existia', class: 'bg-n-alpha-2 text-n-slate-10' },
+  skipped: { label: 'sem dia/hora', class: 'bg-red-500/10 text-red-500' },
+};
+const fmtLogDate = iso =>
+  iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+
+// ── Preencher a Agenda com o histórico (Agente de Agendamento) ──
+// Varre conversas com confirmação de agendamento e registra as consultas na
+// Agenda do sistema — "duplica" a agenda do Google SEM mexer no bot do N8N.
+const showBackfillModal = ref(false);
+const backfill = ref({ since_days: 90, limit: 100 });
+const isBackfilling = ref(false);
+const backfillLastRun = () => settings.value?.agenda_backfill_last_run || null;
+
+const runBackfill = async () => {
+  isBackfilling.value = true;
+  try {
+    const { data } = await CrmAPI.agendaBackfill({
+      since_days: backfill.value.since_days,
+      limit: backfill.value.limit,
+    });
+    useAlert(data.message || 'Preenchimento iniciado!');
+    showBackfillModal.value = false;
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao iniciar o preenchimento.');
+  } finally {
+    isBackfilling.value = false;
+  }
+};
+
+// ── Editar | Salvar (rascunho) | Publicar por agente ──
+// Os cards abrem TRAVADOS (leitura). Editar destrava; Salvar guarda um
+// RASCUNHO que NÃO muda o agente no ar; Publicar é o que passa a valer.
+const editingAgent = ref({});
+const savingAgent = ref('');
+// valores carregados por agente (para o Descartar voltar atrás)
+const loadedValues = ref({});
+
+const snapshotAgent = key => {
+  const a = aiAgents.value[key];
+  const snap = { prompt: a.prompt, model: a.model, effort: a.effort };
+  if (key === 'opportunity') {
+    snap.watchers = JSON.parse(JSON.stringify(a.watchers || []));
+    snap.wait_minutes = a.wait_minutes;
+  }
+  return snap;
+};
+
+const startEdit = key => {
+  loadedValues.value[key] = snapshotAgent(key);
+  editingAgent.value = { ...editingAgent.value, [key]: true };
+};
+
+const discardEdit = key => {
+  const snap = loadedValues.value[key];
+  if (snap) {
+    const a = aiAgents.value[key];
+    a.prompt = snap.prompt;
+    a.model = snap.model;
+    a.effort = snap.effort;
+    if (key === 'opportunity') {
+      a.watchers = JSON.parse(JSON.stringify(snap.watchers || []));
+      a.wait_minutes = snap.wait_minutes;
+    }
+  }
+  editingAgent.value = { ...editingAgent.value, [key]: false };
+};
+
+// monta os campos de config do agente (sem o enabled — esse é do interruptor)
+const packAgentFields = key => {
+  const a = aiAgents.value[key];
+  const fields = { prompt: (a.prompt || '').trim(), model: a.model, effort: a.effort };
+  if (key === 'opportunity') {
+    fields.watchers = (a.watchers || [])
+      .filter(w => w.stage_id)
+      .map(w => ({
+        stage_id: Number(w.stage_id),
+        user_id: w.user_id || null,
+        lookback_hours: Number(w.lookback_hours) || 24,
+      }));
+    fields.wait_minutes = Number(a.wait_minutes) || 10;
+  }
+  return fields;
+};
+
+// SALVAR = rascunho: guarda no banco mas o agente continua usando a
+// configuração publicada
+const saveAgentDraft = async key => {
+  savingAgent.value = key;
+  try {
+    await CrmAPI.updateAi({ agents: { [key]: { draft: packAgentFields(key) } } });
+    aiAgents.value[key].has_draft = true;
+    editingAgent.value = { ...editingAgent.value, [key]: false };
+    useAlert(`💾 Rascunho de ${AGENT_META[key].title} salvo — ainda NÃO está valendo. Publique quando quiser aplicar.`);
+  } catch {
+    useAlert('Erro ao salvar o rascunho.');
+  } finally {
+    savingAgent.value = '';
+  }
+};
+
+// PUBLICAR = aplica de verdade (e limpa o rascunho)
+const publishAgent = async key => {
+  savingAgent.value = key;
+  try {
+    await CrmAPI.updateAi({ agents: { [key]: { ...packAgentFields(key), draft: {} } } });
+    aiAgents.value[key].has_draft = false;
+    editingAgent.value = { ...editingAgent.value, [key]: false };
+    loadedValues.value[key] = snapshotAgent(key);
+    useAlert(`🚀 ${AGENT_META[key].title} publicado — vale a partir das próximas análises.`);
+  } catch {
+    useAlert('Erro ao publicar o agente.');
+  } finally {
+    savingAgent.value = '';
+  }
+};
 
 // ── Interruptor DEFINITIVO do agente ──
 // Liga/desliga NA HORA (grava direto no banco, sem depender do botão
@@ -119,7 +312,7 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #0F5FA6, #7C3AED)',
     color: '#0F5FA6',
     tag: 'Atendimento',
-    description: 'Lê a conversa e devolve o indicador de interesse do paciente (alto/médio/baixo/perdido), um resumo e o próximo passo sugerido para a atendente.',
+    description: 'Lê a conversa e devolve, numa análise só: indicador de interesse (alto/médio/baixo/perdido), resumo, próximo passo, a ETAPA DO SCRIPT CEVICO em que o paciente está e 2-3 FRASES PRONTAS para a atendente copiar e usar.',
     triggers: [
       { icon: 'i-lucide-mouse-pointer-click', label: 'Botão "Analisar com IA" no painel da conversa' },
       { icon: 'i-lucide-zap', label: 'Ação de coluna "Analisar com IA"' },
@@ -140,15 +333,15 @@ const AGENT_META = {
     suggestion: 'Analisa muitas respostas de uma vez — vale usar esforço alto.',
   },
   scheduler: {
-    title: 'Agente de Agendamento',
+    title: 'Secretário da Agenda',
     icon: 'i-lucide-calendar-plus',
     gradient: 'linear-gradient(135deg, #B8860B, #D4A017)',
     color: '#B8860B',
     tag: 'Agenda',
-    description: 'Extrai da conversa o nome, telefone, problema, dia, hora, médico e unidade da consulta confirmada e cria o compromisso na Agenda.',
+    description: 'Lê a conversa e ANOTA a consulta na Agenda do sistema: nome, telefone, dia, hora, médico, unidade, valor e observações. Entende reagendamento (atualiza a consulta existente). NUNCA fala com o paciente — quem conversa é o Atendente IA (N8N).',
     triggers: [
-      { icon: 'i-lucide-zap', label: 'Ação de coluna "Agendar consulta (IA)"' },
-      { icon: 'i-lucide-calendar-days', label: 'Cria o compromisso na Agenda' },
+      { icon: 'i-lucide-zap', label: 'Card entra nas colunas escolhidas abaixo' },
+      { icon: 'i-lucide-calendar-days', label: 'Anota/reagenda na Agenda do sistema' },
       { icon: 'i-lucide-list-checks', label: 'Sem dia/hora → tarefa "⚠️ Confirmar consulta"' },
     ],
     suggestion: 'Extração estruturada — Sonnet no esforço médio resolve bem e custa menos.',
@@ -167,6 +360,48 @@ const AGENT_META = {
       { icon: 'i-lucide-scan-search', label: 'Radar pontual: varredura única que não fica ativa' },
     ],
     suggestion: 'Classificação simples e frequente — Haiku mantém o custo baixinho.',
+  },
+  closing: {
+    title: 'Monitor de Fechamento',
+    icon: 'i-lucide-hand-coins',
+    gradient: 'linear-gradient(135deg, #065F46, #10B981)',
+    color: '#065F46',
+    tag: 'Cirurgias',
+    description: 'Lê a conversa quando o card entra na coluna escolhida e registra o FECHAMENTO da cirurgia: valor fechado, forma de pagamento e data combinada. Preenche o valor do card (se vazio) e o 💰 aparece na Agenda de Cirurgias — visível só para admin.',
+    triggers: [
+      { icon: 'i-lucide-zap', label: 'Ação de coluna "Adicionar agente de IA" → Monitor de Fechamento' },
+      { icon: 'i-lucide-wallet', label: 'Valor + forma de pagamento gravados no contato' },
+      { icon: 'i-lucide-calendar-days', label: 'Valor visível na conferência da Agenda de Cirurgias (admin)' },
+    ],
+    suggestion: 'Extração estruturada — Sonnet no esforço médio.',
+  },
+  sales: {
+    title: 'Consultor Comercial',
+    icon: 'i-lucide-handshake',
+    gradient: 'linear-gradient(135deg, #065F46, #34D399)',
+    color: '#047857',
+    tag: 'Fechamento',
+    description: 'Dois papéis: AO VIVO, o botão "💼 Ajuda com objeção" no painel da conversa identifica o que está travando o paciente e sugere respostas prontas no tom CEVICO para a vendedora. Para a GESTÃO, analisa as conversas que geraram fechamento de cirurgia e produz insights comerciais (o que funciona, objeções vencidas, recomendações).',
+    triggers: [
+      { icon: 'i-lucide-handshake', label: 'Botão "💼 Ajuda com objeção" no painel da conversa' },
+      { icon: 'i-lucide-lightbulb', label: 'Botão "Gerar insights comerciais" abaixo (gestão)' },
+      { icon: 'i-lucide-shield', label: 'Nunca fala com o paciente — quem decide e envia é a vendedora' },
+    ],
+    suggestion: 'Leitura fina de vendas — Opus no esforço alto vale o custo.',
+  },
+  nps: {
+    title: 'Agente de NPS',
+    icon: 'i-lucide-smile',
+    gradient: 'linear-gradient(135deg, #0D9488, #2DD4BF)',
+    color: '#0D9488',
+    tag: 'Satisfação',
+    description: 'Lê a conversa do pós-operatório e identifica a NOTA (0-10) que o paciente deu. Etiqueta o contato com a faixa (nps-9-10 / nps-7-8 / nps-0-6) — o Dashboard CRM e o painel do Gestor mostram a % de satisfação a partir daí.',
+    triggers: [
+      { icon: 'i-lucide-zap', label: 'Ação de coluna "Adicionar agente de IA" → Agente de NPS (ex.: coluna Pós-Operatório)' },
+      { icon: 'i-lucide-tags', label: 'Etiquetas nps-9-10 / nps-7-8 / nps-0-6 no contato' },
+      { icon: 'i-lucide-bar-chart-3', label: 'Bloco "Satisfação (NPS)" no Dashboard CRM' },
+    ],
+    suggestion: 'Ler uma nota é simples — Haiku resolve baratinho.',
   },
 };
 
@@ -232,71 +467,55 @@ const loadStages = async () => {
 const loadAgents = async () => {
   await store.dispatch('crm/fetchSettings');
   const a = settings.value?.ai?.agents || {};
-  const load = key => ({
-    // opt-in: agente só aparece LIGADO se foi ligado de propósito
-    enabled: a[key]?.enabled === true,
-    prompt: a[key]?.prompt || '',
-    model: a[key]?.model || '',
-    effort: a[key]?.effort || '',
-    default_prompt: a[key]?.default_prompt || '',
-  });
+  // se há rascunho salvo, os CAMPOS mostram o rascunho (continuar de onde
+  // parou); o agente no ar continua usando a config publicada até Publicar
+  const load = key => {
+    const draft = a[key]?.draft || null;
+    return {
+      // opt-in: agente só aparece LIGADO se foi ligado de propósito
+      enabled: a[key]?.enabled === true,
+      prompt: (draft ? draft.prompt : a[key]?.prompt) || '',
+      model: (draft ? draft.model : a[key]?.model) || '',
+      effort: (draft ? draft.effort : a[key]?.effort) || '',
+      has_draft: !!draft,
+      default_prompt: a[key]?.default_prompt || '',
+    };
+  };
   // compat: config antiga (stage_ids soltos) vira vigia sem direcionamento
   const legacyWatchers = (a.opportunity?.stage_ids || []).map(id => ({
     stage_id: id,
     user_id: null,
     lookback_hours: a.opportunity?.lookback_hours || 24,
   }));
+  const oppDraft = a.opportunity?.draft || null;
   aiAgents.value = {
     conversation: load('conversation'),
     form: load('form'),
     scheduler: load('scheduler'),
+    closing: load('closing'),
+    nps: load('nps'),
+    sales: load('sales'),
     opportunity: {
       ...load('opportunity'),
-      watchers: a.opportunity?.watchers?.length ? a.opportunity.watchers : legacyWatchers,
-      wait_minutes: a.opportunity?.wait_minutes || 10,
+      watchers: oppDraft?.watchers?.length
+        ? oppDraft.watchers
+        : (a.opportunity?.watchers?.length ? a.opportunity.watchers : legacyWatchers),
+      wait_minutes: (oppDraft?.wait_minutes || a.opportunity?.wait_minutes) || 10,
     },
   };
+  Object.keys(aiAgents.value).forEach(key => {
+    loadedValues.value[key] = snapshotAgent(key);
+  });
+  schedulerStageIds.value = [...(settings.value?.scheduler_stage_ids || [])];
+  const saved = settings.value?.agent_stage_ids || {};
+  STAGE_AGENTS.forEach(a => {
+    agentStageIds.value[a] = [...(saved[a] || [])];
+  });
   // relatório de gastos + colunas para o Radar (em paralelo)
   loadStages().catch(() => {});
   CrmAPI.getAiUsage()
     .then(({ data }) => { aiUsage.value = data; })
     .catch(() => {});
-};
-
-const saveAgents = async () => {
-  isSavingAgents.value = true;
-  try {
-    const pack = agent => ({
-      enabled: agent.enabled,
-      prompt: agent.prompt.trim(),
-      model: agent.model,
-      effort: agent.effort,
-    });
-    await CrmAPI.updateAi({
-      agents: {
-        conversation: pack(aiAgents.value.conversation),
-        form: pack(aiAgents.value.form),
-        scheduler: pack(aiAgents.value.scheduler),
-        opportunity: {
-          ...pack(aiAgents.value.opportunity),
-          // só vigias com coluna escolhida valem
-          watchers: aiAgents.value.opportunity.watchers
-            .filter(w => w.stage_id)
-            .map(w => ({
-              stage_id: Number(w.stage_id),
-              user_id: w.user_id || null,
-              lookback_hours: Number(w.lookback_hours) || 24,
-            })),
-          wait_minutes: Number(aiAgents.value.opportunity.wait_minutes) || 10,
-        },
-      },
-    });
-    useAlert('Agentes de IA salvos!');
-  } catch {
-    useAlert('Erro ao salvar os agentes.');
-  } finally {
-    isSavingAgents.value = false;
-  }
 };
 
 const aiConfigured = ref(false);
@@ -339,16 +558,78 @@ const ACTION_LABELS = {
   google_ads_conversion: 'Conversão Google Ads',
   send_form: 'Enviar formulário',
   ai_analyze: 'Agente de IA: Analista de Conversas',
-  schedule_appointment: 'Agente de IA: Agendamento',
+  schedule_appointment: 'IA: Secretário da Agenda',
+  set_value: 'Adicionar preço no card',
 };
 
 const openProgrammingMode = () => {
   window.location.href = `/app/accounts/${accountId.value}/crm?programming=1`;
 };
 
+// ── Resultados das automações (dashboard com presets de período) ──
+const RESULT_PERIODS = [
+  { key: 'today', label: 'Hoje' },
+  { key: 'yesterday', label: 'Ontem' },
+  { key: 'week', label: 'Essa semana' },
+  { key: 'month', label: 'Este mês' },
+  { key: 'last_month', label: 'Mês passado' },
+];
+const resultsPeriod = ref('today');
+const resultsData = ref(null);
+const loadingResults = ref(false);
+
+const TRIGGER_LABELS = {
+  card_entered: 'Card entrou na coluna',
+  card_left: 'Card saiu da coluna',
+  card_stalled: 'Card parado por X tempo',
+  label_added: 'Etiqueta adicionada',
+  label_removed: 'Etiqueta removida',
+  message_created: 'Mensagem criada',
+  value_added: 'Valor adicionado no card',
+};
+
+const loadResults = async () => {
+  loadingResults.value = true;
+  try {
+    const { data } = await CrmAPI.getAutomationsDashboard({ preset: resultsPeriod.value });
+    resultsData.value = data;
+  } catch {
+    resultsData.value = null;
+    useAlert('Erro ao carregar os resultados das automações.');
+  } finally {
+    loadingResults.value = false;
+  }
+};
+
+const setResultsPeriod = key => {
+  resultsPeriod.value = key;
+  loadResults();
+};
+
+// carrega quando a aba abre pela primeira vez
+watch(activeTab, tab => {
+  if (tab === 'resultados' && !resultsData.value && !loadingResults.value) loadResults();
+});
+
+const maxTimelineFired = () =>
+  Math.max(1, ...(resultsData.value?.timeline || []).map(d => d.fired));
+
+const fmtDay = iso => {
+  const [, m, d] = iso.split('-');
+  return `${d}/${m}`;
+};
+
+const fmtLastFired = iso => {
+  if (!iso) return 'nunca no período';
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+};
+
 // ── Tratamento de dados (atalhos conectados) ──
 const TREATMENT_TOOLS = [
-  { icon: 'i-lucide-tag', title: 'Etiqueta retroativa', desc: 'Aplica etiqueta e move para coluna quem já mencionou um termo nas mensagens (busca em massa no histórico).' },
+  { icon: 'i-lucide-move', title: 'Mover e etiquetar em LOTE', desc: 'Filtre cards por coluna, valor, caixa de entrada ou etiqueta → mova todos de coluna e/ou adicione etiqueta (nunca duplica). Ex: COM valor em Novos Contatos → Envio de Orçamento.' },
+  { icon: 'i-lucide-tag', title: 'Etiquetar e/ou mover por conteúdo', desc: 'Se a conversa contém X, ou Y, ou Z → aplica etiqueta e/ou MOVE o card de coluna (etiqueta opcional — dá para só mover). Busca em massa no histórico.' },
   { icon: 'i-lucide-replace', title: 'Substituir / remover etiqueta', desc: 'Troca ou limpa etiquetas em massa em toda a base.' },
   { icon: 'i-lucide-circle-dollar-sign', title: 'Valor pelo orçamento', desc: 'Detecta valores de orçamento nas conversas e preenche o valor do card.' },
   { icon: 'i-lucide-user-check', title: 'Unificar contatos duplicados', desc: 'Mescla contatos com mesmo telefone/e-mail (com prévia antes de aplicar).' },
@@ -443,12 +724,41 @@ const deleteBot = async bot => {
   }
 };
 
+// registro de atividade do robô — mostra por que ele está (ou não) enviando
+const expandedBotLog = ref(null);
+const REASON_LABELS = {
+  aguardando_prazo: 'aguardando o prazo da cutucada',
+  paciente_falou_ultimo: 'paciente falou por último (vez do atendimento)',
+  cadencia_completa: 'já recebeu todas as cutucadas',
+  etiquetas: 'barrado pelo filtro de etiquetas',
+  erro: 'erro ao enviar',
+};
+const reasonLine = run =>
+  Object.entries(run?.reasons || {})
+    .map(([k, v]) => `${v} ${REASON_LABELS[k] || k}`)
+    .join(' · ');
+// por que o robô pode estar parado — aviso bem visível no card
+const botWarning = bot => {
+  if (bot.window_status === 'janela_encerrada')
+    return `⏸ A data "para em" já passou (${fmtLogDate(bot.ends_at)}) — o robô NÃO está enviando nada. Edite o robô e limpe ou estenda a janela.`;
+  if (bot.window_status === 'ainda_nao_comecou')
+    return `⏳ A janela "começa em" ainda não chegou (${fmtLogDate(bot.starts_at)}) — o robô só envia a partir dela.`;
+  return '';
+};
+
+// unidade correta por etapa: minutos ÷ 60, dias × 24 (igual ao backend)
 const delayLabel = step => {
-  const hours = step.delay_value != null
-    ? Number(step.delay_value) * (step.delay_unit === 'days' ? 24 : 1)
-    : Number(step.delay_hours);
+  let hours;
+  if (step.delay_value != null) {
+    const v = Number(step.delay_value);
+    if (step.delay_unit === 'days') hours = v * 24;
+    else if (step.delay_unit === 'minutes') hours = v / 60;
+    else hours = v;
+  } else {
+    hours = Number(step.delay_hours);
+  }
   if (hours < 1) return `${Math.round(hours * 60)}min`;
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return `${Math.round(hours * 10) / 10}h`;
   return `${Math.round(hours / 24)}d`;
 };
 
@@ -490,6 +800,12 @@ onMounted(async () => {
           :class="activeTab === 'programacao' ? 'bg-yellow-500 text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           @click="activeTab = 'programacao'"
         >⚡ Modo Programação</button>
+        <button
+          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
+          :class="activeTab === 'resultados' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'resultados' ? { background: 'linear-gradient(135deg, #65A30D, #84CC16)' } : {}"
+          @click="activeTab = 'resultados'"
+        >📊 Resultados</button>
         <button
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
           :class="activeTab === 'tratamento' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
@@ -547,6 +863,46 @@ onMounted(async () => {
               >
                 {{ delayLabel(s) }}: {{ s.template_params ? `📋 ${s.template_params.name}` : `"${s.message}"` }}
               </span>
+            </div>
+
+            <!-- aviso quando a janela parou o robô (causa silenciosa nº 1) -->
+            <div
+              v-if="bot.active && botWarning(bot)"
+              class="mt-2 text-xs rounded-lg px-3 py-2 font-medium"
+              style="background: rgba(217, 119, 6, 0.1); color: #b45309; border: 1px solid rgba(217, 119, 6, 0.35)"
+            >
+              {{ botWarning(bot) }}
+            </div>
+
+            <!-- última rodada + registro de atividade -->
+            <div class="mt-2 flex items-center gap-2 flex-wrap text-[11px] text-n-slate-10">
+              <template v-if="bot.activity?.last_run">
+                <span>
+                  Última rodada {{ fmtLogDate(bot.activity.last_run.at) }} ·
+                  <template v-if="bot.activity.last_run.status === 'fora_da_janela'">fora da janela (não enviou)</template>
+                  <template v-else>
+                    {{ bot.activity.last_run.candidates }} conversa(s) na mira ·
+                    <b :class="bot.activity.last_run.sent ? 'text-green-600' : ''">{{ bot.activity.last_run.sent }} enviada(s)</b>
+                  </template>
+                </span>
+                <span v-if="reasonLine(bot.activity.last_run)" class="text-n-slate-9">{{ reasonLine(bot.activity.last_run) }}</span>
+              </template>
+              <span v-else>Sem rodadas registradas ainda (o registro começa após esta atualização).</span>
+              <button
+                v-if="bot.activity?.events?.length"
+                class="text-n-brand font-medium hover:underline"
+                @click="expandedBotLog = expandedBotLog === bot.id ? null : bot.id"
+              >
+                📒 Registro de atividade ({{ bot.activity.events.length }})
+              </button>
+            </div>
+            <div v-if="expandedBotLog === bot.id && bot.activity?.events?.length" class="mt-2 rounded-lg bg-n-alpha-1 divide-y divide-n-weak">
+              <div v-for="(ev, i) in bot.activity.events" :key="i" class="px-3 py-1.5 text-[11px] flex items-center gap-2">
+                <span>{{ ev.type === 'sent' ? '✉️' : '⚠️' }}</span>
+                <span class="text-n-slate-9 flex-shrink-0">{{ fmtLogDate(ev.at) }}</span>
+                <span class="text-n-slate-11 truncate">{{ ev.contact || 'Contato' }} · conversa #{{ ev.conversation_id }}</span>
+                <span class="text-n-slate-10 truncate">{{ ev.type === 'sent' ? ev.note : `erro: ${ev.note}` }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -641,6 +997,13 @@ onMounted(async () => {
                   >
                     ● {{ agent.enabled ? 'Ligado' : 'Desligado' }}
                   </span>
+                  <span
+                    v-if="agent.has_draft"
+                    class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-600"
+                    title="Existe um rascunho salvo que ainda NÃO está valendo — clique em Publicar para aplicar"
+                  >
+                    📝 Rascunho não publicado
+                  </span>
                 </div>
                 <p class="text-xs text-n-slate-10 mt-1">{{ AGENT_META[key].description }}</p>
               </div>
@@ -666,7 +1029,7 @@ onMounted(async () => {
                     />
                   </span>
                 </button>
-                <span class="text-[9px] text-n-slate-9">vale na hora</span>
+                <span class="text-[9px] text-n-slate-9">salva na hora</span>
               </div>
             </div>
 
@@ -684,12 +1047,13 @@ onMounted(async () => {
             </div>
 
             <!-- Modelo + Esforço (vazio = recomendado pelo sistema) -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2" :class="!editingAgent[key] ? 'opacity-70' : ''">
               <div>
                 <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Modelo de IA</label>
                 <select
                   v-model="agent.model"
-                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  :disabled="!editingAgent[key]"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12 disabled:cursor-not-allowed"
                 >
                   <option value="">⭐ {{ recommendedModelLabel(key) }}</option>
                   <option v-for="m in AGENT_MODELS" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -701,7 +1065,8 @@ onMounted(async () => {
                 </label>
                 <select
                   v-model="agent.effort"
-                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+                  :disabled="!editingAgent[key]"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12 disabled:cursor-not-allowed"
                 >
                   <option value="">⭐ {{ recommendedEffortLabel(key) }}</option>
                   <option v-for="e in AGENT_EFFORTS" :key="e.value" :value="e.value">{{ e.label }}</option>
@@ -746,7 +1111,8 @@ onMounted(async () => {
                   v-model.number="agent.wait_minutes"
                   type="number"
                   min="1"
-                  class="w-16 border border-n-weak rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12"
+                  :disabled="!editingAgent[key]"
+                  class="w-16 border border-n-weak rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
                 />
                 min sem resposta
               </div>
@@ -774,7 +1140,8 @@ onMounted(async () => {
                         </label>
                         <select
                           v-model="w.stage_id"
-                          class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12"
+                          :disabled="!editingAgent[key]"
+                          class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
                         >
                           <option value="" disabled>Escolha a coluna…</option>
                           <option v-for="s in allStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
@@ -784,7 +1151,8 @@ onMounted(async () => {
                         <label class="text-[10px] font-medium text-n-slate-9 block mb-0.5">Avisar no painel de</label>
                         <select
                           v-model="w.user_id"
-                          class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12"
+                          :disabled="!editingAgent[key]"
+                          class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
                         >
                           <option :value="null">👥 Todos os atendentes</option>
                           <option v-for="ag in teamAgents" :key="ag.id" :value="ag.id">{{ ag.available_name || ag.name }}</option>
@@ -794,12 +1162,14 @@ onMounted(async () => {
                         <label class="text-[10px] font-medium text-n-slate-9 block mb-0.5">Olhando o movimento das</label>
                         <select
                           v-model.number="w.lookback_hours"
-                          class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12"
+                          :disabled="!editingAgent[key]"
+                          class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
                         >
                           <option v-for="o in LOOKBACK_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
                         </select>
                       </div>
                       <button
+                        v-if="editingAgent[key]"
                         class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm flex-shrink-0 self-end sm:self-auto sm:mb-2"
                         title="Remover esta vigia"
                         @click="removeWatcher(wi)"
@@ -807,6 +1177,7 @@ onMounted(async () => {
                     </div>
                   </div>
                   <button
+                    v-if="editingAgent[key]"
                     class="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-dashed transition-colors hover:bg-n-alpha-1"
                     style="border-color: rgba(220,38,38,0.5); color: #DC2626"
                     @click="addWatcher"
@@ -833,26 +1204,220 @@ onMounted(async () => {
               </div>
             </div>
 
+            <!-- Consultor Comercial: insights p/ a gestão -->
+            <div v-if="key === 'sales'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                <p class="text-xs font-medium text-n-slate-11 flex-1">
+                  💡 Insights comerciais
+                  <span class="text-n-slate-9 font-normal">(analisa as conversas que FECHARAM cirurgia — alimentadas pelo Monitor de Fechamento)</span>
+                </p>
+                <button
+                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                  :style="{ background: AGENT_META.sales.gradient }"
+                  :disabled="isGeneratingInsights"
+                  @click="generateSalesInsights"
+                >
+                  {{ isGeneratingInsights ? 'Analisando… (1-2 min)' : 'Gerar insights comerciais' }}
+                </button>
+              </div>
+              <div v-if="salesInsights()?.text" class="rounded-lg bg-n-alpha-1 p-3 max-h-72 overflow-y-auto">
+                <p class="text-[10px] text-n-slate-9 mb-1.5">
+                  {{ salesInsights().conversations }} conversa(s) analisada(s) · {{ fmtLogDate(salesInsights().generated_at) }}
+                </p>
+                <pre class="text-[11px] text-n-slate-11 whitespace-pre-wrap font-sans leading-relaxed">{{ salesInsights().text }}</pre>
+              </div>
+              <p v-else-if="salesInsights()?.error" class="text-[11px] text-amber-600">⚠️ {{ salesInsights().error }}</p>
+            </div>
+
+            <!-- Colunas de atuação (Analista / Monitor de Fechamento / NPS) -->
+            <div v-if="STAGE_AGENTS.includes(key)" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-2">
+              <p class="text-xs font-medium text-n-slate-11">
+                Colunas de atuação
+                <span class="text-n-slate-9 font-normal">
+                  (card entrou na coluna → o agente lê a conversa
+                  <template v-if="key === 'closing'">; sugestão: as colunas de "Indicação de Cirurgia"</template>
+                  <template v-else-if="key === 'nps'">; sugestão: a coluna de Pós-Operatório</template>)
+                </span>
+              </p>
+              <div v-if="!allStages.length" class="text-xs text-n-slate-9">Carregando colunas…</div>
+              <div v-else class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="st in allStages"
+                  :key="st.id"
+                  class="text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors"
+                  :class="agentStageIds[key].includes(st.id)
+                    ? 'text-white border-transparent'
+                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                  :style="agentStageIds[key].includes(st.id) ? { background: AGENT_META[key].gradient } : {}"
+                  @click="toggleAgentStage(key, st.id)"
+                >
+                  {{ st.name }}
+                </button>
+              </div>
+              <button
+                class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                :style="{ background: AGENT_META[key].gradient }"
+                :disabled="savingAgentStages === key"
+                @click="saveAgentStages(key)"
+              >
+                {{ savingAgentStages === key ? 'Salvando…' : 'Salvar colunas de atuação' }}
+              </button>
+            </div>
+
+            <!-- Config do Secretário da Agenda -->
+            <div v-if="key === 'scheduler'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
+                📥 Anota consultas na Agenda do sistema lendo as conversas — <b>nunca fala com o
+                paciente</b> (quem conversa é o Atendente IA do N8N). Roda quando um card ENTRA nas
+                colunas escolhidas abaixo; reagendamentos atualizam a consulta existente.
+              </div>
+
+              <!-- Colunas onde o Secretário atua -->
+              <div>
+                <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                  Colunas onde o Secretário atua
+                  <span class="text-n-slate-9 font-normal">(card entrou → lê a conversa e anota na Agenda; nenhuma marcada = só manual)</span>
+                </p>
+                <div v-if="!allStages.length" class="text-xs text-n-slate-9">Carregando colunas…</div>
+                <div v-else class="flex flex-wrap gap-1.5">
+                  <button
+                    v-for="s in allStages"
+                    :key="s.id"
+                    class="text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors"
+                    :class="schedulerStageIds.includes(s.id)
+                      ? 'text-white border-transparent'
+                      : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                    :style="schedulerStageIds.includes(s.id) ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
+                    @click="toggleSchedulerStage(s.id)"
+                  >
+                    {{ s.name }}
+                  </button>
+                </div>
+                <button
+                  class="mt-2 text-xs font-semibold text-white px-3 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-50"
+                  style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+                  :disabled="isSavingSchedulerStages"
+                  @click="saveSchedulerStages"
+                >
+                  {{ isSavingSchedulerStages ? 'Salvando…' : 'Salvar colunas de atuação' }}
+                </button>
+              </div>
+
+              <!-- Preencher com o histórico -->
+              <div class="flex items-center gap-2 flex-wrap border-t border-n-weak pt-3">
+                <button
+                  class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90"
+                  style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+                  @click="showBackfillModal = true"
+                >
+                  <span class="i-lucide-calendar-search text-xs" />
+                  Preencher agenda com o histórico…
+                </button>
+                <span v-if="backfillLastRun()" class="text-[11px] text-n-slate-10">
+                  Última varredura: {{ backfillLastRun().scanned }} conversas ·
+                  {{ backfillLastRun().created || 0 }} criadas · {{ backfillLastRun().rescheduled || 0 }} reagendadas ·
+                  {{ backfillLastRun().already || 0 }} já existiam
+                </span>
+              </div>
+
+              <!-- Registro de atividade: cada leitura vira uma linha -->
+              <div class="border-t border-n-weak pt-3">
+                <button
+                  class="flex items-center gap-1.5 text-xs font-medium text-n-slate-11 hover:text-n-brand"
+                  @click="showSchedulerLog = !showSchedulerLog"
+                >
+                  <span :class="showSchedulerLog ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="text-xs" />
+                  📒 Registro de atividade ({{ schedulerLog().length }} última(s) leitura(s))
+                </button>
+                <div v-if="showSchedulerLog" class="mt-2 space-y-1 max-h-56 overflow-y-auto pr-1">
+                  <p v-if="!schedulerLog().length" class="text-xs text-n-slate-9">
+                    Nenhuma leitura ainda — as linhas aparecem aqui conforme o Secretário trabalhar.
+                  </p>
+                  <div
+                    v-for="(entry, i) in schedulerLog()"
+                    :key="i"
+                    class="flex items-center gap-2 text-[11px] text-n-slate-11 rounded-lg bg-n-solid-2 border border-n-weak px-2.5 py-1.5 flex-wrap"
+                  >
+                    <span class="text-n-slate-9">{{ fmtLogDate(entry.at) }}</span>
+                    <span class="font-medium text-n-slate-12 truncate max-w-[160px]">{{ entry.name }}</span>
+                    <span v-if="entry.when" class="text-n-slate-10">→ consulta {{ fmtLogDate(entry.when) }}</span>
+                    <span
+                      class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold ml-auto"
+                      :class="(SCHEDULER_OUTCOMES[entry.outcome] || {}).class"
+                    >
+                      {{ (SCHEDULER_OUTCOMES[entry.outcome] || {}).label || entry.outcome }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
               Prompt do agente <span class="text-n-slate-9 font-normal">(vazio = usa o prompt padrão abaixo)</span>
             </label>
             <textarea
               v-model="agent.prompt"
               rows="4"
-              class="w-full border border-n-weak rounded-xl px-3 py-2.5 text-xs bg-n-solid-1 text-n-slate-12 font-mono leading-relaxed"
+              :disabled="!editingAgent[key]"
+              class="w-full border border-n-weak rounded-xl px-3 py-2.5 text-xs bg-n-solid-1 text-n-slate-12 font-mono leading-relaxed disabled:opacity-70 disabled:cursor-not-allowed"
               :placeholder="agent.default_prompt"
             />
+
+            <!-- EDITAR | SALVAR (rascunho) | PUBLICAR -->
+            <div class="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-n-weak">
+              <button
+                v-if="!editingAgent[key]"
+                class="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 hover:text-n-brand transition-colors"
+                @click="startEdit(key)"
+              >
+                <span class="i-lucide-pencil text-xs" />
+                Editar
+              </button>
+              <template v-else>
+                <button
+                  class="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-amber-500/50 text-amber-600 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+                  :disabled="savingAgent === key"
+                  title="Guarda as mudanças SEM aplicar — o agente continua como está até você publicar"
+                  @click="saveAgentDraft(key)"
+                >
+                  <span :class="savingAgent === key ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-save'" class="text-xs" />
+                  Salvar rascunho
+                </button>
+                <button
+                  class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 shadow"
+                  :style="{ background: AGENT_META[key].gradient }"
+                  :disabled="savingAgent === key"
+                  title="Aplica de verdade — vale nas próximas análises"
+                  @click="publishAgent(key)"
+                >
+                  <span :class="savingAgent === key ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-rocket'" class="text-xs" />
+                  Publicar
+                </button>
+                <button
+                  class="text-xs text-n-slate-9 hover:text-n-slate-11 px-2 py-2"
+                  :disabled="savingAgent === key"
+                  @click="discardEdit(key)"
+                >
+                  Descartar mudanças
+                </button>
+              </template>
+              <button
+                v-if="!editingAgent[key] && agent.has_draft"
+                class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 shadow"
+                :style="{ background: AGENT_META[key].gradient }"
+                :disabled="savingAgent === key"
+                title="Publica o rascunho salvo — vale nas próximas análises"
+                @click="publishAgent(key)"
+              >
+                <span :class="savingAgent === key ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-rocket'" class="text-xs" />
+                Publicar rascunho
+              </button>
+              <span class="text-[10px] text-n-slate-9 ml-auto">
+                Salvar = guarda sem aplicar · Publicar = passa a valer · interruptor liga/desliga na hora
+              </span>
+            </div>
           </div>
         </div>
-
-        <button
-          class="w-full text-white rounded-xl py-2.5 text-sm font-bold hover:opacity-90 disabled:opacity-50 shadow"
-          style="background: linear-gradient(135deg, #7C3AED, #5B21B6)"
-          :disabled="isSavingAgents"
-          @click="saveAgents"
-        >
-          {{ isSavingAgents ? 'Salvando…' : 'Salvar agentes' }}
-        </button>
       </div>
 
       <!-- ══ MODO PROGRAMAÇÃO — painel panorâmico de automações ══ -->
@@ -996,6 +1561,113 @@ onMounted(async () => {
       </div>
 
       <!-- ══ TRATAMENTO DE DADOS ══ -->
+      <!-- ══ RESULTADOS — dashboard das automações de coluna ══ -->
+      <div v-else-if="activeTab === 'resultados'" class="max-w-3xl space-y-5">
+        <p class="text-sm text-n-slate-11">
+          Quantas vezes cada automação de coluna trabalhou no período — disparos, falhas e
+          pacientes alcançados. Réguas de mensagem têm resultados na Campanha WhatsApp.
+        </p>
+
+        <!-- Presets de período (mesmos do Meu Painel) -->
+        <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto">
+          <button
+            v-for="p in RESULT_PERIODS"
+            :key="p.key"
+            class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
+            :class="resultsPeriod === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="resultsPeriod === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            @click="setResultsPeriod(p.key)"
+          >
+            {{ p.label }}
+          </button>
+        </div>
+
+        <div v-if="loadingResults" class="flex items-center gap-2 text-sm text-n-slate-10 py-8">
+          <Spinner class="w-4 h-4" /> Carregando resultados…
+        </div>
+
+        <template v-else-if="resultsData">
+          <!-- KPIs -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #0F5FA6, #0B4A82)">
+              <p class="text-[11px] font-medium text-white/80">Disparos</p>
+              <p class="text-xl font-bold leading-tight">{{ resultsData.totals.fired }}</p>
+            </div>
+            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
+              <p class="text-[11px] font-medium text-white/80">Pacientes alcançados</p>
+              <p class="text-xl font-bold leading-tight">{{ resultsData.totals.contacts }}</p>
+            </div>
+            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
+              <p class="text-[11px] font-medium text-white/80">Automações ativas</p>
+              <p class="text-xl font-bold leading-tight">{{ resultsData.totals.active_automations }}</p>
+            </div>
+            <div
+              class="rounded-xl px-4 py-3 shadow"
+              :class="resultsData.totals.failed ? 'text-white' : 'bg-n-solid-1 border border-n-weak'"
+              :style="resultsData.totals.failed ? { background: 'linear-gradient(135deg, #DC2626, #F59E0B)' } : {}"
+            >
+              <p class="text-[11px] font-medium" :class="resultsData.totals.failed ? 'text-white/80' : 'text-n-slate-10'">Falhas</p>
+              <p class="text-xl font-bold leading-tight" :class="resultsData.totals.failed ? '' : 'text-n-slate-12'">{{ resultsData.totals.failed }}</p>
+            </div>
+          </div>
+
+          <!-- Disparos por dia -->
+          <div v-if="resultsData.timeline.length > 1" class="rounded-2xl border-2 border-n-weak bg-n-solid-2 p-4">
+            <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-3">Disparos por dia</p>
+            <div class="flex items-end gap-1 h-24 overflow-x-auto">
+              <div
+                v-for="d in resultsData.timeline"
+                :key="d.date"
+                class="flex flex-col items-center gap-1 flex-1 min-w-[22px]"
+                :title="`${fmtDay(d.date)}: ${d.fired} disparo(s)`"
+              >
+                <span class="text-[9px] text-n-slate-10 leading-none">{{ d.fired || '' }}</span>
+                <div
+                  class="w-full rounded-t-md"
+                  :style="{
+                    height: `${Math.max(d.fired ? 8 : 2, (d.fired / maxTimelineFired()) * 64)}px`,
+                    background: d.fired ? 'linear-gradient(180deg, #7C3AED, #0F5FA6)' : 'rgba(148,163,184,0.25)',
+                  }"
+                />
+                <span class="text-[8px] text-n-slate-9 leading-none whitespace-nowrap">{{ fmtDay(d.date) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Ranking por automação -->
+          <div class="rounded-2xl border-2 border-n-weak bg-n-solid-2 p-4">
+            <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-3">Automação por automação</p>
+            <div v-if="!resultsData.automations.length" class="text-sm text-n-slate-10 py-4">
+              Nenhuma automação com movimento no período.
+            </div>
+            <div v-else class="space-y-2">
+              <div
+                v-for="a in resultsData.automations"
+                :key="a.id"
+                class="rounded-xl border border-n-weak bg-n-solid-1 px-3.5 py-2.5"
+              >
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ backgroundColor: a.stage_color || '#94A3B8' }" />
+                  <p class="text-sm font-semibold text-n-slate-12 truncate">{{ a.name }}</p>
+                  <span
+                    class="text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0"
+                    :class="a.active ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-10'"
+                  >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
+                  <span class="ml-auto text-sm font-bold text-n-slate-12 flex-shrink-0">{{ a.fired }}×</span>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap text-[11px] text-n-slate-10 mt-1">
+                  <span>{{ a.stage_name }}</span>
+                  <span>· {{ TRIGGER_LABELS[a.trigger_type] || a.trigger_type }} → {{ ACTION_LABELS[a.action_type] || a.action_type }}</span>
+                  <span>· {{ a.contacts }} paciente(s)</span>
+                  <span v-if="a.failed" class="text-red-500 font-medium">· {{ a.failed }} falha(s)</span>
+                  <span class="ml-auto">último: {{ fmtLastFired(a.last_fired_at) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <div v-else-if="activeTab === 'tratamento'" class="max-w-3xl">
         <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
           <p class="text-sm text-n-slate-11">
@@ -1096,6 +1768,69 @@ onMounted(async () => {
             {{ isSweeping ? 'Iniciando…' : 'Varrer agora' }}
           </button>
           <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showSweepModal = false">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: preencher a Agenda com o histórico -->
+    <div
+      v-if="showBackfillModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      @click.self="showBackfillModal = false"
+    >
+      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div class="h-1.5 w-full" style="background: linear-gradient(135deg, #B8860B, #D4A017)" />
+        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak">
+          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
+            <span class="i-lucide-calendar-search" style="color: #B8860B" />
+            Preencher agenda com o histórico
+          </h2>
+          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showBackfillModal = false" />
+        </div>
+        <div class="p-5 space-y-4">
+          <p class="text-xs text-n-slate-11 leading-relaxed">
+            O Agente de Agendamento vai ler as conversas com <b>confirmação de agendamento</b>
+            (ex.: "Consulta confirmada" do bot) e registrar cada consulta na Agenda do sistema —
+            criando as novas e <b>reagendando</b> as que mudaram de horário. Nada é enviado ao paciente.
+          </p>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Olhar as conversas dos últimos</label>
+              <select v-model.number="backfill.since_days" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12">
+                <option :value="7">7 dias</option>
+                <option :value="30">30 dias</option>
+                <option :value="90">90 dias</option>
+                <option :value="180">180 dias</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Teto de conversas</label>
+              <select v-model.number="backfill.limit" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12">
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+                <option :value="200">200</option>
+                <option :value="300">300 (máximo)</option>
+              </select>
+            </div>
+          </div>
+          <div class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
+            ⚠️ Cada conversa = 1 análise de IA (Sonnet ≈ US$ 0,01–0,02 cada). O Agente de Agendamento
+            precisa estar <b>LIGADO</b> e com a chave configurada. Rodar de novo não duplica consultas.
+          </div>
+        </div>
+        <div class="flex gap-2 px-5 pb-5">
+          <button
+            class="flex-1 flex items-center justify-center gap-1.5 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50"
+            style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+            :disabled="isBackfilling"
+            @click="runBackfill"
+          >
+            <span :class="isBackfilling ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-play'" class="text-sm" />
+            {{ isBackfilling ? 'Iniciando…' : 'Começar a preencher' }}
+          </button>
+          <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showBackfillModal = false">
             Fechar
           </button>
         </div>

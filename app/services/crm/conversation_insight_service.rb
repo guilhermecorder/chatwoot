@@ -26,9 +26,22 @@ class Crm::ConversationInsightService
       proximo_passo: {
         type: 'string',
         description: 'Sugestão curta e prática do próximo passo para a atendente (1 frase)'
+      },
+      etapa_do_script: {
+        type: 'string',
+        enum: %w[recepcao sondagem autoridade orcamento objecoes agendamento
+                 pos_agendamento pos_consulta pos_cirurgico reagendamento],
+        description: 'Etapa do script de atendimento CEVICO em que a conversa está'
+      },
+      frases_sugeridas: {
+        type: 'array',
+        minItems: 2,
+        maxItems: 3,
+        items: { type: 'string' },
+        description: 'Frases prontas, no tom do script CEVICO, para a atendente enviar agora (2 a 3 opções)'
       }
     },
-    required: %w[interesse resumo proximo_passo],
+    required: %w[interesse resumo proximo_passo etapa_do_script frases_sugeridas],
     additionalProperties: false
   }.freeze
 
@@ -46,6 +59,57 @@ class Crm::ConversationInsightService
     No resumo, seja concreto: o que a pessoa procura, objeções levantadas,
     como está a responsividade e em que ponto da jornada ela está.
     Escreva em português do Brasil, direto e sem jargão.
+
+    ETAPA DO SCRIPT (etapa_do_script) — o atendimento CEVICO segue um script;
+    identifique onde a conversa está:
+    - recepcao: primeiro contato, ainda sem saber para quem é o atendimento
+    - sondagem: descobrindo o procedimento desejado e quando quer resolver
+    - autoridade: hora de apresentar médicos, clínica (IOP), unidades e equipamento
+    - orcamento: hora de enviar (ou acabou de enviar) os valores e perguntar
+      se o investimento é possível
+    - objecoes: paciente com dúvidas ou objeções (valor, medo, família,
+      convênio, pesquisar mais) que precisam ser acolhidas
+    - agendamento: investimento confirmado — coletar nome completo, telefone,
+      dia, turno e unidade (Av. Paulista ou Tatuapé)
+    - pos_agendamento: consulta já confirmada — só responder dúvidas, sem
+      fazer novas perguntas nem reabrir a venda
+    - pos_consulta: já passou com o médico — aguarda indicação da cirurgia
+    - pos_cirurgico: já operou — acolher e, se houver problema, encaminhar
+      ao pós-operatório
+    - reagendamento: quer remarcar — reconduzir para novo dia/turno/unidade
+
+    FRASES SUGERIDAS (frases_sugeridas): escreva 2 a 3 frases PRONTAS para a
+    ATENDENTE enviar em seguida, adequadas à etapa e ao momento exato da
+    conversa, no tom do script CEVICO:
+    - curtas e diretas (até ~150 caracteres cada), tratando o paciente por "você"
+    - SEM emoji, SEM travessão (—), SEM listas
+    - nunca usar "preço", "custo", "caro", "barato", "desconto", "pagar" —
+      falar em "investimento" e "valor"; NUNCA oferecer desconto
+    - consultivo, sem pressão: acolher primeiro, agendar depois; na maioria
+      dos casos terminar com uma pergunta que mantém o diálogo aberto
+    - não repetir pergunta que o paciente já respondeu; não insistir no
+      agendamento se ele já foi convidado duas vezes
+
+    Dados oficiais da CEVICO para usar nas frases (nunca invente outros):
+    - Consulta de avaliação: R$ 150 com exames inclusos (biometria,
+      microscopia, fundo de olho e pentacam); avaliação de glaucoma R$ 300
+    - Refrativa (dois olhos): PRK R$ 4.900, Lasik R$ 5.700 — a técnica é
+      definida pelo médico com base nos exames
+    - Catarata (por olho): R$ 2.800 lente nacional, R$ 3.200 Rayner
+      importada, R$ 5.690 Rayner de foco estendido
+    - Pagamento: à vista no PIX ou em até 10x sem juros no cartão; não
+      atendemos convênio nem reembolso
+    - Médicos: Dr. Henrique Gemelli, Dra. Roberta Negri e Dr. Gustavo Bittar
+      (refrativa: Dr. Gustavo Bittar, especialista em córnea); a cirurgia de
+      catarata é do Dr. Jorge Haddad (mais de 30.000 cirurgias)
+    - Equipamento de refrativa: Schwind Amaris 1050RS, considerado o padrão
+      ouro mundial
+    - Unidades: Av. Paulista, 1499, 9º andar (metrô Trianon-MASP) e Tatuapé,
+      R. Serra de Botucatu, 880, 4º andar (estação Carrão)
+    - Consultas: segunda a quinta na Av. Paulista; quarta e sexta no Tatuapé;
+      sábado e domingo não há agenda
+    - Pós-operatório e casos específicos: encaminhar para a Vaneide,
+      (11) 98769-0286
   PROMPT
 
   def initialize(conversation:)
@@ -77,6 +141,8 @@ class Crm::ConversationInsightService
       level: parsed['interesse'],
       summary: parsed['resumo'],
       next_step: parsed['proximo_passo'],
+      script_stage: parsed['etapa_do_script'],
+      suggested_phrases: Array(parsed['frases_sugeridas']).first(3),
       model: model,
       analyzed_at: Time.current.iso8601
     }
