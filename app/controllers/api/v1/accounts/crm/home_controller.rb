@@ -1,31 +1,26 @@
 # Meu Painel: boas-vindas + indicadores com preset de período
-# (hoje/ontem/essa semana/este mês/mês passado) + avisos do Radar.
+# (hoje/ontem/essa semana/este mês/mês passado/este ano) + avisos do Radar.
 # Tudo no fuso da clínica (São Paulo).
 #
-# Os indicadores ESPELHAM O CRM (é onde a operação vive), em visão de
-# coorte: leads que chegaram no período e até onde avançaram no funil.
-# - Novos contatos (leads) = contatos novos das caixas Google + Instagram
-# - Consultas agendadas    = leads que chegaram à coluna "Agendamento..."
-# - Taxa de agendamento    = consultas ÷ leads × 100
-# - Cirurgias fechadas     = leads que chegaram à coluna "Cirurgia Agendada"
-# - Indicações de cirurgia = leads que chegaram à "Indicação de Cirurgia"
+# PAINÉIS POR PESSOA (?panel=): mesmo layout, indicadores da função de cada uma:
+# - agendamento (Vaneide, padrão): espelha o CRM em coorte — leads que
+#   chegaram no período e até onde avançaram no funil.
+# - conducao (Elisangela): condução do paciente na clínica — consultas do
+#   período, comparecimento, faltas e indicações de cirurgia (Agenda).
+# - cirurgia (Gabriela): fechamento — indicações, cirurgias agendadas/
+#   realizadas e taxa de fechamento.
+# - medico (?doctor=Nome): a agenda de cada médico — consultas, presença,
+#   indicações e cirurgias dele.
 class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show
     since, until_at = resolve_range
 
-    leads = leads_count(since, until_at)
-    agendadas = reached_stage_count(/agendamento/i, since, until_at)
-
     render json: {
       period: params[:preset].presence || 'today',
-      # indicadores do período selecionado (coorte pelo dia em que o lead chegou)
-      new_leads: leads,
-      appointments_created: agendadas,
-      booking_conversion: pct(agendadas, leads),
-      surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i),
-      surgery_indications: reached_stage_count(/indica/i, since, until_at),
+      panel: panel_key,
+      panel_data: panel_data(since, until_at),
       # termômetros de agora (independem do período)
       open_conversations: account.conversations.open.count,
       unanswered: account.conversations.open.where.not(waiting_since: nil).count,
@@ -33,14 +28,192 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       new_contacts_30d: leads_count(30.days.ago, Time.current),
       appointments_30d: reached_stage_count(/agendamento/i, 30.days.ago, Time.current),
       next_appointments: next_appointments_json,
-      opportunity_alerts: opportunity_alerts_json
-    }
+      opportunity_alerts: opportunity_alerts_json,
+      my_tasks: my_tasks_json
+    }.merge(panel_key == 'agendamento' ? panel_data(since, until_at) : {}) # compat: campos antigos no topo
   end
 
   private
 
   def account
     Current.account
+  end
+
+  def panel_key
+    key = params[:panel].presence || 'agendamento'
+    # agente com painel ATRIBUÍDO pelo admin fica travado nele
+    unless Current.account_user.administrator?
+      assigned = crm_settings&.agenda_config&.dig('panel_assignments', Current.user.id.to_s)
+      key = assigned if assigned.present?
+    end
+    %w[agendamento conducao cirurgia medico gestor].include?(key) ? key : 'agendamento'
+  end
+
+  def crm_settings
+    @crm_settings ||= CrmSetting.find_by(account: account)
+  end
+
+  def panel_data(since, until_at)
+    # painéis da AGENDA contam o período-calendário inteiro (a consulta de
+    # hoje à tarde conta em "Hoje"); o de leads corta em "agora" (coorte)
+    @panel_data ||= case panel_key
+                    when 'conducao' then conducao_metrics(since, agenda_until(until_at))
+                    when 'cirurgia' then cirurgia_metrics(since, agenda_until(until_at))
+                    when 'medico'   then medico_metrics(since, agenda_until(until_at))
+                    when 'gestor'   then gestor_metrics(since, until_at)
+                    else agendamento_metrics(since, until_at)
+                    end
+  end
+
+  # ── Painel Gestor — indicadores-chave do processo INTEIRO ──
+  def gestor_metrics(since, until_at)
+    ag = agendamento_metrics(since, until_at)
+    full_until = agenda_until(until_at)
+    periodo = consultas.where(canceled_at: nil, due_at: since..full_until)
+    compareceu = periodo.where(attendance: 'attended').count
+    faltou = periodo.where(attendance: 'missed').count
+    indicacoes = periodo.where(surgery_indication: 'indicated').count
+    agendadas = cirurgias.where(created_at: since..until_at).count
+    realizadas_scope = cirurgias.where(due_at: since..full_until)
+    ag.merge(
+      show_rate: pct(compareceu, compareceu + faltou),
+      indications: indicacoes,
+      surgeries_booked: agendadas,
+      closing_rate: pct(agendadas, indicacoes),
+      surgeries_done: realizadas_scope.where(attendance: 'attended').or(realizadas_scope.where(status: :done)).count,
+      nps: nps_summary
+    )
+  end
+
+  # NPS via etiquetas do agente de NPS (5 faixas: 9-10 ... 1-2)
+  def nps_summary
+    counts = Crm::NpsService::NPS_LABELS.index_with do |tag|
+      account.contacts.tagged_with(tag).count
+    rescue StandardError
+      0
+    end
+    total = counts.values.sum
+    {
+      promoters: counts['nps-9-10'], passives: counts['nps-7-8'],
+      detractors: counts['nps-1-2'] + counts['nps-3-4'],
+      total: total,
+      satisfaction: total.positive? ? (counts['nps-9-10'].to_f / total * 100).round(1) : nil
+    }
+  end
+
+  def agenda_until(until_at)
+    now = TZ.now
+    case params[:preset]
+    when 'week'  then now.end_of_week.end_of_day
+    when 'month' then now.end_of_month.end_of_day
+    when 'year'  then now.end_of_year.end_of_day
+    when 'yesterday', 'last_month' then until_at
+    else now.end_of_day # hoje
+    end
+  end
+
+  # ── Painel Agendamento (Vaneide) — coorte pelo dia em que o lead chegou ──
+  def agendamento_metrics(since, until_at)
+    leads = leads_count(since, until_at)
+    agendadas = reached_stage_count(/agendamento/i, since, until_at)
+    {
+      new_leads: leads,
+      appointments_created: agendadas,
+      booking_conversion: pct(agendadas, leads),
+      surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i),
+      surgery_indications: reached_stage_count(/indica/i, since, until_at)
+    }
+  end
+
+  # ── Painel Condução (Elisangela) — a jornada dentro da clínica (Agenda) ──
+  def conducao_metrics(since, until_at)
+    periodo = consultas.where(canceled_at: nil, due_at: since..until_at)
+    compareceu = periodo.where(attendance: 'attended').count
+    faltou = periodo.where(attendance: 'missed').count
+    {
+      consultations: periodo.count,
+      attended: compareceu,
+      missed: faltou,
+      show_rate: pct(compareceu, compareceu + faltou),
+      indications: periodo.where(surgery_indication: 'indicated').count,
+      # consultas que já passaram e ninguém marcou Compareceu/Faltou
+      unconfirmed: periodo.where(attendance: nil).where('due_at < ?', Time.current).count
+    }
+  end
+
+  # ── Painel Cirurgias (Gabriela) — fechamento e pós-operatório ──
+  def cirurgia_metrics(since, until_at)
+    indicacoes = consultas.where(canceled_at: nil, due_at: since..until_at, surgery_indication: 'indicated').count
+    agendadas = cirurgias.where(created_at: since..until_at).count
+    realizadas_scope = cirurgias.where(due_at: since..until_at)
+    {
+      indications: indicacoes,
+      surgeries_booked: agendadas,
+      closing_rate: pct(agendadas, indicacoes),
+      surgeries_done: realizadas_scope.where(attendance: 'attended').or(realizadas_scope.where(status: :done)).count,
+      surgeries_missed: realizadas_scope.where(attendance: 'missed').count,
+      # indicados do período que ainda não viraram cirurgia marcada
+      awaiting_closing: [indicacoes - agendadas, 0].max,
+      upcoming_surgeries: cirurgias.where(due_at: Time.current..).count
+    }
+  end
+
+  # ── Painel Médicos — a agenda de cada médico (?doctor=Nome) ──
+  def medico_metrics(since, until_at)
+    scope = consultas.where(canceled_at: nil, due_at: since..until_at)
+    surgery_scope = cirurgias.where(due_at: since..until_at)
+    if params[:doctor].present?
+      scope = scope.where(doctor: params[:doctor])
+      surgery_scope = surgery_scope.where(doctor: params[:doctor])
+    end
+    compareceu = scope.where(attendance: 'attended').count
+    faltou = scope.where(attendance: 'missed').count
+    indicated = scope.where(surgery_indication: 'indicated').limit(300).to_a
+    conversions = indicated.count { |t| surgery_booked_for_phone?(t.phone) }
+    nps_scores = nps_scores_for(scope.where(attendance: 'attended'))
+    # entre quem COMPARECEU: quantos saíram com indicação × sem indicação
+    sem_indicacao = [compareceu - indicated.size, 0].max
+    {
+      doctor: params[:doctor].presence,
+      consultations: scope.count,
+      attended: compareceu,
+      missed: faltou,
+      show_rate: pct(compareceu, compareceu + faltou),
+      indications: indicated.size,
+      indication_rate: pct(indicated.size, compareceu),
+      no_indication: sem_indicacao,
+      no_indication_rate: pct(sem_indicacao, compareceu),
+      conversions: conversions,
+      conversion_rate: pct(conversions, indicated.size),
+      nps_avg: nps_scores.any? ? (nps_scores.sum.to_f / nps_scores.size).round(1) : nil,
+      nps_count: nps_scores.size,
+      surgeries: surgery_scope.count
+    }
+  end
+
+  # o paciente indicado tem cirurgia MARCADA? (match por telefone, 8 dígitos)
+  def surgery_booked_for_phone?(phone)
+    digits = phone.to_s.gsub(/\D/, '')
+    return false if digits.length < 8
+
+    cirurgias.where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}").exists?
+  end
+
+  # notas de NPS dos pacientes dessas consultas (via contato, teto 200)
+  def nps_scores_for(tasks_scope)
+    tasks_scope.limit(200).filter_map do |t|
+      digits = t.phone.to_s.gsub(/\D/, '')
+      next if digits.length < 8
+
+      contact = account.contacts
+                       .where("regexp_replace(COALESCE(phone_number, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
+                       .first
+      contact&.additional_attributes&.dig('nps', 'score')
+    end
+  end
+
+  def cirurgias
+    account.tasks.where(task_type: 'cirurgia', canceled_at: nil)
   end
 
   def resolve_range
@@ -50,6 +223,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     when 'week'       then [now.beginning_of_week.beginning_of_day, now]
     when 'month'      then [now.beginning_of_month.beginning_of_day, now]
     when 'last_month' then [now.last_month.beginning_of_month, now.last_month.end_of_month]
+    when 'year'       then [now.beginning_of_year.beginning_of_day, now]
     else [now.beginning_of_day, now] # hoje (padrão)
     end
   end
@@ -114,6 +288,27 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # avisos do Radar de Oportunidades (cards quentes sem atendimento).
   # Cada aviso pode ter um painel de destino (user_id): o admin vê todos
   # (com o nome de quem vai atender); a atendente só vê os dela + os gerais.
+  # tarefas esperando VOCÊ (aviso dourado no painel — criador atribuiu)
+  def my_tasks_json
+    open_tasks = account.tasks.where(assignee_id: Current.user.id, status: %w[todo doing])
+                        .where.not(task_type: %w[consulta cirurgia])
+                        .order(Arel.sql('priority DESC, due_at ASC NULLS LAST, created_at DESC'))
+    {
+      count: open_tasks.count,
+      items: open_tasks.limit(5).map do |t|
+        {
+          id: t.id,
+          title: t.title,
+          priority: t.priority,
+          status: t.status,
+          due_at: t.due_at,
+          creator_name: t.creator&.name,
+          comments_count: Array(t.comments).size
+        }
+      end
+    }
+  end
+
   def opportunity_alerts_json
     settings = CrmSetting.find_by(account: account)
     state = settings&.ai_config&.dig('opportunity_state') || {}

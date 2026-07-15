@@ -27,6 +27,7 @@ import LabelDashboard from './LabelDashboard.vue';
 import CrmDashboardReport from './CrmDashboardReport.vue';
 import WhatsappHealth from './WhatsappHealth.vue';
 import TrafficFunnel from './TrafficFunnel.vue';
+import DoctorsDashboard from './DoctorsDashboard.vue';
 import AdsReport from './AdsReport.vue';
 
 const meta = {
@@ -204,6 +205,14 @@ export default {
             permissions: ['administrator', 'report_manage'],
           },
           component: TrafficFunnel,
+        },
+        {
+          path: 'doctors',
+          name: 'doctors_reports',
+          meta: {
+            permissions: ['administrator', 'report_manage'],
+          },
+          component: DoctorsDashboard,
         },
         {
           path: 'ads',

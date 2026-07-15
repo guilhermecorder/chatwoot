@@ -95,6 +95,18 @@ const formatCurrency = (val) =>
 
 // ── Charts ────────────────────────────────────────────────────────────
 
+// fatia com gradiente vertical (mesmo aspecto "macio e brilhante" do donut
+// de Tarefas): topo mais claro, base na cor cheia
+const shinySlices = colors => ctx => {
+  const base = colors[ctx.dataIndex % colors.length];
+  const { chartArea, ctx: c } = ctx.chart;
+  if (!chartArea) return base;
+  const g = c.createLinearGradient(chartArea.left, chartArea.top, chartArea.left, chartArea.bottom);
+  g.addColorStop(0, base + '99');
+  g.addColorStop(1, base);
+  return g;
+};
+
 const CHART_OPTIONS_BASE = {
   responsive: true,
   maintainAspectRatio: false,
@@ -143,9 +155,11 @@ const inboxChart = computed(() => {
       labels: o.map(x => x.inbox),
       datasets: [{
         data: o.map(x => x.count),
-        backgroundColor: PALETTE.slice(0, o.length),
-        borderWidth: 2,
-        borderColor: 'rgba(255,255,255,0.08)',
+        backgroundColor: shinySlices(PALETTE),
+        borderWidth: 0,
+        borderRadius: 14,
+        spacing: 3,
+        hoverOffset: 6,
       }],
     },
     options: {
@@ -155,8 +169,8 @@ const inboxChart = computed(() => {
         legend: { display: true, position: 'bottom', labels: { padding: 12, boxWidth: 12, font: { size: 11 } } },
         tooltip: { callbacks: { label: ctx => ` ${ctx.raw} conversas (${ctx.label})` } },
       },
-      cutout: '65%',
-      animation: { duration: 400 },
+      cutout: '66%',
+      animation: { duration: 500, easing: 'easeOutQuart' },
     },
   };
 });
@@ -170,9 +184,11 @@ const labelChart = computed(() => {
       labels: items.map(x => x.label),
       datasets: [{
         data: items.map(x => x.count),
-        backgroundColor: PALETTE.slice(0, items.length),
-        borderWidth: 2,
-        borderColor: 'rgba(255,255,255,0.08)',
+        backgroundColor: shinySlices(PALETTE),
+        borderWidth: 0,
+        borderRadius: 14,
+        spacing: 3,
+        hoverOffset: 6,
       }],
     },
     options: {
@@ -189,8 +205,8 @@ const labelChart = computed(() => {
           },
         },
       },
-      cutout: '65%',
-      animation: { duration: 400 },
+      cutout: '66%',
+      animation: { duration: 500, easing: 'easeOutQuart' },
     },
   };
 });
@@ -284,20 +300,30 @@ const timeChart = computed(() => {
   };
 });
 
+// cores das 5 faixas de NPS (promotores → detratores)
+const NPS_BAND_GRADS = [
+  ['#059669', '#34D399'],
+  ['#65A30D', '#A3E635'],
+  ['#B8860B', '#D4A017'],
+  ['#EA580C', '#FB923C'],
+  ['#DC2626', '#F87171'],
+];
+
 // ── Responsividade ────────────────────────────────────────────────────
 const resp = computed(() => data.value?.responsiveness ?? null);
 
 // gradientes harmônicos (azul → roxo → dourado → laranja → verde → ciano),
 // seguindo a paleta oficial do dashboard
+// tema "Flor del Mar": fúcsia vibrante sobre azul-mar (referências)
 const RESP_GRADS = [
-  ['#0F5FA6', '#3B82F6'],
-  ['#5B21B6', '#7C3AED'],
+  ['#9D174D', '#EC4899'],
+  ['#1D4ED8', '#60A5FA'],
+  ['#BE185D', '#F472B6'],
+  ['#0369A1', '#38BDF8'],
+  ['#DB2777', '#F9A8D4'],
+  ['#0D9488', '#2DD4BF'],
   ['#7C3AED', '#A78BFA'],
   ['#B8860B', '#D4A017'],
-  ['#D97706', '#F59E0B'],
-  ['#EA580C', '#FB923C'],
-  ['#059669', '#84CC16'],
-  ['#0891B2', '#22D3EE'],
 ];
 
 const respMilestones = computed(() => {
@@ -311,7 +337,8 @@ const respMilestones = computed(() => {
     grad: RESP_GRADS[i % RESP_GRADS.length],
     reached: s.reached,
     pct: s.reached_pct,
-    width: Math.max((s.reached / max) * 100, 5),
+    // pelo menos 33% preenchido: barra curta demais fica feia de ler
+    width: Math.max((s.reached / max) * 100, 33),
   }));
 });
 
@@ -585,16 +612,22 @@ const agentView = computed(() => {
             <div class="h-52 w-52 flex-shrink-0">
               <Doughnut :data="labelChart.data" :options="labelChart.options" />
             </div>
-            <div class="flex-1 w-full space-y-1.5 max-h-52 overflow-y-auto" style="scrollbar-width: thin;">
-              <div
-                v-for="(item, i) in data.by_label.items"
-                :key="item.label"
-                class="flex items-center gap-2 text-xs"
-              >
-                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: PALETTE[i % PALETTE.length] }" />
-                <span class="text-n-slate-12 flex-1 truncate">{{ item.label }}</span>
-                <span class="font-semibold text-n-slate-12">{{ item.count }}</span>
-                <span class="text-n-slate-9 w-12 text-right">{{ item.pct }}%</span>
+            <div class="flex-1 w-full space-y-2 max-h-52 overflow-y-auto pr-1" style="scrollbar-width: thin;">
+              <!-- colunas arredondadas em gradiente (mínimo 33% preenchido) -->
+              <div v-for="(item, i) in data.by_label.items" :key="item.label" class="flex items-center gap-2 text-xs">
+                <span class="text-n-slate-12 w-24 truncate flex-shrink-0">{{ item.label }}</span>
+                <div class="flex-1 h-5 rounded-full bg-n-alpha-1 overflow-hidden">
+                  <div
+                    class="h-full rounded-full flex items-center justify-end pr-2"
+                    :style="{
+                      width: Math.max((item.count / (data.by_label.items[0]?.count || 1)) * 100, 33) + '%',
+                      background: `linear-gradient(90deg, ${PALETTE[i % PALETTE.length]}, ${PALETTE[i % PALETTE.length]}99)`,
+                    }"
+                  >
+                    <span class="text-[10px] font-bold text-white drop-shadow">{{ item.count }}</span>
+                  </div>
+                </div>
+                <span class="text-n-slate-9 w-10 text-right flex-shrink-0">{{ item.pct }}%</span>
               </div>
             </div>
           </div>
@@ -626,6 +659,52 @@ const agentView = computed(() => {
             O Radar audita as colunas vigiadas (07:30–18h a cada 10 min; madrugada a cada 4h)
             e avisa no Meu Painel — configure em Automações → Agentes de IA.
           </p>
+        </div>
+      </div>
+
+      <!-- 🌟 Satisfação (NPS) — pós-operatório -->
+      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-10">
+        <div class="flex items-center gap-2 mb-5 flex-wrap">
+          <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0D9488, #2DD4BF)">
+            <span class="i-lucide-smile text-white text-sm" />
+          </span>
+          <h3 class="text-sm font-bold text-n-slate-12">Satisfação dos pacientes (NPS)</h3>
+          <span class="text-[11px] text-n-slate-9 ml-auto">
+            {{ data.nps?.stage_name ? `pacientes que chegaram a "${data.nps.stage_name}"` : 'funil inteiro' }} · notas lidas pelo agente de NPS
+          </span>
+        </div>
+        <div v-if="!data.nps?.total" class="flex flex-col items-center justify-center py-8 text-n-slate-10 text-sm gap-2">
+          <span class="i-lucide-smile text-2xl" />
+          <span>Sem respostas de NPS ainda — ligue o Agente de NPS numa coluna do pós-operatório (Automações → Agentes de IA).</span>
+        </div>
+        <div v-else class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+          <div class="rounded-2xl p-5 text-white shadow-lg text-center" style="background: linear-gradient(135deg, #0D9488, #2DD4BF)">
+            <p class="text-xs font-medium text-white/80 mb-1">% satisfação (notas 9-10)</p>
+            <p class="text-4xl font-bold">{{ data.nps.satisfaction }}%</p>
+            <p class="text-[11px] text-white/70 mt-1">NPS {{ data.nps.nps_score }} · {{ data.nps.total }} resposta(s)</p>
+          </div>
+          <div class="sm:col-span-2 space-y-2.5">
+            <div
+              v-for="(band, bi) in data.nps.bands"
+              :key="band.key"
+              class="flex items-center gap-3"
+            >
+              <span class="text-xs text-n-slate-12 w-44 flex-shrink-0 truncate">{{ band.label }}</span>
+              <div class="flex-1 h-6 rounded-full bg-n-alpha-1 overflow-hidden">
+                <div
+                  class="h-full rounded-full flex items-center justify-end pr-2"
+                  :style="{
+                    width: Math.max((band.count / data.nps.total) * 100, band.count ? 33 : 4) + '%',
+                    background: `linear-gradient(90deg, ${NPS_BAND_GRADS[bi][0]}, ${NPS_BAND_GRADS[bi][1]})`,
+                  }"
+                >
+                  <span v-if="band.count" class="text-[10px] font-bold text-white drop-shadow">{{ band.count }}</span>
+                </div>
+              </div>
+              <span class="text-xs text-n-slate-9 w-12 text-right">{{ Math.round((band.count / data.nps.total) * 100) }}%</span>
+            </div>
+            <p class="text-[10px] text-n-slate-9">Etiquetas nps-9-10 / nps-7-8 / nps-0-6 aplicadas pelo agente — também dá pra filtrar o board por elas.</p>
+          </div>
         </div>
       </div>
 

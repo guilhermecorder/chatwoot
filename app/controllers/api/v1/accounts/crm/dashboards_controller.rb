@@ -22,6 +22,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       sheet_surgeries:    build_sheet_surgeries(since, until_at),
       by_label:           build_by_label(contacts),
       radar:              build_radar(since, until_at),
+      nps:                build_nps(pipeline, contacts),
     }
   end
 
@@ -281,6 +282,48 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       }
     end
     { total: total, items: items }
+  end
+
+  # ── NPS do pós-operatório ──────────────────────────────────────────
+  # % de satisfação a partir das etiquetas do agente de NPS
+  # (nps-9-10 / nps-7-8 / nps-0-6), com recorte nos cards que chegaram
+  # ao pós-operatório (se a coluna existir; senão, funil inteiro).
+  def build_nps(pipeline, contacts)
+    pos_stage = pipeline.stages.detect { |st| st.name.match?(/p[oó]s/i) }
+    scope_ids = if pos_stage
+                  ordered = pipeline.stages.sort_by(&:position)
+                  ids = ordered.select { |st| st.position >= pos_stage.position }.map(&:id)
+                  contacts.where(stage_id: ids).select(:contact_id)
+                else
+                  contacts.select(:contact_id)
+                end
+
+    counts = ActsAsTaggableOn::Tagging
+             .joins(:tag)
+             .where(taggable_type: 'Contact', context: 'labels')
+             .where(taggable_id: scope_ids)
+             .where(tags: { name: Crm::NpsService::NPS_LABELS })
+             .group('tags.name')
+             .count
+
+    bands = [
+      { key: 'nps-9-10', label: '😍 Notas 9 a 10 (promotores)' },
+      { key: 'nps-7-8',  label: '🙂 Notas 7 a 8' },
+      { key: 'nps-5-6',  label: '😐 Notas 5 a 6' },
+      { key: 'nps-3-4',  label: '😕 Notas 3 a 4' },
+      { key: 'nps-1-2',  label: '😞 Notas 1 a 2 (detratores)' }
+    ].map { |b| b.merge(count: counts[b[:key]].to_i) }
+
+    total = bands.sum { |b| b[:count] }
+    promoters = bands.first[:count]
+    detractors_low = counts['nps-5-6'].to_i + counts['nps-3-4'].to_i + counts['nps-1-2'].to_i
+    {
+      stage_name: pos_stage&.name,
+      bands: bands,
+      total: total,
+      satisfaction: total.positive? ? (promoters.to_f / total * 100).round(1) : nil,
+      nps_score: total.positive? ? (((promoters - detractors_low).to_f / total) * 100).round : nil
+    }
   end
 
   # ── Radar de Oportunidades × Consultas agendadas ──────────────────
