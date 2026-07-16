@@ -84,6 +84,10 @@ class Crm::FollowupBotJob < ApplicationJob
   end
 
   def process_conversation(bot, conversation, steps, run, events)
+    # TRAVA individual: atendente pausou o follow-up para este paciente
+    # (botão na janelinha da conversa) — nenhum robô cutuca
+    return run[:reasons]['pausado_para_paciente'] += 1 if conversation.contact&.additional_attributes&.[]('cevico_followup_paused').present?
+
     return run[:reasons]['etiquetas'] += 1 unless labels_match?(bot, conversation.contact)
 
     anchor = silence_anchor(conversation)

@@ -65,6 +65,14 @@ class CrmAutomationFireJob < ApplicationJob
 
   private
 
+  # A conversa que os agentes leem é a de ATIVIDADE mais recente — não a
+  # criada por último. Paciente que segue conversando na mesma conversa
+  # antiga (padrão no WhatsApp) era lido errado quando existia qualquer
+  # conversa mais nova em outra caixa/canal.
+  def latest_conversation(contact)
+    contact.conversations.order(Arel.sql('last_activity_at DESC NULLS LAST, created_at DESC')).first
+  end
+
   def build_payload(automation, contact, stage, pipeline, extra)
     previous = extra[:previous_stage] || {}
     {
@@ -103,16 +111,32 @@ class CrmAutomationFireJob < ApplicationJob
     return unless label_title.present?
 
     existing = contact.label_list
+    # já tinha a etiqueta → nada a fazer (e nada de redisparar cadeia)
+    return if existing.map(&:downcase).include?(label_title.downcase)
+
     contact.update!(label_list: (existing + [label_title]).uniq)
+
+    # A etiqueta NOVA dispara as automações "Etiqueta adicionada" da coluna
+    # atual do card — permite cadeias: mensagem com "catarata" → etiqueta
+    # "catarata" → mover de coluna / definir valor. Antes, só a etiqueta
+    # aplicada pela tela disparava; a aplicada por automação ficava muda.
+    pipeline = automation.stage.pipeline
+    card = Crm::Contact.find_by(contact_id: contact.id, pipeline_id: pipeline.id)
+    return unless card&.stage
+
+    CrmAutomationTriggerService.new(crm_contact: card, new_stage: card.stage,
+                                    event_type: 'label_added', label: label_title).call
   end
 
   def log_timeline(automation, contact, pipeline)
     # Registra como nota interna na conversa mais recente do contato
-    conversation = contact.conversations.order(created_at: :desc).first
+    conversation = latest_conversation(contact)
     return unless conversation
 
+    # inbox é obrigatória no Message — sem ela a nota falhava em silêncio
     conversation.messages.create!(
       account:     pipeline.account,
+      inbox:       conversation.inbox,
       message_type: :activity,
       content:     "🤖 Automação \"#{automation.name}\" disparada automaticamente.",
       private:     true
@@ -146,7 +170,7 @@ class CrmAutomationFireJob < ApplicationJob
     cfg = automation.action_config
 
     # Envia mensagem privada na última conversa do contato
-    conversation = contact.conversations.order(created_at: :desc).first
+    conversation = latest_conversation(contact)
 
     if conversation
       content_lines = ["📣 *Automação:* #{automation.name}"]
@@ -156,6 +180,7 @@ class CrmAutomationFireJob < ApplicationJob
 
       conversation.messages.create!(
         account:      pipeline.account,
+        inbox:        conversation.inbox,
         message_type: :activity,
         content:      content_lines.join("\n"),
         private:      true
@@ -221,7 +246,7 @@ class CrmAutomationFireJob < ApplicationJob
   # Monitor de Fechamento: extrai valor/forma de pagamento/data da cirurgia
   # e grava no contato + preenche o valor do card se estiver vazio.
   def closing_extract(contact, pipeline)
-    conversation = contact.conversations.order(created_at: :desc).first
+    conversation = latest_conversation(contact)
     return unless conversation
 
     result = Crm::SurgeryClosingService.new(conversation: conversation).call
@@ -249,7 +274,7 @@ class CrmAutomationFireJob < ApplicationJob
   # Agente de NPS: identifica a nota 0-10 e etiqueta o contato com a faixa
   # (nps-9-10 / nps-7-8 / nps-0-6) — alimenta o bloco de NPS do Dashboard CRM.
   def nps_score(contact)
-    conversation = contact.conversations.order(created_at: :desc).first
+    conversation = latest_conversation(contact)
     return unless conversation
 
     result = Crm::NpsService.new(conversation: conversation).call
@@ -269,7 +294,7 @@ class CrmAutomationFireJob < ApplicationJob
   end
 
   def ai_analyze(contact)
-    conversation = contact.conversations.order(created_at: :desc).first
+    conversation = latest_conversation(contact)
     return unless conversation
 
     result = Crm::ConversationInsightService.new(conversation: conversation).call
@@ -283,7 +308,7 @@ class CrmAutomationFireJob < ApplicationJob
   # e cria o compromisso na Agenda (tarefa com unidade). Se a IA não confirmar
   # dia e hora, cria uma tarefa de revisão para a equipe completar.
   def schedule_appointment(automation, contact, pipeline)
-    conversation = contact.conversations.order(created_at: :desc).first
+    conversation = latest_conversation(contact)
     return unless conversation
 
     result = Crm::AppointmentExtractionService.new(conversation: conversation).call
@@ -322,6 +347,7 @@ class CrmAutomationFireJob < ApplicationJob
         description: "A IA não encontrou dia e hora confirmados na conversa.\n#{notes}",
         unit: unit,
         phone: phone,
+        contact: contact,
         procedure: result[:procedure].presence,
         doctor: result[:doctor].presence,
         task_type: 'consulta',
@@ -334,6 +360,7 @@ class CrmAutomationFireJob < ApplicationJob
 
     conversation.messages.create!(
       account: account,
+      inbox: conversation.inbox,
       message_type: :activity,
       content: note,
       private: true
@@ -349,7 +376,7 @@ class CrmAutomationFireJob < ApplicationJob
     # não reenvia para quem já respondeu este formulário
     return if form.responses.where(contact_id: contact.id).where.not(completed_at: nil).exists?
 
-    conversation = contact.conversations.order(created_at: :desc).first
+    conversation = latest_conversation(contact)
     return unless conversation
 
     link = form.public_link_for(contact)

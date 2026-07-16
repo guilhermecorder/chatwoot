@@ -32,8 +32,12 @@ class Crm::OpportunityRadarService
         type: 'boolean',
         description: 'true se o paciente está QUENTE: pronto/querendo agendar consulta ou avançar agora'
       },
-      motivo: { type: 'string', description: 'Por que este card é uma oportunidade, em 1 frase concreta (cite o que o paciente disse)' },
-      acao: { type: 'string', description: 'O que a atendente deve fazer AGORA, em 1 frase prática' }
+      motivo: { type: 'string', description: 'Por que este card é uma oportunidade, em 1 frase concreta e direta (cite o que o paciente disse)' },
+      acao: {
+        type: 'string',
+        description: 'Orientação para a atendente em tom PROFESSORAL e calmo (1-2 frases): o que fazer e por quê, ' \
+                     'como um bom professor orienta — sem tom de alarme, sem "imediatamente/agora/urgente"'
+      }
     },
     required: %w[oportunidade motivo acao],
     additionalProperties: false
@@ -50,9 +54,20 @@ class Crm::OpportunityRadarService
 
     - oportunidade=true SÓ quando há sinal claro de intenção de avançar.
     - Dúvida genérica, pedido de informação fria ou conversa morna → false.
-    - motivo: cite concretamente o que o paciente disse/pediu.
-    - acao: instrução prática para a atendente (ex.: "Responda oferecendo
-      dois horários ainda hoje").
+    - motivo: DIRETO ao ponto — cite concretamente o que o paciente disse/pediu.
+    - acao: tom PROFESSORAL e tranquilo, como um bom professor orientando a
+      atendente: o que fazer e por quê, sem alarme e sem palavras de urgência
+      ("imediatamente", "agora", "urgente"). Ex.: "Vale oferecer dois horários
+      da semana para o retorno em Mogi — data e hora definidas costumam fechar
+      o agendamento."
+
+    ATENÇÃO à etapa da jornada (vem no cabeçalho): quando a coluna for de
+    PÓS-CONSULTA (compareceu à consulta, indicação de cirurgia, não fechou
+    ainda, pós-operatório), o paciente costuma estar ANSIOSO — sinais de
+    oportunidade incluem dúvidas sobre a cirurgia, medo, preço, recuperação
+    ou silêncio depois da indicação. Nesses casos a acao deve orientar
+    acolhimento: responder as dúvidas com calma, reforçar segurança e
+    próximos passos, sem pressão comercial.
     Escreva em português do Brasil.
   PROMPT
 
@@ -90,11 +105,18 @@ class Crm::OpportunityRadarService
         analyzed += 1
         checked[conversation.display_id.to_s] = Time.current.iso8601
 
-        verdict = analyze(conversation)
+        verdict = analyze(conversation, stage_of(conversation)&.name)
         next unless verdict && verdict['oportunidade']
 
         new_alerts << build_alert(conversation, verdict, watcher)
-        history << { 'conversation_id' => conversation.display_id, 'detected_at' => Time.current.iso8601 }
+        # histórico com destino e coluna — alimenta a responsividade do
+        # Radar no Dashboard dos Agentes (quem respondeu e em quanto tempo)
+        history << {
+          'conversation_id' => conversation.display_id,
+          'detected_at' => Time.current.iso8601,
+          'user_id' => watcher[:user_id],
+          'stage_name' => stage_of(conversation)&.name
+        }.compact
       end
     end
 
@@ -187,8 +209,8 @@ class Crm::OpportunityRadarService
     scope.order(waiting_since: :asc).limit(80)
   end
 
-  def analyze(conversation)
-    transcript = build_transcript(conversation)
+  def analyze(conversation, stage_name = nil)
+    transcript = build_transcript(conversation, stage_name)
     return nil if transcript.blank?
 
     message = client.messages.create(
@@ -281,7 +303,7 @@ class Crm::OpportunityRadarService
     @ai_config = nil # limpa memo
   end
 
-  def build_transcript(conversation)
+  def build_transcript(conversation, stage_name = nil)
     messages = conversation.messages
                            .where(message_type: [:incoming, :outgoing])
                            .where(private: false)
@@ -298,7 +320,8 @@ class Crm::OpportunityRadarService
       "[#{m.created_at.strftime('%d/%m %H:%M')}] #{author}: #{m.content.to_s.strip.truncate(500)}"
     end
 
+    stage_line = stage_name.present? ? "Etapa da jornada (coluna do CRM): #{stage_name}.\n" : ''
     "Paciente #{conversation.contact&.name || 'sem nome'} aguarda resposta há #{waiting_min} minutos.\n" \
-      "Conversa:\n\n#{lines.join("\n")}"
+      "#{stage_line}Conversa:\n\n#{lines.join("\n")}"
   end
 end

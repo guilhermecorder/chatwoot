@@ -9,8 +9,23 @@ class Crm::AppointmentRecorder
   def self.record(account:, result:, contact: nil, conversation: nil, default_unit: nil)
     outcome = do_record(account: account, result: result, contact: contact,
                         conversation: conversation, default_unit: default_unit)
+    stamp_gender(contact, result[:gender])
     log_activity(account, result, contact, conversation, outcome)
     outcome
+  end
+
+  # sexo do paciente detectado na conversa (nome/contexto) → anotado no
+  # contato; o Espaço do Paciente muda de cor sozinho. Marcação manual da
+  # equipe vence: só grava se ainda não tem.
+  def self.stamp_gender(contact, gender)
+    return if contact.blank? || gender.blank?
+
+    attrs = contact.additional_attributes || {}
+    return if attrs['sexo'].present?
+
+    contact.update!(additional_attributes: attrs.merge('sexo' => gender))
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::AppointmentRecorder] sexo: #{e.message}"
   end
 
   def self.do_record(account:, result:, contact: nil, conversation: nil, default_unit: nil)
@@ -32,7 +47,7 @@ class Crm::AppointmentRecorder
     return :already if account.tasks.exists?(due_at: result[:starts_at], title: "Consulta: #{name}")
 
     # REAGENDAMENTO: se o paciente já tem consulta FUTURA, ela vira o novo horário
-    future = future_appointment(account, phone, name)
+    future = future_appointment(account, phone, name, contact)
     if future
       return :already if future.due_at == result[:starts_at]
 
@@ -43,6 +58,7 @@ class Crm::AppointmentRecorder
         doctor: result[:doctor].presence || future.doctor,
         procedure: result[:procedure].presence || future.procedure,
         phone: phone.presence || future.phone,
+        contact: contact || future.contact,
         description: [future.description.presence, "Reagendada pela IA:\n#{notes}"].compact.join("\n\n"),
         canceled_at: nil,
         status: :todo
@@ -56,6 +72,7 @@ class Crm::AppointmentRecorder
       due_at: result[:starts_at],
       unit: unit,
       phone: phone,
+      contact: contact,
       procedure: result[:procedure].presence,
       doctor: result[:doctor].presence,
       task_type: 'consulta',
@@ -88,11 +105,17 @@ class Crm::AppointmentRecorder
     Rails.logger.warn "[Crm::AppointmentRecorder] log: #{e.message}"
   end
 
-  # consulta futura ativa do mesmo telefone (últimos 8 dígitos) ou nome
-  def self.future_appointment(account, phone, name)
+  # consulta futura ativa do mesmo CONTATO (unificado), telefone (últimos
+  # 8 dígitos) ou nome — nessa ordem de confiança
+  def self.future_appointment(account, phone, name, contact = nil)
     scope = account.tasks.where(task_type: 'consulta', canceled_at: nil)
                    .where('due_at > ?', Time.current)
                    .where.not(status: 'done')
+
+    if contact
+      by_contact = scope.where(contact_id: contact.id).order(:due_at).first
+      return by_contact if by_contact
+    end
 
     digits = phone.to_s.gsub(/\D/, '')
     if digits.length >= 8

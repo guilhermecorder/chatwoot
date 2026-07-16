@@ -4,9 +4,12 @@
 // exames...), dia, horário, médico e unidade. Criado à mão ou pelo Agente
 // de Agendamento (IA) via ação de coluna do CRM.
 import { ref, computed, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { frontendURL } from 'dashboard/helper/URLHelper';
+import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   addDays, addWeeks, addMonths, isSameDay, isSameMonth, format,
@@ -14,13 +17,22 @@ import {
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import {
-  DOCTORS, resolveWindows, resolveBlocked, resolveBlockedDays,
+  DOCTORS, MODALITIES, resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
 import { ALL_THEMES, resolveTheme } from 'dashboard/helper/cevicoThemes';
 
 const store = useStore();
 const { isAdmin } = useAdmin();
+const route = useRoute();
+const router = useRouter();
+
+// Espaço do Paciente: consulta amarrada ao contato (Fase 0) abre a
+// página única com toda a jornada do paciente
+const openPatientSpace = task => {
+  if (!task?.contact_id) return;
+  router.push(frontendURL(`accounts/${route.params.accountId}/patient/${task.contact_id}`));
+};
 
 const agents = useMapGetter('agents/getAgents');
 const currentUser = useMapGetter('getCurrentUser');
@@ -515,6 +527,9 @@ const unitOf = task => {
 };
 const dotColor = task => unitOf(task)?.color || '#94A3B8';
 const isOverdue = task => task.status !== 'done' && new Date(task.due_at) < new Date();
+// modalidade da consulta (sem tipo = avaliação, caso das consultas antigas)
+const modalityOf = task =>
+  MODALITIES.find(m => m.key === (task.modality || 'avaliacao')) || MODALITIES[0];
 
 // ── Ocupação da agenda (% preenchida — dia/semana/mês) ──────
 // Segue a navegação do calendário e o filtro ativo (unidade/médico).
@@ -566,6 +581,23 @@ const occColor = pct => {
   if (pct >= 80) return '#EF4444';
   if (pct >= 50) return '#D4A017';
   return '#22C55E';
+};
+
+// barra SEGMENTADA por tipo de consulta (avaliação/retorno/exames) —
+// mostra quanto da agenda está ocupada com cada modalidade
+const occSegments = scan => {
+  if (isSurgeryMode.value || !scan.total) return null;
+  return MODALITIES
+    .map(m => ({ ...m, count: scan.byModality?.[m.key] || 0 }))
+    .filter(s => s.count > 0)
+    .map(s => ({ ...s, pct: Math.round((s.count / scan.total) * 100) }));
+};
+const occCaption = scan => {
+  if (!scan.total) return null;
+  const parts = (occSegments(scan) || [])
+    .map(s => `${s.label} ${s.pct}%`)
+    .join(' · ');
+  return parts || null;
 };
 
 // % de um dia específico (chip nas visões Mês/Semana)
@@ -648,6 +680,7 @@ const emptyForm = (day, prefill = {}) => ({
   phone: prefill.phone || '',
   procedure: prefill.procedure || '',
   doctor: prefill.doctor || activeDoctor.value || '',
+  modality: prefill.modality || 'avaliacao',
   date: format(day || cursor.value, 'yyyy-MM-dd'),
   time: prefill.time || '09:00',
   unit: prefill.unit ||
@@ -670,6 +703,30 @@ const openCreateOnDay = (day, prefill = {}) => {
 const openCreateSlot = (day, win, slot) =>
   openCreateOnDay(day, { time: slot, unit: win.unit, doctor: win.doctor });
 
+// mês: clicar no dia NAVEGA para a semana daquele dia (agendar é na
+// semana ou no botão +, onde o horário já vem entendido)
+const goToWeek = day => {
+  cursor.value = new Date(day);
+  viewMode.value = 'week';
+};
+
+// semana: a ALTURA do clique dentro da célula diz o horário — metade de
+// cima = hora cheia, metade de baixo = meia hora
+const openCreateAtPoint = (day, hour, evt) => {
+  const cell = evt.currentTarget;
+  const ratio = cell.clientHeight
+    ? Math.min(0.99, Math.max(0, evt.offsetY / cell.clientHeight))
+    : 0;
+  const half = ratio >= 0.5 ? '30' : '00';
+  openCreateOnDay(day, { time: `${String(hour).padStart(2, '0')}:${half}` });
+};
+
+// botão + flutuante: o caminho principal para agendar de qualquer visão
+const openCreateFab = () => {
+  const base = viewMode.value === 'month' ? new Date() : new Date(cursor.value);
+  openCreateOnDay(base);
+};
+
 const openEdit = task => {
   const d = new Date(task.due_at);
   const pad = n => String(n).padStart(2, '0');
@@ -679,6 +736,7 @@ const openEdit = task => {
     phone: task.phone ?? '',
     procedure: task.procedure ?? '',
     doctor: task.doctor ?? '',
+    modality: task.modality || 'avaliacao',
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
     time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
     unit: task.unit ?? '',
@@ -700,6 +758,7 @@ const save = async () => {
       phone: form.value.phone.trim(),
       procedure: form.value.procedure.trim(),
       doctor: form.value.doctor.trim(),
+      modality: form.value.modality || 'avaliacao',
       due_at: dueAt.toISOString(),
       unit: form.value.unit,
       status: form.value.status,
@@ -1280,8 +1339,14 @@ const onDropCell = (day, hour) => {
             :style="{ backgroundColor: UNITS[activeUnit].color }"
           >{{ UNITS[activeUnit].label }}</span>
           <span v-else class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-n-alpha-2 text-n-slate-11">Toda a clínica</span>
-          <span class="text-[10px] text-n-slate-9 ml-auto hidden sm:block">
+          <span v-if="isSurgeryMode" class="text-[10px] text-n-slate-9 ml-auto hidden sm:block">
             🟢 com vagas · 🟡 enchendo · 🔴 quase cheia — cadeados fora da conta
+          </span>
+          <span v-else class="text-[10px] text-n-slate-9 ml-auto hidden sm:flex items-center gap-2.5">
+            <span v-for="m in MODALITIES" :key="m.key" class="flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full" :style="{ background: m.color }" />{{ m.label }}
+            </span>
+            <span>— cadeados fora da conta</span>
           </span>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1290,15 +1355,25 @@ const onDropCell = (day, hour) => {
               <span class="text-n-slate-11">Dia <span class="text-n-slate-9">({{ occDayLabel }})</span></span>
               <span class="font-bold text-n-slate-12">{{ occDay.total ? occDay.pct + '%' : '—' }}</span>
             </div>
-            <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden">
+            <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden flex">
+              <template v-if="occDay.total && occSegments(occDay)">
+                <div
+                  v-for="s in occSegments(occDay)"
+                  :key="s.key"
+                  class="h-full transition-all"
+                  :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }"
+                  :title="`${s.label}: ${s.count} bloco(s)`"
+                />
+              </template>
               <div
-                v-if="occDay.total"
+                v-else-if="occDay.total"
                 class="h-full rounded-full transition-all"
                 :style="{ width: Math.max(occDay.pct, 3) + '%', background: occColor(occDay.pct) }"
               />
             </div>
             <p class="text-[10px] text-n-slate-9 mt-0.5">
               {{ occDay.total ? `${occDay.filled} de ${occDay.total} blocos ocupados` : 'sem janela neste dia' }}
+              <template v-if="occCaption(occDay)"> · {{ occCaption(occDay) }}</template>
             </p>
           </div>
           <div>
@@ -1306,15 +1381,25 @@ const onDropCell = (day, hour) => {
               <span class="text-n-slate-11">Semana <span class="text-n-slate-9">({{ occWeekLabel }})</span></span>
               <span class="font-bold text-n-slate-12">{{ occWeek.total ? occWeek.pct + '%' : '—' }}</span>
             </div>
-            <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden">
+            <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden flex">
+              <template v-if="occWeek.total && occSegments(occWeek)">
+                <div
+                  v-for="s in occSegments(occWeek)"
+                  :key="s.key"
+                  class="h-full transition-all"
+                  :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }"
+                  :title="`${s.label}: ${s.count} bloco(s)`"
+                />
+              </template>
               <div
-                v-if="occWeek.total"
+                v-else-if="occWeek.total"
                 class="h-full rounded-full transition-all"
                 :style="{ width: Math.max(occWeek.pct, 3) + '%', background: occColor(occWeek.pct) }"
               />
             </div>
             <p class="text-[10px] text-n-slate-9 mt-0.5">
               {{ occWeek.total ? `${occWeek.filled} de ${occWeek.total} blocos ocupados` : 'sem janelas na semana' }}
+              <template v-if="occCaption(occWeek)"> · {{ occCaption(occWeek) }}</template>
             </p>
           </div>
           <div>
@@ -1322,15 +1407,25 @@ const onDropCell = (day, hour) => {
               <span class="text-n-slate-11">Mês <span class="text-n-slate-9">({{ occMonthLabel }})</span></span>
               <span class="font-bold text-n-slate-12">{{ occMonth.total ? occMonth.pct + '%' : '—' }}</span>
             </div>
-            <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden">
+            <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden flex">
+              <template v-if="occMonth.total && occSegments(occMonth)">
+                <div
+                  v-for="s in occSegments(occMonth)"
+                  :key="s.key"
+                  class="h-full transition-all"
+                  :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }"
+                  :title="`${s.label}: ${s.count} bloco(s)`"
+                />
+              </template>
               <div
-                v-if="occMonth.total"
+                v-else-if="occMonth.total"
                 class="h-full rounded-full transition-all"
                 :style="{ width: Math.max(occMonth.pct, 3) + '%', background: occColor(occMonth.pct) }"
               />
             </div>
             <p class="text-[10px] text-n-slate-9 mt-0.5">
               {{ occMonth.total ? `${occMonth.filled} de ${occMonth.total} blocos ocupados` : 'sem janelas no mês' }}
+              <template v-if="occCaption(occMonth)"> · {{ occCaption(occMonth) }}</template>
             </p>
           </div>
         </div>
@@ -1354,7 +1449,8 @@ const onDropCell = (day, hour) => {
               inMonth(day) ? 'bg-n-solid-1' : 'bg-n-alpha-1 opacity-60',
               isDayOff(day) ? 'opacity-50' : '',
             ]"
-            @click="openCreateOnDay(day)"
+            title="Abrir a semana deste dia"
+            @click="goToWeek(day)"
           >
             <div class="flex items-center justify-between flex-shrink-0 mb-1">
               <span
@@ -1465,8 +1561,8 @@ const onDropCell = (day, hour) => {
               isDayOff(day) ? 'bg-n-alpha-1' : 'cursor-pointer hover:bg-n-alpha-1',
               dragOverDay === dateKey(day) && !isDayOff(day) ? 'bg-amber-400/10' : '',
             ]"
-            :title="isDayOff(day) ? '' : 'Clique para agendar às ' + String(hour).padStart(2, '0') + ':00'"
-            @click="!isDayOff(day) && openCreateOnDay(day, { time: `${String(hour).padStart(2, '0')}:00` })"
+            :title="isDayOff(day) ? '' : 'Clique para agendar por volta das ' + String(hour).padStart(2, '0') + 'h (a altura do clique define a meia hora)'"
+            @click="!isDayOff(day) && openCreateAtPoint(day, hour, $event)"
             @dragover.prevent="dragTask && !isDayOff(day) && (dragOverDay = dateKey(day))"
             @dragleave="dragOverDay === dateKey(day) && (dragOverDay = '')"
             @drop.prevent="onDropCell(day, hour)"
@@ -1737,6 +1833,11 @@ const onDropCell = (day, hour) => {
                   </span>
                 </div>
                 <div class="flex items-center gap-3 mt-1 text-[11px] text-n-slate-10 flex-wrap">
+                  <span
+                    v-if="!isSurgeryTask(task)"
+                    class="text-[10px] font-semibold px-1.5 py-px rounded-full text-white"
+                    :style="{ background: modalityOf(task).color }"
+                  >{{ modalityOf(task).label }}</span>
                   <span v-if="task.phone" class="flex items-center gap-1"><span class="i-lucide-phone text-[10px]" />{{ task.phone }}</span>
                   <span v-if="task.procedure" class="flex items-center gap-1"><span class="i-lucide-eye text-[10px]" />{{ task.procedure }}</span>
                   <span v-if="task.doctor" class="flex items-center gap-1"><span class="i-lucide-stethoscope text-[10px]" />{{ task.doctor }}</span>
@@ -1878,7 +1979,18 @@ const onDropCell = (day, hour) => {
             <template v-if="isSurgeryMode">{{ editingTask ? 'Editar cirurgia' : 'Agendar cirurgia' }}</template>
             <template v-else>{{ editingTask ? 'Editar consulta' : 'Nova consulta' }}</template>
           </h2>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showModal = false" />
+          <div class="flex items-center gap-1.5">
+            <button
+              v-if="editingTask?.contact_id"
+              class="flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 hover:text-n-brand"
+              title="Abrir o Espaço do Paciente"
+              @click="openPatientSpace(editingTask)"
+            >
+              <PatientSpaceIcon :size="18" />
+              Espaço do Paciente
+            </button>
+            <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showModal = false" />
+          </div>
         </div>
 
         <div class="flex-1 overflow-y-auto p-5 space-y-3.5">
@@ -1889,6 +2001,23 @@ const onDropCell = (day, hour) => {
               class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
               placeholder="Maria Silva"
             />
+          </div>
+          <!-- Modalidade — só no trilho de consultas -->
+          <div v-if="!isSurgeryMode">
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Tipo de consulta</label>
+            <div class="flex gap-1.5">
+              <button
+                v-for="m in MODALITIES"
+                :key="m.key"
+                type="button"
+                class="flex-1 text-xs font-medium px-2 py-1.5 rounded-lg border transition-colors"
+                :class="form.modality === m.key ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
+                :style="form.modality === m.key ? { background: m.color } : {}"
+                @click="form.modality = m.key"
+              >
+                {{ m.label }}
+              </button>
+            </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -2394,6 +2523,15 @@ const onDropCell = (day, hour) => {
       </div>
     </div>
 
+    <!-- botão + flutuante: caminho principal para agendar consultas -->
+    <button
+      class="fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full text-white shadow-xl flex items-center justify-center transition-transform hover:scale-110 active:scale-95"
+      :style="{ background: theme.primary, boxShadow: '0 10px 26px rgba(0,0,0,.3)' }"
+      title="Agendar consulta"
+      @click="openCreateFab"
+    >
+      <span class="i-lucide-plus text-2xl" />
+    </button>
   </div>
 </template>
 

@@ -63,21 +63,36 @@ export const dateKey = d => {
 
 export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 
+// modalidades de consulta — alimentam a ocupação por tipo
+export const MODALITIES = [
+  { key: 'avaliacao', label: 'Avaliação', color: '#0F5FA6' },
+  { key: 'retorno', label: 'Retorno', color: '#D4A017' },
+  { key: 'exames', label: 'Exames', color: '#7C3AED' },
+];
+
 // varre um intervalo de dias e devolve estatísticas + primeiras vagas livres:
-// tasks = consultas (com due_at); blockedSet = Set de blockKey
+// tasks = consultas (com due_at); blockedSet = Set de blockKey.
+// byModality: blocos ocupados POR TIPO de consulta (avaliação/retorno/exames)
 export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set(), from, days, freeLimit = 3, futureOnly = false, pastOnly = false }) => {
   const occupied = new Set();
+  const modalityByKey = new Map();
   tasks.forEach(t => {
     if (!t.due_at) return;
     const d = new Date(t.due_at);
     const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    occupied.add(blockKey(dateKey(d), hm, t.unit || ''));
-    occupied.add(`${dateKey(d)}|${hm}|`); // sem unidade também ocupa
+    const mod = t.modality || 'avaliacao'; // consulta sem tipo = avaliação
+    const withUnit = blockKey(dateKey(d), hm, t.unit || '');
+    const noUnit = `${dateKey(d)}|${hm}|`; // sem unidade também ocupa
+    occupied.add(withUnit);
+    occupied.add(noUnit);
+    if (!modalityByKey.has(withUnit)) modalityByKey.set(withUnit, mod);
+    if (!modalityByKey.has(noUnit)) modalityByKey.set(noUnit, mod);
   });
 
   const now = new Date();
   let total = 0;
   let filled = 0;
+  const byModality = {};
   const freeSlots = [];
 
   for (let i = 0; i < days; i += 1) {
@@ -99,14 +114,18 @@ export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set()
           if (pastOnly && slotDate > now) return;
 
           total += 1;
-          const isTaken = occupied.has(key) || occupied.has(blockKey(dateKey(day), slot, ''));
-          if (isTaken) filled += 1;
-          else if (freeSlots.length < freeLimit && slotDate > now) {
+          const noUnitKey = blockKey(dateKey(day), slot, '');
+          const isTaken = occupied.has(key) || occupied.has(noUnitKey);
+          if (isTaken) {
+            filled += 1;
+            const mod = modalityByKey.get(key) || modalityByKey.get(noUnitKey) || 'avaliacao';
+            byModality[mod] = (byModality[mod] || 0) + 1;
+          } else if (freeSlots.length < freeLimit && slotDate > now) {
             freeSlots.push({ day: new Date(day), slot, win });
           }
         });
       });
   }
 
-  return { total, filled, freeSlots, pct: total ? Math.round((filled / total) * 100) : 0 };
+  return { total, filled, freeSlots, byModality, pct: total ? Math.round((filled / total) * 100) : 0 };
 };

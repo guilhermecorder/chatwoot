@@ -42,9 +42,15 @@ class Crm::AppointmentExtractionService
       reagendamento: {
         type: 'boolean',
         description: 'true se esta confirmação é um REAGENDAMENTO (o paciente já tinha consulta e mudou dia/horário)'
+      },
+      sexo: {
+        type: 'string',
+        enum: %w[masculino feminino desconhecido],
+        description: 'Sexo do PACIENTE da consulta, deduzido do nome ou do contexto ' \
+                     '("minha mãe", "meu pai", "ele/ela"). Na dúvida, desconhecido.'
       }
     },
-    required: %w[encontrado nome telefone data hora unidade problema medico observacoes valor_consulta reagendamento],
+    required: %w[encontrado nome telefone data hora unidade problema medico observacoes valor_consulta reagendamento sexo],
     additionalProperties: false
   }.freeze
 
@@ -68,6 +74,10 @@ class Crm::AppointmentExtractionService
       R$ 300 para glaucoma), registre; senão deixe vazio.
     - reagendamento=true quando a conversa mostra que o paciente JÁ TINHA uma
       consulta e trocou o dia/horário ("preciso remarcar", "mudar o horário").
+    - sexo: deduza o sexo do PACIENTE da consulta pelo nome (Maria → feminino,
+      João → masculino) ou pelo contexto ("minha mãe", "meu avô", "ela"). Atenção:
+      quem conversa pode estar marcando para OUTRA pessoa — o que vale é o
+      paciente. Nome ambíguo e sem pistas no texto → desconhecido.
     - Não invente dados: campo não confirmado fica vazio.
   PROMPT
 
@@ -109,6 +119,7 @@ class Crm::AppointmentExtractionService
       notes: parsed['observacoes'].to_s.strip,
       price: parsed['valor_consulta'].to_s.strip,
       reschedule: parsed['reagendamento'] == true,
+      gender: %w[masculino feminino].include?(parsed['sexo']) ? parsed['sexo'] : nil,
       model: model
     }
   rescue Anthropic::Errors::AuthenticationError

@@ -57,6 +57,25 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
     render json: { stage: stage_json }
   end
 
+  # POST /crm/conversation_summary/toggle_followup — TRAVA individual:
+  # a atendente pausa/reativa o follow-up SÓ para este paciente (todos os
+  # robôs param de cutucá-lo). Aberto a qualquer atendente — é o freio de
+  # emergência de quem está vendo a conversa.
+  def toggle_followup
+    contact = @conversation.contact
+    return render json: { error: 'Conversa sem contato.' }, status: :unprocessable_entity if contact.blank?
+
+    attrs = contact.additional_attributes || {}
+    if ActiveModel::Type::Boolean.new.cast(params[:paused])
+      attrs['cevico_followup_paused'] = { 'by' => Current.user.name, 'at' => Time.current.iso8601 }
+    else
+      attrs.delete('cevico_followup_paused')
+    end
+    contact.update!(additional_attributes: attrs)
+
+    render json: { followup: followup_json }
+  end
+
   private
 
   def conversation
@@ -69,7 +88,28 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
       labels: @conversation.label_list,
       metrics: metrics_json,
       ai: @conversation.additional_attributes&.[]('ai_insight'),
-      ai_configured: ai_configured?
+      ai_configured: ai_configured?,
+      followup: followup_json
+    }
+  end
+
+  # estado do follow-up para ESTA conversa: pausado para o paciente? e quais
+  # robôs alcançam esta conversa (por coluna do card ou por caixa)
+  def followup_json
+    contact = @conversation.contact
+    paused = contact&.additional_attributes&.[]('cevico_followup_paused')
+    card = find_card
+
+    bots = Current.account.crm_followup_bots.order(:id).select do |bot|
+      inbox_ok = bot.inbox_id.blank? || bot.inbox_id == @conversation.inbox_id
+      stage_ok = !bot.stage_scoped? || (card && bot.stage_id == card.stage_id)
+      inbox_ok && stage_ok
+    end
+
+    {
+      paused: paused.present?,
+      paused_by: paused.is_a?(Hash) ? paused['by'] : nil,
+      bots: bots.map { |b| { id: b.id, name: b.name, active: b.active } }
     }
   end
 

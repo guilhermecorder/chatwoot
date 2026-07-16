@@ -1,6 +1,8 @@
 class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseController
-  before_action :check_admin
-  before_action :bot, only: [:update, :destroy]
+  # toggle é a CHAVE DE EMERGÊNCIA: qualquer atendente pode pausar/religar
+  # um robô que estiver se comportando mal (gerenciar continua admin-only)
+  before_action :check_admin, except: [:toggle]
+  before_action :bot, only: [:update, :destroy, :toggle]
 
   def index
     bots = Current.account.crm_followup_bots.includes(:inbox, :sender).order(created_at: :desc)
@@ -21,6 +23,22 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
   def destroy
     bot.destroy!
     head :no_content
+  end
+
+  # POST /crm/followup_bots/:id/toggle — pausa/religa e registra QUEM mexeu
+  # no registro de atividade (auditável no card do robô)
+  def toggle
+    bot.update!(active: !bot.active)
+
+    log = bot.activity_log.presence || {}
+    event = {
+      'at' => Time.current.iso8601, 'type' => 'toggle',
+      'note' => "#{bot.active ? '▶️ religado' : '⏸ pausado'} por #{Current.user.name}"
+    }
+    log['events'] = ([event] + Array(log['events'])).first(60)
+    bot.update_columns(activity_log: log) # rubocop:disable Rails/SkipsModelValidations
+
+    render json: bot_json(bot)
   end
 
   private

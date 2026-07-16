@@ -42,22 +42,35 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
     account.tasks.where(task_type: 'cirurgia', canceled_at: nil, due_at: since..until_at)
   end
 
+  # SÓ os 3 médicos da casa. O campo doctor é texto livre (a IA preenche
+  # variações: "Roberta Negri", "Dra Roberta Negri"...) — cada variação é
+  # normalizada pelo sobrenome/nome e AGREGADA no médico oficial; nomes de
+  # fora (ex. médico citado no script) ficam fora do ranking.
+  def canonical_doctor(raw)
+    Crm::DoctorNames.canonical(raw)
+  end
+
   def doctors_rows(since, until_at)
     scope = consultas(since, until_at).where.not(doctor: [nil, ''])
-    doctors = scope.distinct.pluck(:doctor)
+    variants = scope.distinct.pluck(:doctor).group_by { |raw| canonical_doctor(raw) }
+    variants.delete(nil) # quem não é da casa sai do ranking
 
-    rows = doctors.map do |doc|
-      d_scope = scope.where(doctor: doc)
+    rows = variants.map do |doc, raw_names|
+      d_scope = scope.where(doctor: raw_names)
       attended = d_scope.where(attendance: 'attended').count
       missed = d_scope.where(attendance: 'missed').count
       indicated = d_scope.where(surgery_indication: 'indicated').limit(300).to_a
-      infos = indicated.map { |t| conversion_info(t.phone) }
+      infos = conversion_infos(indicated)
       conversions = infos.count { |i| i[:booked] }
       # 💰 faturamento gerado pela indicação: soma dos fechamentos dos
       # pacientes indicados por este médico que viraram cirurgia
       revenue = infos.select { |i| i[:booked] }.sum { |i| i[:value] }
       nps_scores = nps_scores_for(d_scope.where(attendance: 'attended'))
-      surgeries_done_scope = cirurgias_range(since, until_at).where(doctor: doc)
+      # cirurgias também podem vir com grafia variada do médico
+      surgery_names = cirurgias_range(since, until_at).where.not(doctor: [nil, ''])
+                                                      .distinct.pluck(:doctor)
+                                                      .select { |raw| canonical_doctor(raw) == doc }
+      surgeries_done_scope = cirurgias_range(since, until_at).where(doctor: surgery_names)
 
       {
         doctor: doc,
@@ -120,9 +133,33 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
     end.sort_by { |c| -c[:count] }
   end
 
-  # o indicado virou cirurgia? e por quanto fechou? (telefone + Monitor de
-  # Fechamento; sem fechamento registrado, cai no valor do card do CRM)
-  def conversion_info(phone)
+  # os indicados viraram cirurgia? e por quanto fecharam? Fase 0: tudo em
+  # LOTE pelo contact_id (3 queries no total) — o regexp de telefone em loop
+  # ficou só como fallback dos registros antigos que não casaram no backfill.
+  def conversion_infos(indicated)
+    linked, legacy = indicated.partition { |t| t.contact_id.present? }
+
+    booked_ids = account.tasks.where(task_type: 'cirurgia', canceled_at: nil)
+                        .where(contact_id: linked.map(&:contact_id).uniq)
+                        .distinct.pluck(:contact_id).to_set
+    contacts = account.contacts.where(id: booked_ids.to_a).index_by(&:id)
+    cards = Crm::Contact.joins(:pipeline)
+                        .where(crm_pipelines: { account_id: account.id }, contact_id: booked_ids.to_a)
+                        .group_by(&:contact_id)
+
+    infos = linked.map do |t|
+      next { booked: false, value: 0.0 } unless booked_ids.include?(t.contact_id)
+
+      contact = contacts[t.contact_id]
+      value = contact&.additional_attributes&.dig('surgery_closing', 'value').to_f
+      value = cards[t.contact_id]&.first&.value.to_f if value.zero?
+      { booked: true, value: value }
+    end
+    infos + legacy.map { |t| legacy_conversion_info(t.phone) }
+  end
+
+  # fallback (registro antigo sem contact_id): match por telefone, um a um
+  def legacy_conversion_info(phone)
     digits = phone.to_s.gsub(/\D/, '')
     return { booked: false, value: 0.0 } if digits.length < 8
 
@@ -131,9 +168,7 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
                     .exists?
     return { booked: false, value: 0.0 } unless booked
 
-    contact = account.contacts
-                     .where("regexp_replace(COALESCE(phone_number, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
-                     .first
+    contact = Task.match_contact(account, phone)
     value = contact&.additional_attributes&.dig('surgery_closing', 'value').to_f
     if value.zero? && contact
       card = Crm::Contact.joins(:pipeline)
@@ -144,16 +179,13 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
     { booked: true, value: value }
   end
 
+  # NPS dos pacientes das tasks: 1 query pelos contact_ids (Fase 0)
   def nps_scores_for(tasks_scope)
-    tasks_scope.limit(200).filter_map do |t|
-      digits = t.phone.to_s.gsub(/\D/, '')
-      next if digits.length < 8
+    contact_ids = tasks_scope.limit(200).pluck(:contact_id).compact
+    return [] if contact_ids.empty?
 
-      contact = account.contacts
-                       .where("regexp_replace(COALESCE(phone_number, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
-                       .first
-      contact&.additional_attributes&.dig('nps', 'score')
-    end
+    account.contacts.where(id: contact_ids.uniq)
+           .filter_map { |c| c.additional_attributes&.dig('nps', 'score') }
   end
 
   def pct(part, total)

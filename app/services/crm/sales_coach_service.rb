@@ -179,7 +179,7 @@ class Crm::SalesCoachService
                        .where("additional_attributes -> 'surgery_closing' IS NOT NULL")
                        .order(updated_at: :desc)
                        .limit(limit)
-    contacts.filter_map { |c| c.conversations.order(created_at: :desc).first }
+    contacts.filter_map { |c| c.conversations.order(Arel.sql('last_activity_at DESC NULLS LAST, created_at DESC')).first }
   end
 
   def build_transcript(conversation, max: MAX_MESSAGES)
