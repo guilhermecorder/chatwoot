@@ -13,6 +13,8 @@ import crmRoutes from './crm/routes';
 import academyRoutes from './academy/routes';
 import tasksRoutes from './tasks/routes';
 import agendaRoutes from './agenda/routes';
+import patientRoutes from './patient/routes';
+import cevicoPagesRoutes from './pages/routes';
 import inicioRoutes from './inicio/routes';
 import cevicoAutomationsRoutes from './cevicoAutomations/routes';
 import AppContainer from './Dashboard.vue';
@@ -40,6 +42,8 @@ export default {
         ...academyRoutes.routes,
         ...tasksRoutes.routes,
         ...agendaRoutes.routes,
+        ...patientRoutes.routes,
+        ...cevicoPagesRoutes.routes,
         ...inicioRoutes.routes,
         ...cevicoAutomationsRoutes.routes,
       ],

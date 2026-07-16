@@ -82,61 +82,20 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
 
   def task_params
     params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id, :unit,
-                  :phone, :procedure, :doctor, :attendance, :surgery_indication, :indicated_procedure)
+                  :phone, :procedure, :doctor, :modality, :attendance, :surgery_indication, :indicated_procedure,
+                  :contact_id)
   end
 
   # Conferência do dia → CRM: compareceu/faltou/cirurgia indicada movem o
-  # card do contato para as colunas configuradas em agenda_config
-  # .attendance_stages (modal "Janelas dos médicos" da Agenda), disparando
-  # as automações da coluna de destino (a régua de conversão de cada caso).
+  # card do contato (lógica compartilhada com a conduta do médico na
+  # Central do Paciente — Crm::AttendanceReflector).
   def reflect_attendance_in_crm
-    cfg = CrmSetting.find_by(account: Current.account)&.agenda_config || {}
-    stages_cfg = cfg['attendance_stages'] || {}
-
-    target_id =
-      if task.task_type == 'cirurgia'
-        # trilho de cirurgias: realizada / não veio têm colunas próprias
-        { 'attended' => stages_cfg['surgery_done_stage_id'],
-          'missed' => stages_cfg['surgery_missed_stage_id'] }[task.attendance]
-      elsif task.surgery_indication == 'indicated'
-        stages_cfg['indicated_stage_id']
-      elsif task.attendance == 'missed'
-        stages_cfg['missed_stage_id']
-      elsif task.attendance == 'attended'
-        stages_cfg['attended_stage_id']
-      end
-    return if target_id.blank?
-
-    contact = find_contact_by_phone(task.phone)
-    return if contact.blank?
-
-    card = Crm::Contact.joins(:pipeline)
-                       .where(crm_pipelines: { account_id: Current.account.id }, contact_id: contact.id)
-                       .order('crm_pipelines.position').first
-    return if card.blank?
-
-    new_stage = Crm::Stage.joins(:pipeline)
-                          .where(crm_pipelines: { account_id: Current.account.id })
-                          .find_by(id: target_id)
-    return if new_stage.blank? || new_stage.id == card.stage_id
-
-    previous_stage = card.stage
-    card.update!(stage_id: new_stage.id, pipeline_id: new_stage.pipeline_id)
-    CrmAutomationTriggerService.new(crm_contact: card, new_stage: new_stage,
-                                    previous_stage: previous_stage, event_type: 'card_entered').call
-    CrmAutomationTriggerService.new(crm_contact: card, new_stage: previous_stage,
-                                    previous_stage: previous_stage, event_type: 'card_left').call
-  rescue StandardError => e
-    Rails.logger.error "[Tasks] reflexo do comparecimento no CRM: #{e.message}"
+    Crm::AttendanceReflector.call(account: Current.account, task: task)
   end
 
-  def find_contact_by_phone(phone)
-    digits = phone.to_s.gsub(/\D/, '')
-    return nil if digits.length < 8
-
-    Current.account.contacts
-           .where("regexp_replace(COALESCE(phone_number, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
-           .first
+  # contato unificado (Fase 0) primeiro; telefone só para registro antigo sem link
+  def patient_contact(task)
+    task.contact || Task.match_contact(Current.account, task.phone)
   end
 
   def task_json(t)
@@ -152,8 +111,10 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
       created_at: t.created_at,
       unit: t.unit,
       phone: t.phone,
+      contact_id: t.contact_id,
       procedure: t.procedure,
       doctor: t.doctor,
+      modality: t.modality,
       canceled_at: t.canceled_at,
       rescheduled_count: t.rescheduled_count,
       attendance: t.attendance,
@@ -170,7 +131,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
   def surgery_value_json(t)
     return {} unless t.task_type == 'cirurgia' && Current.account_user.administrator?
 
-    contact = find_contact_by_phone(t.phone)
+    contact = patient_contact(t)
     return {} if contact.blank?
 
     card = Crm::Contact.joins(:pipeline)

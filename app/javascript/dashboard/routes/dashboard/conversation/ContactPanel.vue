@@ -124,9 +124,15 @@ const closeContactPanel = () => {
   });
 };
 
-// CEVICO: painel enxuto — Macros e Atributos do contato saem da lista
-// (as informações importantes ficam no card-resumo no topo)
-const HIDDEN_SIDEBAR_ITEMS = ['macros', 'contact_attributes'];
+// CEVICO: painel enxuto — Macros, Atributos, Time/Prioridade, Informações
+// da conversa e Participantes saem da lista (as informações importantes
+// ficam no card-resumo no topo)
+const HIDDEN_SIDEBAR_ITEMS = [
+  'macros',
+  'contact_attributes',
+  'conversation_info',
+  'conversation_participants',
+];
 
 onMounted(() => {
   conversationSidebarItems.value = conversationSidebarItemsOrder.value.filter(
@@ -302,17 +308,13 @@ onMounted(() => {
               <ShopifyOrdersList :contact-id="contactId" />
             </AccordionItem>
           </div>
-          <div v-else-if="element.name === 'contact_notes'">
-            <AccordionItem
-              :title="$t('CONVERSATION_SIDEBAR.ACCORDION.CONTACT_NOTES')"
-              :is-open="isContactSidebarItemOpen('is_contact_notes_open')"
-              compact
-              @toggle="
-                value => toggleSidebarUIState('is_contact_notes_open', value)
-              "
-            >
-              <ContactNotes :contact-id="contactId" />
-            </AccordionItem>
+          <!-- Notas do contato SEM gaveta: título + caixa de texto direta -->
+          <div v-else-if="element.name === 'contact_notes'" class="px-3 py-2">
+            <p class="text-sm font-semibold text-n-slate-12 mb-2 flex items-center gap-1.5">
+              <span class="i-lucide-sticky-note text-sm text-n-slate-10" />
+              {{ $t('CONVERSATION_SIDEBAR.ACCORDION.CONTACT_NOTES') }}
+            </p>
+            <ContactNotes :contact-id="contactId" />
           </div>
           <div v-else-if="element.name === 'shared_files'">
             <AccordionItem

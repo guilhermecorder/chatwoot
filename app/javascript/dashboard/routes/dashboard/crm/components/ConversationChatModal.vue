@@ -1,16 +1,20 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
+import { frontendURL } from 'dashboard/helper/URLHelper';
 import { useAlert } from 'dashboard/composables';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import MessageApi from 'dashboard/api/inbox/message';
 import ConversationApi from 'dashboard/api/inbox/conversation';
+import CrmAPI from 'dashboard/api/crm';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import TemplatesPicker from 'dashboard/components/widgets/conversation/WhatsappTemplates/TemplatesPicker.vue';
 import CannedResponse from 'dashboard/components/widgets/conversation/CannedResponse.vue';
 import WhatsAppTemplateReply from 'dashboard/components/widgets/conversation/WhatsappTemplates/WhatsAppTemplateReply.vue';
 import EmojiPicker from 'shared/components/emoji/EmojiPicker.vue';
+import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import { onClickOutside } from '@vueuse/core';
 
 const props = defineProps({
@@ -24,6 +28,14 @@ const emit = defineEmits(['close', 'replied', 'resolved', 'conversationStarted']
 const { t } = useI18n();
 const store = useStore();
 const { isAdmin } = useAdmin();
+const route = useRoute();
+const router = useRouter();
+
+// Espaço do Paciente: página única com toda a jornada do paciente
+const openPatientSpace = () => {
+  emit('close');
+  router.push(frontendURL(`accounts/${route.params.accountId}/patient/${props.contact.contact_id}`));
+};
 
 const conversationId = computed(() => props.contact.last_conversation_id);
 const hasConversation = computed(() => !!conversationId.value);
@@ -255,6 +267,55 @@ const toggleLabel = async label => {
   }
 };
 
+// ── Trava do follow-up: pausa por PACIENTE + chave por ROBÔ ──
+// A atendente para o robô sem depender de admin: ou silencia só este
+// paciente, ou desliga o robô inteiro (chave de emergência).
+const followup = ref(null); // { paused, paused_by, bots: [{id, name, active}] }
+const isTogglingFollowup = ref(false);
+
+const loadFollowup = async () => {
+  if (!conversationId.value) return;
+  try {
+    const { data } = await CrmAPI.getConversationSummary(conversationId.value);
+    followup.value = data.followup || null;
+  } catch { /* sem o bloco — painel segue funcionando */ }
+};
+watch(showCardPanel, open => {
+  if (open && !followup.value) loadFollowup();
+});
+
+const togglePatientPause = async () => {
+  if (isTogglingFollowup.value || !followup.value || !conversationId.value) return;
+  isTogglingFollowup.value = true;
+  try {
+    const { data } = await CrmAPI.toggleFollowupPause(conversationId.value, !followup.value.paused);
+    followup.value = data.followup;
+    useAlert(followup.value.paused
+      ? t('CRM.CHAT.FOLLOWUP_PAUSED_PATIENT')
+      : t('CRM.CHAT.FOLLOWUP_RESUMED_PATIENT'));
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  } finally {
+    isTogglingFollowup.value = false;
+  }
+};
+
+const toggleFollowupBot = async bot => {
+  if (isTogglingFollowup.value) return;
+  isTogglingFollowup.value = true;
+  try {
+    const { data } = await CrmAPI.toggleFollowupBot(bot.id);
+    bot.active = data.active;
+    useAlert(data.active
+      ? t('CRM.CHAT.FOLLOWUP_BOT_ON', { name: bot.name })
+      : t('CRM.CHAT.FOLLOWUP_BOT_OFF', { name: bot.name }));
+  } catch {
+    useAlert(t('CRM.ERROR.GENERIC'));
+  } finally {
+    isTogglingFollowup.value = false;
+  }
+};
+
 // telefone copiável ao lado do nome
 const copyPhone = async () => {
   if (!props.contact.phone_number) return;
@@ -439,6 +500,14 @@ watch(conversationId, id => {
         >
           {{ $t('CRM.CHAT.STATUS_RESOLVED') }}
         </span>
+        <!-- Espaço do Paciente -->
+        <button
+          class="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0 transition-transform hover:scale-110"
+          title="Espaço do Paciente"
+          @click="openPatientSpace"
+        >
+          <PatientSpaceIcon :size="22" />
+        </button>
         <!-- Painel do card (mover coluna / etiquetas) -->
         <button
           v-if="stages.length"
@@ -484,6 +553,53 @@ watch(conversationId, id => {
               <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: l.color ?? '#6B7280' }" />
               {{ l.title }}
             </button>
+          </div>
+        </div>
+
+        <!-- 🤖 Trava do robô de follow-up -->
+        <div v-if="followup && (followup.bots.length || followup.paused)" class="pt-2.5 border-t border-n-weak">
+          <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+            🤖 {{ $t('CRM.CHAT.FOLLOWUP_TITLE') }}
+          </label>
+          <button
+            class="w-full flex items-center justify-between gap-2 text-xs px-2.5 py-2 rounded-lg border transition-colors disabled:opacity-50"
+            :class="followup.paused
+              ? 'border-amber-400/60 bg-amber-400/10 text-amber-600 dark:text-amber-400 font-medium'
+              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            :disabled="isTogglingFollowup"
+            @click="togglePatientPause"
+          >
+            <span class="flex items-center gap-1.5">
+              <span :class="followup.paused ? 'i-lucide-bell-off' : 'i-lucide-bell'" class="text-sm" />
+              {{ followup.paused
+                ? $t('CRM.CHAT.FOLLOWUP_PAUSED_LABEL', { by: followup.paused_by || '—' })
+                : $t('CRM.CHAT.FOLLOWUP_PAUSE_PATIENT') }}
+            </span>
+            <span class="font-semibold flex-shrink-0">
+              {{ followup.paused ? $t('CRM.CHAT.FOLLOWUP_RESUME') : $t('CRM.CHAT.FOLLOWUP_PAUSE') }}
+            </span>
+          </button>
+          <div v-if="followup.bots.length" class="mt-1.5 space-y-1">
+            <div
+              v-for="bot in followup.bots"
+              :key="bot.id"
+              class="flex items-center justify-between gap-2 text-[11px] px-2.5 py-1.5 rounded-lg bg-n-solid-2 border border-n-weak"
+            >
+              <span class="flex items-center gap-1.5 min-w-0 text-n-slate-11">
+                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="bot.active ? 'bg-green-500' : 'bg-n-slate-7'" />
+                <span class="truncate">{{ bot.name }}</span>
+              </span>
+              <button
+                class="font-semibold flex-shrink-0 hover:underline disabled:opacity-50"
+                :class="bot.active ? 'text-red-500' : 'text-green-600 dark:text-green-400'"
+                :disabled="isTogglingFollowup"
+                :title="$t('CRM.CHAT.FOLLOWUP_BOT_HINT')"
+                @click="toggleFollowupBot(bot)"
+              >
+                {{ bot.active ? $t('CRM.CHAT.FOLLOWUP_BOT_STOP') : $t('CRM.CHAT.FOLLOWUP_BOT_START') }}
+              </button>
+            </div>
+            <p class="text-[10px] text-n-slate-9 px-0.5">{{ $t('CRM.CHAT.FOLLOWUP_BOT_SCOPE_HINT') }}</p>
           </div>
         </div>
       </div>
@@ -556,11 +672,13 @@ watch(conversationId, id => {
 
             <!-- Bolha -->
             <div v-else class="flex" :class="isIncoming(m) ? 'justify-start' : 'justify-end'">
+              <!-- balão enviado: azul royal com gradiente (letra branca) -->
               <div
                 class="max-w-[80%] rounded-2xl px-3 py-2"
                 :class="isIncoming(m)
                   ? 'bg-n-solid-2 border border-n-weak text-n-slate-12 rounded-bl-sm'
-                  : 'bg-n-brand text-white rounded-br-sm'"
+                  : 'text-white rounded-br-sm shadow-sm'"
+                :style="isIncoming(m) ? {} : { background: 'linear-gradient(135deg, #1D4ED8, #2563EB 60%, #3B82F6)' }"
               >
                 <p v-if="m.content" class="text-sm whitespace-pre-wrap break-words leading-relaxed">{{ m.content }}</p>
                 <div v-if="m.attachments?.length" class="space-y-1" :class="m.content ? 'mt-1.5' : ''">

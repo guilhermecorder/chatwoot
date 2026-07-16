@@ -1,7 +1,10 @@
 <script setup>
 import { computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { frontendURL } from 'dashboard/helper/URLHelper';
+import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import { relativeTime } from '../helpers';
 
 const props = defineProps({
@@ -9,6 +12,13 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['click', 'openChat']);
+
+const route = useRoute();
+const router = useRouter();
+// Espaço do Paciente: a página única com toda a jornada
+const openPatient = () => {
+  router.push(frontendURL(`accounts/${route.params.accountId}/patient/${props.contact.contact_id}`));
+};
 
 const { isAdmin } = useAdmin();
 const accountLabels = useMapGetter('labels/getLabels');
@@ -144,6 +154,13 @@ const channelIcon = (channelType) => {
       <span v-if="entryDate" class="text-xs text-n-slate-9">{{ entryDate }}</span>
       <span class="flex items-center gap-1.5 ml-auto">
         <span v-if="lastActivity" class="text-xs text-n-slate-9">{{ lastActivity }}</span>
+        <button
+          class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
+          title="Espaço do Paciente"
+          @click.stop="openPatient"
+        >
+          <PatientSpaceIcon :size="24" />
+        </button>
         <button
           class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors"
           :class="contact.last_conversation_id

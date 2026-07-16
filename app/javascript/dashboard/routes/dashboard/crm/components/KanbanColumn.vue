@@ -421,9 +421,9 @@ const delayLabel = (minutes) => {
           </div>
 
           <div class="flex items-center gap-1 flex-shrink-0 ml-1">
-            <!-- Arrastar coluna — só admin reorganiza o kanban -->
+            <!-- Arrastar coluna — só admin e SÓ no modo edição -->
             <span
-              v-if="isAdmin"
+              v-if="isAdmin && editMode"
               class="column-drag-handle i-lucide-grip-vertical text-sm text-n-slate-9 hover:text-n-slate-12 cursor-grab active:cursor-grabbing"
               title="Arrastar para reordenar a coluna"
             />

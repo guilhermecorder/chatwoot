@@ -50,15 +50,17 @@ const newStageColor = ref('#6B7280');
 // A base inteira (9k+ cards) só entra sob demanda (busca / botão "Tudo") —
 // carregar tudo sempre travava máquinas fracas (i3/celular).
 const WINDOW_OPTIONS = [7, 15, 30];
-// padrão: ESTE MÊS (leve e cobre o trabalho corrente); 7/15/30d e "Tudo"
-// continuam; "Personalizado" abre o De/Até dos filtros com a base completa
-const savedWindow = localStorage.getItem('cevico_crm_window_days') || 'month';
+// padrão: ESSA SEMANA (a carga inicial mais leve possível cobrindo o
+// trabalho corrente); mês/ano/7/15/30d e "Tudo" continuam; "Personalizado"
+// abre o De/Até dos filtros com a base completa
+const savedWindow = localStorage.getItem('cevico_crm_window_days') || 'week';
 const windowMode = ref(
-  ['7', '15', '30', 'month', 'year'].includes(String(savedWindow)) ? String(savedWindow) : 'month'
+  ['7', '15', '30', 'week', 'month', 'year'].includes(String(savedWindow)) ? String(savedWindow) : 'week'
 );
 const dayOfYear = () =>
   Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
 const windowDays = computed(() => {
+  if (windowMode.value === 'week') return new Date().getDay() + 1; // desde domingo
   if (windowMode.value === 'month') return new Date().getDate();
   if (windowMode.value === 'year') return dayOfYear();
   return Number(windowMode.value);
@@ -872,9 +874,18 @@ const createAndAddContact = async () => {
       class="flex items-center gap-2 px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-wrap"
     >
       <span class="i-lucide-zap text-n-gold" />
-      {{ windowMode === 'month' ? 'Leads ativos deste mês' : (windowMode === 'year' ? 'Leads ativos deste ano' : `Leads ativos dos últimos ${windowDays} dias`) }}
+      {{ windowMode === 'week' ? 'Leads ativos desta semana' : (windowMode === 'month' ? 'Leads ativos deste mês' : (windowMode === 'year' ? 'Leads ativos deste ano' : `Leads ativos dos últimos ${windowDays} dias`)) }}
       ({{ contactsMeta.shown }} de {{ contactsMeta.total }}) — leve e rápido. A busca enxerga a base toda.
       <span class="ml-1">Janela:</span>
+      <button
+        class="px-1.5 py-0.5 rounded border transition-colors"
+        :class="windowMode === 'week' && contactsScope === 'days'
+          ? 'border-n-brand text-n-brand font-medium'
+          : 'border-n-weak hover:bg-n-alpha-1'"
+        @click="setWindowDays('week')"
+      >
+        Essa semana
+      </button>
       <button
         class="px-1.5 py-0.5 rounded border transition-colors"
         :class="windowMode === 'month' && contactsScope === 'days'
@@ -1321,11 +1332,13 @@ const createAndAddContact = async () => {
         </button>
       </div>
 
+      <!-- mover COLUNA só no modo edição — fora dele o arrasto fica p/ os cards -->
       <draggable
         v-else
         v-model="selectedPipeline.stages"
         item-key="id"
         :animation="150"
+        :disabled="!isEditMode"
         handle=".column-drag-handle"
         style="display:flex;gap:16px;height:100%;min-width:max-content;"
         @end="onColumnReorder"

@@ -3,13 +3,23 @@
 // primeira vista — nome/telefone copiáveis, estágio do CRM, etiquetas,
 // responsividade e a análise de IA (indicador de interesse).
 import { ref, computed, watch, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import CrmAPI from 'dashboard/api/crm';
 import { useAlert } from 'dashboard/composables';
+import { frontendURL } from 'dashboard/helper/URLHelper';
+import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 
 const props = defineProps({
   conversationId: { type: [Number, String], required: true },
   contact: { type: Object, default: () => ({}) },
 });
+
+const route = useRoute();
+const router = useRouter();
+// Espaço do Paciente: página única com toda a jornada
+const openPatientSpace = () => {
+  router.push(frontendURL(`accounts/${route.params.accountId}/patient/${props.contact.id}`));
+};
 
 const summary = ref(null);
 const isLoading = ref(false);
@@ -109,6 +119,26 @@ const moveToStage = async stageId => {
   }
 };
 
+// TRAVA do follow-up: a atendente pausa as cutucadas para ESTE paciente
+// sem sair da conversa (o robô inteiro se desliga no balão do CRM/Automações)
+const isTogglingFollowup = ref(false);
+const togglePatientPause = async () => {
+  const fu = summary.value?.followup;
+  if (isTogglingFollowup.value || !fu) return;
+  isTogglingFollowup.value = true;
+  try {
+    const { data } = await CrmAPI.toggleFollowupPause(props.conversationId, !fu.paused);
+    summary.value.followup = data.followup;
+    useAlert(data.followup.paused
+      ? 'Follow-up pausado para este paciente.'
+      : 'Follow-up reativado para este paciente.');
+  } catch {
+    useAlert('Erro ao alterar o follow-up.');
+  } finally {
+    isTogglingFollowup.value = false;
+  }
+};
+
 const INTEREST = {
   alto: { label: 'Interesse ALTO', class: 'bg-green-500/15 text-green-600', dot: 'bg-green-500' },
   medio: { label: 'Interesse MÉDIO', class: 'bg-amber-500/15 text-amber-600', dot: 'bg-amber-500' },
@@ -185,6 +215,15 @@ const analyzedAgo = computed(() => {
         {{ contact.phone_number }}
         <span class="i-lucide-copy text-[11px] text-n-slate-9 flex-shrink-0" />
       </button>
+      <button
+        v-if="contact?.id"
+        class="flex items-center gap-1.5 text-xs font-semibold text-n-slate-12 hover:text-n-brand text-left mt-0.5"
+        title="Abrir o Espaço do Paciente"
+        @click="openPatientSpace"
+      >
+        <PatientSpaceIcon :size="18" />
+        Espaço do Paciente
+      </button>
     </div>
 
     <template v-if="summary">
@@ -256,6 +295,24 @@ const analyzedAgo = computed(() => {
           {{ lastPatientAgo }}
         </span>
       </div>
+
+      <!-- 🤖 Trava do follow-up (pausa por paciente) -->
+      <button
+        v-if="summary.followup && (summary.followup.bots?.length || summary.followup.paused)"
+        class="w-full flex items-center justify-between gap-2 text-[11px] px-2 py-1.5 rounded-lg border transition-colors disabled:opacity-50 mb-2"
+        :class="summary.followup.paused
+          ? 'border-amber-400/60 bg-amber-400/10 text-amber-600 dark:text-amber-400 font-medium'
+          : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+        :disabled="isTogglingFollowup"
+        :title="summary.followup.paused ? `Pausado por ${summary.followup.paused_by || '—'}` : 'O robô de follow-up para de cutucar este paciente'"
+        @click="togglePatientPause"
+      >
+        <span class="flex items-center gap-1.5">
+          <span :class="summary.followup.paused ? 'i-lucide-bell-off' : 'i-lucide-bell'" class="text-xs" />
+          {{ summary.followup.paused ? 'Follow-up pausado p/ este paciente' : 'Pausar follow-up p/ este paciente' }}
+        </span>
+        <span class="font-semibold flex-shrink-0">{{ summary.followup.paused ? 'Reativar' : 'Pausar' }}</span>
+      </button>
 
       <!-- Análise de IA -->
       <div class="border-t border-n-weak pt-2">

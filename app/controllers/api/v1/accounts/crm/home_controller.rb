@@ -119,6 +119,15 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     {
       new_leads: leads,
       appointments_created: agendadas,
+      # volume CONCRETO: consultas registradas na Agenda no período, mesmo
+      # que o lead tenha chegado em outro dia (Vaneide agenda 15 → mostra 15;
+      # o recorte por coorte continua na taxa de agendamento)
+      appointments_booked: account.tasks.where(task_type: 'consulta', created_at: since..until_at).count,
+      # e destes, quantos CHEGARAM E AGENDARAM no mesmo período (lead novo
+      # que já saiu com consulta — o atendimento no timing perfeito)
+      appointments_same_day: account.tasks.where(task_type: 'consulta', created_at: since..until_at)
+                                    .joins(:contact).where(contacts: { created_at: since..until_at })
+                                    .distinct.count(:contact_id),
       booking_conversion: pct(agendadas, leads),
       surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i),
       surgery_indications: reached_stage_count(/indica/i, since, until_at)
@@ -163,13 +172,14 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     scope = consultas.where(canceled_at: nil, due_at: since..until_at)
     surgery_scope = cirurgias.where(due_at: since..until_at)
     if params[:doctor].present?
-      scope = scope.where(doctor: params[:doctor])
-      surgery_scope = surgery_scope.where(doctor: params[:doctor])
+      # tolerante a grafia ("Roberta Negri" e "Dra. Roberta Negri" são a mesma)
+      scope = Crm::DoctorNames.filter(scope, params[:doctor])
+      surgery_scope = Crm::DoctorNames.filter(surgery_scope, params[:doctor])
     end
     compareceu = scope.where(attendance: 'attended').count
     faltou = scope.where(attendance: 'missed').count
     indicated = scope.where(surgery_indication: 'indicated').limit(300).to_a
-    conversions = indicated.count { |t| surgery_booked_for_phone?(t.phone) }
+    conversions = count_conversions(indicated)
     nps_scores = nps_scores_for(scope.where(attendance: 'attended'))
     # entre quem COMPARECEU: quantos saíram com indicação × sem indicação
     sem_indicacao = [compareceu - indicated.size, 0].max
@@ -191,7 +201,16 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }
   end
 
-  # o paciente indicado tem cirurgia MARCADA? (match por telefone, 8 dígitos)
+  # indicados que têm cirurgia MARCADA — em lote pelo contact_id (Fase 0);
+  # telefone só como fallback dos registros antigos sem link
+  def count_conversions(indicated)
+    linked, legacy = indicated.partition { |t| t.contact_id.present? }
+    booked_ids = cirurgias.where(contact_id: linked.map(&:contact_id).uniq)
+                          .distinct.pluck(:contact_id).to_set
+    linked.count { |t| booked_ids.include?(t.contact_id) } +
+      legacy.count { |t| surgery_booked_for_phone?(t.phone) }
+  end
+
   def surgery_booked_for_phone?(phone)
     digits = phone.to_s.gsub(/\D/, '')
     return false if digits.length < 8
@@ -199,17 +218,13 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     cirurgias.where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}").exists?
   end
 
-  # notas de NPS dos pacientes dessas consultas (via contato, teto 200)
+  # notas de NPS dos pacientes dessas consultas: 1 query pelos contact_ids
   def nps_scores_for(tasks_scope)
-    tasks_scope.limit(200).filter_map do |t|
-      digits = t.phone.to_s.gsub(/\D/, '')
-      next if digits.length < 8
+    contact_ids = tasks_scope.limit(200).pluck(:contact_id).compact
+    return [] if contact_ids.empty?
 
-      contact = account.contacts
-                       .where("regexp_replace(COALESCE(phone_number, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
-                       .first
-      contact&.additional_attributes&.dig('nps', 'score')
-    end
+    account.contacts.where(id: contact_ids.uniq)
+           .filter_map { |c| c.additional_attributes&.dig('nps', 'score') }
   end
 
   def cirurgias
