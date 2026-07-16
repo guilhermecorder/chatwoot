@@ -1930,6 +1930,112 @@ Sem migration nova. Feedback do teste visual do Guilherme + pedidos novos.
   barra 100% limpa + nuvem espalhada + medalha oficial ✓. Estúdio/
   sanfona/Gemini aguardam teste visual logado (sem chave de IA local).
 
+## 44. 🚨😊 Rodada pós-deploy 16/07 (tarde) — popup do Radar, feedback de bugs, fixes de produção ⏳ NO WORKING TREE
+
+Sem migration nova. Feedback real do primeiro dia do lote no ar.
+
+- **🐛 FIX "88 consultas agendadas" (contador fantasma):** consulta
+  registrada PARA O PASSADO (preenchimento de histórico/disparo
+  retroativo: due_at < created_at) não conta mais como "agendada no
+  período" — booked_scope no Meu Painel (appointments_booked e
+  same_day). Testado: retro fica fora ✓.
+- **🐛 FIX horário errado do Secretário (11h → 11:30):** regra de
+  HORÁRIO LITERAL no prompt de extração ("11h"=11:00, NUNCA arredondar,
+  vale só o horário da confirmação final, não explícito = vazio).
+- **📆 "Ver na agenda"** nas notas de agendamento da IA (Secretário e
+  Atendente Instagram): link markdown que abre a Agenda direto no DIA
+  da consulta (AgendaBoard lê ?date= e abre na visão Dia).
+- **🧞 POPUP "PRIORIDADE MÁXIMA" do Radar:** paciente quente esperando
+  20+ min → popup salta na tela do atendente com animação GÊNIO DA
+  LÂMPADA (canto inferior direito); re-checa AO VIVO no servidor (se já
+  responderam, não incomoda); clicar fora = tremidinha + "Essa é a
+  prioridade máxima. 😊" + card laranja→azul + botão Atender agora
+  PULSANDO; Atender agora abre a conversa (mesma conversa não repete
+  por 15 min). Polling leve 90s (GET crm/home/radar_ping).
+- **⏸ Radar: desativação manual pela atendente** (botão no bloco de
+  avisos do Meu Painel) com REGISTRO de quem/quando
+  (opportunity_state.manual_log, POST crm/home/toggle_radar).
+- **🐞 FEEDBACK DE BUGS do time:** "Reportar problema 🐞" no menu do
+  perfil → gaveta lateral (título + detalhes + tela atual automática) →
+  vira card no board do Guilherme (assignee = 1º admin, task_type bug,
+  prioridade alta — aparece no Meu Painel dele) → quando o card é
+  CONCLUÍDO, quem reportou vê "🎉 problema que você reportou foi
+  resolvido!" no próprio Meu Painel (7 dias). POST crm/bug_reports.
+- **ESPAÇO DO PACIENTE:** (a) CONTRASTE automático — temas claros
+  (azul jovem, rosa jovem, verde) trocam letras/chips para tinta escura
+  (.cevico-ink-dark, sem mexer nos temas escuros); (b) ANÚNCIO DE
+  ORIGEM em PLACA DOURADA no header ("Anúncio do 1º contato") + cada
+  conversa da timeline mostra "📣 Veio do anúncio: X" (meta_ads da
+  própria conversa); (c) TRILHA DE AUTOMAÇÕES: CrmAutomationFireJob
+  grava cada disparo no contato (cevico_automation_trail, últimos 60) e
+  o card Automações ganha "🧭 Por onde ele já passou" com data/hora —
+  base p/ saber qual automação realmente ajuda.
+- **📝 PROMPT DE AGENDAMENTO N8N v2** (Google Agenda, ANTES de
+  internalizar): entregue em ~/Desktop/CEVICO/prompt-agendamento-v2.md —
+  contrato ESTRUTURADO supervisor↔calendar_agent (OPERACAO/DATA/BLOCO/
+  DURACAO_MIN/...), horário LITERAL, sequência verificar_dia →
+  ofertar 2 → verificar_bloco → criar → LER o evento e confirmar só com
+  os dados LIDOS (fim da confirmação falsa), STATUS explícito
+  (LIVRE/OCUPADO/CRIADO/ERRO), fuso fixo, checklist final, prompt novo
+  do calendar_agent e 5 ajustes de config (temperature 0, tools nativas
+  separadas, timeZone no nó, cortes de data como variável, log 1 semana).
+- **🔍 IMAGENS/ÁUDIOS não abrem (produção):** balão azul NÃO é a causa
+  (só estiliza variant AGENT). Suspeita: mídia do WhatsApp Cloud não
+  baixada p/ o ActiveStorage (fica só a URL da Meta, que EXPIRA) ou
+  storage/proxy da VPS. DIAGNÓSTICO pronto p/ rodar na VPS (ver mensagem
+  16/07) — corrigir com evidência na próxima rodada.
+
+### NO RADAR (pedidos 16/07 — construir depois, ordem a combinar)
+- 🏆 PRÊMIOS de zerar a fila: quando a responsável zera 100% das
+  conversas pendentes das colunas dela → celebração com animação,
+  elogio e frases motivacionais (Meu Painel).
+- 💀 SKELETON SCREENS no carregamento ("o sistema se constrói na frente
+  da pessoa, como a armadura do Homem de Ferro") — vira padrão de
+  design do sistema.
+- ⌘P BUSCA UNIVERSAL: CMD/CTRL+P abre busca rápida de paciente/lead/
+  histórico de qualquer lugar → ficha do paciente (Espaço do Paciente).
+- 📱 EFEITOS "iPhone": rodada de polimento de animações/transições p/
+  deixar o sistema viciante.
+- 🤖 AUDITOR DE DADOS POR IA ("ambiente de tratamento de dados por IA"):
+  analista que audita o que o admin pedir no CRM e organiza — agenda,
+  cards fora de coluna, valores errados — com relatório e ações
+  aprováveis. Encaixa com a AUDITORIA da semana de 20/07.
+
+## 45. 🏆 CARDS VIVOS do Meu Painel — metas, recordes e "posso viajar?" (16/07, noite) ⏳ NO WORKING TREE
+
+Sem migration nova. Junto com o item 44 no working tree.
+
+- **METAS POR PAINEL (🎯 admin, ao lado da engrenagem):** meta MENSAL por
+  indicador de cada painel (agendamento/condução/cirurgias/médicos/
+  gestor; % é meta direta). Salvas em agenda_config.panel_goals. O
+  backend converte a meta pro período visto (hoje = fatia diária,
+  semana = 7 dias, este mês = proporcional aos dias corridos, ano =
+  meses corridos).
+- **CARDS VIVOS (todos os painéis):** ritmo contra a meta muda a COR do
+  card na paleta do próprio painel — 🔴 <40% do esperado (vinho/alerta),
+  🟠 40-70% (âmbar), 70-100% mantém as cores normais, 🟢 meta batida
+  (verde do painel + selo ✓ META + pulso suave) — "cores mais
+  preocupantes quando for mal, já nos alerta". Medidor fino de "% do
+  ritmo da meta" + valor esperado no rodapé do card.
+- **🏆 RECORDES AUTOMÁTICOS:** melhor valor já visto por indicador e por
+  tipo de período (dia/semana/mês/ano), gravado sozinho quando batido
+  (agenda_config.panel_records). Card recordista ganha selo 🏆 RECORDE,
+  anel dourado e a **AURA DE ÁTOMOS orbitando RENTE à borda em SENTIDO
+  HORÁRIO** (TileAura.vue, canvas leve, mesma linguagem da névoa dos
+  formulários) — mais forte quanto mais acima da meta.
+- **✈️ GESTOR — indicador próprio de decisão:** card grande no topo do
+  painel Gestor com o veredito "Tudo bem — pode viajar ✈️" (verde) /
+  "Atenção hoje 🟠" / "Ação imediata ⚠️" (vermelho) + CENTRAL DE AVISOS
+  com os motivos prontos: metas em vermelho/âmbar, pacientes quentes do
+  Radar, conversas sem resposta (>8), consultas sem conferência e
+  tarefas no board.
+- **Popup do Radar:** entrar no Meu Painel = o aviso cumpriu o papel →
+  popup se despede sozinho (e não abre enquanto estiver lá).
+- Teste local: metas de teste na conta 3 (agendamento: 900 leads/mês,
+  220 consultas/mês, taxa 15%) — hoje deve mostrar meta batida em leads
+  e consultas (com 🏆 na primeira carga) e taxa em ritmo ok.
+- Rubocop: 2 ofensas novas corrigidas; restantes herdadas. Vite ✓.
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
 **ONDE ESTAMOS (2026-07-15, manhã — TUDO NO AR ✅):** itens 14-36 EM
