@@ -68,7 +68,7 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
 
   def form_params
     params.permit(:name, :active, :intro_title, :intro_text, :thank_you_text,
-                  questions: [:id, :label, :type, :required, { options: [] }])
+                  questions: [:id, :label, :type, :required, :text, :color, { options: [] }])
   end
 
   def scoped_responses
@@ -80,7 +80,8 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
   # agrega por pergunta ATUAL do formulário, casando pelo id gravado
   # no snapshot da resposta
   def aggregate_questions(responses)
-    @form.questions.map do |q|
+    # cards de mensagem não têm resposta — ficam fora do dashboard
+    @form.questions.reject { |q| q['type'] == 'message' }.map do |q|
       values = responses.filter_map do |r|
         ans = r.answers.find { |a| a['id'] == q['id'] }
         v = ans && ans['value']

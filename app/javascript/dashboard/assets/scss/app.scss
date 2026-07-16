@@ -1,1 +1,41 @@
 @import 'woot';
+
+// ── CEVICO: combinações de FONTES (menu do perfil → Alterar fontes) ──
+// Regra de ouro (pesquisa 16/07): serifa SÓ em títulos — nunca em inputs,
+// balões de chat, números ou tabelas (fadiga visual). As fontes vêm do
+// Google Fonts e só são baixadas quando a combinação é escolhida
+// (cevicoFontHelper injeta o <link>). Georgia/serif ficam de fallback.
+
+// Clássica Medicinal — Lora (títulos) + Open Sans (texto): acolhimento médico
+html[data-cevico-font='classica'] body,
+html[data-cevico-font='classica'] #app {
+  font-family: 'Open Sans', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+html[data-cevico-font='classica'] h1,
+html[data-cevico-font='classica'] h2,
+html[data-cevico-font='classica'] h3,
+html[data-cevico-font='classica'] h4 {
+  font-family: 'Lora', Georgia, serif;
+}
+
+// Científica Moderna — Merriweather (títulos) + IBM Plex Sans (texto):
+// precisão cirúrgica; Plex nunca confunde 1/I/l (dados clínicos)
+html[data-cevico-font='cientifica'] body,
+html[data-cevico-font='cientifica'] #app {
+  font-family: 'IBM Plex Sans', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+html[data-cevico-font='cientifica'] h1,
+html[data-cevico-font='cientifica'] h2,
+html[data-cevico-font='cientifica'] h3,
+html[data-cevico-font='cientifica'] h4 {
+  font-family: 'Merriweather', Georgia, serif;
+}
+
+// Editorial Elegante — Playfair Display (títulos) + Inter (texto):
+// premium intelectual, estilo Notion/Medium
+html[data-cevico-font='editorial'] h1,
+html[data-cevico-font='editorial'] h2,
+html[data-cevico-font='editorial'] h3,
+html[data-cevico-font='editorial'] h4 {
+  font-family: 'Playfair Display', Georgia, serif;
+}

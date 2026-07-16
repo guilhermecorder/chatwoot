@@ -9,6 +9,10 @@ import {
 import { LocalStorage } from 'shared/helpers/localStorage';
 import { LOCAL_STORAGE_KEYS } from 'dashboard/constants/localStorage';
 import { setColorTheme, setBrandTheme } from 'dashboard/helper/themeHelper.js';
+import {
+  CEVICO_FONT_COMBOS,
+  applyCevicoFontCombo,
+} from 'dashboard/helper/cevicoFontHelper';
 
 const getThemeOptions = t => [
   {
@@ -76,6 +80,18 @@ export function useAppearanceHotKeys() {
       },
     }));
 
+    // CEVICO: combinações de fontes — mesmo padrão de seleção dos temas
+    const fontOptions = CEVICO_FONT_COMBOS.map(combo => ({
+      id: `cevico_font_${combo.key}`,
+      title: combo.label,
+      parent: 'font_settings',
+      section: 'Fontes',
+      icon: ICON_APPEARANCE,
+      handler: () => {
+        applyCevicoFontCombo(combo.key);
+      },
+    }));
+
     return [
       {
         id: 'appearance_settings',
@@ -89,6 +105,14 @@ export function useAppearanceHotKeys() {
       },
       ...options,
       ...brandOptions,
+      {
+        id: 'font_settings',
+        title: 'Alterar fontes',
+        section: 'Fontes',
+        icon: ICON_APPEARANCE,
+        children: fontOptions.map(option => option.id),
+      },
+      ...fontOptions,
     ];
   });
 

@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n';
 import Avatar from 'next/avatar/Avatar.vue';
 import SidebarProfileMenuStatus from './SidebarProfileMenuStatus.vue';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
+import { initCevicoFontCombo } from 'dashboard/helper/cevicoFontHelper';
 
 import {
   DropdownContainer,
@@ -44,6 +45,9 @@ const showChatSupport = computed(() => {
   );
 });
 
+// ── CEVICO: Alterar fontes — seleção em painel, igual ao menu de temas ──
+initCevicoFontCombo(); // aplica a combinação salva ao abrir o sistema
+
 const menuItems = computed(() => {
   return [
     {
@@ -79,6 +83,17 @@ const menuItems = computed(() => {
       click: () => {
         const ninja = document.querySelector('ninja-keys');
         ninja.open({ parent: 'appearance_settings' });
+      },
+    },
+    {
+      // CEVICO: abre o painel de combinações (mesmo padrão do menu de temas)
+      show: true,
+      showOnCustomBrandedInstance: true,
+      label: 'Alterar fontes',
+      icon: 'i-lucide-type',
+      click: () => {
+        const ninja = document.querySelector('ninja-keys');
+        ninja.open({ parent: 'font_settings' });
       },
     },
     {

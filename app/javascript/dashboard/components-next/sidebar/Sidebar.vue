@@ -352,11 +352,51 @@ const toggleHiddenFeature = key => {
   localStorage.setItem('cevico_hidden_menu', JSON.stringify(hiddenFeatures.value));
 };
 
-const customizableItems = computed(() =>
-  menuItems.value
-    .filter(item => FEATURE_BY_ITEM_NAME[item.name])
-    .filter(item => !blockedFeatures.value.includes(FEATURE_BY_ITEM_NAME[item.name]))
-    .map(item => ({ key: FEATURE_BY_ITEM_NAME[item.name], label: item.label }))
+// ── Ordem dos itens do menu (Personalizar menu, por pessoa/navegador) ──
+// Padrão: Relatórios logo abaixo do CRM (pedido 2026-07-15).
+const DEFAULT_MENU_ORDER = [
+  'Inicio', 'CRM', 'Reports', 'Inbox', 'Conversation', 'Captain', 'Companies',
+  'Campanha WhatsApp', 'Forms', 'Tasks', 'Agenda', 'Academy',
+  'Automations Hub', 'Integrations Hub', 'Settings',
+];
+const menuOrder = ref(
+  JSON.parse(localStorage.getItem('cevico_menu_order') ?? 'null') || [...DEFAULT_MENU_ORDER]
+);
+const orderIndex = name => {
+  const saved = menuOrder.value.indexOf(name);
+  if (saved !== -1) return saved;
+  const fallback = DEFAULT_MENU_ORDER.indexOf(name);
+  return fallback !== -1 ? fallback + 0.5 : 999; // item novo entra perto do padrão
+};
+const moveMenuItem = (name, dir) => {
+  const names = orderedMenuEntries.value.map(i => i.name);
+  const idx = names.indexOf(name);
+  const to = idx + dir;
+  if (idx === -1 || to < 0 || to >= names.length) return;
+  [names[idx], names[to]] = [names[to], names[idx]];
+  menuOrder.value = names;
+  localStorage.setItem('cevico_menu_order', JSON.stringify(names));
+};
+const resetMenuOrder = () => {
+  menuOrder.value = [...DEFAULT_MENU_ORDER];
+  localStorage.removeItem('cevico_menu_order');
+};
+
+// itens do modal Personalizar menu: TODOS os itens do papel (inclusive os
+// ocultos, para poder reexibir), na ordem atual, com ↑/↓ e olhinho
+const orderedMenuEntries = computed(() =>
+  menuItemsForRole.value
+    .filter(item => {
+      const key = FEATURE_BY_ITEM_NAME[item.name];
+      return !key || !blockedFeatures.value.includes(key);
+    })
+    .map(item => ({
+      name: item.name,
+      label: item.label,
+      icon: item.icon,
+      feature: FEATURE_BY_ITEM_NAME[item.name] || null,
+    }))
+    .sort((a, b) => orderIndex(a.name) - orderIndex(b.name))
 );
 
 // ── Ícones em gradiente: do Início (azul CEVICO) até Configurações
@@ -398,15 +438,18 @@ const menuItemsForRole = computed(() => {
 });
 
 const visibleMenuItems = computed(() => {
-  const items = menuItemsForRole.value.filter(item => {
-    const key = FEATURE_BY_ITEM_NAME[item.name];
-    if (!key) return true;
-    // Caixa de Entrada é visão de admin — atendimento acontece pelo CRM
-    if (key === 'inbox' && !isAdmin.value) return false;
-    return (
-      !blockedFeatures.value.includes(key) && !hiddenFeatures.value.includes(key)
-    );
-  });
+  const items = menuItemsForRole.value
+    .filter(item => {
+      const key = FEATURE_BY_ITEM_NAME[item.name];
+      if (!key) return true;
+      // Caixa de Entrada é visão de admin — atendimento acontece pelo CRM
+      if (key === 'inbox' && !isAdmin.value) return false;
+      return (
+        !blockedFeatures.value.includes(key) && !hiddenFeatures.value.includes(key)
+      );
+    })
+    // ordem escolhida no Personalizar menu (padrão: Relatórios após CRM)
+    .sort((a, b) => orderIndex(a.name) - orderIndex(b.name));
   const denominator = Math.max(items.length - 1, 1);
   return items.map((item, index) => ({
     ...item,
@@ -471,24 +514,10 @@ const menuItems = computed(() => {
           activeOn: ['inbox_conversation'],
           to: accountScopedRoute('home'),
         },
-        // Menções/Participantes/Não atendidas são visão de admin —
-        // atendente trabalha por "Todas as conversas" e pelo CRM
+        // Menções/Participantes saíram para TODOS (pedido 2026-07-15);
+        // Não atendidas segue como visão de admin
         ...(isAdmin.value
           ? [
-              {
-                name: 'Mentions',
-                label: t('SIDEBAR.MENTIONED_CONVERSATIONS'),
-                icon: 'i-lucide-at-sign',
-                activeOn: ['conversation_through_mentions'],
-                to: accountScopedRoute('conversation_mentions'),
-              },
-              {
-                name: 'Participating',
-                label: t('SIDEBAR.PARTICIPATING_CONVERSATIONS'),
-                icon: 'i-lucide-user-round-check',
-                activeOn: ['conversation_through_participating'],
-                to: accountScopedRoute('conversation_participating'),
-              },
               {
                 name: 'Unattended',
                 activeOn: ['conversation_through_unattended'],
@@ -691,6 +720,16 @@ const menuItems = computed(() => {
           to: accountScopedRoute('doctors_reports'),
         },
         {
+          name: 'Agents Dashboard',
+          label: 'Dashboard dos Agentes',
+          to: accountScopedRoute('agents_dashboard_reports'),
+        },
+        {
+          name: 'Agenda Dashboard',
+          label: 'Dashboard da Agenda',
+          to: accountScopedRoute('agenda_dashboard_reports'),
+        },
+        {
           name: 'Ads Report',
           label: 'Anúncios (Meta)',
           to: accountScopedRoute('ads_reports'),
@@ -770,6 +809,12 @@ const menuItems = computed(() => {
       to: accountScopedRoute('agenda_board'),
     },
     {
+      name: 'Cevico Pages',
+      label: 'Páginas',
+      icon: 'i-lucide-panels-top-left',
+      to: accountScopedRoute('cevico_pages_home'),
+    },
+    {
       name: 'Academy',
       label: 'Academia CEVICO',
       icon: 'i-lucide-graduation-cap',
@@ -793,7 +838,7 @@ const menuItems = computed(() => {
                 name: 'Automations Rules',
                 label: 'Regras da caixa de entrada',
                 icon: 'i-lucide-repeat',
-                to: accountScopedRoute('automation_list'),
+                to: accountScopedRoute('cevico_automations', {}, { tab: 'regras' }),
               },
               {
                 name: 'Automations AI Agents',
@@ -806,6 +851,12 @@ const menuItems = computed(() => {
                 label: 'Modo Programação',
                 icon: 'i-lucide-zap',
                 to: accountScopedRoute('cevico_automations', {}, { tab: 'programacao' }),
+              },
+              {
+                name: 'Automations Results',
+                label: 'Resultados',
+                icon: 'i-lucide-bar-chart-3',
+                to: accountScopedRoute('cevico_automations', {}, { tab: 'resultados' }),
               },
               {
                 name: 'Automations Treatment',
@@ -1117,24 +1168,53 @@ const menuItems = computed(() => {
               @click="showCustomizeMenu = false"
             />
           </div>
-          <div class="p-4 space-y-1 max-h-[60vh] overflow-y-auto">
-            <label
-              v-for="item in customizableItems"
-              :key="item.key"
-              class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-n-alpha-1 cursor-pointer"
+          <div class="px-4 pt-3 pb-1 flex items-center justify-between">
+            <p class="text-[11px] text-n-slate-10">
+              Use as setas para mudar a ordem; a caixinha mostra/oculta o item.
+            </p>
+            <button
+              class="text-[11px] font-medium text-n-brand hover:underline flex-shrink-0"
+              @click="resetMenuOrder"
             >
+              Restaurar ordem padrão
+            </button>
+          </div>
+          <div class="p-4 pt-2 space-y-1 max-h-[60vh] overflow-y-auto">
+            <div
+              v-for="(item, idx) in orderedMenuEntries"
+              :key="item.name"
+              class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-n-alpha-1"
+            >
+              <!-- reordenar -->
+              <div class="flex flex-col -my-1">
+                <button
+                  class="i-lucide-chevron-up text-sm text-n-slate-9 hover:text-n-brand disabled:opacity-25"
+                  :disabled="idx === 0"
+                  title="Subir"
+                  @click="moveMenuItem(item.name, -1)"
+                />
+                <button
+                  class="i-lucide-chevron-down text-sm text-n-slate-9 hover:text-n-brand disabled:opacity-25"
+                  :disabled="idx === orderedMenuEntries.length - 1"
+                  title="Descer"
+                  @click="moveMenuItem(item.name, 1)"
+                />
+              </div>
+              <span v-if="typeof item.icon === 'string'" :class="item.icon" class="text-sm text-n-slate-10 flex-shrink-0" />
+              <span class="text-sm text-n-slate-12 flex-1 truncate">{{ item.label }}</span>
+              <span
+                v-if="item.feature && hiddenFeatures.includes(item.feature)"
+                class="text-[10px] text-n-slate-9"
+              >oculto</span>
               <input
+                v-if="item.feature"
                 type="checkbox"
                 class="rounded accent-n-brand"
-                :checked="!hiddenFeatures.includes(item.key)"
-                @change="toggleHiddenFeature(item.key)"
+                title="Mostrar/ocultar este item"
+                :checked="!hiddenFeatures.includes(item.feature)"
+                @change="toggleHiddenFeature(item.feature)"
               />
-              <span class="text-sm text-n-slate-12">{{ item.label }}</span>
-              <span
-                v-if="hiddenFeatures.includes(item.key)"
-                class="text-[10px] text-n-slate-9 ml-auto"
-              >oculto</span>
-            </label>
+            </div>
           </div>
         </div>
       </div>

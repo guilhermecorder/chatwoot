@@ -5,6 +5,9 @@
 # Formato de cada pergunta em `questions`:
 #   { "id" => "q1", "label" => "...", "type" => "choice|multi|text|scale|yesno",
 #     "options" => ["...", ...], "required" => true }
+# Tipo especial "message" = card só de frase + cor (sem pergunta):
+#   { "id" => "q2", "label" => "frase", "type" => "message",
+#     "text" => "apoio (opcional)", "color" => "auto|navy|laranja|..." }
 # == Schema Information
 #
 # Table name: crm_forms
@@ -42,7 +45,7 @@ class Crm::Form < ApplicationRecord
 
   before_validation :ensure_slug, on: :create
 
-  QUESTION_TYPES = %w[choice multi text scale yesno].freeze
+  QUESTION_TYPES = %w[choice multi text scale yesno message].freeze
 
   # link público único por contato: o token assinado identifica
   # formulário + contato sem expor nenhum id

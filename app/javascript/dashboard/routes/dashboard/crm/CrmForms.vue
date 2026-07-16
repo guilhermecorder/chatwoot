@@ -24,6 +24,21 @@ const QUESTION_TYPES = [
   { value: 'yesno', label: 'Sim / Não' },
   { value: 'scale', label: 'Escala 0 a 10' },
   { value: 'text', label: 'Resposta aberta' },
+  { value: 'message', label: '💬 Card de mensagem (só frase + cor)' },
+];
+
+// cores do card de mensagem — mesmas chaves da paleta da página pública
+const MESSAGE_COLORS = [
+  { key: 'auto', label: 'Sequência', css: 'linear-gradient(135deg, #F97316, #EC4899, #8B5CF6)' },
+  { key: 'navy', label: 'Marca', css: 'linear-gradient(135deg, #1E2B5B 55%, #D4AF37)' },
+  { key: 'laranja', label: 'Laranja', css: '#F97316' },
+  { key: 'turquesa', label: 'Turquesa', css: '#06B6D4' },
+  { key: 'magenta', label: 'Magenta', css: '#EC4899' },
+  { key: 'lima', label: 'Verde lima', css: '#84CC16' },
+  { key: 'roxo', label: 'Roxo', css: '#8B5CF6' },
+  { key: 'amarelo', label: 'Amarelo sol', css: '#FACC15' },
+  { key: 'coral', label: 'Coral', css: '#FB923C' },
+  { key: 'royal', label: 'Azul royal', css: '#2563EB' },
 ];
 
 const selectedForm = computed(() =>
@@ -63,6 +78,8 @@ const newQuestion = () => ({
   options: [],
   optionsText: '',
   required: true,
+  text: '',
+  color: 'auto',
 });
 
 // Template estratégico: novo formulário já nasce com as perguntas que
@@ -103,6 +120,8 @@ const openBuilder = form => {
         questions: (form.questions || []).map(q => ({
           ...q,
           optionsText: (q.options || []).join('\n'),
+          text: q.text || '',
+          color: q.color || 'auto',
         })),
       }
     : {
@@ -137,13 +156,15 @@ const saveForm = async () => {
       id: q.id,
       label: q.label.trim(),
       type: q.type,
-      required: !!q.required,
+      required: q.type === 'message' ? false : !!q.required,
       options: needsOptions(q.type)
         ? q.optionsText.split('\n').map(o => o.trim()).filter(Boolean)
         : [],
+      color: q.color || 'auto',
+      ...(q.type === 'message' ? { text: (q.text || '').trim() } : {}),
     }));
-  if (!questions.length) {
-    useAlert('Adicione pelo menos uma pergunta.');
+  if (!questions.some(q => q.type !== 'message')) {
+    useAlert('Adicione pelo menos uma pergunta (cards de mensagem não contam).');
     return;
   }
   const invalid = questions.find(q => needsOptions(q.type) && q.options.length < 2);
@@ -469,8 +490,12 @@ const pct = (count, total) => (total ? Math.round((count / total) * 100) : 0);
             class="rounded-xl border border-n-weak p-3"
           >
             <div class="flex items-center gap-2 mb-2">
-              <span class="text-[11px] font-semibold text-n-slate-9 flex-shrink-0">{{ i + 1 }}.</span>
-              <input v-model="q.label" class="flex-1 border border-n-weak rounded-lg px-2.5 py-1.5 text-sm bg-n-solid-2 text-n-slate-12" placeholder="Escreva a pergunta..." />
+              <span class="text-[11px] font-semibold text-n-slate-9 flex-shrink-0">{{ q.type === 'message' ? '💬' : `${i + 1}.` }}</span>
+              <input
+                v-model="q.label"
+                class="flex-1 border border-n-weak rounded-lg px-2.5 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+                :placeholder="q.type === 'message' ? 'Frase do card (ex: Você está indo muito bem! 🚀)' : 'Escreva a pergunta...'"
+              />
               <button class="i-lucide-chevron-up text-n-slate-10 hover:text-n-slate-12" title="Subir" @click="moveQuestion(i, -1)" />
               <button class="i-lucide-chevron-down text-n-slate-10 hover:text-n-slate-12" title="Descer" @click="moveQuestion(i, 1)" />
               <button class="i-lucide-trash-2 text-n-slate-10 hover:text-red-500" title="Remover" @click="draft.questions.splice(i, 1)" />
@@ -479,7 +504,7 @@ const pct = (count, total) => (total ? Math.round((count / total) * 100) : 0);
               <select v-model="q.type" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2 text-n-slate-12">
                 <option v-for="t in QUESTION_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
               </select>
-              <label class="flex items-center gap-1.5 text-xs text-n-slate-11">
+              <label v-if="q.type !== 'message'" class="flex items-center gap-1.5 text-xs text-n-slate-11">
                 <input v-model="q.required" type="checkbox" class="rounded accent-n-brand" />
                 Obrigatória
               </label>
@@ -491,15 +516,49 @@ const pct = (count, total) => (total ? Math.round((count / total) * 100) : 0);
               class="w-full border border-n-weak rounded-lg px-2.5 py-1.5 text-xs bg-n-solid-2 text-n-slate-12 mt-2"
               placeholder="Uma opção por linha:&#10;Menos de 5 anos&#10;5 a 15 anos&#10;Mais de 15 anos"
             />
+            <!-- card de mensagem: texto de apoio embaixo da frase -->
+            <input
+              v-if="q.type === 'message'"
+              v-model="q.text"
+              class="w-full border border-n-weak rounded-lg px-2.5 py-1.5 text-xs bg-n-solid-2 text-n-slate-12 mt-2"
+              placeholder="Texto de apoio (opcional, aparece menor embaixo da frase)"
+            />
+            <!-- cor do card em botões em linha — vale p/ QUALQUER tipo;
+                 "Sequência" segue os blocos dopamine automáticos -->
+            <div class="flex items-center gap-1.5 flex-wrap mt-2">
+              <span class="text-[11px] text-n-slate-10 mr-1">Cor do card:</span>
+              <button
+                v-for="c in MESSAGE_COLORS"
+                :key="c.key"
+                type="button"
+                class="flex items-center gap-1.5 px-2 py-1 rounded-full border text-[11px] transition-colors"
+                :class="q.color === c.key
+                  ? 'border-n-brand bg-n-brand/10 text-n-brand font-medium'
+                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                :title="c.label"
+                @click="q.color = c.key"
+              >
+                <span class="w-3.5 h-3.5 rounded-full border border-black/10" :style="{ background: c.css }" />
+                {{ c.label }}
+              </button>
+            </div>
           </div>
         </div>
 
-        <button
-          class="w-full border border-dashed border-n-weak rounded-xl py-2 text-xs text-n-slate-10 hover:text-n-brand hover:border-n-brand mb-4"
-          @click="draft.questions.push(newQuestion())"
-        >
-          + Adicionar pergunta
-        </button>
+        <div class="flex gap-2 mb-4">
+          <button
+            class="flex-1 border border-dashed border-n-weak rounded-xl py-2 text-xs text-n-slate-10 hover:text-n-brand hover:border-n-brand"
+            @click="draft.questions.push(newQuestion())"
+          >
+            + Adicionar pergunta
+          </button>
+          <button
+            class="flex-1 border border-dashed border-n-weak rounded-xl py-2 text-xs text-n-slate-10 hover:text-n-brand hover:border-n-brand"
+            @click="draft.questions.push({ ...newQuestion(), type: 'message', required: false })"
+          >
+            + 💬 Card de mensagem
+          </button>
+        </div>
 
         <button
           class="w-full bg-n-brand text-white rounded-lg py-2.5 text-sm font-medium hover:bg-n-brand/90 disabled:opacity-50"

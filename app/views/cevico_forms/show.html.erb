@@ -4,32 +4,154 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title><%= @form.intro_title.presence || @form.name %> — CEVICO</title>
+  <%# Cinzel = fonte do lettering oficial do logo (estilo Trajan) %>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
   <style>
-    :root { --brand: #0F5FA6; --brand-dark: #0B4A82; }
+    /* DOPAMINE COLORS em BLOCOS (pesquisa do Guilherme, 16/07):
+       Bloco 1 (engajamento rápido) = laranja ↔ turquesa;
+       Bloco 2 (miolo / zona de risco) = magenta, verde lima, roxo, amarelo;
+       Bloco 3 (reta final) = coral, azul royal, e o pouso de volta à marca.
+       Abertura e encerramento = AZUL MARINHO DO LOGO + ouro (identidade). */
+    :root {
+      /* navy = a cor EXATA do fundo do logo oficial (#152C61) */
+      --brand: #152C61; --brand-soft: #ECEFF8;
+      --navy: #152C61; --navy-deep: #0C1B40; --navy-light: #23407F;
+      --gold: #D4AF37; --gold-dark: #8A6620; --gold-mid: #C9A24B; --gold-light: #F5E9B8;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(160deg, #0F5FA6 0%, #0B4A82 60%, #083A67 100%);
+      background: var(--navy);
       min-height: 100vh; min-height: 100dvh;
       display: flex; align-items: center; justify-content: center; padding: 16px;
       color: #1a2333;
+    }
+    .bg { position: fixed; inset: 0; z-index: -1; opacity: 0; transition: opacity .7s ease; }
+    .bg.on { opacity: 1; }
+
+    /* ── selo oficial: a placa do logo REAL em miniatura ── */
+    .selo { margin-bottom: 14px; }
+    .selo img {
+      height: 34px; display: block; border-radius: 7px;
+      box-shadow: 0 3px 10px rgba(12,27,64,.28);
+    }
+
+    /* abertura: a placa do logo oficial (PNG original, fundo navy) */
+    .logo-banner { margin: 2px 0 18px; }
+    .logo-banner img {
+      display: block; width: 100%; max-width: 420px; margin: 0 auto;
+      border-radius: 14px; box-shadow: 0 10px 30px rgba(12,27,64,.35);
+    }
+
+    /* abertura: impressão de OURO — brilho pulsando ao redor do cartão */
+    .card.gold-glow { animation: goldGlow 2.6s ease-in-out infinite; }
+    @keyframes goldGlow {
+      0%, 100% { box-shadow: 0 20px 60px rgba(0,0,0,.3), 0 0 0 0 rgba(212,175,55,.55); }
+      50% { box-shadow: 0 20px 60px rgba(0,0,0,.3), 0 0 42px 8px rgba(212,175,55,.55); }
+    }
+
+    /* fim das respostas: a névoa ENERGIZA o cartão inteiro, pulsa e suaviza */
+    .card.surge { animation: cardSurge .8s ease-in-out 2; }
+    @keyframes cardSurge {
+      0%, 100% { box-shadow: 0 20px 60px rgba(0,0,0,.3); transform: scale(1); }
+      50% { box-shadow: 0 20px 60px rgba(0,0,0,.3), 0 0 64px 16px rgba(212,175,55,.65); transform: scale(1.012); }
+    }
+
+    /* final: logo girando ao próprio redor como uma MOEDA GROSSA,
+       brilhando em dourado infinitamente */
+    .coin-stage {
+      width: 96px; height: 96px; margin: 0 auto 16px;
+      perspective: 700px;
+      animation: coinGlow 2s ease-in-out infinite;
+    }
+    .coin {
+      width: 100%; height: 100%; position: relative;
+      transform-style: preserve-3d;
+      animation: coinSpin 3.4s linear infinite;
+    }
+    /* face da moeda = MEDALHA com o olho oficial (PNG original, fundo navy) */
+    .coin .face {
+      position: absolute; inset: 0; border-radius: 50%;
+      background: var(--navy); border: 3px solid var(--gold);
+      display: flex; align-items: center; justify-content: center;
+      backface-visibility: hidden; overflow: hidden;
+    }
+    .coin .face img { width: 72%; display: block; }
+    .coin .face.front { transform: translateZ(4px); }
+    .coin .face.back { transform: rotateY(180deg) translateZ(4px); }
+    /* camadas do miolo = a espessura da moeda */
+    .coin .edge {
+      position: absolute; inset: 0; border-radius: 50%;
+      background: linear-gradient(90deg, #8A6620, #D4AF37, #8A6620);
+    }
+    @keyframes coinSpin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+    @keyframes coinGlow {
+      0%, 100% { filter: drop-shadow(0 0 8px rgba(212,175,55,.45)); }
+      50% { filter: drop-shadow(0 0 26px rgba(212,175,55,.85)); }
+    }
+
+    /* a linha faz a VOLTA na borda do card antes do final */
+    #sweep {
+      position: absolute; inset: 0; pointer-events: none;
+      opacity: 0; transition: opacity .3s ease; z-index: 5;
+    }
+    #sweep.run { opacity: 1; }
+    #sweep rect {
+      fill: none; stroke: url(#sweepGold); stroke-width: 5; stroke-linecap: round;
+      stroke-dasharray: 16 84;
+    }
+    #sweep.run rect { animation: sweepRun 1.9s cubic-bezier(.3, .1, .3, 1) forwards; }
+    @keyframes sweepRun { to { stroke-dashoffset: -200; } }
+    .final .word-final {
+      font-family: 'Cinzel', 'Times New Roman', serif; font-weight: 700;
+      font-size: 19px; letter-spacing: 4px; margin-bottom: 14px;
+      background: linear-gradient(120deg, var(--gold-dark), var(--gold-mid) 45%, var(--gold));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    @keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+    @keyframes goldPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,.6); }
+      50% { box-shadow: 0 0 34px 10px rgba(212,175,55,.35); }
     }
     .card {
       background: #fff; border-radius: 20px; width: 100%; max-width: 560px;
       padding: 32px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.3);
       display: flex; flex-direction: column; min-height: 420px;
+      position: relative; /* âncora da volta na borda (#sweep) */
     }
-    .progress { height: 6px; background: #e8edf4; border-radius: 3px; overflow: hidden; margin-bottom: 24px; }
-    .progress-bar { height: 100%; background: var(--brand); border-radius: 3px; transition: width .35s ease; width: 0%; }
+
+    /* ── barra de progresso com NÉVOA DE ÁTOMOS ──
+       partículas na cor do card dançam ao redor da linha; a névoa fica
+       mais densa conforme avança e, no fim, energiza o cartão inteiro. */
+    .progress-wrap { position: relative; margin-bottom: 24px; }
+    .progress { height: 7px; background: #e8edf4; border-radius: 4px; overflow: hidden; }
+    .progress-bar {
+      height: 100%; border-radius: 4px; width: 0%;
+      transition: width .5s cubic-bezier(.22,.9,.35,1), background-color .5s ease;
+      background: var(--brand);
+      /* sem glow na barra: o overflow do trilho cortava o brilho e parecia
+         bug no 100% — a energia agora é toda da névoa */
+    }
+    #mist {
+      position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
+      width: calc(100% + 28px); height: 52px; pointer-events: none; z-index: 2;
+    }
+
     .step { display: none; flex: 1; flex-direction: column; animation: fade .3s ease; }
     .step.active { display: flex; }
     @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-    .brand { font-size: 12px; font-weight: 700; letter-spacing: 2px; color: var(--brand); margin-bottom: 12px; }
-    h1 { font-size: 24px; line-height: 1.25; margin-bottom: 10px; }
+    h1 { font-size: 24px; line-height: 1.25; margin-bottom: 10px; color: var(--navy); }
     h2 { font-size: 20px; line-height: 1.3; margin-bottom: 6px; }
     .subtitle { color: #5a6b82; font-size: 15px; line-height: 1.5; margin-bottom: 20px; }
     .qcount { font-size: 12px; color: #8a97a8; margin-bottom: 8px; }
+    /* micro-textos de incentivo (3ª pergunta, metade, última) */
+    .cheer { font-size: 12.5px; font-weight: 700; color: var(--brand); margin-bottom: 6px; }
     .required-mark { color: #d3455b; }
+    /* card de mensagem (só frase + cor, sem pergunta) */
+    .step-msg { justify-content: center; text-align: center; }
+    .step-msg h2 { font-size: 26px; line-height: 1.3; color: var(--brand); }
     .options { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
     .opt {
       border: 2px solid #dde5ee; border-radius: 12px; padding: 14px 16px; font-size: 15px;
@@ -37,7 +159,7 @@
       display: flex; align-items: center; gap: 10px; color: #1a2333;
     }
     .opt:active { transform: scale(.985); }
-    .opt.selected { border-color: var(--brand); background: #eef5fc; font-weight: 600; }
+    .opt.selected { border-color: var(--brand); background: var(--brand-soft); font-weight: 600; }
     .opt .tick { width: 20px; height: 20px; border: 2px solid #c3cfdd; border-radius: 50%; flex-shrink: 0; position: relative; }
     .opt.multi .tick { border-radius: 6px; }
     .opt.selected .tick { border-color: var(--brand); background: var(--brand); }
@@ -61,57 +183,201 @@
     .btn:active { transform: scale(.98); }
     .btn-primary { background: var(--brand); color: #fff; flex: 1; }
     .btn-primary:disabled { background: #b8c6d6; cursor: default; }
+    .btn-gold {
+      background: linear-gradient(135deg, #B8860B, var(--gold)); color: #fff; flex: 1;
+      box-shadow: 0 8px 22px rgba(212,175,55,.4);
+    }
     .btn-ghost { background: #eef2f7; color: #5a6b82; }
     .error { color: #d3455b; font-size: 13px; margin-top: 10px; display: none; }
     .final { text-align: center; justify-content: center; align-items: center; }
-    .final .emoji { font-size: 56px; margin-bottom: 16px; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="progress"><div class="progress-bar" id="bar"></div></div>
+  <div class="bg on" id="bgA" style="background: linear-gradient(160deg, #0C1B40 0%, #152C61 55%, #23407F 100%)"></div>
+  <div class="bg" id="bgB"></div>
+  <div class="card gold-glow" id="card">
+    <!-- selo oficial (a placa do logo real) em TODOS os cards -->
+    <div class="selo">
+      <img src="/brand-assets/cevico-logo.png" alt="CEVICO — Cuidados Oculares">
+    </div>
+    <div class="progress-wrap">
+      <canvas id="mist"></canvas>
+      <div class="progress"><div class="progress-bar" id="bar"></div></div>
+    </div>
 
-    <!-- Abertura -->
+    <!-- Abertura: o logo OFICIAL (arquivo original) como placa da marca -->
     <div class="step active" id="step-intro">
-      <div class="brand">CEVICO — CENTRO DA VISÃO</div>
+      <div class="logo-banner">
+        <img src="/brand-assets/cevico-logo.png" alt="CEVICO — Cuidados Oculares">
+      </div>
       <h1><%= @form.intro_title.presence || @form.name %></h1>
       <p class="subtitle">
         <% if @first_name.present? %>Olá, <%= @first_name %>! <% end %>
-        <%= @form.intro_text.presence || 'Leva menos de 2 minutos e nos ajuda a preparar o melhor atendimento para você.' %>
+        <%= @form.intro_text.presence || 'Vale a pena responder essas perguntas. Você poderá avisar o seu médico sobre algo importante sobre você, sua saúde ou seus olhos. Além disso, poderá perguntar o que quiser pra ele, antes mesmo da consulta.' %>
       </p>
       <div class="nav">
-        <button class="btn btn-primary" onclick="go(0)">Começar</button>
+        <button class="btn btn-gold" onclick="go(0)">Começar</button>
       </div>
     </div>
 
-    <!-- Perguntas (montadas via JS) -->
+    <!-- Passos (perguntas + cards de mensagem, montados via JS) -->
     <div id="questions-root"></div>
 
-    <!-- Agradecimento -->
+    <!-- a linha que faz a volta na borda do card (final) -->
+    <svg id="sweep" aria-hidden="true">
+      <defs>
+        <linearGradient id="sweepGold" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#8A6620"/>
+          <stop offset="0.5" stop-color="#F5E9B8"/>
+          <stop offset="1" stop-color="#D4AF37"/>
+        </linearGradient>
+      </defs>
+      <rect id="sweepRect" x="3" y="3" rx="17" pathLength="100"/>
+    </svg>
+
+    <!-- Final: paciente preferido, em ouro sobre azul marinho da marca -->
     <div class="step final" id="step-done">
-      <div class="emoji">💙</div>
-      <h2>Obrigado<%= @first_name.present? ? ", #{@first_name}" : '' %>!</h2>
-      <p class="subtitle" style="margin-top:8px">
-        <%= @form.thank_you_text.presence || 'Suas respostas foram enviadas. Até breve na CEVICO!' %>
+      <div class="coin-stage">
+        <div class="coin">
+          <span class="edge" style="transform: translateZ(-3px)"></span>
+          <span class="edge" style="transform: translateZ(-1px)"></span>
+          <span class="edge" style="transform: translateZ(1px)"></span>
+          <span class="edge" style="transform: translateZ(3px)"></span>
+          <div class="face back"><img src="/brand-assets/cevico-eye.png" alt=""></div>
+          <div class="face front"><img src="/brand-assets/cevico-eye.png" alt="CEVICO"></div>
+        </div>
+      </div>
+      <div class="word-final">CEVICO</div>
+      <h2>Parabéns<%= @first_name.present? ? ", #{@first_name}" : '' %>! Você já é um dos nossos pacientes preferidos.</h2>
+      <p class="subtitle" style="margin-top:10px">
+        <%= @form.thank_you_text.presence || 'As suas respostas já foram anexadas no seu cadastro e já estão nas mãos do seu médico. A sua consulta será excelente.' %>
       </p>
     </div>
   </div>
 
   <script>
-    const QUESTIONS = <%= raw @form.questions.to_json %>;
+    // STEPS = perguntas + cards de mensagem, na ordem montada no criador
+    const STEPS = <%= raw @form.questions.to_json %>;
     const SUBMIT_URL = window.location.pathname;
     const answers = {};   // id -> value
     let current = -1;     // -1 = intro
 
-    // monta os passos das perguntas
+    // numeração só das perguntas de verdade (mensagem não conta)
+    const qIndexOf = []; let qTotal = 0;
+    STEPS.forEach(s => {
+      if (s.type === 'message') { qIndexOf.push(null); }
+      else { qIndexOf.push(qTotal); qTotal += 1; }
+    });
+
+    // ── paleta dopamine ──
+    const PALETTES = {
+      laranja:   { bg: 'linear-gradient(160deg, #C2410C 0%, #F97316 55%, #FDBA74 100%)', brand: '#EA580C', soft: '#FEF0E5' },
+      turquesa:  { bg: 'linear-gradient(160deg, #0E7490 0%, #06B6D4 55%, #67E8F9 100%)', brand: '#0891B2', soft: '#E0F7FC' },
+      magenta:   { bg: 'linear-gradient(160deg, #9D174D 0%, #EC4899 55%, #F9A8D4 100%)', brand: '#DB2777', soft: '#FDEAF3' },
+      lima:      { bg: 'linear-gradient(160deg, #3F6212 0%, #84CC16 55%, #D9F99D 100%)', brand: '#65A30D', soft: '#F2FBE3' },
+      roxo:      { bg: 'linear-gradient(160deg, #5B21B6 0%, #8B5CF6 55%, #C4B5FD 100%)', brand: '#7C3AED', soft: '#F0EAFE' },
+      amarelo:   { bg: 'linear-gradient(160deg, #B45309 0%, #FACC15 55%, #FEF08A 100%)', brand: '#CA8A04', soft: '#FEF9DF' },
+      coral:     { bg: 'linear-gradient(160deg, #EA580C 0%, #FB923C 55%, #FED7AA 100%)', brand: '#EA580C', soft: '#FEF1E6' },
+      royal:     { bg: 'linear-gradient(160deg, #1E3A8A 0%, #2563EB 55%, #60A5FA 100%)', brand: '#1D4ED8', soft: '#E8EFFD' },
+      navySuave: { bg: 'linear-gradient(160deg, #16295B 0%, #23407F 55%, #3D5699 100%)', brand: '#23407F', soft: '#EAEDF7' },
+      navy:      { bg: 'linear-gradient(160deg, #0C1B40 0%, #152C61 55%, #23407F 100%)', brand: '#152C61', soft: '#ECEFF8' },
+    };
+    const FINAL_PALETTE = { bg: 'linear-gradient(160deg, #060D22 0%, #0C1B40 55%, #152C61 100%)', brand: '#B8912B', soft: '#FBF4DE' };
+
+    // Sequência em BLOCOS: engajamento (laranja↔turquesa) → miolo ousado
+    // (magenta/lima/roxo/amarelo) → reta final que desacelera e volta à marca.
+    const BLOCKS = { b1: 0, b2: 0 }; // fronteiras p/ os micro-textos
+    function buildSequence(n) {
+      const seq = [];
+      const b1 = Math.min(4, Math.max(2, n - 2));
+      let b3 = n - b1 - 6;
+      if (b3 < 0) b3 = (n - b1) > 2 ? 1 : 0;
+      const b2 = n - b1 - b3;
+      BLOCKS.b1 = b1; BLOCKS.b2 = b2;
+      const A = ['laranja', 'turquesa'];
+      const B = ['magenta', 'lima', 'roxo', 'amarelo'];
+      const C = ['coral', 'royal', 'amarelo', 'coral', 'royal', 'roxo'];
+      for (let i = 0; i < b1; i += 1) seq.push(A[i % 2]);
+      for (let i = 0; i < b2; i += 1) seq.push(B[i % 4]);
+      for (let i = 0; i < b3; i += 1) seq.push(C[i % 6]);
+      // pouso: reta final longa termina preparando a volta ao azul da marca
+      if (b3 >= 4) { seq[n - 1] = 'navySuave'; seq[n - 2] = 'royal'; }
+      return seq;
+    }
+    const SEQ = buildSequence(STEPS.length);
+
+    function stepPalette(i) {
+      if (i < 0) return PALETTES.navy; // abertura = marca
+      const q = STEPS[i];
+      // cor escolhida no criador vence a sequência — em qualquer tipo de card
+      if (q.color && q.color !== 'auto' && PALETTES[q.color]) return PALETTES[q.color];
+      return PALETTES[SEQ[i]] || PALETTES.navy;
+    }
+
+    let bgFlip = false;
+    function applyPalette(p) {
+      const showEl = document.getElementById(bgFlip ? 'bgA' : 'bgB');
+      const hideEl = document.getElementById(bgFlip ? 'bgB' : 'bgA');
+      showEl.style.background = p.bg;
+      showEl.classList.add('on');
+      hideEl.classList.remove('on');
+      bgFlip = !bgFlip;
+      document.documentElement.style.setProperty('--brand', p.brand);
+      document.documentElement.style.setProperty('--brand-soft', p.soft);
+      mist.setBrand(p.brand);
+    }
+
+    // micro-textos de incentivo — frases OFICIAIS da pesquisa (16/07),
+    // amarradas às fronteiras dos blocos + metade + 3ª + última.
+    // As fronteiras caem na primeira PERGUNTA de cada bloco (cards de
+    // mensagem não mostram cheer).
+    const firstQuestionAt = from => {
+      for (let i = from; i < STEPS.length; i += 1) {
+        if (STEPS[i].type !== 'message') return i;
+      }
+      return -1;
+    };
+    const CHEER_B2 = firstQuestionAt(BLOCKS.b1);
+    const CHEER_B3 = firstQuestionAt(BLOCKS.b1 + BLOCKS.b2);
+    function cheerFor(stepIdx, qn) {
+      if (qn === null || qTotal < 4) return '';
+      if (qn === qTotal - 1) return 'Última pergunta! Prometo. 😉';
+      if (qn === Math.floor(qTotal / 2)) return 'Falta pouco! Suas respostas estão nos ajudando muito. 🌟';
+      if (stepIdx === CHEER_B2) return 'Vamos para a melhor parte? Suas respostas estão ótimas. ✨';
+      if (stepIdx === CHEER_B3) return 'Quase lá! Só mais alguns segundos e terminamos. ⏳';
+      if (qn === 2) return 'Muito bem, vamos em frente...';
+      if (qn === 3) return 'Olha só, você já começou muito bem! 🚀';
+      return '';
+    }
+
+    // monta os passos
     const root = document.getElementById('questions-root');
-    QUESTIONS.forEach((q, i) => {
+    STEPS.forEach((q, i) => {
       const step = document.createElement('div');
-      step.className = 'step';
+      const isLast = i === STEPS.length - 1;
+      step.className = q.type === 'message' ? 'step step-msg' : 'step';
       step.id = 'step-' + i;
       let body = '';
+
+      if (q.type === 'message') {
+        // card só de frase + cor: um respiro/celebração no meio do caminho
+        body += `<h2>${esc(q.label)}</h2>`;
+        if (q.text) body += `<p class="subtitle" style="margin-top:12px">${esc(q.text)}</p>`;
+        body += `<div class="nav">
+          <button class="btn btn-ghost" onclick="go(${i - 1})">Voltar</button>
+          <button class="btn btn-primary" onclick="${isLast ? 'submit()' : `go(${i + 1})`}">${isLast ? 'Enviar respostas' : 'Continuar'}</button>
+        </div>`;
+        step.innerHTML = body;
+        root.appendChild(step);
+        return;
+      }
+
+      const qn = qIndexOf[i];
       const req = q.required ? ' <span class="required-mark">*</span>' : '';
-      body += `<div class="qcount">Pergunta ${i + 1} de ${QUESTIONS.length}</div>`;
+      // sem "Pergunta X de Y": o paciente não precisa de contagem —
+      // a barra (névoa) já dá a sensação de progresso
+      const cheer = cheerFor(i, qn);
+      if (cheer) body += `<div class="cheer">${cheer}</div>`;
       body += `<h2>${esc(q.label)}${req}</h2>`;
 
       if (q.type === 'choice' || q.type === 'yesno') {
@@ -129,13 +395,13 @@
         ).join('') + '</div>';
         body += '<div class="qcount" style="margin-top:8px">0 = nada &nbsp;·&nbsp; 10 = muito</div>';
       } else {
-        body += `<textarea id="txt-${i}" placeholder="Escreva aqui..." oninput="answers[QUESTIONS[${i}].id] = this.value"></textarea>`;
+        body += `<textarea id="txt-${i}" placeholder="Escreva aqui..." oninput="answers[STEPS[${i}].id] = this.value"></textarea>`;
       }
 
       body += `<p class="error" id="err-${i}">Essa pergunta é obrigatória 🙏</p>`;
       body += `<div class="nav">
         <button class="btn btn-ghost" onclick="go(${i - 1})">Voltar</button>
-        <button class="btn btn-primary" onclick="next(${i})">${i === QUESTIONS.length - 1 ? 'Enviar respostas' : 'Continuar'}</button>
+        <button class="btn btn-primary" onclick="next(${i})">${isLast ? 'Enviar respostas' : 'Continuar'}</button>
       </div>`;
       step.innerHTML = body;
       root.appendChild(step);
@@ -149,17 +415,28 @@
     }
 
     function go(i) {
-      if (i < 0) { current = -1; show('step-intro'); setBar(); return; }
-      current = i; show('step-' + i); setBar();
+      if (i < 0) { current = -1; show('step-intro'); setBar(); applyPalette(stepPalette(-1)); glow(true); return; }
+      current = i; show('step-' + i); setBar(); applyPalette(stepPalette(i)); glow(false);
     }
 
+    // brilho dourado pulsante do cartão: na abertura e no final
+    function glow(on) {
+      document.getElementById('card').classList.toggle('gold-glow', on);
+    }
+
+    // Barra com PSICOLOGIA: avança rápido na primeira metade e desacelera
+    // até o fim. A névoa de átomos fica mais densa conforme avança.
     function setBar() {
-      const pct = current < 0 ? 4 : Math.round(((current + 1) / (QUESTIONS.length + 1)) * 100);
-      document.getElementById('bar').style.width = pct + '%';
+      const bar = document.getElementById('bar');
+      const t = current < 0 ? 0.04 : (current + 1) / (STEPS.length + 1);
+      const eased = 1 - Math.pow(1 - t, 2); // rápido no começo, calmo no fim
+      bar.style.width = Math.round(eased * 100) + '%';
+      bar.style.setProperty('--energy', Math.pow(t, 1.5).toFixed(3));
+      mist.setProgress(eased);
     }
 
     function pick(i, el) {
-      answers[QUESTIONS[i].id] = el.dataset.v;
+      answers[STEPS[i].id] = el.dataset.v;
       el.parentElement.querySelectorAll('.opt').forEach(o => o.classList.remove('selected'));
       el.classList.add('selected');
       setTimeout(() => next(i), 220); // avança sozinho — 1 toque por pergunta
@@ -168,18 +445,18 @@
     function pickMulti(i, el) {
       el.classList.toggle('selected');
       const sel = [...el.parentElement.querySelectorAll('.opt.selected')].map(o => o.dataset.v);
-      answers[QUESTIONS[i].id] = sel;
+      answers[STEPS[i].id] = sel;
     }
 
     function pickScale(i, el) {
-      answers[QUESTIONS[i].id] = el.dataset.v;
+      answers[STEPS[i].id] = el.dataset.v;
       el.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
       el.classList.add('selected');
       setTimeout(() => next(i), 220);
     }
 
     function next(i) {
-      const q = QUESTIONS[i];
+      const q = STEPS[i];
       const v = answers[q.id];
       const empty = v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
       if (q.required && empty) {
@@ -187,12 +464,12 @@
         return;
       }
       document.getElementById('err-' + i).style.display = 'none';
-      if (i === QUESTIONS.length - 1) { submit(); return; }
+      if (i === STEPS.length - 1) { submit(); return; }
       go(i + 1);
     }
 
     async function submit() {
-      const payload = QUESTIONS.map(q => ({
+      const payload = STEPS.filter(q => q.type !== 'message').map(q => ({
         id: q.id, label: q.label, type: q.type, value: answers[q.id] ?? ''
       }));
       try {
@@ -202,9 +479,120 @@
           body: JSON.stringify({ answers: payload })
         });
       } catch (e) { /* mesmo offline, mostra o obrigado — melhor UX que travar */ }
-      current = QUESTIONS.length; show('step-done');
-      document.getElementById('bar').style.width = '100%';
+      current = STEPS.length;
+      const bar = document.getElementById('bar');
+      bar.style.width = '100%';
+      bar.style.setProperty('--energy', '1');
+      mist.setProgress(1);
+      // clímax: a linha chega na ponta, FAZ A VOLTA na borda do card
+      // enquanto a névoa energiza tudo... e então volta pro lugar dela
+      mist.surge();
+      const card = document.getElementById('card');
+      card.classList.add('surge');
+      borderSweep();
+      setTimeout(() => {
+        card.classList.remove('surge');
+        show('step-done');
+        applyPalette(FINAL_PALETTE);
+        glow(true);
+      }, 2000);
     }
+
+    // a linha percorre a borda do card (2 voltas de segmento dourado)
+    function borderSweep() {
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduced) return;
+      const card = document.getElementById('card');
+      const svg = document.getElementById('sweep');
+      const rect = document.getElementById('sweepRect');
+      svg.setAttribute('viewBox', `0 0 ${card.clientWidth} ${card.clientHeight}`);
+      svg.setAttribute('width', card.clientWidth);
+      svg.setAttribute('height', card.clientHeight);
+      rect.setAttribute('width', card.clientWidth - 6);
+      rect.setAttribute('height', card.clientHeight - 6);
+      svg.classList.add('run');
+      setTimeout(() => svg.classList.remove('run'), 1950);
+    }
+
+    // ── névoa de átomos: partículas na cor do card ao redor da linha ──
+    const mist = (() => {
+      const cv = document.getElementById('mist');
+      const ctx = cv.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      let W = 0; let H = 0; let parts = [];
+      let progress = 0.04; let brand = '#D4AF37'; let surge = 0;
+
+      function resize() {
+        const r = cv.getBoundingClientRect();
+        W = cv.width = Math.max(1, Math.round(r.width * dpr));
+        H = cv.height = Math.max(1, Math.round(r.height * dpr));
+      }
+      function spawn() {
+        // volume na ponta + NUVEM generosa: rastro ao longo da linha e
+        // resíduos soltos flutuando ao redor (inclusive além da ponta)
+        const roll = Math.random();
+        const tipShare = 0.3 + 0.3 * progress;
+        let x;
+        let stray = false;
+        if (roll < tipShare) {
+          x = progress * W * (0.84 + Math.random() * 0.22); // enxame na ponta (passa um pouco dela)
+        } else if (roll < tipShare + 0.18) {
+          stray = true; // resíduo solto: qualquer lugar da linha, bem espalhado
+          x = Math.random() * Math.min(W, progress * W * 1.12);
+        } else {
+          x = Math.pow(Math.random(), 0.75) * progress * W;  // rastro atrás
+        }
+        const nearTip = !stray && x > progress * W * 0.8;
+        return {
+          x,
+          y: H / 2 + (Math.random() - 0.5) * H * (stray ? 1.0 : (nearTip ? 0.9 : 0.7)),
+          r: (0.6 + Math.random() * (nearTip ? 2.3 : 1.6)) * dpr,
+          vx: (Math.random() - 0.35) * 0.4 * dpr,
+          vy: (Math.random() - 0.5) * 0.25 * dpr,
+          life: Math.random() * 60, max: 90 + Math.random() * 140,
+          gold: Math.random() < 0.22, // pitada de ouro CEVICO na névoa
+          tip: nearTip,
+        };
+      }
+      function rgba(hex, a) {
+        const n = parseInt(hex.slice(1), 16);
+        return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+      }
+      function tick() {
+        ctx.clearRect(0, 0, W, H);
+        const target = Math.round(16 + 130 * progress + 170 * surge);
+        while (parts.length < target) parts.push(spawn());
+        if (parts.length > target) parts.length = target;
+        parts.forEach((p, i) => {
+          p.x += p.vx * (1 + surge * 3); p.y += p.vy * (1 + surge * 2); p.life += 1;
+          const t = p.life / p.max;
+          if (t >= 1 || p.x < 0 || p.x > W) { parts[i] = spawn(); return; }
+          const a = Math.sin(Math.min(t, 1) * Math.PI) *
+            (0.25 + 0.5 * progress + 0.3 * surge) * (p.tip ? 1.3 : 0.95);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r * (1 + surge * 0.8), 0, Math.PI * 2);
+          ctx.fillStyle = p.gold ? rgba('#D4AF37', a) : rgba(brand, a);
+          ctx.fill();
+        });
+        requestAnimationFrame(tick);
+      }
+      resize();
+      window.addEventListener('resize', resize);
+      if (!reduced) requestAnimationFrame(tick);
+      return {
+        setProgress(p) { progress = Math.max(0.04, Math.min(1, p)); },
+        setBrand(b) { brand = b; },
+        surge() {
+          if (reduced) return;
+          surge = 1;
+          const cool = setInterval(() => {
+            surge -= 0.05;
+            if (surge <= 0) { surge = 0; clearInterval(cool); }
+          }, 90);
+        },
+      };
+    })();
 
     setBar();
   </script>

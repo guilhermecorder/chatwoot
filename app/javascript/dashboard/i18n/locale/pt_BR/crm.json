@@ -157,7 +157,20 @@
       "CARD_PANEL": "Mover card / etiquetas",
       "CARD_MOVED": "Card movido!",
       "COPY_PHONE": "Copiar telefone",
-      "PHONE_COPIED": "Telefone copiado!"
+      "PHONE_COPIED": "Telefone copiado!",
+      "FOLLOWUP_TITLE": "Robô de follow-up",
+      "FOLLOWUP_PAUSE_PATIENT": "Pausar cutucadas para este paciente",
+      "FOLLOWUP_PAUSED_LABEL": "Pausado para este paciente (por {by})",
+      "FOLLOWUP_PAUSE": "Pausar",
+      "FOLLOWUP_RESUME": "Reativar",
+      "FOLLOWUP_PAUSED_PATIENT": "Follow-up pausado para este paciente — nenhum robô vai cutucá-lo.",
+      "FOLLOWUP_RESUMED_PATIENT": "Follow-up reativado para este paciente.",
+      "FOLLOWUP_BOT_STOP": "Parar para todos",
+      "FOLLOWUP_BOT_START": "Religar",
+      "FOLLOWUP_BOT_ON": "Robô \"{name}\" religado.",
+      "FOLLOWUP_BOT_OFF": "Robô \"{name}\" PAUSADO para todos os pacientes.",
+      "FOLLOWUP_BOT_HINT": "Chave de emergência: para o robô inteiro, para todos os pacientes.",
+      "FOLLOWUP_BOT_SCOPE_HINT": "\"Parar para todos\" desliga o robô inteiro (fica registrado quem parou). Para silenciar só este paciente, use o botão acima."
     },
     "PRESETS": {
       "TITLE": "Visualizações de colunas",
