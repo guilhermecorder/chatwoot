@@ -65,6 +65,7 @@ const STAR_FIELD = [
 
 const THEMES = {
   blueYoung: {
+    light: true, // fundo claro → letras escuras (contraste)
     grad: 'linear-gradient(135deg, #0EA5E9 0%, #38BDF8 45%, #7DD3FC 100%)',
     accent: '#0284C7',
     accentGrad: 'linear-gradient(135deg, #0EA5E9, #38BDF8)',
@@ -89,6 +90,7 @@ const THEMES = {
     stars: true,
   },
   pinkYoung: {
+    light: true, // fundo claro → letras escuras (contraste)
     grad: 'linear-gradient(135deg, #EC4899 0%, #F472B6 45%, #F9A8D4 100%)',
     accent: '#DB2777',
     accentGrad: 'linear-gradient(135deg, #EC4899, #F472B6)',
@@ -115,12 +117,16 @@ const THEMES = {
   // sexo ainda desconhecido (começo do funil) = VERDE dopamine neutro;
   // quando o sexo é descoberto (equipe ou Secretário), a cor muda sozinha
   greenNeutral: {
+    light: true, // fundo claro → letras escuras (contraste)
     grad: 'linear-gradient(135deg, #047857 0%, #10B981 50%, #34D399 100%)',
     accent: '#059669',
     accentGrad: 'linear-gradient(135deg, #059669, #34D399)',
     stars: false,
   },
 };
+
+// contraste automático: tema claro → tinta escura; tema escuro → branca
+const isLightTheme = computed(() => !!theme.value.light);
 
 const theme = computed(() => {
   const { gender, age } = identity.value;
@@ -708,6 +714,7 @@ watch(contactId, () => {
         <!-- ══ Cabeçalho dopamine (a cor segue o paciente) ══ -->
         <div
           class="relative rounded-2xl p-5 mb-5 text-white shadow-lg overflow-hidden"
+          :class="isLightTheme ? 'cevico-ink-dark' : ''"
           :style="{ background: theme.grad }"
         >
           <div
@@ -790,22 +797,21 @@ watch(contactId, () => {
                   {{ label }}
                 </span>
               </div>
-              <!-- anúncio de origem -->
+              <!-- anúncio de origem: a PLACA DOURADA do primeiro contato -->
               <div
                 v-if="identity.origin"
-                class="mt-2.5 flex items-center gap-2 bg-white/10 rounded-xl px-3 py-1.5 w-fit max-w-full"
+                class="mt-2.5 flex items-center gap-2 rounded-xl px-3 py-2 w-fit max-w-full"
+                style="background: rgba(212, 175, 55, 0.18); border: 1.5px solid rgba(212, 175, 55, 0.65); box-shadow: 0 2px 10px rgba(212, 175, 55, 0.25)"
               >
-                <span
-                  class="i-lucide-megaphone text-sm text-white/80 shrink-0"
-                />
-                <p class="text-[12px] text-white/85 truncate">
-                  Chegou pelo anúncio
+                <span class="i-lucide-megaphone text-sm shrink-0" style="color: #f4de8e" />
+                <p class="text-[12px] truncate">
+                  <span class="font-bold uppercase tracking-wide text-[10px]" style="color: #f4de8e">Anúncio do 1º contato</span><br />
                   <strong>{{
                     identity.origin.ad_name ||
                     identity.origin.headline ||
                     'Meta Ads'
                   }}</strong>
-                  em {{ fmtDate(identity.origin.captured_at) }}
+                  · {{ fmtDate(identity.origin.captured_at) }}
                 </p>
               </div>
             </div>
@@ -1051,6 +1057,24 @@ watch(contactId, () => {
               >
                 Nada rodando agora.
               </p>
+
+              <!-- trilha: por quais automações ele JÁ passou, e quando -->
+              <details v-if="(automations.trail || []).length" class="pt-1">
+                <summary class="text-[11px] font-semibold cursor-pointer" :style="{ color: theme.accent }">
+                  🧭 Por onde ele já passou ({{ automations.trail.length }} disparo(s))
+                </summary>
+                <div class="mt-1.5 space-y-1 max-h-44 overflow-y-auto pr-1">
+                  <p
+                    v-for="(t, ti) in automations.trail"
+                    :key="ti"
+                    class="text-[11px] text-n-slate-11 flex items-center gap-1.5"
+                  >
+                    <span class="text-n-slate-9 shrink-0 tabular-nums">{{ fmtDateTime(t.at) }}</span>
+                    <span class="truncate">⚙️ {{ t.name }}</span>
+                    <span v-if="t.stage" class="text-n-slate-9 truncate">· {{ t.stage }}</span>
+                  </p>
+                </div>
+              </details>
             </div>
           </div>
         </div>
@@ -1242,6 +1266,14 @@ watch(contactId, () => {
                           >
                             abrir #{{ event.conversation_id }}
                           </button>
+                        </p>
+                        <!-- o anúncio que trouxe ESTA conversa, bem visível -->
+                        <p
+                          v-if="event.ad_name"
+                          class="mt-1 text-[11px] font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full"
+                          style="background: rgba(212, 175, 55, 0.14); color: #8a6620; border: 1px solid rgba(212, 175, 55, 0.4)"
+                        >
+                          📣 Veio do anúncio: {{ event.ad_name }}
                         </p>
                       </template>
 
@@ -2170,3 +2202,9 @@ class="opacity-70"
     </div>
   </div>
 </template>
+
+<style scoped>
+.cevico-ink-dark { color: #0b2239 !important; }
+.cevico-ink-dark [class*='text-white'] { color: rgba(11,34,57,.85) !important; }
+.cevico-ink-dark [class*='bg-white/'] { background: rgba(11,34,57,.10) !important; }
+</style>

@@ -126,7 +126,10 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
     {
       followup_paused: contact.additional_attributes&.dig('cevico_followup_paused').present?,
       followup_bots: bots.map { |b| { id: b.id, name: b.name } },
-      stage_automations: stage_autos.map { |a| { id: a.id, name: a.name, action_type: a.action_type } }
+      stage_automations: stage_autos.map { |a| { id: a.id, name: a.name, action_type: a.action_type } },
+      # por quais automações o paciente JÁ PASSOU e quando (trilha gravada
+      # pelo CrmAutomationFireJob) — mostra qual automação realmente ajudou
+      trail: Array(contact.additional_attributes&.dig('cevico_automation_trail')).reverse.first(30)
     }
   end
 
@@ -195,6 +198,7 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
 
   def conversation_events(contact)
     patient_conversations(contact).map do |conv|
+      ad = conv.additional_attributes&.dig('meta_ads')
       {
         type: 'conversa',
         at: conv.created_at,
@@ -202,7 +206,9 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
         inbox: conv.inbox&.name,
         channel: conv.inbox&.channel_type&.demodulize,
         status: conv.status,
-        last_activity_at: conv.last_activity_at
+        last_activity_at: conv.last_activity_at,
+        # o anúncio que trouxe ESTA conversa (evidente na jornada)
+        ad_name: ad && (ad['ad_name'].presence || ad['headline'].presence)
       }
     end
   end
