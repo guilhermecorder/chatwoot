@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_15_000001) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_16_000002) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -437,6 +437,29 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_15_000001) do
     t.index ["slug", "locale", "portal_id"], name: "index_categories_on_slug_and_locale_and_portal_id", unique: true
   end
 
+  create_table "cevico_pages", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "title", null: false
+    t.string "slug", null: false
+    t.string "category", default: "captacao", null: false
+    t.string "status", default: "draft", null: false
+    t.string "emoji"
+    t.string "color"
+    t.string "subtitle"
+    t.text "body"
+    t.string "meta_title"
+    t.text "meta_description"
+    t.string "cta_label"
+    t.string "cta_url"
+    t.bigint "views_count", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "sections", default: [], null: false
+    t.index ["account_id", "category"], name: "index_cevico_pages_on_account_id_and_category"
+    t.index ["account_id"], name: "index_cevico_pages_on_account_id"
+    t.index ["slug"], name: "index_cevico_pages_on_slug", unique: true
+  end
+
   create_table "channel_api", force: :cascade do |t|
     t.integer "account_id", null: false
     t.string "webhook_url"
@@ -833,6 +856,24 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_15_000001) do
     t.index ["inbox_id"], name: "index_crm_campaigns_on_inbox_id"
     t.index ["scheduled_at"], name: "index_crm_campaigns_on_scheduled_at"
     t.index ["sender_id"], name: "index_crm_campaigns_on_sender_id"
+  end
+
+  create_table "crm_clinical_notes", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "contact_id", null: false
+    t.bigint "task_id"
+    t.bigint "author_id", null: false
+    t.string "doctor"
+    t.datetime "performed_at", null: false
+    t.jsonb "fields", default: {}, null: false
+    t.text "observations"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "contact_id", "performed_at"], name: "index_clinical_notes_on_account_contact_performed"
+    t.index ["account_id"], name: "index_crm_clinical_notes_on_account_id"
+    t.index ["author_id"], name: "index_crm_clinical_notes_on_author_id"
+    t.index ["contact_id"], name: "index_crm_clinical_notes_on_contact_id"
+    t.index ["task_id"], name: "index_crm_clinical_notes_on_task_id"
   end
 
   create_table "crm_contact_stage_logs", force: :cascade do |t|
@@ -1493,10 +1534,13 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_15_000001) do
     t.string "surgery_indication"
     t.string "indicated_procedure"
     t.jsonb "comments", default: [], null: false
+    t.string "modality"
+    t.bigint "contact_id"
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
     t.index ["account_id", "unit"], name: "index_tasks_on_account_id_and_unit"
     t.index ["account_id"], name: "index_tasks_on_account_id"
     t.index ["assignee_id"], name: "index_tasks_on_assignee_id"
+    t.index ["contact_id"], name: "index_tasks_on_contact_id"
     t.index ["creator_id"], name: "index_tasks_on_creator_id"
   end
 
@@ -1612,6 +1656,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_15_000001) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "cevico_pages", "accounts"
   add_foreign_key "crm_ai_usages", "accounts"
   add_foreign_key "crm_automation_logs", "crm_automations", column: "automation_id"
   add_foreign_key "crm_automations", "crm_stages", column: "stage_id"
@@ -1621,6 +1666,10 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_15_000001) do
   add_foreign_key "crm_campaigns", "accounts"
   add_foreign_key "crm_campaigns", "inboxes"
   add_foreign_key "crm_campaigns", "users", column: "sender_id"
+  add_foreign_key "crm_clinical_notes", "accounts"
+  add_foreign_key "crm_clinical_notes", "contacts"
+  add_foreign_key "crm_clinical_notes", "tasks"
+  add_foreign_key "crm_clinical_notes", "users", column: "author_id"
   add_foreign_key "crm_contacts", "contacts"
   add_foreign_key "crm_contacts", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "crm_contacts", "crm_stages", column: "stage_id"
@@ -1643,6 +1692,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_15_000001) do
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "inboxes", "portals"
   add_foreign_key "tasks", "accounts"
+  add_foreign_key "tasks", "contacts"
   add_foreign_key "tasks", "users", column: "assignee_id"
   add_foreign_key "tasks", "users", column: "creator_id"
   add_foreign_key "user_sessions", "users"
