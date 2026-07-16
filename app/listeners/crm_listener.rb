@@ -35,6 +35,8 @@ class CrmListener < BaseListener
     return if message.blank? || message.private?
     return unless %w[incoming outgoing].include?(message.message_type)
 
+    handle_instagram_agent(message) # Atendente IA das caixas configuradas
+
     contact = message.conversation&.contact
     return if contact.blank?
 
@@ -58,6 +60,57 @@ class CrmListener < BaseListener
   end
 
   private
+
+  # ── ATENDENTE INSTAGRAM (agente respondedor por caixa) ──
+  # incoming na caixa configurada → agenda o job com 12s de espera (junta
+  # mensagens picadas). Outgoing HUMANO na mesma caixa → PAUSA o agente;
+  # humano mandando 👍 → REATIVA. Mensagens do próprio agente e de robôs
+  # de follow-up não mexem na pausa.
+  def handle_instagram_agent(message)
+    conversation = message.conversation
+    return if conversation.blank?
+
+    cfg = CrmSetting.find_by(account_id: conversation.account_id)&.ai_config || {}
+    agent = (cfg['agents'] || {})['instagram'] || {}
+    return unless agent['enabled'] == true
+    return unless Array(agent['inbox_ids']).map(&:to_i).include?(conversation.inbox_id)
+
+    if message.message_type == 'incoming'
+      state = conversation.additional_attributes&.[]('cevico_atendente_ia') || {}
+      return if state['paused']
+
+      Crm::InstagramAgentJob.set(wait: 12.seconds).perform_later(conversation.id, message.id)
+    else # outgoing
+      return if message.additional_attributes&.[]('cevico_ia_agent').present? # do próprio agente
+      return if message.additional_attributes&.[]('cevico_followup_bot_id').present? # robô de follow-up
+
+      if message.content.to_s.strip == '👍'
+        set_instagram_pause(conversation, false)
+        note_instagram(conversation, '▶️ Atendente IA reativado nesta conversa (👍 do atendimento).')
+      else
+        state = conversation.additional_attributes&.[]('cevico_atendente_ia') || {}
+        return if state['paused'] # já estava pausado — não repete a nota
+
+        set_instagram_pause(conversation, true, reason: 'humano_assumiu')
+        note_instagram(conversation, '⏸ Atendente IA pausado — o atendimento humano assumiu esta conversa. Mande 👍 para reativar.')
+      end
+    end
+  rescue StandardError => e
+    Rails.logger.error "[CrmListener] atendente instagram: #{e.message}"
+  end
+
+  def set_instagram_pause(conversation, paused, reason: nil)
+    attrs = conversation.additional_attributes || {}
+    attrs['cevico_atendente_ia'] = paused ? { 'paused' => true, 'reason' => reason, 'at' => Time.current.iso8601 }.compact : {}
+    conversation.update_column(:additional_attributes, attrs) # rubocop:disable Rails/SkipsModelValidations
+  end
+
+  def note_instagram(conversation, content)
+    conversation.messages.create!(
+      account_id: conversation.account_id, inbox_id: conversation.inbox_id,
+      message_type: :activity, private: true, content: content
+    )
+  end
 
   def direction_matches?(automation, message)
     direction = automation.action_config&.dig('message_direction').presence || 'incoming'
