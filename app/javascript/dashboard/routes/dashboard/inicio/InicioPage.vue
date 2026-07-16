@@ -8,6 +8,7 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import TileAura from 'dashboard/components-next/radar/TileAura.vue';
 import CrmAPI from 'dashboard/api/crm';
 import {
   DOCTORS, resolveWindows, resolveBlocked, resolveBlockedDays,
@@ -147,43 +148,180 @@ const panelTiles = computed(() => {
   const d = pd.value;
   if (selectedPanel.value === 'conducao') {
     return [
-      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, sub: 'agenda das unidades', grad: 'linear-gradient(135deg, #0F766E, #115E59)' },
-      { label: 'Compareceram', icon: 'i-lucide-user-check', value: d.attended ?? 0, sub: 'conferência do dia (Agenda)', grad: 'linear-gradient(135deg, #14B8A6, #0D9488)' },
-      { label: 'Comparecimento', icon: 'i-lucide-percent', value: `${d.show_rate ?? 0}%`, sub: `${d.missed ?? 0} falta(s) no período`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, sub: 'saíram da consulta indicados', grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
+      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', sub: 'agenda das unidades', grad: 'linear-gradient(135deg, #0F766E, #115E59)' },
+      { label: 'Compareceram', icon: 'i-lucide-user-check', value: d.attended ?? 0, gk: 'attended', sub: 'conferência do dia (Agenda)', grad: 'linear-gradient(135deg, #14B8A6, #0D9488)' },
+      { label: 'Comparecimento', icon: 'i-lucide-percent', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.missed ?? 0} falta(s) no período`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: 'saíram da consulta indicados', grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
     ];
   }
   if (selectedPanel.value === 'cirurgia') {
     return [
-      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, sub: 'pacientes indicados no período', grad: 'linear-gradient(135deg, #9D174D, #BE185D)' },
-      { label: 'Cirurgias agendadas', icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, sub: 'fechadas no período', grad: 'linear-gradient(135deg, #BE185D, #EC4899)' },
-      { label: 'Taxa de fechamento', icon: 'i-lucide-percent', value: `${d.closing_rate ?? 0}%`, sub: 'agendadas ÷ indicações', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-      { label: 'Cirurgias realizadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, sub: `${d.surgeries_missed ?? 0} não vieram`, grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
+      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: 'pacientes indicados no período', grad: 'linear-gradient(135deg, #9D174D, #BE185D)' },
+      { label: 'Cirurgias agendadas', icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, gk: 'surgeries_booked', sub: 'fechadas no período', grad: 'linear-gradient(135deg, #BE185D, #EC4899)' },
+      { label: 'Taxa de fechamento', icon: 'i-lucide-percent', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: 'agendadas ÷ indicações', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+      { label: 'Cirurgias realizadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, gk: 'surgeries_done', sub: `${d.surgeries_missed ?? 0} não vieram`, grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
     ];
   }
   if (selectedPanel.value === 'medico') {
     return [
-      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`, grad: 'linear-gradient(135deg, #0369A1, #075985)' },
-      { label: 'Com indicação de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, sub: `${d.indication_rate ?? 0}% de quem compareceu`, grad: 'linear-gradient(135deg, #0EA5E9, #38BDF8)' },
+      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`, grad: 'linear-gradient(135deg, #0369A1, #075985)' },
+      { label: 'Com indicação de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: `${d.indication_rate ?? 0}% de quem compareceu`, grad: 'linear-gradient(135deg, #0EA5E9, #38BDF8)' },
       { label: 'Sem indicação', icon: 'i-lucide-user-minus', value: d.no_indication ?? 0, sub: `${d.no_indication_rate ?? 0}% de quem compareceu`, grad: 'linear-gradient(135deg, #64748B, #94A3B8)' },
-      { label: 'Conversão em cirurgia', icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, sub: `${d.conversions ?? 0} viraram cirurgia · NPS ${d.nps_avg ?? '—'}`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+      { label: 'Conversão em cirurgia', icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, gk: 'conversion_rate', pct: true, sub: `${d.conversions ?? 0} viraram cirurgia · NPS ${d.nps_avg ?? '—'}`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
     ];
   }
   if (selectedPanel.value === 'gestor') {
     return [
-      { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
-      { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, sub: `${d.appointments_created ?? 0} consulta(s) agendada(s)`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
-      { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, sub: `${d.indications ?? 0} indicação(ões) de cirurgia`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-      { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`, grad: 'linear-gradient(135deg, #065F46, #10B981)' },
+      { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
+      { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, sub: `${d.appointments_created ?? 0} consulta(s) agendada(s)`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
+      { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.indications ?? 0} indicação(ões) de cirurgia`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+      { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`, grad: 'linear-gradient(135deg, #065F46, #10B981)' },
     ];
   }
   // agendamento (padrão — Vaneide)
   return [
-    { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
-    { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
-    { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, chip: conversionVerdict.value, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-    { label: 'Cirurgias fechadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, sub: 'coluna Cirurgia Agendada (CRM)', grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
+    { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
+    { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
+    { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, chip: conversionVerdict.value, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+    { label: 'Cirurgias fechadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', sub: 'coluna Cirurgia Agendada (CRM)', grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
   ];
+});
+
+// ── CARDS VIVOS: metas, recordes e cores por desempenho ──
+// Meta é MENSAL (config do admin na mira 🎯); o backend manda o fator do
+// período. Status: 🔴 <40% do esperado · 🟠 40-70% · cores do painel
+// 70-100% · 🟢 meta batida · 🏆 recorde = aura de átomos orbitando.
+const goalsInfo = computed(() => data.value?.goals || { targets: {}, factor: 1, records: {} });
+
+// paleta de "bom e mau resultado" POR PAINEL (o mau alerta, o meta celebra)
+const STATUS_GRADS = {
+  agendamento: { bad: 'linear-gradient(135deg, #7F1D1D, #B91C1C)', warn: 'linear-gradient(135deg, #92400E, #D97706)', meta: 'linear-gradient(135deg, #065F46, #10B981)' },
+  conducao: { bad: 'linear-gradient(135deg, #7F1D1D, #B91C1C)', warn: 'linear-gradient(135deg, #92400E, #D97706)', meta: 'linear-gradient(135deg, #0F766E, #2DD4BF)' },
+  cirurgia: { bad: 'linear-gradient(135deg, #831843, #4C0519)', warn: 'linear-gradient(135deg, #9A3412, #EA580C)', meta: 'linear-gradient(135deg, #047857, #34D399)' },
+  medico: { bad: 'linear-gradient(135deg, #7F1D1D, #991B1B)', warn: 'linear-gradient(135deg, #A16207, #EAB308)', meta: 'linear-gradient(135deg, #065F46, #14B8A6)' },
+  gestor: { bad: 'linear-gradient(135deg, #450A0A, #991B1B)', warn: 'linear-gradient(135deg, #78350F, #F59E0B)', meta: 'linear-gradient(135deg, #064E3B, #10B981)' },
+};
+
+const tileState = tile => {
+  const g = goalsInfo.value;
+  const value = parseFloat(String(tile.value)) || 0;
+  const target = Number(g.targets?.[tile.gk]);
+  const rec = g.records?.[tile.gk];
+  let status = 'none';
+  let ratio = null;
+  let expected = null;
+  if (tile.gk && target > 0) {
+    expected = tile.pct ? target : target * (g.factor || 1);
+    ratio = expected > 0 ? value / expected : null;
+    if (ratio >= 1) status = 'meta';
+    else if (ratio >= 0.7) status = 'ok';
+    else if (ratio >= 0.4) status = 'warn';
+    else status = 'bad';
+  }
+  return { status, ratio, expected, isRecord: !!rec?.is_record, best: rec?.best || 0 };
+};
+
+const tileVisual = tile => {
+  const st = tileState(tile);
+  const grads = STATUS_GRADS[selectedPanel.value] || STATUS_GRADS.agendamento;
+  return {
+    ...st,
+    grad: ['bad', 'warn', 'meta'].includes(st.status) ? grads[st.status] : tile.grad,
+    aura: st.isRecord,
+    auraIntensity: Math.max(0.5, Math.min(1.2, st.ratio ?? 0.7)),
+    pulse: st.status === 'meta' || st.isRecord,
+  };
+};
+
+// ── modal de METAS (admin, mira 🎯 ao lado das pílulas) ──
+const showGoalsModal = ref(false);
+const goalsDraft = ref({});
+const isSavingGoals = ref(false);
+const GOAL_FIELDS = {
+  agendamento: [
+    { gk: 'new_leads', label: 'Novos contatos no mês' },
+    { gk: 'appointments_booked', label: 'Consultas agendadas no mês' },
+    { gk: 'booking_conversion', label: 'Taxa de agendamento (%)', pct: true },
+    { gk: 'surgeries_closed', label: 'Cirurgias fechadas no mês' },
+  ],
+  conducao: [
+    { gk: 'consultations', label: 'Consultas no mês' },
+    { gk: 'attended', label: 'Comparecimentos no mês' },
+    { gk: 'show_rate', label: 'Comparecimento (%)', pct: true },
+    { gk: 'indications', label: 'Indicações no mês' },
+  ],
+  cirurgia: [
+    { gk: 'indications', label: 'Indicações no mês' },
+    { gk: 'surgeries_booked', label: 'Cirurgias agendadas no mês' },
+    { gk: 'closing_rate', label: 'Taxa de fechamento (%)', pct: true },
+    { gk: 'surgeries_done', label: 'Cirurgias realizadas no mês' },
+  ],
+  medico: [
+    { gk: 'consultations', label: 'Consultas no mês' },
+    { gk: 'indications', label: 'Indicações no mês' },
+    { gk: 'conversion_rate', label: 'Conversão em cirurgia (%)', pct: true },
+  ],
+  gestor: [
+    { gk: 'new_leads', label: 'Novos contatos no mês' },
+    { gk: 'booking_conversion', label: 'Taxa de agendamento (%)', pct: true },
+    { gk: 'show_rate', label: 'Comparecimento (%)', pct: true },
+    { gk: 'closing_rate', label: 'Fechamento de cirurgias (%)', pct: true },
+  ],
+};
+const openGoalsModal = () => {
+  const all = crmSettings.value?.panel_goals || {};
+  goalsDraft.value = JSON.parse(JSON.stringify(all));
+  if (!goalsDraft.value[selectedPanel.value]) goalsDraft.value[selectedPanel.value] = {};
+  showGoalsModal.value = true;
+};
+const saveGoals = async () => {
+  if (isSavingGoals.value) return;
+  isSavingGoals.value = true;
+  try {
+    const clean = {};
+    Object.entries(goalsDraft.value).forEach(([panel, goals]) => {
+      const g = Object.fromEntries(Object.entries(goals || {}).filter(([, v]) => Number(v) > 0));
+      if (Object.keys(g).length) clean[panel] = g;
+    });
+    await CrmAPI.updatePanelGoals(clean);
+    await store.dispatch('crm/fetchSettings');
+    showGoalsModal.value = false;
+    fetchData();
+  } finally {
+    isSavingGoals.value = false;
+  }
+};
+
+// ── GESTOR: "posso viajar?" — o indicador próprio de decisão ──
+// agrega metas em vermelho, radar, sem resposta e pendências num
+// semáforo único com os motivos prontos para agir
+const gestorSignals = computed(() => {
+  if (selectedPanel.value !== 'gestor' || !data.value) return [];
+  const sigs = [];
+  (panelTiles.value || []).forEach(tile => {
+    const st = tileState(tile);
+    if (st.status === 'bad') sigs.push({ level: 'red', icon: 'i-lucide-trending-down', text: `${tile.label}: muito abaixo da meta (${tile.value})` });
+    else if (st.status === 'warn') sigs.push({ level: 'amber', icon: 'i-lucide-alert-triangle', text: `${tile.label}: abaixo do ritmo da meta (${tile.value})` });
+  });
+  const alerts = radarAlerts.value.length;
+  if (alerts) sigs.push({ level: 'red', icon: 'i-lucide-radar', text: `${alerts} paciente(s) quente(s) sem atendimento (Radar)` });
+  const waiting = data.value.unanswered ?? 0;
+  if (waiting > 8) sigs.push({ level: 'amber', icon: 'i-lucide-message-circle', text: `${waiting} conversas abertas aguardando resposta` });
+  const unconfirmed = data.value.panel_data?.unconfirmed ?? 0;
+  if (unconfirmed > 0) sigs.push({ level: 'amber', icon: 'i-lucide-clipboard-alert', text: `${unconfirmed} consulta(s) sem conferência na Agenda` });
+  const bugs = data.value.my_tasks?.count ?? 0;
+  if (bugs > 0) sigs.push({ level: 'info', icon: 'i-lucide-list-todo', text: `${bugs} tarefa(s) esperando você no board` });
+  return sigs;
+});
+const gestorVerdict = computed(() => {
+  const sigs = gestorSignals.value;
+  if (sigs.some(x => x.level === 'red')) {
+    return { key: 'red', title: 'Ação imediata ⚠️', sub: 'Tem coisa precisando de você agora — os motivos estão aqui embaixo.', grad: 'linear-gradient(135deg, #7F1D1D, #DC2626)' };
+  }
+  if (sigs.some(x => x.level === 'amber')) {
+    return { key: 'amber', title: 'Atenção hoje 🟠', sub: 'Nada crítico, mas vale um olho antes de desligar.', grad: 'linear-gradient(135deg, #92400E, #F59E0B)' };
+  }
+  return { key: 'green', title: 'Tudo bem — pode viajar ✈️', sub: 'Metas no ritmo, ninguém esperando, nada travado. A operação está rodando.', grad: 'linear-gradient(135deg, #065F46, #10B981)' };
 });
 
 // linha de destaque abaixo dos tiles — muda com o painel
@@ -254,6 +392,36 @@ const fmtTaskDue = iso =>
   iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
 
 // ── Radar de Oportunidades ──────────────────────────────────
+// pausa manual pela atendente (fica registrado quem desligou e quando)
+const radarStatus = ref(null);
+const togglingRadar = ref(false);
+const loadRadarStatus = async () => {
+  try {
+    const { data: ping } = await CrmAPI.radarPing();
+    radarStatus.value = ping.radar;
+  } catch {
+    radarStatus.value = null;
+  }
+};
+const toggleRadarManual = async () => {
+  const turningOff = radarStatus.value?.enabled;
+  // eslint-disable-next-line no-alert
+  if (turningOff && !window.confirm('Desativar o Radar de Oportunidades? Fica registrado que foi você.')) return;
+  togglingRadar.value = true;
+  try {
+    const { data: res } = await CrmAPI.toggleRadar();
+    radarStatus.value = res.radar;
+  } finally {
+    togglingRadar.value = false;
+  }
+};
+const radarLastActionLabel = computed(() => {
+  const a = radarStatus.value?.last_action;
+  if (!a) return '';
+  const when = new Date(a.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return `${a.action} por ${a.user} às ${when}`;
+});
+
 const radarAlerts = computed(() => data.value?.opportunity_alerts?.alerts || []);
 const radarLastRun = computed(() => {
   const iso = data.value?.opportunity_alerts?.last_run_at;
@@ -397,6 +565,7 @@ const onVisible = () => {
 
 onMounted(() => {
   store.dispatch('crm/fetchSettings').catch(() => {});
+  loadRadarStatus();
   refreshAll();
   refreshTimer = setInterval(refreshAll, 120000);
   document.addEventListener('visibilitychange', onVisible);
@@ -432,6 +601,34 @@ onUnmounted(() => {
       </div>
 
       <template v-else>
+        <!-- 🎉 Seus reports de bug resolvidos (notificação p/ quem reportou) -->
+        <div
+          v-if="data?.bug_reports?.resolved?.length"
+          class="rounded-2xl border-2 border-green-500/40 bg-green-500/5 overflow-hidden mb-6"
+        >
+          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #059669, #34D399)" />
+          <div class="p-4 sm:p-5">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-xl">🎉</span>
+              <h2 class="text-sm font-bold text-n-slate-12">
+                {{ data.bug_reports.resolved.length === 1
+                  ? 'Um problema que você reportou foi resolvido!'
+                  : `${data.bug_reports.resolved.length} problemas que você reportou foram resolvidos!` }}
+              </h2>
+            </div>
+            <div class="space-y-1.5">
+              <p
+                v-for="r in data.bug_reports.resolved"
+                :key="r.id"
+                class="text-xs text-n-slate-11 bg-n-solid-1 border border-green-500/25 rounded-lg px-3 py-2"
+              >
+                ✅ {{ r.title }}
+                <span class="text-n-slate-9">— resolvido {{ new Date(r.completed_at).toLocaleDateString('pt-BR') }}. Obrigado por avisar! 💙</span>
+              </p>
+            </div>
+          </div>
+        </div>
+
         <!-- 🚨 Avisos do Radar de Oportunidades -->
         <div
           v-if="radarAlerts.length"
@@ -449,6 +646,15 @@ onUnmounted(() => {
                   : `${radarAlerts.length} pacientes quentes sem atendimento` }}
               </h2>
               <span v-if="radarLastRun" class="text-[11px] text-n-slate-9 ml-auto">auditoria às {{ radarLastRun }}</span>
+              <button
+                v-if="radarStatus"
+                class="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-n-weak text-n-slate-10 hover:bg-n-alpha-1 disabled:opacity-50"
+                :title="radarLastActionLabel"
+                :disabled="togglingRadar"
+                @click="toggleRadarManual"
+              >
+                {{ radarStatus.enabled ? '⏸ Pausar radar' : '▶️ Reativar radar' }}
+              </button>
             </div>
             <div class="space-y-2">
               <div
@@ -546,6 +752,14 @@ onUnmounted(() => {
             >
               <span class="i-lucide-settings-2 text-sm" />
             </button>
+            <button
+              v-if="isAdmin"
+              class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 flex items-center justify-center"
+              title="Metas do painel (os cards mudam de cor contra a meta)"
+              @click="openGoalsModal"
+            >
+              <span class="i-lucide-target text-sm" />
+            </button>
           </div>
           <!-- pílulas de médico (só no painel Médicos) -->
           <div v-if="selectedPanel === 'medico'" class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto">
@@ -584,22 +798,87 @@ onUnmounted(() => {
           </button>
         </div>
 
+        <!-- ✈️ GESTOR: o indicador de decisão — posso viajar ou é ação imediata? -->
+        <div
+          v-if="selectedPanel === 'gestor' && data"
+          class="rounded-2xl text-white shadow-lg overflow-hidden mb-4"
+          :style="{ background: gestorVerdict.grad }"
+        >
+          <div class="p-4 sm:p-5">
+            <div class="flex items-center gap-3 flex-wrap">
+              <div class="flex-1 min-w-[220px]">
+                <p class="text-lg font-bold">{{ gestorVerdict.title }}</p>
+                <p class="text-xs text-white/80 mt-0.5">{{ gestorVerdict.sub }}</p>
+              </div>
+              <span class="text-[10px] px-2.5 py-1 rounded-full bg-white/20 font-semibold">
+                {{ gestorSignals.length ? `${gestorSignals.length} aviso(s)` : 'nenhum aviso' }}
+              </span>
+            </div>
+            <!-- central de avisos: os motivos, prontos para agir -->
+            <div v-if="gestorSignals.length" class="mt-3 space-y-1.5">
+              <div
+                v-for="(sig, si) in gestorSignals"
+                :key="si"
+                class="flex items-center gap-2 bg-black/15 rounded-lg px-3 py-1.5 text-xs"
+              >
+                <span :class="sig.icon" class="text-sm shrink-0" />
+                <span class="flex-1">{{ sig.text }}</span>
+                <span
+                  class="w-2 h-2 rounded-full shrink-0"
+                  :style="{ background: sig.level === 'red' ? '#FCA5A5' : sig.level === 'amber' ? '#FDE68A' : '#BAE6FD' }"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Indicadores do período — mudam com o painel escolhido -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <div
             v-for="tile in panelTiles"
             :key="tile.label"
-            class="rounded-2xl p-4 sm:p-5 text-white shadow-lg"
-            :style="{ background: tile.grad }"
+            class="relative rounded-2xl p-4 sm:p-5 text-white shadow-lg transition-all duration-700"
+            :class="[
+              tileVisual(tile).pulse ? 'cevico-meta-pulse' : '',
+              tileVisual(tile).isRecord ? 'ring-2 ring-amber-300/80' : '',
+            ]"
+            :style="{ background: tileVisual(tile).grad }"
           >
-            <div class="flex items-center gap-1.5 mb-1 text-white/80"><span :class="tile.icon" class="text-sm" /><p class="text-xs font-medium">{{ tile.label }}</p></div>
-            <p class="text-3xl font-bold">{{ tile.value }}</p>
-            <span v-if="tile.chip" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ tile.chip.label }}</span>
-            <template v-else-if="tile.sub">
-              <!-- linhas curtas propositais: nada de frase quebrando no meio -->
-              <p class="text-[10px] text-white/70 truncate">{{ tile.sub }}</p>
-              <p v-if="tile.sub2" class="text-[10px] text-white/80 truncate">{{ tile.sub2 }}</p>
-            </template>
+            <!-- 🏆 recorde: átomos orbitando o card em sentido horário -->
+            <TileAura
+              v-if="tileVisual(tile).aura"
+              :intensity="tileVisual(tile).auraIntensity"
+              gold
+            />
+            <div class="relative">
+              <div class="flex items-center gap-1.5 mb-1 text-white/80">
+                <span :class="tile.icon" class="text-sm" />
+                <p class="text-xs font-medium flex-1 truncate">{{ tile.label }}</p>
+                <span v-if="tileVisual(tile).isRecord" class="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-300 text-amber-900" title="Melhor resultado já registrado neste tipo de período">🏆 RECORDE</span>
+                <span v-else-if="tileVisual(tile).status === 'meta'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/25" title="Meta batida">✓ META</span>
+                <span v-else-if="tileVisual(tile).status === 'bad'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/25" title="Muito abaixo do ritmo da meta">⚠️</span>
+              </div>
+              <p class="text-3xl font-bold">{{ tile.value }}</p>
+              <span v-if="tile.chip" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ tile.chip.label }}</span>
+              <template v-else-if="tile.sub">
+                <!-- linhas curtas propositais: nada de frase quebrando no meio -->
+                <p class="text-[10px] text-white/70 truncate">{{ tile.sub }}</p>
+                <p v-if="tile.sub2" class="text-[10px] text-white/80 truncate">{{ tile.sub2 }}</p>
+              </template>
+              <!-- medidor da meta (aparece quando o admin definiu meta) -->
+              <div v-if="tileVisual(tile).ratio !== null" class="mt-2">
+                <div class="h-1.5 rounded-full bg-black/20 overflow-hidden">
+                  <div
+                    class="h-full rounded-full bg-white/85 transition-all duration-700"
+                    :style="{ width: Math.min(100, Math.round(tileVisual(tile).ratio * 100)) + '%' }"
+                  />
+                </div>
+                <p class="text-[9px] text-white/70 mt-0.5">
+                  {{ Math.round(tileVisual(tile).ratio * 100) }}% do ritmo da meta
+                  <template v-if="!tile.pct"> · esperado {{ Math.ceil(tileVisual(tile).expected) }}</template>
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -832,11 +1111,70 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+
+    <!-- 🎯 Modal de METAS por painel (admin) -->
+    <div
+      v-if="showGoalsModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      @click.self="showGoalsModal = false"
+    >
+      <div class="bg-n-solid-1 rounded-2xl shadow-xl w-full max-w-md p-5">
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
+            <span class="i-lucide-target text-base" style="color: #d4af37" />
+            Metas — {{ currentPanel.label }}
+          </h3>
+          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showGoalsModal = false" />
+        </div>
+        <p class="text-[11px] text-n-slate-10 mb-4">
+          Metas MENSAIS (as taxas % são diretas). Os cards mudam de cor pelo ritmo:
+          🔴 muito abaixo · 🟠 abaixo · cores normais no ritmo · 🟢 meta batida · 🏆 recorde com átomos.
+        </p>
+        <div class="space-y-3 mb-4">
+          <label
+            v-for="field in GOAL_FIELDS[selectedPanel] || []"
+            :key="field.gk"
+            class="flex items-center gap-3"
+          >
+            <span class="text-xs text-n-slate-11 flex-1">{{ field.label }}</span>
+            <input
+              v-model.number="goalsDraft[selectedPanel][field.gk]"
+              type="number"
+              min="0"
+              :step="field.pct ? 0.5 : 1"
+              class="w-24 h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-sm text-n-slate-12 text-right"
+              placeholder="—"
+            />
+          </label>
+        </div>
+        <p class="text-[10px] text-n-slate-9 mb-3">Deixar vazio (ou 0) = sem meta para aquele card.</p>
+        <div class="flex justify-end gap-2">
+          <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showGoalsModal = false">Cancelar</button>
+          <button
+            class="px-4 rounded-lg py-2 text-sm font-semibold text-white disabled:opacity-60"
+            :style="{ background: currentPanel.grad }"
+            :disabled="isSavingGoals"
+            @click="saveGoals"
+          >
+            {{ isSavingGoals ? 'Salvando…' : 'Salvar metas' }}
+          </button>
+        </div>
+      </div>
+    </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* meta batida / recorde: o card respira com brilho suave */
+.cevico-meta-pulse {
+  animation: cevicoMetaPulse 2.6s ease-in-out infinite;
+}
+@keyframes cevicoMetaPulse {
+  0%, 100% { box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2); }
+  50% { box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2), 0 0 26px 4px rgba(244, 222, 142, 0.45); }
+}
+
 /* botão de atalho pulsante (Ir para agenda) — respiração suave */
 .cevico-pulse-btn {
   animation: cevico-pulse 2.2s ease-in-out infinite;

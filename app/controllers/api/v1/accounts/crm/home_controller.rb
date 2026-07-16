@@ -29,11 +29,69 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       appointments_30d: reached_stage_count(/agendamento/i, 30.days.ago, Time.current),
       next_appointments: next_appointments_json,
       opportunity_alerts: opportunity_alerts_json,
-      my_tasks: my_tasks_json
+      my_tasks: my_tasks_json,
+      bug_reports: bug_reports_json,
+      # metas do painel + fator do período + recordes (cards vivos)
+      goals: goals_json
     }.merge(panel_key == 'agendamento' ? panel_data(since, until_at) : {}) # compat: campos antigos no topo
   end
 
+  # ── popup "prioridade máxima" do Radar ──
+  # Checagem LEVE chamada pelo painel global: devolve o aviso mais urgente
+  # do usuário logado cuja conversa AINDA está esperando há 20+ minutos
+  # (re-checa ao vivo — se alguém já respondeu, não incomoda ninguém).
+  POPUP_WAIT_MINUTES = 20
+
+  def radar_ping # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    settings = CrmSetting.find_by(account: account)
+    cfg = settings&.ai_config || {}
+    return render json: { alert: nil, radar: radar_status(cfg) } unless cfg.dig('agents', 'opportunity', 'enabled') == true
+
+    alerts = Array(cfg.dig('opportunity_state', 'alerts')).reverse
+    # o popup é da tela do atendente ESPECÍFICO: aviso direcionado a mim,
+    # ou aviso geral (sem destino) quando não sou admin
+    alerts = alerts.select do |a|
+      a['user_id'].present? ? a['user_id'].to_i == Current.user.id : !Current.account_user.administrator?
+    end
+
+    live = alerts.lazy.filter_map do |a|
+      conversation = account.conversations.find_by(display_id: a['conversation_id'])
+      next unless conversation&.open? && conversation.waiting_since.present?
+
+      minutes = ((Time.current - conversation.waiting_since) / 60).floor
+      next if minutes < POPUP_WAIT_MINUTES
+
+      a.merge('waiting_minutes' => minutes)
+    end.first
+
+    render json: { alert: live, radar: radar_status(cfg) }
+  end
+
+  # a atendente pode DESLIGAR o radar na mão — fica registrado quem e quando
+  def toggle_radar # rubocop:disable Metrics/AbcSize
+    settings = CrmSetting.find_by(account: account) || CrmSetting.create!(account: account)
+    cfg = settings.ai_config || {}
+    cfg['agents'] ||= {}
+    cfg['agents']['opportunity'] ||= {}
+    enabled = cfg['agents']['opportunity']['enabled'] == true
+    cfg['agents']['opportunity']['enabled'] = !enabled
+    state = cfg['opportunity_state'] ||= {}
+    log = Array(state['manual_log'])
+    log << { 'action' => enabled ? 'desativado' : 'ativado', 'user' => Current.user.name, 'at' => Time.current.iso8601 }
+    state['manual_log'] = log.last(20)
+    settings.update!(ai_config: cfg)
+    render json: { radar: radar_status(cfg) }
+  end
+
   private
+
+  def radar_status(cfg)
+    last = Array(cfg.dig('opportunity_state', 'manual_log')).last
+    {
+      enabled: cfg.dig('agents', 'opportunity', 'enabled') == true,
+      last_action: last
+    }
+  end
 
   def account
     Current.account
@@ -121,13 +179,16 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       appointments_created: agendadas,
       # volume CONCRETO: consultas registradas na Agenda no período, mesmo
       # que o lead tenha chegado em outro dia (Vaneide agenda 15 → mostra 15;
-      # o recorte por coorte continua na taxa de agendamento)
-      appointments_booked: account.tasks.where(task_type: 'consulta', created_at: since..until_at).count,
+      # o recorte por coorte continua na taxa de agendamento).
+      # Consulta marcada PARA O PASSADO = preenchimento de histórico
+      # (Preencher histórico / disparo retroativo) — fica FORA do contador
+      # (foi o "88 agendadas" fantasma de 15/07).
+      appointments_booked: booked_scope(account, since, until_at).count,
       # e destes, quantos CHEGARAM E AGENDARAM no mesmo período (lead novo
       # que já saiu com consulta — o atendimento no timing perfeito)
-      appointments_same_day: account.tasks.where(task_type: 'consulta', created_at: since..until_at)
-                                    .joins(:contact).where(contacts: { created_at: since..until_at })
-                                    .distinct.count(:contact_id),
+      appointments_same_day: booked_scope(account, since, until_at)
+        .joins(:contact).where(contacts: { created_at: since..until_at })
+        .distinct.count(:contact_id),
       booking_conversion: pct(agendadas, leads),
       surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i),
       surgery_indications: reached_stage_count(/indica/i, since, until_at)
@@ -324,17 +385,116 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }
   end
 
+  # reports 🐞 de quem está logado: abertos + resolvidos na última semana
+  # (o resolvido vira a notificação "seu report foi corrigido" no painel)
+  def bug_reports_json
+    mine = account.tasks.where(creator_id: Current.user.id).where("title LIKE '🐞%'")
+    {
+      open: mine.where(status: %i[todo doing]).count,
+      resolved: mine.where(status: :done)
+                    .where(completed_at: 7.days.ago..)
+                    .order(completed_at: :desc).limit(3)
+                    .map { |t| { id: t.id, title: t.title, completed_at: t.completed_at } }
+    }
+  end
+
   def opportunity_alerts_json
     settings = CrmSetting.find_by(account: account)
     state = settings&.ai_config&.dig('opportunity_state') || {}
     alerts = Array(state['alerts']).reverse
-    unless Current.account_user.administrator?
-      alerts = alerts.select { |a| a['user_id'].blank? || a['user_id'].to_i == Current.user.id }
-    end
+    alerts = alerts.select { |a| a['user_id'].blank? || a['user_id'].to_i == Current.user.id } unless Current.account_user.administrator?
     {
       last_run_at: state['last_run_at'],
       alerts: alerts.first(10)
     }
+  end
+
+  # ── metas + recordes dos cards do painel ──
+  # Meta é MENSAL por indicador (config do admin). O fator converte a meta
+  # para o período visualizado (hoje = fatia diária; semana = 7 dias;
+  # este mês = proporcional aos dias corridos...). Indicadores de % não
+  # usam fator (meta direta). Recordes: melhor valor já visto por período
+  # equivalente (dia/semana/mês/ano) — batido = gravado na hora.
+  RECORD_KEYS = {
+    'agendamento' => %w[new_leads appointments_booked surgeries_closed],
+    'conducao' => %w[consultations attended indications],
+    'cirurgia' => %w[indications surgeries_booked surgeries_done],
+    'medico' => %w[consultations indications conversions],
+    'gestor' => %w[new_leads indications surgeries_booked]
+  }.freeze
+
+  def goals_json
+    cfg = crm_settings&.agenda_config || {}
+    {
+      targets: (cfg['panel_goals'] || {})[panel_key] || {},
+      factor: goal_factor,
+      records: records_json
+    }
+  end
+
+  def goal_factor
+    now = TZ.now
+    days_in_month = now.end_of_month.day.to_f
+    case params[:preset]
+    when 'week' then 7 / days_in_month
+    when 'month' then now.day / days_in_month
+    when 'last_month' then 1.0
+    when 'year' then (now.month - 1) + (now.day / days_in_month)
+    else 1 / days_in_month # hoje e ontem = fatia diária
+    end.round(4)
+  end
+
+  def record_period_key
+    now = TZ.now
+    case params[:preset]
+    when 'yesterday' then (now - 1.day).strftime('%Y-%m-%d')
+    when 'week' then now.strftime('%G-w%V')
+    when 'month' then now.strftime('%Y-%m')
+    when 'last_month' then (now - 1.month).strftime('%Y-%m')
+    when 'year' then now.strftime('%Y')
+    else now.strftime('%Y-%m-%d')
+    end
+  end
+
+  def record_basis
+    { 'yesterday' => 'day', 'week' => 'week', 'month' => 'month',
+      'last_month' => 'month', 'year' => 'year' }[params[:preset]] || 'day'
+  end
+
+  def records_json # rubocop:disable Metrics/AbcSize
+    keys = RECORD_KEYS[panel_key] || []
+    return {} if keys.empty?
+
+    data = panel_data(nil, nil) # já memoizado pelo show
+    settings = crm_settings || CrmSetting.create!(account: account)
+    cfg = settings.agenda_config || {}
+    all = cfg['panel_records'] ||= {}
+    changed = false
+    period = record_period_key
+
+    result = keys.index_with do |key|
+      value = data[key.to_sym] || data[key] # panel_data usa chaves símbolo
+      next { best: 0, is_record: false } unless value.is_a?(Numeric)
+
+      slot_key = "#{panel_key}.#{key}.#{record_basis}"
+      slot = all[slot_key] || {}
+      if value.positive? && value > slot['best'].to_f
+        slot = { 'best' => value, 'period' => period }
+        all[slot_key] = slot
+        changed = true
+      end
+      { best: slot['best'].to_f, is_record: slot['period'] == period && slot['best'].to_f.positive? }
+    end
+    settings.update!(agenda_config: cfg.merge('panel_records' => all)) if changed
+    result
+  end
+
+  # consultas AGENDADAS de verdade no período: criadas no período e marcadas
+  # para a frente (due_at >= criação). Registro retroativo de histórico
+  # (consulta que já tinha acontecido) não é agendamento novo.
+  def booked_scope(account, since, until_at)
+    account.tasks.where(task_type: 'consulta', created_at: since..until_at)
+           .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
   end
 
   def pct(part, total)

@@ -280,6 +280,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['panel_assignments'] = params.require(:panel_assignments)
                                        .permit!.to_h.transform_values(&:to_s)
     end
+    # METAS por painel ({painel => {indicador => meta mensal}}): os cards
+    # do Meu Painel mudam de cor conforme o desempenho contra a meta
+    if params.key?(:panel_goals)
+      cfg['panel_goals'] = params.require(:panel_goals).permit!.to_h
+                                 .transform_values { |g| g.to_h.transform_values(&:to_f) }
+    end
     # conferência do dia: RESPONSÁVEIS (consultas/cirurgias) + prazo — se
     # passar do horário sem conferir, nasce a tarefa "Concluir a conferência"
     if params.key?(:attendance_owners)
@@ -507,6 +513,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
       agenda_theme: (s.agenda_config || {})['theme'],
       panel_assignments: (s.agenda_config || {})['panel_assignments'] || {},
+      panel_goals: (s.agenda_config || {})['panel_goals'] || {},
       clinical_access: (s.agenda_config || {})['clinical_access'] || {},
       agenda_backfill_last_run: (s.agenda_config || {})['backfill_last_run'],
       scheduler_log: Array((s.agenda_config || {})['scheduler_log']).first(30),
