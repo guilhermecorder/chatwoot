@@ -1393,6 +1393,543 @@ dourada (pulsando); as zeradas ficam escuras; legenda do donut em grade
 com destaques próprios ("Parabéns..." dourado claro + "Você desenrola
 mesmo! ✨" maior, dourado escuro).
 
+## 37. RODADA 2026-07-15 (tarde) — Travas do follow-up, Dashboard dos Agentes, modalidades, coerência do menu ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Migration **20260715000002** (tasks.modality — aditiva). Lote tem 1 migration.
+
+**1. 🔒 TRAVAS do robô de follow-up (pedido: "as meninas conseguirem pará-lo"):**
+- TRAVA INDIVIDUAL: botão "Pausar follow-up p/ este paciente" no painel do
+  balão do CRM (seção 🤖 no painel mover-card/etiquetas) E no card-resumo do
+  painel de Conversas. Grava quem pausou (contact.additional_attributes
+  .cevico_followup_paused); o job pula o contato (motivo
+  "pausado_para_paciente" no registro). Endpoint: POST
+  crm/conversation_summary/toggle_followup (aberto a atendentes).
+- CHAVE DE EMERGÊNCIA por robô: lista dos robôs que alcançam a conversa no
+  mesmo painel, com "Parar para todos" — POST crm/followup_bots/:id/toggle
+  (ABERTO a atendentes; gerenciar continua admin). Registra "⏸ pausado por
+  Fulana" no registro de atividade do robô.
+- summary_json ganhou followup {paused, paused_by, bots[]}.
+
+**2. Etiquetamento automático — cadeia fechada:** o combo já existia
+(gatilho "Mensagem criada" + frases-chave + ação "Aplicar etiqueta");
+agora a etiqueta aplicada POR AUTOMAÇÃO também dispara as automações
+"Etiqueta adicionada" da coluna (cadeias: frase → etiqueta → mover/valor).
+Anti-loop: etiqueta que o contato já tem não redispara. 🐛 BUG ACHADO NO
+TESTE: ações "Registrar na conversa"/"Avisar equipe"/nota do Secretário
+criavam Message SEM INBOX → falha silenciosa em produção (provável causa
+das 12 falhas do "Secretário da Agenda (automático)" no print) — corrigido
+(inbox: conversation.inbox nos 3 pontos).
+
+**3. Dashboard dos Agentes (Relatórios, admin, GET crm/agents_dashboard):**
+- Por pessoa: conversas atribuídas, mensagens enviadas, 1ª resposta média
+  (reporting_events), resolvidas, consultas agendadas, avisos do Radar
+  respondidos + tempo médio. Presets hoje/semana/mês/mês passado/ano.
+- RESPONSIVIDADE AO RADAR: histórico do Radar agora grava destino+coluna;
+  1ª msg outgoing após o aviso = resposta (taxa geral + por painel de
+  destino + por quem respondeu). ⚠️ lição repetida: default_scope do
+  Message quebra GROUP BY → reorder(nil).
+
+**4. Agenda — modalidade da consulta:** avaliacao|retorno|exames
+(tasks.modality; pílulas no modal, chip colorido no card da visão Dia).
+Ocupação (dia/semana/mês) virou barra SEGMENTADA por tipo + legenda +
+"Avaliação X% · Retorno Y%" no rodapé. Sem tipo = avaliação. scanAgenda
+devolve byModality (MODALITIES exportado no cevicoAgenda.js).
+
+**5. Ajustes:** Menções/Participantes REMOVIDOS de Conversas p/ todos;
+Dashboard dos Médicos só com os 3 oficiais (Crm::DoctorNames normaliza
+grafias; Meu Painel médico usa o mesmo filtro); CRM abre em "Essa semana"
+(nova janela de carga, localStorage novo padrão) e mover COLUNA só no modo
+edição; Meu Painel com saúde de Cirurgias SEMPRE lado a lado; menu
+Automações = abas do hub (aba nova "Regras da caixa de entrada" com
+liga/desliga das regras nativas + item "Resultados" no menu).
+
+**6. INSTAGRAM/FACEBOOK (item grande — DECISÕES PENDENTES do Guilherme):**
+plano desenhado (agente interno respondedor por INBOX, inspirado no fluxo
+N8N mapeado no item 27; confirmações oficiais sempre via WhatsApp; fase 1
+= DM, fase 2 = comentários). Aguardando: caixa Instagram conectada?
+escopo do prompt, expediente, e aprovação do desenho.
+
+Testado no Docker (API real, conta 3): trava individual e chave por robô
+(atendente pode toggle, update 403), job pula pausado, cadeia
+etiqueta→label_added fired ✓ + anti-loop ✓, agents_dashboard ✓,
+doctors dedupe ✓ (Jorge Haddad fora), modality round-trip ✓, migration ✓,
+Vite compila os 12 arquivos ✓. Usuária de teste "atendente.teste@cevico
+.local" criada no local; consulta "Teste Modalidade" id 21 (16/07 14h,
+retorno) p/ ver o chip e a barra segmentada.
+
+## 38. RODADA 2026-07-15 (noite) — ATENDENTE INSTAGRAM + Dashboard da Agenda + menu ordenável ⏳ NÃO COMMITADO, AGUARDA TESTE VISUAL
+
+Sem migration nova (lote 37-38 = só a 20260715000002 do item 37).
+
+**1. 🤖📱 ATENDENTE INSTAGRAM (8º agente, key 'instagram') — o 1º agente
+RESPONDEDOR (fala com o paciente):**
+- Crm::InstagramAgentService: prompt DESTILADO do fluxo N8N (46k → ~8k),
+  Sonnet 5/médio recomendado; structured output {mensagens[1-3], etapa,
+  agendar, agendamento{nome/telefone/dia/hora/unidade/procedimento},
+  pausar, chamar_humano}. Guardrail PRÓPRIO (RESPONDER_GUARDRAIL no
+  AiAgentConfig — RESPONDER_AGENTS): nunca inventar valor/horário, nunca
+  diagnóstico, urgência → PA + chamar_humano.
+- Crm::AgendaSlots (NOVO): vagas livres calculadas NO SERVIDOR (janelas ×
+  consultas × cadeados; espelho do DEFAULT_WINDOWS) → o prompt recebe
+  HORÁRIOS DISPONÍVEIS reais; slot_available? valida antes de gravar.
+- Crm::InstagramAgentJob: espera 12s e só responde se a mensagem ainda é a
+  última (anti-picada, junta mensagens), teto 60 respostas/dia/conversa,
+  envia mensagens marcadas (additional_attributes.cevico_ia_agent),
+  agenda via AppointmentRecorder (horário inválido → tarefa ⚠️ em vez de
+  gravar errado), captura telefone p/ o contato (+55, ponte p/ WhatsApp),
+  nota privada 📅, registro de atividade em ai_config.instagram_state.
+- CrmListener#handle_instagram_agent: SÓ nas caixas escolhidas
+  (agents.instagram.inbox_ids) e com o agente LIGADO. Emojis do N8N:
+  humano respondeu → PAUSA (nota ⏸); humano manda 👍 → REATIVA (nota ▶️);
+  confirmação de agendamento (😊) → o próprio agente se pausa (pausar).
+  Mensagens do agente e do robô de follow-up não mexem na pausa.
+- Confirmações oficiais: o agente avisa que confirmação/lembretes vão
+  pelo WHATSAPP (regra no prompt) e a equipe/robôs seguem por lá.
+- UI: card completo no hub (faixa rosa de aviso, pílulas de CAIXAS,
+  registro de atividade, Editar/Salvar/Publicar/interruptor);
+  update_ai permite agents.instagram.inbox_ids; ai_json expõe inbox_ids
+  + instagram_events.
+- Canal Instagram nativo: card em Caixas de Entrada TRAVADO porque faltam
+  INSTAGRAM_APP_ID/SECRET/VERIFY_TOKEN (app da Meta — passos externos
+  documentados p/ o Guilherme; feature flag da conta já está ON).
+- Testado no Docker: slots reais ✓, slot inválido ✓, listener incoming ✓,
+  job sem chave → erro amigável logado ✓, pausa por humano ✓, 👍 reativa ✓,
+  agendamento válido criou consulta+nota ✓, inválido criou tarefa ⚠️ ✓.
+- FUTURO combinado: agentes de atendimento POR COLUNA (reagendamento p/
+  quem já agendou; suporte pós-operatório com escalada a humano) — a
+  arquitetura do respondedor já nasce pronta p/ isso.
+
+**2. 📊 Dashboard da Agenda (Relatórios, admin, GET crm/agenda_dashboard):**
+KPIs consultas (total/comparecimento/faltas/canceladas/reagendadas/SEM
+CONFERÊNCIA/indicações), mix por modalidade (share + comparecimento),
+por médico (DoctorNames), por unidade, volume por dia da semana,
+cirurgias (realizadas/não veio/veio-e-não-fez/por clínica), ocupação
+(agenda cheia 7d + aproveitamento 7d + sala cirúrgica, client-side com
+scanAgenda) e "o que vem pela frente" (próx. 7 dias + conferência
+pendente 30d). Testado via API real.
+
+**3. Menu lateral ORDENÁVEL:** Relatórios agora logo abaixo do CRM
+(ordem padrão nova) e o "Personalizar menu" ganhou setas ↑/↓ por item +
+"Restaurar ordem padrão" (localStorage cevico_menu_order, por pessoa).
+
+**4. Follow-up pausado→retomado NÃO reenvia** (verificado com teste real:
+marcadores das etapas moram na conversa; pausar/religar robô ou paciente
+não zera nada; etapas vencidas na pausa caem no anti-rajada).
+
+**5. Tipo de consulta ACOMPANHA A JORNADA (Task#infer_consulta_modality):**
+consulta criada SEM tipo explícito (Secretário/Atendente Instagram/
+backfill) nasce RETORNO se o paciente já tem consulta anterior (telefone,
+8 dígitos) e AVALIAÇÃO se é a primeira; escolha manual no modal sempre
+vence. Testado: novato→avaliacao, volta→retorno, manual→exames ✓.
+
+**6. PLANEJADOS (combinados 15/07, construir nas próximas rodadas):**
+- 📞 AGENTE DE TELEFONEMA: decisão do Guilherme (15/07 noite) = INTEGRAR
+  um sistema PRONTO de voz por IA que ele conhece (contrata e pluga no
+  nosso via API/webhook) em vez de construir pipeline próprio — fica NO
+  RADAR; quando contratar, mapeamos a API e conectamos (fila de quem está
+  parado nas colunas + resultado da ligação de volta pro card). O plano
+  v1 "Discador do CRM" (humano liga, IA prepara roteiro) segue disponível
+  como alternativa caso a integração demore.
+
+## 39. 🏥 CENTRAL DO PACIENTE — PRÓXIMA GRANDE CRIAÇÃO (especificada 15/07, construir na próxima sessão)
+
+A página única do paciente, acessível de TODOS os pontos de contato
+(card do CRM, balão, painel da conversa, Agenda, busca). Três camadas:
+
+**FASE 0 — Unificação (pedra fundamental, vem primeiro):**
+- Migration aditiva `tasks.contact_id` (+ índice) + backfill por telefone
+  (últimos 8 dígitos) — acaba com matches frágeis e N+1 de telefone em
+  loop (candidatos da auditoria ganham a solução definitiva).
+- Consulta criada passa a amarrar no contato; telefone continua como
+  fallback p/ quem não existe ainda. Informações SEMPRE unificadas.
+
+**FASE 1 — Jornada (tudo já existe no banco, é costurar):**
+- Identidade (nome, telefones, e-mail, etiquetas, card/coluna atual).
+- LINHA DO TEMPO completa: anúncio de origem (meta_ads) → conversas por
+  canal → movimentos no funil (stage_logs) → consultas (com tipo/
+  comparecimento/reagendamentos) → indicação → fechamento (valor/
+  pagamento) → cirurgia → pós-op → NPS → formulários respondidos →
+  follow-ups recebidos. Indicadores do paciente (responsividade, tempo
+  no funil, valor).
+
+**FASE 2 — ESPAÇO NOBRE DO MÉDICO (anotações de consulta, ref. foto do
+sistema atual do IOP que o Guilherme mostrou 15/07):**
+- Registro clínico por consulta com CAMPOS RÁPIDOS (a vida do médico
+  fácil): tipo de procedimento (refrativa → técnica PRK/Lasik; catarata
+  → tipo de lente nacional/Rayner/foco estendido/trifocal/tórica...),
+  OLHO (OD | OE | AO), refração OD/OE, acuidade, PIO, biomicroscopia,
+  fundoscopia, CONDUTA/indicação (pílulas), pedido de exames + campo
+  livre de observações.
+- UPLOAD DE FOTOS/EXAMES (ActiveStorage já existe no Chatwoot — viável;
+  atenção: storage na VPS entra no plano de backup).
+- Permissões: médicos e admin editam; equipe visualiza o que for
+  liberado. ⚠️ LGPD: dado de SAÚDE é sensível — módulo nasce como
+  "anotações internas da clínica" (não substitui prontuário certificado
+  SBIS/CFM); acesso restrito e auditável.
+- Conduta preenchida pelo médico pode alimentar a indicação/CRM
+  automaticamente (mesmo reflexo da conferência do dia).
+
+**FASE 3 — IA em cima do banco (pedido do Guilherme):** análise do
+perfil do paciente cruzando jornada + formulários + anotações (o que
+converte, o que prevê falta, sugestão de abordagem por perfil).
+
+Ordem de construção: Fase 0 → 1 → 2 (a 3 depois da auditoria).
+
+**✅ CONSTRUÍDO (15/07, noite — Fases 0, 1 e 2; falta a 3, pós-auditoria).
+No working tree, NÃO commitado, junto com o lote dos itens 37–38.**
+
+- **Fase 0 (unificação):** migration aditiva `20260715000003`
+  (tasks.contact_id + FK + índice + backfill em SQL puro pelos últimos 8
+  dígitos, preferindo match de número inteiro). Task ganhou
+  `belongs_to :contact`, hook `link_contact_by_phone` (toda task nasce
+  amarrada ao contato, venha do modal, Secretário, Atendente Instagram ou
+  automação; contato explícito vence), `Task.for_patient` e
+  `Task.match_contact` (critério único de match). `infer_consulta_modality`
+  agora usa o histórico do CONTATO. AppointmentRecorder grava/reagenda com
+  contact; tasks_controller aceita contact_id e o devolve no JSON.
+- **Fase 0b (fim dos N+1 de telefone):** Dashboard dos Médicos
+  (conversion_infos em lote: 3 queries; nps por contact_ids) e Meu Painel
+  (count_conversions em lote) — regexp de telefone só como fallback de
+  registro antigo sem link.
+- **Fase 1 (Espaço do Paciente):** `GET /crm/patients/:contact_id`
+  (patients_controller) → identity (nome/fones/etiquetas/cards do funil/
+  anúncio de origem), timeline (origem → conversas → funil → consultas c/
+  tipo/comparecimento/reagendamento/indicação → fechamento → cirurgia →
+  NPS → formulários c/ respostas → follow-ups por robô) e indicators
+  (dias de jornada, responsividade in/out, funil atual + dias, consultas
+  ✓/✗/🔁, valor, NPS). Página `patient/PatientSpace.vue` (rota
+  `/patient/:contactId`), header azul vítreo + KPIs + linha do tempo
+  vertical (toggle recente/início). ATALHOS nos 4 pontos: card do CRM
+  (ContactCard, ícone ao lado do balão), balão (ConversationChatModal,
+  header), painel da conversa (ConversationSummaryCard, link sob o
+  telefone) e Agenda (modal de edição, quando a consulta tem contato).
+- **Fase 2 (Espaço Nobre do Médico):** migration aditiva `20260715000004`
+  (crm_clinical_notes: contact/task/author, doctor, performed_at, fields
+  jsonb, observations) + fotos via ActiveStorage (has_many_attached, ⚠️
+  storage da VPS entra no plano de backup). Campos rápidos no modal:
+  procedimento (refrativa→PRK/Lasik | catarata→lente nacional/Rayner/foco
+  estendido/trifocal/tórica), olho OD/OE/AO, refração/acuidade/PIO por
+  olho, biomicroscopia, fundoscopia, conduta (linhas→pílulas), exames
+  pedidos, indicação de cirurgia. Indicação marcada + consulta ligada →
+  task vira 'indicated' e o card move no CRM via `Crm::AttendanceReflector`
+  (serviço extraído do tasks_controller; conferência do dia usa o mesmo).
+  PERMISSÕES (agenda_config.clinical_access, config no escudo 🛡️ da
+  própria seção, admin): médicos (doctor_user_ids) + admin editam (cada
+  médico só edita a própria; admin todas), equipe só vê com team_view
+  ligado (padrão DESLIGADO — LGPD); acesso auditado no log
+  ("[CEVICO clínico]"). Testado por HTTP: 403 p/ agente, 200 admin,
+  upload/remoção de foto ok, team_view liga/desliga ok.
+- **Testes locais (Docker):** consulta criada por API com telefone →
+  contact_id linkado sozinho + modality inferida (avaliação → retorno na
+  2ª); backfill validou (3/6 tasks com fone casaram na base local);
+  paciente 1 da conta 3 → 34 eventos na timeline; dashboards refatorados
+  respondendo; rubocop limpo nos arquivos novos; Vite compilando tudo.
+- **Dados de teste locais (conta 3, podem apagar):** consulta "Teste
+  Fase 0" 20/07 14h (task 27) e anotação clínica #2 (Dr. Gustavo,
+  refrativa PRK AO, com foto exame.png) no paciente 1.
+- **⚠️ DEPLOY DESTE PEDAÇO:** 2 migrations aditivas (…000003 backfill +
+  …000004 tabela nova) → BACKUP ANTES. Reversão: reimplantar imagem
+  anterior no EasyPanel. Depois do deploy: marcar os médicos no 🛡️ do
+  Espaço do Médico (senão só admin edita) e decidir team_view.
+- **Fase 3 (IA no banco):** NÃO construída — combinado deixar para depois
+  da auditoria (semana de 20/07).
+- **🎨 REPAGINADA "DOPAMINE COLOR" (15/07, madrugada — pedido do Guilherme
+  após aprovar o painel):** o ambiente inteiro se veste com a cor do
+  paciente — homem = azul (jovem→azul céu, maduro→azul profundo, 60+→céu
+  noturno COM ESTRELAS), mulher = rosa (jovem→claro, madura→intenso,
+  60+→roxo); sem sexo/idade no contato = azul CEVICO neutro. Sexo/idade
+  vêm de additional/custom_attributes do contato (sexo/gender/genero +
+  data_nascimento/date_of_birth/idade) — a equipe preenche e a página
+  colore sozinha. Barra superior = trunfo: card do funil + sinais rápidos
+  (formulários ✓, NPS, robôs rodando, follow-up pausado). Cards de
+  informação novos: Consultas (datas+motivo+✓/✗), Procedimento &
+  Investimento (orçamento de indicação × fechamento × TAXA DE PERFORMANCE
+  %), NPS & Pesquisas, Automações neste contato (robôs de follow-up
+  aplicáveis + automações da coluna + pausa — backend novo `automations`).
+  JORNADA EMPILHADA: estágios do funil em pilha vertical (1º em cima →
+  atual embaixo com anel), data + salto de dias à esquerda, dias dentro de
+  cada estágio, etiquetas ganhas no período (backend novo `label_events`
+  via taggings.created_at — remoção não tem histórico no core), rodapé com
+  total da jornada + média por estágio; toggle "eventos detalhados" mantém
+  a timeline completa. Espaço do Médico PROTAGONISTA (coluna larga) com
+  faixa "À uma vista" (última anotação resumida). Bloco ATUALIZAÇÕES
+  (backend novo `updates`): próximos compromissos, pendências abertas,
+  notas da equipe. Modal do médico: PROCEDIMENTOS OFICIAIS COM PREÇO —
+  Refrativa (PRK/Lasik R$5.000), Catarata (Nacional 2.800 | Mono Rayner
+  3.200 | Tórica monofocal 5.600 | Foco estendido 5.690 | Trifocal 8.490 |
+  Galaxy 14.990), Faco Refrativa (Trifocal/Galaxy), Artisan (11.900),
+  Outros (Anel de Ferrara/Crosslinking/Glaucoma/Retina/Lente Escleral/
+  Blefaroplastia) — escolher GERA O ORÇAMENTO DE INDICAÇÃO (editável,
+  fields.indicated_value), que preenche o valor do card no CRM (se vazio)
+  e depois é comparado ao fechamento da IA → taxa de performance (quanto
+  vendemos do máximo; base p/ precificação/descontos). Ícone
+  característico PatientSpaceIcon (medalhão gradiente azul→lilás→rosa)
+  nos 4 atalhos. Sem migration nova nesta repaginada (tudo jsonb/payload).
+  Teste visual: contato 1 da conta 3 está como masculino/31 anos (tema
+  azul adulto) — mudar sexo/data_nascimento no contato troca o tema.
+- **🎨 RODADA 2 DA DOPAMINE (16/07, madrugada — feedback do Guilherme):**
+  (a) SEXO DO PACIENTE: botões em linha ♂/♀ no cabeçalho do Espaço do
+  Paciente (POST crm/patients/:id/update_profile) + o Secretário da Agenda
+  DETECTA o sexo pelo nome/contexto da conversa ("minha mãe", "meu pai") —
+  campo sexo no schema do extraction service, carimbado via
+  AppointmentRecorder.stamp_gender (manual vence); sexo desconhecido =
+  tema VERDE dopamine (novos contatos/orçamento), muda de cor sozinho
+  quando descoberto. (b) Jornada CORRIDA: estágios repetidos consecutivos
+  fundidos num bloco só. (c) 🐛 FIX agentes de IA: os 7 pontos do
+  CrmAutomationFireJob liam a conversa CRIADA por último (created_at) —
+  agora leem a de ATIVIDADE mais recente (latest_conversation; causa
+  provável do "não está agendando direito"); sales_coach idem. Sobre "não
+  pega a coluna Consulta Realizada": automações disparam quando o card
+  ENTRA na coluna — quem já estava lá quando o agente foi ligado não
+  dispara (usar o disparo manual da automação no Modo Programação ou o
+  Preencher histórico do Secretário). (d) MEU PAINEL: "Consultas
+  agendadas" agora = appointments_booked (tasks consulta CRIADAS no
+  período — volume concreto da Vaneide), com o recorte por coorte como
+  subtítulo; botão PULSANTE "Ir para agenda" na Saúde da Agenda
+  (animação cevico-pulse). (e) CRM local espelhado com as 12 colunas da
+  CEVICO (Novos Contatos → ... → Pós Operatório; "Cirurgia" renomeada p/
+  "Cirurgia Agendada" preservando cards). (f) BALÃO azul céu dopamine:
+  bolhas enviadas com gradiente #0EA5E9→#38BDF8→#7DD3FC no chat core
+  (bubbles/Base.vue, variant AGENT) e no balão do CRM. (g) PAINEL DIREITO
+  enxuto: saíram Time/Prioridade/Informações da conversa/Participantes;
+  "Pessoa responsável" (ex-Agente atribuído) em BOTÕES EM LINHA — termo
+  oficial adotado p/ o padrão de seleção do sistema; Notas do contato sem
+  gaveta, com caixa de texto direta embaixo (Cmd+Enter salva).
+  (h) FORMULÁRIOS PÚBLICOS dopamine: fundo troca com crossfade a cada
+  pergunta (céu→esmeralda→dourado→lilás→rosa→coral→teal; abertura azul
+  marinho CEVICO, agradecimento dourado), cartão acompanha via CSS vars.
+  (i) RADAR: título com plural correto; "O que fazer" em tom PROFESSORAL
+  (sem urgência); "Motivo" direto; prompt recebe a COLUNA da jornada e
+  orienta acolhimento em etapas pós-consulta (paciente ansioso) — vigia
+  na coluna Consulta Realizada já funciona (vigias por coluna); prompt
+  custom do Radar pode ser editado no card do agente. Sem migration nova.
+
+## 40. 🌐 AMBIENTE DE PÁGINAS + refinamentos (16/07 — construído, no working tree)
+
+- **PÁGINAS CEVICO** (item novo do menu lateral, ícone painéis): sites
+  públicos para anunciar procedimentos, quebrar objeções e nutrir
+  pacientes, organizados pelas 4 CATEGORIAS de estágio da jornada:
+  Captação | Pré consulta | Pré cirurgia | Pós operatório. Migration
+  aditiva `20260716000001` (cevico_pages: título, slug único, categoria,
+  status draft/published, emoji, cor, subtítulo, corpo em markdown
+  (CommonMarker), meta_title/meta_description SEO, CTA label/url,
+  views_count). Página pública em `/p/:slug` (cevico_pages_controller,
+  sem login): hero navy+dourado c/ selo CEVICO, corpo formatado
+  (destaques em dourado via blockquote), CTA dourado p/ WhatsApp, footer
+  "não substitui avaliação médica"; SEO completo: title/description
+  próprios, canonical, Open Graph, h1 — pronto p/ ranquear (catarata,
+  refrativa, lasik, prk, artisan, trifocal, galaxy, fácica, riscos).
+  Admin em `PagesHome.vue` (visual otimizado da Academia: header da
+  marca, cards médios c/ cor+emoji do assunto, selo NO AR/RASCUNHO,
+  visitas, copiar link/abrir), editor c/ categoria em botões em linha,
+  paleta de cores, bloco SEO explicado e Publicar dourado. Equipe vê,
+  só admin edita (menu do agente enxuto não mostra — decidir depois).
+  Página de teste local: /p/cirurgia-de-catarata-... (conta 3).
+- **Meu Painel**: + `appointments_same_day` — "chegaram E agendaram no
+  período" (lead novo que já saiu com consulta; via contact_id da Fase 0)
+  no subtítulo do card Consultas agendadas.
+- **Formulários (rodada de refinamento)**: dourado "ouro de verdade"
+  (#D4AF37/#F4DE8E, menos queimado); abertura = fundo navy CEVICO +
+  cartão branco com BRILHO DOURADO PULSANTE (gold-glow); selo oficial
+  CEVICO (marca C + nome) em TODOS os cards; textos base novos — intro
+  "Vale a pena responder essas perguntas..." e final "Parabéns, você já
+  é um dos nossos pacientes preferidos..." (intro_text/thank_you_text
+  próprios do formulário continuam vencendo); final com logo FLUTUANDO
+  e pulsando em dourado, cartão pulsando e fundo navy bem escuro; barra
+  de progresso com PSICOLOGIA (avança rápido até ~50%, desacelera no fim
+  — easing 1-(1-t)²) e EFEITO ENERGIZANTE estilo "Ultracode" (shimmer
+  que acelera e ganha glow dourado perto do fim — CSS puro, leve,
+  --energy 0→1).
+- **Balão das conversas**: azul ROYAL com gradiente (#1D4ED8→#2563EB→
+  #3B82F6) — contraste melhor com letra branca (chat core + balão CRM).
+- **Alterar fontes** (menu do perfil, abaixo de Alterar Tema): cada
+  clique troca a combinação — Padrão | Serifada (Georgia/Cambria) |
+  Mista (títulos com serifa) — html[data-cevico-font] + CSS no
+  app.scss, salvo por aparelho (localStorage cevico_font_combo), fontes
+  do sistema (zero download).
+- Deploy deste pedaço: 1 migration aditiva nova (…20260716000001) →
+  backup antes. Reversão: imagem anterior no EasyPanel.
+
+## 41. 🏅 MARCA REAL + formulários "efeito rampa" + fontes v2 (16/07 — construído, no working tree) ⏳ AGUARDA TESTE VISUAL
+
+Sem migration nova. Rodada guiada pelo logo oficial + pesquisa de
+dopamine colors do Guilherme (sequência em blocos) + pesquisa de fontes.
+
+- **MARCA OFICIAL NO SISTEMA:** logo vetorizado em
+  `public/brand-assets/cevico-eye.svg` (olho na moldura, gradiente ouro,
+  fundo transparente — feito a partir do logo enviado; se vier o PNG
+  original, salvar ao lado). Lockup completo (olho + CEVICO em Cinzel
+  dourado + CUIDADOS OCULARES) montado em HTML/CSS. Cores do logo:
+  navy #1E2B5B (profundo #111C42) + ouro #D4AF37/#C9A24B/#F5E9B8.
+  Aplicado: selo de TODOS os cards do formulário, lockup grande na
+  abertura, medalhão flutuante no final, hero + selo das Páginas
+  (adeus "C" em CSS). Cinzel via Google Fonts só nas páginas públicas.
+- **FORMULÁRIOS — sequência dopamine em BLOCOS (pesquisa 16/07):**
+  Bloco 1 engajamento (laranja ↔ turquesa), Bloco 2 miolo/zona de risco
+  (magenta, verde lima, roxo elétrico, amarelo sol), Bloco 3 reta final
+  (coral, azul royal; formulários longos pousam em royal → navy suave).
+  buildSequence() adapta a qualquer nº de perguntas (13 perguntas caem
+  EXATAMENTE na tabela de 15 cards da pesquisa). Abertura/encerramento
+  = navy do logo + ouro. MICRO-TEXTOS: 3ª pergunta "Muito bem, vamos em
+  frente...", metade "Falta pouco! Suas respostas estão nos ajudando
+  muito. 🌟", última "Última pergunta!" (fonte menor, cor do tema).
+- **CARD DE MENSAGEM (💬, tipo 'message'):** card só de frase + texto de
+  apoio + COR (botões em linha no criador: Sequência/Marca/8 cores) —
+  um respiro/celebração no meio do formulário. Não conta na numeração
+  nem no dashboard de respostas; backend permite text/color.
+  Botão próprio "+ 💬 Card de mensagem" no criador.
+- **NÉVOA DE ÁTOMOS na barra de progresso:** canvas leve com partículas
+  na cor do card (com pitada de ouro) dançando ao redor da linha; fica
+  mais densa conforme avança; no envio ENERGIZA o cartão inteiro
+  (pulso dourado ~1,6s) e suaviza para o card final. Respeita
+  prefers-reduced-motion.
+- **FONTES v2 (menu do perfil):** seleção em PAINEL igual ao de temas
+  (ninja-keys, parent font_settings). Combinações novas da pesquisa —
+  Padrão (Inter) | Clássica Medicinal (Lora + Open Sans) | Científica
+  Moderna (Merriweather + IBM Plex Sans) | Editorial Elegante (Playfair
+  Display + Inter). Serifa SÓ em títulos (h1-h4) — nunca em inputs/chat/
+  números (regra de ouro da pesquisa). Google Fonts baixa só quando a
+  combinação é escolhida (cevicoFontHelper injeta o link); chaves
+  antigas serif/mixed migram sozinhas.
+- **Meu Painel:** card "Consultas agendadas" sem frase quebrada — duas
+  linhas curtas propositais ("registradas no período" + "⚡ N chegaram
+  e agendaram"), com truncate de guarda.
+- Testado no Docker (browser real): abertura com logo ✓, laranja→
+  turquesa→…→amarelo na última ✓, card de mensagem magenta ✓,
+  micro-textos nas 3 posições ✓, névoa densificando ✓, envio gravou
+  resposta SEM os cards de mensagem ✓, final ouro sobre navy escuro ✓,
+  hero das Páginas com logo real ✓, Vite compila os 6 arquivos ✓,
+  rubocop: só ofensas herdadas. Dados de teste: card de mensagem
+  "Você está indo muito bem! 🚀" inserido no formulário da conta 3;
+  meta_title da página de catarata corrigido p/ "Cuidados Oculares".
+- **DECIDIDO (16/07): CONSTRUTOR DE PÁGINAS v2 por SEÇÕES** — em vez de
+  markdown corrido: seções empilháveis (hero/texto/benefícios/FAQ/
+  depoimento/CTA/galeria), cada uma com efeito escolhível, + seção IA
+  (gera/repagina seção ou página inteira com a chave Anthropic).
+  Imagens: IA de imagem é serviço externo (decidir depois). Proposta
+  detalhada apresentada; aguardando aprovação do desenho p/ construir.
+
+## 42. 🏗️ CONSTRUTOR v2 (Páginas POR SEÇÕES + efeitos + agente Copywriter) + refinos do formulário + Agenda (16/07, tarde 2 — working tree) ⏳ AGUARDA TESTE VISUAL
+
+Migration aditiva **20260716000002** (cevico_pages.sections jsonb, default []).
+Páginas antigas (markdown) continuam funcionando — seções vencem quando existem.
+
+- **CONSTRUTOR DE PÁGINAS POR SEÇÕES (manual):** no editor de Páginas,
+  seções empilháveis em botões em linha — Texto, Benefícios (cards c/ selo
+  dourado), Passo a passo (números dourados), FAQ (sanfona), Depoimento,
+  👁️ EXPERIÊNCIA DE VISÃO (frase embaçada + slider dourado "como você
+  enxerga hoje → visão corrigida ✨" — conexão emocional com o paciente),
+  Faixa de destaque (navy+ouro) e CTA. Cada seção com EFEITO próprio em
+  botões em linha: Sem efeito | Movimentação (sobe em cascata) |
+  Desfocado→foco | Líquido (fundo ondulando) | EFEITO MIOPIA (a seção
+  nasce embaçada como o míope enxerga e o SCROLL "corrige" a visão, com
+  legenda) | EFEITO ASTIGMATISMO (visão dupla que se alinha) | Brilho
+  dourado. Renderer público novo em cevico_pages/show.html.erb
+  (IntersectionObserver + scroll-progress, prefers-reduced-motion ok).
+  Página demo local: /p/demo-construtor-v2 (conta 3).
+- **9º AGENTE: COPYWRITER DE PÁGINAS (key 'copywriter', Opus/high
+  recomendado):** Crm::CopywriterService — recebe briefing + etapa da
+  jornada + (opcional) INSIGHTS de um formulário (dores/desejos/objeções
+  reais) e escreve a página INTEIRA em seções (structured output:
+  title/subtitle/emoji/meta SEO/cta/sections c/ efeitos), com persona de
+  copywriter oftalmo (quebra objeção, preços oficiais só se pedido, nunca
+  inventa depoimento, nunca promete resultado). Botão "🪄 Gerar página com
+  IA" no editor (briefing + select "usar insights de: formulário X") —
+  preenche o editor, admin revisa e publica. Card completo no hub de
+  Agentes (Editar/Salvar/Publicar/interruptor, padrão OFF). POST
+  crm/pages/generate (admin). Modalidades futuras combinadas: carrossel,
+  roteiro de reels, descrição de post, anúncio (próxima rodada).
+- **CHAVE DO GEMINI (Google):** campo próprio em Integrações → Claude
+  (gemini_api_key, mascarada como a da Anthropic; gemini_key_set no
+  ai_json) — RESERVADA para gerar IMAGENS nas Páginas (plugar na próxima
+  rodada; Anthropic não gera imagem).
+- **FORMULÁRIOS (refinos do feedback):** SEM contador "Pergunta X de Y"
+  (a névoa já dá o progresso); micro-textos FIÉIS à pesquisa nas
+  fronteiras dos blocos (3ª "Muito bem, vamos em frente...", 4ª "Olha só,
+  você já começou muito bem! 🚀", 1ª pergunta do bloco 2 "Vamos para a
+  melhor parte? ✨", metade "Falta pouco! 🌟", 1ª do bloco 3 "Quase lá! ⏳",
+  última "Última pergunta! Prometo. 😉" — fronteiras caem na primeira
+  PERGUNTA do bloco, nunca em card de mensagem); NÉVOA mais forte e
+  GRUDADA NA PONTA conforme avança (enxame na ponta + rastro, alpha maior
+  na ponta); FINAL NOVO: a linha completa faz a VOLTA NA BORDA do card
+  (segmento dourado, 2 voltas via SVG pathLength) enquanto a névoa
+  energiza, e volta pro lugar; logo vira MOEDA GROSSA 3D girando e
+  brilhando infinitamente (4 camadas de espessura + drop-shadow pulsante);
+  COR ESCOLHÍVEL em QUALQUER card do criador (pills em todos os tipos,
+  override da sequência).
+- **AGENDA (usabilidade):** botão + FLUTUANTE redondo (canto inferior
+  direito, cor do tema) = caminho principal de agendar; clicar num DIA do
+  MÊS agora ABRE A SEMANA daquele dia; na SEMANA, a ALTURA do clique na
+  célula define a meia hora (metade de cima = HH:00, de baixo = HH:30).
+- **LOGO OFICIAL INTEGRADO (arquivos reais recebidos 16/07):** originais
+  salvos em public/brand-assets/ — cevico-logo.png (lockup 626×212, fundo
+  navy), cevico-eye.png (olho 282×268) e cevico-logo-dark-bg.png (fundo
+  removido via fuzz — SÓ p/ fundos escuros, tem halo leve). Navy EXATO
+  medido do arquivo: #152C61 (profundo #0C1B40, claro #23407F) — aplicado
+  em formulários (fundo, paletas navy/navySuave/final) e Páginas (hero).
+  Abertura do formulário = PLACA do logo original (PNG com cantos
+  arredondados); hero das Páginas = lockup transparente real;
+  cevico-eye.svg REDESENHADO fiel (moldura aberta nas laterais, olho
+  atravessa) p/ fundos claros (selo dos cards + moeda 3D).
+- Testado no Docker (browser real): página demo com todos os efeitos ✓
+  (miopia corrige no scroll, slider da visão ✓, benefícios focam, faixa
+  brilha, CTA dourado), formulário sem contador ✓ + frases nas fronteiras
+  certas ✓ + moeda girando com espessura visível ✓ + névoa na ponta ✓,
+  Vite compila os 8 arquivos ✓, rubocop: arquivos novos limpos (ofensas
+  restantes herdadas), migration aplicada ✓. Copywriter SEM teste de API
+  real local (sem chave no Docker) — testar em produção com o agente
+  ligado. Dados de teste: /p/demo-construtor-v2.
+
+## 43. ✍️ COPYWRITER MULTI-FORMATO + Construtor de Páginas (10º agente) + hub sanfona + Gemini nativo (16/07, noite — working tree) ⏳ AGUARDA TESTE VISUAL
+
+Sem migration nova. Feedback do teste visual do Guilherme + pedidos novos.
+
+- **HUB DE AGENTES EM SANFONA:** com 10 agentes, os cards agora ficam
+  RECOLHIDOS (faixa colorida + ícone + título + tags + descrição resumida
+  + interruptor); clicar no cabeçalho desce o agente completo com
+  animação leve (opacity+translate 0.28s, chevron girando). Interruptor
+  não abre/fecha (@click.stop).
+- **COPYWRITER MULTI-FORMATO (evoluiu):** modalidades página | carrossel
+  | roteiro de reels | post | anúncio; ESTRUTURAS validadas com "como
+  usar" no prompt — Kishōtenketsu, Storytelling, Jornada do Herói,
+  Notícia (pirâmide invertida), Perguntas e Respostas, Diálogo — em
+  botões em linha; campo "SUAS estruturas e referências" salvo na config
+  do agente (agents.copywriter.references, entra em TODO prompt).
+  **ESTÚDIO DE CONTEÚDO** dentro do card do agente: formato + estrutura +
+  briefing + insights de formulário → resultado em blocos (cards/cenas/
+  variações) + legenda + hashtags + "Copiar tudo". POST
+  crm/settings/copywriter_content (admin). Schemas extraídos p/
+  Crm::CopywriterSchemas (rubocop limpo).
+- **10º AGENTE: CONSTRUTOR DE PÁGINAS (key 'pagebuilder', Sonnet/médio):**
+  a dupla do Copywriter — recebe COPY PRONTA e MONTA a página (seções +
+  efeitos + SEO) SEM reescrever o conteúdo. No editor de Páginas o painel
+  de IA ganhou DOIS MODOS em botões em linha: "✍️ Escrever do zero
+  (Copywriter)" | "🧱 Montar de copy pronta (Construtor)". Card completo
+  no hub (OFF por padrão).
+- **TIME CRIA PÁGINAS:** qualquer pessoa do time abre o editor, usa a IA
+  e salva RASCUNHO (controller força: não-admin não muda status — não
+  publica nem despublica; excluir e slug seguem admin). Aviso no editor:
+  "rascunho salvo vai para o admin publicar".
+- **GEMINI NATIVO em Integrações:** card próprio (ícone gradiente Google)
+  + seção no modal com chave mascarada (Google AI Studio), Salvar e
+  TESTAR CONEXÃO real (GET /v1beta/models). Campo saiu de dentro do
+  Claude. POST crm/settings/test_gemini. Botão "Gerar imagem" nas seções
+  = próxima rodada.
+- **FORMULÁRIO (feedback):** bug visual da barra no 100% corrigido (o
+  glow era cortado pelo overflow do trilho — glow removido, energia é
+  toda da névoa); NUVEM maior: resíduos soltos ao redor e além da ponta
+  (18% strays), rastro mais visível, canvas mais alto (52px), 16+130
+  partículas — mantendo o volume na ponta; SELO = mini placa do logo
+  oficial (PNG real arredondado); MOEDA final = MEDALHA com o olho
+  oficial (cevico-eye.png, fundo navy + borda ouro).
+- **CAPTAIN REMOVIDO:** o balão flutuante do Copilot/Captain do Chatwoot
+  (canto inferior direito, brigava com o + da Agenda) saiu do Dashboard.
+- Testado no Docker: Vite compila os 6 arquivos ✓, rubocop 100% limpo nos
+  arquivos novos/tocados ✓, services carregam e rotas resolvem ✓
+  (copywriter_content + test_gemini), formulário no browser real:
+  barra 100% limpa + nuvem espalhada + medalha oficial ✓. Estúdio/
+  sanfona/Gemini aguardam teste visual logado (sem chave de IA local).
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
 **ONDE ESTAMOS (2026-07-15, manhã — TUDO NO AR ✅):** itens 14-36 EM
