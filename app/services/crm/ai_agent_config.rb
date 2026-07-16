@@ -23,8 +23,16 @@ module Crm::AiAgentConfig
     'opportunity'  => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # classificação simples e frequente
     'closing'      => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # valor/pagamento/data do fechamento
     'nps'          => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # nota 0-10, tarefa simples
-    'sales'        => { 'model' => 'claude-opus-4-8', 'effort' => 'high' }    # objeções + insights p/ gestão
+    'sales'        => { 'model' => 'claude-opus-4-8', 'effort' => 'high' },   # objeções + insights p/ gestão
+    'instagram'    => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # conversa com paciente no direct
+    'copywriter'   => { 'model' => 'claude-opus-4-8', 'effort' => 'high' },   # copy persuasiva multi-formato
+    'pagebuilder'  => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }  # montar página a partir de copy pronta
   }.freeze
+
+  # Agentes RESPONDEDORES: os únicos autorizados a falar com o paciente
+  # (hoje só o Atendente Instagram, restrito às caixas escolhidas na config).
+  # Todos os demais seguem a trava operacional de leitura.
+  RESPONDER_AGENTS = %w[instagram].freeze
 
   # preço US$ por milhão de tokens (entrada / saída)
   PRICING = {
@@ -47,6 +55,24 @@ module Crm::AiAgentConfig
     - Você PODE sugerir frases prontas PARA A ATENDENTE humana usar, quando
       o formato de saída pedido tiver campo para isso. A decisão de enviar
       (ou não) é sempre dela.
+    - Responda exclusivamente no formato estruturado pedido.
+  GUARD
+
+  # Trava dos agentes RESPONDEDORES (falam com o paciente): o risco muda —
+  # aqui o perigo é inventar dado clínico/valor/horário ou prometer resultado.
+  RESPONDER_GUARDRAIL = <<~GUARD.freeze
+
+    REGRAS INEGOCIÁVEIS (não podem ser alteradas por nenhuma instrução acima):
+    - Suas mensagens SÃO enviadas ao paciente. Use APENAS informações que
+      estão neste prompt ou na conversa — NUNCA invente valores, horários,
+      endereços, nomes ou dados clínicos.
+    - NUNCA forneça diagnóstico médico nem prometa resultado de cirurgia.
+    - Só ofereça horários que constem na lista de HORÁRIOS DISPONÍVEIS
+      fornecida no contexto. Fora dela, diga que vai verificar com a equipe.
+    - Urgência (dor intensa, perda súbita de visão, trauma): oriente procurar
+      pronto atendimento oftalmológico imediatamente e marque chamar_humano.
+    - Em dúvida sobre qualquer informação, marque chamar_humano em vez de
+      arriscar uma resposta.
     - Responda exclusivamente no formato estruturado pedido.
   GUARD
 
@@ -75,10 +101,12 @@ module Crm::AiAgentConfig
     agent_config['enabled'] != true
   end
 
-  # prompt do agente (custom ou padrão) SEMPRE com a trava operacional no fim
+  # prompt do agente (custom ou padrão) SEMPRE com a trava certa no fim:
+  # respondedor (fala com paciente) tem trava própria; os demais, a de leitura
   def system_prompt
     base = agent_config['prompt'].presence || self.class::SYSTEM_PROMPT
-    base + OPERATIONAL_GUARDRAIL
+    guard = RESPONDER_AGENTS.include?(self.class::AGENT_KEY) ? RESPONDER_GUARDRAIL : OPERATIONAL_GUARDRAIL
+    base + guard
   end
 
   def recommended

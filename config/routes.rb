@@ -41,6 +41,8 @@ Rails.application.routes.draw do
   # Formulário público CEVICO (paciente responde pelo link do WhatsApp, sem login)
   get 'forms/:slug/:token', to: 'cevico_forms#show', as: :cevico_form
   post 'forms/:slug/:token', to: 'cevico_forms#submit'
+  # Páginas públicas CEVICO (nutrição/procedimentos — preparadas p/ SEO)
+  get 'p/:slug', to: 'cevico_pages#show', as: :cevico_page
 
   get '/health', to: 'health#show'
   get '/api', to: 'api#index'
@@ -148,7 +150,9 @@ Rails.application.routes.draw do
             resources :message_automations, only: [:index, :create, :update, :destroy] do
               member { get :preview_eligible }
             end
-            resources :followup_bots, only: [:index, :create, :update, :destroy]
+            resources :followup_bots, only: [:index, :create, :update, :destroy] do
+              member { post :toggle } # chave de emergência — aberta às atendentes
+            end
             resource :traffic_report, only: [:show]
             resource :ads_report, only: [:show], controller: 'ads_reports' do
               post :backfill
@@ -157,6 +161,7 @@ Rails.application.routes.draw do
               post :analyze
                 post :sales_help
               post :move_stage
+              post :toggle_followup
             end
             resources :forms, only: [:index, :create, :update, :destroy] do
               member do
@@ -192,6 +197,9 @@ Rails.application.routes.draw do
               post :test_meta_ads
               post :update_ai
               post :test_ai
+              post :test_gemini
+              # Estúdio do Copywriter: conteúdo multi-formato (carrossel, reels...)
+              post :copywriter_content
               post :update_google_ads
               post :test_google_ads
               post :update_sheets
@@ -204,10 +212,22 @@ Rails.application.routes.draw do
               post :radar_scan
               get :ai_usage
             end
+            # Páginas públicas (ambiente Páginas)
+            resources :pages, only: [:index, :create, :update, :destroy], controller: 'pages' do
+              # agente copywriter escreve a página inteira em seções
+              collection { post :generate }
+            end
+            # Central do Paciente: espaço do paciente + anotações do médico
+            resources :patients, only: [:show], controller: 'patients' do
+              member { post :update_profile }
+              resources :clinical_notes, only: [:index, :create, :update, :destroy], controller: 'clinical_notes'
+            end
             resource :home, only: [:show], controller: 'home'
             resource :campaigns_dashboard, only: [:show], controller: 'campaigns_dashboards'
             resource :automations_dashboard, only: [:show], controller: 'automations_dashboards'
             resource :doctors_dashboard, only: [:show], controller: 'doctors_dashboards'
+            resource :agents_dashboard, only: [:show], controller: 'agents_dashboards'
+            resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
             resources :pipelines, only: [:index, :show, :create, :update, :destroy] do
               resources :stages, only: [:index, :create, :update, :destroy] do
                 collection { post :reorder }

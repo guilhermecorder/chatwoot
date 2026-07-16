@@ -68,6 +68,43 @@ const AI_EFFORTS = [
   { value: 'max', label: 'Máximo — melhor análise possível' },
 ];
 
+// ── Gemini (Google) — integração nativa: chave p/ gerar IMAGENS nas Páginas ──
+const gemini = ref({ api_key: '' });
+const isGeminiSaving = ref(false);
+const isGeminiTesting = ref(false);
+const geminiTestResult = ref(null);
+
+const saveGemini = async () => {
+  if (!gemini.value.api_key.trim()) {
+    useAlert('Cole a chave do Gemini para salvar.');
+    return;
+  }
+  isGeminiSaving.value = true;
+  try {
+    await CrmAPI.updateAi({ gemini_api_key: gemini.value.api_key.trim() });
+    gemini.value.api_key = '';
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Chave do Gemini salva!');
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao salvar a chave do Gemini.');
+  } finally {
+    isGeminiSaving.value = false;
+  }
+};
+
+const testGeminiConnection = async () => {
+  isGeminiTesting.value = true;
+  geminiTestResult.value = null;
+  try {
+    const { data } = await CrmAPI.testGemini();
+    geminiTestResult.value = data;
+  } catch {
+    geminiTestResult.value = { success: false, message: 'Erro ao testar a conexão.' };
+  } finally {
+    isGeminiTesting.value = false;
+  }
+};
+
 const saveAi = async () => {
   isAiSaving.value = true;
   try {
@@ -808,6 +845,64 @@ const fetchWorkflows = async () => {
         </div>
 
         <!-- ══ Google Sheets (planilha de cirurgias) ══ -->
+        <!-- ══ Gemini (Google) — imagens por IA nas Páginas ══ -->
+        <div v-if="showSection('gemini')" :class="props.only ? '' : 'border-t border-n-weak pt-5'">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #1A73E8, #9B72CB, #D96570)">
+              <span class="i-lucide-image-plus text-white text-sm" />
+            </span>
+            <p class="text-sm font-semibold text-n-slate-12">Gemini — IA do Google</p>
+            <span
+              class="text-[10px] px-2 py-0.5 rounded-full font-medium"
+              :class="aiStatus.gemini_key_set ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-10'"
+            >
+              ● {{ aiStatus.gemini_key_set ? 'Conectado' : 'Não configurado' }}
+            </span>
+          </div>
+          <p class="text-xs text-n-slate-10 mb-3">
+            Reservado para GERAR IMAGENS nas Páginas (heros, ilustrações de procedimentos).
+            A chave sai do <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" class="text-n-brand hover:underline">Google AI Studio</a> — gratuita para começar.
+          </p>
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+              Chave da API (Google AI Studio)
+              <span v-if="aiStatus.gemini_key_set" class="text-green-600 font-normal">(já configurada)</span>
+            </label>
+            <input
+              v-model="gemini.api_key"
+              type="password"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+              :placeholder="aiStatus.gemini_key_set ? 'Digite para substituir' : 'AIza...'"
+            />
+          </div>
+          <div class="flex items-center gap-2 mt-3 flex-wrap">
+            <button
+              class="h-9 px-4 rounded-lg bg-n-brand text-white text-sm font-medium hover:bg-n-brand/90 disabled:opacity-50"
+              :disabled="isGeminiSaving"
+              @click="saveGemini"
+            >
+              {{ isGeminiSaving ? 'Salvando…' : 'Salvar chave' }}
+            </button>
+            <button
+              class="h-9 px-4 rounded-lg border border-n-weak text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50"
+              :disabled="isGeminiTesting || !aiStatus.gemini_key_set"
+              @click="testGeminiConnection"
+            >
+              {{ isGeminiTesting ? 'Testando…' : 'Testar conexão' }}
+            </button>
+            <span
+              v-if="geminiTestResult"
+              class="text-xs font-medium"
+              :class="geminiTestResult.success ? 'text-green-600' : 'text-red-500'"
+            >
+              {{ geminiTestResult.message }}
+            </span>
+          </div>
+          <p class="text-[11px] text-n-slate-9 mt-2">
+            O botão "Gerar imagem" nas seções das Páginas entra na próxima rodada — a conexão já fica pronta.
+          </p>
+        </div>
+
         <div v-if="showSection('sheets')" :class="props.only ? '' : 'border-t border-n-weak pt-5'">
           <div class="flex items-center gap-3 mb-4">
             <div class="w-9 h-9 rounded-xl bg-[#0F9D58]/10 flex items-center justify-center flex-shrink-0">

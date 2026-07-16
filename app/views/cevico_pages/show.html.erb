@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <%# SEO: título e descrição próprios da página (Google mostra exatamente isso) %>
+  <title><%= @page.meta_title.presence || "#{@page.title} — CEVICO Cuidados Oculares" %></title>
+  <meta name="description" content="<%= @page.meta_description.presence || @page.subtitle %>">
+  <link rel="canonical" href="<%= request.original_url.split('?').first %>">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="<%= @page.meta_title.presence || @page.title %>">
+  <meta property="og:description" content="<%= @page.meta_description.presence || @page.subtitle %>">
+  <meta property="og:site_name" content="CEVICO — Cuidados Oculares">
+  <style>
+    /* Identidade CEVICO: azul marinho EXATO do logo (#152C61) + dourado */
+    :root { --navy: #152C61; --navy-deep: #0C1B40; --brand: #0F5FA6; --gold: #D4AF37; --gold-soft: #F4DE8E; --gold-dark: #8A6620; --gold-mid: #C9A24B; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #1a2333; background: #f6f8fb; line-height: 1.65;
+    }
+    .hero {
+      background: linear-gradient(160deg, var(--navy-deep) 0%, var(--navy) 55%, var(--brand) 100%);
+      color: #fff; padding: 56px 20px 72px; text-align: center; position: relative; overflow: hidden;
+    }
+    .hero::after {
+      content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4px;
+      background: linear-gradient(90deg, var(--gold), var(--gold-soft), var(--gold));
+    }
+    /* selo = o logo OFICIAL (versão transparente p/ fundo escuro) */
+    .selo { display: inline-block; margin-bottom: 20px; }
+    .selo img { height: 52px; display: block; }
+    .hero .emoji { font-size: 52px; display: block; margin-bottom: 14px; }
+    .hero h1 { font-size: clamp(26px, 5vw, 40px); line-height: 1.2; max-width: 760px; margin: 0 auto 12px; }
+    .hero p { font-size: 17px; color: rgba(255,255,255,.85); max-width: 640px; margin: 0 auto; }
+    .content {
+      max-width: 720px; margin: -36px auto 0; background: #fff; border-radius: 20px;
+      padding: 36px 28px; box-shadow: 0 18px 50px rgba(7,42,76,.14); position: relative;
+    }
+    .content h2 { color: var(--navy); font-size: 24px; margin: 28px 0 10px; }
+    .content h3 { color: var(--brand); font-size: 19px; margin: 22px 0 8px; }
+    .content p { margin: 12px 0; font-size: 16.5px; }
+    .content ul, .content ol { margin: 12px 0 12px 22px; font-size: 16.5px; }
+    .content li { margin: 6px 0; }
+    .content strong { color: var(--navy); }
+    .content blockquote {
+      border-left: 4px solid var(--gold); background: #fdf9ec; padding: 12px 16px;
+      border-radius: 0 10px 10px 0; margin: 16px 0; color: #5a4a12;
+    }
+    .content a { color: var(--brand); }
+    .content img { max-width: 100%; border-radius: 12px; }
+    .cta-wrap { text-align: center; margin: 36px 0 8px; }
+    .cta {
+      display: inline-block; background: linear-gradient(135deg, #B8860B, var(--gold));
+      color: #fff; text-decoration: none; font-weight: 800; font-size: 17px;
+      padding: 16px 34px; border-radius: 14px; box-shadow: 0 10px 26px rgba(212,175,55,.4);
+      transition: transform .15s ease;
+    }
+    .cta:hover { transform: scale(1.04); }
+    footer { text-align: center; padding: 40px 16px 48px; color: #7a8aa0; font-size: 13px; }
+    footer .foot-selo { color: var(--navy); font-weight: 700; letter-spacing: 1.5px; margin-bottom: 4px; }
+
+    /* ══ CONSTRUTOR v2: seções empilhadas com efeitos ══ */
+    .sections { max-width: 760px; margin: -36px auto 0; padding: 0 16px; position: relative; }
+    .sec {
+      background: #fff; border-radius: 20px; padding: 30px 26px; margin-bottom: 22px;
+      box-shadow: 0 14px 40px rgba(7,42,76,.12); position: relative;
+    }
+    .sec h2 { color: var(--navy); font-size: 23px; margin-bottom: 12px; line-height: 1.25; }
+    .sec p { margin: 10px 0; font-size: 16.5px; }
+    .sec-inner { position: relative; }
+
+    /* hero-seção = faixa de destaque navy + ouro no meio da página */
+    .sec-hero { background: linear-gradient(160deg, var(--navy-deep), var(--navy)); color: #fff; text-align: center; }
+    .sec-hero h2 { color: #fff; font-size: 26px; }
+    .sec-hero p { color: rgba(255,255,255,.85); }
+    .sec-hero::after {
+      content: ''; position: absolute; left: 24px; right: 24px; bottom: 14px; height: 3px;
+      border-radius: 2px; background: linear-gradient(90deg, var(--gold-dark), var(--gold-soft), var(--gold));
+    }
+
+    /* benefícios: cards com selo dourado */
+    .benef { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 14px; }
+    .benef .b {
+      border: 1.5px solid #e6ebf3; border-radius: 14px; padding: 14px;
+      background: linear-gradient(180deg, #fff, #fafbfd);
+    }
+    .benef .b .ic {
+      width: 26px; height: 26px; border-radius: 50%; margin-bottom: 8px;
+      background: linear-gradient(135deg, #B8860B, var(--gold)); color: #fff;
+      display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800;
+    }
+    .benef .b b { color: var(--navy); font-size: 15px; display: block; margin-bottom: 4px; }
+    .benef .b span { font-size: 14px; color: #4a5a72; }
+
+    /* passo a passo: números dourados */
+    .passos { margin-top: 14px; }
+    .passos .p { display: flex; gap: 12px; margin-bottom: 14px; }
+    .passos .n {
+      flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%;
+      background: linear-gradient(135deg, #B8860B, var(--gold)); color: #fff;
+      display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px;
+    }
+    .passos b { color: var(--navy); display: block; font-size: 15.5px; }
+    .passos span { font-size: 14.5px; color: #4a5a72; }
+
+    /* FAQ: sanfona */
+    .faq details { border-bottom: 1px solid #e6ebf3; padding: 10px 0; }
+    .faq summary {
+      cursor: pointer; font-weight: 700; color: var(--navy); font-size: 15.5px;
+      list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    }
+    .faq summary::after { content: '+'; color: var(--gold); font-size: 20px; font-weight: 800; }
+    .faq details[open] summary::after { content: '−'; }
+    .faq details p { font-size: 14.5px; color: #4a5a72; margin-top: 8px; }
+
+    /* depoimento */
+    .sec-depoimento { background: #fdf9ec; border: 1.5px solid rgba(212,175,55,.35); }
+    .sec-depoimento .q { font-size: 40px; color: var(--gold); line-height: 1; font-family: Georgia, serif; }
+    .sec-depoimento p { font-size: 17px; font-style: italic; color: #4a3f14; }
+    .sec-depoimento .autor { font-weight: 700; color: var(--navy); font-style: normal; font-size: 14px; margin-top: 10px; }
+
+    /* EXPERIÊNCIA DE VISÃO: como o paciente enxerga antes → depois */
+    .visao-demo {
+      background: linear-gradient(160deg, var(--navy-deep), var(--navy));
+      border-radius: 16px; padding: 28px 20px 20px; text-align: center; margin-top: 14px;
+    }
+    .visao-scene {
+      color: #fff; font-size: clamp(20px, 4vw, 30px); font-weight: 800; letter-spacing: .5px;
+      padding: 18px 8px 26px;
+      filter: blur(calc((1 - var(--clear, 0)) * 7px));
+      text-shadow: calc((1 - var(--clear, 0)) * 5px) 0 0 rgba(255,255,255,.28),
+                   calc((1 - var(--clear, 0)) * -5px) 0 0 rgba(255,255,255,.2);
+      transition: filter .15s linear;
+    }
+    .visao-scene small { display: block; font-size: .55em; font-weight: 500; color: var(--gold-soft); margin-top: 8px; }
+    .visao-demo input[type=range] { width: 88%; accent-color: var(--gold); }
+    .visao-labels { display: flex; justify-content: space-between; width: 88%; margin: 6px auto 0; font-size: 11px; color: rgba(255,255,255,.75); }
+
+    /* ── EFEITOS por seção ── */
+    /* foco: nasce desfocada e ganha nitidez ao entrar na tela */
+    .fx-foco .sec-inner { filter: blur(9px); opacity: .5; transition: filter 1.1s ease, opacity 1.1s ease; }
+    .fx-foco.in-view .sec-inner { filter: blur(0); opacity: 1; }
+
+    /* movimento: conteúdo sobe suave, em cascata */
+    .fx-movimento .sec-inner > * { opacity: 0; transform: translateY(30px); transition: opacity .7s ease, transform .7s ease; }
+    .fx-movimento.in-view .sec-inner > * { opacity: 1; transform: none; }
+    .fx-movimento.in-view .sec-inner > *:nth-child(2) { transition-delay: .12s; }
+    .fx-movimento.in-view .sec-inner > *:nth-child(3) { transition-delay: .24s; }
+    .fx-movimento.in-view .sec-inner > *:nth-child(4) { transition-delay: .36s; }
+
+    /* miopia: embaça como o paciente enxerga; o scroll "corrige" a visão */
+    .fx-miopia .sec-inner { filter: blur(calc((1 - var(--clear, 0)) * 8px)); }
+    .fx-miopia .fx-legenda, .fx-astigmatismo .fx-legenda {
+      font-size: 12px; font-weight: 700; color: var(--brand);
+      margin-bottom: 10px; opacity: calc(1 - var(--clear, 0) * .85);
+    }
+
+    /* astigmatismo: visão dupla/fantasma que se alinha com o scroll */
+    .fx-astigmatismo .sec-inner {
+      filter: blur(calc((1 - var(--clear, 0)) * 2px));
+      text-shadow: calc((1 - var(--clear, 0)) * 6px) 0 0 rgba(30,43,91,.28),
+                   calc((1 - var(--clear, 0)) * -6px) 0 0 rgba(30,43,91,.18);
+    }
+
+    /* líquido: fundo vivo, ondulando devagar atrás do conteúdo */
+    .fx-liquido { overflow: hidden; }
+    .fx-liquido::before {
+      content: ''; position: absolute; inset: -40%;
+      background:
+        radial-gradient(closest-side, rgba(15,95,166,.14), transparent 65%),
+        radial-gradient(closest-side, rgba(212,175,55,.16), transparent 60%);
+      background-size: 60% 60%, 50% 50%;
+      background-repeat: no-repeat;
+      background-position: 20% 30%, 75% 65%;
+      animation: liquid 11s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+    @keyframes liquid {
+      0% { background-position: 20% 30%, 75% 65%; transform: rotate(0deg) scale(1); }
+      50% { background-position: 60% 55%, 35% 30%; transform: rotate(4deg) scale(1.06); }
+      100% { background-position: 30% 70%, 70% 25%; transform: rotate(-3deg) scale(1.02); }
+    }
+
+    /* brilho: pulso dourado premium */
+    .fx-brilho { animation: secGlow 2.8s ease-in-out infinite; }
+    @keyframes secGlow {
+      0%, 100% { box-shadow: 0 14px 40px rgba(7,42,76,.12); }
+      50% { box-shadow: 0 14px 40px rgba(7,42,76,.12), 0 0 34px 4px rgba(212,175,55,.4); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .fx-foco .sec-inner, .fx-movimento .sec-inner > *, .fx-miopia .sec-inner,
+      .fx-astigmatismo .sec-inner, .visao-scene { filter: none !important; opacity: 1 !important; transform: none !important; text-shadow: none !important; }
+      .fx-liquido::before, .fx-brilho { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <div class="selo">
+      <img src="/brand-assets/cevico-logo-dark-bg.png" alt="CEVICO — Cuidados Oculares">
+    </div>
+    <% if @page.emoji.present? %><span class="emoji"><%= @page.emoji %></span><% end %>
+    <h1><%= @page.title %></h1>
+    <% if @page.subtitle.present? %><p><%= @page.subtitle %></p><% end %>
+  </div>
+
+  <% if @page.sections.present? %>
+    <%# ══ Construtor v2: seções com efeitos ══ %>
+    <div class="sections">
+      <% @page.sections.each_with_index do |sec, si| %>
+        <% type = sec['type']; effect = sec['effect'].presence || 'nenhum' %>
+        <% paragraphs = sec['text'].to_s.split(/\n{2,}|\n/).map(&:strip).reject(&:blank?) %>
+        <section class="sec sec-<%= type %> fx-<%= effect %>" data-fx="<%= effect %>">
+          <% if %w[miopia astigmatismo].include?(effect) %>
+            <p class="fx-legenda">
+              <%= effect == 'miopia' ? '👓 É assim que a miopia embaça — role e sinta a nitidez da correção…' : '👓 É assim que o astigmatismo duplica — role e veja tudo se alinhar…' %>
+            </p>
+          <% end %>
+          <div class="sec-inner">
+            <% case type %>
+            <% when 'hero' %>
+              <h2><%= sec['title'] %></h2>
+              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+            <% when 'beneficios' %>
+              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+              <div class="benef">
+                <% Array(sec['items']).each do |item| %>
+                  <div class="b"><span class="ic">✓</span><b><%= item['title'] %></b><span><%= item['text'] %></span></div>
+                <% end %>
+              </div>
+            <% when 'passos' %>
+              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+              <div class="passos">
+                <% Array(sec['items']).each_with_index do |item, i| %>
+                  <div class="p"><span class="n"><%= i + 1 %></span><div><b><%= item['title'] %></b><span><%= item['text'] %></span></div></div>
+                <% end %>
+              </div>
+            <% when 'faq' %>
+              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
+              <div class="faq">
+                <% Array(sec['items']).each do |item| %>
+                  <details><summary><%= item['title'] %></summary><p><%= item['text'] %></p></details>
+                <% end %>
+              </div>
+            <% when 'depoimento' %>
+              <div class="q">“</div>
+              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+              <% if sec['title'].present? %><p class="autor">— <%= sec['title'] %></p><% end %>
+            <% when 'visao' %>
+              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+              <div class="visao-demo">
+                <div class="visao-scene" id="visao-<%= si %>">
+                  Enxergar cada detalhe da vida
+                  <small>é assim que fica a sua visão depois da correção</small>
+                </div>
+                <input type="range" min="0" max="100" value="0" oninput="document.getElementById('visao-<%= si %>').style.setProperty('--clear', this.value / 100)">
+                <div class="visao-labels"><span>como você enxerga hoje</span><span>visão corrigida ✨</span></div>
+              </div>
+            <% when 'cta' %>
+              <% if sec['title'].present? %><h2 style="text-align:center"><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each do |p| %><p style="text-align:center"><%= p %></p><% end %>
+              <div class="cta-wrap" style="margin-top:18px">
+                <a class="cta" href="<%= @page.cta_url.presence || '#' %>" rel="noopener">
+                  <%= @page.cta_label.presence || 'Falar com a CEVICO no WhatsApp' %>
+                </a>
+              </div>
+            <% else %>
+              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+            <% end %>
+          </div>
+        </section>
+      <% end %>
+      <% unless @page.sections.any? { |s| s['type'] == 'cta' } %>
+        <% if @page.cta_url.present? %>
+          <section class="sec"><div class="cta-wrap" style="margin:6px 0">
+            <a class="cta" href="<%= @page.cta_url %>" rel="noopener"><%= @page.cta_label.presence || 'Falar com a CEVICO no WhatsApp' %></a>
+          </div></section>
+        <% end %>
+      <% end %>
+    </div>
+  <% else %>
+    <%# páginas antigas: corpo markdown de sempre %>
+    <article class="content">
+      <%= raw @page.body_html %>
+      <% if @page.cta_url.present? %>
+        <div class="cta-wrap">
+          <a class="cta" href="<%= @page.cta_url %>" rel="noopener">
+            <%= @page.cta_label.presence || 'Falar com a CEVICO no WhatsApp' %>
+          </a>
+        </div>
+      <% end %>
+    </article>
+  <% end %>
+
+  <footer>
+    <div class="foot-selo">CEVICO — CUIDADOS OCULARES</div>
+    Conteúdo informativo — não substitui a avaliação médica.
+  </footer>
+
+  <script>
+    // efeitos de entrada (foco/movimento) + efeitos guiados pelo scroll
+    // (miopia/astigmatismo: a "correção" acontece conforme a seção sobe)
+    (function () {
+      var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduced) return;
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting) e.target.classList.add('in-view'); });
+      }, { threshold: 0.3 });
+      document.querySelectorAll('.fx-foco, .fx-movimento').forEach(function (el) { io.observe(el); });
+
+      var progressive = Array.prototype.slice.call(document.querySelectorAll('.fx-miopia, .fx-astigmatismo'));
+      if (!progressive.length) return;
+      function update() {
+        var vh = window.innerHeight;
+        progressive.forEach(function (el) {
+          var r = el.getBoundingClientRect();
+          // 0 quando a seção aparece embaixo → 1 quando o topo dela passa do meio
+          var t = (vh - r.top) / (vh * 0.85);
+          el.style.setProperty('--clear', Math.max(0, Math.min(1, t)).toFixed(3));
+        });
+      }
+      window.addEventListener('scroll', update, { passive: true });
+      window.addEventListener('resize', update);
+      update();
+    })();
+  </script>
+</body>
+</html>

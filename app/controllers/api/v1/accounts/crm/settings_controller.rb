@@ -117,6 +117,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
     cfg = crm_settings.ai_config || {}
     cfg['api_key'] = params[:api_key] if params[:api_key].present?
+    # Gemini (Google): reservada para geração de IMAGENS das Páginas
+    cfg['gemini_api_key'] = params[:gemini_api_key] if params[:gemini_api_key].present?
     cfg['model']   = params[:model]   if params.key?(:model)
     cfg['effort']  = params[:effort]  if params.key?(:effort)
     # agentes internos: ligar/pausar, prompt, modelo e esforço por agente
@@ -136,6 +138,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 closing: agent_fields,
                                 nps: agent_fields,
                                 sales: agent_fields,
+                                copywriter: agent_fields + [:references],
+                                pagebuilder: agent_fields,
+                                instagram: agent_fields + [{ inbox_ids: [] }],
                                 opportunity: agent_fields + [:wait_minutes, :lookback_hours,
                                                              { stage_ids: [],
                                                                watchers: %i[stage_id user_id lookback_hours] }])
@@ -171,6 +176,49 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: { success: false, message: "Modelo #{cfg['model']} indisponível para esta chave." }
   rescue StandardError => e
     render json: { success: false, message: "Erro de conexão: #{e.message}" }
+  end
+
+  # testa a chave do Gemini (Google) de verdade — lista os modelos da conta
+  def test_gemini
+    cfg = crm_settings.ai_config || {}
+    key = cfg['gemini_api_key']
+    return render json: { success: false, message: 'Configure a chave do Gemini primeiro.' } if key.blank?
+
+    response = HTTParty.get(
+      'https://generativelanguage.googleapis.com/v1beta/models',
+      query: { key: key, pageSize: 1 },
+      timeout: 20
+    )
+    if response.code == 200
+      render json: { success: true, message: 'Gemini conectado! Chave válida. ✓' }
+    elsif [401, 403].include?(response.code)
+      render json: { success: false, message: 'Chave do Gemini inválida ou sem permissão.' }
+    else
+      render json: { success: false, message: "Gemini respondeu com erro #{response.code}." }
+    end
+  rescue StandardError => e
+    render json: { success: false, message: "Erro de conexão: #{e.message}" }
+  end
+
+  # Estúdio do Copywriter: gera conteúdo multi-formato (carrossel, roteiro
+  # de reels, post, anúncio) — o resultado é copiado pela equipe, nada é
+  # publicado sozinho
+  def copywriter_content
+    unless Current.account_user.administrator?
+      return render json: { error: 'Apenas administradores usam o Estúdio por enquanto.' }, status: :forbidden
+    end
+
+    form = params[:form_id].present? ? Current.account.crm_forms.find_by(id: params[:form_id]) : nil
+    result = Crm::CopywriterService.new(
+      account: Current.account,
+      briefing: params[:briefing].to_s,
+      modality: params[:modality].to_s,
+      structure: params[:structure].presence || 'auto',
+      form: form
+    ).call
+    return render json: { error: result[:error] }, status: :unprocessable_entity if result[:error]
+
+    render json: result
   end
 
   def test_google_ads
@@ -247,6 +295,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                                :surgery_done_stage_id, :surgery_missed_stage_id)
                                        .to_h.transform_values { |v| v.presence&.to_i }
     end
+    # Central do Paciente: quem são os MÉDICOS no sistema (editam anotações
+    # clínicas) e se a equipe pode visualizar as anotações (LGPD: fechado
+    # por padrão)
+    if params.key?(:clinical_access)
+      access = params.require(:clinical_access).permit(:team_view, doctor_user_ids: []).to_h
+      cfg['clinical_access'] = {
+        'doctor_user_ids' => Array(access['doctor_user_ids']).map(&:to_i),
+        'team_view' => ActiveModel::Type::Boolean.new.cast(access['team_view']) == true
+      }
+    end
     crm_settings.update!(agenda_config: cfg)
     render json: {
       agenda_windows: cfg['windows'] || [],
@@ -257,7 +315,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       surgery_locations: cfg['surgery_locations'] || [],
       surgery_windows: cfg['surgery_windows'] || [],
       agenda_theme: cfg['theme'],
-      panel_assignments: cfg['panel_assignments'] || {}
+      panel_assignments: cfg['panel_assignments'] || {},
+      clinical_access: cfg['clinical_access'] || {}
     }
   end
 
@@ -448,6 +507,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
       agenda_theme: (s.agenda_config || {})['theme'],
       panel_assignments: (s.agenda_config || {})['panel_assignments'] || {},
+      clinical_access: (s.agenda_config || {})['clinical_access'] || {},
       agenda_backfill_last_run: (s.agenda_config || {})['backfill_last_run'],
       scheduler_log: Array((s.agenda_config || {})['scheduler_log']).first(30),
       scheduler_stage_ids: Crm::Automation.joins(stage: :pipeline)
@@ -483,10 +543,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'opportunity' => Crm::OpportunityRadarService::SYSTEM_PROMPT,
       'closing' => Crm::SurgeryClosingService::SYSTEM_PROMPT,
       'nps' => Crm::NpsService::SYSTEM_PROMPT,
-      'sales' => Crm::SalesCoachService::SYSTEM_PROMPT
+      'sales' => Crm::SalesCoachService::SYSTEM_PROMPT,
+      'instagram' => Crm::InstagramAgentService::SYSTEM_PROMPT,
+      'copywriter' => Crm::CopywriterService::SYSTEM_PROMPT,
+      'pagebuilder' => Crm::PageBuilderService::SYSTEM_PROMPT
     }
     {
       api_key_set: cfg['api_key'].present?,
+      gemini_key_set: cfg['gemini_api_key'].present?,
       model: cfg['model'].presence || Crm::AiAgentConfig::DEFAULT_MODEL,
       effort: cfg['effort'].presence || 'high',
       configured: cfg['api_key'].present?,
@@ -494,17 +558,20 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       opportunity_alerts_count: visible_alerts_count(cfg),
       opportunity_last_run: cfg.dig('opportunity_state', 'last_run'),
       sales_insights: cfg.dig('agents', 'sales', 'insights'),
+      instagram_events: Array(cfg.dig('instagram_state', 'events')).first(30),
       agents: default_prompts.to_h do |key, default_prompt|
         recommended = Crm::AiAgentConfig::RECOMMENDED[key] || {}
         [key, {
           # opt-in: sem enabled true gravado, o agente está DESLIGADO
           enabled: agents.dig(key, 'enabled') == true,
           prompt: agents.dig(key, 'prompt').presence,
+          references: agents.dig(key, 'references').presence,
           model: agents.dig(key, 'model').presence,
           effort: agents.dig(key, 'effort').presence,
           recommended_model: recommended['model'],
           recommended_effort: recommended['effort'],
           stage_ids: Array(agents.dig(key, 'stage_ids')).map(&:to_i),
+          inbox_ids: Array(agents.dig(key, 'inbox_ids')).map(&:to_i),
           wait_minutes: agents.dig(key, 'wait_minutes').presence&.to_i,
           lookback_hours: agents.dig(key, 'lookback_hours').presence&.to_i,
           watchers: Array(agents.dig(key, 'watchers')).map do |w|

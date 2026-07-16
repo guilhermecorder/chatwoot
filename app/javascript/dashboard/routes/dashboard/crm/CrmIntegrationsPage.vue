@@ -53,6 +53,14 @@ const cevicoCards = computed(() => [
     enabled: !!settings.value?.ai?.configured,
   },
   {
+    key: 'gemini',
+    name: 'Gemini — imagens (Google)',
+    icon: 'i-lucide-image-plus',
+    color: '#9B72CB',
+    description: 'IA do Google para gerar imagens nas Páginas (heros e ilustrações de procedimentos).',
+    enabled: !!settings.value?.ai?.gemini_key_set,
+  },
+  {
     key: 'sheets',
     name: 'Google Sheets',
     icon: 'i-lucide-sheet',

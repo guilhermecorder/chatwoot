@@ -144,6 +144,19 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // TRAVA individual do follow-up: pausa/reativa as cutucadas p/ este paciente
+  toggleFollowupPause(conversationId, paused) {
+    return axios.post(`${this.url}/conversation_summary/toggle_followup`, {
+      conversation_id: conversationId,
+      paused,
+    });
+  }
+
+  // chave de emergência: pausa/religa o robô inteiro (aberta às atendentes)
+  toggleFollowupBot(botId) {
+    return axios.post(`${this.url}/followup_bots/${botId}/toggle`);
+  }
+
   // Consultor Comercial: gerar insights das conversas fechadas (gestão)
   generateSalesInsights() {
     return axios.post(`${this.url}/settings/sales_insights`);
@@ -276,6 +289,16 @@ class CrmAPI extends ApiClient {
   // dashboard dos médicos (conversão consulta→cirurgia, NPS, clínicas)
   getDoctorsDashboard(params = {}) {
     return axios.get(`${this.url}/doctors_dashboard`, { params });
+  }
+
+  // dashboard dos agentes (equipe humana: atendimento + resposta ao Radar)
+  getAgentsDashboard(params = {}) {
+    return axios.get(`${this.url}/agents_dashboard`, { params });
+  }
+
+  // dashboard da agenda (comparecimento, modalidades, médicos, cirurgias)
+  getAgendaDashboard(params = {}) {
+    return axios.get(`${this.url}/agenda_dashboard`, { params });
   }
 
   // mover e etiquetar cards em lote (coluna/valor/caixa/etiqueta)
@@ -427,6 +450,68 @@ class CrmAPI extends ApiClient {
   // ── Dashboard ─────────────────────────────────────────────────────
   getDashboard(pipelineId, params = {}) {
     return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard`, { params });
+  }
+
+  // ── Páginas CEVICO ────────────────────────────────────────────────
+  getPages() {
+    return axios.get(`${this.url}/pages`);
+  }
+
+  createPage(data) {
+    return axios.post(`${this.url}/pages`, data);
+  }
+
+  updatePage(id, data) {
+    return axios.put(`${this.url}/pages/${id}`, data);
+  }
+
+  deletePage(id) {
+    return axios.delete(`${this.url}/pages/${id}`);
+  }
+
+  // agente copywriter escreve a página inteira em seções
+  generatePage(data) {
+    return axios.post(`${this.url}/pages/generate`, data);
+  }
+
+  // Estúdio do Copywriter: carrossel, roteiro de reels, post, anúncio
+  generateCopyContent(data) {
+    return axios.post(`${this.url}/settings/copywriter_content`, data);
+  }
+
+  testGemini() {
+    return axios.post(`${this.url}/settings/test_gemini`);
+  }
+
+  // ── Central do Paciente ───────────────────────────────────────────
+  getPatient(contactId) {
+    return axios.get(`${this.url}/patients/${contactId}`);
+  }
+
+  // sexo/nascimento do paciente (muda o tema dopamine da página)
+  updatePatientProfile(contactId, profile) {
+    return axios.post(`${this.url}/patients/${contactId}/update_profile`, profile);
+  }
+
+  getClinicalNotes(contactId) {
+    return axios.get(`${this.url}/patients/${contactId}/clinical_notes`);
+  }
+
+  // fotos vão junto → FormData (multipart)
+  createClinicalNote(contactId, formData) {
+    return axios.post(`${this.url}/patients/${contactId}/clinical_notes`, formData);
+  }
+
+  updateClinicalNote(contactId, noteId, formData) {
+    return axios.put(`${this.url}/patients/${contactId}/clinical_notes/${noteId}`, formData);
+  }
+
+  deleteClinicalNote(contactId, noteId) {
+    return axios.delete(`${this.url}/patients/${contactId}/clinical_notes/${noteId}`);
+  }
+
+  updateClinicalAccess(clinicalAccess) {
+    return axios.post(`${this.url}/settings/update_agenda`, { clinical_access: clinicalAccess });
   }
 
   // ── Automations ───────────────────────────────────────────────────

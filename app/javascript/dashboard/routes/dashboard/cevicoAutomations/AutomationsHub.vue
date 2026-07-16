@@ -18,7 +18,7 @@ const settings = useMapGetter('crm/getSettings');
 const accountLabels = useMapGetter('labels/getLabels');
 const teamAgents = useMapGetter('agents/getAgents');
 
-const TABS = ['robos', 'agentes', 'programacao', 'resultados', 'tratamento'];
+const TABS = ['robos', 'regras', 'agentes', 'programacao', 'resultados', 'tratamento'];
 const activeTab = ref(TABS.includes(route.query.tab) ? route.query.tab : 'robos');
 
 // os itens do menu lateral apontam para a MESMA rota com ?tab= diferente —
@@ -41,6 +41,9 @@ const aiAgents = ref({
   closing: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
   nps: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
   sales: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
+  instagram: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', inbox_ids: [] },
+  copywriter: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', references: '' },
+  pagebuilder: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
 });
 
 const LOOKBACK_OPTIONS = [
@@ -133,6 +136,28 @@ const saveAgentStages = async agent => {
 
 // 💼 insights comerciais do Consultor Comercial (gestão)
 const salesInsights = () => settings.value?.ai?.sales_insights || null;
+// registro de atividade do Atendente Instagram (respondeu/agendou/pausou)
+const instagramEvents = () => settings.value?.ai?.instagram_events || [];
+const INSTAGRAM_EVENT_LABELS = {
+  respondeu: '💬 respondeu',
+  agendou: '📅 agendou e pausou',
+  horario_invalido: '⚠️ horário não validou (tarefa criada)',
+  teto_diario: '🛑 teto diário — pausado',
+  erro: '❌ erro',
+};
+// painel de situação do Atendente Instagram (números dos últimos registros)
+const instagramStats = () => {
+  const evs = instagramEvents();
+  return {
+    replied: evs.filter(e => e.type === 'respondeu').length,
+    scheduled: evs.filter(e => e.type === 'agendou').length,
+    errors: evs.filter(e => e.type === 'erro' || e.type === 'horario_invalido').length,
+  };
+};
+const instagramInboxNames = agent =>
+  (agent.inbox_ids || [])
+    .map(id => inboxes.value.find(i => i.id === id)?.name)
+    .filter(Boolean);
 const isGeneratingInsights = ref(false);
 const generateSalesInsights = async () => {
   if (isGeneratingInsights.value) return;
@@ -188,6 +213,82 @@ const runBackfill = async () => {
 
 // ── Editar | Salvar (rascunho) | Publicar por agente ──
 // Os cards abrem TRAVADOS (leitura). Editar destrava; Salvar guarda um
+// ✍️ ESTÚDIO DO COPYWRITER: conteúdo multi-formato com estrutura escolhida
+const STUDIO_MODALITIES = [
+  { key: 'carrossel', label: 'Carrossel' },
+  { key: 'reels', label: 'Roteiro de Reels' },
+  { key: 'post', label: 'Post / Descrição' },
+  { key: 'anuncio', label: 'Anúncio' },
+];
+const STUDIO_STRUCTURES = [
+  { key: 'auto', label: 'Automática' },
+  { key: 'kishotenketsu', label: 'Kishōtenketsu' },
+  { key: 'storytelling', label: 'Storytelling' },
+  { key: 'jornada_heroi', label: 'Jornada do Herói' },
+  { key: 'noticia', label: 'Notícia' },
+  { key: 'perguntas_respostas', label: 'Perguntas e Respostas' },
+  { key: 'dialogo', label: 'Diálogo' },
+];
+const studio = ref({ modality: 'carrossel', structure: 'auto', briefing: '', form_id: '', generating: false, result: null });
+const studioForms = ref([]);
+const loadStudioForms = async () => {
+  try {
+    const { data } = await CrmAPI.getForms();
+    studioForms.value = (data || []).filter(f => f.has_insight);
+  } catch {
+    studioForms.value = [];
+  }
+};
+const generateStudio = async () => {
+  if (!studio.value.briefing.trim()) {
+    useAlert('Escreva o briefing do conteúdo.');
+    return;
+  }
+  studio.value.generating = true;
+  studio.value.result = null;
+  try {
+    const { data } = await CrmAPI.generateCopyContent({
+      briefing: studio.value.briefing,
+      modality: studio.value.modality,
+      structure: studio.value.structure,
+      form_id: studio.value.form_id || undefined,
+    });
+    studio.value.result = data;
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Não consegui gerar o conteúdo.');
+  } finally {
+    studio.value.generating = false;
+  }
+};
+const copyStudioResult = async () => {
+  const r = studio.value.result;
+  if (!r) return;
+  const parts = [r.titulo, '', ...(r.blocos || []).map(b => `${b.rotulo}\n${b.texto}`)];
+  if (r.legenda) parts.push('', `LEGENDA:\n${r.legenda}`);
+  if (r.hashtags) parts.push('', r.hashtags);
+  await navigator.clipboard.writeText(parts.join('\n'));
+  useAlert('Conteúdo copiado! 📋');
+};
+const savingRefs = ref(false);
+const saveCopyReferences = async () => {
+  savingRefs.value = true;
+  try {
+    await CrmAPI.updateAi({ agents: { copywriter: { references: aiAgents.value.copywriter.references || '' } } });
+    useAlert('Referências salvas — o Copywriter segue esse estilo em tudo.');
+  } catch {
+    useAlert('Erro ao salvar as referências.');
+  } finally {
+    savingRefs.value = false;
+  }
+};
+
+// SANFONA dos agentes: cabeçalho sempre visível, corpo desce ao clicar
+// (são muitos agentes — assim dá para navegar pela página com controle)
+const expandedAgents = ref({});
+const toggleAgentExpand = key => {
+  expandedAgents.value = { ...expandedAgents.value, [key]: !expandedAgents.value[key] };
+};
+
 // RASCUNHO que NÃO muda o agente no ar; Publicar é o que passa a valer.
 const editingAgent = ref({});
 const savingAgent = ref('');
@@ -201,6 +302,7 @@ const snapshotAgent = key => {
     snap.watchers = JSON.parse(JSON.stringify(a.watchers || []));
     snap.wait_minutes = a.wait_minutes;
   }
+  if (key === 'instagram') snap.inbox_ids = [...(a.inbox_ids || [])];
   return snap;
 };
 
@@ -220,6 +322,7 @@ const discardEdit = key => {
       a.watchers = JSON.parse(JSON.stringify(snap.watchers || []));
       a.wait_minutes = snap.wait_minutes;
     }
+    if (key === 'instagram') a.inbox_ids = [...(snap.inbox_ids || [])];
   }
   editingAgent.value = { ...editingAgent.value, [key]: false };
 };
@@ -238,7 +341,19 @@ const packAgentFields = key => {
       }));
     fields.wait_minutes = Number(a.wait_minutes) || 10;
   }
+  if (key === 'instagram') {
+    fields.inbox_ids = (a.inbox_ids || []).map(Number);
+  }
   return fields;
+};
+
+// caixas do Atendente Instagram: pílulas de seleção no card
+const toggleInstagramInbox = id => {
+  const list = aiAgents.value.instagram.inbox_ids || [];
+  const idx = list.indexOf(id);
+  if (idx === -1) list.push(id);
+  else list.splice(idx, 1);
+  aiAgents.value.instagram.inbox_ids = [...list];
 };
 
 // SALVAR = rascunho: guarda no banco mas o agente continua usando a
@@ -389,6 +504,49 @@ const AGENT_META = {
     ],
     suggestion: 'Leitura fina de vendas — Opus no esforço alto vale o custo.',
   },
+  instagram: {
+    title: 'Atendente Instagram',
+    icon: 'i-lucide-instagram',
+    gradient: 'linear-gradient(135deg, #C2185B, #7C3AED)',
+    color: '#C2185B',
+    tag: 'Atendimento ao vivo',
+    description: 'O ÚNICO agente que FALA com o paciente: responde o direct das caixas escolhidas seguindo o script CEVICO (sondagem → autoridade → orçamento → agendamento). Agenda SOZINHO na Agenda interna oferecendo só horários livres, captura o telefone e avisa que a confirmação oficial vai pelo WhatsApp. PAUSA quando um humano responde na conversa; humano manda 👍 para reativar; a confirmação de agendamento (😊) pausa sozinha.',
+    triggers: [
+      { icon: 'i-lucide-instagram', label: 'Mensagem recebida nas caixas escolhidas abaixo (espera ~12s e junta mensagens picadas)' },
+      { icon: 'i-lucide-calendar-check', label: 'Agenda direto na Agenda interna (só horários livres reais)' },
+      { icon: 'i-lucide-message-circle', label: 'Confirmações oficiais e lembretes seguem pelo WhatsApp' },
+      { icon: 'i-lucide-pause', label: 'Humano respondeu = pausa · 👍 = reativa · urgência = chama humano' },
+    ],
+    suggestion: 'Conversa ao vivo — Sonnet no esforço médio equilibra qualidade e custo.',
+  },
+  copywriter: {
+    title: 'Copywriter',
+    icon: 'i-lucide-pen-line',
+    gradient: 'linear-gradient(135deg, #7C3AED, #D4AF37)',
+    color: '#7C3AED',
+    tag: 'Marketing',
+    description: 'Escreve a copy da casa em VÁRIOS FORMATOS: páginas, carrosséis, roteiros de reels, posts e anúncios — com estruturas validadas (kishōtenketsu, storytelling, jornada do herói, notícia, P&R, diálogo) e as SUAS referências de estilo. Pode usar os INSIGHTS reais dos formulários (dores/desejos/objeções do público).',
+    triggers: [
+      { icon: 'i-lucide-sparkles', label: 'Botão "Gerar página com IA" no editor de Páginas' },
+      { icon: 'i-lucide-pen-line', label: 'Estúdio de conteúdo aqui embaixo (carrossel, reels, post, anúncio)' },
+      { icon: 'i-lucide-clipboard-list', label: 'Opcional: insights de um formulário alimentam a copy' },
+      { icon: 'i-lucide-shield', label: 'Nada vai ao ar sozinho — você revisa e publica' },
+    ],
+    suggestion: 'Copy é fino — Opus no esforço alto escreve os melhores textos.',
+  },
+  pagebuilder: {
+    title: 'Construtor de Páginas',
+    icon: 'i-lucide-layout-template',
+    gradient: 'linear-gradient(135deg, #0F5FA6, #D4AF37)',
+    color: '#0F5FA6',
+    tag: 'Marketing',
+    description: 'Recebe uma COPY PRONTA (do Copywriter, sua ou do time) e MONTA a página no editor: distribui o texto em seções, escolhe os efeitos visuais e gera o SEO — sem reescrever o conteúdo. É a dupla do Copywriter: um escreve, o outro constrói.',
+    triggers: [
+      { icon: 'i-lucide-layout-template', label: 'Modo "Montar de copy pronta" no editor de Páginas' },
+      { icon: 'i-lucide-shield', label: 'Publicar continua sendo decisão humana (admin)' },
+    ],
+    suggestion: 'Montagem estruturada — Sonnet no esforço médio resolve bem.',
+  },
   nps: {
     title: 'Agente de NPS',
     icon: 'i-lucide-smile',
@@ -495,6 +653,12 @@ const loadAgents = async () => {
     closing: load('closing'),
     nps: load('nps'),
     sales: load('sales'),
+    copywriter: { ...load('copywriter'), references: a.copywriter?.references || '' },
+    pagebuilder: load('pagebuilder'),
+    instagram: {
+      ...load('instagram'),
+      inbox_ids: [...(a.instagram?.inbox_ids || [])],
+    },
     opportunity: {
       ...load('opportunity'),
       watchers: oppDraft?.watchers?.length
@@ -681,6 +845,32 @@ const goToCampaign = () => {
   router.push({ name: 'crm_campaigns', params: { accountId: accountId.value } });
 };
 
+// ── Regras da caixa de entrada (Automation nativa do Chatwoot) ──
+// A aba mostra e liga/desliga as regras; criar/editar continua no editor
+// completo nativo (condições e ações complexas ficam lá).
+const nativeRules = useMapGetter('automations/getAutomations');
+const loadingNativeRules = ref(false);
+const loadNativeRules = async () => {
+  loadingNativeRules.value = true;
+  await store.dispatch('automations/get');
+  loadingNativeRules.value = false;
+};
+const toggleNativeRule = async rule => {
+  try {
+    await store.dispatch('automations/update', { ...rule, active: !rule.active });
+  } catch {
+    useAlert('Erro ao atualizar a regra');
+  }
+};
+const openNativeEditor = () =>
+  router.push({ name: 'automation_list', params: { accountId: accountId.value } });
+const RULE_EVENT_LABELS = {
+  conversation_created: 'Conversa criada',
+  conversation_updated: 'Conversa atualizada',
+  conversation_opened: 'Conversa reaberta',
+  message_created: 'Mensagem criada',
+};
+
 // ── Robôs de follow-up ──
 const bots = ref([]);
 const loadingBots = ref(true);
@@ -732,6 +922,7 @@ const REASON_LABELS = {
   cadencia_completa: 'já recebeu todas as cutucadas',
   etiquetas: 'barrado pelo filtro de etiquetas',
   momento_perdido: 'cutucada vencida há horas — descartada (anti-rajada)',
+  pausado_para_paciente: 'follow-up pausado para o paciente (trava da atendente)',
   erro: 'erro ao enviar',
 };
 const reasonLine = run =>
@@ -764,11 +955,13 @@ const delayLabel = step => {
 };
 
 onMounted(async () => {
+  loadStudioForms();
   if (!inboxes.value.length) store.dispatch('inboxes/get');
   if (!accountLabels.value.length) store.dispatch('labels/get');
   if (!teamAgents.value.length) store.dispatch('agents/get');
   loadBots();
   loadReguas(); // aparecem no painel panorâmico (Modo Programação)
+  loadNativeRules(); // aba "Regras da caixa de entrada"
   await loadAgents();
   aiConfigured.value = !!settings.value?.ai?.configured;
   loadColumnAutomations();
@@ -790,6 +983,11 @@ onMounted(async () => {
           :class="activeTab === 'robos' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           @click="activeTab = 'robos'"
         >🤖 Robôs de follow-up</button>
+        <button
+          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
+          :class="activeTab === 'regras' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          @click="activeTab = 'regras'"
+        >🔁 Regras da caixa de entrada</button>
         <button
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
           :class="activeTab === 'agentes' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
@@ -910,6 +1108,60 @@ onMounted(async () => {
         </div>
       </div>
       <!-- ══ AGENTES DE IA ══ -->
+      <!-- ══ REGRAS DA CAIXA DE ENTRADA (Automation nativa) ══ -->
+      <div v-else-if="activeTab === 'regras'" class="max-w-3xl">
+        <div class="flex items-start justify-between gap-3 mb-4 flex-wrap">
+          <p class="text-sm text-n-slate-11 flex-1 min-w-[240px]">
+            Regras que rodam nas conversas da caixa de entrada: quando uma conversa é criada ou uma
+            mensagem chega, aplicam etiqueta, atribuem time/atendente, mudam prioridade... Ligue e
+            desligue por aqui; criar e editar é no editor completo.
+          </p>
+          <button
+            class="px-3 py-1.5 text-sm font-medium rounded-lg bg-n-brand text-white hover:opacity-90 transition-opacity flex items-center gap-1.5"
+            @click="openNativeEditor"
+          >
+            <span class="i-lucide-external-link text-xs" />
+            Abrir editor completo
+          </button>
+        </div>
+
+        <div v-if="loadingNativeRules" class="flex justify-center py-10"><Spinner /></div>
+        <p v-else-if="!nativeRules.length" class="text-sm text-n-slate-10 border border-dashed border-n-weak rounded-xl p-6 text-center">
+          Nenhuma regra criada ainda — use o editor completo para criar a primeira.
+        </p>
+        <div v-else class="space-y-2">
+          <div
+            v-for="rule in nativeRules"
+            :key="rule.id"
+            class="border border-n-weak rounded-xl p-3 flex items-center gap-3 bg-n-solid-2"
+          >
+            <span
+              class="w-2 h-2 rounded-full flex-shrink-0"
+              :class="rule.active ? 'bg-green-500' : 'bg-n-slate-7'"
+            />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-n-slate-12 truncate">{{ rule.name }}</p>
+              <p class="text-[11px] text-n-slate-10 truncate">
+                {{ RULE_EVENT_LABELS[rule.event_name] || rule.event_name }}
+                <template v-if="rule.description"> · {{ rule.description }}</template>
+              </p>
+            </div>
+            <span
+              class="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
+              :class="rule.active ? 'bg-green-500/15 text-green-600 dark:text-green-400' : 'bg-n-alpha-1 text-n-slate-10'"
+            >
+              {{ rule.active ? 'Ativa' : 'Desligada' }}
+            </span>
+            <button
+              class="text-xs font-medium px-2.5 py-1 rounded-lg border border-n-weak hover:bg-n-alpha-1 transition-colors flex-shrink-0"
+              @click="toggleNativeRule(rule)"
+            >
+              {{ rule.active ? 'Desligar' : 'Ligar' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div v-else-if="activeTab === 'agentes'" class="max-w-3xl space-y-5">
         <div v-if="!aiConfigured" class="rounded-xl border-2 p-4 text-sm text-n-slate-11" style="border-color: rgba(212,160,23,0.4); background: rgba(212,160,23,0.08)">
           ⚠️ A Claude ainda não está conectada — configure a chave da API em
@@ -979,8 +1231,8 @@ onMounted(async () => {
           <div class="h-1.5 w-full" :style="{ background: AGENT_META[key].gradient }" />
 
           <div class="p-5">
-            <!-- Cabeçalho -->
-            <div class="flex items-start gap-3 mb-3">
+            <!-- Cabeçalho (clique = desce/recolhe o agente completo) -->
+            <div class="flex items-start gap-3 cursor-pointer select-none" :class="expandedAgents[key] ? 'mb-3' : ''" @click="toggleAgentExpand(key)">
               <span class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 shadow" :style="{ background: AGENT_META[key].gradient }">
                 <span :class="AGENT_META[key].icon" class="text-white text-lg" />
               </span>
@@ -1007,10 +1259,10 @@ onMounted(async () => {
                     📝 Rascunho não publicado
                   </span>
                 </div>
-                <p class="text-xs text-n-slate-10 mt-1">{{ AGENT_META[key].description }}</p>
+                <p class="text-xs text-n-slate-10 mt-1" :class="expandedAgents[key] ? '' : 'line-clamp-2'">{{ AGENT_META[key].description }}</p>
               </div>
               <!-- INTERRUPTOR definitivo: grava na hora, sem "Salvar" -->
-              <div class="flex flex-col items-end gap-1 flex-shrink-0">
+              <div class="flex flex-col items-end gap-1 flex-shrink-0" @click.stop>
                 <button
                   class="relative w-14 h-7 rounded-full transition-colors disabled:opacity-50"
                   :class="agent.enabled ? 'bg-green-500' : 'bg-n-alpha-3'"
@@ -1033,7 +1285,14 @@ onMounted(async () => {
                 </button>
                 <span class="text-[9px] text-n-slate-9">salva na hora</span>
               </div>
+              <span
+                class="i-lucide-chevron-down text-n-slate-9 text-lg mt-2 flex-shrink-0 transition-transform duration-200"
+                :class="expandedAgents[key] ? 'rotate-180' : ''"
+              />
             </div>
+
+            <!-- corpo completo do agente: desce com animação leve -->
+            <div v-if="expandedAgents[key]" class="cevico-agent-body">
 
             <!-- Onde se aplica -->
             <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5">Onde se aplica</p>
@@ -1091,6 +1350,72 @@ onMounted(async () => {
                 <span class="i-lucide-lightbulb text-xs" />
                 {{ AGENT_META[key].suggestion }}
               </span>
+            </div>
+
+            <!-- Config específica do Atendente Instagram (respondedor) -->
+            <div v-if="key === 'instagram'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <!-- 🎛 Painel de situação: a configuração dele, num relance -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div class="rounded-lg px-3 py-2" :class="agent.enabled ? 'bg-green-500/10' : 'bg-n-alpha-1'">
+                  <p class="text-[10px] text-n-slate-10">Situação</p>
+                  <p class="text-sm font-bold" :class="agent.enabled ? 'text-green-600 dark:text-green-400' : 'text-n-slate-11'">
+                    {{ agent.enabled ? '● Atendendo' : '○ Desligado' }}
+                  </p>
+                </div>
+                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
+                  <p class="text-[10px] text-n-slate-10">Caixas em que atende</p>
+                  <p class="text-sm font-bold text-n-slate-12 truncate" :title="instagramInboxNames(agent).join(', ')">
+                    {{ instagramInboxNames(agent).length ? instagramInboxNames(agent).join(', ') : 'nenhuma' }}
+                  </p>
+                </div>
+                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
+                  <p class="text-[10px] text-n-slate-10">Respostas <span class="text-n-slate-9">(últ. registros)</span></p>
+                  <p class="text-sm font-bold text-n-slate-12">💬 {{ instagramStats().replied }}</p>
+                </div>
+                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
+                  <p class="text-[10px] text-n-slate-10">Agendamentos / avisos</p>
+                  <p class="text-sm font-bold text-n-slate-12">
+                    📅 {{ instagramStats().scheduled }}
+                    <span v-if="instagramStats().errors" class="text-amber-500">· ⚠️ {{ instagramStats().errors }}</span>
+                  </p>
+                </div>
+              </div>
+              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #C2185B, #7C3AED)">
+                ⚠️ Este agente FALA COM O PACIENTE nas caixas abaixo. Ele agenda só na Agenda interna,
+                nunca inventa valores/horários, e as confirmações oficiais vão pelo WhatsApp.
+                Se um humano responder na conversa, ele PAUSA na hora — 👍 do atendimento reativa.
+              </div>
+              <div>
+                <p class="text-xs font-medium text-n-slate-11 mb-1.5">Caixas de entrada em que ele atende <span class="text-n-slate-9 font-normal">(nenhuma marcada = desligado na prática)</span></p>
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    v-for="ib in inboxes"
+                    :key="ib.id"
+                    class="text-xs px-2.5 py-1 rounded-full border transition-colors disabled:opacity-60"
+                    :class="(agent.inbox_ids || []).includes(ib.id)
+                      ? 'text-white border-transparent'
+                      : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
+                    :style="(agent.inbox_ids || []).includes(ib.id) ? { background: 'linear-gradient(135deg, #C2185B, #7C3AED)' } : {}"
+                    :disabled="!editingAgent[key]"
+                    @click="toggleInstagramInbox(ib.id)"
+                  >
+                    {{ ib.name }}
+                  </button>
+                  <p v-if="!inboxes.length" class="text-[11px] text-n-slate-10">Nenhuma caixa de entrada na conta ainda.</p>
+                </div>
+                <p class="text-[10px] text-n-slate-9 mt-1">Escolha a caixa do Instagram quando ela for conectada (Configurações → Caixas de Entrada). Salve e publique para valer.</p>
+              </div>
+              <!-- 📒 Registro de atividade -->
+              <div v-if="instagramEvents().length">
+                <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">📒 Registro de atividade</p>
+                <div class="max-h-40 overflow-y-auto space-y-1">
+                  <p v-for="(ev, i) in instagramEvents()" :key="i" class="text-[11px] text-n-slate-11">
+                    <span class="text-n-slate-9">{{ new Date(ev.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }}</span>
+                    · #{{ ev.conversation_id }} {{ ev.contact }} — {{ INSTAGRAM_EVENT_LABELS[ev.type] || ev.type }}
+                    <span v-if="ev.note" class="text-n-slate-9">({{ ev.note }})</span>
+                  </p>
+                </div>
+              </div>
             </div>
 
             <!-- Config específica do Radar de Oportunidades (perene) -->
@@ -1229,6 +1554,104 @@ onMounted(async () => {
                 <pre class="text-[11px] text-n-slate-11 whitespace-pre-wrap font-sans leading-relaxed">{{ salesInsights().text }}</pre>
               </div>
               <p v-else-if="salesInsights()?.error" class="text-[11px] text-amber-600">⚠️ {{ salesInsights().error }}</p>
+            </div>
+
+            <!-- ✍️ ESTÚDIO DO COPYWRITER: referências + conteúdo multi-formato -->
+            <div v-if="key === 'copywriter'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
+                <span class="i-lucide-pen-line text-xs" style="color: #7C3AED" /> Estúdio de conteúdo
+                <span class="font-normal text-n-slate-9">— escolha o formato e a estrutura; o resultado é seu para copiar</span>
+              </p>
+
+              <!-- referências da casa: o agente segue esse estilo em TUDO -->
+              <div>
+                <p class="text-[11px] font-medium text-n-slate-11 mb-1">
+                  Suas estruturas e referências de copywriting
+                  <span class="text-n-slate-9 font-normal">(cole exemplos que você gosta, frases da casa, regras de estilo — vale para páginas e para o Estúdio)</span>
+                </p>
+                <textarea
+                  v-model="aiAgents.copywriter.references"
+                  rows="3"
+                  class="w-full border border-n-weak rounded-lg px-2.5 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
+                  placeholder="Ex: sempre abrir com pergunta que toca a dor · nunca usar 'agende já' · exemplo de copy aprovada: ..."
+                />
+                <button
+                  class="text-[11px] font-semibold text-white px-3 py-1.5 rounded-lg mt-1 disabled:opacity-50"
+                  style="background: linear-gradient(135deg, #7C3AED, #5B21B6)"
+                  :disabled="savingRefs"
+                  @click="saveCopyReferences"
+                >
+                  {{ savingRefs ? 'Salvando…' : 'Salvar referências' }}
+                </button>
+              </div>
+
+              <!-- formato: botões em linha -->
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-[11px] text-n-slate-10">Formato:</span>
+                <button
+                  v-for="m in STUDIO_MODALITIES"
+                  :key="m.key"
+                  class="px-2.5 h-7 rounded-full border text-[11px] font-medium transition-colors"
+                  :class="studio.modality === m.key ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                  :style="studio.modality === m.key ? { background: AGENT_META.copywriter.gradient } : {}"
+                  @click="studio.modality = m.key"
+                >
+                  {{ m.label }}
+                </button>
+                <span class="text-[10px] text-n-slate-9">· páginas são no editor de Páginas</span>
+              </div>
+
+              <!-- estrutura narrativa: botões em linha -->
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-[11px] text-n-slate-10">Estrutura:</span>
+                <button
+                  v-for="st in STUDIO_STRUCTURES"
+                  :key="st.key"
+                  class="px-2.5 h-7 rounded-full border text-[11px] font-medium transition-colors"
+                  :class="studio.structure === st.key ? 'border-n-brand bg-n-brand/10 text-n-brand' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                  @click="studio.structure = st.key"
+                >
+                  {{ st.label }}
+                </button>
+              </div>
+
+              <textarea
+                v-model="studio.briefing"
+                rows="3"
+                class="w-full border border-n-weak rounded-lg px-2.5 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
+                placeholder="Briefing: assunto, objetivo e o que não pode faltar. Ex: carrossel sobre os 5 mitos da cirurgia de catarata, tom acolhedor, CTA para avaliação."
+              />
+              <div class="flex items-center gap-2 flex-wrap">
+                <select v-model="studio.form_id" class="h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-12 max-w-[240px]">
+                  <option value="">Sem insights de formulário</option>
+                  <option v-for="f in studioForms" :key="f.id" :value="f.id">Usar insights de: {{ f.name }}</option>
+                </select>
+                <button
+                  class="ml-auto px-3 h-8 rounded-lg text-[11px] font-bold text-white flex items-center gap-1.5 disabled:opacity-60"
+                  :style="{ background: AGENT_META.copywriter.gradient }"
+                  :disabled="studio.generating"
+                  @click="generateStudio"
+                >
+                  <span :class="studio.generating ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-sparkles'" class="text-xs" />
+                  {{ studio.generating ? 'Escrevendo…' : 'Gerar conteúdo' }}
+                </button>
+              </div>
+
+              <!-- resultado -->
+              <div v-if="studio.result" class="rounded-lg bg-n-alpha-1 p-3 space-y-2">
+                <div class="flex items-center gap-2">
+                  <p class="text-xs font-bold text-n-slate-12 flex-1">{{ studio.result.titulo }}</p>
+                  <button class="text-[11px] font-medium text-n-brand hover:underline flex items-center gap-1" @click="copyStudioResult">
+                    <span class="i-lucide-copy text-[10px]" /> Copiar tudo
+                  </button>
+                </div>
+                <div v-for="(b, bi) in studio.result.blocos" :key="bi" class="rounded-md bg-n-solid-2 border border-n-weak px-2.5 py-2">
+                  <p class="text-[10px] font-bold text-n-slate-9 uppercase tracking-wide">{{ b.rotulo }}</p>
+                  <p class="text-[11px] text-n-slate-11 whitespace-pre-wrap leading-relaxed">{{ b.texto }}</p>
+                </div>
+                <p v-if="studio.result.legenda" class="text-[11px] text-n-slate-11 whitespace-pre-wrap"><b>Legenda:</b> {{ studio.result.legenda }}</p>
+                <p v-if="studio.result.hashtags" class="text-[11px] text-n-slate-10">{{ studio.result.hashtags }}</p>
+              </div>
             </div>
 
             <!-- Colunas de atuação (Analista / Monitor de Fechamento / NPS) -->
@@ -1417,6 +1840,7 @@ onMounted(async () => {
               <span class="text-[10px] text-n-slate-9 ml-auto">
                 Salvar = guarda sem aplicar · Publicar = passa a valer · interruptor liga/desliga na hora
               </span>
+            </div>
             </div>
           </div>
         </div>
@@ -1841,3 +2265,9 @@ onMounted(async () => {
 
   </div>
 </template>
+
+<style scoped>
+/* sanfona dos agentes: aparição suave e leve */
+.cevico-agent-body { animation: agentReveal 0.28s ease; }
+@keyframes agentReveal { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+</style>
