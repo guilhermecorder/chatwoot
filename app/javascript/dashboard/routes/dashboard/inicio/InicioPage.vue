@@ -180,7 +180,7 @@ const panelTiles = computed(() => {
   // agendamento (padrão — Vaneide)
   return [
     { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
-    { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_created ?? 0, sub: 'chegaram à coluna Agendamento', grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
+    { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
     { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, chip: conversionVerdict.value, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
     { label: 'Cirurgias fechadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, sub: 'coluna Cirurgia Agendada (CRM)', grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
   ];
@@ -308,11 +308,10 @@ const surgUsageLast7 = computed(() => {
   from.setDate(from.getDate() - 7);
   return scanSurgery({ from, days: 7, pastOnly: true });
 });
-// mostra o bloco de cirurgias nos painéis que conduzem/fecham/operam
-const showSurgeryHealth = computed(() =>
-  ['medico', 'conducao', 'cirurgia', 'gestor'].includes(selectedPanel.value) &&
-  resolveSurgeryWindows(crmSettings.value).length > 0
-);
+// bloco de cirurgias SEMPRE lado a lado com o de consultas (pedido
+// 2026-07-15) — meta do mês e próxima cirurgia valem mesmo sem janelas
+// da sala configuradas (as barras mostram "—" até configurar)
+const showSurgeryHealth = computed(() => true);
 
 // 🎯 META DO MÊS: 100 cirurgias — barra de progresso no retângulo
 const SURGERY_GOAL = 100;
@@ -445,7 +444,9 @@ onUnmounted(() => {
                 <span class="i-lucide-radar text-white text-base" />
               </span>
               <h2 class="text-sm font-bold text-n-slate-12">
-                {{ radarAlerts.length }} paciente(s) quente(s) sem atendimento
+                {{ radarAlerts.length === 1
+                  ? '1 paciente quente sem atendimento'
+                  : `${radarAlerts.length} pacientes quentes sem atendimento` }}
               </h2>
               <span v-if="radarLastRun" class="text-[11px] text-n-slate-9 ml-auto">auditoria às {{ radarLastRun }}</span>
             </div>
@@ -594,7 +595,11 @@ onUnmounted(() => {
             <div class="flex items-center gap-1.5 mb-1 text-white/80"><span :class="tile.icon" class="text-sm" /><p class="text-xs font-medium">{{ tile.label }}</p></div>
             <p class="text-3xl font-bold">{{ tile.value }}</p>
             <span v-if="tile.chip" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ tile.chip.label }}</span>
-            <p v-else-if="tile.sub" class="text-[10px] text-white/70">{{ tile.sub }}</p>
+            <template v-else-if="tile.sub">
+              <!-- linhas curtas propositais: nada de frase quebrando no meio -->
+              <p class="text-[10px] text-white/70 truncate">{{ tile.sub }}</p>
+              <p v-if="tile.sub2" class="text-[10px] text-white/80 truncate">{{ tile.sub2 }}</p>
+            </template>
           </div>
         </div>
 
@@ -619,7 +624,15 @@ onUnmounted(() => {
               </span>
               <h2 class="text-sm font-bold text-n-slate-12">Saúde da Agenda</h2>
             </div>
-            <button class="text-xs font-medium text-n-brand hover:underline" @click="go('agenda_board')">Ver agenda →</button>
+            <!-- atalho pulsante para a Agenda (cor do ambiente) -->
+            <button
+              class="cevico-pulse-btn px-4 h-9 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-md"
+              style="background: linear-gradient(135deg, #5B21B6, #7C3AED)"
+              @click="go('agenda_board')"
+            >
+              <span class="i-lucide-calendar-days text-sm" />
+              Ir para agenda →
+            </button>
           </div>
 
           <!-- DOIS retângulos simétricos: Consultas × Cirurgias -->
@@ -822,3 +835,24 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* botão de atalho pulsante (Ir para agenda) — respiração suave */
+.cevico-pulse-btn {
+  animation: cevico-pulse 2.2s ease-in-out infinite;
+  transition: transform 0.15s ease;
+}
+.cevico-pulse-btn:hover {
+  transform: scale(1.05);
+  animation-play-state: paused;
+}
+@keyframes cevico-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 9px rgba(124, 58, 237, 0);
+  }
+}
+</style>

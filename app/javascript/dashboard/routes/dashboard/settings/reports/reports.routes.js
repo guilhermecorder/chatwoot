@@ -28,6 +28,8 @@ import CrmDashboardReport from './CrmDashboardReport.vue';
 import WhatsappHealth from './WhatsappHealth.vue';
 import TrafficFunnel from './TrafficFunnel.vue';
 import DoctorsDashboard from './DoctorsDashboard.vue';
+import AgentsDashboard from './AgentsDashboard.vue';
+import AgendaDashboard from './AgendaDashboard.vue';
 import AdsReport from './AdsReport.vue';
 
 const meta = {
@@ -213,6 +215,22 @@ export default {
             permissions: ['administrator', 'report_manage'],
           },
           component: DoctorsDashboard,
+        },
+        {
+          path: 'agents_dashboard',
+          name: 'agents_dashboard_reports',
+          meta: {
+            permissions: ['administrator', 'report_manage'],
+          },
+          component: AgentsDashboard,
+        },
+        {
+          path: 'agenda_dashboard',
+          name: 'agenda_dashboard_reports',
+          meta: {
+            permissions: ['administrator', 'report_manage'],
+          },
+          component: AgendaDashboard,
         },
         {
           path: 'ads',

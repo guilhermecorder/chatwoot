@@ -20,7 +20,10 @@ const { variant, orientation, inReplyTo, shouldGroupWithNext } =
 const { t } = useI18n();
 
 const varaintBaseMap = {
-  [MESSAGE_VARIANTS.AGENT]: 'bg-n-solid-blue text-n-slate-12',
+  // CEVICO: balão enviado em azul ROYAL com gradiente (contraste perfeito
+  // com a letra branca)
+  [MESSAGE_VARIANTS.AGENT]:
+    'bg-gradient-to-br from-[#1D4ED8] via-[#2563EB] to-[#3B82F6] text-white [&_.prose-bubble]:text-white [&_a]:text-white [&_a]:underline',
   [MESSAGE_VARIANTS.PRIVATE]:
     'bg-n-solid-amber text-n-amber-12 [&_.prosemirror-mention-node]:font-semibold',
   [MESSAGE_VARIANTS.USER]: 'bg-n-slate-4 text-n-slate-12',
@@ -121,7 +124,9 @@ const replyToPreview = computed(() => {
         variant === MESSAGE_VARIANTS.EMAIL ? 'px-3 pb-3' : '',
         variant === MESSAGE_VARIANTS.PRIVATE
           ? 'text-n-amber-12/50'
-          : 'text-n-slate-11',
+          : variant === MESSAGE_VARIANTS.AGENT
+            ? 'text-white/80'
+            : 'text-n-slate-11',
       ]"
       class="mt-2"
     />
