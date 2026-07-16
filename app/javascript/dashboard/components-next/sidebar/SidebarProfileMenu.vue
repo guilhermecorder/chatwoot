@@ -86,6 +86,16 @@ const menuItems = computed(() => {
       },
     },
     {
+      // CEVICO: feedback de bugs — vira card no board do Guilherme
+      show: true,
+      showOnCustomBrandedInstance: true,
+      label: 'Reportar problema 🐞',
+      icon: 'i-lucide-bug',
+      click: () => {
+        window.dispatchEvent(new CustomEvent('cevico:report-bug'));
+      },
+    },
+    {
       // CEVICO: abre o painel de combinações (mesmo padrão do menu de temas)
       show: true,
       showOnCustomBrandedInstance: true,

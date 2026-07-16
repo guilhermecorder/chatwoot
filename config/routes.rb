@@ -212,6 +212,8 @@ Rails.application.routes.draw do
               post :radar_scan
               get :ai_usage
             end
+            # Feedback de bugs do time (vira card 🐞 no board do admin)
+            resources :bug_reports, only: [:create], controller: 'bug_reports'
             # Páginas públicas (ambiente Páginas)
             resources :pages, only: [:index, :create, :update, :destroy], controller: 'pages' do
               # agente copywriter escreve a página inteira em seções
@@ -222,7 +224,12 @@ Rails.application.routes.draw do
               member { post :update_profile }
               resources :clinical_notes, only: [:index, :create, :update, :destroy], controller: 'clinical_notes'
             end
-            resource :home, only: [:show], controller: 'home'
+            resource :home, only: [:show], controller: 'home' do
+              # popup de prioridade máxima do Radar (checagem leve) e
+              # pausa manual do radar pela atendente (com registro)
+              get :radar_ping
+              post :toggle_radar
+            end
             resource :campaigns_dashboard, only: [:show], controller: 'campaigns_dashboards'
             resource :automations_dashboard, only: [:show], controller: 'automations_dashboards'
             resource :doctors_dashboard, only: [:show], controller: 'doctors_dashboards'

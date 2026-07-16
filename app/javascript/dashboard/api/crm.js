@@ -206,6 +206,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { panel_assignments: panelAssignments });
   }
 
+  // metas mensais por painel — os cards mudam de cor contra a meta
+  updatePanelGoals(panelGoals) {
+    return axios.post(`${this.url}/settings/update_agenda`, { panel_goals: panelGoals });
+  }
+
   // conferência do dia → colunas do CRM (compareceu/faltou/cirurgia indicada)
   updateAttendanceStages(attendanceStages) {
     return axios.post(`${this.url}/settings/update_agenda`, { attendance_stages: attendanceStages });
@@ -481,6 +486,20 @@ class CrmAPI extends ApiClient {
 
   testGemini() {
     return axios.post(`${this.url}/settings/test_gemini`);
+  }
+
+  // popup de prioridade máxima do Radar + pausa manual (com registro)
+  radarPing() {
+    return axios.get(`${this.url}/home/radar_ping`);
+  }
+
+  toggleRadar() {
+    return axios.post(`${this.url}/home/toggle_radar`);
+  }
+
+  // feedback de bugs do time → card 🐞 no board do admin
+  reportBug(data) {
+    return axios.post(`${this.url}/bug_reports`, data);
   }
 
   // ── Central do Paciente ───────────────────────────────────────────
