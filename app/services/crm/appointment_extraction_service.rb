@@ -63,6 +63,12 @@ class Crm::AppointmentExtractionService
     - Só marque encontrado=true se a conversa CONFIRMA dia e hora (a atendente
       propôs e o paciente aceitou, ou vice-versa). Proposta sem confirmação não vale.
     - Se houver mais de um agendamento, use o MAIS RECENTE confirmado.
+    - hora: copie o horário EXATAMENTE como foi confirmado, LITERAL:
+      "11h" = 11:00, "11 horas" = 11:00, "11:30"/"11h30"/"onze e meia" = 11:30.
+      NUNCA arredonde nem complete minutos que não foram ditos (11:00 e 11:30
+      são consultas DIFERENTES — errar isso fura a agenda da clínica). Se a
+      conversa citar vários horários (opções oferecidas), vale só o da
+      CONFIRMAÇÃO final. Horário não explícito = campo vazio.
     - Datas relativas ("amanhã", "quinta que vem") devem ser convertidas usando a
       data de hoje informada no início da conversa.
     - unidade: identifique pela menção a Tatuapé ou Paulista/Av. Paulista/Bela Vista.

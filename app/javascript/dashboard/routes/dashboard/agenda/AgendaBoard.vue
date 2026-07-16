@@ -663,6 +663,14 @@ const fetchTasks = async () => {
 };
 
 onMounted(async () => {
+  // deep-link "📆 Ver na agenda" (nota da IA): ?date=AAAA-MM-DD abre o DIA
+  if (route.query.date) {
+    const d = new Date(`${route.query.date}T12:00:00`);
+    if (!Number.isNaN(d.getTime())) {
+      cursor.value = d;
+      viewMode.value = 'day';
+    }
+  }
   if (!agents.value.length) store.dispatch('agents/get');
   await store.dispatch('crm/fetchSettings').catch(() => {}); // janelas dos médicos
   fetchTasks();

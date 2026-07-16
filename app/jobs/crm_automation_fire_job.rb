@@ -44,6 +44,8 @@ class CrmAutomationFireJob < ApplicationJob
       set_value(automation, contact, pipeline)
     end
 
+    stamp_automation_trail(automation, contact, stage)
+
     # Registra log de sucesso
     Crm::AutomationLog.create!(
       automation: automation,
@@ -64,6 +66,23 @@ class CrmAutomationFireJob < ApplicationJob
   end
 
   private
+
+  # trilha de automações do PACIENTE: cada disparo fica gravado no contato
+  # (o Espaço do Paciente mostra "por quais automações ele passou e quando" —
+  # é assim que dá pra saber qual automação realmente ajudou)
+  def stamp_automation_trail(automation, contact, stage)
+    attrs = contact.additional_attributes || {}
+    trail = Array(attrs['cevico_automation_trail'])
+    trail << {
+      'name' => automation.name,
+      'action' => automation.action_type,
+      'stage' => stage&.name,
+      'at' => Time.current.iso8601
+    }
+    contact.update!(additional_attributes: attrs.merge('cevico_automation_trail' => trail.last(60)))
+  rescue StandardError => e
+    Rails.logger.warn "[CrmAutomationFire] trilha: #{e.message}"
+  end
 
   # A conversa que os agentes leem é a de ATIVIDADE mais recente — não a
   # criada por último. Paciente que segue conversando na mesma conversa
@@ -334,10 +353,13 @@ class CrmAutomationFireJob < ApplicationJob
       )
       return if outcome == :already
 
-      when_str = result[:starts_at].in_time_zone('America/Sao_Paulo').strftime('%d/%m/%Y às %H:%M')
+      local_time = result[:starts_at].in_time_zone('America/Sao_Paulo')
+      when_str = local_time.strftime('%d/%m/%Y às %H:%M')
       verb = outcome == :rescheduled ? 'REAGENDADA' : 'agendada'
+      agenda_url = "/app/accounts/#{account.id}/agenda?date=#{local_time.strftime('%Y-%m-%d')}"
       note = "📅 Consulta #{verb} pela IA: #{name} — #{when_str}" \
-             "#{unit ? " (#{unit == 'tatuape' ? 'Tatuapé' : 'Av. Paulista'})" : ''}. Registrada na Agenda."
+             "#{unit ? " (#{unit == 'tatuape' ? 'Tatuapé' : 'Av. Paulista'})" : ''}. " \
+             "Registrada na Agenda. [📆 Ver na agenda](#{agenda_url})"
     else
       # sem dia/hora confirmados → tarefa de revisão para a equipe
       return if account.tasks.where(status: %i[todo doing]).exists?(title: "⚠️ Confirmar consulta: #{name}")

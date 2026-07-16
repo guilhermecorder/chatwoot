@@ -127,7 +127,8 @@ class Crm::InstagramAgentJob < ApplicationJob
     conversation.messages.create!(
       account_id: account.id, inbox_id: conversation.inbox_id, message_type: :activity, private: true,
       content: "📅 Atendente Instagram agendou: #{ag[:nome]} — #{starts_at.strftime('%d/%m/%Y às %H:%M')} " \
-               "(#{ag[:unidade] == 'tatuape' ? 'Tatuapé' : 'Av. Paulista'}). Confirmação oficial segue pelo WhatsApp."
+               "(#{ag[:unidade] == 'tatuape' ? 'Tatuapé' : 'Av. Paulista'}). Confirmação oficial segue pelo WhatsApp. " \
+               "[📆 Ver na agenda](/app/accounts/#{account.id}/agenda?date=#{starts_at.strftime('%Y-%m-%d')})"
     )
   end
 
