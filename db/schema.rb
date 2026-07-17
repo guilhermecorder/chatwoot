@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_16_000002) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_17_000008) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -437,6 +437,49 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_16_000002) do
     t.index ["slug", "locale", "portal_id"], name: "index_categories_on_slug_and_locale_and_portal_id", unique: true
   end
 
+  create_table "cevico_content_items", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "title", null: false
+    t.string "format", default: "post", null: false
+    t.string "stage", default: "ideia", null: false
+    t.integer "owner_id"
+    t.date "due_on"
+    t.text "notes"
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "stage"], name: "index_cevico_content_items_on_account_id_and_stage"
+    t.index ["account_id"], name: "index_cevico_content_items_on_account_id"
+  end
+
+  create_table "cevico_finance_entries", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.date "entry_date", null: false
+    t.string "kind", null: false
+    t.string "category"
+    t.string "description", default: "", null: false
+    t.decimal "amount", precision: 12, scale: 2, default: "0.0", null: false
+    t.integer "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "entry_date"], name: "index_cevico_finance_entries_on_account_id_and_entry_date"
+    t.index ["account_id", "kind"], name: "index_cevico_finance_entries_on_account_id_and_kind"
+    t.index ["account_id"], name: "index_cevico_finance_entries_on_account_id"
+  end
+
+  create_table "cevico_goal_plans", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.date "month", null: false
+    t.jsonb "targets", default: {}, null: false
+    t.text "guidance"
+    t.jsonb "process_notes", default: [], null: false
+    t.jsonb "milestones", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "month"], name: "index_cevico_goal_plans_on_account_id_and_month", unique: true
+    t.index ["account_id"], name: "index_cevico_goal_plans_on_account_id"
+  end
+
   create_table "cevico_pages", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.string "title", null: false
@@ -455,9 +498,63 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_16_000002) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "sections", default: [], null: false
+    t.bigint "next_page_id"
+    t.integer "cta_clicks_count", default: 0, null: false
+    t.integer "next_clicks_count", default: 0, null: false
+    t.jsonb "daily_stats", default: {}, null: false
+    t.jsonb "ab_variants", default: [], null: false
+    t.jsonb "team_comments", default: [], null: false
     t.index ["account_id", "category"], name: "index_cevico_pages_on_account_id_and_category"
     t.index ["account_id"], name: "index_cevico_pages_on_account_id"
+    t.index ["next_page_id"], name: "index_cevico_pages_on_next_page_id"
     t.index ["slug"], name: "index_cevico_pages_on_slug", unique: true
+  end
+
+  create_table "cevico_people_profiles", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "user_id", null: false
+    t.jsonb "disc", default: {}, null: false
+    t.jsonb "goals", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "life", default: {}, null: false
+    t.jsonb "assessments", default: [], null: false
+    t.index ["account_id", "user_id"], name: "index_cevico_people_profiles_on_account_id_and_user_id", unique: true
+    t.index ["account_id"], name: "index_cevico_people_profiles_on_account_id"
+    t.index ["user_id"], name: "index_cevico_people_profiles_on_user_id"
+  end
+
+  create_table "cevico_pillars", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "name", null: false
+    t.string "subtitle"
+    t.string "emoji", default: "🏛️"
+    t.string "color", default: "navy"
+    t.string "status", default: "atencao", null: false
+    t.text "health_note"
+    t.jsonb "owner_ids", default: [], null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "position"], name: "index_cevico_pillars_on_account_id_and_position"
+    t.index ["account_id"], name: "index_cevico_pillars_on_account_id"
+  end
+
+  create_table "cevico_strategies", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "pillar_id", null: false
+    t.string "kind", default: "estrategia", null: false
+    t.string "title", null: false
+    t.text "description"
+    t.string "status", default: "andamento", null: false
+    t.integer "owner_id"
+    t.date "due_on"
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "kind"], name: "index_cevico_strategies_on_account_id_and_kind"
+    t.index ["account_id"], name: "index_cevico_strategies_on_account_id"
+    t.index ["pillar_id"], name: "index_cevico_strategies_on_pillar_id"
   end
 
   create_table "channel_api", force: :cascade do |t|
@@ -1028,6 +1125,20 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_16_000002) do
     t.jsonb "settings", default: {}, null: false
     t.index ["pipeline_id", "position"], name: "index_crm_stages_on_pipeline_id_and_position"
     t.index ["pipeline_id"], name: "index_crm_stages_on_pipeline_id"
+  end
+
+  create_table "crm_weekly_feedbacks", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "user_id", null: false
+    t.date "week_start", null: false
+    t.jsonb "stats", default: {}, null: false
+    t.jsonb "feedback", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "cadence", default: "weekly", null: false
+    t.index ["account_id", "user_id", "week_start", "cadence"], name: "idx_crm_weekly_feedbacks_unique", unique: true
+    t.index ["account_id"], name: "index_crm_weekly_feedbacks_on_account_id"
+    t.index ["user_id"], name: "index_crm_weekly_feedbacks_on_user_id"
   end
 
   create_table "csat_survey_responses", force: :cascade do |t|
@@ -1656,7 +1767,16 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_16_000002) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "cevico_content_items", "accounts"
+  add_foreign_key "cevico_finance_entries", "accounts"
+  add_foreign_key "cevico_goal_plans", "accounts"
   add_foreign_key "cevico_pages", "accounts"
+  add_foreign_key "cevico_pages", "cevico_pages", column: "next_page_id"
+  add_foreign_key "cevico_people_profiles", "accounts"
+  add_foreign_key "cevico_people_profiles", "users"
+  add_foreign_key "cevico_pillars", "accounts"
+  add_foreign_key "cevico_strategies", "accounts"
+  add_foreign_key "cevico_strategies", "cevico_pillars", column: "pillar_id"
   add_foreign_key "crm_ai_usages", "accounts"
   add_foreign_key "crm_automation_logs", "crm_automations", column: "automation_id"
   add_foreign_key "crm_automations", "crm_stages", column: "stage_id"
@@ -1690,6 +1810,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_16_000002) do
   add_foreign_key "crm_pipelines", "accounts"
   add_foreign_key "crm_settings", "accounts"
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"
+  add_foreign_key "crm_weekly_feedbacks", "accounts"
+  add_foreign_key "crm_weekly_feedbacks", "users"
   add_foreign_key "inboxes", "portals"
   add_foreign_key "tasks", "accounts"
   add_foreign_key "tasks", "contacts"

@@ -355,8 +355,8 @@ const toggleHiddenFeature = key => {
 // ── Ordem dos itens do menu (Personalizar menu, por pessoa/navegador) ──
 // Padrão: Relatórios logo abaixo do CRM (pedido 2026-07-15).
 const DEFAULT_MENU_ORDER = [
-  'Inicio', 'CRM', 'Reports', 'Inbox', 'Conversation', 'Captain', 'Companies',
-  'Campanha WhatsApp', 'Forms', 'Tasks', 'Agenda', 'Academy',
+  'Inicio', 'CRM', 'Reports', 'Strategy', 'Finance', 'Goals', 'People', 'Inbox', 'Conversation', 'Captain', 'Companies',
+  'Campanha WhatsApp', 'Forms', 'Tasks', 'Agenda', 'Cevico Pages', 'Academy',
   'Automations Hub', 'Integrations Hub', 'Settings',
 ];
 const menuOrder = ref(
@@ -425,7 +425,7 @@ const gradientColorAt = ratio => {
 // Agenda | Tarefas | Configurações (só o perfil: nome, e-mail, foto, senha)
 const menuItemsForRole = computed(() => {
   if (isAdmin.value) return menuItems.value;
-  const allow = ['Inicio', 'CRM', 'Conversation', 'Agenda', 'Tasks'];
+  const allow = ['Inicio', 'CRM', 'Conversation', 'Agenda', 'Tasks', 'People', 'Goals'];
   return [
     ...menuItems.value.filter(i => allow.includes(i.name)),
     {
@@ -482,7 +482,7 @@ const menuItems = computed(() => {
       icon: 'i-lucide-house',
       to: accountScopedRoute('inicio_home'),
       getterKeys: { count: 'crm/getRadarAlertCount' },
-      countVariant: 'radar', // cor do Radar (laranja-avermelhado), pulsando
+      countVariant: 'radar', // verde dopamine, igual ao badge — pulsando
     },
     // CRM em primeiro — é o hub de atendimento
     {
@@ -735,6 +735,11 @@ const menuItems = computed(() => {
           to: accountScopedRoute('ads_reports'),
         },
         {
+          name: 'Google Dashboard',
+          label: 'Google (Ads + GA4)',
+          to: accountScopedRoute('google_dashboard_reports'),
+        },
+        {
           name: 'WhatsApp Health',
           label: 'Saúde do WhatsApp',
           to: accountScopedRoute('whatsapp_health_reports'),
@@ -792,6 +797,20 @@ const menuItems = computed(() => {
             icon: 'i-lucide-clipboard-list',
             to: accountScopedRoute('crm_forms'),
           },
+          // Painel Estratégico: a empresa por pilares — só admin
+          {
+            name: 'Strategy',
+            label: 'Estratégia',
+            icon: 'i-lucide-compass',
+            to: accountScopedRoute('cevico_strategy'),
+          },
+          // Gestão Financeira: receitas, custos e investimentos — só admin
+          {
+            name: 'Finance',
+            label: 'Financeiro',
+            icon: 'i-lucide-wallet',
+            to: accountScopedRoute('cevico_finance'),
+          },
         ]
       : []),
     {
@@ -810,9 +829,53 @@ const menuItems = computed(() => {
     },
     {
       name: 'Cevico Pages',
-      label: 'Páginas',
+      label: 'Conteúdos',
       icon: 'i-lucide-panels-top-left',
-      to: accountScopedRoute('cevico_pages_home'),
+      children: [
+        {
+          name: 'Pages List',
+          label: 'Páginas',
+          icon: 'i-lucide-panels-top-left',
+          to: accountScopedRoute('cevico_pages_home'),
+        },
+        {
+          name: 'Content Planner',
+          label: 'Planejamento de conteúdos',
+          icon: 'i-lucide-kanban',
+          to: accountScopedRoute('cevico_content_board'),
+        },
+        // Análise de funis + testes A/B (PÁGINAS PRO) — só admin
+        ...(isAdmin.value
+          ? [
+              {
+                name: 'Pages Analytics',
+                label: 'Análise de funis',
+                icon: 'i-lucide-chart-line',
+                to: accountScopedRoute('cevico_pages_analytics'),
+              },
+              {
+                name: 'AB Center',
+                label: 'Testes A/B',
+                icon: 'i-lucide-flask-conical',
+                to: accountScopedRoute('cevico_ab_center'),
+              },
+            ]
+          : []),
+      ],
+    },
+    // Pessoas: DISC, desenvolvimento e feedbacks (cada um vê o seu)
+    {
+      name: 'People',
+      label: 'Pessoas',
+      icon: 'i-lucide-heart-handshake',
+      to: accountScopedRoute('cevico_people'),
+    },
+    // Painel de Metas: admin define, time acompanha
+    {
+      name: 'Goals',
+      label: 'Metas',
+      icon: 'i-lucide-target',
+      to: accountScopedRoute('cevico_goals'),
     },
     {
       name: 'Academy',
@@ -885,6 +948,17 @@ const menuItems = computed(() => {
           icon: 'i-lucide-briefcase',
           to: accountScopedRoute('general_settings_index'),
         },
+        // Domínio público das páginas/formulários (só admin)
+        ...(isAdmin.value
+          ? [
+              {
+                name: 'Settings Domain',
+                label: 'Domínio',
+                icon: 'i-lucide-globe',
+                to: accountScopedRoute('dominio_settings_index'),
+              },
+            ]
+          : []),
         // {
         //   name: 'Settings Captain',
         //   label: t('SIDEBAR.CAPTAIN_AI'),

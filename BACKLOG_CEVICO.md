@@ -2036,6 +2036,485 @@ Sem migration nova. Junto com o item 44 no working tree.
   e consultas (com 🏆 na primeira carga) e taxa em ritmo ok.
 - Rubocop: 2 ofensas novas corrigidas; restantes herdadas. Vite ✓.
 
+## 46. 📱🌐 CRM mobile + cores por caixa + domínio público oficial (16/07, noite 2) ⏳ NO WORKING TREE
+
+Sem migration nova. Pedidos do Guilherme na retomada da noite.
+
+- **CRM abre SEMPRE em "Últimos 7 dias"**: a janela de trabalho não fica
+  mais gravada no aparelho (localStorage → sessionStorage): toda visita
+  nova começa nos 7 dias (garantia de carga leve no celular — a janela
+  pesada salva era o que travava). Trocar a janela continua valendo
+  durante a sessão do navegador.
+- **CRM MOBILE (abaixo de 768px)**: navegador de colunas fixo no topo —
+  chips com bolinha da cor da coluna + nome + contagem; o chip ativo
+  (gradiente azul→roxo) acompanha o deslize e clicar PULA direto pra
+  coluna (com 12 colunas o deslize era maratona). Barras do topo/filtros/
+  janela viram trilhos deslizáveis de 1 linha (não empilham mais), texto
+  explicativo da janela some no celular, padding do board 12px.
+  ⚠️ Lições técnicas: snap "x mandatory" CANCELA scroll programático
+  (desligar o snap no pulo e religar ~80ms depois; o alvo já é posição de
+  snap); scroll-behavior:smooth inline fazia até behavior:'auto' virar
+  smooth (removido — o pulo é instantâneo e confiável). No webview do
+  teste, eventos de scroll programático não disparam (chip-segue-deslize
+  conferir no celular real).
+- **COR PRÓPRIA POR CAIXA DE ENTRADA** (helper cevicoInboxColors.js):
+  paleta de 8 gradientes; a cor segue a ORDEM DE CRIAÇÃO da caixa (caixa
+  nova não muda a cor das antigas; nome fora do cadastro cai em hash).
+  Aplicada nas pílulas de Conversas (ativa = gradiente da caixa; inativa
+  = pontinho da cor) e no filtro do CRM, que deixou de ser select cinza e
+  virou BOTÕES EM LINHA coloridos. Dourado ficou reservado pro "Todas".
+- **DOMÍNIO PÚBLICO OFICIAL das páginas/formulários** (Meta e Google):
+  nova env `CEVICO_PUBLIC_HOST` (ex. www.cevico.com.br). Com ela setada:
+  páginas respondem na RAIZ do domínio oficial (www.cevico.com.br/
+  preoperatorio — rota coringa no FIM das rotas, só no host oficial),
+  raiz "/" = índice bonito das páginas publicadas por categoria
+  (identidade navy+ouro, logo real), /p/slug e links antigos de
+  formulário redirecionam 301 pro oficial, canonical/og:url apontam
+  SEMPRE pro oficial, links de formulário do WhatsApp já saem no domínio
+  oficial, tela Páginas mostra/abre a URL nova. Slugs reservados
+  (app/api/forms/health/...) bloqueados no modelo. SEM a env, nada muda.
+  Helper central: app/services/cevico/public_site.rb.
+  ⚠️ ORDEM DO DEPLOY: primeiro apontar DNS + adicionar o domínio no
+  EasyPanel (SSL emitido), SÓ DEPOIS setar a env em web+sidekiq — env
+  setada com domínio morto = links antigos redirecionando pro vazio.
+  PENDENTE: Guilherme descobrir onde o site cevico.com.br está hospedado
+  (caminho /preoperatorio no www exige proxy lá; subdomínio dedicado ex.
+  conteudo.cevico.com.br é o caminho simples).
+- Testes: vite 200 nos 4 arquivos; rubocop zero ofensas nos arquivos
+  novos; bateria HTTP local (índice 200, página na raiz 200, 301 do /p/ e
+  do form antigo com token válido, 404 slug inexistente, form 200 no host
+  oficial, baseline sem env intacta); visual desktop+mobile 390px no
+  browser embutido. Senha local do admin@admin.com (conta 3) =
+  CevicoTeste@2026 (só Docker local, p/ teste visual).
+
+## 47. 💚🌐 Radar verde dopamine + Configurações → Domínio (17/07) ⏳ NO WORKING TREE
+
+Sem migration nova. Junto com o item 46 no working tree.
+
+- **RADAR VERDE DOPAMINE** (pedido: oportunidade é convite, não bronca —
+  o laranja-avermelhado dava tom de punição): gradiente novo
+  #059669→#4ADE80 em TODAS as superfícies do agente — badge pulsante da
+  sidebar (SidebarGroupHeader), popup gênio da lâmpada (estado inicial;
+  o "acalmado" segue azul), bloco de avisos do Meu Painel (moldura,
+  barra, chamas, pílula ⏱ e botão Atender agora), card do agente no hub
+  (identidade opportunity), caixa de config + botão Radar pontual +
+  modal, bloco Radar×Consultas do Dashboard CRM. Vermelho continua só
+  onde é semântico (bugs 🐞, atrasos, metas vermelhas, falhas).
+- **CONFIGURAÇÕES → DOMÍNIO** (novo item no menu Configurações, só
+  admin): o domínio público agora é configurado NA TELA e fica no BANCO
+  (InstallationConfig CEVICO_PUBLIC_HOST, cache GlobalConfig/Redis; env
+  continua como fallback). A tela tem: input com normalização
+  (https://…/ vira host limpo), botão 🔍 Verificar (DNS resolve? HTTPS
+  /health responde? selos verdes), Salvar com aviso se o domínio ainda
+  não responde, passo a passo Hostinger+EasyPanel com o CNAME alvo
+  (app_host) e botão copiar, exemplos de URL ao vivo e aviso quando o
+  valor vem da env. Backend: GET public_domain / POST
+  update_public_domain (422 p/ host inválido, admin-only) / POST
+  check_public_domain no settings_controller do CRM.
+- **DOIS MODOS de domínio** (Cevico::PublicSite.dedicated_host?):
+  dedicado (host ≠ FRONTEND_URL → raiz vira índice de páginas) e MESMO
+  domínio do sistema (ex. sistema.cevico.com.br → app continua na raiz
+  e /app; páginas moram nos caminhos /nome-da-pagina; /p/ normaliza 301).
+  Decisão do Guilherme 17/07: subdomínio sistema.cevico.com.br (site
+  cevico.com.br é Hostinger, conta compartilhada pelo Henrique).
+- Senha local do admin@admin.com RESTAURADA p/ Admin@123456 (a troca de
+  ontem era só p/ meu teste visual).
+- Testes: vite 200 nos 9 arquivos; rubocop zero nos métodos novos
+  (check_public_domain refatorado em helpers); bateria HTTP com config
+  DO BANCO: dedicado (índice 200, página raiz 200, /p/ 301) + mesmo-host
+  (app na raiz, página no caminho, /app intacto, /p/ normaliza) + 422
+  inválido + check google.com dns/http ok; visual: tela Domínio + Meu
+  Painel verde + badge verde.
+- PRÓXIMAS RODADAS COMBINADAS (aguardando ordem do Guilherme):
+  (A) DESIGN_CEVICO.md + tokens (cores dopamine, espaçamentos, molas de
+  movimento estilo iPhone, componentes oficiais: pílulas de período,
+  botões em linha, cards vivos) → alicerce do "repasse geral";
+  (B) repasse dos DASHBOARDS (paleta dopamine, animações de recorde,
+  mobile/tablet); (C) microinterações (menus, skeleton armadura do Homem
+  de Ferro, gênio da lâmpada) + ícones próprios da sidebar
+  (descaracterizar Chatwoot); (D) experiência do time (frases
+  motivacionais + elogios estratégicos no Meu Painel; ambiente de
+  relacionamento interno home-office); (E) ambiente de PLANEJAMENTO DE
+  CONTEÚDOS estilo workflow/canvas (especificar juntos antes de
+  construir).
+
+## 48. 🤍⚡ Radar branco energizado + CRM 2 linhas + PÁGINAS: projetos, funil e conversão (17/07, madrugada) ⏳ NO WORKING TREE — ⚠️ TEM MIGRATION
+
+⚠️ MIGRATION NOVA: 20260717000001 (funil/rastreio em cevico_pages) —
+BACKUP DO BANCO antes do deploy. Reversão: reimplantar imagem anterior
+(migration é aditiva, não precisa reverter o banco).
+
+- **🤍 Notificação do Radar no Meu Painel repaginada** (feedback: layout
+  deixava a desejar): cartão FUNDO BRANCO fixo nos dois temas (tinta
+  escura própria, chips verdes/dourados) e botão "Atender agora" com
+  ANIMAÇÃO DE ENERGIA (.cevico-energy-btn: respiração + anéis verdes
+  emanando + brilho varrendo + gradiente vivo; respeita
+  prefers-reduced-motion).
+- **📐 Toolbar do CRM em 2 LINHAS intencionais** (feedback: "alinhar,
+  espaçar, distribuir"): linha 1 = o que eu PROCURO (busca, sem
+  resposta, ordenação, caixas, Filtros + contador à direita); linha 2 =
+  o que eu VEJO (visualizações de colunas, período do lead, limpar).
+  TODOS os controles com 34px de altura; no celular cada linha é um
+  trilho deslizável.
+- **🔎 Empty state explicativo**: quando o filtro de período zera o
+  board ("Exibindo 0 de N" que assustou o Guilherme), a tela agora diz
+  que o filtro olha a DATA DE CHEGADA do lead e que os cards continuam
+  no funil; pílulas ganharam tooltip "leads que CHEGARAM...".
+- **📋 PÁGINAS — gestão de projetos**: status novo 'idea' (💡 Ideia →
+  🛠 Em produção → 🟢 Publicada/NO AR), chips de filtro com contagem no
+  topo, badge tri-estado nos cards, seletor "Etapa do projeto" no editor
+  (admin; equipe segue criando rascunho).
+- **➡️ FUNIL DE PÁGINAS**: campo next_page_id — o botão da página pode
+  "reapontar para outra página da CEVICO" (captação despretensiosa →
+  aprofundamento → convite WhatsApp). Editor: bloco "Próximo passo do
+  botão" (botões em linha WhatsApp | Outra página + select de destino +
+  aviso se destino não publicado). Texto do botão automático
+  ("Continuar: {título} →") quando vazio.
+- **📊 RASTREAMENTO/CONVERSÃO**: redirecionadores que CONTAM clique —
+  /p/:slug/cta (convite WhatsApp) e /p/:slug/next (funil, manda ?de=slug
+  pra próxima página registrar a ORIGEM). daily_stats jsonb por dia
+  {view/cta/next/de:{slug:n}} + contadores totais (cta_clicks_count,
+  next_clicks_count; view via track_hit!). Cards do admin mostram
+  👁 visitas · ➡ funil · 💬 WhatsApp · % clicam; API manda last7.
+  Base p/ "público super qualificado" (pixel/CAPI nas páginas = rodada
+  futura).
+- **🔍 CAUSA DAS IMAGENS/ÁUDIOS ACHADA** (diagnóstico na VPS):
+  active_storage service = LOCAL e TODOS os anexos recentes "ARQUIVO
+  SUMIU do disco" → /app/storage NÃO é volume persistente (cada
+  Implantar descarta os arquivos) e web/sidekiq têm discos separados
+  (mídia baixada pelo sidekiq nunca aparece pro web). FIX SEM CÓDIGO no
+  EasyPanel: criar VOLUME COMPARTILHADO (mesmo nome, ex. cevico-storage)
+  montado em /app/storage NOS DOIS serviços (web e sidekiq) e
+  reimplantar; arquivos antigos são irrecuperáveis (URLs da Meta
+  expiram). Depois: rclone do volume (fotos clínicas!) e avaliar S3/R2.
+- Testes: migration local ok (annotate atualizou o model), vite 200,
+  rubocop zero nos arquivos tocados (helpers extraídos), e2e do funil
+  com contadores conferidos no banco (A next=1, B view c/ origem
+  de:{demo}=1, cta=1), visual: chips/status/cards/editor confirmados.
+  Dados de teste do funil só no Docker local.
+
+## 49. 🔧 FIX gerador de páginas IA + radar só admin + leads de teste (17/07, madrugada 2) ⏳ NO WORKING TREE
+
+Sem migration nova. Feedback do teste do Guilherme em produção.
+
+- **🐛 FIX "Internal Server Error" do Gerar página com IA**: causa
+  principal = timeout do cliente Anthropic em 60s — o Copywriter escreve
+  páginas inteiras (Opus, esforço alto, até 8k tokens = MINUTOS) e a
+  chamada morria no meio. Timeout → 300s (agentes rápidos não mudam).
+  Blindagem completa: resposta vazia vira mensagem amigável (era
+  JSON.parse(nil) = 500), rescue amplo com log nos dois serviços
+  ([Copywriter]/[PageBuilder] no log) e rescue no Pages#generate — o
+  botão NUNCA mais devolve 500 seco; sempre explica o que houve.
+  parse_structured_response compartilhado no AiAgentConfig. Schemas
+  conferidos: sem minItems/pattern (lição antiga ok). Se em produção
+  ainda estourar (proxy matando requisição longa), próximo passo é gerar
+  em background com aviso — anotado.
+- **⏸ Pausar radar SÓ ADMIN**: botão some para atendentes no Meu Painel
+  e o backend recusa (403) — pausar o Radar é decisão de gestão.
+- **🧪 20 LEADS DE TESTE por comando** (novo padrão de teste): rake
+  `cevico:seed_test_leads ACCOUNT_ID=3` cria 20 leads variados (12
+  colunas, datas espalhadas em 45 dias, valores reais dos procedimentos,
+  etiquetas sortidas + `teste-lote` p/ achar/limpar). Rodada 2x local =
+  40 leads no board de teste.
+
+## 50. 🧭 Radar formato CRM + Meta de tempo + Mentor do Time + Painel Estratégico (17/07, manhã) ⏳ NO WORKING TREE — ⚠️ TEM 2 MIGRATIONS
+
+⚠️ MIGRATIONS NOVAS: 20260717000002 (cevico_pillars + cevico_strategies) e
+20260717000003 (crm_weekly_feedbacks) — BACKUP DO BANCO antes do deploy.
+Reversão: reimplantar imagem anterior (migrations aditivas). Cron novo
+(crm_weekly_mentor_job) → reimplantar SIDEKIQ junto, inegociável.
+
+- **💚 Radar no formato do card do CRM** (pedido: "melhor distribuído,
+  desktop e mobile, parecido com o card do CRM"): cada aviso virou um card
+  irmão do ContactCard — avatar com iniciais (gradiente verde), nome +
+  telefone, pílula da coluna com bolinha, pílula ⏱ de espera, motivo como
+  prévia de mensagem (barra verde à esquerda), "💡 O que fazer" e rodapé de
+  ações com ícone do Espaço do Paciente + botão energizado "Atender agora".
+  Grade de 2 colunas no desktop (lg:grid-cols-2), empilhado no mobile. O
+  card inteiro clica para a conversa. Backend: build_alert agora manda
+  contact_id (avisos antigos sem contact_id só escondem o medalhão).
+- **🎯 META DE TEMPO DE ATENDIMENTO** (config no agente): campo novo na
+  caixa do Radar (Automações → Radar) — "responder o paciente em até N
+  minutos" (ai_config.agents.opportunity.response_goal_minutes, padrão 15,
+  entra no rascunho/Publicar como os demais campos). Relatório PESSOAL no
+  Meu Painel (card "Meta de tempo de atendimento", respeita o período):
+  tempo médio, % dentro da meta, nº respostas, barra + selo (🏅 Meta batida
+  ≥70% e média dentro / 💪 No ritmo / ⏳ Fora da meta). Atendente vê só o
+  seu; admin vê a quebra "Time no período". Fonte: reporting_events
+  reply_time (>0) que o Chatwoot já grava — sem migration.
+- **🧭 MENTOR DO TIME** (agente novo, opt-in, nasce DESLIGADO): toda
+  segunda 08h SP (cron 0 11 * * 1) coleta os dados de uso da semana de
+  CADA pessoa (respostas, tempo médio, % na meta, conversas resolvidas,
+  mensagens enviadas, tarefas concluídas) e a IA escreve feedback
+  individual: resumo, ponto forte, O PONTO FRACO a corrigir e 2-3 soluções
+  simples + incentivo. Compara com a MEDIANA do time sem expor colegas.
+  Card no Meu Painel (moldura navy→ouro; admin navega por pílulas com o
+  time inteiro). Semana sem uso = sem feedback. Botão "Gerar feedback
+  agora" no card do agente (admin; últimos 7 dias). Tabela
+  crm_weekly_feedbacks (1 registro por pessoa/semana, stats + feedback).
+  Recomendado Sonnet 5 esforço alto (~5 chamadas/semana). Schema sem
+  minItems (lição antiga ok).
+- **🏛️ PAINEL ESTRATÉGICO** (menu "Estratégia", só admin, ícone bússola,
+  logo abaixo de Relatórios): a CEVICO por PILARES do negócio. Nascem
+  prontos os 3 combinados: 🧲 Aquisição de Pacientes (marketing/vendas),
+  🏥 Operação Clínica (exames/consultas/cirurgias), 💰 Financeiro &
+  Tributário. Cada pilar: responsáveis (pílulas douradas), SEMÁFORO de
+  saúde clicável (🟢 Saudável / 🟡 Atenção / 🔴 Crítico), nota "como está
+  hoje" (desempenho/contexto), barra de progresso (% de estratégias
+  concluídas) e a lista de 🎯 estratégias / 🛠 correções — cada uma com
+  dono, prazo (vermelho se vencido) e andamento que GIRA no clique
+  (💡 Ideia → ▶️ Em andamento → ✅ Concluída → ⏸ Pausada). Expandir o item
+  abre descrição/dono/prazo/tipo/excluir. Modal do pilar: emoji, nome,
+  cobertura, 6 cores, responsáveis, excluir. "+ Novo pilar" para outros
+  setores. 3 colunas no desktop largo, 1 no celular.
+- ⚠️ Lição nova: o reset global do Chatwoot deixa select/input com 100% de
+  largura e VENCE utilitários Tailwind (input:not([type]) tem
+  especificidade maior que .w-16) — em linhas flex, travar com style
+  inline (width: Xrem). Corrigido no Painel Estratégico e nos dois inputs
+  numéricos da caixa do Radar.
+- Testes: 2 migrations locais ok; rubocop zero nos métodos/arquivos novos;
+  vite 200 nos 7 arquivos; spec do schedule.yml verde; visual desktop +
+  mobile 375px no browser embutido (Meu Painel com os 3 cards novos,
+  Estratégia com criação/giro de status/modal, Automações com Mentor +
+  campo da meta); seeds de teste na conta 3 (avisos do Radar com
+  contact_id, reply_time, 2 feedbacks simulados, 3 pilares + 4 itens).
+
+## 51. 📊 Jornada de atendimento por pessoa + ajustes de feedback do 50 (17/07, manhã 2) ⏳ NO WORKING TREE
+
+Sem migration nova. Feedback do Guilherme sobre o item 50 + pedido novo.
+
+- **📊 DASHBOARD DOS AGENTES — jornada de atendimento por pessoa** (pedido:
+  "cada agente deve ter o seu dashboard, com as suas estatísticas, para
+  feedback"): cada card de pessoa ganhou (a) tile novo "resposta ao lead
+  (média)" = média de TODAS as respostas (reporting_events reply_time>0,
+  não só a 1ª) com contagem; (b) bloco "jornada": horário da 1ª mensagem
+  em média, da última mensagem em média, dias com atendimento; (c)
+  MAIORES PAUSAS do período (top 3 intervalos ≥30min entre uma mensagem
+  enviada e outra no mesmo dia, com dia da semana, faixa de horário e
+  duração colorida: 1h+ âmbar, 2h+ vermelho). Backend: workday_stats no
+  agents_dashboards_controller (1 pluck de sender_id+created_at, agrupado
+  por pessoa/dia no fuso SP).
+- **🔎 CRM: "Limpar filtros" só para filtros de verdade**: as opções
+  pré-definidas sempre visíveis (pílulas de período, botões de caixa,
+  visualizações de colunas, Sem resposta) NÃO acendem mais o botão
+  "Limpar filtros" nem o contador do Filtros — cada uma desliga no
+  próprio lugar. O empty state explicativo continua enxergando qualquer
+  filtragem (computed anyFilteringActive separado).
+- **🎨 Painel Estratégico repaginado** (feedback: "pesou a mão nos
+  emojis"): semáforo com BOLINHAS coloridas, itens com ícones lucide
+  (alvo azul = estratégia, chave âmbar = correção), status em texto puro,
+  prazo com ícone de relógio — emoji ficou só na identidade do pilar.
+- **🧡 GRADIENTE NAVY→DOURADO ABOLIDO** (feedback: "não ficou bom, evite"):
+  Estratégia = navy→azul royal (#152C61→#3B82F6); Mentor do Time = LARANJA
+  (#C2410C→#FB923C) em tudo (card do hub, faixa, card do Meu Painel,
+  pílulas, números das soluções). Labels do feedback sem emoji.
+- Testes: vite 200 nos 5 arquivos, rubocop (só ofensas herdadas do
+  radar_stats, 10→6), visual completo (dashboard com jornada e pausas,
+  CRM sem limpar-filtros nos presets, Estratégia limpa, Mentor laranja).
+
+## 52. 🚀 PÁGINAS PRO + PESSOAS PRO + Workflow de conteúdos (17/07, manhã 3) ⏳ NO WORKING TREE — ⚠️ TEM 2 MIGRATIONS + CRON NOVO
+
+⚠️ MIGRATIONS: 20260717000004 (ab_variants+team_comments em cevico_pages
++ tabela cevico_content_items) e 20260717000005 (cevico_people_profiles
++ cadence nos feedbacks c/ reindex único). CRON NOVO crm_monthly_mentor_job
+(dia 1, 08:30 SP) → reimplantar SIDEKIQ. Backup antes, como sempre.
+
+**📄 PÁGINAS PRO** (menu Páginas virou grupo: Minhas páginas / Análise &
+funis (admin) / Planejamento de conteúdos):
+- **Testes A/B**: variações de título/subtítulo/botão servidas SORTEADAS
+  no MESMO endereço (ab_variants; 'a' = original; até 3 variações);
+  visitante do teste carrega ?v= nos cliques → visitas/cliques/conversão
+  POR VARIAÇÃO no daily_stats (view_b/cta_b/next_b). Bloco "Teste A/B"
+  no editor c/ placar ao vivo e checkbox "no ar (sorteada)"; placar
+  também na Análise c/ selo "liderando" (10+ visitas/variação).
+- **Estúdio de copy**: comentários do time por página (team_comments,
+  add/delete autor-ou-admin, thread no editor).
+- **ANÁLISE DE PÁGINAS** (/pages/analise, admin): tabela geral (visitas,
+  cliques, % clicam, badge de teste no ar), série diária 30d em barras,
+  QUANTO DA PÁGINA LERAM (beacon sendBeacon de profundidade 25/50/75/100
+  → POST /p/:slug/track, skip_forgery), origens do funil (?de=), placar A/B.
+- **MONTADOR DE FUNIS** (o "link build"): cadeias de next_page_id
+  desenhadas como trilha horizontal c/ conversão de cada elo (X seguiram
+  · %), visitas vindas do elo anterior, fim = WhatsApp; select em cada nó
+  REAPONTA o funil na hora; páginas publicadas fora de funil listadas p/
+  virar novo caminho.
+- Mapa de calor de cliques = fase 2 (anotado).
+
+**🧭 WORKFLOW DE CONTEÚDOS** (/pages/conteudos, time inteiro): kanban
+ideia → copy → produção → revisão → publicado; cards c/ formato (reels/
+carrossel/post/anúncio/página/e-mail em pill colorida), dono, prazo
+(vermelho vencido), notas; criar rápido por coluna; mover c/ ← →;
+excluir = admin. Tabela cevico_content_items.
+
+**💚 PESSOAS PRO** (menu "Pessoas", cada um vê o seu; admin vê o time;
+atendente ganhou 'People' no menu enxuto):
+- **DISC / 4 temperamentos**: questionário próprio de 12 perguntas
+  (discQuiz.js; D=Colérico, I=Sanguíneo, S=Fleumático, C=Melancólico),
+  a própria pessoa responde (2 min); dashboard individual: barras
+  D/I/S/C, perfil dominante c/ headline, combinação dominante+secundário
+  (DISC_DUOS), pontos fortes, pontos de atenção e "como se comunicar";
+  visão do gestor: grid do time c/ perfil dominante de cada um
+  (combinar pessoas/montar times). Salvo em cevico_people_profiles.disc.
+- **Desenvolvimento pessoal**: objetivos c/ porquê + prazo + status
+  (andamento/concluído/pausado no clique) + METAS checkbox → barra de
+  progresso ao vivo; goals jsonb; pessoa edita o seu, admin edita todos.
+- **Feedbacks**: linha do tempo dos ciclos do Mentor c/ badge SEMANAL
+  (laranja) / MENSAL (roxo), resumo + forte + a corrigir.
+- **Mentor MENSAL**: WeeklyMentorService ganhou cadence ('monthly' =
+  mês fechado, prompt avisa que é visão de evolução), Crm::MonthlyMentorJob
+  + cron dia 1; card do Meu Painel segue SEMANAL (weekly filtrado).
+- Testes: migrations ok; rubocop ZERO nos 11 arquivos backend; vite 200
+  nos 10 arquivos frontend; spec do schedule verde; e2e público do A/B
+  via curl (sorteio alternando h1, ?v=b forçando, CTA carregando ?v=b,
+  beacon 204, contadores view_a/view_b/cta_b/scroll conferidos no banco);
+  visual completo (Análise c/ funil e placar, Conteúdos, Pessoas c/ quiz
+  DISC respondido de ponta a ponta, objetivo criado e meta batida a 100%,
+  timeline semanal+mensal, editor c/ estúdio A/B e comentários).
+
+## 53. 🎯 METAS + Objeções high-ticket + Pessoas v2 (Roda da Vida) + Conteúdos/A/B + Google + agentes de comentários (17/07, tarde) ⏳ NO WORKING TREE — ⚠️ 2 MIGRATIONS + CRON NOVO
+
+⚠️ MIGRATIONS: 20260717000006 (cevico_goal_plans) e 20260717000007
+(life+assessments em cevico_people_profiles). CRON NOVO
+crm_comments_agent_job (*/5) → reimplantar SIDEKIQ. Backup antes.
+
+- **🎯 PAINEL DE METAS** (menu "Metas"; admin edita, time vê): plano por
+  MÊS (mês atual/próximo/qualquer) com 6 indicadores oficiais (leads,
+  consultas agendadas/realizadas, cirurgias agendadas/realizadas, valor
+  fechado via StageLog "Cirurgia Realizada"×value), HISTÓRICO de 12 meses
+  em barras por indicador (mês selecionado destacado) + alvo editável +
+  progresso do mês contra a meta; orientações "como vamos chegar lá";
+  MARCOS com check e prazo; notas de AJUSTE DE PROCESSO por pessoa;
+  criação de TAREFA real pro time (tasks/create, prefixo 🎯); ROTINAS do
+  time + FERRAMENTAS importantes (agenda_config). **MEU PAINEL ganhou a
+  faixa Metas do mês (barras) · Rotinas · Ferramentas** e o MENTOR recebe
+  meta_do_mes (alvos+orientações+marcos pendentes) no payload — orienta a
+  equipe rumo à meta.
+- **⚔️ FERRAMENTAS DE FECHAMENTO** (/tools, time lê; atalho na faixa do
+  Meu Painel): SCRIPT de fechamento editável (admin) + **MAPA DE
+  OBJEÇÕES gerado por IA** (Crm::ObjectionMapService, agente sales):
+  lê conversas de quem AVANÇOU nos 4 estágios-chave (StageLog 120d) e
+  extrai por estágio as maiores objeções (frequência alta/média/baixa) +
+  a MELHOR RESPOSTA real que converteu (frase pronta, clique = copia) +
+  por que funciona. Botão admin "Gerar/Atualizar com IA".
+- **💚 PESSOAS v2**: DISC agora com **28 itens** (16 escolhas + 12
+  escalas 0-10 — mais dados); teste novo dos **4 TEMPERAMENTOS** (12
+  situações de vida); todo teste fica **ARQUIVADO** (assessments, compara
+  no radar); card do time mostra a **ORDEM dos 4** (D › I › S › C
+  colorida — a ordem importa) + temperamento dominante; **RADAR (teia)**
+  DISC × Temperamentos × teste arquivado (RadarChart.vue, estilo o
+  gráfico de jogador). **ABA VIDA (privada — nem admin vê)**:
+  **RODA DA VIDA** animada de 8 áreas coloridas (fatias crescem até a
+  nota, média no centro, polígono da avaliação ANTERIOR por cima =
+  evolução visível, pergunta reflexiva por área, histórico de momentos
+  com nota do momento) · **OBJETIVOS POR HORIZONTE** (20/10/5/3/1 anos,
+  3/1 meses, 1 semana, 1 dia, AGORA) · **HÁBITOS & CRENÇAS** com a ficha
+  estratégica (com quem aprendeu? era autoridade? o que é absurdo? o que
+  Deus pensa? pelo que vai trocar?) + PREÇO pago em 4 áreas (0-10, mini-
+  barras coloridas = forças/fraquezas) + status "vencido 🏆".
+- **📚 MENU "CONTEÚDOS"** (ex-Páginas): Páginas · Planejamento de
+  conteúdos · Análise de funis · **TESTES A/B (central)** — nova tela
+  /pages/ab com tudo num lugar: testes NO AR com placar e líder,
+  variações pausadas, páginas candidatas (ordenadas por visitas).
+- **🏆 TAREFAS**: BANCO DE ELOGIOS (16 frases bem-humoradas, sorteio a
+  cada 100%, destaque maior) + donut dourado SEM glow, com **névoa de
+  partículas douradas orbitando** (16 partículas, raio/velocidade/opacity
+  variados, prefers-reduced-motion ok).
+- **📊 DASHBOARD GOOGLE (Ads + GA4)** em Relatórios: estado da conexão
+  GA4 (measurement_id+api_secret — já existia o GoogleAdsConversionsService
+  via Measurement Protocol e a ação de coluna google_ads_conversion),
+  série de 30 dias das CONVERSÕES ENVIADAS (log novo sent_log por
+  dia/evento no service), totais por evento e as colunas plugadas; espaço
+  pronto pro developer token (investimento/cliques, como o painel Meta).
+- **💬 AGENTES DA META**: Atendente Instagram virou **"Atendente Direct &
+  Messenger"** (o seletor de caixas já aceita qualquer canal — com a caixa
+  do Messenger conectada ele responde lá também); **12º agente
+  "RESPONDEDOR DE COMENTÁRIOS"** (IG+FB): varre comentários novos dos
+  posts/anúncios a cada 5 min (Graph API v19), responde em público no tom
+  CEVICO (curto, sem preço/dado clínico, convida pro direct), caso sério
+  = marca pro humano e silencia; config no card (Page token write-only +
+  fb_page_id + ig_user_id) + registro de atividade estilo nativo
+  (comments_state.events); nasce DESLIGADO e precisa do token do app da
+  Meta (mesmo pendente do canal Instagram — item 38).
+- Testes: 2 migrations ok; rubocop zero em TODOS os arquivos novos/
+  tocados; vite 200 nos 19 arquivos; spec do schedule verde; visual:
+  Painel de Metas com histórico real e progresso, faixa do Meu Painel,
+  teste dos temperamentos respondido de ponta a ponta + radar comparando,
+  Roda da Vida avaliada e registrada com histórico, Ferramentas com
+  script salvo. Mapa de objeções e comentários dependem de chave/token
+  (produção).
+
+## 54. 💰 GESTÃO FINANCEIRA + Reportar problema padrão + Radar verde + valores da marca (17/07, madrugada 2) ⏳ NO WORKING TREE — ⚠️ TEM MIGRATION
+
+⚠️ MIGRATION NOVA: 20260717000008 (cevico_finance_entries) — BACKUP DO
+BANCO antes do deploy. Aditiva; reversão = reimplantar imagem anterior.
+Sem cron novo nesta rodada.
+
+- **💰 GESTÃO FINANCEIRA** (menu "Financeiro", logo abaixo de Estratégia,
+  SÓ ADMIN — backend também bloqueia): o caixa da CEVICO num lugar só.
+  - **Lançamentos** (livro caixa): receitas (consultas/cirurgias/exames/
+    convênios), tributos, custos (serviços/comissões/distribuição de
+    lucros/serviços médicos/sala cirúrgica), investimento em PRODUTO &
+    ESTOQUE (lentes/insumos/medicamentos) e em EQUIPAMENTOS (+manutenção/
+    tecnologia). Formulário rápido (data, tipo→categorias dinâmicas,
+    descrição, valor pt-BR "1.234,56"), editar (lápis carrega no form) e
+    excluir com confirmação; lista do período com pílula colorida por
+    tipo e valor +verde/−vermelho.
+  - **Visão geral**: KPIs do período (Receita, Custos, Tributos, Lucro c/
+    % de margem, Produto & Estoque, Equipamentos, Resultado do caixa =
+    lucro − investimentos), GRÁFICO DE LINHA de 12 meses (receita/custos/
+    tributos/lucro/investimentos; lucro ouro mais grosso = protagonista,
+    investimentos tracejado) e donuts de custos/receitas por categoria
+    (mesmo aspecto macio dos outros painéis).
+  - **Períodos**: Hoje · Ontem · Essa semana · Este mês · Mês passado ·
+    Este ano · **PERSONALIZADO** (duas datas livres + Aplicar) — pedido
+    novo, período de análise escolhido pela pessoa.
+  - **COMPARAR MESES**: dois seletores de mês lado a lado → tabela de
+    indicadores (A, B, variação % com seta; direção "boa" colorida:
+    receita/lucro subindo = verde, custo/tributo subindo = vermelho,
+    investimento neutro) + quebra de custos por categoria A vs B.
+  - Backend: tabela cevico_finance_entries (account, entry_date, kind,
+    category, description, amount decimal 12,2, created_by_id) +
+    finance_controller (show/create_entry/update_entry/delete_entry/
+    compare) — só admin.
+- **🐞 "Reportar problema" PADRÃO no Meu Painel de todos**: botão no topo
+  do cartão de boas-vindas (vidro branco translúcido), abre a mesma
+  gaveta global; funciona em qualquer painel/tema e no celular.
+- **💚 Ícone do Radar VERDE**: o ícone do "Meu Painel" na sidebar agora
+  pulsa no MESMO verde do badge (#10B981) quando há avisos do Radar —
+  antes ficava laranja-avermelhado (#EA3E23), destoava da notificação.
+- **✍️ VALORES DA MARCA no Copywriter** (registro oficial): "tecnologia
+  de ponta, acolhimento humano e clareza visual" entraram no SYSTEM_PROMPT
+  do Crm::CopywriterService como a bússola de toda comunicação (equipamento
+  de primeira sem frieza, cuidado pelo nome, comunicação de bater o olho).
+- ⚠️ Lição nova: o field-base global (_base.scss) dá `mb-4` + `w-full` a
+  TODO input/select e o `select` perde a borda — em formulários custom,
+  travar `margin-bottom: 0` e borda com STYLE INLINE (irmão da lição do
+  width:100%).
+- Testes: migration local ok; rubocop zero nos 4 arquivos ruby; vite 200
+  nos 7 arquivos; visual desktop + mobile 375px nos DOIS temas (claro e
+  escuro): 3 abas do Financeiro, lançamento criado de ponta a ponta pelo
+  form (custo sala cirúrgica R$ 2.350), personalizado 10/05→10/07,
+  comparação jun×jul com variações certas, botão Reportar problema
+  abrindo a gaveta no desktop e no mobile, ícone verde confirmado via
+  computed style. Massa de teste: 124 lançamentos em 12 meses na conta 3
+  (embutida direto via runner, sem rake novo).
+
+### 🏗️ PRÓXIMA GRANDE RODADA — "PÁGINAS PRO" (pedidos 17/07, especificar juntos antes de construir)
+1. **Estúdio de Copy por página**: ambiente de criação/edição da copy
+   com estrutura entendida pelo Construtor (título/subtítulo/bullets),
+   salvar rápido e visual, copy OFICIAL + variações de teste,
+   comentários do time.
+2. **Testes A/B**: variações de página servidas alternadamente no mesmo
+   slug + resultados (visitas/cliques/conversão por variação) — base
+   já existe (daily_stats/redirecionadores).
+3. **Ambiente de ANÁLISE no menu lateral**: estatísticas completas por
+   página (série diária de visitas/cliques, origem do funil, taxa),
+   mapa de calor de cliques/scroll (coleta leve na página pública),
+   e DASHBOARD geral de páginas.
+4. **MONTADOR DE FUNIS visual**: tela onde os funis são montados
+   ligando páginas (página → página → WhatsApp), vendo o caminho e a
+   conversão de cada elo — o "link build" da CEVICO. Base: next_page_id.
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
 **ONDE ESTAMOS (2026-07-15, manhã — TUDO NO AR ✅):** itens 14-36 EM

@@ -502,6 +502,19 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/bug_reports`, data);
   }
 
+  // Configurações → Domínio (público das páginas/formulários)
+  getPublicDomain() {
+    return axios.get(`${this.url}/settings/public_domain`);
+  }
+
+  updatePublicDomain(host) {
+    return axios.post(`${this.url}/settings/update_public_domain`, { host });
+  }
+
+  checkPublicDomain(host) {
+    return axios.post(`${this.url}/settings/check_public_domain`, { host });
+  }
+
   // ── Central do Paciente ───────────────────────────────────────────
   getPatient(contactId) {
     return axios.get(`${this.url}/patients/${contactId}`);
@@ -531,6 +544,152 @@ class CrmAPI extends ApiClient {
 
   updateClinicalAccess(clinicalAccess) {
     return axios.post(`${this.url}/settings/update_agenda`, { clinical_access: clinicalAccess });
+  }
+
+  // Mentor do Time: gera o feedback semanal agora (últimos 7 dias, admin)
+  runMentor() {
+    return axios.post(`${this.url}/settings/run_mentor`);
+  }
+
+  // ── PÁGINAS PRO: análise, funis, comentários ──────────────────────
+  getPagesDashboard() {
+    return axios.get(`${this.url}/pages_dashboard`);
+  }
+
+  addPageComment(pageId, text) {
+    return axios.post(`${this.url}/pages/${pageId}/add_comment`, { text });
+  }
+
+  deletePageComment(pageId, commentId) {
+    return axios.post(`${this.url}/pages/${pageId}/delete_comment`, { comment_id: commentId });
+  }
+
+  // ── Planejamento de conteúdos (workflow de marketing) ─────────────
+  getContentItems() {
+    return axios.get(`${this.url}/content_items`);
+  }
+
+  createContentItem(data) {
+    return axios.post(`${this.url}/content_items`, data);
+  }
+
+  updateContentItem(id, data) {
+    return axios.put(`${this.url}/content_items/${id}`, data);
+  }
+
+  deleteContentItem(id) {
+    return axios.delete(`${this.url}/content_items/${id}`);
+  }
+
+  // ── Ambiente Pessoas (DISC + desenvolvimento + feedbacks) ─────────
+  getPeople() {
+    return axios.get(`${this.url}/people`);
+  }
+
+  saveDisc(scores) {
+    return axios.post(`${this.url}/people/save_disc`, { scores });
+  }
+
+  savePersonGoals(userId, goals) {
+    return axios.post(`${this.url}/people/save_goals`, { user_id: userId, goals });
+  }
+
+  // testes arquivados (disc v2 / 4 temperamentos) + espaço de vida
+  saveAssessment(kind, scores) {
+    return axios.post(`${this.url}/people/save_assessment`, { kind, scores });
+  }
+
+  saveLife(payload) {
+    return axios.post(`${this.url}/people/save_life`, payload);
+  }
+
+  // ── Painel de Metas ────────────────────────────────────────────────
+  getGoalPlans(month) {
+    return axios.get(`${this.url}/goal_plans`, { params: { month } });
+  }
+
+  upsertGoalPlan(payload) {
+    return axios.post(`${this.url}/goal_plans/upsert`, payload);
+  }
+
+  addGoalNote(month, text, aboutUserId) {
+    return axios.post(`${this.url}/goal_plans/add_note`, { month, text, about_user_id: aboutUserId });
+  }
+
+  deleteGoalNote(month, noteId) {
+    return axios.post(`${this.url}/goal_plans/delete_note`, { month, note_id: noteId });
+  }
+
+  updateRoutinesTools(payload) {
+    return axios.post(`${this.url}/goal_plans/update_routines`, payload);
+  }
+
+  // ── Ferramentas de Fechamento (script + mapa de objeções) ─────────
+  getClosingTools() {
+    return axios.get(`${this.url}/closing_tools`);
+  }
+
+  updateClosingScript(script) {
+    return axios.post(`${this.url}/closing_tools/update_script`, { script });
+  }
+
+  generateObjectionMap() {
+    return axios.post(`${this.url}/closing_tools/generate_map`);
+  }
+
+  // ── Dashboard Google (Ads + GA4) ───────────────────────────────────
+  getGoogleDashboard() {
+    return axios.get(`${this.url}/google_dashboard`);
+  }
+
+  // ── Gestão Financeira (só admin) ───────────────────────────────────
+  getFinance(params) {
+    return axios.get(`${this.url}/finance`, { params });
+  }
+
+  createFinanceEntry(payload) {
+    return axios.post(`${this.url}/finance/create_entry`, payload);
+  }
+
+  updateFinanceEntry(entryId, payload) {
+    return axios.post(`${this.url}/finance/update_entry`, { entry_id: entryId, ...payload });
+  }
+
+  deleteFinanceEntry(entryId) {
+    return axios.post(`${this.url}/finance/delete_entry`, { entry_id: entryId });
+  }
+
+  compareFinanceMonths(monthA, monthB) {
+    return axios.get(`${this.url}/finance/compare`, { params: { month_a: monthA, month_b: monthB } });
+  }
+
+  // ── Painel Estratégico (pilares do negócio, só admin) ─────────────
+  getStrategyBoard() {
+    return axios.get(`${this.url}/strategy`);
+  }
+
+  createStrategyPillar(data) {
+    return axios.post(`${this.url}/strategy/create_pillar`, data);
+  }
+
+  updateStrategyPillar(pillarId, data) {
+    return axios.post(`${this.url}/strategy/update_pillar`, { pillar_id: pillarId, ...data });
+  }
+
+  deleteStrategyPillar(pillarId) {
+    return axios.post(`${this.url}/strategy/delete_pillar`, { pillar_id: pillarId });
+  }
+
+  createStrategyItem(pillarId, data) {
+    return axios.post(`${this.url}/strategy/create_item`, { pillar_id: pillarId, ...data });
+  }
+
+  updateStrategyItem(itemId, data) {
+    return axios.post(`${this.url}/strategy/update_item`, { item_id: itemId, ...data });
+  }
+
+  deleteStrategyItem(itemId) {
+    return axios.post(`${this.url}/strategy/delete_item`, { item_id: itemId });
   }
 
   // ── Automations ───────────────────────────────────────────────────

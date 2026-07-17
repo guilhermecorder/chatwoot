@@ -15,6 +15,10 @@ import tasksRoutes from './tasks/routes';
 import agendaRoutes from './agenda/routes';
 import patientRoutes from './patient/routes';
 import cevicoPagesRoutes from './pages/routes';
+import cevicoStrategyRoutes from './strategy/routes';
+import cevicoPeopleRoutes from './people/routes';
+import cevicoGoalsRoutes from './goals/routes';
+import cevicoFinanceRoutes from './finance/routes';
 import inicioRoutes from './inicio/routes';
 import cevicoAutomationsRoutes from './cevicoAutomations/routes';
 import AppContainer from './Dashboard.vue';
@@ -44,6 +48,10 @@ export default {
         ...agendaRoutes.routes,
         ...patientRoutes.routes,
         ...cevicoPagesRoutes.routes,
+        ...cevicoStrategyRoutes.routes,
+        ...cevicoPeopleRoutes.routes,
+        ...cevicoGoalsRoutes.routes,
+        ...cevicoFinanceRoutes.routes,
         ...inicioRoutes.routes,
         ...cevicoAutomationsRoutes.routes,
       ],

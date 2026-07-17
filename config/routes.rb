@@ -10,6 +10,14 @@ Rails.application.routes.draw do
 
   post 'resend_confirmation', to: 'auth/resend_confirmations#create'
 
+  # ── CEVICO: raiz do domínio público oficial ────────────────────────────
+  # Precisa vir ANTES do root do app: em domínio DEDICADO às páginas, "/"
+  # mostra o índice das páginas publicadas. Se o domínio público for o
+  # MESMO do sistema, public_root? é falso e o app continua dono da raiz.
+  constraints(->(req) { Cevico::PublicSite.public_root?(req.host) }) do
+    root to: 'cevico_pages#home', as: :cevico_public_root
+  end
+
   ## renders the frontend paths only if its not an api only server
   if ActiveModel::Type::Boolean.new.cast(ENV.fetch('CW_API_ONLY_SERVER', false))
     root to: 'api#index'
@@ -42,6 +50,10 @@ Rails.application.routes.draw do
   get 'forms/:slug/:token', to: 'cevico_forms#show', as: :cevico_form
   post 'forms/:slug/:token', to: 'cevico_forms#submit'
   # Páginas públicas CEVICO (nutrição/procedimentos — preparadas p/ SEO)
+  # /cta e /next = redirecionadores que CONTAM o clique (funil + conversão)
+  get 'p/:slug/cta', to: 'cevico_pages#cta_click', as: :cevico_page_cta
+  get 'p/:slug/next', to: 'cevico_pages#next_step', as: :cevico_page_next
+  post 'p/:slug/track', to: 'cevico_pages#track', as: :cevico_page_track
   get 'p/:slug', to: 'cevico_pages#show', as: :cevico_page
 
   get '/health', to: 'health#show'
@@ -206,10 +218,15 @@ Rails.application.routes.draw do
               post :test_sheets
               post :update_agenda
               post :agenda_backfill
+              # Configurações → Domínio (público das páginas/formulários)
+              get :public_domain
+              post :update_public_domain
+              post :check_public_domain
               post :sync_scheduler_stages
                 post :sync_agent_stages
                 post :sales_insights
               post :radar_scan
+              post :run_mentor
               get :ai_usage
             end
             # Feedback de bugs do time (vira card 🐞 no board do admin)
@@ -218,6 +235,52 @@ Rails.application.routes.draw do
             resources :pages, only: [:index, :create, :update, :destroy], controller: 'pages' do
               # agente copywriter escreve a página inteira em seções
               collection { post :generate }
+              # estúdio de copy: comentários do time na página
+              member do
+                post :add_comment
+                post :delete_comment
+              end
+            end
+            # Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
+            resource :pages_dashboard, only: [:show], controller: 'pages_dashboards'
+            # Planejamento de conteúdos (workflow kanban de marketing)
+            resources :content_items, only: [:index, :create, :update, :destroy]
+            # Ambiente Pessoas: DISC + desenvolvimento pessoal + feedbacks
+            resource :people, only: [:show], controller: 'people' do
+              post :save_disc
+              post :save_goals
+              post :save_assessment
+              post :save_life
+            end
+            # Painel de Metas (admin cria; time acompanha)
+            resource :goal_plans, only: [:show], controller: 'goal_plans' do
+              post :upsert
+              post :add_note
+              post :delete_note
+              post :update_routines
+            end
+            # Ferramentas de Fechamento (script + mapa de objeções)
+            resource :closing_tools, only: [:show], controller: 'closing_tools' do
+              post :update_script
+              post :generate_map
+            end
+            # Dashboard Google (Ads + GA4): conversões enviadas + integração
+            resource :google_dashboard, only: [:show], controller: 'google_dashboards'
+            # Gestão Financeira (receitas, custos, tributos, investimentos) — só admin
+            resource :finance, only: [:show], controller: 'finance' do
+              post :create_entry
+              post :update_entry
+              post :delete_entry
+              get :compare
+            end
+            # Painel Estratégico (a empresa por pilares) — só admin
+            resource :strategy, only: [:show], controller: 'strategy' do
+              post :create_pillar
+              post :update_pillar
+              post :delete_pillar
+              post :create_item
+              post :update_item
+              post :delete_item
             end
             # Central do Paciente: espaço do paciente + anotações do médico
             resources :patients, only: [:show], controller: 'patients' do
@@ -852,4 +915,14 @@ Rails.application.routes.draw do
   # ----------------------------------------------------------------------
   # Routes for testing
   resources :widget_tests, only: [:index] unless Rails.env.production?
+
+  # ── CEVICO: páginas na RAIZ do domínio público oficial ─────────────────
+  # www.cevico.com.br/preoperatorio (sem /p/) — endereço limpo p/ Meta e
+  # Google. Fica no FIM das rotas de propósito: só pega o que NENHUMA rota
+  # real pegou, e SÓ quando o host da requisição é o domínio oficial
+  # (CEVICO_PUBLIC_HOST). Sem a env, esta rota nunca dispara.
+  constraints(->(req) { Cevico::PublicSite.official_host?(req.host) }) do
+    get '/:slug', to: 'cevico_pages#show', as: :cevico_page_official,
+                  constraints: { slug: /[a-z0-9\-]+/ }
+  end
 end

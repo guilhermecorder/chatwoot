@@ -39,6 +39,25 @@ crm_opportunity_radar_job:
   class: 'Crm::OpportunityRadarJob'
   queue: scheduled_jobs
 
+# CEVICO: Mentor do Time (feedback semanal por usuário no Meu Painel)
+# segunda 11:00 UTC = 08:00 em São Paulo, analisando a semana que acabou
+crm_weekly_mentor_job:
+  cron: '0 11 * * 1'
+  class: 'Crm::WeeklyMentorJob'
+  queue: scheduled_jobs
+
+# CEVICO: ciclo MENSAL do Mentor (dia 1, 08:30 SP — visão de evolução do mês)
+crm_monthly_mentor_job:
+  cron: '30 11 1 * *'
+  class: 'Crm::MonthlyMentorJob'
+  queue: scheduled_jobs
+
+# CEVICO: Respondedor de Comentários IG/FB (só age com agente ligado + token)
+crm_comments_agent_job:
+  cron: '*/5 * * * *'
+  class: 'Crm::CommentsAgentJob'
+  queue: scheduled_jobs
+
 # executed hourly for scheduled jobs that do not need minute-level cadence
 trigger_hourly_scheduled_items_job:
   cron: '0 * * * *'

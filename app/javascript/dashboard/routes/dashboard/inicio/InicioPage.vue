@@ -9,6 +9,7 @@ import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import TileAura from 'dashboard/components-next/radar/TileAura.vue';
+import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import CrmAPI from 'dashboard/api/crm';
 import {
   DOCTORS, resolveWindows, resolveBlocked, resolveBlockedDays,
@@ -435,6 +436,93 @@ const waitingLabel = alert => {
 };
 const openConversation = alert =>
   router.push(`/app/accounts/${accountId.value}/conversations/${alert.conversation_id}`);
+// atalhos no formato do card do CRM (iniciais + Espaço do Paciente)
+const alertInitials = alert =>
+  (alert.contact_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+const openPatientSpace = alert =>
+  router.push(`/app/accounts/${accountId.value}/patient/${alert.contact_id}`);
+
+// ── 🎯 Metas / Rotinas / Ferramentas (Painel de Metas alimenta) ──
+const goalsData = ref(null);
+const loadGoalsStrip = async () => {
+  try {
+    const { data: payload } = await CrmAPI.getGoalPlans();
+    goalsData.value = payload;
+  } catch {
+    goalsData.value = null;
+  }
+};
+const goalTargets = computed(() => goalsData.value?.plan?.targets || {});
+const goalCurrent = computed(() => {
+  const h = (goalsData.value?.history || []).find(x => x.month === goalsData.value?.month);
+  return h?.values || {};
+});
+// só indicadores COM meta definida (até 3, os de maior alvo)
+const goalRows = computed(() =>
+  Object.entries(goalTargets.value)
+    .filter(([, v]) => Number(v) > 0)
+    .slice(0, 4)
+    .map(([key, target]) => {
+      const current = goalCurrent.value[key] || 0;
+      return {
+        key,
+        label: goalsData.value?.indicators?.[key] || key,
+        current,
+        target: Number(target),
+        pct: Math.min(100, Math.round((current / Number(target)) * 100)),
+      };
+    })
+);
+const teamRoutines = computed(() => goalsData.value?.routines || []);
+const importantTools = computed(() => goalsData.value?.tools || []);
+const goToGoals = () => router.push(`/app/accounts/${accountId.value}/goals`);
+const goToTools = () => router.push(`/app/accounts/${accountId.value}/tools`);
+const openTool = tool => tool.url && window.open(tool.url, '_blank', 'noopener');
+// abre a gaveta global de feedback de bugs (BugReportDrawer no Dashboard.vue)
+const reportBug = () => window.dispatchEvent(new CustomEvent('cevico:report-bug'));
+
+// ── Mentor do Time: feedback semanal individual ──
+// Cada pessoa vê o seu; admin navega pelo time (pílulas com os nomes).
+const weeklyFeedback = computed(() => data.value?.weekly_feedback || null);
+const myFeedback = computed(() => weeklyFeedback.value?.mine || null);
+const teamFeedbacks = computed(() => weeklyFeedback.value?.team || []);
+const feedbackViewUserId = ref(null);
+const visibleFeedback = computed(() => {
+  if (feedbackViewUserId.value) {
+    return teamFeedbacks.value.find(f => f.user_id === feedbackViewUserId.value) || myFeedback.value;
+  }
+  return myFeedback.value || teamFeedbacks.value[0] || null;
+});
+const fbWeekLabel = fb => {
+  if (!fb?.week_start) return '';
+  const d = new Date(`${fb.week_start}T12:00:00`);
+  const end = new Date(d);
+  end.setDate(d.getDate() + 6);
+  const f = x => x.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  return `semana de ${f(d)} a ${f(end)}`;
+};
+
+// ── Meta de tempo de atendimento (configurada no agente Radar) ──
+// Relatório PESSOAL: cada atendente acompanha a própria meta; admin vê a
+// quebra do time. Os números vêm dos reporting_events (reply_time) que o
+// Chatwoot grava a cada resposta ao paciente.
+const responseGoal = computed(() => data.value?.response_goal || null);
+const goalMinutes = computed(() => responseGoal.value?.goal_minutes || 15);
+const myResponse = computed(() => responseGoal.value?.mine || null);
+const teamResponse = computed(() => responseGoal.value?.agents || []);
+const respVerdict = row => {
+  if (!row || !row.replies) return null;
+  if (row.avg_minutes <= goalMinutes.value && row.within_rate >= 70)
+    return { label: '🏅 Meta batida', bg: 'rgba(16,185,129,0.14)', color: '#047857' };
+  if (row.avg_minutes <= goalMinutes.value)
+    return { label: '💪 No ritmo', bg: 'rgba(59,130,246,0.12)', color: '#1D4ED8' };
+  return { label: '⏳ Fora da meta', bg: 'rgba(239,68,68,0.12)', color: '#B91C1C' };
+};
+const fmtMin = m => {
+  if (m === null || m === undefined) return '—';
+  if (m >= 60) return `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, '0')}`;
+  return `${String(m).replace('.', ',')} min`;
+};
 
 // ── Indicadores do período ──────────────────────────────────
 const conversionVerdict = computed(() => {
@@ -566,6 +654,7 @@ const onVisible = () => {
 onMounted(() => {
   store.dispatch('crm/fetchSettings').catch(() => {});
   loadRadarStatus();
+  loadGoalsStrip();
   refreshAll();
   refreshTimer = setInterval(refreshAll, 120000);
   document.addEventListener('visibilitychange', onVisible);
@@ -586,7 +675,19 @@ onUnmounted(() => {
         :style="{ background: currentPanel.grad }"
       >
         <div class="relative z-10" style="color: #fff">
-          <p class="text-sm font-medium mb-1" style="color: rgba(255,255,255,0.75)">{{ todayLabel }}</p>
+          <div class="flex items-start justify-between gap-2 mb-1">
+            <p class="text-sm font-medium" style="color: rgba(255,255,255,0.75)">{{ todayLabel }}</p>
+            <!-- 🐞 Reportar problema — padrão no painel de TODOS (pedido 17/07) -->
+            <button
+              class="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[11px] font-semibold transition-colors flex-shrink-0"
+              style="background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.25)"
+              title="Algo não funcionou? Vira um card no board do Guilherme e você recebe o aviso quando resolver."
+              @click="reportBug"
+            >
+              <span class="i-lucide-bug text-xs" />
+              Reportar problema
+            </button>
+          </div>
           <h1 class="text-2xl sm:text-4xl font-bold leading-tight" style="color: #fff">{{ greeting }}, {{ firstName }}! 👋</h1>
           <p class="text-sm mt-2" style="color: rgba(255,255,255,0.85)">
             Boas-vindas ao CEVICO S.I —
@@ -629,26 +730,30 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 🚨 Avisos do Radar de Oportunidades -->
+        <!-- 💚 Avisos do Radar de Oportunidades — cartão BRANCO (contraste
+             nos dois temas) + verde dopamine + botão que emana energia
+             (pedido 17/07: convite, não bronca) -->
         <div
           v-if="radarAlerts.length"
-          class="rounded-2xl border-2 border-red-500/40 bg-red-500/5 overflow-hidden mb-6"
+          class="rounded-2xl overflow-hidden mb-6 bg-white shadow-lg"
+          style="border: 2px solid rgba(16, 185, 129, 0.35)"
         >
-          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #DC2626, #F59E0B)" />
+          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #059669, #4ADE80)" />
           <div class="p-4 sm:p-5">
             <div class="flex items-center gap-2 mb-3 flex-wrap">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #DC2626, #F59E0B)">
+              <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #059669, #4ADE80)">
                 <span class="i-lucide-radar text-white text-base" />
               </span>
-              <h2 class="text-sm font-bold text-n-slate-12">
+              <h2 class="text-sm font-bold" style="color: #0f172a">
                 {{ radarAlerts.length === 1
                   ? '1 paciente quente sem atendimento'
                   : `${radarAlerts.length} pacientes quentes sem atendimento` }}
               </h2>
-              <span v-if="radarLastRun" class="text-[11px] text-n-slate-9 ml-auto">auditoria às {{ radarLastRun }}</span>
+              <span v-if="radarLastRun" class="text-[11px] ml-auto" style="color: #94a3b8">auditoria às {{ radarLastRun }}</span>
               <button
-                v-if="radarStatus"
-                class="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-n-weak text-n-slate-10 hover:bg-n-alpha-1 disabled:opacity-50"
+                v-if="radarStatus && isAdmin"
+                class="text-[11px] font-medium px-2.5 py-1 rounded-lg border disabled:opacity-50"
+                style="border-color: #e2e8f0; color: #64748b"
                 :title="radarLastActionLabel"
                 :disabled="togglingRadar"
                 @click="toggleRadarManual"
@@ -656,28 +761,67 @@ onUnmounted(() => {
                 {{ radarStatus.enabled ? '⏸ Pausar radar' : '▶️ Reativar radar' }}
               </button>
             </div>
-            <div class="space-y-2">
+            <!-- cards no formato do card do CRM: identidade em cima, pílulas,
+                 motivo como prévia e ações no rodapé — 2 colunas no desktop -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-2.5 items-start">
               <div
                 v-for="alert in radarAlerts"
                 :key="alert.conversation_id"
-                class="bg-n-solid-1 border border-red-500/25 rounded-xl p-3"
+                class="rounded-xl p-3 cursor-pointer transition-all hover:shadow-md flex flex-col gap-2"
+                style="background: #ffffff; border: 1px solid #e2e8f0"
+                @click="openConversation(alert)"
               >
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="i-lucide-flame text-red-500" />
-                  <p class="text-sm font-bold text-n-slate-12">{{ alert.contact_name }}</p>
-                  <span v-if="alert.stage_name" class="text-[10px] px-2 py-0.5 rounded-full bg-n-alpha-2 text-n-slate-11">{{ alert.stage_name }}</span>
-                  <span class="text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-600 font-semibold">⏱ {{ waitingLabel(alert) }}</span>
-                  <span v-if="alert.user_name" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 font-semibold">📌 para {{ alert.user_name }}</span>
+                <!-- identidade (avatar + nome + telefone), badge ⏱ à direita -->
+                <div class="flex items-center gap-2">
+                  <div
+                    class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold flex-shrink-0"
+                    style="background: linear-gradient(135deg, #059669, #4ADE80)"
+                  >
+                    {{ alertInitials(alert) }}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold truncate leading-tight" style="color: #0f172a">{{ alert.contact_name }}</p>
+                    <p v-if="alert.phone" class="text-xs truncate" style="color: #64748b">{{ alert.phone }}</p>
+                  </div>
+                  <span
+                    class="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0"
+                    style="background: rgba(16, 185, 129, 0.12); color: #047857; border: 1px solid rgba(16, 185, 129, 0.3)"
+                  >
+                    <span class="i-lucide-clock text-[11px]" />
+                    {{ waitingLabel(alert) }}
+                  </span>
+                </div>
+                <!-- pílulas (coluna do funil + destino do aviso) -->
+                <div v-if="alert.stage_name || alert.user_name" class="flex flex-wrap gap-1">
+                  <span v-if="alert.stage_name" class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded" style="background: #eef2f7; color: #475569">
+                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background: #059669" />
+                    {{ alert.stage_name }}
+                  </span>
+                  <span v-if="alert.user_name" class="text-xs px-1.5 py-0.5 rounded font-medium" style="background: rgba(212, 160, 23, 0.14); color: #92600a">📌 para {{ alert.user_name }}</span>
+                </div>
+                <!-- motivo como prévia de mensagem (igual ao card do CRM) -->
+                <div class="rounded-r-lg px-2 py-1.5" style="background: #f8fafc; border-left: 2px solid #10b981">
+                  <p class="text-xs leading-snug" style="color: #475569">{{ alert.motivo }}</p>
+                </div>
+                <p class="text-xs" style="color: #475569">💡 <b style="color: #0f172a">O que fazer:</b> {{ alert.acao }}</p>
+                <!-- rodapé de ações (igual ao card do CRM) -->
+                <div class="flex items-center justify-between gap-1 mt-auto">
                   <button
-                    class="ml-auto text-xs font-semibold text-white px-3 py-1.5 rounded-lg hover:opacity-90"
-                    style="background: linear-gradient(135deg, #DC2626, #F59E0B)"
-                    @click="openConversation(alert)"
+                    v-if="alert.contact_id"
+                    class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
+                    title="Espaço do Paciente"
+                    @click.stop="openPatientSpace(alert)"
+                  >
+                    <PatientSpaceIcon :size="24" />
+                  </button>
+                  <span v-else />
+                  <button
+                    class="cevico-energy-btn text-xs font-bold text-white px-3.5 py-1.5 rounded-lg"
+                    @click.stop="openConversation(alert)"
                   >
                     Atender agora →
                   </button>
                 </div>
-                <p class="text-xs text-n-slate-11 mt-1.5"><b class="text-n-slate-12">Motivo:</b> {{ alert.motivo }}</p>
-                <p class="text-xs text-n-slate-11 mt-0.5"><b class="text-n-slate-12">O que fazer:</b> {{ alert.acao }}</p>
               </div>
             </div>
           </div>
@@ -727,6 +871,156 @@ onUnmounted(() => {
                 <span v-if="task.due_at" class="text-[10px] text-n-slate-10 ml-auto">⏰ {{ fmtTaskDue(task.due_at) }}</span>
               </button>
             </div>
+          </div>
+        </div>
+
+        <!-- 🧭 Mentor do Time: feedback da semana (individual; admin vê o time) -->
+        <div
+          v-if="visibleFeedback"
+          class="rounded-2xl overflow-hidden mb-6 bg-n-card outline outline-1 outline-n-container"
+        >
+          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #C2410C, #FB923C)" />
+          <div class="p-4 sm:p-5">
+            <div class="flex items-center gap-2 mb-3 flex-wrap">
+              <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #C2410C, #FB923C)">
+                <span class="i-lucide-graduation-cap text-white text-base" />
+              </span>
+              <h2 class="text-sm font-bold text-n-slate-12">
+                {{ visibleFeedback.user_id === currentUser.id ? 'Seu feedback da semana' : `Feedback de ${visibleFeedback.user_name}` }}
+              </h2>
+              <span class="text-[11px] text-n-slate-9 ml-auto">{{ fbWeekLabel(visibleFeedback) }}</span>
+            </div>
+
+            <!-- admin: navega pelo time -->
+            <div v-if="isAdmin && teamFeedbacks.length > 1" class="flex items-center gap-1 flex-wrap mb-3">
+              <button
+                v-for="fb in teamFeedbacks"
+                :key="fb.user_id"
+                class="text-[11px] font-medium px-2.5 py-1 rounded-full transition-colors"
+                :class="visibleFeedback.user_id === fb.user_id ? 'text-white' : 'text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2'"
+                :style="visibleFeedback.user_id === fb.user_id ? { background: 'linear-gradient(135deg, #C2410C, #FB923C)' } : {}"
+                @click="feedbackViewUserId = fb.user_id"
+              >
+                {{ fb.user_name.split(' ')[0] }}
+              </button>
+            </div>
+
+            <p class="text-sm text-n-slate-11 leading-relaxed mb-3">{{ visibleFeedback.feedback.resumo }}</p>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
+              <div class="rounded-xl p-3" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25)">
+                <p class="text-[10px] font-bold uppercase tracking-wide mb-1" style="color: #047857">Ponto forte</p>
+                <p class="text-xs text-n-slate-11 leading-snug">{{ visibleFeedback.feedback.ponto_forte }}</p>
+              </div>
+              <div class="rounded-xl p-3" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3)">
+                <p class="text-[10px] font-bold uppercase tracking-wide mb-1" style="color: #B45309">O ponto a corrigir</p>
+                <p class="text-xs text-n-slate-11 leading-snug">{{ visibleFeedback.feedback.ponto_fraco }}</p>
+              </div>
+            </div>
+
+            <div v-if="visibleFeedback.feedback.solucoes?.length" class="space-y-1.5 mb-3">
+              <p class="text-[10px] font-bold uppercase tracking-wide text-n-slate-9">Soluções simples desta semana</p>
+              <div
+                v-for="(sol, si) in visibleFeedback.feedback.solucoes"
+                :key="si"
+                class="flex items-start gap-2 rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2"
+              >
+                <span
+                  class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 mt-0.5"
+                  style="background: linear-gradient(135deg, #C2410C, #FB923C)"
+                >
+                  {{ si + 1 }}
+                </span>
+                <div class="min-w-0">
+                  <p class="text-xs font-semibold text-n-slate-12">{{ sol.titulo }}</p>
+                  <p class="text-xs text-n-slate-10 leading-snug">{{ sol.como_fazer }}</p>
+                </div>
+              </div>
+            </div>
+
+            <p v-if="visibleFeedback.feedback.incentivo" class="text-xs italic" style="color: #9A3412">
+              {{ visibleFeedback.feedback.incentivo }}
+            </p>
+          </div>
+        </div>
+
+        <!-- 🎯 Metas · Rotinas · Ferramentas (alimentado pelo Painel de Metas) -->
+        <div v-if="goalsData" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+          <!-- METAS do mês -->
+          <button
+            class="rounded-2xl border border-n-weak bg-n-card outline-none p-4 text-left hover:border-amber-500/60 hover:shadow-md transition-all"
+            @click="goToGoals"
+          >
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
+                <span class="i-lucide-target text-white text-sm" />
+              </span>
+              <p class="text-xs font-bold text-n-slate-12 flex-1">Metas do mês</p>
+              <span class="i-lucide-chevron-right text-sm text-n-slate-9" />
+            </div>
+            <template v-if="goalRows.length">
+              <div v-for="g in goalRows" :key="g.key" class="mb-1.5">
+                <div class="flex items-center justify-between text-[10px] mb-0.5">
+                  <span class="text-n-slate-10 truncate">{{ g.label }}</span>
+                  <b class="text-n-slate-12">{{ g.current }}/{{ g.target }}</b>
+                </div>
+                <div class="h-1.5 bg-n-alpha-1 rounded-full overflow-hidden">
+                  <div
+                    class="h-full rounded-full transition-all duration-700"
+                    :style="{ width: `${Math.max(g.pct, 2)}%`, background: g.pct >= 100 ? 'linear-gradient(90deg, #047857, #34D399)' : 'linear-gradient(90deg, #B8860B, #D4A017)' }"
+                  />
+                </div>
+              </div>
+            </template>
+            <p v-else class="text-[11px] text-n-slate-9">
+              {{ isAdmin ? 'Defina a meta do mês no Painel de Metas →' : 'A meta do mês aparece aqui quando o gestor definir.' }}
+            </p>
+          </button>
+
+          <!-- ROTINAS -->
+          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F766E, #2DD4BF)">
+                <span class="i-lucide-repeat text-white text-sm" />
+              </span>
+              <p class="text-xs font-bold text-n-slate-12">Rotinas</p>
+            </div>
+            <template v-if="teamRoutines.length">
+              <p v-for="(r, ri) in teamRoutines.slice(0, 5)" :key="ri" class="text-[11px] text-n-slate-11 leading-relaxed flex items-start gap-1.5 mb-0.5">
+                <span class="i-lucide-check-circle-2 text-[11px] mt-0.5 flex-shrink-0" style="color: #0D9488" />
+                {{ r }}
+              </p>
+            </template>
+            <p v-else class="text-[11px] text-n-slate-9">
+              {{ isAdmin ? 'Cadastre as rotinas do time no Painel de Metas.' : 'As rotinas combinadas aparecem aqui.' }}
+            </p>
+          </div>
+
+          <!-- FERRAMENTAS importantes -->
+          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #065F46, #34D399)">
+                <span class="i-lucide-wrench text-white text-sm" />
+              </span>
+              <p class="text-xs font-bold text-n-slate-12">Ferramentas</p>
+            </div>
+            <button
+              class="w-full flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
+              @click="goToTools"
+            >
+              <span class="i-lucide-swords text-[11px]" style="color: #047857" />
+              Fechamento: script + mapa de objeções
+              <span class="i-lucide-chevron-right text-[11px] ml-auto text-n-slate-9" />
+            </button>
+            <button
+              v-for="(t, ti) in importantTools.slice(0, 4)"
+              :key="ti"
+              class="w-full flex items-center gap-1.5 text-[11px] text-n-slate-11 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
+              @click="openTool(t)"
+            >
+              <span class="i-lucide-external-link text-[11px] text-n-slate-9" />
+              <span class="truncate">{{ t.label }}</span>
+            </button>
           </div>
         </div>
 
@@ -892,6 +1186,96 @@ onUnmounted(() => {
             <p class="text-[10px] text-n-slate-9">{{ panelHighlight.sub }}</p>
           </div>
           <p class="text-2xl font-bold text-n-slate-12">{{ panelHighlight.value }}</p>
+        </div>
+
+        <!-- ⏱ Meta de tempo de atendimento — relatório pessoal (config no
+             agente Radar). Atendente vê a própria meta; admin vê o time. -->
+        <div
+          v-if="responseGoal && (myResponse || teamResponse.length)"
+          class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6"
+        >
+          <div class="flex items-center gap-2 mb-4 flex-wrap">
+            <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #059669, #4ADE80)">
+              <span class="i-lucide-target text-white text-base" />
+            </span>
+            <h2 class="text-sm font-bold text-n-slate-12">Meta de tempo de atendimento</h2>
+            <span
+              class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+              style="background: rgba(16, 185, 129, 0.12); color: #047857"
+            >
+              responder em até {{ goalMinutes }} min
+            </span>
+            <span v-if="isAdmin && !responseGoal.configured" class="text-[10px] text-n-slate-9 ml-auto">
+              ajuste a meta em Automações → Radar de Oportunidades
+            </span>
+          </div>
+
+          <!-- meu resultado no período (3 medidores + selo) -->
+          <div v-if="myResponse" class="mb-1">
+            <div class="grid grid-cols-3 gap-3">
+              <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center">
+                <p class="text-[10px] text-n-slate-9 mb-0.5">Seu tempo médio</p>
+                <p class="text-xl sm:text-2xl font-bold" :style="{ color: myResponse.avg_minutes <= goalMinutes ? '#059669' : '#DC2626' }">
+                  {{ fmtMin(myResponse.avg_minutes) }}
+                </p>
+              </div>
+              <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center">
+                <p class="text-[10px] text-n-slate-9 mb-0.5">Dentro da meta</p>
+                <p class="text-xl sm:text-2xl font-bold text-n-slate-12">{{ myResponse.within_rate }}%</p>
+              </div>
+              <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center">
+                <p class="text-[10px] text-n-slate-9 mb-0.5">Respostas</p>
+                <p class="text-xl sm:text-2xl font-bold text-n-slate-12">{{ myResponse.replies }}</p>
+              </div>
+            </div>
+            <div class="mt-2.5">
+              <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden">
+                <div
+                  class="h-full rounded-full transition-all duration-700"
+                  :style="{
+                    width: Math.max(myResponse.within_rate, 3) + '%',
+                    background: myResponse.within_rate >= 70 ? 'linear-gradient(90deg, #059669, #4ADE80)' : 'linear-gradient(90deg, #D97706, #F59E0B)',
+                  }"
+                />
+              </div>
+              <div class="flex items-center justify-between mt-1.5 flex-wrap gap-1">
+                <p class="text-[10px] text-n-slate-9">
+                  {{ myResponse.within_goal }} de {{ myResponse.replies }} respostas dentro da meta
+                </p>
+                <span
+                  v-if="respVerdict(myResponse)"
+                  class="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                  :style="{ background: respVerdict(myResponse).bg, color: respVerdict(myResponse).color }"
+                >
+                  {{ respVerdict(myResponse).label }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- admin: quebra por atendente -->
+          <div v-if="isAdmin && teamResponse.length" class="space-y-1.5" :class="myResponse ? 'mt-4 pt-3 border-t border-n-weak' : ''">
+            <p v-if="myResponse" class="text-xs font-medium text-n-slate-11 mb-1.5">Time no período</p>
+            <div
+              v-for="row in teamResponse"
+              :key="row.user_id"
+              class="flex items-center gap-2 flex-wrap rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2"
+            >
+              <span class="text-sm font-semibold text-n-slate-12 truncate">{{ row.name }}</span>
+              <span class="text-[10px] text-n-slate-9">{{ row.replies }} resposta(s)</span>
+              <span class="text-xs font-bold ml-auto" :style="{ color: row.avg_minutes <= goalMinutes ? '#059669' : '#DC2626' }">
+                {{ fmtMin(row.avg_minutes) }}
+              </span>
+              <span class="text-[10px] text-n-slate-10">{{ row.within_rate }}% na meta</span>
+              <span
+                v-if="respVerdict(row)"
+                class="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                :style="{ background: respVerdict(row).bg, color: respVerdict(row).color }"
+              >
+                {{ respVerdict(row).label }}
+              </span>
+            </div>
+          </div>
         </div>
 
         <!-- Saúde da Agenda -->
@@ -1191,6 +1575,82 @@ onUnmounted(() => {
   }
   50% {
     box-shadow: 0 0 0 9px rgba(124, 58, 237, 0);
+  }
+}
+
+/* "Atender agora" do Radar — botão que EMANA ENERGIA (pedido 17/07):
+   respiração + anéis verdes saindo do botão + brilho varrendo por cima */
+.cevico-energy-btn {
+  position: relative;
+  background: linear-gradient(135deg, #059669, #22c55e, #4ade80);
+  background-size: 200% 200%;
+  overflow: hidden;
+  animation:
+    cevico-energy-breathe 2s ease-in-out infinite,
+    cevico-energy-rings 2s ease-out infinite,
+    cevico-energy-grad 4s ease-in-out infinite;
+  transition: transform 0.15s ease;
+}
+.cevico-energy-btn:hover {
+  transform: scale(1.06);
+}
+.cevico-energy-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.45) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  animation: cevico-energy-shine 2.6s ease-in-out infinite;
+}
+@keyframes cevico-energy-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.035);
+  }
+}
+@keyframes cevico-energy-rings {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(34, 197, 94, 0.5),
+      0 0 0 0 rgba(34, 197, 94, 0.3);
+  }
+  100% {
+    box-shadow:
+      0 0 0 10px rgba(34, 197, 94, 0),
+      0 0 0 18px rgba(34, 197, 94, 0);
+  }
+}
+@keyframes cevico-energy-grad {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+@keyframes cevico-energy-shine {
+  0%,
+  55% {
+    transform: translateX(-120%);
+  }
+  85%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cevico-energy-btn,
+  .cevico-energy-btn::after {
+    animation: none;
   }
 }
 </style>
