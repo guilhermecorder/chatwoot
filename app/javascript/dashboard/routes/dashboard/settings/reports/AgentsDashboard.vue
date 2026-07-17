@@ -53,7 +53,13 @@ const rateColor = pct => {
 const fmtMin = min => {
   if (min === null || min === undefined) return '—';
   if (min < 60) return `${min}min`;
-  return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`;
+  return `${Math.floor(min / 60)}h${String(Math.round(min % 60)).padStart(2, '0')}`;
+};
+// pausas do expediente: 2h+ vermelho, 1h+ âmbar, resto neutro
+const gapColor = min => {
+  if (min >= 120) return '#DC2626';
+  if (min >= 60) return '#B45309';
+  return '#475569';
 };
 
 onMounted(fetchData);
@@ -172,7 +178,7 @@ onMounted(fetchData);
                   {{ row.messages_sent }} mensagens
                 </span>
               </div>
-              <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center">
+              <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
                 <div class="rounded-xl bg-n-alpha-1 px-2 py-2">
                   <p class="text-base font-bold text-n-slate-12">{{ row.conversations_assigned }}</p>
                   <p class="text-[10px] text-n-slate-10">conversas atribuídas</p>
@@ -182,6 +188,12 @@ onMounted(fetchData);
                     {{ fmtMin(row.avg_first_response_min) }}
                   </p>
                   <p class="text-[10px] text-n-slate-10">1ª resposta (média)</p>
+                </div>
+                <div class="rounded-xl bg-n-alpha-1 px-2 py-2">
+                  <p class="text-base font-bold" :style="{ color: speedColor(row.avg_reply_min) }">
+                    {{ fmtMin(row.avg_reply_min) }}
+                  </p>
+                  <p class="text-[10px] text-n-slate-10">resposta ao lead (média{{ row.replies_count ? ` · ${row.replies_count}` : '' }})</p>
                 </div>
                 <div class="rounded-xl bg-n-alpha-1 px-2 py-2">
                   <p class="text-base font-bold text-n-slate-12">{{ row.conversations_resolved }}</p>
@@ -200,6 +212,32 @@ onMounted(fetchData);
                     {{ fmtMin(row.radar_avg_response_min) }}
                   </p>
                   <p class="text-[10px] text-n-slate-10">tempo até responder o Radar</p>
+                </div>
+              </div>
+
+              <!-- Jornada de atendimento: horários reais + maiores pausas -->
+              <div v-if="row.workday" class="mt-3 rounded-xl border border-n-weak bg-n-alpha-1 px-3 py-2.5">
+                <div class="flex items-center gap-x-4 gap-y-1 flex-wrap text-xs text-n-slate-11">
+                  <span class="inline-flex items-center gap-1.5">
+                    <span class="i-lucide-sunrise text-sm" style="color: #D97706" />
+                    1ª mensagem em média às <b class="text-n-slate-12">{{ row.workday.avg_first_msg }}</b>
+                  </span>
+                  <span class="inline-flex items-center gap-1.5">
+                    <span class="i-lucide-sunset text-sm" style="color: #7C3AED" />
+                    última em média às <b class="text-n-slate-12">{{ row.workday.avg_last_msg }}</b>
+                  </span>
+                  <span class="text-n-slate-9">{{ row.workday.days_active }} dia(s) com atendimento</span>
+                </div>
+                <div v-if="row.workday.top_gaps?.length" class="flex items-center gap-1.5 flex-wrap mt-2">
+                  <span class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">maiores pausas</span>
+                  <span
+                    v-for="(g, gi) in row.workday.top_gaps"
+                    :key="gi"
+                    class="text-[11px] px-2 py-0.5 rounded-full bg-n-solid-2 border border-n-weak text-n-slate-11"
+                  >
+                    {{ g.day }} · {{ g.from }} → {{ g.to }} ·
+                    <b :style="{ color: gapColor(g.minutes) }">{{ fmtMin(g.minutes) }}</b>
+                  </span>
                 </div>
               </div>
             </div>

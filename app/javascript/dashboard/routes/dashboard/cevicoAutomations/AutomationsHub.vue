@@ -37,7 +37,9 @@ const aiAgents = ref({
   conversation: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
   form: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
   scheduler: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
-  opportunity: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', watchers: [], wait_minutes: 10 },
+  opportunity: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', watchers: [], wait_minutes: 10, response_goal_minutes: 15 },
+  mentor: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
+  comments: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', page_access_token: '', fb_page_id: '', ig_user_id: '', page_token_set: false },
   closing: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
   nps: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
   sales: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
@@ -159,6 +161,21 @@ const instagramInboxNames = agent =>
     .map(id => inboxes.value.find(i => i.id === id)?.name)
     .filter(Boolean);
 const isGeneratingInsights = ref(false);
+// Mentor do Time pontual: gera o feedback dos últimos 7 dias agora
+const isRunningMentor = ref(false);
+const runMentorNow = async () => {
+  if (isRunningMentor.value) return;
+  isRunningMentor.value = true;
+  try {
+    const { data } = await CrmAPI.runMentor();
+    useAlert(data.message || 'Mentor iniciado! Veja o Meu Painel em alguns minutos.');
+    setTimeout(() => { isRunningMentor.value = false; }, 90000);
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao iniciar o Mentor.');
+    isRunningMentor.value = false;
+  }
+};
+
 const generateSalesInsights = async () => {
   if (isGeneratingInsights.value) return;
   isGeneratingInsights.value = true;
@@ -301,8 +318,13 @@ const snapshotAgent = key => {
   if (key === 'opportunity') {
     snap.watchers = JSON.parse(JSON.stringify(a.watchers || []));
     snap.wait_minutes = a.wait_minutes;
+    snap.response_goal_minutes = a.response_goal_minutes;
   }
   if (key === 'instagram') snap.inbox_ids = [...(a.inbox_ids || [])];
+  if (key === 'comments') {
+    snap.fb_page_id = a.fb_page_id;
+    snap.ig_user_id = a.ig_user_id;
+  }
   return snap;
 };
 
@@ -321,8 +343,14 @@ const discardEdit = key => {
     if (key === 'opportunity') {
       a.watchers = JSON.parse(JSON.stringify(snap.watchers || []));
       a.wait_minutes = snap.wait_minutes;
+      a.response_goal_minutes = snap.response_goal_minutes;
     }
     if (key === 'instagram') a.inbox_ids = [...(snap.inbox_ids || [])];
+    if (key === 'comments') {
+      a.fb_page_id = snap.fb_page_id;
+      a.ig_user_id = snap.ig_user_id;
+      a.page_access_token = '';
+    }
   }
   editingAgent.value = { ...editingAgent.value, [key]: false };
 };
@@ -340,9 +368,16 @@ const packAgentFields = key => {
         lookback_hours: Number(w.lookback_hours) || 24,
       }));
     fields.wait_minutes = Number(a.wait_minutes) || 10;
+    fields.response_goal_minutes = Number(a.response_goal_minutes) || 15;
   }
   if (key === 'instagram') {
     fields.inbox_ids = (a.inbox_ids || []).map(Number);
+  }
+  if (key === 'comments') {
+    fields.fb_page_id = (a.fb_page_id || '').trim();
+    fields.ig_user_id = (a.ig_user_id || '').trim();
+    // token só viaja quando digitado (nunca volta preenchido do servidor)
+    if ((a.page_access_token || '').trim()) fields.page_access_token = a.page_access_token.trim();
   }
   return fields;
 };
@@ -464,8 +499,8 @@ const AGENT_META = {
   opportunity: {
     title: 'Radar de Oportunidades',
     icon: 'i-lucide-radar',
-    gradient: 'linear-gradient(135deg, #DC2626, #F59E0B)',
-    color: '#DC2626',
+    gradient: 'linear-gradient(135deg, #059669, #4ADE80)',
+    color: '#059669',
     tag: 'Não perder venda',
     description: 'Audita as colunas vigiadas e encontra pacientes QUENTES parados sem atendimento (ex.: quer agendar e ninguém respondeu). Cria o aviso no Meu Painel com nome, motivo e o que a atendente deve fazer.',
     triggers: [
@@ -505,12 +540,12 @@ const AGENT_META = {
     suggestion: 'Leitura fina de vendas — Opus no esforço alto vale o custo.',
   },
   instagram: {
-    title: 'Atendente Instagram',
+    title: 'Atendente Direct & Messenger',
     icon: 'i-lucide-instagram',
     gradient: 'linear-gradient(135deg, #C2185B, #7C3AED)',
     color: '#C2185B',
     tag: 'Atendimento ao vivo',
-    description: 'O ÚNICO agente que FALA com o paciente: responde o direct das caixas escolhidas seguindo o script CEVICO (sondagem → autoridade → orçamento → agendamento). Agenda SOZINHO na Agenda interna oferecendo só horários livres, captura o telefone e avisa que a confirmação oficial vai pelo WhatsApp. PAUSA quando um humano responde na conversa; humano manda 👍 para reativar; a confirmação de agendamento (😊) pausa sozinha.',
+    description: 'FALA com o paciente nas caixas escolhidas — Instagram Direct E Facebook Messenger — seguindo o script CEVICO (sondagem → autoridade → orçamento → agendamento). Agenda SOZINHO na Agenda interna oferecendo só horários livres, captura o telefone e avisa que a confirmação oficial vai pelo WhatsApp. PAUSA quando um humano responde na conversa; humano manda 👍 para reativar; a confirmação de agendamento (😊) pausa sozinha.',
     triggers: [
       { icon: 'i-lucide-instagram', label: 'Mensagem recebida nas caixas escolhidas abaixo (espera ~12s e junta mensagens picadas)' },
       { icon: 'i-lucide-calendar-check', label: 'Agenda direto na Agenda interna (só horários livres reais)' },
@@ -560,6 +595,36 @@ const AGENT_META = {
       { icon: 'i-lucide-bar-chart-3', label: 'Bloco "Satisfação (NPS)" no Dashboard CRM' },
     ],
     suggestion: 'Ler uma nota é simples — Haiku resolve baratinho.',
+  },
+  comments: {
+    title: 'Respondedor de Comentários',
+    icon: 'i-lucide-message-square-reply',
+    gradient: 'linear-gradient(135deg, #7C3AED, #DB2777)',
+    color: '#7C3AED',
+    tag: 'Atendimento ao vivo',
+    description: 'Responde os COMENTÁRIOS públicos dos posts e anúncios do Instagram e Facebook: agradece elogios, tira dúvidas leves e convida pro direct/WhatsApp — sem falar preço nem dado clínico em público. Reclamação séria ou urgência = marca pro humano e fica quieto. Corrige o gargalo de atendimento dos comentários.',
+    triggers: [
+      { icon: 'i-lucide-clock', label: 'Varre os comentários novos a cada 5 minutos' },
+      { icon: 'i-lucide-message-square-reply', label: 'Responde em público no tom CEVICO (curto e caloroso)' },
+      { icon: 'i-lucide-hand', label: 'Caso delicado → não responde e marca pro humano' },
+      { icon: 'i-lucide-key-round', label: 'Precisa do token da Página da Meta (cole aqui embaixo)' },
+    ],
+    suggestion: 'Comentário público é a vitrine — Sonnet no esforço médio.',
+  },
+  mentor: {
+    title: 'Mentor do Time',
+    icon: 'i-lucide-graduation-cap',
+    gradient: 'linear-gradient(135deg, #C2410C, #FB923C)',
+    color: '#C2410C',
+    tag: 'Evolução do time',
+    description: 'Capta os dados de uso da semana de CADA pessoa (tempo de resposta, conversas resolvidas, mensagens, tarefas) e entrega um feedback individual no Meu Painel: o ponto forte, O PONTO FRACO exato a corrigir e 2-3 soluções simples que geram grande resultado. Compara com a mediana do time sem expor ninguém.',
+    triggers: [
+      { icon: 'i-lucide-calendar-check', label: 'Toda segunda de manhã, analisando a semana que acabou' },
+      { icon: 'i-lucide-house', label: 'Feedback individual no Meu Painel de cada pessoa' },
+      { icon: 'i-lucide-eye', label: 'Admin vê o feedback do time inteiro' },
+      { icon: 'i-lucide-shield', label: 'Nunca fala com paciente — só lê números de uso' },
+    ],
+    suggestion: 'Feedback humano e fino, 1x por semana — Sonnet no esforço alto.',
   },
 };
 
@@ -665,6 +730,15 @@ const loadAgents = async () => {
         ? oppDraft.watchers
         : (a.opportunity?.watchers?.length ? a.opportunity.watchers : legacyWatchers),
       wait_minutes: (oppDraft?.wait_minutes || a.opportunity?.wait_minutes) || 10,
+      response_goal_minutes: (oppDraft?.response_goal_minutes || a.opportunity?.response_goal_minutes) || 15,
+    },
+    mentor: load('mentor'),
+    comments: {
+      ...load('comments'),
+      page_access_token: '',
+      fb_page_id: a.comments?.fb_page_id || '',
+      ig_user_id: a.comments?.ig_user_id || '',
+      page_token_set: a.comments?.page_token_set === true,
     },
   };
   Object.keys(aiAgents.value).forEach(key => {
@@ -1421,7 +1495,7 @@ onMounted(async () => {
             <!-- Config específica do Radar de Oportunidades (perene) -->
             <div v-if="key === 'opportunity'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
               <!-- O que ele monitora, direto ao ponto -->
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #DC2626, #F59E0B)">
+              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #059669, #4ADE80)">
                 <p>
                   📡 Monitora só o movimento <b>novo</b> de cada coluna vigiada (espera > {{ agent.wait_minutes }} min)
                   · avisa no <b>Meu Painel</b> do atendente escolhido · <b>nunca fala com o paciente</b>.
@@ -1439,9 +1513,33 @@ onMounted(async () => {
                   type="number"
                   min="1"
                   :disabled="!editingAgent[key]"
-                  class="w-16 border border-n-weak rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
+                  class="border border-n-weak rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
+                  style="width: 4.5rem"
                 />
                 min sem resposta
+              </div>
+
+              <!-- Meta de tempo de atendimento: vira o relatório pessoal
+                   de cada atendente no Meu Painel -->
+              <div class="rounded-lg border border-n-weak bg-n-solid-2 px-3 py-2.5">
+                <div class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11">
+                  <span class="i-lucide-target text-sm" style="color: #059669" />
+                  <b class="text-n-slate-12">Meta de tempo de atendimento:</b>
+                  responder o paciente em até
+                  <input
+                    v-model.number="agent.response_goal_minutes"
+                    type="number"
+                    min="1"
+                    :disabled="!editingAgent[key]"
+                    class="border border-n-weak rounded-lg px-2 py-1 text-sm bg-n-solid-1 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
+                    style="width: 4.5rem"
+                  />
+                  minutos
+                </div>
+                <p class="text-[11px] text-n-slate-9 mt-1">
+                  Cada atendente acompanha a própria meta no <b>Meu Painel</b>: tempo médio de resposta,
+                  % das respostas dentro da meta e o selo de meta batida. Admin vê a quebra por atendente.
+                </p>
               </div>
 
               <!-- Vigias: coluna + painel do atendente + janela de tempo -->
@@ -1519,7 +1617,7 @@ onMounted(async () => {
               <div class="border-t border-n-weak pt-3 flex items-center gap-2 flex-wrap">
                 <button
                   class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90"
-                  style="background: linear-gradient(135deg, #DC2626, #F59E0B)"
+                  style="background: linear-gradient(135deg, #059669, #4ADE80)"
                   @click="showSweepModal = true"
                 >
                   <span class="i-lucide-scan-search text-xs" />
@@ -1528,6 +1626,101 @@ onMounted(async () => {
                 <span class="text-[11px] text-n-slate-9">
                   varre AGORA a coluna que você escolher e avisa o atendente escolhido — roda uma vez, não fica ativo
                 </span>
+              </div>
+            </div>
+
+            <!-- Respondedor de Comentários: conexão da Meta + registro -->
+            <div v-if="key === 'comments'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #7C3AED, #DB2777)">
+                <p>
+                  Responde os <b>comentários públicos</b> dos posts e anúncios a cada 5 min ·
+                  sem preço/dado clínico em público · caso sério = <b>marca pro humano</b>.
+                  Precisa do <b>token da Página</b> (app da Meta — o mesmo caminho do canal Instagram).
+                </p>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label class="block">
+                  <span class="text-[10px] font-medium text-n-slate-9">ID da Página do Facebook (opcional)</span>
+                  <input
+                    v-model="agent.fb_page_id"
+                    type="text"
+                    :disabled="!editingAgent[key]"
+                    placeholder="ex.: 1234567890"
+                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                  />
+                </label>
+                <label class="block">
+                  <span class="text-[10px] font-medium text-n-slate-9">ID da conta Instagram Business (opcional)</span>
+                  <input
+                    v-model="agent.ig_user_id"
+                    type="text"
+                    :disabled="!editingAgent[key]"
+                    placeholder="ex.: 17841400000000"
+                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                  />
+                </label>
+              </div>
+              <label class="block">
+                <span class="text-[10px] font-medium text-n-slate-9">
+                  Token de acesso da Página {{ agent.page_token_set ? '— já conectado ✓ (cole um novo só pra trocar)' : '' }}
+                </span>
+                <input
+                  v-model="agent.page_access_token"
+                  type="password"
+                  :disabled="!editingAgent[key]"
+                  :placeholder="agent.page_token_set ? '••••••••••••' : 'cole o Page Access Token da Meta'"
+                  class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                />
+              </label>
+              <!-- registro de atividade (aparência nativa) -->
+              <div v-if="(settings?.ai?.comments_events || []).length">
+                <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Últimos comentários tratados</p>
+                <div class="space-y-1 max-h-44 overflow-y-auto">
+                  <div v-for="(ev, ei) in settings.ai.comments_events" :key="ei" class="rounded-lg bg-n-alpha-1 px-2.5 py-1.5 text-[11px]">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <span :class="ev.platform === 'instagram' ? 'i-lucide-instagram' : 'i-lucide-facebook'" class="text-[11px] text-n-slate-9" />
+                      <b class="text-n-slate-12">@{{ ev.author }}</b>
+                      <span
+                        class="text-[9px] font-bold px-1.5 rounded-full uppercase"
+                        :style="ev.status === 'respondido'
+                          ? 'background: rgba(16,185,129,0.15); color: #047857'
+                          : ev.status === 'humano'
+                            ? 'background: rgba(245,158,11,0.15); color: #B45309'
+                            : 'background: rgba(100,116,139,0.15); color: #64748B'"
+                      >
+                        {{ ev.status }}
+                      </span>
+                    </div>
+                    <p class="text-n-slate-10 mt-0.5">“{{ ev.comment }}”</p>
+                    <p v-if="ev.reply && ev.status === 'respondido'" class="text-n-slate-11 mt-0.5">↳ {{ ev.reply }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Mentor do Time: como funciona + gerar agora -->
+            <div v-if="key === 'mentor'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-2">
+              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #C2410C, #FB923C)">
+                <p>
+                  Toda <b>segunda de manhã</b> ele lê a semana de cada pessoa e deixa o feedback no
+                  <b>Meu Painel</b> dela: ponto forte, o ponto fraco a corrigir e soluções simples ·
+                  compara com a <b>mediana do time</b> sem expor ninguém · <b>nunca fala com o paciente</b>.
+                </p>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <p class="text-xs font-medium text-n-slate-11 flex-1">
+                  Primeira rodada ou teste
+                  <span class="text-n-slate-9 font-normal">(analisa os últimos 7 dias agora, sem esperar segunda)</span>
+                </p>
+                <button
+                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                  :style="{ background: AGENT_META.mentor.gradient }"
+                  :disabled="isRunningMentor || !agent.enabled"
+                  :title="agent.enabled ? '' : 'Ligue o Mentor no interruptor acima primeiro'"
+                  @click="runMentorNow"
+                >
+                  {{ isRunningMentor ? 'Gerando… (1-2 min)' : 'Gerar feedback agora' }}
+                </button>
               </div>
             </div>
 
@@ -2136,10 +2329,10 @@ onMounted(async () => {
       @click.self="showSweepModal = false"
     >
       <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden">
-        <div class="h-1.5 w-full flex-shrink-0" style="background: linear-gradient(135deg, #DC2626, #F59E0B)" />
+        <div class="h-1.5 w-full flex-shrink-0" style="background: linear-gradient(135deg, #059669, #4ADE80)" />
         <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak">
           <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-scan-search" style="color: #DC2626" />
+            <span class="i-lucide-scan-search" style="color: #059669" />
             Radar pontual
             <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-n-alpha-2 text-n-slate-11">roda uma vez</span>
           </h2>

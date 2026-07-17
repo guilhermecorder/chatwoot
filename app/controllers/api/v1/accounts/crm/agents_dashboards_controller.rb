@@ -46,7 +46,7 @@ class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::Ba
     end
   end
 
-  def agents_rows(since, until_at, radar_by_responder)
+  def agents_rows(since, until_at, radar_by_responder) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     range = since..until_at
 
     # agregações em lote (1 query por métrica, não por pessoa)
@@ -64,6 +64,11 @@ class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::Ba
                       .where.not(user_id: nil).group(:user_id).count
     consultas = account.tasks.where(task_type: 'consulta', created_at: range)
                        .group(:creator_id).count
+    reply_scope = account.reporting_events.where(name: 'reply_time', created_at: range)
+                         .where('value > 0').where.not(user_id: nil)
+    reply_avg = reply_scope.group(:user_id).average(:value)
+    reply_count = reply_scope.group(:user_id).count
+    workdays = workday_stats(range)
 
     rows = account.users.map do |user|
       radar = radar_by_responder[user.id] || { responded: 0, total_minutes: 0.0 }
@@ -73,16 +78,75 @@ class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::Ba
         conversations_assigned: assigned[user.id] || 0,
         messages_sent: sent[user.id] || 0,
         avg_first_response_min: first_resp[user.id] ? (first_resp[user.id].to_f / 60).round(1) : nil,
+        # "lead response time": média de TODAS as respostas (não só a 1ª)
+        avg_reply_min: reply_avg[user.id] ? (reply_avg[user.id].to_f / 60).round(1) : nil,
+        replies_count: reply_count[user.id] || 0,
         conversations_resolved: resolved[user.id] || 0,
         appointments_created: consultas[user.id] || 0,
         radar_responded: radar[:responded],
-        radar_avg_response_min: radar[:responded].positive? ? (radar[:total_minutes] / radar[:responded]).round : nil
+        radar_avg_response_min: radar[:responded].positive? ? (radar[:total_minutes] / radar[:responded]).round : nil,
+        # jornada de atendimento: 1ª/última mensagem e maiores pausas
+        workday: workdays[user.id]
       }
     end
 
     # só quem trabalhou no período (evita listar contas de sistema paradas)
     rows.select { |r| r[:messages_sent].positive? || r[:conversations_assigned].positive? || r[:radar_responded].positive? }
         .sort_by { |r| -r[:messages_sent] }
+  end
+
+  # ── Jornada de atendimento por pessoa (pedido 17/07) ──
+  # A partir das mensagens ENVIADAS por cada pessoa, dia a dia: horário da
+  # primeira e da última mensagem (média do período) e as MAIORES PAUSAS
+  # entre uma mensagem e outra dentro do expediente — retrato honesto do
+  # horário de atendimento real, para feedback.
+  WEEKDAYS_PT = %w[dom seg ter qua qui sex sáb].freeze
+  MIN_GAP_MINUTES = 30 # pausa menor que isso é ritmo normal, não intervalo
+
+  def workday_stats(range) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    rows = account.messages.reorder(nil)
+                  .where(message_type: :outgoing, private: false, created_at: range, sender_type: 'User')
+                  .where.not(sender_id: nil)
+                  .pluck(:sender_id, :created_at)
+
+    by_user = Hash.new { |h, k| h[k] = [] }
+    rows.each { |uid, at| by_user[uid] << at.in_time_zone(TZ) }
+
+    by_user.transform_values do |times|
+      per_day = times.sort.group_by(&:to_date)
+      firsts = []
+      lasts = []
+      gaps = []
+      per_day.each do |date, list|
+        firsts << minutes_of_day(list.first)
+        lasts << minutes_of_day(list.last)
+        list.each_cons(2) do |a, b|
+          diff = ((b - a) / 60).round
+          gaps << { date: date, from: a, to: b, minutes: diff } if diff >= MIN_GAP_MINUTES
+        end
+      end
+      {
+        days_active: per_day.size,
+        avg_first_msg: fmt_time_of_day(firsts.sum / firsts.size),
+        avg_last_msg: fmt_time_of_day(lasts.sum / lasts.size),
+        top_gaps: gaps.max_by(3) { |g| g[:minutes] }.map do |g|
+          {
+            day: "#{WEEKDAYS_PT[g[:date].wday]} #{g[:date].strftime('%d/%m')}",
+            from: g[:from].strftime('%H:%M'),
+            to: g[:to].strftime('%H:%M'),
+            minutes: g[:minutes]
+          }
+        end
+      }
+    end
+  end
+
+  def minutes_of_day(time)
+    (time.hour * 60) + time.min
+  end
+
+  def fmt_time_of_day(total_minutes)
+    format('%<h>02d:%<m>02d', h: total_minutes / 60, m: total_minutes % 60)
   end
 
   # ── Responsividade ao Radar de Oportunidades ──
