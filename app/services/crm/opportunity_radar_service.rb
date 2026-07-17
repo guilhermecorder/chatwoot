@@ -234,6 +234,7 @@ class Crm::OpportunityRadarService
     stage = stage_of(conversation)
     {
       'conversation_id' => conversation.display_id,
+      'contact_id' => conversation.contact_id,
       'contact_name' => contact&.name.presence || 'Paciente',
       'phone' => contact&.phone_number,
       'stage_name' => stage&.name,

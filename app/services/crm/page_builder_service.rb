@@ -55,13 +55,14 @@ class Crm::PageBuilderService
       messages: [{ role: 'user', content: build_input }]
     )
     record_usage(message)
-
-    text = message.content.find { |block| block.type == :text }&.text
-    JSON.parse(text)
+    parse_structured_response(message)
   rescue Anthropic::Errors::APIError => e
     { error: "Erro na IA: #{e.message}" }
-  rescue JSON::ParserError
+  rescue JSON::ParserError, TypeError
     { error: 'A IA devolveu um formato inesperado. Tente de novo.' }
+  rescue StandardError => e
+    Rails.logger.error "[PageBuilder] #{e.class}: #{e.message}"
+    { error: "Não consegui montar agora (#{e.class.name.demodulize}). Tente de novo em instantes." }
   end
 
   private

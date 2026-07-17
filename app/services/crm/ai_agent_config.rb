@@ -26,13 +26,15 @@ module Crm::AiAgentConfig
     'sales'        => { 'model' => 'claude-opus-4-8', 'effort' => 'high' },   # objeções + insights p/ gestão
     'instagram'    => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # conversa com paciente no direct
     'copywriter'   => { 'model' => 'claude-opus-4-8', 'effort' => 'high' },   # copy persuasiva multi-formato
-    'pagebuilder'  => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }  # montar página a partir de copy pronta
+    'pagebuilder'  => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # montar página a partir de copy pronta
+    'mentor'       => { 'model' => 'claude-sonnet-5', 'effort' => 'high' },   # feedback semanal do time (1x/semana)
+    'comments'     => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }  # comentário público: curto, mas é a cara da clínica
   }.freeze
 
   # Agentes RESPONDEDORES: os únicos autorizados a falar com o paciente
   # (hoje só o Atendente Instagram, restrito às caixas escolhidas na config).
   # Todos os demais seguem a trava operacional de leitura.
-  RESPONDER_AGENTS = %w[instagram].freeze
+  RESPONDER_AGENTS = %w[instagram comments].freeze
 
   # preço US$ por milhão de tokens (entrada / saída)
   PRICING = {
@@ -79,7 +81,8 @@ module Crm::AiAgentConfig
   private
 
   def client
-    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 60)
+    # 300s: Copywriter/Construtor geram páginas inteiras (minutos) — 60s estourava no meio (bug 17/07)
+    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 300)
   end
 
   def ai_config
@@ -132,6 +135,14 @@ module Crm::AiAgentConfig
     cfg = { format: format }
     cfg[:effort] = effort if effort && model.exclude?('haiku')
     cfg
+  end
+
+  # extrai o JSON estruturado da resposta, com guarda p/ resposta vazia
+  def parse_structured_response(message)
+    text = message.content.find { |block| block.type == :text }&.text
+    return { error: 'A IA não devolveu conteúdo (resposta vazia). Tente de novo.' } if text.blank?
+
+    JSON.parse(text)
   end
 
   # grava tokens + custo estimado da chamada (alimenta o relatório de gastos)

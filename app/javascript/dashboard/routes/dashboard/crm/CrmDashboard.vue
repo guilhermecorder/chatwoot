@@ -636,14 +636,14 @@ const agentView = computed(() => {
         <!-- Radar de Oportunidades × Consultas -->
         <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
           <div class="flex items-center gap-2 mb-5">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #DC2626, #F59E0B)">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #059669, #4ADE80)">
               <span class="i-lucide-radar text-white text-sm" />
             </span>
             <h3 class="text-sm font-bold text-n-slate-12">Radar de Oportunidades</h3>
             <span class="text-[11px] text-n-slate-9 ml-auto">no período selecionado</span>
           </div>
           <div class="grid grid-cols-2 gap-4">
-            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #DC2626, #F59E0B)">
+            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #059669, #4ADE80)">
               <p class="text-xs font-medium text-white/80 mb-1">Oportunidades detectadas</p>
               <p class="text-3xl font-bold">{{ data.radar?.opportunities ?? 0 }}</p>
               <p class="text-[11px] text-white/70 mt-1">pacientes quentes sem atendimento</p>

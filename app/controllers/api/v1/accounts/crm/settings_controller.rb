@@ -141,7 +141,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 copywriter: agent_fields + [:references],
                                 pagebuilder: agent_fields,
                                 instagram: agent_fields + [{ inbox_ids: [] }],
-                                opportunity: agent_fields + [:wait_minutes, :lookback_hours,
+                                mentor: agent_fields,
+                                comments: agent_fields + [:page_access_token, :fb_page_id, :ig_user_id],
+                                opportunity: agent_fields + [:wait_minutes, :lookback_hours, :response_goal_minutes,
                                                              { stage_ids: [],
                                                                watchers: %i[stage_id user_id lookback_hours] }])
                         .to_h
@@ -441,6 +443,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: { success: true, message: 'Radar pontual iniciado! Os avisos aparecem no Meu Painel em alguns minutos.' }
   end
 
+  # Mentor do Time pontual (admin): gera o feedback dos últimos 7 dias agora,
+  # sem esperar a segunda-feira — bom para testar e para a primeira rodada.
+  def run_mentor
+    unless Current.account_user.administrator?
+      return render json: { error: 'Só administradores rodam o Mentor.' }, status: :forbidden
+    end
+
+    Crm::WeeklyMentorJob.perform_later(Current.account.id)
+    render json: { success: true, message: 'Mentor do Time iniciado! Os feedbacks aparecem no Meu Painel em alguns minutos.' }
+  end
+
   # ── Relatório de uso/custo dos agentes de IA ────────────────────────────────
 
   def ai_usage
@@ -457,6 +470,35 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     }
   end
 
+  # ── Configurações → Domínio (público das páginas/formulários) ──────────────
+
+  def public_domain
+    render json: public_domain_json
+  end
+
+  def update_public_domain
+    return render json: { error: 'Apenas administradores podem alterar o domínio.' }, status: :forbidden unless Current.account_user.administrator?
+
+    value = Cevico::PublicSite.normalize(params[:host].to_s)
+    if params[:host].to_s.present? && value.blank?
+      return render json: { error: 'Endereço inválido. Use só o domínio, ex.: sistema.cevico.com.br' }, status: :unprocessable_entity
+    end
+    if value.present? && !value.match?(/\A[a-z0-9]([a-z0-9.-]*[a-z0-9])?\z/i)
+      return render json: { error: 'Endereço inválido. Use só o domínio, sem https:// e sem barras.' }, status: :unprocessable_entity
+    end
+
+    Cevico::PublicSite.save_host!(params[:host].to_s)
+    render json: public_domain_json
+  end
+
+  # verifica DNS + resposta HTTPS do domínio (antes/depois de salvar)
+  def check_public_domain
+    host = Cevico::PublicSite.normalize(params[:host].presence.to_s) || Cevico::PublicSite.host
+    return render json: { error: 'Nenhum domínio para verificar.' }, status: :unprocessable_entity if host.blank?
+
+    render json: domain_check_result(host)
+  end
+
   # baixa a planilha agora e devolve uma prévia das primeiras linhas
   def test_sheets
     result = Crm::SheetsSurgeryService.new(account: Current.account).fetch!
@@ -468,6 +510,38 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   private
+
+  def public_domain_json
+    db_value = InstallationConfig.find_by(name: 'CEVICO_PUBLIC_HOST')&.value.presence
+    {
+      host: Cevico::PublicSite.host,
+      dedicated: Cevico::PublicSite.dedicated_host?,
+      app_host: Cevico::PublicSite.app_host,
+      from_env: db_value.blank? && ENV['CEVICO_PUBLIC_HOST'].present?,
+      example_page_url: Cevico::PublicSite.configured? ? Cevico::PublicSite.page_url('preoperatorio') : nil,
+      example_form_url: "#{Cevico::PublicSite.base_url}/forms/…"
+    }
+  end
+
+  def domain_check_result(host)
+    result = { host: host }
+    begin
+      require 'resolv'
+      result[:dns_ip] = Resolv.getaddress(host)
+      result[:dns_ok] = true
+    rescue StandardError
+      result[:dns_ok] = false
+    end
+    result.merge!(domain_http_check(host)) if result[:dns_ok]
+    result
+  end
+
+  def domain_http_check(host)
+    res = HTTParty.get("https://#{host}/health", timeout: 6)
+    { http_ok: res.code == 200, http_code: res.code }
+  rescue StandardError => e
+    { http_ok: false, http_error: e.class.name.demodulize }
+  end
 
   def usage_breakdown(scope, column)
     last30 = scope.where(created_at: 30.days.ago..Time.current)
@@ -553,7 +627,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'sales' => Crm::SalesCoachService::SYSTEM_PROMPT,
       'instagram' => Crm::InstagramAgentService::SYSTEM_PROMPT,
       'copywriter' => Crm::CopywriterService::SYSTEM_PROMPT,
-      'pagebuilder' => Crm::PageBuilderService::SYSTEM_PROMPT
+      'pagebuilder' => Crm::PageBuilderService::SYSTEM_PROMPT,
+      'mentor' => Crm::WeeklyMentorService::SYSTEM_PROMPT,
+      'comments' => Crm::CommentsAgentService::SYSTEM_PROMPT
     }
     {
       api_key_set: cfg['api_key'].present?,
@@ -566,6 +642,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       opportunity_last_run: cfg.dig('opportunity_state', 'last_run'),
       sales_insights: cfg.dig('agents', 'sales', 'insights'),
       instagram_events: Array(cfg.dig('instagram_state', 'events')).first(30),
+      comments_events: Array(cfg.dig('comments_state', 'events')).first(30),
+      comments_last_run_at: cfg.dig('comments_state', 'last_run_at'),
       agents: default_prompts.to_h do |key, default_prompt|
         recommended = Crm::AiAgentConfig::RECOMMENDED[key] || {}
         [key, {
@@ -580,7 +658,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           stage_ids: Array(agents.dig(key, 'stage_ids')).map(&:to_i),
           inbox_ids: Array(agents.dig(key, 'inbox_ids')).map(&:to_i),
           wait_minutes: agents.dig(key, 'wait_minutes').presence&.to_i,
+          response_goal_minutes: agents.dig(key, 'response_goal_minutes').presence&.to_i,
           lookback_hours: agents.dig(key, 'lookback_hours').presence&.to_i,
+          # Respondedor de Comentários (token nunca volta pro navegador)
+          page_token_set: agents.dig(key, 'page_access_token').present?,
+          fb_page_id: agents.dig(key, 'fb_page_id').presence,
+          ig_user_id: agents.dig(key, 'ig_user_id').presence,
           watchers: Array(agents.dig(key, 'watchers')).map do |w|
             {
               stage_id: w['stage_id'].to_i,

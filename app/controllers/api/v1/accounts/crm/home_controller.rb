@@ -29,6 +29,10 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       appointments_30d: reached_stage_count(/agendamento/i, 30.days.ago, Time.current),
       next_appointments: next_appointments_json,
       opportunity_alerts: opportunity_alerts_json,
+      # meta de tempo de atendimento (relatório pessoal por atendente)
+      response_goal: response_goal_json(since, until_at),
+      # Mentor do Time: feedback semanal individual (admin vê o time)
+      weekly_feedback: weekly_feedback_json,
       my_tasks: my_tasks_json,
       bug_reports: bug_reports_json,
       # metas do painel + fator do período + recordes (cards vivos)
@@ -67,8 +71,11 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     render json: { alert: live, radar: radar_status(cfg) }
   end
 
-  # a atendente pode DESLIGAR o radar na mão — fica registrado quem e quando
-  def toggle_radar # rubocop:disable Metrics/AbcSize
+  # pausar/reativar o radar é decisão de gestão — SÓ ADMIN (pedido 17/07);
+  # fica registrado quem e quando
+  def toggle_radar # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+    return render json: { error: 'Só administradores pausam o Radar.' }, status: :forbidden unless Current.account_user.administrator?
+
     settings = CrmSetting.find_by(account: account) || CrmSetting.create!(account: account)
     cfg = settings.ai_config || {}
     cfg['agents'] ||= {}
@@ -396,6 +403,73 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
                     .order(completed_at: :desc).limit(3)
                     .map { |t| { id: t.id, title: t.title, completed_at: t.completed_at } }
     }
+  end
+
+  # ── Mentor do Time: o feedback da última semana gerada ──
+  # Cada pessoa vê o SEU feedback; admin também recebe o do time inteiro
+  # (para acompanhar quem precisa de ajuda em quê).
+  def weekly_feedback_json
+    # o card do Meu Painel mostra o ciclo SEMANAL; o mensal vive em Pessoas
+    scope = Crm::WeeklyFeedback.where(account: account, cadence: 'weekly')
+    latest_week = scope.maximum(:week_start)
+    return { mine: nil, team: [] } if latest_week.blank?
+
+    rows = scope.where(week_start: latest_week).includes(:user).order(:user_id)
+    as_json = rows.map do |row|
+      {
+        user_id: row.user_id,
+        user_name: row.user.available_name,
+        week_start: row.week_start,
+        stats: row.stats,
+        feedback: row.feedback
+      }
+    end
+    {
+      mine: as_json.find { |r| r[:user_id] == Current.user.id },
+      team: Current.account_user.administrator? ? as_json : []
+    }
+  end
+
+  # ── Meta de tempo de atendimento (relatório pessoal) ──
+  # Usa os reporting_events 'reply_time' que o Chatwoot já grava a cada
+  # resposta (quanto tempo o paciente esperou por ela). A meta é configurada
+  # no agente Radar (Automações → Radar de Oportunidades). Atendente vê o
+  # próprio relatório; admin vê a quebra por atendente.
+  # meta configurada no agente Radar (nil = admin ainda não definiu; usa 15)
+  def response_goal_minutes
+    @response_goal_minutes ||= crm_settings&.ai_config&.dig('agents', 'opportunity', 'response_goal_minutes').presence&.to_i
+  end
+
+  def response_goal_json(since, until_at)
+    rows = response_goal_rows(since, until_at, response_goal_minutes || 15)
+    {
+      goal_minutes: response_goal_minutes || 15,
+      configured: response_goal_minutes.present?,
+      mine: rows.find { |r| r[:user_id] == Current.user.id },
+      agents: Current.account_user.administrator? ? rows : []
+    }
+  end
+
+  def response_goal_rows(since, until_at, goal_minutes) # rubocop:disable Metrics/AbcSize
+    scope = account.reporting_events.where(name: 'reply_time', created_at: since..until_at).where('value > 0')
+    scope = scope.where(user_id: Current.user.id) unless Current.account_user.administrator?
+
+    counts = scope.group(:user_id).count
+    avgs = scope.group(:user_id).average(:value)
+    within = scope.where(value: ..goal_minutes * 60).group(:user_id).count
+    names = account.users.where(id: counts.keys.compact).index_by(&:id)
+    rows = counts.keys.compact.map do |uid|
+      hits = within.fetch(uid, 0)
+      {
+        user_id: uid,
+        name: names[uid]&.available_name || 'Atendente',
+        replies: counts[uid],
+        avg_minutes: (avgs[uid].to_f / 60).round(1),
+        within_goal: hits,
+        within_rate: pct(hits, counts[uid])
+      }
+    end
+    rows.sort_by { |r| -r[:replies] }
   end
 
   def opportunity_alerts_json

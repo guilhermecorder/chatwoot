@@ -1,13 +1,20 @@
 # Página PÚBLICA do formulário CEVICO — o paciente acessa pelo link
 # assinado enviado no WhatsApp, sem login. O token identifica o
 # formulário e o contato; a resposta cai amarrada ao paciente.
-class CevicoFormsController < ActionController::Base
+class CevicoFormsController < ActionController::Base # rubocop:disable Rails/ApplicationController
   protect_from_forgery with: :null_session
   layout false
 
   before_action :load_form
 
   def show
+    # domínio oficial configurado → link antigo (host da VPS) redireciona
+    # 301 pro oficial; o token vai junto no caminho, nada quebra
+    if Cevico::PublicSite.configured? && !Cevico::PublicSite.official_host?(request.host)
+      return redirect_to "#{Cevico::PublicSite.base_url}#{request.fullpath}",
+                         status: :moved_permanently, allow_other_host: true
+    end
+
     render :show
   end
 
@@ -38,6 +45,6 @@ class CevicoFormsController < ActionController::Base
     return render plain: 'Formulário não encontrado ou link inválido.', status: :not_found if @form.nil?
 
     @contact = data[:contact_id] && Contact.find_by(id: data[:contact_id], account_id: data[:account_id])
-    @first_name = @contact&.name.to_s.split(' ').first
+    @first_name = @contact&.name.to_s.split.first
   end
 end

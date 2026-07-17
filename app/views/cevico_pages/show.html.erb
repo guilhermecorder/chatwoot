@@ -6,7 +6,11 @@
   <%# SEO: título e descrição próprios da página (Google mostra exatamente isso) %>
   <title><%= @page.meta_title.presence || "#{@page.title} — CEVICO Cuidados Oculares" %></title>
   <meta name="description" content="<%= @page.meta_description.presence || @page.subtitle %>">
-  <link rel="canonical" href="<%= request.original_url.split('?').first %>">
+  <%# canonical: com domínio oficial configurado, aponta SEMPRE pra ele —
+      Google e Meta enxergam um endereço só %>
+  <% canonical_url = Cevico::PublicSite.configured? ? Cevico::PublicSite.page_url(@page.slug) : request.original_url.split('?').first %>
+  <link rel="canonical" href="<%= canonical_url %>">
+  <meta property="og:url" content="<%= canonical_url %>">
   <meta property="og:type" content="article">
   <meta property="og:title" content="<%= @page.meta_title.presence || @page.title %>">
   <meta property="og:description" content="<%= @page.meta_description.presence || @page.subtitle %>">
@@ -202,8 +206,9 @@
       <img src="/brand-assets/cevico-logo-dark-bg.png" alt="CEVICO — Cuidados Oculares">
     </div>
     <% if @page.emoji.present? %><span class="emoji"><%= @page.emoji %></span><% end %>
-    <h1><%= @page.title %></h1>
-    <% if @page.subtitle.present? %><p><%= @page.subtitle %></p><% end %>
+    <%# headline pode vir de uma variação do teste A/B (mesmo slug) %>
+    <h1><%= @page.display_title %></h1>
+    <% if @page.display_subtitle.present? %><p><%= @page.display_subtitle %></p><% end %>
   </div>
 
   <% if @page.sections.present? %>
@@ -265,8 +270,8 @@
               <% if sec['title'].present? %><h2 style="text-align:center"><%= sec['title'] %></h2><% end %>
               <% paragraphs.each do |p| %><p style="text-align:center"><%= p %></p><% end %>
               <div class="cta-wrap" style="margin-top:18px">
-                <a class="cta" href="<%= @page.cta_url.presence || '#' %>" rel="noopener">
-                  <%= @page.cta_label.presence || 'Falar com a CEVICO no WhatsApp' %>
+                <a class="cta" href="<%= @page.cta_href || '#' %>" rel="noopener">
+                  <%= @page.cta_text %>
                 </a>
               </div>
             <% else %>
@@ -277,9 +282,9 @@
         </section>
       <% end %>
       <% unless @page.sections.any? { |s| s['type'] == 'cta' } %>
-        <% if @page.cta_url.present? %>
+        <% if @page.cta_href %>
           <section class="sec"><div class="cta-wrap" style="margin:6px 0">
-            <a class="cta" href="<%= @page.cta_url %>" rel="noopener"><%= @page.cta_label.presence || 'Falar com a CEVICO no WhatsApp' %></a>
+            <a class="cta" href="<%= @page.cta_href %>" rel="noopener"><%= @page.cta_text %></a>
           </div></section>
         <% end %>
       <% end %>
@@ -288,10 +293,10 @@
     <%# páginas antigas: corpo markdown de sempre %>
     <article class="content">
       <%= raw @page.body_html %>
-      <% if @page.cta_url.present? %>
+      <% if @page.cta_href %>
         <div class="cta-wrap">
-          <a class="cta" href="<%= @page.cta_url %>" rel="noopener">
-            <%= @page.cta_label.presence || 'Falar com a CEVICO no WhatsApp' %>
+          <a class="cta" href="<%= @page.cta_href %>" rel="noopener">
+            <%= @page.cta_text %>
           </a>
         </div>
       <% end %>
@@ -328,6 +333,28 @@
       window.addEventListener('scroll', update, { passive: true });
       window.addEventListener('resize', update);
       update();
+    })();
+
+    // profundidade de rolagem (25/50/75/100): 1 beacon por visita ao sair —
+    // alimenta o "quanto da página leram" na Análise de Páginas
+    (function () {
+      var maxDepth = 0, sent = false;
+      function measure() {
+        var doc = document.documentElement;
+        var total = doc.scrollHeight - window.innerHeight;
+        var pct = total > 0 ? ((window.scrollY || doc.scrollTop) / total) * 100 : 100;
+        var bucket = pct >= 95 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
+        if (bucket > maxDepth) maxDepth = bucket;
+      }
+      function send() {
+        if (sent || !maxDepth || !navigator.sendBeacon) return;
+        sent = true;
+        navigator.sendBeacon('/p/<%= @page.slug %>/track', new URLSearchParams({ depth: String(maxDepth) }));
+      }
+      window.addEventListener('scroll', measure, { passive: true });
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') send(); });
+      window.addEventListener('pagehide', send);
+      measure();
     })();
   </script>
 </body>

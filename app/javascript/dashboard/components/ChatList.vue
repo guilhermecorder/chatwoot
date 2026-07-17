@@ -36,6 +36,10 @@ import { emitter } from 'shared/helpers/mitt';
 import wootConstants from 'dashboard/constants/globals';
 import advancedFilterOptions from './widgets/conversation/advancedFilterItems';
 import filterQueryGenerator from '../helper/filterQueryGenerator.js';
+import {
+  inboxGradientFor,
+  inboxSolidFor,
+} from '../helper/cevicoInboxColors.js';
 import languages from 'dashboard/components/widgets/conversation/advancedFilterItems/languages';
 import countries from 'shared/constants/countries';
 import { generateValuesForEditCustomViews } from 'dashboard/helper/customViewsHelper';
@@ -77,6 +81,9 @@ const store = useStore();
 // salva no navegador e é pré-selecionada ao abrir Conversas.
 const INBOX_PILLS_KEY = 'cevico_conversas_inboxes';
 const pillInboxes = computed(() => store.getters['inboxes/getInboxes'] || []);
+// cor própria por caixa (pedido 16/07) — dourado fica só no "Todas"
+const pillGradient = ib => inboxGradientFor(pillInboxes.value, ib.id);
+const pillDot = ib => inboxSolidFor(pillInboxes.value, ib.id);
 const showInboxPills = computed(
   () =>
     !props.teamId && !props.label && !props.conversationType && !props.foldersId
@@ -1036,12 +1043,17 @@ watch(conversationFilters, (newVal, oldVal) => {
       <button
         v-for="ib in pillInboxes"
         :key="ib.id"
-        class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
+        class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 flex items-center gap-1.5"
         :class="activeInboxSet.has(ib.id) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-        :style="activeInboxSet.has(ib.id) ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
+        :style="activeInboxSet.has(ib.id) ? { background: pillGradient(ib) } : {}"
         :title="activeInboxSet.has(ib.id) ? 'Clique para tirar esta caixa da seleção' : 'Clique para somar esta caixa à seleção'"
         @click="selectInboxPill(ib.id)"
       >
+        <span
+          v-if="!activeInboxSet.has(ib.id)"
+          class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+          :style="{ background: pillDot(ib) }"
+        />
         {{ ib.name }}
       </button>
     </div>

@@ -12,6 +12,11 @@ import ConversationChatModal from './components/ConversationChatModal.vue';
 import ColumnPresetsModal from './components/ColumnPresetsModal.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import ContactAPI from 'dashboard/api/contacts';
+import {
+  inboxGradientFor,
+  inboxSolidFor,
+  ALL_INBOXES_GRADIENT,
+} from 'dashboard/helper/cevicoInboxColors.js';
 
 const store = useStore();
 const { isAdmin } = useAdmin();
@@ -50,12 +55,14 @@ const newStageColor = ref('#6B7280');
 // A base inteira (9k+ cards) só entra sob demanda (busca / botão "Tudo") —
 // carregar tudo sempre travava máquinas fracas (i3/celular).
 const WINDOW_OPTIONS = [7, 15, 30];
-// padrão: ESSA SEMANA (a carga inicial mais leve possível cobrindo o
-// trabalho corrente); mês/ano/7/15/30d e "Tudo" continuam; "Personalizado"
-// abre o De/Até dos filtros com a base completa
-const savedWindow = localStorage.getItem('cevico_crm_window_days') || 'week';
+// padrão: ÚLTIMOS 7 DIAS — garantia de abertura leve no celular (pedido
+// 16/07). A troca de janela vale só para a sessão do navegador
+// (sessionStorage): fechar/abrir de novo volta pros 7 dias. Mês/ano/15/30d
+// e "Tudo" continuam; "Personalizado" abre o De/Até com a base completa.
+localStorage.removeItem('cevico_crm_window_days'); // chave antiga (persistia janela pesada)
+const savedWindow = sessionStorage.getItem('cevico_crm_window_days') || '7';
 const windowMode = ref(
-  ['7', '15', '30', 'week', 'month', 'year'].includes(String(savedWindow)) ? String(savedWindow) : 'week'
+  ['7', '15', '30', 'week', 'month', 'year'].includes(String(savedWindow)) ? String(savedWindow) : '7'
 );
 const dayOfYear = () =>
   Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
@@ -86,7 +93,7 @@ const loadBoard = async pipelineId => {
 
 const setWindowDays = async mode => {
   windowMode.value = String(mode);
-  localStorage.setItem('cevico_crm_window_days', String(mode));
+  sessionStorage.setItem('cevico_crm_window_days', String(mode));
   contactsScope.value = 'days';
   if (!selectedPipelineId.value) return;
   await store.dispatch('crm/fetchContacts', {
@@ -329,27 +336,45 @@ const availableInboxes = computed(() => {
   return [...set].sort();
 });
 
+// cor própria por caixa (mesma paleta das pílulas de Conversas — pedido 16/07)
+const accountInboxes = useMapGetter('inboxes/getInboxes');
+const crmInboxGradient = name =>
+  inboxGradientFor(accountInboxes.value || [], name);
+const crmInboxDot = name => inboxSolidFor(accountInboxes.value || [], name);
+
 const totalContacts = computed(() => allContacts.value.length);
 const filteredCount = computed(() => filteredContacts.value.length);
 
+// Só o que foi escolhido DENTRO do painel Filtros (ou digitado) conta aqui.
+// As opções pré-definidas sempre visíveis — pílulas de período, botões de
+// caixa, visualizações de colunas, Sem resposta — têm estado próprio na
+// tela e NÃO acendem o "Limpar filtros" (pedido 17/07).
 const activeFilterCount = computed(() => {
   let n = 0;
   if (filters.value.search)            n++;
   if (filters.value.assigneeId !== '') n++;
   if (filters.value.labels.length > 0) n++;
-  if (filters.value.inboxName)         n++;
-  if (filters.value.stageIds.length > 0) n++;
   if (filters.value.createdAt)         n++;
   if (filters.value.lastActivity)      n++;
-  if (filters.value.dateFrom || filters.value.dateTo) n++;
-  if (filters.value.awaitingOnly)      n++;
+  // De/Até digitado no painel conta; período vindo das pílulas, não
+  if ((filters.value.dateFrom || filters.value.dateTo) && !activeDatePreset.value) n++;
   return n;
 });
 
 const hasActiveFilters = computed(() => activeFilterCount.value > 0);
 
+// p/ o empty state explicativo, QUALQUER filtragem em jogo conta
+// (inclusive as opções pré-definidas)
+const anyFilteringActive = computed(() =>
+  hasActiveFilters.value ||
+  !!filters.value.inboxName ||
+  filters.value.stageIds.length > 0 ||
+  filters.value.awaitingOnly ||
+  !!filters.value.dateFrom || !!filters.value.dateTo
+);
+
 const allFilteredOut = computed(() =>
-  hasActiveFilters.value && filteredCount.value === 0
+  anyFilteringActive.value && filteredCount.value === 0
 );
 
 const loadAllContacts = async () => {
@@ -385,6 +410,13 @@ const DATE_PRESETS = [
   { key: 'all', label: 'Desde o início' },
 ];
 const activeDatePreset = ref('');
+const activeDatePresetLabel = computed(
+  () => DATE_PRESETS.find(p => p.key === activeDatePreset.value)?.label ?? ''
+);
+// o filtro de data (chegada do lead) está em jogo? — usado no empty state
+const dateFilterActive = computed(
+  () => Boolean(activeDatePreset.value || filters.value.dateFrom || filters.value.dateTo)
+);
 
 const localDateStr = d => {
   const pad = n => String(n).padStart(2, '0');
@@ -482,6 +514,62 @@ const contactsByStage = computed(() => {
     map[stage.id] = sortCards(filteredContacts.value.filter(c => c.stage_id === stage.id));
   }
   return map;
+});
+
+// ── Navegador de colunas no CELULAR (pedido 16/07) ────────────────────
+// No celular cada coluna ocupa ~86vw com snap; com 12 colunas o deslize
+// vira maratona. Os chips fixos no topo mostram onde a pessoa está e pulam
+// direto pra qualquer coluna. Só aparece abaixo de md (768px).
+const boardScrollRef = ref(null);
+const mobileStageIdx = ref(0);
+const mobileChipRefs = ref([]);
+const visibleStages = computed(() =>
+  (selectedPipeline.value?.stages ?? []).filter(s => isStageVisible(s.id))
+);
+// métricas da coluna mobile: w-[86vw], gap 16px, padding do board 12px (p-3)
+const mobileColMetrics = el => ({
+  w: window.innerWidth * 0.86,
+  gap: 16,
+  pad: 12,
+  view: el?.clientWidth || window.innerWidth,
+});
+let snapRestoreTimer = null;
+const scrollToStage = idx => {
+  const el = boardScrollRef.value;
+  if (!el) return;
+  const { w, gap, pad, view } = mobileColMetrics(el);
+  // snap-center: alinha o centro da coluna com o centro da tela
+  const target = pad + idx * (w + gap) + w / 2 - view / 2;
+  // com snap "mandatory" LIGADO o navegador cancela o scroll programático
+  // (re-ancora no ponto atual) e scroll suave nem progride em webviews com
+  // animação suspensa — então: desliga o snap, PULA direto e religa; o
+  // alvo já é uma posição de snap, então religar não move nada
+  el.style.scrollSnapType = 'none';
+  el.scrollLeft = Math.max(0, target);
+  clearTimeout(snapRestoreTimer);
+  snapRestoreTimer = setTimeout(() => {
+    el.style.scrollSnapType = '';
+  }, 80);
+  mobileStageIdx.value = idx;
+};
+const onBoardScroll = () => {
+  if (window.innerWidth >= 768) return;
+  const el = boardScrollRef.value;
+  if (!el || !visibleStages.value.length) return;
+  const { w, gap, pad, view } = mobileColMetrics(el);
+  const raw = (el.scrollLeft - pad + (view - w) / 2) / (w + gap);
+  mobileStageIdx.value = Math.min(
+    Math.max(Math.round(raw), 0),
+    visibleStages.value.length - 1
+  );
+};
+// mantém o chip ativo à vista enquanto a pessoa desliza o board
+watch(mobileStageIdx, idx => {
+  mobileChipRefs.value[idx]?.scrollIntoView({
+    behavior: 'smooth',
+    inline: 'center',
+    block: 'nearest',
+  });
 });
 
 // IDs de contatos já adicionados ao pipeline atual (contact_id do Chatwoot)
@@ -759,7 +847,7 @@ const createAndAddContact = async () => {
 <template>
   <div class="bg-n-surface-1" style="display:flex;flex-direction:column;height:100%;width:100%;" @click="showLabelsDropdown = false; showStagesDropdown = false">
     <!-- Top bar -->
-    <div class="flex items-center gap-3 px-6 py-4 border-b border-n-weak flex-shrink-0 flex-wrap">
+    <div class="flex items-center gap-3 px-3 py-2.5 md:px-6 md:py-4 border-b border-n-weak flex-shrink-0 flex-wrap">
       <h1 class="text-lg font-bold text-n-slate-12 flex items-center gap-2">
         <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
           <span class="i-lucide-rocket text-white text-base" />
@@ -797,8 +885,9 @@ const createAndAddContact = async () => {
         </template>
       </div>
 
-      <!-- Right actions — design novo: grupos de pílulas alinhados -->
-      <div class="flex items-center gap-2 ml-auto justify-end flex-wrap">
+      <!-- Right actions — design novo: grupos de pílulas alinhados
+           (no celular vira trilho deslizável em vez de empilhar) -->
+      <div class="flex items-center gap-2 ml-auto justify-end flex-nowrap overflow-x-auto max-w-full md:flex-wrap md:overflow-visible">
         <!-- Renomear funil (excluir foi ocultado a pedido do Guilherme) -->
         <div
           v-if="isAdmin && selectedPipeline && !isRenamingPipeline"
@@ -816,7 +905,7 @@ const createAndAddContact = async () => {
         <!-- Ferramentas — grupo único de pílulas (só admin) -->
         <div
           v-if="isAdmin"
-          class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 flex-wrap"
+          class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 flex-nowrap md:flex-wrap"
         >
           <button
             v-if="selectedPipeline && !isProgrammingMode"
@@ -868,17 +957,21 @@ const createAndAddContact = async () => {
       </div>
     </div>
 
-    <!-- Janela de trabalho: aviso + seletor de período + carregar tudo -->
+    <!-- Janela de trabalho: aviso + seletor de período + carregar tudo
+         (no celular vira 1 linha deslizável, sem o texto explicativo) -->
     <div
       v-if="['days', 'recent'].includes(contactsMeta.scope) && contactsMeta.total > contactsMeta.shown"
-      class="flex items-center gap-2 px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-wrap"
+      class="flex items-center gap-2 px-3 md:px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible"
     >
-      <span class="i-lucide-zap text-n-gold" />
-      {{ windowMode === 'week' ? 'Leads ativos desta semana' : (windowMode === 'month' ? 'Leads ativos deste mês' : (windowMode === 'year' ? 'Leads ativos deste ano' : `Leads ativos dos últimos ${windowDays} dias`)) }}
-      ({{ contactsMeta.shown }} de {{ contactsMeta.total }}) — leve e rápido. A busca enxerga a base toda.
-      <span class="ml-1">Janela:</span>
+      <span class="i-lucide-zap text-n-gold flex-shrink-0" />
+      <span class="whitespace-nowrap flex-shrink-0">
+        {{ windowMode === 'week' ? 'Leads ativos desta semana' : (windowMode === 'month' ? 'Leads ativos deste mês' : (windowMode === 'year' ? 'Leads ativos deste ano' : `Leads ativos dos últimos ${windowDays} dias`)) }}
+        ({{ contactsMeta.shown }} de {{ contactsMeta.total }})
+      </span>
+      <span class="hidden md:inline">— leve e rápido. A busca enxerga a base toda.</span>
+      <span class="ml-1 flex-shrink-0">Janela:</span>
       <button
-        class="px-1.5 py-0.5 rounded border transition-colors"
+        class="px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap flex-shrink-0"
         :class="windowMode === 'week' && contactsScope === 'days'
           ? 'border-n-brand text-n-brand font-medium'
           : 'border-n-weak hover:bg-n-alpha-1'"
@@ -887,7 +980,7 @@ const createAndAddContact = async () => {
         Essa semana
       </button>
       <button
-        class="px-1.5 py-0.5 rounded border transition-colors"
+        class="px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap flex-shrink-0"
         :class="windowMode === 'month' && contactsScope === 'days'
           ? 'border-n-brand text-n-brand font-medium'
           : 'border-n-weak hover:bg-n-alpha-1'"
@@ -896,7 +989,7 @@ const createAndAddContact = async () => {
         Este mês
       </button>
       <button
-        class="px-1.5 py-0.5 rounded border transition-colors"
+        class="px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap flex-shrink-0"
         :class="windowMode === 'year' && contactsScope === 'days'
           ? 'border-n-brand text-n-brand font-medium'
           : 'border-n-weak hover:bg-n-alpha-1'"
@@ -907,7 +1000,7 @@ const createAndAddContact = async () => {
       <button
         v-for="d in WINDOW_OPTIONS"
         :key="d"
-        class="px-1.5 py-0.5 rounded border transition-colors"
+        class="px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap flex-shrink-0"
         :class="windowMode === String(d) && contactsScope === 'days'
           ? 'border-n-brand text-n-brand font-medium'
           : 'border-n-weak hover:bg-n-alpha-1'"
@@ -916,7 +1009,7 @@ const createAndAddContact = async () => {
         {{ d }}d
       </button>
       <button
-        class="px-1.5 py-0.5 rounded border border-n-weak hover:bg-n-alpha-1 disabled:opacity-50"
+        class="px-1.5 py-0.5 rounded border border-n-weak hover:bg-n-alpha-1 disabled:opacity-50 whitespace-nowrap flex-shrink-0"
         :disabled="isLoadingAll"
         title="Carrega a base completa e abre o De/Até para escolher qualquer intervalo"
         @click="loadAllContacts(); openFiltersPanel()"
@@ -924,7 +1017,7 @@ const createAndAddContact = async () => {
         {{ isLoadingAll ? 'Carregando…' : 'Personalizado…' }}
       </button>
       <button
-        class="px-1.5 py-0.5 rounded border border-n-weak hover:bg-n-alpha-1 disabled:opacity-50"
+        class="px-1.5 py-0.5 rounded border border-n-weak hover:bg-n-alpha-1 disabled:opacity-50 whitespace-nowrap flex-shrink-0"
         :disabled="isLoadingAll"
         title="Carrega a base completa, do primeiro lead até hoje"
         @click="loadAllContacts"
@@ -1001,23 +1094,25 @@ const createAndAddContact = async () => {
 
     <!-- Filter bar (only when a pipeline is selected) -->
     <div v-if="selectedPipeline && !uiFlags.isFetchingPipelines && !uiFlags.isFetchingContacts" class="flex-shrink-0">
-      <!-- Main filter row -->
-      <div class="flex items-center gap-2 px-4 py-2 border-b border-n-weak flex-wrap">
+      <!-- Toolbar em 2 LINHAS intencionais (pedido 17/07: alinhado e
+           distribuído). Linha 1 = "o que eu PROCURO" (busca, sem resposta,
+           ordenação, caixa, filtros). Linha 2 = "o que eu VEJO" (colunas,
+           período do lead, limpar). Altura padrão de TODOS os controles:
+           34px. No celular cada linha vira trilho deslizável. -->
+      <div class="flex items-center gap-2 px-3 md:px-4 pt-2 pb-1.5 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible">
         <!-- Search input -->
-        <div class="relative flex-none w-72">
+        <div class="relative flex-none w-48 md:w-72">
           <span class="absolute left-3 top-1/2 -translate-y-1/2 i-lucide-search text-n-slate-9 text-base pointer-events-none" />
           <input
             v-model="filters.search"
-            class="w-full pl-9 pr-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12 placeholder-n-slate-9 focus:outline-none focus:border-n-brand"
+            class="w-full h-[34px] pl-9 pr-3 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12 placeholder-n-slate-9 focus:outline-none focus:border-n-brand"
             :placeholder="$t('CRM.FILTER.SEARCH_PLACEHOLDER')"
           />
         </div>
 
-
-
         <!-- Sem resposta (paciente aguardando) -->
         <button
-          class="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors whitespace-nowrap"
+          class="flex items-center gap-1.5 h-[34px] px-3 text-sm rounded-lg border transition-colors whitespace-nowrap flex-shrink-0"
           :class="filters.awaitingOnly
             ? 'bg-amber-500/15 border-amber-500 text-amber-700 dark:text-amber-400 font-medium'
             : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
@@ -1047,19 +1142,42 @@ const createAndAddContact = async () => {
           <option value="">{{ $t('CRM.FILTER.SORT_DEFAULT') }}</option>
         </select>
 
-        <!-- Caixa de entrada -->
-        <select
-          v-model="filters.inboxName"
-          class="h-[34px] text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand max-w-[170px]"
+        <!-- Caixa de entrada — botões em linha, cor própria por caixa -->
+        <div
+          v-if="availableInboxes.length"
+          class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 flex-nowrap md:max-w-[440px] md:overflow-x-auto flex-shrink-0"
           :title="$t('CRM.MODAL.INBOX')"
         >
-          <option value="">{{ $t('CRM.FILTER.ALL_INBOXES') }}</option>
-          <option v-for="inbox in availableInboxes" :key="inbox" :value="inbox">{{ inbox }}</option>
-        </select>
+          <span class="i-lucide-inbox text-sm ml-2 mr-0.5 text-n-slate-10 flex-shrink-0" />
+          <button
+            class="h-7 px-2.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
+            :class="filters.inboxName === '' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="filters.inboxName === '' ? { background: ALL_INBOXES_GRADIENT } : {}"
+            @click="filters.inboxName = ''"
+          >
+            {{ $t('CRM.FILTER.ALL_INBOXES') }}
+          </button>
+          <button
+            v-for="inbox in availableInboxes"
+            :key="inbox"
+            class="h-7 px-2.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 flex items-center gap-1.5"
+            :class="filters.inboxName === inbox ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="filters.inboxName === inbox ? { background: crmInboxGradient(inbox) } : {}"
+            :title="`Só cards cuja última conversa é da caixa ${inbox}`"
+            @click="filters.inboxName = filters.inboxName === inbox ? '' : inbox"
+          >
+            <span
+              v-if="filters.inboxName !== inbox"
+              class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              :style="{ background: crmInboxDot(inbox) }"
+            />
+            {{ inbox }}
+          </button>
+        </div>
 
         <!-- Filters toggle button -->
         <button
-          class="relative flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors"
+          class="relative flex items-center gap-1.5 h-[34px] px-3 text-sm rounded-lg border transition-colors whitespace-nowrap flex-shrink-0"
           :class="showFilters || activeFilterCount > 0
             ? 'bg-n-brand/10 border-n-brand text-n-brand'
             : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
@@ -1075,50 +1193,63 @@ const createAndAddContact = async () => {
           </span>
         </button>
 
+        <!-- Contador (fim da linha 1) -->
+        <span class="text-xs text-n-slate-9 whitespace-nowrap ml-auto hidden md:inline">
+          {{ $t('CRM.FILTER.SHOWING', { count: filteredCount, total: contactsMeta.total ?? totalContacts }) }}
+          <template v-if="contactsMeta.with_conversations">
+            · {{ $t('CRM.FILTER.WITH_CONVERSATION', { count: contactsMeta.with_conversations }) }}
+          </template>
+        </span>
+      </div>
+
+      <!-- Linha 2: visualizações de colunas + período do lead -->
+      <div class="flex items-center gap-2 px-3 md:px-4 pt-0 pb-2 border-b border-n-weak flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible">
         <!-- Visualizações pré-configuradas (colunas) -->
-        <div class="flex items-center gap-1">
-          <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 flex-wrap">
-            <button
-              class="h-7 flex items-center gap-1.5 px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
-              :class="activePresetNames.length === 0 ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-              :style="activePresetNames.length === 0 ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
-              @click="clearPresets"
-            >
-              <span class="i-lucide-columns-3 text-sm" />
-              Todas as colunas
-            </button>
-            <button
-              v-for="p in columnPresets"
-              :key="p.name"
-              class="h-7 px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap max-w-[160px] truncate"
-              :class="activePresetNames.includes(p.name) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-              :style="activePresetNames.includes(p.name) ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
-              :title="`Mostrar só as colunas de ${p.name} (dá para combinar mais de uma)`"
-              @click="togglePreset(p.name)"
-            >
-              {{ p.name }}
-            </button>
-            <button
-              v-if="isAdmin"
-              class="h-7 w-7 flex items-center justify-center rounded-lg text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
-              :title="$t('CRM.PRESETS.MANAGE')"
-              @click="showPresetsModal = true"
-            >
-              <span class="i-lucide-settings-2 text-sm" />
-            </button>
-          </div>
+        <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 flex-nowrap md:flex-wrap flex-shrink-0">
+          <button
+            class="h-7 flex items-center gap-1.5 px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+            :class="activePresetNames.length === 0 ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="activePresetNames.length === 0 ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            @click="clearPresets"
+          >
+            <span class="i-lucide-columns-3 text-sm" />
+            Todas as colunas
+          </button>
+          <button
+            v-for="p in columnPresets"
+            :key="p.name"
+            class="h-7 px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap max-w-[160px] truncate"
+            :class="activePresetNames.includes(p.name) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="activePresetNames.includes(p.name) ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            :title="`Mostrar só as colunas de ${p.name} (dá para combinar mais de uma)`"
+            @click="togglePreset(p.name)"
+          >
+            {{ p.name }}
+          </button>
+          <button
+            v-if="isAdmin"
+            class="h-7 w-7 flex items-center justify-center rounded-lg text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
+            :title="$t('CRM.PRESETS.MANAGE')"
+            @click="showPresetsModal = true"
+          >
+            <span class="i-lucide-settings-2 text-sm" />
+          </button>
         </div>
 
-        <!-- Período do lead (atalhos de data — azul/roxo, melhor no tema claro) -->
-        <div class="flex items-center bg-n-solid-2 rounded-xl p-0.5 gap-0.5 flex-wrap border border-n-weak">
-          <span class="i-lucide-calendar-clock text-sm ml-2 mr-0.5" style="color: #7C3AED" />
+        <!-- Período do lead (data de CHEGADA — azul/roxo) -->
+        <div class="flex items-center h-[34px] bg-n-solid-2 rounded-xl px-0.5 gap-0.5 flex-nowrap md:flex-wrap border border-n-weak flex-shrink-0">
+          <span
+            class="i-lucide-calendar-clock text-sm ml-2 mr-0.5"
+            style="color: #7C3AED"
+            title="Filtra pela data em que o lead CHEGOU"
+          />
           <button
             v-for="p in DATE_PRESETS"
             :key="p.key"
             class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
             :class="activeDatePreset === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
             :style="activeDatePreset === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
-            :title="`Só leads que chegaram: ${p.label.toLowerCase()} (clique de novo para limpar)`"
+            :title="`Só leads que CHEGARAM ${p.label.toLowerCase()} (clique de novo para limpar)`"
             @click="applyDatePreset(p.key)"
           >
             {{ p.label }}
@@ -1128,30 +1259,21 @@ const createAndAddContact = async () => {
         <!-- Clear filters button -->
         <button
           v-if="hasActiveFilters"
-          class="flex items-center gap-1 text-xs text-red-500 hover:text-red-600 ml-1"
+          class="flex items-center gap-1 h-[34px] px-2 text-xs text-red-500 hover:text-red-600 flex-shrink-0"
           @click="clearFilters"
         >
           <span class="i-lucide-x text-sm" />
           {{ $t('CRM.FILTER.CLEAR') }}
         </button>
 
-        <!-- Counter (fim da linha) -->
-        <span class="text-xs text-n-slate-9 whitespace-nowrap ml-auto">
-          {{ $t('CRM.FILTER.SHOWING', { count: filteredCount, total: contactsMeta.total ?? totalContacts }) }}
-          <template v-if="contactsMeta.with_conversations">
-            · {{ $t('CRM.FILTER.WITH_CONVERSATION', { count: contactsMeta.with_conversations }) }}
-          </template>
-        </span>
-
         <!-- Completando em background -->
         <span
           v-if="isBackgroundLoading"
-          class="flex items-center gap-1 text-xs text-n-slate-9 whitespace-nowrap"
+          class="flex items-center gap-1 text-xs text-n-slate-9 whitespace-nowrap ml-auto"
         >
           <span class="i-lucide-loader-2 animate-spin text-xs" />
           {{ $t('CRM.FILTER.LOADING_REST') }}
         </span>
-
       </div>
 
       <!-- Expanded filter panel (rascunho — só filtra ao Aplicar) -->
@@ -1317,16 +1439,59 @@ const createAndAddContact = async () => {
       <p class="text-sm">{{ $t('CRM.NO_PIPELINE') }}</p>
     </div>
 
-    <!-- Kanban board -->
-    <div
-      v-else
-      class="kanban-board-scroll snap-x snap-mandatory md:snap-none"
-      style="flex:1;min-height:0;overflow-x:scroll;overflow-y:auto;padding:24px;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,0.45) transparent;scroll-behavior:smooth;"
-    >
-      <!-- All-filtered-out empty state -->
-      <div v-if="allFilteredOut" class="flex flex-col items-center justify-center h-full text-n-slate-9">
-        <span class="i-lucide-search-x text-4xl mb-3" />
-        <p class="text-sm">{{ $t('CRM.FILTER.EMPTY') }}</p>
+    <!-- Kanban board (+ navegador de colunas no celular) -->
+    <div v-else class="flex flex-col flex-1 min-h-0">
+      <!-- Navegador de colunas — SÓ CELULAR: mostra onde está e pula direto -->
+      <div
+        v-if="visibleStages.length"
+        class="md:hidden flex items-center gap-1.5 px-3 py-2 border-b border-n-weak overflow-x-auto flex-shrink-0"
+      >
+        <button
+          v-for="(s, i) in visibleStages"
+          :key="s.id"
+          :ref="el => (mobileChipRefs[i] = el)"
+          class="h-7 px-2.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 flex items-center gap-1.5 border transition-colors"
+          :class="i === mobileStageIdx
+            ? 'text-white border-transparent shadow'
+            : 'text-n-slate-11 border-n-weak bg-n-solid-2'"
+          :style="i === mobileStageIdx ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+          @click="scrollToStage(i)"
+        >
+          <span
+            class="w-2 h-2 rounded-full flex-shrink-0"
+            :style="{ background: s.color || '#94A3B8' }"
+          />
+          {{ s.name }}
+          <span
+            class="inline-flex items-center justify-center min-w-[16px] h-4 px-1 text-[10px] font-bold rounded-full"
+            :class="i === mobileStageIdx ? 'bg-white/25 text-white' : 'bg-n-alpha-2 text-n-slate-10'"
+          >
+            {{ (contactsByStage[s.id] ?? []).length }}
+          </span>
+        </button>
+      </div>
+
+      <div
+        ref="boardScrollRef"
+        class="kanban-board-scroll snap-x snap-mandatory md:snap-none p-3 md:p-6"
+        style="flex:1;min-height:0;overflow-x:scroll;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,0.45) transparent;"
+        @scroll.passive="onBoardScroll"
+      >
+      <!-- All-filtered-out empty state (explica o PORQUÊ quando o culpado
+           é o filtro de data — ele olha a data de CHEGADA do lead) -->
+      <div v-if="allFilteredOut" class="flex flex-col items-center justify-center h-full text-n-slate-9 px-6 text-center">
+        <span class="i-lucide-calendar-search text-4xl mb-3" v-if="dateFilterActive" />
+        <span class="i-lucide-search-x text-4xl mb-3" v-else />
+        <template v-if="dateFilterActive">
+          <p class="text-sm font-medium text-n-slate-11">
+            Nenhum lead <b>chegou</b> {{ activeDatePresetLabel ? `em "${activeDatePresetLabel}"` : 'no período escolhido' }}.
+          </p>
+          <p class="text-xs mt-1 max-w-md">
+            Esse filtro olha a <b>data de chegada</b> do lead — os cards continuam
+            no funil, só estão escondidos pelo filtro.
+          </p>
+        </template>
+        <p v-else class="text-sm">{{ $t('CRM.FILTER.EMPTY') }}</p>
         <button class="mt-3 text-sm text-n-brand hover:underline" @click="clearFilters">
           {{ $t('CRM.FILTER.CLEAR_FILTERS') }}
         </button>
@@ -1395,6 +1560,7 @@ const createAndAddContact = async () => {
           </div>
         </template>
       </draggable>
+      </div>
     </div>
 
     <!-- Contact detail modal -->

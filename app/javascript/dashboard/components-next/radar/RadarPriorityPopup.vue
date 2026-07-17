@@ -120,7 +120,7 @@ const attendNow = () => {
       :style="{
         background: calmed
           ? 'linear-gradient(135deg, #0369A1, #2563EB)'
-          : 'linear-gradient(135deg, #DC2626, #F59E0B)',
+          : 'linear-gradient(135deg, #059669, #4ADE80)',
         transition: 'background .6s ease',
       }"
     >
@@ -141,7 +141,7 @@ const attendNow = () => {
         </p>
         <button
           class="mt-3 w-full py-2.5 rounded-xl font-bold text-sm bg-white shadow"
-          :class="calmed ? 'text-blue-700 cevico-btn-pulse' : 'text-red-600'"
+          :class="calmed ? 'text-blue-700 cevico-btn-pulse' : 'text-emerald-600'"
           @click.stop="attendNow"
         >
           Atender agora →

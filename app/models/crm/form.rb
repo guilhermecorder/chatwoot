@@ -72,6 +72,8 @@ class Crm::Form < ApplicationRecord
   end
 
   def base_url
-    ENV.fetch('FRONTEND_URL', '').chomp('/')
+    # domínio público oficial quando configurado (www.cevico.com.br);
+    # senão, o host do sistema — ver Cevico::PublicSite
+    Cevico::PublicSite.base_url
   end
 end

@@ -11,6 +11,7 @@ import CrmAPI from 'dashboard/api/crm';
 
 const currentRole = useMapGetter('getCurrentRole');
 const isAdmin = computed(() => currentRole.value === 'administrator');
+const currentUserId = useMapGetter('getCurrentUserID');
 
 const isLoading = ref(true);
 const pages = ref([]);
@@ -128,7 +129,9 @@ const fetchPages = async () => {
 const pagesByCategory = computed(() => {
   const map = {};
   CATEGORY_ORDER.forEach(c => {
-    map[c] = pages.value.filter(p => p.category === c);
+    map[c] = pages.value.filter(
+      p => p.category === c && (!statusFilter.value || p.status === statusFilter.value)
+    );
   });
   return map;
 });
@@ -152,12 +155,38 @@ const blankPage = () => ({
   meta_description: '',
   cta_label: 'Falar com a CEVICO no WhatsApp',
   cta_url: '',
+  next_page_id: null,
   sections: [],
 });
 
+// ── gestão de projetos: ideia → em produção → publicada (17/07) ──
+const STATUS_META = {
+  idea: { label: '💡 IDEIA', chip: '💡 Ideias', badge: 'bg-violet-500/90 text-white' },
+  draft: { label: '🛠 EM PRODUÇÃO', chip: '🛠 Em produção', badge: 'bg-black/40 text-white/90' },
+  published: { label: 'NO AR', chip: '🟢 Publicadas', badge: 'bg-white/90 text-green-700' },
+};
+const statusFilter = ref(''); // '' = todas
+const statusCount = status => pages.value.filter(p => p.status === status).length;
+
+// ── funil: próxima página + números de conversão ──
+const funnelCandidates = computed(() =>
+  pages.value.filter(p => p.id !== editing.value?.id)
+);
+const nextPageTitle = id => pages.value.find(p => p.id === id)?.title || '';
+const pageStatsTitle = page => {
+  const l7 = page.last7 || {};
+  return `Últimos 7 dias: ${l7.views || 0} visitas · ${l7.next || 0} seguiram o funil · ${l7.cta || 0} foram pro WhatsApp`;
+};
+const pageConversion = page => {
+  const clicks = (page.cta_clicks_count || 0) + (page.next_clicks_count || 0);
+  if (!page.views_count) return null;
+  return Math.round((clicks / page.views_count) * 100);
+};
+
 const openNew = category => {
   editing.value = null;
-  form.value = { ...blankPage(), category: category || 'captacao' };
+  form.value = { ...blankPage(), category: category || 'captacao', ab_variants: [] };
+  comments.value = [];
   showEditor.value = true;
 };
 
@@ -165,10 +194,60 @@ const openEdit = page => {
   editing.value = page;
   form.value = {
     ...page,
+    ab_variants: (page.ab_variants || []).map(v => ({ ...v })),
     sections: (page.sections || []).map(s => ({ ...blankSection(s.type), ...s, items: s.items || [] })),
   };
+  comments.value = page.team_comments || [];
   showEditor.value = true;
 };
+
+// ── 🧪 Teste A/B: variações de título/subtítulo/botão no MESMO endereço ──
+const addVariant = () => {
+  form.value.ab_variants = form.value.ab_variants || [];
+  const used = form.value.ab_variants.map(v => v.key);
+  const key = ['b', 'c', 'd'].find(k => !used.includes(k));
+  if (!key) return;
+  form.value.ab_variants.push({
+    key, name: `Variação ${key.toUpperCase()}`, title: '', subtitle: '', cta_label: '', active: false,
+  });
+};
+const removeVariant = i => form.value.ab_variants.splice(i, 1);
+const abTotals = computed(() => editing.value?.ab_results || {});
+const abLine = key => {
+  const t = abTotals.value[key];
+  if (!t) return null;
+  const clicks = (t.cta || 0) + (t.next || 0);
+  const rate = t.view ? Math.round((clicks / t.view) * 100) : null;
+  return { views: t.view || 0, clicks, rate };
+};
+
+// ── 💬 comentários do time (estúdio de copy) ──
+const comments = ref([]);
+const commentText = ref('');
+const sendingComment = ref(false);
+const sendComment = async () => {
+  if (!commentText.value.trim() || !editing.value) return;
+  sendingComment.value = true;
+  try {
+    const { data } = await CrmAPI.addPageComment(editing.value.id, commentText.value.trim());
+    comments.value = data.team_comments || [];
+    commentText.value = '';
+  } catch {
+    useAlert('Não consegui comentar.');
+  } finally {
+    sendingComment.value = false;
+  }
+};
+const removeComment = async comment => {
+  try {
+    const { data } = await CrmAPI.deletePageComment(editing.value.id, comment.id);
+    comments.value = data.team_comments || [];
+  } catch {
+    useAlert('Só o autor ou um admin apagam o comentário.');
+  }
+};
+const fmtCommentAt = iso =>
+  new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 const savePage = async (publish = null) => {
   if (!form.value.title?.trim()) {
@@ -212,8 +291,13 @@ const copyLink = async page => {
 };
 
 const openPublic = page => {
-  window.open(`/p/${page.slug}`, '_blank', 'noopener');
+  // abre no endereço oficial (www.cevico.com.br/slug) quando configurado
+  window.open(page.public_url || `/p/${page.slug}`, '_blank', 'noopener');
 };
+
+// caminho curto exibido no card (sem https://)
+const publicPath = page =>
+  (page.public_url || `/p/${page.slug}`).replace(/^https?:\/\//, '');
 
 onMounted(() => {
   fetchPages();
@@ -255,6 +339,27 @@ onMounted(() => {
       </div>
 
       <template v-else>
+        <!-- gestão de projetos: filtro por etapa (ideia/produção/publicada) -->
+        <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 mb-5 w-fit max-w-full overflow-x-auto">
+          <button
+            class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
+            :class="statusFilter === '' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="statusFilter === '' ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            @click="statusFilter = ''"
+          >
+            Todas ({{ pages.length }})
+          </button>
+          <button
+            v-for="(meta, st) in STATUS_META"
+            :key="st"
+            class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
+            :class="statusFilter === st ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="statusFilter === st ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            @click="statusFilter = statusFilter === st ? '' : st"
+          >
+            {{ meta.chip }} ({{ statusCount(st) }})
+          </button>
+        </div>
         <div v-for="cat in CATEGORY_ORDER" :key="cat" class="mb-7">
           <div class="flex items-center gap-2 mb-3">
             <span class="w-7 h-7 rounded-lg flex items-center justify-center text-white" :style="{ background: CATEGORY_META[cat].grad }">
@@ -286,14 +391,27 @@ onMounted(() => {
                 <span>{{ page.emoji || '👁️' }}</span>
                 <span
                   class="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold"
-                  :class="page.status === 'published' ? 'bg-white/90 text-green-700' : 'bg-black/30 text-white/90'"
+                  :class="STATUS_META[page.status]?.badge || 'bg-black/30 text-white/90'"
                 >
-                  {{ page.status === 'published' ? 'NO AR' : 'RASCUNHO' }}
+                  {{ STATUS_META[page.status]?.label || page.status }}
                 </span>
               </div>
               <div class="p-3">
                 <p class="text-[13px] font-bold text-n-slate-12 leading-snug line-clamp-2">{{ page.title }}</p>
-                <p class="text-[10px] text-n-slate-9 mt-1">/p/{{ page.slug }} · {{ page.views_count }} visita(s)</p>
+                <p class="text-[10px] text-n-slate-9 mt-1 truncate" :title="publicPath(page)">{{ publicPath(page) }}</p>
+                <!-- números do funil: visitas · seguiram o funil · WhatsApp · conversão -->
+                <p
+                  v-if="page.status === 'published'"
+                  class="text-[10px] text-n-slate-10 mt-0.5 whitespace-nowrap"
+                  :title="pageStatsTitle(page)"
+                >
+                  👁 {{ page.views_count }}
+                  <template v-if="page.next_page_id"> · ➡ {{ page.next_clicks_count }}</template>
+                  · 💬 {{ page.cta_clicks_count }}
+                  <span v-if="pageConversion(page) !== null" class="font-semibold text-emerald-600">
+                    · {{ pageConversion(page) }}% clicam
+                  </span>
+                </p>
                 <div class="flex items-center gap-1 mt-2" @click.stop>
                   <button class="px-2 h-6 rounded-md text-[10px] font-medium text-n-slate-11 hover:bg-n-alpha-1 border border-n-weak" @click="copyLink(page)">
                     copiar link
@@ -555,22 +673,170 @@ onMounted(() => {
             </label>
           </div>
 
-          <!-- CTA -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-            <label class="block">
-              <span class="text-[11px] font-medium text-n-slate-11">Texto do botão (CTA)</span>
-              <input v-model="form.cta_label" type="text" class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
-            </label>
-            <label class="block">
-              <span class="text-[11px] font-medium text-n-slate-11">Link do botão (WhatsApp da clínica)</span>
-              <input v-model="form.cta_url" type="text" placeholder="https://wa.me/5511..." class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
-            </label>
+          <!-- Próximo passo do botão: WhatsApp OU outra página (funil) -->
+          <div class="bg-n-alpha-1 rounded-xl p-3 mb-3">
+            <p class="text-[11px] font-semibold text-n-slate-12 mb-2 flex items-center gap-1.5">
+              <span class="i-lucide-milestone text-xs" style="color: #d4af37" /> Próximo passo do botão
+              <span class="text-[10px] font-normal text-n-slate-9">— todo clique é contado (mede a conversão)</span>
+            </p>
+            <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 w-fit mb-2">
+              <button
+                class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
+                :class="!form.next_page_id ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+                :style="!form.next_page_id ? { background: 'linear-gradient(135deg, #059669, #4ADE80)' } : {}"
+                @click="form.next_page_id = null"
+              >
+                💬 Convite pro WhatsApp
+              </button>
+              <button
+                class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
+                :class="form.next_page_id ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+                :style="form.next_page_id ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+                :disabled="!funnelCandidates.length"
+                @click="form.next_page_id = form.next_page_id || funnelCandidates[0]?.id"
+              >
+                ➡️ Outra página CEVICO (funil)
+              </button>
+            </div>
+
+            <div v-if="form.next_page_id" class="mb-2">
+              <span class="text-[11px] font-medium text-n-slate-11">Página de destino (o visitante chega marcado com a origem)</span>
+              <select
+                v-model="form.next_page_id"
+                class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
+              >
+                <option v-for="p in funnelCandidates" :key="p.id" :value="p.id">
+                  {{ STATUS_META[p.status]?.chip || p.status }} — {{ p.title }}
+                </option>
+              </select>
+              <p class="text-[10px] text-amber-600 mt-1" v-if="pages.find(p => p.id === form.next_page_id)?.status !== 'published'">
+                ⚠ A página de destino ainda não está publicada — enquanto isso, o botão usa o WhatsApp.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label class="block">
+                <span class="text-[11px] font-medium text-n-slate-11">Texto do botão (vazio = automático)</span>
+                <input v-model="form.cta_label" type="text" class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
+              </label>
+              <label class="block">
+                <span class="text-[11px] font-medium text-n-slate-11">Link do WhatsApp da clínica</span>
+                <input v-model="form.cta_url" type="text" placeholder="https://wa.me/5511..." class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
+              </label>
+            </div>
           </div>
 
-          <label v-if="editing && isAdmin" class="block mb-4">
-            <span class="text-[11px] font-medium text-n-slate-11">Endereço (/p/…) — mudar quebra links já divulgados</span>
+          <!-- 🧪 Teste A/B: variações servidas no mesmo endereço -->
+          <div v-if="editing" class="bg-n-alpha-1 rounded-xl p-3 mb-3">
+            <p class="text-[11px] font-semibold text-n-slate-12 mb-1 flex items-center gap-1.5">
+              <span class="i-lucide-flask-conical text-xs" style="color: #d4af37" /> Teste A/B
+              <span class="text-[10px] font-normal text-n-slate-9">— variações do título/subtítulo/botão servidas no MESMO endereço; visitas e cliques contam por variação</span>
+            </p>
+
+            <!-- original (A) -->
+            <div class="flex items-center gap-2 flex-wrap rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5 mb-1.5 text-[11px]">
+              <span class="font-bold text-n-slate-12">A — original</span>
+              <span class="text-n-slate-10 truncate flex-1 min-w-[120px]">{{ form.title }}</span>
+              <span v-if="abLine('a')" class="text-n-slate-10">
+                {{ abLine('a').views }} visitas · {{ abLine('a').clicks }} cliques
+                <b v-if="abLine('a').rate !== null" class="text-emerald-600">· {{ abLine('a').rate }}%</b>
+              </span>
+            </div>
+
+            <div v-for="(v, vi) in form.ab_variants || []" :key="v.key" class="rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-2 mb-1.5">
+              <div class="flex items-center gap-2 flex-wrap mb-1.5">
+                <span class="text-[11px] font-bold text-n-slate-12 uppercase">{{ v.key }}</span>
+                <input v-model="v.name" type="text" class="h-7 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12" style="width: 9rem" />
+                <span v-if="abLine(v.key)" class="text-[11px] text-n-slate-10">
+                  {{ abLine(v.key).views }} visitas · {{ abLine(v.key).clicks }} cliques
+                  <b v-if="abLine(v.key).rate !== null" class="text-emerald-600">· {{ abLine(v.key).rate }}%</b>
+                </span>
+                <label class="ml-auto flex items-center gap-1.5 text-[11px] font-medium cursor-pointer" :class="v.active ? 'text-emerald-600' : 'text-n-slate-10'">
+                  <input v-model="v.active" type="checkbox" class="accent-emerald-600" style="width: 14px; height: 14px" />
+                  {{ v.active ? 'no ar (sorteada)' : 'pausada' }}
+                </label>
+                <button class="i-lucide-trash-2 text-n-slate-10 hover:text-red-500 text-sm" title="Excluir variação" @click="removeVariant(vi)" />
+              </div>
+              <input v-model="v.title" type="text" placeholder="Título desta variação (vazio = usa o original)" class="w-full h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12 mb-1.5" />
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <input v-model="v.subtitle" type="text" placeholder="Subtítulo (vazio = original)" class="h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12" />
+                <input v-model="v.cta_label" type="text" placeholder="Texto do botão (vazio = original)" class="h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12" />
+              </div>
+            </div>
+
+            <button
+              v-if="(form.ab_variants || []).length < 3"
+              class="px-2.5 h-7 rounded-lg border border-dashed border-n-weak text-[11px] text-n-slate-10 hover:text-n-brand hover:border-n-brand flex items-center gap-1"
+              @click="addVariant"
+            >
+              <span class="i-lucide-plus text-xs" /> Criar variação
+            </button>
+            <p class="text-[10px] text-n-slate-9 mt-1.5">
+              Ative a variação e salve: cada visitante é sorteado entre a original e as ativas. Os resultados aparecem aqui e na Análise de Páginas.
+            </p>
+          </div>
+
+          <!-- 💬 Comentários do time (estúdio de copy) -->
+          <div v-if="editing" class="bg-n-alpha-1 rounded-xl p-3 mb-3">
+            <p class="text-[11px] font-semibold text-n-slate-12 mb-2 flex items-center gap-1.5">
+              <span class="i-lucide-messages-square text-xs" style="color: #d4af37" /> Comentários do time
+              <span class="text-[10px] font-normal text-n-slate-9">— sugestões de copy, ajustes, aprovações</span>
+            </p>
+            <div v-if="comments.length" class="space-y-1.5 mb-2 max-h-44 overflow-y-auto">
+              <div v-for="c in comments" :key="c.id" class="rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] font-bold text-n-slate-12">{{ c.name }}</span>
+                  <span class="text-[10px] text-n-slate-9">{{ fmtCommentAt(c.at) }}</span>
+                  <button
+                    v-if="isAdmin || c.user_id === currentUserId"
+                    class="ml-auto i-lucide-x text-n-slate-10 hover:text-red-500 text-xs"
+                    title="Apagar"
+                    @click="removeComment(c)"
+                  />
+                </div>
+                <p class="text-[11px] text-n-slate-11 mt-0.5 whitespace-pre-line">{{ c.text }}</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <input
+                v-model="commentText"
+                type="text"
+                placeholder="Deixe uma sugestão pra este texto…"
+                class="flex-1 min-w-0 h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-12"
+                @keyup.enter="sendComment"
+              />
+              <button
+                class="px-2.5 h-8 rounded-lg text-[11px] font-semibold text-white disabled:opacity-50"
+                style="background: linear-gradient(135deg, #0F5FA6, #1E7FBF)"
+                :disabled="sendingComment || !commentText.trim()"
+                @click="sendComment"
+              >
+                Comentar
+              </button>
+            </div>
+          </div>
+
+          <label v-if="editing && isAdmin" class="block mb-3">
+            <span class="text-[11px] font-medium text-n-slate-11">Endereço da página (a parte final do link) — mudar quebra links já divulgados</span>
             <input v-model="form.slug" type="text" class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12 font-mono" />
           </label>
+
+          <!-- etapa do projeto (gestão: ideia → produção → publicada) -->
+          <div v-if="isAdmin" class="flex items-center gap-2 mb-4 flex-wrap">
+            <span class="text-[11px] font-medium text-n-slate-11">Etapa do projeto:</span>
+            <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5">
+              <button
+                v-for="(meta, st) in STATUS_META"
+                :key="st"
+                class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
+                :class="form.status === st ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+                :style="form.status === st ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+                @click="form.status = st"
+              >
+                {{ meta.chip }}
+              </button>
+            </div>
+          </div>
 
           <div class="flex items-center justify-end gap-2">
             <button class="px-3 h-9 rounded-lg text-[12px] font-medium text-n-slate-11 hover:bg-n-alpha-1" @click="showEditor = false">
@@ -579,9 +845,9 @@ onMounted(() => {
             <button
               class="px-3 h-9 rounded-lg text-[12px] font-semibold border border-n-weak text-n-slate-12 hover:bg-n-alpha-1 disabled:opacity-60"
               :disabled="saving"
-              @click="savePage(false)"
+              @click="savePage(isAdmin ? null : false)"
             >
-              Salvar rascunho
+              {{ isAdmin ? 'Salvar' : 'Salvar rascunho' }}
             </button>
             <button
               v-if="isAdmin"
