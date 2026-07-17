@@ -2498,6 +2498,14 @@ Sem cron novo nesta rodada.
   abrindo a gaveta no desktop e no mobile, ícone verde confirmado via
   computed style. Massa de teste: 124 lançamentos em 12 meses na conta 3
   (embutida direto via runner, sem rake novo).
+- **PÓS-"PODE SUBIR" (mesmo dia): Acessos ganharam Metas e Pessoas** —
+  as seções novas do menu enxuto (itens 52-53) não apareciam no modal
+  "Acessos de Usuário" (Configurações → Agentes → escudo) e o admin não
+  conseguia bloquear. Agora: chaves 'goals' e 'people' no FEATURES do
+  AgentAccessModal + no FEATURE_BY_ITEM_NAME da Sidebar (o filtro que
+  esconde do menu). Backend já aceitava (agent_permissions jsonb livre).
+  Testado: bloqueio via banco no admin some Metas+Pessoas do menu,
+  restaura ao limpar; modal mostra as 2 seções novas.
 
 ### 🏗️ PRÓXIMA GRANDE RODADA — "PÁGINAS PRO" (pedidos 17/07, especificar juntos antes de construir)
 1. **Estúdio de Copy por página**: ambiente de criação/edição da copy

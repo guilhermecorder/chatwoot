@@ -332,6 +332,10 @@ const FEATURE_BY_ITEM_NAME = {
   Agenda: 'agenda',
   Academy: 'academy',
   Settings: 'settings',
+  // seções novas do menu enxuto da equipe (itens 52-53) — controláveis
+  // no "Acessos" de cada agente, como as demais
+  Goals: 'goals',
+  People: 'people',
 };
 
 const blockedFeatures = computed(() => {

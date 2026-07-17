@@ -16,6 +16,8 @@ const FEATURES = [
   { key: 'inbox',         label: 'Caixa de entrada' },
   { key: 'conversation',  label: 'Conversas' },
   { key: 'crm',           label: 'CRM (funil de leads)' },
+  { key: 'goals',         label: 'Metas (painel do mês)' },
+  { key: 'people',        label: 'Pessoas (DISC e desenvolvimento)' },
   { key: 'crm_campaigns', label: 'Campanha WhatsApp (mensagens em massa)' },
   { key: 'tasks',         label: 'Tarefas' },
   { key: 'agenda',        label: 'Agenda' },
