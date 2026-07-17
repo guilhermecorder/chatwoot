@@ -172,6 +172,43 @@ const stats = computed(() => ({
 const allDone = computed(
   () => stats.value.todo === 0 && stats.value.doing === 0 && stats.value.done > 0
 );
+
+// 🏆 BANCO DE ELOGIOS: um elogio aleatório a cada 100% (bem-humorado,
+// alegre e incentivador — pedido 17/07)
+const PRAISE_BANK = [
+  'Você desenrola mesmo!',
+  'Espantoso!',
+  'Como você consegue jogar tão solta?',
+  'Impressionante!',
+  'Você mandou muito bem!',
+  'Mandou bem demais!',
+  'Assim que é bom, é ou não é?',
+  'Zerado!',
+  'Pessoa desenrolada é outro nível!',
+  'Como você faz pra ser tão incrível?',
+  'Fez parecer fácil. De novo.',
+  'A fila viu você chegando e desistiu.',
+  'Isso foi uma aula.',
+  'Tarefa nenhuma sobrevive a você!',
+  'O dia acabou cedo pra essa lista.',
+  'Talento é pouco: isso é hábito de campeão.',
+];
+const pickPraise = () => PRAISE_BANK[Math.floor(Math.random() * PRAISE_BANK.length)];
+const praise = ref(pickPraise());
+watch(allDone, now => {
+  if (now) praise.value = pickPraise();
+});
+
+// névoa de partículas douradas ORBITANDO o donut (substitui o glow)
+const mistParticles = Array.from({ length: 16 }, (_, i) => ({
+  id: i,
+  r: 70 + Math.random() * 28,
+  dur: 5 + Math.random() * 5,
+  delay: -Math.random() * 8,
+  size: 2.5 + Math.random() * 3.5,
+  op: 0.45 + Math.random() * 0.5,
+}));
+
 const ringPhase = ref(''); // '' | 'tremor' | 'gold'
 let ringTimer = null;
 watch(
@@ -574,9 +611,23 @@ const formatDue = iso => {
                fica DOURADO pulsando (como os ícones da sidebar) -->
           <div
             v-if="donutChart"
-            class="h-48 cevico-donut-glow relative"
+            class="h-48 relative"
             :class="{ 'cevico-ring-tremor': ringPhase === 'tremor', 'cevico-donut-gold': ringPhase === 'gold' }"
           >
+            <!-- névoa de partículas douradas circulando com o donut -->
+            <span
+              v-for="p in (ringPhase === 'gold' ? mistParticles : [])"
+              :key="'mist' + p.id"
+              class="cevico-donut-mist"
+              :style="{
+                '--r': p.r + 'px',
+                '--dur': p.dur + 's',
+                '--delay': p.delay + 's',
+                width: p.size + 'px',
+                height: p.size + 'px',
+                opacity: p.op,
+              }"
+            />
             <!-- só o anel gira (sentido horário); os emojis ficam parados -->
             <div class="h-full" :class="ringPhase === 'gold' ? 'cevico-donut-spin' : ''">
               <Doughnut :data="donutChart.data" :options="donutChart.options" />
@@ -620,8 +671,9 @@ const formatDue = iso => {
             <p class="text-xs font-semibold leading-snug" style="color: #D4A017">
               Parabéns, 100% das tarefas concluídas.
             </p>
-            <p class="text-sm font-extrabold tracking-wide" style="color: #B8860B">
-              Você desenrola mesmo! ✨
+            <!-- elogio ALEATÓRIO do banco de elogios, com destaque -->
+            <p class="text-lg font-black tracking-wide leading-snug" style="color: #B8860B">
+              {{ praise }} ✨
             </p>
           </div>
 
@@ -961,8 +1013,30 @@ const formatDue = iso => {
     inset 0 -1px 0 rgba(15, 23, 42, 0.15);
 }
 
-/* brilho macio por trás do donut */
-.cevico-donut-glow {
-  filter: drop-shadow(0 6px 14px rgba(15, 95, 166, 0.2));
+/* névoa de partículas douradas orbitando o donut (no lugar do glow) */
+.cevico-donut-mist {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 9999px;
+  background: radial-gradient(circle, #f5e9b8 0%, #d4a017 70%);
+  box-shadow: 0 0 6px rgba(212, 160, 23, 0.85);
+  pointer-events: none;
+  animation: cevico-donut-orbit var(--dur) linear infinite;
+  animation-delay: var(--delay);
+}
+@keyframes cevico-donut-orbit {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg) translateX(var(--r));
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg) translateX(var(--r));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cevico-donut-mist {
+    animation: none;
+    display: none;
+  }
 }
 </style>

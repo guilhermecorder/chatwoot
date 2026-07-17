@@ -29,6 +29,7 @@ import WhatsappHealth from './WhatsappHealth.vue';
 import TrafficFunnel from './TrafficFunnel.vue';
 import DoctorsDashboard from './DoctorsDashboard.vue';
 import AgentsDashboard from './AgentsDashboard.vue';
+import GoogleDashboard from './GoogleDashboard.vue';
 import AgendaDashboard from './AgendaDashboard.vue';
 import AdsReport from './AdsReport.vue';
 
@@ -215,6 +216,14 @@ export default {
             permissions: ['administrator', 'report_manage'],
           },
           component: DoctorsDashboard,
+        },
+        {
+          path: 'google_dashboard',
+          name: 'google_dashboard_reports',
+          meta: {
+            permissions: ['administrator', 'report_manage'],
+          },
+          component: GoogleDashboard,
         },
         {
           path: 'agents_dashboard',

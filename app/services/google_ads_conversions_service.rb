@@ -16,7 +16,7 @@ class GoogleAdsConversionsService
     @params     = params
   end
 
-  def call
+  def call # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     config = crm_settings&.google_ads_config
     return { success: false, error: 'Google Ads não configurado' } unless configured?(config)
 
@@ -28,23 +28,24 @@ class GoogleAdsConversionsService
 
     body = {
       client_id: client_id,
-      events:    [build_event],
+      events: [build_event]
     }
 
     response = HTTParty.post(
       url,
-      body:    body.to_json,
+      body: body.to_json,
       headers: { 'Content-Type' => 'application/json' },
       timeout: 15
     )
 
     # GA4 Measurement Protocol retorna 204 em sucesso (sem corpo)
     if response.code == 204 || response.success?
+      log_sent! # alimenta o Dashboard Google (conversões enviadas por dia)
       { success: true }
     else
       { success: false, error: "HTTP #{response.code}: #{response.body&.slice(0, 200)}" }
     end
-  rescue => e
+  rescue StandardError => e
     { success: false, error: e.message }
   end
 
@@ -54,21 +55,36 @@ class GoogleAdsConversionsService
     @crm_settings ||= CrmSetting.find_by(account: @account)
   end
 
+  # registro leve por dia/evento (Dashboard Google mostra o que foi enviado)
+  def log_sent!
+    settings = crm_settings
+    return if settings.blank?
+
+    cfg = settings.google_ads_config || {}
+    log = (cfg['sent_log'] ||= {})
+    day = (log[Date.current.iso8601] ||= {})
+    day[@event_name.to_s] = day[@event_name.to_s].to_i + 1
+    # mantém só ~90 dias
+    cfg['sent_log'] = log.sort.last(90).to_h
+    settings.update_columns(google_ads_config: cfg) # rubocop:disable Rails/SkipsModelValidations
+  rescue StandardError => e
+    Rails.logger.warn "[GoogleAdsConversions] log falhou: #{e.message}"
+  end
+
   def configured?(config)
     config.is_a?(Hash) && config['measurement_id'].present? && config['api_secret'].present?
   end
 
   def build_event
-    event = {
-      name:   @event_name,
-      params: base_params.merge(@params),
+    {
+      name: @event_name,
+      params: base_params.merge(@params)
     }
-    event
   end
 
   def base_params
     p = {
-      engagement_time_msec: '1',
+      engagement_time_msec: '1'
     }
     if @contact
       p[:contact_id]    = @contact.id.to_s
