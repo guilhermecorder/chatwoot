@@ -2498,6 +2498,19 @@ Sem cron novo nesta rodada.
   abrindo a gaveta no desktop e no mobile, ícone verde confirmado via
   computed style. Massa de teste: 124 lançamentos em 12 meses na conta 3
   (embutida direto via runner, sem rake novo).
+- **PÓS-"PODE SUBIR" 2 (mesmo dia): CRM sem controle duplicado de dias** —
+  a barra "Janela:" (Essa semana/Este mês/Este ano/7d/15d/30d/Personalizado/
+  Desde o início) duplicava as pílulas de período da linha 2 e confundia.
+  Agora: barra virou SÓ AVISO (⚡ leads ativos + contagem + spinner qdo
+  carregando); as PÍLULAS de período são o controle único — cada uma
+  ALARGA a janela de carregamento que precisa (ensureWindowForPreset:
+  mês→janela mês, ano→ano, Desde o início→base completa; nunca encolhe);
+  De/Até manual no painel de Filtros também puxa a base completa se o
+  intervalo for mais antigo que a janela (watch). E o trilho das CAIXAS
+  perdeu o max-w-440px que cortava os nomes — quebra linha no desktop
+  (md:flex-wrap + min-h), celular segue trilho. Testado: pílula Este mês
+  alargou a janela sozinha (aviso mudou junto), Desde o início carregou
+  44/44 e o aviso sumiu, caixas inteiras.
 - **PÓS-"PODE SUBIR" (mesmo dia): Acessos ganharam Metas e Pessoas** —
   as seções novas do menu enxuto (itens 52-53) não apareciam no modal
   "Acessos de Usuário" (Configurações → Agentes → escudo) e o admin não

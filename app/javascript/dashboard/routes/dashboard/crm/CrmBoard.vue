@@ -54,7 +54,6 @@ const newStageColor = ref('#6B7280');
 // (abertura instantânea), depois a JANELA DE TRABALHO completa em background.
 // A base inteira (9k+ cards) só entra sob demanda (busca / botão "Tudo") —
 // carregar tudo sempre travava máquinas fracas (i3/celular).
-const WINDOW_OPTIONS = [7, 15, 30];
 // padrão: ÚLTIMOS 7 DIAS — garantia de abertura leve no celular (pedido
 // 16/07). A troca de janela vale só para a sessão do navegador
 // (sessionStorage): fechar/abrir de novo volta pros 7 dias. Mês/ano/15/30d
@@ -423,6 +422,28 @@ const localDateStr = d => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
+// A pílula de período também ABRE A JANELA de carregamento que ela
+// precisa (controle ÚNICO — pedido 17/07: a barra "Janela:" com botões
+// duplicava as opções e confundia). Só ALARGA, nunca encolhe.
+const ensureWindowForPreset = key => {
+  if (contactsScope.value === 'all' || isLoadingAll.value) return;
+  if (key === 'all') {
+    loadAllContacts();
+    return;
+  }
+  const wanted = {
+    today: null, // 7 dias mínimos já cobrem
+    yesterday: ['7', 2],
+    week: ['week', new Date().getDay() + 1],
+    last7: ['7', 7],
+    month: ['month', new Date().getDate()],
+    year: ['year', dayOfYear()],
+  }[key];
+  if (!wanted) return;
+  const [mode, days] = wanted;
+  if (days > windowDays.value) setWindowDays(mode);
+};
+
 const applyDatePreset = key => {
   if (activeDatePreset.value === key) {
     activeDatePreset.value = '';
@@ -430,6 +451,7 @@ const applyDatePreset = key => {
     filters.value.dateTo = '';
     return;
   }
+  ensureWindowForPreset(key);
   const now = new Date();
   const today = localDateStr(now);
   let from = today;
@@ -457,6 +479,17 @@ const applyDatePreset = key => {
   filters.value.dateFrom = from;
   filters.value.dateTo = to;
 };
+
+// De/Até MANUAL (painel de Filtros) também garante a base necessária:
+// intervalo mais antigo que a janela atual → carrega a base completa
+// (os presets não passam por aqui — eles já ajustam a própria janela).
+watch(() => [filters.value.dateFrom, filters.value.dateTo], ([from]) => {
+  if (!from || activeDatePreset.value) return;
+  if (contactsScope.value === 'all' || isLoadingAll.value) return;
+  const days =
+    Math.ceil((Date.now() - new Date(`${from}T00:00:00`).getTime()) / 86400000) + 1;
+  if (days > windowDays.value) loadAllContacts();
+});
 
 // Buscar precisa enxergar a base toda: se ela ainda não foi carregada,
 // dispara o carregamento completo na primeira busca (o loadAllContacts
@@ -957,8 +990,9 @@ const createAndAddContact = async () => {
       </div>
     </div>
 
-    <!-- Janela de trabalho: aviso + seletor de período + carregar tudo
-         (no celular vira 1 linha deslizável, sem o texto explicativo) -->
+    <!-- Janela de trabalho: agora é SÓ um aviso (os botões duplicavam as
+         pílulas de período — pedido 17/07). Quem manda na janela são as
+         pílulas da linha 2: cada uma alarga o carregamento que precisar. -->
     <div
       v-if="['days', 'recent'].includes(contactsMeta.scope) && contactsMeta.total > contactsMeta.shown"
       class="flex items-center gap-2 px-3 md:px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible"
@@ -968,62 +1002,11 @@ const createAndAddContact = async () => {
         {{ windowMode === 'week' ? 'Leads ativos desta semana' : (windowMode === 'month' ? 'Leads ativos deste mês' : (windowMode === 'year' ? 'Leads ativos deste ano' : `Leads ativos dos últimos ${windowDays} dias`)) }}
         ({{ contactsMeta.shown }} de {{ contactsMeta.total }})
       </span>
-      <span class="hidden md:inline">— leve e rápido. A busca enxerga a base toda.</span>
-      <span class="ml-1 flex-shrink-0">Janela:</span>
-      <button
-        class="px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap flex-shrink-0"
-        :class="windowMode === 'week' && contactsScope === 'days'
-          ? 'border-n-brand text-n-brand font-medium'
-          : 'border-n-weak hover:bg-n-alpha-1'"
-        @click="setWindowDays('week')"
-      >
-        Essa semana
-      </button>
-      <button
-        class="px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap flex-shrink-0"
-        :class="windowMode === 'month' && contactsScope === 'days'
-          ? 'border-n-brand text-n-brand font-medium'
-          : 'border-n-weak hover:bg-n-alpha-1'"
-        @click="setWindowDays('month')"
-      >
-        Este mês
-      </button>
-      <button
-        class="px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap flex-shrink-0"
-        :class="windowMode === 'year' && contactsScope === 'days'
-          ? 'border-n-brand text-n-brand font-medium'
-          : 'border-n-weak hover:bg-n-alpha-1'"
-        @click="setWindowDays('year')"
-      >
-        Este ano
-      </button>
-      <button
-        v-for="d in WINDOW_OPTIONS"
-        :key="d"
-        class="px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap flex-shrink-0"
-        :class="windowMode === String(d) && contactsScope === 'days'
-          ? 'border-n-brand text-n-brand font-medium'
-          : 'border-n-weak hover:bg-n-alpha-1'"
-        @click="setWindowDays(d)"
-      >
-        {{ d }}d
-      </button>
-      <button
-        class="px-1.5 py-0.5 rounded border border-n-weak hover:bg-n-alpha-1 disabled:opacity-50 whitespace-nowrap flex-shrink-0"
-        :disabled="isLoadingAll"
-        title="Carrega a base completa e abre o De/Até para escolher qualquer intervalo"
-        @click="loadAllContacts(); openFiltersPanel()"
-      >
-        {{ isLoadingAll ? 'Carregando…' : 'Personalizado…' }}
-      </button>
-      <button
-        class="px-1.5 py-0.5 rounded border border-n-weak hover:bg-n-alpha-1 disabled:opacity-50 whitespace-nowrap flex-shrink-0"
-        :disabled="isLoadingAll"
-        title="Carrega a base completa, do primeiro lead até hoje"
-        @click="loadAllContacts"
-      >
-        Desde o início
-      </button>
+      <span class="hidden md:inline">— leve e rápido. A busca enxerga a base toda, e o período abaixo carrega mais quando precisa.</span>
+      <span v-if="isLoadingAll || isBackgroundLoading" class="flex items-center gap-1 text-n-brand whitespace-nowrap flex-shrink-0">
+        <span class="i-lucide-loader-circle animate-spin text-xs" />
+        carregando…
+      </span>
     </div>
 
     <!-- Edit mode banner -->
@@ -1142,10 +1125,12 @@ const createAndAddContact = async () => {
           <option value="">{{ $t('CRM.FILTER.SORT_DEFAULT') }}</option>
         </select>
 
-        <!-- Caixa de entrada — botões em linha, cor própria por caixa -->
+        <!-- Caixa de entrada — botões em linha, cor própria por caixa.
+             Desktop: QUEBRA LINHA em vez de cortar os nomes (a largura
+             máxima de 440px escondia caixas — pedido 17/07). -->
         <div
           v-if="availableInboxes.length"
-          class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 flex-nowrap md:max-w-[440px] md:overflow-x-auto flex-shrink-0"
+          class="flex items-center min-h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 py-0.5 gap-0.5 flex-nowrap md:flex-wrap flex-shrink-0"
           :title="$t('CRM.MODAL.INBOX')"
         >
           <span class="i-lucide-inbox text-sm ml-2 mr-0.5 text-n-slate-10 flex-shrink-0" />
