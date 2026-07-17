@@ -43,6 +43,12 @@ class Crm::CopywriterService
     estendido R$ 5.690 | Trifocal R$ 8.490 | Galaxy R$ 14.990) · Artisan
     R$ 11.900. Só cite valor se o briefing pedir.
 
+    VALORES DA MARCA (a bússola de TODA comunicação CEVICO — definidos
+    pelo Guilherme): tecnologia de ponta, acolhimento humano e clareza
+    visual. Toda copy deve transmitir os três: equipamento e técnica de
+    primeira linha (sem frieza), cuidado que abraça o paciente pelo nome,
+    e comunicação limpa que qualquer pessoa entende de bater o olho.
+
     Sua missão: escrever PÁGINAS por seções que conectam com o paciente e
     o levam a chamar a clínica no WhatsApp.
 
@@ -98,13 +104,14 @@ class Crm::CopywriterService
       messages: [{ role: 'user', content: build_briefing }]
     )
     record_usage(message)
-
-    text = message.content.find { |block| block.type == :text }&.text
-    JSON.parse(text)
+    parse_structured_response(message)
   rescue Anthropic::Errors::APIError => e
     { error: "Erro na IA: #{e.message}" }
-  rescue JSON::ParserError
+  rescue JSON::ParserError, TypeError
     { error: 'A IA devolveu um formato inesperado. Tente de novo.' }
+  rescue StandardError => e
+    Rails.logger.error "[Copywriter] #{e.class}: #{e.message}"
+    { error: "Não consegui gerar agora (#{e.class.name.demodulize}). Tente de novo em instantes." }
   end
 
   private

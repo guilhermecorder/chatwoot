@@ -48,7 +48,7 @@ const count = computed(() =>
         :icon="icon"
         class="size-4"
         :class="countVariant === 'radar' && dynamicCount ? 'cevico-radar-icon' : ''"
-        :style="countVariant === 'radar' && dynamicCount ? { color: '#EA3E23' } : (iconColor ? { color: iconColor } : {})"
+        :style="countVariant === 'radar' && dynamicCount ? { color: '#10B981' } : (iconColor ? { color: iconColor } : {})"
       />
       <span
         v-if="showBadge"
@@ -109,11 +109,11 @@ const count = computed(() =>
   70%, 100% { transform: scale(1.45); opacity: 0; }
 }
 
-/* Radar de Oportunidades: laranja-avermelhado (cor do agente) PULSANDO —
-   o ícone do menu pulsa junto, no mesmo ritmo */
+/* Radar de Oportunidades: VERDE DOPAMINE pulsando — oportunidade é
+   convite, não bronca (pedido 17/07); o ícone do menu pulsa junto */
 .cevico-radar-badge {
   position: relative;
-  background: linear-gradient(135deg, #dc2626, #f59e0b);
+  background: linear-gradient(135deg, #059669, #4ade80);
   animation: cevico-radar-throb 2.2s ease-in-out infinite;
 }
 .cevico-radar-badge::after {
@@ -121,7 +121,7 @@ const count = computed(() =>
   position: absolute;
   inset: -2px;
   border-radius: 9999px;
-  border: 2px solid rgba(234, 62, 35, 0.65);
+  border: 2px solid rgba(52, 211, 153, 0.7);
   animation: cevico-radar-ring 2.2s ease-out infinite;
 }
 .cevico-radar-icon {
