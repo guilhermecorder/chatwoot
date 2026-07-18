@@ -6,7 +6,8 @@
 # pessoa respondeu e em quanto tempo).
 # Fontes: reporting_events do core + histórico do Radar + Agenda.
 class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
+  before_action -> { require_capability(:reports) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   RADAR_SAMPLE = 400 # avisos do histórico avaliados por chamada
@@ -28,11 +29,6 @@ class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::Ba
     Current.account
   end
 
-  def check_admin
-    return if Current.account_user.administrator?
-
-    render json: { error: 'Apenas administradores.' }, status: :forbidden
-  end
 
   def resolve_range
     now = TZ.now

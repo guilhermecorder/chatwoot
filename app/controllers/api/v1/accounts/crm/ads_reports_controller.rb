@@ -3,7 +3,8 @@
 # gravada nos contatos (leads) e as conversões do CRM (cards que chegaram
 # na etapa de conversão, ex. Cirurgia).
 class Api::V1::Accounts::Crm::AdsReportsController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
+  before_action -> { require_capability(:reports) }
 
   # GET /api/v1/accounts/:account_id/crm/ads_report?since=YYYY-MM-DD&until=YYYY-MM-DD
   def show
@@ -36,11 +37,6 @@ class Api::V1::Accounts::Crm::AdsReportsController < Api::V1::Accounts::BaseCont
 
   private
 
-  def check_admin
-    return if Current.account_user.administrator?
-
-    render json: { error: 'Apenas administradores podem ver o relatório de anúncios.' }, status: :forbidden
-  end
 
   def since_date
     @since_date ||= begin

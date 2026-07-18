@@ -1,4 +1,7 @@
 class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+
+  before_action -> { require_capability(:reports) }
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show

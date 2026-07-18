@@ -2,6 +2,9 @@
 # volume, tipo de mensagem, responsividade e conversões (consultas
 # agendadas / cirurgias via stage_logs) — no mesmo espírito do Dashboard CRM.
 class Api::V1::Accounts::Crm::CampaignsDashboardsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+
+  before_action -> { require_capability(:campaigns) }
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show

@@ -3,7 +3,8 @@
 # de leitura, resultados do teste A/B) + o mapa dos FUNIS montados
 # (página → página → WhatsApp) com a conversão de cada elo.
 class Api::V1::Accounts::Crm::PagesDashboardsController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
+  before_action -> { require_capability(:pages) }
 
   SERIES_DAYS = 30
 
@@ -17,9 +18,6 @@ class Api::V1::Accounts::Crm::PagesDashboardsController < Api::V1::Accounts::Bas
 
   private
 
-  def check_admin
-    render json: { error: 'Só administradores veem a análise.' }, status: :forbidden unless Current.account_user.administrator?
-  end
 
   def analytics_json(page) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     stats = page.daily_stats || {}

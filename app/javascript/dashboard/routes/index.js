@@ -10,25 +10,45 @@ import AnalyticsHelper from '../helper/AnalyticsHelper';
 const ONBOARDING_STEPS = ['account_details', 'enrichment'];
 const routes = [...dashboard.routes];
 
-// CEVICO: seções bloqueáveis por agente (crm_settings.agent_permissions).
-// Fail-open: se as settings ainda não carregaram, deixa passar — a sidebar
-// já esconde os itens; isto só barra acesso por URL direta.
-const CEVICO_BLOCKED_ROUTE_CHECKS = {
-  crm: name => name === 'crm_board',
-  crm_campaigns: name => name === 'crm_campaigns',
-  tasks: name => name === 'tasks_board',
-  agenda: name => name === 'agenda_board',
-  academy: name => name?.startsWith('academy'),
-  reports: name => name?.includes('_reports') || name === 'label_dashboard',
-  companies: name => name?.startsWith('companies_'),
-  captain: name => name?.startsWith('captain_'),
+// CEVICO (modelo de CONCESSÃO, 17/07): rotas de áreas administrativas que
+// abrem para atendente COM a área concedida pelo admin em
+// crm_settings.agent_permissions['grants']. A tranca de verdade é o
+// backend (require_capability) — aqui é só para a navegação fazer sentido.
+// Fail-closed: sem concessão confirmada, volta para o painel.
+const CEVICO_GRANTED_ROUTES = {
+  crm_dashboard_reports: ['reports'],
+  traffic_funnel_reports: ['reports'],
+  doctors_reports: ['reports'],
+  agents_dashboard_reports: ['reports'],
+  agenda_dashboard_reports: ['reports'],
+  ads_reports: ['reports'],
+  google_dashboard_reports: ['reports'],
+  whatsapp_health_reports: ['reports'],
+  crm_campaigns: ['campaigns'],
+  crm_campaigns_dashboard: ['campaigns', 'reports'],
+  cevico_automations: ['automations', 'data_tools'],
+  crm_integrations: ['settings'],
+  cevico_finance: ['finance'],
+  cevico_strategy: ['strategy'],
+  cevico_pages_analytics: ['pages'],
+  cevico_ab_center: ['pages'],
 };
 
-const isCevicoBlockedRoute = to => {
-  const settings = store.getters['crm/getSettings'];
-  const userId = store.getters.getCurrentUserID;
-  const blocked = settings?.agent_permissions?.[String(userId)] ?? [];
-  return blocked.some(key => CEVICO_BLOCKED_ROUTE_CHECKS[key]?.(to.name));
+const cevicoRouteAllowed = async (to, isAdminRole) => {
+  const needed = CEVICO_GRANTED_ROUTES[to.name];
+  if (!needed || isAdminRole) return true;
+  let settings = store.getters['crm/getSettings'];
+  if (!settings?.agent_permissions) {
+    // primeira navegação por URL direta: espera as settings para decidir
+    try {
+      settings = await store.dispatch('crm/fetchSettings');
+    } catch {
+      return false;
+    }
+  }
+  const userId = String(store.getters.getCurrentUserID);
+  const grants = settings?.agent_permissions?.grants?.[userId] ?? [];
+  return needed.some(capability => grants.includes(capability));
 };
 
 export const router = createRouter({ history: createWebHistory(), routes });
@@ -75,7 +95,7 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
     return next(frontendURL(`accounts/${routeAccountId}/dashboard`));
   }
 
-  if (isCevicoBlockedRoute(to)) {
+  if (!(await cevicoRouteAllowed(to, isAdmin))) {
     return next(frontendURL(`accounts/${routeAccountId}/dashboard`));
   }
 

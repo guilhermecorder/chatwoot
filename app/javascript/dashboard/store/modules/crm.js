@@ -275,6 +275,13 @@ const actions = {
     return data;
   },
 
+  // acessos por atendente (admin): concessões + menu do dia a dia
+  async updateAgentGrants({ dispatch }, payload) {
+    const { data } = await CrmAPI.updateAgentGrants(payload);
+    await dispatch('fetchSettings');
+    return data;
+  },
+
   async testN8n() {
     const { data } = await CrmAPI.testN8n();
     return data;

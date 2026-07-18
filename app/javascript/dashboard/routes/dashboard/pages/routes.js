@@ -17,7 +17,7 @@ export default {
       // Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
       path: frontendURL('accounts/:accountId/pages/analise'),
       name: 'cevico_pages_analytics',
-      meta: { permissions: ['administrator'] },
+      meta: { permissions: ['administrator', 'agent'] },
       component: PagesAnalytics,
     },
     {
@@ -31,7 +31,7 @@ export default {
       // Central de Testes A/B (admin)
       path: frontendURL('accounts/:accountId/pages/ab'),
       name: 'cevico_ab_center',
-      meta: { permissions: ['administrator'] },
+      meta: { permissions: ['administrator', 'agent'] },
       component: ABCenter,
     },
   ],

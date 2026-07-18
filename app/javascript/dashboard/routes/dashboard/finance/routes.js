@@ -7,7 +7,7 @@ export default {
       // Gestão Financeira: receitas, custos, tributos e investimentos (só admin)
       path: frontendURL('accounts/:accountId/finance'),
       name: 'cevico_finance',
-      meta: { permissions: ['administrator'] },
+      meta: { permissions: ['administrator', 'agent'] },
       component: FinancePanel,
     },
   ],

@@ -6,7 +6,8 @@
 # Ocupação % (agenda cheia/aproveitamento) é calculada na tela, com as
 # mesmas janelas da Agenda/Meu Painel.
 class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
+  before_action -> { require_capability(:reports) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
@@ -31,11 +32,6 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
     Current.account
   end
 
-  def check_admin
-    return if Current.account_user.administrator?
-
-    render json: { error: 'Apenas administradores.' }, status: :forbidden
-  end
 
   def resolve_range
     now = TZ.now

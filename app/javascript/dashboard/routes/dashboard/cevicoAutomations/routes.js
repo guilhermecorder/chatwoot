@@ -6,7 +6,7 @@ export default {
     {
       path: frontendURL('accounts/:accountId/cevico-automations'),
       name: 'cevico_automations',
-      meta: { permissions: ['administrator'] },
+      meta: { permissions: ['administrator', 'agent'] },
       component: AutomationsHub,
     },
   ],

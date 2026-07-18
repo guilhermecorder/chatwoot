@@ -1,7 +1,9 @@
 class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseController
   # toggle é a CHAVE DE EMERGÊNCIA: qualquer atendente pode pausar/religar
   # um robô que estiver se comportando mal (gerenciar continua admin-only)
-  before_action :check_admin, except: [:toggle]
+  include Crm::AccessControl
+
+  before_action -> { require_capability(:automations) }, except: [:toggle]
   before_action :bot, only: [:update, :destroy, :toggle]
 
   def index
@@ -47,11 +49,6 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
     @bot ||= Current.account.crm_followup_bots.find(params[:id])
   end
 
-  def check_admin
-    return if Current.account_user.administrator?
-
-    render json: { error: 'Apenas administradores podem gerenciar robôs.' }, status: :forbidden
-  end
 
   def bot_params
     params.require(:followup_bot).permit(

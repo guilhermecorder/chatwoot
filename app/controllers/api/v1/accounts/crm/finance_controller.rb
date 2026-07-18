@@ -2,7 +2,8 @@
 # (presets ou datas livres), histórico mensal de 12 meses para o gráfico
 # de linha, lançamentos (CRUD) e comparação de dois meses lado a lado.
 class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
+  before_action -> { require_capability(:finance) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   HISTORY_MONTHS = 12
@@ -61,9 +62,6 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     Current.account.cevico_finance_entries
   end
 
-  def check_admin
-    render json: { error: 'Só administradores acessam o financeiro.' }, status: :forbidden unless Current.account_user.administrator?
-  end
 
   def entry_params
     {

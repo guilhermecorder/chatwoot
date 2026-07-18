@@ -7,7 +7,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
     update_google_ads test_google_ads update_sheets test_sheets update_agenda agenda_backfill
     update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
-    sales_insights radar_scan run_mentor copywriter_content
+    sales_insights radar_scan run_mentor copywriter_content update_price_table
   ].freeze
   before_action -> { require_capability(:settings) }, only: ADMIN_SETTINGS_ACTIONS
   # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
@@ -17,24 +17,39 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: settings_json(crm_settings)
   end
 
-  # POST update_agent_grants — admin concede/retira áreas de um atendente.
-  # body: { user_id:, grants: ["reports","campaigns",...] }
-  # Mescla em agent_permissions['grants'] sem tocar no legado de menu.
+  # POST update_agent_grants — admin configura os acessos de UM atendente.
+  # body: { user_id:, grants: ["reports",...], menu: ["crm","tasks",...] }
+  # - grants: áreas administrativas CONCEDIDAS (allow-list, vale na API)
+  # - menu: itens do dia a dia visíveis no menu dela(e) (só visual)
+  # Mescla por usuário no servidor — nunca sobrescreve os demais.
   def update_agent_grants
     user_id = params[:user_id].to_s
     return render json: { error: 'Informe o atendente.' }, status: :unprocessable_entity if user_id.blank?
 
-    valid = Array(params[:grants]).map(&:to_s) & Crm::AccessControl::CAPABILITIES
     perms = crm_settings.agent_permissions || {}
-    grants = perms['grants'] || {}
-    if valid.empty?
-      grants.delete(user_id)
-    else
-      grants[user_id] = valid
+
+    if params.key?(:grants)
+      valid = Array(params[:grants]).map(&:to_s) & Crm::AccessControl::CAPABILITIES
+      grants = perms['grants'] || {}
+      valid.empty? ? grants.delete(user_id) : grants[user_id] = valid
+      perms['grants'] = grants
     end
-    perms['grants'] = grants
+
+    if params.key?(:menu)
+      valid_menu = Array(params[:menu]).map(&:to_s) & Crm::AccessControl::DAY_MENU_ITEMS
+      menu = perms['menu'] || {}
+      # padrão (sem registro) = DAY_MENU_DEFAULT; gravar lista própria só
+      # quando for diferente do padrão mantém o banco enxuto
+      if valid_menu.sort == Crm::AccessControl::DAY_MENU_DEFAULT.sort
+        menu.delete(user_id)
+      else
+        menu[user_id] = valid_menu
+      end
+      perms['menu'] = menu
+    end
+
     crm_settings.update!(agent_permissions: perms)
-    render json: { grants: grants }
+    render json: { grants: perms['grants'] || {}, menu: perms['menu'] || {} }
   end
 
   def update
@@ -45,6 +60,27 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
     crm_settings.update!(settings_params)
     render json: settings_json(crm_settings)
+  end
+
+  # POST update_price_table — Tabela de preços oficial (Configurações →
+  # Tabela de preços). Alimenta o Espaço do Paciente e os prompts da IA.
+  def update_price_table
+    items = Array(params[:items]).first(60).filter_map do |raw|
+      name = raw[:name].to_s.strip[0, 80]
+      next if name.blank?
+
+      {
+        'group' => raw[:group].to_s.strip[0, 80].presence || 'Outros',
+        'name' => name,
+        'price' => raw[:price].to_f.round(2),
+        'promo_price' => raw[:promo_price].present? ? raw[:promo_price].to_f.round(2) : nil
+      }.compact
+    end
+
+    cfg = crm_settings.agenda_config || {}
+    cfg['price_table'] = { 'items' => items, 'updated_at' => Time.current.iso8601 }
+    crm_settings.update!(agenda_config: cfg)
+    render json: { price_table: cfg['price_table'] }
   end
 
   def test_n8n
@@ -620,6 +656,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       surgery_locations: (s.agenda_config || {})['surgery_locations'] || [],
       surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
       agenda_theme: (s.agenda_config || {})['theme'],
+      # tabela de preços vigente (com os padrões quando não há tabela salva)
+      price_table: {
+        items: Cevico::PriceList.items(Current.account),
+        customized: (s.agenda_config || {}).dig('price_table', 'items').present?,
+        updated_at: (s.agenda_config || {}).dig('price_table', 'updated_at')
+      },
       panel_assignments: (s.agenda_config || {})['panel_assignments'] || {},
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},
       clinical_access: (s.agenda_config || {})['clinical_access'] || {},

@@ -16,8 +16,16 @@
 module Crm::AccessControl
   extend ActiveSupport::Concern
 
-  # áreas concedíveis (o admin marca quais o atendente pode acessar)
-  CAPABILITIES = %w[reports campaigns automations data_tools settings finance strategy goals pages].freeze
+  # áreas concedíveis (o admin marca quais o atendente pode acessar).
+  # 'goals' saiu da lista (decisão 17/07): edição de Metas é SÓ ADMIN,
+  # o painel em si é aberto ao time (goal_plans#show).
+  CAPABILITIES = %w[reports campaigns automations data_tools settings finance strategy pages].freeze
+
+  # itens do MENU do dia a dia que o admin liga/desliga por atendente
+  # (só visual — os endpoints dessas áreas continuam abertos ao time).
+  # Padrão de quem não tem configuração: DAY_MENU_DEFAULT.
+  DAY_MENU_ITEMS = %w[crm conversation agenda goals canned tasks people academy].freeze
+  DAY_MENU_DEFAULT = %w[crm conversation agenda goals canned].freeze
 
   private
 

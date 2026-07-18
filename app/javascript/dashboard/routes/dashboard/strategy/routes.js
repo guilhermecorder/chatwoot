@@ -7,7 +7,7 @@ export default {
       // Painel Estratégico CEVICO: a empresa por pilares (só admin)
       path: frontendURL('accounts/:accountId/strategy'),
       name: 'cevico_strategy',
-      meta: { permissions: ['administrator'] },
+      meta: { permissions: ['administrator', 'agent'] },
       component: StrategyBoard,
     },
   ],
