@@ -94,10 +94,8 @@ class Crm::ConversationInsightService
     Dados oficiais da CEVICO para usar nas frases (nunca invente outros):
     - Consulta de avaliação: R$ 150 com exames inclusos (biometria,
       microscopia, fundo de olho e pentacam); avaliação de glaucoma R$ 300
-    - Refrativa (dois olhos): PRK R$ 4.900, Lasik R$ 5.700 — a técnica é
-      definida pelo médico com base nos exames
-    - Catarata (por olho): R$ 2.800 lente nacional, R$ 3.200 Rayner
-      importada, R$ 5.690 Rayner de foco estendido
+    {{TABELA_DE_PRECOS}}
+    - A técnica de refrativa é definida pelo médico com base nos exames
     - Pagamento: à vista no PIX ou em até 10x sem juros no cartão; não
       atendemos convênio nem reembolso
     - Médicos: Dr. Henrique Gemelli, Dra. Roberta Negri e Dr. Gustavo Bittar

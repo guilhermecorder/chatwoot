@@ -6,6 +6,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
+import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { frontendURL } from 'dashboard/helper/URLHelper';
@@ -366,14 +367,16 @@ const latestNote = computed(() => notes.value[0] || null);
 // ── PROCEDIMENTOS OFICIAIS (preços = orçamento de indicação) ────────
 // O valor escolhido aqui é o orçamento OFICIAL da indicação; no fechamento
 // a IA grava o valor final e a diferença vira a taxa de performance.
-const PROCEDURES = [
+// Os preços vêm da TABELA DE PREÇOS (Configurações → Tabela de preços) —
+// os valores abaixo são só o plano B enquanto as settings carregam.
+const PROCEDURE_GROUPS = [
   {
     key: 'refrativa',
     label: 'Refrativa',
     optionLabel: 'Técnica',
     options: [
-      { name: 'PRK', price: 5000 },
-      { name: 'Lasik', price: 5000 },
+      { name: 'PRK', price: 4900 },
+      { name: 'Lasik', price: 5700 },
     ],
   },
   {
@@ -413,8 +416,28 @@ const PROCEDURES = [
     ],
   },
 ];
+// preço vigente por nome (promocional vence) vindo da tabela oficial
+const officialPriceByName = computed(() => {
+  const items = crmSettings.value?.price_table?.items || [];
+  const map = {};
+  items.forEach(item => {
+    map[item.name.toLowerCase().trim()] =
+      Number(item.promo_price || item.price) || undefined;
+  });
+  return map;
+});
+const withOfficialPrice = option => {
+  const official = officialPriceByName.value[option.name?.toLowerCase().trim()];
+  return official ? { ...option, price: official } : option;
+};
+const PROCEDURES = computed(() =>
+  PROCEDURE_GROUPS.map(group => ({
+    ...withOfficialPrice(group),
+    options: group.options.map(withOfficialPrice),
+  }))
+);
 const selectedProcedure = computed(() =>
-  PROCEDURES.find(p => p.key === noteForm.value.procedure_type)
+  PROCEDURES.value.find(p => p.key === noteForm.value.procedure_type)
 );
 
 const EYES = ['OD', 'OE', 'AO'];
@@ -464,7 +487,7 @@ const pickProcedure = key => {
   }
   form.procedure_type = key;
   form.procedure_option = '';
-  const proc = PROCEDURES.find(p => p.key === key);
+  const proc = PROCEDURES.value.find(p => p.key === key);
   if (proc?.price) applyIndication(proc.label, proc.price);
 };
 
@@ -611,7 +634,14 @@ const deleteNote = async note => {
     !window.confirm('Excluir esta anotação clínica? Essa ação não tem volta.')
   )
     return;
-  await CrmAPI.deleteClinicalNote(contactId.value, note.id).catch(() => {});
+  try {
+    await CrmAPI.deleteClinicalNote(contactId.value, note.id);
+    useAlert('Anotação excluída.');
+  } catch (error) {
+    useAlert(
+      error?.response?.data?.error || 'Não consegui excluir a anotação.'
+    );
+  }
   fetchNotes();
 };
 
@@ -634,7 +664,7 @@ const consultOptions = computed(() =>
 const notePills = note => {
   const f = note.fields || {};
   const pills = [];
-  const proc = PROCEDURES.find(p => p.key === f.procedure_type);
+  const proc = PROCEDURES.value.find(p => p.key === f.procedure_type);
   if (proc) pills.push(proc.label);
   else if (f.procedure_type) pills.push(f.procedure_type);
   const option = f.procedure_option || f.technique || f.lens_type;

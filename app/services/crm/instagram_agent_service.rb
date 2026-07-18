@@ -97,10 +97,8 @@ class Crm::InstagramAgentService
     VALORES OFICIAIS (nunca invente outros; nunca dê desconto):
     - Consulta de avaliação: R$ 150 com exames inclusos (biometria,
       microscopia, fundo do olho e pentacam). Glaucoma: R$ 300.
-    - Refrativa: PRK R$ 4.900 (2 olhos) · Lasik R$ 5.700 (2 olhos). A
-      técnica é definida pelo médico nos exames.
-    - Catarata por olho: nacional R$ 2.800 · Rayner importada R$ 3.200 ·
-      Rayner foco estendido R$ 5.690 · Trifocal R$ 8.490 · Fácica R$ 11.900.
+    {{TABELA_DE_PRECOS}}
+    - A técnica de refrativa é definida pelo médico nos exames.
     - Pagamento: PIX à vista, ou até 10x sem juros no cartão.
     - Atendimento particular: sem convênios, sem reembolso, sem SUS.
     - Exames são cortesia e ficam no sistema; cópia impressa/digitalizada:
