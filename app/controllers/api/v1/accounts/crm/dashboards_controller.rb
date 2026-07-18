@@ -1,4 +1,6 @@
 class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseController
+  TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
+
   def show
     pipeline = Current.account.crm_pipelines.includes(:stages).find(params[:pipeline_id])
     since, until_at = resolve_range
@@ -28,15 +30,18 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
 
   private
 
-  # período: presets hoje/ontem/semana ou N dias (comportamento antigo)
+  # período no fuso da clínica (São Paulo) — antes usava o fuso do servidor
+  # (UTC): "hoje" começava às 21h da véspera e os números não batiam com o
+  # Meu Painel/Agenda (que já eram SP). Presets hoje/ontem/semana ou N dias.
   def resolve_range
+    now = TZ.now
     case params[:preset]
-    when 'today'     then [Date.current.beginning_of_day, Time.current]
-    when 'yesterday' then [1.day.ago.beginning_of_day, 1.day.ago.end_of_day]
-    when 'week'      then [Date.current.beginning_of_week.beginning_of_day, Time.current]
+    when 'today'     then [now.beginning_of_day, now]
+    when 'yesterday' then [now.yesterday.beginning_of_day, now.yesterday.end_of_day]
+    when 'week'      then [now.beginning_of_week.beginning_of_day, now]
     else
       period = [[params[:period].to_i, 7].max, 1825].min
-      [period.days.ago.beginning_of_day, Time.current]
+      [(now - period.days).beginning_of_day, now]
     end
   end
 
@@ -246,7 +251,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     by_day = contacts
       .joins(:contact)
       .where(contacts: { created_at: since..until_at })
-      .group("DATE(contacts.created_at AT TIME ZONE 'UTC')")
+      .group("DATE(contacts.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')")
       .count
 
     schedule_by_day = reached_stage_by_day(pipeline, contacts, since, until_at, /agendamento/i)
@@ -395,7 +400,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       .joins(:contact)
       .where(stage_id: reached_ids)
       .where(contacts: { created_at: since..until_at })
-      .group("DATE(contacts.created_at AT TIME ZONE 'UTC')")
+      .group("DATE(contacts.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')")
       .count
   end
 end

@@ -1,4 +1,10 @@
 class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+
+  # disparar/criar campanha em massa = área concedível (padrão: só admin).
+  # Leitura (index/show/results) e prévias ficam livres p/ acompanhar.
+  before_action -> { require_capability(:campaigns) },
+                only: %i[create destroy send_now schedule preview_audience]
   before_action :campaign, only: [:show, :destroy, :send_now, :schedule, :results]
 
   def index
@@ -25,7 +31,10 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
   end
 
   def send_now
-    return render_could_not_create_error('Campanha já foi enviada') unless @campaign.draft? || @campaign.scheduled?
+    # bloqueia só a campanha CONCLUÍDA (evita reblast acidental). Uma campanha
+    # travada em "processando" (job perdido num deploy) ou "falhou" pode ser
+    # reenviada: o job agora retoma sem reenviar quem já recebeu.
+    return render_could_not_create_error('Campanha já foi concluída') if @campaign.completed?
 
     @campaign.update!(status: :processing)
     Crm::CampaignRunJob.perform_later(@campaign.id)

@@ -11,6 +11,9 @@ class CrmStalledCardsJob < ApplicationJob
       .includes(stage: { pipeline: :account })
       .find_each do |automation|
         process_automation(automation)
+      rescue StandardError => e
+        # uma automação quebrada não pode derrubar a rodada inteira (todas as contas)
+        Rails.logger.error "[CrmStalledCardsJob] automation #{automation.id}: #{e.message}"
       end
   end
 
@@ -45,6 +48,13 @@ class CrmStalledCardsJob < ApplicationJob
       .exists?
 
     return if already_fired
+
+    # TRAVA SÍNCRONA: o log 'fired' é gravado pelo FireJob depois, em outra fila.
+    # Sem isto, duas rodadas seguidas (cron 30 min) enfileiravam o disparo 2× para
+    # o mesmo card antes do 1º log existir → mensagem/form duplicado. A chave inclui
+    # stage_moved_at: se o card ENTRAR DE NOVO na coluna, pode disparar de novo.
+    enqueue_key = "CRM_STALLED_ENQUEUED::#{automation.id}::#{crm_contact.contact_id}::#{crm_contact.stage_moved_at.to_i}"
+    return unless Redis::LockManager.new.lock(enqueue_key, 6.hours)
 
     CrmAutomationFireJob.perform_later(
       automation.id,

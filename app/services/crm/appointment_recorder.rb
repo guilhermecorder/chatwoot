@@ -19,11 +19,13 @@ class Crm::AppointmentRecorder
   # equipe vence: só grava se ainda não tem.
   def self.stamp_gender(contact, gender)
     return if contact.blank? || gender.blank?
+    return if contact.additional_attributes&.dig('sexo').present?
 
-    attrs = contact.additional_attributes || {}
-    return if attrs['sexo'].present?
-
-    contact.update!(additional_attributes: attrs.merge('sexo' => gender))
+    # merge atômico: gravar o sexo não pode apagar a pausa/fechamento que outro
+    # caminho escreveu no mesmo instante. Marcação manual da equipe vence.
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      attrs['sexo'].present? ? attrs : attrs.merge('sexo' => gender)
+    end
   rescue StandardError => e
     Rails.logger.warn "[Crm::AppointmentRecorder] sexo: #{e.message}"
   end
@@ -105,9 +107,13 @@ class Crm::AppointmentRecorder
     Rails.logger.warn "[Crm::AppointmentRecorder] log: #{e.message}"
   end
 
-  # consulta futura ativa do mesmo CONTATO (unificado), telefone (últimos
-  # 8 dígitos) ou nome — nessa ordem de confiança
-  def self.future_appointment(account, phone, name, contact = nil)
+  # consulta futura ativa do mesmo CONTATO (unificado) ou telefone — nessa
+  # ordem de confiança. NÃO adivinha mais por nome: reagendar pelo homônimo
+  # (base tem ~20k contatos, e sem nome extraído o título virava "Consulta:
+  # Paciente") movia a consulta de OUTRA pessoa, que sumia da agenda. Sem match
+  # confiável → devolve nil e o chamador cria uma consulta nova (duplicar é bem
+  # menos grave do que apagar a consulta de um terceiro).
+  def self.future_appointment(account, phone, _name, contact = nil)
     scope = account.tasks.where(task_type: 'consulta', canceled_at: nil)
                    .where('due_at > ?', Time.current)
                    .where.not(status: 'done')
@@ -118,12 +124,25 @@ class Crm::AppointmentRecorder
     end
 
     digits = phone.to_s.gsub(/\D/, '')
-    if digits.length >= 8
-      by_phone = scope.where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
-                      .order(:due_at).first
-      return by_phone if by_phone
-    end
+    return nil if digits.length < 8
 
-    scope.find_by(title: "Consulta: #{name}")
+    # candidatos pelo fim do número e, entre eles, o primeiro que é a MESMA
+    # linha (confirma DDD/prefixo — dois DDDs com o mesmo final de 8 não casam)
+    scope.where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
+         .order(:due_at)
+         .find { |task| same_phone_line?(digits, task.phone) }
+  end
+
+  # mesma linha telefônica: tolera o +55 e nº com/sem DDD. Mesmo comprimento
+  # (ambos com DDD) exige igualdade — dois DDDs que só compartilham o final de
+  # 8 dígitos NÃO casam. Comprimentos diferentes: o maior tem que terminar no
+  # menor (ex.: "+55 11 9..." casa com "11 9...").
+  def self.same_phone_line?(a_digits, b_phone)
+    b = b_phone.to_s.gsub(/\D/, '')
+    return false if b.length < 8
+    return a_digits == b if a_digits.length == b.length
+
+    short, long = [a_digits, b].sort_by(&:length)
+    long.end_with?(short)
   end
 end

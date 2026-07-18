@@ -122,11 +122,13 @@ class Crm::SurgeryClosingService
   end
 
   def build_transcript
+    # reorder: o default_scope do Message (created_at ASC) vence um .order
+    # comum, então pegava as N mensagens mais ANTIGAS e a IA nunca via as novas
     messages = @conversation.messages
                             .where(message_type: [:incoming, :outgoing])
                             .where(private: false)
                             .where.not(content: [nil, ''])
-                            .order(created_at: :desc)
+                            .reorder(created_at: :desc)
                             .limit(MAX_MESSAGES)
                             .reverse
 

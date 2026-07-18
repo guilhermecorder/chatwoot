@@ -24,7 +24,18 @@ class Crm::FollowupBotJob < ApplicationJob
   STALE_HOURS = 3
 
   def perform
-    Crm::FollowupBot.active.includes(:inbox).find_each { |bot| process_bot(bot) }
+    # TRAVA: cron a cada 2 min. Se uma rodada demora mais que isso (muitas
+    # conversas abertas), a seguinte começava por cima e podia cutucar o mesmo
+    # paciente 2× antes do persist_state. O lock faz a rodada nova pular.
+    lock_manager = Redis::LockManager.new
+    lock_key = 'CRM_FOLLOWUP_BOT_JOB_LOCK'
+    return unless lock_manager.lock(lock_key, 10.minutes)
+
+    begin
+      Crm::FollowupBot.active.includes(:inbox).find_each { |bot| process_bot(bot) }
+    ensure
+      lock_manager.unlock(lock_key)
+    end
   end
 
   private
@@ -53,7 +64,9 @@ class Crm::FollowupBotJob < ApplicationJob
     run = { status: 'ok', candidates: ids.size, sent: 0, reasons: Hash.new(0) }
     events = []
 
-    Conversation.where(id: ids).find_each do |conversation|
+    # eager-load do contato + inbox: evita 1 query por conversa só pra achar o
+    # contato/etiquetas na hora de decidir a cutucada
+    Conversation.where(id: ids).includes(:contact, :inbox).find_each do |conversation|
       process_conversation(bot, conversation, steps, run, events)
     rescue StandardError => e
       run[:reasons]['erro'] += 1
@@ -159,7 +172,12 @@ class Crm::FollowupBotJob < ApplicationJob
     crm = Crm::Contact.find_by(pipeline_id: bot.stage.pipeline_id, contact_id: conversation.contact_id)
     return nil unless crm
 
-    Crm::StageLog.where(crm_contact_id: crm.id, stage_id: bot.stage_id).maximum(:entered_at) || crm.updated_at
+    # fallback ESTÁVEL: stage_moved_at (quando entrou na coluna atual) e, por
+    # fim, created_at. Antes caía em updated_at, que muda a QUALQUER edição do
+    # card (valor, nota) → o marcador da etapa mudava e a cadência de coluna
+    # RECOMEÇAVA, reenviando cutucadas ao paciente.
+    Crm::StageLog.where(crm_contact_id: crm.id, stage_id: bot.stage_id).maximum(:entered_at) ||
+      crm.stage_moved_at || crm.created_at
   end
 
   def hours_since(time)
@@ -223,17 +241,18 @@ class Crm::FollowupBotJob < ApplicationJob
   end
 
   def persist_state(conversation, bot, anchor, state)
-    attrs = conversation.additional_attributes || {}
-    stored = attrs['cevico_followup'] || {}
-    stored = { 'bots' => { stored['bot_id'].to_s => stored } } if stored['bot_id'].present? # legado
-    stored['bots'] ||= {}
-
-    stored['bots'][bot.id.to_s] = {
-      'anchor' => anchor.iso8601, 'sent' => state['sent'],
-      'stage_key' => state['stage_key'], 'stage_sent' => state['stage_sent']
-    }
-    attrs['cevico_followup'] = stored
-    conversation.update_column(:additional_attributes, attrs)
+    # merge atômico: relê dentro da trava e grava só a entrada DESTE robô, sem
+    # apagar o estado de outro robô nem a chave de pausa do Atendente Instagram
+    Cevico::AttributeMerge.merge!(conversation) do |attrs|
+      stored = attrs['cevico_followup'] || {}
+      stored = { 'bots' => { stored['bot_id'].to_s => stored } } if stored['bot_id'].present? # legado
+      stored['bots'] ||= {}
+      stored['bots'][bot.id.to_s] = {
+        'anchor' => anchor.iso8601, 'sent' => state['sent'],
+        'stage_key' => state['stage_key'], 'stage_sent' => state['stage_sent']
+      }
+      attrs.merge('cevico_followup' => stored)
+    end
   end
 
   def send_nudge(bot, conversation, step)

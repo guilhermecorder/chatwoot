@@ -47,6 +47,7 @@ class Crm::MessageAutomation < ApplicationRecord
   validates :delay_days, numericality: { greater_than_or_equal_to: 0 }
   validates :template_params, presence: true
   validate :trigger_must_be_present
+  validate :inbox_belongs_to_account
 
   before_create :ensure_marker_label
 
@@ -100,6 +101,14 @@ class Crm::MessageAutomation < ApplicationRecord
     return if trigger_label.present? || trigger_stage_id.present?
 
     errors.add(:base, 'Defina uma etiqueta ou uma coluna como gatilho')
+  end
+
+  # higiene multi-tenant: a caixa tem que ser da MESMA conta da régua
+  def inbox_belongs_to_account
+    return if inbox.blank? || account_id.blank?
+    return if inbox.account_id == account_id
+
+    errors.add(:inbox, 'não pertence a esta conta')
   end
 
   def ensure_marker_label

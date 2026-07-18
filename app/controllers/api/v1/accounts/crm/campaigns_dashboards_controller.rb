@@ -2,6 +2,8 @@
 # volume, tipo de mensagem, responsividade e conversões (consultas
 # agendadas / cirurgias via stage_logs) — no mesmo espírito do Dashboard CRM.
 class Api::V1::Accounts::Crm::CampaignsDashboardsController < Api::V1::Accounts::BaseController
+  TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
+
   def show
     since, until_at = resolve_range
     cost = params[:cost_per_message].to_f # R$ por mensagem modelo (informado na tela)
@@ -23,14 +25,16 @@ class Api::V1::Accounts::Crm::CampaignsDashboardsController < Api::V1::Accounts:
 
   private
 
+  # período no fuso da clínica (São Paulo), como os demais painéis
   def resolve_range
+    now = TZ.now
     case params[:preset]
-    when 'today'     then [Date.current.beginning_of_day, Time.current]
-    when 'yesterday' then [1.day.ago.beginning_of_day, 1.day.ago.end_of_day]
-    when 'week'      then [Date.current.beginning_of_week.beginning_of_day, Time.current]
+    when 'today'     then [now.beginning_of_day, now]
+    when 'yesterday' then [now.yesterday.beginning_of_day, now.yesterday.end_of_day]
+    when 'week'      then [now.beginning_of_week.beginning_of_day, now]
     else
       period = [[params[:period].to_i, 7].max, 1825].min
-      [period.days.ago.beginning_of_day, Time.current]
+      [(now - period.days).beginning_of_day, now]
     end
   end
 

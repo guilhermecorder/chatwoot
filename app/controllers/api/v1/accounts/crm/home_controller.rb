@@ -559,7 +559,15 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       end
       { best: slot['best'].to_f, is_record: slot['period'] == period && slot['best'].to_f.positive? }
     end
-    settings.update!(agenda_config: cfg.merge('panel_records' => all)) if changed
+    # esta é uma requisição GET (carga do painel): só grava quando bate um
+    # recorde, e sob trava relendo o agenda_config fresco — assim não atropela
+    # uma config que o admin tenha salvo em paralelo (só a chave panel_records muda)
+    if changed
+      settings.with_lock do
+        fresh = settings.reload.agenda_config || {}
+        settings.update!(agenda_config: fresh.merge('panel_records' => all))
+      end
+    end
     result
   end
 

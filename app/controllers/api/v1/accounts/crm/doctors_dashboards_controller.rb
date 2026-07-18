@@ -4,6 +4,11 @@
 # pacientes que ele atendeu. Traz também o volume de cirurgias por clínica
 # parceira (IOP, Ocular Surgery...). Fonte: Agenda (tasks) + contatos.
 class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+
+  # traz faturamento por médico → área de relatórios (padrão: só admin)
+  before_action -> { require_capability(:reports) }
+
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show

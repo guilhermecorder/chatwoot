@@ -5,11 +5,20 @@ class CrmAutomationFireJob < ApplicationJob
     automation = Crm::Automation.find_by(id: automation_id)
     return unless automation&.active?
 
-    contact = Contact.find_by(id: contact_id)
-    return unless contact
-
     stage    = automation.stage
     pipeline = stage.pipeline
+
+    # contato SEMPRE resolvido dentro da conta da automação (sem isso, um
+    # contact_id de outra conta — o endpoint trigger recebe cru — vazava)
+    contact = pipeline.account.contacts.find_by(id: contact_id)
+    return unless contact
+
+    # automação de "entrou na coluna" com ATRASO: se o paciente já saiu da
+    # coluna nesse meio tempo, não dispara (evita form/mensagem fora de contexto
+    # pra quem já avançou). Disparo imediato (sem atraso) não é afetado.
+    return if automation.trigger_type == 'card_entered' &&
+              automation.delay_minutes.to_i.positive? &&
+              !card_in_stage?(automation, contact)
 
     payload = build_payload(automation, contact, stage, pipeline, extra_payload)
 
@@ -67,19 +76,30 @@ class CrmAutomationFireJob < ApplicationJob
 
   private
 
+  # o card do contato ainda está na coluna da automação? (usado p/ segurar
+  # disparo atrasado de card_entered quando o paciente já avançou)
+  def card_in_stage?(automation, contact)
+    Crm::Contact.exists?(
+      contact_id: contact.id,
+      pipeline_id: automation.stage.pipeline_id,
+      stage_id: automation.stage_id
+    )
+  end
+
   # trilha de automações do PACIENTE: cada disparo fica gravado no contato
   # (o Espaço do Paciente mostra "por quais automações ele passou e quando" —
   # é assim que dá pra saber qual automação realmente ajudou)
   def stamp_automation_trail(automation, contact, stage)
-    attrs = contact.additional_attributes || {}
-    trail = Array(attrs['cevico_automation_trail'])
-    trail << {
-      'name' => automation.name,
-      'action' => automation.action_type,
-      'stage' => stage&.name,
-      'at' => Time.current.iso8601
-    }
-    contact.update!(additional_attributes: attrs.merge('cevico_automation_trail' => trail.last(60)))
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      trail = Array(attrs['cevico_automation_trail'])
+      trail << {
+        'name' => automation.name,
+        'action' => automation.action_type,
+        'stage' => stage&.name,
+        'at' => Time.current.iso8601
+      }
+      attrs.merge('cevico_automation_trail' => trail.last(60))
+    end
   rescue StandardError => e
     Rails.logger.warn "[CrmAutomationFire] trilha: #{e.message}"
   end
@@ -275,15 +295,14 @@ class CrmAutomationFireJob < ApplicationJob
     end
     return unless result[:closed]
 
-    attrs = contact.additional_attributes || {}
-    attrs['surgery_closing'] = {
+    closing = {
       'value' => result[:value].positive? ? result[:value] : nil,
       'payment' => result[:payment].presence,
       'surgery_date' => result[:surgery_date]&.iso8601,
       'note' => result[:note].presence,
       'at' => Time.current.iso8601
     }.compact
-    contact.update!(additional_attributes: attrs)
+    Cevico::AttributeMerge.merge!(contact) { |attrs| attrs.merge('surgery_closing' => closing) }
 
     # valor do card: preenche se ainda estiver vazio (não sobrescreve o manual)
     card = Crm::Contact.find_by(pipeline_id: pipeline.id, contact_id: contact.id)
@@ -307,9 +326,8 @@ class CrmAutomationFireJob < ApplicationJob
     kept = contact.label_list.reject { |l| Crm::NpsService::NPS_LABELS.include?(l.to_s) }
     contact.update_labels(kept + [label])
 
-    attrs = contact.additional_attributes || {}
-    attrs['nps'] = { 'score' => result[:score], 'comment' => result[:comment].presence, 'at' => Time.current.iso8601 }.compact
-    contact.update!(additional_attributes: attrs)
+    nps = { 'score' => result[:score], 'comment' => result[:comment].presence, 'at' => Time.current.iso8601 }.compact
+    Cevico::AttributeMerge.merge!(contact) { |attrs| attrs.merge('nps' => nps) }
   end
 
   def ai_analyze(contact)
@@ -397,6 +415,9 @@ class CrmAutomationFireJob < ApplicationJob
 
     # não reenvia para quem já respondeu este formulário
     return if form.responses.where(contact_id: contact.id).where.not(completed_at: nil).exists?
+    # nem para quem JÁ RECEBEU o link há pouco (evita rajada de links quando o
+    # gatilho é "mensagem recebida": o paciente responde, dispara de novo...)
+    return if form_sent_recently?(contact, form)
 
     conversation = latest_conversation(contact)
     return unless conversation
@@ -413,6 +434,28 @@ class CrmAutomationFireJob < ApplicationJob
       message_type: :outgoing,
       content: content
     )
+    mark_form_sent(contact, form)
+  end
+
+  FORM_RESEND_COOLDOWN = 7.days
+
+  def form_sent_recently?(contact, form)
+    sent_at = contact.additional_attributes&.dig('cevico_forms_sent', form.id.to_s)
+    return false if sent_at.blank?
+
+    Time.zone.parse(sent_at.to_s) > FORM_RESEND_COOLDOWN.ago
+  rescue ArgumentError, TypeError
+    false
+  end
+
+  def mark_form_sent(contact, form)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      sent = attrs['cevico_forms_sent'] || {}
+      sent[form.id.to_s] = Time.current.iso8601
+      attrs.merge('cevico_forms_sent' => sent)
+    end
+  rescue StandardError => e
+    Rails.logger.warn "[CrmAutomationFire] mark_form_sent: #{e.message}"
   end
 
   def fire_n8n(automation, payload)

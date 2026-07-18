@@ -1,6 +1,40 @@
 class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+
+  # integração/config sensível = admin (ou área concedida). Leitura (show) e os
+  # atalhos usados pela tela do atendente ficam livres.
+  ADMIN_SETTINGS_ACTIONS = %i[
+    update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
+    update_google_ads test_google_ads update_sheets test_sheets update_agenda agenda_backfill
+    update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
+    sales_insights radar_scan run_mentor copywriter_content
+  ].freeze
+  before_action -> { require_capability(:settings) }, only: ADMIN_SETTINGS_ACTIONS
+  # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
+  before_action :require_administrator!, only: [:update_agent_grants]
+
   def show
     render json: settings_json(crm_settings)
+  end
+
+  # POST update_agent_grants — admin concede/retira áreas de um atendente.
+  # body: { user_id:, grants: ["reports","campaigns",...] }
+  # Mescla em agent_permissions['grants'] sem tocar no legado de menu.
+  def update_agent_grants
+    user_id = params[:user_id].to_s
+    return render json: { error: 'Informe o atendente.' }, status: :unprocessable_entity if user_id.blank?
+
+    valid = Array(params[:grants]).map(&:to_s) & Crm::AccessControl::CAPABILITIES
+    perms = crm_settings.agent_permissions || {}
+    grants = perms['grants'] || {}
+    if valid.empty?
+      grants.delete(user_id)
+    else
+      grants[user_id] = valid
+    end
+    perms['grants'] = grants
+    crm_settings.update!(agent_permissions: perms)
+    render json: { grants: grants }
   end
 
   def update

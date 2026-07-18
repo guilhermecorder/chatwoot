@@ -36,10 +36,25 @@ class Crm::AttendanceReflector
     return if new_stage.blank? || new_stage.id == card.stage_id
 
     previous_stage = card.stage
-    card.update!(stage_id: new_stage.id, pipeline_id: new_stage.pipeline_id)
-    CrmAutomationTriggerService.new(crm_contact: card, new_stage: new_stage,
+    # coluna de OUTRO funil: se o contato já tem card lá, mover ESSE card (não
+    # trocar o pipeline_id do card atual, que estourava o índice único
+    # contact_id+pipeline_id e o reflexo se perdia em silêncio no rescue)
+    moved_card =
+      if new_stage.pipeline_id == card.pipeline_id
+        card.update!(stage_id: new_stage.id)
+        card
+      else
+        other = Crm::Contact.find_or_initialize_by(contact_id: contact.id, pipeline_id: new_stage.pipeline_id)
+        return if other.persisted? && other.stage_id == new_stage.id
+
+        other.stage_id = new_stage.id
+        other.save!
+        other
+      end
+
+    CrmAutomationTriggerService.new(crm_contact: moved_card, new_stage: new_stage,
                                     previous_stage: previous_stage, event_type: 'card_entered').call
-    CrmAutomationTriggerService.new(crm_contact: card, new_stage: previous_stage,
+    CrmAutomationTriggerService.new(crm_contact: moved_card, new_stage: previous_stage,
                                     previous_stage: previous_stage, event_type: 'card_left').call
   rescue StandardError => e
     Rails.logger.error "[Crm::AttendanceReflector] task #{task.id}: #{e.message}"
