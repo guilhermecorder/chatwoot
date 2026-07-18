@@ -1,4 +1,9 @@
 class Api::V1::Accounts::Crm::TrafficReportsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+
+  # traz investimento em anúncios (Meta) → área de relatórios (padrão: só admin)
+  before_action -> { require_capability(:reports) }
+
   def show
     period = [[params[:period].to_i, 7].max, 365].min
     since = period.days.ago.beginning_of_day

@@ -2,8 +2,10 @@
 // Dashboard dos MÉDICOS (análise do gestor): quem mais converte consulta em
 // cirurgia, indicações, comparecimento, NPS dos pacientes de cada médico e
 // o volume de cirurgias por clínica parceira (IOP, Ocular Surgery...).
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import CrmAPI from 'dashboard/api/crm';
 import { DOCTORS } from 'dashboard/helper/cevicoAgenda';
 
@@ -48,7 +50,23 @@ const npsColor = avg => {
   return '#DC2626';
 };
 
-onMounted(fetchData);
+// resumo geral do período (soma dos médicos) c/ metas oficiais do mês
+const goals = useCevicoGoals();
+const totals = computed(() => {
+  const rows = data.value?.doctors || [];
+  const sum = key => rows.reduce((s, r) => s + Number(r[key] || 0), 0);
+  return {
+    consultations: sum('consultations'),
+    conversions: sum('conversions'),
+    surgeriesDone: sum('surgeries_done'),
+    revenue: sum('revenue'),
+  };
+});
+
+onMounted(() => {
+  fetchData();
+  goals.load();
+});
 </script>
 
 <template>
@@ -84,6 +102,45 @@ onMounted(fetchData);
       </div>
 
       <template v-else>
+        <!-- 📈 Resumo do período (c/ selos de recorde/meta do mês) -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <DashKpi
+            compact
+            label="Consultas realizadas"
+            :value="totals.consultations"
+            from="#0369A1"
+            to="#38BDF8"
+            :state="goals.stateFor('consultations_attended')"
+            :goal="goals.goalFor('consultations_attended')"
+          />
+          <DashKpi
+            compact
+            label="Viraram cirurgia"
+            :value="totals.conversions"
+            from="#5B21B6"
+            to="#7C3AED"
+          />
+          <DashKpi
+            compact
+            label="Cirurgias realizadas"
+            :value="totals.surgeriesDone"
+            from="#059669"
+            to="#34D399"
+            :state="goals.stateFor('surgeries_done')"
+            :goal="goals.goalFor('surgeries_done')"
+          />
+          <DashKpi
+            compact
+            label="Faturamento gerado"
+            :value="Math.round(totals.revenue)"
+            prefix="R$ "
+            from="#065F46"
+            to="#10B981"
+            :state="goals.stateFor('revenue_closed')"
+            :goal="goals.goalFor('revenue_closed')"
+          />
+        </div>
+
         <!-- 🏆 Ranking de conversão -->
         <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-6">
           <h2 class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-2">
@@ -105,12 +162,13 @@ onMounted(fetchData);
               class="rounded-2xl border-2 bg-n-solid-1 p-4"
               :style="{ borderColor: doctorColor(row.doctor) + '40' }"
             >
+              <!-- nome nunca vira "Dr. …": quebra linha no celular em vez de truncar -->
               <div class="flex items-center gap-2 flex-wrap mb-3">
                 <span class="text-lg">{{ medal(i) }}</span>
-                <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: doctorColor(row.doctor) }" />
-                <p class="text-sm font-bold text-n-slate-12 flex-1 truncate">{{ row.doctor }}</p>
+                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: doctorColor(row.doctor) }" />
+                <p class="text-sm font-bold text-n-slate-12 flex-1 min-w-[140px] break-words">{{ row.doctor }}</p>
                 <span
-                  class="text-xs font-bold text-white px-3 py-1 rounded-full"
+                  class="text-xs font-bold text-white px-3 py-1 rounded-full whitespace-nowrap"
                   :style="{ background: `linear-gradient(135deg, ${doctorColor(row.doctor)}, ${doctorColor(row.doctor)}99)` }"
                 >
                   {{ row.conversion_rate }}% de conversão

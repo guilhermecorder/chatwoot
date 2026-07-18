@@ -49,10 +49,14 @@ class Crm::ContactUnificationService
     phone_groups.values + email_groups.values
   end
 
+  # memoizado: duplicate_groups e email_groups chamavam isto, varrendo os ~20k
+  # contatos DUAS vezes por preview/apply
   def phone_groups
-    contacts = account.contacts.where.not(phone_number: [nil, '']).select(:id, :name, :phone_number, :email, :created_at)
-    contacts.group_by { |c| c.phone_number.gsub(/\D/, '') }
-            .select { |digits, group| digits.present? && group.size > 1 }
+    @phone_groups ||= begin
+      contacts = account.contacts.where.not(phone_number: [nil, '']).select(:id, :name, :phone_number, :email, :created_at)
+      contacts.group_by { |c| c.phone_number.gsub(/\D/, '') }
+              .select { |digits, group| digits.present? && group.size > 1 }
+    end
   end
 
   # duplicados por e-mail que ainda não foram pegos pelo telefone

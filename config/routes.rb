@@ -228,6 +228,10 @@ Rails.application.routes.draw do
               post :radar_scan
               post :run_mentor
               get :ai_usage
+              # concessão de acessos por atendente (allow-list, admin)
+              post :update_agent_grants
+              # tabela de preços oficial (Espaço do Paciente + prompts da IA)
+              post :update_price_table
             end
             # Feedback de bugs do time (vira card 🐞 no board do admin)
             resources :bug_reports, only: [:create], controller: 'bug_reports'

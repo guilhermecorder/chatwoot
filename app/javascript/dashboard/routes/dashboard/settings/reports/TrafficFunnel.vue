@@ -94,11 +94,11 @@ const cpl = computed(() => {
   <div class="flex flex-col h-full overflow-y-auto p-8 bg-n-surface-1">
     <!-- Header -->
     <div class="flex items-center gap-4 mb-8 flex-wrap">
+      <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #22D3EE)">
+        <span class="i-lucide-filter text-white text-lg" />
+      </span>
       <div>
-        <h1 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-          <span class="i-lucide-filter text-n-brand" />
-          Funil de Tráfego
-        </h1>
+        <h1 class="text-lg font-bold text-n-slate-12">Funil de Tráfego</h1>
         <p class="text-xs text-n-slate-10 mt-0.5">
           Do anúncio à cirurgia: Meta Ads → WhatsApp → jornada no CRM
         </p>

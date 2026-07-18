@@ -201,6 +201,21 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { theme });
   }
 
+  // acessos de UM atendente (admin): áreas concedidas + menu do dia a dia.
+  // Merge por usuário no servidor — nunca clobbera os demais.
+  updateAgentGrants({ userId, grants, menu }) {
+    return axios.post(`${this.url}/settings/update_agent_grants`, {
+      user_id: userId,
+      grants,
+      menu,
+    });
+  }
+
+  // tabela de preços oficial (Espaço do Paciente + prompts da IA) — admin
+  updatePriceTable(items) {
+    return axios.post(`${this.url}/settings/update_price_table`, { items });
+  }
+
   // qual versão do Meu Painel cada agente vê — admin
   updatePanelAssignments(panelAssignments) {
     return axios.post(`${this.url}/settings/update_agenda`, { panel_assignments: panelAssignments });

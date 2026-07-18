@@ -68,9 +68,20 @@ class Crm::RetroLabelJob < ApplicationJob
       scope = scope.where(clauses.join(' OR '), *values)
     end
 
-    scope = scope.where('messages.created_at >= ?', Date.parse(options['period_from']).beginning_of_day) if options['period_from'].present?
-    scope = scope.where('messages.created_at <= ?', Date.parse(options['period_to']).end_of_day) if options['period_to'].present?
+    # datas inválidas não podem derrubar o job (o filtro só é ignorado)
+    if (from = safe_date(options['period_from']))
+      scope = scope.where('messages.created_at >= ?', from.beginning_of_day)
+    end
+    if (to = safe_date(options['period_to']))
+      scope = scope.where('messages.created_at <= ?', to.end_of_day)
+    end
     scope
+  end
+
+  def self.safe_date(value)
+    value.present? ? Date.parse(value.to_s) : nil
+  rescue ArgumentError, TypeError
+    nil
   end
 
   private

@@ -65,13 +65,16 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
     contact = @conversation.contact
     return render json: { error: 'Conversa sem contato.' }, status: :unprocessable_entity if contact.blank?
 
-    attrs = contact.additional_attributes || {}
-    if ActiveModel::Type::Boolean.new.cast(params[:paused])
-      attrs['cevico_followup_paused'] = { 'by' => Current.user.name, 'at' => Time.current.iso8601 }
-    else
-      attrs.delete('cevico_followup_paused')
+    paused = ActiveModel::Type::Boolean.new.cast(params[:paused])
+    # merge atômico: gravar a pausa não pode ser apagado por outra escrita
+    # concorrente no contato (sexo/nps/fechamento) — senão o robô volta a cutucar
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      if paused
+        attrs.merge('cevico_followup_paused' => { 'by' => Current.user.name, 'at' => Time.current.iso8601 })
+      else
+        attrs.except('cevico_followup_paused')
+      end
     end
-    contact.update!(additional_attributes: attrs)
 
     render json: { followup: followup_json }
   end

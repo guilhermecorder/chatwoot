@@ -108,6 +108,11 @@ module Crm::AiAgentConfig
   # respondedor (fala com paciente) tem trava própria; os demais, a de leitura
   def system_prompt
     base = agent_config['prompt'].presence || self.class::SYSTEM_PROMPT
+    # {{TABELA_DE_PRECOS}} vira a tabela de preços oficial na hora da chamada
+    # (Configurações → Tabela de preços; sem tabela salva = valores padrão)
+    if base.include?('{{TABELA_DE_PRECOS}}')
+      base = base.gsub('{{TABELA_DE_PRECOS}}', Cevico::PriceList.prompt_block(@account))
+    end
     guard = RESPONDER_AGENTS.include?(self.class::AGENT_KEY) ? RESPONDER_GUARDRAIL : OPERATIONAL_GUARDRAIL
     base + guard
   end

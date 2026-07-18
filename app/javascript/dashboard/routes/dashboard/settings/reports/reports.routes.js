@@ -189,7 +189,7 @@ export default {
           path: 'crm_dashboard',
           name: 'crm_dashboard_reports',
           meta: {
-            permissions: ['administrator', 'report_manage'],
+            permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: CrmDashboardReport,
         },
@@ -197,7 +197,7 @@ export default {
           path: 'whatsapp_health',
           name: 'whatsapp_health_reports',
           meta: {
-            permissions: ['administrator', 'report_manage'],
+            permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: WhatsappHealth,
         },
@@ -205,7 +205,7 @@ export default {
           path: 'traffic_funnel',
           name: 'traffic_funnel_reports',
           meta: {
-            permissions: ['administrator', 'report_manage'],
+            permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: TrafficFunnel,
         },
@@ -213,7 +213,7 @@ export default {
           path: 'doctors',
           name: 'doctors_reports',
           meta: {
-            permissions: ['administrator', 'report_manage'],
+            permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: DoctorsDashboard,
         },
@@ -221,7 +221,7 @@ export default {
           path: 'google_dashboard',
           name: 'google_dashboard_reports',
           meta: {
-            permissions: ['administrator', 'report_manage'],
+            permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: GoogleDashboard,
         },
@@ -229,7 +229,7 @@ export default {
           path: 'agents_dashboard',
           name: 'agents_dashboard_reports',
           meta: {
-            permissions: ['administrator', 'report_manage'],
+            permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: AgentsDashboard,
         },
@@ -237,7 +237,7 @@ export default {
           path: 'agenda_dashboard',
           name: 'agenda_dashboard_reports',
           meta: {
-            permissions: ['administrator', 'report_manage'],
+            permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: AgendaDashboard,
         },
@@ -245,7 +245,7 @@ export default {
           path: 'ads',
           name: 'ads_reports',
           meta: {
-            permissions: ['administrator', 'report_manage'],
+            permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: AdsReport,
         },

@@ -2536,6 +2536,106 @@ Sem cron novo nesta rodada.
    ligando páginas (página → página → WhatsApp), vendo o caminho e a
    conversão de cada elo — o "link build" da CEVICO. Base: next_page_id.
 
+## 55. 🔐 ACESSOS POR CONCESSÃO + Tabela de preços + Metas com dono + paleta (17/07, noite) ⏳ NO WORKING TREE (branch feat/acessos-concessao-frontend) — ⚠️ TEM 1 MIGRATION
+
+Parte 1 da auditoria do frontend (relatório `AUDITORIA_FRONTEND_2026-07.md`)
+aprovada pelo Guilherme + decisões da rodada. Tudo testado no Docker local
+(admin + atendente.teste, API e visual). **Aguarda "pode subir".**
+
+**a) Controle de acessos vira CONCESSÃO de verdade (Lote 3 completo):**
+- Backend: `finance`/`strategy`/`pages`/`data_tools`/`reports`/`campaigns`/
+  `automations` agora usam `require_capability` (antes eram check_admin seco
+  — conceder não abria nada). Dashboards CRM/Campanhas/Automações ganharam
+  trava (estavam ABERTOS). `followup_bots` criar/editar = automations
+  (toggle segue livre p/ atendentes). `goals` SAIU das capabilities (edição
+  de Metas = só admin, decisão do dia). `update_agent_grants` agora aceita
+  também `menu` (itens do dia a dia por pessoa), merge por usuário no
+  servidor — sem clobber.
+- Modal "Acessos" reescrito: perfis rápidos (Atendimento padrão / Agenda &
+  Conferência / Médico) + grupo "Menu do dia a dia" (checkboxes visuais) +
+  grupo "Áreas administrativas" (concessões reais c/ selo verde). Admin-alvo
+  = tela explica que admin tem tudo.
+- Sidebar: menu padrão do atendente = **Meu Painel | CRM | Conversas |
+  Agenda | Metas | Respostas prontas** (item novo → canned do core, rota já
+  aceitava agente) + Conteúdos (rascunhos do time, decisão do dia) +
+  Configurações (perfil). Tarefas/Pessoas/Academia ligáveis por pessoa no
+  modal. Áreas concedidas APARECEM no menu (Relatórios só c/ dashboards
+  CEVICO; core reports continua admin). Hub de Automações filtra ABAS por
+  concessão (robôs/resultados=automations, tratamento=data_tools, resto
+  admin). AGENT_MENU_ORDER próprio (admin mantém a ordem de sempre).
+- Rotas: `meta.permissions` das rotas concedíveis ganharam 'agent' + guard
+  novo `CEVICO_GRANTED_ROUTES` em routes/index.js (fail-closed, espera as
+  settings carregarem p/ decidir). Bloqueio legado morreu; listas antigas
+  valem só como "esconder do menu" (default preservado). grants começa
+  vazio = ninguém ganha nem perde acesso no deploy.
+- ⚠️ MUDANÇA VISÍVEL: Tarefas e Pessoas SAEM do menu padrão das meninas
+  (pedido explícito) — religar por pessoa no 🛡️ Acessos após o deploy.
+
+**b) 💰 TABELA DE PREÇOS central (Configurações → Tabela de preços):**
+grupo/procedimento/preço/promo (promo vale na frente), em
+`agenda_config.price_table` (sem migration). Alimenta: Espaço do Paciente
+(orçamento de indicação; PRK/Lasik corrigidos p/ 4.900/5.700 dos prompts) e
+os prompts do Atendente IA + Analista via token `{{TABELA_DE_PRECOS}}`
+(substituído na chamada; sem tabela salva = padrões idênticos aos de hoje;
+prompts CUSTOM salvos precisam incluir o token p/ aderir).
+
+**c) 🎯 METAS com dono e caminho:** cada indicador ganhou "responsável"
+(select do time) + "o que é preciso para alcançar" (admin prepara; time vê
+"Fulana puxa essa meta" + o texto). Migration `20260718000001`
+(cevico_goal_plans.indicator_meta jsonb) — **backup antes do deploy**.
+
+**d) 🎨 PALETA TAILWIND completada** (F1 🔴 da auditoria): sky/blue/emerald/
+amber/teal/orange/rose/pink/cyan/lime/fuchsia/purple/indigo/gray entram no
+tailwind.config.js ANTES das cores do tema (149 usos de classes-fantasma
+passam a valer; pílula ♂/♀ do Espaço do Paciente legível — bug provado).
+Paletas do tema (green/yellow/red/violet/slate/n/woot) intactas.
+
+**e) F5:** deletePage/deleteClinicalNote agora avisam sucesso/erro (antes
+falhavam mudos).
+
+Deploy: 1 migration aditiva → backup (`/root/backup_cevico.sh`); sem cron
+novo; reversão = imagem anterior. Pós-deploy: conferir acessos de cada
+atendente no 🛡️ (religar Tarefas p/ quem usa) e revisar a Tabela de preços.
+
+## 56. 📊 REPASSE DOS DASHBOARDS DE RELATÓRIOS (rodada B, 18/07 madrugada) ⏳ NO WORKING TREE (mesma branch do 55) — sem migration
+
+Pedido: todos os dashboards de Relatórios no padrão CEVICO, mais bonitos e
+coloridos, com animações relevantes — recorde, meta batida e muito abaixo
+da meta. Construído e testado ao vivo (admin, desktop + 390px).
+
+**Kit novo (reusável):**
+- `components-next/cevico/DashKpi.vue` — card de KPI padrão: gradiente por
+  dashboard, número com CONTAGEM ANIMADA (easeOut 750ms), barra de meta e
+  4 estados vivos: 🏆 `record` (aura de átomos TileAura + selo dourado
+  shimmer + brilho), 🎯 `hit` (respiração verde), ⏳ `low` (selo âmbar),
+  🚨 `critical` (anel vermelho pulsando). Respeita prefers-reduced-motion.
+- `composables/useCevicoGoals.js` — metas OFICIAIS do mês via
+  `goal_plans#show` (mesma fonte do Painel de Metas → selos nunca
+  discordam da tela de Metas): valor do mês, meta, ritmo esperado
+  (proporcional ao dia), recorde de 12 meses (exige histórico real > 0;
+  regras: ≥meta=hit, <65% do ritmo=low, <35%=critical, record vence).
+
+**Onde os selos de meta/recorde entraram** (sempre indicadores oficiais):
+- Dashboard CRM → Novas no período (new_leads)
+- Dashboard da Agenda → Consultas (appointments_booked), Comparecimento
+  (consultations_attended), Cirurgias agendadas/realizadas
+  (surgeries_booked/done)
+- Dashboard dos Médicos → FAIXA-RESUMO NOVA no topo (consultas realizadas,
+  viraram cirurgia, cirurgias realizadas, faturamento c/ meta
+  revenue_closed) + FIX: nome do médico não trunca mais p/ "Dr. …" no
+  celular (quebra linha)
+- Dashboard dos Agentes → faixa do Radar em DashKpi (cores semânticas) +
+  fix de truncamento do nome
+
+**Só padronização visual (sem metas):** Dashboard Campanhas (4 KPIs →
+DashKpi), Google (card de conversões), Funil de Tráfego + Saúde do
+WhatsApp + Anúncios Meta (cabeçalho da família: chip gradiente + título).
+
+Obs.: selo/barra de meta usa SEMPRE o número oficial do mês ("meta do
+mês: X de Y"), mesmo com o KPI filtrado em outro período — decisão de
+consistência com o Painel de Metas. Local: metas da conta 3 ajustadas p/
+demo (appointments_booked=8 → meta batida). Deploy: junto com o item 55.
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
 **ONDE ESTAMOS (2026-07-15, manhã — TUDO NO AR ✅):** itens 14-36 EM

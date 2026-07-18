@@ -1,4 +1,5 @@
 const { slateDark } = require('@radix-ui/colors');
+const twColors = require('tailwindcss/colors');
 import { colors } from './theme/colors';
 import { icons } from './theme/icons';
 const defaultTheme = require('tailwindcss/defaultTheme');
@@ -212,6 +213,23 @@ const tailwindConfig = {
       'modal-backdrop-light': 'rgba(0, 0, 0, 0.4)',
       'modal-backdrop-dark': 'rgba(0, 0, 0, 0.6)',
       current: 'currentColor',
+      // CEVICO: paletas padrão do Tailwind que o tema Radix do fork não expõe.
+      // Entram ANTES de ...colors — as paletas do tema (green/yellow/red/
+      // violet/slate/woot/n) continuam mandando onde os nomes coincidem.
+      gray: twColors.gray,
+      blue: twColors.blue,
+      sky: twColors.sky,
+      cyan: twColors.cyan,
+      teal: twColors.teal,
+      emerald: twColors.emerald,
+      lime: twColors.lime,
+      amber: twColors.amber,
+      orange: twColors.orange,
+      rose: twColors.rose,
+      pink: twColors.pink,
+      fuchsia: twColors.fuchsia,
+      purple: twColors.purple,
+      indigo: twColors.indigo,
       ...colors,
       body: slateDark.slate7,
     },

@@ -11,52 +11,111 @@ const emit = defineEmits(['close']);
 
 const store = useStore();
 
-// seções do sistema que o admin pode bloquear por agente
-const FEATURES = [
-  { key: 'inbox',         label: 'Caixa de entrada' },
-  { key: 'conversation',  label: 'Conversas' },
-  { key: 'crm',           label: 'CRM (funil de leads)' },
-  { key: 'goals',         label: 'Metas (painel do mês)' },
-  { key: 'people',        label: 'Pessoas (DISC e desenvolvimento)' },
-  { key: 'crm_campaigns', label: 'Campanha WhatsApp (mensagens em massa)' },
-  { key: 'tasks',         label: 'Tarefas' },
-  { key: 'agenda',        label: 'Agenda' },
-  { key: 'reports',       label: 'Relatórios (dashboards)' },
-  { key: 'academy',       label: 'Academia CEVICO' },
-  { key: 'companies',     label: 'Empresas' },
-  { key: 'captain',       label: 'Captain (IA)' },
-  { key: 'settings',      label: 'Configurações' },
+// ── Menu do dia a dia (só visual — o admin liga/desliga por pessoa) ──
+const DAY_ITEMS = [
+  { key: 'crm',          label: 'CRM (funil de leads)' },
+  { key: 'conversation', label: 'Conversas' },
+  { key: 'agenda',       label: 'Agenda' },
+  { key: 'goals',        label: 'Metas (acompanhar o mês)' },
+  { key: 'canned',       label: 'Respostas prontas' },
+  { key: 'tasks',        label: 'Tarefas' },
+  { key: 'people',       label: 'Pessoas (DISC e desenvolvimento)' },
+  { key: 'academy',      label: 'Academia CEVICO' },
 ];
+// padrão combinado 17/07: Meu Painel | CRM | Conversas | Agenda | Metas |
+// Respostas prontas (Meu Painel e Conteúdos aparecem sempre)
+const DAY_DEFAULT = ['crm', 'conversation', 'agenda', 'goals', 'canned'];
+
+// ── Áreas administrativas (CONCESSÃO — vale de verdade, na API também) ──
+const GRANT_ITEMS = [
+  { key: 'reports',    label: 'Relatórios',            hint: 'dashboards CEVICO (CRM, Médicos, Agentes, Agenda, Anúncios…)' },
+  { key: 'campaigns',  label: 'Campanha WhatsApp',     hint: 'mensagens em massa e o painel de resultados' },
+  { key: 'automations', label: 'Automações',           hint: 'robôs de follow-up e resultados das automações' },
+  { key: 'data_tools', label: 'Tratamento de dados',   hint: 'etiquetas retroativas, mover em lote, unificar contatos' },
+  { key: 'settings',   label: 'Integrações & config.', hint: 'integrações do CRM e configurações sensíveis' },
+  { key: 'finance',    label: 'Financeiro',            hint: 'livro caixa da clínica — receitas, custos, margem' },
+  { key: 'strategy',   label: 'Estratégia',            hint: 'painel estratégico por pilares' },
+  { key: 'pages',      label: 'Análise de Páginas',    hint: 'análise de funis e testes A/B (rascunhos já são do time)' },
+];
+
+// ── Perfis rápidos (preenchem os checkboxes; dá para ajustar depois) ──
+const PRESETS = [
+  {
+    key: 'standard',
+    label: 'Atendimento (padrão)',
+    hint: 'responde mensagens, agenda, acompanha metas',
+    menu: [...DAY_DEFAULT],
+    grants: [],
+  },
+  {
+    key: 'agenda',
+    label: 'Agenda & Conferência',
+    hint: 'vive na agenda: conferência de consultas e cirurgias',
+    menu: ['agenda', 'conversation', 'goals', 'canned', 'tasks'],
+    grants: [],
+  },
+  {
+    key: 'doctor',
+    label: 'Médico(a)',
+    hint: 'agenda própria, metas e dashboards',
+    menu: ['agenda', 'goals'],
+    grants: ['reports'],
+  },
+];
+
+const isTargetAdmin = computed(() => props.agent.role === 'administrator');
 
 const crmSettings = useMapGetter('crm/getSettings');
 
-const blocked = ref([]);
+const dayMenu = ref([...DAY_DEFAULT]);
+const grants = ref([]);
 const isSaving = ref(false);
 
 onMounted(async () => {
   if (!Object.keys(crmSettings.value.agent_permissions ?? {}).length) {
     await store.dispatch('crm/fetchSettings').catch(() => {});
   }
-  blocked.value = [
-    ...(crmSettings.value.agent_permissions?.[String(props.agent.id)] ?? []),
-  ];
+  const perms = crmSettings.value.agent_permissions ?? {};
+  const uid = String(props.agent.id);
+  grants.value = [...(perms.grants?.[uid] ?? [])];
+  if (perms.menu?.[uid]) {
+    dayMenu.value = [...perms.menu[uid]];
+  } else {
+    // legado (lista de bloqueio antiga): padrão menos o que era bloqueado
+    const legacyBlocked = perms[uid] ?? [];
+    dayMenu.value = DAY_DEFAULT.filter(key => !legacyBlocked.includes(key));
+  }
 });
 
-const toggle = key => {
-  const idx = blocked.value.indexOf(key);
-  if (idx === -1) blocked.value.push(key);
-  else blocked.value.splice(idx, 1);
+const toggle = (list, key) => {
+  const idx = list.indexOf(key);
+  if (idx === -1) list.push(key);
+  else list.splice(idx, 1);
 };
 
-const blockedCount = computed(() => blocked.value.length);
+const applyPreset = preset => {
+  dayMenu.value = [...preset.menu];
+  grants.value = [...preset.grants];
+};
+
+const activePreset = computed(() => {
+  const same = (a, b) =>
+    a.length === b.length && [...a].sort().join() === [...b].sort().join();
+  return (
+    PRESETS.find(
+      p => same(p.menu, dayMenu.value) && same(p.grants, grants.value)
+    )?.key ?? null
+  );
+});
 
 const save = async () => {
   isSaving.value = true;
   try {
-    const perms = { ...(crmSettings.value.agent_permissions ?? {}) };
-    if (blocked.value.length) perms[String(props.agent.id)] = blocked.value;
-    else delete perms[String(props.agent.id)];
-    await store.dispatch('crm/updateSettings', { agent_permissions: perms });
+    await store.dispatch('crm/updateAgentGrants', {
+      userId: props.agent.id,
+      grants: grants.value,
+      menu: dayMenu.value,
+    });
     useAlert('Acessos atualizados!');
     emit('close');
   } catch {
@@ -68,39 +127,108 @@ const save = async () => {
 </script>
 
 <template>
-  <div class="flex flex-col">
-    <div class="px-8 pt-8 pb-4">
+  <div class="flex flex-col max-h-[85vh]">
+    <div class="px-8 pt-8 pb-4 flex-shrink-0">
       <h2 class="text-base font-semibold text-n-slate-12">
         Acessos de {{ agent.name }}
       </h2>
-      <p class="text-sm text-n-slate-10 mt-1">
-        Desmarque as seções que {{ agent.name.split(' ')[0] }} <strong>não</strong> deve acessar.
-        As seções bloqueadas somem do menu dela(e).
+      <p v-if="isTargetAdmin" class="text-sm text-n-slate-10 mt-1">
+        {{ agent.name.split(' ')[0] }} é <strong>administrador(a)</strong> e
+        tem acesso a tudo — não há o que configurar aqui.
+      </p>
+      <p v-else class="text-sm text-n-slate-10 mt-1">
+        Marque o que {{ agent.name.split(' ')[0] }} <strong>pode</strong> ver e
+        acessar. Meu Painel e Conteúdos (rascunhos) aparecem para todo o time.
       </p>
     </div>
 
-    <div class="px-8 space-y-1">
-      <label
-        v-for="feature in FEATURES"
-        :key="feature.key"
-        class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-n-alpha-1 cursor-pointer"
-      >
-        <input
-          type="checkbox"
-          class="rounded accent-n-brand"
-          :checked="!blocked.includes(feature.key)"
-          @change="toggle(feature.key)"
-        />
-        <span class="text-sm text-n-slate-12">{{ feature.label }}</span>
-        <span
-          v-if="blocked.includes(feature.key)"
-          class="text-[10px] font-medium text-red-500 bg-red-500/10 rounded-full px-2 py-0.5 ml-auto"
-        >bloqueado</span>
-      </label>
+    <div v-if="!isTargetAdmin" class="px-8 overflow-y-auto space-y-5">
+      <!-- perfis rápidos -->
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10 mb-2">
+          Perfis rápidos
+        </p>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            v-for="preset in PRESETS"
+            :key="preset.key"
+            class="px-3 py-1.5 rounded-full text-xs font-medium border transition-colors"
+            :class="
+              activePreset === preset.key
+                ? 'bg-n-brand text-white border-n-brand'
+                : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
+            "
+            :title="preset.hint"
+            @click="applyPreset(preset)"
+          >
+            {{ preset.label }}
+          </button>
+        </div>
+      </div>
+
+      <!-- menu do dia a dia -->
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10 mb-1">
+          Menu do dia a dia
+        </p>
+        <p class="text-xs text-n-slate-9 mb-2">
+          o que aparece no menu lateral dela(e)
+        </p>
+        <div class="space-y-0.5">
+          <label
+            v-for="item in DAY_ITEMS"
+            :key="item.key"
+            class="flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-n-alpha-1 cursor-pointer"
+          >
+            <input
+              type="checkbox"
+              class="rounded accent-n-brand"
+              :checked="dayMenu.includes(item.key)"
+              @change="toggle(dayMenu, item.key)"
+            />
+            <span class="text-sm text-n-slate-12">{{ item.label }}</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- áreas administrativas -->
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10 mb-1">
+          Áreas administrativas
+        </p>
+        <p class="text-xs text-n-slate-9 mb-2">
+          concessões de verdade: liberam a tela E os dados — use com critério
+        </p>
+        <div class="space-y-0.5">
+          <label
+            v-for="item in GRANT_ITEMS"
+            :key="item.key"
+            class="flex items-start gap-3 px-3 py-1.5 rounded-lg hover:bg-n-alpha-1 cursor-pointer"
+          >
+            <input
+              type="checkbox"
+              class="rounded accent-n-brand mt-0.5"
+              :checked="grants.includes(item.key)"
+              @change="toggle(grants, item.key)"
+            />
+            <span class="flex flex-col">
+              <span class="text-sm text-n-slate-12 flex items-center gap-2">
+                {{ item.label }}
+                <span
+                  v-if="grants.includes(item.key)"
+                  class="text-[10px] font-medium text-green-600 bg-green-600/10 rounded-full px-2 py-0.5"
+                >concedido</span>
+              </span>
+              <span class="text-[11px] text-n-slate-9">{{ item.hint }}</span>
+            </span>
+          </label>
+        </div>
+      </div>
     </div>
 
-    <div class="flex items-center gap-2 px-8 py-6">
+    <div class="flex items-center gap-2 px-8 py-6 flex-shrink-0">
       <button
+        v-if="!isTargetAdmin"
         class="bg-n-brand text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50"
         :disabled="isSaving"
         @click="save"
@@ -111,10 +239,13 @@ const save = async () => {
         class="border border-n-weak rounded-lg px-4 py-2 text-sm text-n-slate-11"
         @click="emit('close')"
       >
-        Cancelar
+        {{ isTargetAdmin ? 'Fechar' : 'Cancelar' }}
       </button>
-      <span v-if="blockedCount" class="text-xs text-n-slate-10 ml-auto">
-        {{ blockedCount }} seção(ões) bloqueada(s)
+      <span
+        v-if="!isTargetAdmin && grants.length"
+        class="text-xs text-n-slate-10 ml-auto"
+      >
+        {{ grants.length }} área(s) concedida(s)
       </span>
     </div>
   </div>

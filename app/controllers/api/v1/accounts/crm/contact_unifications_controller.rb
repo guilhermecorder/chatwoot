@@ -1,5 +1,6 @@
 class Api::V1::Accounts::Crm::ContactUnificationsController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
+  before_action -> { require_capability(:data_tools) }
 
   # POST /api/v1/accounts/:account_id/crm/contact_unification/preview
   def preview
@@ -15,9 +16,4 @@ class Api::V1::Accounts::Crm::ContactUnificationsController < Api::V1::Accounts:
 
   private
 
-  def check_admin
-    return if Current.account_user.administrator?
-
-    render json: { error: 'Apenas administradores podem unificar contatos.' }, status: :forbidden
-  end
 end

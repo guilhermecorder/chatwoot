@@ -6,7 +6,8 @@
 # (pode rodar de novo à vontade — cada rodada cria 20 leads novos)
 namespace :cevico do
   desc 'Cria 20 leads de teste no CRM (só para ambiente local!)'
-  task seed_test_leads: :environment do
+  task seed_test_leads: :environment do # rubocop:disable Metrics/BlockLength
+    abort('❌ seed_test_leads é SÓ para desenvolvimento local (RAILS_ENV=development).') unless Rails.env.development?
     account = Account.find(ENV.fetch('ACCOUNT_ID', 3).to_i)
     pipeline = Crm::Pipeline.where(account_id: account.id).first || abort('Sem pipeline nessa conta.')
 

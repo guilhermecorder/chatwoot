@@ -5,6 +5,7 @@
 // para orientações, feedbacks e treinamentos.
 import { ref, onMounted } from 'vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import CrmAPI from 'dashboard/api/crm';
 
 const isLoading = ref(true);
@@ -109,26 +110,32 @@ onMounted(fetchData);
           </p>
 
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #EA580C, #FB923C)">
-              <p class="text-[11px] font-medium text-white/80">Avisos no período</p>
-              <p class="text-2xl font-bold leading-tight">{{ data.radar?.total_alerts ?? 0 }}</p>
-            </div>
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #0F5FA6, #38BDF8)">
-              <p class="text-[11px] font-medium text-white/80">Respondidos</p>
-              <p class="text-2xl font-bold leading-tight">{{ data.radar?.responded ?? 0 }}</p>
-            </div>
-            <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
-              <p class="text-[11px] font-medium text-n-slate-10">Taxa de resposta</p>
-              <p class="text-2xl font-bold leading-tight" :style="{ color: rateColor(data.radar?.response_rate ?? 0) }">
-                {{ data.radar?.response_rate ?? 0 }}%
-              </p>
-            </div>
-            <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
-              <p class="text-[11px] font-medium text-n-slate-10">Tempo médio p/ responder</p>
-              <p class="text-2xl font-bold leading-tight" :style="{ color: speedColor(data.radar?.avg_response_min) }">
-                {{ fmtMin(data.radar?.avg_response_min) }}
-              </p>
-            </div>
+            <DashKpi
+              compact
+              label="Avisos no período"
+              :value="data.radar?.total_alerts ?? 0"
+              from="#EA580C"
+              to="#FB923C"
+            />
+            <DashKpi
+              compact
+              label="Respondidos"
+              :value="data.radar?.responded ?? 0"
+              from="#0F5FA6"
+              to="#38BDF8"
+            />
+            <DashKpi
+              compact
+              label="Taxa de resposta"
+              :value="`${data.radar?.response_rate ?? 0}%`"
+              :value-color="rateColor(data.radar?.response_rate ?? 0)"
+            />
+            <DashKpi
+              compact
+              label="Tempo médio p/ responder"
+              :value="fmtMin(data.radar?.avg_response_min)"
+              :value-color="speedColor(data.radar?.avg_response_min)"
+            />
           </div>
 
           <!-- por painel de destino -->
@@ -170,7 +177,7 @@ onMounted(fetchData);
             >
               <div class="flex items-center gap-2 flex-wrap mb-3">
                 <span class="text-lg">{{ medal(i) }}</span>
-                <p class="text-sm font-bold text-n-slate-12 flex-1 truncate">{{ row.name }}</p>
+                <p class="text-sm font-bold text-n-slate-12 flex-1 min-w-[140px] break-words">{{ row.name }}</p>
                 <span
                   class="text-xs font-bold text-white px-3 py-1 rounded-full"
                   style="background: linear-gradient(135deg, #7C3AED, #A78BFA)"

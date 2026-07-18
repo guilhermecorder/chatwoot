@@ -23,6 +23,7 @@ import sla from './sla/sla.routes';
 import teams from './teams/teams.routes';
 import customRoles from './customRoles/customRole.routes';
 import dominio from './dominio/dominio.routes';
+import precos from './precos/precos.routes';
 import profile from './profile/profile.routes';
 import security from './security/security.routes';
 import conversationWorkflow from './conversationWorkflow/conversationWorkflow.routes';
@@ -65,6 +66,7 @@ export default {
     ...teams.routes,
     ...customRoles.routes,
     ...dominio.routes,
+    ...precos.routes,
     ...profile.routes,
     ...security.routes,
     ...conversationWorkflow.routes,

@@ -2,6 +2,9 @@
 # automação disparou no período (presets iguais ao Meu Painel), falhas,
 # contatos alcançados e série por dia. Fonte: crm_automation_logs.
 class Api::V1::Accounts::Crm::AutomationsDashboardsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+
+  before_action -> { require_capability(:automations) }
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show

@@ -3,7 +3,8 @@
 # corretivas (dono, prazo, andamento). Os 3 pilares combinados nascem
 # prontos na primeira visita.
 class Api::V1::Accounts::Crm::StrategyController < Api::V1::Accounts::BaseController
-  before_action :require_administrator
+  include Crm::AccessControl
+  before_action -> { require_capability(:strategy) }
 
   def show
     CevicoPillar.seed_defaults!(account)
@@ -50,11 +51,6 @@ class Api::V1::Accounts::Crm::StrategyController < Api::V1::Accounts::BaseContro
 
   private
 
-  def require_administrator
-    return if Current.account_user.administrator?
-
-    render json: { error: 'O Painel Estratégico é só para administradores.' }, status: :forbidden
-  end
 
   def account
     Current.account

@@ -17,7 +17,9 @@ class Crm::CommentsAgentService
   MEDIA_LIMIT = 10       # posts recentes olhados por rodada
   COMMENTS_LIMIT = 25    # comentários por post
   REPLIES_PER_RUN = 10   # teto de respostas por rodada (segurança)
-  HANDLED_TTL = 14.days
+  HANDLED_TTL = 30.days  # memória de "já respondi" (comentário some da lista de pendentes)
+  TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
+  BUSINESS_HOURS = (7...22) # comentário público só em horário de gente (SP)
 
   OUTPUT_SCHEMA = {
     type: 'object',
@@ -53,8 +55,10 @@ class Crm::CommentsAgentService
     return { error: 'agente desligado' } if agent_paused?
     return { error: 'sem token da Página (conecte em Automações → Respondedor de Comentários)' } if token.blank?
     return { error: 'IA não configurada' } if api_key.blank?
+    return { error: 'fora do horário (07h–22h SP)' } unless BUSINESS_HOURS.cover?(TZ.now.hour)
 
     handled = prune_handled
+    prior_events = Array(state['events'])
     events = []
     replied = 0
 
@@ -62,15 +66,18 @@ class Crm::CommentsAgentService
       break if replied >= REPLIES_PER_RUN
       next if handled.key?(comment[:id])
 
-      handled[comment[:id]] = Time.current.iso8601
       verdict = ask_ai(comment)
-      next if verdict.blank?
+      next if verdict.blank? # IA falhou → NÃO marca; tenta de novo na próxima rodada
 
+      # decidiu → marca ANTES de responder e PERSISTE já: um crash depois do
+      # POST não faz o comentário ser respondido de novo em público na rodada seguinte
+      handled[comment[:id]] = Time.current.iso8601
       events << handle_verdict(comment, verdict)
       replied += 1 if events.last&.dig('status') == 'respondido'
+      save_state(handled, (events + prior_events).first(30))
     end
 
-    save_state(handled, events)
+    save_state(handled, (events + prior_events).first(30))
     { success: true, replied: replied, seen: events.size }
   end
 
@@ -180,14 +187,16 @@ class Crm::CommentsAgentService
     end
   end
 
+  # events já vem pronto e cortado em 30 pelo chamador (persistência incremental)
   def save_state(handled, events)
     settings = CrmSetting.find_or_create_by!(account: @account)
     cfg = settings.ai_config || {}
     cfg['comments_state'] = {
       'handled' => handled,
-      'events' => (events + Array(state['events'])).first(30),
+      'events' => Array(events).first(30),
       'last_run_at' => Time.current.iso8601
     }
     settings.update!(ai_config: cfg)
+    @ai_config = nil # limpa memo p/ a próxima leitura de state pegar o fresco
   end
 end

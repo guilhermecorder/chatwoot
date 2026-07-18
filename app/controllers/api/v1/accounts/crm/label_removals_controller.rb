@@ -1,4 +1,8 @@
 class Api::V1::Accounts::Crm::LabelRemovalsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+
+  before_action -> { require_capability(:data_tools) }
+
   def preview
     return render_could_not_create_error('Informe a etiqueta') if params[:label].blank?
 

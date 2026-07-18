@@ -17,6 +17,12 @@ class Api::V1::Accounts::Crm::StagesController < Api::V1::Accounts::BaseControll
   end
 
   def destroy
+    # coluna com cards: bloqueia (o dependent: :nullify batia no NOT NULL do
+    # stage_id e virava erro 500 seco na cara do admin)
+    if @stage.crm_contacts.exists?
+      return render json: { error: 'Mova os cards desta coluna antes de excluí-la.' }, status: :unprocessable_entity
+    end
+
     @stage.destroy!
     head :no_content
   end

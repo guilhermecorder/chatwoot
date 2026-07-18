@@ -1,9 +1,10 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import { useAccount } from 'dashboard/composables/useAccount';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import FollowupBotModal from 'dashboard/routes/dashboard/crm/components/FollowupBotModal.vue';
 import CrmAPI from 'dashboard/api/crm';
@@ -12,13 +13,31 @@ const store = useStore();
 const route = useRoute();
 const router = useRouter();
 const { accountId } = useAccount();
+const { isAdmin } = useAdmin();
 
 const inboxes = useMapGetter('inboxes/getInboxes');
 const settings = useMapGetter('crm/getSettings');
 const accountLabels = useMapGetter('labels/getLabels');
 const teamAgents = useMapGetter('agents/getAgents');
+const currentUserId = useMapGetter('getCurrentUserID');
 
 const TABS = ['robos', 'regras', 'agentes', 'programacao', 'resultados', 'tratamento'];
+
+// atendente concedido só vê as abas da área dele: robôs/resultados =
+// Automações; tratamento = Tratamento de dados; o resto é de admin
+const myGrants = computed(() => {
+  const perms = settings.value?.agent_permissions ?? {};
+  return perms.grants?.[String(currentUserId.value)] ?? [];
+});
+const canSee = capability =>
+  isAdmin.value || myGrants.value.includes(capability);
+const visibleTabs = computed(() =>
+  TABS.filter(tab => {
+    if (['robos', 'resultados'].includes(tab)) return canSee('automations');
+    if (tab === 'tratamento') return canSee('data_tools');
+    return isAdmin.value; // regras, agentes de IA, programação
+  })
+);
 const activeTab = ref(TABS.includes(route.query.tab) ? route.query.tab : 'robos');
 
 // os itens do menu lateral apontam para a MESMA rota com ?tab= diferente —
@@ -28,6 +47,17 @@ watch(
   tab => {
     if (TABS.includes(tab)) activeTab.value = tab;
   }
+);
+
+// garante que atendente concedido nunca fica numa aba que não é dele
+watch(
+  visibleTabs,
+  tabs => {
+    if (tabs.length && !tabs.includes(activeTab.value)) {
+      activeTab.value = tabs[0];
+    }
+  },
+  { immediate: true }
 );
 
 // ── Agentes de IA internos (editar prompt / pausar) ──
@@ -1050,36 +1080,42 @@ onMounted(async () => {
       <p class="text-xs text-n-slate-10 mt-0.5">
         Tudo que trabalha sozinho no sistema: réguas, robôs, agentes de IA, automações de coluna e tratamento de dados.
       </p>
-      <!-- Tabs -->
+      <!-- Tabs (atendente concedido só vê as abas da área dele) -->
       <div class="flex gap-1 mt-3 flex-wrap">
         <button
+          v-if="visibleTabs.includes('robos')"
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
           :class="activeTab === 'robos' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           @click="activeTab = 'robos'"
         >🤖 Robôs de follow-up</button>
         <button
+          v-if="visibleTabs.includes('regras')"
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
           :class="activeTab === 'regras' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           @click="activeTab = 'regras'"
         >🔁 Regras da caixa de entrada</button>
         <button
+          v-if="visibleTabs.includes('agentes')"
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
           :class="activeTab === 'agentes' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           :style="activeTab === 'agentes' ? { background: 'linear-gradient(135deg, #7C3AED, #5B21B6)' } : {}"
           @click="activeTab = 'agentes'"
         ><span class="i-lucide-sparkles text-xs" />Agentes de IA</button>
         <button
+          v-if="visibleTabs.includes('programacao')"
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
           :class="activeTab === 'programacao' ? 'bg-yellow-500 text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           @click="activeTab = 'programacao'"
         >⚡ Modo Programação</button>
         <button
+          v-if="visibleTabs.includes('resultados')"
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
           :class="activeTab === 'resultados' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           :style="activeTab === 'resultados' ? { background: 'linear-gradient(135deg, #65A30D, #84CC16)' } : {}"
           @click="activeTab = 'resultados'"
         >📊 Resultados</button>
         <button
+          v-if="visibleTabs.includes('tratamento')"
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
           :class="activeTab === 'tratamento' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           @click="activeTab = 'tratamento'"

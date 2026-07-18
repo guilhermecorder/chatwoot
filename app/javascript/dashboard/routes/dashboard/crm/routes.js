@@ -16,13 +16,13 @@ export default {
     {
       path: frontendURL('accounts/:accountId/crm/campaigns'),
       name: 'crm_campaigns',
-      meta: { permissions: ['administrator'] },
+      meta: { permissions: ['administrator', 'agent'] },
       component: CrmCampaigns,
     },
     {
       path: frontendURL('accounts/:accountId/crm/campaigns/dashboard'),
       name: 'crm_campaigns_dashboard',
-      meta: { permissions: ['administrator'] },
+      meta: { permissions: ['administrator', 'agent'] },
       component: CrmCampaignsDashboard,
     },
     {
@@ -34,7 +34,7 @@ export default {
     {
       path: frontendURL('accounts/:accountId/crm/integrations'),
       name: 'crm_integrations',
-      meta: { permissions: ['administrator'] },
+      meta: { permissions: ['administrator', 'agent'] },
       component: CrmIntegrationsPage,
     },
   ],

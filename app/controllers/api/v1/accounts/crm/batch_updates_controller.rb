@@ -1,7 +1,8 @@
 # Tratamento de dados → "Mover e etiquetar em lote": prévia + aplicação
 # em segundo plano (Crm::BatchUpdateJob). Admin-only — mexe na base inteira.
 class Api::V1::Accounts::Crm::BatchUpdatesController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
+  before_action -> { require_capability(:data_tools) }
 
   # POST preview — quantos cards seriam afetados + amostra
   def preview
@@ -42,9 +43,4 @@ class Api::V1::Accounts::Crm::BatchUpdatesController < Api::V1::Accounts::BaseCo
     }.compact
   end
 
-  def check_admin
-    return if Current.account_user.administrator?
-
-    render json: { error: 'Apenas administradores podem usar o tratamento em lote.' }, status: :forbidden
-  end
 end

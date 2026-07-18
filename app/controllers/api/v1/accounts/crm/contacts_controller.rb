@@ -68,6 +68,12 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   end
 
   def update
+    # stage_id tem que ser uma coluna DESTE funil (evita mover o card para uma
+    # coluna de outro funil/conta passando um id qualquer)
+    if params[:stage_id].present? && !@pipeline.stages.exists?(id: params[:stage_id])
+      return render json: { error: 'Coluna inválida para este funil.' }, status: :unprocessable_entity
+    end
+
     previous_stage = @crm_contact.stage
     @crm_contact.update!(crm_contact_params)
 

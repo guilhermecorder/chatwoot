@@ -30,6 +30,7 @@ class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseContr
     plan.targets = params.permit(targets: {})[:targets].to_h.transform_values(&:to_f) if params.key?(:targets)
     plan.guidance = params[:guidance].to_s[0, 4000] if params.key?(:guidance)
     plan.milestones = sanitize_milestones if params.key?(:milestones)
+    plan.indicator_meta = sanitize_indicator_meta if params.key?(:indicator_meta)
     plan.save!
     render json: plan_json(plan)
   end
@@ -123,8 +124,21 @@ class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseContr
       targets: plan.targets || {},
       guidance: plan.guidance,
       process_notes: plan.process_notes || [],
-      milestones: plan.milestones || []
+      milestones: plan.milestones || [],
+      indicator_meta: plan.indicator_meta || {}
     }
+  end
+
+  # responsável + "o que é preciso para alcançar" por indicador
+  def sanitize_indicator_meta
+    raw = params.permit(indicator_meta: {})[:indicator_meta].to_h
+    raw.slice(*CevicoGoalPlan::INDICATORS.keys.map(&:to_s)).to_h do |key, meta|
+      meta = meta.is_a?(Hash) ? meta : {}
+      [key, {
+        'owner_id' => meta['owner_id'].presence&.to_i,
+        'how' => meta['how'].to_s[0, 1000].presence
+      }.compact]
+    end.reject { |_k, v| v.empty? }
   end
 
   # ── histórico mensal dos indicadores (últimos 12 meses) ──

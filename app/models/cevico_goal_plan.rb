@@ -4,15 +4,16 @@
 #
 # Table name: cevico_goal_plans
 #
-#  id            :bigint           not null, primary key
-#  guidance      :text
-#  milestones    :jsonb            not null
-#  month         :date             not null
-#  process_notes :jsonb            not null
-#  targets       :jsonb            not null
-#  created_at    :datetime         not null
-#  updated_at    :datetime         not null
-#  account_id    :bigint           not null
+#  id             :bigint           not null, primary key
+#  guidance       :text
+#  indicator_meta :jsonb            not null
+#  milestones     :jsonb            not null
+#  month          :date             not null
+#  process_notes  :jsonb            not null
+#  targets        :jsonb            not null
+#  created_at     :datetime         not null
+#  updated_at     :datetime         not null
+#  account_id     :bigint           not null
 #
 # Indexes
 #

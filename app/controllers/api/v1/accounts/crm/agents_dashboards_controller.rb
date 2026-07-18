@@ -6,7 +6,8 @@
 # pessoa respondeu e em quanto tempo).
 # Fontes: reporting_events do core + histórico do Radar + Agenda.
 class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
+  before_action -> { require_capability(:reports) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   RADAR_SAMPLE = 400 # avisos do histórico avaliados por chamada
@@ -28,11 +29,6 @@ class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::Ba
     Current.account
   end
 
-  def check_admin
-    return if Current.account_user.administrator?
-
-    render json: { error: 'Apenas administradores.' }, status: :forbidden
-  end
 
   def resolve_range
     now = TZ.now
@@ -165,12 +161,17 @@ class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::Ba
     by_responder = Hash.new { |hash, key| hash[key] = { responded: 0, total_minutes: 0.0 } }
     by_target = Hash.new { |hash, key| hash[key] = { total: 0, responded: 0, total_minutes: 0.0 } }
 
+    # carrega TODAS as conversas do histórico de uma vez (antes era 1 query por
+    # aviso — até 400 idas ao banco por abertura do dashboard)
+    display_ids = history.filter_map { |h| h['conversation_id'] }.uniq
+    conv_by_display = account.conversations.where(display_id: display_ids).index_by(&:display_id)
+
     history.each do |h|
       detected_at = parse_time(h['detected_at'])
       target = by_target[h['user_id']] # nil = aviso geral (todos os painéis)
       target[:total] += 1
 
-      conversation = account.conversations.find_by(display_id: h['conversation_id'])
+      conversation = conv_by_display[h['conversation_id']]
       next if conversation.blank?
 
       first_reply = conversation.messages

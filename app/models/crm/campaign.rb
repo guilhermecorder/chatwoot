@@ -46,6 +46,7 @@ class Crm::Campaign < ApplicationRecord
   validates :name, presence: true
   validates :template_params, presence: true
   validate :inbox_must_be_whatsapp_cloud
+  validate :inbox_belongs_to_account
 
   enum status: { draft: 0, processing: 1, completed: 2, failed: 3, scheduled: 4 }
 
@@ -149,5 +150,13 @@ class Crm::Campaign < ApplicationRecord
     return if inbox.channel_type == 'Channel::Whatsapp' && inbox.channel.provider == 'whatsapp_cloud'
 
     errors.add(:inbox, 'deve ser um canal WhatsApp Cloud (API oficial)')
+  end
+
+  # higiene multi-tenant: a caixa tem que ser da MESMA conta da campanha
+  def inbox_belongs_to_account
+    return if inbox.blank? || account_id.blank?
+    return if inbox.account_id == account_id
+
+    errors.add(:inbox, 'não pertence a esta conta')
   end
 end

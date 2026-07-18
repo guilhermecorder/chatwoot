@@ -3,7 +3,10 @@
 namespace :cevico do
   desc 'Cria/atualiza os formulários Pré-Operatório e Antes da Avaliação'
   task seed_forms: :environment do
-    account = Account.find(ENV.fetch('ACCOUNT_ID', Account.first.id))
+    # exige ACCOUNT_ID explícito — em produção multi-conta, Account.first pode
+    # não ser a conta certa (criava formulário na conta errada)
+    account_id = ENV['ACCOUNT_ID'].presence or abort('❌ Passe a conta: ACCOUNT_ID=<id> bundle exec rails cevico:seed_forms')
+    account = Account.find(account_id)
 
     forms = [
       {

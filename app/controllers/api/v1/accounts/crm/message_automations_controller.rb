@@ -1,4 +1,7 @@
 class Api::V1::Accounts::Crm::MessageAutomationsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+
+  before_action -> { require_capability(:campaigns) }, only: %i[create update destroy]
   before_action :automation, only: [:update, :destroy, :preview_eligible]
 
   def index

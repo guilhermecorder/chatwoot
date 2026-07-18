@@ -100,9 +100,9 @@ class CrmListener < BaseListener
   end
 
   def set_instagram_pause(conversation, paused, reason: nil)
-    attrs = conversation.additional_attributes || {}
-    attrs['cevico_atendente_ia'] = paused ? { 'paused' => true, 'reason' => reason, 'at' => Time.current.iso8601 }.compact : {}
-    conversation.update_column(:additional_attributes, attrs) # rubocop:disable Rails/SkipsModelValidations
+    value = paused ? { 'paused' => true, 'reason' => reason, 'at' => Time.current.iso8601 }.compact : {}
+    # merge atômico: não atropela o estado do follow-up gravado em paralelo
+    Cevico::AttributeMerge.merge!(conversation) { |attrs| attrs.merge('cevico_atendente_ia' => value) }
   end
 
   def note_instagram(conversation, content)

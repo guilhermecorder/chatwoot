@@ -4,7 +4,8 @@
 # estado da integração. Investimento/cliques do Google Ads entram quando o
 # developer token for conectado (mesmo caminho do painel Meta).
 class Api::V1::Accounts::Crm::GoogleDashboardsController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
+  before_action -> { require_capability(:reports) }
 
   def show
     cfg = CrmSetting.find_by(account: Current.account)&.google_ads_config || {}
@@ -21,9 +22,6 @@ class Api::V1::Accounts::Crm::GoogleDashboardsController < Api::V1::Accounts::Ba
 
   private
 
-  def check_admin
-    render json: { error: 'Só administradores.' }, status: :forbidden unless Current.account_user.administrator?
-  end
 
   def series(log)
     (0...30).map do |i|
