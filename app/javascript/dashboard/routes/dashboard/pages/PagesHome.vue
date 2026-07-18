@@ -276,7 +276,12 @@ const savePage = async (publish = null) => {
 const deletePage = async page => {
   // eslint-disable-next-line no-alert
   if (!window.confirm(`Excluir a página "${page.title}"? O link público para de funcionar.`)) return;
-  await CrmAPI.deletePage(page.id).catch(() => {});
+  try {
+    await CrmAPI.deletePage(page.id);
+    useAlert('Página excluída.');
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Não consegui excluir a página.');
+  }
   fetchPages();
 };
 
