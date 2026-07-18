@@ -125,13 +125,17 @@ const conversionStageNames = computed(() => {
     <!-- Header -->
     <div class="flex items-center gap-3 mb-6 flex-wrap">
       <div>
-        <h1 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-          <span class="i-lucide-megaphone text-n-brand" />
-          Anúncios (Meta)
-        </h1>
-        <p class="text-xs text-n-slate-10 mt-0.5">
-          Qual anúncio trouxe cada lead — e qual gerou cirurgia
-        </p>
+        <div class="flex items-center gap-3">
+          <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #1D4ED8, #38BDF8)">
+            <span class="i-lucide-megaphone text-white text-lg" />
+          </span>
+          <div>
+            <h1 class="text-lg font-bold text-n-slate-12">Anúncios (Meta)</h1>
+            <p class="text-xs text-n-slate-10 mt-0.5">
+              Qual anúncio trouxe cada lead — e qual gerou cirurgia
+            </p>
+          </div>
+        </div>
       </div>
       <div class="flex-1" />
       <div class="flex items-center gap-1.5 bg-n-solid-2 border border-n-weak rounded-xl p-1">

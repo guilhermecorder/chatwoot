@@ -75,11 +75,11 @@ onMounted(async () => {
 <template>
   <div class="flex flex-col h-full overflow-y-auto p-6 bg-n-surface-1">
     <div class="flex items-center gap-3 mb-6 flex-wrap">
+      <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, #059669, #34D399)">
+        <span class="i-lucide-activity text-white text-lg" />
+      </span>
       <div>
-        <h1 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-          <span class="i-lucide-activity text-n-brand" />
-          Saúde do WhatsApp
-        </h1>
+        <h1 class="text-lg font-bold text-n-slate-12">Saúde do WhatsApp</h1>
         <p class="text-xs text-n-slate-10 mt-0.5">
           Qualidade e limites de cada número conectado — dados ao vivo da Meta
         </p>

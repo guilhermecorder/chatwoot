@@ -5,6 +5,8 @@
 import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import CrmAPI from 'dashboard/api/crm';
 import {
   DOCTORS, MODALITIES, resolveWindows, resolveBlocked, resolveBlockedDays,
@@ -83,8 +85,12 @@ const maxWeekday = computed(() =>
   Math.max(1, ...(data.value?.by_weekday || []).map(w => w.count))
 );
 
+// metas oficiais do mês (Painel de Metas) → selos de recorde/meta nos KPIs
+const goals = useCevicoGoals();
+
 onMounted(() => {
   fetchData();
+  goals.load();
   if (!(allTasks.value || []).length) store.dispatch('tasks/fetch').catch(() => {});
   if (!crmSettings.value) store.dispatch('crm/fetchSettings').catch(() => {});
 });
@@ -123,33 +129,43 @@ onMounted(() => {
       </div>
 
       <template v-else>
-        <!-- KPIs de consultas -->
+        <!-- KPIs de consultas (padrão CEVICO c/ selos de recorde/meta) -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #0F5FA6, #38BDF8)">
-            <p class="text-[11px] font-medium text-white/80">Consultas no período</p>
-            <p class="text-2xl font-bold leading-tight">{{ data.consultas?.total ?? 0 }}</p>
-            <p class="text-[10px] text-white/70">{{ data.consultas?.canceled ?? 0 }} cancelada(s)</p>
-          </div>
-          <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #059669, #34D399)">
-            <p class="text-[11px] font-medium text-white/80">Comparecimento</p>
-            <p class="text-2xl font-bold leading-tight">{{ data.consultas?.show_rate ?? 0 }}%</p>
-            <p class="text-[10px] text-white/70">{{ data.consultas?.attended ?? 0 }} vieram · {{ data.consultas?.missed ?? 0 }} faltaram</p>
-          </div>
-          <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-            <p class="text-[11px] font-medium text-white/80">Indicações de cirurgia</p>
-            <p class="text-2xl font-bold leading-tight">{{ data.consultas?.indications ?? 0 }}</p>
-            <p class="text-[10px] text-white/70">{{ data.consultas?.indication_rate ?? 0 }}% de quem compareceu</p>
-          </div>
-          <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
-            <p class="text-[11px] font-medium text-n-slate-10">Reagendadas / sem conferência</p>
-            <p class="text-2xl font-bold leading-tight text-n-slate-12">
-              {{ data.consultas?.rescheduled ?? 0 }}
-              <span class="text-base font-semibold" :class="(data.consultas?.unconfirmed ?? 0) > 0 ? 'text-red-500' : 'text-n-slate-9'">
-                / {{ data.consultas?.unconfirmed ?? 0 }}
-              </span>
-            </p>
-            <p class="text-[10px] text-n-slate-9">sem conferência = passou sem ✓/✗</p>
-          </div>
+          <DashKpi
+            compact
+            label="Consultas no período"
+            :value="data.consultas?.total ?? 0"
+            :sub="`${data.consultas?.canceled ?? 0} cancelada(s)`"
+            from="#0F5FA6"
+            to="#38BDF8"
+            :state="goals.stateFor('appointments_booked')"
+            :goal="goals.goalFor('appointments_booked')"
+          />
+          <DashKpi
+            compact
+            label="Comparecimento"
+            :value="`${data.consultas?.show_rate ?? 0}%`"
+            :sub="`${data.consultas?.attended ?? 0} vieram · ${data.consultas?.missed ?? 0} faltaram`"
+            from="#059669"
+            to="#34D399"
+            :state="goals.stateFor('consultations_attended')"
+            :goal="goals.goalFor('consultations_attended')"
+          />
+          <DashKpi
+            compact
+            label="Indicações de cirurgia"
+            :value="data.consultas?.indications ?? 0"
+            :sub="`${data.consultas?.indication_rate ?? 0}% de quem compareceu`"
+            from="#B8860B"
+            to="#D4A017"
+          />
+          <DashKpi
+            compact
+            label="Reagendadas / sem conferência"
+            :value="`${data.consultas?.rescheduled ?? 0} / ${data.consultas?.unconfirmed ?? 0}`"
+            sub="sem conferência = passou sem ✓/✗"
+            :value-color="(data.consultas?.unconfirmed ?? 0) > 0 ? '#EF4444' : ''"
+          />
         </div>
 
         <!-- Modalidades + dias da semana -->
@@ -242,22 +258,36 @@ onMounted(() => {
             Agenda de Cirurgias
           </h2>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #0284C7, #7DD3FC)">
-              <p class="text-[11px] font-medium text-white/80">Agendadas</p>
-              <p class="text-2xl font-bold leading-tight">{{ data.cirurgias?.total ?? 0 }}</p>
-            </div>
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #059669, #34D399)">
-              <p class="text-[11px] font-medium text-white/80">Realizadas</p>
-              <p class="text-2xl font-bold leading-tight">{{ data.cirurgias?.done ?? 0 }}</p>
-            </div>
-            <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
-              <p class="text-[11px] font-medium text-n-slate-10">Não veio</p>
-              <p class="text-2xl font-bold leading-tight text-red-500">{{ data.cirurgias?.missed ?? 0 }}</p>
-            </div>
-            <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
-              <p class="text-[11px] font-medium text-n-slate-10">⚠️ Veio e não fez</p>
-              <p class="text-2xl font-bold leading-tight text-amber-500">{{ data.cirurgias?.attended_not_done ?? 0 }}</p>
-            </div>
+            <DashKpi
+              compact
+              label="Agendadas"
+              :value="data.cirurgias?.total ?? 0"
+              from="#0284C7"
+              to="#7DD3FC"
+              :state="goals.stateFor('surgeries_booked')"
+              :goal="goals.goalFor('surgeries_booked')"
+            />
+            <DashKpi
+              compact
+              label="Realizadas"
+              :value="data.cirurgias?.done ?? 0"
+              from="#059669"
+              to="#34D399"
+              :state="goals.stateFor('surgeries_done')"
+              :goal="goals.goalFor('surgeries_done')"
+            />
+            <DashKpi
+              compact
+              label="Não veio"
+              :value="data.cirurgias?.missed ?? 0"
+              value-color="#EF4444"
+            />
+            <DashKpi
+              compact
+              label="⚠️ Veio e não fez"
+              :value="data.cirurgias?.attended_not_done ?? 0"
+              value-color="#F59E0B"
+            />
           </div>
           <div v-if="data.cirurgias?.by_location?.length" class="flex flex-wrap gap-2">
             <span

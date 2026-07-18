@@ -12,6 +12,8 @@ import {
   PointElement, LineElement, Filler,
 } from 'chart.js';
 import { Bar, Doughnut } from 'vue-chartjs';
+import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 
 ChartJS.register(
   Title, Tooltip, Legend,
@@ -65,7 +67,13 @@ const load = async () => {
   }
 };
 
-onMounted(load);
+// metas oficiais do mês (Painel de Metas) → selos de recorde/meta nos KPIs
+const goals = useCevicoGoals();
+
+onMounted(() => {
+  load();
+  goals.load();
+});
 watch(selectedPeriodKey, load);
 watch(() => props.pipeline?.id, load);
 
@@ -405,51 +413,50 @@ const agentView = computed(() => {
     <!-- Content -->
     <div v-else-if="data">
 
-      <!-- KPIs -->
+      <!-- KPIs (padrão CEVICO: DashKpi c/ selos de recorde/meta do mês) -->
       <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5 mb-10">
-        <!-- Total — azul -->
-        <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #0F5FA6, #0B4A82)">
-          <p class="text-xs opacity-80 mb-1.5">Total no funil</p>
-          <p class="text-3xl font-bold">{{ data.kpis.total_leads }}</p>
-          <p class="text-xs opacity-70 mt-1">conversas</p>
-        </div>
-
-        <!-- Novos — branco contraste -->
-        <div class="rounded-2xl p-5 bg-white dark:bg-n-solid-2 border-2 border-n-weak shadow-sm">
-          <p class="text-xs text-n-slate-10 mb-1.5">Novas no período</p>
-          <p class="text-3xl font-bold" style="color: #0F5FA6">{{ data.kpis.new_in_period }}</p>
-          <p class="text-xs text-n-slate-9 mt-1">conversas</p>
-        </div>
-
-        <!-- Valor em pipeline — verde limão (o número mais positivo) -->
-        <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #65A30D, #84CC16)">
-          <p class="text-xs opacity-85 mb-1.5">Valor em pipeline</p>
-          <p class="text-2xl font-bold leading-tight">{{ formatCurrency(data.kpis.total_value) }}</p>
-          <p class="text-xs opacity-75 mt-1">total</p>
-        </div>
-
-        <!-- Fechamentos — dourado -->
-        <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-          <p class="text-xs opacity-85 mb-1.5">Fechamentos</p>
-          <p class="text-3xl font-bold">{{ data.kpis.closed_count }}</p>
-          <p class="text-xs opacity-75 mt-1">conversas</p>
-        </div>
-
-        <!-- Taxa — roxo -->
-        <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-          <p class="text-xs opacity-80 mb-1.5">Taxa de fechamento</p>
-          <p class="text-3xl font-bold">{{ data.kpis.close_rate }}%</p>
-          <p class="text-xs opacity-70 mt-1">conversão</p>
-        </div>
-
-        <!-- Tempo médio — branco -->
-        <div class="rounded-2xl p-5 bg-white dark:bg-n-solid-2 border-2 border-n-weak shadow-sm">
-          <p class="text-xs text-n-slate-10 mb-1.5">Tempo médio</p>
-          <p class="text-2xl font-bold text-n-slate-12 leading-tight">
-            {{ formatDuration(data.kpis.avg_conversion_minutes) }}
-          </p>
-          <p class="text-xs text-n-slate-9 mt-1">de conversão</p>
-        </div>
+        <DashKpi
+          label="Total no funil"
+          :value="data.kpis.total_leads"
+          sub="conversas"
+          from="#0F5FA6"
+          to="#0B4A82"
+        />
+        <DashKpi
+          label="Novas no período"
+          :value="data.kpis.new_in_period"
+          sub="conversas"
+          value-color="#0F5FA6"
+          :state="goals.stateFor('new_leads')"
+          :goal="goals.goalFor('new_leads')"
+        />
+        <DashKpi
+          label="Valor em pipeline"
+          :value="Math.round(data.kpis.total_value || 0)"
+          prefix="R$ "
+          sub="total"
+          from="#65A30D"
+          to="#84CC16"
+        />
+        <DashKpi
+          label="Fechamentos"
+          :value="data.kpis.closed_count"
+          sub="conversas"
+          from="#B8860B"
+          to="#D4A017"
+        />
+        <DashKpi
+          label="Taxa de fechamento"
+          :value="`${data.kpis.close_rate}%`"
+          sub="conversão"
+          from="#5B21B6"
+          to="#7C3AED"
+        />
+        <DashKpi
+          label="Tempo médio"
+          :value="formatDuration(data.kpis.avg_conversion_minutes)"
+          sub="de conversão"
+        />
       </div>
 
       <!-- Atendimento por agente -->

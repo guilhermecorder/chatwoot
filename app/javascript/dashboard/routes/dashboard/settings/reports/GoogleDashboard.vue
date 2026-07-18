@@ -5,6 +5,7 @@
 // Ads fica. Investimento/cliques entram quando o developer token do Ads
 // for conectado (mesmo caminho do painel Meta).
 import { ref, computed, onMounted } from 'vue';
+import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
@@ -67,10 +68,13 @@ onMounted(load);
               conectar em Integrações → Google
             </button>
           </div>
-          <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #1E40AF, #3B82F6)">
-            <p class="text-[11px] font-medium text-white/80">Conversões enviadas (30 dias)</p>
-            <p class="text-2xl font-bold leading-tight">{{ total30 }}</p>
-          </div>
+          <DashKpi
+            compact
+            label="Conversões enviadas (30 dias)"
+            :value="total30"
+            from="#1E40AF"
+            to="#3B82F6"
+          />
           <div class="rounded-xl px-4 py-3 border border-n-weak bg-n-solid-1">
             <p class="text-[11px] font-medium text-n-slate-10">Google Ads (investimento/cliques)</p>
             <p class="text-sm font-bold" :style="{ color: data.ads_token_set ? '#047857' : '#64748B' }">

@@ -2,6 +2,7 @@
 // Dashboard das campanhas de mensagem modelo — investimento, volume,
 // responsividade e conversões, no mesmo visual do Dashboard CEVICO.
 import { ref, computed, onMounted, watch } from 'vue';
+import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 
@@ -109,28 +110,38 @@ const formatDate = iso =>
       <div v-else-if="error" class="text-center py-16 text-n-slate-10 text-sm">{{ error }}</div>
 
       <template v-else>
-        <!-- KPIs linha 1 -->
+        <!-- KPIs linha 1 (padrão CEVICO: DashKpi) -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
-          <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #0F5FA6, #0B4A82)">
-            <p class="text-xs font-medium text-white/80 mb-1">Investimento</p>
-            <p class="text-2xl font-bold leading-tight">{{ formatCurrency(totals.investment) }}</p>
-            <p class="text-[11px] text-white/70 mt-1">{{ totals.campaigns || 0 }} campanha(s) no período</p>
-          </div>
-          <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-            <p class="text-xs font-medium text-white/80 mb-1">Volume de mensagens</p>
-            <p class="text-3xl font-bold">{{ totals.sent || 0 }}</p>
-            <p class="text-[11px] text-white/70 mt-1">mensagens modelo enviadas</p>
-          </div>
-          <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-            <p class="text-xs font-medium text-white/80 mb-1">Taxa de responsividade</p>
-            <p class="text-3xl font-bold">{{ totals.reply_rate || 0 }}%</p>
-            <p class="text-[11px] text-white/70 mt-1">{{ totals.replies || 0 }} responderam</p>
-          </div>
-          <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #65A30D, #84CC16)">
-            <p class="text-xs font-medium text-white/80 mb-1">Valor em campanha</p>
-            <p class="text-2xl font-bold leading-tight">{{ formatCurrency(totals.potential_value) }}</p>
-            <p class="text-[11px] text-white/70 mt-1">$ possível nos cards dos destinatários</p>
-          </div>
+          <DashKpi
+            label="Investimento"
+            :value="Math.round(totals.investment || 0)"
+            prefix="R$ "
+            :sub="`${totals.campaigns || 0} campanha(s) no período`"
+            from="#0F5FA6"
+            to="#0B4A82"
+          />
+          <DashKpi
+            label="Volume de mensagens"
+            :value="totals.sent || 0"
+            sub="mensagens modelo enviadas"
+            from="#5B21B6"
+            to="#7C3AED"
+          />
+          <DashKpi
+            label="Taxa de responsividade"
+            :value="`${totals.reply_rate || 0}%`"
+            :sub="`${totals.replies || 0} responderam`"
+            from="#B8860B"
+            to="#D4A017"
+          />
+          <DashKpi
+            label="Valor em campanha"
+            :value="Math.round(totals.potential_value || 0)"
+            prefix="R$ "
+            sub="$ possível nos cards dos destinatários"
+            from="#65A30D"
+            to="#84CC16"
+          />
         </div>
 
         <!-- KPIs linha 2: conversões -->
