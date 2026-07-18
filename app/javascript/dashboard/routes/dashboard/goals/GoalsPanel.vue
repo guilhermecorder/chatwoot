@@ -44,14 +44,32 @@ const load = async targetMonth => {
 };
 
 // ── formulário do plano (rascunho local → Salvar) ──
-const form = ref({ targets: {}, guidance: '', milestones: [] });
+const form = ref({ targets: {}, guidance: '', milestones: [], indicator_meta: {} });
 const hydrateForm = () => {
   const plan = data.value?.plan;
   form.value = {
     targets: { ...(plan?.targets || {}) },
     guidance: plan?.guidance || '',
     milestones: (plan?.milestones || []).map(m => ({ ...m })),
+    indicator_meta: Object.fromEntries(
+      Object.entries(plan?.indicator_meta || {}).map(([k, v]) => [k, { ...v }])
+    ),
   };
+};
+
+// responsável + "o que é preciso" por indicador (admin prepara, time vê)
+const metaOf = key => form.value.indicator_meta[key] || {};
+const setMeta = (key, field, value) => {
+  const meta = { ...metaOf(key), [field]: value };
+  if (!meta.owner_id) delete meta.owner_id;
+  if (!meta.how) delete meta.how;
+  if (Object.keys(meta).length) form.value.indicator_meta[key] = meta;
+  else delete form.value.indicator_meta[key];
+};
+const ownerName = key => {
+  const id = metaOf(key).owner_id;
+  if (!id) return null;
+  return (teamAgents.value || []).find(a => a.id === id)?.name || null;
 };
 const saving = ref(false);
 const savePlan = async () => {
@@ -271,6 +289,42 @@ onMounted(async () => {
                 <p class="text-[10px] text-n-slate-10 mt-0.5">
                   {{ fmtVal(key, progressOf(key).current) }} de {{ fmtVal(key, progressOf(key).target) }}
                   · <b :style="{ color: progressOf(key).pct >= 100 ? '#047857' : undefined }">{{ progressOf(key).pct }}%</b>
+                </p>
+              </div>
+
+              <!-- responsável + o que é preciso para alcançar -->
+              <div v-if="isAdmin" class="mt-2 pt-2 border-t border-n-weak space-y-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-[10px] text-n-slate-9 flex-shrink-0">responsável:</span>
+                  <select
+                    :value="metaOf(key).owner_id || ''"
+                    class="h-7 flex-1 rounded-lg border border-n-weak bg-n-solid-2 px-1.5 text-[11px] text-n-slate-12"
+                    style="margin-bottom: 0"
+                    @change="setMeta(key, 'owner_id', Number($event.target.value) || null)"
+                  >
+                    <option value="">— ninguém ainda —</option>
+                    <option v-for="a in teamAgents" :key="a.id" :value="a.id">{{ a.name }}</option>
+                  </select>
+                </div>
+                <textarea
+                  :value="metaOf(key).how || ''"
+                  rows="2"
+                  placeholder="O que é preciso para alcançar essa meta?"
+                  class="w-full rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 text-[11px] text-n-slate-12 resize-y"
+                  style="margin-bottom: 0"
+                  @input="setMeta(key, 'how', $event.target.value)"
+                />
+              </div>
+              <div
+                v-else-if="ownerName(key) || metaOf(key).how"
+                class="mt-2 pt-2 border-t border-n-weak"
+              >
+                <p v-if="ownerName(key)" class="text-[10px] font-semibold text-n-slate-11 flex items-center gap-1">
+                  <span class="i-lucide-user-round text-[11px]" :style="{ color: INDICATOR_COLORS[key] }" />
+                  {{ ownerName(key) }} puxa essa meta
+                </p>
+                <p v-if="metaOf(key).how" class="text-[11px] text-n-slate-10 mt-0.5 whitespace-pre-line">
+                  {{ metaOf(key).how }}
                 </p>
               </div>
             </div>
