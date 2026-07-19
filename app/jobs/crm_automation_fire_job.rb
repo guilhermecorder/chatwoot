@@ -337,8 +337,13 @@ class CrmAutomationFireJob < ApplicationJob
     result = Crm::ConversationInsightService.new(conversation: conversation).call
     return if result[:error]
 
-    attrs = conversation.additional_attributes || {}
-    conversation.update!(additional_attributes: attrs.merge('ai_insight' => result.stringify_keys))
+    # merge atômico: a chamada de IA demora segundos — gravar com snapshot
+    # velho apagava chaves recém-escritas (foi o gatilho do incidente do
+    # follow-up de 18/07: o marcador de cutucadas enviadas sumia e o robô
+    # reenviava a cada rodada)
+    Cevico::AttributeMerge.merge!(conversation) do |attrs|
+      attrs.merge('ai_insight' => result.stringify_keys)
+    end
   end
 
   # Agente de Agendamento: lê a conversa, extrai nome/telefone/dia/hora/unidade

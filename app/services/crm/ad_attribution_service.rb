@@ -42,10 +42,13 @@ class Crm::AdAttributionService
   end
 
   def stamp(record)
-    attrs = record.additional_attributes || {}
-    return if attrs['meta_ads'].present? # primeiro toque vence
+    return if (record.additional_attributes || {})['meta_ads'].present? # primeiro toque vence
 
-    record.update!(additional_attributes: attrs.merge('meta_ads' => attribution_data))
+    # merge atômico: gravar a atribuição não pode apagar chaves concorrentes
+    # (marcador do follow-up, pausa, perfil do paciente)
+    Cevico::AttributeMerge.merge!(record) do |attrs|
+      attrs['meta_ads'].present? ? attrs : attrs.merge('meta_ads' => attribution_data)
+    end
   rescue StandardError => e
     Rails.logger.error "[Crm::AdAttribution] #{record.class}##{record.id}: #{e.message}"
   end

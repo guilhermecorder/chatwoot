@@ -30,7 +30,11 @@ class Instagram::WebhooksBaseService
     return unless user['username']
 
     instagram_attributes = build_instagram_attributes(user)
-    @contact.update!(additional_attributes: @contact.additional_attributes.merge(instagram_attributes))
+    # merge atômico (CEVICO): o webhook chega a cada mensagem — gravar o
+    # perfil não pode apagar a pausa do follow-up/perfil do paciente
+    Cevico::AttributeMerge.merge!(@contact) do |attrs|
+      attrs.merge(instagram_attributes)
+    end
   end
 
   def build_instagram_attributes(user)

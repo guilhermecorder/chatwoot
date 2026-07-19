@@ -15,8 +15,10 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
     if result[:error]
       render json: { error: result[:error] }, status: :unprocessable_entity
     else
-      attrs = @conversation.additional_attributes || {}
-      @conversation.update!(additional_attributes: attrs.merge('ai_insight' => result.stringify_keys))
+      # merge atômico: não pode apagar o marcador do follow-up nem a pausa
+      Cevico::AttributeMerge.merge!(@conversation) do |attrs|
+        attrs.merge('ai_insight' => result.stringify_keys)
+      end
       render json: { ai: result }
     end
   end

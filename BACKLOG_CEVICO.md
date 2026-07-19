@@ -2636,6 +2636,244 @@ mês: X de Y"), mesmo com o KPI filtrado em outro período — decisão de
 consistência com o Painel de Metas. Local: metas da conta 3 ajustadas p/
 demo (appointments_booked=8 → meta batida). Deploy: junto com o item 55.
 
+# ═══ LOTE 57–80 — pedido do Guilherme em 18/07 (📋 A FAZER) ═══
+
+> Registrado na íntegra em 18/07, logo após o merge do PR #1 (itens 55/56).
+> Ordem de construção sugerida: refinos rápidos (67, 71, 74, 79, 80) →
+> médios (58, 61, 62, 63, 69, 72, 73, 75, 76, 78) → grandes (57, 59, 60,
+> 64–66, 68, 70, 77).
+
+## 57. 🧲 CONSTRUTOR — painel personalizado drag-and-drop
+Aba nova "Construtor": montar painel totalmente personalizado com QUALQUER
+elemento/indicador já existente no sistema. Drag-and-drop "com ímã"
+(snap/grade magnética), espaço já pré-configurado para ficar bonito
+(UI/UX), escolha de paleta de cores etc.
+
+## 58. 🎯 Painel de Metas multi-período
+Ambientes de metas: do DIA, da SEMANA, do FINAL DE SEMANA, do MÊS, do
+TRIMESTRE e do ANO — e metas de INDICADORES (% de conversão, outros).
+
+## 59. 🏭 DESENHO DO PROCESSO (aba no Estratégico)
+Ambiente para DESCREVER cada estágio do processo e montar o plano de forma
+visual — "desenhar o processo como uma máquina": etapas, zoom em etapas,
+criação de processos, passe de bastão. Ex.: agendamento → comparecimento →
+consulta → indicação de cirurgia (ou não) → fechamento (ou não). Para o
+time todo ver e entender o processo como o Guilherme entende.
+
+## 60. 🌪️ Montador de Funis — aba própria em Conteúdos
+Selecionar fontes de tráfego E outras fontes de captação (médicos
+parceiros, indicação etc.).
+
+## 61. 🧠 DISC + 4 Temperamentos — gráficos completos
+Um gráfico completo para o DISC e outro para os 4 Temperamentos, com opção
+de vê-los SOBREPOSTOS ou LADO A LADO.
+
+## 62. 🛡️ Acessos — refino por seção + selecionar tudo
+Aprofundar o refino: abrir seções (ex. "Relatórios") e escolher QUAIS
+relatórios o agente acessa; opção "selecionar tudo" para agilizar. Visual
+bonito, mais sério: estilo CEVICO com cores sóbrias de ambiente de
+configuração. (Elogio registrado: forma de visualizar atual "ótima".)
+
+## 63. 📢 Radar de Oportunidades — notificação em CARDS EMPILHADOS
+Desktop + celular: pilha de cards (não quadros lado a lado). Cards de trás
+mostram só nome + tempo sem resposta; o card da frente mostra tudo:
+estágio do CRM, etiquetas, último contexto MUITO breve ("quer agendar dia
+15", "qual a diferença entre galaxy e trifocal?"), botão convidativo
+(manter) + acesso à ficha da pessoa. Ao tocar no botão: mini-prêmio — 3
+emojis de ✅ pipocam do ponto do toque.
+
+## 64. 🤖 Agente de AGENDAMENTO interno ("N8N melhorado")
+Agenda na agenda interna, faz reagendamento.
+
+## 65. 🤖 Agente de SUPORTE PRÉ-CONSULTA (avaliação)
+Responde principais dúvidas, ajuda com reagendamento, fala sobre colírios.
+
+## 66. 🤖 Agente de FECHAMENTO de cirurgia + follow-up longo
+Aborda com mensagem modelo; follow-up com mensagens modelo quando
+necessário; quando a pessoa responde, segue SCRIPT VALIDADO (Guilherme vai
+fornecer — construir com campo/placeholder) e conduz ao fechamento com
+elegância. Fechou → agenda cirurgia. Precisa pensar → follow-up modelo em
+7, 30, 90, 180, 270 e 360 dias. Objetivo: acompanhamento LONGO do funil.
+
+## 67. 💬 Conversas — limpeza + filtros de jornada
+Remover as 3 seleções "Minhas / Não atribuídas / Todos" (nossa seleção é
+melhor). Menu lateral de conversas: tirar tudo, deixar só o principal. No
+TOPO do Conversas: filtro por estágio da jornada (coluna do CRM) e por
+etiquetas.
+
+## 68. 📦 Financeiro — ESTOQUE + gráficos em verde
+Ambiente de estoque com dashboard próprio: custo, potencial de lucro, e
+CONSULTA AUTOMÁTICA quando solicitado — ex.: indicação de lente trifocal
+config. xyz já consulta o estoque → tem? agenda cirurgia p/ data próxima;
+não tem? encomendar e abrir PEDIDO vinculado ao card do paciente (motivo).
++ Atualizar cor dos gráficos do Financeiro: VERDE como cor principal.
+
+## 69. 📣 Campanha de WhatsApp — repaginada
+Organizar ambiente, cores, botões; fluidez das seleções do "Nova
+campanha". Clarear "o que conta como conversão": ex. explícito "conversão
+desta campanha = lead sair de 'Orçamento enviado' → 'Consulta agendada'".
+
+## 70. 🧹 Automações = Tratamento de dados unificado
+Ambiente com TODAS as ferramentas para tratar o banco contextualizado ao
+sistema — identificação tradicional + IA. Aprimorar ambiente e painel.
++ Ajustar layout/design de TODAS as abas dentro de Automações.
+
+## 71. 🎬 Conteúdos/Planejamento — FIX criar peça + comemorações
+BUG: não é possível criar peça nova em NENHUMA coluna — corrigir.
+Animação de comemoração PROGRESSIVA ao mover: Copy → algo de "foco,
+ideias"; Em produção → corações; Publicado → CHUVA DE FOGUETES.
+
+## 72. 📄 Análise de Páginas — reorganizar
+Visualização pré-configurada por CATEGORIA de página (captação,
+pré-consulta, pré-cirurgia, pós-operatório); lugar para seleção de
+PALAVRAS-CHAVE; analisar performance com indicadores chave, espaços bem
+aproveitados, respiros, cores — estilo CEVICO. (Elogio: "ficou muito bom".)
+
+## 73. 📝 Formulários — hub inicial + retenção/abandono
+Sessão inicial: formulários construídos + dados gerais envio × respostas +
+% conversão de respostas por envio, POR formulário. Clique no formulário →
+dashboard organizado e visual. Se possível: gráfico de ABANDONO (retenção)
+por card do formulário, com %.
+FIX: na explosão de transição p/ o último card, a margem da "aura de
+átomos" aparece e fica estranho → aparição do card CEVICO fluída e
+agradável, apenas transição ok.
+
+## 74. ✅ Tarefas — ajustes dopamine
+Ajustar a dopamine color do painel. Donut de tarefas: aura dourada MAIS
+espalhada e REMOVER o glow do donut.
+
+## 75. 📅 Agenda de cirurgias — temas + barra de navegação
+Tema padrão do gradiente: "cor dopamine → cor esbranquiçada". Escolha de
+tema vira POPUP que salta na tela; botão do tema em lugar independente, ao
+lado ESQUERDO do calendário. Linha de visualização: mês | semana | dia |
+personalizado (com o calendário). "HOJE" ao lado esquerdo da seleção de
+dias, com "+dia / −dia" ao redor, e mostrando junto o dia/mês/ano.
+
+## 76. 👨‍⚕️ Agenda dos médicos — controle + layout
+- Janela dos médicos, ao lado de "editar": FECHAR a agenda do médico, ou
+  abrir em dias/horários personalizáveis.
+- Agenda (consulta E cirurgia): seleção "pré-configurada em linha" para
+  mostrar só "agenda do médico" ou "cirurgia aqui ou ali".
+- Visualização semanal: toggle "remover sábado e domingo" (limpa e
+  aproveita espaço). Horários das 08 às 18. "Espichar" verticalmente.
+- Agenda do DIA dos médicos (elogiada): reduzir horizontalmente e aumentar
+  verticalmente os horários, bem ajustada ponta a ponta, com respiros.
+- Lista abaixo: + etiqueta da paciente e, se respondeu formulário, botão
+  para o médico LER as respostas antes da consulta.
+- "Conferência das Consultas do dia" (excelente): só espaçamento/layout
+  mais claro e menos poluído.
+
+## 77. 🎓 Academia CEVICO — temas novos + ambiente Ferramentas
+Atualizar assuntos com temas para corrigir gargalos do funil/jornada do
+paciente. Criar ambiente "Ferramentas": Guilherme cria ferramentas em
+texto bonito para o time.
+
+## 78. ⚙️ Integrações unificadas dentro de Configurações
+Unificar as abas de "Integrações" e movê-las para Configurações.
+
+## 79. 🏠 Meu Painel — lógica de cores de meta UNIVERSAL
+Cores de abaixo/dentro/acima da meta valendo para TODOS os ambientes
+("agendamento — Vaneide", "condução — Elizangela" etc.).
+FIX de dado: corrigir nome "Elizangela" com Z (conferir se é cadastro).
+
+## 80. 📇 CRM — período personalizado + dashboard alinhado
+Linha "Hoje, Ontem, …": adicionar "Personalizado" à direita, abrindo o
+calendário bonito e arredondado já criado. Dashboard CRM: alinhar os dados
+para caberem perfeitamente no espaço; relacionar indicadores com a meta
+(como já feito em "novas no período").
+
+## 81. 🪞 Pessoas — AUTOCONHECIMENTO do colaborador (respondido 18/07)
+Quem preenche DISC/Temperamentos passa a VER as próprias respostas e a
+análise do seu perfil (objetivo: autoconhecimento e desenvolvimento da
+equipe). Painel de GESTÃO disso para o Guilherme + cada pessoa pode
+refazer a avaliação 1x a cada 3 meses (trava de 90 dias).
+
+# ═══ 🚨 ITEM 91 — INCIDENTE do follow-up (18-19/07) + TRAVAS ═══
+
+**O que houve:** robô de follow-up enviou DEZENAS de mensagens idênticas
+aos mesmos pacientes, de 2 em 2 min (giro do cron), em produção.
+**Causa raiz:** o marcador de "já enviei" vive em additional_attributes da
+conversa; escritores CONCORRENTES gravavam esse JSON com padrão
+lê→altera→grava SEM trava e apagavam o marcador (pior: o ai_insight do
+crm_automation_fire_job, que segura o objeto por segundos durante a
+chamada de IA e grava snapshot velho). Sem marcador, cada rodada reenviava.
+**Correção (3 camadas, à prova de qualquer causa):**
+1. TRAVA FÍSICA no job: fonte da verdade = tabela de MENSAGENS (cutucadas
+   carregam cevico_followup_bot_id). Piso de 30 min entre cutucadas por
+   conversa, teto = nº de etapas por âncora, teto diário de 4 — valem
+   mesmo com marcador apagado. Motivos novos no registro de atividade:
+   trava_intervalo_minimo / trava_cadencia_completa / trava_teto_diario.
+2. Marcar ANTES de enviar (falha segura: perde 1 cutucada, nunca duplica).
+3. TODOS os 6 escritores diretos de additional_attributes convertidos para
+   Cevico::AttributeMerge.merge! (ai_insight ×2, atribuição de anúncios,
+   perfil do paciente, webhook Instagram, sync WhatsApp) — também protege
+   a PAUSA por paciente, que podia ser apagada do mesmo jeito.
+**Prova:** tmp/test_followup_guard.rb reproduz o incidente (apaga o
+marcador 5× e roda o job) — com o fix, permanece 1 única mensagem.
+**Plano de subida:** hotfix a partir de f6605d379 (leva junto o lote 55/56
+já aprovado — 1 migration aditiva → backup antes); robôs DESLIGADOS até o
+deploy; religar depois e acompanhar o registro de atividade.
+
+# ═══ RODADA 2 do lote — pedidos 18/07 (manhã) ═══
+
+## 82. 🖥️ CRM — modo TELA CHEIA (desktop)
+Botão para o board ocupar TODA a janela do navegador: só a linha de
+filtros pré-selecionados + colunas/cards. Conforto pro trabalho do dia a
+dia (não precisa ser fullscreen do navegador, é ocupar a janela toda).
+
+## 83. 📡 Radar — indicador de EFICÁCIA (conversões pós-notificação)
+O widget do Radar deve mostrar as CONVERSÕES GERADAS após o aviso do
+agente: quantas consultas a mais estamos agendando por causa dele
+(atribuição: lead avisado → agendou depois do aviso).
+
+## 84. 📊 Funil de Tráfego — barras SIMÉTRICAS + Personalizado
+É o nosso funil mais completo, mas as barras não estão boas: centralizar
+(simétricas, como texto centralizado), diferenciar queda × ganho, suavizar
+o preenchimento (bonito como a barra de progresso do formulário).
++ Na linha de período: adicionar "Personalizado".
+
+## 85. 🤖 Dashboard dos AGENTES DE IA
+Novo dashboard: o que os agentes (Secretário, Analista, Radar, Copywriter,
+Atendente…) estão fazendo + principais indicadores de cada um.
+
+## 86. 📅 Dashboard da Agenda — atalho em todos os painéis + equipe
+Atalho para o Dashboard da Agenda em TODOS os painéis do Meu Painel;
+liberar esse dashboard para a equipe (não só admin).
+
+## 87. 📣 Anúncios (Meta) — repaginar
+Ambiente importantíssimo, ainda cru: conversões não representam a
+realidade, layout desalinhado do nosso padrão. Atualizar forma de exibir,
+clareza da conversão e visual.
+
+## 88. 💬 Status do WhatsApp no painel do GESTOR
+Painel do admin/gestor com avisos SE os números de WhatsApp estão ok ou
+não — sempre evidente. Avisos podem ser marcados com ✓ (limpar a tela).
+
+## 89. 💀⚡ SKELETON "armadura do Homem de Ferro"
+Carregamento progressivo (skeleton) em vez de tela branca — vai montando
+o ambiente de forma inteligente e agradável. Começar por Meu Painel e CRM.
+
+## 90. 💬🎨 Conversas — balão de estágio/etiquetas + cor da caixa
+Na lista de conversas: mostrar etiquetas e a coluna da jornada; abrir em
+BALÃOZINHO (como o popover de estágio dentro da conversa). Cor do TEXTO
+da conversa = cor principal da caixa de entrada (indicador vivo, cor
+sólida dopamine, sem gradiente).
+
+## Refinos da rodada 2 sobre itens já construídos
+- **71 (Planejamento)**: animação do PUBLICADO baseada na das Tarefas,
+  verde: explosão SAI DO CARD na troca de coluna; atrás de um emoji da
+  explosão a COLUNA se energiza — aura de elétrons circula em sentido
+  HORÁRIO e, ao completar o círculo, a coluna acende verde pulsando.
+  Mover card entre colunas inspirado no movimento do card do CRM.
+- **74 (Tarefas)**: aura do donut MAIS VOLUMOSA, um pouco mais densa.
+
+## ⏳ Pendências de clarificação do lote (perguntar ao Guilherme)
+- **Item 66**: script validado de fechamento — Guilherme vai fornecer
+  (construir com campo editável/placeholder até lá).
+- Deploy do lote 55/56: AINDA NÃO SUBIU (confirmado 18/07). Quando subir:
+  backup → web → sidekiq; pós-deploy: 🛡️ acessos, 💰 tabela de preços,
+  🎯 metas de julho. Reversão: imagem build 56 (7187c2de6).
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
 **ONDE ESTAMOS (2026-07-15, manhã — TUDO NO AR ✅):** itens 14-36 EM
