@@ -22,10 +22,13 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
   # também anota sozinho quando percebe pela conversa)
   def update_profile
     contact = Current.account.contacts.find(params[:id])
-    attrs = contact.additional_attributes || {}
-    attrs['sexo'] = params[:sexo].to_s if params.key?(:sexo) && %w[masculino feminino].include?(params[:sexo].to_s)
-    attrs['data_nascimento'] = params[:data_nascimento].to_s if params.key?(:data_nascimento)
-    contact.update!(additional_attributes: attrs)
+    # merge atômico: salvar sexo/nascimento não pode apagar a pausa do
+    # follow-up nem outras chaves gravadas em paralelo
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      attrs['sexo'] = params[:sexo].to_s if params.key?(:sexo) && %w[masculino feminino].include?(params[:sexo].to_s)
+      attrs['data_nascimento'] = params[:data_nascimento].to_s if params.key?(:data_nascimento)
+      attrs
+    end
     render json: { profile: patient_profile(contact) }
   end
 

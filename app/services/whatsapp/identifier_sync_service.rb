@@ -40,7 +40,13 @@ class Whatsapp::IdentifierSyncService
     username = normalize_username(username)
     return if username.blank?
 
-    synced_contact.update!(additional_attributes: additional_attributes_with_username(username))
+    # merge atômico (CEVICO): roda no fluxo de mensagens — não pode apagar
+    # chaves concorrentes do contato (pausa do follow-up, perfil)
+    Cevico::AttributeMerge.merge!(synced_contact) do |attrs|
+      social_profiles = attrs['social_profiles'] || {}
+      social_profiles['whatsapp'] = username
+      attrs.merge('social_profiles' => social_profiles, 'social_whatsapp_user_name' => username)
+    end
   end
 
   def synced_contact
@@ -53,16 +59,5 @@ class Whatsapp::IdentifierSyncService
 
   def normalize_username(value)
     value.to_s.sub(/\A@+/, '').presence
-  end
-
-  def additional_attributes_with_username(username)
-    attributes = synced_contact.additional_attributes.deep_dup
-    social_profiles = attributes['social_profiles'] || {}
-    social_profiles['whatsapp'] = username
-
-    attributes.merge(
-      'social_profiles' => social_profiles,
-      'social_whatsapp_user_name' => username
-    )
   end
 end

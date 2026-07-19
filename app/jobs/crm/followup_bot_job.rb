@@ -22,6 +22,13 @@ class Crm::FollowupBotJob < ApplicationJob
   # tratada SEM enviar (evita rajada após deploy/queda — o robô não manda
   # 4 cutucadas atrasadas de uma vez)
   STALE_HOURS = 3
+  # ── TRAVA FÍSICA (incidente 18/07: rajadas de 2 em 2 min) ──
+  # A fonte da VERDADE são as mensagens já enviadas (cada cutucada carrega
+  # cevico_followup_bot_id), não o marcador em additional_attributes — que
+  # pode ser apagado por um escritor concorrente. Mesmo sem marcador nenhum,
+  # o robô NUNCA passa destes limites por conversa:
+  MIN_GAP_MINUTES = 30 # piso entre cutucadas (qualquer robô) na mesma conversa
+  DAILY_CAP = 4        # teto diário de cutucadas (qualquer robô) na mesma conversa
 
   def perform
     # TRAVA: cron a cada 2 min. Se uma rodada demora mais que isso (muitas
@@ -151,11 +158,43 @@ class Crm::FollowupBotJob < ApplicationJob
       return
     end
 
-    send_nudge(bot, conversation, chosen[:step])
+    # ── TRAVA FÍSICA: consulta as cutucadas REALMENTE enviadas (tabela de
+    # mensagens) antes de qualquer envio. Protege o paciente mesmo que o
+    # marcador tenha sido apagado/corrompido por outro processo.
+    nudges = bot_nudges(conversation)
+    sent_since_anchor = nudges.where('created_at >= ?', anchor).count
+    if sent_since_anchor >= steps.size
+      # cadência já saiu inteira nas mensagens → ressincroniza o marcador
+      mark_steps(state, due)
+      persist_state(conversation, bot, anchor, state)
+      run[:reasons]['trava_cadencia_completa'] += 1
+      return
+    end
+
+    last_nudge_at = nudges.maximum(:created_at)
+    if last_nudge_at && last_nudge_at > MIN_GAP_MINUTES.minutes.ago
+      run[:reasons]['trava_intervalo_minimo'] += 1
+      return
+    end
+
+    if nudges.where('created_at >= ?', TZ.now.beginning_of_day).count >= DAILY_CAP
+      run[:reasons]['trava_teto_diario'] += 1
+      return
+    end
+
+    # marca ANTES de enviar (falha segura): se o envio quebrar no meio, o
+    # pior caso é PERDER uma cutucada — nunca duplicar para o paciente
     mark_steps(state, due) # as vencidas anteriores são absorvidas pela enviada
     persist_state(conversation, bot, anchor, state)
+    send_nudge(bot, conversation, chosen[:step])
     run[:sent] += 1
     events << event_for(conversation, 'sent', note: step_label(chosen[:step]))
+  end
+
+  # cutucadas de QUALQUER robô de follow-up nesta conversa (mensagens reais)
+  def bot_nudges(conversation)
+    conversation.messages.outgoing
+                .where("additional_attributes ->> 'cevico_followup_bot_id' IS NOT NULL")
   end
 
   def mark_steps(state, due)
