@@ -55,15 +55,32 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       reauth = channel.try(:reauthorization_required?) || false
       failed = inbox.messages.outgoing.where(status: :failed)
                     .where('messages.created_at >= ?', 24.hours.ago).count
+      health = whatsapp_health_cached(channel)
       {
         id: inbox.id,
         name: inbox.name,
         phone: channel.try(:phone_number),
         reauthorization_required: reauth,
         failed_24h: failed,
-        ok: !reauth && failed.zero?
+        ok: !reauth && failed.zero?,
+        # status da CONTA na Meta (pedido 20/07): qualidade + limite de
+        # mensagens/dia + situação do nome — o que interessa ao gestor
+        quality: health&.dig(:quality_rating),
+        limit_tier: health&.dig(:messaging_limit_tier),
+        name_status: health&.dig(:name_status),
+        verified_name: health&.dig(:verified_name)
       }
     end
+  end
+
+  # a Meta é consultada no máximo a cada 10 min por número (falha também
+  # fica em cache — canal que não é Cloud API não trava o painel)
+  def whatsapp_health_cached(channel)
+    Rails.cache.fetch("cevico/wa_health/#{channel.id}", expires_in: 10.minutes) do
+      Whatsapp::HealthService.new(channel).fetch_health_status || {}
+    rescue StandardError
+      {}
+    end.presence
   end
 
   # ── popup "prioridade máxima" do Radar ──
@@ -505,9 +522,29 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     alerts = alerts.select { |a| a['user_id'].blank? || a['user_id'].to_i == Current.user.id } unless Current.account_user.administrator?
     {
       last_run_at: state['last_run_at'],
-      alerts: alerts.first(10),
+      alerts: with_conversation_info(alerts.first(10)),
       efficacy: radar_efficacy_json(state)
     }
+  end
+
+  # o balão de conversa do card do Radar (mesmo do CRM) precisa da caixa,
+  # canal e status — enriquece na LEITURA (1 consulta em lote), valendo
+  # também para avisos antigos já salvos no estado
+  def with_conversation_info(alerts)
+    conversations = account.conversations
+                           .where(display_id: alerts.map { |a| a['conversation_id'] })
+                           .includes(:inbox).index_by(&:display_id)
+    alerts.map do |alert|
+      conversation = conversations[alert['conversation_id']]
+      next alert if conversation.blank?
+
+      alert.merge(
+        'inbox_id' => conversation.inbox_id,
+        'inbox_name' => conversation.inbox&.name,
+        'channel_type' => conversation.inbox&.channel_type,
+        'conversation_status' => conversation.status
+      )
+    end
   end
 
   # item 83 — EFICÁCIA do Radar: dos avisos ATENDIDOS nos últimos 30 dias,
@@ -598,8 +635,10 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
 
     data = panel_data(nil, nil) # já memoizado pelo show
     settings = crm_settings || CrmSetting.create!(account: account)
-    cfg = settings.agenda_config || {}
-    all = cfg['panel_records'] ||= {}
+    # cópia profunda: mexer no hash DO ATRIBUTO em memória deixava o
+    # registro "sujo" e o with_lock logo abaixo estourava (500 no painel
+    # na primeira vez que uma métrica batia recorde) — hotfix 20/07
+    all = ((settings.agenda_config || {})['panel_records'] || {}).deep_dup
     changed = false
     period = record_period_key
 

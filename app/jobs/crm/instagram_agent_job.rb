@@ -116,7 +116,8 @@ class Crm::InstagramAgentJob < ApplicationJob
                      "Dados: #{ag.map { |k, v| "#{k}: #{v}" }.join(' · ')}\nConversa ##{conversation.display_id}",
         phone: ag[:telefone], contact: conversation.contact,
         task_type: 'consulta', priority: :high, status: :todo,
-        creator: account.administrators.first || account.users.first
+        creator: account.administrators.first || account.users.first,
+        assignee: Crm::TaskOwner.resolve(account, contact: conversation.contact, task_type: 'consulta')
       )
       log_event(account, conversation, 'horario_invalido', "#{ag[:dia]} #{ag[:hora]} não validou — tarefa criada")
       lock_manager.unlock(lock_key) if slot_locked

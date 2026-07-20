@@ -63,7 +63,8 @@ class Crm::AppointmentRecorder
         contact: contact || future.contact,
         description: [future.description.presence, "Reagendada pela IA:\n#{notes}"].compact.join("\n\n"),
         canceled_at: nil,
-        status: :todo
+        status: :todo,
+        assignee: future.assignee || Crm::TaskOwner.resolve(account, contact: contact || future.contact, task_type: 'consulta')
       )
       return :rescheduled
     end
@@ -80,7 +81,9 @@ class Crm::AppointmentRecorder
       task_type: 'consulta',
       priority: :medium,
       status: :todo,
-      creator: creator
+      creator: creator,
+      # no nome de quem cuida da coluna do paciente (aviso no painel dela)
+      assignee: Crm::TaskOwner.resolve(account, contact: contact, task_type: 'consulta')
     )
     :created
   end

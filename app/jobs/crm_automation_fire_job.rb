@@ -398,7 +398,8 @@ class CrmAutomationFireJob < ApplicationJob
         task_type: 'consulta',
         priority: :high,
         status: :todo,
-        creator: creator
+        creator: creator,
+        assignee: Crm::TaskOwner.resolve(account, contact: contact, task_type: 'consulta')
       )
       note = "📅 A IA não conseguiu confirmar dia e hora da consulta de #{name} — criei uma tarefa de revisão para a equipe."
     end

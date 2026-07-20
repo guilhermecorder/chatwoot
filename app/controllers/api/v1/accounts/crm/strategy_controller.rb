@@ -8,7 +8,20 @@ class Api::V1::Accounts::Crm::StrategyController < Api::V1::Accounts::BaseContro
 
   def show
     CevicoPillar.seed_defaults!(account)
-    render json: board_json.merge(processes: processes_list)
+    render json: board_json.merge(processes: processes_list, business: business_board)
+  end
+
+  # ── 🧭 PAINEL DO EMPRESÁRIO: o quadro de gestão do dono (kanban pessoal,
+  # continuar/parar/começar, matrizes de prioridade e oportunidade, pessoas
+  # estratégicas, objetivos do ano e problemas → solução). Só admin vê e
+  # salva — é a mesa de trabalho do empresário, não do time. ──
+  def save_business_board
+    return render json: { error: 'Só administradores mexem no Painel do Empresário.' }, status: :forbidden unless Current.account_user.administrator?
+
+    cfg = crm_settings.agenda_config || {}
+    cfg['business_board'] = sanitize_business_board
+    crm_settings.update!(agenda_config: cfg)
+    render json: { business: cfg['business_board'] }
   end
 
   # ── 🏭 DESENHO DO PROCESSO (item 59): a máquina da clínica, etapa a
@@ -114,6 +127,54 @@ class Api::V1::Accounts::Crm::StrategyController < Api::V1::Accounts::BaseContro
             'handoff' => s[:handoff].to_s[0, 500] }
         end
       }
+    end
+  end
+
+  # o quadro só existe para o admin; para o resto do time nem trafega
+  def business_board
+    return nil unless Current.account_user.administrator?
+
+    board = (crm_settings.agenda_config || {})['business_board']
+    board.is_a?(Hash) ? board : {}
+  end
+
+  BUSINESS_LISTS = { 'kanban' => %w[todo doing done], 'spc' => %w[continuar parar comecar],
+                     'priorities' => %w[do schedule delegate drop], 'opportunities' => %w[first plan fit avoid] }.freeze
+
+  def sanitize_business_board
+    raw = params[:business].presence || {}
+    board = BUSINESS_LISTS.to_h do |section, keys|
+      [section, keys.index_with { |k| sanitize_board_items(raw.dig(section, k)) }]
+    end
+    %w[objectives goals activities].each do |k|
+      board[k] = Array(raw[k]).first(5).map { |t| t.to_s[0, 160] }
+    end
+    board.merge('people' => sanitize_people(raw[:people]), 'problems' => sanitize_problems(raw[:problems]))
+  end
+
+  def sanitize_people(list)
+    Array(list).first(12).filter_map do |p|
+      next if p[:name].blank?
+
+      { 'id' => p[:id].presence || SecureRandom.hex(4),
+        'name' => p[:name].to_s[0, 80], 'why' => p[:why].to_s[0, 200] }
+    end
+  end
+
+  def sanitize_problems(list)
+    Array(list).first(12).filter_map do |pr|
+      next if pr[:problem].blank? && pr[:solution].blank?
+
+      { 'id' => pr[:id].presence || SecureRandom.hex(4),
+        'problem' => pr[:problem].to_s[0, 300], 'solution' => pr[:solution].to_s[0, 300] }
+    end
+  end
+
+  def sanitize_board_items(list)
+    Array(list).first(30).filter_map do |item|
+      next if item[:text].blank?
+
+      { 'id' => item[:id].presence || SecureRandom.hex(4), 'text' => item[:text].to_s[0, 200] }
     end
   end
 

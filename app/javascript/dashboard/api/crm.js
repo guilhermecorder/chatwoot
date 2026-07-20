@@ -805,6 +805,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/strategy/save_processes`, { processes });
   }
 
+  // 🧭 Painel do Empresário (quadro de gestão do dono — só admin)
+  saveBusinessBoard(business) {
+    return axios.post(`${this.url}/strategy/save_business_board`, { business });
+  }
+
   // ── Automations ───────────────────────────────────────────────────
   getAutomations(pipelineId, stageId) {
     return axios.get(`${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations`);
