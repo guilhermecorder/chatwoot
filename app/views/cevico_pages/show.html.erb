@@ -6,6 +6,9 @@
   <%# SEO: título e descrição próprios da página (Google mostra exatamente isso) %>
   <title><%= @page.meta_title.presence || "#{@page.title} — CEVICO Cuidados Oculares" %></title>
   <meta name="description" content="<%= @page.meta_description.presence || @page.subtitle %>">
+  <% if @page.seo_keywords.present? %>
+    <meta name="keywords" content="<%= @page.seo_keywords %>">
+  <% end %>
   <%# canonical: com domínio oficial configurado, aponta SEMPRE pra ele —
       Google e Meta enxergam um endereço só %>
   <% canonical_url = Cevico::PublicSite.configured? ? Cevico::PublicSite.page_url(@page.slug) : request.original_url.split('?').first %>

@@ -3,6 +3,7 @@
 # Table name: tasks
 #
 #  id                  :bigint           not null, primary key
+#  archived_at         :datetime
 #  attendance          :string
 #  canceled_at         :datetime
 #  comments            :jsonb            not null

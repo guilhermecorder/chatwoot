@@ -11,6 +11,9 @@ import UnreadBadge from 'dashboard/components-next/Conversation/ConversationCard
 import SLACardLabel from './components/SLACardLabel.vue';
 import VoiceCallStatus from './VoiceCallStatus.vue';
 import Checkbox from 'dashboard/components-next/checkbox/Checkbox.vue';
+import { useMapGetter } from 'dashboard/composables/store';
+import { inboxSolidFor } from 'dashboard/helper/cevicoInboxColors';
+import CrmAPI from 'dashboard/api/crm';
 
 const props = defineProps({
   chat: { type: Object, required: true },
@@ -98,6 +101,51 @@ watch(
     hovered.value = false;
   }
 );
+
+// ── CEVICO (item 90 — 19/07): indicador VIVO da caixa + balão da jornada ──
+// nome do contato na cor sólida da própria caixa de entrada; chip com a
+// coluna do CRM que abre um balãozinho de "botões em linha" para mover
+const allInboxes = useMapGetter('inboxes/getInboxes');
+const crmPipelines = useMapGetter('crm/getPipelines');
+const nameColor = computed(() =>
+  inboxSolidFor(allInboxes.value || [], props.chat.inbox_id)
+);
+const journeyStages = computed(() =>
+  (crmPipelines.value || []).flatMap(p => p.stages || [])
+);
+const chatStage = computed(
+  () => journeyStages.value.find(s => s.id === props.chat.crm_stage_id) || null
+);
+const showStagePopover = ref(false);
+const isMovingStage = ref(false);
+// balão via Teleport (fora do card): a animação do card ativo cria stacking
+// context e prendia o z-index — dentro da lista o balão ficava "vazado"
+const chipEl = ref(null);
+const popoverPos = ref({ x: 0, y: 0 });
+const toggleStagePopover = () => {
+  if (!showStagePopover.value && chipEl.value) {
+    const r = chipEl.value.getBoundingClientRect();
+    popoverPos.value = {
+      x: Math.min(r.left, window.innerWidth - 272),
+      y: r.bottom + 4,
+    };
+  }
+  showStagePopover.value = !showStagePopover.value;
+};
+const pickStage = async stage => {
+  if (isMovingStage.value || stage.id === props.chat.crm_stage_id) return;
+  isMovingStage.value = true;
+  try {
+    await CrmAPI.moveConversationStage(props.chat.id, stage.id);
+    // eslint-disable-next-line vue/no-mutating-props
+    props.chat.crm_stage_id = stage.id;
+    showStagePopover.value = false;
+  } catch {
+    // mantém o balão aberto para tentar de novo
+  } finally {
+    isMovingStage.value = false;
+  }
+};
 </script>
 
 <template>
@@ -171,6 +219,7 @@ watch(
       <h4
         class="conversation--user text-sm my-0 mx-2 capitalize pt-0.5 text-ellipsis overflow-hidden whitespace-nowrap flex-1 min-w-0 ltr:pr-16 rtl:pl-16 text-n-slate-12"
         :class="hasUnread ? 'font-semibold' : 'font-medium'"
+        :style="nameColor ? { color: nameColor } : {}"
       >
         {{ currentContact.name }}
       </h4>
@@ -220,6 +269,61 @@ watch(
           class="ltr:ml-auto rtl:mr-auto mt-1"
         />
       </div>
+      <!-- coluna da jornada (CRM) — chip que abre o balãozinho de mover -->
+      <div v-if="chatStage" class="relative mx-2 mt-1" @click.stop>
+        <button
+          ref="chipEl"
+          class="inline-flex items-center gap-1 h-5 px-1.5 rounded-full border border-n-weak text-[10px] font-medium text-n-slate-11 hover:bg-n-alpha-1 transition-colors max-w-full"
+          title="Coluna da jornada — toque para mover"
+          @click="toggleStagePopover"
+        >
+          <span
+            class="w-2 h-2 rounded-full flex-shrink-0"
+            :style="{ background: chatStage.color }"
+          />
+          <span class="truncate">{{ chatStage.name }}</span>
+          <span class="i-lucide-chevron-down text-[10px] flex-shrink-0" />
+        </button>
+
+        <Teleport v-if="showStagePopover" to="body">
+          <div
+            class="fixed inset-0 z-[9998]"
+            @click.stop="showStagePopover = false"
+          />
+          <div
+            class="fixed z-[9999] w-64 rounded-xl border border-n-weak bg-white dark:bg-n-solid-2 shadow-xl p-2"
+            :style="{ left: `${popoverPos.x}px`, top: `${popoverPos.y}px` }"
+            @click.stop
+          >
+          <p class="text-[10px] font-bold text-n-slate-10 uppercase mb-1.5">
+            Mover para a coluna
+          </p>
+          <div class="flex flex-wrap gap-1">
+            <button
+              v-for="s in journeyStages"
+              :key="s.id"
+              class="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] font-medium border transition-all"
+              :class="s.id === chat.crm_stage_id
+                ? 'text-white'
+                : 'text-n-slate-11 hover:bg-n-alpha-1 border-n-weak'"
+              :style="s.id === chat.crm_stage_id
+                ? { background: s.color, borderColor: s.color }
+                : {}"
+              :disabled="isMovingStage"
+              @click="pickStage(s)"
+            >
+              <span
+                v-if="s.id !== chat.crm_stage_id"
+                class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                :style="{ background: s.color }"
+              />
+              {{ s.name }}
+            </button>
+          </div>
+          </div>
+        </Teleport>
+      </div>
+
       <CardLabels
         v-if="showLabelsSection"
         :conversation-labels="chat.labels"

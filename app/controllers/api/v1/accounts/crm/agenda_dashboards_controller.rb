@@ -6,8 +6,8 @@
 # Ocupação % (agenda cheia/aproveitamento) é calculada na tela, com as
 # mesmas janelas da Agenda/Meu Painel.
 class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::BaseController
-  include Crm::AccessControl
-  before_action -> { require_capability(:reports) }
+  # LIBERADO PARA A EQUIPE (item 86): dado operacional da agenda, sem
+  # valores financeiros — todo o time acompanha comparecimento e ocupação.
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 

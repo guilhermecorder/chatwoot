@@ -173,7 +173,7 @@ class Crm::WeeklyMentorService
   # metas + orientações do mês corrente: o mentor conecta o feedback
   # individual ao plano do Painel de Metas
   def current_goal_payload
-    plan = @account.cevico_goal_plans.find_by(month: TZ.now.to_date.beginning_of_month)
+    plan = @account.cevico_goal_plans.find_by(period_type: 'month', month: TZ.now.to_date.beginning_of_month)
     return nil if plan.nil?
 
     {

@@ -2,6 +2,7 @@
 // Dashboard das campanhas de mensagem modelo — investimento, volume,
 // responsividade e conversões, no mesmo visual do Dashboard CEVICO.
 import { ref, computed, onMounted, watch } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
@@ -104,9 +105,7 @@ const formatDate = iso =>
         <span class="text-n-slate-9">(valor cobrado pela Meta por template enviado — usado no cálculo de investimento)</span>
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
-      </div>
+      <SkeletonScreen v-if="isLoading" variant="dashboard" />
       <div v-else-if="error" class="text-center py-16 text-n-slate-10 text-sm">{{ error }}</div>
 
       <template v-else>

@@ -7,6 +7,8 @@
 // histórico de 12 meses em LINHA (mesma linguagem dos outros painéis)
 // e comparação de dois meses lado a lado.
 import { ref, computed, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
+import StockTab from './StockTab.vue';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
@@ -33,7 +35,9 @@ const AMBAR = '#D97706';
 const OURO = '#D4A017';
 const AZUL = '#0F5FA6';
 const ROXO = '#7C3AED';
-const PALETTE = [AZUL, ROXO, OURO, '#84CC16', '#3B82F6', '#A78BFA', '#F0C420', '#22D3EE', '#EA580C', '#10B981', '#F472B6', '#94A3B8'];
+// VERDE é a cor principal dos gráficos (item 68): a família de verdes
+// lidera e as demais cores só apoiam quando há muitas categorias
+const PALETTE = ['#059669', '#0F766E', '#84CC16', '#34D399', OURO, AZUL, ROXO, '#22D3EE', '#EA580C', '#F472B6', '#A78BFA', '#94A3B8'];
 
 // identidade visual por tipo de lançamento
 const KIND_META = {
@@ -52,6 +56,7 @@ const tab = ref('overview'); // overview | entries | compare
 const TABS = [
   { key: 'overview', label: 'Visão geral', icon: 'i-lucide-chart-line' },
   { key: 'entries', label: 'Lançamentos', icon: 'i-lucide-list-plus' },
+  { key: 'stock', label: 'Estoque', icon: 'i-lucide-package' },
   { key: 'compare', label: 'Comparar meses', icon: 'i-lucide-columns-2' },
 ];
 
@@ -129,29 +134,39 @@ const periodLabel = computed(() => {
   return p.from === p.to ? fmtDate(p.from) : `${fmtDate(p.from)} → ${fmtDate(p.to)}`;
 });
 
-// ── KPIs da visão geral ──
+// ── KPIs da visão geral — DOPAMINE COLORS (pedido 19/07): cards em
+// degradê pleno com fonte branca, mesma linguagem do Meu Painel ──
 const summary = computed(() => data.value?.summary || {});
+const GRADS = {
+  verde: 'linear-gradient(135deg, #065F46, #10B981)',
+  vermelho: 'linear-gradient(135deg, #B91C1C, #F87171)',
+  ambar: 'linear-gradient(135deg, #B45309, #FBBF24)',
+  ouro: 'linear-gradient(135deg, #B8860B, #D4A017)',
+  azul: 'linear-gradient(135deg, #0F5FA6, #3B82F6)',
+  roxo: 'linear-gradient(135deg, #5B21B6, #7C3AED)',
+  teal: 'linear-gradient(135deg, #0F766E, #14B8A6)',
+};
 const kpiCards = computed(() => [
-  { key: 'receita', label: 'Receita', value: summary.value.receita, color: VERDE, icon: 'i-lucide-trending-up' },
-  { key: 'custo', label: 'Custos', value: summary.value.custo, color: VERMELHO, icon: 'i-lucide-trending-down' },
-  { key: 'tributo', label: 'Tributos', value: summary.value.tributo, color: AMBAR, icon: 'i-lucide-landmark' },
+  { key: 'receita', label: 'Receita', value: summary.value.receita, grad: GRADS.verde, icon: 'i-lucide-trending-up' },
+  { key: 'custo', label: 'Custos', value: summary.value.custo, grad: GRADS.vermelho, icon: 'i-lucide-trending-down' },
+  { key: 'tributo', label: 'Tributos', value: summary.value.tributo, grad: GRADS.ambar, icon: 'i-lucide-landmark' },
   {
     key: 'lucro',
     label: 'Lucro do período',
     value: summary.value.lucro,
-    color: (summary.value.lucro || 0) >= 0 ? VERDE : VERMELHO,
+    grad: (summary.value.lucro || 0) >= 0 ? GRADS.ouro : GRADS.vermelho,
     icon: 'i-lucide-piggy-bank',
     badge: summary.value.margem != null ? `${summary.value.margem.toLocaleString('pt-BR')}% de margem` : null,
   },
 ]);
 const investCards = computed(() => [
-  { key: 'investimento_produto', label: 'Produto & Estoque', value: summary.value.investimento_produto, color: AZUL, icon: 'i-lucide-package', hint: 'investimento no período' },
-  { key: 'investimento_equipamento', label: 'Equipamentos', value: summary.value.investimento_equipamento, color: ROXO, icon: 'i-lucide-microscope', hint: 'investimento no período' },
+  { key: 'investimento_produto', label: 'Produto & Estoque', value: summary.value.investimento_produto, grad: GRADS.azul, icon: 'i-lucide-package', hint: 'investimento no período' },
+  { key: 'investimento_equipamento', label: 'Equipamentos', value: summary.value.investimento_equipamento, grad: GRADS.roxo, icon: 'i-lucide-microscope', hint: 'investimento no período' },
   {
     key: 'caixa',
     label: 'Resultado do caixa',
     value: summary.value.caixa,
-    color: (summary.value.caixa || 0) >= 0 ? '#0F766E' : VERMELHO,
+    grad: (summary.value.caixa || 0) >= 0 ? GRADS.teal : GRADS.vermelho,
     icon: 'i-lucide-wallet',
     hint: 'lucro − investimentos',
   },
@@ -161,8 +176,9 @@ const investCards = computed(() => [
 const lineChart = computed(() => {
   const m = data.value?.monthly;
   if (!m?.length) return null;
-  // hierarquia de peso: Lucro (ouro) é a linha protagonista, mais grossa;
-  // Tributos fica fininha pra não competir com o ouro (cores vizinhas)
+  // hierarquia de peso (item 68: VERDE é a cor principal): Receita, verde
+  // e preenchida, é a protagonista; Lucro ouro logo atrás; Tributos fica
+  // fininha pra não competir com o ouro (cores vizinhas)
   const line = (label, key, color, { dashed = false, width = 2.5 } = {}) => ({
     label,
     data: m.map(x => x[key]),
@@ -180,11 +196,11 @@ const lineChart = computed(() => {
     data: {
       labels: m.map(x => monthShort(x.month)),
       datasets: [
-        line('Receita', 'receita', VERDE),
-        line('Custos', 'custos', VERMELHO),
+        line('Receita', 'receita', VERDE, { width: 3.5 }),
+        line('Custos', 'custos', VERMELHO, { width: 2 }),
         line('Tributos', 'tributos', AMBAR, { width: 1.5 }),
-        line('Lucro', 'lucro', OURO, { width: 3.5 }),
-        line('Investimentos', 'investimentos', AZUL, { dashed: true }),
+        line('Lucro', 'lucro', OURO, { width: 2.5 }),
+        line('Investimentos', 'investimentos', AZUL, { dashed: true, width: 2 }),
       ],
     },
     options: {
@@ -407,7 +423,7 @@ const compareCosts = computed(() => {
       </div>
 
       <!-- período (vale para Visão geral e Lançamentos) -->
-      <div v-if="tab !== 'compare'" class="mb-5">
+      <div v-if="tab !== 'compare' && tab !== 'stock'" class="mb-5">
         <div class="flex items-center gap-1.5 flex-wrap">
           <button
             v-for="p in PERIODS"
@@ -450,56 +466,49 @@ const compareCosts = computed(() => {
         </p>
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
-      </div>
+      <!-- ════════ ESTOQUE (carrega os próprios dados) ════════ -->
+      <StockTab v-if="tab === 'stock'" />
+
+      <SkeletonScreen v-else-if="isLoading" variant="dashboard" />
 
       <template v-else-if="data">
         <!-- ════════ VISÃO GERAL ════════ -->
         <template v-if="tab === 'overview'">
-          <!-- indicadores principais -->
+          <!-- indicadores principais — dopamine: degradê pleno + fonte branca -->
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
             <div
               v-for="card in kpiCards"
               :key="card.key"
-              class="rounded-2xl border border-n-weak bg-n-card p-4"
+              class="relative rounded-2xl p-4 text-white shadow-md overflow-hidden"
+              :style="{ background: card.grad }"
             >
-              <div class="flex items-center gap-2 mb-2">
-                <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ background: card.color }">
-                  <span :class="card.icon" class="text-white text-sm" />
-                </span>
-                <p class="text-[11px] font-bold text-n-slate-11 leading-tight">{{ card.label }}</p>
-              </div>
-              <p class="text-xl sm:text-2xl font-bold tabular-nums" :style="{ color: card.color }">
+              <span :class="card.icon" class="absolute -right-2 -bottom-3 text-[64px] text-white/15 pointer-events-none" />
+              <p class="text-[11px] font-bold leading-tight relative" style="color: rgba(255,255,255,0.9)">{{ card.label }}</p>
+              <p class="text-xl sm:text-2xl font-bold tabular-nums mt-1.5 relative" style="color: #fff">
                 {{ fmtMoney(card.value) }}
               </p>
               <span
                 v-if="card.badge"
-                class="inline-block mt-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                :style="{ background: `${card.color}1A`, color: card.color }"
+                class="inline-block mt-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-black/20 relative"
+                style="color: #fff"
               >
                 {{ card.badge }}
               </span>
             </div>
           </div>
 
-          <!-- investimentos + caixa -->
+          <!-- investimentos + caixa — dopamine -->
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
             <div
               v-for="card in investCards"
               :key="card.key"
-              class="rounded-2xl border border-n-weak bg-n-card p-4"
+              class="relative rounded-2xl p-4 text-white shadow-md overflow-hidden"
+              :style="{ background: card.grad }"
             >
-              <div class="flex items-center gap-2 mb-2">
-                <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ background: card.color }">
-                  <span :class="card.icon" class="text-white text-sm" />
-                </span>
-                <div class="min-w-0">
-                  <p class="text-[11px] font-bold text-n-slate-11 leading-tight">{{ card.label }}</p>
-                  <p class="text-[10px] text-n-slate-9">{{ card.hint }}</p>
-                </div>
-              </div>
-              <p class="text-lg font-bold tabular-nums" :style="{ color: card.color }">
+              <span :class="card.icon" class="absolute -right-2 -bottom-3 text-[56px] text-white/15 pointer-events-none" />
+              <p class="text-[11px] font-bold leading-tight relative" style="color: rgba(255,255,255,0.9)">{{ card.label }}</p>
+              <p class="text-[10px] relative" style="color: rgba(255,255,255,0.65)">{{ card.hint }}</p>
+              <p class="text-lg font-bold tabular-nums mt-1 relative" style="color: #fff">
                 {{ fmtMoney(card.value) }}
               </p>
             </div>

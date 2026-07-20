@@ -19,12 +19,19 @@ export const DEFAULT_WINDOWS = [
   { dow: 5, unit: 'tatuape',  doctor: 'Dra. Roberta Negri',   turno: 'Manhã', start: '10:30', end: '13:00', block: 10 },
 ];
 
-// janelas salvas nas settings (ou o padrão)
+// médicos com a agenda FECHADA (item 76) — as janelas deles somem em
+// TODO consumidor (agenda, ocupação, saúde do Meu Painel)
+export const resolveClosedDoctors = settings =>
+  Array.isArray(settings?.agenda_closed_doctors) ? settings.agenda_closed_doctors : [];
+
+// janelas salvas nas settings (ou o padrão) — sem os médicos fechados
 export const resolveWindows = settings => {
   const saved = settings?.agenda_windows;
-  return Array.isArray(saved) && saved.length
+  const list = Array.isArray(saved) && saved.length
     ? saved.map(w => ({ ...w, dow: Number(w.dow), block: Number(w.block) }))
     : DEFAULT_WINDOWS;
+  const closed = resolveClosedDoctors(settings);
+  return closed.length ? list.filter(w => !closed.includes(w.doctor)) : list;
 };
 
 export const resolveBlocked = settings =>

@@ -170,6 +170,7 @@ onMounted(async () => {
   await store.dispatch('crm/fetchSettings');
   n8nUrl.value    = settings.value.n8n_base_url || '';
   n8nApiKey.value = '';  // nunca pré-preenche a key por segurança
+  oftalmo.value.base_url = settings.value.oftalmofacil?.base_url || '';
 
   const m = settings.value.meta_ads || {};
   meta.value = {
@@ -198,6 +199,28 @@ const metaStatus = computed(() => settings.value.meta_ads || {});
 const googleStatus = computed(() => settings.value.google_ads || {});
 const aiStatus = computed(() => settings.value.ai || {});
 const sheetsStatus = computed(() => settings.value.sheets || {});
+
+// ── OftalmoFácil (conexão nativa) ──────────────────────────
+const oftalmo = ref({ base_url: '', api_key: '' });
+const isOftalmoSaving = ref(false);
+const oftalmoStatus = computed(() => settings.value.oftalmofacil || {});
+
+const saveOftalmo = async () => {
+  isOftalmoSaving.value = true;
+  try {
+    await CrmAPI.updateOftalmofacil({
+      base_url: oftalmo.value.base_url.trim(),
+      api_key: oftalmo.value.api_key.trim(),
+    });
+    oftalmo.value.api_key = ''; // nunca fica na tela depois de salvar
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Conexão OftalmoFácil salva. 👁️');
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao salvar a conexão.');
+  } finally {
+    isOftalmoSaving.value = false;
+  }
+};
 
 const saveMeta = async () => {
   isMetaSaving.value = true;
@@ -999,6 +1022,74 @@ const fetchWorkflows = async () => {
           <p v-if="sheetsStatus.fetched_at" class="text-[11px] text-n-slate-9 mt-2">
             Última importação: {{ new Date(sheetsStatus.fetched_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) }}
             — {{ sheetsStatus.cached_count }} linha(s) em uso no Dashboard.
+          </p>
+        </div>
+
+        <!-- OftalmoFácil (conexão nativa) -->
+        <div v-if="showSection('oftalmofacil')" :class="props.only ? '' : 'border-t border-n-weak pt-5'">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: rgba(69, 181, 170, 0.12)">
+              <span class="i-lucide-eye text-lg" style="color: #45B5AA" />
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-sm font-semibold text-n-slate-12">OftalmoFácil</h3>
+              <p class="text-xs text-n-slate-10">Conexão nativa — endereço e chave da API do sistema OftalmoFácil</p>
+            </div>
+            <span
+              class="ml-auto text-[10px] px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+              :class="oftalmoStatus.configured ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
+            >
+              {{ oftalmoStatus.configured ? '✓ Conectada' : 'Pendente' }}
+            </span>
+          </div>
+
+          <div class="bg-n-alpha-1 rounded-xl p-3.5 mb-4 text-xs text-n-slate-11 space-y-1.5">
+            <p>
+              Guarde aqui o <b>endereço</b> e a <b>chave da API</b> do OftalmoFácil.
+              A chave fica protegida no servidor e <b>nunca</b> volta para a tela.
+            </p>
+            <p class="text-n-slate-9">
+              Com a conexão salva, o fluxo de dados entre os dois sistemas é ligado
+              em cima dela assim que a documentação da API for plugada.
+            </p>
+          </div>
+
+          <div class="space-y-3">
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Endereço (URL base)</label>
+              <input
+                v-model="oftalmo.base_url"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
+                placeholder="https://api.oftalmofacil.com.br"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                Chave da API
+                <span v-if="oftalmoStatus.key_set" class="text-green-600 font-normal">· já configurada (preencha só para trocar)</span>
+              </label>
+              <input
+                v-model="oftalmo.api_key"
+                type="password"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
+                :placeholder="oftalmoStatus.key_set ? '••••••••••••' : 'cole a chave aqui'"
+              />
+            </div>
+          </div>
+
+          <div class="flex gap-2 mt-3">
+            <button
+              class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50 transition-colors"
+              style="background: #45B5AA"
+              :disabled="isOftalmoSaving"
+              @click="saveOftalmo"
+            >
+              {{ isOftalmoSaving ? 'Salvando...' : 'Salvar conexão' }}
+            </button>
+          </div>
+
+          <p v-if="oftalmoStatus.updated_at" class="text-[11px] text-n-slate-9 mt-2">
+            Última alteração: {{ new Date(oftalmoStatus.updated_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) }}
           </p>
         </div>
 

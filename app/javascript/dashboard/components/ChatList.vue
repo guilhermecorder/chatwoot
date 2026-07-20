@@ -12,7 +12,6 @@ import ConversationList from './ConversationList.vue';
 import Dialog from 'dashboard/components-next/dialog/Dialog.vue';
 import ConversationFilter from 'next/filter/ConversationFilter.vue';
 import SaveCustomView from 'next/filter/SaveCustomView.vue';
-import ChatTypeTabs from './widgets/ChatTypeTabs.vue';
 import DeleteCustomViews from 'dashboard/routes/dashboard/customviews/DeleteCustomViews.vue';
 import ConversationBulkActions from './widgets/conversation/conversationBulkActions/Index.vue';
 import TeleportWithDirection from 'dashboard/components-next/TeleportWithDirection.vue';
@@ -68,7 +67,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['conversationLoad']);
-const { uiSettings } = useUISettings();
+const { uiSettings, updateUISettings } = useUISettings();
 const { t } = useI18n();
 const router = useRouter();
 const route = useRoute();
@@ -168,7 +167,32 @@ onMounted(() => {
 
 const resolveAttributesModalRef = ref(null);
 
-const activeAssigneeTab = ref(wootConstants.ASSIGNEE_TYPE.ME);
+// CEVICO 18/07: abas Minhas/Não atribuídas/Todos REMOVIDAS — a lista é
+// sempre "todas" (as pílulas de caixa + filtros da jornada organizam)
+const activeAssigneeTab = ref(wootConstants.ASSIGNEE_TYPE.ALL);
+
+// ── CEVICO 18/07: filtros da JORNADA no topo do Conversas ──
+// estágio do CRM (coluna da jornada) + etiqueta, no lugar das abas
+const journeyStageId = ref(null);
+const journeyLabel = ref(null);
+const crmPipelines = computed(() => store.getters['crm/getPipelines'] || []);
+const journeyStages = computed(() =>
+  crmPipelines.value.flatMap(p => p.stages || [])
+);
+const journeyLabels = computed(
+  () => store.getters['labels/getLabels'] || []
+);
+const hasJourneyFilter = computed(
+  () => Boolean(journeyStageId.value || journeyLabel.value)
+);
+const clearJourneyFilters = () => {
+  journeyStageId.value = null;
+  journeyLabel.value = null;
+};
+onMounted(() => {
+  if (!crmPipelines.value.length) store.dispatch('crm/fetchPipelines');
+  if (!journeyLabels.value.length) store.dispatch('labels/get');
+});
 // CEVICO: padrão é TODAS as conversas à disposição do time —
 // o filtro de status serve para organizar, nunca para esconder
 const activeStatus = ref(wootConstants.STATUS_TYPE.ALL);
@@ -345,17 +369,22 @@ const conversationListPagination = computed(() => {
 });
 
 const conversationFilters = computed(() => {
+  const journeyLabels_ = journeyLabel.value ? [journeyLabel.value] : undefined;
   return {
     inboxId: props.conversationInbox ? props.conversationInbox : undefined,
     assigneeType: activeAssigneeTab.value,
     status: activeStatus.value,
     sortBy: activeSortBy.value,
     page: conversationListPagination.value,
-    labels: props.label ? [props.label] : undefined,
+    labels: props.label ? [props.label] : journeyLabels_,
     teamId: props.teamId || undefined,
     conversationType: props.conversationType || undefined,
+    crmStageId: journeyStageId.value || undefined,
   };
 });
+
+// trocar estágio/etiqueta da jornada = recarregar a lista do zero
+watch([journeyStageId, journeyLabel], () => resetAndFetchData());
 
 const activeTeam = computed(() => {
   if (props.teamId) {
@@ -737,6 +766,28 @@ function onBasicFilterChange(value, type) {
 const isUnreadFirst = computed(
   () => activeSortBy.value === wootConstants.SORT_BY_TYPE.UNREAD
 );
+
+// CEVICO 19/07: ordenação visível da lista ("da mais recente para a mais
+// antiga" e o inverso) — escolher uma ordem sai do modo 'não lidas'.
+// Faz o MESMO trio do filtro nativo: refetch + sort do getter da lista
+// (setChatSortFilter) + persistência no uiSettings.
+const journeyOrder = computed({
+  get() {
+    return activeSortBy.value === wootConstants.SORT_BY_TYPE.LAST_ACTIVITY_AT_ASC
+      ? wootConstants.SORT_BY_TYPE.LAST_ACTIVITY_AT_ASC
+      : wootConstants.SORT_BY_TYPE.LAST_ACTIVITY_AT_DESC;
+  },
+  set(value) {
+    store.dispatch('setChatSortFilter', value);
+    updateUISettings({
+      conversations_filter_by: {
+        status: activeStatus.value,
+        order_by: value,
+      },
+    });
+    onBasicFilterChange(value, 'sort');
+  },
+});
 function toggleUnreadFirst() {
   const next = isUnreadFirst.value
     ? wootConstants.SORT_BY_TYPE.LAST_ACTIVITY_AT_DESC
@@ -1027,10 +1078,11 @@ watch(conversationFilters, (newVal, oldVal) => {
       @basic-filter-change="onBasicFilterChange"
     />
 
-    <!-- CEVICO: escolha das caixas de entrada (aceita várias; salva no navegador) -->
+    <!-- CEVICO: escolha das caixas de entrada (aceita várias; salva no navegador).
+         Enquadramento (pedido 19/07): mesma calha horizontal do cabeçalho (px-3) -->
     <div
       v-if="showInboxPills && pillInboxes.length"
-      class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 mx-2 mb-1.5 overflow-x-auto flex-shrink-0"
+      class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 mx-3 mb-1.5 overflow-x-auto flex-shrink-0"
     >
       <button
         class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
@@ -1079,31 +1131,75 @@ watch(conversationFilters, (newVal, oldVal) => {
       @close="onCloseDeleteFoldersModal"
     />
 
-    <ChatTypeTabs
+    <!-- CEVICO 18/07: filtros da JORNADA (estágio do CRM + etiqueta),
+         no lugar das abas Minhas/Não atribuídas/Todos -->
+    <div
       v-if="!hasAppliedFiltersOrActiveFolders"
-      :items="assigneeTabItems"
-      :active-tab="activeAssigneeTab"
-      is-compact
-      @chat-tab-change="updateAssigneeTab"
-    />
-
-    <!-- Toggle: não lidas no topo -->
-    <button
-      v-if="!hasAppliedFiltersOrActiveFolders"
-      class="flex items-center gap-2 mx-3 mt-1 mb-0.5 px-2 py-1 rounded-lg text-xs transition-colors"
-      :class="isUnreadFirst
-        ? 'bg-n-brand/10 text-n-brand'
-        : 'text-n-slate-11 hover:bg-n-alpha-1'"
-      @click="toggleUnreadFirst"
+      class="flex items-center gap-1.5 mx-3 mt-1.5 mb-0.5"
     >
-      <span
-        class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0"
-        :class="isUnreadFirst ? 'bg-n-brand border-n-brand' : 'border-n-slate-8'"
+      <select
+        v-model="journeyStageId"
+        class="flex-1 min-w-0 h-7 rounded-full border px-2.5 text-[11px] font-medium transition-colors cursor-pointer"
+        :class="journeyStageId
+          ? 'border-n-brand/40 bg-n-brand/10 text-n-brand'
+          : 'border-n-weak bg-n-solid-1 text-n-slate-11'"
       >
-        <span v-if="isUnreadFirst" class="i-lucide-check text-white text-[10px]" />
-      </span>
-      {{ $t('CHAT_LIST.UNREAD_FIRST') }}
-    </button>
+        <option :value="null">🧭 Estágio: todos</option>
+        <option v-for="s in journeyStages" :key="s.id" :value="s.id">
+          {{ s.name }}
+        </option>
+      </select>
+      <select
+        v-model="journeyLabel"
+        class="flex-1 min-w-0 h-7 rounded-full border px-2.5 text-[11px] font-medium transition-colors cursor-pointer"
+        :class="journeyLabel
+          ? 'border-n-brand/40 bg-n-brand/10 text-n-brand'
+          : 'border-n-weak bg-n-solid-1 text-n-slate-11'"
+      >
+        <option :value="null">🏷️ Etiqueta: todas</option>
+        <option v-for="lb in journeyLabels" :key="lb.id" :value="lb.title">
+          {{ lb.title }}
+        </option>
+      </select>
+      <button
+        v-if="hasJourneyFilter"
+        class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-n-slate-10 hover:bg-n-alpha-1 hover:text-n-slate-12 transition-colors"
+        title="Limpar filtros da jornada"
+        @click="clearJourneyFilters"
+      >
+        <span class="i-lucide-x text-xs" />
+      </button>
+    </div>
+
+    <!-- Toggle "não lidas no topo" + ORDENAÇÃO (pedido 19/07) na mesma linha -->
+    <div
+      v-if="!hasAppliedFiltersOrActiveFolders"
+      class="flex items-center gap-1.5 mx-3 mt-1 mb-0.5"
+    >
+      <button
+        class="flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition-colors flex-shrink-0"
+        :class="isUnreadFirst
+          ? 'bg-n-brand/10 text-n-brand'
+          : 'text-n-slate-11 hover:bg-n-alpha-1'"
+        @click="toggleUnreadFirst"
+      >
+        <span
+          class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0"
+          :class="isUnreadFirst ? 'bg-n-brand border-n-brand' : 'border-n-slate-8'"
+        >
+          <span v-if="isUnreadFirst" class="i-lucide-check text-white text-[10px]" />
+        </span>
+        {{ $t('CHAT_LIST.UNREAD_FIRST') }}
+      </button>
+      <select
+        v-model="journeyOrder"
+        class="flex-1 min-w-0 h-7 rounded-full border px-2 text-[11px] font-medium transition-colors cursor-pointer border-n-weak bg-n-solid-1 text-n-slate-11"
+        title="Ordem da lista de conversas"
+      >
+        <option value="last_activity_at_desc">↕️ Da mais recente para a mais antiga</option>
+        <option value="last_activity_at_asc">↕️ Da mais antiga para a mais recente</option>
+      </select>
+    </div>
 
     <p
       v-if="!chatListLoading && !conversationList.length"

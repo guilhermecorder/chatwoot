@@ -12,12 +12,55 @@ class Api::V1::Accounts::Crm::PagesDashboardsController < Api::V1::Accounts::Bas
     pages = Current.account.cevico_pages.order(:category, :title).to_a
     render json: {
       pages: pages.map { |p| analytics_json(p) },
-      funnels: funnels_json(pages)
+      funnels: funnels_json(pages),
+      # 🌪 Montador de Funis (item 60): fontes de captação por funil
+      funnel_sources: agenda_cfg['funnel_sources'] || {},
+      source_catalog: source_catalog
     }
+  end
+
+  # ── 🌪 item 60: fontes de TRÁFEGO e CAPTAÇÃO de cada funil ──
+  # {'<id da página-cabeça>' => ['meta', 'indicacao', ...]} + catálogo
+  # editável (médicos parceiros, indicação, tráfego pago...)
+  def save_funnel_sources # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    cfg = agenda_cfg
+    if params.key?(:funnel_sources)
+      cfg['funnel_sources'] = params.require(:funnel_sources).permit!.to_h
+                                    .transform_values { |v| Array(v).map(&:to_s).first(10) }
+    end
+    if params.key?(:source_catalog)
+      cfg['funnel_source_catalog'] = Array(params[:source_catalog]).first(20).filter_map do |s|
+        next if s[:label].blank?
+
+        { 'key' => s[:key].presence || SecureRandom.hex(3), 'label' => s[:label].to_s[0, 60], 'emoji' => s[:emoji].to_s[0, 8].presence || '📥' }
+      end
+    end
+    crm_settings.update!(agenda_config: cfg)
+    render json: { funnel_sources: cfg['funnel_sources'] || {}, source_catalog: source_catalog }
   end
 
   private
 
+  DEFAULT_SOURCES = [
+    { 'key' => 'meta', 'label' => 'Tráfego Meta (Facebook/Instagram)', 'emoji' => '📣' },
+    { 'key' => 'google', 'label' => 'Tráfego Google', 'emoji' => '🔎' },
+    { 'key' => 'organico', 'label' => 'Orgânico / redes sociais', 'emoji' => '🌱' },
+    { 'key' => 'medicos', 'label' => 'Médicos parceiros', 'emoji' => '🩺' },
+    { 'key' => 'indicacao', 'label' => 'Indicação de paciente', 'emoji' => '🤝' }
+  ].freeze
+
+  def crm_settings
+    @crm_settings ||= CrmSetting.find_or_create_by!(account: Current.account)
+  end
+
+  def agenda_cfg
+    @agenda_cfg ||= crm_settings.agenda_config || {}
+  end
+
+  def source_catalog
+    saved = agenda_cfg['funnel_source_catalog']
+    saved.is_a?(Array) && saved.any? ? saved : DEFAULT_SOURCES
+  end
 
   def analytics_json(page) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     stats = page.daily_stats || {}
@@ -32,6 +75,7 @@ class Api::V1::Accounts::Crm::PagesDashboardsController < Api::V1::Accounts::Bas
       slug: page.slug,
       status: page.status,
       category: page.category,
+      seo_keywords: page.seo_keywords,
       emoji: page.emoji,
       views_count: page.views_count,
       cta_clicks_count: page.cta_clicks_count,

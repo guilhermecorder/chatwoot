@@ -1,32 +1,28 @@
-# PAINEL DE METAS: histórico mensal dos indicadores + o plano de cada mês
+# PAINEL DE METAS: histórico dos indicadores + o plano de cada período
 # (alvos, orientações, notas de ajuste por pessoa, marcos). Só ADMIN cria/
 # edita o plano; o time inteiro VÊ (transparência da meta) e acompanha o
 # progresso no Meu Painel. Rotinas e Ferramentas importantes moram aqui.
+#
+# MULTI-PERÍODO (item 58): ambientes de meta do DIA, da SEMANA, do FIM DE
+# SEMANA, do MÊS (oficial dos selos/dashboards), do TRIMESTRE e do ANO —
+# cada um com seu histórico. Também entram as metas de INDICADORES (%):
+# agendamento, comparecimento e conversão p/ cirurgia, derivadas dos
+# mesmos números (nunca digitadas à mão).
 class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseController
   before_action :check_admin, except: [:show]
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
-  HISTORY_MONTHS = 12
 
   def show
-    month = parse_month(params[:month]) || TZ.now.to_date.beginning_of_month
-    render json: {
-      month: month.iso8601,
-      indicators: CevicoGoalPlan::INDICATORS,
-      plan: plan_json(find_plan(month)),
-      plans_index: account.cevico_goal_plans.order(month: :desc).limit(24).pluck(:month),
-      history: monthly_history,
-      routines: agenda_cfg['team_routines'] || [],
-      tools: agenda_cfg['important_tools'] || [],
-      closing_script_set: agenda_cfg['closing_script'].present?
-    }
+    start = normalize_start(parse_date(params[:month]) || TZ.now.to_date)
+    render json: show_payload(start)
   end
 
   def upsert # rubocop:disable Metrics/AbcSize
-    month = parse_month(params[:month])
-    return render json: { error: 'Mês inválido.' }, status: :unprocessable_entity if month.nil?
+    date = parse_date(params[:month])
+    return render json: { error: 'Período inválido.' }, status: :unprocessable_entity if date.nil?
 
-    plan = account.cevico_goal_plans.find_or_initialize_by(month: month)
+    plan = scoped_plans.find_or_initialize_by(month: normalize_start(date))
     plan.targets = params.permit(targets: {})[:targets].to_h.transform_values(&:to_f) if params.key?(:targets)
     plan.guidance = params[:guidance].to_s[0, 4000] if params.key?(:guidance)
     plan.milestones = sanitize_milestones if params.key?(:milestones)
@@ -37,7 +33,8 @@ class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseContr
 
   # nota de ajuste de processo (por pessoa do time)
   def add_note # rubocop:disable Metrics/AbcSize
-    plan = account.cevico_goal_plans.find_or_create_by!(month: parse_month(params[:month]) || TZ.now.to_date.beginning_of_month)
+    start = normalize_start(parse_date(params[:month]) || TZ.now.to_date)
+    plan = scoped_plans.find_or_create_by!(month: start)
     text = params[:text].to_s.strip[0, 1000]
     return render json: { error: 'Escreva a nota.' }, status: :unprocessable_entity if text.blank?
 
@@ -50,7 +47,8 @@ class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseContr
   end
 
   def delete_note
-    plan = account.cevico_goal_plans.find_by!(month: parse_month(params[:month]))
+    date = parse_date(params[:month])
+    plan = scoped_plans.find_by!(month: date && normalize_start(date))
     plan.update!(process_notes: Array(plan.process_notes).reject { |n| n['id'] == params[:note_id] })
     render json: plan_json(plan)
   end
@@ -88,14 +86,46 @@ class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseContr
     render json: { error: 'Só administradores editam as metas.' }, status: :forbidden unless Current.account_user.administrator?
   end
 
-  def parse_month(value)
-    Date.parse(value.to_s).beginning_of_month
+  # ── período selecionado (day/week/weekend/month/quarter/year) ──
+  def period
+    @period ||= CevicoGoalPlan::PERIOD_TYPES.include?(params[:period].to_s) ? params[:period].to_s : 'month'
+  end
+
+  def period_math
+    @period_math ||= Crm::GoalPeriodHistoryService.new(account, period)
+  end
+
+  def scoped_plans
+    account.cevico_goal_plans.where(period_type: period)
+  end
+
+  def parse_date(value)
+    Date.parse(value.to_s)
   rescue ArgumentError, TypeError
     nil
   end
 
-  def find_plan(month)
-    account.cevico_goal_plans.find_by(month: month)
+  def normalize_start(date)
+    period_math.normalize_start(date)
+  end
+
+  def show_payload(start)
+    {
+      period: period,
+      month: start.iso8601,
+      indicators: CevicoGoalPlan::ALL_INDICATORS,
+      rate_keys: CevicoGoalPlan::RATE_INDICATORS.keys,
+      plan: plan_json(find_plan(start)),
+      plans_index: scoped_plans.order(month: :desc).limit(24).pluck(:month),
+      history: period_math.history(scoped_plans),
+      routines: agenda_cfg['team_routines'] || [],
+      tools: agenda_cfg['important_tools'] || [],
+      closing_script_set: agenda_cfg['closing_script'].present?
+    }
+  end
+
+  def find_plan(start)
+    scoped_plans.find_by(month: start)
   end
 
   def about_name
@@ -120,6 +150,7 @@ class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseContr
 
     {
       id: plan.id,
+      period: plan.period_type,
       month: plan.month.iso8601,
       targets: plan.targets || {},
       guidance: plan.guidance,
@@ -132,54 +163,13 @@ class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseContr
   # responsável + "o que é preciso para alcançar" por indicador
   def sanitize_indicator_meta
     raw = params.permit(indicator_meta: {})[:indicator_meta].to_h
-    raw.slice(*CevicoGoalPlan::INDICATORS.keys.map(&:to_s)).to_h do |key, meta|
+    sanitized = raw.slice(*CevicoGoalPlan::ALL_INDICATORS.keys.map(&:to_s)).to_h do |key, meta|
       meta = meta.is_a?(Hash) ? meta : {}
       [key, {
         'owner_id' => meta['owner_id'].presence&.to_i,
         'how' => meta['how'].to_s[0, 1000].presence
       }.compact]
-    end.reject { |_k, v| v.empty? }
-  end
-
-  # ── histórico mensal dos indicadores (últimos 12 meses) ──
-  def monthly_history # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-    from = (TZ.now.to_date.beginning_of_month - (HISTORY_MONTHS - 1).months).beginning_of_day
-
-    leads = Crm::Contact.joins(:pipeline).where(crm_pipelines: { account_id: account.id })
-                        .where('crm_contacts.created_at >= ?', from)
-                        .group(Arel.sql("date_trunc('month', crm_contacts.created_at)")).count
-    consultas = account.tasks.where(task_type: 'consulta').where('created_at >= ?', from)
-                       .group(Arel.sql("date_trunc('month', created_at)")).count
-    attended = account.tasks.where(task_type: 'consulta', attendance: 'attended').where('due_at >= ?', from)
-                      .group(Arel.sql("date_trunc('month', due_at)")).count
-    surg_booked = account.tasks.where(task_type: 'cirurgia').where('created_at >= ?', from)
-                         .group(Arel.sql("date_trunc('month', created_at)")).count
-    surg_done = account.tasks.where(task_type: 'cirurgia', attendance: 'attended').where('due_at >= ?', from)
-                       .group(Arel.sql("date_trunc('month', due_at)")).count
-    revenue = Crm::StageLog.joins(crm_contact: :pipeline)
-                           .where(crm_pipelines: { account_id: account.id }, event_type: 'entered')
-                           .where('stage_name ILIKE ?', '%cirurgia realizada%')
-                           .where('entered_at >= ?', from)
-                           .group(Arel.sql("date_trunc('month', entered_at)"))
-                           .sum('crm_contacts.value')
-
-    plans = account.cevico_goal_plans.where(month: from.to_date..).index_by { |p| p.month.iso8601 }
-
-    (0...HISTORY_MONTHS).map do |i|
-      month = (from.to_date + i.months).beginning_of_month
-      key = ->(h) { h.find { |k, _v| k.to_date.beginning_of_month == month }&.last || 0 }
-      {
-        month: month.iso8601,
-        values: {
-          'new_leads' => key.call(leads),
-          'appointments_booked' => key.call(consultas),
-          'consultations_attended' => key.call(attended),
-          'surgeries_booked' => key.call(surg_booked),
-          'surgeries_done' => key.call(surg_done),
-          'revenue_closed' => key.call(revenue).to_f.round
-        },
-        targets: plans[month.iso8601]&.targets || {}
-      }
     end
+    sanitized.reject { |_k, v| v.empty? }
   end
 end

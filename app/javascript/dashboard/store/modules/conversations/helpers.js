@@ -36,11 +36,19 @@ export const filterByUnattended = (
 };
 
 export const applyPageFilters = (conversation, filters) => {
-  const { inboxId, status, labels = [], teamId, conversationType } = filters;
+  const {
+    inboxId,
+    status,
+    labels = [],
+    teamId,
+    conversationType,
+    crmStageId,
+  } = filters;
   const {
     status: chatStatus,
     inbox_id: chatInboxId,
     labels: chatLabels = [],
+    crm_stage_id: chatCrmStageId,
     meta = {},
     first_reply_created_at: firstReplyOn,
     waiting_since: waitingSince,
@@ -52,6 +60,11 @@ export const applyPageFilters = (conversation, filters) => {
   shouldFilter = filterByInbox(shouldFilter, inboxId, chatInboxId);
   shouldFilter = filterByTeam(shouldFilter, teamId, chatTeamId);
   shouldFilter = filterByLabel(shouldFilter, labels, chatLabels);
+  // filtro da jornada CEVICO (coluna do CRM do contato)
+  if (crmStageId) {
+    shouldFilter =
+      shouldFilter && Number(chatCrmStageId) === Number(crmStageId);
+  }
   shouldFilter = filterByUnattended(
     shouldFilter,
     conversationType,

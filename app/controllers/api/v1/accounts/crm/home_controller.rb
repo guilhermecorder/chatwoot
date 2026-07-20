@@ -5,7 +5,7 @@
 # PAINÉIS POR PESSOA (?panel=): mesmo layout, indicadores da função de cada uma:
 # - agendamento (Vaneide, padrão): espelha o CRM em coorte — leads que
 #   chegaram no período e até onde avançaram no funil.
-# - conducao (Elisangela): condução do paciente na clínica — consultas do
+# - conducao (Elizangela): condução do paciente na clínica — consultas do
 #   período, comparecimento, faltas e indicações de cirurgia (Agenda).
 # - cirurgia (Gabriela): fechamento — indicações, cirurgias agendadas/
 #   realizadas e taxa de fechamento.
@@ -35,9 +35,35 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       weekly_feedback: weekly_feedback_json,
       my_tasks: my_tasks_json,
       bug_reports: bug_reports_json,
+      # status dos números de WhatsApp (item 88 — só o gestor vê)
+      whatsapp_status: whatsapp_status_json,
       # metas do painel + fator do período + recordes (cards vivos)
       goals: goals_json
     }.merge(panel_key == 'agendamento' ? panel_data(since, until_at) : {}) # compat: campos antigos no topo
+  end
+
+  # item 88: cada número de WhatsApp com o estado evidente — precisa
+  # reautorizar? teve falha de envio nas últimas 24h?
+  def whatsapp_status_json
+    return nil unless Current.account_user.administrator?
+
+    inboxes = account.inboxes.where(channel_type: 'Channel::Whatsapp').includes(:channel)
+    return nil if inboxes.empty?
+
+    inboxes.map do |inbox|
+      channel = inbox.channel
+      reauth = channel.try(:reauthorization_required?) || false
+      failed = inbox.messages.outgoing.where(status: :failed)
+                    .where('messages.created_at >= ?', 24.hours.ago).count
+      {
+        id: inbox.id,
+        name: inbox.name,
+        phone: channel.try(:phone_number),
+        reauthorization_required: reauth,
+        failed_24h: failed,
+        ok: !reauth && failed.zero?
+      }
+    end
   end
 
   # ── popup "prioridade máxima" do Radar ──
@@ -202,7 +228,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }
   end
 
-  # ── Painel Condução (Elisangela) — a jornada dentro da clínica (Agenda) ──
+  # ── Painel Condução (Elizangela) — a jornada dentro da clínica (Agenda) ──
   def conducao_metrics(since, until_at)
     periodo = consultas.where(canceled_at: nil, due_at: since..until_at)
     compareceu = periodo.where(attendance: 'attended').count
@@ -479,8 +505,39 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     alerts = alerts.select { |a| a['user_id'].blank? || a['user_id'].to_i == Current.user.id } unless Current.account_user.administrator?
     {
       last_run_at: state['last_run_at'],
-      alerts: alerts.first(10)
+      alerts: alerts.first(10),
+      efficacy: radar_efficacy_json(state)
     }
+  end
+
+  # item 83 — EFICÁCIA do Radar: dos avisos ATENDIDOS nos últimos 30 dias,
+  # quantos pacientes AGENDARAM consulta depois do aviso (a consulta nasceu
+  # após o toque em "Atender agora", até 14 dias depois)
+  RADAR_CONVERSION_WINDOW = 14.days
+
+  def radar_efficacy_json(state) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+    log = Array(state['attended_log']).select do |entry|
+      entry['attended_at'].present? && Time.zone.parse(entry['attended_at'].to_s) >= 30.days.ago
+    rescue ArgumentError, TypeError
+      false
+    end
+    return nil if log.empty?
+
+    contact_ids = log.filter_map { |entry| entry['contact_id'].presence&.to_i }.uniq
+    consultas = account.tasks.where(task_type: 'consulta', contact_id: contact_ids)
+                       .where('created_at >= ?', 45.days.ago)
+                       .pluck(:contact_id, :created_at)
+
+    converted = log.count do |entry|
+      cid = entry['contact_id'].presence&.to_i
+      next false if cid.blank?
+
+      at = Time.zone.parse(entry['attended_at'].to_s)
+      consultas.any? { |contact_id, created| contact_id == cid && created > at && created <= at + RADAR_CONVERSION_WINDOW }
+    end
+
+    { attended_30d: log.size, converted_30d: converted,
+      rate: log.any? ? ((converted.to_f / log.size) * 100).round : 0 }
   end
 
   # ── metas + recordes dos cards do painel ──

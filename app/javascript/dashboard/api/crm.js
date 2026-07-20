@@ -178,6 +178,16 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { windows });
   }
 
+  // médicos com a agenda fechada (item 76)
+  updateClosedDoctors(closedDoctors) {
+    return axios.post(`${this.url}/settings/update_agenda`, { closed_doctors: closedDoctors });
+  }
+
+  // etiquetas + resposta de formulário das consultas do dia (item 76)
+  getAgendaDayDetails(taskIds) {
+    return axios.get(`${this.url.replace(/crm$/, 'tasks')}/agenda_details`, { params: { ids: taskIds.join(',') } });
+  }
+
   updateAgendaBlocked(blocked) {
     return axios.post(`${this.url}/settings/update_agenda`, { blocked });
   }
@@ -203,11 +213,12 @@ class CrmAPI extends ApiClient {
 
   // acessos de UM atendente (admin): áreas concedidas + menu do dia a dia.
   // Merge por usuário no servidor — nunca clobbera os demais.
-  updateAgentGrants({ userId, grants, menu }) {
+  updateAgentGrants({ userId, grants, menu, reportKeys }) {
     return axios.post(`${this.url}/settings/update_agent_grants`, {
       user_id: userId,
       grants,
       menu,
+      report_keys: reportKeys,
     });
   }
 
@@ -291,6 +302,13 @@ class CrmAPI extends ApiClient {
 
   applyRetroLabel(data) {
     return axios.post(`${this.url}/retro_labels/apply`, data);
+  }
+
+  // Radar: "Atender agora" remove o aviso da fila oficial (-1 p/ todos)
+  radarAttend(conversationId) {
+    return axios.post(`${this.url}/radar/attend`, {
+      conversation_id: conversationId,
+    });
   }
 
   // mover o card do CRM direto da conversa
@@ -571,6 +589,20 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/pages_dashboard`);
   }
 
+  // 🌪 Montador de Funis (item 60): fontes de captação por funil
+  saveFunnelSources(payload) {
+    return axios.post(`${this.url}/pages_dashboard/save_funnel_sources`, payload);
+  }
+
+  // item 95: renovar os ambientes (concluídos → coluna oculta)
+  archiveDoneTasks() {
+    return axios.post(`${this.url.replace(/crm$/, 'tasks')}/archive_done`);
+  }
+
+  archivePublishedContent() {
+    return axios.post(`${this.url}/content_items/archive_published`);
+  }
+
   addPageComment(pageId, text) {
     return axios.post(`${this.url}/pages/${pageId}/add_comment`, { text });
   }
@@ -585,11 +617,12 @@ class CrmAPI extends ApiClient {
   }
 
   createContentItem(data) {
-    return axios.post(`${this.url}/content_items`, data);
+    // envelope content_item: o "format" solto colidia com o format da rota
+    return axios.post(`${this.url}/content_items`, { content_item: data });
   }
 
   updateContentItem(id, data) {
-    return axios.put(`${this.url}/content_items/${id}`, data);
+    return axios.put(`${this.url}/content_items/${id}`, { content_item: data });
   }
 
   deleteContentItem(id) {
@@ -610,29 +643,29 @@ class CrmAPI extends ApiClient {
   }
 
   // testes arquivados (disc v2 / 4 temperamentos) + espaço de vida
-  saveAssessment(kind, scores) {
-    return axios.post(`${this.url}/people/save_assessment`, { kind, scores });
+  saveAssessment(kind, scores, answers = []) {
+    return axios.post(`${this.url}/people/save_assessment`, { kind, scores, answers });
   }
 
   saveLife(payload) {
     return axios.post(`${this.url}/people/save_life`, payload);
   }
 
-  // ── Painel de Metas ────────────────────────────────────────────────
-  getGoalPlans(month) {
-    return axios.get(`${this.url}/goal_plans`, { params: { month } });
+  // ── Painel de Metas (multi-período: period = day/week/weekend/month/quarter/year) ──
+  getGoalPlans(month, period) {
+    return axios.get(`${this.url}/goal_plans`, { params: { month, period } });
   }
 
   upsertGoalPlan(payload) {
     return axios.post(`${this.url}/goal_plans/upsert`, payload);
   }
 
-  addGoalNote(month, text, aboutUserId) {
-    return axios.post(`${this.url}/goal_plans/add_note`, { month, text, about_user_id: aboutUserId });
+  addGoalNote(month, text, aboutUserId, period) {
+    return axios.post(`${this.url}/goal_plans/add_note`, { month, text, about_user_id: aboutUserId, period });
   }
 
-  deleteGoalNote(month, noteId) {
-    return axios.post(`${this.url}/goal_plans/delete_note`, { month, note_id: noteId });
+  deleteGoalNote(month, noteId, period) {
+    return axios.post(`${this.url}/goal_plans/delete_note`, { month, note_id: noteId, period });
   }
 
   updateRoutinesTools(payload) {
@@ -678,6 +711,66 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/finance/compare`, { params: { month_a: monthA, month_b: monthB } });
   }
 
+  // ── OftalmoFácil (conexão nativa) ───────────────────────────────────
+  updateOftalmofacil(payload) {
+    return axios.post(`${this.url}/settings/update_oftalmofacil`, payload);
+  }
+
+  // ── Dashboard dos agentes de IA (só admin) ──────────────────────────
+  getAiDashboard(preset) {
+    return axios.get(`${this.url}/ai_dashboard`, { params: { preset } });
+  }
+
+  // ── Ferramentas da Academia (time lê; admin escreve) ────────────────
+  getTeamTools() {
+    return axios.get(`${this.url}/team_tools`);
+  }
+
+  createTeamTool(payload) {
+    return axios.post(`${this.url}/team_tools`, payload);
+  }
+
+  updateTeamTool(toolId, payload) {
+    return axios.patch(`${this.url}/team_tools/${toolId}`, payload);
+  }
+
+  deleteTeamTool(toolId) {
+    return axios.delete(`${this.url}/team_tools/${toolId}`);
+  }
+
+  // ── Estoque (dashboard/CRUD = área financeira; lookup/pedido = time) ─
+  getStock() {
+    return axios.get(`${this.url}/stock`);
+  }
+
+  createStockItem(payload) {
+    return axios.post(`${this.url}/stock/create_item`, payload);
+  }
+
+  updateStockItem(itemId, payload) {
+    return axios.post(`${this.url}/stock/update_item`, { item_id: itemId, ...payload });
+  }
+
+  deleteStockItem(itemId) {
+    return axios.post(`${this.url}/stock/delete_item`, { item_id: itemId });
+  }
+
+  lookupStock(q) {
+    return axios.get(`${this.url}/stock/lookup`, { params: { q } });
+  }
+
+  createStockOrder(payload) {
+    return axios.post(`${this.url}/stock/create_order`, payload);
+  }
+
+  updateStockOrder(orderId, status) {
+    return axios.post(`${this.url}/stock/update_order`, { order_id: orderId, status });
+  }
+
+  deleteStockOrder(orderId) {
+    return axios.post(`${this.url}/stock/delete_order`, { order_id: orderId });
+  }
+
   // ── Painel Estratégico (pilares do negócio, só admin) ─────────────
   getStrategyBoard() {
     return axios.get(`${this.url}/strategy`);
@@ -705,6 +798,11 @@ class CrmAPI extends ApiClient {
 
   deleteStrategyItem(itemId) {
     return axios.post(`${this.url}/strategy/delete_item`, { item_id: itemId });
+  }
+
+  // 🏭 Desenho do Processo (item 59)
+  saveStrategyProcesses(processes) {
+    return axios.post(`${this.url}/strategy/save_processes`, { processes });
   }
 
   // ── Automations ───────────────────────────────────────────────────

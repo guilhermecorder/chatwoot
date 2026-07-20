@@ -7,6 +7,8 @@ import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import FollowupBotModal from 'dashboard/routes/dashboard/crm/components/FollowupBotModal.vue';
+import DataTreatmentTools from 'dashboard/routes/dashboard/crm/components/DataTreatmentTools.vue';
+import AiAgentsDashboard from './AiAgentsDashboard.vue';
 import CrmAPI from 'dashboard/api/crm';
 
 const store = useStore();
@@ -21,7 +23,7 @@ const accountLabels = useMapGetter('labels/getLabels');
 const teamAgents = useMapGetter('agents/getAgents');
 const currentUserId = useMapGetter('getCurrentUserID');
 
-const TABS = ['robos', 'regras', 'agentes', 'programacao', 'resultados', 'tratamento'];
+const TABS = ['robos', 'regras', 'agentes', 'painel_ia', 'programacao', 'resultados', 'tratamento'];
 
 // atendente concedido só vê as abas da área dele: robôs/resultados =
 // Automações; tratamento = Tratamento de dados; o resto é de admin
@@ -894,23 +896,6 @@ const fmtLastFired = iso => {
   });
 };
 
-// ── Tratamento de dados (atalhos conectados) ──
-const TREATMENT_TOOLS = [
-  { icon: 'i-lucide-move', title: 'Mover e etiquetar em LOTE', desc: 'Filtre cards por coluna, valor, caixa de entrada ou etiqueta → mova todos de coluna e/ou adicione etiqueta (nunca duplica). Ex: COM valor em Novos Contatos → Envio de Orçamento.' },
-  { icon: 'i-lucide-tag', title: 'Etiquetar e/ou mover por conteúdo', desc: 'Se a conversa contém X, ou Y, ou Z → aplica etiqueta e/ou MOVE o card de coluna (etiqueta opcional — dá para só mover). Busca em massa no histórico.' },
-  { icon: 'i-lucide-replace', title: 'Substituir / remover etiqueta', desc: 'Troca ou limpa etiquetas em massa em toda a base.' },
-  { icon: 'i-lucide-circle-dollar-sign', title: 'Valor pelo orçamento', desc: 'Detecta valores de orçamento nas conversas e preenche o valor do card.' },
-  { icon: 'i-lucide-user-check', title: 'Unificar contatos duplicados', desc: 'Mescla contatos com mesmo telefone/e-mail (com prévia antes de aplicar).' },
-];
-
-const openTreatment = () => {
-  router.push({
-    name: 'crm_campaigns',
-    params: { accountId: accountId.value },
-    query: { tab: 'automations' },
-  });
-};
-
 // ── Réguas de mensagem (mesmo motor da Campanha WhatsApp) ──
 const automations = ref([]);
 const loadingReguas = ref(true);
@@ -1074,52 +1059,71 @@ onMounted(async () => {
 
 <template>
   <div class="bg-n-surface-1 flex flex-col h-full w-full">
-    <!-- Header -->
+    <!-- Header (item 70: medalhão + abas coloridas, mesma linguagem da
+         Campanha WhatsApp — cada aba tem a sua cor) -->
     <div class="px-6 py-4 border-b border-n-weak flex-shrink-0">
-      <h1 class="text-lg font-semibold text-n-slate-12">Automações</h1>
-      <p class="text-xs text-n-slate-10 mt-0.5">
-        Tudo que trabalha sozinho no sistema: réguas, robôs, agentes de IA, automações de coluna e tratamento de dados.
-      </p>
+      <div class="flex items-center gap-3">
+        <span class="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-sm" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
+          <span class="i-lucide-workflow text-white text-lg" />
+        </span>
+        <div>
+          <h1 class="text-lg font-semibold text-n-slate-12">Automações</h1>
+          <p class="text-xs text-n-slate-10 mt-0.5">
+            Tudo que trabalha sozinho no sistema: réguas, robôs, agentes de IA, automações de coluna e tratamento de dados.
+          </p>
+        </div>
+      </div>
       <!-- Tabs (atendente concedido só vê as abas da área dele) -->
       <div class="flex gap-1 mt-3 flex-wrap">
         <button
           v-if="visibleTabs.includes('robos')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
-          :class="activeTab === 'robos' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'robos' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'robos' ? { background: 'linear-gradient(135deg, #0F5FA6, #3B82F6)' } : {}"
           @click="activeTab = 'robos'"
-        >🤖 Robôs de follow-up</button>
+        ><span class="i-lucide-bot text-xs" />Robôs de follow-up</button>
         <button
           v-if="visibleTabs.includes('regras')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
-          :class="activeTab === 'regras' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'regras' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'regras' ? { background: 'linear-gradient(135deg, #0E7490, #22D3EE)' } : {}"
           @click="activeTab = 'regras'"
-        >🔁 Regras da caixa de entrada</button>
+        ><span class="i-lucide-repeat text-xs" />Regras da caixa de entrada</button>
         <button
           v-if="visibleTabs.includes('agentes')"
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'agentes' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :class="activeTab === 'agentes' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           :style="activeTab === 'agentes' ? { background: 'linear-gradient(135deg, #7C3AED, #5B21B6)' } : {}"
           @click="activeTab = 'agentes'"
         ><span class="i-lucide-sparkles text-xs" />Agentes de IA</button>
         <button
+          v-if="visibleTabs.includes('painel_ia')"
+          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'painel_ia' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'painel_ia' ? { background: 'linear-gradient(135deg, #9D174D, #DB2777)' } : {}"
+          @click="activeTab = 'painel_ia'"
+        ><span class="i-lucide-activity text-xs" />Painel dos agentes</button>
+        <button
           v-if="visibleTabs.includes('programacao')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
-          :class="activeTab === 'programacao' ? 'bg-yellow-500 text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'programacao' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'programacao' ? { background: 'linear-gradient(135deg, #D97706, #F59E0B)' } : {}"
           @click="activeTab = 'programacao'"
-        >⚡ Modo Programação</button>
+        ><span class="i-lucide-zap text-xs" />Modo Programação</button>
         <button
           v-if="visibleTabs.includes('resultados')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
-          :class="activeTab === 'resultados' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'resultados' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           :style="activeTab === 'resultados' ? { background: 'linear-gradient(135deg, #65A30D, #84CC16)' } : {}"
           @click="activeTab = 'resultados'"
-        >📊 Resultados</button>
+        ><span class="i-lucide-bar-chart-3 text-xs" />Resultados</button>
         <button
           v-if="visibleTabs.includes('tratamento')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors"
-          :class="activeTab === 'tratamento' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'tratamento' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'tratamento' ? { background: 'linear-gradient(135deg, #0F766E, #14B8A6)' } : {}"
           @click="activeTab = 'tratamento'"
-        >Tratamento de dados</button>
+        ><span class="i-lucide-database text-xs" />Tratamento de dados</button>
       </div>
     </div>
 
@@ -2323,29 +2327,49 @@ onMounted(async () => {
         </template>
       </div>
 
+      <!-- ══ PAINEL DOS AGENTES DE IA (item 85, só admin) ══ -->
+      <AiAgentsDashboard v-else-if="activeTab === 'painel_ia'" />
+
+      <!-- ══ TRATAMENTO DE DADOS UNIFICADO (item 70) ══ -->
       <div v-else-if="activeTab === 'tratamento'" class="max-w-3xl">
-        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <p class="text-sm text-n-slate-11">
-            Ferramentas de limpeza e enriquecimento em massa da base — rodam com prévia antes de aplicar.
-          </p>
+        <p class="text-sm text-n-slate-11 mb-4">
+          A casa de TODAS as ferramentas para tratar a base: identificação
+          tradicional (filtros, etiquetas, unificação — sempre com prévia
+          antes de aplicar) e identificação com inteligência.
+        </p>
+        <DataTreatmentTools />
+
+        <!-- extras com IA que já moram no hub (só admin: mexem no Radar e na Agenda) -->
+        <div v-if="isAdmin" class="grid sm:grid-cols-2 gap-4 mt-2 mb-6">
           <button
-            class="text-sm px-3 py-2 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 flex items-center gap-1.5 flex-shrink-0"
-            @click="openTreatment"
+            class="text-left rounded-2xl border border-n-weak bg-n-solid-2 p-4 hover:border-n-brand transition-colors flex items-start gap-3"
+            @click="showSweepModal = true"
           >
-            <span class="i-lucide-external-link text-sm" />
-            Abrir Tratamento de dados
+            <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #DC2626, #F59E0B)">
+              <span class="i-lucide-scan-search text-white text-base" />
+            </span>
+            <span>
+              <p class="text-sm font-bold text-n-slate-12 mb-1">Radar pontual</p>
+              <p class="text-xs text-n-slate-10 leading-relaxed">
+                Varredura ÚNICA por leads aguardando resposta (coluna + etiqueta +
+                período) → avisos no Meu Painel. Não fica ativa.
+              </p>
+            </span>
           </button>
-        </div>
-        <div class="grid sm:grid-cols-2 gap-4">
           <button
-            v-for="tool in TREATMENT_TOOLS"
-            :key="tool.title"
-            class="text-left rounded-2xl border-2 border-n-weak bg-n-solid-2 p-4 hover:border-n-brand transition-colors"
-            @click="openTreatment"
+            class="text-left rounded-2xl border border-n-weak bg-n-solid-2 p-4 hover:border-n-brand transition-colors flex items-start gap-3"
+            @click="showBackfillModal = true"
           >
-            <span :class="tool.icon" class="text-xl mb-2 block" style="color: #0F5FA6" />
-            <p class="text-sm font-bold text-n-slate-12 mb-1">{{ tool.title }}</p>
-            <p class="text-xs text-n-slate-10 leading-relaxed">{{ tool.desc }}</p>
+            <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
+              <span class="i-lucide-calendar-search text-white text-base" />
+            </span>
+            <span>
+              <p class="text-sm font-bold text-n-slate-12 mb-1">Preencher a Agenda com o histórico</p>
+              <p class="text-xs text-n-slate-10 leading-relaxed">
+                O Agente de Agendamento lê as confirmações antigas e registra as
+                consultas na Agenda — sem duplicar, nada vai ao paciente.
+              </p>
+            </span>
           </button>
         </div>
       </div>

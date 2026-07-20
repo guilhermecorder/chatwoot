@@ -2,6 +2,7 @@
 // Formulários CEVICO (ex: perguntas pré-operatórias): montagem das
 // perguntas, dashboard de respostas e insights de marketing com IA.
 import { ref, computed, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import CrmAPI from 'dashboard/api/crm';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import { useAlert } from 'dashboard/composables';
@@ -232,10 +233,37 @@ const generateInsights = async () => {
 
 // barra percentual por opção
 const pct = (count, total) => (total ? Math.round((count / total) * 100) : 0);
+
+// ── item 73: hub inicial — envio × respostas × conversão + retenção ──
+const convPct = f => (f.sent_count ? Math.round((f.responses_count / f.sent_count) * 100) : null);
+// retenção card a card: % de quem ABRIU que chegou em cada card
+const funnelRows = f => {
+  const fs = f.funnel_stats || {};
+  const open = fs.open || 0;
+  if (!open) return [];
+  return (f.questions || []).map(q => {
+    const reached = Math.min(fs[`q:${q.id}`] || 0, open);
+    return {
+      id: q.id,
+      label: q.type === 'message' ? `💬 ${q.label}` : q.label,
+      reached,
+      pctReached: Math.round((reached / open) * 100),
+    };
+  });
+};
+const abandonPct = f => {
+  const fs = f.funnel_stats || {};
+  if (!fs.open) return null;
+  return Math.max(0, 100 - Math.round(((fs.done || 0) / fs.open) * 100));
+};
+const retentionColor = p => (p >= 70 ? '#047857' : p >= 40 ? '#B45309' : '#B91C1C');
 </script>
 
 <template>
+  <!-- enquadramento (pedido 19/07): dashboard mais estreito e centrado —
+       cards menos esticados na horizontal, leitura mais equilibrada -->
   <div class="flex flex-col h-full overflow-y-auto p-6 bg-n-surface-1">
+    <div class="max-w-5xl mx-auto w-full flex flex-col flex-1">
     <!-- Header -->
     <div class="flex items-center gap-3 mb-6 flex-wrap">
       <div>
@@ -257,25 +285,65 @@ const pct = (count, total) => (total ? Math.round((count / total) * 100) : 0);
       </button>
     </div>
 
-    <div v-if="isLoading" class="flex justify-center py-16"><Spinner /></div>
+    <SkeletonScreen v-if="isLoading" variant="list" />
 
     <template v-else>
-      <!-- Lista de formulários -->
-      <div class="flex gap-2 flex-wrap mb-5">
+      <!-- ── Hub inicial: cada formulário com envio × respostas × conversão
+           e o gráfico de ABANDONO (retenção card a card) — item 73 ── -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         <button
           v-for="f in forms"
           :key="f.id"
-          class="flex items-center gap-2 px-3 py-2 rounded-xl border text-sm transition-colors"
+          class="rounded-2xl border p-4 text-left transition-all"
           :class="selectedFormId === f.id
-            ? 'border-n-brand bg-n-brand/10 text-n-brand font-medium'
-            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            ? 'border-n-brand bg-n-brand/5 shadow-sm'
+            : 'border-n-weak bg-n-solid-2 hover:border-n-brand/50 hover:shadow-sm'"
           @click="selectForm(f.id)"
         >
-          {{ f.name }}
-          <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-n-alpha-2">{{ f.responses_count }}</span>
-          <span v-if="!f.active" class="text-[10px] text-n-slate-9">(inativo)</span>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-sm font-bold text-n-slate-12 flex-1 min-w-0 truncate">{{ f.name }}</span>
+            <span v-if="!f.active" class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-2 text-n-slate-10 flex-shrink-0">inativo</span>
+          </div>
+          <!-- envio × respostas × % conversão -->
+          <div class="grid grid-cols-3 gap-1.5 mb-2.5">
+            <div class="rounded-lg px-2 py-1.5 text-center" style="background: rgba(15, 95, 166, 0.1)">
+              <p class="text-base font-black leading-tight" style="color: #0F5FA6">{{ f.sent_count }}</p>
+              <p class="text-[9px] text-n-slate-10">envios</p>
+            </div>
+            <div class="rounded-lg px-2 py-1.5 text-center" style="background: rgba(124, 58, 237, 0.1)">
+              <p class="text-base font-black leading-tight" style="color: #7C3AED">{{ f.responses_count }}</p>
+              <p class="text-[9px] text-n-slate-10">respostas</p>
+            </div>
+            <div class="rounded-lg px-2 py-1.5 text-center" style="background: rgba(184, 134, 11, 0.12)">
+              <p class="text-base font-black leading-tight" style="color: #B8860B">{{ convPct(f) === null ? '—' : `${convPct(f)}%` }}</p>
+              <p class="text-[9px] text-n-slate-10">conversão</p>
+            </div>
+          </div>
+          <!-- retenção card a card (mini) -->
+          <template v-if="funnelRows(f).length">
+            <div class="flex items-end gap-[2px] h-8 mb-1">
+              <div
+                v-for="row in funnelRows(f)"
+                :key="row.id"
+                class="flex-1 rounded-t-sm"
+                :style="{
+                  height: `${Math.max(row.pctReached, 4)}%`,
+                  background: retentionColor(row.pctReached),
+                  opacity: 0.85,
+                }"
+                :title="`${row.label}: ${row.pctReached}% chegaram aqui`"
+              />
+            </div>
+            <p class="text-[10px] text-n-slate-10">
+              abandono: <b :style="{ color: retentionColor(100 - (abandonPct(f) ?? 0)) }">{{ abandonPct(f) }}%</b>
+              <span class="text-n-slate-9">· de quem abre, {{ 100 - (abandonPct(f) ?? 0) }}% conclui</span>
+            </p>
+          </template>
+          <p v-else class="text-[10px] text-n-slate-9">
+            a retenção card a card começa a contar nas próximas visitas.
+          </p>
         </button>
-        <p v-if="!forms.length" class="text-sm text-n-slate-10 py-2">
+        <p v-if="!forms.length" class="text-sm text-n-slate-10 py-2 col-span-full">
           Nenhum formulário ainda — crie o primeiro e ligue nas automações de coluna (⚡ Modo Programação).
         </p>
       </div>
@@ -339,6 +407,36 @@ const pct = (count, total) => (total ? Math.round((count / total) * 100) : 0);
           </div>
         </div>
 
+        <!-- Retenção card a card: onde o paciente ABANDONA (item 73) -->
+        <div v-if="funnelRows(selectedForm).length" class="rounded-2xl border border-n-weak bg-n-solid-2 p-5 mb-8">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-2">
+            <span class="i-lucide-trending-down text-base" style="color: #B91C1C" />
+            Retenção card a card
+            <span class="text-[11px] font-normal text-n-slate-9">
+              — {{ selectedForm.funnel_stats?.open || 0 }} aberturas · {{ selectedForm.funnel_stats?.done || 0 }} concluíram
+              <b v-if="abandonPct(selectedForm) !== null"> · abandono {{ abandonPct(selectedForm) }}%</b>
+            </span>
+          </h3>
+          <div class="space-y-1.5 mt-3">
+            <div v-for="(row, ri) in funnelRows(selectedForm)" :key="row.id" class="flex items-center gap-2">
+              <span class="text-[10px] text-n-slate-9 w-5 text-right flex-shrink-0">{{ ri + 1 }}º</span>
+              <span class="text-[11px] text-n-slate-11 truncate" style="width: 200px">{{ row.label }}</span>
+              <div class="flex-1 h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
+                <div
+                  class="h-full rounded-full transition-all duration-700"
+                  :style="{ width: `${Math.max(row.pctReached, 2)}%`, background: retentionColor(row.pctReached) }"
+                />
+              </div>
+              <span class="text-[11px] font-bold w-10 text-right" :style="{ color: retentionColor(row.pctReached) }">
+                {{ row.pctReached }}%
+              </span>
+            </div>
+          </div>
+          <p class="text-[10px] text-n-slate-9 mt-2">
+            % de quem ABRIU o link que chegou em cada card — a queda entre um card e o próximo mostra onde o formulário perde gente.
+          </p>
+        </div>
+
         <!-- Insights -->
         <div v-if="summary.ai_insight" class="rounded-2xl border-2 border-purple-500/30 bg-white dark:bg-n-solid-1 p-6 mb-8 shadow-sm">
           <div class="flex items-center gap-2 mb-3">
@@ -376,12 +474,13 @@ const pct = (count, total) => (total ? Math.round((count / total) * 100) : 0);
           </div>
         </div>
 
-        <!-- Por pergunta -->
-        <div class="grid md:grid-cols-2 gap-6">
+        <!-- Por pergunta: cards mais estreitos e com mais respiro vertical -->
+        <div class="grid md:grid-cols-2 gap-5">
           <div
             v-for="q in summary.questions"
             :key="q.id"
             class="rounded-2xl border-2 border-n-weak bg-white dark:bg-n-solid-1 p-6 shadow-sm"
+            style="min-height: 15rem"
           >
             <div class="flex items-start justify-between gap-3 mb-4">
               <div>
@@ -441,6 +540,7 @@ const pct = (count, total) => (total ? Math.round((count / total) * 100) : 0);
         </div>
       </template>
     </template>
+    </div>
 
     <!-- ══ Builder modal ══ -->
     <div

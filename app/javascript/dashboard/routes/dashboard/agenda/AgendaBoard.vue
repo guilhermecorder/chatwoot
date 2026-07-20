@@ -3,7 +3,8 @@
 // Cada agendamento guarda: nome, telefone, problema (catarata, refrativa,
 // exames...), dia, horário, médico e unidade. Criado à mão ou pelo Agente
 // de Agendamento (IA) via ação de coluna do CRM.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
@@ -193,6 +194,8 @@ const VIEW_MODES = [
   { key: 'month', label: 'Mês', icon: 'i-lucide-calendar' },
   { key: 'week', label: 'Semana', icon: 'i-lucide-calendar-range' },
   { key: 'day', label: 'Dia', icon: 'i-lucide-calendar-check' },
+  // personalizado abre o calendário bonito p/ escolher a data (item 75)
+  { key: 'custom', label: 'Personalizado', icon: 'i-lucide-calendar-search' },
 ];
 
 // Unidades da clínica (agendas paralelas compartilhadas)
@@ -206,7 +209,9 @@ const PROBLEMAS = [
   'Exames', 'Consulta geral', 'Pós-operatório', 'Plástica ocular',
 ];
 
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 07h às 20h
+const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 07h às 20h (grade do DIA)
+// item 76: a SEMANA mostra só o expediente real (08h às 18h), espichada
+const WEEK_HOURS = Array.from({ length: 11 }, (_, i) => i + 8);
 
 // ── Médicos e janelas de avaliação da clínica ───────────────
 // (DOCTORS/DEFAULT_WINDOWS/slotsFor vivem em helper/cevicoAgenda.js,
@@ -337,6 +342,55 @@ const saveWindows = async () => {
   }
 };
 
+// ── item 76: FECHAR/reabrir a agenda de um médico (as janelas dele
+// somem de toda parte até reabrir; personalizar dias/horários = Editar) ──
+const closedDoctors = computed(() => crmSettings.value?.agenda_closed_doctors || []);
+const isDoctorClosed = name => closedDoctors.value.includes(name);
+const togglingDoctor = ref('');
+const toggleDoctorClosed = async name => {
+  const wasClosed = isDoctorClosed(name);
+  togglingDoctor.value = name;
+  try {
+    const next = wasClosed
+      ? closedDoctors.value.filter(x => x !== name)
+      : [...closedDoctors.value, name];
+    await CrmAPI.updateClosedDoctors(next);
+    await store.dispatch('crm/fetchSettings');
+    useAlert(wasClosed
+      ? `Agenda de ${name} reaberta!`
+      : `Agenda de ${name} fechada — as janelas somem até reabrir.`);
+  } catch {
+    useAlert('Não consegui atualizar a agenda do médico.');
+  } finally {
+    togglingDoctor.value = '';
+  }
+};
+
+// ── item 76: etiquetas + resposta de formulário na lista do dia ──
+const dayDetails = ref({});
+const formAnswersTask = ref(null); // { name, detail } → modal de leitura
+const loadDayDetails = async () => {
+  const ids = dayViewTasks.value.filter(t => t.contact_id).map(t => t.id);
+  if (!ids.length) {
+    dayDetails.value = {};
+    return;
+  }
+  try {
+    const { data } = await CrmAPI.getAgendaDayDetails(ids);
+    dayDetails.value = Object.fromEntries(data.map(d => [d.task_id, d]));
+  } catch {
+    dayDetails.value = {};
+  }
+};
+watch([viewMode, cursor, agendaMode, allTasks], () => {
+  if (viewMode.value === 'day') loadDayDetails();
+});
+const detailOf = task => dayDetails.value[task.id] || null;
+const openFormAnswers = task => {
+  const detail = detailOf(task);
+  if (detail?.form_response) formAnswersTask.value = { name: displayName(task), detail };
+};
+
 // ── Filtro de consultas ─────────────────────────────────────
 const activeUnit = computed(() =>
   view.value.startsWith('unit:') ? view.value.slice(5) : null
@@ -414,6 +468,14 @@ const step = dir => {
 };
 const goToday = () => { cursor.value = new Date(); };
 
+// item 75: HOJE com dia/mês/ano + passos de UM DIA (−dia / +dia) ao redor
+const todayFull = computed(() => format(cursor.value, 'dd/MM/yyyy'));
+const stepDay = dir => { cursor.value = addDays(cursor.value, dir); };
+const onViewMode = key => {
+  if (key === 'custom') { toggleDatePicker(); return; } // abre o calendário
+  viewMode.value = key;
+};
+
 const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
 
 const navLabel = computed(() => {
@@ -443,11 +505,18 @@ const weeks = computed(() => {
   return result;
 });
 
-// dias da semana da visão semanal
+// dias da semana da visão semanal — toggle "remover sáb/dom" (item 76)
+const hideWeekend = ref(localStorage.getItem('cevico_agenda_hide_weekend') === '1');
+const toggleWeekend = () => {
+  hideWeekend.value = !hideWeekend.value;
+  localStorage.setItem('cevico_agenda_hide_weekend', hideWeekend.value ? '1' : '0');
+};
 const weekDays = computed(() => {
   const start = startOfWeek(cursor.value, { weekStartsOn: 0 });
-  return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  return hideWeekend.value ? days.filter(d => d.getDay() !== 0 && d.getDay() !== 6) : days;
 });
+const weekGridCols = computed(() => `52px repeat(${weekDays.value.length}, 1fr)`);
 
 // visão diária: consultas agrupadas por hora
 const dayViewTasks = computed(() => dayTasks(cursor.value));
@@ -461,8 +530,8 @@ const tasksOutsideHours = computed(() =>
 // ── Blocos proporcionais ao tempo (visões semana e dia) ─────
 // 15 min = 25% de uma hora: o bloco ocupa exatamente o espaço do seu
 // tempo, deixando o espaço livre evidente para o próximo encaixe.
-const WEEK_ROW_PX = 48; // altura de 1 hora na grade semanal
-const DAY_ROW_PX = 88;  // altura de 1 hora na grade diária
+const WEEK_ROW_PX = 64; // altura de 1 hora na grade semanal (espichada — item 76)
+const DAY_ROW_PX = 112; // altura de 1 hora na grade diária (mais vertical — item 76)
 
 // posição do bloco DENTRO da célula da hora (semana)
 const weekBlockStyle = (task, idx) => {
@@ -921,7 +990,7 @@ const attendanceStages = ref({
   attended_stage_id: '', missed_stage_id: '', indicated_stage_id: '',
   surgery_done_stage_id: '', surgery_missed_stage_id: '',
 });
-// responsáveis pela conferência + prazo (consultas = Elisangela,
+// responsáveis pela conferência + prazo (consultas = Elizangela,
 // cirurgias = Gabriela — o admin escolhe); passou do prazo sem conferir →
 // tarefa automática "Concluir a conferência do dia" pra pessoa certa
 const attendanceOwners = ref({ consulta_user_id: '', cirurgia_user_id: '', deadline: '19:00' });
@@ -1087,7 +1156,41 @@ const onDropCell = (day, hour) => {
         </div>
 
         <!-- Navegação -->
-        <div class="flex items-center gap-1 sm:ml-auto">
+        <div class="flex items-center gap-1 sm:ml-auto flex-wrap">
+          <!-- 🎨 tema: botão independente, à ESQUERDA do calendário (item 75) -->
+          <button
+            v-if="isAdmin"
+            class="w-8 h-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 mr-1"
+            title="Tema do ambiente (Santorini, Flor del Mar...)"
+            @click="showThemeMenu = true"
+          >
+            <span class="i-lucide-palette text-sm" />
+          </button>
+          <!-- HOJE com a data completa + um dia pra trás / pra frente -->
+          <button
+            class="w-8 h-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:bg-n-alpha-1 text-[10px] font-bold"
+            title="Um dia para trás"
+            @click="stepDay(-1)"
+          >
+            −dia
+          </button>
+          <button
+            class="text-xs font-bold px-3 h-8 rounded-lg text-white flex items-center gap-1.5"
+            :style="{ background: theme.pill }"
+            title="Voltar para hoje"
+            @click="goToday"
+          >
+            Hoje
+            <span class="font-normal opacity-90">{{ todayFull }}</span>
+          </button>
+          <button
+            class="w-8 h-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:bg-n-alpha-1 text-[10px] font-bold"
+            title="Um dia para a frente"
+            @click="stepDay(1)"
+          >
+            +dia
+          </button>
+          <span class="w-px h-6 bg-n-weak mx-1.5" />
           <button
             class="w-8 h-8 flex items-center justify-center rounded-lg text-n-slate-10 hover:bg-n-alpha-1 i-lucide-chevron-left"
             @click="step(-1)"
@@ -1142,27 +1245,20 @@ const onDropCell = (day, hour) => {
             class="w-8 h-8 flex items-center justify-center rounded-lg text-n-slate-10 hover:bg-n-alpha-1 i-lucide-chevron-right"
             @click="step(1)"
           />
-          <button
-            class="ml-1 text-xs font-medium px-2.5 py-1.5 rounded-lg text-white"
-            :style="{ background: theme.primary }"
-            @click="goToday"
-          >
-            Hoje
-          </button>
         </div>
       </div>
 
       <!-- Linha 2: pré-definições SEMPRE alinhadas em linha (rola de lado se faltar espaço) -->
       <div class="flex items-center gap-2 overflow-x-auto pb-0.5" style="scrollbar-width: thin">
-        <!-- Visões: Mês / Semana / Dia -->
+        <!-- Visões: Mês / Semana / Dia / Personalizado (item 75) -->
         <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 flex-shrink-0">
           <button
             v-for="m in VIEW_MODES"
             :key="m.key"
             class="flex items-center gap-1.5 px-3 h-7 rounded-lg text-xs font-medium transition-colors"
-            :class="viewMode === m.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="viewMode === m.key ? { background: theme.pill } : {}"
-            @click="viewMode = m.key"
+            :class="viewMode === m.key || (m.key === 'custom' && showDatePicker) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="viewMode === m.key || (m.key === 'custom' && showDatePicker) ? { background: theme.pill } : {}"
+            @click="onViewMode(m.key)"
           >
             <span :class="m.icon" class="text-sm" />
             {{ m.label }}
@@ -1216,36 +1312,6 @@ const onDropCell = (day, hour) => {
             <span class="i-lucide-clock text-sm" />
             Janela da sala cirúrgica
           </button>
-          <!-- 🎨 tema do ambiente (admin) -->
-          <div v-if="isAdmin" class="relative">
-            <button
-              class="w-9 h-9 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
-              title="Tema do ambiente (Santorini, Flor del Mar...)"
-              @click="showThemeMenu = !showThemeMenu"
-            >
-              <span class="i-lucide-palette text-sm" />
-            </button>
-            <div
-              v-if="showThemeMenu"
-              class="absolute right-0 top-11 z-30 w-56 bg-n-solid-1 border border-n-weak rounded-xl shadow-2xl p-1.5 space-y-0.5"
-            >
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase px-2 pt-1">Tema dos ambientes</p>
-              <button
-                v-for="t in ALL_THEMES"
-                :key="t.key"
-                class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs hover:bg-n-alpha-1 disabled:opacity-50"
-                :disabled="isSavingTheme"
-                @click="setTheme(t.key)"
-              >
-                <span class="w-5 h-5 rounded-full flex-shrink-0" :style="{ background: t.primary }" />
-                <span class="flex-1">
-                  <span class="font-semibold text-n-slate-12">{{ t.emoji }} {{ t.label }}</span>
-                  <span class="block text-[10px] text-n-slate-9 leading-tight">{{ t.desc }}</span>
-                </span>
-                <span v-if="theme.key === t.key" class="i-lucide-check text-sm text-green-500" />
-              </button>
-            </div>
-          </div>
           <select
             v-model="view"
             class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
@@ -1264,15 +1330,127 @@ const onDropCell = (day, hour) => {
           </select>
         </div>
       </div>
+
+      <!-- seleção pré-configurada EM LINHA (item 76): só a agenda de um
+           médico, ou as cirurgias de um local -->
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Ver:</span>
+        <button
+          class="px-2.5 h-7 rounded-full text-[11px] font-medium border transition-colors"
+          :class="view === 'clinic' ? 'text-white border-transparent font-bold' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="view === 'clinic' ? { background: isSurgeryMode ? surgeryGrad : theme.pill, color: isSurgeryMode ? surgeryInk : '#fff' } : {}"
+          @click="view = 'clinic'"
+        >
+          {{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}
+        </button>
+        <template v-if="!isSurgeryMode">
+          <button
+            v-for="d in DOCTORS"
+            :key="'quick' + d.name"
+            class="px-2.5 h-7 rounded-full text-[11px] font-medium border transition-colors flex items-center gap-1.5"
+            :class="view === `doctor:${d.name}` ? 'text-white border-transparent font-bold' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="view === `doctor:${d.name}` ? { background: d.color } : {}"
+            @click="view = `doctor:${d.name}`"
+          >
+            <span v-if="view !== `doctor:${d.name}`" class="w-2 h-2 rounded-full" :style="{ background: d.color }" />
+            {{ d.short }}
+            <span v-if="isDoctorClosed(d.name)" class="text-[9px]">⏸</span>
+          </button>
+        </template>
+        <template v-else>
+          <button
+            v-for="loc in surgeryLocations"
+            :key="'quickloc' + loc.key"
+            class="px-2.5 h-7 rounded-full text-[11px] font-medium border transition-colors"
+            :class="view === `unit:${loc.key}` ? 'border-transparent font-bold cevico-glass cevico-surgery-ink' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="view === `unit:${loc.key}` ? { background: surgeryGrad, '--surg-text': surgeryInk } : {}"
+            @click="view = `unit:${loc.key}`"
+          >
+            {{ loc.label }}
+          </button>
+        </template>
+      </div>
       </div>
 
+      </div>
+    </div>
+
+    <!-- 📖 respostas do formulário do paciente (o médico lê antes — item 76) -->
+    <div
+      v-if="formAnswersTask"
+      class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      @click.self="formAnswersTask = null"
+    >
+      <div class="w-full max-w-lg max-h-[85vh] flex flex-col bg-n-solid-1 border border-n-weak rounded-3xl shadow-2xl overflow-hidden">
+        <div class="h-1.5 w-full flex-shrink-0" style="background: linear-gradient(90deg, #5B21B6, #7C3AED)" />
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-n-weak flex-shrink-0">
+          <span class="w-8 h-8 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
+            <span class="i-lucide-book-open-check text-white text-base" />
+          </span>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-sm font-bold text-n-slate-12 truncate">{{ formAnswersTask.name }}</h2>
+            <p class="text-[11px] text-n-slate-9">
+              {{ formAnswersTask.detail.form_response.form }}
+              · respondido em {{ new Date(formAnswersTask.detail.form_response.answered_at).toLocaleDateString('pt-BR') }}
+            </p>
+          </div>
+          <button class="i-lucide-x text-n-slate-10 hover:text-n-slate-12" @click="formAnswersTask = null" />
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-2.5">
+          <div
+            v-for="(ans, ai) in formAnswersTask.detail.form_response.answers"
+            :key="ai"
+            class="rounded-xl border border-n-weak bg-n-solid-2 px-3.5 py-2.5"
+          >
+            <p class="text-[11px] font-semibold text-n-slate-10 mb-0.5">{{ ans.label }}</p>
+            <p class="text-sm text-n-slate-12">
+              {{ Array.isArray(ans.value) ? ans.value.join(', ') : (ans.value || '—') }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🎨 POPUP do tema: salta na tela (item 75) -->
+    <div
+      v-if="showThemeMenu"
+      class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      @click.self="showThemeMenu = false"
+    >
+      <div class="cevico-theme-pop w-full max-w-md bg-n-solid-1 border border-n-weak rounded-3xl shadow-2xl p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="w-8 h-8 rounded-xl flex items-center justify-center" :style="{ background: theme.primary }">
+            <span class="i-lucide-palette text-white text-base" />
+          </span>
+          <div class="flex-1">
+            <h2 class="text-sm font-bold text-n-slate-12">Tema dos ambientes</h2>
+            <p class="text-[11px] text-n-slate-9">vale para a Agenda e as Tarefas — escolha o clima do dia</p>
+          </div>
+          <button class="i-lucide-x text-n-slate-10 hover:text-n-slate-12" @click="showThemeMenu = false" />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button
+            v-for="t in ALL_THEMES"
+            :key="t.key"
+            class="rounded-2xl border p-3 text-left transition-all hover:shadow-md disabled:opacity-50"
+            :class="theme.key === t.key ? 'border-transparent ring-2' : 'border-n-weak'"
+            :style="theme.key === t.key ? { '--tw-ring-color': t.ring } : {}"
+            :disabled="isSavingTheme"
+            @click="setTheme(t.key)"
+          >
+            <span class="block h-8 rounded-lg mb-2" :style="{ background: t.primary }" />
+            <span class="text-xs font-bold text-n-slate-12 flex items-center gap-1">
+              {{ t.emoji }} {{ t.label }}
+              <span v-if="theme.key === t.key" class="i-lucide-check text-sm text-green-500 ml-auto" />
+            </span>
+            <span class="block text-[10px] text-n-slate-9 leading-tight mt-0.5">{{ t.desc }}</span>
+          </button>
+        </div>
       </div>
     </div>
 
     <!-- Loading -->
-    <div v-if="isLoading" class="flex justify-center items-center flex-1">
-      <Spinner :size="32" class="text-n-brand" />
-    </div>
+    <SkeletonScreen v-if="isLoading" variant="calendar" />
 
     <!-- ÁREA ROLÁVEL: KPIs + ocupação + calendário (cabeçalho acima fica FIXO) -->
     <div v-else class="flex-1 min-h-0 overflow-y-auto" :style="isSurgeryMode ? { boxShadow: `inset 0 0 0 2px ${theme.key === 'cevico' ? 'rgba(56,189,248,0.3)' : theme.ring + '4D'}` } : {}">
@@ -1508,10 +1686,22 @@ const onDropCell = (day, hour) => {
     <!-- ══ VISÃO SEMANAL ══ grade horária estilo Google: horas à esquerda,
          célula vazia = 1 clique agenda, arrastar consulta = reagendar -->
     <div v-else-if="viewMode === 'week'" class="p-3 sm:p-5 max-w-[1440px] mx-auto w-full">
+      <!-- toggle "remover sáb/dom": semana útil limpa, mais espaço (item 76) -->
+      <div class="flex items-center justify-end mb-2">
+        <button
+          class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 h-7 rounded-full border transition-colors"
+          :class="hideWeekend ? 'text-white border-transparent font-bold' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="hideWeekend ? { background: theme.pill } : {}"
+          @click="toggleWeekend"
+        >
+          <span :class="hideWeekend ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="text-xs" />
+          {{ hideWeekend ? 'Sáb/dom escondidos' : 'Esconder sáb/dom' }}
+        </button>
+      </div>
       <div class="overflow-x-auto">
       <div class="min-w-[760px] border border-n-weak rounded-xl overflow-hidden bg-n-solid-1">
         <!-- Cabeçalho: dias da semana -->
-        <div class="grid bg-n-solid-2" style="grid-template-columns: 52px repeat(7, 1fr)">
+        <div class="grid bg-n-solid-2" :style="{ gridTemplateColumns: weekGridCols }">
           <div class="border-b border-n-weak" />
           <button
             v-for="day in weekDays"
@@ -1551,12 +1741,12 @@ const onDropCell = (day, hour) => {
           </button>
         </div>
 
-        <!-- Linhas de hora -->
+        <!-- Linhas de hora (08–18, espichadas — item 76) -->
         <div
-          v-for="hour in HOURS"
+          v-for="hour in WEEK_HOURS"
           :key="hour"
           class="grid"
-          style="grid-template-columns: 52px repeat(7, 1fr)"
+          :style="{ gridTemplateColumns: weekGridCols }"
         >
           <div class="text-right pr-2 pt-1 text-[11px] text-n-slate-9 font-medium border-t border-n-weak">
             {{ String(hour).padStart(2, '0') }}:00
@@ -1564,7 +1754,7 @@ const onDropCell = (day, hour) => {
           <div
             v-for="day in weekDays"
             :key="day.toISOString() + hour"
-            class="relative border-t border-l border-n-weak h-12 transition-colors"
+            class="relative border-t border-l border-n-weak h-16 transition-colors"
             :class="[
               isDayOff(day) ? 'bg-n-alpha-1' : 'cursor-pointer hover:bg-n-alpha-1',
               dragOverDay === dateKey(day) && !isDayOff(day) ? 'bg-amber-400/10' : '',
@@ -1605,9 +1795,9 @@ const onDropCell = (day, hour) => {
       </p>
     </div>
 
-    <!-- ══ VISÃO DIÁRIA ══ (largura pensada p/ tablet e notebook) -->
+    <!-- ══ VISÃO DIÁRIA ══ (mais estreita e mais alta — item 76) -->
     <div v-else class="p-3 sm:p-5">
-      <div class="max-w-4xl mx-auto">
+      <div class="max-w-3xl mx-auto">
         <!-- Fim de semana / dia fechado -->
         <div
           v-if="isWeekend(cursor)"
@@ -1798,13 +1988,13 @@ const onDropCell = (day, hour) => {
               tudo conferido ✓
             </span>
           </div>
-          <div class="space-y-1.5">
+          <div class="space-y-2.5">
               <div
                 v-for="task in dayViewTasks"
                 :key="task.id"
-                class="w-full text-left rounded-xl border-2 px-3 py-2.5 transition-colors cursor-pointer"
+                class="w-full text-left rounded-2xl border px-4 py-3 transition-colors cursor-pointer"
                 :class="task.attendance === 'missed' ? 'opacity-75' : ''"
-                :style="{ borderColor: dotColor(task) + '60', backgroundColor: dotColor(task) + '10' }"
+                :style="{ borderColor: dotColor(task) + '50', backgroundColor: dotColor(task) + '0C' }"
                 @click="openEdit(task)"
               >
                 <div class="flex items-center gap-2 flex-wrap">
@@ -1840,7 +2030,7 @@ const onDropCell = (day, hour) => {
                     Sem indicação
                   </span>
                 </div>
-                <div class="flex items-center gap-3 mt-1 text-[11px] text-n-slate-10 flex-wrap">
+                <div class="flex items-center gap-3 mt-1.5 text-[11px] text-n-slate-10 flex-wrap">
                   <span
                     v-if="!isSurgeryTask(task)"
                     class="text-[10px] font-semibold px-1.5 py-px rounded-full text-white"
@@ -1849,6 +2039,30 @@ const onDropCell = (day, hour) => {
                   <span v-if="task.phone" class="flex items-center gap-1"><span class="i-lucide-phone text-[10px]" />{{ task.phone }}</span>
                   <span v-if="task.procedure" class="flex items-center gap-1"><span class="i-lucide-eye text-[10px]" />{{ task.procedure }}</span>
                   <span v-if="task.doctor" class="flex items-center gap-1"><span class="i-lucide-stethoscope text-[10px]" />{{ task.doctor }}</span>
+                </div>
+
+                <!-- etiquetas do paciente + respostas do formulário (item 76) -->
+                <div
+                  v-if="detailOf(task) && (detailOf(task).labels.length || detailOf(task).form_response)"
+                  class="flex items-center gap-1.5 mt-1.5 flex-wrap"
+                >
+                  <span
+                    v-for="lbl in detailOf(task).labels"
+                    :key="task.id + lbl"
+                    class="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                    :style="{ background: dotColor(task) + '18', color: dotColor(task) }"
+                  >
+                    🏷 {{ lbl }}
+                  </span>
+                  <button
+                    v-if="detailOf(task).form_response"
+                    class="text-[10px] font-bold px-2.5 py-1 rounded-lg text-white hover:opacity-90"
+                    style="background: linear-gradient(135deg, #5B21B6, #7C3AED)"
+                    title="Respostas que o paciente deu no formulário — leia antes da consulta"
+                    @click.stop="openFormAnswers(task)"
+                  >
+                    📖 Ler respostas do formulário
+                  </button>
                 </div>
 
                 <!-- Conferência do dia: compareceu/faltou → indicação de cirurgia -->
@@ -2342,12 +2556,33 @@ const onDropCell = (day, hour) => {
           </div>
         </div>
         <div class="flex-1 overflow-y-auto p-5 space-y-4">
-          <!-- Legenda dos médicos -->
-          <div class="flex items-center gap-3 flex-wrap">
-            <span v-for="d in DOCTORS" :key="d.name" class="flex items-center gap-1.5 text-xs text-n-slate-11">
-              <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: d.color }" />
-              {{ d.name }}
-            </span>
+          <!-- Legenda dos médicos + FECHAR/reabrir a agenda (item 76) -->
+          <div class="space-y-1.5">
+            <div
+              v-for="d in DOCTORS"
+              :key="d.name"
+              class="flex items-center gap-2 flex-wrap rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2"
+              :class="isDoctorClosed(d.name) ? 'opacity-70' : ''"
+            >
+              <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: d.color }" />
+              <span class="text-xs font-medium text-n-slate-12" :class="isDoctorClosed(d.name) ? 'line-through' : ''">{{ d.name }}</span>
+              <span v-if="isDoctorClosed(d.name)" class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-500/12 text-red-500">agenda fechada</span>
+              <button
+                v-if="isAdmin"
+                class="ml-auto text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50"
+                :class="isDoctorClosed(d.name)
+                  ? 'text-green-600 border-green-500/40 hover:bg-green-500/10'
+                  : 'text-red-500 border-red-500/40 hover:bg-red-500/10'"
+                :disabled="togglingDoctor === d.name"
+                :title="isDoctorClosed(d.name) ? 'Reabrir a agenda deste médico' : 'Fechar a agenda deste médico (as janelas somem até reabrir; para abrir em dias/horários personalizados use o Editar)'"
+                @click="toggleDoctorClosed(d.name)"
+              >
+                {{ isDoctorClosed(d.name) ? '▶️ Reabrir agenda' : '⏸ Fechar agenda' }}
+              </button>
+            </div>
+            <p v-if="isAdmin" class="text-[10px] text-n-slate-9">
+              fechar tira o médico de toda a agenda na hora; para abrir em dias/horários personalizados, use o <b>Editar</b>.
+            </p>
           </div>
 
           <!-- ═ Visualização ═ -->
@@ -2558,5 +2793,14 @@ const onDropCell = (day, hour) => {
     inset 0 1px 0 rgba(255, 255, 255, 0.45),
     inset 0 -1px 0 rgba(2, 132, 199, 0.25),
     0 2px 8px rgba(56, 189, 248, 0.35);
+}
+
+/* popup do tema SALTA na tela (item 75) */
+.cevico-theme-pop {
+  animation: cevico-theme-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes cevico-theme-pop {
+  from { opacity: 0; transform: scale(0.86) translateY(14px); }
+  to { opacity: 1; transform: none; }
 }
 </style>

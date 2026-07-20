@@ -1,8 +1,8 @@
 // Conteúdo do ambiente PESSOAS: diagnóstico DISC v2 (28 itens — escolha +
-// escalas 0-10, mais dados), teste dos 4 TEMPERAMENTOS, Roda da Vida e a
-// ficha estratégica de hábitos/crenças (técnicas de coaching e
-// planejamento de vida). Correlação clássica: D=Colérico · I=Sanguíneo ·
-// S=Fleumático · C=Melancólico.
+// escalas 0-10, mais dados), teste dos 4 TEMPERAMENTOS (24 perguntas
+// equilibradas), Roda da Vida e a ficha estratégica de hábitos/crenças
+// (técnicas de coaching e planejamento de vida). Correlação clássica:
+// D=Colérico · I=Sanguíneo · S=Fleumático · C=Melancólico.
 
 // ── DISC v2: 16 situações de escolha + 12 afirmações em escala 0-10 ──
 export const DISC_QUESTIONS = [
@@ -169,6 +169,10 @@ export const DISC_SCALES = [
 ];
 
 // ── Teste dos 4 TEMPERAMENTOS (vida pessoal, não só trabalho) ──
+// 24 perguntas EQUILIBRADAS: cada uma tem exatamente 1 opção por
+// temperamento (Colérico=d · Sanguíneo=i · Fleumático=s · Melancólico=c),
+// cobrindo os eixos clássicos — energia social, reação emocional, ritmo,
+// relacionamentos, organização e vida interior.
 export const TEMPERAMENT_QUESTIONS = [
   {
     q: 'Numa festa em que conheço pouca gente, eu…',
@@ -276,6 +280,114 @@ export const TEMPERAMENT_QUESTIONS = [
       { dim: 'i', text: 'Prometer demais e me perder na desordem' },
       { dim: 's', text: 'Aceitar tudo calado e acumular mágoa' },
       { dim: 'c', text: 'Pessimismo e crítica dura comigo e com os outros' },
+    ],
+  },
+  {
+    q: 'Numa fila ou espera longa, eu…',
+    options: [
+      { dim: 'd', text: 'Fico impaciente e procuro um jeito de acelerar' },
+      { dim: 'i', text: 'Puxo papo com quem estiver do lado' },
+      { dim: 's', text: 'Espero numa boa — pressa não me domina' },
+      { dim: 'c', text: 'Uso o tempo pra pensar e observar tudo' },
+    ],
+  },
+  {
+    q: 'Com horários e compromissos…',
+    options: [
+      { dim: 'd', text: 'Agenda cheia: encaixo mais do que cabe' },
+      { dim: 'i', text: 'Me atraso às vezes — me empolgo no caminho' },
+      { dim: 's', text: 'Chego no horário, sem correria' },
+      { dim: 'c', text: 'Chego antes — atrasar me angustia' },
+    ],
+  },
+  {
+    q: 'Minhas amizades são…',
+    options: [
+      { dim: 'd', text: 'Parcerias: gente que caminha e constrói junto' },
+      { dim: 'i', text: 'Muitas! Faço amigo em qualquer lugar' },
+      { dim: 's', text: 'Antigas e leais — amizade de anos' },
+      { dim: 'c', text: 'Raras e profundas — poucos entram de verdade' },
+    ],
+  },
+  {
+    q: 'Quando alguém me magoa…',
+    options: [
+      { dim: 'd', text: 'Confronto na hora e depois viro a página' },
+      { dim: 'i', text: 'Perdoo rápido — quase esqueço' },
+      { dim: 's', text: 'Digo que está tudo bem (mesmo sem estar)' },
+      { dim: 'c', text: 'Perdoo, mas não esqueço' },
+    ],
+  },
+  {
+    q: 'Meu espaço (quarto, mesa, carro) costuma ser…',
+    options: [
+      { dim: 'd', text: 'Funcional: o que importa é servir ao objetivo' },
+      { dim: 'i', text: 'Uma bagunça criativa que só eu entendo' },
+      { dim: 's', text: 'Confortável, do jeitinho de sempre' },
+      { dim: 'c', text: 'Organizado: cada coisa no seu lugar' },
+    ],
+  },
+  {
+    q: 'De férias, meu estilo é…',
+    options: [
+      { dim: 'd', text: 'Roteiro intenso: aproveitar o máximo possível' },
+      { dim: 'i', text: 'Conhecer gente nova e viver histórias' },
+      { dim: 's', text: 'Descansar DE VERDADE, sem plano nenhum' },
+      { dim: 'c', text: 'Viagem planejada nos detalhes, sem surpresa' },
+    ],
+  },
+  {
+    q: 'Diante de uma injustiça…',
+    options: [
+      { dim: 'd', text: 'Enfrento na hora, custe o que custar' },
+      { dim: 'i', text: 'Falo, mobilizo, chamo atenção pro caso' },
+      { dim: 's', text: 'Me abalo, mas evito virar briga' },
+      { dim: 'c', text: 'Sofro por dentro e analiso de todos os lados' },
+    ],
+  },
+  {
+    q: 'Quando conto uma história…',
+    options: [
+      { dim: 'd', text: 'Resumo: começo, fim e o que importa' },
+      { dim: 'i', text: 'Dramatizo, enfeito e faço rir' },
+      { dim: 's', text: 'Conto com calma, se me perguntarem' },
+      { dim: 'c', text: 'Detalho com precisão — do jeito que foi' },
+    ],
+  },
+  {
+    q: 'Minha energia recarrega quando…',
+    options: [
+      { dim: 'd', text: 'Estou vencendo um desafio' },
+      { dim: 'i', text: 'Estou cercado de gente que amo' },
+      { dim: 's', text: 'Estou em casa, em paz, sem cobrança' },
+      { dim: 'c', text: 'Estou sozinho, no meu mundo' },
+    ],
+  },
+  {
+    q: 'Sobre sonhos e projetos pessoais…',
+    options: [
+      { dim: 'd', text: 'Meta ambiciosa com prazo — e vou com tudo' },
+      { dim: 'i', text: 'Tenho mil ideias e começo várias ao mesmo tempo' },
+      { dim: 's', text: 'Passos pequenos e seguros, sem me arriscar' },
+      { dim: 'c', text: 'Só começo com o plano perfeito na cabeça' },
+    ],
+  },
+  {
+    q: 'Nas discussões em família…',
+    options: [
+      { dim: 'd', text: 'Quero resolver logo e seguir em frente' },
+      { dim: 'i', text: 'Quero fazer as pazes rápido — não aguento clima ruim' },
+      { dim: 's', text: 'Cedo pra ter paz, mesmo tendo razão' },
+      { dim: 'c', text: 'Preciso entender quem errou e por quê' },
+    ],
+  },
+  {
+    q: 'O que eu mais valorizo em alguém…',
+    options: [
+      { dim: 'd', text: 'Coragem e palavra: fala e cumpre' },
+      { dim: 'i', text: 'Alegria e presença: estar junto de verdade' },
+      { dim: 's', text: 'Constância: quem fica nos dias difíceis' },
+      { dim: 'c', text: 'Profundidade: conversa que vai além do raso' },
     ],
   },
 ];

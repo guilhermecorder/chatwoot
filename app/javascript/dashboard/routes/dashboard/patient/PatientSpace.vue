@@ -4,6 +4,7 @@
 // a jornada do funil vira uma pilha de estágios com tempos e etiquetas,
 // e o Espaço do Médico é o protagonista (tudo-à-vista + anotações).
 import { ref, computed, onMounted, watch } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
@@ -116,9 +117,11 @@ const THEMES = {
     stars: false,
   },
   // sexo ainda desconhecido (começo do funil) = VERDE dopamine neutro;
-  // quando o sexo é descoberto (equipe ou Secretário), a cor muda sozinha
+  // quando o sexo é descoberto (equipe ou Secretário), a cor muda sozinha.
+  // Fonte BRANCA (pedido 19/07): tinta escura fica SÓ nos temas clarinhos
+  // de verdade (azul jovem e rosa jovem) — no verde ela sumia na parte
+  // escura do degradê.
   greenNeutral: {
-    light: true, // fundo claro → letras escuras (contraste)
     grad: 'linear-gradient(135deg, #047857 0%, #10B981 50%, #34D399 100%)',
     accent: '#059669',
     accentGrad: 'linear-gradient(135deg, #059669, #34D399)',
@@ -508,6 +511,81 @@ const applyIndication = (label, price) => {
   if (price) form.indicated_value = String(price);
 };
 
+// ── CONSULTA AUTOMÁTICA DE ESTOQUE na indicação (item 68) ──────────
+// Indicou a lente → o sistema já consulta o estoque: tem? agendar a
+// cirurgia para uma data próxima; não tem? encomendar — o PEDIDO nasce
+// vinculado ao card do paciente com o motivo.
+const stockLookup = ref({ state: 'idle', matches: [] });
+const stockOrderCreated = ref(false);
+const orderingStock = ref(false);
+let stockTimer = null;
+
+const stockQuery = computed(() => {
+  if (!noteForm.value.surgery_indicated) return '';
+  return (
+    noteForm.value.procedure_option || noteForm.value.indicated_procedure || ''
+  ).trim();
+});
+
+watch(stockQuery, q => {
+  stockOrderCreated.value = false;
+  clearTimeout(stockTimer);
+  if (!q || q.length < 3) {
+    stockLookup.value = { state: 'idle', matches: [] };
+    return;
+  }
+  stockLookup.value = { state: 'loading', matches: [] };
+  stockTimer = setTimeout(async () => {
+    try {
+      const { data: payload } = await CrmAPI.lookupStock(q);
+      stockLookup.value = { state: 'done', matches: payload.matches || [] };
+    } catch {
+      // sem acesso/sem estoque cadastrado — a caixinha simplesmente não aparece
+      stockLookup.value = { state: 'idle', matches: [] };
+    }
+  }, 400);
+});
+
+const stockAvailable = computed(() =>
+  stockLookup.value.matches.filter(m => m.available)
+);
+
+const orderStockForPatient = async () => {
+  orderingStock.value = true;
+  try {
+    // auditoria P1: se o lookup achou o item (zerado) no catálogo, o
+    // pedido nasce VINCULADO a ele — o "Recebi ✓" repõe o estoque sozinho
+    const catalogMatch = stockLookup.value.matches[0];
+    await CrmAPI.createStockOrder({
+      item_name: catalogMatch?.name || stockQuery.value,
+      stock_item_id: catalogMatch?.id || null,
+      quantity: 1,
+      reason:
+        `Indicação: ${noteForm.value.indicated_procedure || stockQuery.value}` +
+        (identity.value?.name ? ` — paciente ${identity.value.name}` : ''),
+      task_id: noteForm.value.task_id,
+      contact_id: contactId.value,
+    });
+    stockOrderCreated.value = true;
+    useAlert('Pedido criado e vinculado ao paciente. 🛒');
+  } catch {
+    useAlert('Não consegui criar o pedido de estoque.');
+  } finally {
+    orderingStock.value = false;
+  }
+};
+
+// auditoria P2: sair para a Agenda no meio da anotação descartava tudo
+// que o médico digitou — agora avisa antes
+const goToAgendaForSurgery = () => {
+  // eslint-disable-next-line no-alert
+  const ok = window.confirm(
+    'Você está no meio de uma anotação — o que não foi salvo se perde ao ir para a Agenda. Ir mesmo assim?'
+  );
+  if (!ok) return;
+  router.push(frontendURL(`accounts/${accountId.value}/agenda`));
+};
+
 const openNewNote = () => {
   editingNote.value = null;
   noteForm.value = blankForm();
@@ -730,9 +808,7 @@ watch(contactId, () => {
 <template>
   <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
     <div class="max-w-6xl mx-auto w-full p-4 sm:p-8">
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
-      </div>
+      <SkeletonScreen v-if="isLoading" variant="dashboard" />
 
       <div v-else-if="!data" class="text-center py-16">
         <p class="text-sm text-n-slate-10">
@@ -2125,6 +2201,61 @@ class="opacity-70"
                 A consulta ligada também é marcada e o card se move no funil.
               </template>
             </p>
+
+            <!-- consulta automática de ESTOQUE (item 68) -->
+            <div v-if="stockLookup.state === 'loading'" class="mt-2 flex items-center gap-2 text-[11px] text-n-slate-10">
+              <Spinner size="tiny" />
+              Consultando o estoque…
+            </div>
+            <div
+              v-else-if="stockLookup.state === 'done' && stockAvailable.length"
+              class="mt-2 rounded-lg p-2.5"
+              style="background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.3)"
+            >
+              <p class="text-[11px] font-bold" style="color: #059669">
+                ✅ Em estoque:
+                {{ stockAvailable.map(m => `${m.name}${m.specification ? ` (${m.specification})` : ''} — ${m.quantity} un.`).join(' · ') }}
+              </p>
+              <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+                <p class="text-[10px] text-n-slate-10">Dá para agendar a cirurgia para uma data próxima.</p>
+                <button
+                  type="button"
+                  class="h-7 px-2.5 rounded-lg text-[10px] font-bold text-white"
+                  style="background: #059669"
+                  @click="goToAgendaForSurgery"
+                >
+                  📅 Agendar cirurgia
+                </button>
+              </div>
+            </div>
+            <div
+              v-else-if="stockLookup.state === 'done'"
+              class="mt-2 rounded-lg p-2.5"
+              style="background: rgba(217, 119, 6, 0.1); border: 1px solid rgba(217, 119, 6, 0.3)"
+            >
+              <p class="text-[11px] font-bold" style="color: #D97706">
+                📦 Sem estoque para esta indicação.
+              </p>
+              <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+                <template v-if="stockOrderCreated">
+                  <p class="text-[10px] font-semibold" style="color: #059669">
+                    ✓ Pedido criado e vinculado ao card deste paciente — acompanhe em Financeiro → Estoque.
+                  </p>
+                </template>
+                <template v-else>
+                  <p class="text-[10px] text-n-slate-10">Encomende agora: o pedido fica vinculado ao card do paciente com o motivo.</p>
+                  <button
+                    type="button"
+                    class="h-7 px-2.5 rounded-lg text-[10px] font-bold text-white disabled:opacity-60"
+                    style="background: #D97706"
+                    :disabled="orderingStock"
+                    @click="orderStockForPatient"
+                  >
+                    {{ orderingStock ? 'Criando pedido…' : '🛒 Encomendar para este paciente' }}
+                  </button>
+                </template>
+              </div>
+            </div>
           </template>
         </div>
 

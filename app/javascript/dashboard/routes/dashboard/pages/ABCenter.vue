@@ -4,6 +4,7 @@
 // subtítulo/botão no mesmo endereço); formulários e campanhas entram nas
 // próximas rodadas, no mesmo padrão.
 import { ref, computed, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import { frontendURL } from 'dashboard/helper/URLHelper';
@@ -71,9 +72,7 @@ onMounted(load);
         </div>
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
-      </div>
+      <SkeletonScreen v-if="isLoading" variant="list" />
 
       <template v-else>
         <!-- no ar -->

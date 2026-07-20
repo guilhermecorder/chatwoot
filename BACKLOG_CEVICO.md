@@ -2643,30 +2643,75 @@ demo (appointments_booked=8 → meta batida). Deploy: junto com o item 55.
 > médios (58, 61, 62, 63, 69, 72, 73, 75, 76, 78) → grandes (57, 59, 60,
 > 64–66, 68, 70, 77).
 
-## 57. 🧲 CONSTRUTOR — painel personalizado drag-and-drop
+## 57. 🧲 CONSTRUTOR — painel personalizado drag-and-drop ✅ CONSTRUÍDO (19/07)
 Aba nova "Construtor": montar painel totalmente personalizado com QUALQUER
 elemento/indicador já existente no sistema. Drag-and-drop "com ímã"
 (snap/grade magnética), espaço já pré-configurado para ficar bonito
 (UI/UX), escolha de paleta de cores etc.
+COMO FICOU: menu novo "Construtor" (🧲, abaixo de Metas, admin E equipe;
+rota /builder). Catálogo com 10 elementos vivos (KPIs de hoje/30d, Metas
+do mês, Radar, Tarefas, Próximas consultas, Minha meta de tempo — mesmas
+fontes do Meu Painel/Painel de Metas). Grade magnética de 12 colunas:
+arrastar reordena com deslize de ímã (TransitionGroup), tamanhos P/M/G
+(3/6/12 colunas), 5 paletas (CEVICO/Dourado/Oceano/Verde vivo/Flor del
+Mar). Modo "🧲 Personalizar" liga catálogo/remoção/tamanhos; layout salvo
+por pessoa neste navegador (cevico_builder_{uid}). Sem migration.
 
-## 58. 🎯 Painel de Metas multi-período
+## 58. 🎯 Painel de Metas multi-período ✅ CONSTRUÍDO (19/07, working tree)
 Ambientes de metas: do DIA, da SEMANA, do FINAL DE SEMANA, do MÊS, do
 TRIMESTRE e do ANO — e metas de INDICADORES (% de conversão, outros).
+COMO FICOU: linha de pílulas Dia|Semana|Fim de semana|Mês|Trimestre|Ano no
+Painel de Metas, navegação ‹ Atual › por período (+ calendário no mês).
+Cada ambiente tem plano próprio (alvos, responsável, "o que é preciso",
+marcos, notas) e histórico calibrador: 14 dias / 12 semanas / 12 fins de
+semana / 12 meses / 8 trimestres / 5 anos — agregação no fuso de SP.
+3 metas de indicadores em %: agendamento (lead→consulta), comparecimento
+(agendada→realizada), conversão (consulta→cirurgia) — sempre CALCULADAS
+dos mesmos números, nunca digitadas. MÊS segue sendo a fonte oficial dos
+selos (useCevicoGoals/Meu Painel/Mentor intocados). Backend: migration
+20260719000001 (period_type + índice único novo, ADITIVA), service novo
+Crm::GoalPeriodHistoryService, controller multi-período. Rotinas &
+ferramentas (globais) só aparecem no ambiente do mês.
 
-## 59. 🏭 DESENHO DO PROCESSO (aba no Estratégico)
+## 59. 🏭 DESENHO DO PROCESSO (aba no Estratégico) ✅ CONSTRUÍDO (19/07)
+COMO FICOU: aba nova "Desenho do Processo" no Painel Estratégico (dourada,
+ao lado de Pilares). A MÁQUINA: etapas em cards numerados conectados por
+setas com o PASSE DE BASTÃO escrito em cada elo; clique = ZOOM da etapa
+(o que acontece, responsável "quem segura o bastão", o que dispara a
+próxima). Admin desenha (criar processos, adicionar/mover/excluir etapas,
+salvar); quem tem acesso ao Estratégico vê. A jornada padrão do Guilherme
+(agendamento → comparecimento → consulta → indicação ou não → fechamento
+ou não) nasce pronta. Dados em agenda_config.process_designs (sem
+migration; endpoint POST strategy/save_processes).
 Ambiente para DESCREVER cada estágio do processo e montar o plano de forma
 visual — "desenhar o processo como uma máquina": etapas, zoom em etapas,
 criação de processos, passe de bastão. Ex.: agendamento → comparecimento →
 consulta → indicação de cirurgia (ou não) → fechamento (ou não). Para o
 time todo ver e entender o processo como o Guilherme entende.
 
-## 60. 🌪️ Montador de Funis — aba própria em Conteúdos
+## 60. 🌪️ Montador de Funis — aba própria em Conteúdos ✅ CONSTRUÍDO (19/07)
 Selecionar fontes de tráfego E outras fontes de captação (médicos
 parceiros, indicação etc.).
+COMO FICOU: item novo "Montador de Funis" no submenu Conteúdos (rota
+/pages/funis, concessão pages). Cada funil mostra [📥 Fontes de captação]
+→ páginas encadeadas (visitas, % de cada elo) → 💬 WhatsApp. Catálogo de
+fontes com 5 padrões (Tráfego Meta, Tráfego Google, Orgânico, Médicos
+parceiros, Indicação de paciente) + criar fontes novas (ex.: um médico
+parceiro específico). Admin escolhe as fontes por funil e reaponta elos
+(next_page_id) na mesma tela; páginas soltas viram início de novo caminho.
+Dados em agenda_config.funnel_sources/funnel_source_catalog (sem
+migration; endpoint POST pages_dashboard/save_funnel_sources).
 
-## 61. 🧠 DISC + 4 Temperamentos — gráficos completos
+## 61. 🧠 DISC + 4 Temperamentos — gráficos completos ✅ CONSTRUÍDO (19/07, working tree)
 Um gráfico completo para o DISC e outro para os 4 Temperamentos, com opção
 de vê-los SOBREPOSTOS ou LADO A LADO.
+COMO FICOU: botões em linha "Sobrepostos | Lado a lado" no card "O mapa
+dos 4" (aba Perfil do Pessoas; aparecem quando a pessoa tem os 2 testes).
+Sobrepostos = radar único comparando (comportamento anterior, com comparar
+arquivado). Lado a lado = um gráfico COMPLETO por teste: radar próprio
+(DISC azul / Temperamentos rosa) + barras % por dimensão em ordem de
+ranking (1º, 2º…) com nome completo (D — Dominância / Sanguíneo…) e
+gradiente da dimensão. Sem migration, só TestsTab.vue.
 
 ## 62. 🛡️ Acessos — refino por seção + selecionar tudo
 Aprofundar o refino: abrir seções (ex. "Relatórios") e escolher QUAIS
@@ -2701,35 +2746,83 @@ melhor). Menu lateral de conversas: tirar tudo, deixar só o principal. No
 TOPO do Conversas: filtro por estágio da jornada (coluna do CRM) e por
 etiquetas.
 
-## 68. 📦 Financeiro — ESTOQUE + gráficos em verde
+## 68. 📦 Financeiro — ESTOQUE + gráficos em verde ✅ CONSTRUÍDO (19/07, noite 3)
 Ambiente de estoque com dashboard próprio: custo, potencial de lucro, e
 CONSULTA AUTOMÁTICA quando solicitado — ex.: indicação de lente trifocal
 config. xyz já consulta o estoque → tem? agenda cirurgia p/ data próxima;
 não tem? encomendar e abrir PEDIDO vinculado ao card do paciente (motivo).
 + Atualizar cor dos gráficos do Financeiro: VERDE como cor principal.
+COMO FICOU: aba ESTOQUE dentro do Financeiro (4ª aba) com KPIs (unidades,
+custo parado, potencial de lucro — itens sem preço de venda ficam de fora
+—, pedidos abertos), alerta âmbar de estoque mínimo, catálogo com CRUD
+(categoria, config, qtd/qtd mínima, custo, preço, fornecedor) e PEDIDOS
+com fluxo pendente → encomendado → recebido (recebido SOMA a quantidade
+no estoque) / cancelado + chip do paciente que abre o Espaço dele.
+CONSULTA AUTOMÁTICA no Espaço do Paciente: marcou "⭐ Saiu com indicação"
+e escolheu a lente → lookup em 400ms: TEM (caixa verde "Em estoque: … N
+un." + botão 📅 Agendar cirurgia → Agenda) ou NÃO TEM (caixa âmbar +
+🛒 Encomendar para este paciente → pedido com motivo "Indicação: … —
+paciente Fulano", task_id da consulta ligada + contact_id). Acessos:
+dashboard/CRUD = concessão finance; lookup/criar pedido = time logado
+(lookup NÃO expõe custo nem preço). Migration ADITIVA 20260719000005
+(cevico_stock_items + cevico_stock_orders). Gráficos do Financeiro:
+paleta dos donuts liderada por verdes e Receita virou a linha
+protagonista (verde, mais grossa) no histórico de 12 meses.
+Testado no Docker: rails runner (custo/lucro/low_stock/lookup/receber
+soma) + HTTP (admin 200; atendente lookup/pedido 200, dashboard/CRUD
+403) + visual (aba, alerta, Recebi ✓, consulta verde/âmbar no paciente).
 
-## 69. 📣 Campanha de WhatsApp — repaginada
+## 69. 📣 Campanha de WhatsApp — repaginada ✅ CONSTRUÍDO (19/07)
 Organizar ambiente, cores, botões; fluidez das seleções do "Nova
 campanha". Clarear "o que conta como conversão": ex. explícito "conversão
 desta campanha = lead sair de 'Orçamento enviado' → 'Consulta agendada'".
+COMO FICOU: header c/ medalhão verde WhatsApp + abas dopamine (Campanhas
+verde/Automações roxa/Painel azul) + botões gradiente; composer com PASSOS
+numerados (1 A mensagem azul · 2 O público roxo · 3 Conversão verde);
+seção de conversão ganhou a FRASE POR EXTENSO montada ao vivo das seleções
+("Conversão desta campanha = o lead ENTRAR na coluna X…") e, vazia, mostra
+o exemplo explícito do Orçamento enviado → Consulta agendada.
 
-## 70. 🧹 Automações = Tratamento de dados unificado
+## 70. 🧹 Automações = Tratamento de dados unificado ✅ CONSTRUÍDO (19/07, noite 3)
 Ambiente com TODAS as ferramentas para tratar o banco contextualizado ao
 sistema — identificação tradicional + IA. Aprimorar ambiente e painel.
 + Ajustar layout/design de TODAS as abas dentro de Automações.
+COMO FICOU: as 6 ferramentas saíram da Campanha WhatsApp e viraram o
+componente compartilhado DataTreatmentTools.vue, montado DENTRO de
+Automações → Tratamento de dados (funcionam ali mesmo, sem pular de
+tela). Duas seções: IDENTIFICAÇÃO TRADICIONAL (etiquetar/mover por
+conteúdo ouro, lote azul, substituir roxa, remover vermelha, unificar
+teal — cada uma com medalhão de cor própria, prévia antes de aplicar) e
+IDENTIFICAÇÃO COM INTELIGÊNCIA (valores pelo orçamento verde) + 2 cards
+só-admin que abrem os modais já existentes (Radar pontual, Preencher a
+Agenda com o histórico). Layout das abas: header com medalhão workflow
+roxo + TODAS as abas com pílula colorida própria (Robôs azul, Regras
+ciano, Agentes roxa, Programação âmbar, Resultados verde-lima,
+Tratamento teal) com ícone lucide. Na Campanha WhatsApp, a aba
+Automações ficou SÓ com as réguas + card-aviso "mudaram de casa" que
+leva direto ao hub. Sem migration. Testado no Docker: tela unificada
+renderiza, prévia de unificação roda da nova casa (0 duplicados ✓),
+card-aviso navega certo, aba Robôs intacta.
 
 ## 71. 🎬 Conteúdos/Planejamento — FIX criar peça + comemorações
 BUG: não é possível criar peça nova em NENHUMA coluna — corrigir.
 Animação de comemoração PROGRESSIVA ao mover: Copy → algo de "foco,
 ideias"; Em produção → corações; Publicado → CHUVA DE FOGUETES.
 
-## 72. 📄 Análise de Páginas — reorganizar
+## 72. 📄 Análise de Páginas — reorganizar ✅ CONSTRUÍDO (19/07)
 Visualização pré-configurada por CATEGORIA de página (captação,
 pré-consulta, pré-cirurgia, pós-operatório); lugar para seleção de
 PALAVRAS-CHAVE; analisar performance com indicadores chave, espaços bem
 aproveitados, respiros, cores — estilo CEVICO. (Elogio: "ficou muito bom".)
+COMO FICOU: pílulas de categoria no topo (cores/ícones da jornada; escolher
+uma pré-seleciona a página mais visitada da categoria); PALAVRAS-CHAVE
+novas por página (campo no bloco SEO do editor, migration ADITIVA
+20260719000002 cevico_pages.seo_keywords, entra na meta keywords pública)
+viram chips com contagem que FILTRAM a lista; página escolhida ganhou
+selo da categoria + chips 🔑 + 4 KPIs dopamine (Visitas 30d azul, Cliques
+roxo, Taxa dourado, Leram até o fim verde).
 
-## 73. 📝 Formulários — hub inicial + retenção/abandono
+## 73. 📝 Formulários — hub inicial + retenção/abandono ✅ CONSTRUÍDO (19/07)
 Sessão inicial: formulários construídos + dados gerais envio × respostas +
 % conversão de respostas por envio, POR formulário. Clique no formulário →
 dashboard organizado e visual. Se possível: gráfico de ABANDONO (retenção)
@@ -2737,19 +2830,49 @@ por card do formulário, com %.
 FIX: na explosão de transição p/ o último card, a margem da "aura de
 átomos" aparece e fica estranho → aparição do card CEVICO fluída e
 agradável, apenas transição ok.
+COMO FICOU: hub inicial = card por formulário c/ envios × respostas × %
+conversão + mini-gráfico de retenção + % de abandono; dashboard do form
+ganhou "Retenção card a card" completo (barras verde/laranja/vermelho por
+% que chegou em cada card, aberturas × concluíram). Dados novos: migration
+ADITIVA 20260719000003 (crm_forms.sent_count + funnel_stats), envio
+contado no send_form do job, aberto/concluído contados no controller
+público, beacon 1x por card no JS público (sendBeacon → POST /track,
+incremento atômico jsonb_set). FIX da aura: partículas agora se DISSOLVEM
+perto das bordas do canvas (fade por distância) em vez de cortar na linha
+reta — some a "margem" no surge. Testado por HTTP (200/204 + contadores).
 
 ## 74. ✅ Tarefas — ajustes dopamine
 Ajustar a dopamine color do painel. Donut de tarefas: aura dourada MAIS
 espalhada e REMOVER o glow do donut.
 
-## 75. 📅 Agenda de cirurgias — temas + barra de navegação
+## 75. 📅 Agenda de cirurgias — temas + barra de navegação ✅ CONSTRUÍDO (19/07)
 Tema padrão do gradiente: "cor dopamine → cor esbranquiçada". Escolha de
 tema vira POPUP que salta na tela; botão do tema em lugar independente, ao
 lado ESQUERDO do calendário. Linha de visualização: mês | semana | dia |
 personalizado (com o calendário). "HOJE" ao lado esquerdo da seleção de
 dias, com "+dia / −dia" ao redor, e mostrando junto o dia/mês/ano.
+COMO FICOU: gradiente padrão já era dopamine→branco (pedido 18/07 no
+DEFAULT_THEME); tema agora é POPUP central c/ animação "salta na tela"
+(cards de gradiente 2 colunas, ring no ativo) e o botão 🎨 mudou p/ o
+lado ESQUERDO do bloco do calendário; navegação nova: [🎨] [−dia]
+[Hoje · dd/mm/aaaa] [+dia] | [‹ período ▾ ›]; linha de visões ganhou
+"Personalizado" que abre o calendário arredondado (pílula acende enquanto
+aberto). Vale p/ Consultas E Cirurgias (mesma tela).
 
-## 76. 👨‍⚕️ Agenda dos médicos — controle + layout
+## 76. 👨‍⚕️ Agenda dos médicos — controle + layout ✅ CONSTRUÍDO (19/07)
+COMO FICOU: (1) modal Janelas → cada médico tem "⏸ Fechar agenda /
+▶️ Reabrir" (salvo em agenda_config.closed_doctors; resolveWindows filtra
+em TODO lugar — agenda, ocupação, saúde; personalizar dias/horários segue
+no Editar); (2) linha "Ver:" com botões em linha — Toda a clínica +
+médicos (cores) no trilho de consultas, Todos os locais + clínicas no de
+cirurgias; (3) semana 08h–18h espichada (célula 48→64px) + toggle
+"Esconder sáb/dom" (localStorage); (4) dia mais estreito (max-w-3xl) e
+mais alto (88→112px/h); (5) lista do dia com 🏷 etiquetas do paciente +
+botão "📖 Ler respostas do formulário" (modal roxo; endpoint novo GET
+tasks/agenda_details c/ etiquetas + última resposta por consulta);
+(6) conferência com cards mais respirados (borda 1px, raio maior,
+espaçamento 2.5). Testado no Docker ponta a ponta (fechar/reabrir médico
+persistiu e restaurou; modal de respostas abriu).
 - Janela dos médicos, ao lado de "editar": FECHAR a agenda do médico, ou
   abrir em dias/horários personalizáveis.
 - Agenda (consulta E cirurgia): seleção "pré-configurada em linha" para
@@ -2763,13 +2886,35 @@ dias, com "+dia / −dia" ao redor, e mostrando junto o dia/mês/ano.
 - "Conferência das Consultas do dia" (excelente): só espaçamento/layout
   mais claro e menos poluído.
 
-## 77. 🎓 Academia CEVICO — temas novos + ambiente Ferramentas
+## 77. 🎓 Academia CEVICO — temas novos + ambiente Ferramentas ✅ CONSTRUÍDO (19/07, noite 3)
 Atualizar assuntos com temas para corrigir gargalos do funil/jornada do
 paciente. Criar ambiente "Ferramentas": Guilherme cria ferramentas em
 texto bonito para o time.
+COMO FICOU: Academia ganhou 2 abas (Trilhas azul / Ferramentas ouro c/
+contador). TRILHAS: nova 1ª seção "Gargalos da jornada — onde o lead
+trava (e como destravar)" com 5 temas-gargalo (Lead novo que não
+responde, Orçamento que esfria, No-show, Indicação sem fechamento,
+Pós-op sem indicação), cada um com cor/ícone próprios; seções antigas
+mantidas. FERRAMENTAS: admin escreve com marcação leve (# título,
+## subtítulo, - lista, 1. passos, > citação, **negrito**, --- divisor)
+num editor com PRÉVIA ao vivo lado a lado; time lê em página bonita
+(modal com faixa navy+ouro, título serifado, subtítulos ouro, bullets
+com ponto dourado) — renderização SEGURA por blocos, sem v-html.
+Rascunho (não publicada) só o admin vê; agrupamento por categoria.
+Migration ADITIVA 20260719000006 (cevico_tools) + TeamToolsController
+(index aberto ao time logado; escrever = só admin). Testado no Docker:
+HTTP (admin CRUD 200; atendente vê só publicadas, criar = 403) +
+visual (abas, gargalos, card, leitura formatada).
+Dados de teste conta 3: ferramentas "Script de confirmação de véspera"
+e "Rascunho secreto".
 
-## 78. ⚙️ Integrações unificadas dentro de Configurações
+## 78. ⚙️ Integrações unificadas dentro de Configurações ✅ CONSTRUÍDO (19/07)
 Unificar as abas de "Integrações" e movê-las para Configurações.
+COMO FICOU: a central única (CEVICO: n8n/Meta/Google/Claude/Gemini/Sheets
++ Aplicativos do sistema) virou o 1º item DENTRO de Configurações; o item
+de topo saiu do menu e a entrada nativa duplicada ("Integrations" →
+settings_applications) foi removida — tudo em /crm/integrations, mesma
+concessão de acesso (settings).
 
 ## 79. 🏠 Meu Painel — lógica de cores de meta UNIVERSAL
 Cores de abaixo/dentro/acima da meta valendo para TODOS os ambientes
@@ -2782,11 +2927,137 @@ calendário bonito e arredondado já criado. Dashboard CRM: alinhar os dados
 para caberem perfeitamente no espaço; relacionar indicadores com a meta
 (como já feito em "novas no período").
 
-## 81. 🪞 Pessoas — AUTOCONHECIMENTO do colaborador (respondido 18/07)
+## 81. 🪞 Pessoas — AUTOCONHECIMENTO do colaborador ✅ CONSTRUÍDO (19/07, noite 3)
 Quem preenche DISC/Temperamentos passa a VER as próprias respostas e a
 análise do seu perfil (objetivo: autoconhecimento e desenvolvimento da
 equipe). Painel de GESTÃO disso para o Guilherme + cada pessoa pode
 refazer a avaliação 1x a cada 3 meses (trava de 90 dias).
+COMO FICOU: o runner agora grava as RESPOSTAS pergunta a pergunta
+(q + escolha + dimensão; escala vira "N/10") dentro do assessment
+(jsonb, sem migration). No arquivo de testes, botão "ver respostas"
+(própria pessoa + admin) abre modal com a ANÁLISE do teste (perfil
+dominante + headline + ranking com %) e a lista das respostas com selo
+colorido da dimensão. TRAVA DE 90 DIAS: backend recusa (422 com a data
+de liberação) refazer o mesmo tipo antes de 3 meses — admin bypassa;
+no front o botão vira "🔒 Refazer libera em DD/MM/AA". GESTÃO (admin):
+card sanfona "Gestão dos testes do time" no topo do Pessoas — por
+pessoa: DISC e Temperamentos com dominante colorido, data, 🔒 refaz
+DD/MM/AA ou ✅ pode refazer, nº de respostas; clique no nome abre o
+espaço da pessoa. Testado no Docker: HTTP (atendente grava 2 respostas,
+2ª tentativa 422 "libera em 17/10/2026", admin 2× 200, payload com
+answers) + visual (painel de gestão + modal de respostas).
+Dados de teste conta 3: assessments de temperamentos do Atendente
+Teste e do Guilherme (2 respostas cada).
+
+# ═══ ONDE PARAMOS — 19/07 (noite 3 — blocos grandes) ═══
+- 🎨 RODADA PRÉ-DEPLOY (teste visual do Guilherme, 6 ajustes, tudo
+  testado no Docker): (1) INTEGRAÇÃO OFTALMOFÁCIL nativa na central de
+  Integrações — card teal + modal (URL base + chave protegida, nunca
+  volta pra tela; agenda_config.oftalmofacil, endpoint
+  update_oftalmofacil só admin/settings; fluxo de dados liga quando a
+  documentação da API chegar); (2) fonte do ambiente do PACIENTE:
+  BRANCA em todos os temas — tinta escura ficou SÓ nos clarinhos de
+  verdade (azul jovem + rosa jovem); o VERDE passou a fonte branca
+  (decisão: era o que o print pedia; 1 linha p/ reverter se quiser
+  verde-preto); (3) FINANCEIRO dopamine colors — KPIs em degradê pleno
+  c/ fonte branca e ícone marca-d'água (verde/vermelho/âmbar/ouro/azul/
+  roxo/teal, negativos viram vermelho); (4) CONVERSAS enquadrado (calha
+  única px-3 nas pílulas/filtros) + ORDENAÇÃO visível "Da mais recente
+  para a mais antiga" ↔ inversa (trio nativo completo:
+  setChatSortFilter + uiSettings + refetch — provado invertendo a
+  lista); (5) CONSTRUTOR: catálogo COMPLETO em 4 seções (5 indicadores
+  de agora + 11 do dia via painel gestor [taxa de agendamento,
+  comparecimento, fechamento pós-indicação, NPS…] + 5 blocos vivos +
+  13 ATALHOS DE DASHBOARDS que navegam) + PREDEFINIÇÕES nomeadas
+  (salvar/aplicar/excluir, localStorage por pessoa); (6) FORMULÁRIOS:
+  dashboard enquadrado em max-w-5xl centrado, cards das perguntas mais
+  estreitos c/ min-height (leitura equilibrada). Dados de teste:
+  conexão OftalmoFácil salva na conta 3 + predefinição "Manhã de
+  segunda". VÍDEOS 92-94 adiados por decisão; kit CEVICO virou
+  convenção (nota antes da Rodada 3).
+- 🔍 AUDITORIA DOS 6 BLOCOS feita NA MESMA SESSÃO (relatório
+  AUDITORIA_BLOCOS_2026-07-19.md na raiz): 11 achados (2🔴 provados no
+  Estoque — duplicação no ciclo de status + escrita cross-account — 5🟡
+  4⚪) e TODOS CORRIGIDOS após o "corrige tudo" do Guilherme, com
+  re-teste completo (transições finais + with_lock, item validado na
+  conta, PATCH parcial das Ferramentas preservando campos, pedido da
+  indicação vinculado ao catálogo, confirm antes de sair da anotação,
+  N+1 dos pedidos em lote, alerta de mínimo só com min>0, sparkline no
+  fuso SP, trava 90d enxerga DISC legado, save_assessment sob trava).
+  A1 = pós-deploy: avisar que as conversões de Anúncios podem CAIR (o
+  default parou de contar "Indicação") e fixar as colunas oficiais no
+  seletor. Convenção nova registrada: REUSAR O KIT CEVICO em toda tela
+  nova (ver nota antes da Rodada 3); vídeos 92–94 adiados.
+- CONSTRUÍDOS NESTA SESSÃO (working tree, todos testados no Docker):
+  itens 68 (Estoque no Financeiro + gráficos verdes + consulta automática
+  na indicação do Espaço do Paciente), 70 (Tratamento de dados UNIFICADO
+  em Automações + abas coloridas do hub; Campanha WhatsApp ficou só com
+  réguas + card-aviso), 77 (Academia: gargalos da jornada + ambiente
+  FERRAMENTAS com editor/prévia e leitura bonita), 81 (autoconhecimento:
+  respostas gravadas + modal de leitura + trava 90 dias + gestão dos
+  testes p/ admin), 85 (Painel dos agentes de IA em Automações, fonte
+  crm_ai_usages) e 87 (Anúncios Meta repaginado + default de conversão
+  sem "indicação").
+- MIGRATIONS NOVAS (aditivas): 20260719000005 (cevico_stock_items +
+  cevico_stock_orders) e 20260719000006 (cevico_tools). Backup antes do
+  deploy, como sempre.
+- LIÇÃO NOVA: pluck com múltiplos agregados SEM ALIAS (3× SUM) gera
+  colunas homônimas "sum" e o cast mistura os tipos (decimal virava 0) —
+  sempre dar alias distinto em cada agregado.
+- FALTAM dos grandes: 64-66 (aguardam script validado do Guilherme) e
+  92-94 (vídeo — aguardam decisão de infra VPS × Bunny/Mux).
+- DADOS DE TESTE desta sessão (conta 3, podem limpar): itens/pedidos de
+  estoque, ferramentas "Script de confirmação de véspera" e "Rascunho
+  secreto", assessments de temperamentos (Atendente Teste + Guilherme),
+  50 registros semeados em crm_ai_usages.
+
+# ═══ ONDE PARAMOS — 19/07 (noite 2 — sessão de aceleração) ═══
+- CONSTRUÍDOS HOJE (working tree, todos testados no Docker): itens 57, 58,
+  59, 60, 61, 69, 72, 73, 75, 76, 78, 83, 86, 88, 95 + teste dos
+  Temperamentos c/ 24 perguntas + CHECK ✓ nos avisos do Meu Painel
+  (feedback/Radar/tarefas/WhatsApp).
+- MIGRATIONS NOVAS DA SESSÃO (todas aditivas): 20260719000001 (period_type
+  em cevico_goal_plans), 20260719000002 (seo_keywords em cevico_pages),
+  20260719000003 (sent_count + funnel_stats em crm_forms), 20260719000004
+  (archived_at em tasks + cevico_content_items).
+- AINDA A FAZER dos grandes: 68 (Estoque), 70 (Automações unificadas), 77
+  (Academia + Ferramentas), 81 (Autoconhecimento), 85 (Dashboard dos
+  agentes IA), 87 (Anúncios Meta repaginar) — cada um é um ambiente
+  inteiro, próximas sessões; 64-66 aguardam o script validado; 92-94
+  (vídeo: editor IA/player/hospedagem) PRECISAM DE DECISÃO do Guilherme
+  (custo de armazenamento/transcodificação ou serviço externo tipo
+  Bunny/Mux — não dá pra construir sem escolher o caminho).
+- Dados de teste locais desta sessão (conta 3, podem limpar): metas
+  semanais/diárias, keywords "catarata", funnel_stats do form, task 35,
+  attended_log simulado, tarefas arquivadas.
+
+# ═══ ONDE PARAMOS — 19/07 (noite) ═══
+- HOTFIX do follow-up (item 91): commit 42bba6ac1 → PR #2 MERGEADO na
+  develop (695b6517f) → build 58 VERDE. ⏳ DEPLOY PENDENTE (backup → web →
+  sidekiq → religar robôs olhando o registro de atividade). Robôs DESLIGADOS
+  até lá. Esse deploy carrega o lote 55/56 aprovado (1 migration aditiva).
+- WORKING TREE (não commitado, testado no Docker local): itens 62, 63, 67,
+  71+refinos, 74, 79, 80, 82, 84, 89 (skeleton em 17 telas), 90 + Meu
+  Painel (strip abaixo da agenda, Metas do mês roxa) + CRM sem "Filtros"
+  (pílulas Responsável/Etiqueta + ferramentas dopamine) + rake
+  cevico:fix_imported_dates (datas do lote importado — item da rodada 19/07).
+- ITEM 58 CONSTRUÍDO 19/07 (working tree): Metas multi-período + % —
+  migration nova 20260719000001 (aditiva; period_type em cevico_goal_plans).
+  Testado no Docker (6 períodos + save semanal + Meu Painel intacto).
+- ITEM 61 CONSTRUÍDO 19/07 (working tree): DISC + Temperamentos com
+  Sobrepostos | Lado a lado no Pessoas (sem migration).
+- RODADA 19/07 tarde (pedidos novos, construídos): teste dos 4
+  TEMPERAMENTOS ampliado p/ 24 perguntas equilibradas (1 opção por
+  temperamento em cada; validador rodado) + CHECK ✓ nos avisos do Meu
+  Painel (feedback da semana, Radar, tarefas esperando): a janelinha some
+  e VOLTA quando há novidade (assinatura por conteúdo: outra semana/outros
+  pacientes/outras tarefas; localStorage por pessoa).
+- PRÓXIMO DA FILA: médios (69, 72, 73, 75, 76, 78, 86, 88) → grandes (57,
+  59, 60, 64-66, 68, 70, 77, 81, 83, 85, 87, 92-95).
+- Pós-deploy c/ Guilherme: dry-run cevico:fix_imported_dates[1] na produção
+  (mostra distribuição por mês; APPLY=1 depois de conferir) + 🛡️ acessos +
+  💰 tabela de preços + 🎯 metas de julho.
+- Husky quebrado nesta máquina (npx fora do PATH) → commits com --no-verify.
 
 # ═══ 🚨 ITEM 91 — INCIDENTE do follow-up (18-19/07) + TRAVAS ═══
 
@@ -2821,10 +3092,16 @@ Botão para o board ocupar TODA a janela do navegador: só a linha de
 filtros pré-selecionados + colunas/cards. Conforto pro trabalho do dia a
 dia (não precisa ser fullscreen do navegador, é ocupar a janela toda).
 
-## 83. 📡 Radar — indicador de EFICÁCIA (conversões pós-notificação)
+## 83. 📡 Radar — indicador de EFICÁCIA (conversões pós-notificação) ✅ CONSTRUÍDO (19/07)
 O widget do Radar deve mostrar as CONVERSÕES GERADAS após o aviso do
 agente: quantas consultas a mais estamos agendando por causa dele
 (atribuição: lead avisado → agendou depois do aviso).
+COMO FICOU: selo verde "📈 N consulta(s) geradas · X%" no cabeçalho do
+widget do Radar no Meu Painel. Atribuição: dos avisos ATENDIDOS nos
+últimos 30 dias (attended_log do item 63), conta os pacientes cuja
+consulta foi CRIADA depois do toque em "Atender agora" (janela de 14
+dias). Cálculo no crm/home (payload efficacy), validado no Docker
+(cenário 2 atendidos → 1 conversão = 50%).
 
 ## 84. 📊 Funil de Tráfego — barras SIMÉTRICAS + Personalizado
 É o nosso funil mais completo, mas as barras não estão boas: centralizar
@@ -2832,22 +3109,69 @@ agente: quantas consultas a mais estamos agendando por causa dele
 o preenchimento (bonito como a barra de progresso do formulário).
 + Na linha de período: adicionar "Personalizado".
 
-## 85. 🤖 Dashboard dos AGENTES DE IA
+## 85. 🤖 Dashboard dos AGENTES DE IA ✅ CONSTRUÍDO (19/07, noite 3)
 Novo dashboard: o que os agentes (Secretário, Analista, Radar, Copywriter,
 Atendente…) estão fazendo + principais indicadores de cada um.
+COMO FICOU: aba nova "Painel dos agentes" (rosa, só admin) dentro de
+Automações + item no submenu lateral. Período Hoje/7d/30d; 4 KPIs
+(trabalhos, custo US$ estimado por tokens, agentes ligados X/12, mais
+ativo) + um CARD POR AGENTE (12): medalhão colorido, o-que-faz em uma
+linha, selo ligado/desligado (interruptor definitivo), selo "fala c/
+paciente" nos respondedores, nº de trabalhos, custo, mini-gráfico de
+barras do ritmo diário (14 dias), modelo em uso (mesma resolução do
+runtime: agente > recomendado > global) e "última atividade: há Xh /
+nunca rodou". Ordenado: ligados primeiro, mais ativos no topo. Fonte:
+crm_ai_usages (1 linha por chamada) + ai_config do crm_settings. Extras:
+feedbacks do Mentor 30d. Endpoint novo ai_dashboard (só admin), sem
+migration. FIX importante no caminho: pluck com 3 SUMs SEM ALIAS gera
+colunas homônimas "sum" e o cast mistura os tipos (custo virava 0) →
+aliases distintos resolvem. LIÇÃO p/ o repo: sempre dar alias em
+múltiplos agregados no pluck. Testado no Docker: endpoint (custos
+corretos por agente após o fix) + visual (KPIs, cards, sparkline,
+"nunca rodou"). Dados de teste conta 3: 50 crm_ai_usages semeados.
 
-## 86. 📅 Dashboard da Agenda — atalho em todos os painéis + equipe
+## 86. 📅 Dashboard da Agenda — atalho em todos os painéis + equipe ✅ CONSTRUÍDO (19/07)
 Atalho para o Dashboard da Agenda em TODOS os painéis do Meu Painel;
 liberar esse dashboard para a equipe (não só admin).
+COMO FICOU: botão azul "Dashboard da Agenda" fixo na linha do seletor de
+painéis (aparece em todos, p/ todos); backend perdeu a exigência da
+capability reports (dado operacional, sem valores financeiros) — qualquer
+pessoa logada da conta acessa.
 
-## 87. 📣 Anúncios (Meta) — repaginar
+## 87. 📣 Anúncios (Meta) — repaginar ✅ CONSTRUÍDO (19/07, noite 3)
 Ambiente importantíssimo, ainda cru: conversões não representam a
 realidade, layout desalinhado do nosso padrão. Atualizar forma de exibir,
 clareza da conversão e visual.
+COMO FICOU: (1) CONVERSÃO MAIS FIEL — o padrão de colunas de conversão
+agora EXCLUI as etapas de indicação ("%cirurgia%" sem "%indica%";
+indicação ainda não é venda e inflava o número; se a conta só tiver
+colunas com "indica", cai no padrão antigo; config manual continua
+valendo). (2) CLAREZA — frase POR EXTENSO estilo item 69, montada ao
+vivo das colunas escolhidas: "Conversão deste painel = o card do lead
+PASSAR pela coluna 'X' ou 'Y' — vale para leads que CHEGARAM pelo
+anúncio no período, mesmo que a cirurgia feche depois", com o seletor
+de colunas dopamine logo abaixo (chips verdes) e aviso "indicação ainda
+não é venda" no picker. (3) VISUAL padrão CEVICO — hero azul Meta com
+períodos embutidos, 6 KPIs com medalhão colorido (Investimento azul,
+Leads roxo, CPL ciano, Conversões verde, CAC âmbar, Receita ouro), card
+ROAS com cor pelo resultado (≥2× verde / ≥1× ouro / <1× vermelho) e
+frase "cada R$ 1 investido virou R$ X", card 🏆 CAMPEÃO DO PERÍODO,
+tabela com medalhas 🥇🥈🥉 no top 3, pílula de ROAS colorida por linha e
+skeleton no carregamento. Sem migration, endpoints mantidos. Testado no
+Docker: visual completo com o lead/conversão real da conta 3 (campeão
+"Cirurgia refrativa", R$ 5.000) e frase provando o novo default (só
+Cirurgia Agendada/Realizada, sem Indicação).
 
-## 88. 💬 Status do WhatsApp no painel do GESTOR
+## 88. 💬 Status do WhatsApp no painel do GESTOR ✅ CONSTRUÍDO (19/07)
 Painel do admin/gestor com avisos SE os números de WhatsApp estão ok ou
 não — sempre evidente. Avisos podem ser marcados com ✓ (limpar a tela).
+COMO FICOU: card no topo do Meu Painel (só admin) listando cada número
+WhatsApp Cloud: ✅ funcionando / 🔴 precisa reautorizar / ⚠️ N falhas de
+envio em 24h (mensagens outgoing status failed); verde quando tudo ok,
+vermelho quando não; ✓ usa o mecanismo de check novo (some e VOLTA sozinho
+quando o estado de qualquer número muda). Payload whatsapp_status no
+crm/home (nil p/ atendente e p/ conta sem WhatsApp — local não renderiza,
+produção sim).
 
 ## 89. 💀⚡ SKELETON "armadura do Homem de Ferro"
 Carregamento progressivo (skeleton) em vez de tela branca — vai montando
@@ -2866,6 +3190,48 @@ sólida dopamine, sem gradiente).
   HORÁRIO e, ao completar o círculo, a coluna acende verde pulsando.
   Mover card entre colunas inspirado no movimento do card do CRM.
 - **74 (Tarefas)**: aura do donut MAIS VOLUMOSA, um pouco mais densa.
+
+# ═══ RODADA 3 — pedidos 19/07 ═══
+
+> 🧰 **CONVENÇÃO DE CONSTRUÇÃO (decisão do Guilherme, 19/07): REUSAR O
+> KIT CEVICO.** Toda tela nova nasce das peças que já existem — DashKpi,
+> TileAura, skeleton, board estilo CRM, abas em pílulas coloridas,
+> KPI-cards com medalhão, frase de conversão POR EXTENSO, botões em
+> linha, prévia antes de aplicar, modal de leitura serif+ouro. Inventar
+> componente novo só quando o kit não resolve.
+
+> ⏸️ **VÍDEO (92–94) ADIADO por decisão do Guilherme em 19/07** — retomar
+> mais pra frente, quando ele decidir o caminho de infra (VPS × Bunny/Mux).
+
+## 92. 🎬 Editor de vídeo por IA
+Dentro do sistema: adicionamos referências e orientações, ele edita o
+vídeo pra nós.
+
+## 93. ▶️ Player de vídeo próprio + "delay" nas páginas
+Player estilo Russell Brunson para o site. Delay de conteúdo: vídeo na
+página e, após X minutos (parte certa do vídeo), a página "abre novas
+informações" (oferta etc.).
+
+## 94. 📦 Hospedagem de conteúdos próprios
+Hospedar nossos vídeos/conteúdos através do sistema.
+
+## 95. ✅ Tarefas/Conteúdos — renovar ambiente após 100% ✅ CONSTRUÍDO (19/07)
+5 min após concluir todas as tarefas (e no Planejamento também): mover os
+cards para uma COLUNA OCULTA e renovar o ambiente (tela limpa pro próximo
+ciclo).
+COMO FICOU: migration ADITIVA 20260719000004 (archived_at em tasks E
+cevico_content_items = a coluna oculta; os index dos dois boards excluem
+arquivados). Tarefas: no 100% aparece o chip "🧹 tela nova em 5:00"
+(contagem ao vivo) + botão "Renovar agora"; entrou tarefa nova no meio →
+cancela sozinho; renovação arquiva SÓ cards do board (consultas/cirurgias
+da Agenda nunca entram). Planejamento: mesmo ciclo quando TODAS as peças
+estão em Publicado (chip verde no header). Endpoints POST
+tasks/archive_done e content_items/archive_published. Testado no Docker:
+5 tarefas arquivadas, board renasceu limpo, 14 consultas preservadas.
+
+## Atualização do item 63 (Radar)
+Formato CARROSSEL pulsante (estilo Tarefas 100%). Botão "Atender agora":
+-1 na contagem, remove o card, passa para o próximo, até zerar.
 
 ## ⏳ Pendências de clarificação do lote (perguntar ao Guilherme)
 - **Item 66**: script validado de fechamento — Guilherme vai fornecer

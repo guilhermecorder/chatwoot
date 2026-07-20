@@ -5,30 +5,45 @@ class Api::V1::Accounts::Crm::TrafficReportsController < Api::V1::Accounts::Base
   before_action -> { require_capability(:reports) }
 
   def show
-    period = [[params[:period].to_i, 7].max, 365].min
-    since = period.days.ago.beginning_of_day
+    since, until_at, period = resolve_window
 
     render json: {
       period_days: period,
-      ads: ads_metrics(since),
-      conversations_started: conversations_started(since),
+      ads: ads_metrics(since, until_at),
+      conversations_started: conversations_started(since, until_at),
       funnel_stages: funnel_stages,
       labels: label_counts,
-      agents: agent_metrics(since)
+      agents: agent_metrics(since, until_at)
     }
   end
 
   private
 
-  def ads_metrics(since)
+  # janela do relatório: período em dias OU intervalo PERSONALIZADO (de/até)
+  def resolve_window
+    if params[:from].present?
+      since = Date.parse(params[:from]).beginning_of_day
+      until_at = params[:to].present? ? Date.parse(params[:to]).end_of_day : Time.current
+      [since, until_at, ((until_at - since) / 1.day).ceil]
+    else
+      period = [[params[:period].to_i, 7].max, 365].min
+      [period.days.ago.beginning_of_day, Time.current, period]
+    end
+  rescue Date::Error
+    period = 30
+    [period.days.ago.beginning_of_day, Time.current, period]
+  end
+
+  def ads_metrics(since, until_at)
     Crm::MetaInsightsService.new(
       account: Current.account,
-      since_date: since.to_date
+      since_date: since.to_date,
+      until_date: until_at.to_date
     ).call
   end
 
-  def conversations_started(since)
-    Current.account.conversations.where('created_at >= ?', since).count
+  def conversations_started(since, until_at)
+    Current.account.conversations.where(created_at: since..until_at).count
   end
 
   # Etapas do funil = colunas do pipeline do CRM com a contagem atual de cards
@@ -67,12 +82,12 @@ class Api::V1::Accounts::Crm::TrafficReportsController < Api::V1::Accounts::Base
   end
 
   # Por agente: tempo médio de primeira resposta no período + conversas abertas
-  def agent_metrics(since)
+  def agent_metrics(since, until_at)
     agents = Current.account.users.map { |u| [u.id, u.name] }.to_h
 
     avg_first_response = Current.account.reporting_events
                                 .where(name: 'first_response')
-                                .where('created_at >= ?', since)
+                                .where(created_at: since..until_at)
                                 .group(:user_id)
                                 .average(:value)
 

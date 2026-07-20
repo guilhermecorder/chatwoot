@@ -5,17 +5,18 @@
 #
 # Table name: cevico_content_items
 #
-#  id         :bigint           not null, primary key
-#  due_on     :date
-#  format     :string           default("post"), not null
-#  notes      :text
-#  position   :integer          default(0), not null
-#  stage      :string           default("ideia"), not null
-#  title      :string           not null
-#  created_at :datetime         not null
-#  updated_at :datetime         not null
-#  account_id :bigint           not null
-#  owner_id   :integer
+#  id          :bigint           not null, primary key
+#  archived_at :datetime
+#  due_on      :date
+#  format      :string           default("post"), not null
+#  notes       :text
+#  position    :integer          default(0), not null
+#  stage       :string           default("ideia"), not null
+#  title       :string           not null
+#  created_at  :datetime         not null
+#  updated_at  :datetime         not null
+#  account_id  :bigint           not null
+#  owner_id    :integer
 #
 # Indexes
 #

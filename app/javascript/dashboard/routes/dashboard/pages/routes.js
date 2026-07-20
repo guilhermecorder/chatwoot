@@ -3,6 +3,7 @@ import PagesHome from './PagesHome.vue';
 import PagesAnalytics from './PagesAnalytics.vue';
 import ContentBoard from './ContentBoard.vue';
 import ABCenter from './ABCenter.vue';
+import FunnelBuilder from './FunnelBuilder.vue';
 
 export default {
   routes: [
@@ -19,6 +20,13 @@ export default {
       name: 'cevico_pages_analytics',
       meta: { permissions: ['administrator', 'agent'] },
       component: PagesAnalytics,
+    },
+    {
+      // 🌪 Montador de Funis (item 60): fontes de captação → páginas → WhatsApp
+      path: frontendURL('accounts/:accountId/pages/funis'),
+      name: 'cevico_funnel_builder',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: FunnelBuilder,
     },
     {
       // Planejamento de conteúdos (workflow de marketing)

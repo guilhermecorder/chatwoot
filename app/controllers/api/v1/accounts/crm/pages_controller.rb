@@ -97,7 +97,8 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
 
   def page_params
     permitted = params.permit(:title, :slug, :category, :status, :emoji, :color, :subtitle,
-                              :body, :meta_title, :meta_description, :cta_label, :cta_url,
+                              :body, :meta_title, :meta_description, :seo_keywords,
+                              :cta_label, :cta_url,
                               :next_page_id,
                               sections: [:type, :effect, :title, :text, { items: [:title, :text] }],
                               ab_variants: [:key, :name, :title, :subtitle, :cta_label, :active])
@@ -157,6 +158,7 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
       body: page.body,
       meta_title: page.meta_title,
       meta_description: page.meta_description,
+      seo_keywords: page.seo_keywords,
       cta_label: page.cta_label,
       cta_url: page.cta_url,
       sections: page.sections || [],

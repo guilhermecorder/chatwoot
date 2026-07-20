@@ -15,10 +15,12 @@
 #  id             :bigint           not null, primary key
 #  active         :boolean          default(TRUE), not null
 #  ai_insight     :jsonb            not null
+#  funnel_stats   :jsonb            not null
 #  intro_text     :text
 #  intro_title    :string
 #  name           :string           not null
 #  questions      :jsonb            not null
+#  sent_count     :integer          default(0), not null
 #  slug           :string           not null
 #  thank_you_text :text
 #  created_at     :datetime         not null
@@ -46,6 +48,18 @@ class Crm::Form < ApplicationRecord
   before_validation :ensure_slug, on: :create
 
   QUESTION_TYPES = %w[choice multi text scale yesno message].freeze
+
+  # incremento atômico da retenção ({'open'=>n, 'q:<id>'=>n, 'done'=>n}) —
+  # SQL puro para aguentar respostas simultâneas sem perder contagem
+  def bump_funnel!(key)
+    safe = key.to_s[0, 44]
+    self.class.where(id: id).update_all( # rubocop:disable Rails/SkipsModelValidations
+      ActiveRecord::Base.sanitize_sql_array(
+        ["funnel_stats = jsonb_set(coalesce(funnel_stats, '{}'::jsonb), ARRAY[?],
+          (coalesce(funnel_stats->>?, '0')::int + 1)::text::jsonb)", safe, safe]
+      )
+    )
+  end
 
   # link público único por contato: o token assinado identifica
   # formulário + contato sem expor nenhum id
