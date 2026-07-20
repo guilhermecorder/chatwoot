@@ -2949,6 +2949,25 @@ answers) + visual (painel de gestão + modal de respostas).
 Dados de teste conta 3: assessments de temperamentos do Atendente
 Teste e do Guilherme (2 respostas cada).
 
+# ═══ 🚀 SUBIDA DO LOTE — 20/07 ~02h (STATUS AO FECHAR A SESSÃO) ═══
+- Commit 028cf2d49 (92 arquivos) → PR #3 → mergeado na develop
+  (16a589d99) → **BUILD #59 VERDE** (houve partial_outage do GitHub
+  Actions no meio — ~1h de fila — resolveu sozinho).
+- **BACKUP FEITO E VERIFICADO**: /root/backup_cevico_antes_deploy_
+  20260720_0221.sql.gz na VPS — 42M, gzip íntegro, 114 tabelas, banco
+  chatwoot_migrado c/ contacts/conversations/crm_pipelines/tasks.
+  ⚠️ LIÇÃO: o $POSTGRES_DB do container aponta pro banco 'postgres'
+  (vazio) — backup SEMPRE com `-d chatwoot_migrado` explícito.
+- **FALTA SÓ O BOTÃO**: Implantar web → Implantar sidekiq no EasyPanel
+  (7 migrations aditivas rodam sozinhas no web). Reversão: imagem
+  anterior no histórico, banco intacto.
+- PÓS-DEPLOY (ordem): conferência rápida → religar 1 robô de follow-up
+  olhando o registro (trava_* = proteção ok) → 🛡️ ACESSOS DAS
+  ATENDENTES ANTES DA CLÍNICA ABRIR (concessões nascem vazias!) →
+  💰 tabela de preços → 🎯 metas de julho → 📣 fixar colunas de
+  conversão dos Anúncios (número vai cair — é o default honesto) →
+  dry-run cevico:fix_imported_dates[1] → médicos no 🛡️ clínico.
+
 # ═══ ONDE PARAMOS — 19/07 (noite 3 — blocos grandes) ═══
 - 🎨 RODADA PRÉ-DEPLOY (teste visual do Guilherme, 6 ajustes, tudo
   testado no Docker): (1) INTEGRAÇÃO OFTALMOFÁCIL nativa na central de
@@ -3232,6 +3251,119 @@ tasks/archive_done e content_items/archive_published. Testado no Docker:
 ## Atualização do item 63 (Radar)
 Formato CARROSSEL pulsante (estilo Tarefas 100%). Botão "Atender agora":
 -1 na contagem, remove o card, passa para o próximo, até zerar.
+
+## 96. ✅ Balão da conversa DIRETO do card do Radar ✅ CONSTRUÍDO (20/07, não commitado)
+Pedido do Guilherme: o card do Radar de Oportunidades ter o ícone de
+"abrir conversa" e abrir o BALÃO (o mesmo do CRM) — a pessoa resolve dali
+mesmo, sem nem ir até Conversas.
+COMO FICOU (kit CEVICO, reusando o ConversationChatModal do CRM):
+- Card do Radar no Meu Painel ganhou o ícone 💬 (message-circle-more azul)
+  ao lado do medalhão do Espaço do Paciente — mesmo rodapé do card do CRM.
+- Ícone, clique no corpo do card E "Atender agora" abrem o BALÃO por cima
+  do Meu Painel (antes navegava pra tela de Conversas). "Atender agora"
+  mantém os ✅ e o -1.
+- Responder ou Resolver PELO balão também dá o -1 na fila e registra no
+  attended_log (eficácia do item 83 continua contando; se abrir pelo ícone
+  e só olhar, o aviso fica).
+- Backend: home_controller#with_conversation_info enriquece os avisos na
+  LEITURA (1 consulta em lote) com inbox_id/inbox_name/channel_type/status
+  — o balão mostra a caixa e o botão de templates funciona; vale até para
+  avisos antigos já salvos no estado.
+Sem migration. Testado no Docker (conta 3): balão abriu com "Teste Local ·
+Nº1" e 30 mensagens, resposta saiu, card sumiu da fila, attended_log
+registrou; caminho do "Atender agora" idem. Popup "prioridade máxima"
+(gênio da lâmpada) segue navegando — abrir balão por lá é possível se o
+Guilherme quiser (aparece em qualquer tela).
+
+## 97. ✅ PAINEL DO EMPRESÁRIO ✅ CONSTRUÍDO (20/07, não commitado)
+Pedido do Guilherme (foto do quadro da parede "Quadro do Empresário"):
+aba nova com as ferramentas de gestão e direcionamento do dono, no kit
+CEVICO, dopamine, integrada aos dados existentes.
+COMO FICOU: 3ª pílula "Painel do Empresário" (LARANJA, como o quadro
+original) no Estratégico — SÓ ADMIN (backend não trafega o quadro p/
+atendente: business=null no show + 403 no save, testado com a atendente
+teste). Reproduz o desenho por inteiro:
+- Semana do empresário: kanban A fazer→Fazendo→Feito (setas nos cards,
+  Feito risca + explosão de ✅🎉💪 via EmojiFx, "limpar feitos");
+- Continuar · Parar · Começar (blocos verde/vermelho/azul, chips);
+- Matriz de Prioridades (importância×urgência: Agendar/Fazer agora/
+  Eliminar/Delegar) e Matriz de Oportunidades (resultados×esforço:
+  Fazer primeiro/Planejar/Encaixar/Evitar) — 2×2 com eixos, chips por
+  quadrante;
+- Pessoas Estratégicas (medalhão de iniciais + porquê);
+- Objetivos do Ano / Metas Específicas / Atividades Estratégicas (5
+  numerados, medalhão acende ao preencher);
+- MÉTRICAS DA EMPRESA INTEGRADAS ao Financeiro real (GET finance preset
+  mês): faturamento, volume de vendas (lançamentos de receita), ticket
+  médio, custo mensal, lucro c/ margem, PONTO DE EQUILÍBRIO com barra
+  ("mês pago — lucrando" / "% do caminho") + FRASE POR EXTENSO verde/
+  âmbar + atalho "abrir Financeiro";
+- Principais Problemas → Solução Imediata (post-its âmbar→verde
+  levemente tortos, como na parede).
+AUTOSAVE com debounce 900ms + chip "Salvo às HH:MM". Persistência em
+agenda_config.business_board (SEM migration) via strategy_controller
+(show + save_business_board c/ sanitização e caps). Componente novo
+strategy/BusinessPanel.vue reusando DashKpi/EmojiFx/pílulas/medalhões.
+Testado no Docker conta 3: todos os blocos + autosave + releitura pós-
+reload + banco conferido + permissões. Dados de demonstração deixados
+na conta 3 (kanban 1 card, 1 continuar, 1 prioridade, Dr. Henrique,
+objetivo 1, 1 par problema→solução).
+
+## 98. 🔴 HOTFIX: Meu Painel 500 ao bater recorde ✅ CORRIGIDO (20/07, não commitado — SUBIR URGENTE)
+Bug DO LOTE EM PRODUÇÃO (item 53, Painel de Metas): records_json mutava
+o agenda_config em memória (cfg['panel_records'] ||= {} + escrita no
+hash do atributo) e chamava settings.with_lock logo depois — Rails
+recusa lock com atributo sujo ("Locking a record with unpersisted
+changes") → o crm/home devolve 500 na PRIMEIRA vez que qualquer métrica
+do painel bate recorde. Com panel_records nascendo vazio no deploy de
+20/07, qualquer número > 0 é recorde ⇒ Meu Painel quebra em produção
+conforme o dia anda. FIX: deep_dup do hash antes de mexer (o registro
+fica limpo; a gravação continua sob trava relendo fresco). Reproduzido
+e corrigido no Docker (500 → 200 na mesma tela). PRIORIDADE MÁXIMA no
+próximo push.
+
+## 99. ✅ Tarefas automáticas COM RESPONSÁVEL por coluna do CRM ✅ CONSTRUÍDO (20/07, não commitado)
+Pedido 20/07 (produção): tarefas dos robôs nasciam "sem responsável" —
+cada menina cuida de colunas do CRM e precisa receber o aviso no nome
+dela. COMO FICOU:
+- Config: modal da coluna (Editar Kanban → engrenagem → Configurações)
+  ganhou "👤 Responsável pelas tarefas desta coluna" (select do time;
+  stage.settings.task_owner_id; merge preserva main_inbox_ids).
+- Crm::TaskOwner.resolve: coluna atual do paciente → dona; fallback
+  responsáveis da conferência (attendance_owners consulta/cirurgia);
+  nada configurado → sem dono (como antes).
+- Aplicado nos 3 pontos: Crm::AppointmentRecorder (criar + reagendar
+  sem roubar dono manual), CrmAutomationFireJob "⚠️ Confirmar consulta"
+  e Atendente Instagram (tarefa de revisão). Conferência já atribuía.
+- Aviso dourado do Meu Painel já filtra por assignee ⇒ notificação cai
+  no painel da responsável; TasksBoard já mostra/edita responsável.
+- BACKFILL: bundle exec rails "cevico:assign_tasks[1]" (dry-run mostra
+  a distribuição por pessoa; APPLY=1 grava; só tarefas abertas sem dono).
+  ORDEM PÓS-DEPLOY: 1º configurar os responsáveis nas colunas, 2º rodar.
+Testado Docker: resolve por coluna ("Atendente Teste"), fallback
+conferência, task do Secretário nasceu com dona certa, rake dry-run +
+APPLY, modal salvou e preservou caixas.
+
+## 100. ✅ Conversas: filtros EVIDENTES que se recolhem ✅ CONSTRUÍDO (20/07, não commitado)
+Pedido 20/07: mostrar todas as opções; depois de escolher, recolher e
+deixar evidente só o selecionado. Estágios e etiquetas viraram CHIPS
+com bolinha colorida (todos à vista, max-h c/ scroll); ao escolher,
+recolhe numa pílula única na cor do estágio/etiqueta com ✕ (clique =
+trocar/limpar). Ordenação virou 2 botões sempre visíveis ("↓ Recentes
+primeiro" | "↑ Antigas primeiro", ativo destacado) no lugar do select.
+"Não lidas no topo" mantido. ChatList.vue; lógica de filtro intocada.
+
+## 101. ✅ Números de WhatsApp MINI c/ STATUS DA CONTA ✅ CONSTRUÍDO (20/07, não commitado)
+Pedido 20/07: resumo pequenininho e discreto, e sobre "status da conta"
+(não "funcionando"). Faixa de UMA linha no Meu Painel (admin): bolinha
+por número colorida pela QUALIDADE da conta na Meta (verde saudável /
+âmbar atenção / vermelho baixa-sinalizada / cinza indisponível) + nome
+verificado + "limite N/dia" (messaging_limit_tier) + falhas 24h só se
+houver + "precisa reautorizar" em vermelho. Backend: whatsapp_status_json
+enriquecido c/ Whatsapp::HealthService NATIVO (Meta Graph) em cache de
+10 min por número (falha tb cacheada — não trava o painel; canal fake
+local caiu no fallback certinho). Detalhes completos seguem em
+Relatórios → Saúde do WhatsApp.
 
 ## ⏳ Pendências de clarificação do lote (perguntar ao Guilherme)
 - **Item 66**: script validado de fechamento — Guilherme vai fornecer

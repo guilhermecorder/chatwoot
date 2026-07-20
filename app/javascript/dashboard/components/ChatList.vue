@@ -182,13 +182,13 @@ const journeyStages = computed(() =>
 const journeyLabels = computed(
   () => store.getters['labels/getLabels'] || []
 );
-const hasJourneyFilter = computed(
-  () => Boolean(journeyStageId.value || journeyLabel.value)
+// pílula recolhida mostra o nome/cor do que foi escolhido (pedido 20/07)
+const selectedJourneyStage = computed(
+  () => journeyStages.value.find(s => s.id === journeyStageId.value) || null
 );
-const clearJourneyFilters = () => {
-  journeyStageId.value = null;
-  journeyLabel.value = null;
-};
+const selectedJourneyLabel = computed(
+  () => journeyLabels.value.find(l => l.title === journeyLabel.value) || null
+);
 onMounted(() => {
   if (!crmPipelines.value.length) store.dispatch('crm/fetchPipelines');
   if (!journeyLabels.value.length) store.dispatch('labels/get');
@@ -1131,74 +1131,111 @@ watch(conversationFilters, (newVal, oldVal) => {
       @close="onCloseDeleteFoldersModal"
     />
 
-    <!-- CEVICO 18/07: filtros da JORNADA (estágio do CRM + etiqueta),
-         no lugar das abas Minhas/Não atribuídas/Todos -->
+    <!-- CEVICO 20/07: filtros da JORNADA em BOTÕES EM LINHA — as opções
+         ficam todas EVIDENTES; depois de escolher, recolhem e sobra só a
+         pílula do que está selecionado (clique nela para trocar/limpar) -->
     <div
       v-if="!hasAppliedFiltersOrActiveFolders"
-      class="flex items-center gap-1.5 mx-3 mt-1.5 mb-0.5"
+      class="mx-3 mt-1.5 mb-0.5 space-y-1"
     >
-      <select
-        v-model="journeyStageId"
-        class="flex-1 min-w-0 h-7 rounded-full border px-2.5 text-[11px] font-medium transition-colors cursor-pointer"
-        :class="journeyStageId
-          ? 'border-n-brand/40 bg-n-brand/10 text-n-brand'
-          : 'border-n-weak bg-n-solid-1 text-n-slate-11'"
-      >
-        <option :value="null">🧭 Estágio: todos</option>
-        <option v-for="s in journeyStages" :key="s.id" :value="s.id">
-          {{ s.name }}
-        </option>
-      </select>
-      <select
-        v-model="journeyLabel"
-        class="flex-1 min-w-0 h-7 rounded-full border px-2.5 text-[11px] font-medium transition-colors cursor-pointer"
-        :class="journeyLabel
-          ? 'border-n-brand/40 bg-n-brand/10 text-n-brand'
-          : 'border-n-weak bg-n-solid-1 text-n-slate-11'"
-      >
-        <option :value="null">🏷️ Etiqueta: todas</option>
-        <option v-for="lb in journeyLabels" :key="lb.id" :value="lb.title">
-          {{ lb.title }}
-        </option>
-      </select>
-      <button
-        v-if="hasJourneyFilter"
-        class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-n-slate-10 hover:bg-n-alpha-1 hover:text-n-slate-12 transition-colors"
-        title="Limpar filtros da jornada"
-        @click="clearJourneyFilters"
-      >
-        <span class="i-lucide-x text-xs" />
-      </button>
-    </div>
-
-    <!-- Toggle "não lidas no topo" + ORDENAÇÃO (pedido 19/07) na mesma linha -->
-    <div
-      v-if="!hasAppliedFiltersOrActiveFolders"
-      class="flex items-center gap-1.5 mx-3 mt-1 mb-0.5"
-    >
-      <button
-        class="flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition-colors flex-shrink-0"
-        :class="isUnreadFirst
-          ? 'bg-n-brand/10 text-n-brand'
-          : 'text-n-slate-11 hover:bg-n-alpha-1'"
-        @click="toggleUnreadFirst"
-      >
-        <span
-          class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0"
-          :class="isUnreadFirst ? 'bg-n-brand border-n-brand' : 'border-n-slate-8'"
+      <!-- Estágio da jornada -->
+      <div v-if="!journeyStageId" class="flex items-start gap-1.5">
+        <span class="text-[10px] flex-shrink-0 mt-1" title="Estágio da jornada (CRM)">🧭</span>
+        <div class="flex flex-wrap gap-1 max-h-16 overflow-y-auto min-w-0" style="scrollbar-width: thin;">
+          <button
+            v-for="s in journeyStages"
+            :key="s.id"
+            class="inline-flex items-center gap-1 px-1.5 h-5 rounded-full border border-n-weak text-[10px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
+            :title="`Ver só as conversas de: ${s.name}`"
+            @click="journeyStageId = s.id"
+          >
+            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: s.color || '#94A3B8' }" />
+            {{ s.name }}
+          </button>
+        </div>
+      </div>
+      <div v-else class="flex items-center gap-1.5">
+        <span class="text-[10px] flex-shrink-0">🧭</span>
+        <button
+          class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
+          :style="{ background: selectedJourneyStage?.color || '#2563EB' }"
+          title="Clique para trocar de estágio"
+          @click="journeyStageId = null"
         >
-          <span v-if="isUnreadFirst" class="i-lucide-check text-white text-[10px]" />
-        </span>
-        {{ $t('CHAT_LIST.UNREAD_FIRST') }}
-      </button>
-      <select
-        v-model="journeyOrder"
-        class="flex-1 min-w-0 h-7 rounded-full border px-2 text-[11px] font-medium transition-colors cursor-pointer border-n-weak bg-n-solid-1 text-n-slate-11"
-        title="Ordem da lista de conversas"
-      >
-        <option value="last_activity_at_desc">↕️ Da mais recente para a mais antiga</option>
-        <option value="last_activity_at_asc">↕️ Da mais antiga para a mais recente</option>
-      </select>
+          {{ selectedJourneyStage?.name || 'Estágio' }}
+          <span class="i-lucide-x text-[10px]" />
+        </button>
+      </div>
+
+      <!-- Etiqueta -->
+      <div v-if="!journeyLabel" class="flex items-start gap-1.5">
+        <span class="text-[10px] flex-shrink-0 mt-1" title="Etiqueta">🏷️</span>
+        <div class="flex flex-wrap gap-1 max-h-16 overflow-y-auto min-w-0" style="scrollbar-width: thin;">
+          <button
+            v-for="lb in journeyLabels"
+            :key="lb.id"
+            class="inline-flex items-center gap-1 px-1.5 h-5 rounded-full border border-n-weak text-[10px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
+            :title="`Ver só as conversas com a etiqueta: ${lb.title}`"
+            @click="journeyLabel = lb.title"
+          >
+            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: lb.color || '#94A3B8' }" />
+            {{ lb.title }}
+          </button>
+        </div>
+      </div>
+      <div v-else class="flex items-center gap-1.5">
+        <span class="text-[10px] flex-shrink-0">🏷️</span>
+        <button
+          class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
+          :style="{ background: selectedJourneyLabel?.color || '#2563EB' }"
+          title="Clique para trocar de etiqueta"
+          @click="journeyLabel = null"
+        >
+          {{ journeyLabel }}
+          <span class="i-lucide-x text-[10px]" />
+        </button>
+      </div>
+
+      <!-- Não lidas no topo + ordenação (2 opções sempre à vista) -->
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <button
+          class="flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition-colors flex-shrink-0"
+          :class="isUnreadFirst
+            ? 'bg-n-brand/10 text-n-brand'
+            : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          @click="toggleUnreadFirst"
+        >
+          <span
+            class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0"
+            :class="isUnreadFirst ? 'bg-n-brand border-n-brand' : 'border-n-slate-8'"
+          >
+            <span v-if="isUnreadFirst" class="i-lucide-check text-white text-[10px]" />
+          </span>
+          {{ $t('CHAT_LIST.UNREAD_FIRST') }}
+        </button>
+        <div class="flex items-center gap-1 ml-auto">
+          <button
+            class="inline-flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-medium border transition-colors"
+            :class="journeyOrder === 'last_activity_at_desc'
+              ? 'border-n-brand bg-n-brand/10 text-n-brand font-bold'
+              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            title="Da mais recente para a mais antiga"
+            @click="journeyOrder = 'last_activity_at_desc'"
+          >
+            <span class="i-lucide-arrow-down text-[10px]" /> Recentes primeiro
+          </button>
+          <button
+            class="inline-flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-medium border transition-colors"
+            :class="journeyOrder === 'last_activity_at_asc'
+              ? 'border-n-brand bg-n-brand/10 text-n-brand font-bold'
+              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            title="Da mais antiga para a mais recente"
+            @click="journeyOrder = 'last_activity_at_asc'"
+          >
+            <span class="i-lucide-arrow-up text-[10px]" /> Antigas primeiro
+          </button>
+        </div>
+      </div>
     </div>
 
     <p

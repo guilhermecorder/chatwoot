@@ -46,10 +46,14 @@ class Api::V1::Accounts::Crm::StagesController < Api::V1::Accounts::BaseControll
 
   def stage_params
     # settings.main_inbox_ids = caixas de entrada PRINCIPAIS da coluna
-    permitted = params.require(:stage).permit(:name, :color, :position, :description, settings: { main_inbox_ids: [] })
+    # settings.task_owner_id = quem cuida da coluna (tarefas automáticas
+    # de pacientes daqui nascem no nome dela — pedido 20/07)
+    permitted = params.require(:stage).permit(:name, :color, :position, :description,
+                                              settings: [:task_owner_id, { main_inbox_ids: [] }])
     if permitted[:settings]
       permitted[:settings] = (@stage&.settings || {}).merge(
-        'main_inbox_ids' => Array(permitted[:settings][:main_inbox_ids]).map(&:to_i).reject(&:zero?)
+        'main_inbox_ids' => Array(permitted[:settings][:main_inbox_ids]).map(&:to_i).reject(&:zero?),
+        'task_owner_id' => permitted[:settings][:task_owner_id].presence&.to_i
       )
     end
     permitted
@@ -57,6 +61,7 @@ class Api::V1::Accounts::Crm::StagesController < Api::V1::Accounts::BaseControll
 
   def stage_json(s)
     { id: s.id, name: s.name, color: s.color, position: s.position, pipeline_id: s.pipeline_id, description: s.description,
-      main_inbox_ids: Array(s.settings&.[]('main_inbox_ids')).map(&:to_i) }
+      main_inbox_ids: Array(s.settings&.[]('main_inbox_ids')).map(&:to_i),
+      task_owner_id: s.settings&.[]('task_owner_id') }
   end
 end

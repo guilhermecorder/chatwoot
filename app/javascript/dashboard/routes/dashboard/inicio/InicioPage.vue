@@ -12,6 +12,7 @@ import SkeletonPiece from 'dashboard/components-next/cevico/SkeletonPiece.vue';
 import EmojiFx from 'dashboard/components-next/cevico/EmojiFx.vue';
 import TileAura from 'dashboard/components-next/radar/TileAura.vue';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
+import ConversationChatModal from 'dashboard/routes/dashboard/crm/components/ConversationChatModal.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import {
@@ -461,6 +462,35 @@ watch(radarAlerts, list => { radarQueue.value = [...(list || [])]; }, { immediat
 const radarFront = computed(() => radarQueue.value[0] || null);
 const radarPeek = computed(() => radarQueue.value.slice(1, 4));
 const radarFx = ref(null);
+// balão da conversa DIRETO do card (o mesmo do CRM): a atendente resolve
+// dali mesmo, sem precisar ir até Conversas
+const radarChat = ref(null);
+const openChatBalloon = alert => {
+  radarChat.value = {
+    contact_id: alert.contact_id,
+    name: alert.contact_name,
+    phone_number: alert.phone,
+    labels: [],
+    last_conversation_id: alert.conversation_id,
+    last_conversation: {
+      inbox_id: alert.inbox_id,
+      inbox_name: alert.inbox_name,
+      channel_type: alert.channel_type,
+      status: alert.conversation_status || 'open',
+    },
+  };
+};
+// mexeu na conversa pelo balão = aviso atendido: -1 na fila e registra no
+// servidor (a eficácia do Radar continua contando normalmente)
+const onRadarChatReplied = () => {
+  const convId = radarChat.value?.last_conversation_id;
+  if (!convId || !radarQueue.value.some(a => a.conversation_id === convId)) return;
+  radarQueue.value = radarQueue.value.filter(a => a.conversation_id !== convId);
+  CrmAPI.radarAttend(convId).catch(() => {});
+};
+const onRadarChatResolved = ({ status }) => {
+  if (status === 'resolved') onRadarChatReplied();
+};
 const attendNow = (alert, event) => {
   if (radarFx.value && event) {
     radarFx.value.burstAt(event.clientX, event.clientY, ['✅'], 3);
@@ -469,8 +499,8 @@ const attendNow = (alert, event) => {
   // persiste o -1 no servidor (vale p/ todos; se o paciente continuar sem
   // resposta, a próxima auditoria do Radar recoloca o aviso sozinha)
   CrmAPI.radarAttend(alert.conversation_id).catch(() => {});
-  // pequena pausa para o prêmio ser sentido antes de abrir a conversa
-  setTimeout(() => openConversation(alert), 320);
+  // pequena pausa para o prêmio ser sentido antes de abrir o balão
+  setTimeout(() => openChatBalloon(alert), 320);
 };
 const rotateRadar = () => {
   if (radarQueue.value.length < 2) return;
@@ -489,8 +519,6 @@ const waitingLabel = alert => {
   if (min < 60) return `${min} min sem resposta`;
   return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')} sem resposta`;
 };
-const openConversation = alert =>
-  router.push(`/app/accounts/${accountId.value}/conversations/${alert.conversation_id}`);
 // atalhos no formato do card do CRM (iniciais + Espaço do Paciente)
 const alertInitials = alert =>
   (alert.contact_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
@@ -731,15 +759,28 @@ const avisoChecado = signature => Boolean(dismissedAvisos.value[signature]);
 const fbSignature = computed(() =>
   visibleFeedback.value ? `fb:${myFeedback.value?.week_start || visibleFeedback.value.week_start}` : ''
 );
-// item 88: status dos números de WhatsApp (gestor) — a assinatura muda
-// quando o estado de algum número muda, e o aviso volta sozinho
+// item 88 v2 (pedido 20/07): números de WhatsApp MINI e discreto no
+// painel do gestor, mostrando o STATUS DA CONTA na Meta (qualidade +
+// limite de envio), não um "funcionando" genérico
 const whatsappStatus = computed(() => data.value?.whatsapp_status || null);
-const waSignature = computed(() =>
-  whatsappStatus.value
-    ? `wa:${whatsappStatus.value.map(w => `${w.id}-${w.ok ? 1 : 0}-${w.reauthorization_required ? 1 : 0}-${w.failed_24h}`).join(',')}`
-    : ''
+const waProblem = computed(() =>
+  (whatsappStatus.value || []).some(
+    w => w.reauthorization_required || ['RED', 'FLAGGED'].includes(w.quality) || w.name_status === 'DECLINED'
+  )
 );
-const waAllOk = computed(() => (whatsappStatus.value || []).every(w => w.ok));
+const WA_QUALITY = {
+  GREEN: { dot: '#10B981', label: 'conta saudável' },
+  YELLOW: { dot: '#F59E0B', label: 'qualidade em atenção' },
+  RED: { dot: '#EF4444', label: 'qualidade baixa — risco de restrição' },
+  FLAGGED: { dot: '#EF4444', label: 'conta sinalizada pela Meta' },
+};
+const waQuality = w =>
+  WA_QUALITY[(w.quality || '').toUpperCase()] || { dot: '#94A3B8', label: 'status indisponível' };
+const WA_TIERS = {
+  TIER_50: '50/dia', TIER_250: '250/dia', TIER_1K: '1 mil/dia',
+  TIER_10K: '10 mil/dia', TIER_100K: '100 mil/dia', TIER_UNLIMITED: 'sem limite',
+};
+const waTier = tier => WA_TIERS[tier] || null;
 const radarSignature = computed(
   () => `radar:${radarAlerts.value.map(a => a.conversation_id).sort((a, b) => a - b).join(',')}`
 );
@@ -843,56 +884,33 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 💬 Status do WhatsApp (item 88 — só o gestor): sempre evidente,
-             marcável com ✓; volta sozinho quando o estado muda -->
+        <!-- 💬 Números de WhatsApp (item 88 v2 — pedido 20/07): faixa MINI
+             e discreta com o STATUS DA CONTA na Meta; fica vermelha só
+             quando existe problema de verdade -->
         <div
-          v-if="whatsappStatus && !avisoChecado(waSignature)"
-          class="rounded-2xl border-2 overflow-hidden mb-6"
-          :style="waAllOk
-            ? 'border-color: rgba(16,185,129,0.4); background: rgba(16,185,129,0.04)'
-            : 'border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.05)'"
+          v-if="whatsappStatus"
+          class="flex items-center gap-x-3 gap-y-1 flex-wrap mb-6 px-3 py-1.5 rounded-xl border text-[11px]"
+          :class="waProblem ? 'border-red-500/40 bg-red-500/5' : 'border-n-weak bg-n-solid-2'"
+          title="Status das contas de WhatsApp na Meta (atualiza a cada 10 min) — detalhes em Relatórios → Saúde do WhatsApp"
         >
-          <div class="h-1.5 w-full" :style="{ background: waAllOk ? 'linear-gradient(90deg, #059669, #4ADE80)' : 'linear-gradient(90deg, #B91C1C, #F87171)' }" />
-          <div class="p-4 sm:p-5">
-            <div class="flex items-center gap-2 mb-2.5 flex-wrap">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center" :style="{ background: waAllOk ? 'linear-gradient(135deg, #059669, #4ADE80)' : 'linear-gradient(135deg, #B91C1C, #F87171)' }">
-                <span class="i-lucide-phone text-white text-base" />
-              </span>
-              <h2 class="text-sm font-bold text-n-slate-12">
-                {{ waAllOk ? 'Números de WhatsApp: tudo certo' : 'Atenção nos números de WhatsApp' }}
-              </h2>
-              <button
-                class="ml-auto w-7 h-7 rounded-lg border border-n-weak flex items-center justify-center flex-shrink-0"
-                :style="{ color: waAllOk ? '#059669' : '#B91C1C' }"
-                title="Dar check: esconder este aviso (volta se o estado de algum número mudar)"
-                @click="checkAviso(waSignature)"
-              >
-                <span class="i-lucide-check text-sm" />
-              </button>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div
-                v-for="w in whatsappStatus"
-                :key="w.id"
-                class="flex items-center gap-2 flex-wrap rounded-xl border border-n-weak bg-n-solid-1 px-3 py-2"
-              >
-                <span class="text-base">{{ w.ok ? '✅' : '🔴' }}</span>
-                <div class="flex-1 min-w-0">
-                  <p class="text-xs font-bold text-n-slate-12 truncate">{{ w.name }}</p>
-                  <p v-if="w.phone" class="text-[10px] text-n-slate-9">{{ w.phone }}</p>
-                </div>
-                <span v-if="w.reauthorization_required" class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-500/15 text-red-500">
-                  precisa reautorizar
-                </span>
-                <span v-else-if="w.failed_24h" class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/15 text-amber-600">
-                  {{ w.failed_24h }} falha(s) de envio em 24h
-                </span>
-                <span v-else class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-green-500/12 text-green-600">
-                  funcionando
-                </span>
-              </div>
-            </div>
-          </div>
+          <span class="i-lucide-phone text-xs flex-shrink-0" :class="waProblem ? 'text-red-500' : 'text-n-slate-9'" />
+          <span
+            v-for="w in whatsappStatus"
+            :key="w.id"
+            class="inline-flex items-center gap-1.5 text-n-slate-11 min-w-0"
+          >
+            <span
+              class="w-2 h-2 rounded-full flex-shrink-0"
+              :style="{ background: w.reauthorization_required ? '#EF4444' : waQuality(w).dot }"
+            />
+            <b class="text-n-slate-12 truncate">{{ w.verified_name || w.name }}</b>
+            <span v-if="w.reauthorization_required" class="text-red-500 font-bold whitespace-nowrap">precisa reautorizar</span>
+            <template v-else>
+              <span class="text-n-slate-9 whitespace-nowrap">{{ waQuality(w).label }}</span>
+              <span v-if="waTier(w.limit_tier)" class="text-n-slate-9 whitespace-nowrap">· limite {{ waTier(w.limit_tier) }}</span>
+              <span v-if="w.failed_24h" class="text-amber-600 whitespace-nowrap">· {{ w.failed_24h }} falha(s) 24h</span>
+            </template>
+          </span>
         </div>
 
         <!-- 💚 Avisos do Radar de Oportunidades — cartão BRANCO (contraste
@@ -972,7 +990,7 @@ onUnmounted(() => {
                 v-if="radarFront"
                 :key="`front-${radarFront.conversation_id}`"
                 class="cevico-radar-front relative z-10 rounded-xl p-3 cursor-pointer flex flex-col gap-2 bg-white"
-                @click="openConversation(radarFront)"
+                @click="openChatBalloon(radarFront)"
               >
                 <div class="flex items-center gap-2">
                   <div
@@ -1005,15 +1023,24 @@ onUnmounted(() => {
                 </div>
                 <p class="text-xs" style="color: #475569">💡 <b style="color: #0f172a">O que fazer:</b> {{ radarFront.acao }}</p>
                 <div class="flex items-center justify-between gap-1 mt-auto">
-                  <button
-                    v-if="radarFront.contact_id"
-                    class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
-                    title="Espaço do Paciente"
-                    @click.stop="openPatientSpace(radarFront)"
-                  >
-                    <PatientSpaceIcon :size="24" />
-                  </button>
-                  <span v-else />
+                  <div class="flex items-center gap-1">
+                    <button
+                      v-if="radarFront.contact_id"
+                      class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
+                      title="Espaço do Paciente"
+                      @click.stop="openPatientSpace(radarFront)"
+                    >
+                      <PatientSpaceIcon :size="24" />
+                    </button>
+                    <button
+                      class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
+                      style="color: #2563EB; background: rgba(37, 99, 235, 0.1)"
+                      title="Abrir conversa"
+                      @click.stop="openChatBalloon(radarFront)"
+                    >
+                      <span class="i-lucide-message-circle-more text-lg" />
+                    </button>
+                  </div>
                   <div class="flex items-center gap-1.5">
                     <button
                       v-if="radarQueue.length > 1"
@@ -1787,6 +1814,15 @@ onUnmounted(() => {
       </div>
     </div>
     </div>
+
+    <!-- Balão da conversa direto do card do Radar (o mesmo do CRM) -->
+    <ConversationChatModal
+      v-if="radarChat"
+      :contact="radarChat"
+      @close="radarChat = null"
+      @replied="onRadarChatReplied"
+      @resolved="onRadarChatResolved"
+    />
 
     <EmojiFx ref="radarFx" />
   </div>

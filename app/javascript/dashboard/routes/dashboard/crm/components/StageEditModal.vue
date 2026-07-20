@@ -15,11 +15,13 @@ const store = useStore();
 const { t } = useI18n();
 
 const inboxes = useMapGetter('inboxes/getInboxes');
+// responsável pela coluna: tarefas automáticas nascem no nome dela
+const teamAgents = useMapGetter('agents/getAgents');
 
 const activeSection = ref('general');
 const isSaving = ref(false);
 
-const form = ref({ name: '', color: '#6B7280', description: '', main_inbox_ids: [] });
+const form = ref({ name: '', color: '#6B7280', description: '', main_inbox_ids: [], task_owner_id: null });
 
 watch(() => props.stage, (s) => {
   if (!s) return;
@@ -28,8 +30,10 @@ watch(() => props.stage, (s) => {
     color: s.color ?? '#6B7280',
     description: s.description ?? '',
     main_inbox_ids: [...(s.main_inbox_ids ?? [])],
+    task_owner_id: s.task_owner_id ?? null,
   };
   if (!inboxes.value.length) store.dispatch('inboxes/get');
+  if (!teamAgents.value.length) store.dispatch('agents/get');
 }, { immediate: true });
 
 const toggleMainInbox = id => {
@@ -48,7 +52,10 @@ const save = async () => {
       name: form.value.name,
       color: form.value.color,
       description: form.value.description,
-      settings: { main_inbox_ids: form.value.main_inbox_ids },
+      settings: {
+        main_inbox_ids: form.value.main_inbox_ids,
+        task_owner_id: form.value.task_owner_id,
+      },
     });
     useAlert(t('CRM.SUCCESS.STAGE_RENAMED'));
     emit('saved');
@@ -191,6 +198,28 @@ const sections = [
                 </label>
                 <p v-if="!inboxes.length" class="text-xs text-n-slate-9">Carregando caixas…</p>
               </div>
+            </div>
+            <div class="border-t border-n-weak" />
+
+            <!-- 👤 Responsável pelas tarefas da coluna (pedido 20/07) -->
+            <div>
+              <p class="text-sm font-medium text-n-slate-12 mb-1">
+                👤 Responsável pelas tarefas desta coluna
+              </p>
+              <p class="text-xs text-n-slate-10 mb-2.5 leading-relaxed">
+                Tarefas criadas pelos robôs (Secretário da Agenda, automações,
+                Atendente IA) para pacientes que estão NESTA coluna nascem no nome
+                desta pessoa — e o aviso dourado aparece no Meu Painel dela.
+              </p>
+              <select
+                v-model="form.task_owner_id"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option :value="null">— sem responsável fixo —</option>
+                <option v-for="agent in teamAgents" :key="agent.id" :value="agent.id">
+                  {{ agent.available_name || agent.name }}
+                </option>
+              </select>
             </div>
             <div class="border-t border-n-weak" />
 

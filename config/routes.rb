@@ -312,6 +312,8 @@ Rails.application.routes.draw do
               post :delete_item
               # 🏭 Desenho do Processo (item 59)
               post :save_processes
+              # 🧭 Painel do Empresário (quadro de gestão do dono)
+              post :save_business_board
             end
             # Central do Paciente: espaço do paciente + anotações do médico
             resources :patients, only: [:show], controller: 'patients' do

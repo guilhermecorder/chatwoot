@@ -10,6 +10,7 @@ import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import BusinessPanel from './BusinessPanel.vue';
 
 const store = useStore();
 const teamAgents = useMapGetter('agents/getAgents');
@@ -17,8 +18,10 @@ const { isAdmin } = useAdmin();
 
 const isLoading = ref(true);
 const pillars = ref([]);
-// abas do Estratégico: Pilares | 🏭 Desenho do Processo (item 59)
+// abas do Estratégico: Pilares | 🏭 Desenho do Processo (item 59) |
+// 🧭 Painel do Empresário (quadro de gestão do dono — só admin)
 const activeTab = ref('pilares');
+const business = ref(null);
 
 // identidade CEVICO: gradientes oficiais por cor do pilar
 const PILLAR_COLORS = {
@@ -73,6 +76,7 @@ const load = async () => {
     const { data } = await CrmAPI.getStrategyBoard();
     pillars.value = data.pillars || [];
     processes.value = data.processes || [];
+    business.value = data.business || {};
     if (!selectedProcessId.value && processes.value.length) {
       selectedProcessId.value = processes.value[0].id;
     }
@@ -317,9 +321,23 @@ onMounted(() => {
         >
           <span class="i-lucide-factory text-sm" /> Desenho do Processo
         </button>
+        <button
+          v-if="isAdmin"
+          class="px-3 h-8 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'empresario' ? 'text-white font-bold' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'empresario' ? 'background: linear-gradient(135deg, #C2410C, #F97316)' : ''"
+          @click="activeTab = 'empresario'"
+        >
+          <span class="i-lucide-briefcase text-sm" /> Painel do Empresário
+        </button>
       </div>
 
       <SkeletonScreen v-if="isLoading" variant="board" />
+
+      <!-- ══ 🧭 PAINEL DO EMPRESÁRIO ══ o quadro de gestão do dono (só admin) -->
+      <div v-else-if="activeTab === 'empresario' && isAdmin" class="mt-4">
+        <BusinessPanel :initial="business" />
+      </div>
 
       <!-- ══ 🏭 DESENHO DO PROCESSO ══ a máquina da clínica, etapa a etapa -->
       <div v-else-if="activeTab === 'processo'" class="mt-4">
