@@ -20,6 +20,7 @@
 #  meta_title        :string
 #  next_clicks_count :integer          default(0), not null
 #  sections          :jsonb            not null
+#  seo_keywords      :string
 #  slug              :string           not null
 #  status            :string           default("draft"), not null
 #  subtitle          :string

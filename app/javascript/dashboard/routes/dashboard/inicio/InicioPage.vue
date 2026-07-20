@@ -8,9 +8,12 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import SkeletonPiece from 'dashboard/components-next/cevico/SkeletonPiece.vue';
+import EmojiFx from 'dashboard/components-next/cevico/EmojiFx.vue';
 import TileAura from 'dashboard/components-next/radar/TileAura.vue';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import {
   DOCTORS, resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, blockKey, scanAgenda,
@@ -47,7 +50,7 @@ const PANELS = [
     grad: 'linear-gradient(135deg, #0F5FA6 0%, #7C3AED 100%)',
   },
   {
-    key: 'conducao', label: 'Condução', who: 'Elisangela',
+    key: 'conducao', label: 'Condução', who: 'Elizangela',
     icon: 'i-lucide-route', desc: 'do agendamento à indicação',
     grad: 'linear-gradient(135deg, #0F766E 0%, #2DD4BF 100%)',
   },
@@ -194,6 +197,27 @@ const panelTiles = computed(() => {
 // 70-100% · 🟢 meta batida · 🏆 recorde = aura de átomos orbitando.
 const goalsInfo = computed(() => data.value?.goals || { targets: {}, factor: 1, records: {} });
 
+// 🎯 METAS OFICIAIS (Painel de Metas) como FALLBACK dos alvos da mira —
+// a régua de cores (abaixo/dentro/acima da meta) vale em TODOS os painéis
+// (Vaneide, Elizangela, Gabriela, Médicos, Gestor), mesmo sem mira própria
+// configurada. Pedido 18/07 (item 79).
+const officialGoals = useCevicoGoals();
+onMounted(() => officialGoals.load());
+const OFFICIAL_GK = {
+  new_leads: 'new_leads',
+  appointments_booked: 'appointments_booked',
+  consultations: 'appointments_booked',
+  attended: 'consultations_attended',
+  surgeries_booked: 'surgeries_booked',
+  surgeries_done: 'surgeries_done',
+  surgeries_closed: 'surgeries_booked',
+};
+const officialTargetFor = gk => {
+  const key = OFFICIAL_GK[gk];
+  if (!key) return 0;
+  return Number(officialGoals.infoFor(key)?.target || 0);
+};
+
 // paleta de "bom e mau resultado" POR PAINEL (o mau alerta, o meta celebra)
 const STATUS_GRADS = {
   agendamento: { bad: 'linear-gradient(135deg, #7F1D1D, #B91C1C)', warn: 'linear-gradient(135deg, #92400E, #D97706)', meta: 'linear-gradient(135deg, #065F46, #10B981)' },
@@ -206,7 +230,8 @@ const STATUS_GRADS = {
 const tileState = tile => {
   const g = goalsInfo.value;
   const value = parseFloat(String(tile.value)) || 0;
-  const target = Number(g.targets?.[tile.gk]);
+  // mira 🎯 do painel manda; sem ela, vale a meta OFICIAL do mês
+  const target = Number(g.targets?.[tile.gk]) || officialTargetFor(tile.gk);
   const rec = g.records?.[tile.gk];
   let status = 'none';
   let ratio = null;
@@ -389,6 +414,9 @@ const myTasksCount = computed(() => data.value?.my_tasks?.count || 0);
 const TASK_PRIORITY_LABEL = { low: 'baixa', medium: 'média', high: 'ALTA', urgent: 'URGENTE' };
 const goToTasks = () =>
   router.push({ name: 'tasks_board', params: { accountId: accountId.value } });
+// atalho pro Dashboard da Agenda em TODOS os painéis (item 86 — equipe vê)
+const goToAgendaDashboard = () =>
+  router.push({ name: 'agenda_dashboard_reports', params: { accountId: accountId.value } });
 const fmtTaskDue = iso =>
   iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
 
@@ -424,10 +452,37 @@ const radarLastActionLabel = computed(() => {
 });
 
 const radarAlerts = computed(() => data.value?.opportunity_alerts?.alerts || []);
+
+// ── Radar em CARROSSEL pulsante (item 63 — 19/07): um card por vez com
+// tudo; os de trás só espiam (nome + tempo). "Atender agora" = 3 ✅
+// pipocam do toque, -1 na contagem, o próximo assume — até zerar.
+const radarQueue = ref([]);
+watch(radarAlerts, list => { radarQueue.value = [...(list || [])]; }, { immediate: true });
+const radarFront = computed(() => radarQueue.value[0] || null);
+const radarPeek = computed(() => radarQueue.value.slice(1, 4));
+const radarFx = ref(null);
+const attendNow = (alert, event) => {
+  if (radarFx.value && event) {
+    radarFx.value.burstAt(event.clientX, event.clientY, ['✅'], 3);
+  }
+  radarQueue.value = radarQueue.value.filter(a => a !== alert);
+  // persiste o -1 no servidor (vale p/ todos; se o paciente continuar sem
+  // resposta, a próxima auditoria do Radar recoloca o aviso sozinha)
+  CrmAPI.radarAttend(alert.conversation_id).catch(() => {});
+  // pequena pausa para o prêmio ser sentido antes de abrir a conversa
+  setTimeout(() => openConversation(alert), 320);
+};
+const rotateRadar = () => {
+  if (radarQueue.value.length < 2) return;
+  const [first, ...rest] = radarQueue.value;
+  radarQueue.value = [...rest, first];
+};
 const radarLastRun = computed(() => {
   const iso = data.value?.opportunity_alerts?.last_run_at;
   return iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null;
 });
+// item 83 — eficácia: consultas agendadas DEPOIS do aviso atendido (30d)
+const radarEfficacy = computed(() => data.value?.opportunity_alerts?.efficacy || null);
 const waitingLabel = alert => {
   if (!alert.waiting_since) return '';
   const min = Math.round((Date.now() - new Date(alert.waiting_since).getTime()) / 60000);
@@ -651,7 +706,49 @@ const onVisible = () => {
   if (document.visibilityState === 'visible') refreshAll();
 };
 
+// ── ✓ dar CHECK num aviso: a janelinha some da tela e só volta quando
+// houver NOVIDADE (a assinatura muda: outra semana de feedback, outros
+// pacientes no Radar, outras tarefas). Por pessoa, neste aparelho. ──
+const dismissStorageKey = computed(() => `cevico_avisos_checados_${currentUser.value?.id || 0}`);
+const dismissedAvisos = ref({});
+const loadDismissedAvisos = () => {
+  try {
+    dismissedAvisos.value = JSON.parse(localStorage.getItem(dismissStorageKey.value) || '{}');
+  } catch {
+    dismissedAvisos.value = {};
+  }
+};
+const checkAviso = signature => {
+  if (!signature) return;
+  const entries = Object.entries({ ...dismissedAvisos.value, [signature]: Date.now() })
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 40); // guarda só os últimos, não cresce pra sempre
+  dismissedAvisos.value = Object.fromEntries(entries);
+  localStorage.setItem(dismissStorageKey.value, JSON.stringify(dismissedAvisos.value));
+};
+const avisoChecado = signature => Boolean(dismissedAvisos.value[signature]);
+// assinaturas de conteúdo de cada janelinha
+const fbSignature = computed(() =>
+  visibleFeedback.value ? `fb:${myFeedback.value?.week_start || visibleFeedback.value.week_start}` : ''
+);
+// item 88: status dos números de WhatsApp (gestor) — a assinatura muda
+// quando o estado de algum número muda, e o aviso volta sozinho
+const whatsappStatus = computed(() => data.value?.whatsapp_status || null);
+const waSignature = computed(() =>
+  whatsappStatus.value
+    ? `wa:${whatsappStatus.value.map(w => `${w.id}-${w.ok ? 1 : 0}-${w.reauthorization_required ? 1 : 0}-${w.failed_24h}`).join(',')}`
+    : ''
+);
+const waAllOk = computed(() => (whatsappStatus.value || []).every(w => w.ok));
+const radarSignature = computed(
+  () => `radar:${radarAlerts.value.map(a => a.conversation_id).sort((a, b) => a - b).join(',')}`
+);
+const tasksSignature = computed(
+  () => `tasks:${myTasks.value.map(t => t.id).sort((a, b) => a - b).join(',')}`
+);
+
 onMounted(() => {
+  loadDismissedAvisos();
   store.dispatch('crm/fetchSettings').catch(() => {});
   loadRadarStatus();
   loadGoalsStrip();
@@ -697,8 +794,24 @@ onUnmounted(() => {
         <span class="i-lucide-eye absolute -right-6 -bottom-8 text-[160px] text-white/10" />
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
+      <!-- SKELETON Homem de Ferro (item 89): o painel se monta por partes -->
+      <div v-if="isLoading" class="space-y-6">
+        <SkeletonPiece variant="block" class="h-28" :order="0" />
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <SkeletonPiece variant="block" class="h-36" :order="1" />
+          <SkeletonPiece variant="block" class="h-36" :order="2" />
+          <SkeletonPiece variant="block" class="h-36" :order="3" />
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <SkeletonPiece v-for="i in 5" :key="`pp${i}`" variant="pill" :order="3 + i" />
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <SkeletonPiece v-for="i in 6" :key="`per${i}`" variant="pill" class="!h-7 !w-20" :order="8 + i" />
+        </div>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <SkeletonPiece v-for="i in 4" :key="`t${i}`" variant="tile" class="!h-36" :order="14 + i" />
+        </div>
+        <SkeletonPiece variant="block" class="h-64" :order="19" />
       </div>
 
       <template v-else>
@@ -730,11 +843,63 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 💬 Status do WhatsApp (item 88 — só o gestor): sempre evidente,
+             marcável com ✓; volta sozinho quando o estado muda -->
+        <div
+          v-if="whatsappStatus && !avisoChecado(waSignature)"
+          class="rounded-2xl border-2 overflow-hidden mb-6"
+          :style="waAllOk
+            ? 'border-color: rgba(16,185,129,0.4); background: rgba(16,185,129,0.04)'
+            : 'border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.05)'"
+        >
+          <div class="h-1.5 w-full" :style="{ background: waAllOk ? 'linear-gradient(90deg, #059669, #4ADE80)' : 'linear-gradient(90deg, #B91C1C, #F87171)' }" />
+          <div class="p-4 sm:p-5">
+            <div class="flex items-center gap-2 mb-2.5 flex-wrap">
+              <span class="w-8 h-8 rounded-lg flex items-center justify-center" :style="{ background: waAllOk ? 'linear-gradient(135deg, #059669, #4ADE80)' : 'linear-gradient(135deg, #B91C1C, #F87171)' }">
+                <span class="i-lucide-phone text-white text-base" />
+              </span>
+              <h2 class="text-sm font-bold text-n-slate-12">
+                {{ waAllOk ? 'Números de WhatsApp: tudo certo' : 'Atenção nos números de WhatsApp' }}
+              </h2>
+              <button
+                class="ml-auto w-7 h-7 rounded-lg border border-n-weak flex items-center justify-center flex-shrink-0"
+                :style="{ color: waAllOk ? '#059669' : '#B91C1C' }"
+                title="Dar check: esconder este aviso (volta se o estado de algum número mudar)"
+                @click="checkAviso(waSignature)"
+              >
+                <span class="i-lucide-check text-sm" />
+              </button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div
+                v-for="w in whatsappStatus"
+                :key="w.id"
+                class="flex items-center gap-2 flex-wrap rounded-xl border border-n-weak bg-n-solid-1 px-3 py-2"
+              >
+                <span class="text-base">{{ w.ok ? '✅' : '🔴' }}</span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs font-bold text-n-slate-12 truncate">{{ w.name }}</p>
+                  <p v-if="w.phone" class="text-[10px] text-n-slate-9">{{ w.phone }}</p>
+                </div>
+                <span v-if="w.reauthorization_required" class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-500/15 text-red-500">
+                  precisa reautorizar
+                </span>
+                <span v-else-if="w.failed_24h" class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/15 text-amber-600">
+                  {{ w.failed_24h }} falha(s) de envio em 24h
+                </span>
+                <span v-else class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-green-500/12 text-green-600">
+                  funcionando
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 💚 Avisos do Radar de Oportunidades — cartão BRANCO (contraste
              nos dois temas) + verde dopamine + botão que emana energia
              (pedido 17/07: convite, não bronca) -->
         <div
-          v-if="radarAlerts.length"
+          v-if="radarQueue.length && !avisoChecado(radarSignature)"
           class="rounded-2xl overflow-hidden mb-6 bg-white shadow-lg"
           style="border: 2px solid rgba(16, 185, 129, 0.35)"
         >
@@ -745,10 +910,19 @@ onUnmounted(() => {
                 <span class="i-lucide-radar text-white text-base" />
               </span>
               <h2 class="text-sm font-bold" style="color: #0f172a">
-                {{ radarAlerts.length === 1
+                {{ radarQueue.length === 1
                   ? '1 paciente quente sem atendimento'
-                  : `${radarAlerts.length} pacientes quentes sem atendimento` }}
+                  : `${radarQueue.length} pacientes quentes sem atendimento` }}
               </h2>
+              <!-- 📈 eficácia (item 83): o Radar gerando consulta de verdade -->
+              <span
+                v-if="radarEfficacy"
+                class="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                style="background: rgba(16, 185, 129, 0.12); color: #047857; border: 1px solid rgba(16, 185, 129, 0.3)"
+                :title="`Dos ${radarEfficacy.attended_30d} avisos atendidos nos últimos 30 dias, ${radarEfficacy.converted_30d} paciente(s) agendaram consulta depois do aviso`"
+              >
+                📈 {{ radarEfficacy.converted_30d }} consulta(s) geradas · {{ radarEfficacy.rate }}%
+              </span>
               <span v-if="radarLastRun" class="text-[11px] ml-auto" style="color: #94a3b8">auditoria às {{ radarLastRun }}</span>
               <button
                 v-if="radarStatus && isAdmin"
@@ -760,76 +934,116 @@ onUnmounted(() => {
               >
                 {{ radarStatus.enabled ? '⏸ Pausar radar' : '▶️ Reativar radar' }}
               </button>
-            </div>
-            <!-- cards no formato do card do CRM: identidade em cima, pílulas,
-                 motivo como prévia e ações no rodapé — 2 colunas no desktop -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-2.5 items-start">
-              <div
-                v-for="alert in radarAlerts"
-                :key="alert.conversation_id"
-                class="rounded-xl p-3 cursor-pointer transition-all hover:shadow-md flex flex-col gap-2"
-                style="background: #ffffff; border: 1px solid #e2e8f0"
-                @click="openConversation(alert)"
+              <button
+                class="w-7 h-7 rounded-lg border flex items-center justify-center transition-colors flex-shrink-0"
+                style="border-color: #e2e8f0; color: #059669"
+                title="Dar check: esconder este aviso (volta quando o Radar tiver novidade)"
+                @click="checkAviso(radarSignature)"
               >
-                <!-- identidade (avatar + nome + telefone), badge ⏱ à direita -->
+                <span class="i-lucide-check text-sm" />
+              </button>
+            </div>
+            <!-- CARROSSEL pulsante (item 63): a pilha espia atrás (nome +
+                 tempo) e o card da frente mostra tudo — CRM, etiquetas,
+                 contexto e o botão convidativo -->
+            <div class="relative max-w-2xl mx-auto" :style="{ paddingTop: `${radarPeek.length * 14 + 2}px` }">
+              <!-- pilha de trás -->
+              <div
+                v-for="(p, i) in radarPeek"
+                :key="`peek-${p.conversation_id}`"
+                class="absolute left-1/2 -translate-x-1/2 rounded-xl border flex items-center gap-2 px-3 h-8 cursor-pointer"
+                :style="{
+                  top: `${(radarPeek.length - 1 - i) * 14}px`,
+                  width: `calc(100% - ${(i + 1) * 36}px)`,
+                  zIndex: 3 - i,
+                  background: '#fbfdfc',
+                  borderColor: '#dbe7e1',
+                  opacity: String(0.85 - i * 0.18),
+                }"
+                :title="`Trazer ${p.contact_name} para a frente`"
+                @click="rotateRadar"
+              >
+                <span class="text-[11px] font-semibold truncate" style="color: #334155">{{ p.contact_name }}</span>
+                <span class="text-[10px] ml-auto flex-shrink-0" style="color: #047857">{{ waitingLabel(p) }}</span>
+              </div>
+
+              <!-- card da FRENTE (pulsa como Tarefas 100%) -->
+              <div
+                v-if="radarFront"
+                :key="`front-${radarFront.conversation_id}`"
+                class="cevico-radar-front relative z-10 rounded-xl p-3 cursor-pointer flex flex-col gap-2 bg-white"
+                @click="openConversation(radarFront)"
+              >
                 <div class="flex items-center gap-2">
                   <div
                     class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold flex-shrink-0"
                     style="background: linear-gradient(135deg, #059669, #4ADE80)"
                   >
-                    {{ alertInitials(alert) }}
+                    {{ alertInitials(radarFront) }}
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-semibold truncate leading-tight" style="color: #0f172a">{{ alert.contact_name }}</p>
-                    <p v-if="alert.phone" class="text-xs truncate" style="color: #64748b">{{ alert.phone }}</p>
+                    <p class="text-sm font-semibold truncate leading-tight" style="color: #0f172a">{{ radarFront.contact_name }}</p>
+                    <p v-if="radarFront.phone" class="text-xs truncate" style="color: #64748b">{{ radarFront.phone }}</p>
                   </div>
                   <span
                     class="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0"
                     style="background: rgba(16, 185, 129, 0.12); color: #047857; border: 1px solid rgba(16, 185, 129, 0.3)"
                   >
                     <span class="i-lucide-clock text-[11px]" />
-                    {{ waitingLabel(alert) }}
+                    {{ waitingLabel(radarFront) }}
                   </span>
                 </div>
-                <!-- pílulas (coluna do funil + destino do aviso) -->
-                <div v-if="alert.stage_name || alert.user_name" class="flex flex-wrap gap-1">
-                  <span v-if="alert.stage_name" class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded" style="background: #eef2f7; color: #475569">
+                <div v-if="radarFront.stage_name || radarFront.user_name" class="flex flex-wrap gap-1">
+                  <span v-if="radarFront.stage_name" class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded" style="background: #eef2f7; color: #475569">
                     <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background: #059669" />
-                    {{ alert.stage_name }}
+                    {{ radarFront.stage_name }}
                   </span>
-                  <span v-if="alert.user_name" class="text-xs px-1.5 py-0.5 rounded font-medium" style="background: rgba(212, 160, 23, 0.14); color: #92600a">📌 para {{ alert.user_name }}</span>
+                  <span v-if="radarFront.user_name" class="text-xs px-1.5 py-0.5 rounded font-medium" style="background: rgba(212, 160, 23, 0.14); color: #92600a">📌 para {{ radarFront.user_name }}</span>
                 </div>
-                <!-- motivo como prévia de mensagem (igual ao card do CRM) -->
                 <div class="rounded-r-lg px-2 py-1.5" style="background: #f8fafc; border-left: 2px solid #10b981">
-                  <p class="text-xs leading-snug" style="color: #475569">{{ alert.motivo }}</p>
+                  <p class="text-xs leading-snug" style="color: #475569">{{ radarFront.motivo }}</p>
                 </div>
-                <p class="text-xs" style="color: #475569">💡 <b style="color: #0f172a">O que fazer:</b> {{ alert.acao }}</p>
-                <!-- rodapé de ações (igual ao card do CRM) -->
+                <p class="text-xs" style="color: #475569">💡 <b style="color: #0f172a">O que fazer:</b> {{ radarFront.acao }}</p>
                 <div class="flex items-center justify-between gap-1 mt-auto">
                   <button
-                    v-if="alert.contact_id"
+                    v-if="radarFront.contact_id"
                     class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
                     title="Espaço do Paciente"
-                    @click.stop="openPatientSpace(alert)"
+                    @click.stop="openPatientSpace(radarFront)"
                   >
                     <PatientSpaceIcon :size="24" />
                   </button>
                   <span v-else />
-                  <button
-                    class="cevico-energy-btn text-xs font-bold text-white px-3.5 py-1.5 rounded-lg"
-                    @click.stop="openConversation(alert)"
-                  >
-                    Atender agora →
-                  </button>
+                  <div class="flex items-center gap-1.5">
+                    <button
+                      v-if="radarQueue.length > 1"
+                      class="text-[11px] font-medium px-2 py-1.5 rounded-lg border transition-colors"
+                      style="border-color: #e2e8f0; color: #64748b"
+                      title="Deixar para depois — vai para o fim da fila"
+                      @click.stop="rotateRadar"
+                    >
+                      pular ↷
+                    </button>
+                    <button
+                      class="cevico-energy-btn text-xs font-bold text-white px-3.5 py-1.5 rounded-lg"
+                      @click.stop="attendNow(radarFront, $event)"
+                    >
+                      Atender agora →
+                    </button>
+                  </div>
                 </div>
               </div>
+
+              <p v-if="radarQueue.length > 4" class="text-center text-[11px] mt-1.5" style="color: #94a3b8">
+                +{{ radarQueue.length - 4 }} na fila
+              </p>
             </div>
           </div>
         </div>
 
         <!-- 📋 Tarefas esperando você (aviso DOURADO — coisa boa a fazer) -->
         <div
-          v-if="myTasks.length"
+          v-if="myTasks.length && !avisoChecado(tasksSignature)"
           class="rounded-2xl border-2 overflow-hidden mb-6"
           style="border-color: rgba(212, 160, 23, 0.5); background: rgba(212, 160, 23, 0.05)"
         >
@@ -848,6 +1062,14 @@ onUnmounted(() => {
                 @click="goToTasks"
               >
                 Abrir Tarefas →
+              </button>
+              <button
+                class="w-7 h-7 rounded-lg border border-n-weak flex items-center justify-center transition-colors flex-shrink-0"
+                style="color: #B8860B"
+                title="Dar check: esconder este aviso (volta quando houver tarefa nova)"
+                @click="checkAviso(tasksSignature)"
+              >
+                <span class="i-lucide-check text-sm" />
               </button>
             </div>
             <div class="space-y-1.5">
@@ -876,7 +1098,7 @@ onUnmounted(() => {
 
         <!-- 🧭 Mentor do Time: feedback da semana (individual; admin vê o time) -->
         <div
-          v-if="visibleFeedback"
+          v-if="visibleFeedback && !avisoChecado(fbSignature)"
           class="rounded-2xl overflow-hidden mb-6 bg-n-card outline outline-1 outline-n-container"
         >
           <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #C2410C, #FB923C)" />
@@ -889,6 +1111,14 @@ onUnmounted(() => {
                 {{ visibleFeedback.user_id === currentUser.id ? 'Seu feedback da semana' : `Feedback de ${visibleFeedback.user_name}` }}
               </h2>
               <span class="text-[11px] text-n-slate-9 ml-auto">{{ fbWeekLabel(visibleFeedback) }}</span>
+              <button
+                class="w-7 h-7 rounded-lg border border-n-weak flex items-center justify-center transition-colors flex-shrink-0"
+                style="color: #C2410C"
+                title="Dar check: li meu feedback, pode esconder (volta na próxima semana)"
+                @click="checkAviso(fbSignature)"
+              >
+                <span class="i-lucide-check text-sm" />
+              </button>
             </div>
 
             <!-- admin: navega pelo time -->
@@ -944,85 +1174,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 🎯 Metas · Rotinas · Ferramentas (alimentado pelo Painel de Metas) -->
-        <div v-if="goalsData" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-          <!-- METAS do mês -->
-          <button
-            class="rounded-2xl border border-n-weak bg-n-card outline-none p-4 text-left hover:border-amber-500/60 hover:shadow-md transition-all"
-            @click="goToGoals"
-          >
-            <div class="flex items-center gap-2 mb-2">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-                <span class="i-lucide-target text-white text-sm" />
-              </span>
-              <p class="text-xs font-bold text-n-slate-12 flex-1">Metas do mês</p>
-              <span class="i-lucide-chevron-right text-sm text-n-slate-9" />
-            </div>
-            <template v-if="goalRows.length">
-              <div v-for="g in goalRows" :key="g.key" class="mb-1.5">
-                <div class="flex items-center justify-between text-[10px] mb-0.5">
-                  <span class="text-n-slate-10 truncate">{{ g.label }}</span>
-                  <b class="text-n-slate-12">{{ g.current }}/{{ g.target }}</b>
-                </div>
-                <div class="h-1.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div
-                    class="h-full rounded-full transition-all duration-700"
-                    :style="{ width: `${Math.max(g.pct, 2)}%`, background: g.pct >= 100 ? 'linear-gradient(90deg, #047857, #34D399)' : 'linear-gradient(90deg, #B8860B, #D4A017)' }"
-                  />
-                </div>
-              </div>
-            </template>
-            <p v-else class="text-[11px] text-n-slate-9">
-              {{ isAdmin ? 'Defina a meta do mês no Painel de Metas →' : 'A meta do mês aparece aqui quando o gestor definir.' }}
-            </p>
-          </button>
-
-          <!-- ROTINAS -->
-          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F766E, #2DD4BF)">
-                <span class="i-lucide-repeat text-white text-sm" />
-              </span>
-              <p class="text-xs font-bold text-n-slate-12">Rotinas</p>
-            </div>
-            <template v-if="teamRoutines.length">
-              <p v-for="(r, ri) in teamRoutines.slice(0, 5)" :key="ri" class="text-[11px] text-n-slate-11 leading-relaxed flex items-start gap-1.5 mb-0.5">
-                <span class="i-lucide-check-circle-2 text-[11px] mt-0.5 flex-shrink-0" style="color: #0D9488" />
-                {{ r }}
-              </p>
-            </template>
-            <p v-else class="text-[11px] text-n-slate-9">
-              {{ isAdmin ? 'Cadastre as rotinas do time no Painel de Metas.' : 'As rotinas combinadas aparecem aqui.' }}
-            </p>
-          </div>
-
-          <!-- FERRAMENTAS importantes -->
-          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #065F46, #34D399)">
-                <span class="i-lucide-wrench text-white text-sm" />
-              </span>
-              <p class="text-xs font-bold text-n-slate-12">Ferramentas</p>
-            </div>
-            <button
-              class="w-full flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
-              @click="goToTools"
-            >
-              <span class="i-lucide-swords text-[11px]" style="color: #047857" />
-              Fechamento: script + mapa de objeções
-              <span class="i-lucide-chevron-right text-[11px] ml-auto text-n-slate-9" />
-            </button>
-            <button
-              v-for="(t, ti) in importantTools.slice(0, 4)"
-              :key="ti"
-              class="w-full flex items-center gap-1.5 text-[11px] text-n-slate-11 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
-              @click="openTool(t)"
-            >
-              <span class="i-lucide-external-link text-[11px] text-n-slate-9" />
-              <span class="truncate">{{ t.label }}</span>
-            </button>
-          </div>
-        </div>
 
         <!-- Seletor de painel (cada pessoa no seu) -->
         <div class="flex items-center gap-2 flex-wrap mb-3">
@@ -1053,6 +1204,16 @@ onUnmounted(() => {
               @click="openGoalsModal"
             >
               <span class="i-lucide-target text-sm" />
+            </button>
+            <!-- atalho pro Dashboard da Agenda em TODOS os painéis (item 86) -->
+            <button
+              class="h-8 px-3 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 hover:opacity-90 whitespace-nowrap"
+              style="background: linear-gradient(135deg, #0369A1, #38BDF8)"
+              title="Dashboard da Agenda — comparecimento, ocupação, cirurgias"
+              @click="goToAgendaDashboard"
+            >
+              <span class="i-lucide-calendar-range text-sm" />
+              Dashboard da Agenda
             </button>
           </div>
           <!-- pílulas de médico (só no painel Médicos) -->
@@ -1422,6 +1583,86 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 🎯 Metas · Rotinas · Ferramentas (alimentado pelo Painel de Metas) -->
+        <div v-if="goalsData" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+          <!-- METAS do mês -->
+          <button
+            class="rounded-2xl border border-n-weak bg-n-card outline-none p-4 text-left hover:border-violet-500/60 hover:shadow-md transition-all"
+            @click="goToGoals"
+          >
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
+                <span class="i-lucide-target text-white text-sm" />
+              </span>
+              <p class="text-xs font-bold text-n-slate-12 flex-1">Metas do mês</p>
+              <span class="i-lucide-chevron-right text-sm text-n-slate-9" />
+            </div>
+            <template v-if="goalRows.length">
+              <div v-for="g in goalRows" :key="g.key" class="mb-1.5">
+                <div class="flex items-center justify-between text-[10px] mb-0.5">
+                  <span class="text-n-slate-10 truncate">{{ g.label }}</span>
+                  <b class="text-n-slate-12">{{ g.current }}/{{ g.target }}</b>
+                </div>
+                <div class="h-1.5 bg-n-alpha-1 rounded-full overflow-hidden">
+                  <div
+                    class="h-full rounded-full transition-all duration-700"
+                    :style="{ width: `${Math.max(g.pct, 2)}%`, background: g.pct >= 100 ? 'linear-gradient(90deg, #047857, #34D399)' : 'linear-gradient(90deg, #5B21B6, #7C3AED)' }"
+                  />
+                </div>
+              </div>
+            </template>
+            <p v-else class="text-[11px] text-n-slate-9">
+              {{ isAdmin ? 'Defina a meta do mês no Painel de Metas →' : 'A meta do mês aparece aqui quando o gestor definir.' }}
+            </p>
+          </button>
+
+          <!-- ROTINAS -->
+          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F766E, #2DD4BF)">
+                <span class="i-lucide-repeat text-white text-sm" />
+              </span>
+              <p class="text-xs font-bold text-n-slate-12">Rotinas</p>
+            </div>
+            <template v-if="teamRoutines.length">
+              <p v-for="(r, ri) in teamRoutines.slice(0, 5)" :key="ri" class="text-[11px] text-n-slate-11 leading-relaxed flex items-start gap-1.5 mb-0.5">
+                <span class="i-lucide-check-circle-2 text-[11px] mt-0.5 flex-shrink-0" style="color: #0D9488" />
+                {{ r }}
+              </p>
+            </template>
+            <p v-else class="text-[11px] text-n-slate-9">
+              {{ isAdmin ? 'Cadastre as rotinas do time no Painel de Metas.' : 'As rotinas combinadas aparecem aqui.' }}
+            </p>
+          </div>
+
+          <!-- FERRAMENTAS importantes -->
+          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #065F46, #34D399)">
+                <span class="i-lucide-wrench text-white text-sm" />
+              </span>
+              <p class="text-xs font-bold text-n-slate-12">Ferramentas</p>
+            </div>
+            <button
+              class="w-full flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
+              @click="goToTools"
+            >
+              <span class="i-lucide-swords text-[11px]" style="color: #047857" />
+              Fechamento: script + mapa de objeções
+              <span class="i-lucide-chevron-right text-[11px] ml-auto text-n-slate-9" />
+            </button>
+            <button
+              v-for="(t, ti) in importantTools.slice(0, 4)"
+              :key="ti"
+              class="w-full flex items-center gap-1.5 text-[11px] text-n-slate-11 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
+              @click="openTool(t)"
+            >
+              <span class="i-lucide-external-link text-[11px] text-n-slate-9" />
+              <span class="truncate">{{ t.label }}</span>
+            </button>
+          </div>
+        </div>
+
         <!-- Acesso rápido (compacto, largura toda) -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <button
@@ -1546,10 +1787,21 @@ onUnmounted(() => {
       </div>
     </div>
     </div>
+
+    <EmojiFx ref="radarFx" />
   </div>
 </template>
 
 <style scoped>
+/* card da frente do Radar: pulso verde (como Tarefas 100%) */
+.cevico-radar-front {
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  animation: cevico-radar-pulse 2.2s ease-in-out infinite;
+}
+@keyframes cevico-radar-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.3); }
+  50% { box-shadow: 0 0 22px rgba(52, 211, 153, 0.65); }
+}
 /* meta batida / recorde: o card respira com brilho suave */
 .cevico-meta-pulse {
   animation: cevicoMetaPulse 2.6s ease-in-out infinite;

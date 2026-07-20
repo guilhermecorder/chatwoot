@@ -1,13 +1,16 @@
 <script setup>
-// PAINEL DE METAS: o histórico dos indicadores mês a mês (para estipular a
-// meta nova com base em dados) + o plano do mês — alvos, orientações de
+// PAINEL DE METAS: o histórico dos indicadores (para estipular a meta nova
+// com base em dados) + o plano de cada período — alvos, orientações de
 // como chegar lá, notas de ajuste por pessoa, MARCOS com check e tarefas
 // para o time. Só ADMIN edita; o time inteiro acompanha.
+// MULTI-PERÍODO (item 58): ambientes de meta do dia, da semana, do fim de
+// semana, do mês (o oficial dos selos), do trimestre e do ano + metas de
+// indicadores em % (agendamento, comparecimento, conversão p/ cirurgia).
 import { ref, computed, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
-import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 
 const store = useStore();
@@ -16,32 +19,83 @@ const { isAdmin } = useAdmin();
 
 const isLoading = ref(true);
 const data = ref(null);
-const month = ref(''); // ISO do dia 1 do mês selecionado
+const month = ref(''); // ISO do INÍCIO do período selecionado
+
+// ── ambientes de meta (item 58) ──
+const PERIODS = [
+  { key: 'day', label: 'Dia' },
+  { key: 'week', label: 'Semana' },
+  { key: 'weekend', label: 'Fim de semana' },
+  { key: 'month', label: 'Mês' },
+  { key: 'quarter', label: 'Trimestre' },
+  { key: 'year', label: 'Ano' },
+];
+const period = ref('month');
+const HIST_HINTS = {
+  day: 'os últimos 14 dias',
+  week: 'as últimas 12 semanas',
+  weekend: 'os últimos 12 fins de semana',
+  month: 'os últimos 12 meses',
+  quarter: 'os últimos 8 trimestres',
+  year: 'os últimos 5 anos',
+};
 
 const monthLabel = iso =>
   new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-const nextMonthIso = () => {
+// datas sempre no fuso LOCAL (toISOString mudaria o dia depois das 21h)
+const fmtIso = d =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const parseIso = iso => new Date(`${iso}T12:00:00`);
+
+// início do período que contém HOJE (mesma regra do backend)
+const currentStartIso = () => {
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 10);
+  if (period.value === 'day') return fmtIso(d);
+  if (period.value === 'week' || period.value === 'weekend') {
+    const start = new Date(d);
+    start.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // segunda
+    if (period.value === 'weekend') start.setDate(start.getDate() + 5); // sábado
+    return fmtIso(start);
+  }
+  if (period.value === 'quarter')
+    return fmtIso(new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1));
+  if (period.value === 'year') return fmtIso(new Date(d.getFullYear(), 0, 1));
+  return fmtIso(new Date(d.getFullYear(), d.getMonth(), 1));
 };
-const thisMonthIso = () => {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+// navega um período para trás/frente a partir do selecionado
+const shiftedIso = dir => {
+  const d = parseIso(month.value);
+  if (period.value === 'day') d.setDate(d.getDate() + dir);
+  else if (period.value === 'week' || period.value === 'weekend')
+    d.setDate(d.getDate() + dir * 7);
+  else if (period.value === 'quarter') d.setMonth(d.getMonth() + dir * 3);
+  else if (period.value === 'year') d.setFullYear(d.getFullYear() + dir);
+  else d.setMonth(d.getMonth() + dir);
+  return fmtIso(d);
 };
 
-const load = async targetMonth => {
-  isLoading.value = true;
-  try {
-    const { data: payload } = await CrmAPI.getGoalPlans(targetMonth);
-    data.value = payload;
-    month.value = payload.month;
-    hydrateForm();
-  } catch {
-    useAlert('Não consegui carregar o Painel de Metas.');
-  } finally {
-    isLoading.value = false;
+// nome humano do período selecionado (títulos e alertas)
+const periodTitle = computed(() => {
+  if (!month.value) return '';
+  const d = parseIso(month.value);
+  const dm = x => x.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  if (period.value === 'day')
+    return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+  if (period.value === 'week') {
+    const end = new Date(d);
+    end.setDate(d.getDate() + 6);
+    return `semana de ${dm(d)} a ${dm(end)}`;
   }
-};
+  if (period.value === 'weekend') {
+    const end = new Date(d);
+    end.setDate(d.getDate() + 1);
+    return `fim de semana ${d.getDate()} e ${dm(end)}`;
+  }
+  if (period.value === 'quarter')
+    return `${Math.floor(d.getMonth() / 3) + 1}º trimestre de ${d.getFullYear()}`;
+  if (period.value === 'year') return `${d.getFullYear()}`;
+  return monthLabel(month.value);
+});
 
 // ── formulário do plano (rascunho local → Salvar) ──
 const form = ref({ targets: {}, guidance: '', milestones: [], indicator_meta: {} });
@@ -55,6 +109,25 @@ const hydrateForm = () => {
       Object.entries(plan?.indicator_meta || {}).map(([k, v]) => [k, { ...v }])
     ),
   };
+};
+
+const load = async targetDate => {
+  isLoading.value = true;
+  try {
+    const { data: payload } = await CrmAPI.getGoalPlans(targetDate, period.value);
+    data.value = payload;
+    month.value = payload.month;
+    hydrateForm();
+  } catch {
+    useAlert('Não consegui carregar o Painel de Metas.');
+  } finally {
+    isLoading.value = false;
+  }
+};
+const switchPeriod = async p => {
+  if (period.value === p) return;
+  period.value = p;
+  await load(currentStartIso());
 };
 
 // responsável + "o que é preciso" por indicador (admin prepara, time vê)
@@ -75,9 +148,13 @@ const saving = ref(false);
 const savePlan = async () => {
   saving.value = true;
   try {
-    const { data: plan } = await CrmAPI.upsertGoalPlan({ month: month.value, ...form.value });
+    const { data: plan } = await CrmAPI.upsertGoalPlan({
+      month: month.value,
+      period: period.value,
+      ...form.value,
+    });
     data.value.plan = plan;
-    useAlert(`Meta de ${monthLabel(month.value)} salva! 🎯`);
+    useAlert(`Meta (${periodTitle.value}) salva! 🎯`);
   } catch {
     useAlert('Não consegui salvar a meta.');
   } finally {
@@ -93,13 +170,30 @@ const INDICATOR_COLORS = {
   surgeries_booked: '#B8860B',
   surgeries_done: '#047857',
   revenue_closed: '#BE185D',
+  rate_scheduling: '#6366F1',
+  rate_attendance: '#0891B2',
+  rate_surgery: '#EA580C',
 };
 const history = computed(() => data.value?.history || []);
 const maxOf = key => Math.max(1, ...history.value.map(h => h.values[key] || 0));
 const monthShort = iso =>
   new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
-const fmtVal = (key, v) =>
-  key === 'revenue_closed' ? `R$ ${Number(v || 0).toLocaleString('pt-BR')}` : Number(v || 0).toLocaleString('pt-BR');
+// rótulo curto de cada barra, conforme o ambiente de meta
+const barShort = iso => {
+  if (period.value === 'month') return monthShort(iso);
+  const d = parseIso(iso);
+  if (period.value === 'quarter')
+    return `T${Math.floor(d.getMonth() / 3) + 1}·${String(d.getFullYear()).slice(2)}`;
+  if (period.value === 'year') return `${d.getFullYear()}`;
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+};
+const isRate = key => (data.value?.rate_keys || []).includes(key);
+const fmtVal = (key, v) => {
+  if (isRate(key)) return `${Number(v || 0).toLocaleString('pt-BR')}%`;
+  return key === 'revenue_closed'
+    ? `R$ ${Number(v || 0).toLocaleString('pt-BR')}`
+    : Number(v || 0).toLocaleString('pt-BR');
+};
 
 // progresso do mês selecionado (valores atuais × alvo)
 const selectedHistory = computed(() => history.value.find(h => h.month === month.value));
@@ -128,7 +222,7 @@ const noteAbout = ref('');
 const sendNote = async () => {
   if (!noteText.value.trim()) return;
   try {
-    const { data: plan } = await CrmAPI.addGoalNote(month.value, noteText.value.trim(), noteAbout.value || null);
+    const { data: plan } = await CrmAPI.addGoalNote(month.value, noteText.value.trim(), noteAbout.value || null, period.value);
     data.value.plan = plan;
     hydrateForm();
     noteText.value = '';
@@ -137,7 +231,7 @@ const sendNote = async () => {
   }
 };
 const removeNote = async note => {
-  const { data: plan } = await CrmAPI.deleteGoalNote(month.value, note.id).catch(() => ({}));
+  const { data: plan } = await CrmAPI.deleteGoalNote(month.value, note.id, period.value).catch(() => ({}));
   if (plan) data.value.plan = plan;
 };
 
@@ -150,7 +244,7 @@ const createTeamTask = async () => {
   try {
     await store.dispatch('tasks/create', {
       title: `🎯 ${taskDraft.value.title.trim()}`,
-      description: `Atividade da meta de ${monthLabel(month.value)} (Painel de Metas).`,
+      description: `Atividade da meta (${periodTitle.value}) — Painel de Metas.`,
       assignee_id: taskDraft.value.assignee_id || null,
       priority: 'high',
     });
@@ -190,7 +284,7 @@ const saveRoutinesTools = async () => {
 
 onMounted(async () => {
   if (!teamAgents.value.length) store.dispatch('agents/get');
-  await load(thisMonthIso());
+  await load(currentStartIso());
   hydrateRoutines();
 });
 </script>
@@ -204,43 +298,67 @@ onMounted(async () => {
         </span>
         <div class="flex-1 min-w-0">
           <h1 class="text-lg font-bold text-n-slate-12">Painel de Metas</h1>
-          <p class="text-xs text-n-slate-10">analise o histórico, defina a meta do mês e acompanhe o caminho — marcos, ajustes e tarefas</p>
+          <p class="text-xs text-n-slate-10">analise o histórico, defina metas por período — dia, semana, fim de semana, mês, trimestre e ano — e acompanhe o caminho</p>
         </div>
-        <div class="flex items-center gap-1.5">
+      </div>
+
+      <!-- ambientes de meta + navegação do período -->
+      <div class="flex items-center gap-2 flex-wrap mb-4">
+        <div class="flex items-center gap-1 flex-wrap">
           <button
-            class="px-3 h-8 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
-            :class="month === thisMonthIso() ? 'bg-n-alpha-2 font-bold' : ''"
-            @click="load(thisMonthIso())"
+            v-for="p in PERIODS"
+            :key="p.key"
+            class="px-3 h-8 rounded-full text-xs font-medium border transition-colors"
+            :class="period === p.key
+              ? 'text-white border-transparent font-bold shadow-sm'
+              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="period === p.key ? 'background: linear-gradient(135deg, #B8860B, #D4A017)' : ''"
+            @click="switchPeriod(p.key)"
           >
-            Mês atual
+            {{ p.label }}
+          </button>
+        </div>
+        <div class="flex items-center gap-1.5 ml-auto">
+          <button
+            class="w-8 h-8 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center justify-center"
+            title="Período anterior"
+            @click="load(shiftedIso(-1))"
+          >
+            <span class="i-lucide-chevron-left text-sm" />
           </button>
           <button
             class="px-3 h-8 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
-            :class="month === nextMonthIso() ? 'bg-n-alpha-2 font-bold' : ''"
-            @click="load(nextMonthIso())"
+            :class="month === currentStartIso() ? 'bg-n-alpha-2 font-bold' : ''"
+            @click="load(currentStartIso())"
           >
-            Próximo mês
+            Atual
+          </button>
+          <button
+            class="w-8 h-8 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center justify-center"
+            title="Próximo período"
+            @click="load(shiftedIso(1))"
+          >
+            <span class="i-lucide-chevron-right text-sm" />
           </button>
           <input
+            v-if="period === 'month'"
             :value="month ? month.slice(0, 7) : ''"
             type="month"
             class="h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-            style="width: 10rem"
+            style="width: 10rem; margin-bottom: 0"
             @change="load(`${$event.target.value}-01`)"
           />
         </div>
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
-      </div>
+      <SkeletonScreen v-if="isLoading" variant="dashboard" />
 
       <template v-else>
         <!-- ── histórico + meta por indicador ── -->
         <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-5">
           <h2 class="text-sm font-bold text-n-slate-12 mb-1">
-            Meta de {{ monthLabel(month) }}
-            <span class="text-[11px] font-normal text-n-slate-9">— cada indicador mostra os últimos 12 meses pra você calibrar o alvo</span>
+            Meta — {{ periodTitle }}
+            <span class="text-[11px] font-normal text-n-slate-9">— cada indicador mostra {{ HIST_HINTS[period] }} pra você calibrar o alvo</span>
           </h2>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
             <div
@@ -251,14 +369,14 @@ onMounted(async () => {
               <div class="flex items-center gap-2 flex-wrap mb-2">
                 <span class="w-2.5 h-2.5 rounded-full" :style="{ background: INDICATOR_COLORS[key] }" />
                 <p class="text-xs font-bold text-n-slate-12 flex-1">{{ label }}</p>
-                <span class="text-[10px] text-n-slate-9">alvo:</span>
+                <span class="text-[10px] text-n-slate-9">{{ isRate(key) ? 'alvo (%):' : 'alvo:' }}</span>
                 <input
                   v-model.number="form.targets[key]"
                   type="number"
                   min="0"
                   :disabled="!isAdmin"
                   class="h-7 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs font-bold text-n-slate-12 disabled:opacity-60"
-                  style="width: 6rem"
+                  style="width: 6rem; margin-bottom: 0"
                 />
               </div>
               <!-- 12 meses em barras; o mês selecionado destacado -->
@@ -271,12 +389,12 @@ onMounted(async () => {
                     height: `${Math.max(((h.values[key] || 0) / maxOf(key)) * 100, h.values[key] ? 8 : 2)}%`,
                     background: h.month === month ? INDICATOR_COLORS[key] : `${INDICATOR_COLORS[key]}55`,
                   }"
-                  :title="`${monthShort(h.month)}: ${fmtVal(key, h.values[key])}${h.targets[key] ? ` · meta ${fmtVal(key, h.targets[key])}` : ''}`"
+                  :title="`${barShort(h.month)}: ${fmtVal(key, h.values[key])}${h.targets[key] ? ` · meta ${fmtVal(key, h.targets[key])}` : ''}`"
                 />
               </div>
               <div class="flex items-center justify-between mt-1">
-                <span class="text-[9px] text-n-slate-9">{{ monthShort(history[0]?.month) }}</span>
-                <span class="text-[9px] text-n-slate-9">{{ monthShort(history[history.length - 1]?.month) }}</span>
+                <span class="text-[9px] text-n-slate-9">{{ history.length ? barShort(history[0].month) : '' }}</span>
+                <span class="text-[9px] text-n-slate-9">{{ history.length ? barShort(history[history.length - 1].month) : '' }}</span>
               </div>
               <!-- progresso do mês contra a meta -->
               <div v-if="progressOf(key)" class="mt-2">
@@ -349,7 +467,7 @@ onMounted(async () => {
               :disabled="saving"
               @click="savePlan"
             >
-              {{ saving ? 'Salvando…' : `Salvar meta de ${monthLabel(month)}` }}
+              {{ saving ? 'Salvando…' : `Salvar meta (${periodTitle})` }}
             </button>
           </div>
         </div>
@@ -358,7 +476,7 @@ onMounted(async () => {
           <!-- marcos -->
           <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
             <h2 class="text-sm font-bold text-n-slate-12 mb-3 flex items-center gap-2">
-              <span class="i-lucide-flag text-base" style="color: #B8860B" /> Marcos do mês
+              <span class="i-lucide-flag text-base" style="color: #B8860B" /> {{ period === 'month' ? 'Marcos do mês' : 'Marcos do período' }}
             </h2>
             <div v-for="(m, mi) in form.milestones" :key="m.id || mi" class="flex items-center gap-2 mb-1.5">
               <button
@@ -450,8 +568,8 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- rotinas + ferramentas (vão pro Meu Painel do time) -->
-        <div v-if="isAdmin" class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-6">
+        <!-- rotinas + ferramentas (vão pro Meu Painel do time; são globais, só no ambiente do mês) -->
+        <div v-if="isAdmin && period === 'month'" class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-6">
           <h2 class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-2">
             <span class="i-lucide-repeat text-base" style="color: #0D9488" /> Rotinas e ferramentas do time
             <span class="text-[11px] font-normal text-n-slate-9">— aparecem no Meu Painel de todo mundo</span>

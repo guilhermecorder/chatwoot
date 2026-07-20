@@ -15,6 +15,7 @@ class CevicoFormsController < ActionController::Base # rubocop:disable Rails/App
                          status: :moved_permanently, allow_other_host: true
     end
 
+    @form.bump_funnel!('open')
     render :show
   end
 
@@ -30,10 +31,19 @@ class CevicoFormsController < ActionController::Base # rubocop:disable Rails/App
       completed_at: Time.current
     )
 
+    @form.bump_funnel!('done')
     render json: { ok: true, id: response.id }
   rescue StandardError => e
     Rails.logger.error "[CevicoForms] submit: #{e.message}"
     render json: { ok: false }, status: :unprocessable_entity
+  end
+
+  # beacon de retenção: o paciente CHEGOU no card X (1 por card por visita)
+  # — alimenta o gráfico de abandono do hub dos Formulários
+  def track
+    qid = params[:question_id].to_s[0, 40]
+    @form.bump_funnel!("q:#{qid}") if qid.present? && @form.questions.any? { |q| q['id'] == qid }
+    head :no_content
   end
 
   private

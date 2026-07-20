@@ -49,6 +49,7 @@ Rails.application.routes.draw do
   # Formulário público CEVICO (paciente responde pelo link do WhatsApp, sem login)
   get 'forms/:slug/:token', to: 'cevico_forms#show', as: :cevico_form
   post 'forms/:slug/:token', to: 'cevico_forms#submit'
+  post 'forms/:slug/:token/track', to: 'cevico_forms#track'
   # Páginas públicas CEVICO (nutrição/procedimentos — preparadas p/ SEO)
   # /cta e /next = redirecionadores que CONTAM o clique (funil + conversão)
   get 'p/:slug/cta', to: 'cevico_pages#cta_click', as: :cevico_page_cta
@@ -175,6 +176,9 @@ Rails.application.routes.draw do
               post :move_stage
               post :toggle_followup
             end
+            # Radar de Oportunidades: "Atender agora" tira o aviso da fila
+            # (se o paciente seguir sem resposta, a próxima auditoria recoloca)
+            post 'radar/attend', to: 'radar#attend'
             resources :forms, only: [:index, :create, :update, :destroy] do
               member do
                 get :summary
@@ -216,6 +220,8 @@ Rails.application.routes.draw do
               post :test_google_ads
               post :update_sheets
               post :test_sheets
+              # OftalmoFácil: conexão nativa (endereço + chave)
+              post :update_oftalmofacil
               post :update_agenda
               post :agenda_backfill
               # Configurações → Domínio (público das páginas/formulários)
@@ -246,9 +252,15 @@ Rails.application.routes.draw do
               end
             end
             # Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
-            resource :pages_dashboard, only: [:show], controller: 'pages_dashboards'
+            resource :pages_dashboard, only: [:show], controller: 'pages_dashboards' do
+              # 🌪 Montador de Funis (item 60): fontes de captação
+              post :save_funnel_sources
+            end
             # Planejamento de conteúdos (workflow kanban de marketing)
-            resources :content_items, only: [:index, :create, :update, :destroy]
+            resources :content_items, only: [:index, :create, :update, :destroy] do
+              # renovar o ambiente: publicados → coluna oculta (item 95)
+              collection { post :archive_published }
+            end
             # Ambiente Pessoas: DISC + desenvolvimento pessoal + feedbacks
             resource :people, only: [:show], controller: 'people' do
               post :save_disc
@@ -277,6 +289,19 @@ Rails.application.routes.draw do
               post :delete_entry
               get :compare
             end
+            # Ferramentas da Academia (item 77): time lê, admin escreve
+            resources :team_tools, only: [:index, :create, :update, :destroy], controller: 'team_tools'
+            # Estoque (item 68): dashboard/CRUD são área financeira;
+            # lookup + pedido são do fluxo clínico (abertos ao time)
+            resource :stock, only: [:show], controller: 'stock' do
+              post :create_item
+              post :update_item
+              post :delete_item
+              get :lookup
+              post :create_order
+              post :update_order
+              post :delete_order
+            end
             # Painel Estratégico (a empresa por pilares) — só admin
             resource :strategy, only: [:show], controller: 'strategy' do
               post :create_pillar
@@ -285,6 +310,8 @@ Rails.application.routes.draw do
               post :create_item
               post :update_item
               post :delete_item
+              # 🏭 Desenho do Processo (item 59)
+              post :save_processes
             end
             # Central do Paciente: espaço do paciente + anotações do médico
             resources :patients, only: [:show], controller: 'patients' do
@@ -301,6 +328,8 @@ Rails.application.routes.draw do
             resource :automations_dashboard, only: [:show], controller: 'automations_dashboards'
             resource :doctors_dashboard, only: [:show], controller: 'doctors_dashboards'
             resource :agents_dashboard, only: [:show], controller: 'agents_dashboards'
+            # Dashboard dos AGENTES DE IA (item 85, só admin)
+            resource :ai_dashboard, only: [:show], controller: 'ai_dashboards'
             resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
             resources :pipelines, only: [:index, :show, :create, :update, :destroy] do
               resources :stages, only: [:index, :create, :update, :destroy] do
@@ -478,6 +507,13 @@ Rails.application.routes.draw do
           resources :labels, only: [:index, :show, :create, :update, :destroy]
           resources :tasks, only: [:index, :create, :update, :destroy] do
             member { post :comment }
+            collection do
+              # etiquetas do paciente + respostas de formulário p/ a lista
+              # do dia da Agenda (o médico lê antes da consulta — item 76)
+              get :agenda_details
+              # renovar o ambiente: concluídas → coluna oculta (item 95)
+              post :archive_done
+            end
           end
 
           resources :notifications, only: [:index, :update, :destroy] do

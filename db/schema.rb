@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_18_000001) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_19_000006) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -448,6 +448,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_18_000001) do
     t.integer "position", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "archived_at"
     t.index ["account_id", "stage"], name: "index_cevico_content_items_on_account_id_and_stage"
     t.index ["account_id"], name: "index_cevico_content_items_on_account_id"
   end
@@ -477,7 +478,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_18_000001) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "indicator_meta", default: {}, null: false
-    t.index ["account_id", "month"], name: "index_cevico_goal_plans_on_account_id_and_month", unique: true
+    t.string "period_type", default: "month", null: false
+    t.index ["account_id", "period_type", "month"], name: "index_cevico_goal_plans_on_account_period_start", unique: true
     t.index ["account_id"], name: "index_cevico_goal_plans_on_account_id"
   end
 
@@ -505,6 +507,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_18_000001) do
     t.jsonb "daily_stats", default: {}, null: false
     t.jsonb "ab_variants", default: [], null: false
     t.jsonb "team_comments", default: [], null: false
+    t.string "seo_keywords"
     t.index ["account_id", "category"], name: "index_cevico_pages_on_account_id_and_category"
     t.index ["account_id"], name: "index_cevico_pages_on_account_id"
     t.index ["next_page_id"], name: "index_cevico_pages_on_next_page_id"
@@ -541,6 +544,42 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_18_000001) do
     t.index ["account_id"], name: "index_cevico_pillars_on_account_id"
   end
 
+  create_table "cevico_stock_items", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "name", null: false
+    t.string "category", default: "lentes", null: false
+    t.string "specification", default: ""
+    t.integer "quantity", default: 0, null: false
+    t.integer "min_quantity", default: 0, null: false
+    t.decimal "unit_cost", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "sale_price", precision: 12, scale: 2, default: "0.0", null: false
+    t.string "supplier", default: ""
+    t.string "notes", default: ""
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "category"], name: "index_cevico_stock_items_on_account_id_and_category"
+    t.index ["account_id"], name: "index_cevico_stock_items_on_account_id"
+  end
+
+  create_table "cevico_stock_orders", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "stock_item_id"
+    t.string "item_name", null: false
+    t.string "specification", default: ""
+    t.integer "quantity", default: 1, null: false
+    t.string "reason", default: ""
+    t.string "status", default: "pendente", null: false
+    t.integer "task_id"
+    t.integer "contact_id"
+    t.integer "created_by_id"
+    t.datetime "received_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "status"], name: "index_cevico_stock_orders_on_account_id_and_status"
+    t.index ["account_id"], name: "index_cevico_stock_orders_on_account_id"
+    t.index ["stock_item_id"], name: "index_cevico_stock_orders_on_stock_item_id"
+  end
+
   create_table "cevico_strategies", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.bigint "pillar_id", null: false
@@ -556,6 +595,20 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_18_000001) do
     t.index ["account_id", "kind"], name: "index_cevico_strategies_on_account_id_and_kind"
     t.index ["account_id"], name: "index_cevico_strategies_on_account_id"
     t.index ["pillar_id"], name: "index_cevico_strategies_on_pillar_id"
+  end
+
+  create_table "cevico_tools", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "title", null: false
+    t.string "emoji", default: "🧰", null: false
+    t.string "category", default: "", null: false
+    t.text "content", default: "", null: false
+    t.integer "position", default: 0, null: false
+    t.boolean "published", default: true, null: false
+    t.integer "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_cevico_tools_on_account_id"
   end
 
   create_table "channel_api", force: :cascade do |t|
@@ -1058,6 +1111,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_18_000001) do
     t.jsonb "ai_insight", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "sent_count", default: 0, null: false
+    t.jsonb "funnel_stats", default: {}, null: false
     t.index ["account_id"], name: "index_crm_forms_on_account_id"
     t.index ["slug"], name: "index_crm_forms_on_slug", unique: true
   end
@@ -1648,6 +1703,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_18_000001) do
     t.jsonb "comments", default: [], null: false
     t.string "modality"
     t.bigint "contact_id"
+    t.datetime "archived_at"
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
     t.index ["account_id", "unit"], name: "index_tasks_on_account_id_and_unit"
     t.index ["account_id"], name: "index_tasks_on_account_id"
@@ -1776,8 +1832,12 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_18_000001) do
   add_foreign_key "cevico_people_profiles", "accounts"
   add_foreign_key "cevico_people_profiles", "users"
   add_foreign_key "cevico_pillars", "accounts"
+  add_foreign_key "cevico_stock_items", "accounts"
+  add_foreign_key "cevico_stock_orders", "accounts"
+  add_foreign_key "cevico_stock_orders", "cevico_stock_items", column: "stock_item_id"
   add_foreign_key "cevico_strategies", "accounts"
   add_foreign_key "cevico_strategies", "cevico_pillars", column: "pillar_id"
+  add_foreign_key "cevico_tools", "accounts"
   add_foreign_key "crm_ai_usages", "accounts"
   add_foreign_key "crm_automation_logs", "crm_automations", column: "automation_id"
   add_foreign_key "crm_automations", "crm_stages", column: "stage_id"

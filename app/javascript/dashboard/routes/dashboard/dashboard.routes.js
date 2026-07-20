@@ -18,6 +18,7 @@ import cevicoPagesRoutes from './pages/routes';
 import cevicoStrategyRoutes from './strategy/routes';
 import cevicoPeopleRoutes from './people/routes';
 import cevicoGoalsRoutes from './goals/routes';
+import cevicoBuilderRoutes from './builder/routes';
 import cevicoFinanceRoutes from './finance/routes';
 import inicioRoutes from './inicio/routes';
 import cevicoAutomationsRoutes from './cevicoAutomations/routes';
@@ -51,6 +52,7 @@ export default {
         ...cevicoStrategyRoutes.routes,
         ...cevicoPeopleRoutes.routes,
         ...cevicoGoalsRoutes.routes,
+        ...cevicoBuilderRoutes.routes,
         ...cevicoFinanceRoutes.routes,
         ...inicioRoutes.routes,
         ...cevicoAutomationsRoutes.routes,

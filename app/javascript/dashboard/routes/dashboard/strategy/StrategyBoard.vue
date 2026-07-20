@@ -4,16 +4,21 @@
 // vierem). Cada pilar: responsáveis, semáforo de saúde, "como está" e as
 // estratégias/ações corretivas com dono, prazo e andamento.
 import { ref, computed, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 
 const store = useStore();
 const teamAgents = useMapGetter('agents/getAgents');
+const { isAdmin } = useAdmin();
 
 const isLoading = ref(true);
 const pillars = ref([]);
+// abas do Estratégico: Pilares | 🏭 Desenho do Processo (item 59)
+const activeTab = ref('pilares');
 
 // identidade CEVICO: gradientes oficiais por cor do pilar
 const PILLAR_COLORS = {
@@ -67,11 +72,72 @@ const load = async () => {
   try {
     const { data } = await CrmAPI.getStrategyBoard();
     pillars.value = data.pillars || [];
+    processes.value = data.processes || [];
+    if (!selectedProcessId.value && processes.value.length) {
+      selectedProcessId.value = processes.value[0].id;
+    }
   } catch {
     useAlert('Não consegui carregar o Painel Estratégico.');
   } finally {
     isLoading.value = false;
   }
+};
+
+// ── 🏭 DESENHO DO PROCESSO (item 59): a máquina da clínica ──
+// etapas conectadas com PASSE DE BASTÃO; clique = zoom na etapa
+const processes = ref([]);
+const selectedProcessId = ref('');
+const selectedProcess = computed(
+  () => processes.value.find(p => p.id === selectedProcessId.value) || null
+);
+const zoomStep = ref(null); // etapa aberta em zoom (leitura ou edição)
+const editingProcess = ref(false); // modo de desenho (admin)
+const savingProcess = ref(false);
+
+const ownerName = id => agentName(id) || 'Sem dono definido';
+
+const persistProcesses = async () => {
+  savingProcess.value = true;
+  try {
+    const { data } = await CrmAPI.saveStrategyProcesses(processes.value);
+    processes.value = data.processes || [];
+    useAlert('Processo salvo — o time já vê o desenho novo. 🏭');
+  } catch {
+    useAlert('Não consegui salvar o processo.');
+  } finally {
+    savingProcess.value = false;
+  }
+};
+
+const addProcess = () => {
+  const proc = {
+    id: `novo-${Date.now()}`,
+    name: 'Novo processo',
+    emoji: '🏭',
+    steps: [{ id: `s-${Date.now()}`, title: 'Primeira etapa', desc: '', owner_id: null, handoff: '' }],
+  };
+  processes.value.push(proc);
+  selectedProcessId.value = proc.id;
+  editingProcess.value = true;
+};
+const removeProcess = () => {
+  // eslint-disable-next-line no-alert
+  if (!window.confirm(`Excluir o processo "${selectedProcess.value?.name}"?`)) return;
+  processes.value = processes.value.filter(p => p.id !== selectedProcessId.value);
+  selectedProcessId.value = processes.value[0]?.id || '';
+  persistProcesses();
+};
+const addStep = () => {
+  selectedProcess.value.steps.push({
+    id: `s-${Date.now()}`, title: 'Nova etapa', desc: '', owner_id: null, handoff: '',
+  });
+};
+const removeStep = idx => selectedProcess.value.steps.splice(idx, 1);
+const moveStep = (idx, dir) => {
+  const steps = selectedProcess.value.steps;
+  const j = idx + dir;
+  if (j < 0 || j >= steps.length) return;
+  [steps[idx], steps[j]] = [steps[j], steps[idx]];
 };
 
 // ── editor do pilar (modal) ─────────────────────────────────
@@ -223,6 +289,7 @@ onMounted(() => {
           </p>
         </div>
         <button
+          v-if="activeTab === 'pilares'"
           class="flex items-center gap-1.5 text-xs font-semibold text-white px-3.5 h-9 rounded-xl hover:opacity-90 shadow-sm"
           style="background: linear-gradient(135deg, #152C61, #3B82F6)"
           @click="openNewPillar"
@@ -232,8 +299,192 @@ onMounted(() => {
         </button>
       </div>
 
-      <div v-if="isLoading" class="flex items-center justify-center py-24">
-        <Spinner />
+      <!-- abas: Pilares | Desenho do Processo (item 59) -->
+      <div class="flex items-center gap-1 bg-n-solid-2 border border-n-weak rounded-xl p-1 w-fit mt-3">
+        <button
+          class="px-3 h-8 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'pilares' ? 'text-white font-bold' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'pilares' ? 'background: linear-gradient(135deg, #152C61, #3B82F6)' : ''"
+          @click="activeTab = 'pilares'"
+        >
+          <span class="i-lucide-columns-3 text-sm" /> Pilares
+        </button>
+        <button
+          class="px-3 h-8 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'processo' ? 'text-white font-bold' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'processo' ? 'background: linear-gradient(135deg, #B8860B, #D4AF37)' : ''"
+          @click="activeTab = 'processo'"
+        >
+          <span class="i-lucide-factory text-sm" /> Desenho do Processo
+        </button>
+      </div>
+
+      <SkeletonScreen v-if="isLoading" variant="board" />
+
+      <!-- ══ 🏭 DESENHO DO PROCESSO ══ a máquina da clínica, etapa a etapa -->
+      <div v-else-if="activeTab === 'processo'" class="mt-4">
+        <div class="flex items-center gap-2 flex-wrap mb-4">
+          <button
+            v-for="p in processes"
+            :key="p.id"
+            class="px-3 h-8 rounded-full text-xs font-medium border transition-colors flex items-center gap-1.5"
+            :class="selectedProcessId === p.id ? 'text-white border-transparent font-bold' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="selectedProcessId === p.id ? 'background: linear-gradient(135deg, #B8860B, #D4AF37)' : ''"
+            @click="selectedProcessId = p.id"
+          >
+            {{ p.emoji }} {{ p.name }}
+          </button>
+          <button
+            v-if="isAdmin"
+            class="px-3 h-8 rounded-full text-xs font-medium border border-dashed border-n-weak text-n-slate-10 hover:bg-n-alpha-1 flex items-center gap-1"
+            @click="addProcess"
+          >
+            <span class="i-lucide-plus text-xs" /> Criar processo
+          </button>
+          <div class="flex-1" />
+          <template v-if="isAdmin && selectedProcess">
+            <button
+              class="px-3 h-8 rounded-xl text-xs font-bold transition-colors"
+              :class="editingProcess ? 'text-white' : 'border border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="editingProcess ? 'background: linear-gradient(135deg, #B8860B, #D4AF37)' : ''"
+              @click="editingProcess = !editingProcess"
+            >
+              {{ editingProcess ? '✓ Visualizar' : '✏️ Desenhar' }}
+            </button>
+            <button
+              v-if="editingProcess"
+              class="px-3 h-8 rounded-xl text-xs font-bold text-white disabled:opacity-60"
+              style="background: linear-gradient(135deg, #047857, #34D399)"
+              :disabled="savingProcess"
+              @click="persistProcesses"
+            >
+              {{ savingProcess ? 'Salvando…' : 'Salvar processo' }}
+            </button>
+            <button
+              v-if="editingProcess && processes.length > 1"
+              class="w-8 h-8 rounded-xl border border-n-weak text-n-slate-10 hover:text-red-500 flex items-center justify-center"
+              title="Excluir este processo"
+              @click="removeProcess"
+            >
+              <span class="i-lucide-trash-2 text-sm" />
+            </button>
+          </template>
+        </div>
+
+        <div v-if="selectedProcess" class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 overflow-x-auto">
+          <input
+            v-if="editingProcess"
+            v-model="selectedProcess.name"
+            class="text-sm font-bold text-n-slate-12 bg-n-solid-2 border border-n-weak rounded-lg px-2 h-8 mb-4"
+            style="width: 20rem; margin-bottom: 1rem"
+          />
+          <!-- a MÁQUINA: etapas conectadas pelo passe de bastão -->
+          <div class="flex items-stretch gap-0 min-w-max pb-2">
+            <template v-for="(s, si) in selectedProcess.steps" :key="s.id">
+              <button
+                class="w-60 flex-shrink-0 rounded-2xl border-2 text-left p-3.5 transition-all hover:shadow-md hover:-translate-y-0.5"
+                style="border-color: rgba(184, 134, 11, 0.35); background: rgba(184, 134, 11, 0.05)"
+                title="Clique para dar zoom nesta etapa"
+                @click="zoomStep = s"
+              >
+                <div class="flex items-center gap-1.5 mb-1">
+                  <span
+                    class="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black text-white flex-shrink-0"
+                    style="background: linear-gradient(135deg, #B8860B, #D4AF37)"
+                  >{{ si + 1 }}</span>
+                  <p class="text-xs font-bold text-n-slate-12 leading-tight">{{ s.title }}</p>
+                </div>
+                <p class="text-[11px] text-n-slate-10 leading-snug line-clamp-3">{{ s.desc || '—' }}</p>
+                <p class="text-[10px] font-semibold mt-1.5" style="color: #92600A">
+                  <span class="i-lucide-user-round text-[10px]" /> {{ ownerName(s.owner_id) }}
+                </p>
+              </button>
+              <!-- passe de bastão -->
+              <div v-if="si < selectedProcess.steps.length - 1" class="flex flex-col items-center justify-center px-2 flex-shrink-0 w-28">
+                <span class="i-lucide-arrow-right text-xl" style="color: #B8860B" />
+                <span class="text-[9px] text-center leading-tight mt-0.5 text-n-slate-9">{{ s.handoff || 'passe de bastão' }}</span>
+              </div>
+            </template>
+            <button
+              v-if="editingProcess"
+              class="w-14 flex-shrink-0 rounded-2xl border-2 border-dashed border-n-weak text-n-slate-9 hover:text-n-slate-11 hover:bg-n-alpha-1 flex items-center justify-center ml-2"
+              title="Adicionar etapa"
+              @click="addStep"
+            >
+              <span class="i-lucide-plus text-lg" />
+            </button>
+          </div>
+          <p class="text-[10px] text-n-slate-9 mt-2">
+            clique numa etapa para dar ZOOM — descrição completa, responsável e o passe de bastão para a próxima.
+          </p>
+        </div>
+
+        <!-- ZOOM da etapa -->
+        <div
+          v-if="zoomStep"
+          class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          @click.self="zoomStep = null"
+        >
+          <div class="w-full max-w-lg bg-n-solid-1 border border-n-weak rounded-3xl shadow-2xl overflow-hidden">
+            <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #B8860B, #D4AF37)" />
+            <div class="p-5">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-black" style="background: linear-gradient(135deg, #B8860B, #D4AF37)">
+                  {{ selectedProcess.steps.indexOf(zoomStep) + 1 }}
+                </span>
+                <input
+                  v-if="editingProcess"
+                  v-model="zoomStep.title"
+                  class="flex-1 text-sm font-bold text-n-slate-12 bg-n-solid-2 border border-n-weak rounded-lg px-2 h-9"
+                  style="margin-bottom: 0"
+                />
+                <h2 v-else class="text-sm font-bold text-n-slate-12 flex-1">{{ zoomStep.title }}</h2>
+                <button class="i-lucide-x text-n-slate-10 hover:text-n-slate-12" @click="zoomStep = null" />
+              </div>
+
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">O que acontece nesta etapa</p>
+              <textarea
+                v-if="editingProcess"
+                v-model="zoomStep.desc"
+                rows="3"
+                class="w-full rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2 text-xs text-n-slate-12 resize-y mb-3"
+              />
+              <p v-else class="text-xs text-n-slate-11 leading-relaxed mb-3 whitespace-pre-line">{{ zoomStep.desc || '—' }}</p>
+
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Responsável (quem segura o bastão)</p>
+              <select
+                v-if="editingProcess"
+                v-model="zoomStep.owner_id"
+                class="h-9 rounded-xl border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 mb-3"
+                style="width: 14rem; margin-bottom: 0.75rem"
+              >
+                <option :value="null">— sem dono definido —</option>
+                <option v-for="a in teamAgents" :key="a.id" :value="a.id">{{ a.available_name || a.name }}</option>
+              </select>
+              <p v-else class="text-xs font-semibold mb-3" style="color: #92600A">{{ ownerName(zoomStep.owner_id) }}</p>
+
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Passe de bastão (o que dispara a próxima etapa)</p>
+              <textarea
+                v-if="editingProcess"
+                v-model="zoomStep.handoff"
+                rows="2"
+                class="w-full rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2 text-xs text-n-slate-12 resize-y"
+              />
+              <p v-else class="text-xs text-n-slate-11 leading-relaxed whitespace-pre-line">{{ zoomStep.handoff || '—' }}</p>
+
+              <div v-if="editingProcess" class="flex items-center gap-1.5 mt-4 pt-3 border-t border-n-weak">
+                <button class="px-2.5 h-8 rounded-lg border border-n-weak text-xs text-n-slate-11 hover:bg-n-alpha-1" @click="moveStep(selectedProcess.steps.indexOf(zoomStep), -1)">← mover</button>
+                <button class="px-2.5 h-8 rounded-lg border border-n-weak text-xs text-n-slate-11 hover:bg-n-alpha-1" @click="moveStep(selectedProcess.steps.indexOf(zoomStep), 1)">mover →</button>
+                <button
+                  class="ml-auto px-2.5 h-8 rounded-lg border border-red-500/40 text-xs text-red-500 hover:bg-red-500/10"
+                  @click="removeStep(selectedProcess.steps.indexOf(zoomStep)); zoomStep = null"
+                >
+                  Excluir etapa
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- pilares: 1 coluna no celular, 2 no notebook, 3 no desktop largo -->

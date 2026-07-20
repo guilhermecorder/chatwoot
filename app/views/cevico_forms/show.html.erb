@@ -259,6 +259,24 @@
     // STEPS = perguntas + cards de mensagem, na ordem montada no criador
     const STEPS = <%= raw @form.questions.to_json %>;
     const SUBMIT_URL = window.location.pathname;
+    // beacon de retenção: avisa 1x quando o paciente CHEGA em cada card —
+    // alimenta o gráfico de abandono do hub (falhar não atrapalha nada)
+    const trackedCards = new Set();
+    function trackReach(qid) {
+      if (!qid || trackedCards.has(qid)) return;
+      trackedCards.add(qid);
+      try {
+        navigator.sendBeacon
+          ? navigator.sendBeacon(SUBMIT_URL + '/track', new Blob(
+              [JSON.stringify({ question_id: qid })], { type: 'application/json' }))
+          : fetch(SUBMIT_URL + '/track', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ question_id: qid }),
+              keepalive: true,
+            });
+      } catch (e) { /* silencioso */ }
+    }
     const answers = {};   // id -> value
     let current = -1;     // -1 = intro
 
@@ -417,6 +435,7 @@
     function go(i) {
       if (i < 0) { current = -1; show('step-intro'); setBar(); applyPalette(stepPalette(-1)); glow(true); return; }
       current = i; show('step-' + i); setBar(); applyPalette(stepPalette(i)); glow(false);
+      trackReach(STEPS[i] && STEPS[i].id);
     }
 
     // brilho dourado pulsante do cartão: na abertura e no final
@@ -567,8 +586,13 @@
         parts.forEach((p, i) => {
           p.x += p.vx * (1 + surge * 3); p.y += p.vy * (1 + surge * 2); p.life += 1;
           const t = p.life / p.max;
-          if (t >= 1 || p.x < 0 || p.x > W) { parts[i] = spawn(); return; }
-          const a = Math.sin(Math.min(t, 1) * Math.PI) *
+          if (t >= 1 || p.x < 0 || p.x > W || p.y < 0 || p.y > H) { parts[i] = spawn(); return; }
+          // fade suave perto das bordas do canvas: a névoa se dissolve em vez
+          // de ser CORTADA numa linha reta (a "margem" que aparecia no surge)
+          const edge = Math.max(0, Math.min(1,
+            p.y / (9 * dpr), (H - p.y) / (9 * dpr),
+            p.x / (12 * dpr), (W - p.x) / (12 * dpr)));
+          const a = edge * Math.sin(Math.min(t, 1) * Math.PI) *
             (0.25 + 0.5 * progress + 0.3 * surge) * (p.tip ? 1.3 : 0.95);
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.r * (1 + surge * 0.8), 0, Math.PI * 2);

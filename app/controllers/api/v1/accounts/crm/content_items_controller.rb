@@ -3,8 +3,17 @@
 # Time inteiro cria e move; excluir é do admin.
 class Api::V1::Accounts::Crm::ContentItemsController < Api::V1::Accounts::BaseController
   def index
-    items = Current.account.cevico_content_items.order(:position, :id)
+    # arquivados (coluna oculta do item 95) ficam fora do board
+    items = Current.account.cevico_content_items.where(archived_at: nil).order(:position, :id)
     render json: { items: items.map { |i| item_json(i) } }
+  end
+
+  # item 95: RENOVAR o ambiente — publicados vão pra coluna oculta
+  def archive_published
+    count = Current.account.cevico_content_items
+                   .where(stage: 'publicado', archived_at: nil)
+                   .update_all(archived_at: Time.current) # rubocop:disable Rails/SkipsModelValidations
+    render json: { archived: count }
   end
 
   def create
@@ -34,7 +43,9 @@ class Api::V1::Accounts::Crm::ContentItemsController < Api::V1::Accounts::BaseCo
   end
 
   def item_params
-    params.permit(:title, :format, :stage, :owner_id, :due_on, :notes, :position)
+    # Envelope obrigatório: a rota da API tem defaults { format: 'json' } e o
+    # path param sobrescreveria um :format solto no corpo da requisição.
+    params.require(:content_item).permit(:title, :format, :stage, :owner_id, :due_on, :notes, :position)
   end
 
   def item_json(item)

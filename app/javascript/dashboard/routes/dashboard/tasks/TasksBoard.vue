@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, reactive, onMounted, watch } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
@@ -11,6 +12,7 @@ import {
 } from 'chart.js';
 import { Doughnut } from 'vue-chartjs';
 import TasksAPI from 'dashboard/api/tasks';
+import CrmAPI from 'dashboard/api/crm';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import { resolveTheme } from 'dashboard/helper/cevicoThemes';
 
@@ -199,15 +201,59 @@ watch(allDone, now => {
   if (now) praise.value = pickPraise();
 });
 
-// névoa de partículas douradas ORBITANDO o donut (substitui o glow)
-const mistParticles = Array.from({ length: 16 }, (_, i) => ({
-  id: i,
-  r: 70 + Math.random() * 28,
-  dur: 5 + Math.random() * 5,
-  delay: -Math.random() * 8,
-  size: 2.5 + Math.random() * 3.5,
-  op: 0.45 + Math.random() * 0.5,
-}));
+// ── item 95: RENOVAR O AMBIENTE — 5 min depois do 100%, as concluídas
+// vão pra coluna oculta e a tela nasce limpa pro próximo ciclo ──
+const RENEW_AFTER_MS = 5 * 60 * 1000;
+let renewTimer = null;
+const renewCountdown = ref(0); // segundos restantes (mostra o chip)
+let renewTicker = null;
+const clearRenewTimers = () => {
+  clearTimeout(renewTimer);
+  clearInterval(renewTicker);
+  renewTimer = null;
+  renewTicker = null;
+  renewCountdown.value = 0;
+};
+const renewNow = async () => {
+  clearRenewTimers();
+  try {
+    await CrmAPI.archiveDoneTasks();
+    await fetchTasks();
+    useAlert('Ambiente renovado — tela limpa pro próximo ciclo! ✨');
+  } catch {
+    useAlert('Não consegui renovar o ambiente.');
+  }
+};
+watch(allDone, now => {
+  if (!now) {
+    clearRenewTimers(); // entrou tarefa nova no meio → cancela a renovação
+    return;
+  }
+  renewCountdown.value = RENEW_AFTER_MS / 1000;
+  renewTicker = setInterval(() => { renewCountdown.value = Math.max(0, renewCountdown.value - 1); }, 1000);
+  renewTimer = setTimeout(renewNow, RENEW_AFTER_MS);
+});
+const renewLabel = computed(() => {
+  const m = Math.floor(renewCountdown.value / 60);
+  const s = String(renewCountdown.value % 60).padStart(2, '0');
+  return `${m}:${s}`;
+});
+
+// névoa de partículas douradas ORBITANDO o donut (substitui o glow) —
+// aura ESPALHADA e VOLUMOSA (pedidos 18/07): muitas partículas em órbitas
+// amplas, mais densas perto do anel; as distantes menores e mais tênues
+const mistParticles = Array.from({ length: 70 }, (_, i) => {
+  const r = 60 + Math.random() * 78;
+  const far = (r - 60) / 78; // 0 = coladinha no anel · 1 = bem longe
+  return {
+    id: i,
+    r,
+    dur: 4.5 + Math.random() * 6.5,
+    delay: -Math.random() * 10,
+    size: 2.5 + Math.random() * (5 - far * 2.5),
+    op: (0.5 + Math.random() * 0.45) * (1 - far * 0.4),
+  };
+});
 
 const ringPhase = ref(''); // '' | 'tremor' | 'gold'
 let ringTimer = null;
@@ -501,9 +547,7 @@ const formatDue = iso => {
     </div>
 
     <!-- Loading -->
-    <div v-if="isLoading" class="flex justify-center items-center flex-1">
-      <Spinner :size="32" class="text-n-brand" />
-    </div>
+    <SkeletonScreen v-if="isLoading" variant="board" />
 
     <!-- Kanban + dashboard -->
     <div v-else class="flex-1 min-h-0 overflow-x-auto p-8">
@@ -675,6 +719,20 @@ const formatDue = iso => {
             <p class="text-lg font-black tracking-wide leading-snug" style="color: #B8860B">
               {{ praise }} ✨
             </p>
+            <!-- item 95: renovação automática do ambiente -->
+            <div v-if="renewCountdown > 0" class="flex items-center justify-center gap-1.5 pt-1">
+              <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" style="background: rgba(184, 134, 11, 0.14); color: #92600A">
+                🧹 tela nova em {{ renewLabel }}
+              </span>
+              <button
+                class="text-[10px] font-bold px-2 py-0.5 rounded-full text-white hover:opacity-90"
+                style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+                title="Mover as concluídas pra coluna oculta agora"
+                @click="renewNow"
+              >
+                Renovar agora
+              </button>
+            </div>
           </div>
 
           <!-- Números-chave: no modo 100%, só o FEITO fica dourado (pulsando);
@@ -995,15 +1053,11 @@ const formatDue = iso => {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+/* sem glow no donut (pedido 18/07) — só a respiração sutil de opacidade;
+   quem brilha é a névoa de partículas ao redor */
 @keyframes cevico-donut-gold-pulse {
-  0%, 100% {
-    filter: drop-shadow(0 0 5px rgba(212, 160, 23, 0.35));
-    opacity: 1;
-  }
-  50% {
-    filter: drop-shadow(0 0 14px rgba(255, 200, 40, 0.65));
-    opacity: 0.92;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.9; }
 }
 
 /* efeito "vidro" leve dos temas (Santorini etc.) */

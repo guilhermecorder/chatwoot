@@ -2,11 +2,14 @@
 // PLANEJAMENTO DE CONTEÚDOS (workflow de marketing): cada peça de conteúdo
 // (reels, carrossel, post, anúncio, página, e-mail) anda pelo fluxo
 // ideia → copy → produção → revisão → publicado. Time inteiro usa.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
+import draggable from 'vuedraggable';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import EmojiFx from 'dashboard/components-next/cevico/EmojiFx.vue';
 import CrmAPI from 'dashboard/api/crm';
 
 const store = useStore();
@@ -52,6 +55,47 @@ const load = async () => {
   }
 };
 
+// ── item 95: RENOVAR o ambiente — tudo PUBLICADO? 5 min depois os cards
+// vão pra coluna oculta e o quadro nasce limpo pro próximo ciclo ──
+const allPublished = computed(
+  () => items.value.length > 0 && items.value.every(i => i.stage === 'publicado')
+);
+const RENEW_AFTER_MS = 5 * 60 * 1000;
+let renewTimer = null;
+const renewCountdown = ref(0);
+let renewTicker = null;
+const clearRenewTimers = () => {
+  clearTimeout(renewTimer);
+  clearInterval(renewTicker);
+  renewTimer = null;
+  renewTicker = null;
+  renewCountdown.value = 0;
+};
+const renewNow = async () => {
+  clearRenewTimers();
+  try {
+    await CrmAPI.archivePublishedContent();
+    await load();
+    useAlert('Quadro renovado — pronto pro próximo ciclo de conteúdos! ✨');
+  } catch {
+    useAlert('Não consegui renovar o quadro.');
+  }
+};
+watch(allPublished, now => {
+  if (!now) {
+    clearRenewTimers();
+    return;
+  }
+  renewCountdown.value = RENEW_AFTER_MS / 1000;
+  renewTicker = setInterval(() => { renewCountdown.value = Math.max(0, renewCountdown.value - 1); }, 1000);
+  renewTimer = setTimeout(renewNow, RENEW_AFTER_MS);
+});
+const renewLabel = computed(() => {
+  const m = Math.floor(renewCountdown.value / 60);
+  const s = String(renewCountdown.value % 60).padStart(2, '0');
+  return `${m}:${s}`;
+});
+
 // ── criar rápido (input no topo de cada coluna) ──
 const drafts = ref({});
 const draftFor = stage => {
@@ -70,18 +114,109 @@ const addItem = async stage => {
   }
 };
 
-// ── mover pelo fluxo (setas ← →) ──
+// ── comemoração progressiva (rodada 2 — 18/07) ──
+// copy = foco/ideias · produção = corações · publicado = explosão SAINDO
+// DO CARD (1 emoji sorteado, estilo Tarefas) + a coluna se ENERGIZA:
+// elétrons dão a volta em sentido horário e ela acende verde, pulsando.
+const fx = ref(null);
+const CELEBRATIONS = {
+  copy: { emojis: ['💡', '🎯', '✍️'], count: 5 },
+  producao: { emojis: ['❤️', '💖', '❤️‍🔥'], count: 10 },
+};
+const PUBLISH_EMOJIS = ['🥳', '👏', '⭐️', '🔥', '🥇', '🚀', '💚', '✅', '💎'];
+// '' | 'charging' (volta dos elétrons) | 'lit' (pulsando) | 'fading' (esvai)
+const publishedCharge = ref('');
+// 1ª publicação da sessão = festa completa; as SEGUINTES = só pop de 3 ✅
+let publishedCelebratedOnce = false;
+let chargeLapTimer = null;
+let chargeFadeTimer = null;
+let chargeOffTimer = null;
+const energizePublishedColumn = () => {
+  clearTimeout(chargeLapTimer);
+  clearTimeout(chargeFadeTimer);
+  clearTimeout(chargeOffTimer);
+  publishedCharge.value = '';
+  requestAnimationFrame(() => {
+    publishedCharge.value = 'charging';
+  });
+  chargeLapTimer = setTimeout(() => {
+    publishedCharge.value = 'lit';
+  }, 1100);
+  chargeFadeTimer = setTimeout(() => {
+    publishedCharge.value = 'fading'; // a intensidade some LENTAMENTE
+  }, 5100);
+  chargeOffTimer = setTimeout(() => {
+    publishedCharge.value = '';
+  }, 7400);
+};
+const cardCenter = id => {
+  const el = document.querySelector(`[data-cid="${id}"]`);
+  if (!el) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+};
+const celebrate = async (item, event) => {
+  if (!fx.value) return;
+  if (item.stage === 'publicado') {
+    await nextTick();
+    const { x, y } = cardCenter(item.id);
+    if (publishedCelebratedOnce) {
+      // já teve a festa nesta sessão: só um "pop" de 3 checks verdes
+      fx.value.burstAt(x, y, ['✅'], 3);
+      return;
+    }
+    publishedCelebratedOnce = true;
+    const emoji =
+      PUBLISH_EMOJIS[Math.floor(Math.random() * PUBLISH_EMOJIS.length)];
+    fx.value.burstAt(x, y, [emoji], 26);
+    setTimeout(energizePublishedColumn, 150);
+    return;
+  }
+  const c = CELEBRATIONS[item.stage];
+  if (!c) return;
+  if (event?.clientX) {
+    fx.value.burstAt(event.clientX, event.clientY, c.emojis, c.count);
+  } else {
+    await nextTick();
+    const { x, y } = cardCenter(item.id);
+    fx.value.burstAt(x, y, c.emojis, c.count);
+  }
+};
 const stageIndex = key => STAGES.findIndex(s => s.key === key);
-const moveItem = async (item, dir) => {
+const moveItem = async (item, dir, event) => {
   const idx = stageIndex(item.stage) + dir;
   if (idx < 0 || idx >= STAGES.length) return;
   const before = item.stage;
   item.stage = STAGES[idx].key;
   try {
     await CrmAPI.updateContentItem(item.id, { stage: item.stage });
+    if (dir > 0) celebrate(item, event);
   } catch {
     item.stage = before;
     useAlert('Não consegui mover.');
+  }
+};
+
+// ── arrasto entre colunas (mesmo movimento do card do CRM) ──
+const onDrop = async (stageKey, list) => {
+  const ids = new Set(list.map(i => i.id));
+  const moved = list.find(i => i.stage !== stageKey);
+  const fromIdx = moved ? stageIndex(moved.stage) : -1;
+  list.forEach(i => {
+    i.stage = stageKey;
+  });
+  // preserva a ordem deixada pelo arrasto nesta coluna
+  items.value = [...items.value.filter(i => !ids.has(i.id)), ...list];
+  if (!moved) return; // só reordenou dentro da própria coluna
+  try {
+    await CrmAPI.updateContentItem(moved.id, {
+      stage: stageKey,
+      position: list.findIndex(i => i.id === moved.id),
+    });
+    if (stageIndex(stageKey) > fromIdx) celebrate(moved);
+  } catch {
+    useAlert('Não consegui mover.');
+    load();
   }
 };
 
@@ -131,12 +266,23 @@ onMounted(() => {
           <h1 class="text-lg font-bold text-n-slate-12">Planejamento de conteúdos</h1>
           <p class="text-xs text-n-slate-10">o fluxo das peças de marketing: ideia → copy → produção → revisão → publicado</p>
         </div>
+        <!-- item 95: tudo publicado → o quadro se renova sozinho -->
+        <div v-if="renewCountdown > 0" class="flex items-center gap-1.5">
+          <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" style="background: rgba(16, 185, 129, 0.14); color: #047857">
+            🧹 quadro novo em {{ renewLabel }}
+          </span>
+          <button
+            class="text-[10px] font-bold px-2 py-0.5 rounded-full text-white hover:opacity-90"
+            style="background: linear-gradient(135deg, #047857, #10B981)"
+            @click="renewNow"
+          >
+            Renovar agora
+          </button>
+        </div>
       </div>
     </div>
 
-    <div v-if="isLoading" class="flex justify-center py-16">
-      <Spinner :size="32" class="text-n-brand" />
-    </div>
+    <SkeletonScreen v-if="isLoading" variant="board" />
 
     <!-- board: colunas deslizáveis (desktop e mobile) -->
     <div v-else class="flex-1 overflow-x-auto overflow-y-hidden px-4 sm:px-8 pb-4">
@@ -144,7 +290,12 @@ onMounted(() => {
         <div
           v-for="stage in STAGES"
           :key="stage.key"
-          class="w-64 flex-shrink-0 flex flex-col rounded-2xl bg-n-solid-2 border border-n-weak overflow-hidden"
+          class="relative w-64 flex-shrink-0 flex flex-col rounded-2xl bg-n-solid-2 border border-n-weak overflow-hidden"
+          :class="{
+            'cevico-col-charging': stage.key === 'publicado' && publishedCharge === 'charging',
+            'cevico-col-lit': stage.key === 'publicado' && publishedCharge === 'lit',
+            'cevico-col-fading': stage.key === 'publicado' && publishedCharge === 'fading',
+          }"
         >
           <div class="px-3 py-2 flex items-center gap-2 text-white" :style="{ background: stage.grad }">
             <span :class="stage.icon" class="text-sm" />
@@ -172,11 +323,21 @@ onMounted(() => {
               </button>
             </div>
 
-            <!-- cards -->
+            <!-- cards — arrasto entre colunas no mesmo movimento do CRM -->
+            <draggable
+              :model-value="byStage[stage.key]"
+              group="cevico-content"
+              item-key="id"
+              :animation="150"
+              :empty-insert-threshold="80"
+              ghost-class="opacity-40"
+              class="min-h-[40px]"
+              @update:model-value="list => onDrop(stage.key, list)"
+            >
+              <template #item="{ element: item }">
             <div
-              v-for="item in byStage[stage.key]"
-              :key="item.id"
-              class="rounded-xl border border-n-weak bg-n-solid-1 mb-1.5 overflow-hidden"
+              :data-cid="item.id"
+              class="rounded-xl border border-n-weak bg-n-solid-1 mb-1.5 overflow-hidden cursor-grab active:cursor-grabbing"
             >
               <div class="px-2.5 py-2 cursor-pointer hover:bg-n-alpha-1" @click="expanded = expanded === item.id ? null : item.id">
                 <p class="text-xs font-semibold text-n-slate-12 leading-snug">{{ item.title }}</p>
@@ -232,14 +393,14 @@ onMounted(() => {
                   <button
                     class="h-6 px-2 rounded-md border border-n-weak text-[10px] text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-30"
                     :disabled="stageIndex(item.stage) === 0"
-                    @click="moveItem(item, -1)"
+                    @click="moveItem(item, -1, $event)"
                   >
                     ← voltar
                   </button>
                   <button
                     class="h-6 px-2 rounded-md border border-n-weak text-[10px] font-semibold text-n-slate-12 hover:bg-n-alpha-1 disabled:opacity-30"
                     :disabled="stageIndex(item.stage) === STAGES.length - 1"
-                    @click="moveItem(item, 1)"
+                    @click="moveItem(item, 1, $event)"
                   >
                     avançar →
                   </button>
@@ -253,6 +414,8 @@ onMounted(() => {
                 </div>
               </div>
             </div>
+              </template>
+            </draggable>
 
             <p v-if="!byStage[stage.key].length" class="text-[10px] text-n-slate-9 text-center py-3">
               nada aqui ainda
@@ -261,5 +424,60 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <EmojiFx ref="fx" />
   </div>
 </template>
+
+<style scoped>
+/* volta dos ELÉTRONS na coluna Publicado (sentido horário, 1 volta) */
+@property --cevico-lap {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+.cevico-col-charging::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 1rem;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--cevico-lap),
+    transparent 0deg 292deg,
+    rgba(52, 211, 153, 0.25) 310deg,
+    #34d399 338deg,
+    #ecfdf5 356deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 10;
+  animation: cevico-col-lap 1.1s linear forwards;
+}
+@keyframes cevico-col-lap {
+  to { --cevico-lap: 360deg; }
+}
+
+/* círculo completo → coluna acesa pulsando SÓ PRA FORA (box-shadow);
+   a tela de dentro fica branca/intocada (pedido 19/07) */
+.cevico-col-lit {
+  border-color: #10b981 !important;
+  animation: cevico-col-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cevico-col-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(16, 185, 129, 0.35); }
+  50% { box-shadow: 0 0 26px rgba(52, 211, 153, 0.75); }
+}
+/* fim da festa: a intensidade SOME LENTAMENTE (2.3s de decaimento) */
+.cevico-col-fading {
+  border-color: #10b981 !important;
+  animation: cevico-col-fade 2.3s ease-out forwards;
+}
+@keyframes cevico-col-fade {
+  0% { box-shadow: 0 0 18px rgba(52, 211, 153, 0.55); }
+  100% { box-shadow: 0 0 0 rgba(52, 211, 153, 0); border-color: inherit; }
+}
+</style>

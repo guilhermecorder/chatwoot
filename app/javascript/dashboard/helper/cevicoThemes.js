@@ -110,18 +110,19 @@ export const DEFAULT_THEME = {
   emoji: '👁️',
   desc: 'azul CEVICO com roxo — o visual original',
   primary: 'linear-gradient(135deg, #0F5FA6 0%, #7C3AED 100%)',
-  action: 'linear-gradient(135deg, #059669, #34D399)',
+  // verde DOPAMINE oficial (o mesmo do Radar: #059669 → #4ADE80)
+  action: 'linear-gradient(135deg, #059669, #4ADE80)',
   accent: 'linear-gradient(135deg, #B8860B, #D4A017)',
   pill: 'linear-gradient(135deg, #0F5FA6, #7C3AED)',
   soft: '#7C3AED',
   ring: '#7C3AED',
   glass: false,
-  // padrão: azul vítreo próprio do trilho, com texto branco (visual atual)
-  surgeryGrad: 'linear-gradient(135deg, #0284C7 0%, #38BDF8 55%, #7DD3FC 100%)',
-  surgeryText: '#FFFFFF',
+  // padrão do trilho de cirurgias (pedido 18/07): DOPAMINE → esbranquiçado
+  surgeryGrad: 'linear-gradient(135deg, #059669 0%, #A7F3D0 55%, #FFFFFF 100%)',
+  surgeryText: '#065F46',
   // "Nesta semana" do trilho: mais claro que o tema, menos que o "hoje"
-  surgerySoft: 'linear-gradient(135deg, #38BDF8 0%, #BAE6FD 100%)',
-  surgerySoftText: '#0C4A6E',
+  surgerySoft: 'linear-gradient(135deg, #4ADE80 0%, #D1FAE5 100%)',
+  surgerySoftText: '#065F46',
 };
 
 export const ALL_THEMES = [DEFAULT_THEME, ...CEVICO_THEMES];

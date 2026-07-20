@@ -4,6 +4,7 @@
 // A/B) + o MONTADOR DE FUNIS — o "link build" da CEVICO: ligar páginas
 // (página → página → WhatsApp) vendo a conversão de cada elo.
 import { ref, computed, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
@@ -33,6 +34,40 @@ const load = async () => {
 const selected = computed(() => pages.value.find(p => p.id === selectedId.value) || null);
 const publishedPages = computed(() => pages.value.filter(p => p.status === 'published'));
 
+// ── item 72: visão pré-configurada por CATEGORIA da jornada ──
+const CATEGORY_ORDER = ['captacao', 'pre_consulta', 'pre_cirurgia', 'pos_operatorio'];
+const CATEGORY_META = {
+  captacao: { label: 'Captação', icon: 'i-lucide-megaphone', grad: 'linear-gradient(135deg, #0F5FA6, #1E7FBF)' },
+  pre_consulta: { label: 'Pré-consulta', icon: 'i-lucide-stethoscope', grad: 'linear-gradient(135deg, #0284C7, #38BDF8)' },
+  pre_cirurgia: { label: 'Pré-cirurgia', icon: 'i-lucide-heart-pulse', grad: 'linear-gradient(135deg, #B8860B, #D4AF37)' },
+  pos_operatorio: { label: 'Pós-operatório', icon: 'i-lucide-shield-check', grad: 'linear-gradient(135deg, #047857, #10B981)' },
+};
+const categoryFilter = ref(''); // '' = todas
+const keywordFilter = ref('');
+const keywordsOf = p =>
+  (p.seo_keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+const filteredPages = computed(() =>
+  pages.value.filter(
+    p =>
+      (!categoryFilter.value || p.category === categoryFilter.value) &&
+      (!keywordFilter.value || keywordsOf(p).includes(keywordFilter.value))
+  )
+);
+const setCategory = cat => {
+  categoryFilter.value = cat;
+  keywordFilter.value = '';
+  // pré-seleciona a página mais visitada da categoria (visão pronta)
+  const best = [...filteredPages.value].sort((a, b) => b.views_count - a.views_count)[0];
+  if (best) selectedId.value = best.id;
+};
+// todas as palavras-chave em uso (com contagem) — vira o filtro
+const allKeywords = computed(() => {
+  const counts = {};
+  pages.value.forEach(p => keywordsOf(p).forEach(k => { counts[k] = (counts[k] || 0) + 1; }));
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+});
+
+
 // série diária: barras SVG simples (30 dias)
 const maxSeries = computed(() => {
   if (!selected.value) return 1;
@@ -52,6 +87,22 @@ const scrollPct = bucket => {
   if (!scrollTotal.value) return 0;
   return Math.round(((selected.value?.scroll?.[bucket] || 0) / scrollTotal.value) * 100);
 };
+
+// ── item 72: indicadores chave da página escolhida (30 dias) ──
+const kpis = computed(() => {
+  if (!selected.value) return [];
+  const s = selected.value.series || [];
+  const views30 = s.reduce((sum, d) => sum + d.view, 0);
+  const clicks30 = s.reduce((sum, d) => sum + d.cta + d.next, 0);
+  const rate30 = views30 ? Math.round((clicks30 / views30) * 100) : null;
+  const full = scrollTotal.value ? Math.round(((selected.value.scroll?.['100'] || 0) / scrollTotal.value) * 100) : null;
+  return [
+    { label: 'Visitas (30 dias)', value: views30.toLocaleString('pt-BR'), grad: 'linear-gradient(135deg, #0F5FA6, #38BDF8)', icon: 'i-lucide-eye' },
+    { label: 'Cliques (30 dias)', value: clicks30.toLocaleString('pt-BR'), grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)', icon: 'i-lucide-mouse-pointer-click' },
+    { label: 'Taxa de clique', value: rate30 === null ? '—' : `${rate30}%`, grad: 'linear-gradient(135deg, #B8860B, #D4AF37)', icon: 'i-lucide-trending-up' },
+    { label: 'Leram até o fim', value: full === null ? '—' : `${full}%`, grad: 'linear-gradient(135deg, #047857, #34D399)', icon: 'i-lucide-book-open-check' },
+  ];
+});
 
 // resultados do teste A/B da página selecionada
 const abRows = computed(() => {
@@ -120,21 +171,60 @@ onMounted(load);
         </div>
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
-      </div>
+      <SkeletonScreen v-if="isLoading" variant="dashboard" />
 
       <template v-else>
-        <!-- ── Visão geral: todas as páginas ── -->
+        <!-- ── visão pré-configurada por categoria da jornada (item 72) ── -->
+        <div class="flex items-center gap-1.5 flex-wrap mb-4">
+          <button
+            class="px-3 h-8 rounded-full text-xs font-medium border transition-colors"
+            :class="!categoryFilter ? 'text-white border-transparent font-bold shadow-sm' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="!categoryFilter ? 'background: linear-gradient(135deg, #0F172A, #475569)' : ''"
+            @click="setCategory('')"
+          >
+            Todas
+          </button>
+          <button
+            v-for="cat in CATEGORY_ORDER"
+            :key="cat"
+            class="px-3 h-8 rounded-full text-xs font-medium border transition-colors flex items-center gap-1.5"
+            :class="categoryFilter === cat ? 'text-white border-transparent font-bold shadow-sm' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="categoryFilter === cat ? `background: ${CATEGORY_META[cat].grad}` : ''"
+            @click="setCategory(cat)"
+          >
+            <span :class="CATEGORY_META[cat].icon" class="text-sm" />
+            {{ CATEGORY_META[cat].label }}
+          </button>
+        </div>
+
+        <!-- ── palavras-chave em uso (filtram as páginas) ── -->
+        <div v-if="allKeywords.length" class="flex items-center gap-1.5 flex-wrap mb-4">
+          <span class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Palavras-chave:</span>
+          <button
+            v-for="[kw, n] in allKeywords"
+            :key="kw"
+            class="px-2.5 h-6 rounded-full text-[11px] border transition-colors"
+            :class="keywordFilter === kw ? 'text-white border-transparent font-bold' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+            :style="keywordFilter === kw ? 'background: linear-gradient(135deg, #B8860B, #D4AF37)' : ''"
+            @click="keywordFilter = keywordFilter === kw ? '' : kw"
+          >
+            {{ kw }} <b>{{ n }}</b>
+          </button>
+        </div>
+
+        <!-- ── Visão geral: páginas (filtradas pela visão escolhida) ── -->
         <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-6">
           <h2 class="text-sm font-bold text-n-slate-12 mb-3 flex items-center gap-2">
             <span class="i-lucide-panels-top-left text-base" style="color: #0F5FA6" />
-            Todas as páginas
+            {{ categoryFilter ? CATEGORY_META[categoryFilter].label : 'Todas as páginas' }}
             <span class="text-[11px] font-normal text-n-slate-9">clique numa linha para abrir a análise completa</span>
           </h2>
+          <p v-if="!filteredPages.length" class="text-xs text-n-slate-9 py-4 text-center">
+            nenhuma página nesta visão ainda.
+          </p>
           <div class="space-y-1.5">
             <button
-              v-for="p in pages"
+              v-for="p in filteredPages"
               :key="p.id"
               class="w-full flex items-center gap-2 flex-wrap rounded-xl border px-3 py-2 text-left transition-all"
               :class="selectedId === p.id ? 'border-n-brand bg-n-brand/5' : 'border-n-weak bg-n-solid-1 hover:border-n-brand/50'"
@@ -155,10 +245,42 @@ onMounted(load);
 
         <!-- ── Análise da página escolhida ── -->
         <div v-if="selected" class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-6">
-          <h2 class="text-sm font-bold text-n-slate-12 mb-4 flex items-center gap-2">
+          <h2 class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-2 flex-wrap">
             <span class="text-base">{{ selected.emoji || '👁️' }}</span>
             {{ selected.title }}
+            <span
+              class="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
+              :style="`background: ${CATEGORY_META[selected.category]?.grad || '#64748B'}`"
+            >
+              {{ CATEGORY_META[selected.category]?.label || selected.category }}
+            </span>
           </h2>
+          <!-- palavras-chave da página -->
+          <div v-if="keywordsOf(selected).length" class="flex items-center gap-1 flex-wrap mb-3">
+            <span
+              v-for="kw in keywordsOf(selected)"
+              :key="kw"
+              class="text-[10px] px-2 py-0.5 rounded-full"
+              style="background: rgba(212, 175, 55, 0.14); color: #92600A"
+            >
+              🔑 {{ kw }}
+            </span>
+          </div>
+          <div v-else class="mb-3" />
+
+          <!-- indicadores chave (estilo CEVICO, com respiro) -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-5">
+            <div
+              v-for="k in kpis"
+              :key="k.label"
+              class="rounded-xl p-3 text-white"
+              :style="`background: ${k.grad}`"
+            >
+              <span :class="k.icon" class="text-base opacity-90" />
+              <p class="text-xl font-black leading-tight mt-1">{{ k.value }}</p>
+              <p class="text-[10px] opacity-90">{{ k.label }}</p>
+            </div>
+          </div>
 
           <!-- série diária (30 dias) -->
           <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5">Visitas por dia — últimos 30 dias</p>

@@ -11,6 +11,7 @@ import CrmIntegrationsModal from './components/CrmIntegrationsModal.vue';
 import ConversationChatModal from './components/ConversationChatModal.vue';
 import ColumnPresetsModal from './components/ColumnPresetsModal.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import SkeletonPiece from 'dashboard/components-next/cevico/SkeletonPiece.vue';
 import ContactAPI from 'dashboard/api/contacts';
 import {
   inboxGradientFor,
@@ -128,6 +129,15 @@ const makeDefaultFilters = () => ({
 });
 
 const filters = ref(makeDefaultFilters());
+
+// pílula de ETIQUETA (pedido 19/07): o painel "Filtros" foi aposentado —
+// responsável e etiqueta viraram pílulas pré-selecionadas na linha 1
+const labelPillValue = computed({
+  get: () => filters.value.labels[0] || '',
+  set: v => {
+    filters.value.labels = v ? [v] : [];
+  },
+});
 
 // Painel expandido usa RASCUNHO — só refiltra ao clicar em "Aplicar"
 // (com milhares de cards, refiltrar a cada clique pesa).
@@ -412,6 +422,21 @@ const activeDatePreset = ref('');
 const activeDatePresetLabel = computed(
   () => DATE_PRESETS.find(p => p.key === activeDatePreset.value)?.label ?? ''
 );
+// PERSONALIZADO (item 80): De/Até direto na linha das pílulas de período
+const showCustomDate = ref(false);
+const customDateActive = computed(
+  () => !activeDatePreset.value && Boolean(filters.value.dateFrom || filters.value.dateTo)
+);
+const onCustomDate = () => {
+  activeDatePreset.value = '';
+  // datas antigas precisam da base toda carregada (a pílula alarga a janela)
+  if ((filters.value.dateFrom || filters.value.dateTo) && contactsScope.value !== 'all') loadAllContacts();
+};
+const clearCustomDate = () => {
+  filters.value.dateFrom = '';
+  filters.value.dateTo = '';
+  showCustomDate.value = false;
+};
 // o filtro de data (chegada do lead) está em jogo? — usado no empty state
 const dateFilterActive = computed(
   () => Boolean(activeDatePreset.value || filters.value.dateFrom || filters.value.dateTo)
@@ -622,6 +647,15 @@ const alreadyInPipelineResults = computed(() =>
 const isEditMode           = ref(false);
 const isProgrammingMode    = ref(false);
 const showIntegrationsModal = ref(false);
+
+// ── Modo TELA CHEIA (item 82 — 18/07): o board toma a janela inteira do
+// navegador — só a barra de filtros + colunas, conforto pro dia a dia.
+// A preferência fica salva no navegador de cada pessoa.
+const isFocusMode = ref(localStorage.getItem('cevico_crm_focus') === '1');
+const toggleFocusMode = () => {
+  isFocusMode.value = !isFocusMode.value;
+  localStorage.setItem('cevico_crm_focus', isFocusMode.value ? '1' : '0');
+};
 // ──────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -878,9 +912,14 @@ const createAndAddContact = async () => {
 </script>
 
 <template>
-  <div class="bg-n-surface-1" style="display:flex;flex-direction:column;height:100%;width:100%;" @click="showLabelsDropdown = false; showStagesDropdown = false">
-    <!-- Top bar -->
-    <div class="flex items-center gap-3 px-3 py-2.5 md:px-6 md:py-4 border-b border-n-weak flex-shrink-0 flex-wrap">
+  <div
+    class="bg-n-surface-1"
+    :class="isFocusMode ? 'fixed inset-0 z-[100]' : ''"
+    style="display:flex;flex-direction:column;height:100%;width:100%;"
+    @click="showLabelsDropdown = false; showStagesDropdown = false"
+  >
+    <!-- Top bar (some no modo tela cheia) -->
+    <div v-show="!isFocusMode" class="flex items-center gap-3 px-3 py-2.5 md:px-6 md:py-4 border-b border-n-weak flex-shrink-0 flex-wrap">
       <h1 class="text-lg font-bold text-n-slate-12 flex items-center gap-2">
         <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
           <span class="i-lucide-rocket text-white text-base" />
@@ -940,50 +979,55 @@ const createAndAddContact = async () => {
           v-if="isAdmin"
           class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 flex-nowrap md:flex-wrap"
         >
+          <!-- cada ferramenta com a sua cor da paleta dopamine (19/07) -->
           <button
             v-if="selectedPipeline && !isProgrammingMode"
             class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg transition-colors whitespace-nowrap"
             :class="isEditMode
               ? 'bg-amber-500 text-white hover:bg-amber-600'
-              : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              : 'text-n-slate-11 hover:bg-blue-500/10'"
             @click="isEditMode = !isEditMode"
           >
-            <span :class="isEditMode ? 'i-lucide-x' : 'i-lucide-layout-template'" class="text-sm" />
+            <span
+              :class="isEditMode ? 'i-lucide-x' : 'i-lucide-layout-template'"
+              class="text-sm"
+              :style="isEditMode ? {} : { color: '#0F5FA6' }"
+            />
             {{ isEditMode ? $t('CRM.EXIT_EDIT_MODE') : $t('CRM.EDIT_MODE') }}
           </button>
 
           <button
             v-if="selectedPipeline && !isProgrammingMode && !isEditMode"
-            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-yellow-600 hover:bg-yellow-500/10 transition-colors whitespace-nowrap"
+            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-amber-500/10 transition-colors whitespace-nowrap"
             @click="isProgrammingMode = true"
           >
-            <span class="i-lucide-zap text-sm" />
+            <span class="i-lucide-zap text-sm" style="color: #d4a017" />
             {{ $t('CRM.PROGRAMMING_MODE') }}
           </button>
 
           <button
-            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-n-alpha-1 transition-colors whitespace-nowrap"
+            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-violet-500/10 transition-colors whitespace-nowrap"
             title="Integrações (n8n, Meta, Google, Claude)"
             @click="$router.push({ name: 'crm_integrations' })"
           >
-            <span class="i-lucide-plug text-sm" />
+            <span class="i-lucide-plug text-sm" style="color: #7c3aed" />
             Integrações
           </button>
 
           <button
-            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-n-alpha-1 transition-colors whitespace-nowrap"
+            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-pink-500/10 transition-colors whitespace-nowrap"
             title="Central de mensagens em massa (templates WhatsApp)"
             @click="$router.push({ name: 'crm_campaigns' })"
           >
-            <span class="i-lucide-megaphone text-sm" />
+            <span class="i-lucide-megaphone text-sm" style="color: #db2777" />
             Mensagens em massa
           </button>
 
           <button
-            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-n-alpha-1 transition-colors whitespace-nowrap"
+            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-emerald-500/10 transition-colors whitespace-nowrap"
             @click="showNewPipelineForm = !showNewPipelineForm; showDeletePipelineConfirm = false"
           >
-            <span class="i-lucide-plus text-sm" />
+            <span class="i-lucide-plus text-sm" style="color: #059669" />
             {{ $t('CRM.NEW_PIPELINE') }}
           </button>
         </div>
@@ -994,7 +1038,7 @@ const createAndAddContact = async () => {
          pílulas de período — pedido 17/07). Quem manda na janela são as
          pílulas da linha 2: cada uma alarga o carregamento que precisar. -->
     <div
-      v-if="['days', 'recent'].includes(contactsMeta.scope) && contactsMeta.total > contactsMeta.shown"
+      v-if="!isFocusMode && ['days', 'recent'].includes(contactsMeta.scope) && contactsMeta.total > contactsMeta.shown"
       class="flex items-center gap-2 px-3 md:px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible"
     >
       <span class="i-lucide-zap text-n-gold flex-shrink-0" />
@@ -1160,23 +1204,35 @@ const createAndAddContact = async () => {
           </button>
         </div>
 
-        <!-- Filters toggle button -->
-        <button
-          class="relative flex items-center gap-1.5 h-[34px] px-3 text-sm rounded-lg border transition-colors whitespace-nowrap flex-shrink-0"
-          :class="showFilters || activeFilterCount > 0
-            ? 'bg-n-brand/10 border-n-brand text-n-brand'
-            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-          @click="showFilters ? (showFilters = false) : openFiltersPanel()"
+        <!-- Responsável + Etiqueta em pílulas dopamine (pedido 19/07 —
+             o painel "Filtros" foi aposentado; o importante fica à mão) -->
+        <select
+          v-model="filters.assigneeId"
+          class="h-[34px] text-xs font-medium border rounded-full px-2.5 flex-shrink-0 cursor-pointer transition-colors"
+          :class="filters.assigneeId !== ''
+            ? 'bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400'
+            : 'border-n-weak bg-n-solid-2 text-n-slate-11'"
+          style="width: auto; max-width: 13rem"
+          title="Filtrar pelo responsável do card"
         >
-          <span class="i-lucide-sliders-horizontal text-sm" />
-          {{ $t('CRM.FILTER.FILTERS') }}
-          <span
-            v-if="activeFilterCount > 0"
-            class="inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold bg-n-brand text-white rounded-full"
-          >
-            {{ activeFilterCount }}
-          </span>
-        </button>
+          <option value="">👤 Responsável: todos</option>
+          <option value="none">Sem responsável</option>
+          <option v-for="a in agents" :key="a.id" :value="a.id">
+            {{ a.available_name || a.name }}
+          </option>
+        </select>
+        <select
+          v-model="labelPillValue"
+          class="h-[34px] text-xs font-medium border rounded-full px-2.5 flex-shrink-0 cursor-pointer transition-colors"
+          :class="labelPillValue
+            ? 'bg-amber-500/10 border-amber-500 text-amber-700 dark:text-amber-400'
+            : 'border-n-weak bg-n-solid-2 text-n-slate-11'"
+          style="width: auto; max-width: 12rem"
+          title="Filtrar por etiqueta do contato"
+        >
+          <option value="">🏷️ Etiqueta: todas</option>
+          <option v-for="l in availableLabels" :key="l" :value="l">{{ l }}</option>
+        </select>
 
         <!-- Contador (fim da linha 1) -->
         <span class="text-xs text-n-slate-9 whitespace-nowrap ml-auto hidden md:inline">
@@ -1239,7 +1295,63 @@ const createAndAddContact = async () => {
           >
             {{ p.label }}
           </button>
+
+          <!-- Personalizado (item 80): calendário arredondado no balãozinho -->
+          <div class="relative">
+            <button
+              class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+              :class="customDateActive ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="customDateActive ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+              title="Escolher um intervalo de datas de chegada do lead"
+              @click="showCustomDate = !showCustomDate"
+            >
+              Personalizado
+            </button>
+            <div
+              v-if="showCustomDate"
+              class="absolute top-9 right-0 z-50 bg-white dark:bg-n-solid-2 border border-n-weak rounded-2xl shadow-xl p-3 flex items-center gap-2"
+              @click.stop
+            >
+              <input
+                v-model="filters.dateFrom"
+                type="date"
+                class="h-8 text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+                style="width: 8.4rem"
+                title="De"
+                @change="onCustomDate"
+              />
+              <span class="text-[10px] text-n-slate-9">até</span>
+              <input
+                v-model="filters.dateTo"
+                type="date"
+                class="h-8 text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+                style="width: 8.4rem"
+                title="Até (vazio = hoje)"
+                @change="onCustomDate"
+              />
+              <button
+                class="w-7 h-7 rounded-full flex items-center justify-center text-n-slate-10 hover:bg-n-alpha-1"
+                title="Limpar intervalo"
+                @click="clearCustomDate"
+              >
+                <span class="i-lucide-x text-xs" />
+              </button>
+            </div>
+          </div>
         </div>
+
+        <!-- Tela cheia (item 82): o board toma a janela toda -->
+        <button
+          class="flex items-center gap-1.5 h-[34px] px-3 text-sm rounded-lg border transition-colors whitespace-nowrap flex-shrink-0 ml-auto"
+          :class="isFocusMode
+            ? 'bg-n-brand/10 border-n-brand text-n-brand font-medium'
+            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+          :title="isFocusMode ? 'Voltar ao layout normal' : 'Só filtros e colunas, na janela inteira'"
+          @click="toggleFocusMode"
+        >
+          <span :class="isFocusMode ? 'i-lucide-minimize-2' : 'i-lucide-maximize-2'" class="text-sm" />
+          {{ isFocusMode ? 'Sair da tela cheia' : 'Tela cheia' }}
+        </button>
 
         <!-- Clear filters button -->
         <button
@@ -1413,9 +1525,27 @@ const createAndAddContact = async () => {
       </div>
     </div>
 
-    <!-- Loading -->
-    <div v-if="uiFlags.isFetchingPipelines || uiFlags.isFetchingContacts" class="flex justify-center items-center flex-1">
-      <Spinner :size="32" class="text-n-brand" />
+    <!-- Loading — SKELETON Homem de Ferro (item 89): o board se monta por partes -->
+    <div v-if="uiFlags.isFetchingPipelines || uiFlags.isFetchingContacts" class="flex-1 overflow-hidden px-3 md:px-4 pt-3">
+      <div class="flex items-center gap-2 mb-2">
+        <SkeletonPiece variant="block" class="h-[34px] w-72 !rounded-lg" :order="0" />
+        <SkeletonPiece v-for="i in 3" :key="`f${i}`" variant="pill" class="!h-[34px]" :order="i" />
+      </div>
+      <div class="flex items-center gap-2 mb-3">
+        <SkeletonPiece v-for="i in 5" :key="`v${i}`" variant="pill" class="!h-7 !w-24" :order="3 + i" />
+      </div>
+      <div class="flex gap-4 h-full min-w-max">
+        <div v-for="c in 5" :key="`col${c}`" class="w-64 flex-shrink-0 space-y-2">
+          <SkeletonPiece variant="block" class="h-10 !rounded-xl" :order="7 + c" />
+          <SkeletonPiece
+            v-for="r in 3 - (c % 2)"
+            :key="`card${c}-${r}`"
+            variant="block"
+            class="h-28 !rounded-xl"
+            :order="9 + c + r * 2"
+          />
+        </div>
+      </div>
     </div>
 
     <!-- Empty state -->

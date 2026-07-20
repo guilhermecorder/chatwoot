@@ -3,6 +3,7 @@
 // script CEVICO, MAPA DE OBJEÇÕES por estágio (gerado pela IA a partir
 // das conversas que CONVERTERAM) e as ferramentas importantes do time.
 import { ref, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
@@ -83,9 +84,7 @@ onMounted(load);
         </div>
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
-      </div>
+      <SkeletonScreen v-if="isLoading" variant="list" />
 
       <template v-else>
         <!-- Script CEVICO -->

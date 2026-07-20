@@ -84,6 +84,7 @@ class ConversationFinder
     filter_by_status unless params[:q]
     filter_by_team
     filter_by_labels
+    filter_by_crm_stage
     filter_by_query
     filter_by_source_id
   end
@@ -177,6 +178,14 @@ class ConversationFinder
     @conversations = @conversations.tagged_with(params[:labels], any: true)
   end
 
+  # filtro da jornada CEVICO: conversas cujo contato está na coluna do CRM
+  def filter_by_crm_stage
+    return if params[:crm_stage_id].blank?
+
+    @conversations = @conversations.joins(contact: :crm_contacts)
+                                   .where(crm_contacts: { stage_id: params[:crm_stage_id] })
+  end
+
   def filter_by_source_id
     return unless params[:source_id]
 
@@ -187,9 +196,11 @@ class ConversationFinder
   def set_count_for_all_conversations
     return legacy_count_for_all_conversations if @conversations.limit_value || @conversations.offset_value || @conversations.eager_loading?
 
+    # coluna qualificada: o join de crm_contacts (filtro da jornada) também
+    # tem assignee_id e a referência solta fica ambígua no Postgres
     counts = @conversations.unscope(:order).pick(
-      Arel.sql("COUNT(*) FILTER (WHERE assignee_id = #{current_user.id})"),
-      Arel.sql('COUNT(*) FILTER (WHERE assignee_id IS NULL)'),
+      Arel.sql("COUNT(*) FILTER (WHERE conversations.assignee_id = #{current_user.id.to_i})"),
+      Arel.sql('COUNT(*) FILTER (WHERE conversations.assignee_id IS NULL)'),
       Arel.sql('COUNT(*)')
     )
     counts || [0, 0, 0]
@@ -209,7 +220,8 @@ class ConversationFinder
 
   def conversations_base_query
     @conversations.includes(
-      :taggings, :inbox, { assignee: { avatar_attachment: [:blob] } }, { contact: { avatar_attachment: [:blob] } }, :team, :contact_inbox
+      :taggings, :inbox, { assignee: { avatar_attachment: [:blob] } },
+      { contact: [{ avatar_attachment: [:blob] }, :crm_contacts] }, :team, :contact_inbox
     )
   end
 

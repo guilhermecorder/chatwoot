@@ -413,8 +413,10 @@ const agentView = computed(() => {
     <!-- Content -->
     <div v-else-if="data">
 
-      <!-- KPIs (padrão CEVICO: DashKpi c/ selos de recorde/meta do mês) -->
-      <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5 mb-10">
+      <!-- KPIs (padrão CEVICO: DashKpi c/ selos de recorde/meta do mês) —
+           auto-ajuste (item 80): os cards sempre CABEM no espaço, em
+           qualquer largura, sem cortar rótulo -->
+      <div class="grid gap-4 mb-8" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr))">
         <DashKpi
           label="Total no funil"
           :value="data.kpis.total_leads"
@@ -444,6 +446,8 @@ const agentView = computed(() => {
           sub="conversas"
           from="#B8860B"
           to="#D4A017"
+          :state="goals.stateFor('surgeries_booked')"
+          :goal="goals.goalFor('surgeries_booked')"
         />
         <DashKpi
           label="Taxa de fechamento"

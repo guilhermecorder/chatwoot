@@ -5,6 +5,7 @@
 // dos feedbacks do Mentor (semanais e mensais). Admin vê o time inteiro
 // para combinar perfis e montar times fortes e entrosados.
 import { ref, computed, watch, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
@@ -115,6 +116,28 @@ const GOAL_STATUS = [
 ];
 const goalStatusOf = goal => GOAL_STATUS.find(s => s.key === goal.status) || GOAL_STATUS[0];
 
+// ── GESTÃO DOS TESTES (item 81, só admin): quem fez o quê, quando, e
+// quando cada pessoa pode refazer (trava de 90 dias = 1x por trimestre) ──
+const showTestsPanel = ref(false);
+const RETAKE_DAYS = 90;
+const testStatusOf = (p, kind) => {
+  const latest = [...(p.assessments || [])].reverse().find(a => a.kind === kind);
+  if (!latest) return { done: false };
+  const takenAt = new Date(latest.taken_at);
+  const retakeDate = new Date(takenAt);
+  retakeDate.setDate(retakeDate.getDate() + RETAKE_DAYS);
+  const ranking = latest.ranking || discRanking(latest.scores);
+  return {
+    done: true,
+    takenAt,
+    retakeDate,
+    locked: retakeDate > new Date(),
+    dominant: DISC_PROFILES[ranking[0]],
+    answers: (latest.answers || []).length,
+  };
+};
+const fmtShort = d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+
 // ── Feedbacks do Mentor (semanais e mensais) ──
 const feedbacks = computed(() => person.value?.feedbacks || []);
 const fbPeriodLabel = fb => {
@@ -147,9 +170,7 @@ onMounted(load);
         </div>
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
-      </div>
+      <SkeletonScreen v-if="isLoading" variant="dashboard" />
 
       <template v-else>
         <!-- admin: visão do time (perfil dominante de cada um, lado a lado) -->
@@ -186,6 +207,55 @@ onMounted(load);
           </div>
         </div>
 
+        <!-- admin: GESTÃO DOS TESTES (item 81) — quem fez, quando, trava -->
+        <div v-if="data.admin && data.people.length > 1" class="bg-n-solid-2 border border-n-weak rounded-2xl overflow-hidden mb-5">
+          <button
+            class="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-n-alpha-1 transition-colors"
+            @click="showTestsPanel = !showTestsPanel"
+          >
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #0F766E, #2DD4BF)">
+              <span class="i-lucide-clipboard-check text-white text-sm" />
+            </span>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-bold text-n-slate-12">Gestão dos testes do time</p>
+              <p class="text-[10px] text-n-slate-9">quem já fez DISC e Temperamentos, quando, e quando cada um pode refazer (1x por trimestre)</p>
+            </div>
+            <span class="text-n-slate-10 flex-shrink-0" :class="showTestsPanel ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" />
+          </button>
+
+          <div v-if="showTestsPanel" class="border-t border-n-weak divide-y divide-n-weak">
+            <div class="hidden sm:grid items-center px-4 py-2 text-[10px] font-bold text-n-slate-9 uppercase tracking-wide" style="grid-template-columns: 1.2fr 1fr 1fr">
+              <span>Pessoa</span>
+              <span>DISC (trabalho)</span>
+              <span>4 Temperamentos (vida)</span>
+            </div>
+            <div
+              v-for="p in data.people"
+              :key="`tests-${p.user_id}`"
+              class="grid items-center gap-2 px-4 py-2.5 sm:gap-0"
+              style="grid-template-columns: 1.2fr 1fr 1fr"
+            >
+              <button class="text-xs font-semibold text-n-slate-12 text-left truncate hover:text-teal-600" @click="selectedUserId = p.user_id">
+                {{ p.name }}
+              </button>
+              <template v-for="kind in ['disc', 'temperamentos']" :key="kind">
+                <div v-if="testStatusOf(p, kind).done" class="min-w-0">
+                  <p class="text-[11px] font-bold truncate" :style="{ color: testStatusOf(p, kind).dominant?.color }">
+                    {{ kind === 'disc' ? `${testStatusOf(p, kind).dominant?.letter} — ${testStatusOf(p, kind).dominant?.name}` : testStatusOf(p, kind).dominant?.temperament }}
+                  </p>
+                  <p class="text-[10px] text-n-slate-9">
+                    {{ fmtShort(testStatusOf(p, kind).takenAt) }}
+                    <template v-if="testStatusOf(p, kind).locked"> · 🔒 refaz {{ fmtShort(testStatusOf(p, kind).retakeDate) }}</template>
+                    <template v-else> · ✅ pode refazer</template>
+                    <template v-if="testStatusOf(p, kind).answers"> · {{ testStatusOf(p, kind).answers }} respostas</template>
+                  </p>
+                </div>
+                <p v-else class="text-[11px] text-n-slate-9">— pendente</p>
+              </template>
+            </div>
+          </div>
+        </div>
+
         <div v-if="person" class="bg-n-solid-2 border border-n-weak rounded-2xl overflow-hidden">
           <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #0F766E, #2DD4BF)" />
           <div class="p-4 sm:p-6">
@@ -214,7 +284,7 @@ onMounted(load);
             </div>
 
             <!-- ═══ ABA PERFIL: testes, radar, ordem dos 4 e arquivo ═══ -->
-            <TestsTab v-if="tab === 'perfil'" :person="person" :is-me="isMe" />
+            <TestsTab v-if="tab === 'perfil'" :person="person" :is-me="isMe" :is-admin="data.admin" />
 
             <!-- ═══ ABA VIDA (privada): Roda da Vida, objetivos, hábitos ═══ -->
             <LifeTab v-else-if="tab === 'vida' && isMe" :person="person" />

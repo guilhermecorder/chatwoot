@@ -6,6 +6,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   ADMIN_SETTINGS_ACTIONS = %i[
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
     update_google_ads test_google_ads update_sheets test_sheets update_agenda agenda_backfill
+    update_oftalmofacil
     update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
     sales_insights radar_scan run_mentor copywriter_content update_price_table
   ].freeze
@@ -48,8 +49,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       perms['menu'] = menu
     end
 
+    # quais RELATÓRIOS o atendente vê (item 62): lista vazia/ausente = todos
+    if params.key?(:report_keys)
+      keys = Array(params[:report_keys]).map(&:to_s).first(40)
+      report_keys = perms['report_keys'] || {}
+      keys.empty? ? report_keys.delete(user_id) : report_keys[user_id] = keys
+      perms['report_keys'] = report_keys
+    end
+
     crm_settings.update!(agent_permissions: perms)
-    render json: { grants: perms['grants'] || {}, menu: perms['menu'] || {} }
+    render json: { grants: perms['grants'] || {}, menu: perms['menu'] || {},
+                   report_keys: perms['report_keys'] || {} }
   end
 
   def update
@@ -303,6 +313,20 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ── Google Sheets (planilha de cirurgias → Dashboard) ──────────────────────
 
+  # ── OftalmoFácil: conexão nativa (endereço + chave da API) ─────────────────
+  # A chave nunca volta na resposta (só o selo key_set); o fluxo de dados
+  # liga em cima desta conexão quando a documentação da API for plugada.
+  def update_oftalmofacil # rubocop:disable Metrics/AbcSize
+    cfg = crm_settings.agenda_config || {}
+    of = cfg['oftalmofacil'] || {}
+    of['base_url'] = params[:base_url].to_s.strip if params.key?(:base_url)
+    of['api_key'] = params[:api_key].to_s.strip if params[:api_key].to_s.strip.present?
+    of['updated_at'] = Time.current.iso8601
+    cfg['oftalmofacil'] = of
+    crm_settings.update!(agenda_config: cfg)
+    render json: { oftalmofacil: oftalmofacil_json(crm_settings) }
+  end
+
   def update_sheets
     cfg = crm_settings.sheets_config || {}
     if params.key?(:sheet_url)
@@ -333,6 +357,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
     # dias inteiros fechados (feriado, congresso, folga...)
     cfg['blocked_days'] = Array(params[:blocked_days]).map(&:to_s) if params.key?(:blocked_days)
+    # médicos com a agenda FECHADA (item 76): janelas deles somem de toda
+    # parte (agenda, ocupação, saúde) até reabrir
+    cfg['closed_doctors'] = Array(params[:closed_doctors]).map(&:to_s) if params.key?(:closed_doctors)
     # locais de cirurgia (clínicas parceiras — IOP etc.) do trilho de cirurgias
     if params.key?(:surgery_locations)
       cfg['surgery_locations'] = Array(params[:surgery_locations]).map do |l|
@@ -388,6 +415,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_windows: cfg['windows'] || [],
       agenda_blocked: cfg['blocked'] || [],
       agenda_blocked_days: cfg['blocked_days'] || [],
+      agenda_closed_doctors: cfg['closed_doctors'] || [],
       attendance_stages: cfg['attendance_stages'] || {},
       attendance_owners: cfg['attendance_owners'] || {},
       surgery_locations: cfg['surgery_locations'] || [],
@@ -636,6 +664,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     params.permit(:n8n_base_url, :n8n_api_key, column_presets: [:name, { stage_ids: [] }], agent_permissions: {})
   end
 
+  def oftalmofacil_json(s)
+    of = (s.agenda_config || {})['oftalmofacil'] || {}
+    {
+      base_url: of['base_url'],
+      key_set: of['api_key'].present?,
+      configured: of['base_url'].present? && of['api_key'].present?,
+      updated_at: of['updated_at']
+    }
+  end
+
   def settings_json(s)
     {
       n8n_base_url: s.n8n_base_url,
@@ -648,9 +686,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       google_ads: google_ads_json(s),
       ai: ai_json(s),
       sheets: sheets_json(s),
+      oftalmofacil: oftalmofacil_json(s),
       agenda_windows: (s.agenda_config || {})['windows'] || [],
       agenda_blocked: (s.agenda_config || {})['blocked'] || [],
       agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || [],
+      agenda_closed_doctors: (s.agenda_config || {})['closed_doctors'] || [],
       attendance_stages: (s.agenda_config || {})['attendance_stages'] || {},
       attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},
       surgery_locations: (s.agenda_config || {})['surgery_locations'] || [],

@@ -86,11 +86,13 @@ class Api::V1::Accounts::Crm::AdsReportsController < Api::V1::Accounts::BaseCont
       if configured.any?
         configured
       else
-        # padrão: etapas com "cirurgia" no nome (conversão principal da clínica)
-        Crm::Stage.joins(:pipeline)
-                  .where(crm_pipelines: { account_id: Current.account.id })
-                  .where('crm_stages.name ILIKE ?', '%cirurgia%')
-                  .pluck(:id)
+        # padrão: etapas com "cirurgia" no nome, SEM as de indicação —
+        # indicação ainda não é venda e inflava as conversões (item 87)
+        base = Crm::Stage.joins(:pipeline)
+                         .where(crm_pipelines: { account_id: Current.account.id })
+                         .where('crm_stages.name ILIKE ?', '%cirurgia%')
+        strict = base.where.not('crm_stages.name ILIKE ?', '%indica%').pluck(:id)
+        strict.any? ? strict : base.pluck(:id)
       end
     end
   end

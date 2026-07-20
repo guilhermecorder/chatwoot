@@ -68,6 +68,14 @@ const cevicoCards = computed(() => [
     description: 'Importa a planilha de cirurgias (data, paciente, procedimento, valor, unidade) para o Dashboard.',
     enabled: !!settings.value?.sheets?.configured,
   },
+  {
+    key: 'oftalmofacil',
+    name: 'OftalmoFácil',
+    icon: 'i-lucide-eye',
+    color: '#45B5AA',
+    description: 'Conexão nativa com o sistema OftalmoFácil — endereço e chave da API guardados no CEVICO S.I.',
+    enabled: !!settings.value?.oftalmofacil?.configured,
+  },
 ]);
 
 const closeConfig = () => {

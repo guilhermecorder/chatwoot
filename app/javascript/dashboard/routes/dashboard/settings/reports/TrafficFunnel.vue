@@ -15,11 +15,19 @@ const PERIODS = [
   { value: 180, label: '6 meses' },
 ];
 
+// período PERSONALIZADO (item 84): De/Até direto na linha de períodos
+const isCustom = ref(false);
+const customFrom = ref('');
+const customTo = ref('');
+
 const load = async () => {
   isLoading.value = true;
   hasError.value = false;
   try {
-    const { data: response } = await CrmAPI.getTrafficReport({ period: period.value });
+    const params = isCustom.value && customFrom.value
+      ? { from: customFrom.value, to: customTo.value || undefined }
+      : { period: period.value };
+    const { data: response } = await CrmAPI.getTrafficReport(params);
     data.value = response;
   } catch {
     hasError.value = true;
@@ -29,7 +37,13 @@ const load = async () => {
 };
 
 onMounted(load);
-watch(period, load);
+watch(period, () => {
+  isCustom.value = false;
+  load();
+});
+watch([customFrom, customTo], () => {
+  if (isCustom.value && customFrom.value) load();
+});
 
 const formatCurrency = v =>
   'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -77,8 +91,13 @@ const funnelRows = computed(() => {
   const max = Math.max(...rows.map(r => r.count), 1);
   return rows.map((row, index) => {
     const previous = index > 0 ? rows[index - 1].count : null;
-    const rate = previous ? ((row.count / previous) * 100).toFixed(1) : null;
-    return { ...row, width: Math.max((row.count / max) * 100, 2), rate };
+    const rate = previous ? (row.count / previous) * 100 : null;
+    return {
+      ...row,
+      width: Math.max((row.count / max) * 100, 4),
+      rate: rate ? rate.toFixed(1) : null,
+      gain: rate !== null && rate >= 100, // ganho (entrou mais do que a etapa anterior)
+    };
   });
 });
 
@@ -104,14 +123,36 @@ const cpl = computed(() => {
         </p>
       </div>
       <div class="flex-1" />
-      <div class="flex items-center gap-1.5 bg-n-solid-2 border border-n-weak rounded-xl p-1">
+      <div class="flex items-center gap-1.5 bg-n-solid-2 border border-n-weak rounded-xl p-1 flex-wrap">
         <button
           v-for="p in PERIODS"
           :key="p.value"
           class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
-          :class="period === p.value ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :class="!isCustom && period === p.value ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
           @click="period = p.value"
         >{{ p.label }}</button>
+        <button
+          class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+          :class="isCustom ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          @click="isCustom = true"
+        >Personalizado</button>
+        <template v-if="isCustom">
+          <input
+            v-model="customFrom"
+            type="date"
+            class="h-[30px] text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+            style="width: 8.2rem"
+            title="De"
+          />
+          <span class="text-[10px] text-n-slate-9">até</span>
+          <input
+            v-model="customTo"
+            type="date"
+            class="h-[30px] text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+            style="width: 8.2rem"
+            title="Até (vazio = hoje)"
+          />
+        </template>
       </div>
     </div>
 
@@ -170,29 +211,47 @@ const cpl = computed(() => {
         </div>
       </div>
 
-      <!-- Funil -->
+      <!-- Funil SIMÉTRICO (item 84): barras centralizadas como um funil de
+           verdade, preenchimento suave com brilho (estilo barra do
+           formulário) e queda × ganho bem diferentes -->
       <div class="bg-n-solid-2 border border-n-weak rounded-xl p-5 max-w-4xl mb-6">
         <p class="text-xs font-semibold text-n-slate-11 mb-6">Funil completo</p>
-        <div class="space-y-2">
-          <div v-for="row in funnelRows" :key="row.key" class="flex items-center gap-4">
+        <div class="space-y-1.5">
+          <div v-for="row in funnelRows" :key="row.key" class="flex items-center gap-3">
             <div class="w-44 text-right flex-shrink-0">
               <p class="text-xs text-n-slate-12 font-medium truncate">{{ row.name }}</p>
               <p class="text-[10px] text-n-slate-9">{{ row.source }}</p>
             </div>
-            <div class="flex-1 flex items-center gap-2">
+            <div class="flex-1 flex justify-center min-w-0">
               <div
-                class="h-8 rounded-lg transition-all flex items-center justify-end px-2"
-                :style="{ width: row.width + '%', backgroundColor: row.color + 'CC', minWidth: '2.5rem' }"
+                class="cevico-funnel-bar"
+                :style="{
+                  width: row.width + '%',
+                  background: `linear-gradient(90deg, ${row.color}77 0%, ${row.color}F2 50%, ${row.color}77 100%)`,
+                }"
               >
-                <span class="text-xs font-bold text-white drop-shadow">{{ formatNumber(row.count) }}</span>
+                <span class="text-xs font-bold text-white" style="text-shadow: 0 1px 2px rgba(15, 23, 42, 0.45)">
+                  {{ formatNumber(row.count) }}
+                </span>
               </div>
-              <span v-if="row.rate" class="text-[10px] text-n-slate-9 flex-shrink-0">{{ row.rate }}%</span>
+            </div>
+            <div class="w-20 flex-shrink-0">
+              <span
+                v-if="row.rate"
+                class="inline-flex items-center gap-0.5 text-[10px] font-semibold rounded-full px-1.5 py-0.5"
+                :class="row.gain
+                  ? 'bg-emerald-500/12 text-emerald-600'
+                  : 'bg-n-alpha-1 text-n-slate-10'"
+              >
+                <span :class="row.gain ? 'i-lucide-trending-up' : 'i-lucide-trending-down'" class="text-[10px]" />
+                {{ row.rate }}%
+              </span>
             </div>
           </div>
         </div>
         <p class="text-xs text-n-slate-9 mt-4">
-          A porcentagem mostra a conversão em relação à etapa anterior. As etapas do CRM
-          refletem os cards atuais em cada coluna do funil.
+          A porcentagem compara com a etapa anterior — <span class="text-emerald-600 font-medium">verde ↑</span> é ganho,
+          cinza ↓ é a queda natural do funil. As etapas do CRM refletem os cards atuais em cada coluna.
         </p>
       </div>
 
@@ -259,3 +318,45 @@ const cpl = computed(() => {
     </template>
   </div>
 </template>
+
+<style scoped>
+/* barra do funil: cheia, arredondada, com relevo e varredura de brilho
+   (mesma linguagem da barra de progresso do formulário) */
+.cevico-funnel-bar {
+  position: relative;
+  overflow: hidden;
+  height: 30px;
+  min-width: 3rem;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -2px 5px rgba(15, 23, 42, 0.18);
+}
+.cevico-funnel-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.32) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  animation: cevico-funnel-sheen 2.6s ease-in-out infinite;
+}
+@keyframes cevico-funnel-sheen {
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cevico-funnel-bar::after {
+    animation: none;
+  }
+}
+</style>

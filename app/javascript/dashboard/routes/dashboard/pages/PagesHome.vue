@@ -4,6 +4,7 @@
 // Identidade da marca (azul marinho + dourado) com o nosso toque; cada
 // página nasce pronta para SEO (meta título/descrição próprios, /p/slug).
 import { ref, computed, onMounted } from 'vue';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
@@ -153,6 +154,7 @@ const blankPage = () => ({
   body: '',
   meta_title: '',
   meta_description: '',
+  seo_keywords: '',
   cta_label: 'Falar com a CEVICO no WhatsApp',
   cta_url: '',
   next_page_id: null,
@@ -339,9 +341,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <div v-if="isLoading" class="flex justify-center py-16">
-        <Spinner :size="32" class="text-n-brand" />
-      </div>
+      <SkeletonScreen v-if="isLoading" variant="list" />
 
       <template v-else>
         <!-- gestão de projetos: filtro por etapa (ideia/produção/publicada) -->
@@ -672,9 +672,18 @@ onMounted(() => {
               <span class="text-[11px] font-medium text-n-slate-11">Título no Google (vazio = usa o título da página)</span>
               <input v-model="form.meta_title" type="text" placeholder="Cirurgia de Catarata em São Paulo | CEVICO" class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
             </label>
-            <label class="block">
+            <label class="block mb-2">
               <span class="text-[11px] font-medium text-n-slate-11">Descrição no Google (1-2 frases que convidam ao clique)</span>
               <textarea v-model="form.meta_description" rows="2" class="mt-1 w-full rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 text-[13px] text-n-slate-12" />
+            </label>
+            <label class="block">
+              <span class="text-[11px] font-medium text-n-slate-11">Palavras-chave (separadas por vírgula — viram filtro na Análise)</span>
+              <input
+                v-model="form.seo_keywords"
+                type="text"
+                placeholder="catarata, cirurgia de catarata, lente trifocal"
+                class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
+              />
             </label>
           </div>
 

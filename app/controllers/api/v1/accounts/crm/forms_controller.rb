@@ -122,6 +122,8 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
       thank_you_text: f.thank_you_text,
       questions: f.questions,
       responses_count: responses_count,
+      sent_count: f.sent_count,
+      funnel_stats: f.funnel_stats || {},
       has_insight: f.ai_insight.present?,
       created_at: f.created_at
     }

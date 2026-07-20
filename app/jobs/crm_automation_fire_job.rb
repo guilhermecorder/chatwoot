@@ -440,6 +440,8 @@ class CrmAutomationFireJob < ApplicationJob
       content: content
     )
     mark_form_sent(contact, form)
+    # contador de ENVIOS do hub dos Formulários (envio × respostas × %)
+    Crm::Form.where(id: form.id).update_all('sent_count = sent_count + 1') # rubocop:disable Rails/SkipsModelValidations
   end
 
   FORM_RESEND_COOLDOWN = 7.days

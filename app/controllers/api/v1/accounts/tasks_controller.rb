@@ -2,7 +2,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
   before_action :task, only: [:update, :destroy]
 
   def index
-    tasks = Current.account.tasks.includes(:creator, :assignee)
+    # cards arquivados (coluna oculta do item 95) ficam fora do board
+    tasks = Current.account.tasks.where(archived_at: nil).includes(:creator, :assignee)
 
     # Privacidade: agente comum só vê as próprias tarefas (criadas por/para ele)
     # e as das UNIDADES (agenda compartilhada). Admin vê tudo.
@@ -15,6 +16,47 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
     tasks = tasks.where(unit: params[:unit]) if params[:unit].present?
     tasks = tasks.order(Arel.sql('priority DESC, due_at ASC NULLS LAST, created_at DESC'))
     render json: tasks.map { |t| task_json(t) }
+  end
+
+  # item 95: RENOVAR o ambiente — as tarefas CONCLUÍDAS visíveis pra mim
+  # vão pra coluna oculta (a tela nasce limpa pro próximo ciclo)
+  def archive_done
+    # consultas/cirurgias (Agenda) NUNCA entram aqui — só cards do board
+    scope = Current.account.tasks.where(status: :done, archived_at: nil)
+                   .where("task_type IS NULL OR task_type NOT IN ('consulta', 'cirurgia')")
+    unless Current.account_user.administrator?
+      uid = Current.user.id
+      scope = scope.where('assignee_id = :uid OR creator_id = :uid', uid: uid)
+    end
+    count = scope.update_all(archived_at: Time.current) # rubocop:disable Rails/SkipsModelValidations
+    render json: { archived: count }
+  end
+
+  # Lista do dia da Agenda (item 76): etiquetas do paciente + a resposta de
+  # formulário mais recente — o médico LÊ as respostas antes da consulta
+  def agenda_details # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+    ids = params[:ids].to_s.split(',').map(&:to_i).first(80)
+    day_tasks = Current.account.tasks.where(id: ids).where.not(contact_id: nil)
+    contacts = Current.account.contacts.where(id: day_tasks.map(&:contact_id)).index_by(&:id)
+    responses = Crm::FormResponse.where(account_id: Current.account.id, contact_id: contacts.keys)
+                                 .where.not(completed_at: nil)
+                                 .includes(:form).order(:completed_at)
+                                 .group_by(&:contact_id)
+
+    render json: day_tasks.map { |t|
+      contact = contacts[t.contact_id]
+      resp = (responses[t.contact_id] || []).last
+      {
+        task_id: t.id,
+        contact_id: t.contact_id,
+        labels: contact ? contact.label_list.map(&:to_s).first(4) : [],
+        form_response: resp && {
+          form: resp.form&.name,
+          answered_at: resp.completed_at,
+          answers: Array(resp.answers).reject { |a| a['type'] == 'message' }
+        }
+      }
+    }
   end
 
   def create
