@@ -1,5 +1,6 @@
 <script setup>
 import { ref, unref, provide, computed, watch, onMounted } from 'vue';
+import { onClickOutside } from '@vueuse/core';
 import { useStore } from 'vuex';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -189,6 +190,24 @@ const selectedJourneyStage = computed(
 const selectedJourneyLabel = computed(
   () => journeyLabels.value.find(l => l.title === journeyLabel.value) || null
 );
+// item 102 (20/07): JANELINHA selecionável no lugar da nuvem de chips —
+// tela limpa; aperta "Colunas CRM" ou "Etiquetas", escolhe, ela se fecha
+const filterPanel = ref(null); // null | 'stage' | 'label'
+const journeyFilterWrap = ref(null);
+const toggleFilterPanel = kind => {
+  filterPanel.value = filterPanel.value === kind ? null : kind;
+};
+const pickJourneyStage = s => {
+  journeyStageId.value = s.id;
+  filterPanel.value = null;
+};
+const pickJourneyLabel = l => {
+  journeyLabel.value = l.title;
+  filterPanel.value = null;
+};
+onClickOutside(journeyFilterWrap, () => {
+  filterPanel.value = null;
+});
 onMounted(() => {
   if (!crmPipelines.value.length) store.dispatch('crm/fetchPipelines');
   if (!journeyLabels.value.length) store.dispatch('labels/get');
@@ -1082,7 +1101,7 @@ watch(conversationFilters, (newVal, oldVal) => {
          Enquadramento (pedido 19/07): mesma calha horizontal do cabeçalho (px-3) -->
     <div
       v-if="showInboxPills && pillInboxes.length"
-      class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 mx-3 mb-1.5 overflow-x-auto flex-shrink-0"
+      class="cevico-no-scrollbar flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 mx-3 mb-1.5 overflow-x-auto flex-shrink-0"
     >
       <button
         class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
@@ -1131,69 +1150,117 @@ watch(conversationFilters, (newVal, oldVal) => {
       @close="onCloseDeleteFoldersModal"
     />
 
-    <!-- CEVICO 20/07: filtros da JORNADA em BOTÕES EM LINHA — as opções
-         ficam todas EVIDENTES; depois de escolher, recolhem e sobra só a
-         pílula do que está selecionado (clique nela para trocar/limpar) -->
+    <!-- CEVICO item 102 (20/07): filtros da jornada em JANELINHA — tela
+         limpa. Dois botões (Colunas CRM | Etiquetas); apertou, abre a
+         janelinha com as opções; escolheu, fecha e sobra a pílula colorida -->
     <div
       v-if="!hasAppliedFiltersOrActiveFolders"
-      class="mx-3 mt-1.5 mb-0.5 space-y-1"
+      ref="journeyFilterWrap"
+      class="mx-3 mt-1.5 mb-0.5 space-y-1 relative"
     >
-      <!-- Estágio da jornada -->
-      <div v-if="!journeyStageId" class="flex items-start gap-1.5">
-        <span class="text-[10px] flex-shrink-0 mt-1" title="Estágio da jornada (CRM)">🧭</span>
-        <div class="flex flex-wrap gap-1 max-h-16 overflow-y-auto min-w-0" style="scrollbar-width: thin;">
-          <button
-            v-for="s in journeyStages"
-            :key="s.id"
-            class="inline-flex items-center gap-1 px-1.5 h-5 rounded-full border border-n-weak text-[10px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
-            :title="`Ver só as conversas de: ${s.name}`"
-            @click="journeyStageId = s.id"
-          >
-            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: s.color || '#94A3B8' }" />
-            {{ s.name }}
-          </button>
-        </div>
-      </div>
-      <div v-else class="flex items-center gap-1.5">
-        <span class="text-[10px] flex-shrink-0">🧭</span>
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <!-- Colunas CRM: gatilho ou pílula do selecionado -->
         <button
+          v-if="!journeyStageId"
+          class="inline-flex items-center gap-1 px-2 h-6 rounded-lg border text-[11px] font-medium transition-colors"
+          :class="filterPanel === 'stage'
+            ? 'border-n-brand bg-n-brand/10 text-n-brand'
+            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+          @click="toggleFilterPanel('stage')"
+        >
+          <span class="i-lucide-columns-3 text-[11px]" />
+          Colunas CRM
+          <span class="i-lucide-chevron-down text-[10px]" />
+        </button>
+        <button
+          v-else
           class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
           :style="{ background: selectedJourneyStage?.color || '#2563EB' }"
-          title="Clique para trocar de estágio"
+          title="Clique para limpar"
           @click="journeyStageId = null"
         >
-          {{ selectedJourneyStage?.name || 'Estágio' }}
+          {{ selectedJourneyStage?.name || 'Coluna' }}
           <span class="i-lucide-x text-[10px]" />
         </button>
-      </div>
 
-      <!-- Etiqueta -->
-      <div v-if="!journeyLabel" class="flex items-start gap-1.5">
-        <span class="text-[10px] flex-shrink-0 mt-1" title="Etiqueta">🏷️</span>
-        <div class="flex flex-wrap gap-1 max-h-16 overflow-y-auto min-w-0" style="scrollbar-width: thin;">
-          <button
-            v-for="lb in journeyLabels"
-            :key="lb.id"
-            class="inline-flex items-center gap-1 px-1.5 h-5 rounded-full border border-n-weak text-[10px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
-            :title="`Ver só as conversas com a etiqueta: ${lb.title}`"
-            @click="journeyLabel = lb.title"
-          >
-            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: lb.color || '#94A3B8' }" />
-            {{ lb.title }}
-          </button>
-        </div>
-      </div>
-      <div v-else class="flex items-center gap-1.5">
-        <span class="text-[10px] flex-shrink-0">🏷️</span>
+        <!-- Etiquetas: gatilho ou pílula do selecionado -->
         <button
+          v-if="!journeyLabel"
+          class="inline-flex items-center gap-1 px-2 h-6 rounded-lg border text-[11px] font-medium transition-colors"
+          :class="filterPanel === 'label'
+            ? 'border-n-brand bg-n-brand/10 text-n-brand'
+            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+          @click="toggleFilterPanel('label')"
+        >
+          <span class="i-lucide-tag text-[11px]" />
+          Etiquetas
+          <span class="i-lucide-chevron-down text-[10px]" />
+        </button>
+        <button
+          v-else
           class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
           :style="{ background: selectedJourneyLabel?.color || '#2563EB' }"
-          title="Clique para trocar de etiqueta"
+          title="Clique para limpar"
           @click="journeyLabel = null"
         >
           {{ journeyLabel }}
           <span class="i-lucide-x text-[10px]" />
         </button>
+      </div>
+
+      <!-- a JANELINHA (abre por cima da lista, fecha ao escolher/clicar fora) -->
+      <div
+        v-if="filterPanel"
+        class="absolute z-30 left-0 right-0 top-7 bg-n-solid-1 border border-n-weak rounded-xl shadow-xl p-2.5"
+      >
+        <div class="flex items-center gap-1 mb-2">
+          <button
+            class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
+            :class="filterPanel === 'stage' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="filterPanel === 'stage' ? 'background: linear-gradient(135deg, #152C61, #3B82F6)' : ''"
+            @click="filterPanel = 'stage'"
+          >
+            Colunas CRM
+          </button>
+          <button
+            class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
+            :class="filterPanel === 'label' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="filterPanel === 'label' ? 'background: linear-gradient(135deg, #B8860B, #D4AF37)' : ''"
+            @click="filterPanel = 'label'"
+          >
+            Etiquetas
+          </button>
+          <button
+            class="ml-auto w-6 h-6 rounded-lg flex items-center justify-center text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1"
+            @click="filterPanel = null"
+          >
+            <span class="i-lucide-x text-xs" />
+          </button>
+        </div>
+        <div class="flex flex-wrap gap-1 max-h-44 overflow-y-auto" style="scrollbar-width: thin;">
+          <template v-if="filterPanel === 'stage'">
+            <button
+              v-for="s in journeyStages"
+              :key="s.id"
+              class="inline-flex items-center gap-1 px-2 h-6 rounded-full border border-n-weak text-[11px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
+              @click="pickJourneyStage(s)"
+            >
+              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: s.color || '#94A3B8' }" />
+              {{ s.name }}
+            </button>
+          </template>
+          <template v-else>
+            <button
+              v-for="lb in journeyLabels"
+              :key="lb.id"
+              class="inline-flex items-center gap-1 px-2 h-6 rounded-full border border-n-weak text-[11px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
+              @click="pickJourneyLabel(lb)"
+            >
+              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: lb.color || '#94A3B8' }" />
+              {{ lb.title }}
+            </button>
+          </template>
+        </div>
       </div>
 
       <!-- Não lidas no topo + ordenação (2 opções sempre à vista) -->
@@ -1298,3 +1365,15 @@ watch(conversationFilters, (newVal, oldVal) => {
     />
   </div>
 </template>
+
+<style scoped>
+/* pílulas de caixa: desliza no dedo/scroll SEM barra de rolagem aparente
+   (pedido 20/07 — mobile clean) */
+.cevico-no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.cevico-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+</style>

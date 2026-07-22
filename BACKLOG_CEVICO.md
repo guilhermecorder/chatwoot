@@ -3365,6 +3365,41 @@ enriquecido c/ Whatsapp::HealthService NATIVO (Meta Graph) em cache de
 local caiu no fallback certinho). Detalhes completos seguem em
 Relatórios → Saúde do WhatsApp.
 
+## 102. ✅ Conversas CLEAN: filtros em JANELINHA + mobile sem barra ✅ CONSTRUÍDO (20/07 noite, não commitado)
+Feedback do Guilherme em produção: a nuvem de chips do item 100 poluía.
+COMO FICOU: dois botões discretos "Colunas CRM ▾ | Etiquetas ▾"; apertou,
+abre a JANELINHA (painel flutuante com as 2 abas, chips coloridos,
+rolável); escolheu, fecha sozinha e sobra a pílula colorida com ✕
+(clique limpa). Fecha ao clicar fora (onClickOutside). Pílulas de caixa
+de entrada deslizam SEM barra de rolagem aparente (scrollbar-width:none
++ webkit) — mobile clean. Testado: janelinha abre/fecha, filtro aplica,
+pílula recolhe.
+
+## 103. ✅ AMBIENTE DE TAGS DE PERDAS 🟥 ✅ CONSTRUÍDO (20/07 noite, não commitado)
+Card "🟥 Perdas por motivo" no Dashboard CRM: padrão CEVICO de 6 motivos
+(Não respondeu / Sem interesse / Valor / Convênio / Distância / Momento
+futuro) → botão cria as 6 etiquetas VERMELHAS perda_* de uma vez (via API
+nativa de etiquetas, sem backend novo); ranking de perdas do período em
+barras vermelhas c/ % (fonte: by_label que o dashboard já calcula;
+etiquetas perda_* extras criadas à mão entram sozinhas no ranking) +
+frase de gestão ("o motivo campeão é onde o dinheiro está vazando").
+Fluxo da atendente: lead esfriou → aplica perda_* no balão do card.
+Testado: 6 etiquetas criadas no clique, empty state ok.
+
+## 104. ✅ AMBIENTE DO MÉDICO (gestão e contratações) ✅ CONSTRUÍDO (20/07 noite, não commitado)
+Dashboard dos Médicos ganhou abas "Desempenho | 🩺 Gestão do time médico"
+(gestão SÓ ADMIN — profiles nem trafega p/ atendente [null] + save 403,
+testado). Card por médico: medalhão nas cores oficiais da Agenda, status
+em botões em linha (Ativo/Em contratação/Em avaliação/Pausado),
+especialidade, números REAIS do período (consultas/conversão/NPS),
+💪 Forças e 🧗 Pontos a desenvolver em chips (Enter adiciona), 📝
+observações do gestor; card tracejado "Contratando?" adiciona candidato
+(nasce Em contratação, removível). Autosave debounce c/ chip "Salvo às"
+em agenda_config.doctor_profiles (SEM migration; backend
+doctors_dashboards_controller#save_profiles + sanitização). Testado:
+força no Dr. Gustavo, Dra. Camila Souza em contratação, persistência
+pós-reload confirmada no banco.
+
 ## ⏳ Pendências de clarificação do lote (perguntar ao Guilherme)
 - **Item 66**: script validado de fechamento — Guilherme vai fornecer
   (construir com campo editável/placeholder até lá).

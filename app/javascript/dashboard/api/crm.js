@@ -329,6 +329,13 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/doctors_dashboard`, { params });
   }
 
+  // 🩺 Ambiente do médico (item 104): perfis de gestão — só admin
+  saveDoctorProfiles(profiles) {
+    return axios.post(`${this.url}/doctors_dashboard/save_profiles`, {
+      profiles,
+    });
+  }
+
   // dashboard dos agentes (equipe humana: atendimento + resposta ao Radar)
   getAgentsDashboard(params = {}) {
     return axios.get(`${this.url}/agents_dashboard`, { params });
