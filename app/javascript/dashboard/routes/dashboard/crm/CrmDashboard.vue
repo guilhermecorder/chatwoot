@@ -34,6 +34,67 @@ const PALETTE = [AZUL, ROXO, OURO, LIME, '#3B82F6', '#A78BFA', '#F0C420', '#22D3
 
 const store   = useStore();
 const data    = ref(null);
+
+// ── 🟥 item 103 (20/07): ambiente de PERDAS — padrão de etiquetas + análise ──
+// os motivos oficiais de perda da CEVICO; cada um vira uma etiqueta vermelha
+// "perda_*" que a atendente aplica no balão/card quando o lead esfria
+const LOSS_LABELS = [
+  { title: 'perda_nao_respondeu', name: 'Não respondeu' },
+  { title: 'perda_sem_interesse', name: 'Sem interesse' },
+  { title: 'perda_valor', name: 'Valor' },
+  { title: 'perda_convenio', name: 'Convênio' },
+  { title: 'perda_distancia', name: 'Distância' },
+  { title: 'perda_momento_futuro', name: 'Momento futuro' },
+];
+const lossNameOf = title =>
+  LOSS_LABELS.find(l => l.title === title)?.name ||
+  title.replace('perda_', '').replaceAll('_', ' ');
+const accountLabels = computed(() => store.getters['labels/getLabels'] || []);
+const missingLossLabels = computed(() =>
+  LOSS_LABELS.filter(l => !accountLabels.value.some(al => al.title === l.title))
+);
+const creatingLossLabels = ref(false);
+const createLossLabels = async () => {
+  if (creatingLossLabels.value) return;
+  creatingLossLabels.value = true;
+  try {
+    // sequencial de propósito: cria uma a uma, sem estourar a API
+    const pending = [...missingLossLabels.value];
+    for (let i = 0; i < pending.length; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await store.dispatch('labels/create', {
+        title: pending[i].title,
+        description: `Motivo de perda: ${pending[i].name}`,
+        color: '#EF4444',
+        show_on_sidebar: false,
+      });
+    }
+  } finally {
+    creatingLossLabels.value = false;
+  }
+};
+// perdas por motivo no período (vem do by_label que o dashboard já calcula)
+const lossRows = computed(() => {
+  const counted = (data.value?.by_label?.items || []).filter(i =>
+    i.label?.startsWith('perda_')
+  );
+  const rows = LOSS_LABELS.map(l => ({
+    title: l.title,
+    name: l.name,
+    count: counted.find(c => c.label === l.title)?.count || 0,
+  }));
+  // etiquetas perda_* extras criadas à mão também entram
+  counted.forEach(c => {
+    if (!rows.some(r => r.title === c.label)) {
+      rows.push({ title: c.label, name: lossNameOf(c.label), count: c.count });
+    }
+  });
+  return rows.sort((a, b) => b.count - a.count);
+});
+const lossTotal = computed(() => lossRows.value.reduce((s, r) => s + r.count, 0));
+onMounted(() => {
+  if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
+});
 const loading = ref(false);
 const error   = ref(false);
 
@@ -669,6 +730,80 @@ const agentView = computed(() => {
             <span class="i-lucide-info text-xs" />
             O Radar audita as colunas vigiadas (07:30–18h a cada 10 min; madrugada a cada 4h)
             e avisa no Meu Painel — configure em Automações → Agentes de IA.
+          </p>
+        </div>
+      </div>
+
+      <!-- 🟥 Perdas por motivo (item 103) — ambiente das tags de perda -->
+      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-6">
+        <div class="flex items-center gap-2 mb-5 flex-wrap">
+          <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B91C1C, #EF4444)">
+            <span class="i-lucide-heart-crack text-white text-sm" />
+          </span>
+          <h3 class="text-sm font-bold text-n-slate-12">🟥 Perdas por motivo</h3>
+          <span v-if="lossTotal" class="text-[11px] text-n-slate-9 ml-auto">
+            {{ lossTotal }} etiqueta(s) de perda aplicadas nos leads deste funil
+          </span>
+        </div>
+
+        <!-- padrão ainda não criado: um clique e as 6 etiquetas nascem -->
+        <div
+          v-if="missingLossLabels.length"
+          class="rounded-xl border border-dashed p-4 mb-4"
+          style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.04)"
+        >
+          <p class="text-xs text-n-slate-11 mb-2.5">
+            Padrão CEVICO de motivos de perda ({{ missingLossLabels.length }} faltando) — cada um vira uma
+            etiqueta vermelha <b>perda_*</b> pronta para a atendente aplicar no balão quando o lead esfriar:
+          </p>
+          <div class="flex flex-wrap gap-1.5 mb-3">
+            <span
+              v-for="l in missingLossLabels"
+              :key="l.title"
+              class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border"
+              style="border-color: rgba(239, 68, 68, 0.45); color: #B91C1C"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" style="background: #EF4444" />
+              {{ l.name }}
+            </span>
+          </div>
+          <button
+            class="text-xs font-semibold text-white px-3.5 py-2 rounded-xl hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+            style="background: linear-gradient(135deg, #B91C1C, #EF4444)"
+            :disabled="creatingLossLabels"
+            @click="createLossLabels"
+          >
+            <span :class="creatingLossLabels ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-tags'" class="text-sm" />
+            {{ creatingLossLabels ? 'Criando…' : 'Criar as etiquetas padrão de perdas' }}
+          </button>
+        </div>
+
+        <!-- ranking dos motivos (barras vermelhas, estilo etiquetas) -->
+        <div v-if="!lossTotal && !missingLossLabels.length" class="flex flex-col items-center justify-center py-6 text-n-slate-10 text-sm gap-2">
+          <span class="i-lucide-heart-crack text-2xl" />
+          <span>Nenhuma perda etiquetada no período — quando um lead esfriar, aplique o motivo <b>perda_*</b> no balão do card.</span>
+        </div>
+        <div v-else-if="lossTotal" class="space-y-2 max-w-2xl">
+          <div v-for="r in lossRows" :key="r.title" class="flex items-center gap-2 text-xs">
+            <span class="text-n-slate-12 w-32 truncate flex-shrink-0">{{ r.name }}</span>
+            <div class="flex-1 h-5 rounded-full bg-n-alpha-1 overflow-hidden">
+              <div
+                class="h-full rounded-full flex items-center justify-end pr-2 transition-all duration-500"
+                :style="{
+                  width: Math.max((r.count / (lossRows[0]?.count || 1)) * 100, r.count ? 33 : 0) + '%',
+                  background: 'linear-gradient(90deg, #B91C1C, #EF4444)',
+                }"
+              >
+                <span v-if="r.count" class="text-[10px] font-bold text-white drop-shadow">{{ r.count }}</span>
+              </div>
+            </div>
+            <span class="text-n-slate-9 w-10 text-right flex-shrink-0">
+              {{ lossTotal ? Math.round((r.count / lossTotal) * 100) : 0 }}%
+            </span>
+          </div>
+          <p class="text-[11px] text-n-slate-9 pt-1 flex items-center gap-1.5">
+            <span class="i-lucide-info text-xs" />
+            O motivo campeão é onde o dinheiro está vazando — leve para a reunião da equipe e ataque com script/oferta.
           </p>
         </div>
       </div>

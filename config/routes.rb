@@ -328,7 +328,10 @@ Rails.application.routes.draw do
             end
             resource :campaigns_dashboard, only: [:show], controller: 'campaigns_dashboards'
             resource :automations_dashboard, only: [:show], controller: 'automations_dashboards'
-            resource :doctors_dashboard, only: [:show], controller: 'doctors_dashboards'
+            resource :doctors_dashboard, only: [:show], controller: 'doctors_dashboards' do
+              # 🩺 Ambiente do médico (item 104): perfis de gestão — só admin
+              post :save_profiles
+            end
             resource :agents_dashboard, only: [:show], controller: 'agents_dashboards'
             # Dashboard dos AGENTES DE IA (item 85, só admin)
             resource :ai_dashboard, only: [:show], controller: 'ai_dashboards'

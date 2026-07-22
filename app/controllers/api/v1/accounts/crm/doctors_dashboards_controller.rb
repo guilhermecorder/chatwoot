@@ -18,11 +18,53 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
       period: params[:preset].presence || 'month',
       doctors: doctors_rows(since, until_at),
       surgeries_by_clinic: surgeries_by_clinic(since, until_at),
-      consultations_by_unit: consultations_by_unit(since, until_at)
+      consultations_by_unit: consultations_by_unit(since, until_at),
+      # 🩺 Ambiente do médico (item 104): perfis de gestão — forças/fraquezas
+      # são leitura de GESTÃO, só o admin enxerga (nem trafega p/ o time)
+      profiles: Current.account_user.administrator? ? doctor_profiles : nil
     }
   end
 
+  # perfis de gestão dos médicos (contratações, forças, fraquezas, plano)
+  def save_profiles
+    return render json: { error: 'Só administradores editam os perfis médicos.' }, status: :forbidden unless Current.account_user.administrator?
+
+    settings = CrmSetting.find_or_create_by!(account: account)
+    cfg = settings.agenda_config || {}
+    cfg['doctor_profiles'] = sanitize_doctor_profiles
+    settings.update!(agenda_config: cfg)
+    render json: { profiles: cfg['doctor_profiles'] }
+  end
+
   private
+
+  def doctor_profiles
+    profiles = CrmSetting.find_by(account: account)&.agenda_config&.dig('doctor_profiles')
+    profiles.is_a?(Hash) ? profiles : {}
+  end
+
+  DOCTOR_STATUSES = %w[ativo contratacao avaliacao pausado].freeze
+
+  def sanitize_doctor_profiles
+    Hash(params[:profiles].presence&.to_unsafe_h).first(30).to_h do |name, raw|
+      [name.to_s[0, 80], sanitize_doctor_profile(raw.is_a?(Hash) ? raw : {})]
+    end
+  end
+
+  def sanitize_doctor_profile(raw)
+    {
+      'status' => DOCTOR_STATUSES.include?(raw['status']) ? raw['status'] : 'ativo',
+      'specialty' => raw['specialty'].to_s[0, 120],
+      'strengths' => sanitize_traits(raw['strengths']),
+      'weaknesses' => sanitize_traits(raw['weaknesses']),
+      'notes' => raw['notes'].to_s[0, 2000],
+      'custom' => [true, 'true'].include?(raw['custom'])
+    }
+  end
+
+  def sanitize_traits(list)
+    Array(list).first(12).map { |s| s.to_s[0, 120] }.compact_blank
+  end
 
   def account
     Current.account
