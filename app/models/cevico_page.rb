@@ -133,6 +133,9 @@ class CevicoPage < ApplicationRecord
         'effect' => SECTION_EFFECTS.include?(sec['effect']) ? sec['effect'] : 'nenhum',
         'title' => sec['title'].to_s[0, 200],
         'text' => sec['text'].to_s[0, 4000],
+        # retoques que a IA agora também controla — mesma régua do editor
+        'color' => sec['color'].to_s.match?(/\A#[0-9A-Fa-f]{6}\z/) ? sec['color'] : nil,
+        'image_url' => sec['image_url'].to_s.start_with?('/rails/active_storage/') ? sec['image_url'] : nil,
         'items' => Array(sec['items']).map do |it|
           it = it.to_h.deep_stringify_keys
           { 'title' => it['title'].to_s[0, 200], 'text' => it['text'].to_s[0, 1000] }

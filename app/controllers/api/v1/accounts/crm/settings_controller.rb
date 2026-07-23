@@ -219,7 +219,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 nps: agent_fields,
                                 sales: agent_fields,
                                 copywriter: agent_fields + [:references],
-                                pagebuilder: agent_fields,
+                                # Construtor PRO (23/07): referências de estilo + teto de resposta
+                                pagebuilder: agent_fields + [:references, :max_tokens],
                                 instagram: agent_fields + [{ inbox_ids: [] }],
                                 mentor: agent_fields,
                                 comments: agent_fields + [:page_access_token, :fb_page_id, :ig_user_id],

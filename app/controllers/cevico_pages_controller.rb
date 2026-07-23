@@ -56,6 +56,21 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     render json: Crm::PageGenerateJob.page_status(page.id) || { status: 'idle' }
   end
 
+  # CHAT DO CONSTRUTOR (item 112): manda a instrução pro agente de
+  # correção — roda em segundo plano e a aba acompanha pelo status
+  def builder_chat
+    page = CevicoPage.find_by_preview_token(params[:token])
+    return head :not_found if page.nil?
+    return head :forbidden unless page.valid_edit_token?(params[:edit]) && !page.published?
+
+    message = params[:message].to_s.strip[0, 2000]
+    return render json: { error: 'Escreva o que você quer mudar.' }, status: :unprocessable_entity if message.blank?
+
+    Redis::Alfred.setex(Crm::PageGenerateJob.page_key(page.id), { status: 'running' }.to_json, 15.minutes)
+    Crm::PageEditJob.perform_later(page.account_id, page.id, message)
+    render json: { ok: true }
+  end
+
   # retoque inline (só textos; exige o token de RETOQUE e rascunho)
   def inline_update
     page = CevicoPage.find_by_preview_token(params[:token])
@@ -93,9 +108,10 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
                 allow_other_host: true
   end
 
-  # beacon de rolagem + retoque inline: sem formulário Rails, a proteção
-  # de forgery não se aplica (a segurança é o token assinado)
-  skip_forgery_protection only: [:track, :inline_update]
+  # beacon de rolagem + retoque inline + chat do construtor: sem
+  # formulário Rails, a proteção de forgery não se aplica (a segurança é
+  # o token assinado)
+  skip_forgery_protection only: [:track, :inline_update, :builder_chat]
 
   def track
     page = CevicoPage.published.find_by(slug: params[:slug])

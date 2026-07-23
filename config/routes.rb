@@ -59,6 +59,7 @@ Rails.application.routes.draw do
   # ambiente de montagem: status da construção e retoque inline
   get 'p/rascunho/:token/status', to: 'cevico_pages#build_status'
   post 'p/rascunho/:token/retocar', to: 'cevico_pages#inline_update'
+  post 'p/rascunho/:token/construtor', to: 'cevico_pages#builder_chat'
   get 'p/rascunho/:token', to: 'cevico_pages#preview', as: :cevico_page_preview
   get 'p/:slug', to: 'cevico_pages#show', as: :cevico_page
 
