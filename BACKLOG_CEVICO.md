@@ -3558,7 +3558,51 @@ avisado, nunca sucesso vazio. PEDIDO DO GUILHERME anotado: ambiente do
 Construtor mais CONTROLÁVEL (teto de tokens, esforço, etc. na mão do
 admin) → incorporar ao item 112.
 
-## 112. ⏳ CHAT DO CONSTRUTOR no editor de Páginas (combinado 23/07, a construir)
+## 112. ✅ FASE 1 CONSTRUÍDA (23/07 tarde, não commitado): CHAT DO CONSTRUTOR + CONSTRUTOR PRO
+CONSTRUTOR PRO (card do agente em Automações → Agentes de IA): campo
+"Referências de estilo" (textarea, injetada em TODA montagem/correção —
+aceita chave references igual ao Copywriter) + "Teto de resposta
+(tokens)" (1.000–60.000; vazio = 30.000) + botão "Salvar rédeas do
+Construtor"; backend: permit no settings_controller + leitores
+max_tokens_config/style_refs/style_refs_block no AiAgentConfig, usados
+no PageBuilderService e no novo PageEditorService. CHAT DO CONSTRUTOR
+(na página de rascunho, junto da barra de retoque): botão "💬
+Construtor" abre painel navy/ouro c/ histórico (localStorage por
+página), instruções tipo "FAQ pro final"/"seção dourada com brilho" →
+POST /p/rascunho/:token/construtor (token de EDIÇÃO; 403 testado) →
+PageEditJob → PageEditorService (página atual JSON + instrução →
+página completa atualizada + "reply" pro chat) → aplica → aba recarrega
+em cascata e o chat reabre com a resposta; retoques abertos são SALVOS
+antes de enviar (senão a IA passaria por cima); erro = balão legível.
+SCHEMA das seções ganhou color+image_url (enum/validação — o Construtor
+agora PINTA páginas na montagem; normalize_ai_sections preserva).
+Testado conta 3: painel/balões/⏳/erro legível no browser, 403, enqueue
++ sidekiq, EDIT_SCHEMA carrega, PRO salva e os services leem (40000 +
+referências). ⚠️ DEPLOY: web E SIDEKIQ (service+job novos). FASE 2
+(fotos com visão no chat) segue combinada — slot de chave Gemini
+"geração de imagens das Páginas" já existe no update_ai.
+
+## (desenho original) 112: CHAT DO CONSTRUTOR no Ambiente de Montagem
+ONDE: na própria página de rascunho (Ambiente de Montagem) — balão
+flutuante "💬 Falar com o Construtor" ao lado da barra de retoque.
+FASE 1 (uma sessão): (a) chat de correção por TEXTO — "deixa o título
+mais direto", "FAQ por último", "seção 3 dourada com brilho", "adiciona
+depoimentos" → PageEditorService recebe página atual (JSON) + instrução
+→ devolve página atualizada no MESMO PAGE_SCHEMA (estendido c/
+color/image_url/effect por seção) + campo "reply" (resposta do agente
+no chat, incl. SUGESTÕES de imagens por seção) → PageEditJob aplica →
+aba recarrega em cascata; histórico do chat em jsonb da página;
+endpoints no CevicoPagesController gated pelo token de EDIÇÃO;
+(b) CONTROLES DO CONSTRUTOR na tela do agente (Automações → Agentes de
+IA): modelo, esforço, teto de tokens e instruções fixas de marca
+(pedido do Guilherme).
+FASE 2: IMAGENS no chat — anexa fotos (upload_image já existe) → agente
+VÊ as fotos (visão da API, blocos de imagem) + página atual → decide em
+qual seção cada foto entra (seta sections[].image_url) e responde o
+porquê; só URLs do NOSSO storage passam (sanitização já existe). Logo
+CEVICO já aparece automático no hero de toda página.
+
+## (histórico) 112-original: CHAT DO CONSTRUTOR no editor de Páginas (combinado 23/07)
 Ideia do Guilherme: conversar com o agente DENTRO do editor — manda
 comentários e FOTOS, o agente atualiza o rascunho seção a seção; fotos
 hospedadas no sistema entram na página; publicar continua manual (admin).

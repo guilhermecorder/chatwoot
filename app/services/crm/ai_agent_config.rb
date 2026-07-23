@@ -135,6 +135,27 @@ module Crm::AiAgentConfig
     EFFORTS.include?(e) ? e : nil
   end
 
+  # Construtor PRO (23/07): teto de resposta escolhido pelo admin —
+  # nil = o padrão de cada serviço decide
+  def max_tokens_config
+    t = agent_config['max_tokens'].to_i
+    t.between?(1_000, 60_000) ? t : nil
+  end
+
+  # Construtor PRO: referências de estilo do admin (exemplos de páginas
+  # admiradas, diretrizes de marca) — injetadas na entrada da geração.
+  # Aceita a chave 'references' (mesmo nome que o Copywriter já usa).
+  def style_refs
+    agent_config['style_refs'].to_s.strip.presence ||
+      agent_config['references'].to_s.strip.presence
+  end
+
+  def style_refs_block
+    return '' if style_refs.blank?
+
+    "\nREFERÊNCIAS E DIRETRIZES DE ESTILO (definidas pelo admin — inspire-se nelas ao montar, sem copiá-las literalmente):\n#{style_refs[0, 12_000]}\n"
+  end
+
   # monta o output_config com o formato pedido + esforço quando o modelo aceita
   def output_config_for(format)
     cfg = { format: format }

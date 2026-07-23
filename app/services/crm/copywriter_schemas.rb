@@ -9,6 +9,10 @@ module Crm::CopywriterSchemas
       effect: { type: 'string', enum: CevicoPage::SECTION_EFFECTS },
       title: { type: 'string', description: 'Título da seção (vazio quando não precisar)' },
       text: { type: 'string', description: 'Texto corrido da seção (parágrafos separados por linha em branco)' },
+      color: { type: 'string',
+               description: 'Cor de fundo suave da seção em hexadecimal #RRGGBB (use com parcimônia — 2-3 seções por página; string vazia = sem cor). Paleta da casa: #0F5FA6 azul, #D4AF37 dourado, #10B981 verde, #7C3AED roxo' },
+      image_url: { type: 'string',
+                   description: 'SOMENTE um caminho de imagem listado no contexto como disponível (começa com /rails/active_storage/) ou string vazia — NUNCA invente URL de imagem' },
       items: {
         type: 'array',
         description: 'Itens da seção (benefícios/passos/FAQ: title = item ou pergunta, text = explicação ou resposta)',
@@ -20,7 +24,7 @@ module Crm::CopywriterSchemas
         }
       }
     },
-    required: %w[type effect title text items],
+    required: %w[type effect title text color image_url items],
     additionalProperties: false
   }.freeze
 

@@ -77,7 +77,7 @@ const aiAgents = ref({
   sales: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
   instagram: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', inbox_ids: [] },
   copywriter: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', references: '' },
-  pagebuilder: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
+  pagebuilder: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', references: '', max_tokens: '' },
 });
 
 const LOOKBACK_OPTIONS = [
@@ -328,6 +328,28 @@ const saveCopyReferences = async () => {
     useAlert('Erro ao salvar as referências.');
   } finally {
     savingRefs.value = false;
+  }
+};
+
+// Construtor PRO (23/07): referências de estilo + teto de resposta
+const savingBuilderPro = ref(false);
+const saveBuilderPro = async () => {
+  savingBuilderPro.value = true;
+  try {
+    const tokens = parseInt(aiAgents.value.pagebuilder.max_tokens, 10);
+    await CrmAPI.updateAi({
+      agents: {
+        pagebuilder: {
+          references: aiAgents.value.pagebuilder.references || '',
+          max_tokens: Number.isFinite(tokens) && tokens >= 1000 ? tokens : '',
+        },
+      },
+    });
+    useAlert('Construtor ajustado — as próximas montagens seguem essas rédeas. 🏗️');
+  } catch {
+    useAlert('Erro ao salvar os ajustes do Construtor.');
+  } finally {
+    savingBuilderPro.value = false;
   }
 };
 
@@ -751,7 +773,11 @@ const loadAgents = async () => {
     nps: load('nps'),
     sales: load('sales'),
     copywriter: { ...load('copywriter'), references: a.copywriter?.references || '' },
-    pagebuilder: load('pagebuilder'),
+    pagebuilder: {
+      ...load('pagebuilder'),
+      references: a.pagebuilder?.references || '',
+      max_tokens: a.pagebuilder?.max_tokens || '',
+    },
     instagram: {
       ...load('instagram'),
       inbox_ids: [...(a.instagram?.inbox_ids || [])],
@@ -1787,6 +1813,48 @@ onMounted(async () => {
                 <pre class="text-[11px] text-n-slate-11 whitespace-pre-wrap font-sans leading-relaxed">{{ salesInsights().text }}</pre>
               </div>
               <p v-else-if="salesInsights()?.error" class="text-[11px] text-amber-600">⚠️ {{ salesInsights().error }}</p>
+            </div>
+
+            <!-- 🏗️ CONSTRUTOR PRO: referências de estilo + teto de resposta -->
+            <div v-if="key === 'pagebuilder'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
+                <span class="i-lucide-ruler text-xs" style="color: #d4af37" /> Construtor PRO
+                <span class="font-normal text-n-slate-9">— rédeas da montagem: estilo e tamanho da resposta</span>
+              </p>
+              <div>
+                <p class="text-[11px] font-medium text-n-slate-11 mb-1">
+                  Referências de estilo
+                  <span class="text-n-slate-9 font-normal">(cole exemplos de páginas que você admira, diretrizes de marca, o que nunca pode faltar — o Construtor se inspira nelas em TODA montagem)</span>
+                </p>
+                <textarea
+                  v-model="aiAgents.pagebuilder.references"
+                  rows="3"
+                  class="w-full border border-n-weak rounded-lg px-2.5 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
+                  placeholder="Ex: hero curto e emocional · benefícios sempre em cards · fechar com FAQ + CTA dourado · tom calmo, público 55+, letra grande…"
+                />
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-[11px] text-n-slate-10">Teto de resposta (tokens):</span>
+                <input
+                  v-model="aiAgents.pagebuilder.max_tokens"
+                  type="number"
+                  min="1000"
+                  max="60000"
+                  step="1000"
+                  placeholder="30000"
+                  class="w-24 h-8 border border-n-weak rounded-lg px-2 text-xs bg-n-solid-2 text-n-slate-12"
+                  style="width: 6.5rem"
+                />
+                <span class="text-[10px] text-n-slate-9">vazio = padrão (30.000). Página grande truncada? Aumente. Custo alto? Diminua.</span>
+              </div>
+              <button
+                class="text-[11px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50"
+                style="background: linear-gradient(135deg, #d4af37, #f4de8e); color: #072a4c"
+                :disabled="savingBuilderPro"
+                @click="saveBuilderPro"
+              >
+                {{ savingBuilderPro ? 'Salvando…' : 'Salvar rédeas do Construtor' }}
+              </button>
             </div>
 
             <!-- ✍️ ESTÚDIO DO COPYWRITER: referências + conteúdo multi-formato -->

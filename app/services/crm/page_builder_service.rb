@@ -57,8 +57,9 @@ class Crm::PageBuilderService
       model: model,
       # páginas longas (copy grande) + esforço de raciocínio dividem o
       # MESMO teto de tokens — 8192 truncava o JSON no meio e a página
-      # saía vazia (caso real 23/07, landing de catarata trifocal)
-      max_tokens: 30_000,
+      # saía vazia (caso real 23/07, landing de catarata trifocal).
+      # Construtor PRO: o admin pode escolher o teto na tela do agente.
+      max_tokens: max_tokens_config || 30_000,
       system_: system_prompt,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: build_input }]
@@ -79,7 +80,7 @@ class Crm::PageBuilderService
   def build_input
     <<~INPUT
       ETAPA DA JORNADA: #{CevicoPage::CATEGORIES[@category] || @category}
-
+      #{style_refs_block}
       COPY PRONTA (montar a página com este conteúdo):
       #{@copy}
     INPUT
