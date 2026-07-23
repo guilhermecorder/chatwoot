@@ -3568,6 +3568,14 @@ certo, custo rastreado no Painel dos Agentes). Combina com item 110
 Guilherme quer o ambiente do Construtor mais CONTROLÁVEL — expor na
 tela do agente (Automações → Agentes de IA) o teto de tokens, o esforço
 e instruções extras por página, p/ landing pages caprichadas.
+🔴 CAUSA REAL da landing vazia (descoberta 23/07 madrugada 3, prints de
+produção): a IA GEROU a página (opus-4-8, 4.647 tokens de saída, status
+done) mas apply_result_to_page lia o resultado com chaves SÍMBOLO e o
+JSON.parse devolve chaves TEXTO → aplicava tudo nil/vazio (título ficava
+o placeholder, sections []). FIX: deep_stringify_keys no apply. Lição:
+resultado de JSON.parse = SEMPRE chave texto — testar o apply com o
+payload real, não com hash montado à mão (o teste local usava símbolos
+e passava).
 
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 

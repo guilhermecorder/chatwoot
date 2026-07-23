@@ -46,16 +46,20 @@ class Crm::PageGenerateJob < ApplicationJob
   private
 
   # resultado da IA vai DIRETO pra página (rascunho): a aba de montagem
-  # recarrega e mostra pronta; slug/status/categoria ficam como estão
+  # recarrega e mostra pronta; slug/status/categoria ficam como estão.
+  # ⚠️ o resultado vem do JSON.parse = chaves em TEXTO — ler com símbolo
+  # aplicava tudo vazio (bug real 23/07: IA montou a landing, o apply
+  # descartou). deep_stringify_keys aceita os dois dialetos.
   def apply_result_to_page(page, result)
+    result = result.to_h.deep_stringify_keys
     page.update!(
-      title: result[:title].presence || page.title,
-      subtitle: result[:subtitle].to_s,
-      emoji: result[:emoji].presence || page.emoji,
-      meta_title: result[:meta_title].to_s,
-      meta_description: result[:meta_description].to_s,
-      cta_label: result[:cta_label].presence || page.cta_label,
-      sections: CevicoPage.normalize_ai_sections(result[:sections])
+      title: result['title'].presence || page.title,
+      subtitle: result['subtitle'].to_s,
+      emoji: result['emoji'].presence || page.emoji,
+      meta_title: result['meta_title'].to_s,
+      meta_description: result['meta_description'].to_s,
+      cta_label: result['cta_label'].presence || page.cta_label,
+      sections: CevicoPage.normalize_ai_sections(result['sections'])
     )
   end
 
