@@ -33,6 +33,12 @@ class Crm::PageBuilderService
     - Gere título da página, subtítulo, emoji, meta_title/meta_description
       (SEO com os termos que o público pesquisa) e o texto do CTA a partir
       da própria copy.
+    - A copy pode vir com INSTRUÇÕES DE MONTAGEM embutidas (blocos "não
+      renderizar", notas para o agente, pedidos de layout, placeholders
+      de foto como [FOTO: ...], [IMAGEM: ...]). Use essas instruções como
+      orientação e NUNCA as copie para o texto das seções — o paciente só
+      vê o conteúdo final. Placeholders de imagem: descarte (as fotos são
+      adicionadas depois no editor).
     - Escreva em português do Brasil.
   PROMPT
 
@@ -49,7 +55,10 @@ class Crm::PageBuilderService
 
     message = client.messages.create(
       model: model,
-      max_tokens: 8192,
+      # páginas longas (copy grande) + esforço de raciocínio dividem o
+      # MESMO teto de tokens — 8192 truncava o JSON no meio e a página
+      # saía vazia (caso real 23/07, landing de catarata trifocal)
+      max_tokens: 30_000,
       system_: system_prompt,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: build_input }]

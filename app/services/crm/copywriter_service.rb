@@ -98,7 +98,9 @@ class Crm::CopywriterService
     schema = @modality == 'pagina' ? OUTPUT_SCHEMA : CONTENT_SCHEMA
     message = client.messages.create(
       model: model,
-      max_tokens: 8192,
+      # esforço de raciocínio + página longa dividem o mesmo teto — 8192
+      # truncava o JSON de páginas grandes (mesma lição do Construtor)
+      max_tokens: @modality == 'pagina' ? 30_000 : 8192,
       system_: system_prompt,
       output_config: output_config_for({ type: 'json_schema', schema: schema }),
       messages: [{ role: 'user', content: build_briefing }]
