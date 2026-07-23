@@ -51,14 +51,35 @@ const SECTION_EFFECTS = [
 ];
 const ITEM_TYPES = ['beneficios', 'passos', 'faq'];
 const typeMeta = key => SECTION_TYPES.find(t => t.key === key) || SECTION_TYPES[0];
+// retoques (23/07): cores de fundo suave por seção
+const SECTION_COLORS = ['#0F5FA6', '#D4AF37', '#10B981', '#7C3AED', '#EC4899', '#F59E0B', '#0EA5E9', '#64748B'];
 
 const blankSection = type => ({
   type,
   effect: 'nenhum',
   title: '',
   text: '',
+  color: '',
+  image_url: '',
   items: ITEM_TYPES.includes(type) ? [{ title: '', text: '' }] : [],
 });
+
+// upload da imagem da seção → storage do sistema (caminho relativo)
+const uploadingImage = ref(null);
+const uploadSectionImage = async (event, si) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  uploadingImage.value = si;
+  try {
+    const { data } = await CrmAPI.uploadPageImage(file);
+    form.value.sections[si].image_url = data.url;
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Não consegui enviar a imagem.');
+  } finally {
+    uploadingImage.value = null;
+    event.target.value = '';
+  }
+};
 const addSection = type => form.value.sections.push(blankSection(type));
 const removeSection = i => form.value.sections.splice(i, 1);
 const moveSection = (i, dir) => {
@@ -91,24 +112,40 @@ const generateWithAI = async () => {
     useAlert('Escreva o briefing: assunto, objetivo e o que não pode faltar.');
     return;
   }
+  // AMBIENTE DE MONTAGEM (pedido 23/07): o clique abre a PÁGINA DE
+  // RASCUNHO em outra aba — a IA constrói ali na frente da pessoa
+  // (ampulheta → cascata de pronta → retoque inline). A aba precisa ser
+  // aberta JÁ (gesto do clique), senão o navegador bloqueia o popup.
+  const buildTab = window.open('about:blank', '_blank');
   ai.value.generating = true;
   try {
-    const { data } = await CrmAPI.generatePage({
+    let page = editing.value;
+    if (!page) {
+      // a página nasce como rascunho vazio — é o palco da montagem
+      const { data } = await CrmAPI.createPage({
+        title: form.value.title || 'Página em construção…',
+        category: form.value.category,
+        emoji: form.value.emoji || '🏗️',
+      });
+      page = data;
+      editing.value = data;
+    }
+    await CrmAPI.generatePageStart({
+      page_id: page.id,
       category: form.value.category,
       ...(isCopyMode
         ? { copy: ai.value.copy }
         : { briefing: ai.value.briefing, form_id: ai.value.form_id || undefined }),
     });
-    form.value.title = data.title || form.value.title;
-    form.value.subtitle = data.subtitle || form.value.subtitle;
-    form.value.emoji = data.emoji || form.value.emoji;
-    form.value.meta_title = data.meta_title || '';
-    form.value.meta_description = data.meta_description || '';
-    form.value.cta_label = data.cta_label || form.value.cta_label;
-    form.value.sections = (data.sections || []).map(s => ({ ...blankSection(s.type), ...s, items: s.items || [] }));
-    useAlert('Página escrita! Revise as seções, ajuste o que quiser e publique. ✨');
+    const url = `${page.builder_url}&construir=1`;
+    if (buildTab) buildTab.location.href = url;
+    else window.open(url, '_blank', 'noopener');
+    showEditor.value = false;
+    useAlert('Página em construção aberta em outra aba 🏗️ — acompanhe por lá.');
+    fetchPages();
   } catch (error) {
-    useAlert(error?.response?.data?.error || 'Não consegui gerar a página.');
+    if (buildTab) buildTab.close();
+    useAlert(error?.response?.data?.error || 'Não consegui começar a montagem.');
   } finally {
     ai.value.generating = false;
   }
@@ -302,6 +339,12 @@ const openPublic = page => {
   window.open(page.public_url || `/p/${page.slug}`, '_blank', 'noopener');
 };
 
+// prévia do RASCUNHO (pedido 23/07): link secreto — a página como o
+// paciente veria, com tarja de rascunho, sem contar visita
+const openPreview = page => {
+  if (page.preview_url) window.open(page.preview_url, '_blank', 'noopener');
+};
+
 // caminho curto exibido no card (sem https://)
 const publicPath = page =>
   (page.public_url || `/p/${page.slug}`).replace(/^https?:\/\//, '');
@@ -421,8 +464,22 @@ onMounted(() => {
                   <button class="px-2 h-6 rounded-md text-[10px] font-medium text-n-slate-11 hover:bg-n-alpha-1 border border-n-weak" @click="copyLink(page)">
                     copiar link
                   </button>
-                  <button class="px-2 h-6 rounded-md text-[10px] font-medium text-n-slate-11 hover:bg-n-alpha-1 border border-n-weak" @click="openPublic(page)">
+                  <!-- publicada = abre o endereço oficial; rascunho = prévia
+                       com link secreto (a página como o paciente veria) -->
+                  <button
+                    v-if="page.status === 'published'"
+                    class="px-2 h-6 rounded-md text-[10px] font-medium text-n-slate-11 hover:bg-n-alpha-1 border border-n-weak"
+                    @click="openPublic(page)"
+                  >
                     abrir ↗
+                  </button>
+                  <button
+                    v-else
+                    class="px-2 h-6 rounded-md text-[10px] font-medium text-amber-600 hover:bg-amber-500/10 border border-amber-500/40"
+                    title="Ver a página como o paciente veria, antes de publicar — o link é secreto e não conta visitas"
+                    @click="openPreview(page)"
+                  >
+                    👁 rascunho
                   </button>
                   <button
                     v-if="isAdmin"
@@ -562,7 +619,7 @@ onMounted(() => {
               </button>
             </div>
             <p class="text-[10px] text-n-slate-9 mt-1.5">
-              A IA preenche as seções abaixo — qualquer pessoa do time revisa e salva o rascunho; publicar é com o admin. Requer o agente ligado (Automações → Agentes de IA).
+              A IA preenche as seções abaixo — a montagem roda em segundo plano e pode levar 1–2 min (deixe a janela aberta). Qualquer pessoa do time revisa e salva o rascunho; publicar é com o admin. Requer o agente ligado (Automações → Agentes de IA).
             </p>
           </div>
 
@@ -633,6 +690,48 @@ onMounted(() => {
                 >
                   {{ fx.label }}
                 </button>
+              </div>
+
+              <!-- retoques (23/07): cor de fundo suave da seção -->
+              <div class="flex items-center gap-1.5 flex-wrap mt-2">
+                <span class="text-[10px] text-n-slate-10 mr-1">Cor:</span>
+                <button
+                  class="px-2 h-6 rounded-full border text-[10px] font-medium"
+                  :class="!sec.color
+                    ? 'border-n-brand bg-n-brand/10 text-n-brand'
+                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                  @click="sec.color = ''"
+                >
+                  nenhuma
+                </button>
+                <button
+                  v-for="c in SECTION_COLORS"
+                  :key="c"
+                  class="w-6 h-6 rounded-full border-2 transition-transform"
+                  :class="sec.color === c ? 'scale-110 border-white shadow-md' : 'border-transparent hover:scale-105'"
+                  :style="{ background: c }"
+                  :title="'Fundo suave ' + c"
+                  @click="sec.color = c"
+                />
+              </div>
+
+              <!-- retoques (23/07): imagem da seção (aparece no topo dela) -->
+              <div class="flex items-center gap-2 mt-2">
+                <span class="text-[10px] text-n-slate-10">Imagem:</span>
+                <template v-if="sec.image_url">
+                  <img :src="sec.image_url" class="h-10 w-16 object-cover rounded-md border border-n-weak" />
+                  <button class="text-[10px] text-red-500 hover:underline" @click="sec.image_url = ''">
+                    remover
+                  </button>
+                </template>
+                <label
+                  v-else
+                  class="text-[10px] px-2 h-6 rounded-lg border border-dashed border-n-weak text-n-slate-10 hover:text-n-brand hover:border-n-brand cursor-pointer inline-flex items-center gap-1"
+                >
+                  <span class="i-lucide-image text-xs" />
+                  {{ uploadingImage === si ? 'Enviando…' : 'adicionar imagem' }}
+                  <input type="file" accept="image/*" class="hidden" @change="e => uploadSectionImage(e, si)" />
+                </label>
               </div>
             </div>
 
@@ -853,6 +952,15 @@ onMounted(() => {
           </div>
 
           <div class="flex items-center justify-end gap-2">
+            <!-- prévia do rascunho direto do editor (salva antes de olhar!) -->
+            <button
+              v-if="editing && editing.status !== 'published'"
+              class="px-3 h-9 rounded-lg text-[12px] font-medium text-amber-600 hover:bg-amber-500/10 border border-amber-500/40 mr-auto"
+              title="Abre a prévia do rascunho em outra aba (o que estiver sem salvar não aparece — salve antes)"
+              @click="openPreview(editing)"
+            >
+              👁 Ver rascunho
+            </button>
             <button class="px-3 h-9 rounded-lg text-[12px] font-medium text-n-slate-11 hover:bg-n-alpha-1" @click="showEditor = false">
               Cancelar
             </button>

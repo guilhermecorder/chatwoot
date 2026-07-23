@@ -56,6 +56,8 @@
     }
     .content a { color: var(--brand); }
     .content img { max-width: 100%; border-radius: 12px; }
+    /* imagem de seção (retoques 23/07) */
+    .sec-img { width: 100%; max-width: 640px; display: block; margin: 0 auto 18px; border-radius: 16px; box-shadow: 0 8px 28px rgba(11, 59, 102, 0.14); }
     .cta-wrap { text-align: center; margin: 36px 0 8px; }
     .cta {
       display: inline-block; background: linear-gradient(135deg, #B8860B, var(--gold));
@@ -204,14 +206,92 @@
   </style>
 </head>
 <body>
+  <% if @preview %>
+    <%# tarja da PRÉVIA: deixa claro que é rascunho e que cliques não contam %>
+    <div style="position:sticky;top:0;z-index:99;background:linear-gradient(90deg,#0b3b66,#152C61);color:#fff;padding:10px 16px;text-align:center;font-size:14px;border-bottom:2px solid #D4AF37">
+      👁 <b>RASCUNHO</b> — só quem tem este link vê esta prévia; visitas e cliques não contam.
+      Publique a página para ela ir ao ar<%= " em #{Cevico::PublicSite.host}/#{@page.slug}" if Cevico::PublicSite.configured? %>.
+    </div>
+  <% end %>
+  <%# na prévia o botão leva DIRETO ao destino (sem redirecionador de
+      contagem, que só existe para páginas publicadas) %>
+  <% cta_target = @preview ? (@page.cta_url.presence || (@page.cta_href && '#')) : @page.cta_href %>
+  <%# modo RETOQUE: marca os textos editáveis com data-edit (só com o
+      token de edição — o link de prévia compartilhado fica somente leitura) %>
+  <% ed = ->(key) { @can_edit ? " data-edit=\"#{key}\"".html_safe : ''.html_safe } %>
+
+  <% if @building %>
+    <%# ══ AMBIENTE DE MONTAGEM: ampulheta enquanto a IA constrói ══ %>
+    <div id="construcao" style="position:fixed;inset:0;z-index:120;background:rgba(7,26,51,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;text-align:center;padding:24px">
+      <div class="ampulheta" style="font-size:64px">⏳</div>
+      <h2 style="margin:18px 0 8px;font-size:22px">Construindo a sua página…</h2>
+      <p style="max-width:440px;opacity:.85;font-size:14px;line-height:1.6">
+        A IA está escrevendo as seções agora. Leva de 30 segundos a 2 minutos —
+        pode deixar esta aba aberta que a página se monta sozinha aqui.
+      </p>
+    </div>
+    <style>
+      @keyframes cevicoVira { 0%, 72% { transform: rotate(0) } 88%, 100% { transform: rotate(180deg) } }
+      #construcao .ampulheta { animation: cevicoVira 2.4s infinite ease-in-out; }
+    </style>
+    <script>
+      // consulta o status até a IA terminar; pronta = recarrega em modo "cascata"
+      (function () {
+        var tries = 0;
+        function check() {
+          fetch('/p/rascunho/<%= ERB::Util.url_encode(params[:token].to_s) %>/status')
+            .then(function (r) { return r.json(); })
+            .then(function (st) {
+              if (st.status === 'done') {
+                var u = new URL(location.href);
+                u.searchParams.delete('construir');
+                u.searchParams.set('pronta', '1');
+                location.href = u.toString();
+                return;
+              }
+              if (st.status === 'error') {
+                document.getElementById('construcao').innerHTML =
+                  '<div style="font-size:56px">😕</div><h2 style="margin:16px 0 8px">Não consegui montar</h2>' +
+                  '<p style="max-width:440px;font-size:14px;opacity:.9">' + (st.error || 'Tente de novo no editor de Páginas.') + '</p>';
+                return;
+              }
+              if (++tries < 130) setTimeout(check, 2500);
+            })
+            .catch(function () { if (++tries < 130) setTimeout(check, 2500); });
+        }
+        setTimeout(check, 2500);
+      })();
+    </script>
+  <% elsif @build_error %>
+    <div style="position:sticky;top:0;z-index:98;background:#7F1D1D;color:#fff;padding:10px 16px;text-align:center;font-size:13.5px">
+      😕 A última montagem com IA falhou: <%= @build_error %>
+    </div>
+  <% end %>
+
+  <% if @just_built %>
+    <%# página recém-construída: seções entram em cascata + aviso de pronta %>
+    <style>
+      .sections .sec { opacity: 0; animation: cevicoSobe .6s ease-out forwards; }
+      @keyframes cevicoSobe { from { opacity: 0; transform: translateY(18px) } to { opacity: 1; transform: none } }
+      <% 15.times do |i| %>.sections .sec:nth-child(<%= i + 1 %>) { animation-delay: <%= (i * 0.18).round(2) %>s; }
+      <% end %>
+    </style>
+    <div id="pronta-aviso" style="position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:110;background:linear-gradient(135deg,#065F46,#10B981);color:#fff;padding:10px 20px;border-radius:999px;font-size:14px;font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,.3);white-space:nowrap">
+      ✅ Página pronta!<%= ' Clique nos textos para retocar.' if @can_edit %>
+    </div>
+    <script>
+      setTimeout(function () { var el = document.getElementById('pronta-aviso'); if (el) el.style.display = 'none'; }, 6000);
+    </script>
+  <% end %>
+
   <div class="hero">
     <div class="selo">
       <img src="/brand-assets/cevico-logo-dark-bg.png" alt="CEVICO — Cuidados Oculares">
     </div>
     <% if @page.emoji.present? %><span class="emoji"><%= @page.emoji %></span><% end %>
     <%# headline pode vir de uma variação do teste A/B (mesmo slug) %>
-    <h1><%= @page.display_title %></h1>
-    <% if @page.display_subtitle.present? %><p><%= @page.display_subtitle %></p><% end %>
+    <h1<%= ed.call('title') %>><%= @page.display_title %></h1>
+    <% if @page.display_subtitle.present? %><p<%= ed.call('subtitle') %>><%= @page.display_subtitle %></p><% end %>
   </div>
 
   <% if @page.sections.present? %>
@@ -220,47 +300,55 @@
       <% @page.sections.each_with_index do |sec, si| %>
         <% type = sec['type']; effect = sec['effect'].presence || 'nenhum' %>
         <% paragraphs = sec['text'].to_s.split(/\n{2,}|\n/).map(&:strip).reject(&:blank?) %>
-        <section class="sec sec-<%= type %> fx-<%= effect %>" data-fx="<%= effect %>">
+        <%# retoques (23/07): cor escolhida vira um fundo suave da seção
+            (hex validado no salvar; alpha em sufixo) %>
+        <% tint = sec['color'].to_s.match?(/\A#[0-9A-Fa-f]{6}\z/) ? sec['color'] : nil %>
+        <section class="sec sec-<%= type %> fx-<%= effect %>" data-fx="<%= effect %>"
+                 <% if tint %>style="background: linear-gradient(180deg, <%= tint %>24, <%= tint %>08); border-radius: 18px;"<% end %>>
           <% if %w[miopia astigmatismo].include?(effect) %>
             <p class="fx-legenda">
               <%= effect == 'miopia' ? '👓 É assim que a miopia embaça — role e sinta a nitidez da correção…' : '👓 É assim que o astigmatismo duplica — role e veja tudo se alinhar…' %>
             </p>
           <% end %>
           <div class="sec-inner">
+            <%# imagem da seção (retoques 23/07) — só arquivos do nosso storage %>
+            <% if sec['image_url'].to_s.start_with?('/rails/active_storage/') %>
+              <img class="sec-img" src="<%= sec['image_url'] %>" alt="<%= sec['title'].presence || @page.title %>" loading="lazy">
+            <% end %>
             <% case type %>
             <% when 'hero' %>
-              <h2><%= sec['title'] %></h2>
-              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+              <h2<%= ed.call("sec.#{si}.title") %>><%= sec['title'] %></h2>
+              <% paragraphs.each_with_index do |p, pi| %><p<%= ed.call("sec.#{si}.p.#{pi}") %>><%= p %></p><% end %>
             <% when 'beneficios' %>
-              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
-              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+              <% if sec['title'].present? %><h2<%= ed.call("sec.#{si}.title") %>><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each_with_index do |p, pi| %><p<%= ed.call("sec.#{si}.p.#{pi}") %>><%= p %></p><% end %>
               <div class="benef">
-                <% Array(sec['items']).each do |item| %>
-                  <div class="b"><span class="ic">✓</span><b><%= item['title'] %></b><span><%= item['text'] %></span></div>
+                <% Array(sec['items']).each_with_index do |item, ii| %>
+                  <div class="b"><span class="ic">✓</span><b<%= ed.call("sec.#{si}.item.#{ii}.title") %>><%= item['title'] %></b><span<%= ed.call("sec.#{si}.item.#{ii}.text") %>><%= item['text'] %></span></div>
                 <% end %>
               </div>
             <% when 'passos' %>
-              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
-              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+              <% if sec['title'].present? %><h2<%= ed.call("sec.#{si}.title") %>><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each_with_index do |p, pi| %><p<%= ed.call("sec.#{si}.p.#{pi}") %>><%= p %></p><% end %>
               <div class="passos">
                 <% Array(sec['items']).each_with_index do |item, i| %>
-                  <div class="p"><span class="n"><%= i + 1 %></span><div><b><%= item['title'] %></b><span><%= item['text'] %></span></div></div>
+                  <div class="p"><span class="n"><%= i + 1 %></span><div><b<%= ed.call("sec.#{si}.item.#{i}.title") %>><%= item['title'] %></b><span<%= ed.call("sec.#{si}.item.#{i}.text") %>><%= item['text'] %></span></div></div>
                 <% end %>
               </div>
             <% when 'faq' %>
-              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
+              <% if sec['title'].present? %><h2<%= ed.call("sec.#{si}.title") %>><%= sec['title'] %></h2><% end %>
               <div class="faq">
-                <% Array(sec['items']).each do |item| %>
-                  <details><summary><%= item['title'] %></summary><p><%= item['text'] %></p></details>
+                <% Array(sec['items']).each_with_index do |item, ii| %>
+                  <details<%= ' open'.html_safe if @can_edit %>><summary<%= ed.call("sec.#{si}.item.#{ii}.title") %>><%= item['title'] %></summary><p<%= ed.call("sec.#{si}.item.#{ii}.text") %>><%= item['text'] %></p></details>
                 <% end %>
               </div>
             <% when 'depoimento' %>
               <div class="q">“</div>
-              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
-              <% if sec['title'].present? %><p class="autor">— <%= sec['title'] %></p><% end %>
+              <% paragraphs.each_with_index do |p, pi| %><p<%= ed.call("sec.#{si}.p.#{pi}") %>><%= p %></p><% end %>
+              <% if sec['title'].present? %><p class="autor">— <span<%= ed.call("sec.#{si}.title") %>><%= sec['title'] %></span></p><% end %>
             <% when 'visao' %>
-              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
-              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+              <% if sec['title'].present? %><h2<%= ed.call("sec.#{si}.title") %>><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each_with_index do |p, pi| %><p<%= ed.call("sec.#{si}.p.#{pi}") %>><%= p %></p><% end %>
               <div class="visao-demo">
                 <div class="visao-scene" id="visao-<%= si %>">
                   Enxergar cada detalhe da vida
@@ -270,24 +358,24 @@
                 <div class="visao-labels"><span>como você enxerga hoje</span><span>visão corrigida ✨</span></div>
               </div>
             <% when 'cta' %>
-              <% if sec['title'].present? %><h2 style="text-align:center"><%= sec['title'] %></h2><% end %>
-              <% paragraphs.each do |p| %><p style="text-align:center"><%= p %></p><% end %>
+              <% if sec['title'].present? %><h2 style="text-align:center"<%= ed.call("sec.#{si}.title") %>><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each_with_index do |p, pi| %><p style="text-align:center"<%= ed.call("sec.#{si}.p.#{pi}") %>><%= p %></p><% end %>
               <div class="cta-wrap" style="margin-top:18px">
-                <a class="cta" href="<%= @page.cta_href || '#' %>" rel="noopener">
-                  <%= @page.cta_text %>
+                <a class="cta" href="<%= cta_target || '#' %>" rel="noopener">
+                  <span<%= ed.call('cta_label') %>><%= @page.cta_text %></span>
                 </a>
               </div>
             <% else %>
-              <% if sec['title'].present? %><h2><%= sec['title'] %></h2><% end %>
-              <% paragraphs.each do |p| %><p><%= p %></p><% end %>
+              <% if sec['title'].present? %><h2<%= ed.call("sec.#{si}.title") %>><%= sec['title'] %></h2><% end %>
+              <% paragraphs.each_with_index do |p, pi| %><p<%= ed.call("sec.#{si}.p.#{pi}") %>><%= p %></p><% end %>
             <% end %>
           </div>
         </section>
       <% end %>
       <% unless @page.sections.any? { |s| s['type'] == 'cta' } %>
-        <% if @page.cta_href %>
+        <% if cta_target %>
           <section class="sec"><div class="cta-wrap" style="margin:6px 0">
-            <a class="cta" href="<%= @page.cta_href %>" rel="noopener"><%= @page.cta_text %></a>
+            <a class="cta" href="<%= cta_target %>" rel="noopener"><span<%= ed.call('cta_label') %>><%= @page.cta_text %></span></a>
           </div></section>
         <% end %>
       <% end %>
@@ -296,10 +384,10 @@
     <%# páginas antigas: corpo markdown de sempre %>
     <article class="content">
       <%= raw @page.body_html %>
-      <% if @page.cta_href %>
+      <% if cta_target %>
         <div class="cta-wrap">
-          <a class="cta" href="<%= @page.cta_href %>" rel="noopener">
-            <%= @page.cta_text %>
+          <a class="cta" href="<%= cta_target %>" rel="noopener">
+            <span<%= ed.call('cta_label') %>><%= @page.cta_text %></span>
           </a>
         </div>
       <% end %>
@@ -340,6 +428,8 @@
 
     // profundidade de rolagem (25/50/75/100): 1 beacon por visita ao sair —
     // alimenta o "quanto da página leram" na Análise de Páginas
+    // (na PRÉVIA de rascunho não mede nada)
+    <% unless @preview %>
     (function () {
       var maxDepth = 0, sent = false;
       function measure() {
@@ -359,6 +449,84 @@
       window.addEventListener('pagehide', send);
       measure();
     })();
+    <% end %>
   </script>
+
+  <% if @can_edit && !@building %>
+    <%# ══ MODO RETOQUE (estilo "clica e edita"): só textos — cores,
+        efeitos, imagens e ordem ficam no editor de Páginas ══ %>
+    <div id="retoque-bar" style="position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:115;background:#0b3b66;border:1px solid #D4AF37;border-radius:999px;display:flex;align-items:center;gap:10px;padding:8px 14px;box-shadow:0 12px 34px rgba(0,0,0,.35);max-width:94vw">
+      <span style="color:#fff;font-size:12.5px;white-space:nowrap">✏️ Clique em qualquer texto para editar</span>
+      <button id="retoque-salvar" style="background:linear-gradient(135deg,#d4af37,#f4de8e);color:#072A4C;font-weight:800;font-size:12.5px;border:0;border-radius:999px;padding:7px 16px;cursor:pointer;white-space:nowrap">💾 Salvar</button>
+      <span id="retoque-status" style="color:#9fd6b1;font-size:11px;white-space:nowrap"></span>
+    </div>
+    <script>
+      (function () {
+        var els = document.querySelectorAll('[data-edit]');
+        els.forEach(function (el) {
+          el.setAttribute('contenteditable', 'true');
+          el.setAttribute('spellcheck', 'false');
+          el.style.outline = '1px dashed rgba(212,175,55,.45)';
+          el.style.outlineOffset = '3px';
+          el.style.borderRadius = '4px';
+          el.addEventListener('focus', function () { el.style.outline = '2px solid #D4AF37'; });
+          el.addEventListener('blur', function () { el.style.outline = '1px dashed rgba(212,175,55,.45)'; });
+        });
+        // no modo retoque: FAQ não fecha no clique e links com texto
+        // editável não navegam (senão editar o botão viraria clique)
+        document.addEventListener('click', function (e) {
+          if (e.target.closest('summary')) e.preventDefault();
+          var a = e.target.closest('a');
+          if (a && a.querySelector('[data-edit]')) e.preventDefault();
+        }, true);
+
+        function collect() {
+          var sections = {};
+          function sec(i) {
+            sections[i] = sections[i] || { ps: [], items: {} };
+            return sections[i];
+          }
+          var out = { sections: sections };
+          document.querySelectorAll('[data-edit]').forEach(function (el) {
+            var key = el.getAttribute('data-edit');
+            var val = el.innerText.trim();
+            var m;
+            if (['title', 'subtitle', 'cta_label'].indexOf(key) >= 0) { out[key] = val; return; }
+            if ((m = key.match(/^sec\.(\d+)\.title$/))) { sec(m[1]).title = val; return; }
+            if ((m = key.match(/^sec\.(\d+)\.p\.(\d+)$/))) { sec(m[1]).ps.push(val); return; }
+            if ((m = key.match(/^sec\.(\d+)\.item\.(\d+)\.(title|text)$/))) {
+              var s = sec(m[1]);
+              s.items[m[2]] = s.items[m[2]] || {};
+              s.items[m[2]][m[3]] = val;
+            }
+          });
+          Object.keys(sections).forEach(function (i) {
+            var s = sections[i];
+            // só manda o texto quando a seção TEM parágrafos na tela
+            // (senão apagaria texto que a seção guarda mas não mostra)
+            if (s.ps.length) s.text = s.ps.filter(Boolean).join('\n\n');
+            delete s.ps;
+          });
+          return out;
+        }
+
+        document.getElementById('retoque-salvar').addEventListener('click', function () {
+          var btn = this;
+          var status = document.getElementById('retoque-status');
+          btn.disabled = true;
+          status.textContent = 'salvando…';
+          fetch('/p/rascunho/<%= ERB::Util.url_encode(params[:token].to_s) %>/retocar?edit=<%= ERB::Util.url_encode(params[:edit].to_s) %>', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ edits: collect() })
+          })
+            .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+            .then(function (data) { status.textContent = 'Salvo às ' + (data.saved_at || '') + ' ✓'; })
+            .catch(function () { status.textContent = 'não salvou — tente de novo'; })
+            .finally(function () { btn.disabled = false; });
+        });
+      })();
+    </script>
+  <% end %>
 </body>
 </html>

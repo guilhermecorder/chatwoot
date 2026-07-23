@@ -55,6 +55,11 @@ Rails.application.routes.draw do
   get 'p/:slug/cta', to: 'cevico_pages#cta_click', as: :cevico_page_cta
   get 'p/:slug/next', to: 'cevico_pages#next_step', as: :cevico_page_next
   post 'p/:slug/track', to: 'cevico_pages#track', as: :cevico_page_track
+  # prévia do RASCUNHO (link secreto do admin — token assinado) +
+  # ambiente de montagem: status da construção e retoque inline
+  get 'p/rascunho/:token/status', to: 'cevico_pages#build_status'
+  post 'p/rascunho/:token/retocar', to: 'cevico_pages#inline_update'
+  get 'p/rascunho/:token', to: 'cevico_pages#preview', as: :cevico_page_preview
   get 'p/:slug', to: 'cevico_pages#show', as: :cevico_page
 
   get '/health', to: 'health#show'
@@ -244,7 +249,13 @@ Rails.application.routes.draw do
             # Páginas públicas (ambiente Páginas)
             resources :pages, only: [:index, :create, :update, :destroy], controller: 'pages' do
               # agente copywriter escreve a página inteira em seções
-              collection { post :generate }
+              # (item 111: geração roda em segundo plano — start + status)
+              collection do
+                post :generate
+                post :generate_start
+                get :generate_status
+                post :upload_image
+              end
               # estúdio de copy: comentários do time na página
               member do
                 post :add_comment

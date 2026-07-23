@@ -3460,6 +3460,99 @@ aplicar = atua em NINGUÉM, nunca cai no funil inteiro). Testado: prévia
 ⚠️ DEPLOY: reimplantar WEB **E SIDEKIQ** juntos — sidekiq velho ignoraria
 o filtro de colunas do job e aplicaria no funil inteiro. Sem migrations.
 
+## 110. ✅ PRÉVIA DE RASCUNHO das Páginas ✅ CONSTRUÍDO (23/07, não commitado)
+Pedido do Guilherme: ver a página antes de publicar. COMO FICOU: link
+SECRETO por página (token assinado pelo segredo do servidor —
+CevicoPage#preview_token / find_by_preview_token), rota GET
+/p/rascunho/:token renderiza o show normal com TARJA "👁 RASCUNHO" no
+topo (sticky navy+ouro), SEM contar visita, SEM A/B, beacon de rolagem
+desligado e CTA apontando DIRETO pro destino (o redirecionador de
+contagem só existe pra publicadas). Admin: preview_url no page_json;
+botão "👁 rascunho" âmbar no card (substitui "abrir ↗" quando não
+publicada) + "👁 Ver rascunho" no rodapé do editor (dica: salvar antes).
+Testado conta 3: prévia 200 c/ tarja + CTA direto, público do rascunho
+404, token falso 404, publicada sem tarja (sem regressão). Página de
+teste "teste-previa-rascunho" deixada na conta 3.
+
+## 111. ✅ Montar página com IA em SEGUNDO PLANO ✅ CONSTRUÍDO (23/07, não commitado)
+Era o "internet error": a geração rodava com a conexão ABERTA e o proxy
+derruba em ~60s. COMO FICOU: clique → POST generate_start agenda o
+Crm::PageGenerateJob (novo) e devolve job_id; resultado fica no Redis
+(Redis::Alfred, TTL 15min); o editor consulta generate_status a cada 3s
+por até 5min e preenche as seções quando 'done' — nenhuma conexão longa.
+Erro vira mensagem legível (testado: "IA não configurada..." apareceu no
+alerta em ~4s). Endpoint síncrono antigo (generate) mantido por
+compatibilidade. Testado conta 3: start 200 → status 200 c/ erro legível
+(local sem chave); em produção c/ chave = 'done' + página. ⚠️ DEPLOY:
+web E SIDEKIQ (job novo).
+
+## 🎨 EDITOR DE RETOQUES nas seções ✅ CONSTRUÍDO (23/07, junto c/ 111, não commitado)
+Pedido: edições simples no que a IA criou. Cada seção do editor ganhou:
+COR (8 bolinhas + "nenhuma" → fundo suave degradê no público, hex
+validado no backend) e IMAGEM (upload → POST pages/upload_image →
+ActiveStorage blob avulso → caminho RELATIVO /rails/active_storage/...
+salvo em sections[].image_url — só caminhos do nosso storage passam na
+sanitização; render .sec-img no topo da seção, max 640px, sombra navy).
+Título/texto/efeito/ordem/excluir já existiam. Testado: upload 200
+(81KB png), prévia renderiza tint #0F5FA624 + imagem carrega 200,
+editor mostra Efeito/Cor/Imagem + miniatura.
+
+## 🔧 INFRA 23/07 (madrugada): MÍDIAS RESOLVIDAS + STORAGE PERSISTENTE ✅ NO AR
+Saga do "áudio zerado"/"imagem não disponível": arquivos ERAM baixados
+mas gravados no disco EFÊMERO do container (web e sidekiq cada um com o
+seu; deploy zerava tudo — raio-X: blob 302 → disk 404). CONSERTO: pasta
+/root/cevico-storage no VPS montada como Bind Mount em /app/storage nos
+DOIS serviços (EasyPanel → Armazenamento; container roda como root, sem
+ajuste de permissão). RESGATE prévio: 308kB do sidekiq (testes do
+Guilherme) + 598MB/4.668 arquivos do ROBOMASTER (hipótese DELE: as
+mídias antigas ficaram no storage do Robomaster na migração — docker cp
+direto do container). Junto no mesmo deploy: FRONTEND_URL →
+https://sistema.cevico.com.br + rodada 105-109 NO AR. CONFIRMADO pelo
+Guilherme: imagens e áudios aparecendo (novos e antigos). DOMÍNIOS:
+sistema.cevico.com.br (sistema, oficial do time) + clinica.cevico.com.br
+(público das páginas) — www/raiz = site WordPress na Hostinger (82.25.72.201),
+NUNCA apontar pra VPS. PENDÊNCIAS ABERTAS DESTA FRENTE: incluir
+/root/cevico-storage no backup diário (script /root/backup_cevico.sh só
+salva o banco!); cópia off-VPS (rclone) ganhou urgência; conferir se o
+comando da MARCA (InstallationConfig) e Configurações → Domínio =
+clinica.cevico.com.br foram executados; Robomaster segue de pé como
+retaguarda (n8n/evolution moram no projeto dele — NÃO desligar o projeto
+inteiro sem planejamento).
+
+## 113. ✅ AMBIENTE DE MONTAGEM: a página nasce NA FRENTE da pessoa ✅ CONSTRUÍDO (23/07, não commitado)
+Pedido do Guilherme refinando o 111: clicar em "Gerar/Montar página com
+IA" ABRE A PRÓPRIA PÁGINA DE RASCUNHO em outra aba e a construção
+acontece ali. COMO FICOU: clique → cria o rascunho na hora (se novo) →
+generate_start c/ page_id → job escreve o resultado DIRETO na página
+(apply_result_to_page + normalize_ai_sections) → a aba abre o
+builder_url (prévia + ?edit=token de RETOQUE + construir=1) → AMPULHETA
+⏳ girando ("Construindo a sua página…", consulta status a cada 2,5s) →
+pronta = recarrega c/ CASCATA (seções sobem uma a uma) + selo verde
+"✅ Página pronta! Clique nos textos para retocar" → RETOQUE INLINE
+estilo clica-e-edita: todos os textos (título, subtítulo, h2 das seções,
+parágrafos, itens, autor do depoimento, texto do CTA) contenteditable c/
+moldura tracejada dourada, barra fixa "✏️ Clique em qualquer texto p/
+editar | 💾 Salvar" c/ "Salvo às HH:MM ✓"; salva por POST
+/p/rascunho/:token/retocar (token de EDIÇÃO separado do de visualização
+— link compartilhado é só-leitura; 403 testado) e o merge preserva
+tipo/efeito/cor/imagem/ordem (SÓ textos mudam — o resto é do editor).
+Erro da IA = ampulheta vira "😕 Não consegui montar" + motivo legível.
+FAQ abre e não fecha no modo retoque; CTA não navega ao editar; beacon
+desligado. Lição: payload JSON livre em controller público =
+UnfilteredParameters — permit! antes do to_h (sanitização no modelo).
+Testado ponta a ponta conta 3: clique real → aba "Página em construção…"
+→ ampulheta → erro legível (sem chave local); caminho feliz simulado
+running→done → cascata + barra; retoque salvou título+seção e preservou
+cor #0F5FA6 + imagem. ⚠️ DEPLOY: web E SIDEKIQ.
+
+## 112. ⏳ CHAT DO CONSTRUTOR no editor de Páginas (combinado 23/07, a construir)
+Ideia do Guilherme: conversar com o agente DENTRO do editor — manda
+comentários e FOTOS, o agente atualiza o rascunho seção a seção; fotos
+hospedadas no sistema entram na página; publicar continua manual (admin).
+Decisão: construir DENTRO do sistema (equipe toda usa, fotos no lugar
+certo, custo rastreado no Painel dos Agentes). Combina com item 110
+(prévia) e com a montagem em segundo plano (111).
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
 **ONDE ESTAMOS (2026-07-15, manhã — TUDO NO AR ✅):** itens 14-36 EM
