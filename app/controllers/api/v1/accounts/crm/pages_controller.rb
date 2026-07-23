@@ -43,6 +43,48 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
            status: :unprocessable_entity
   end
 
+  # item 111 — geração em SEGUNDO PLANO: o clique agenda o trabalho e o
+  # editor consulta o status a cada poucos segundos (sem conexão aberta
+  # esperando a IA — era isso que dava "internet error" no proxy)
+  def generate_start
+    job_id = SecureRandom.hex(10)
+    Redis::Alfred.setex(Crm::PageGenerateJob.result_key(job_id), { status: 'running' }.to_json, 15.minutes)
+    # modo "ambiente de montagem": com page_id, o resultado vai DIRETO pra
+    # página e a aba do rascunho acompanha pelo status por página
+    if params[:page_id].present?
+      page = Current.account.cevico_pages.find(params[:page_id])
+      Redis::Alfred.setex(Crm::PageGenerateJob.page_key(page.id), { status: 'running' }.to_json, 15.minutes)
+    end
+    Crm::PageGenerateJob.perform_later(
+      Current.account.id, job_id,
+      'copy' => params[:copy].presence, 'briefing' => params[:briefing].presence,
+      'category' => params[:category].presence, 'form_id' => params[:form_id].presence,
+      'page_id' => params[:page_id].presence
+    )
+    render json: { job_id: job_id }
+  end
+
+  def generate_status
+    raw = Redis::Alfred.get(Crm::PageGenerateJob.result_key(params[:job_id].to_s))
+    return render json: { status: 'expired' } if raw.blank?
+
+    render json: JSON.parse(raw)
+  end
+
+  # imagem de seção (editor de retoques, 23/07): sobe pro storage e
+  # devolve o CAMINHO relativo — funciona em qualquer domínio
+  def upload_image
+    file = params[:image]
+    return render json: { error: 'Envie uma imagem.' }, status: :unprocessable_entity if file.blank? || !file.respond_to?(:content_type)
+    return render json: { error: 'Só imagens (JPG, PNG, WebP).' }, status: :unprocessable_entity unless file.content_type.to_s.start_with?('image/')
+    return render json: { error: 'Imagem muito grande (máx. 8 MB).' }, status: :unprocessable_entity if file.size > 8.megabytes
+
+    blob = ActiveStorage::Blob.create_and_upload!(
+      io: file.tempfile, filename: file.original_filename, content_type: file.content_type
+    )
+    render json: { url: Rails.application.routes.url_helpers.rails_blob_path(blob, only_path: true) }
+  end
+
   # ── Estúdio de copy: comentários do time na página ──
   def add_comment # rubocop:disable Metrics/AbcSize
     page = Current.account.cevico_pages.find(params[:id])
@@ -100,7 +142,7 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
                               :body, :meta_title, :meta_description, :seo_keywords,
                               :cta_label, :cta_url,
                               :next_page_id,
-                              sections: [:type, :effect, :title, :text, { items: [:title, :text] }],
+                              sections: [:type, :effect, :title, :text, :color, :image_url, { items: [:title, :text] }],
                               ab_variants: [:key, :name, :title, :subtitle, :cta_label, :active])
     sanitize_sections!(permitted)
     sanitize_next_page!(permitted)
@@ -118,6 +160,10 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
     permitted[:sections] = permitted[:sections].select { |sec| CevicoPage::SECTION_TYPES.include?(sec[:type]) }
     permitted[:sections].each do |sec|
       sec[:effect] = 'nenhum' unless CevicoPage::SECTION_EFFECTS.include?(sec[:effect])
+      # retoques (23/07): cor = só hexadecimal; imagem = só arquivo do
+      # NOSSO storage (caminho relativo) — nada de URL externa na página
+      sec[:color] = nil unless sec[:color].to_s.match?(/\A#[0-9A-Fa-f]{6}\z/)
+      sec[:image_url] = nil unless sec[:image_url].to_s.start_with?('/rails/active_storage/')
     end
   end
 
@@ -166,6 +212,11 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
       ab_results: page.ab_results,
       team_comments: page.team_comments || [],
       public_url: Cevico::PublicSite.page_url(page.slug),
+      # prévia do rascunho: link secreto que mostra a página antes de publicar
+      preview_url: "#{Cevico::PublicSite.base_url}/p/rascunho/#{page.preview_token}",
+      # ambiente de montagem: prévia + token de RETOQUE (edição inline) —
+      # só o time logado recebe este link
+      builder_url: "#{Cevico::PublicSite.base_url}/p/rascunho/#{page.preview_token}?edit=#{page.edit_token}",
       updated_at: page.updated_at
     }.merge(page_stats_json(page))
   end

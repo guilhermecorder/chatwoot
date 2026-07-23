@@ -519,6 +519,24 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/pages/generate`, data);
   }
 
+  // item 111: geração em segundo plano — agenda e consulta o status
+  generatePageStart(data) {
+    return axios.post(`${this.url}/pages/generate_start`, data);
+  }
+
+  generatePageStatus(jobId) {
+    return axios.get(`${this.url}/pages/generate_status`, {
+      params: { job_id: jobId },
+    });
+  }
+
+  // imagem de seção (editor de retoques)
+  uploadPageImage(file) {
+    const formData = new FormData();
+    formData.append('image', file);
+    return axios.post(`${this.url}/pages/upload_image`, formData);
+  }
+
   // Estúdio do Copywriter: carrossel, roteiro de reels, post, anúncio
   generateCopyContent(data) {
     return axios.post(`${this.url}/settings/copywriter_content`, data);

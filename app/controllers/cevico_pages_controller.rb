@@ -29,6 +29,49 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     render :show
   end
 
+  # Prévia do RASCUNHO — aberta pelo link secreto gerado no admin: mostra
+  # a página como o paciente veria (tarja no topo), sem contar visita,
+  # sem A/B e sem contadores de clique. Com o token de RETOQUE (?edit=) e
+  # página não publicada, vira o AMBIENTE DE MONTAGEM: ampulheta enquanto
+  # a IA constrói, cascata de "pronta" e edição inline dos textos.
+  def preview
+    @page = CevicoPage.find_by_preview_token(params[:token])
+    return render plain: 'Prévia não encontrada.', status: :not_found if @page.nil?
+
+    @preview = true
+    @can_edit = @page.valid_edit_token?(params[:edit]) && !@page.published?
+    @build_status = Crm::PageGenerateJob.page_status(@page.id)
+    @building = @build_status&.dig('status') == 'running'
+    @build_error = @build_status&.dig('status') == 'error' ? @build_status['error'] : nil
+    @just_built = params[:pronta].present?
+    @page.serving_variant = nil
+    render :show
+  end
+
+  # a aba de montagem consulta aqui até a IA terminar
+  def build_status
+    page = CevicoPage.find_by_preview_token(params[:token])
+    return render json: { status: 'not_found' }, status: :not_found if page.nil?
+
+    render json: Crm::PageGenerateJob.page_status(page.id) || { status: 'idle' }
+  end
+
+  # retoque inline (só textos; exige o token de RETOQUE e rascunho)
+  def inline_update
+    page = CevicoPage.find_by_preview_token(params[:token])
+    return head :not_found if page.nil?
+    return head :forbidden unless page.valid_edit_token?(params[:edit]) && !page.published?
+
+    # payload livre (títulos/textos por índice) — o modelo valida campo a
+    # campo com limite de tamanho; permit! só destrava a conversão
+    edits = params[:edits].respond_to?(:permit!) ? params[:edits].permit!.to_h : {}
+    page.apply_inline_edits!(edits)
+    render json: { ok: true, saved_at: Time.zone.now.strftime('%H:%M') }
+  rescue StandardError => e
+    Rails.logger.error "[CevicoPages#inline_update] #{e.class}: #{e.message}"
+    render json: { error: 'Não consegui salvar — tente de novo.' }, status: :unprocessable_entity
+  end
+
   # clique no convite (WhatsApp/cta_url): conta e manda pro destino
   def cta_click
     @page = CevicoPage.published.find_by(slug: params[:slug])
@@ -50,9 +93,9 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
                 allow_other_host: true
   end
 
-  # beacon de profundidade de rolagem (25/50/75/100) — enviado uma vez
-  # por visita pelo sendBeacon; alimenta o "quanto da página leram"
-  skip_forgery_protection only: :track
+  # beacon de rolagem + retoque inline: sem formulário Rails, a proteção
+  # de forgery não se aplica (a segurança é o token assinado)
+  skip_forgery_protection only: [:track, :inline_update]
 
   def track
     page = CevicoPage.published.find_by(slug: params[:slug])

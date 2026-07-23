@@ -93,6 +93,87 @@ class CevicoPage < ApplicationRecord
     status == 'published'
   end
 
+  # ── Prévia do RASCUNHO (pedido 23/07) ──
+  # Link secreto do admin: quem tem o link vê a página antes de publicar,
+  # em qualquer domínio, sem login. O token é assinado pelo segredo do
+  # servidor — não dá pra forjar nem adivinhar.
+  def preview_token
+    Rails.application.message_verifier('cevico-page-preview').generate(id)
+  end
+
+  def self.find_by_preview_token(token)
+    id = Rails.application.message_verifier('cevico-page-preview').verify(token.to_s)
+    find_by(id: id)
+  rescue ActiveSupport::MessageVerifier::InvalidSignature
+    nil
+  end
+
+  # token de RETOQUE (23/07): separado do de visualização — quem recebe o
+  # link da prévia só OLHA; editar inline exige este token, que apenas o
+  # time logado recebe (vem no builder_url do admin)
+  def edit_token
+    Rails.application.message_verifier('cevico-page-edit').generate(id)
+  end
+
+  def valid_edit_token?(token)
+    Rails.application.message_verifier('cevico-page-edit').verify(token.to_s) == id
+  rescue ActiveSupport::MessageVerifier::InvalidSignature
+    false
+  end
+
+  # seções vindas da IA (montagem em segundo plano): só tipos/efeitos
+  # conhecidos e textos com limite — a página pública confia no banco
+  def self.normalize_ai_sections(sections)
+    Array(sections).filter_map do |sec|
+      sec = sec.to_h.deep_stringify_keys
+      next unless SECTION_TYPES.include?(sec['type'])
+
+      {
+        'type' => sec['type'],
+        'effect' => SECTION_EFFECTS.include?(sec['effect']) ? sec['effect'] : 'nenhum',
+        'title' => sec['title'].to_s[0, 200],
+        'text' => sec['text'].to_s[0, 4000],
+        'items' => Array(sec['items']).map do |it|
+          it = it.to_h.deep_stringify_keys
+          { 'title' => it['title'].to_s[0, 200], 'text' => it['text'].to_s[0, 1000] }
+        end
+      }
+    end
+  end
+
+  # retoque inline no rascunho (estilo "clica e edita"): SÓ textos —
+  # tipo/efeito/cor/imagem/ordem ficam como estão (esses são do editor)
+  def apply_inline_edits!(edits) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    edits = edits.to_h.deep_stringify_keys
+    attrs = {}
+    attrs[:title] = edits['title'].to_s.strip[0, 200] if edits['title'].present?
+    attrs[:subtitle] = edits['subtitle'].to_s.strip[0, 300] if edits.key?('subtitle')
+    attrs[:cta_label] = edits['cta_label'].to_s.strip[0, 120] if edits.key?('cta_label')
+    if edits['sections'].is_a?(Hash) && sections.present?
+      attrs[:sections] = sections.map.with_index do |sec, i|
+        patch = edits['sections'][i.to_s]
+        next sec unless patch.is_a?(Hash)
+
+        merged = sec.dup
+        merged['title'] = patch['title'].to_s[0, 200] if patch.key?('title') && !patch['title'].nil?
+        merged['text'] = patch['text'].to_s[0, 4000] if patch.key?('text') && !patch['text'].nil?
+        if patch['items'].is_a?(Hash) && merged['items'].is_a?(Array)
+          merged['items'] = merged['items'].map.with_index do |item, j|
+            item_patch = patch['items'][j.to_s]
+            next item unless item_patch.is_a?(Hash)
+
+            item.merge(
+              item_patch.key?('title') ? { 'title' => item_patch['title'].to_s[0, 200] } : {},
+              item_patch.key?('text') ? { 'text' => item_patch['text'].to_s[0, 1000] } : {}
+            )
+          end
+        end
+        merged
+      end
+    end
+    update!(attrs) if attrs.any?
+  end
+
   # corpo (markdown) → HTML seguro para a página pública
   def body_html
     return '' if body.blank?
