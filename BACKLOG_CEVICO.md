@@ -3545,13 +3545,29 @@ Testado ponta a ponta conta 3: clique real → aba "Página em construção…"
 running→done → cascata + barra; retoque salvou título+seção e preservou
 cor #0F5FA6 + imagem. ⚠️ DEPLOY: web E SIDEKIQ.
 
+## 114. 🔴 HOTFIX: Construtor truncava páginas grandes ✅ CONSTRUÍDO (23/07, madrugada 2)
+Caso real: landing de catarata trifocal (~13k chars de copy) saiu VAZIA.
+Causa: teto de 8.192 tokens dividido entre RACIOCÍNIO (effort) e a
+resposta (o JSON repete a copy inteira) → JSON cortado no meio → erro
+"formato inesperado" (que expira do Redis em 15min — ele viu só o
+esqueleto depois). FIX: max_tokens 30.000 no PageBuilderService e no
+CopywriterService (modo página); prompt do Construtor agora DESCARTA
+instruções de montagem/placeholders [FOTO: ...] do texto final (usa como
+orientação); guarda-corpo no PageGenerateJob: pronta sem seções = erro
+avisado, nunca sucesso vazio. PEDIDO DO GUILHERME anotado: ambiente do
+Construtor mais CONTROLÁVEL (teto de tokens, esforço, etc. na mão do
+admin) → incorporar ao item 112.
+
 ## 112. ⏳ CHAT DO CONSTRUTOR no editor de Páginas (combinado 23/07, a construir)
 Ideia do Guilherme: conversar com o agente DENTRO do editor — manda
 comentários e FOTOS, o agente atualiza o rascunho seção a seção; fotos
 hospedadas no sistema entram na página; publicar continua manual (admin).
 Decisão: construir DENTRO do sistema (equipe toda usa, fotos no lugar
 certo, custo rastreado no Painel dos Agentes). Combina com item 110
-(prévia) e com a montagem em segundo plano (111).
+(prévia) e com a montagem em segundo plano (111). AMPLIADO 23/07:
+Guilherme quer o ambiente do Construtor mais CONTROLÁVEL — expor na
+tela do agente (Automações → Agentes de IA) o teto de tokens, o esforço
+e instruções extras por página, p/ landing pages caprichadas.
 
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 

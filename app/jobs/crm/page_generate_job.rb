@@ -29,6 +29,11 @@ class Crm::PageGenerateJob < ApplicationJob
     page = options['page_id'].present? ? account.cevico_pages.find_by(id: options['page_id']) : nil
     result = run_service(account, options)
     payload = result[:error] ? { status: 'error', error: result[:error] } : { status: 'done', result: result }
+    # guarda-corpo: "pronta" sem NENHUMA seção = algo deu errado na IA —
+    # melhor avisar do que entregar página vazia como sucesso
+    if payload[:status] == 'done' && CevicoPage.normalize_ai_sections(result[:sections] || result['sections']).empty?
+      payload = { status: 'error', error: 'A IA terminou sem conteúdo de seções — tente de novo (se repetir, me avise).' }
+    end
     apply_result_to_page(page, result) if page && payload[:status] == 'done'
     write_status(job_id, page, payload)
   rescue StandardError => e
