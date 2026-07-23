@@ -44,7 +44,9 @@ class Api::V1::Accounts::Crm::RetroLabelsController < Api::V1::Accounts::BaseCon
     {
       'period_from' => params[:period_from].presence,
       'period_to' => params[:period_to].presence,
-      'target_stage_id' => params[:target_stage_id].presence
+      'target_stage_id' => params[:target_stage_id].presence,
+      # colunas onde a regra atua (vazio = funil inteiro, como sempre foi)
+      'stage_ids' => Array(params[:stage_ids]).map(&:to_s).reject(&:blank?).presence
     }.compact
   end
 end

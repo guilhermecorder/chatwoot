@@ -166,6 +166,45 @@ onMounted(() => {
   }
 });
 
+// ── CEVICO 22/07: largura da lista AJUSTÁVEL — a alça fica na borda
+// direita; arrastou, a escolha vale só neste navegador (localStorage);
+// duplo clique volta ao automático. Assim cada atendente encaixa as
+// caixas/filtros do jeito que preferir.
+const LIST_WIDTH_KEY = 'cevico_conversas_largura';
+const listWrapEl = ref(null);
+const listWidth = ref(Number(localStorage.getItem(LIST_WIDTH_KEY)) || 0);
+const clampListWidth = w => Math.min(620, Math.max(280, Math.round(w)));
+const listWidthStyle = computed(() =>
+  listWidth.value && !props.isOnExpandedLayout
+    ? { '--cevico-lista-w': `${clampListWidth(listWidth.value)}px` }
+    : {}
+);
+const startListResize = e => {
+  if (props.isOnExpandedLayout) return;
+  e.preventDefault();
+  const startX = e.clientX;
+  const startW = listWrapEl.value?.offsetWidth || 340;
+  document.body.style.userSelect = 'none';
+  document.body.style.cursor = 'col-resize';
+  const onMove = ev => {
+    listWidth.value = clampListWidth(startW + (ev.clientX - startX));
+  };
+  const onUp = () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+    if (listWidth.value)
+      localStorage.setItem(LIST_WIDTH_KEY, String(listWidth.value));
+  };
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+};
+const resetListWidth = () => {
+  listWidth.value = 0;
+  localStorage.removeItem(LIST_WIDTH_KEY);
+};
+
 const resolveAttributesModalRef = ref(null);
 
 // CEVICO 18/07: abas Minhas/Não atribuídas/Todos REMOVIDAS — a lista é
@@ -1075,12 +1114,24 @@ watch(conversationFilters, (newVal, oldVal) => {
 
 <template>
   <div
+    ref="listWrapEl"
     class="flex flex-col flex-shrink-0 conversations-list-wrap bg-n-surface-1 relative"
     :class="[
       { hidden: !showConversationList },
       isOnExpandedLayout ? 'basis-full' : 'w-[340px] 2xl:w-[412px]',
+      listWidth && !isOnExpandedLayout ? 'cevico-lista-ajustada' : '',
     ]"
+    :style="listWidthStyle"
   >
+    <!-- CEVICO 22/07: alça pra ajustar a largura da lista no arrasto
+         (duplo clique volta ao padrão) — só desktop -->
+    <div
+      v-if="!isOnExpandedLayout"
+      class="cevico-lista-alca hidden md:block absolute top-0 right-0 h-full z-30"
+      title="Arraste para ajustar a largura · duplo clique volta ao padrão"
+      @pointerdown="startListResize"
+      @dblclick="resetListWidth"
+    />
     <slot />
     <ChatListHeader
       :page-title="pageTitle"
@@ -1098,10 +1149,11 @@ watch(conversationFilters, (newVal, oldVal) => {
     />
 
     <!-- CEVICO: escolha das caixas de entrada (aceita várias; salva no navegador).
-         Enquadramento (pedido 19/07): mesma calha horizontal do cabeçalho (px-3) -->
+         Pedido 22/07: TODAS as caixas à primeira vista — as pílulas se
+         amontoam em quantas linhas precisarem (sem rolagem escondida) -->
     <div
       v-if="showInboxPills && pillInboxes.length"
-      class="cevico-no-scrollbar flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 mx-3 mb-1.5 overflow-x-auto flex-shrink-0"
+      class="flex flex-wrap items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 mx-3 mb-1.5 flex-shrink-0"
     >
       <button
         class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
@@ -1367,13 +1419,20 @@ watch(conversationFilters, (newVal, oldVal) => {
 </template>
 
 <style scoped>
-/* pílulas de caixa: desliza no dedo/scroll SEM barra de rolagem aparente
-   (pedido 20/07 — mobile clean) */
-.cevico-no-scrollbar {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+/* largura ajustável da lista (pedido 22/07, só desktop): a escolha da
+   pessoa vence as larguras padrão; a alça é um trilho fino que acende
+   dourado no hover */
+@media (min-width: 768px) {
+  .cevico-lista-ajustada {
+    width: var(--cevico-lista-w) !important;
+  }
 }
-.cevico-no-scrollbar::-webkit-scrollbar {
-  display: none;
+.cevico-lista-alca {
+  width: 5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.cevico-lista-alca:hover {
+  background: rgba(212, 160, 23, 0.35);
 }
 </style>

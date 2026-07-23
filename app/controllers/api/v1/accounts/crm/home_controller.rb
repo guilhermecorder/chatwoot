@@ -493,26 +493,40 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }
   end
 
+  # Pedido 22/07: a meta só vale no HORÁRIO COMERCIAL (seg–sex 08–17h, sem
+  # feriado) — é quando as meninas estão presentes. O que o paciente mandou
+  # de noite/madrugada/fim de semana vira uma segunda média, informativa
+  # ("fora do horário"), sem julgar ninguém por resposta às 3h da manhã.
   def response_goal_rows(since, until_at, goal_minutes) # rubocop:disable Metrics/AbcSize
     scope = account.reporting_events.where(name: 'reply_time', created_at: since..until_at).where('value > 0')
     scope = scope.where(user_id: Current.user.id) unless Current.account_user.administrator?
+    commercial = Crm::BusinessHours.sql_condition('reporting_events.created_at', since, until_at)
+    biz = scope.where(commercial)
+    off = scope.where("NOT (#{commercial})")
 
-    counts = scope.group(:user_id).count
-    avgs = scope.group(:user_id).average(:value)
-    within = scope.where(value: ..goal_minutes * 60).group(:user_id).count
-    names = account.users.where(id: counts.keys.compact).index_by(&:id)
-    rows = counts.keys.compact.map do |uid|
+    counts = biz.group(:user_id).count
+    avgs = biz.group(:user_id).average(:value)
+    within = biz.where(value: ..goal_minutes * 60).group(:user_id).count
+    off_counts = off.group(:user_id).count
+    off_avgs = off.group(:user_id).average(:value)
+
+    user_ids = (counts.keys + off_counts.keys).compact.uniq
+    names = account.users.where(id: user_ids).index_by(&:id)
+    rows = user_ids.map do |uid|
+      replies = counts.fetch(uid, 0)
       hits = within.fetch(uid, 0)
       {
         user_id: uid,
         name: names[uid]&.available_name || 'Atendente',
-        replies: counts[uid],
-        avg_minutes: (avgs[uid].to_f / 60).round(1),
+        replies: replies,
+        avg_minutes: replies.positive? ? (avgs[uid].to_f / 60).round(1) : nil,
         within_goal: hits,
-        within_rate: pct(hits, counts[uid])
+        within_rate: pct(hits, replies),
+        off_replies: off_counts.fetch(uid, 0),
+        off_avg_minutes: off_counts[uid].to_i.positive? ? (off_avgs[uid].to_f / 60).round(1) : nil
       }
     end
-    rows.sort_by { |r| -r[:replies] }
+    rows.sort_by { |r| -(r[:replies] + r[:off_replies]) }
   end
 
   def opportunity_alerts_json

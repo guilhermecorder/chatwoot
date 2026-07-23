@@ -40,7 +40,16 @@ const retro = ref({
   period_from: '',
   period_to: '',
   apply_to_contact: true,
+  // colunas onde a regra atua (pedido 22/07) — vazio = funil inteiro
+  stage_ids: [],
 });
+
+const toggleRetroStage = id => {
+  const idx = retro.value.stage_ids.indexOf(id);
+  if (idx >= 0) retro.value.stage_ids.splice(idx, 1);
+  else retro.value.stage_ids.push(id);
+  retroPreview.value = null; // filtro mudou = prévia antiga não vale mais
+};
 
 const retroLabel = computed(() =>
   retro.value.labelChoice === '__nova__'
@@ -59,6 +68,7 @@ const retroPayload = () => ({
   period_from: retro.value.period_from,
   period_to: retro.value.period_to,
   apply_to_contact: retro.value.apply_to_contact,
+  stage_ids: retro.value.stage_ids.length ? retro.value.stage_ids : undefined,
 });
 
 // precisa de pelo menos uma ação: etiqueta ou coluna
@@ -92,6 +102,7 @@ const applyRetro = async () => {
     retro.value.labelChoice = '';
     retro.value.newLabel = '';
     retro.value.target_stage_id = '';
+    retro.value.stage_ids = [];
   } catch {
     useAlert('Erro ao aplicar');
   } finally {
@@ -427,6 +438,30 @@ const applyUnify = async () => {
             <input v-model="retro.apply_to_contact" type="checkbox" class="rounded" />
             Etiquetar também o contato (para usar em campanhas)
           </label>
+        </div>
+
+        <!-- pedido 22/07: a regra pode valer SÓ para quem está em colunas
+             escolhidas (o card atual do contato) — clicou, acendeu -->
+        <div>
+          <label class="text-xs font-medium text-n-slate-11 block mb-1">
+            Atuar só em quem está nestas colunas
+            <span class="text-n-slate-9">(opcional — nada marcado = funil inteiro)</span>
+          </label>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="s in allStages"
+              :key="s.id"
+              class="text-[11px] px-2.5 py-1 rounded-full border transition-colors"
+              :class="retro.stage_ids.includes(s.id)
+                ? 'text-white border-transparent font-semibold'
+                : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+              :style="retro.stage_ids.includes(s.id) ? { background: s.color || '#B8860B' } : {}"
+              :title="`${s.pipeline_name} › ${s.name}`"
+              @click="toggleRetroStage(s.id)"
+            >
+              {{ s.name }}
+            </button>
+          </div>
         </div>
 
         <div class="flex flex-wrap items-center gap-3 pt-1">

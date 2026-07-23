@@ -75,9 +75,14 @@ class Crm::GoalPeriodHistoryService
     trunc = ->(col) { Arel.sql("date_trunc('#{gran}', (#{col} AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')") }
 
     {
-      'new_leads' => Crm::Contact.joins(:pipeline).where(crm_pipelines: { account_id: @account.id })
-                                 .where(crm_contacts: { created_at: from..to })
-                                 .group(trunc.call('crm_contacts.created_at')).count,
+      # data do lead = quando o CONTATO surgiu (histórico real via
+      # contacts.created_at), nunca a criação do card no CRM — os ~10 mil
+      # cards nasceram juntos na importação de julho e inflavam o mês
+      # (pedido 22/07: "Metas do mês" mostrava 10.191 leads novos)
+      'new_leads' => Crm::Contact.joins(:pipeline).joins(:contact)
+                                 .where(crm_pipelines: { account_id: @account.id })
+                                 .where(contacts: { created_at: from..to })
+                                 .group(trunc.call('contacts.created_at')).count,
       'appointments_booked' => @account.tasks.where(task_type: 'consulta', created_at: from..to)
                                        .group(trunc.call('tasks.created_at')).count,
       'consultations_attended' => @account.tasks.where(task_type: 'consulta', attendance: 'attended', due_at: from..to)
