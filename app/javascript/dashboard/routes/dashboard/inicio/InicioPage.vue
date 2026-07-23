@@ -245,6 +245,11 @@ const tileState = tile => {
     else if (ratio >= 0.4) status = 'warn';
     else status = 'bad';
   }
+  // pedido 22/07: até MEIO-DIA as cores ficam neutras — de manhã o dia mal
+  // começou e o "vermelho de ritmo" só assusta. Meta batida/recorde são
+  // fatos (não julgamento de ritmo) e continuam aparecendo.
+  if (['bad', 'warn'].includes(status) && new Date().getHours() < 12)
+    status = 'neutral';
   return { status, ratio, expected, isRecord: !!rec?.is_record, best: rec?.best || 0 };
 };
 
@@ -253,7 +258,11 @@ const tileVisual = tile => {
   const grads = STATUS_GRADS[selectedPanel.value] || STATUS_GRADS.agendamento;
   return {
     ...st,
-    grad: ['bad', 'warn', 'meta'].includes(st.status) ? grads[st.status] : tile.grad,
+    // sem status de meta mandando, um chip "Muito bom" pinta o card de
+    // verde (pedido 22/07 — o dourado confundia com "neutro")
+    grad: ['bad', 'warn', 'meta'].includes(st.status)
+      ? grads[st.status]
+      : tile.chip?.grad || tile.grad,
     aura: st.isRecord,
     auraIntensity: Math.max(0.5, Math.min(1.2, st.ratio ?? 0.7)),
     pulse: st.status === 'meta' || st.isRecord,
@@ -610,7 +619,13 @@ const fmtMin = m => {
 // ── Indicadores do período ──────────────────────────────────
 const conversionVerdict = computed(() => {
   const r = data.value?.booking_conversion ?? 0;
-  if (r >= 15) return { label: 'Muito bom 🚀', color: '#84CC16' };
+  // "Muito bom" é VERDE (pedido 22/07) — e leva o card junto pelo grad
+  if (r >= 15)
+    return {
+      label: 'Muito bom 🚀',
+      color: '#10B981',
+      grad: 'linear-gradient(135deg, #065F46, #10B981)',
+    };
   if (r >= 10) return { label: 'Bom 👍', color: '#3B82F6' };
   if (r >= 5) return { label: 'Regular', color: '#D4A017' };
   return { label: 'Fraco', color: '#EF4444' };
@@ -699,7 +714,7 @@ const bookingRate30 = computed(() => {
 const booking30Verdict = computed(() => {
   const r = bookingRate30.value;
   if (r === null) return null;
-  if (r >= 15) return { label: 'Muito bom 🚀', color: '#84CC16' };
+  if (r >= 15) return { label: 'Muito bom 🚀', color: '#10B981' };
   if (r >= 10) return { label: 'Bom 👍', color: '#3B82F6' };
   if (r >= 5) return { label: 'Regular', color: '#D4A017' };
   return { label: 'Fraco — hora de agir', color: '#EF4444' };
@@ -1393,26 +1408,38 @@ onUnmounted(() => {
             >
               responder em até {{ goalMinutes }} min
             </span>
+            <span
+              class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-n-alpha-1 text-n-slate-10"
+              title="A meta vale no horário em que a equipe está presente. Noite, madrugada, fim de semana e feriado entram na média 'fora do horário', sem meta."
+            >
+              vale seg–sex · 08h–17h
+            </span>
             <span v-if="isAdmin && !responseGoal.configured" class="text-[10px] text-n-slate-9 ml-auto">
               ajuste a meta em Automações → Radar de Oportunidades
             </span>
           </div>
 
-          <!-- meu resultado no período (3 medidores + selo) -->
+          <!-- meu resultado no período (4 medidores + selo): a meta julga só
+               o horário comercial; "fora do horário" é informativo -->
           <div v-if="myResponse" class="mb-1">
-            <div class="grid grid-cols-3 gap-3">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center">
-                <p class="text-[10px] text-n-slate-9 mb-0.5">Seu tempo médio</p>
-                <p class="text-xl sm:text-2xl font-bold" :style="{ color: myResponse.avg_minutes <= goalMinutes ? '#059669' : '#DC2626' }">
+                <p class="text-[10px] text-n-slate-9 mb-0.5">Tempo médio (08–17h)</p>
+                <p class="text-xl sm:text-2xl font-bold" :style="{ color: myResponse.avg_minutes === null ? undefined : myResponse.avg_minutes <= goalMinutes ? '#059669' : '#DC2626' }">
                   {{ fmtMin(myResponse.avg_minutes) }}
                 </p>
+              </div>
+              <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center" title="Mensagens que chegaram de noite, madrugada, fim de semana ou feriado — sem meta, só informação">
+                <p class="text-[10px] text-n-slate-9 mb-0.5">🌙 Fora do horário</p>
+                <p class="text-xl sm:text-2xl font-bold text-n-slate-11">{{ fmtMin(myResponse.off_avg_minutes) }}</p>
+                <p class="text-[9px] text-n-slate-9">{{ myResponse.off_replies }} resposta(s)</p>
               </div>
               <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center">
                 <p class="text-[10px] text-n-slate-9 mb-0.5">Dentro da meta</p>
                 <p class="text-xl sm:text-2xl font-bold text-n-slate-12">{{ myResponse.within_rate }}%</p>
               </div>
               <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center">
-                <p class="text-[10px] text-n-slate-9 mb-0.5">Respostas</p>
+                <p class="text-[10px] text-n-slate-9 mb-0.5">Respostas (08–17h)</p>
                 <p class="text-xl sm:text-2xl font-bold text-n-slate-12">{{ myResponse.replies }}</p>
               </div>
             </div>
@@ -1428,7 +1455,7 @@ onUnmounted(() => {
               </div>
               <div class="flex items-center justify-between mt-1.5 flex-wrap gap-1">
                 <p class="text-[10px] text-n-slate-9">
-                  {{ myResponse.within_goal }} de {{ myResponse.replies }} respostas dentro da meta
+                  {{ myResponse.within_goal }} de {{ myResponse.replies }} respostas do horário comercial dentro da meta
                 </p>
                 <span
                   v-if="respVerdict(myResponse)"
@@ -1450,11 +1477,18 @@ onUnmounted(() => {
               class="flex items-center gap-2 flex-wrap rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2"
             >
               <span class="text-sm font-semibold text-n-slate-12 truncate">{{ row.name }}</span>
-              <span class="text-[10px] text-n-slate-9">{{ row.replies }} resposta(s)</span>
-              <span class="text-xs font-bold ml-auto" :style="{ color: row.avg_minutes <= goalMinutes ? '#059669' : '#DC2626' }">
+              <span class="text-[10px] text-n-slate-9">{{ row.replies }} resposta(s) 08–17h</span>
+              <span class="text-xs font-bold ml-auto" :style="{ color: row.avg_minutes === null ? undefined : row.avg_minutes <= goalMinutes ? '#059669' : '#DC2626' }">
                 {{ fmtMin(row.avg_minutes) }}
               </span>
               <span class="text-[10px] text-n-slate-10">{{ row.within_rate }}% na meta</span>
+              <span
+                v-if="row.off_replies"
+                class="text-[10px] text-n-slate-9"
+                title="Média das respostas fora do horário comercial (noite, madrugada, fim de semana, feriado) — sem meta"
+              >
+                🌙 {{ fmtMin(row.off_avg_minutes) }} fora ({{ row.off_replies }})
+              </span>
               <span
                 v-if="respVerdict(row)"
                 class="text-[10px] px-2 py-0.5 rounded-full font-bold"

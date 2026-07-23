@@ -75,6 +75,25 @@ class Crm::RetroLabelJob < ApplicationJob
     if (to = safe_date(options['period_to']))
       scope = scope.where('messages.created_at <= ?', to.end_of_day)
     end
+
+    # pedido 22/07: a regra pode atuar SÓ EM COLUNAS ESPECÍFICAS do CRM —
+    # vale o card ATUAL do contato (quem já saiu da coluna não entra)
+    raw_stage_ids = Array(options['stage_ids']).map(&:to_s).reject(&:blank?)
+    if raw_stage_ids.any?
+      # só colunas que existem NA CONTA; se nenhuma sobrou (coluna apagada
+      # entre a prévia e o aplicar), o seguro é atuar em NINGUÉM — nunca
+      # cair de volta no funil inteiro
+      stage_ids = Crm::Stage.joins(:pipeline)
+                            .where(crm_pipelines: { account_id: account.id }, id: raw_stage_ids)
+                            .pluck(:id)
+      scope = if stage_ids.any?
+                scope.joins(:conversation).where(
+                  conversations: { contact_id: Crm::Contact.where(stage_id: stage_ids).select(:contact_id) }
+                )
+              else
+                scope.none
+              end
+    end
     scope
   end
 

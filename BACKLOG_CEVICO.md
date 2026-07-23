@@ -3407,6 +3407,59 @@ pós-reload confirmada no banco.
   backup → web → sidekiq; pós-deploy: 🛡️ acessos, 💰 tabela de preços,
   🎯 metas de julho. Reversão: imagem build 56 (7187c2de6).
 
+## ═══ RODADA 22/07 (PR #5 NO AR — deploy confirmado pelo Guilherme) ═══
+
+## 105. ✅ Conversas: caixas em VÁRIAS LINHAS + largura da lista AJUSTÁVEL ✅ CONSTRUÍDO E SUBIDO (22/07)
+Pedido: todas as caixas à primeira vista + controle manual do tamanho da
+lista. COMO FICOU (ChatList.vue): pílulas de caixa em flex-wrap (quantas
+linhas precisar, sem rolagem escondida) + ALÇA na borda direita da lista
+(trilho de 5px que acende dourado no hover; só desktop ≥768px): arrasta e
+a largura (280–620px) fica salva no navegador (cevico_conversas_largura);
+duplo clique volta ao automático (340/412). Testado: arrasto 340→505 com
+persistência + reset por duplo clique.
+
+## 106. ✅ Meu Painel: cores NEUTRAS até meio-dia + "Muito bom" VERDE ✅ CONSTRUÍDO E SUBIDO (22/07)
+tileState: antes das 12h (hora do navegador) os status de RITMO 'bad' e
+'warn' viram 'neutral' (cor padrão do painel, sem ⚠️, sem sinal vermelho
+no "posso viajar") — meta batida e recorde continuam aparecendo (são
+fatos, não julgamento de ritmo). Selo "Muito bom 🚀" saiu do lima/dourado:
+chip #10B981 e o card da Taxa de agendamento ganha grad VERDE via
+tile.chip.grad (tileVisual usa o grad do chip quando nenhum status de
+meta manda). booking30Verdict idem.
+
+## 107. ✅ METAS DO MÊS com leads REAIS do mês (fix da importação) ✅ CONSTRUÍDO E SUBIDO (22/07)
+CAUSA do 10.191/2000: GoalPeriodHistoryService contava new_leads por
+crm_contacts.created_at — e os ~10 mil CARDS nasceram juntos na janela da
+importação (01–11/07). Os dashboards já usavam a data real
+(contacts.created_at, por isso "Novas no período" mostrava 1.648). FIX:
+new_leads agora conta por contacts.created_at (joins :contact) — mesma
+fonte oficial p/ card "Metas do mês" do Meu Painel, selos do Dashboard
+CRM (useCevicoGoals) e Painel de Metas (histórico mês a mês fica real).
+AUDITORIA dos demais números: build_kpis/build_created_over_time/
+reached_stage_count/leads_count já usavam contacts.created_at — ok.
+cevico:fix_imported_dates continua disponível p/ higiene (dry-run 1º).
+
+## 108. ✅ Tempo de atendimento: média COMERCIAL (08–17h) × FORA do horário ✅ CONSTRUÍDO E SUBIDO (22/07)
+A meta só vale quando as meninas estão presentes: novo Crm::BusinessHours
+(seg–sex 08h–17h SP, MENOS feriados nacionais — fixos + Carnaval/Sexta
+Santa/Corpus via Páscoa calculada) gera a condição SQL; response_goal_rows
+separa reply_time em comercial (meta, % na meta) e fora do horário
+(noite/madrugada/fds/feriado — só informativo, sem julgamento). UI: 4
+medidores (Tempo médio 08–17h · 🌙 Fora do horário · Dentro da meta ·
+Respostas 08–17h) + chip "vale seg–sex · 08h–17h" + 🌙 nas linhas do
+time. Testado na conta 3: 10 min comercial × 9,3 min fora; feriados de
+2026 conferidos (16-17/02, 03/04, 04/06…).
+
+## 109. ✅ Tratamento de dados: "por conteúdo" SÓ EM COLUNAS ESPECÍFICAS ✅ CONSTRUÍDO E SUBIDO (22/07)
+"Etiquetar e/ou MOVER por conteúdo" ganhou chips das colunas do CRM
+("Atuar só em quem está nestas colunas", opcional): a regra vale para o
+card ATUAL do contato. Backend no matching_scope (vale p/ prévia E
+aplicação; stage de outra conta não vaza; coluna apagada entre prévia e
+aplicar = atua em NINGUÉM, nunca cai no funil inteiro). Testado: prévia
+4 conversas sem filtro → 1 com "Novos Contatos"; id inválido → 0.
+⚠️ DEPLOY: reimplantar WEB **E SIDEKIQ** juntos — sidekiq velho ignoraria
+o filtro de colunas do job e aplicaria no funil inteiro. Sem migrations.
+
 ## Estado atual (para retomar — atualizado 2026-07-14, madrugada)
 
 **ONDE ESTAMOS (2026-07-15, manhã — TUDO NO AR ✅):** itens 14-36 EM
