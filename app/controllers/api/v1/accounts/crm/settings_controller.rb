@@ -598,6 +598,20 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: public_domain_json
   end
 
+  # 📊 Rastreamento central (item 117): Pixel da Meta + GA4 — preenche uma
+  # vez e toda página publicada (e o hub) sai carimbada, com o nome da
+  # página dentro dos eventos
+  def update_public_tracking
+    return render json: { error: 'Apenas administradores podem alterar isso.' }, status: :forbidden unless Current.account_user.administrator?
+
+    error = tracking_params_error
+    return render json: { error: error }, status: :unprocessable_entity if error
+
+    Cevico::PublicSite.save_tracking!('meta_pixel_id' => params[:meta_pixel_id].to_s,
+                                      'ga4_id' => params[:ga4_id].to_s)
+    render json: public_domain_json
+  end
+
   # verifica DNS + resposta HTTPS do domínio (antes/depois de salvar)
   def check_public_domain
     host = Cevico::PublicSite.normalize(params[:host].presence.to_s) || Cevico::PublicSite.host
@@ -618,6 +632,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   private
 
+  # validação amigável dos IDs do card 📊 Rastreamento
+  def tracking_params_error
+    ga4 = params[:ga4_id].to_s.strip.upcase
+    return 'ID do GA4 inválido — é o código que começa com G-, ex.: G-AB12CD34EF' if ga4.present? && !ga4.match?(/\AG-[A-Z0-9]{4,16}\z/)
+
+    pixel = params[:meta_pixel_id].to_s.strip
+    return 'ID do Pixel inválido — é só o número que a Meta mostra, ex.: 1234567890123456' if pixel.present? && pixel.gsub(/\D/, '').blank?
+
+    nil
+  end
+
   def public_domain_json
     db_value = InstallationConfig.find_by(name: 'CEVICO_PUBLIC_HOST')&.value.presence
     {
@@ -628,7 +653,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       example_page_url: Cevico::PublicSite.configured? ? Cevico::PublicSite.page_url('preoperatorio') : nil,
       example_form_url: "#{Cevico::PublicSite.base_url}/forms/…",
       hub: Cevico::PublicSite.hub_config,
-      hub_whatsapp_url: Cevico::PublicSite.hub_whatsapp_url
+      hub_whatsapp_url: Cevico::PublicSite.hub_whatsapp_url,
+      tracking: Cevico::PublicSite.tracking_config
     }
   end
 

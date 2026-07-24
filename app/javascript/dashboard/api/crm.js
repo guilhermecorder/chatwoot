@@ -624,6 +624,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_public_hub`, payload);
   }
 
+  // 📊 Rastreamento central (item 117): Pixel da Meta + GA4 nas páginas
+  updatePublicTracking(payload) {
+    return axios.post(`${this.url}/settings/update_public_tracking`, payload);
+  }
+
   // 🌪 Montador de Funis (item 60): fontes de captação por funil
   saveFunnelSources(payload) {
     return axios.post(`${this.url}/pages_dashboard/save_funnel_sources`, payload);

@@ -3632,6 +3632,44 @@ do hub PDCCX → carimbo google_ads → linha hub no relatório; utm viajou
 hub→página; 0 console err; rubocop zero ofensas novas (45=45 no
 settings). Local: CEVICO_PUBLIC_HOST limpo depois do teste.
 
+## 117. ✅ CONSTRUÍDO (24/07, não commitado): RASTREAMENTO CENTRAL — Pixel da Meta + GA4 em todas as páginas
+Pedido do Guilherme (24/07, PRIORIDADE — páginas sobem amanhã): adicionar
+Pixel/tag/API da Meta e Google nas páginas "de forma simples, eficiente e
+trackeando cada página". DESENHO: config UMA vez → card "📊 Rastreamento"
+em Configurações → Domínio (Pixel ID + GA4 ID, só admin, InstallationConfig
+CEVICO_TRACKING via PublicSite.tracking_config/save_tracking!, endpoint
+update_public_tracking c/ validação amigável G-XXXX/só números) → partial
+_analytics_snippet injetado sozinho em TODA página publicada (montada,
+HTML anexada E hub; prévia de rascunho fica LIMPA): Pixel base + PageView
++ ViewContent{content_name: slug, content_category: categoria} + gtag
+config{cevico_page} — UM pixel só, a página viaja DENTRO do evento (nos
+relatórios da Meta/GA4 filtra por página). LEAD: window.cevicoLead dispara
+Contact (Meta) + generate_lead (GA4) no clique pro WhatsApp — páginas
+montadas via listener no /cta; anexadas/hub via gancho no snippet do
+Protocolo, que passa o token como eventID = a MESMA chave que a CAPI
+usará na rodada 2 (dedup automático). Sem migration. TESTADO conta 3:
+salvar 200 + selos verdes; injeção conferida por curl nas 3 famílias
+(montada content_name teste-previa-rascunho / anexada catarata / hub via
+Host header clinica.cevico.com.br, depois host limpo); prévia 0 tags;
+generate_lead no dataLayer c/ página+protocolo; 0 console err; rubocop
+zero ofensas novas. Falta do Guilherme: Pixel ID e GA4 ID reais (camada
+2) + rodada 2 (CAPI fbclid + Google offline gclid) segue na fila.
+
+## 116. ✅ CONSTRUÍDO (24/07, não commitado): CRM MOBILE — navegar sem arrastar
+Pedido do Guilherme (24/07): "no mobile não quero mover os cards
+arrastando, quero navegar nas colunas" — o toque no card grudava no
+arrasto do vuedraggable e brigava com o deslize horizontal do quadro.
+FEITO em KanbanColumn.vue: `useWindowSize` do @vueuse (mesmo padrão do
+Sidebar) → `isMobile = width < 768` (mesmo corte do navegador de chips)
+→ `:disabled="isMobile"` no vuedraggable dos cards + `:key` por
+breakpoint (vuedraggable 4 ignora mudança de prop pós-mount; o remount
+garante a troca ao vivo se a janela cruzar 768px). Desktop intocado.
+TESTADO conta 3 no browser: 375px → Sortable `disabled:true` nas 12
+colunas, arrasto no card não move nada (clique continua abrindo o
+painel do paciente), deslize/chips navegam normal; 1280px →
+`disabled:false`; troca de breakpoint aplica na hora (evento resize).
+Sem migration, só frontend.
+
 ## 112. ✅ FASE 1 CONSTRUÍDA (23/07 tarde, não commitado): CHAT DO CONSTRUTOR + CONSTRUTOR PRO
 CONSTRUTOR PRO (card do agente em Automações → Agentes de IA): campo
 "Referências de estilo" (textarea, injetada em TODA montagem/correção —

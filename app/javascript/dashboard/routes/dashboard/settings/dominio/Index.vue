@@ -22,6 +22,7 @@ const load = async () => {
     info.value = data;
     hostInput.value = data.host || '';
     loadHub(data);
+    loadTracking(data);
   } catch {
     useAlert('Não consegui carregar a configuração de domínio.');
   } finally {
@@ -104,6 +105,31 @@ const saveHub = async () => {
     useAlert(e?.response?.data?.error || 'Não consegui salvar o hub.');
   } finally {
     isSavingHub.value = false;
+  }
+};
+
+// ── 📊 RASTREAMENTO central (item 117): Pixel da Meta + GA4 ──
+// Preenche uma vez; toda página publicada (e o hub) sai carimbada, com o
+// nome da página dentro dos eventos. Clique no WhatsApp = evento de Lead.
+const tracking = ref({ meta_pixel_id: '', ga4_id: '' });
+const isSavingTracking = ref(false);
+const loadTracking = data => {
+  tracking.value = {
+    meta_pixel_id: data.tracking?.meta_pixel_id || '',
+    ga4_id: data.tracking?.ga4_id || '',
+  };
+};
+const saveTracking = async () => {
+  isSavingTracking.value = true;
+  try {
+    const { data } = await CrmAPI.updatePublicTracking(tracking.value);
+    info.value = data;
+    loadTracking(data);
+    useAlert('Rastreamento salvo — todas as páginas já saem carimbadas! 📊');
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui salvar o rastreamento.');
+  } finally {
+    isSavingTracking.value = false;
   }
 };
 
@@ -256,6 +282,45 @@ const hasChanges = computed(() => (info.value?.host || '') !== cleanedInput.valu
               </button>
               <span v-if="info?.hub_whatsapp_url" class="text-[11px] text-emerald-600 font-semibold">✓ WhatsApp ativo no hub</span>
               <span v-else class="text-[11px] text-amber-600">Sem WhatsApp, o hub mostra só as páginas.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 📊 RASTREAMENTO: Pixel da Meta + GA4 em todas as páginas -->
+        <div class="mt-5 bg-n-solid-2 border border-n-weak rounded-2xl overflow-hidden">
+          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #0f5fa6, #7c3aed, #d4af37)" />
+          <div class="p-5">
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1">📊 Rastreamento (Pixel da Meta + Google GA4)</h2>
+            <p class="text-xs text-n-slate-10 mb-3">
+              Preencha <b>uma vez</b> e pronto: toda página publicada (e a porta de entrada)
+              sai com o Pixel e o GA4, com o <b>nome da página dentro do evento</b> — nos
+              relatórios da Meta e do Google você filtra por página. O clique no WhatsApp
+              dispara evento de <b>Lead</b> nas duas plataformas, amarrado ao Protocolo.
+            </p>
+            <div class="grid gap-3 md:grid-cols-2">
+              <label class="block">
+                <span class="text-[11px] font-medium text-n-slate-11">Pixel da Meta (só o número)</span>
+                <input v-model="tracking.meta_pixel_id" type="text" placeholder="1234567890123456" class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
+                <span class="text-[10px] text-n-slate-9">Meta Business → Gerenciador de Eventos → seu Pixel → o ID numérico.</span>
+              </label>
+              <label class="block">
+                <span class="text-[11px] font-medium text-n-slate-11">Google GA4 (código G-…)</span>
+                <input v-model="tracking.ga4_id" type="text" placeholder="G-AB12CD34EF" class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
+                <span class="text-[10px] text-n-slate-9">GA4 → Administrador → Fluxos de dados → seu site → ID da métrica.</span>
+              </label>
+            </div>
+            <div class="flex items-center gap-3 mt-3 flex-wrap">
+              <button
+                class="px-4 py-2 text-sm font-semibold rounded-lg text-white hover:opacity-90 disabled:opacity-50"
+                style="background: linear-gradient(135deg, #0f5fa6, #7c3aed)"
+                :disabled="isSavingTracking"
+                @click="saveTracking"
+              >
+                {{ isSavingTracking ? 'Salvando…' : 'Salvar rastreamento' }}
+              </button>
+              <span v-if="info?.tracking?.meta_pixel_id" class="text-[11px] text-emerald-600 font-semibold">✓ Pixel ativo em todas as páginas</span>
+              <span v-if="info?.tracking?.ga4_id" class="text-[11px] text-emerald-600 font-semibold">✓ GA4 ativo em todas as páginas</span>
+              <span v-if="!info?.tracking?.meta_pixel_id && !info?.tracking?.ga4_id" class="text-[11px] text-n-slate-9">Sem IDs, as páginas seguem só com o rastreio interno (Protocolo).</span>
             </div>
           </div>
         </div>
