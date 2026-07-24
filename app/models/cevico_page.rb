@@ -73,6 +73,17 @@ class CevicoPage < ApplicationRecord
   # funil de páginas: o CTA pode reapontar pra outra página da CEVICO
   belongs_to :next_page, class_name: 'CevicoPage', optional: true
 
+  # exclusão: leva junto os baldes de tráfego e os Protocolos (FKs NOT NULL
+  # travariam o DELETE) e solta quem apontava pra ela como próximo passo
+  has_many :traffic_rows, class_name: 'CevicoPageTraffic', dependent: :delete_all
+  has_many :refs, class_name: 'CevicoPageRef', dependent: :delete_all
+  has_many :funnel_prev_pages, class_name: 'CevicoPage', foreign_key: :next_page_id,
+                               dependent: :nullify, inverse_of: :next_page
+
+  # HTML anexado passa fácil dos 20k da trava genérica do ApplicationRecord;
+  # validação própria = campo isento dela, com o limite real do anexo (2 MB)
+  validates :custom_html, length: { maximum: 2.megabytes }, allow_nil: true
+
   validates :title, presence: true
   validates :category, inclusion: { in: CATEGORIES.keys }
   validates :status, inclusion: { in: STATUSES.keys }
