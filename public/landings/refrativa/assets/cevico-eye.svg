@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 282 268" fill="none">
+  <!-- Marca CEVICO: olho dourado em moldura (vetor fiel ao logo oficial —
+       moldura aberta nas laterais, o olho atravessa as aberturas) -->
+  <defs>
+    <linearGradient id="cevicoGold" x1="0" y1="0" x2="282" y2="268" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8A6620"/>
+      <stop offset="0.4" stop-color="#C9A24B"/>
+      <stop offset="0.62" stop-color="#F5E9B8"/>
+      <stop offset="0.85" stop-color="#D4AF37"/>
+      <stop offset="1" stop-color="#9C7A2C"/>
+    </linearGradient>
+  </defs>
+  <!-- moldura: dois colchetes (aberta na altura do olho) -->
+  <path d="M28 108 V66 Q28 30 64 30 H218 Q254 30 254 66 V108" stroke="url(#cevicoGold)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M254 160 V202 Q254 238 218 238 H64 Q28 238 28 202 V160" stroke="url(#cevicoGold)" stroke-width="14" stroke-linecap="round"/>
+  <!-- olho: as pontas passam pelas aberturas da moldura -->
+  <path d="M14 134 Q141 46 268 134 Q141 222 14 134 Z" stroke="url(#cevicoGold)" stroke-width="14" stroke-linejoin="round"/>
+  <circle cx="141" cy="134" r="34" stroke="url(#cevicoGold)" stroke-width="14"/>
+</svg>
