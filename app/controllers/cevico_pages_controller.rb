@@ -235,7 +235,8 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   def render_custom_page(preview_banner: nil)
     html = @page.custom_html.to_s
     if preview_banner.nil? # ao vivo: injeta o rastreio; prévia fica limpa
-      snippet = render_to_string(partial: 'cevico_pages/tracking_snippet', locals: { page: @page })
+      snippet = render_to_string(partial: 'cevico_pages/analytics_snippet', locals: { page: @page }) +
+                render_to_string(partial: 'cevico_pages/tracking_snippet', locals: { page: @page })
       html = html.match?(%r{</body>}i) ? html.sub(%r{</body>}i) { "#{snippet}</body>" } : html + snippet
     end
     render html: "#{preview_banner}#{html}".html_safe, layout: false # rubocop:disable Rails/OutputSafety

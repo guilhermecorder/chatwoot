@@ -60,6 +60,9 @@
             } catch (err) { dest = href; }
           }
           a.dataset.cevicoRef = '1';
+          // Pixel/GA4 (item 117): o Protocolo vira eventID do Lead —
+          // a mesma chave que a CAPI usará na rodada 2 (sem duplicar)
+          if (window.cevicoLead) { try { window.cevicoLead(data && data.token ? data.token : null); } catch (err) { /* segue o clique */ } }
           location.href = dest;
         });
       return;

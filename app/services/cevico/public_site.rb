@@ -105,6 +105,31 @@ module Cevico::PublicSite
     "https://wa.me/#{number}?text=#{ERB::Util.url_encode(text)}"
   end
 
+  # ── 📊 RASTREAMENTO central (item 117) ──
+  # Pixel da Meta + GA4 configurados UMA vez em Configurações → Domínio e
+  # injetados sozinhos em TODA página publicada (e no hub). A página viaja
+  # dentro do evento (content_name) — um pixel só, cada página identificada.
+  def tracking_config
+    raw = begin
+      GlobalConfig.get('CEVICO_TRACKING')['CEVICO_TRACKING']
+    rescue StandardError
+      nil
+    end
+    raw.is_a?(Hash) ? raw : {}
+  end
+
+  def save_tracking!(attrs)
+    value = {
+      'meta_pixel_id' => attrs['meta_pixel_id'].to_s.gsub(/\D/, '')[0, 20],
+      'ga4_id' => attrs['ga4_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20]
+    }.compact_blank
+    config = InstallationConfig.where(name: 'CEVICO_TRACKING').first_or_initialize
+    config.value = value
+    config.save!
+    GlobalConfig.clear_cache
+    value
+  end
+
   # grava o host no banco (Configurações → Domínio); string vazia limpa
   def save_host!(raw)
     value = normalize(raw)

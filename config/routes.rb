@@ -238,6 +238,7 @@ Rails.application.routes.draw do
               get :public_domain
               post :update_public_domain
               post :update_public_hub
+              post :update_public_tracking
               post :check_public_domain
               post :sync_scheduler_stages
                 post :sync_agent_stages

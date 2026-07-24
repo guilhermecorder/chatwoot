@@ -1,0 +1,63 @@
+<%# 📊 Rastreamento central (item 117): Pixel da Meta + GA4 em TODA página
+    pública (montada, HTML anexada e hub). Config única em Configurações →
+    Domínio, card Rastreamento — página nova já nasce rastreada.
+    Um pixel só: a página viaja DENTRO do evento (content_name/cevico_page).
+    Clique pro WhatsApp dispara Contact (Meta) + generate_lead (GA4); quando
+    o Protocolo é conhecido no clique (páginas anexadas/hub), ele vai como
+    eventID — a chave que casa com a CAPI na rodada 2, sem duplicar.
+    page = nil → hub. %>
+<% cfg = Cevico::PublicSite.tracking_config %>
+<% pixel_id = cfg['meta_pixel_id'].presence %>
+<% ga4_id = cfg['ga4_id'].presence %>
+<% if pixel_id || ga4_id %>
+  <% page_name = page ? page.slug : 'hub' %>
+  <% page_category = (page&.category).presence || 'hub' %>
+  <% if pixel_id %>
+<script>
+!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
+n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,
+document,'script','https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '<%= j pixel_id %>');
+fbq('track', 'PageView');
+fbq('track', 'ViewContent', { content_name: '<%= j page_name %>', content_category: '<%= j page_category %>' });
+</script>
+<noscript><img height="1" width="1" style="display:none" alt=""
+  src="https://www.facebook.com/tr?id=<%= j pixel_id %>&ev=PageView&noscript=1"/></noscript>
+  <% end %>
+  <% if ga4_id %>
+<script async src="https://www.googletagmanager.com/gtag/js?id=<%= j ga4_id %>"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', '<%= j ga4_id %>', { cevico_page: '<%= j page_name %>', cevico_categoria: '<%= j page_category %>' });
+</script>
+  <% end %>
+<script>
+// Lead nas duas plataformas quando o paciente clica pro WhatsApp.
+// O snippet do Protocolo chama com o token quando o tem (vira eventID).
+window.cevicoLead = function (token) {
+  try {
+    if (window.fbq) fbq('track', 'Contact',
+      { content_name: '<%= j page_name %>', content_category: '<%= j page_category %>' },
+      token ? { eventID: token } : undefined);
+  } catch (e) { /* pixel fora do ar */ }
+  try {
+    if (window.gtag) gtag('event', 'generate_lead',
+      { cevico_page: '<%= j page_name %>', protocolo: token || '' });
+  } catch (e) { /* ga fora do ar */ }
+};
+(function () {
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('a');
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    // CTA das páginas montadas (/cta resolve o WhatsApp no servidor);
+    // wa.me direto dispara pelo snippet do Protocolo, já com eventID
+    if (/\/cta(\?|$)/.test(href)) window.cevicoLead(null);
+  }, true);
+})();
+</script>
+<% end %>

@@ -701,6 +701,7 @@
   <% end %>
 
   <%# rastreio de origem (Google Ads/SEO/Meta → funil → protocolo no WhatsApp) %>
+  <%= render 'cevico_pages/analytics_snippet', page: @page unless @preview %>
   <%= render 'cevico_pages/tracking_snippet', page: @page unless @preview %>
 </body>
 </html>
