@@ -837,6 +837,13 @@ const menuItems = computed(() => {
         ...(canSee('pages')
           ? [
               {
+                // 📈 origem (Google Ads/SEO/Meta) → leads → cirurgias
+                name: 'Pages Results',
+                label: 'Resultados de tráfego',
+                icon: 'i-lucide-trending-up',
+                to: accountScopedRoute('cevico_pages_results'),
+              },
+              {
                 name: 'Pages Analytics',
                 label: 'Análise de funis',
                 icon: 'i-lucide-chart-line',

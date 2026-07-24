@@ -1,7 +1,7 @@
 # Mostly modeled after the intial implementation of the service based on 360 Dialog
 # https://docs.360dialog.com/whatsapp-api/whatsapp-api/media
 # https://developers.facebook.com/docs/whatsapp/api/media/
-class Whatsapp::IncomingMessageBaseService
+class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
   include ::Whatsapp::IncomingMessageServiceHelpers
   include ::Whatsapp::IncomingMessageIdentifierHelper
 
@@ -46,6 +46,7 @@ class Whatsapp::IncomingMessageBaseService
     end
 
     stamp_ad_attribution
+    stamp_page_attribution
   end
 
   # Mensagem vinda de clique em anúncio (CTWA) chega com "referral" —
@@ -63,6 +64,23 @@ class Whatsapp::IncomingMessageBaseService
     ).call
   rescue StandardError => e
     Rails.logger.error "[AdAttribution] #{e.message}"
+  end
+
+  # Mensagem com "Protocolo: XXXXX" = paciente veio de uma PÁGINA CEVICO —
+  # carimba página + anúncio de origem (Google/Meta/SEO) no contato
+  def stamp_page_attribution
+    return if outgoing_echo
+
+    text = messages_data.first&.dig(:text, :body)
+    return if text.blank?
+
+    Crm::PageAttributionService.new(
+      contact: @contact,
+      conversation: @conversation,
+      text: text
+    ).call
+  rescue StandardError => e
+    Rails.logger.error "[PageAttribution] #{e.message}"
   end
 
   def process_statuses

@@ -226,11 +226,13 @@ const openNew = category => {
   editing.value = null;
   form.value = { ...blankPage(), category: category || 'captacao', ab_variants: [] };
   comments.value = [];
+  attachedHtmlName.value = '';
   showEditor.value = true;
 };
 
 const openEdit = page => {
   editing.value = page;
+  attachedHtmlName.value = '';
   form.value = {
     ...page,
     ab_variants: (page.ab_variants || []).map(v => ({ ...v })),
@@ -287,6 +289,37 @@ const removeComment = async comment => {
 };
 const fmtCommentAt = iso =>
   new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+// ── 📎 página HTML ANEXADA (feita fora do Construtor — ex.: com IA no
+// computador): o arquivo vai ao ar como veio, com o rastreio injetado.
+// Só admin anexa/remove (o HTML roda script na página pública).
+const htmlFileInput = ref(null);
+const attachedHtmlName = ref('');
+const hasAttachedHtml = computed(
+  () => form.value.custom_html === undefined
+    ? !!editing.value?.has_custom_html
+    : !!form.value.custom_html
+);
+const pickHtmlFile = () => htmlFileInput.value?.click();
+const onHtmlFile = event => {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) {
+    useAlert('Arquivo muito grande (máx. 2 MB).');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    form.value.custom_html = String(reader.result || '');
+    attachedHtmlName.value = file.name;
+  };
+  reader.readAsText(file);
+};
+const removeAttachedHtml = () => {
+  form.value.custom_html = '';
+  attachedHtmlName.value = '';
+};
 
 const savePage = async (publish = null) => {
   if (!form.value.title?.trim()) {
@@ -623,8 +656,30 @@ onMounted(() => {
             </p>
           </div>
 
+          <!-- 📎 página HTML ANEXADA: arquivo pronto feito fora do Construtor -->
+          <div v-if="isAdmin" class="rounded-xl p-3 mb-3 border border-n-weak" style="background: linear-gradient(135deg, rgba(15,95,166,.06), rgba(212,175,55,.06))">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="i-lucide-file-code text-xs" style="color: #0F5FA6" />
+              <span class="text-[11px] font-semibold text-n-slate-12">Página HTML anexada</span>
+              <span v-if="hasAttachedHtml" class="px-2 h-6 inline-flex items-center rounded-full text-[10px] font-bold text-white" style="background: linear-gradient(135deg, #0F5FA6, #1E7FBF)">
+                📎 {{ attachedHtmlName || 'arquivo anexado' }}
+              </span>
+              <div class="flex-1" />
+              <input ref="htmlFileInput" type="file" accept=".html,.htm,text/html" class="hidden" @change="onHtmlFile" />
+              <button class="px-2.5 h-7 rounded-full border border-n-weak text-[11px] font-medium text-n-slate-11 hover:bg-n-alpha-1" @click="pickHtmlFile">
+                {{ hasAttachedHtml ? 'Substituir arquivo' : '📎 Anexar arquivo .html' }}
+              </button>
+              <button v-if="hasAttachedHtml" class="px-2.5 h-7 rounded-full border border-red-500/40 text-[11px] font-medium text-red-500 hover:bg-red-500/10" @click="removeAttachedHtml">
+                Remover
+              </button>
+            </div>
+            <p class="text-[10px] text-n-slate-9 mt-1.5">
+              Pra páginas prontas feitas fora do Construtor (ex.: com IA no computador). O arquivo vai ao ar EXATAMENTE como veio, no endereço desta página, com o rastreamento de origem (Google Ads, SEO, Meta) e o Protocolo do WhatsApp injetados automaticamente. Com arquivo anexado, as seções abaixo ficam de lado — remova o anexo pra voltar ao Construtor.
+            </p>
+          </div>
+
           <!-- ══ Construtor por SEÇÕES ══ -->
-          <div class="mb-3">
+          <div v-if="!hasAttachedHtml" class="mb-3">
             <p class="text-[11px] font-semibold text-n-slate-12 mb-1.5 flex items-center gap-1.5">
               <span class="i-lucide-layers text-xs" style="color: #d4af37" /> Seções da página
               <span class="font-normal text-n-slate-9">— empilhe, escolha o efeito de cada uma</span>

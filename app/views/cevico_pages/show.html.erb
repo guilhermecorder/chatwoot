@@ -472,11 +472,15 @@
       <div id="chat-msgs" style="max-height:44vh;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px">
         <div style="color:#c9d8ec;font-size:12px;background:rgba(255,255,255,.07);border-radius:10px;padding:8px 10px">
           Me diga o que ajustar nesta página — ex.: “deixa o título mais direto”,
-          “joga o FAQ pro final”, “pinta a seção da Galaxy de dourado com brilho”,
-          “adiciona uma seção de passos depois da avaliação”.
+          “joga o FAQ pro final”, “pinta a seção da Galaxy de dourado com brilho”.
+          📎 Anexe fotos: eu olho cada uma e coloco na seção onde ela comunica melhor.
         </div>
       </div>
+      <!-- 📎 fotos anexadas (112 Fase 2): miniaturas antes do envio -->
+      <div id="chat-anexos" style="display:none;padding:6px 12px 0;gap:8px;flex-wrap:wrap"></div>
       <div style="padding:10px 12px;border-top:1px solid rgba(212,175,55,.3);display:flex;gap:8px;align-items:flex-end">
+        <input type="file" id="chat-foto-input" accept="image/*" multiple style="display:none">
+        <button id="chat-foto" title="Anexar fotos" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:10px;color:#f4de8e;font-size:14px;padding:9px 10px;cursor:pointer">📎</button>
         <textarea id="chat-texto" rows="2" placeholder="O que você quer mudar?" style="flex:1;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:10px;color:#fff;font-size:12.5px;padding:8px;resize:none"></textarea>
         <button id="chat-enviar" style="background:linear-gradient(135deg,#d4af37,#f4de8e);color:#072A4C;font-weight:800;font-size:12.5px;border:0;border-radius:10px;padding:9px 12px;cursor:pointer">➤</button>
       </div>
@@ -617,18 +621,68 @@
           }, 2500);
         }
 
+        // ── 📎 fotos no chat (112 Fase 2): sobem na hora da escolha e vão
+        // junto da instrução — o Construtor VÊ cada foto e a posiciona ──
+        var anexos = [];
+        var anexosEl = document.getElementById('chat-anexos');
+        var fotoBtn = document.getElementById('chat-foto');
+        var fotoInput = document.getElementById('chat-foto-input');
+
+        function renderAnexos() {
+          anexosEl.innerHTML = '';
+          anexosEl.style.display = anexos.length ? 'flex' : 'none';
+          anexos.forEach(function (a, i) {
+            var chip = document.createElement('div');
+            chip.style.cssText = 'position:relative;width:44px;height:44px;border-radius:8px;overflow:hidden;border:1px solid rgba(212,175,55,.5)';
+            var img = document.createElement('img');
+            img.src = a.url;
+            img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+            var x = document.createElement('button');
+            x.textContent = '×';
+            x.title = 'Remover';
+            x.style.cssText = 'position:absolute;top:0;right:0;background:rgba(0,0,0,.65);border:0;color:#fff;font-size:11px;line-height:1;width:16px;height:16px;border-radius:0 0 0 8px;cursor:pointer';
+            x.addEventListener('click', function () { anexos.splice(i, 1); renderAnexos(); });
+            chip.appendChild(img);
+            chip.appendChild(x);
+            anexosEl.appendChild(chip);
+          });
+        }
+
+        fotoBtn.addEventListener('click', function () { fotoInput.click(); });
+        fotoInput.addEventListener('change', function () {
+          Array.prototype.slice.call(fotoInput.files).forEach(function (file) {
+            if (anexos.length >= 3) { renderMsg('ia', 'Máximo de 3 fotos por pedido — manda as outras no próximo.'); return; }
+            if (!file.type || file.type.indexOf('image/') !== 0) return;
+            if (file.size > 8 * 1024 * 1024) { renderMsg('ia', '😕 “' + file.name + '” passa de 8 MB — reduza e tente de novo.'); return; }
+            var fd = new FormData();
+            fd.append('image', file);
+            fotoBtn.disabled = true;
+            fotoBtn.textContent = '⏳';
+            fetch('/p/rascunho/<%= ERB::Util.url_encode(params[:token].to_s) %>/foto?edit=<%= ERB::Util.url_encode(params[:edit].to_s) %>', { method: 'POST', body: fd })
+              .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+              .then(function (data) { anexos.push({ url: data.url, name: file.name }); renderAnexos(); })
+              .catch(function () { renderMsg('ia', '😕 Não consegui subir “' + file.name + '” — tente de novo.'); })
+              .finally(function () { fotoBtn.disabled = false; fotoBtn.textContent = '📎'; });
+          });
+          fotoInput.value = '';
+        });
+
         function enviarChat() {
           var texto = textoEl.value.trim();
-          if (!texto || enviarBtn.disabled) return;
+          if ((!texto && !anexos.length) || enviarBtn.disabled) return;
           enviarBtn.disabled = true;
-          chatPush('eu', texto);
+          var fotos = anexos.map(function (a) { return a.url; });
+          var rotulo = anexos.length ? ('📎 ' + anexos.length + ' foto' + (anexos.length > 1 ? 's' : '') + ' — ') : '';
+          chatPush('eu', rotulo + (texto || 'posicionar nas melhores seções'));
           textoEl.value = '';
+          anexos = [];
+          renderAnexos();
           renderMsg('ia', '⏳ Trabalhando na sua correção…');
           salvarRetoques().catch(function () {}).then(function () {
             return fetch('/p/rascunho/<%= ERB::Util.url_encode(params[:token].to_s) %>/construtor?edit=<%= ERB::Util.url_encode(params[:edit].to_s) %>', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message: texto })
+              body: JSON.stringify({ message: texto, images: fotos })
             });
           }).then(function (r) {
             if (!r || !r.ok) throw new Error();
@@ -645,5 +699,8 @@
       })();
     </script>
   <% end %>
+
+  <%# rastreio de origem (Google Ads/SEO/Meta → funil → protocolo no WhatsApp) %>
+  <%= render 'cevico_pages/tracking_snippet', page: @page unless @preview %>
 </body>
 </html>

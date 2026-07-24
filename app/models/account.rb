@@ -72,6 +72,8 @@ class Account < ApplicationRecord
   has_many :crm_message_automations, class_name: 'Crm::MessageAutomation', dependent: :destroy_async
   has_many :crm_followup_bots, class_name: 'Crm::FollowupBot', dependent: :destroy_async
   has_many :cevico_pages, dependent: :destroy_async
+  has_many :cevico_page_refs, dependent: :destroy_async
+  has_many :cevico_page_traffic, class_name: 'CevicoPageTraffic', dependent: :destroy_async
   has_many :cevico_pillars, dependent: :destroy_async
   has_many :cevico_strategies, dependent: :destroy_async
   has_many :cevico_content_items, dependent: :destroy_async
