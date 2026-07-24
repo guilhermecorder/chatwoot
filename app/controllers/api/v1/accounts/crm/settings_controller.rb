@@ -590,6 +590,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: public_domain_json
   end
 
+  # HUB (porta de entrada): WhatsApp do atendimento + frase + texto do botão
+  def update_public_hub
+    return render json: { error: 'Apenas administradores podem alterar o hub.' }, status: :forbidden unless Current.account_user.administrator?
+
+    Cevico::PublicSite.save_hub!(params.permit(:whatsapp, :tagline, :cta_text).to_h)
+    render json: public_domain_json
+  end
+
   # verifica DNS + resposta HTTPS do domínio (antes/depois de salvar)
   def check_public_domain
     host = Cevico::PublicSite.normalize(params[:host].presence.to_s) || Cevico::PublicSite.host
@@ -618,7 +626,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       app_host: Cevico::PublicSite.app_host,
       from_env: db_value.blank? && ENV['CEVICO_PUBLIC_HOST'].present?,
       example_page_url: Cevico::PublicSite.configured? ? Cevico::PublicSite.page_url('preoperatorio') : nil,
-      example_form_url: "#{Cevico::PublicSite.base_url}/forms/…"
+      example_form_url: "#{Cevico::PublicSite.base_url}/forms/…",
+      hub: Cevico::PublicSite.hub_config,
+      hub_whatsapp_url: Cevico::PublicSite.hub_whatsapp_url
     }
   end
 

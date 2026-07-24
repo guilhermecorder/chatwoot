@@ -55,11 +55,15 @@ Rails.application.routes.draw do
   get 'p/:slug/cta', to: 'cevico_pages#cta_click', as: :cevico_page_cta
   get 'p/:slug/next', to: 'cevico_pages#next_step', as: :cevico_page_next
   post 'p/:slug/track', to: 'cevico_pages#track', as: :cevico_page_track
+  post 'p/:slug/ref', to: 'cevico_pages#mint_ref', as: :cevico_page_ref
+  # Protocolo do HUB (porta de entrada na raiz do domínio dedicado)
+  post 'hub/ref', to: 'cevico_pages#hub_ref', as: :cevico_hub_ref
   # prévia do RASCUNHO (link secreto do admin — token assinado) +
   # ambiente de montagem: status da construção e retoque inline
   get 'p/rascunho/:token/status', to: 'cevico_pages#build_status'
   post 'p/rascunho/:token/retocar', to: 'cevico_pages#inline_update'
   post 'p/rascunho/:token/construtor', to: 'cevico_pages#builder_chat'
+  post 'p/rascunho/:token/foto', to: 'cevico_pages#builder_upload'
   get 'p/rascunho/:token', to: 'cevico_pages#preview', as: :cevico_page_preview
   get 'p/:slug', to: 'cevico_pages#show', as: :cevico_page
 
@@ -233,6 +237,7 @@ Rails.application.routes.draw do
               # Configurações → Domínio (público das páginas/formulários)
               get :public_domain
               post :update_public_domain
+              post :update_public_hub
               post :check_public_domain
               post :sync_scheduler_stages
                 post :sync_agent_stages
@@ -263,6 +268,9 @@ Rails.application.routes.draw do
                 post :delete_comment
               end
             end
+            # Resultados de tráfego das Páginas: origem (Google/SEO/Meta) →
+            # visitas → cliques → leads (Protocolo) → agendou → cirurgia
+            resource :pages_report, only: [:show], controller: 'pages_reports'
             # Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
             resource :pages_dashboard, only: [:show], controller: 'pages_dashboards' do
               # 🌪 Montador de Funis (item 60): fontes de captação

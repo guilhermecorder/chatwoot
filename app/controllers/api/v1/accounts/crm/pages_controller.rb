@@ -1,13 +1,18 @@
 # Admin do ambiente PÁGINAS: criar/editar/publicar as páginas públicas
 # da clínica (nutrição de leads, quebra de objeções, procedimentos) por
 # estágio da jornada. Equipe visualiza a lista; só admin mexe.
-class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseController
+class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
   # o TIME inteiro cria e edita RASCUNHOS (inclusive com IA);
   # publicar/despublicar e excluir continuam com o admin
   before_action :check_admin, only: [:destroy]
 
   def index
-    pages = Current.account.cevico_pages.order(:category, :title)
+    # a lista NÃO carrega o HTML anexado (100+ páginas × arquivos grandes);
+    # só a flag de que existe — o conteúdo mora no update/público
+    pages = Current.account.cevico_pages
+                   .select(CevicoPage.column_names - ['custom_html'])
+                   .select('(custom_html IS NOT NULL) AS has_custom_html_flag')
+                   .order(:category, :title)
     render json: { categories: CevicoPage::CATEGORIES, pages: pages.map { |p| page_json(p) } }
   end
 
@@ -141,16 +146,29 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
     permitted = params.permit(:title, :slug, :category, :status, :emoji, :color, :subtitle,
                               :body, :meta_title, :meta_description, :seo_keywords,
                               :cta_label, :cta_url,
-                              :next_page_id,
+                              :next_page_id, :custom_html,
                               sections: [:type, :effect, :title, :text, :color, :image_url, { items: [:title, :text] }],
                               ab_variants: [:key, :name, :title, :subtitle, :cta_label, :active])
     sanitize_sections!(permitted)
     sanitize_next_page!(permitted)
     sanitize_variants!(permitted)
+    sanitize_custom_html!(permitted)
     # quem não é admin não muda status: cria como rascunho e nunca
     # publica/despublica (o default da coluna já é draft)
     permitted.delete(:status) unless Current.account_user.administrator?
     permitted
+  end
+
+  # página HTML ANEXADA vai ao ar como veio (com <script> e tudo) — por
+  # isso só ADMIN anexa/troca/remove; limite de 2 MB segura upload errado
+  def sanitize_custom_html!(permitted)
+    return unless permitted.key?(:custom_html)
+
+    if !Current.account_user.administrator? || permitted[:custom_html].to_s.bytesize > 2.megabytes
+      permitted.delete(:custom_html)
+    else
+      permitted[:custom_html] = permitted[:custom_html].presence
+    end
   end
 
   # só tipos/efeitos conhecidos entram no banco (a página pública confia)
@@ -191,7 +209,7 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
     permitted[:next_page_id] = next_id && Current.account.cevico_pages.exists?(id: next_id) ? next_id : nil
   end
 
-  def page_json(page) # rubocop:disable Metrics/MethodLength
+  def page_json(page) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
     {
       id: page.id,
       title: page.title,
@@ -208,6 +226,7 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
       cta_label: page.cta_label,
       cta_url: page.cta_url,
       sections: page.sections || [],
+      has_custom_html: custom_html_present?(page), # página HTML anexada (o conteúdo não trafega na lista)
       ab_variants: page.ab_variants || [],
       ab_results: page.ab_results,
       team_comments: page.team_comments || [],
@@ -219,6 +238,13 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
       builder_url: "#{Cevico::PublicSite.base_url}/p/rascunho/#{page.preview_token}?edit=#{page.edit_token}",
       updated_at: page.updated_at
     }.merge(page_stats_json(page))
+  end
+
+  # no index a coluna nem foi carregada — usa a flag do SELECT
+  def custom_html_present?(page)
+    return page['has_custom_html_flag'] == true if page.attributes.key?('has_custom_html_flag')
+
+    page.custom_html.present?
   end
 
   def page_stats_json(page)

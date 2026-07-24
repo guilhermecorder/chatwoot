@@ -3558,6 +3558,80 @@ avisado, nunca sucesso vazio. PEDIDO DO GUILHERME anotado: ambiente do
 Construtor mais CONTROLÁVEL (teto de tokens, esforço, etc. na mão do
 admin) → incorporar ao item 112.
 
+## 115. ✅ CONSTRUÍDO (24/07, não commitado): RASTREAMENTO DAS PÁGINAS (plano 100+ páginas c/ ads) + ANEXAR HTML PRONTO
+Pedido do Guilherme 24/07: estender o rastreio de anúncios (CTWA) pras
+PÁGINAS — Google no centro (Ads + SEO orgânico) — e poder anexar páginas
+HTML feitas fora (com IA no computador) dentro do ambiente de Páginas.
+DECISÕES: não existe API navegador→WhatsApp (verificado, "dark social");
+a ponte é o PROTOCOLO no texto pré-preenchido + a parte por API é a CAPI
+(MetaAdsConversionsService JÁ EXISTE; ligar gclid/fbclid nela = rodada 2
+c/ Google offline conversions). Aba de resultados DENTRO do ambiente de
+Páginas (escolha dele).
+COMO FUNCIONA: (1) ORIGEM — Cevico::TrafficSource classifica cada visita
+(google_ads por gclid/utm cpc; google_organico por referer/utm; meta_ads;
+social; outros_ads; busca; funil; direto — padrão de utm dos anúncios:
+utm_source=google|meta + utm_medium=cpc + utm_campaign) e agrega em
+cevico_page_traffic (página×dia×origem×campanha, UPSERT atômico, aguenta
+100+ páginas); snippet público (_tracking_snippet) guarda a origem na
+sessão do navegador e a faz VIAJAR nos links internos (funil/cta/forms;
+next_step repassa no servidor tb). (2) PROTOCOLO — clique no WhatsApp
+gera CevicoPageRef (token 5 chars sem ambíguos p/ ler por telefone,
+válido 90d) e anexa "Protocolo: XXXXX" ao texto (cta_click no servidor
+p/ páginas montadas; POST /p/:slug/ref pro snippet nas anexadas);
+1ª mensagem no WhatsApp com o código (Whatsapp::IncomingMessageBaseService
+→ Crm::PageAttributionService) carimba page_ads no contato+conversa
+(PRIMEIRO TOQUE, AttributeMerge, convive c/ meta_ads do CTWA) e liga
+ref.contact_id. (3) ANEXAR HTML — cevico_pages.custom_html (só admin,
+2MB, permit separado): público serve o arquivo COMO VEIO c/ snippet
+injetado antes do </body>; prévia = tarja RASCUNHO sem rastreio; editor
+(PagesHome) ganhou bloco "Página HTML anexada" (anexar/substituir/
+remover; seções somem c/ anexo); index NÃO carrega o HTML (flag
+has_custom_html via SELECT). (4) ABA RESULTADOS — menu Conteúdos →
+"Resultados de tráfego" (TrafficResults.vue, rota pages/resultados,
+concessão pages): pílulas de período 7/30/90 + pílulas de origem c/
+contagem, 6 DashKpi (Visitas/Cliques/Leads/Agendaram/Cirurgias/Receita),
+linhas por página c/ drill origem+campanha; endpoint crm/pages_report
+(pages_reports_controller: traffic + contatos page_ads + agendou por
+tasks consulta contact_id + cirurgias/receita na MESMA régua do
+relatório de Anúncios [etapas cirurgia sem indicação / config] +
+honestidade minted×matched dos protocolos). MIGRATION 20260724000001
+(custom_html + 2 tabelas) — backup antes. TESTADO conta 3: classificador
+13 casos ✅; visita gclid + organica → baldes certos; cta → redirect c/
+"Protocolo: T4HMU" no wa.me; carimbo 1º toque + não-sobrescreve + texto
+sem código = no-op; mint_ref; página anexada servida c/ snippet (prévia
+c/ tarja sem snippet); origem viajou no link interno (URL levou os utm);
+relatório real (leads 1/booked 1 no bucket google_ads, campanhas
+catarata-julho/galaxy-teste); telas no browser OK (screenshots), 0 erros
+console; rubocop baseline. ⚠️ DEPLOY: WEB + SIDEKIQ + migration.
+PRÓXIMA RODADA (combinado): CAPI Meta c/ fbclid da página + Google Ads
+offline conversions c/ gclid (avisar: precisa config/token dele);
+GA4/Pixel opcionais nas páginas anexadas ele mesmo põe no HTML.
+
+## 115B. ✅ CONSTRUÍDO (24/07, mesma rodada): HUB — PORTA DE ENTRADA na raiz do domínio
+Pedido: hub padrão na raiz de clinica.cevico.com.br direcionando pra
+"refrativa | catarata | lente trifocal". A home do domínio dedicado
+virou HUB da marca (navy/ouro/Cinzel, logo dark-bg): frase de boas-vindas
+configurável + botão dourado "Falar com a CEVICO no WhatsApp" + as 3
+PORTAS (👓 Refrativa /refrativa|lasik|prk|miopia/, 👁️ Catarata
+/catarata/, ✨ Lente Trifocal /trifocal|galaxy|premium/) — cada porta
+acha sozinha a página PUBLICADA do assunto (slug/título); sem página
+ainda, manda pro WhatsApp com o assunto no texto (entrada nunca fica sem
+destino) + índice por categoria como antes. CONFIG em Configurações →
+Domínio, card "🚪 Porta de entrada" (WhatsApp DDI, frase, mensagem do
+botão; InstallationConfig CEVICO_HUB via PublicSite.save_hub!/hub_config,
+endpoint update_public_hub só admin). RASTREIO: snippet parametrizado
+(page nil = hub → POST /hub/ref), cevico_page_refs.cevico_page_id ficou
+NULLABLE (migration 20260724000001 EDITADA antes do deploy), snapshot c/
+slug='hub', relatório ganha linha "🚪 Porta de entrada (hub)" (leads/
+agendou/cirurgias; sem visitas — hub não entra na cevico_page_traffic
+v1, GA4 cobre depois); origem viaja do hub pras páginas (portas
+reescritas no clique c/ utm). TESTADO conta 3: home 200 c/ Host header +
+visual no browser (screenshot navy/ouro), portas acharam refrativa
+(página PRK) e catarata, trifocal caiu pro Whats c/ assunto; protocolo
+do hub PDCCX → carimbo google_ads → linha hub no relatório; utm viajou
+hub→página; 0 console err; rubocop zero ofensas novas (45=45 no
+settings). Local: CEVICO_PUBLIC_HOST limpo depois do teste.
+
 ## 112. ✅ FASE 1 CONSTRUÍDA (23/07 tarde, não commitado): CHAT DO CONSTRUTOR + CONSTRUTOR PRO
 CONSTRUTOR PRO (card do agente em Automações → Agentes de IA): campo
 "Referências de estilo" (textarea, injetada em TODA montagem/correção —
@@ -3578,9 +3652,33 @@ SCHEMA das seções ganhou color+image_url (enum/validação — o Construtor
 agora PINTA páginas na montagem; normalize_ai_sections preserva).
 Testado conta 3: painel/balões/⏳/erro legível no browser, 403, enqueue
 + sidekiq, EDIT_SCHEMA carrega, PRO salva e os services leem (40000 +
-referências). ⚠️ DEPLOY: web E SIDEKIQ (service+job novos). FASE 2
-(fotos com visão no chat) segue combinada — slot de chave Gemini
-"geração de imagens das Páginas" já existe no update_ai.
+referências). ⚠️ DEPLOY: web E SIDEKIQ (service+job novos). PR #10
+mergeado (5eda13c15), build VERDE 23/07 ~15:30.
+
+## 112 FASE 2. ✅ CONSTRUÍDA (23/07 tarde, não commitada): FOTOS COM VISÃO no Chat do Construtor
+No painel 💬 da página de rascunho: botão 📎 (input file image/*,
+múltiplas) → sobe NA HORA via POST /p/rascunho/:token/foto (novo
+endpoint público gated pelos DOIS tokens + rascunho; mesma validação do
+upload do editor: só image/*, 8 MB; devolve caminho relativo) →
+miniaturas 44px com × acima do input → enviar manda images:[caminhos]
+junto da instrução (sem texto + foto = instrução padrão "posicione nas
+melhores seções"). builder_chat sanitiza (só /rails/active_storage/,
+máx. 3) → PageEditJob (4º arg image_urls, retrocompatível) →
+PageEditorService(images:): resolve blob pelo signed_id do caminho,
+foto >3MB vira variante JPEG 1600px só pra IA (página usa a original;
+falhou variante → original; >5MB pós-tudo = descarta, limite da API),
+conteúdo vira blocos [texto "Foto N — caminho" + imagem base64]* +
+build_input com lista "FOTOS ANEXADAS PELA EQUIPE" — o agente VÊ cada
+foto e preenche image_url da seção certa com o caminho EXATO (regra
+nova no SYSTEM_PROMPT; reply conta onde pôs e por quê). Sem foto =
+entrada texto puro idêntica à Fase 1. Testado conta 3: user_content c/
+foto real (3 blocos, base64 ok) + inválida/externa filtradas; upload
+403 sem edit token / 200 com / 422 não-imagem; chat só-foto enqueue →
+job roda service com images e devolve status; UI com DataTransfer real
+(chip aparece, envia, limpa, resposta volta no chat); 0 erros console;
+rubocop = baseline (12 pré-existentes). ⚠️ DEPLOY: web E SIDEKIQ
+(job/service mudaram). Fora do escopo desta fase: geração de imagem
+(slot gemini_api_key segue reservado).
 
 ## (desenho original) 112: CHAT DO CONSTRUTOR no Ambiente de Montagem
 ONDE: na própria página de rascunho (Ambiente de Montagem) — balão

@@ -5,12 +5,13 @@
 class Crm::PageEditJob < ApplicationJob
   queue_as :default
 
-  def perform(account_id, page_id, instruction)
+  def perform(account_id, page_id, instruction, image_urls = [])
     account = Account.find_by(id: account_id)
     page = account&.cevico_pages&.find_by(id: page_id)
     return if page.blank?
 
-    result = Crm::PageEditorService.new(account: account, page: page, instruction: instruction.to_s).call
+    result = Crm::PageEditorService.new(account: account, page: page, instruction: instruction.to_s,
+                                        images: Array(image_urls)).call
     result = result.to_h.deep_stringify_keys
     if result['error'].present?
       return write_status(page, { status: 'error', error: result['error'] })

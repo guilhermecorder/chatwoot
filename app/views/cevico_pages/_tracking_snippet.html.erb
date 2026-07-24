@@ -1,0 +1,74 @@
+<%# Rastreio de origem das Páginas (plano 100+ páginas com ads).
+    Roda em TODA página pública (montada ou HTML anexada):
+    1. guarda a origem da visita (utm/gclid/fbclid ou site de onde veio)
+       na sessão do navegador — primeira origem da sessão vence;
+    2. faz a origem VIAJAR nos links internos (funil, /cta, formulários);
+    3. no clique de link de WhatsApp direto (páginas anexadas), pede o
+       PROTOCOLO ao servidor e injeta no texto da mensagem — é ele que
+       liga o paciente da caixa à página/anúncio de origem.
+    page = nil → modo HUB (raiz do domínio): protocolo sai de /hub/ref. %>
+<% ref_path = page ? "/p/#{page.slug}/ref" : '/hub/ref' %>
+<% default_origin = page ? "a página \"#{page.title}\"" : 'o site da CEVICO' %>
+<script>
+(function () {
+  var KEY = 'cevico_trk';
+  var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid', 'ref_host'];
+  var qs = new URLSearchParams(location.search);
+  var trk = {};
+  try { trk = JSON.parse(sessionStorage.getItem(KEY) || '{}'); } catch (e) { trk = {}; }
+
+  var hasParams = KEEP.some(function (k) { return k !== 'ref_host' && qs.get(k); });
+  if (hasParams) {
+    trk = {};
+    KEEP.forEach(function (k) { var v = qs.get(k); if (v) trk[k] = String(v).slice(0, 150); });
+  } else if (!Object.keys(trk).length && document.referrer) {
+    try {
+      var refHost = new URL(document.referrer).hostname;
+      if (refHost && refHost !== location.hostname) trk.ref_host = refHost;
+    } catch (e) { /* referrer inválido */ }
+  }
+  try { sessionStorage.setItem(KEY, JSON.stringify(trk)); } catch (e) { /* sessão cheia */ }
+
+  function appendTrk(url) {
+    Object.keys(trk).forEach(function (k) {
+      if (!url.searchParams.get(k)) url.searchParams.set(k, trk[k]);
+    });
+    return url;
+  }
+
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('a');
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+
+    // WhatsApp direto (páginas anexadas): busca o Protocolo e injeta no texto
+    if (/^(https?:\/\/(wa\.me|api\.whatsapp\.com)|whatsapp:)/i.test(href)) {
+      if (a.dataset.cevicoRef) return; // já processado — segue o clique
+      e.preventDefault();
+      var body = new URLSearchParams(trk);
+      fetch('<%= ref_path %>', { method: 'POST', body: body, keepalive: true })
+        .then(function (r) { return r.ok ? r.json() : { token: null }; })
+        .catch(function () { return { token: null }; })
+        .then(function (data) {
+          var dest = href;
+          if (data && data.token) {
+            try {
+              var u = new URL(href, location.href);
+              var text = u.searchParams.get('text') || 'Olá! Estava lendo <%= j default_origin %> e quero saber mais.';
+              u.searchParams.set('text', text + '\nProtocolo: ' + data.token);
+              dest = u.toString();
+            } catch (err) { dest = href; }
+          }
+          a.dataset.cevicoRef = '1';
+          location.href = dest;
+        });
+      return;
+    }
+
+    // links internos (funil, /cta, formulários): a origem viaja junto
+    if (Object.keys(trk).length && (href.charAt(0) === '/' || a.host === location.host)) {
+      try { a.href = appendTrk(new URL(a.href, location.href)).toString(); } catch (err) { /* href estranho */ }
+    }
+  }, true);
+})();
+</script>

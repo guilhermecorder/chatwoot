@@ -614,6 +614,16 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/pages_dashboard`);
   }
 
+  // 📈 Resultados de tráfego: origem → visitas → leads → agendou → cirurgia
+  getPagesReport(params = {}) {
+    return axios.get(`${this.url}/pages_report`, { params });
+  }
+
+  // 🚪 Porta de entrada (hub) na raiz do domínio dedicado
+  updatePublicHub(payload) {
+    return axios.post(`${this.url}/settings/update_public_hub`, payload);
+  }
+
   // 🌪 Montador de Funis (item 60): fontes de captação por funil
   saveFunnelSources(payload) {
     return axios.post(`${this.url}/pages_dashboard/save_funnel_sources`, payload);

@@ -21,6 +21,7 @@ const load = async () => {
     const { data } = await CrmAPI.getPublicDomain();
     info.value = data;
     hostInput.value = data.host || '';
+    loadHub(data);
   } catch {
     useAlert('Não consegui carregar a configuração de domínio.');
   } finally {
@@ -79,6 +80,30 @@ const save = async () => {
     useAlert(e?.response?.data?.error || 'Não consegui salvar o domínio.');
   } finally {
     isSaving.value = false;
+  }
+};
+
+// ── 🚪 HUB (porta de entrada na raiz do domínio dedicado) ──
+const hub = ref({ whatsapp: '', tagline: '', cta_text: '' });
+const isSavingHub = ref(false);
+const loadHub = data => {
+  hub.value = {
+    whatsapp: data.hub?.whatsapp || '',
+    tagline: data.hub?.tagline || '',
+    cta_text: data.hub?.cta_text || '',
+  };
+};
+const saveHub = async () => {
+  isSavingHub.value = true;
+  try {
+    const { data } = await CrmAPI.updatePublicHub(hub.value);
+    info.value = data;
+    loadHub(data);
+    useAlert('Porta de entrada salva! 🚪✨');
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui salvar o hub.');
+  } finally {
+    isSavingHub.value = false;
   }
 };
 
@@ -192,6 +217,45 @@ const hasChanges = computed(() => (info.value?.host || '') !== cleanedInput.valu
                 <span class="text-n-brand">{{ info.example_form_url }}</span>
                 (links novos do WhatsApp já saem assim; os antigos redirecionam sozinhos)
               </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 🚪 HUB: porta de entrada na raiz do domínio dedicado -->
+        <div v-if="info?.dedicated || !info?.host" class="mt-5 bg-n-solid-2 border border-n-weak rounded-2xl overflow-hidden">
+          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #152c61, #0f5fa6, #d4af37)" />
+          <div class="p-5">
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🚪 Porta de entrada (hub)</h2>
+            <p class="text-xs text-n-slate-10 mb-3">
+              A raiz do domínio dedicado vira o hub da CEVICO: os três caminhos
+              (Refrativa · Catarata · Lente Trifocal), o botão de WhatsApp com rastreio
+              (Protocolo) e o índice das páginas publicadas. Configure aqui o atendimento.
+            </p>
+            <div class="grid gap-3 md:grid-cols-2">
+              <label class="block">
+                <span class="text-[11px] font-medium text-n-slate-11">WhatsApp do atendimento (só números, com DDI)</span>
+                <input v-model="hub.whatsapp" type="text" placeholder="5567999990000" class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
+              </label>
+              <label class="block">
+                <span class="text-[11px] font-medium text-n-slate-11">Frase de boas-vindas (aparece sob o logo)</span>
+                <input v-model="hub.tagline" type="text" placeholder="Tecnologia de ponta, acolhimento humano e clareza visual." class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
+              </label>
+            </div>
+            <label class="block mt-3">
+              <span class="text-[11px] font-medium text-n-slate-11">Mensagem que o paciente envia ao clicar no WhatsApp</span>
+              <input v-model="hub.cta_text" type="text" placeholder="Olá! Vim do site da CEVICO e quero agendar uma avaliação." class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
+            </label>
+            <div class="flex items-center gap-3 mt-3">
+              <button
+                class="px-4 py-2 text-sm font-semibold rounded-lg text-white hover:opacity-90 disabled:opacity-50"
+                style="background: linear-gradient(135deg, #152c61, #0f5fa6)"
+                :disabled="isSavingHub"
+                @click="saveHub"
+              >
+                {{ isSavingHub ? 'Salvando…' : 'Salvar porta de entrada' }}
+              </button>
+              <span v-if="info?.hub_whatsapp_url" class="text-[11px] text-emerald-600 font-semibold">✓ WhatsApp ativo no hub</span>
+              <span v-else class="text-[11px] text-amber-600">Sem WhatsApp, o hub mostra só as páginas.</span>
             </div>
           </div>
         </div>

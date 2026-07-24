@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_19_000006) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_24_000001) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -483,6 +483,34 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000006) do
     t.index ["account_id"], name: "index_cevico_goal_plans_on_account_id"
   end
 
+  create_table "cevico_page_refs", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "cevico_page_id"
+    t.string "token", null: false
+    t.jsonb "source_data", default: {}, null: false
+    t.bigint "contact_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "created_at"], name: "index_cevico_page_refs_on_account_id_and_created_at"
+    t.index ["cevico_page_id"], name: "index_cevico_page_refs_on_cevico_page_id"
+    t.index ["contact_id"], name: "index_cevico_page_refs_on_contact_id"
+    t.index ["token"], name: "index_cevico_page_refs_on_token", unique: true
+  end
+
+  create_table "cevico_page_traffic", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "cevico_page_id", null: false
+    t.date "date", null: false
+    t.string "source", default: "direto", null: false
+    t.string "campaign", default: "", null: false
+    t.integer "views", default: 0, null: false
+    t.integer "cta_clicks", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "date"], name: "index_cevico_page_traffic_on_account_id_and_date"
+    t.index ["cevico_page_id", "date", "source", "campaign"], name: "index_page_traffic_unique_bucket", unique: true
+  end
+
   create_table "cevico_pages", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.string "title", null: false
@@ -508,6 +536,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000006) do
     t.jsonb "ab_variants", default: [], null: false
     t.jsonb "team_comments", default: [], null: false
     t.string "seo_keywords"
+    t.text "custom_html"
     t.index ["account_id", "category"], name: "index_cevico_pages_on_account_id_and_category"
     t.index ["account_id"], name: "index_cevico_pages_on_account_id"
     t.index ["next_page_id"], name: "index_cevico_pages_on_next_page_id"
@@ -1827,6 +1856,11 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000006) do
   add_foreign_key "cevico_content_items", "accounts"
   add_foreign_key "cevico_finance_entries", "accounts"
   add_foreign_key "cevico_goal_plans", "accounts"
+  add_foreign_key "cevico_page_refs", "accounts"
+  add_foreign_key "cevico_page_refs", "cevico_pages"
+  add_foreign_key "cevico_page_refs", "contacts"
+  add_foreign_key "cevico_page_traffic", "accounts"
+  add_foreign_key "cevico_page_traffic", "cevico_pages"
   add_foreign_key "cevico_pages", "accounts"
   add_foreign_key "cevico_pages", "cevico_pages", column: "next_page_id"
   add_foreign_key "cevico_people_profiles", "accounts"

@@ -14,6 +14,7 @@
 #  cta_clicks_count  :integer          default(0), not null
 #  cta_label         :string
 #  cta_url           :string
+#  custom_html       :text
 #  daily_stats       :jsonb            not null
 #  emoji             :string
 #  meta_description  :text

@@ -70,6 +70,41 @@ module Cevico::PublicSite
     configured? ? "#{base_url}/#{slug}" : "#{base_url}/p/#{slug}"
   end
 
+  # ── HUB (porta de entrada na raiz do domínio dedicado) ──
+  # Config do admin em Configurações → Domínio: WhatsApp do atendimento,
+  # frase de boas-vindas e texto da mensagem. Fica no banco
+  # (InstallationConfig CEVICO_HUB), igual ao host.
+  def hub_config
+    raw = begin
+      GlobalConfig.get('CEVICO_HUB')['CEVICO_HUB']
+    rescue StandardError
+      nil
+    end
+    raw.is_a?(Hash) ? raw : {}
+  end
+
+  def save_hub!(attrs)
+    value = {
+      'whatsapp' => attrs['whatsapp'].to_s.gsub(/\D/, '')[0, 15],
+      'tagline' => attrs['tagline'].to_s.strip[0, 300],
+      'cta_text' => attrs['cta_text'].to_s.strip[0, 300]
+    }.compact_blank
+    config = InstallationConfig.where(name: 'CEVICO_HUB').first_or_initialize
+    config.value = value
+    config.save!
+    GlobalConfig.clear_cache
+    value
+  end
+
+  # link do botão do hub (sem protocolo — ele entra no clique)
+  def hub_whatsapp_url
+    number = hub_config['whatsapp'].presence
+    return nil if number.blank?
+
+    text = hub_config['cta_text'].presence || 'Olá! Vim do site da CEVICO e quero agendar uma avaliação.'
+    "https://wa.me/#{number}?text=#{ERB::Util.url_encode(text)}"
+  end
+
   # grava o host no banco (Configurações → Domínio); string vazia limpa
   def save_host!(raw)
     value = normalize(raw)
