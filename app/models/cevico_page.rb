@@ -80,6 +80,10 @@ class CevicoPage < ApplicationRecord
   has_many :funnel_prev_pages, class_name: 'CevicoPage', foreign_key: :next_page_id,
                                dependent: :nullify, inverse_of: :next_page
 
+  # HTML anexado passa fácil dos 20k da trava genérica do ApplicationRecord;
+  # validação própria = campo isento dela, com o limite real do anexo (2 MB)
+  validates :custom_html, length: { maximum: 2.megabytes }, allow_nil: true
+
   validates :title, presence: true
   validates :category, inclusion: { in: CATEGORIES.keys }
   validates :status, inclusion: { in: STATUSES.keys }
