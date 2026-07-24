@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
+import { useWindowSize } from '@vueuse/core';
 import { useStore } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
@@ -28,6 +29,12 @@ const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat']);
 const store = useStore();
 const { t } = useI18n();
 const { isAdmin } = useAdmin();
+
+// No celular o arrasto briga com o deslize entre colunas (pedido 24/07:
+// "no mobile não quero mover os cards arrastando, quero navegar") — abaixo
+// de md (768px, mesmo corte do navegador de colunas) o drag fica desligado.
+const { width: windowWidth } = useWindowSize();
+const isMobile = computed(() => windowWidth.value < 768);
 
 // ── Agentes de IA nas automações: card destacado + edição rápida dali ──
 const AI_AGENT_ACTIONS = {
@@ -665,11 +672,13 @@ const delayLabel = (minutes) => {
       style="flex:1;overflow-y:scroll;min-height:0;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,0.35) transparent;"
     >
       <draggable
+        :key="isMobile ? 'drag-off' : 'drag-on'"
         v-model="localContacts"
         group="crm-contacts"
         item-key="id"
         :animation="150"
         :empty-insert-threshold="120"
+        :disabled="isMobile"
         ghost-class="opacity-40"
         class="min-h-full"
       >
