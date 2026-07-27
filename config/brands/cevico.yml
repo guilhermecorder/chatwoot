@@ -1,0 +1,13 @@
+# Pacote de marca: CEVICO (padrão do sistema — sem MARCA no ambiente, é ela que vale)
+id: cevico
+nome: 'Sistema CEVICO'
+brand_name: 'Sistema CEVICO'
+logos:
+  logo: '/brand-assets/logo.png'
+  logo_dark: '/brand-assets/logo_dark.png'
+  logo_thumbnail: '/brand-assets/logo_thumbnail.png'
+favicons_dir: ''   # vazio = favicons padrão da raiz (/favicon-*.png)
+cores:
+  # paleta de referência da marca (uso futuro no CSS por marca)
+  primaria: '#152C61'   # navy
+  destaque: '#D4AF37'   # ouro
