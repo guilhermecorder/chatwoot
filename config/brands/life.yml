@@ -1,0 +1,12 @@
+# Pacote de marca: LIFE ENERGIA SOLAR (ativado com MARCA=life no ambiente da VPS da Life)
+id: life
+nome: 'Sistema LIFE'
+brand_name: 'Sistema LIFE'
+logos:
+  logo: '/brand-assets/life/logo.png'
+  logo_dark: '/brand-assets/life/logo_dark.png'
+  logo_thumbnail: '/brand-assets/life/logo_thumbnail.png'
+favicons_dir: '/brand-assets/life'   # favicon-16x16.png / 32 / 96 (quadradinhos solares)
+cores:
+  primaria: '#1A1A1A'   # carvão do logo
+  destaque: '#D2990B'   # ouro solar
