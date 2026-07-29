@@ -395,11 +395,13 @@
     "SORT_TOOLTIP": "Sort",
     "SORT_BY": "Sort by",
     "SORT_GROUPS": {
+      "CUSTOM": "Clinic order",
       "CREATED": "Sort by date of creation",
       "ALPHABETICAL": "Sort in alphabetical order",
       "UNREAD_COUNT": "Sort by unread count"
     },
     "SORT_OPTIONS": {
+      "CUSTOM": "Order set by the admin",
       "CREATED_DESC": "Newest first",
       "CREATED_ASC": "Oldest first",
       "ALPHABETICAL_ASC": "Ascending (A - Z)",

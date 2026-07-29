@@ -1,6 +1,6 @@
 class Api::V1::Accounts::LabelsController < Api::V1::Accounts::BaseController
   before_action :current_account
-  before_action :fetch_label, except: [:index, :create]
+  before_action :fetch_label, except: [:index, :create, :reorder]
   before_action :check_authorization
 
   def index
@@ -15,6 +15,19 @@ class Api::V1::Accounts::LabelsController < Api::V1::Accounts::BaseController
 
   def update
     @label.update!(permitted_params)
+  end
+
+  # ordem definida pelo admin (setinhas na tela de Etiquetas): recebe os ids
+  # na ordem final e grava position 1..N — vale para o time inteiro
+  def reorder
+    ids = Array(params[:ordered_ids]).map(&:to_i)
+    labels = Current.account.labels.where(id: ids).index_by(&:id)
+    ActiveRecord::Base.transaction do
+      ids.each_with_index do |id, index|
+        labels[id]&.update!(position: index + 1)
+      end
+    end
+    head :ok
   end
 
   def destroy

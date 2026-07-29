@@ -7,6 +7,10 @@ class LabelPolicy < ApplicationPolicy
     @account_user.administrator?
   end
 
+  def reorder?
+    @account_user.administrator?
+  end
+
   def show?
     @account_user.administrator?
   end

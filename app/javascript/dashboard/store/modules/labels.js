@@ -14,17 +14,27 @@ export const state = {
   },
 };
 
+// ordem definida pelo admin na tela de Etiquetas (position); etiqueta sem
+// posição vai pro fim, em ordem alfabética. Ordenar SEMPRE no cliente: o
+// cache local (IndexedDB) devolve as linhas fora de ordem.
+const byAdminOrder = (a, b) => {
+  const positionA = Number.isFinite(a.position) ? a.position : Infinity;
+  const positionB = Number.isFinite(b.position) ? b.position : Infinity;
+  if (positionA !== positionB) return positionA - positionB;
+  return (a.title || '').localeCompare(b.title || '');
+};
+
 export const getters = {
   getLabels(_state) {
-    return _state.records;
+    return [..._state.records].sort(byAdminOrder);
   },
   getUIFlags(_state) {
     return _state.uiFlags;
   },
   getLabelsOnSidebar(_state) {
-    return _state.records
-      .filter(record => record.show_on_sidebar)
-      .sort((a, b) => a.title.localeCompare(b.title));
+    return [..._state.records]
+      .sort(byAdminOrder)
+      .filter(record => record.show_on_sidebar);
   },
   getLabelById: _state => id => {
     return _state.records.find(record => record.id === Number(id)) || {};
@@ -48,10 +58,8 @@ export const actions = {
     commit(types.SET_LABEL_UI_FLAG, { isFetching: true });
     try {
       const response = await LabelsAPI.get(true);
-      const sortedLabels = response.data.payload.sort((a, b) =>
-        a.title.localeCompare(b.title)
-      );
-      commit(types.SET_LABELS, sortedLabels);
+      // a ordem visível sai do getter (position do admin)
+      commit(types.SET_LABELS, response.data.payload);
     } catch (error) {
       // Ignore error
     } finally {
@@ -83,6 +91,34 @@ export const actions = {
       throw new Error(error);
     } finally {
       commit(types.SET_LABEL_UI_FLAG, { isUpdating: false });
+    }
+  },
+
+  // grava a nova ordem (admin): otimista na tela (reescreve position local),
+  // refetch se o servidor recusar
+  reorder: async function reorderLabels(
+    { commit, dispatch, state: moduleState },
+    orderedIds
+  ) {
+    const byId = new Map(
+      moduleState.records.map(record => [record.id, record])
+    );
+    const reordered = orderedIds
+      .map((id, index) => {
+        const record = byId.get(id);
+        return record ? { ...record, position: index + 1 } : null;
+      })
+      .filter(Boolean);
+    // etiqueta fora da lista (ex.: criada em outra aba) não pode sumir
+    const leftover = moduleState.records.filter(
+      record => !orderedIds.includes(record.id)
+    );
+    commit(types.SET_LABELS, [...reordered, ...leftover]);
+    try {
+      await LabelsAPI.reorder(orderedIds);
+    } catch (error) {
+      await dispatch('get');
+      throw new Error(error);
     }
   },
 

@@ -1,4 +1,6 @@
 export const SIDEBAR_SORT_KEYS = Object.freeze({
+  // ordem definida pelo admin na tela de Etiquetas (CEVICO)
+  CUSTOM: 'custom',
   CREATED_DESC: 'created_at_desc',
   CREATED_ASC: 'created_at_asc',
   ALPHABETICAL_ASC: 'alphabetical_asc',
@@ -38,6 +40,7 @@ export const SIDEBAR_SORT_OPTIONS_BY_SECTION = Object.freeze({
     SIDEBAR_SORT_KEYS.UNREAD_COUNT_ASC,
   ],
   [SIDEBAR_SORT_SECTIONS.LABELS]: [
+    SIDEBAR_SORT_KEYS.CUSTOM,
     SIDEBAR_SORT_KEYS.CREATED_DESC,
     SIDEBAR_SORT_KEYS.CREATED_ASC,
     SIDEBAR_SORT_KEYS.ALPHABETICAL_ASC,
@@ -56,7 +59,7 @@ export const DEFAULT_SIDEBAR_SORT_PREFERENCES = Object.freeze({
   [SIDEBAR_SORT_SECTIONS.FOLDERS]: SIDEBAR_SORT_KEYS.CREATED_DESC,
   [SIDEBAR_SORT_SECTIONS.TEAMS]: SIDEBAR_SORT_KEYS.UNREAD_COUNT_DESC,
   [SIDEBAR_SORT_SECTIONS.CHANNELS]: SIDEBAR_SORT_KEYS.UNREAD_COUNT_DESC,
-  [SIDEBAR_SORT_SECTIONS.LABELS]: SIDEBAR_SORT_KEYS.UNREAD_COUNT_DESC,
+  [SIDEBAR_SORT_SECTIONS.LABELS]: SIDEBAR_SORT_KEYS.CUSTOM,
 });
 
 export const isValidSidebarSort = (section, sortBy) => {
@@ -143,6 +146,9 @@ export const sortSidebarItems = (
   items,
   { sortBy, labelKey, unreadCountKey = () => 0 }
 ) => {
+  // ordem do admin = a ordem em que os itens já chegam (position da API)
+  if (sortBy === SIDEBAR_SORT_KEYS.CUSTOM) return (items || []).slice();
+
   return (items || []).slice().sort((a, b) => {
     if (sortBy === SIDEBAR_SORT_KEYS.CREATED_DESC) {
       const createdDiff = getCreatedValue(b) - getCreatedValue(a);

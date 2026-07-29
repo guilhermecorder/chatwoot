@@ -5,6 +5,7 @@
 #  id              :bigint           not null, primary key
 #  color           :string           default("#1f93ff"), not null
 #  description     :text
+#  position        :integer
 #  show_on_sidebar :boolean
 #  title           :string
 #  created_at      :datetime         not null
@@ -28,7 +29,9 @@ class Label < ApplicationRecord
             uniqueness: { scope: :account_id }
 
   after_update_commit :update_associated_models
-  default_scope { order(:title) }
+  # ordem definida pelo admin na tela de Etiquetas (position); etiqueta nova
+  # (position nulo) entra no fim, em ordem alfabética
+  default_scope { order(Arel.sql('labels.position ASC NULLS LAST'), :title) }
 
   before_validation do
     self.title = title.downcase if attribute_present?('title')

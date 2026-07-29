@@ -18,7 +18,11 @@
         "DESCRIPTION": "Descrição",
         "COLOR": "Cor",
         "ACTION": "Ações"
-      }
+      },
+      "REORDER_UP": "Subir",
+      "REORDER_DOWN": "Descer",
+      "REORDER_HINT": "Arraste as linhas pela alça ⠿ (ou use as setas) — esta ordem é a que o time vê (menu lateral, seletores e filtros).",
+      "REORDER_DRAG": "Arraste para reordenar"
     },
     "FORM": {
       "NAME": {

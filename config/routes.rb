@@ -530,9 +530,16 @@ Rails.application.routes.draw do
               patch :update
             end
           end
-          resources :labels, only: [:index, :show, :create, :update, :destroy]
+          resources :labels, only: [:index, :show, :create, :update, :destroy] do
+            collection { post :reorder }
+          end
           resources :tasks, only: [:index, :create, :update, :destroy] do
-            member { post :comment }
+            member do
+              post :comment
+              # anexos da tarefa (imagem/PDF/documento — criador ↔ responsável)
+              post :attachments
+              delete 'attachments/:attachment_id', action: :destroy_attachment
+            end
             collection do
               # etiquetas do paciente + respostas de formulário p/ a lista
               # do dia da Agenda (o médico lê antes da consulta — item 76)
