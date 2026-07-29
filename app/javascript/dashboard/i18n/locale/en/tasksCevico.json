@@ -47,6 +47,15 @@
       "TITLE": "Summary",
       "SUBTITLE": "Task distribution",
       "EMPTY": "No tasks to show"
+    },
+    "ATTACH": {
+      "TITLE": "Attachments",
+      "HINT": "(image, PDF, Word or Excel · max 10 per task)",
+      "ADD": "Add file",
+      "SENDING": "Sending…",
+      "REMOVE": "Remove attachment",
+      "ERROR": "Could not upload the file. Try again.",
+      "ON_SAVE": "Files are uploaded when you save the task."
     }
   },
   "AGENDA": {

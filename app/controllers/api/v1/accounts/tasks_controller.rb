@@ -1,9 +1,12 @@
 class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
+  include TaskAttachments
+
   before_action :task, only: [:update, :destroy]
 
   def index
     # cards arquivados (coluna oculta do item 95) ficam fora do board
-    tasks = Current.account.tasks.where(archived_at: nil).includes(:creator, :assignee)
+    tasks = Current.account.tasks.where(archived_at: nil)
+                   .includes(:creator, :assignee, files_attachments: :blob)
 
     # Privacidade: agente comum só vê as próprias tarefas (criadas por/para ele)
     # e as das UNIDADES (agenda compartilhada). Admin vê tudo.
@@ -96,7 +99,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
 
   # POST /tasks/:id/comment — solicitação/ajuda entre quem criou e quem executa
   def comment
-    return render json: { error: 'Sem acesso a esta tarefa.' }, status: :forbidden unless can_comment?
+    return render json: { error: 'Sem acesso a esta tarefa.' }, status: :forbidden unless can_collaborate?
 
     text = params[:text].to_s.strip
     return render json: { error: 'Escreva a mensagem.' }, status: :unprocessable_entity if text.blank?
@@ -117,7 +120,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
     @task ||= Current.account.tasks.find(params[:id])
   end
 
-  def can_comment?
+  def can_collaborate?
     Current.account_user.administrator? ||
       [task.creator_id, task.assignee_id].include?(Current.user.id)
   end
@@ -163,6 +166,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
       surgery_indication: t.surgery_indication,
       indicated_procedure: t.indicated_procedure,
       comments: Array(t.comments),
+      attachments: task_files_json(t),
       creator: { id: t.creator.id, name: t.creator.name },
       assignee: t.assignee ? { id: t.assignee.id, name: t.assignee.name } : nil
     }.merge(surgery_value_json(t))

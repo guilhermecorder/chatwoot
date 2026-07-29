@@ -14,6 +14,17 @@ class TasksAPI extends ApiClient {
   comment(id, text) {
     return axios.post(`${this.url}/${id}/comment`, { text });
   }
+
+  // anexos da tarefa (imagem/PDF/documento)
+  addAttachments(id, files) {
+    const formData = new FormData();
+    files.forEach(file => formData.append('files[]', file));
+    return axios.post(`${this.url}/${id}/attachments`, formData);
+  }
+
+  deleteAttachment(id, attachmentId) {
+    return axios.delete(`${this.url}/${id}/attachments/${attachmentId}`);
+  }
 }
 
 export default new TasksAPI();
