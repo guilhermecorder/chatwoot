@@ -62,7 +62,9 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
 
   if (!isLoggedIn) {
     window.location.assign('/app/login');
-    return '';
+    // aborta a navegação SPA enquanto o redirect acima assume — todo caminho
+    // deste guard precisa chamar next (vue-router 4: "Invalid navigation guard")
+    return next(false);
   }
 
   const { accounts = [], account_id: accountId } = user;

@@ -8,6 +8,18 @@ import { ref, computed, onMounted, watch } from 'vue';
 import CrmAPI from 'dashboard/api/crm';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useAlert } from 'dashboard/composables';
+import { Bar, Doughnut } from 'vue-chartjs';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
 
 const period = ref(30);
 const data = ref(null);
@@ -112,6 +124,114 @@ const champion = computed(() => {
 });
 
 const medalFor = index => ['🥇', '🥈', '🥉'][index] || null;
+
+// ── Gráficos (padrão dos outros dashboards: Chart.js, cores CEVICO) ──
+const shortName = n => ((n || '').length > 26 ? `${(n || '').slice(0, 25)}…` : n || '');
+
+// Investimento × Receita por anúncio: barras deitadas (nome legível);
+// anúncio bom = barra dourada maior que a azul
+const investChart = computed(() => {
+  const top = [...rows.value]
+    .filter(r => r.spend > 0 || r.revenue > 0)
+    .sort((a, b) => (b.spend || 0) - (a.spend || 0))
+    .slice(0, 8);
+  if (!top.length) return null;
+  const barBase = { borderRadius: 6, borderSkipped: false, maxBarThickness: 16 };
+  return {
+    data: {
+      labels: top.map(r => shortName(r.ad_name)),
+      datasets: [
+        { label: 'Investimento', data: top.map(r => r.spend || 0), backgroundColor: AZUL + 'E6', ...barBase },
+        { label: 'Receita (CRM)', data: top.map(r => r.revenue || 0), backgroundColor: OURO + 'E6', ...barBase },
+      ],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 400 },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatMoneyShort(ctx.raw)}` } },
+      },
+      scales: {
+        x: { ticks: { callback: v => formatMoneyShort(v), maxTicksLimit: 6 }, grid: { color: 'rgba(120,140,180,0.12)' } },
+        y: { grid: { display: false }, ticks: { font: { size: 10 } } },
+      },
+    },
+  };
+});
+
+// Leads × Conversões por anúncio (funil de cada anúncio, lado a lado)
+const leadsChart = computed(() => {
+  const top = [...rows.value]
+    .filter(r => (r.leads || 0) > 0)
+    .sort((a, b) => (b.leads || 0) - (a.leads || 0))
+    .slice(0, 8);
+  if (!top.length) return null;
+  const barBase = { borderRadius: 8, borderSkipped: false, maxBarThickness: 26 };
+  return {
+    data: {
+      labels: top.map(r => shortName(r.ad_name)),
+      datasets: [
+        { label: 'Leads', data: top.map(r => r.leads || 0), backgroundColor: ROXO + 'E6', ...barBase },
+        { label: 'Conversões', data: top.map(r => r.conversions || 0), backgroundColor: VERDE + 'E6', ...barBase },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 400 },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatNumber(ctx.raw)}` } },
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { precision: 0, maxTicksLimit: 6 }, grid: { color: 'rgba(120,140,180,0.12)' } },
+        x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 30 } },
+      },
+    },
+  };
+});
+
+// Onde está o investimento (fatia de cada anúncio no total gasto)
+const spendShareChart = computed(() => {
+  const spenders = [...rows.value]
+    .filter(r => (r.spend || 0) > 0)
+    .sort((a, b) => (b.spend || 0) - (a.spend || 0));
+  if (!spenders.length) return null;
+  const top = spenders.slice(0, 5);
+  const rest = spenders.slice(5).reduce((acc, r) => acc + (r.spend || 0), 0);
+  const labels = top.map(r => shortName(r.ad_name)).concat(rest > 0 ? ['Outros anúncios'] : []);
+  const values = top.map(r => r.spend || 0).concat(rest > 0 ? [rest] : []);
+  const palette = [AZUL, ROXO, VERDE, OURO, AMBAR, CIANO];
+  return {
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: palette.slice(0, labels.length), borderWidth: 0, borderRadius: 6, spacing: 3 }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '62%',
+      animation: { duration: 400 },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, padding: 10, font: { size: 10 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${formatMoneyShort(ctx.raw)}` } },
+      },
+    },
+  };
+});
+
+// como cada número nasce — por extenso, no padrão do kit (nunca restar dúvida)
+const FORMULAS = [
+  { label: 'Leads', text: 'contatos que chegaram clicando no anúncio (dado da Meta na 1ª mensagem)' },
+  { label: 'Conversões', text: 'o card do lead passou pela(s) coluna(s) escolhida(s) na faixa verde acima' },
+  { label: 'CPL', text: 'investimento ÷ leads' },
+  { label: 'CAC', text: 'investimento ÷ conversões' },
+  { label: 'Receita (CRM)', text: 'soma do valor em R$ dos cards dos leads que converteram' },
+  { label: 'ROAS', text: 'receita ÷ investimento (quanto voltou de cada R$ 1)' },
+];
 
 const runBackfill = async () => {
   if (isBackfilling.value) return;
@@ -331,6 +451,44 @@ const conversionSentence = computed(() => {
                 <template v-if="champion.revenue"> · {{ formatMoneyShort(champion.revenue) }}</template>
               </p>
             </div>
+          </div>
+        </div>
+
+        <!-- Como cada número é calculado — por extenso, sem mistério -->
+        <div class="rounded-2xl border border-n-weak bg-n-card px-4 py-3 mb-5">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="i-lucide-info text-n-slate-10 text-sm" />
+            <p class="text-[11px] font-bold text-n-slate-11">Como cada número é calculado</p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-1">
+            <p v-for="f in FORMULAS" :key="f.label" class="text-[11px] text-n-slate-10">
+              <span class="font-bold text-n-slate-11">{{ f.label }}</span> = {{ f.text }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Gráficos: o impacto de cada anúncio, visual -->
+        <div v-if="investChart || spendShareChart" class="grid grid-cols-1 xl:grid-cols-3 gap-3 mb-5">
+          <div v-if="investChart" class="xl:col-span-2 rounded-2xl border border-n-weak bg-n-card p-4">
+            <h3 class="text-sm font-bold text-n-slate-12 mb-0.5">Investimento × retorno por anúncio</h3>
+            <p class="text-[11px] text-n-slate-10 mb-3">anúncio saudável = barra dourada (o que voltou) maior que a azul (o que saiu)</p>
+            <div class="h-72">
+              <Bar :data="investChart.data" :options="investChart.options" />
+            </div>
+          </div>
+          <div v-if="spendShareChart" class="rounded-2xl border border-n-weak bg-n-card p-4">
+            <h3 class="text-sm font-bold text-n-slate-12 mb-0.5">Onde está o investimento</h3>
+            <p class="text-[11px] text-n-slate-10 mb-3">fatia de cada anúncio no total gasto do período</p>
+            <div class="h-72">
+              <Doughnut :data="spendShareChart.data" :options="spendShareChart.options" />
+            </div>
+          </div>
+        </div>
+        <div v-if="leadsChart" class="rounded-2xl border border-n-weak bg-n-card p-4 mb-5">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-0.5">Leads e conversões por anúncio</h3>
+          <p class="text-[11px] text-n-slate-10 mb-3">quantos chegaram por cada anúncio (roxo) — e quantos desses viraram conversão (verde)</p>
+          <div class="h-64">
+            <Bar :data="leadsChart.data" :options="leadsChart.options" />
           </div>
         </div>
 

@@ -11,23 +11,27 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     # sem ORDER BY na base: as consultas agrupadas (group/count/sum) do
     # dashboard quebram no Postgres se herdarem a ordenação
     contacts = pipeline.crm_contacts
+    # COORTE do período: cards cujo LEAD surgiu dentro do range escolhido
+    # (data real do contato, não a do card). TODOS os blocos do dashboard
+    # respondem ao seletor de período através dela — pedido do refino 28/07.
+    cohort = contacts.joins(:contact).where(contacts: { created_at: since..until_at })
 
     render json: {
       pipeline_id:        pipeline.id,
       pipeline_name:      pipeline.name,
       period_days:        ((until_at - since) / 1.day).ceil,
-      kpis:               build_kpis(pipeline, contacts, since, until_at),
-      funnel:             build_funnel(pipeline, contacts),
-      value_by_stage:     build_value_by_stage(pipeline, contacts),
-      avg_time_by_stage:  build_avg_time_by_stage(pipeline, contacts),
+      kpis:               build_kpis(pipeline, contacts, cohort, since, until_at),
+      funnel:             build_funnel(pipeline, cohort),
+      value_by_stage:     build_value_by_stage(pipeline, cohort),
+      avg_time_by_stage:  build_avg_time_by_stage(pipeline, cohort),
       by_inbox:           build_by_inbox(since, until_at),
       created_over_time:  build_created_over_time(pipeline, contacts, since, until_at),
-      responsiveness:     build_responsiveness(pipeline, contacts),
+      responsiveness:     build_responsiveness(pipeline, cohort),
       agents:             build_agents(since, until_at),
       sheet_surgeries:    build_sheet_surgeries(since, until_at),
-      by_label:           build_by_label(contacts),
+      by_label:           build_by_label(cohort),
       radar:              build_radar(since, until_at),
-      nps:                build_nps(pipeline, contacts),
+      nps:                build_nps(pipeline, cohort),
     }
   end
 
@@ -135,40 +139,55 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
 
   # ── KPIs ─────────────────────────────────────────────────────────
 
-  def build_kpis(pipeline, contacts, since, until_at)
-    total         = contacts.count
-    # data do lead = quando o contato surgiu (histórico real), não quando o
-    # card foi criado no CRM (que pode ter sido hoje, na importação)
-    new_in_period = contacts.joins(:contact).where(contacts: { created_at: since..until_at }).count
-    total_value   = contacts.sum('COALESCE(value, 0)').to_f.round(2)
+  def build_kpis(pipeline, contacts, cohort, since, until_at)
+    total        = contacts.count
+    cohort_total = cohort.count
+    # mesma régua do Meu Painel (Crm::LeadsUniverse): contatos novos das
+    # caixas de captação — os dois ambientes mostram o MESMO número
+    new_in_period = Crm::LeadsUniverse.scope(Current.account, since, until_at).count
 
-    # Última etapa (maior position) = etapa de fechamento
-    closing_stage = pipeline.stages.order(position: :desc).first
-    closed_count  = closing_stage ? contacts.where(stage: closing_stage).count : 0
-    close_rate    = total > 0 ? ((closed_count.to_f / total) * 100).round(1) : 0
+    # "fechou" = chegou à coluna de cirurgia (sem pós/indicação) ou além —
+    # mesma régua do Meu Painel; antes era só a ÚLTIMA coluna (Pós Operatório)
+    closing_ids   = closing_stage_ids(pipeline)
+    closed_cohort = closing_ids.any? ? cohort.where(stage_id: closing_ids) : cohort.none
+    closed_count  = closed_cohort.count
+    close_rate    = cohort_total.positive? ? ((closed_count.to_f / cohort_total) * 100).round(1) : 0
+    closed_value  = closed_cohort.sum('COALESCE(value, 0)').to_f.round(2)
 
-    # Tempo médio de conversão: soma das durações dos logs de quem chegou na última etapa
-    avg_conversion_minutes = if closing_stage
-      closed_contacts = contacts.where(stage: closing_stage)
-      if closed_contacts.any?
-        Crm::StageLog
-          .where(crm_contact_id: closed_contacts.select(:id))
-          .where.not(duration_minutes: nil)
-          .group(:crm_contact_id)
-          .sum(:duration_minutes)
-          .values
-          .then { |sums| sums.any? ? (sums.sum.to_f / sums.size).round(0) : nil }
-      end
+    # Tempo médio de conversão dos leads do período que fecharam
+    avg_conversion_minutes = if closed_count.positive?
+      Crm::StageLog
+        .where(crm_contact_id: closed_cohort.select(:id))
+        .where.not(duration_minutes: nil)
+        .group(:crm_contact_id)
+        .sum(:duration_minutes)
+        .values
+        .then { |sums| sums.any? ? (sums.sum.to_f / sums.size).round(0) : nil }
     end
 
     {
       total_leads:             total,
+      cohort_total:            cohort_total,
       new_in_period:           new_in_period,
-      total_value:             total_value,
+      closed_value:            closed_value,
       close_rate:              close_rate,
       closed_count:            closed_count,
       avg_conversion_minutes:  avg_conversion_minutes,
     }
+  end
+
+  # colunas que valem como "fechou cirurgia": a coluna /cirurgia/ (sem pós e
+  # sem indicação) e tudo que vem depois dela; sem coluna assim = última
+  def closing_stage_ids(pipeline)
+    ordered = pipeline.stages.sort_by(&:position)
+    target = ordered.find { |s| closing_stage?(s) } || ordered.last
+    return [] if target.nil?
+
+    ordered.select { |s| s.position >= target.position }.map(&:id)
+  end
+
+  def closing_stage?(stage)
+    stage.name.match?(/cirurgia/i) && !stage.name.match?(/pós|indica/i)
   end
 
   # ── Funil ─────────────────────────────────────────────────────────
@@ -247,28 +266,67 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
   # data REAL do lead (contacts.created_at) — usar a data em que o card foi
   # movido criava picos artificiais nos dias de tratamento em massa.
 
+  # granularidade inteligente: 1 dia = por HORA, até ~3 meses = por DIA,
+  # acima disso = por SEMANA — o gráfico nunca vira 1 barra solitária nem
+  # uma parede de 180 barras
   def build_created_over_time(pipeline, contacts, since, until_at)
     days = [((until_at.to_date - since.to_date).to_i + 1), 1].max
+    granularity = :day
+    granularity = :hour if days <= 1
+    granularity = :week if days > 92
 
-    # Usa a data de criação do CONTATO (histórico real), não a do card
-    by_day = contacts
-      .joins(:contact)
-      .where(contacts: { created_at: since..until_at })
-      .group("DATE(contacts.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')")
-      .count
+    series = timeline_series(pipeline, contacts, since, until_at, timeline_bucket_sql(granularity))
 
-    schedule_by_day = reached_stage_by_day(pipeline, contacts, since, until_at, /agendamento/i)
-    surgery_by_day  = reached_stage_by_day(pipeline, contacts, since, until_at, /cirurgia/i, exclude: /pós|indica/i)
-
-    (0...days).map do |i|
-      date = since.to_date + i
+    timeline_keys(granularity, since, until_at).map do |key, label|
       {
-        date: date.iso8601,
-        count: by_day[date] || 0,
-        agendamentos: schedule_by_day[date] || 0,
-        cirurgias: surgery_by_day[date] || 0,
+        date: key,
+        label: label,
+        granularity: granularity,
+        count: series[:novas][key] || 0,
+        agendamentos: series[:agendamentos][key] || 0,
+        cirurgias: series[:cirurgias][key] || 0,
       }
     end
+  end
+
+  def timeline_series(pipeline, contacts, since, until_at, bucket_sql)
+    base = contacts.joins(:contact).where(contacts: { created_at: since..until_at })
+    {
+      novas: base.group(Arel.sql(bucket_sql)).count,
+      agendamentos: reached_stage_scope(pipeline, contacts, since, until_at, /agendamento/i)
+        .group(Arel.sql(bucket_sql)).count,
+      cirurgias: reached_stage_scope(pipeline, contacts, since, until_at, /cirurgia/i, exclude: /pós|indica/i)
+        .group(Arel.sql(bucket_sql)).count
+    }
+  end
+
+  TIMELINE_TZ_SQL = "contacts.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'".freeze
+
+  def timeline_bucket_sql(granularity)
+    case granularity
+    when :hour then "to_char(#{TIMELINE_TZ_SQL}, 'HH24')"
+    when :week then "to_char(date_trunc('week', #{TIMELINE_TZ_SQL}), 'YYYY-MM-DD')"
+    else "to_char(#{TIMELINE_TZ_SQL}, 'YYYY-MM-DD')"
+    end
+  end
+
+  # [chave do bucket, rótulo pronto pro gráfico]
+  def timeline_keys(granularity, since, until_at)
+    case granularity
+    when :hour then (0..23).map { |h| [format('%02d', h), "#{format('%02d', h)}h"] }
+    when :week then week_keys(since, until_at)
+    else (since.to_date..until_at.to_date).map { |d| [d.iso8601, d.strftime('%d/%m')] }
+    end
+  end
+
+  def week_keys(since, until_at)
+    keys = []
+    day = since.to_date.beginning_of_week
+    while day <= until_at.to_date
+      keys << [day.iso8601, "sem. #{day.strftime('%d/%m')}"]
+      day += 7
+    end
+    keys
   end
 
   # ── Etiquetas: volume e proporção entre os leads do funil ─────────
@@ -390,12 +448,12 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     { configured: true, error: 'Não consegui ler a planilha agora.' }
   end
 
-  # leads que chegaram ATÉ a etapa alvo (ou além), agrupados pela data em
-  # que o LEAD surgiu — visão de coorte, imune a movimentações em massa
-  def reached_stage_by_day(pipeline, contacts, since, until_at, pattern, exclude: /pós/i)
+  # leads que chegaram ATÉ a etapa alvo (ou além) no período — visão de
+  # coorte pela data do LEAD, imune a movimentações em massa
+  def reached_stage_scope(pipeline, contacts, since, until_at, pattern, exclude: /pós/i)
     ordered = pipeline.stages.order(:position).to_a
     target = ordered.find { |s| s.name.match?(pattern) && !s.name.match?(exclude) }
-    return {} unless target
+    return contacts.none unless target
 
     reached_ids = ordered.select { |s| s.position >= target.position }.map(&:id)
 
@@ -403,7 +461,5 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       .joins(:contact)
       .where(stage_id: reached_ids)
       .where(contacts: { created_at: since..until_at })
-      .group("DATE(contacts.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo')")
-      .count
   end
 end

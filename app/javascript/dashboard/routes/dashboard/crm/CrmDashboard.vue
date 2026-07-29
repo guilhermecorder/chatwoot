@@ -187,7 +187,9 @@ const CHART_OPTIONS_BASE = {
 const timelineChart = computed(() => {
   if (!data.value?.created_over_time) return null;
   const t = data.value.created_over_time;
+  // o backend manda o rótulo pronto na granularidade certa (hora/dia/semana)
   const labels = t.map(d => {
+    if (d.label) return d.label;
     const dt = new Date(d.date + 'T12:00:00');
     return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   });
@@ -208,11 +210,21 @@ const timelineChart = computed(() => {
         tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw}` } },
       },
       scales: {
-        y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: 'rgba(120,140,180,0.12)' } },
-        x: { grid: { display: false }, ticks: { maxTicksLimit: 12 } },
+        // precision 0 = só inteiros, mas sem forçar 1 em 1 (mês com 1.400
+        // leads virava uma parede de ticks)
+        y: { beginAtZero: true, ticks: { precision: 0, maxTicksLimit: 6 }, grid: { color: 'rgba(120,140,180,0.12)' } },
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 14 } },
       },
     },
   };
+});
+
+// legenda do subtítulo acompanha a granularidade escolhida pelo backend
+const timelineGranularity = computed(() => {
+  const g = data.value?.created_over_time?.[0]?.granularity;
+  if (g === 'hour') return 'por hora do dia';
+  if (g === 'week') return 'por semana';
+  return 'por dia';
 });
 
 // Conversas por caixa de entrada (doughnut)
@@ -481,30 +493,30 @@ const agentView = computed(() => {
         <DashKpi
           label="Total no funil"
           :value="data.kpis.total_leads"
-          sub="conversas"
+          sub="desde o início (não muda com o período)"
           from="#0F5FA6"
           to="#0B4A82"
         />
         <DashKpi
           label="Novas no período"
           :value="data.kpis.new_in_period"
-          sub="conversas"
+          sub="caixas Google + Instagram · igual ao Meu Painel"
           value-color="#0F5FA6"
           :state="goals.stateFor('new_leads')"
           :goal="goals.goalFor('new_leads')"
         />
         <DashKpi
-          label="Valor em pipeline"
-          :value="Math.round(data.kpis.total_value || 0)"
+          label="Valor fechado"
+          :value="Math.round(data.kpis.closed_value || 0)"
           prefix="R$ "
-          sub="total"
+          sub="cirurgias dos leads do período"
           from="#65A30D"
           to="#84CC16"
         />
         <DashKpi
           label="Fechamentos"
           :value="data.kpis.closed_count"
-          sub="conversas"
+          sub="leads do período que chegaram à cirurgia"
           from="#B8860B"
           to="#D4A017"
           :state="goals.stateFor('surgeries_booked')"
@@ -513,14 +525,14 @@ const agentView = computed(() => {
         <DashKpi
           label="Taxa de fechamento"
           :value="`${data.kpis.close_rate}%`"
-          sub="conversão"
+          :sub="`${data.kpis.closed_count} de ${data.kpis.cohort_total} leads do período`"
           from="#5B21B6"
           to="#7C3AED"
         />
         <DashKpi
           label="Tempo médio"
           :value="formatDuration(data.kpis.avg_conversion_minutes)"
-          sub="de conversão"
+          sub="da chegada até fechar a cirurgia"
         />
       </div>
 
@@ -573,7 +585,7 @@ const agentView = computed(() => {
             </span>
             Responsividade das conversas
           </h3>
-          <span class="text-xs text-n-slate-10">% = quanto do total chegou até a etapa · barras proporcionais entre si</span>
+          <span class="text-xs text-n-slate-10">leads do período escolhido · % = quanto do total chegou até a etapa · barras proporcionais entre si</span>
         </div>
 
         <div class="space-y-2.5">
@@ -632,7 +644,7 @@ const agentView = computed(() => {
         <div class="xl:col-span-2 bg-n-solid-2 border border-n-weak rounded-2xl p-6">
           <h3 class="text-sm font-bold text-n-slate-12 mb-1">Conversas ao longo do tempo</h3>
           <p class="text-[11px] text-n-slate-10 mb-4">
-            pela data em que o lead chegou — e, desses leads, quantos avançaram até agendar ou operar
+            {{ timelineGranularity }}, pela data em que o lead chegou — e, desses leads, quantos avançaram até agendar ou operar
           </p>
           <div class="h-64">
             <Bar
@@ -671,7 +683,7 @@ const agentView = computed(() => {
             <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
               <span class="i-lucide-tags text-white text-sm" />
             </span>
-            <h3 class="text-sm font-bold text-n-slate-12">Etiquetas dos leads</h3>
+            <h3 class="text-sm font-bold text-n-slate-12">Etiquetas dos leads <span class="font-normal text-n-slate-10">· período escolhido</span></h3>
             <span v-if="data.by_label?.total" class="text-[11px] text-n-slate-9 ml-auto">
               {{ data.by_label.total }} etiquetas aplicadas
             </span>
@@ -740,7 +752,7 @@ const agentView = computed(() => {
           <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B91C1C, #EF4444)">
             <span class="i-lucide-heart-crack text-white text-sm" />
           </span>
-          <h3 class="text-sm font-bold text-n-slate-12">🟥 Perdas por motivo</h3>
+          <h3 class="text-sm font-bold text-n-slate-12">🟥 Perdas por motivo <span class="font-normal text-n-slate-10">· período escolhido</span></h3>
           <span v-if="lossTotal" class="text-[11px] text-n-slate-9 ml-auto">
             {{ lossTotal }} etiqueta(s) de perda aplicadas nos leads deste funil
           </span>
@@ -816,7 +828,7 @@ const agentView = computed(() => {
           </span>
           <h3 class="text-sm font-bold text-n-slate-12">Satisfação dos pacientes (NPS)</h3>
           <span class="text-[11px] text-n-slate-9 ml-auto">
-            {{ data.nps?.stage_name ? `pacientes que chegaram a "${data.nps.stage_name}"` : 'funil inteiro' }} · notas lidas pelo agente de NPS
+            {{ data.nps?.stage_name ? `pacientes do período que chegaram a "${data.nps.stage_name}"` : 'leads do período' }} · notas lidas pelo agente de NPS
           </span>
         </div>
         <div v-if="!data.nps?.total" class="flex flex-col items-center justify-center py-8 text-n-slate-10 text-sm gap-2">
@@ -915,7 +927,7 @@ const agentView = computed(() => {
 
         <!-- Conversas por etapa -->
         <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Conversas por etapa</h3>
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Conversas por etapa <span class="font-normal text-n-slate-10">· leads do período</span></h3>
           <div class="h-56">
             <Bar
               v-if="funnelChart"
@@ -933,6 +945,7 @@ const agentView = computed(() => {
           <h3 class="text-sm font-bold text-n-slate-12 mb-5 flex items-center gap-2">
             <span class="i-lucide-circle-dollar-sign" style="color: #65A30D" />
             Valor em cada etapa do pipeline
+            <span class="font-normal text-n-slate-10 text-xs">· leads do período</span>
           </h3>
           <div class="h-56">
             <Bar
@@ -949,7 +962,7 @@ const agentView = computed(() => {
 
         <!-- Tempo médio por etapa -->
         <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Tempo médio por etapa</h3>
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Tempo médio por etapa <span class="font-normal text-n-slate-10">· leads do período</span></h3>
           <div class="h-56">
             <Bar
               v-if="timeChart"

@@ -415,11 +415,13 @@ const openCreate = () => {
   editingTask.value = null;
   form.value = emptyForm();
   showDeleteConfirm.value = false;
+  resetPendingFiles();
   showModal.value = true;
 };
 
 const openEdit = task => {
   editingTask.value = task;
+  resetPendingFiles();
   form.value = {
     title: task.title,
     description: task.description ?? '',
@@ -433,6 +435,78 @@ const openEdit = task => {
   showModal.value = true;
 };
 
+// ── 📎 Anexos da tarefa (imagem/PDF/documento) ─────────────
+const ACCEPT_FILES = 'image/*,.pdf,.doc,.docx,.xls,.xlsx';
+const pendingFiles = ref([]); // escolhidos e ainda não enviados ({ file, url })
+const isUploadingFiles = ref(false);
+const previewImage = ref(null); // imagem aberta em tela cheia
+const fileInputEl = ref(null);
+
+const resetPendingFiles = () => {
+  pendingFiles.value.forEach(p => p.url && URL.revokeObjectURL(p.url));
+  pendingFiles.value = [];
+  previewImage.value = null;
+};
+
+const pickFiles = () => fileInputEl.value?.click();
+
+const onFilesPicked = event => {
+  const files = Array.from(event.target.files || []);
+  event.target.value = '';
+  files.forEach(file => {
+    const already =
+      (editingTask.value?.attachments?.length || 0) + pendingFiles.value.length;
+    if (already >= 10) return;
+    pendingFiles.value.push({
+      file,
+      url: file.type?.startsWith('image/') ? URL.createObjectURL(file) : null,
+    });
+  });
+};
+
+const removePending = index => {
+  const item = pendingFiles.value[index];
+  if (item?.url) URL.revokeObjectURL(item.url);
+  pendingFiles.value.splice(index, 1);
+};
+
+// envia os pendentes depois que a tarefa existe; devolve a tarefa atualizada
+const uploadPending = async taskId => {
+  if (!pendingFiles.value.length) return null;
+  isUploadingFiles.value = true;
+  try {
+    const { data } = await TasksAPI.addAttachments(
+      taskId,
+      pendingFiles.value.map(p => p.file)
+    );
+    resetPendingFiles();
+    return data;
+  } catch (error) {
+    useAlert(error?.response?.data?.error || t('TASKS.ATTACH.ERROR'));
+    return null;
+  } finally {
+    isUploadingFiles.value = false;
+  }
+};
+
+const removeAttachment = async att => {
+  if (!editingTask.value) return;
+  try {
+    const { data } = await TasksAPI.deleteAttachment(editingTask.value.id, att.id);
+    syncTask(data);
+    editingTask.value = data;
+  } catch {
+    useAlert(t('TASKS.ATTACH.ERROR'));
+  }
+};
+
+const syncTask = data => {
+  const idx = tasks.value.findIndex(x => x.id === data.id);
+  if (idx !== -1) tasks.value.splice(idx, 1, data);
+  else tasks.value.push(data);
+  store.commit('tasks/upsertTask', data);
+};
+
 const save = async () => {
   if (!form.value.title.trim() || isSaving.value) return;
   isSaving.value = true;
@@ -444,16 +518,15 @@ const save = async () => {
     };
     if (editingTask.value) {
       const wasDone = editingTask.value.status === 'done';
-      const { data } = await TasksAPI.update(editingTask.value.id, payload);
-      const idx = tasks.value.findIndex(x => x.id === data.id);
-      if (idx !== -1) tasks.value.splice(idx, 1, data);
-      store.commit('tasks/upsertTask', data);
+      let { data } = await TasksAPI.update(editingTask.value.id, payload);
+      data = (await uploadPending(data.id)) || data;
+      syncTask(data);
       if (data.status === 'done' && !wasDone) celebrateIfEarly(data);
       useAlert(t('TASKS.SAVED'));
     } else {
-      const { data } = await TasksAPI.create(payload);
-      tasks.value.push(data);
-      store.commit('tasks/upsertTask', data);
+      let { data } = await TasksAPI.create(payload);
+      data = (await uploadPending(data.id)) || data;
+      syncTask(data);
       useAlert(t('TASKS.CREATED'));
     }
     showModal.value = false;
@@ -605,6 +678,14 @@ const formatDue = iso => {
                       class="text-[10px] bg-n-alpha-2 text-n-slate-10 rounded-full px-2 py-0.5"
                     >
                       {{ task.task_type }}
+                    </span>
+                    <span
+                      v-if="task.attachments?.length"
+                      class="text-[10px] bg-n-alpha-2 text-n-slate-10 rounded-full px-2 py-0.5 inline-flex items-center gap-0.5"
+                      :title="$t('TASKS.ATTACH.TITLE')"
+                    >
+                      <span class="i-lucide-paperclip text-[9px]" />
+                      {{ task.attachments.length }}
                     </span>
                   </div>
 
@@ -775,6 +856,17 @@ const formatDue = iso => {
       </div>
     </div>
 
+    <!-- 🔍 anexo de imagem em tela cheia -->
+    <div
+      v-if="previewImage"
+      class="fixed inset-0 z-[70] flex items-center justify-center p-6 cursor-zoom-out"
+      style="background: rgba(0, 0, 0, 0.82)"
+      @click="previewImage = null"
+    >
+      <img :src="previewImage" class="max-w-full max-h-full rounded-xl shadow-2xl" />
+      <button class="absolute top-4 right-4 text-white text-2xl i-lucide-x" @click="previewImage = null" />
+    </div>
+
     <!-- 🎉 Celebração: EXPLOSÃO DE EMOJIS localizada perto do painel -->
     <div
       v-if="showCelebration && burstOrigin === 'float'"
@@ -886,6 +978,69 @@ const formatDue = iso => {
               <option value="doing">{{ $t('TASKS.COLUMNS.DOING') }}</option>
               <option value="done">{{ $t('TASKS.COLUMNS.DONE') }}</option>
             </select>
+          </div>
+
+          <!-- 📎 Anexos: imagem/PDF/documento (criador ↔ responsável) -->
+          <div class="border-t border-n-weak pt-3">
+            <p class="text-xs font-semibold text-n-slate-11 mb-2 flex items-center gap-1.5">
+              <span class="i-lucide-paperclip text-sm" style="color: #B8860B" />
+              {{ $t('TASKS.ATTACH.TITLE') }}
+              <span class="text-n-slate-9 font-normal">{{ $t('TASKS.ATTACH.HINT') }}</span>
+            </p>
+            <div v-if="(editingTask?.attachments?.length || 0) + pendingFiles.length" class="flex flex-wrap gap-2 mb-2">
+              <!-- já salvos na tarefa -->
+              <div v-for="att in editingTask?.attachments || []" :key="`att-${att.id}`" class="relative group">
+                <img
+                  v-if="att.is_image"
+                  :src="att.url"
+                  :title="att.filename"
+                  class="w-16 h-16 rounded-lg object-cover border border-n-weak cursor-zoom-in"
+                  @click="previewImage = att.url"
+                />
+                <a
+                  v-else
+                  :href="att.url"
+                  target="_blank"
+                  :title="att.filename"
+                  class="w-16 h-16 rounded-lg border border-n-weak bg-n-alpha-1 flex flex-col items-center justify-center gap-0.5 px-1"
+                >
+                  <span class="i-lucide-file-text text-lg text-n-slate-10" />
+                  <span class="text-[8px] text-n-slate-10 truncate w-full text-center">{{ att.filename }}</span>
+                </a>
+                <button
+                  class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-n-slate-12 text-white text-[9px] leading-none hidden group-hover:flex items-center justify-center"
+                  :title="$t('TASKS.ATTACH.REMOVE')"
+                  @click.stop="removeAttachment(att)"
+                >
+                  ✕
+                </button>
+              </div>
+              <!-- escolhidos agora (sobem ao salvar) -->
+              <div v-for="(p, i) in pendingFiles" :key="`pend-${i}`" class="relative group">
+                <img v-if="p.url" :src="p.url" :title="p.file.name" class="w-16 h-16 rounded-lg object-cover border border-dashed border-n-strong" />
+                <div v-else :title="p.file.name" class="w-16 h-16 rounded-lg border border-dashed border-n-strong bg-n-alpha-1 flex flex-col items-center justify-center gap-0.5 px-1">
+                  <span class="i-lucide-file-text text-lg text-n-slate-10" />
+                  <span class="text-[8px] text-n-slate-10 truncate w-full text-center">{{ p.file.name }}</span>
+                </div>
+                <button
+                  class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-n-slate-12 text-white text-[9px] leading-none hidden group-hover:flex items-center justify-center"
+                  :title="$t('TASKS.ATTACH.REMOVE')"
+                  @click.stop="removePending(i)"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <button
+              class="text-xs font-medium px-3 py-1.5 rounded-lg border border-n-weak hover:border-n-brand text-n-slate-11 flex items-center gap-1.5 disabled:opacity-50"
+              :disabled="isUploadingFiles"
+              @click="pickFiles"
+            >
+              <span class="i-lucide-plus text-xs" />
+              {{ isUploadingFiles ? $t('TASKS.ATTACH.SENDING') : $t('TASKS.ATTACH.ADD') }}
+            </button>
+            <input ref="fileInputEl" type="file" class="hidden" multiple :accept="ACCEPT_FILES" @change="onFilesPicked" />
+            <p v-if="pendingFiles.length" class="text-[10px] text-n-slate-9 mt-1">{{ $t('TASKS.ATTACH.ON_SAVE') }}</p>
           </div>
 
           <!-- Solicitações / ajuda: conversa entre quem criou e quem executa -->

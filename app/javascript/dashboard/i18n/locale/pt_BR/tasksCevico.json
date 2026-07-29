@@ -47,6 +47,15 @@
       "TITLE": "Resumo",
       "SUBTITLE": "Distribuição das tarefas",
       "EMPTY": "Sem tarefas para exibir"
+    },
+    "ATTACH": {
+      "TITLE": "Anexos",
+      "HINT": "(imagem, PDF, Word ou Excel · máx. 10 por tarefa)",
+      "ADD": "Adicionar arquivo",
+      "SENDING": "Enviando…",
+      "REMOVE": "Remover anexo",
+      "ERROR": "Não consegui enviar o arquivo. Tente de novo.",
+      "ON_SAVE": "Os arquivos sobem quando você salvar a tarefa."
     }
   },
   "AGENDA": {

@@ -295,6 +295,21 @@
     }
   },
   "SIDEBAR": {
+    "SORT_GROUPS": {
+      "CUSTOM": "Ordem da clínica",
+      "CREATED": "Por data de criação",
+      "ALPHABETICAL": "Em ordem alfabética",
+      "UNREAD_COUNT": "Por não lidas"
+    },
+    "SORT_OPTIONS": {
+      "CUSTOM": "Ordem definida pelo admin",
+      "CREATED_DESC": "Mais novas primeiro",
+      "CREATED_ASC": "Mais antigas primeiro",
+      "ALPHABETICAL_ASC": "Crescente (A - Z)",
+      "ALPHABETICAL_DESC": "Decrescente (Z - A)",
+      "UNREAD_COUNT_DESC": "Mais não lidas primeiro",
+      "UNREAD_COUNT_ASC": "Menos não lidas primeiro"
+    },
     "NO_ITEMS": "Nenhum item",
     "CURRENTLY_VIEWING_ACCOUNT": "Visualização atual:",
     "SWITCH": "Trocar",

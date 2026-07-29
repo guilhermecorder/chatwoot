@@ -18,7 +18,11 @@
         "DESCRIPTION": "Description",
         "COLOR": "Color",
         "ACTION": "Actions"
-      }
+      },
+      "REORDER_UP": "Move up",
+      "REORDER_DOWN": "Move down",
+      "REORDER_HINT": "Drag rows by the ⠿ handle (or use the arrows) — this order is what the team sees (sidebar, dropdowns and filters).",
+      "REORDER_DRAG": "Drag to reorder"
     },
     "FORM": {
       "NAME": {

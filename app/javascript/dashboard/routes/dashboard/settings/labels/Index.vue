@@ -5,16 +5,13 @@ import { useI18n } from 'vue-i18n';
 import { useStoreGetters, useStore } from 'dashboard/composables/store';
 import { picoSearch } from '@scmmishra/pico-search';
 
+import draggable from 'vuedraggable';
 import AddLabel from './AddLabel.vue';
 import EditLabel from './EditLabel.vue';
 import BaseSettingsHeader from '../components/BaseSettingsHeader.vue';
 import SettingsLayout from '../SettingsLayout.vue';
 import Button from 'dashboard/components-next/button/Button.vue';
-import {
-  BaseTable,
-  BaseTableRow,
-  BaseTableCell,
-} from 'dashboard/components-next/table';
+import { BaseTableCell } from 'dashboard/components-next/table';
 
 const getters = useStoreGetters();
 const store = useStore();
@@ -38,6 +35,41 @@ const filteredRecords = computed(() => {
   ]);
 });
 const uiFlags = computed(() => getters['labels/getUIFlags'].value);
+
+// reordenar (setinhas) só faz sentido na lista completa, sem busca ativa
+const canReorder = computed(() => !searchQuery.value.trim());
+const isFirst = label => records.value[0]?.id === label.id;
+const isLast = label =>
+  records.value[records.value.length - 1]?.id === label.id;
+
+const moveLabel = async (label, delta) => {
+  const ids = records.value.map(record => record.id);
+  const index = ids.indexOf(label.id);
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= ids.length) return;
+  [ids[index], ids[target]] = [ids[target], ids[index]];
+  try {
+    await store.dispatch('labels/reorder', ids);
+  } catch (error) {
+    useAlert(t('LABEL_MGMT.EDIT.API.ERROR_MESSAGE'));
+  }
+};
+
+// v-model do arrasto: soltar a linha = gravar a ordem (mesma rota das setinhas)
+const draggableRecords = computed({
+  get: () => filteredRecords.value,
+  set: async list => {
+    if (!canReorder.value) return;
+    try {
+      await store.dispatch(
+        'labels/reorder',
+        list.map(label => label.id)
+      );
+    } catch (error) {
+      useAlert(t('LABEL_MGMT.EDIT.API.ERROR_MESSAGE'));
+    }
+  },
+});
 
 const deleteMessage = computed(() => ` ${selectedLabel.value.title}?`);
 
@@ -128,65 +160,126 @@ onBeforeMount(() => {
       </BaseSettingsHeader>
     </template>
     <template #body>
-      <BaseTable
-        :headers="tableHeaders"
-        :items="filteredRecords"
-        :no-data-message="
-          searchQuery ? $t('LABEL_MGMT.NO_RESULTS') : $t('LABEL_MGMT.LIST.404')
-        "
-      >
-        <template #row="{ items }">
-          <BaseTableRow v-for="label in items" :key="label.title" :item="label">
-            <template #default>
-              <BaseTableCell>
-                <span class="text-body-main text-n-slate-12">
-                  {{ label.title }}
-                </span>
-              </BaseTableCell>
+      <p class="mb-3 text-body-sm text-n-slate-11">
+        {{ $t('LABEL_MGMT.LIST.REORDER_HINT') }}
+      </p>
+      <div class="w-full">
+        <table class="min-w-full table-auto divide-y divide-n-weak">
+          <thead v-if="filteredRecords.length" class="border-t border-n-weak">
+            <tr>
+              <th
+                v-for="(header, index) in tableHeaders"
+                :key="index"
+                class="py-4 ltr:pr-4 rtl:pl-4 text-start text-heading-3 text-n-slate-12 capitalize"
+              >
+                {{ header }}
+              </th>
+            </tr>
+          </thead>
+          <draggable
+            v-if="filteredRecords.length"
+            v-model="draggableRecords"
+            tag="tbody"
+            item-key="id"
+            handle=".label-grip"
+            :animation="150"
+            :disabled="!canReorder"
+            ghost-class="opacity-40"
+            class="divide-y divide-n-weak text-n-slate-11"
+          >
+            <template #item="{ element: label }">
+              <tr>
+                <BaseTableCell>
+                  <div class="flex items-center gap-2">
+                    <span
+                      v-if="canReorder"
+                      v-tooltip.top="$t('LABEL_MGMT.LIST.REORDER_DRAG')"
+                      class="label-grip cursor-grab active:cursor-grabbing text-n-slate-10 select-none text-base leading-none"
+                    >
+                      ⠿
+                    </span>
+                    <span class="text-body-main text-n-slate-12">
+                      {{ label.title }}
+                    </span>
+                  </div>
+                </BaseTableCell>
 
-              <BaseTableCell>
-                <span class="text-body-main text-n-slate-11">
-                  {{ label.description }}
-                </span>
-              </BaseTableCell>
-
-              <BaseTableCell>
-                <div class="flex items-center">
-                  <span
-                    class="w-4 h-4 ltr:mr-2 rtl:ml-2 border border-solid rounded border-n-weak"
-                    :style="{ backgroundColor: label.color }"
-                  />
-                  <span class="text-body-main text-n-slate-12">
-                    {{ label.color }}
+                <BaseTableCell>
+                  <span class="text-body-main text-n-slate-11">
+                    {{ label.description }}
                   </span>
-                </div>
-              </BaseTableCell>
+                </BaseTableCell>
 
-              <BaseTableCell align="end">
-                <div class="flex gap-3 justify-end flex-shrink-0">
-                  <Button
-                    v-tooltip.top="$t('LABEL_MGMT.FORM.EDIT')"
-                    icon="i-woot-edit-pen"
-                    slate
-                    sm
-                    :is-loading="loading[label.id]"
-                    @click="openEditPopup(label)"
-                  />
-                  <Button
-                    v-tooltip.top="$t('LABEL_MGMT.FORM.DELETE')"
-                    icon="i-woot-bin"
-                    slate
-                    sm
-                    class="hover:enabled:text-n-ruby-11 hover:enabled:bg-n-ruby-2"
-                    :is-loading="loading[label.id]"
-                    @click="openDeletePopup(label)"
-                  />
-                </div>
-              </BaseTableCell>
+                <BaseTableCell>
+                  <div class="flex items-center">
+                    <span
+                      class="w-4 h-4 ltr:mr-2 rtl:ml-2 border border-solid rounded border-n-weak"
+                      :style="{ backgroundColor: label.color }"
+                    />
+                    <span class="text-body-main text-n-slate-12">
+                      {{ label.color }}
+                    </span>
+                  </div>
+                </BaseTableCell>
+
+                <BaseTableCell align="end">
+                  <div class="flex gap-3 justify-end flex-shrink-0">
+                    <Button
+                      v-if="canReorder"
+                      v-tooltip.top="$t('LABEL_MGMT.LIST.REORDER_UP')"
+                      icon="i-lucide-arrow-up"
+                      slate
+                      sm
+                      :disabled="isFirst(label)"
+                      @click="moveLabel(label, -1)"
+                    />
+                    <Button
+                      v-if="canReorder"
+                      v-tooltip.top="$t('LABEL_MGMT.LIST.REORDER_DOWN')"
+                      icon="i-lucide-arrow-down"
+                      slate
+                      sm
+                      :disabled="isLast(label)"
+                      @click="moveLabel(label, 1)"
+                    />
+                    <Button
+                      v-tooltip.top="$t('LABEL_MGMT.FORM.EDIT')"
+                      icon="i-woot-edit-pen"
+                      slate
+                      sm
+                      :is-loading="loading[label.id]"
+                      @click="openEditPopup(label)"
+                    />
+                    <Button
+                      v-tooltip.top="$t('LABEL_MGMT.FORM.DELETE')"
+                      icon="i-woot-bin"
+                      slate
+                      sm
+                      class="hover:enabled:text-n-ruby-11 hover:enabled:bg-n-ruby-2"
+                      :is-loading="loading[label.id]"
+                      @click="openDeletePopup(label)"
+                    />
+                  </div>
+                </BaseTableCell>
+              </tr>
             </template>
-          </BaseTableRow>
-        </template>
-      </BaseTable>
+          </draggable>
+          <tbody v-else class="divide-y divide-n-weak text-n-slate-11">
+            <tr>
+              <td
+                :colspan="tableHeaders.length"
+                class="py-20 text-center text-body-main !text-base text-n-slate-11"
+              >
+                {{
+                  searchQuery
+                    ? $t('LABEL_MGMT.NO_RESULTS')
+                    : $t('LABEL_MGMT.LIST.404')
+                }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </template>
 
     <woot-modal v-model:show="showAddPopup" :on-close="hideAddPopup">

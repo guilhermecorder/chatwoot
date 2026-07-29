@@ -53,6 +53,10 @@ class Task < ApplicationRecord
   # o telefone vira fallback para paciente que ainda não existe no sistema.
   belongs_to :contact, optional: true
 
+  # anexos da tarefa (imagem/PDF/documento — pedido de exame, print, guia):
+  # visíveis para criador, responsável e admin (storage entra no backup!)
+  has_many_attached :files
+
   validates :title, presence: true
   validate :contact_belongs_to_account
 

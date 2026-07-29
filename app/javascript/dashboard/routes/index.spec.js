@@ -40,6 +40,9 @@ describe('#validateAuthenticateRoutePermission', () => {
       validateAuthenticateRoutePermission(to, next);
 
       expect(mockAssign).toHaveBeenCalledWith('/app/login');
+      // vue-router 4: todo caminho do guard precisa chamar next —
+      // sem isso o dev mode acusa "Invalid navigation guard"
+      expect(next).toHaveBeenCalledWith(false);
     });
   });
 
