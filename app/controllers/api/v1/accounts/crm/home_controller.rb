@@ -222,8 +222,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
 
   # ── Painel Agendamento (Vaneide) — coorte pelo dia em que o lead chegou ──
   def agendamento_metrics(since, until_at)
-    leads = leads_count(since, until_at)
-    agendadas = reached_stage_count(/agendamento/i, since, until_at)
+    universe = leads_scope(since, until_at)
+    leads = universe.count
+    agendadas = reached_stage_count(/agendamento/i, since, until_at, universe: universe)
     {
       new_leads: leads,
       appointments_created: agendadas,
@@ -240,8 +241,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
         .joins(:contact).where(contacts: { created_at: since..until_at })
         .distinct.count(:contact_id),
       booking_conversion: pct(agendadas, leads),
-      surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i),
-      surgery_indications: reached_stage_count(/indica/i, since, until_at)
+      surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i, universe: universe),
+      surgery_indications: reached_stage_count(/indica/i, since, until_at, universe: universe)
     }
   end
 
@@ -357,32 +358,39 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # leads = contatos novos vindos das caixas de marketing (Google/Instagram).
   # Se a conta não tiver caixas com esses nomes (ex.: ambiente local),
   # conta todos os contatos novos para o painel não ficar zerado.
-  def leads_count(since, until_at)
-    scope = account.contacts.where(created_at: since..until_at)
-    inbox_ids = account.inboxes
-                       .where('name ILIKE :g OR name ILIKE :i', g: '%google%', i: '%instagram%')
-                       .pluck(:id)
-    return scope.count if inbox_ids.empty?
+  def leads_scope(since, until_at)
+    Crm::LeadsUniverse.scope(account, since, until_at)
+  end
 
-    scope.joins(:conversations).where(conversations: { inbox_id: inbox_ids }).distinct.count
+  def leads_count(since, until_at)
+    leads_scope(since, until_at).count
   end
 
   # cards do CRM que CHEGARAM à etapa alvo (ou seguiram além dela), só de
   # leads que surgiram no período — espelha as colunas do funil sem sofrer
-  # com movimentações em massa (a data usada é a do LEAD, não a do card)
-  def reached_stage_count(pattern, since, until_at, exclude: /pós/i)
+  # com movimentações em massa (a data usada é a do LEAD, não a do card).
+  # universe: restringe ao MESMO conjunto de leads do card "Novos contatos"
+  # (caixas de marketing) — numerador e denominador na mesma régua.
+  def reached_stage_count(pattern, since, until_at, exclude: /pós/i, universe: nil)
     account.crm_pipelines.includes(:stages).sum do |pipeline|
-      ordered = pipeline.stages.sort_by(&:position)
-      target = ordered.find { |s| s.name.match?(pattern) && !s.name.match?(exclude) }
-      next 0 unless target
+      stage_ids = reached_stage_ids(pipeline, pattern, exclude)
+      next 0 if stage_ids.empty?
 
-      stage_ids = ordered.select { |s| s.position >= target.position }.map(&:id)
-      pipeline.crm_contacts
-              .joins(:contact)
-              .where(stage_id: stage_ids)
-              .where(contacts: { created_at: since..until_at })
-              .count
+      scope = pipeline.crm_contacts
+                      .joins(:contact)
+                      .where(stage_id: stage_ids)
+                      .where(contacts: { created_at: since..until_at })
+      scope = scope.where(contacts: { id: universe.select(:id) }) if universe
+      scope.count
     end
+  end
+
+  def reached_stage_ids(pipeline, pattern, exclude)
+    ordered = pipeline.stages.sort_by(&:position)
+    target = ordered.find { |s| s.name.match?(pattern) && !s.name.match?(exclude) }
+    return [] unless target
+
+    ordered.select { |s| s.position >= target.position }.map(&:id)
   end
 
   def consultas

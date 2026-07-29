@@ -178,7 +178,7 @@ const panelTiles = computed(() => {
   if (selectedPanel.value === 'gestor') {
     return [
       { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
-      { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, sub: `${d.appointments_created ?? 0} consulta(s) agendada(s)`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
+      { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`, sub2: 'avançaram até "Agendamento" no CRM', grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
       { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.indications ?? 0} indicação(ões) de cirurgia`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
       { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`, grad: 'linear-gradient(135deg, #065F46, #10B981)' },
     ];
@@ -187,7 +187,7 @@ const panelTiles = computed(() => {
   return [
     { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
     { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
-    { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, chip: conversionVerdict.value, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+    { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, chip: conversionVerdict.value, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`, sub2: 'avançaram até "Agendamento" no CRM', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
     { label: 'Cirurgias fechadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', sub: 'coluna Cirurgia Agendada (CRM)', grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
   ];
 });
@@ -1357,7 +1357,7 @@ onUnmounted(() => {
               </div>
               <p class="text-3xl font-bold">{{ tile.value }}</p>
               <span v-if="tile.chip" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ tile.chip.label }}</span>
-              <template v-else-if="tile.sub">
+              <template v-if="tile.sub">
                 <!-- linhas curtas propositais: nada de frase quebrando no meio -->
                 <p class="text-[10px] text-white/70 truncate">{{ tile.sub }}</p>
                 <p v-if="tile.sub2" class="text-[10px] text-white/80 truncate">{{ tile.sub2 }}</p>

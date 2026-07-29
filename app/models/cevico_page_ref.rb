@@ -13,7 +13,7 @@
 #  created_at     :datetime         not null
 #  updated_at     :datetime         not null
 #  account_id     :bigint           not null
-#  cevico_page_id :bigint           not null
+#  cevico_page_id :bigint
 #  contact_id     :bigint
 #
 # Indexes
