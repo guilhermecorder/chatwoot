@@ -46,6 +46,15 @@
       if (a.dataset.cevicoRef) return; // já processado — segue o clique
       e.preventDefault();
       var body = new URLSearchParams(trk);
+      // identidade GA4 da sessão (cookies _ga e _ga_*): viaja no Protocolo
+      // para a conversão do CRM voltar AMARRADA à sessão que clicou no
+      // anúncio — é o que faz o Google Ads contabilizar
+      try {
+        var mGa = document.cookie.match(/(?:^|;\s*)_ga=GA\d+\.\d+\.(.+?)(?:;|$)/);
+        if (mGa) body.set('ga_client_id', mGa[1].slice(0, 64));
+        var mSess = document.cookie.match(/(?:^|;\s*)_ga_[^=]+=GS\d+\.\d+\.(\d+)/);
+        if (mSess) body.set('ga_session_id', mSess[1].slice(0, 32));
+      } catch (err) { /* sem cookies GA — segue sem */ }
       fetch('<%= ref_path %>', { method: 'POST', body: body, keepalive: true })
         .then(function (r) { return r.ok ? r.json() : { token: null }; })
         .catch(function () { return { token: null }; })

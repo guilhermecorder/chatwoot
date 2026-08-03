@@ -16,18 +16,17 @@ class GoogleAdsConversionsService
     @params     = params
   end
 
-  def call # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+  def call # rubocop:disable Metrics/MethodLength
     config = crm_settings&.google_ads_config
     return { success: false, error: 'Google Ads não configurado' } unless configured?(config)
 
     measurement_id = config['measurement_id']
     api_secret     = config['api_secret']
-    client_id      = config.fetch('client_id', "crm.#{@contact&.id || SecureRandom.hex(8)}")
 
     url = "#{ENDPOINT}?measurement_id=#{measurement_id}&api_secret=#{api_secret}"
 
     body = {
-      client_id: client_id,
+      client_id: client_identity[:client_id],
       events: [build_event]
     }
 
@@ -82,10 +81,31 @@ class GoogleAdsConversionsService
     }
   end
 
+  # Identidade da sessão que veio da PÁGINA (rastreio do Protocolo): se o
+  # contato tem o client_id real do GA4 gravado (page_ads.ga_client_id,
+  # capturado dos cookies _ga no clique do WhatsApp), a conversão volta
+  # AMARRADA à sessão que clicou no anúncio — é assim que o Google Ads
+  # passa a contabilizar. Sem ele, cai no id sintético antigo (o evento
+  # aparece no GA4, mas sem atribuição de anúncio).
+  def client_identity
+    @client_identity ||= real_client_identity ||
+                         { client_id: "crm.#{@contact&.id || SecureRandom.hex(8)}", session_id: nil, real: false }
+  end
+
+  def real_client_identity
+    page_ads = @contact&.additional_attributes&.dig('page_ads') || {}
+    return if page_ads['ga_client_id'].blank?
+
+    { client_id: page_ads['ga_client_id'], session_id: page_ads['ga_session_id'].presence, real: true }
+  end
+
   def base_params
     p = {
       engagement_time_msec: '1'
     }
+    # session_id da visita original: reforça a junção da conversão com a
+    # sessão certa dentro do GA4
+    p[:session_id] = client_identity[:session_id] if client_identity[:session_id].present?
     if @contact
       p[:contact_id]    = @contact.id.to_s
       p[:contact_name]  = @contact.name if @contact.name.present?

@@ -13,12 +13,7 @@ class CrmAutomationFireJob < ApplicationJob
     contact = pipeline.account.contacts.find_by(id: contact_id)
     return unless contact
 
-    # automação de "entrou na coluna" com ATRASO: se o paciente já saiu da
-    # coluna nesse meio tempo, não dispara (evita form/mensagem fora de contexto
-    # pra quem já avançou). Disparo imediato (sem atraso) não é afetado.
-    return if automation.trigger_type == 'card_entered' &&
-              automation.delay_minutes.to_i.positive? &&
-              !card_in_stage?(automation, contact)
+    return unless should_fire?(automation, contact)
 
     payload = build_payload(automation, contact, stage, pipeline, extra_payload)
 
@@ -75,6 +70,32 @@ class CrmAutomationFireJob < ApplicationJob
   end
 
   private
+
+  # Condições que seguram o disparo:
+  # (a) automação de "entrou na coluna" com ATRASO: se o paciente já saiu da
+  #     coluna nesse meio tempo, não dispara (evita mensagem fora de contexto
+  #     pra quem já avançou). Disparo imediato (sem atraso) não é afetado.
+  # (b) condição "caixa de chegada" (missão 03/08): automação restrita a
+  #     leads que CHEGARAM pela(s) caixa(s) escolhida(s) — ex.: evento de
+  #     conversão do Google só para a caixa GOOGLE. Mesma régua do Dashboard
+  #     CRM (caixa da primeira conversa do contato).
+  def should_fire?(automation, contact)
+    return false if automation.trigger_type == 'card_entered' &&
+                    automation.delay_minutes.to_i.positive? &&
+                    !card_in_stage?(automation, contact)
+
+    entry_inbox_matches?(automation, contact)
+  end
+
+  def entry_inbox_matches?(automation, contact)
+    wanted = Array(automation.action_config&.dig('inbox_ids')).map(&:to_i).reject(&:zero?)
+    return true if wanted.empty?
+
+    entry_inbox_id = contact.conversations.reorder(:created_at, :id).pick(:inbox_id)
+    return false if entry_inbox_id.nil? # lead sem conversa não pertence a caixa nenhuma
+
+    wanted.include?(entry_inbox_id)
+  end
 
   # o card do contato ainda está na coluna da automação? (usado p/ segurar
   # disparo atrasado de card_entered quando o paciente já avançou)

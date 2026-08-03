@@ -4,6 +4,11 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
+import {
+  inboxGradientFor,
+  inboxSolidFor,
+  ALL_INBOXES_GRADIENT,
+} from 'dashboard/helper/cevicoInboxColors.js';
 
 const props = defineProps({
   stage:              { type: Object, required: true },
@@ -36,8 +41,37 @@ const hasN8nWorkflows = computed(() => n8nWorkflows.value?.length > 0);
 store.dispatch('crm/fetchSettings').catch(() => {});
 onMounted(() => {
   if (!agents.value.length) store.dispatch('agents/get');
-  if (!accountLabels.value.length) store.dispatch('labels/fetch');
+  // 'labels/fetch' não existe no store (erro no console toda vez que o
+  // modal abria e etiquetas vazias nunca carregavam) — a ação certa é get
+  if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
+  if (!(accountInboxes.value || []).length) {
+    store.dispatch('inboxes/get').catch(() => {});
+  }
 });
+
+// condição "caixa de chegada do lead" (missão 03/08): pílulas coloridas
+// multi-seleção — a automação só dispara para leads cuja PRIMEIRA conversa
+// foi numa das caixas escolhidas (ex.: evento Google só da caixa GOOGLE)
+const accountInboxes = useMapGetter('inboxes/getInboxes');
+const conditionInboxes = computed(() =>
+  [...(accountInboxes.value || [])].sort((a, b) => a.id - b.id)
+);
+const condInboxGrad = id => inboxGradientFor(accountInboxes.value || [], id);
+const condInboxDot = id => inboxSolidFor(accountInboxes.value || [], id);
+const toggleConditionInbox = id => {
+  const list = [...(form.value.action_config.inbox_ids || [])];
+  if (!id) {
+    form.value.action_config.inbox_ids = [];
+    return;
+  }
+  const idx = list.indexOf(id);
+  if (idx >= 0) list.splice(idx, 1);
+  else list.push(id);
+  form.value.action_config.inbox_ids = list;
+};
+const conditionInboxSet = computed(
+  () => new Set(form.value.action_config.inbox_ids || [])
+);
 
 const isEditing = computed(() => !!props.initialAutomation);
 
@@ -113,6 +147,8 @@ const emptyForm = () => ({
     // Adicionar preço no card
     value:              '',
     value_mode:         'always',
+    // Condição: caixa de chegada do lead (vazio = todas)
+    inbox_ids:          [],
   },
 });
 
@@ -153,6 +189,9 @@ watch(() => props.initialAutomation, (auto) => {
       throttle_minutes:   auto.action_config?.throttle_minutes ?? 0,
       value:              auto.action_config?.value            ?? '',
       value_mode:         auto.action_config?.value_mode       ?? 'always',
+      inbox_ids:          Array.isArray(auto.action_config?.inbox_ids)
+        ? auto.action_config.inbox_ids.map(Number).filter(Boolean)
+        : [],
     },
   };
 }, { immediate: true });
@@ -383,6 +422,45 @@ const save = async () => {
             />
             <span class="text-xs text-n-slate-10">minutos</span>
           </div>
+        </div>
+
+        <!-- Condição: caixa de chegada do lead (pílulas multi, kit CEVICO) -->
+        <div v-if="conditionInboxes.length">
+          <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+            Só para leads da caixa de entrada
+          </label>
+          <div class="flex flex-wrap items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5">
+            <button
+              type="button"
+              class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
+              :class="conditionInboxSet.size === 0 ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="conditionInboxSet.size === 0 ? { background: ALL_INBOXES_GRADIENT } : {}"
+              @click="toggleConditionInbox(0)"
+            >
+              Todas
+            </button>
+            <button
+              v-for="ib in conditionInboxes"
+              :key="ib.id"
+              type="button"
+              class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 flex items-center gap-1.5"
+              :class="conditionInboxSet.has(ib.id) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="conditionInboxSet.has(ib.id) ? { background: condInboxGrad(ib.id) } : {}"
+              :title="conditionInboxSet.has(ib.id) ? 'Clique para tirar esta caixa da condição' : 'Clique para somar esta caixa à condição'"
+              @click="toggleConditionInbox(ib.id)"
+            >
+              <span
+                v-if="!conditionInboxSet.has(ib.id)"
+                class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                :style="{ background: condInboxDot(ib.id) }"
+              />
+              {{ ib.name }}
+            </button>
+          </div>
+          <p class="text-[11px] text-n-slate-10 mt-1.5">
+            A automação só dispara para leads que <b>chegaram</b> por essas caixas (primeira
+            conversa) — ex.: evento de conversão do Google só para a caixa GOOGLE. Vazio = todas.
+          </p>
         </div>
 
         <!-- Ação -->

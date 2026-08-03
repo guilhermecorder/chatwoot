@@ -81,9 +81,24 @@ module Cevico::TrafficSource
       'title' => page&.title || 'Porta de entrada (hub)',
       'source' => source_key(prm, nil), 'campaign' => prm['utm_campaign'].to_s[0, 80],
       'utm_source' => prm['utm_source'], 'utm_medium' => prm['utm_medium'],
-      'utm_content' => prm['utm_content'], 'utm_term' => prm['utm_term'],
-      'gclid' => (params['gclid'].presence || params[:gclid]).to_s[0, 200].presence,
-      'fbclid' => (params['fbclid'].presence || params[:fbclid]).to_s[0, 200].presence
-    }.compact
+      'utm_content' => prm['utm_content'], 'utm_term' => prm['utm_term']
+    }.merge(click_ids(params)).compact
+  end
+
+  # ids de clique/sessão que amarram o lead ao anúncio: gclid/fbclid (da URL)
+  # e a identidade GA4 do navegador (cookies _ga/_ga_*) — é o que permite
+  # devolver a conversão AMARRADA à sessão que clicou no anúncio; sem isso
+  # o Google Ads não atribui (missão 03/08)
+  def click_ids(params)
+    {
+      'gclid' => raw_param(params, 'gclid')[0, 200].presence,
+      'fbclid' => raw_param(params, 'fbclid')[0, 200].presence,
+      'ga_client_id' => raw_param(params, 'ga_client_id')[0, 64].presence,
+      'ga_session_id' => raw_param(params, 'ga_session_id')[0, 32].presence
+    }
+  end
+
+  def raw_param(params, key)
+    (params[key].presence || params[key.to_sym]).to_s
   end
 end
