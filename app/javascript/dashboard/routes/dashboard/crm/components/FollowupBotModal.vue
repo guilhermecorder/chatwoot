@@ -62,7 +62,7 @@ const form = ref({
 
 onMounted(() => {
   if (!inboxes.value.length) store.dispatch('inboxes/get');
-  if (!accountLabels.value.length) store.dispatch('labels/fetch');
+  if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
   if (props.bot) {
     form.value = {
       name: props.bot.name,

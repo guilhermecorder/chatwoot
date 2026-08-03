@@ -52,7 +52,7 @@ const form = ref({
 
 onMounted(() => {
   if (!agents.value.length) store.dispatch('agents/get');
-  if (!accountLabels.value.length) store.dispatch('labels/fetch');
+  if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
 });
 
 watch(() => props.contact, (c) => {

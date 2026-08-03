@@ -428,7 +428,7 @@ const onTemplateSend = async payload => {
 };
 
 onMounted(() => {
-  if (!accountLabels.value.length) store.dispatch('labels/fetch');
+  if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
   if (hasConversation.value) {
     loadMessages();
     startPolling();
