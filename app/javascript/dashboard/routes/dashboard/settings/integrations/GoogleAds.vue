@@ -11,18 +11,22 @@ const settings = useMapGetter('crm/getSettings');
 const measurementId = ref('');
 const apiSecret     = ref('');
 const clientId      = ref('');
+const propertyId    = ref('');
+const serviceAccountJson = ref('');
 const isSaving      = ref(false);
 const isTesting     = ref(false);
 const testResult    = ref(null);
 
 const gadsConfig   = computed(() => settings.value?.google_ads ?? {});
 const isConfigured = computed(() => gadsConfig.value.configured);
+const costConfigured = computed(() => gadsConfig.value.cost_configured);
 
 onMounted(async () => {
   await store.dispatch('crm/fetchSettings');
   measurementId.value = gadsConfig.value.measurement_id || '';
   clientId.value      = gadsConfig.value.client_id      || '';
-  // api_secret nunca pré-preenchido
+  propertyId.value    = gadsConfig.value.ga4_property_id || '';
+  // api_secret e service_account_json nunca pré-preenchidos
 });
 
 const save = async () => {
@@ -36,10 +40,13 @@ const save = async () => {
     const payload = {
       measurement_id: measurementId.value.trim(),
       client_id:      clientId.value.trim() || undefined,
+      ga4_property_id: propertyId.value.trim(),
     };
     if (apiSecret.value.trim()) payload.api_secret = apiSecret.value.trim();
+    if (serviceAccountJson.value.trim()) payload.service_account_json = serviceAccountJson.value.trim();
     await store.dispatch('crm/updateGoogleAds', payload);
     apiSecret.value = '';
+    serviceAccountJson.value = '';
     useAlert('Configurações salvas com sucesso!');
   } catch {
     useAlert('Erro ao salvar. Tente novamente.');
@@ -182,6 +189,75 @@ const testConnection = async () => {
             />
             <span v-if="testResult.success">Evento de teste enviado ao GA4 com sucesso!</span>
             <span v-else>{{ testResult.error }}</span>
+          </div>
+          <!-- resultado do teste de LEITURA do custo (quando configurado) -->
+          <div
+            v-if="testResult?.cost_test"
+            class="flex items-start gap-2 px-3 py-2.5 rounded-lg text-sm"
+            :class="testResult.cost_test.cost !== undefined
+              ? 'bg-green-500/10 text-green-700 border border-green-500/20'
+              : 'bg-amber-500/10 text-amber-700 border border-amber-500/20'"
+          >
+            <span
+              class="text-base flex-shrink-0 mt-0.5"
+              :class="testResult.cost_test.cost !== undefined ? 'i-lucide-circle-dollar-sign' : 'i-lucide-alert-circle'"
+            />
+            <span v-if="testResult.cost_test.cost !== undefined">
+              Leitura do custo OK — R$
+              {{ Number(testResult.cost_test.cost).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) }}
+              gastos nos últimos 7 dias (via GA4).
+            </span>
+            <span v-else>Leitura do custo falhou: {{ testResult.cost_test.error }}</span>
+          </div>
+        </div>
+
+        <!-- 💰 Custo automático dos anúncios (API de dados do GA4) -->
+        <div class="bg-n-solid-2 rounded-2xl border border-n-weak p-6 space-y-5">
+          <div class="flex items-center gap-3 mb-1">
+            <span class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #34A853, #4285F4)">
+              <span class="i-lucide-circle-dollar-sign text-white text-lg" />
+            </span>
+            <div>
+              <h3 class="text-sm font-semibold text-n-slate-12">
+                Custo automático dos anúncios
+                <span v-if="costConfigured" class="text-green-600 font-normal ml-1 text-xs">(configurado)</span>
+              </h3>
+              <p class="text-xs text-n-slate-10">
+                O Dashboard CRM passa a puxar o investimento REAL do Google — sem developer token,
+                lendo o gasto pela propriedade do GA4 (que já está vinculada ao Google Ads)
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">ID da propriedade do GA4</label>
+            <input
+              v-model="propertyId"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
+              placeholder="Ex: 123456789 (só números)"
+            />
+            <p class="text-xs text-n-slate-9 mt-1">GA4 → Admin → Configurações da propriedade → ID da propriedade</p>
+          </div>
+
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+              JSON da conta de serviço
+              <span v-if="costConfigured" class="text-green-600 font-normal ml-1">(já configurado — cole para substituir)</span>
+            </label>
+            <textarea
+              v-model="serviceAccountJson"
+              rows="4"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-xs bg-n-solid-1 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
+              :placeholder="'Cole aqui o conteúdo do arquivo .json da conta de serviço ({ \'type\': \'service_account\', ... })'"
+            />
+          </div>
+
+          <div class="bg-n-alpha-1 rounded-xl p-4 space-y-1.5 text-xs text-n-slate-11">
+            <p class="font-semibold text-n-slate-12">Como criar (5 minutos, uma vez só):</p>
+            <p>1. <b>console.cloud.google.com</b> → IAM e administrador → Contas de serviço → Criar (qualquer nome, sem papéis).</p>
+            <p>2. Na conta criada → Chaves → Adicionar chave → JSON → baixa o arquivo e cola o conteúdo acima.</p>
+            <p>3. No <b>GA4</b> → Admin → Gerenciamento de acesso à propriedade → adicionar o e-mail da conta de serviço (…@…iam.gserviceaccount.com) como <b>Leitor</b>.</p>
+            <p>4. Salvar aqui e clicar em "Testar evento" — o teste também confere a leitura do custo.</p>
           </div>
         </div>
 

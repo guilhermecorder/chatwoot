@@ -48,9 +48,11 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
   private
 
   # ── Filtro por caixa de entrada ───────────────────────────────────
-  # Regra de atribuição: a caixa "dona" do lead é a da PRIMEIRA conversa
-  # dele (primeiro toque). Um paciente que falou no Google e depois no
-  # Instagram pertence só ao Google — as taxas por caixa fecham 100%.
+  # Regra de atribuição: a caixa "dona" do lead é a da primeira conversa
+  # dele NUMA PORTA DE ENTRADA (caixa de captação). Caixas operacionais
+  # (Confirmação de Consulta, NPS...) recebem pacientes que já chegaram
+  # pelas portas — só ficam com quem NUNCA passou por porta nenhuma
+  # (importados/walk-ins). Ajuste de precisão pedido 03/08.
 
   def selected_inbox_ids
     @selected_inbox_ids ||= begin
@@ -63,13 +65,20 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     selected_inbox_ids.any?
   end
 
-  # SQL da caixa de chegada por contato (ids já validados contra a conta)
+  def capture_inbox_ids
+    @capture_inbox_ids ||= Crm::LeadsUniverse.capture_inbox_ids(Current.account)
+  end
+
+  # SQL da caixa de chegada por contato (ids já validados contra a conta):
+  # a primeira conversa numa PORTA DE ENTRADA vence; sem nenhuma, vale a
+  # primeira conversa de qualquer caixa
   def entry_inbox_sql
+    priority = capture_inbox_ids.any? ? "(CASE WHEN inbox_id IN (#{capture_inbox_ids.join(',')}) THEN 0 ELSE 1 END)," : ''
     <<~SQL.squish
       SELECT DISTINCT ON (contact_id) contact_id, inbox_id
       FROM conversations
       WHERE account_id = #{Current.account.id}
-      ORDER BY contact_id, created_at ASC, id ASC
+      ORDER BY contact_id, #{priority} created_at ASC, id ASC
     SQL
   end
 
@@ -530,42 +539,58 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
 
     result_rows = stats.map do |inbox_id, stat|
       row = inbox_result_row(inbox_id, stat, inbox_names)
-      row.merge!(inbox_financials(inbox_id, stat, investments, period_days)) if admin
+      row.merge!(inbox_financials(inbox_id, stat, investments, period_days, since..until_at)) if admin
       row
     end
 
     {
       admin: admin,
-      rows: result_rows.sort_by { |r| [r[:inbox_id].nil? ? 1 : 0, -r[:leads]] }.first(8)
+      capture_inbox_ids: capture_inbox_ids,
+      # portas de entrada primeiro, depois as operacionais, cada grupo por volume
+      rows: result_rows.sort_by { |r| [r[:is_capture] ? 0 : 1, r[:inbox_id].nil? ? 1 : 0, -r[:leads]] }.first(8)
     }
   end
 
-  # uma passada só pelos cards da coorte: leads/agendou/fechou/receita por
-  # caixa de chegada
+  # uma passada só pelos cards da coorte: leads/agendou/compareceu/fechou/
+  # receita por caixa de chegada
   def inbox_funnel_stats(pipeline, full_cohort)
-    sched_ids  = reached_ids_for(pipeline, /agendamento/i).to_set
-    closed_ids = closing_stage_ids(pipeline).to_set
-
-    stats = Hash.new { |h, k| h[k] = { leads: 0, scheduled: 0, closed: 0, revenue: 0.0 } }
+    sets = funnel_stage_sets(pipeline)
+    stats = Hash.new { |h, k| h[k] = { leads: 0, scheduled: 0, attended: 0, closed: 0, revenue: 0.0 } }
     full_cohort.pluck(:contact_id, :stage_id, Arel.sql('COALESCE(crm_contacts.value, 0)')).each do |contact_id, stage_id, value|
-      stat = stats[entry_inbox_map[contact_id]]
-      stat[:leads] += 1
-      stat[:scheduled] += 1 if sched_ids.include?(stage_id)
-      next unless closed_ids.include?(stage_id)
-
-      stat[:closed] += 1
-      stat[:revenue] += value.to_f
+      bump_inbox_stat(stats[entry_inbox_map[contact_id]], stage_id, value, sets)
     end
     stats
+  end
+
+  def funnel_stage_sets(pipeline)
+    {
+      sched: reached_ids_for(pipeline, /agendamento/i).to_set,
+      attended: reached_ids_for(pipeline, /consulta realizada/i).to_set,
+      closed: closing_stage_ids(pipeline).to_set
+    }
+  end
+
+  def bump_inbox_stat(stat, stage_id, value, sets)
+    stat[:leads] += 1
+    stat[:scheduled] += 1 if sets[:sched].include?(stage_id)
+    stat[:attended] += 1 if sets[:attended].include?(stage_id)
+    return unless sets[:closed].include?(stage_id)
+
+    stat[:closed] += 1
+    stat[:revenue] += value.to_f
   end
 
   def inbox_result_row(inbox_id, stat, inbox_names)
     {
       inbox_id: inbox_id,
       name: inbox_id ? (inbox_names[inbox_id] || 'Caixa removida') : 'Sem conversa vinculada',
+      is_capture: inbox_id.present? && capture_inbox_ids.include?(inbox_id),
       leads: stat[:leads],
       scheduled: stat[:scheduled],
       scheduling_rate: pct(stat[:scheduled], stat[:leads]),
+      attended: stat[:attended],
+      # % de comparecimento sobre quem AGENDOU — a régua que interessa
+      attendance_rate: pct(stat[:attended], stat[:scheduled]),
       closed: stat[:closed],
       close_rate: pct(stat[:closed], stat[:leads]),
       revenue: stat[:revenue].round(2)
@@ -576,28 +601,103 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     total.positive? ? ((part.to_f / total) * 100).round(1) : 0.0
   end
 
-  # investimento do período = mensal informado, proporcional aos dias
-  # escolhidos (30,44 dias = mês médio). Sem investimento = métricas nulas.
-  def inbox_financials(inbox_id, stat, investments, period_days)
-    monthly = investments[inbox_id.to_s].to_f
-    return { investment_monthly: nil, investment_period: nil, cpl: nil, cac: nil, roas: nil, roi_pct: nil } unless monthly.positive?
+  # Investimento da caixa no período — dois modos ("as coisas conversam",
+  # pedido 03/08): manual = R$/mês informado, proporcional aos dias
+  # (30,44 = mês médio); meta_auto = gasto REAL do período puxado da conta
+  # de anúncios do Meta (mesma integração do Funil de Tráfego, cache 10min).
+  # Google automático aguarda o developer token do Google Ads (pendente).
+  def inbox_financials(inbox_id, stat, investments, period_days, range)
+    cfg = investments[inbox_id.to_s]
+    mode = cfg&.dig('mode')
+    return empty_financials.merge(investment_mode: mode) if cfg.nil?
 
-    invest = (monthly * period_days / 30.44).round(2)
-    leads = stat[:leads]
-    closed = stat[:closed]
+    case mode
+    when 'meta_auto' then meta_auto_financials(stat, range)
+    when 'google_auto' then google_auto_financials(stat, range)
+    else
+      monthly = cfg['monthly'].to_f
+      return empty_financials.merge(investment_mode: 'manual') unless monthly.positive?
+
+      build_financials(stat, (monthly * period_days / 30.44).round(2),
+                       monthly: monthly.round(2), mode: 'manual')
+    end
+  end
+
+  def meta_auto_financials(stat, range)
+    meta = meta_spend_for(range.first, range.last)
+    spend = meta[:spend].to_f
+    unless spend.positive?
+      reason = meta[:error].presence || (meta[:configured] ? 'sem gasto no período' : 'Meta Ads não configurado em Integrações')
+      return empty_financials.merge(investment_mode: 'meta_auto', investment_note: reason)
+    end
+
+    build_financials(stat, spend.round(2), monthly: nil, mode: 'meta_auto')
+  end
+
+  # gasto do Google lido pela API de dados do GA4 (conta de serviço) —
+  # não precisa do developer token do Google Ads
+  def google_auto_financials(stat, range)
+    data = google_cost_for(range.first, range.last)
+    cost = data[:cost].to_f
+    unless cost.positive?
+      reason = data[:error].presence ||
+               (data[:configured] ? 'sem gasto no período' : 'configure a conta de serviço em Integrações → Google Ads')
+      return empty_financials.merge(investment_mode: 'google_auto', investment_note: reason)
+    end
+
+    build_financials(stat, cost, monthly: nil, mode: 'google_auto')
+  end
+
+  def google_cost_for(since, until_at)
+    @google_cost_for ||= Rails.cache.fetch(
+      ['cevico_google_cost', Current.account.id, since.to_date.iso8601, until_at.to_date.iso8601],
+      expires_in: 10.minutes
+    ) do
+      Crm::GoogleAdCostService.new(account: Current.account, since_date: since.to_date, until_date: until_at.to_date).call
+    end
+  end
+
+  def build_financials(stat, invest, monthly:, mode:)
     revenue = stat[:revenue]
     {
-      investment_monthly: monthly.round(2),
+      investment_mode: mode,
+      investment_monthly: monthly,
       investment_period: invest,
-      cpl: leads.positive? ? (invest / leads).round(2) : nil,
-      cac: closed.positive? ? (invest / closed).round(2) : nil,
+      cpl: cost_per(invest, stat[:leads]),
+      cost_per_schedule: cost_per(invest, stat[:scheduled]),
+      cost_per_attendance: cost_per(invest, stat[:attended]),
+      cac: cost_per(invest, stat[:closed]),
       roas: (revenue / invest).round(2),
       roi_pct: (((revenue - invest) / invest) * 100).round(1)
     }
   end
 
+  def cost_per(invest, count)
+    count.to_i.positive? ? (invest / count).round(2) : nil
+  end
+
+  def empty_financials
+    { investment_mode: nil, investment_monthly: nil, investment_period: nil, investment_note: nil,
+      cpl: nil, cost_per_schedule: nil, cost_per_attendance: nil, cac: nil, roas: nil, roi_pct: nil }
+  end
+
+  # gasto real da conta de anúncios do Meta no período (cache curto: o
+  # dashboard recarrega a cada clique de período/caixa)
+  def meta_spend_for(since, until_at)
+    @meta_spend_for ||= Rails.cache.fetch(
+      ['cevico_meta_spend', Current.account.id, since.to_date.iso8601, until_at.to_date.iso8601],
+      expires_in: 10.minutes
+    ) do
+      Crm::MetaInsightsService.new(account: Current.account, since_date: since.to_date, until_date: until_at.to_date).call
+    end
+  end
+
+  # config por caixa no formato novo {mode, monthly}; número puro = legado manual
   def inbox_investments_config
-    CrmSetting.find_by(account: Current.account)&.agenda_config&.dig('inbox_investments') || {}
+    raw = CrmSetting.find_by(account: Current.account)&.agenda_config&.dig('inbox_investments') || {}
+    raw.transform_values do |v|
+      v.is_a?(Hash) ? v : { 'mode' => 'manual', 'monthly' => v.to_f }
+    end
   end
 
   # etapas "nesta ou além" a partir da primeira que casa com o padrão

@@ -227,11 +227,14 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_price_table`, { items });
   }
 
-  // investimento mensal por caixa de entrada (ROI/CAC do Dashboard) — admin
-  updateInboxInvestments(investments) {
-    return axios.post(`${this.url}/settings/update_inbox_investments`, {
-      investments,
-    });
+  // investimento por caixa + portas de entrada (ROI/CAC do Dashboard) — admin
+  updateInboxInvestments(investments, captureInboxIds) {
+    const payload = { investments };
+    if (captureInboxIds) payload.capture_inbox_ids = captureInboxIds;
+    return axios.post(
+      `${this.url}/settings/update_inbox_investments`,
+      payload
+    );
   }
 
   // qual versão do Meu Painel cada agente vê — admin

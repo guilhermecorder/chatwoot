@@ -94,24 +94,53 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: { price_table: cfg['price_table'] }
   end
 
-  # POST update_inbox_investments — investimento MENSAL em anúncios por
-  # caixa de entrada (Dashboard CRM → Resultados por caixa). Alimenta
-  # CPL/CAC/ROAS/ROI por caixa; o valor do período é proporcional aos dias.
-  # body: { investments: { "12" => 1500.0, "15" => 800.0 } }
+  # POST update_inbox_investments — investimento em anúncios por caixa de
+  # entrada (Dashboard CRM → Resultados por caixa). Dois modos por caixa:
+  # manual (R$/mês, proporcional aos dias do período) ou meta_auto (gasto
+  # REAL do período puxado da conta de anúncios do Meta já integrada).
+  # body: { investments: { "12" => { mode: 'manual', monthly: 1500 },
+  #                        "15" => { mode: 'meta_auto' } } }
   def update_inbox_investments
-    valid_ids = Current.account.inboxes.pluck(:id).map(&:to_s)
-    investments = {}
-    (params[:investments] || {}).each do |inbox_id, monthly|
-      next unless valid_ids.include?(inbox_id.to_s)
-
-      value = monthly.to_f.round(2)
-      investments[inbox_id.to_s] = value if value.positive?
-    end
-
+    investments = sanitized_investments
     cfg = crm_settings.agenda_config || {}
     cfg['inbox_investments'] = investments
+    apply_capture_inboxes(cfg)
     crm_settings.update!(agenda_config: cfg)
-    render json: { inbox_investments: investments }
+    render json: { inbox_investments: investments, capture_inbox_ids: cfg['capture_inbox_ids'] }
+  end
+
+  def sanitized_investments
+    valid_ids = Current.account.inboxes.pluck(:id).map(&:to_s)
+    investments = {}
+    (params[:investments] || {}).each do |inbox_id, raw|
+      next unless valid_ids.include?(inbox_id.to_s)
+
+      entry = sanitize_investment(raw)
+      investments[inbox_id.to_s] = entry if entry
+    end
+    investments
+  end
+
+  # portas de entrada (caixas de captação): a régua da atribuição por
+  # caixa — Dashboard, Meu Painel e automações usam a mesma lista
+  def apply_capture_inboxes(cfg)
+    return unless params.key?(:capture_inbox_ids)
+
+    cfg['capture_inbox_ids'] = Array(params[:capture_inbox_ids]).map(&:to_i) & Current.account.inboxes.pluck(:id)
+  end
+
+  # aceita o formato novo {mode, monthly} e o legado (número puro = manual)
+  def sanitize_investment(raw)
+    if raw.respond_to?(:dig) # hash / ActionController::Parameters
+      mode = %w[meta_auto google_auto].include?(raw[:mode].to_s) ? raw[:mode].to_s : 'manual'
+      return { 'mode' => mode } unless mode == 'manual'
+
+      monthly = raw[:monthly].to_f.round(2)
+      monthly.positive? ? { 'mode' => 'manual', 'monthly' => monthly } : nil
+    else
+      value = raw.to_f.round(2)
+      value.positive? ? { 'mode' => 'manual', 'monthly' => value } : nil
+    end
   end
 
   def test_n8n
@@ -205,8 +234,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # Google Ads API (insights) — aguardando developer token (processo no Google)
     cfg['developer_token'] = params[:developer_token] if params[:developer_token].present?
     cfg['customer_id']     = params[:customer_id]     if params.key?(:customer_id)
+    apply_google_cost_config(cfg)
     crm_settings.update!(google_ads_config: cfg)
     render json: google_ads_json(crm_settings)
+  end
+
+  # Custo automático via API de dados do GA4 (sem developer token):
+  # property id + JSON da conta de serviço (write-only, nunca volta)
+  def apply_google_cost_config(cfg)
+    cfg['ga4_property_id'] = params[:ga4_property_id].to_s.gsub(/\D/, '') if params.key?(:ga4_property_id)
+    cfg['service_account_json'] = params[:service_account_json] if params[:service_account_json].present?
   end
 
   # ── IA (análise de conversas — Anthropic) ──────────────────────────────────
@@ -330,6 +367,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       account: Current.account,
       event_name: 'test_event'
     ).call
+    # se o custo automático estiver configurado, testa também a leitura do
+    # gasto dos últimos 7 dias pela API de dados do GA4
+    cost_service = Crm::GoogleAdCostService.new(account: Current.account, since_date: 7.days.ago.to_date)
+    result[:cost_test] = cost_service.call if cost_service.configured?
     render json: result
   end
 
@@ -882,7 +923,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       developer_token_set: cfg['developer_token'].present?,
       customer_id: cfg['customer_id'],
       configured: cfg['measurement_id'].present? && cfg['api_secret'].present?,
-      insights_configured: cfg['developer_token'].present? && cfg['customer_id'].present?
+      insights_configured: cfg['developer_token'].present? && cfg['customer_id'].present?,
+      ga4_property_id: cfg['ga4_property_id'],
+      service_account_set: cfg['service_account_json'].present?,
+      cost_configured: cfg['ga4_property_id'].present? && cfg['service_account_json'].present?
     }
   end
 

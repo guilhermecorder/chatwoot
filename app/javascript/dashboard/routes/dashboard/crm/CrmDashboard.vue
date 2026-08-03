@@ -252,28 +252,50 @@ const roasPhrase = row => {
   )}`;
 };
 
-// edição do investimento mensal (só admin) — salva e recarrega
+// edição do investimento (só admin) — por caixa: manual (R$/mês) ou
+// automático puxando o gasto REAL do Meta Ads ("as coisas conversam");
+// Google automático chega quando o Google liberar o developer token
 const editingInvest = ref(false);
 const savingInvest = ref(false);
 const investDraft = ref({});
+// portas de entrada (caixas de captação): régua da atribuição por caixa
+const captureDraft = ref([]);
 const openInvestEditor = () => {
   const draft = {};
   inboxOptions.value.forEach(i => {
     const row = inboxRows.value.find(r => r.inbox_id === i.id);
-    draft[i.id] = row?.investment_monthly || null;
+    draft[i.id] = {
+      mode: ['meta_auto', 'google_auto'].includes(row?.investment_mode)
+        ? row.investment_mode
+        : 'manual',
+      monthly: row?.investment_monthly || null,
+    };
   });
   investDraft.value = draft;
+  captureDraft.value = [...(data.value?.inbox_results?.capture_inbox_ids || [])];
   editingInvest.value = true;
+};
+const toggleCapture = id => {
+  const idx = captureDraft.value.indexOf(id);
+  if (idx >= 0) captureDraft.value.splice(idx, 1);
+  else captureDraft.value.push(id);
 };
 const saveInvestments = async () => {
   savingInvest.value = true;
   try {
     const payload = {};
-    Object.entries(investDraft.value).forEach(([id, monthly]) => {
-      const v = parseFloat(String(monthly ?? '').replace(',', '.'));
-      if (v > 0) payload[id] = v;
+    Object.entries(investDraft.value).forEach(([id, cfg]) => {
+      if (cfg.mode === 'meta_auto' || cfg.mode === 'google_auto') {
+        payload[id] = { mode: cfg.mode };
+        return;
+      }
+      const v = parseFloat(String(cfg.monthly ?? '').replace(',', '.'));
+      if (v > 0) payload[id] = { mode: 'manual', monthly: v };
     });
-    await store.dispatch('crm/updateInboxInvestments', payload);
+    await store.dispatch('crm/updateInboxInvestments', {
+      investments: payload,
+      captureInboxIds: [...captureDraft.value],
+    });
     editingInvest.value = false;
     await load();
   } catch {
@@ -828,20 +850,52 @@ const agentView = computed(() => {
           style="border-color: rgba(212, 160, 23, 0.45); background: rgba(212, 160, 23, 0.06)"
         >
           <p class="text-xs text-n-slate-11 mb-3">
-            Quanto você investe em anúncios <b>por mês</b> em cada caixa? O sistema converte
-            para o período escolhido (proporcional aos dias) e calcula CPL, CAC, ROAS e ROI.
+            De onde vem o investimento de cada caixa? <b>Meta (automático)</b> e
+            <b>Google (automático)</b> puxam o gasto REAL do período direto das
+            integrações. <b>R$/mês</b> = você digita e o sistema converte para o período.
             Caixa sem anúncio = deixe em branco.
+            <span class="text-n-slate-10">O Google automático precisa da conta de serviço
+            configurada em Integrações → Google Ads (passo a passo lá).</span>
           </p>
-          <div class="flex flex-wrap gap-3 mb-3">
-            <label
+          <div class="space-y-2 mb-3">
+            <div
               v-for="inbox in inboxOptions"
               :key="inbox.id"
-              class="flex items-center gap-2 text-xs text-n-slate-12"
+              class="flex items-center gap-2 text-xs text-n-slate-12 flex-wrap"
             >
               <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: inboxDot(inbox.id) }" />
-              {{ inbox.name }}
+              <span class="w-44 truncate">{{ inbox.name }}</span>
+              <div class="flex items-center bg-n-solid-1 border border-n-weak rounded-lg p-0.5 gap-0.5">
+                <button
+                  class="px-2 h-6 rounded text-[11px] font-medium transition-colors"
+                  :class="investDraft[inbox.id]?.mode === 'manual' ? 'text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
+                  :style="investDraft[inbox.id]?.mode === 'manual' ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
+                  @click="investDraft[inbox.id].mode = 'manual'"
+                >
+                  R$/mês
+                </button>
+                <button
+                  class="px-2 h-6 rounded text-[11px] font-medium transition-colors"
+                  :class="investDraft[inbox.id]?.mode === 'meta_auto' ? 'text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
+                  :style="investDraft[inbox.id]?.mode === 'meta_auto' ? { background: 'linear-gradient(135deg, #1877F2, #42A5F5)' } : {}"
+                  title="Puxa o gasto real da conta de anúncios do Meta no período escolhido"
+                  @click="investDraft[inbox.id].mode = 'meta_auto'"
+                >
+                  Meta (automático)
+                </button>
+                <button
+                  class="px-2 h-6 rounded text-[11px] font-medium transition-colors"
+                  :class="investDraft[inbox.id]?.mode === 'google_auto' ? 'text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
+                  :style="investDraft[inbox.id]?.mode === 'google_auto' ? { background: 'linear-gradient(135deg, #34A853, #4285F4)' } : {}"
+                  title="Puxa o gasto real do Google Ads no período (via GA4 — configure em Integrações → Google Ads)"
+                  @click="investDraft[inbox.id].mode = 'google_auto'"
+                >
+                  Google (automático)
+                </button>
+              </div>
               <input
-                v-model="investDraft[inbox.id]"
+                v-if="investDraft[inbox.id]?.mode === 'manual'"
+                v-model="investDraft[inbox.id].monthly"
                 type="number"
                 min="0"
                 step="50"
@@ -849,9 +903,36 @@ const agentView = computed(() => {
                 class="h-8 text-xs border rounded-lg px-2 bg-n-solid-1 text-n-slate-12 focus:outline-none"
                 style="width: 110px; margin-bottom: 0; border: 1px solid rgba(212, 160, 23, 0.5)"
               />
-            </label>
+              <span v-else class="text-[11px] text-n-slate-10">
+                gasto real {{ investDraft[inbox.id]?.mode === 'google_auto' ? 'do Google Ads (via GA4)' : 'da conta do Meta' }} no período
+              </span>
+            </div>
           </div>
-          <div class="flex items-center gap-2">
+          <!-- Portas de entrada: quais caixas CAPTAM leads (a atribuição
+               por caixa segue esta lista; as demais são operacionais) -->
+          <div class="pt-3 mt-1" style="border-top: 1px dashed rgba(212, 160, 23, 0.35)">
+            <p class="text-xs font-semibold text-n-slate-12 mb-1">🚪 Portas de entrada (caixas de captação)</p>
+            <p class="text-[11px] text-n-slate-10 mb-2">
+              O lead pertence à primeira porta de entrada por onde falou — caixas operacionais
+              (confirmação, NPS...) não roubam a atribuição de quem veio do Google/Instagram.
+              Esta lista também é a régua do "Novas no período" e do Meu Painel.
+            </p>
+            <div class="flex flex-wrap items-center gap-1">
+              <button
+                v-for="inbox in inboxOptions"
+                :key="'cap-' + inbox.id"
+                class="px-2.5 h-7 rounded-lg text-[11px] font-medium transition-colors flex items-center gap-1.5"
+                :class="captureDraft.includes(inbox.id) ? 'text-white' : 'text-n-slate-10 hover:bg-n-alpha-1 border border-n-weak'"
+                :style="captureDraft.includes(inbox.id) ? { background: inboxGrad(inbox.id) } : {}"
+                @click="toggleCapture(inbox.id)"
+              >
+                <span :class="captureDraft.includes(inbox.id) ? 'i-lucide-door-open' : 'i-lucide-door-closed'" class="text-xs" />
+                {{ inbox.name }}
+              </button>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 mt-3">
             <button
               class="text-xs font-semibold text-white px-3.5 py-2 rounded-xl hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
               style="background: linear-gradient(135deg, #B8860B, #D4A017)"
@@ -890,9 +971,32 @@ const agentView = computed(() => {
               >
                 {{ row.name }}
               </span>
-              <span v-if="showFinancials && row.investment_monthly" class="text-[11px] text-n-slate-10">
+              <span
+                v-if="row.inbox_id && !row.is_capture"
+                class="text-[10px] px-2 py-0.5 rounded-full border text-n-slate-10"
+                style="border-color: rgba(148, 163, 184, 0.4)"
+                title="Caixa operacional: recebe pacientes que já chegaram pelas portas de entrada — só fica com quem nunca passou por porta nenhuma"
+              >
+                ⚙️ operacional
+              </span>
+              <span v-if="showFinancials && row.investment_mode === 'meta_auto' && row.investment_period" class="text-[11px] text-n-slate-10">
+                investimento: {{ formatCurrency(row.investment_period) }} no período
+                · <span style="color: #1877F2" class="font-semibold">puxado do Meta Ads</span>
+              </span>
+              <span v-else-if="showFinancials && row.investment_mode === 'google_auto' && row.investment_period" class="text-[11px] text-n-slate-10">
+                investimento: {{ formatCurrency(row.investment_period) }} no período
+                · <span style="color: #34A853" class="font-semibold">puxado do Google (GA4)</span>
+              </span>
+              <span v-else-if="showFinancials && row.investment_monthly" class="text-[11px] text-n-slate-10">
                 investimento: {{ formatCurrency(row.investment_monthly) }}/mês
                 · {{ formatCurrency(row.investment_period) }} no período
+              </span>
+              <span
+                v-else-if="showFinancials && ['meta_auto', 'google_auto'].includes(row.investment_mode) && row.investment_note"
+                class="text-[11px] font-medium"
+                style="color: #B45309"
+              >
+                ⚠️ {{ row.investment_mode === 'google_auto' ? 'Google automático' : 'Meta automático' }}: {{ row.investment_note }}
               </span>
               <span
                 v-if="showFinancials && row.roas"
@@ -918,6 +1022,13 @@ const agentView = computed(() => {
                 </p>
               </div>
               <div>
+                <p class="text-[11px] text-n-slate-10">Compareceram <span class="opacity-70">· % dos agendados</span></p>
+                <p class="text-xl font-bold" style="color: #0D9488">
+                  {{ row.attended }}
+                  <span class="text-xs font-semibold">· {{ row.attendance_rate }}%</span>
+                </p>
+              </div>
+              <div>
                 <p class="text-[11px] text-n-slate-10">Fecharam cirurgia</p>
                 <p class="text-xl font-bold" style="color: #65A30D">
                   {{ row.closed }}
@@ -932,6 +1043,14 @@ const agentView = computed(() => {
                 <div>
                   <p class="text-[11px] text-n-slate-10">CPL <span class="opacity-70">· custo por lead</span></p>
                   <p class="text-xl font-bold text-n-slate-12">{{ row.cpl ? formatMoney2(row.cpl) : '—' }}</p>
+                </div>
+                <div>
+                  <p class="text-[11px] text-n-slate-10">Custo por agendamento</p>
+                  <p class="text-xl font-bold text-n-slate-12">{{ row.cost_per_schedule ? formatMoney2(row.cost_per_schedule) : '—' }}</p>
+                </div>
+                <div>
+                  <p class="text-[11px] text-n-slate-10">Custo por comparecimento</p>
+                  <p class="text-xl font-bold text-n-slate-12">{{ row.cost_per_attendance ? formatMoney2(row.cost_per_attendance) : '—' }}</p>
                 </div>
                 <div>
                   <p class="text-[11px] text-n-slate-10">CAC <span class="opacity-70">· custo por cirurgia</span></p>

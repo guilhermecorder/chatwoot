@@ -91,7 +91,16 @@ class CrmAutomationFireJob < ApplicationJob
     wanted = Array(automation.action_config&.dig('inbox_ids')).map(&:to_i).reject(&:zero?)
     return true if wanted.empty?
 
-    entry_inbox_id = contact.conversations.reorder(:created_at, :id).pick(:inbox_id)
+    # mesma régua do Dashboard: primeira conversa numa PORTA DE ENTRADA
+    # (caixa de captação) vence; sem nenhuma, primeira conversa geral
+    capture_ids = Crm::LeadsUniverse.capture_inbox_ids(contact.account)
+    scope = contact.conversations
+    entry_inbox_id = if capture_ids.any?
+                       scope.reorder(Arel.sql("(CASE WHEN inbox_id IN (#{capture_ids.join(',')}) THEN 0 ELSE 1 END), created_at, id"))
+                            .pick(:inbox_id)
+                     else
+                       scope.reorder(:created_at, :id).pick(:inbox_id)
+                     end
     return false if entry_inbox_id.nil? # lead sem conversa não pertence a caixa nenhuma
 
     wanted.include?(entry_inbox_id)

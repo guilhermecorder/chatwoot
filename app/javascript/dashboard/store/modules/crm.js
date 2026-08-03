@@ -241,8 +241,11 @@ const actions = {
     return data;
   },
 
-  async updateInboxInvestments(_, investments) {
-    const { data } = await CrmAPI.updateInboxInvestments(investments);
+  async updateInboxInvestments(_, { investments, captureInboxIds }) {
+    const { data } = await CrmAPI.updateInboxInvestments(
+      investments,
+      captureInboxIds
+    );
     return data;
   },
 
