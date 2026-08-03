@@ -9,6 +9,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     update_oftalmofacil
     update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
     sales_insights radar_scan run_mentor copywriter_content update_price_table
+    update_inbox_investments
   ].freeze
   before_action -> { require_capability(:settings) }, only: ADMIN_SETTINGS_ACTIONS
   # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
@@ -91,6 +92,26 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg['price_table'] = { 'items' => items, 'updated_at' => Time.current.iso8601 }
     crm_settings.update!(agenda_config: cfg)
     render json: { price_table: cfg['price_table'] }
+  end
+
+  # POST update_inbox_investments — investimento MENSAL em anúncios por
+  # caixa de entrada (Dashboard CRM → Resultados por caixa). Alimenta
+  # CPL/CAC/ROAS/ROI por caixa; o valor do período é proporcional aos dias.
+  # body: { investments: { "12" => 1500.0, "15" => 800.0 } }
+  def update_inbox_investments
+    valid_ids = Current.account.inboxes.pluck(:id).map(&:to_s)
+    investments = {}
+    (params[:investments] || {}).each do |inbox_id, monthly|
+      next unless valid_ids.include?(inbox_id.to_s)
+
+      value = monthly.to_f.round(2)
+      investments[inbox_id.to_s] = value if value.positive?
+    end
+
+    cfg = crm_settings.agenda_config || {}
+    cfg['inbox_investments'] = investments
+    crm_settings.update!(agenda_config: cfg)
+    render json: { inbox_investments: investments }
   end
 
   def test_n8n

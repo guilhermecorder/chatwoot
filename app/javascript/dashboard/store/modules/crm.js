@@ -232,11 +232,17 @@ const actions = {
     return data;
   },
 
-  async fetchDashboard(_, { pipelineId, period, preset }) {
+  async fetchDashboard(_, { pipelineId, period, preset, inboxIds }) {
     const params = {};
     if (preset) params.preset = preset;
     else if (period) params.period = period;
+    if (inboxIds?.length) params.inbox_ids = inboxIds;
     const { data } = await CrmAPI.getDashboard(pipelineId, params);
+    return data;
+  },
+
+  async updateInboxInvestments(_, investments) {
+    const { data } = await CrmAPI.updateInboxInvestments(investments);
     return data;
   },
 

@@ -250,6 +250,8 @@ Rails.application.routes.draw do
               post :update_agent_grants
               # tabela de preços oficial (Espaço do Paciente + prompts da IA)
               post :update_price_table
+              # investimento mensal por caixa (ROI/CAC do Dashboard CRM)
+              post :update_inbox_investments
             end
             # Feedback de bugs do time (vira card 🐞 no board do admin)
             resources :bug_reports, only: [:create], controller: 'bug_reports'

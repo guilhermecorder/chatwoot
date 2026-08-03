@@ -10,32 +10,85 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
 
     # sem ORDER BY na base: as consultas agrupadas (group/count/sum) do
     # dashboard quebram no Postgres se herdarem a ordenação
-    contacts = pipeline.crm_contacts
+    all_contacts = pipeline.crm_contacts
+    # FILTRO POR CAIXA DE ENTRADA (missão 03/08): quando o admin escolhe uma
+    # caixa, o dashboard inteiro passa a olhar só os leads que CHEGARAM por
+    # ela (caixa da primeira conversa do contato — ninguém conta duas vezes)
+    contacts = filter_by_entry_inbox(all_contacts)
     # COORTE do período: cards cujo LEAD surgiu dentro do range escolhido
     # (data real do contato, não a do card). TODOS os blocos do dashboard
     # respondem ao seletor de período através dela — pedido do refino 28/07.
     cohort = contacts.joins(:contact).where(contacts: { created_at: since..until_at })
+    # coorte SEM filtro de caixa: base do comparativo entre caixas, que
+    # existe justamente para ver todas lado a lado
+    full_cohort = all_contacts.joins(:contact).where(contacts: { created_at: since..until_at })
 
     render json: {
-      pipeline_id:        pipeline.id,
-      pipeline_name:      pipeline.name,
-      period_days:        ((until_at - since) / 1.day).ceil,
-      kpis:               build_kpis(pipeline, contacts, cohort, since, until_at),
-      funnel:             build_funnel(pipeline, cohort),
-      value_by_stage:     build_value_by_stage(pipeline, cohort),
-      avg_time_by_stage:  build_avg_time_by_stage(pipeline, cohort),
-      by_inbox:           build_by_inbox(since, until_at),
-      created_over_time:  build_created_over_time(pipeline, contacts, since, until_at),
-      responsiveness:     build_responsiveness(pipeline, cohort),
-      agents:             build_agents(since, until_at),
-      sheet_surgeries:    build_sheet_surgeries(since, until_at),
-      by_label:           build_by_label(cohort),
-      radar:              build_radar(since, until_at),
-      nps:                build_nps(pipeline, cohort),
+      pipeline_id: pipeline.id,
+      pipeline_name: pipeline.name,
+      period_days: ((until_at - since) / 1.day).ceil,
+      inbox_filter: selected_inbox_ids,
+      kpis: build_kpis(pipeline, contacts, cohort, since, until_at),
+      funnel: build_funnel(pipeline, cohort),
+      value_by_stage: build_value_by_stage(pipeline, cohort),
+      avg_time_by_stage: build_avg_time_by_stage(pipeline, cohort),
+      by_inbox: build_by_inbox(since, until_at),
+      created_over_time: build_created_over_time(pipeline, contacts, since, until_at),
+      responsiveness: build_responsiveness(pipeline, cohort),
+      agents: build_agents(since, until_at),
+      sheet_surgeries: build_sheet_surgeries(since, until_at),
+      by_label: build_by_label(cohort),
+      radar: build_radar(since, until_at),
+      nps: build_nps(pipeline, cohort),
+      inbox_results: build_inbox_results(pipeline, full_cohort, since, until_at),
+      revenue_over_time: build_revenue_over_time(pipeline, full_cohort, since, until_at)
     }
   end
 
   private
+
+  # ── Filtro por caixa de entrada ───────────────────────────────────
+  # Regra de atribuição: a caixa "dona" do lead é a da PRIMEIRA conversa
+  # dele (primeiro toque). Um paciente que falou no Google e depois no
+  # Instagram pertence só ao Google — as taxas por caixa fecham 100%.
+
+  def selected_inbox_ids
+    @selected_inbox_ids ||= begin
+      wanted = Array(params[:inbox_ids]).map(&:to_i).reject(&:zero?)
+      wanted.any? ? (wanted & Current.account.inboxes.pluck(:id)) : []
+    end
+  end
+
+  def inbox_filter_active?
+    selected_inbox_ids.any?
+  end
+
+  # SQL da caixa de chegada por contato (ids já validados contra a conta)
+  def entry_inbox_sql
+    <<~SQL.squish
+      SELECT DISTINCT ON (contact_id) contact_id, inbox_id
+      FROM conversations
+      WHERE account_id = #{Current.account.id}
+      ORDER BY contact_id, created_at ASC, id ASC
+    SQL
+  end
+
+  def entry_contact_ids_sql
+    "SELECT fc.contact_id FROM (#{entry_inbox_sql}) fc WHERE fc.inbox_id IN (#{selected_inbox_ids.join(',')})"
+  end
+
+  def filter_by_entry_inbox(contacts_scope)
+    return contacts_scope unless inbox_filter_active?
+
+    contacts_scope.where("crm_contacts.contact_id IN (#{entry_contact_ids_sql})")
+  end
+
+  # contact_id → inbox_id da primeira conversa (conta inteira, 1 query)
+  def entry_inbox_map
+    @entry_inbox_map ||= ActiveRecord::Base.connection
+                                           .select_rows(entry_inbox_sql)
+                                           .to_h
+  end
 
   # período no fuso da clínica (São Paulo) — antes usava o fuso do servidor
   # (UTC): "hoje" começava às 21h da véspera e os números não batiam com o
@@ -56,19 +109,23 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
   # abertas, sem resposta (última msg é do paciente) e tempo médio de
   # primeira resposta no período — dá para ver o time e cada atendente
   def build_agents(since, until_at)
-    open_by_agent = Current.account.conversations.open.group(:assignee_id).count
+    conv_scope = Current.account.conversations
+    conv_scope = conv_scope.where(inbox_id: selected_inbox_ids) if inbox_filter_active?
+    open_by_agent = conv_scope.open.group(:assignee_id).count
 
-    unanswered_by_agent = Current.account.conversations
-                                 .open
-                                 .where.not(waiting_since: nil)
-                                 .group(:assignee_id)
-                                 .count
+    unanswered_by_agent = conv_scope
+                          .open
+                          .where.not(waiting_since: nil)
+                          .group(:assignee_id)
+                          .count
 
-    avg_first_response = Current.account.reporting_events
-                                .where(name: 'first_response')
-                                .where(created_at: since..until_at)
-                                .group(:user_id)
-                                .average(:value)
+    events_scope = Current.account.reporting_events
+    events_scope = events_scope.where(inbox_id: selected_inbox_ids) if inbox_filter_active?
+    avg_first_response = events_scope
+                         .where(name: 'first_response')
+                         .where(created_at: since..until_at)
+                         .group(:user_id)
+                         .average(:value)
 
     rows = Current.account.users.map do |u|
       {
@@ -144,7 +201,9 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     cohort_total = cohort.count
     # mesma régua do Meu Painel (Crm::LeadsUniverse): contatos novos das
     # caixas de captação — os dois ambientes mostram o MESMO número
-    new_in_period = Crm::LeadsUniverse.scope(Current.account, since, until_at).count
+    universe = Crm::LeadsUniverse.scope(Current.account, since, until_at)
+    universe = universe.where("contacts.id IN (#{entry_contact_ids_sql})") if inbox_filter_active?
+    new_in_period = universe.count
 
     # "fechou" = chegou à coluna de cirurgia (sem pós/indicação) ou além —
     # mesma régua do Meu Painel; antes era só a ÚLTIMA coluna (Pós Operatório)
@@ -270,11 +329,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
   # acima disso = por SEMANA — o gráfico nunca vira 1 barra solitária nem
   # uma parede de 180 barras
   def build_created_over_time(pipeline, contacts, since, until_at)
-    days = [((until_at.to_date - since.to_date).to_i + 1), 1].max
-    granularity = :day
-    granularity = :hour if days <= 1
-    granularity = :week if days > 92
-
+    granularity = timeline_granularity(since, until_at)
     series = timeline_series(pipeline, contacts, since, until_at, timeline_bucket_sql(granularity))
 
     timeline_keys(granularity, since, until_at).map do |key, label|
@@ -298,6 +353,17 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       cirurgias: reached_stage_scope(pipeline, contacts, since, until_at, /cirurgia/i, exclude: /pós|indica/i)
         .group(Arel.sql(bucket_sql)).count
     }
+  end
+
+  # 1 dia = por hora; até 1 mês = por dia; acima = por SEMANA. Gráficos de
+  # área com balde diário viram agulhas (refino 03/08) — semana dá as
+  # colinas fluidas do modelo e alinha Conversas × Faturamento no mesmo eixo
+  def timeline_granularity(since, until_at)
+    days = [((until_at.to_date - since.to_date).to_i + 1), 1].max
+    return :hour if days <= 1
+    return :week if days > 31
+
+    :day
   end
 
   TIMELINE_TZ_SQL = "contacts.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'".freeze
@@ -406,12 +472,13 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       t.present? && t >= since && t <= until_at
     end
 
-    appointments = Current.account.tasks
-                          .where(task_type: 'consulta')
-                          .where(created_at: since..until_at)
-                          .count
+    appointments_scope = Current.account.tasks
+                                .where(task_type: 'consulta')
+                                .where(created_at: since..until_at)
+    # consultas seguem o filtro pela caixa de chegada do paciente da tarefa
+    appointments_scope = appointments_scope.where("tasks.contact_id IN (#{entry_contact_ids_sql})") if inbox_filter_active?
 
-    { opportunities: detected, appointments: appointments }
+    { opportunities: detected, appointments: appointments_scope.count }
   end
 
   # ── Cirurgias da planilha (Google Sheets) ─────────────────────────
@@ -446,6 +513,168 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
   rescue StandardError => e
     Rails.logger.error "[CrmDashboard] sheet_surgeries: #{e.message}"
     { configured: true, error: 'Não consegui ler a planilha agora.' }
+  end
+
+  # ── Resultados por caixa de entrada (missão 03/08) ────────────────
+  # Comparativo lado a lado: cada caixa com os leads do período que
+  # CHEGARAM por ela, quantos avançaram até Agendamento, quantos fecharam
+  # cirurgia e a receita. Com o investimento mensal informado (só admin),
+  # calcula CPL, CAC, ROAS e ROI da caixa.
+
+  def build_inbox_results(pipeline, full_cohort, since, until_at)
+    stats = inbox_funnel_stats(pipeline, full_cohort)
+    admin = Current.account_user&.administrator?
+    investments = inbox_investments_config
+    period_days = (until_at - since) / 1.day
+    inbox_names = Current.account.inboxes.pluck(:id, :name).to_h
+
+    result_rows = stats.map do |inbox_id, stat|
+      row = inbox_result_row(inbox_id, stat, inbox_names)
+      row.merge!(inbox_financials(inbox_id, stat, investments, period_days)) if admin
+      row
+    end
+
+    {
+      admin: admin,
+      rows: result_rows.sort_by { |r| [r[:inbox_id].nil? ? 1 : 0, -r[:leads]] }.first(8)
+    }
+  end
+
+  # uma passada só pelos cards da coorte: leads/agendou/fechou/receita por
+  # caixa de chegada
+  def inbox_funnel_stats(pipeline, full_cohort)
+    sched_ids  = reached_ids_for(pipeline, /agendamento/i).to_set
+    closed_ids = closing_stage_ids(pipeline).to_set
+
+    stats = Hash.new { |h, k| h[k] = { leads: 0, scheduled: 0, closed: 0, revenue: 0.0 } }
+    full_cohort.pluck(:contact_id, :stage_id, Arel.sql('COALESCE(crm_contacts.value, 0)')).each do |contact_id, stage_id, value|
+      stat = stats[entry_inbox_map[contact_id]]
+      stat[:leads] += 1
+      stat[:scheduled] += 1 if sched_ids.include?(stage_id)
+      next unless closed_ids.include?(stage_id)
+
+      stat[:closed] += 1
+      stat[:revenue] += value.to_f
+    end
+    stats
+  end
+
+  def inbox_result_row(inbox_id, stat, inbox_names)
+    {
+      inbox_id: inbox_id,
+      name: inbox_id ? (inbox_names[inbox_id] || 'Caixa removida') : 'Sem conversa vinculada',
+      leads: stat[:leads],
+      scheduled: stat[:scheduled],
+      scheduling_rate: pct(stat[:scheduled], stat[:leads]),
+      closed: stat[:closed],
+      close_rate: pct(stat[:closed], stat[:leads]),
+      revenue: stat[:revenue].round(2)
+    }
+  end
+
+  def pct(part, total)
+    total.positive? ? ((part.to_f / total) * 100).round(1) : 0.0
+  end
+
+  # investimento do período = mensal informado, proporcional aos dias
+  # escolhidos (30,44 dias = mês médio). Sem investimento = métricas nulas.
+  def inbox_financials(inbox_id, stat, investments, period_days)
+    monthly = investments[inbox_id.to_s].to_f
+    return { investment_monthly: nil, investment_period: nil, cpl: nil, cac: nil, roas: nil, roi_pct: nil } unless monthly.positive?
+
+    invest = (monthly * period_days / 30.44).round(2)
+    leads = stat[:leads]
+    closed = stat[:closed]
+    revenue = stat[:revenue]
+    {
+      investment_monthly: monthly.round(2),
+      investment_period: invest,
+      cpl: leads.positive? ? (invest / leads).round(2) : nil,
+      cac: closed.positive? ? (invest / closed).round(2) : nil,
+      roas: (revenue / invest).round(2),
+      roi_pct: (((revenue - invest) / invest) * 100).round(1)
+    }
+  end
+
+  def inbox_investments_config
+    CrmSetting.find_by(account: Current.account)&.agenda_config&.dig('inbox_investments') || {}
+  end
+
+  # etapas "nesta ou além" a partir da primeira que casa com o padrão
+  def reached_ids_for(pipeline, pattern, exclude: /pós/i)
+    ordered = pipeline.stages.sort_by(&:position)
+    target = ordered.find { |s| s.name.match?(pattern) && !s.name.match?(exclude) }
+    return [] unless target
+
+    ordered.select { |s| s.position >= target.position }.map(&:id)
+  end
+
+  # ── Faturamento ao longo do tempo, por caixa de entrada ───────────
+  # receita dos leads que FECHARAM, distribuída pela data de chegada do
+  # lead (mesma régua de coorte do resto do dashboard) e separada pela
+  # caixa de chegada — alimenta o gráfico de áreas em camadas.
+
+  def build_revenue_over_time(pipeline, full_cohort, since, until_at)
+    closed_ids = closing_stage_ids(pipeline)
+    return { points: [], series: [] } if closed_ids.empty?
+
+    granularity = timeline_granularity(since, until_at)
+    keys = timeline_keys(granularity, since, until_at)
+    by_inbox, totals = revenue_buckets(full_cohort, closed_ids, granularity)
+
+    {
+      granularity: granularity,
+      points: keys.map { |k, label| { date: k, label: label } },
+      series: revenue_series(by_inbox, totals, keys)
+    }
+  end
+
+  def revenue_buckets(full_cohort, closed_ids, granularity)
+    by_inbox = Hash.new { |h, k| h[k] = Hash.new(0.0) }
+    totals = Hash.new(0.0)
+    full_cohort.where(stage_id: closed_ids)
+               .pluck(:contact_id, Arel.sql('COALESCE(crm_contacts.value, 0)'), Arel.sql('contacts.created_at'))
+               .each do |contact_id, value, created_at|
+      inbox_id = entry_inbox_map[contact_id]
+      by_inbox[inbox_id][revenue_bucket_key(created_at, granularity)] += value.to_f
+      totals[inbox_id] += value.to_f
+    end
+    [by_inbox, totals]
+  end
+
+  # top 5 caixas por receita + "Outras caixas" agrupadas
+  def revenue_series(by_inbox, totals, keys)
+    inbox_names = Current.account.inboxes.pluck(:id, :name).to_h
+    top = totals.sort_by { |_, v| -v }.first(5).map(&:first)
+
+    series = top.map do |inbox_id|
+      {
+        inbox_id: inbox_id,
+        name: inbox_id ? (inbox_names[inbox_id] || 'Caixa removida') : 'Sem conversa vinculada',
+        values: keys.map { |k, _| by_inbox[inbox_id][k].round(2) }
+      }
+    end
+
+    series + other_revenue_series(by_inbox, totals.keys - top, keys)
+  end
+
+  def other_revenue_series(by_inbox, other_ids, keys)
+    return [] if other_ids.empty?
+
+    [{
+      inbox_id: 'outras',
+      name: 'Outras caixas',
+      values: keys.map { |k, _| other_ids.sum { |id| by_inbox[id][k] }.round(2) }
+    }]
+  end
+
+  def revenue_bucket_key(time, granularity)
+    t = time.in_time_zone(TZ)
+    case granularity
+    when :hour then format('%02d', t.hour)
+    when :week then t.to_date.beginning_of_week.iso8601
+    else t.to_date.iso8601
+    end
   end
 
   # leads que chegaram ATÉ a etapa alvo (ou além) no período — visão de

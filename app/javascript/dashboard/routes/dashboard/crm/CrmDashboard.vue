@@ -3,7 +3,7 @@
 // dourado #D4A017; verde-limão #84CC16 reservado para o que é MUITO bom
 // (valor em pipeline, cirurgias). "Conversa" no lugar de "lead".
 import { ref, computed, watch, onMounted } from 'vue';
-import { useStore } from 'dashboard/composables/store';
+import { useStore, useMapGetter } from 'dashboard/composables/store';
 import {
   Chart as ChartJS,
   Title, Tooltip, Legend,
@@ -11,9 +11,15 @@ import {
   ArcElement,
   PointElement, LineElement, Filler,
 } from 'chart.js';
-import { Bar, Doughnut } from 'vue-chartjs';
+import { Bar, Doughnut, Line } from 'vue-chartjs';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
+import { useAdmin } from 'dashboard/composables/useAdmin';
+import {
+  inboxGradientFor,
+  inboxSolidFor,
+  ALL_INBOXES_GRADIENT,
+} from 'dashboard/helper/cevicoInboxColors.js';
 
 ChartJS.register(
   Title, Tooltip, Legend,
@@ -112,6 +118,58 @@ const selectedPeriod = computed(() => PERIODS.find(p => p.key === selectedPeriod
 
 // ── Load ─────────────────────────────────────────────────────────────
 
+// ── 📥 Filtro por caixa de entrada (missão 03/08) ────────────────────
+// a caixa "dona" do lead é a da PRIMEIRA conversa dele. MESMO modo de
+// seleção das pílulas de Conversas (pedido 03/08): aceita VÁRIAS caixas
+// ao mesmo tempo, "Todas" limpa, e a escolha fica salva no navegador
+// (pré-selecionada ao voltar no dashboard).
+const DASH_INBOX_PILLS_KEY = 'cevico_dashboard_inboxes';
+const { isAdmin } = useAdmin();
+const accountInboxes = useMapGetter('inboxes/getInboxes');
+const inboxOptions = computed(() =>
+  [...(accountInboxes.value || [])].sort((a, b) => a.id - b.id)
+);
+const inboxGrad = idOrName =>
+  inboxGradientFor(accountInboxes.value || [], idOrName);
+const inboxDot = idOrName =>
+  inboxSolidFor(accountInboxes.value || [], idOrName);
+
+const loadSavedInboxPills = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DASH_INBOX_PILLS_KEY) || '[]');
+    return Array.isArray(raw) ? raw.map(Number).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+};
+const selectedInboxIds = ref(loadSavedInboxPills());
+const activeInboxSet = computed(() => new Set(selectedInboxIds.value));
+const inboxFilterActive = computed(() => selectedInboxIds.value.length > 0);
+
+const selectInboxPill = id => {
+  if (!id) {
+    // "Todas": limpa a seleção
+    selectedInboxIds.value = [];
+  } else {
+    const base = [...selectedInboxIds.value];
+    const idx = base.indexOf(id);
+    if (idx >= 0) base.splice(idx, 1);
+    else base.push(id);
+    selectedInboxIds.value = base;
+  }
+  localStorage.setItem(
+    DASH_INBOX_PILLS_KEY,
+    JSON.stringify(selectedInboxIds.value)
+  );
+};
+
+const selectedInboxNames = computed(() =>
+  inboxOptions.value
+    .filter(i => activeInboxSet.value.has(i.id))
+    .map(i => i.name)
+    .join(', ')
+);
+
 const load = async () => {
   loading.value = true;
   error.value   = false;
@@ -120,6 +178,9 @@ const load = async () => {
       pipelineId: props.pipeline.id,
       period: selectedPeriod.value?.period,
       preset: selectedPeriod.value?.preset,
+      inboxIds: inboxFilterActive.value
+        ? [...selectedInboxIds.value]
+        : undefined,
     });
   } catch {
     error.value = true;
@@ -134,8 +195,12 @@ const goals = useCevicoGoals();
 onMounted(() => {
   load();
   goals.load();
+  if (!(accountInboxes.value || []).length) {
+    store.dispatch('inboxes/get').catch(() => {});
+  }
 });
 watch(selectedPeriodKey, load);
+watch(selectedInboxIds, load);
 watch(() => props.pipeline?.id, load);
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -162,6 +227,120 @@ const formatCurrency = (val) =>
     ? 'R$ ' + Number(val).toLocaleString('pt-BR', { maximumFractionDigits: 0 })
     : 'R$ 0';
 
+// com centavos — CPL/CAC pequenos perdem o sentido arredondados
+const formatMoney2 = val =>
+  val || val === 0
+    ? 'R$ ' +
+      Number(val).toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : '—';
+
+// ── 📥 Resultados por caixa de entrada ───────────────────────────────
+const inboxRows = computed(() => data.value?.inbox_results?.rows || []);
+const showFinancials = computed(
+  () => isAdmin.value && data.value?.inbox_results?.admin
+);
+
+// frase por extenso do retorno — a régua que o Guilherme usa nas reuniões
+const roasPhrase = row => {
+  if (!row.roas) return '';
+  return `Cada R$ 1 investido voltou como R$ ${Number(row.roas).toLocaleString(
+    'pt-BR',
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+  )}`;
+};
+
+// edição do investimento mensal (só admin) — salva e recarrega
+const editingInvest = ref(false);
+const savingInvest = ref(false);
+const investDraft = ref({});
+const openInvestEditor = () => {
+  const draft = {};
+  inboxOptions.value.forEach(i => {
+    const row = inboxRows.value.find(r => r.inbox_id === i.id);
+    draft[i.id] = row?.investment_monthly || null;
+  });
+  investDraft.value = draft;
+  editingInvest.value = true;
+};
+const saveInvestments = async () => {
+  savingInvest.value = true;
+  try {
+    const payload = {};
+    Object.entries(investDraft.value).forEach(([id, monthly]) => {
+      const v = parseFloat(String(monthly ?? '').replace(',', '.'));
+      if (v > 0) payload[id] = v;
+    });
+    await store.dispatch('crm/updateInboxInvestments', payload);
+    editingInvest.value = false;
+    await load();
+  } catch {
+    // mantém o editor aberto para tentar de novo
+  } finally {
+    savingInvest.value = false;
+  }
+};
+
+// ── 💰 Faturamento por caixa — áreas em camadas (modelo enviado 03/08) ──
+const REVENUE_FALLBACK = { outras: '#64748B', none: '#475569' };
+const revenueSeriesColor = serie => {
+  if (serie.inbox_id === 'outras') return REVENUE_FALLBACK.outras;
+  if (!serie.inbox_id) return REVENUE_FALLBACK.none;
+  return inboxDot(serie.inbox_id);
+};
+
+const revenueGranularityLabel = computed(() => {
+  const g = data.value?.revenue_over_time?.granularity;
+  if (g === 'hour') return 'por hora do dia';
+  if (g === 'week') return 'por semana';
+  return 'por dia';
+});
+
+const revenueTotal = computed(() =>
+  (data.value?.revenue_over_time?.series || []).reduce(
+    (sum, s) => sum + s.values.reduce((a, v) => a + v, 0),
+    0
+  )
+);
+
+const revenueChart = computed(() => {
+  const rot = data.value?.revenue_over_time;
+  if (!rot?.points?.length || !rot?.series?.length) return null;
+
+  // linha do TOTAL (somatório das caixas): dourada, tracejada, fora da
+  // pilha ('stack' próprio = valor absoluto). Primeira da lista = desenha
+  // por cima das camadas.
+  const totalValues = rot.points.map((_, i) =>
+    rot.series.reduce((sum, s) => sum + (s.values[i] || 0), 0)
+  );
+  const totalDataset = {
+    label: 'Total (todas as caixas)',
+    data: totalValues,
+    borderColor: '#FBBF24',
+    borderWidth: 2.5,
+    borderDash: [6, 4],
+    pointRadius: 0,
+    pointHoverRadius: 4,
+    pointHoverBackgroundColor: '#FFFFFF',
+    tension: 0.45,
+    fill: false,
+    stack: 'cevico-total',
+  };
+
+  const datasets = [
+    totalDataset,
+    ...rot.series.map(serie =>
+      areaDataset(serie.name, serie.values, revenueSeriesColor(serie))
+    ),
+  ];
+  return {
+    data: { labels: rot.points.map(p => p.label), datasets },
+    options: layeredAreaOptions({ stacked: true, format: formatCurrency }),
+  };
+});
+
 // ── Charts ────────────────────────────────────────────────────────────
 
 // fatia com gradiente vertical (mesmo aspecto "macio e brilhante" do donut
@@ -183,7 +362,64 @@ const CHART_OPTIONS_BASE = {
   animation: { duration: 400 },
 };
 
-// Conversas ao longo do tempo — colunas arredondadas, 3 séries sobrepostas
+// ── estilo compartilhado: áreas em camadas com gradiente sobre navy ──
+// (modelo enviado 03/08 — usado no Faturamento e nas Conversas ao longo
+// do tempo, mesmo código pros dois)
+const areaDataset = (label, values, solid) => ({
+  label,
+  data: values,
+  borderColor: solid,
+  borderWidth: 2,
+  pointRadius: 0,
+  pointHoverRadius: 4,
+  pointHoverBackgroundColor: '#FFFFFF',
+  tension: 0.45,
+  fill: true,
+  // gradiente vertical: cor viva em cima desvanecendo pra base — o
+  // visual "camadas de luz" da referência
+  backgroundColor: ctx => {
+    const { chartArea, ctx: c } = ctx.chart;
+    if (!chartArea) return solid + '66';
+    const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+    g.addColorStop(0, solid + 'CC');
+    g.addColorStop(0.65, solid + '55');
+    g.addColorStop(1, solid + '0D');
+    return g;
+  },
+});
+
+const layeredAreaOptions = ({ stacked = false, format = v => v } = {}) => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index', intersect: false },
+  plugins: {
+    legend: {
+      display: true,
+      position: 'bottom',
+      labels: { boxWidth: 12, padding: 14, font: { size: 11 }, color: '#CBD5E1' },
+    },
+    tooltip: {
+      callbacks: { label: ctx => ` ${ctx.dataset.label}: ${format(ctx.raw)}` },
+    },
+  },
+  scales: {
+    y: {
+      stacked,
+      beginAtZero: true,
+      ticks: { maxTicksLimit: 6, precision: 0, color: '#94A3B8', callback: v => format(v) },
+      grid: { color: 'rgba(148, 163, 184, 0.14)' },
+    },
+    x: {
+      ticks: { maxTicksLimit: 14, color: '#94A3B8' },
+      grid: { display: false },
+    },
+  },
+  animation: { duration: 500, easing: 'easeOutQuart' },
+});
+
+// Conversas ao longo do tempo — áreas em camadas SOBREPOSTAS (agendou e
+// operou são subconjuntos das novas, então nada de empilhar); cores vivas
+// pra ler bem sobre o navy
 const timelineChart = computed(() => {
   if (!data.value?.created_over_time) return null;
   const t = data.value.created_over_time;
@@ -193,29 +429,16 @@ const timelineChart = computed(() => {
     const dt = new Date(d.date + 'T12:00:00');
     return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   });
-  const barBase = { borderRadius: 8, borderSkipped: false, maxBarThickness: 26 };
   return {
     data: {
       labels,
       datasets: [
-        { label: 'Novas conversas', data: t.map(d => d.count), backgroundColor: AZUL + 'E6', ...barBase },
-        { label: 'Chegaram a agendar', data: t.map(d => d.agendamentos), backgroundColor: OURO + 'E6', ...barBase },
-        { label: 'Chegaram à cirurgia', data: t.map(d => d.cirurgias), backgroundColor: LIME + 'E6', ...barBase },
+        areaDataset('Novas conversas', t.map(d => d.count), '#3B82F6'),
+        areaDataset('Chegaram a agendar', t.map(d => d.agendamentos), '#FBBF24'),
+        areaDataset('Chegaram à cirurgia', t.map(d => d.cirurgias), '#84CC16'),
       ],
     },
-    options: {
-      ...CHART_OPTIONS_BASE,
-      plugins: {
-        legend: { display: true, position: 'bottom', labels: { boxWidth: 12, padding: 14, font: { size: 11 } } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw}` } },
-      },
-      scales: {
-        // precision 0 = só inteiros, mas sem forçar 1 em 1 (mês com 1.400
-        // leads virava uma parede de ticks)
-        y: { beginAtZero: true, ticks: { precision: 0, maxTicksLimit: 6 }, grid: { color: 'rgba(120,140,180,0.12)' } },
-        x: { grid: { display: false }, ticks: { maxTicksLimit: 14 } },
-      },
-    },
+    options: layeredAreaOptions(),
   };
 });
 
@@ -470,6 +693,43 @@ const agentView = computed(() => {
       </div>
     </div>
 
+    <!-- 📥 Filtro por caixa de entrada — o dashboard INTEIRO responde:
+         quem "pertence" à caixa é o lead cuja PRIMEIRA conversa foi nela.
+         Mesmo modo de seleção das pílulas de Conversas: aceita VÁRIAS
+         caixas, "Todas" limpa, escolha salva no navegador -->
+    <div class="flex items-center gap-2 mb-8 flex-wrap">
+      <div class="flex flex-wrap items-center min-h-[34px] bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5">
+        <span class="i-lucide-inbox text-sm ml-2 mr-0.5 text-n-slate-10 flex-shrink-0" />
+        <button
+          class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
+          :class="activeInboxSet.size === 0 ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeInboxSet.size === 0 ? { background: ALL_INBOXES_GRADIENT } : {}"
+          @click="selectInboxPill(0)"
+        >
+          Todas
+        </button>
+        <button
+          v-for="inbox in inboxOptions"
+          :key="inbox.id"
+          class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 flex items-center gap-1.5"
+          :class="activeInboxSet.has(inbox.id) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeInboxSet.has(inbox.id) ? { background: inboxGrad(inbox.id) } : {}"
+          :title="activeInboxSet.has(inbox.id) ? 'Clique para tirar esta caixa da seleção' : 'Clique para somar esta caixa à seleção'"
+          @click="selectInboxPill(inbox.id)"
+        >
+          <span
+            v-if="!activeInboxSet.has(inbox.id)"
+            class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+            :style="{ background: inboxDot(inbox.id) }"
+          />
+          {{ inbox.name }}
+        </button>
+      </div>
+      <span v-if="inboxFilterActive" class="text-[11px] text-n-slate-10">
+        mostrando só os leads que <b>chegaram</b> por: {{ selectedInboxNames }} (primeira conversa)
+      </span>
+    </div>
+
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-24 text-n-slate-10">
       <span class="i-lucide-loader-2 animate-spin text-2xl mr-2" />
@@ -534,6 +794,174 @@ const agentView = computed(() => {
           :value="formatDuration(data.kpis.avg_conversion_minutes)"
           sub="da chegada até fechar a cirurgia"
         />
+      </div>
+
+      <!-- 📥 Resultados por caixa de entrada (missão 03/08): Google ×
+           Instagram lado a lado — conversão, receita e, p/ admin, o
+           retorno do anúncio (CPL/CAC/ROAS/ROI) -->
+      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-10">
+        <div class="flex items-center justify-between flex-wrap gap-3 mb-2">
+          <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
+              <span class="i-lucide-inbox text-white text-sm" />
+            </span>
+            Resultados por caixa de entrada
+          </h3>
+          <button
+            v-if="showFinancials && !editingInvest"
+            class="text-xs font-semibold px-3.5 py-2 rounded-xl text-white hover:opacity-90 shadow flex items-center gap-1.5"
+            style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+            @click="openInvestEditor"
+          >
+            <span class="i-lucide-circle-dollar-sign text-sm" />
+            Informar investimento mensal
+          </button>
+        </div>
+        <p class="text-[11px] text-n-slate-10 mb-5">
+          cada lead pertence à caixa em que <b>chegou</b> (primeira conversa) — as taxas olham os leads do período escolhido
+        </p>
+
+        <!-- editor do investimento mensal (admin) -->
+        <div
+          v-if="editingInvest"
+          class="rounded-xl border border-dashed p-4 mb-5"
+          style="border-color: rgba(212, 160, 23, 0.45); background: rgba(212, 160, 23, 0.06)"
+        >
+          <p class="text-xs text-n-slate-11 mb-3">
+            Quanto você investe em anúncios <b>por mês</b> em cada caixa? O sistema converte
+            para o período escolhido (proporcional aos dias) e calcula CPL, CAC, ROAS e ROI.
+            Caixa sem anúncio = deixe em branco.
+          </p>
+          <div class="flex flex-wrap gap-3 mb-3">
+            <label
+              v-for="inbox in inboxOptions"
+              :key="inbox.id"
+              class="flex items-center gap-2 text-xs text-n-slate-12"
+            >
+              <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: inboxDot(inbox.id) }" />
+              {{ inbox.name }}
+              <input
+                v-model="investDraft[inbox.id]"
+                type="number"
+                min="0"
+                step="50"
+                placeholder="R$/mês"
+                class="h-8 text-xs border rounded-lg px-2 bg-n-solid-1 text-n-slate-12 focus:outline-none"
+                style="width: 110px; margin-bottom: 0; border: 1px solid rgba(212, 160, 23, 0.5)"
+              />
+            </label>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              class="text-xs font-semibold text-white px-3.5 py-2 rounded-xl hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+              style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+              :disabled="savingInvest"
+              @click="saveInvestments"
+            >
+              <span :class="savingInvest ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
+              {{ savingInvest ? 'Salvando…' : 'Salvar investimentos' }}
+            </button>
+            <button
+              class="text-xs text-n-slate-10 hover:text-n-slate-12 px-2 py-2"
+              :disabled="savingInvest"
+              @click="editingInvest = false"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+
+        <div v-if="!inboxRows.length" class="flex flex-col items-center justify-center py-8 text-n-slate-10 text-sm gap-2">
+          <span class="i-lucide-inbox text-2xl" />
+          <span>Nenhum lead no período — os resultados por caixa aparecem aqui.</span>
+        </div>
+
+        <div v-else class="space-y-3">
+          <div
+            v-for="row in inboxRows"
+            :key="String(row.inbox_id)"
+            class="rounded-xl bg-n-alpha-1 p-4"
+            :style="{ borderLeft: `4px solid ${row.inbox_id ? inboxDot(row.inbox_id) : '#64748B'}` }"
+          >
+            <div class="flex items-center gap-2 mb-3 flex-wrap">
+              <span
+                class="text-xs font-bold text-white px-2.5 py-1 rounded-lg"
+                :style="{ background: row.inbox_id ? inboxGrad(row.inbox_id) : 'linear-gradient(135deg, #475569, #64748B)' }"
+              >
+                {{ row.name }}
+              </span>
+              <span v-if="showFinancials && row.investment_monthly" class="text-[11px] text-n-slate-10">
+                investimento: {{ formatCurrency(row.investment_monthly) }}/mês
+                · {{ formatCurrency(row.investment_period) }} no período
+              </span>
+              <span
+                v-if="showFinancials && row.roas"
+                class="text-[11px] font-bold ml-auto px-2 py-0.5 rounded-full"
+                :style="row.roas >= 1
+                  ? 'color: #3F6212; background: rgba(132,204,22,0.15)'
+                  : 'color: #B91C1C; background: rgba(239,68,68,0.12)'"
+              >
+                {{ roasPhrase(row) }}
+              </span>
+            </div>
+
+            <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(110px, 1fr))">
+              <div>
+                <p class="text-[11px] text-n-slate-10">Leads</p>
+                <p class="text-xl font-bold text-n-slate-12">{{ row.leads }}</p>
+              </div>
+              <div>
+                <p class="text-[11px] text-n-slate-10">Agendaram</p>
+                <p class="text-xl font-bold" style="color: #B8860B">
+                  {{ row.scheduled }}
+                  <span class="text-xs font-semibold">· {{ row.scheduling_rate }}%</span>
+                </p>
+              </div>
+              <div>
+                <p class="text-[11px] text-n-slate-10">Fecharam cirurgia</p>
+                <p class="text-xl font-bold" style="color: #65A30D">
+                  {{ row.closed }}
+                  <span class="text-xs font-semibold">· {{ row.close_rate }}%</span>
+                </p>
+              </div>
+              <div>
+                <p class="text-[11px] text-n-slate-10">Receita</p>
+                <p class="text-xl font-bold" style="color: #65A30D">{{ formatCurrency(row.revenue) }}</p>
+              </div>
+              <template v-if="showFinancials">
+                <div>
+                  <p class="text-[11px] text-n-slate-10">CPL <span class="opacity-70">· custo por lead</span></p>
+                  <p class="text-xl font-bold text-n-slate-12">{{ row.cpl ? formatMoney2(row.cpl) : '—' }}</p>
+                </div>
+                <div>
+                  <p class="text-[11px] text-n-slate-10">CAC <span class="opacity-70">· custo por cirurgia</span></p>
+                  <p class="text-xl font-bold text-n-slate-12">{{ row.cac ? formatMoney2(row.cac) : '—' }}</p>
+                </div>
+                <div>
+                  <p class="text-[11px] text-n-slate-10">ROAS <span class="opacity-70">· receita ÷ invest.</span></p>
+                  <p class="text-xl font-bold" :style="{ color: row.roas >= 1 ? '#65A30D' : row.roas ? '#B91C1C' : undefined }">
+                    {{ row.roas ? row.roas.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + 'x' : '—' }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-[11px] text-n-slate-10">ROI <span class="opacity-70">· lucro s/ invest.</span></p>
+                  <p class="text-xl font-bold" :style="{ color: row.roi_pct >= 0 ? '#65A30D' : row.roi_pct !== null && row.roi_pct !== undefined ? '#B91C1C' : undefined }">
+                    {{ row.roi_pct !== null && row.roi_pct !== undefined ? row.roi_pct.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%' : '—' }}
+                  </p>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <p v-if="showFinancials && !inboxRows.some(r => r.investment_monthly)" class="text-[11px] text-n-slate-9 flex items-center gap-1.5">
+            <span class="i-lucide-info text-xs" />
+            Informe o investimento mensal de cada caixa (botão dourado acima) para ver CPL, CAC, ROAS e ROI.
+          </p>
+          <p class="text-[11px] text-n-slate-9 flex items-center gap-1.5">
+            <span class="i-lucide-info text-xs" />
+            A receita vem do valor dos cards que chegaram à coluna de cirurgia — a mesma régua do card "Valor fechado".
+          </p>
+        </div>
       </div>
 
       <!-- Atendimento por agente -->
@@ -640,19 +1068,23 @@ const agentView = computed(() => {
       <!-- Linha do tempo + Caixas de entrada -->
       <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-10">
 
-        <!-- Conversas ao longo do tempo (colunas arredondadas, 3 séries) -->
-        <div class="xl:col-span-2 bg-n-solid-2 border border-n-weak rounded-2xl p-6">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-1">Conversas ao longo do tempo</h3>
-          <p class="text-[11px] text-n-slate-10 mb-4">
+        <!-- Conversas ao longo do tempo — áreas em camadas sobre navy
+             (mesmo estilo do Faturamento, pedido 03/08) -->
+        <div
+          class="xl:col-span-2 rounded-2xl p-6 shadow-lg"
+          style="background: linear-gradient(160deg, #0A1130, #101A45 55%, #0C1338); border: 1px solid rgba(148, 163, 184, 0.18)"
+        >
+          <h3 class="text-sm font-bold text-white mb-1">Conversas ao longo do tempo</h3>
+          <p class="text-[11px] mb-4" style="color: #94A3B8">
             {{ timelineGranularity }}, pela data em que o lead chegou — e, desses leads, quantos avançaram até agendar ou operar
           </p>
           <div class="h-64">
-            <Bar
+            <Line
               v-if="timelineChart"
               :data="timelineChart.data"
               :options="timelineChart.options"
             />
-            <div v-else class="flex items-center justify-center h-full text-n-slate-10 text-sm">
+            <div v-else class="flex items-center justify-center h-full text-sm" style="color: #64748B">
               Sem dados no período
             </div>
           </div>
@@ -660,7 +1092,10 @@ const agentView = computed(() => {
 
         <!-- Conversas por caixa de entrada -->
         <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Conversas por caixa de entrada</h3>
+          <h3 class="text-sm font-bold text-n-slate-12 mb-1">Conversas por caixa de entrada</h3>
+          <p class="text-[11px] text-n-slate-10 mb-4">
+            todas as caixas do período{{ inboxFilterActive ? ' (não muda com o filtro de caixa)' : '' }}
+          </p>
           <div class="h-64">
             <Doughnut
               v-if="inboxChart"
@@ -671,6 +1106,39 @@ const agentView = computed(() => {
               <span class="i-lucide-pie-chart text-2xl" />
               <span>Sem conversas no período</span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 💰 Faturamento por caixa de entrada — áreas em camadas com
+           gradiente sobre navy (modelo que o Guilherme enviou 03/08) -->
+      <div
+        class="rounded-2xl p-6 mb-10 shadow-lg"
+        style="background: linear-gradient(160deg, #0A1130, #101A45 55%, #0C1338); border: 1px solid rgba(148, 163, 184, 0.18)"
+      >
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
+              <span class="i-lucide-trending-up text-white text-sm" />
+            </span>
+            Faturamento por caixa de entrada
+          </h3>
+          <span v-if="revenueTotal" class="text-sm font-bold" style="color: #FBBF24">
+            {{ formatCurrency(revenueTotal) }} no período
+          </span>
+        </div>
+        <p class="text-[11px] mb-4" style="color: #94A3B8">
+          {{ revenueGranularityLabel }} · receita das cirurgias fechadas, pela data de chegada do lead · cada camada é uma caixa de entrada
+        </p>
+        <div class="h-72">
+          <Line
+            v-if="revenueChart"
+            :data="revenueChart.data"
+            :options="revenueChart.options"
+          />
+          <div v-else class="flex flex-col items-center justify-center h-full text-sm gap-2" style="color: #64748B">
+            <span class="i-lucide-trending-up text-2xl" />
+            <span>Sem faturamento no período — cards que chegarem à coluna de cirurgia aparecem aqui.</span>
           </div>
         </div>
       </div>
@@ -730,7 +1198,9 @@ const agentView = computed(() => {
             <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #059669, #4ADE80)">
               <p class="text-xs font-medium text-white/80 mb-1">Oportunidades detectadas</p>
               <p class="text-3xl font-bold">{{ data.radar?.opportunities ?? 0 }}</p>
-              <p class="text-[11px] text-white/70 mt-1">pacientes quentes sem atendimento</p>
+              <p class="text-[11px] text-white/70 mt-1">
+                pacientes quentes sem atendimento{{ inboxFilterActive ? ' · todas as caixas' : '' }}
+              </p>
             </div>
             <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
               <p class="text-xs font-medium text-white/80 mb-1">Consultas agendadas</p>
@@ -876,7 +1346,9 @@ const agentView = computed(() => {
             <span class="i-lucide-sheet text-white text-sm" />
           </span>
           <h3 class="text-sm font-bold text-n-slate-12">Cirurgias — planilha (Google Sheets)</h3>
-          <span class="text-[11px] text-n-slate-9 ml-auto">mesmo período selecionado acima</span>
+          <span class="text-[11px] text-n-slate-9 ml-auto">
+            mesmo período selecionado acima{{ inboxFilterActive ? ' · a planilha não separa por caixa' : '' }}
+          </span>
         </div>
 
         <p v-if="data.sheet_surgeries.error" class="text-sm text-n-slate-10">
