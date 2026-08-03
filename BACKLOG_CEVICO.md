@@ -3861,3 +3861,38 @@ crm_opportunity_radar_job registrados.
   fluxo N8N em JSON que o Guilherme vai enviar; ferramenta opcional
   "arquivar cards inativos".
 - SMTP (Gmail) configurado para convites de equipe.
+
+## 115B rodada 2. ✅ CONSTRUÍDO (03/08): PORTA DE ENTRADA no tema "Apple das clínicas"
+Pedido do Guilherme: a raiz de clinica.cevico.com.br vira uma página estilo
+"link tree", UMA DOBRA só, com o logo, as cores da marca e o design "Apple
+das clínicas" — dois caminhos: REFRATIVA e LENTE TRIFOCAL.
+- `home.html.erb` redesenhada no tema das landings (base clara, respiro,
+  tipografia gigante c/ tracking negativo, hairlines): placa navy do logo,
+  filete ouro, H1 "Você se interessa mais / por qual procedimento?" com o
+  gradiente navy→royal→laranja, dois cards (ícone em squircle + título +
+  subtítulo + seta laranja), WhatsApp discreto em pílula e rodapé com as
+  unidades + disclaimer CFM. Entrada blur→nítido em cascata, tudo sob
+  prefers-reduced-motion. Título escolhido por ele numa mesa de 10 opções.
+- ÍCONES (escolhidos numa mesa de 6+6 renderizados no tamanho real): olho
+  com o RAIO na pupila (refrativa, squircle royal) e DIAFRAGMA (trifocal,
+  squircle navy c/ traço ouro). SVG inline, traço fino estilo SF Symbols.
+- Portas de 3 → 2 (Refrativa | Catarata com lente trifocal), copy nova.
+  ⚠️ LIÇÃO: o `match` por palavra solta do hub original mandava o card pra
+  qualquer página parecida — no teste local a refrativa caiu numa landing de
+  PRK e a trifocal numa de catarata (em produção cairia na /lente-trifocal
+  antiga). Agora cada porta tem `slug:` OFICIAL e o match virou só rede de
+  segurança: `find { slug == oficial } || find { match }`.
+- Links absolutos via `PublicSite.page_url` (acompanham o domínio).
+- Saiu: o índice de páginas por categoria embaixo do hub (quebrava a dobra
+  única) e o `@pages_by_category` do controller.
+- MANTIDO: Protocolo no WhatsApp (hub_ref), snippets de analytics/tracking,
+  origem viajando pras landings, fallback da porta pro WhatsApp sem página.
+- SEO da home: canonical/og no domínio, JSON-LD MedicalClinic com as duas
+  unidades e os dois procedimentos.
+TESTADO no Docker local: view renderizada pelo Rails (16,6 KB, 2 cards, sem
+ERB sobrando, partials incluídos); prioridade do slug exato provada nos dois
+cenários (com e sem a página oficial publicada), banco local restaurado
+depois; uma dobra confirmada a 375×667 (scrollHeight == innerHeight, sem
+overflow lateral) e a 1280×800.
+⚠️ DEPLOY: só WEB (sem migration, sem cron, sem job novo). Reversão:
+reimplantar a imagem anterior no EasyPanel.

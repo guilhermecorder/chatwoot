@@ -174,13 +174,10 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     head :no_content
   end
 
-  # Raiz do domínio oficial: o HUB — porta de entrada do atendimento.
-  # Três caminhos em destaque (Refrativa | Catarata | Lente Trifocal),
-  # botão de WhatsApp com Protocolo e o índice das demais páginas.
+  # Raiz do domínio oficial: a PORTA DE ENTRADA — uma dobra só, no tema
+  # "Apple das clínicas". Os dois procedimentos em destaque (Refrativa |
+  # Catarata com lente trifocal) e o WhatsApp com Protocolo como saída.
   def home
-    @pages_by_category = CevicoPage.published
-                                   .order(:title)
-                                   .group_by(&:category)
     @hub = Cevico::PublicSite.hub_config
     @hub_whatsapp = Cevico::PublicSite.hub_whatsapp_url
     @doors = hub_doors
@@ -246,19 +243,24 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # que fale do assunto (pelo slug/título); sem página ainda, a porta
   # manda direto pro WhatsApp com o assunto no texto — a entrada nunca
   # fica sem destino.
+  # As portas da raiz. Cada uma aponta para a página OFICIAL pelo :slug —
+  # exato, para o card nunca cair numa página parecida (a /lente-trifocal
+  # antiga, uma landing que cita PRK). O :match é só a rede de segurança
+  # se o slug oficial sair do ar; sem nenhuma página, a porta vai pro
+  # WhatsApp com o assunto escrito.
+  # :icon escolhe o desenho no squircle (ver home.html.erb).
   HUB_DOORS = [
-    { emoji: '👓', title: 'Cirurgia Refrativa', text: 'Liberdade dos óculos: miopia, astigmatismo e hipermetropia.',
+    { icon: :laser, slug: 'refrativa', title: 'Cirurgia refrativa a laser', text: 'Miopia, astigmatismo e hipermetropia',
       match: /refrativa|lasik|prk|miopia/i, whats: 'Olá! Quero saber mais sobre a cirurgia refrativa.' },
-    { emoji: '👁️', title: 'Cirurgia de Catarata', text: 'A visão nítida de volta, com a lente certa pra sua vida.',
-      match: /catarata/i, whats: 'Olá! Quero saber mais sobre a cirurgia de catarata.' },
-    { emoji: '✨', title: 'Lente Trifocal', text: 'Longe, meio e perto — enxergar sem óculos depois da catarata.',
-      match: /trifocal|galaxy|premium/i, whats: 'Olá! Quero saber mais sobre a lente trifocal.' }
+    { icon: :lente, slug: 'trifocal', title: 'Catarata com lente trifocal', text: 'Perto, computador e longe outra vez',
+      match: /trifocal|galaxy|premium/i, whats: 'Olá! Quero saber mais sobre a catarata com lente trifocal.' }
   ].freeze
 
   def hub_doors
     published = CevicoPage.published.to_a
     HUB_DOORS.map do |door|
-      page = published.find { |pg| pg.slug.match?(door[:match]) || pg.title.match?(door[:match]) }
+      page = published.find { |pg| pg.slug == door[:slug] } ||
+             published.find { |pg| pg.slug.match?(door[:match]) || pg.title.match?(door[:match]) }
       door.merge(page_slug: page&.slug)
     end
   end

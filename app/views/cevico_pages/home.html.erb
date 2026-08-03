@@ -3,137 +3,267 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CEVICO — Cuidados Oculares | Comece por aqui</title>
-  <meta name="description" content="<%= @hub['tagline'].presence || 'CEVICO — Cuidados Oculares: cirurgia refrativa, cirurgia de catarata e lentes trifocais. Tecnologia de ponta, acolhimento humano e clareza visual.' %>">
+  <title>CEVICO — Cuidados Oculares | Cirurgia refrativa e catarata em São Paulo</title>
+  <meta name="description" content="<%= @hub['tagline'].presence || 'CEVICO Cuidados Oculares em São Paulo. Cirurgia refrativa a laser (miopia, astigmatismo e hipermetropia) e cirurgia de catarata com lente trifocal. Avaliação com equipe própria na Av. Paulista e no Tatuapé.' %>">
   <link rel="canonical" href="<%= Cevico::PublicSite.base_url %>/">
+  <meta name="theme-color" content="#FFFFFF">
   <meta property="og:type" content="website">
+  <meta property="og:locale" content="pt_BR">
   <meta property="og:title" content="CEVICO — Cuidados Oculares">
-  <meta property="og:description" content="<%= @hub['tagline'].presence || 'Cirurgia refrativa, catarata e lentes trifocais — comece por aqui.' %>">
+  <meta property="og:description" content="<%= @hub['tagline'].presence || 'Cirurgia refrativa a laser e catarata com lente trifocal em São Paulo.' %>">
   <meta property="og:site_name" content="CEVICO — Cuidados Oculares">
   <meta property="og:url" content="<%= Cevico::PublicSite.base_url %>/">
+  <meta property="og:image" content="<%= Cevico::PublicSite.base_url %>/brand-assets/cevico-logo.png">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" type="image/png" href="/brand-assets/cevico-eye.png">
+  <link rel="apple-touch-icon" href="/brand-assets/cevico-eye.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "MedicalClinic",
+    "name": "CEVICO — Cuidados Oculares",
+    "url": "<%= Cevico::PublicSite.base_url %>/",
+    "medicalSpecialty": "Ophthalmologic",
+    "telephone": "+55 11 99165-1628",
+    "address": {
+      "@type": "PostalAddress",
+      "streetAddress": "Av. Paulista, 1499 — 9º andar",
+      "addressLocality": "São Paulo",
+      "addressRegion": "SP",
+      "postalCode": "01311-200",
+      "addressCountry": "BR"
+    },
+    "department": [
+      { "@type": "MedicalClinic", "name": "CEVICO — Unidade Av. Paulista" },
+      {
+        "@type": "MedicalClinic",
+        "name": "CEVICO — Unidade Tatuapé",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "R. Serra de Botucatu, 880 — 4º andar",
+          "addressLocality": "São Paulo",
+          "addressRegion": "SP",
+          "addressCountry": "BR"
+        }
+      }
+    ]
+  }
+  </script>
+
   <style>
-    /* Identidade CEVICO: azul marinho EXATO do logo (#152C61) + dourado */
-    :root { --navy: #152C61; --navy-deep: #0C1B40; --brand: #0F5FA6; --gold: #D4AF37; --gold-soft: #F4DE8E; --gold-dark: #8A6620; --gold-mid: #C9A24B; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      color: #1a2333; background: #f6f8fb; line-height: 1.65;
-    }
-    .hero {
-      background: linear-gradient(160deg, var(--navy-deep) 0%, var(--navy) 55%, var(--brand) 100%);
-      color: #fff; padding: 56px 20px 130px; text-align: center; position: relative; overflow: hidden;
-    }
-    .hero::before {
-      content: ''; position: absolute; inset: -40% -20% auto; height: 130%;
-      background: radial-gradient(ellipse at 50% 0%, rgba(212,175,55,.14), transparent 60%);
-      pointer-events: none;
-    }
-    .hero img { max-width: 280px; width: 70%; height: auto; margin-bottom: 18px; position: relative; }
-    .hero p { opacity: .88; max-width: 600px; margin: 0 auto 26px; font-size: 1.05rem; position: relative; }
-    a.whats {
-      position: relative; display: inline-flex; align-items: center; gap: 10px;
-      background: linear-gradient(135deg, var(--gold), var(--gold-soft) 55%, var(--gold));
-      color: var(--navy-deep); font-weight: 800; font-size: 1.02rem; text-decoration: none;
-      padding: 15px 30px; border-radius: 999px; box-shadow: 0 14px 34px rgba(212,175,55,.35);
-      transition: transform .15s ease, box-shadow .15s ease;
-    }
-    a.whats:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 18px 42px rgba(212,175,55,.45); }
-    .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px 72px; }
+  /* ====== CEVICO — porta de entrada · estética "Apple das clínicas" ======
+     Uma dobra só: placa navy da marca, a pergunta e os caminhos.
+     Branco, respiro, hairlines. Navy e ouro como autoridade;
+     laranja só na seta que puxa o clique.                                 */
+  :root{
+    --navy:#152C61;
+    --navy-deep:#0E1F47;
+    --gold:#D4AF37;
+    --ink:#0F1B38;
+    --ink-soft:#5A6478;
+    --hair:#E4E7EE;
+    --canvas:#FFFFFF;
+    --pop:#FF5722;
+    --royal:#1D4ED8;
+    --royal-2:#2563EB;
+    --sans:-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Helvetica Neue", Arial, sans-serif;
+    --radius:22px;
+    --shadow-card:0 2px 10px rgba(15,27,56,.05);
+    --shadow-float:0 24px 60px rgba(15,27,56,.12);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    font-family:var(--sans);color:var(--ink);background:var(--canvas);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    min-height:100svh;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    padding:clamp(24px,5vh,48px) 20px;
+    position:relative;overflow-x:hidden;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(1000px 520px at 50% -14%, rgba(37,99,235,.10), transparent 68%),
+      radial-gradient(760px 420px at 50% 118%, rgba(212,175,55,.09), transparent 70%);
+  }
+  a{text-decoration:none;color:inherit}
 
-    /* ── as 3 PORTAS (refrativa | catarata | trifocal) ── */
-    .doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: -78px; position: relative; z-index: 2; }
-    a.door {
-      display: block; background: #fff; border: 1px solid #e4e9f2; border-radius: 18px;
-      padding: 26px 22px 22px; text-decoration: none; color: inherit; text-align: center;
-      box-shadow: 0 10px 30px rgba(12,27,64,.12);
-      transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
-      position: relative; overflow: hidden;
-    }
-    a.door::after {
-      content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px;
-      background: linear-gradient(90deg, var(--gold), var(--gold-soft), var(--gold));
-      opacity: 0; transition: opacity .16s ease;
-    }
-    a.door:hover { transform: translateY(-4px); box-shadow: 0 18px 40px rgba(21,44,97,.18); border-color: var(--gold-mid); }
-    a.door:hover::after { opacity: 1; }
-    a.door .emoji { font-size: 2.1rem; display: block; margin-bottom: 10px; }
-    a.door strong { font-family: 'Cinzel', serif; display: block; color: var(--navy); font-size: 1.06rem; letter-spacing: .02em; margin-bottom: 6px; }
-    a.door span { font-size: .9rem; color: #5b6779; display: block; }
-    a.door em { display: inline-block; margin-top: 12px; font-style: normal; font-size: .82rem; font-weight: 700; color: var(--gold-dark); }
+  .hub{width:100%;max-width:560px;display:flex;flex-direction:column;align-items:center;text-align:center}
 
-    h2 {
-      font-family: 'Cinzel', serif; color: var(--navy); font-size: 1.05rem;
-      letter-spacing: .06em; text-transform: uppercase; margin: 40px 0 14px;
-      display: flex; align-items: center; gap: 10px;
-    }
-    h2::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--gold-mid), transparent); }
-    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
-    a.card {
-      display: block; background: #fff; border: 1px solid #e4e9f2; border-radius: 14px;
-      padding: 18px 18px 16px; text-decoration: none; color: inherit;
-      transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
-    }
-    a.card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(21,44,97,.10); border-color: var(--gold-mid); }
-    a.card strong { display: block; color: var(--navy); font-size: 1.02rem; margin-bottom: 4px; }
-    a.card span { font-size: .88rem; color: #5b6779; }
-    .empty { text-align: center; color: #5b6779; padding: 46px 0 10px; }
-    footer { text-align: center; padding: 26px 16px 40px; color: #7c8698; font-size: .82rem; }
-    @media (prefers-reduced-motion: reduce) { a.door, a.card, a.whats { transition: none; } }
+  .plate{
+    display:block;width:clamp(196px,54vw,236px);
+    border-radius:16px;overflow:hidden;
+    box-shadow:0 14px 34px rgba(21,44,97,.20);
+  }
+  .plate img{display:block;width:100%;height:auto}
+
+  .rule{
+    width:44px;height:2px;border-radius:2px;margin:clamp(20px,3.4vh,28px) 0 0;
+    background:linear-gradient(90deg,#8A6620,#C9A24B,#F5E9B8,#D4AF37);
+    opacity:.9;
+  }
+
+  h1{
+    font-size:clamp(1.72rem,5.4vw,2.5rem);line-height:1.1;letter-spacing:-.03em;
+    font-weight:800;margin-top:clamp(16px,2.6vh,22px);text-wrap:balance;
+  }
+  h1 span{
+    background:linear-gradient(105deg,var(--navy) 5%,var(--royal-2) 45%,var(--pop) 92%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .lead{
+    color:var(--ink-soft);font-size:clamp(.98rem,2.5vw,1.08rem);line-height:1.55;
+    margin-top:12px;max-width:29em;text-wrap:balance;
+  }
+
+  .paths{width:100%;display:flex;flex-direction:column;gap:14px;margin-top:clamp(26px,4.2vh,38px)}
+  .path{
+    display:flex;align-items:center;gap:16px;text-align:left;
+    background:#fff;border:1px solid var(--hair);border-radius:var(--radius);
+    padding:18px 20px;box-shadow:var(--shadow-card);
+    transition:transform .28s cubic-bezier(.22,1,.36,1), box-shadow .28s ease, border-color .28s ease;
+  }
+  .path:hover{transform:translateY(-3px);box-shadow:var(--shadow-float);border-color:#D5DCEA}
+  .path:active{transform:translateY(-1px)}
+  .path:focus-visible{outline:2px solid var(--royal);outline-offset:3px}
+
+  .ico{flex:none;width:52px;height:52px;border-radius:16px;display:grid;place-items:center}
+  .ico svg{width:26px;height:26px;stroke:#fff;stroke-width:1.7;fill:none;
+    stroke-linecap:round;stroke-linejoin:round}
+  .ico-laser{background:linear-gradient(140deg,var(--royal),var(--royal-2) 70%,#38BDF8);
+    box-shadow:0 8px 20px rgba(29,78,216,.32)}
+  .ico-lente{background:linear-gradient(140deg,var(--navy-deep),var(--navy));
+    box-shadow:0 8px 20px rgba(21,44,97,.28)}
+  .ico-lente svg{stroke:var(--gold);stroke-width:1.6}
+
+  .path-txt{flex:1;min-width:0}
+  .path-txt strong{display:block;font-size:1.06rem;font-weight:700;letter-spacing:-.02em;line-height:1.25}
+  .path-txt small{display:block;margin-top:4px;color:var(--ink-soft);font-size:.86rem;line-height:1.4;text-wrap:balance}
+  .chev{flex:none;color:var(--pop);font-size:1.15rem;font-weight:700;transition:transform .28s cubic-bezier(.22,1,.36,1)}
+  .path:hover .chev{transform:translateX(4px)}
+
+  .whats{
+    display:inline-flex;align-items:center;gap:9px;margin-top:clamp(20px,3.2vh,26px);
+    font-size:.94rem;font-weight:600;color:var(--navy);
+    padding:11px 22px;border-radius:999px;border:1.5px solid var(--hair);background:#fff;
+    transition:border-color .25s ease,color .25s ease,transform .25s ease;
+  }
+  .whats svg{width:17px;height:17px;fill:#25D366}
+  .whats:hover{border-color:#C9D3E6;transform:translateY(-2px)}
+
+  footer{
+    margin-top:clamp(22px,3.6vh,32px);
+    color:#8A93A6;font-size:.74rem;line-height:1.6;max-width:34em;text-align:center;
+  }
+
+  @media(prefers-reduced-motion:no-preference){
+    .reveal{opacity:0;transform:translateY(14px);filter:blur(8px);
+      animation:reveal .8s cubic-bezier(.22,1,.36,1) forwards}
+    .reveal:nth-child(1){animation-delay:.05s}
+    .reveal:nth-child(2){animation-delay:.13s}
+    .reveal:nth-child(3){animation-delay:.19s}
+    .reveal:nth-child(4){animation-delay:.25s}
+    .reveal:nth-child(5){animation-delay:.33s}
+    .reveal:nth-child(6){animation-delay:.45s}
+    .reveal:nth-child(7){animation-delay:.55s}
+    @keyframes reveal{to{opacity:1;transform:none;filter:blur(0)}}
+  }
+  /* telas baixas (iPhone SE, navegador in-app do Instagram): comprime o
+     respiro para a dobra continuar sendo UMA só */
+  @media(max-height:720px){
+    body{padding:20px}
+    .plate{width:clamp(176px,46vw,204px)}
+    .rule{margin-top:16px}
+    h1{margin-top:12px;font-size:clamp(1.6rem,5vw,2.2rem)}
+    .lead{margin-top:9px;font-size:.95rem}
+    .paths{margin-top:20px;gap:12px}
+    .whats{margin-top:16px;padding:10px 20px}
+    footer{margin-top:16px;font-size:.7rem}
+  }
+  @media(max-width:400px){
+    .path{padding:16px;gap:13px}
+    .ico{width:46px;height:46px;border-radius:14px}
+    .ico svg{width:23px;height:23px}
+    .path-txt strong{font-size:1rem}
+  }
   </style>
 </head>
 <body>
-  <div class="hero">
-    <img src="/brand-assets/cevico-logo-dark-bg.png" alt="CEVICO — Cuidados Oculares">
-    <p><%= @hub['tagline'].presence || 'Tecnologia de ponta, acolhimento humano e clareza visual. Comece por aqui: escolha o seu caminho ou fale direto com a gente.' %></p>
-    <% if @hub_whatsapp %>
-      <a class="whats" href="<%= @hub_whatsapp %>" rel="noopener">💬 Falar com a CEVICO no WhatsApp</a>
-    <% end %>
-  </div>
 
-  <div class="wrap">
-    <%# ── as 3 portas: página publicada quando existe; senão, WhatsApp com o assunto ── %>
-    <div class="doors">
-      <% @doors.each do |door| %>
-        <% href = if door[:page_slug]
-                    "/#{door[:page_slug]}"
-                  elsif @hub['whatsapp'].present?
-                    "https://wa.me/#{@hub['whatsapp']}?text=#{ERB::Util.url_encode(door[:whats])}"
-                  end %>
-        <% next if href.blank? %>
-        <a class="door" href="<%= href %>" rel="noopener">
-          <span class="emoji"><%= door[:emoji] %></span>
-          <strong><%= door[:title] %></strong>
-          <span><%= door[:text] %></span>
-          <em><%= door[:page_slug] ? 'Conhecer →' : 'Falar no WhatsApp →' %></em>
-        </a>
-      <% end %>
-    </div>
+<main class="hub">
 
-    <% if @pages_by_category.blank? %>
-      <p class="empty">Os conteúdos estão sendo preparados. Volte em breve. 😊</p>
-    <% else %>
-      <% CevicoPage::CATEGORIES.each do |key, label| %>
-        <% pages = @pages_by_category[key] %>
-        <% next if pages.blank? %>
-        <h2><%= label %></h2>
-        <div class="cards">
-          <% pages.each do |page| %>
-            <a class="card" href="/<%= page.slug %>">
-              <strong><%= page.title %></strong>
-              <span><%= page.subtitle.presence || page.meta_description %></span>
-            </a>
+  <span class="plate reveal">
+    <img src="/brand-assets/cevico-logo.png" alt="CEVICO — Cuidados Oculares" width="626" height="212">
+  </span>
+
+  <span class="rule reveal" aria-hidden="true"></span>
+
+  <h1 class="reveal">Você se interessa mais<br><span>por qual procedimento?</span></h1>
+
+  <p class="lead reveal">
+    <%= @hub['tagline'].presence || 'Escolha o assunto e veja, com calma, como a CEVICO cuida de cada caso.' %>
+  </p>
+
+  <%# ── as portas: página publicada quando existe; senão, WhatsApp com o assunto ── %>
+  <nav class="paths reveal" aria-label="Procedimentos">
+    <% @doors.each do |door| %>
+      <% href = if door[:page_slug]
+                  Cevico::PublicSite.page_url(door[:page_slug])
+                elsif @hub['whatsapp'].present?
+                  "https://wa.me/#{@hub['whatsapp']}?text=#{ERB::Util.url_encode(door[:whats])}"
+                end %>
+      <% next if href.blank? %>
+      <a class="path" href="<%= href %>" rel="noopener">
+        <span class="ico ico-<%= door[:icon] %>" aria-hidden="true">
+          <% if door[:icon] == :laser %>
+            <%# o raio no lugar da pupila: o laser em si %>
+            <svg viewBox="0 0 24 24">
+              <path d="M2.5 12S6.1 6 12 6s9.5 6 9.5 6-3.6 6-9.5 6-9.5-6-9.5-6Z"/>
+              <path d="M12.9 8.6 10.3 12.4h2.2l-1 3 2.6-3.9h-2.2z"/>
+            </svg>
+          <% else %>
+            <%# diafragma: a lente que abre o foco em todas as distâncias %>
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="9.4"/>
+              <path d="M14.31 8l5.13 8.88"/>
+              <path d="M9.69 8h10.26"/>
+              <path d="M7.38 12l5.13-8.88"/>
+              <path d="M9.69 16 4.56 7.12"/>
+              <path d="M14.31 16H4.05"/>
+              <path d="M16.62 12l-5.13 8.88"/>
+            </svg>
           <% end %>
-        </div>
-      <% end %>
+        </span>
+        <span class="path-txt">
+          <strong><%= door[:title] %></strong>
+          <small><%= door[:text] %></small>
+        </span>
+        <span class="chev" aria-hidden="true">→</span>
+      </a>
     <% end %>
-  </div>
+  </nav>
 
-  <footer>CEVICO — Cuidados Oculares</footer>
+  <% if @hub_whatsapp %>
+    <a class="whats reveal" href="<%= @hub_whatsapp %>" rel="noopener">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2Zm5.8 14.13c-.25.69-1.44 1.31-1.99 1.36-.53.05-1.03.24-3.46-.72-2.91-1.15-4.75-4.13-4.9-4.32-.14-.19-1.16-1.55-1.16-2.95s.73-2.09 1-2.38c.26-.29.57-.36.76-.36.19 0 .38 0 .55.01.18.01.41-.07.64.49.24.57.81 1.97.88 2.11.07.14.12.31.02.5-.09.19-.14.31-.28.48-.14.17-.29.37-.42.5-.14.14-.28.29-.12.57.16.29.71 1.17 1.53 1.9 1.05.94 1.94 1.23 2.22 1.37.28.14.44.12.6-.07.17-.19.69-.81.88-1.09.19-.29.38-.24.64-.14.26.09 1.65.78 1.94.92.28.14.47.21.54.33.07.12.07.69-.18 1.38Z"/></svg>
+      Prefiro falar no WhatsApp
+    </a>
+  <% end %>
 
-  <%# rastreio do hub: origem viaja pras páginas; WhatsApp ganha Protocolo %>
-  <%= render 'cevico_pages/analytics_snippet', page: nil %>
-  <%= render 'cevico_pages/tracking_snippet', page: nil %>
+  <footer class="reveal">
+    CEVICO Cuidados Oculares © <%= Time.current.year %> · Av. Paulista, 1499 e R. Serra de Botucatu, 880 — São Paulo/SP<br>
+    Resultados variam de pessoa para pessoa; a indicação cirúrgica é confirmada em avaliação médica.
+  </footer>
+
+</main>
+
+<%# rastreio do hub: origem viaja pras páginas; WhatsApp ganha Protocolo %>
+<%= render 'cevico_pages/analytics_snippet', page: nil %>
+<%= render 'cevico_pages/tracking_snippet', page: nil %>
 </body>
 </html>
