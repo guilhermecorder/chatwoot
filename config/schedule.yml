@@ -22,10 +22,12 @@ crm_scheduler_job:
 
 # CEVICO: robôs de follow-up (cutucadas para reabrir a conversa)
 # roda a cada 2 min para cadências em minutos serem pontuais
+# fila HIGH: sidekiq processa filas em ordem estrita e scheduled_jobs fica
+# quase no fim — os jobs de IA atrasavam a cutucada de 15min em até 30min
 crm_followup_bot_job:
   cron: '*/2 * * * *'
   class: 'Crm::FollowupBotJob'
-  queue: scheduled_jobs
+  queue: high
 
 # CEVICO: prazo da conferência do dia (tarefa automática p/ a responsável)
 crm_attendance_reminder_job:

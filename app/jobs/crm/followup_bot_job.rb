@@ -11,7 +11,11 @@
 # rodada com os motivos de cada conversa não cutucada + histórico dos envios.
 # É onde se entende, em produção, por que o robô está (ou não) enviando.
 class Crm::FollowupBotJob < ApplicationJob
-  queue_as :scheduled_jobs
+  # fila ALTA de propósito (missão 03/08): o sidekiq do fork processa as
+  # filas em ordem ESTRITA e scheduled_jobs fica quase no fim — em produção
+  # os jobs de IA seguravam a rodada por 10-30 min e a "cutucada de 15min"
+  # saía meia hora depois. Este job é leve (consultas + 1 mensagem).
+  queue_as :high
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   LOOKBACK = 3.days # não cutuca conversas antigas demais
@@ -116,23 +120,8 @@ class Crm::FollowupBotJob < ApplicationJob
 
     stage_entered = stage_entry_at(bot, conversation) # nil se não for robô de coluna
     state = followup_state(conversation, bot, anchor, stage_entered)
-    silence_hours = (Time.current - anchor) / 3600.0
 
-    # etapas VENCIDAS ainda não tratadas (com quanto tempo de atraso cada uma)
-    due = []
-    steps.each_with_index do |step, index|
-      from_stage = step['delay_from'] == 'stage_entry'
-      # etapas "desde a entrada na coluna" têm marcador PRÓPRIO, amarrado à
-      # entrada na coluna — resposta do paciente não as redispara.
-      sent_list = from_stage ? state['stage_sent'] : state['sent']
-      next if sent_list.include?(index)
-
-      base_hours = from_stage ? hours_since(stage_entered) : silence_hours
-      delay = Crm::FollowupBot.step_delay_hours(step)
-      next if base_hours.nil? || base_hours < delay
-
-      due << { step: step, index: index, from_stage: from_stage, overdue: base_hours - delay }
-    end
+    due = overdue_steps(steps, state, anchor, stage_entered)
 
     if due.empty?
       if (state['sent'] + state['stage_sent']).size >= steps.size
@@ -143,20 +132,28 @@ class Crm::FollowupBotJob < ApplicationJob
       return
     end
 
-    # ANTI-RAJADA: manda no máximo UMA cutucada por conversa por rodada —
-    # a de maior prazo entre as vencidas (as anteriores perderam a vez).
-    chosen = due.max_by { |d| Crm::FollowupBot.step_delay_hours(d[:step]) }
-
-    if chosen[:overdue] > STALE_HOURS
-      # venceu há horas (deploy/queda/madrugada): marca como tratada SEM
-      # enviar — cutucada velha às 6h da manhã não ajuda ninguém
-      mark_steps(state, due)
+    # Só o que venceu há HORAS (deploy/queda longa) perde o momento — é
+    # marcado como tratado SEM enviar. As demais vencidas NÃO são mais
+    # absorvidas (fix 03/08: a cadência inteira sumia numa rodada atrasada):
+    # sai UMA por rodada, na ORDEM da cadência, e as outras esperam a vez
+    # respeitando o intervalo mínimo entre cutucadas.
+    stale, fresh = due.partition { |d| d[:overdue] > STALE_HOURS }
+    if stale.any?
+      mark_steps(state, stale)
       persist_state(conversation, bot, anchor, state)
-      run[:reasons]['momento_perdido'] += 1
-      events << event_for(conversation, 'skipped',
-                          note: "#{step_label(chosen[:step])} venceu há #{chosen[:overdue].round}h — não enviada")
-      return
+      stale.each do |d|
+        events << event_for(conversation, 'skipped',
+                            note: "#{step_label(d[:step])} venceu há #{d[:overdue].round}h — não enviada")
+      end
+      if fresh.empty?
+        run[:reasons]['momento_perdido'] += 1
+        return
+      end
     end
+
+    # ANTI-RAJADA: no máximo UMA cutucada por conversa por rodada — a mais
+    # antiga da cadência entre as vencidas (ordem das mensagens preservada)
+    chosen = fresh.min_by { |d| Crm::FollowupBot.step_delay_hours(d[:step]) }
 
     # ── TRAVA FÍSICA: consulta as cutucadas REALMENTE enviadas (tabela de
     # mensagens) antes de qualquer envio. Protege o paciente mesmo que o
@@ -183,12 +180,37 @@ class Crm::FollowupBotJob < ApplicationJob
     end
 
     # marca ANTES de enviar (falha segura): se o envio quebrar no meio, o
-    # pior caso é PERDER uma cutucada — nunca duplicar para o paciente
-    mark_steps(state, due) # as vencidas anteriores são absorvidas pela enviada
+    # pior caso é PERDER uma cutucada — nunca duplicar para o paciente.
+    # Só a etapa ESCOLHIDA é marcada: as outras vencidas saem nas próximas
+    # rodadas, com o intervalo mínimo entre elas.
+    mark_steps(state, [chosen])
     persist_state(conversation, bot, anchor, state)
     send_nudge(bot, conversation, chosen[:step])
     run[:sent] += 1
     events << event_for(conversation, 'sent', note: step_label(chosen[:step]))
+  end
+
+  # etapas VENCIDAS ainda não tratadas (com quanto tempo de atraso cada uma).
+  # O atraso DESCONTA o expediente: etapa que venceu de madrugada/à noite
+  # conta o atraso a partir das 08h seguintes — ela não "perde o momento"
+  # só porque venceu com o envio fechado (fix 03/08: passos empilhados
+  # eram descartados em série).
+  def overdue_steps(steps, state, anchor, stage_entered)
+    due = []
+    steps.each_with_index do |step, index|
+      from_stage = step['delay_from'] == 'stage_entry'
+      # etapas "desde a entrada na coluna" têm marcador PRÓPRIO, amarrado à
+      # entrada na coluna — resposta do paciente não as redispara.
+      sent_list = from_stage ? state['stage_sent'] : state['sent']
+      next if sent_list.include?(index)
+
+      base_time = from_stage ? stage_entered : anchor
+      delay = Crm::FollowupBot.step_delay_hours(step)
+      next if base_time.nil? || hours_since(base_time) < delay
+
+      due << { step: step, index: index, from_stage: from_stage, overdue: effective_overdue_hours(base_time + delay.hours) }
+    end
+    due
   end
 
   # cutucadas de QUALQUER robô de follow-up nesta conversa (mensagens reais)
@@ -223,6 +245,21 @@ class Crm::FollowupBotJob < ApplicationJob
     return nil if time.nil?
 
     (Time.current - time) / 3600.0
+  end
+
+  # atraso "justo" de uma etapa: se ela venceu FORA do expediente (madrugada/
+  # noite), o relógio do atraso só começa às 08h seguintes — o envio estava
+  # fechado, a etapa não tem culpa. Nunca negativo.
+  def effective_overdue_hours(due_at)
+    due_local = due_at.in_time_zone(TZ)
+    effective = if BUSINESS_HOURS.cover?(due_local.hour)
+                  due_local
+                elsif due_local.hour < BUSINESS_HOURS.first
+                  due_local.change(hour: BUSINESS_HOURS.first)
+                else
+                  (due_local + 1.day).change(hour: BUSINESS_HOURS.first)
+                end
+    [(Time.current - effective) / 3600.0, 0.0].max
   end
 
   # Filtros "tem / não tem": só cutuca quem TEM todas as etiquetas exigidas
@@ -272,9 +309,14 @@ class Crm::FollowupBotJob < ApplicationJob
     mine = stored.dig('bots', bot.id.to_s) || {}
     stage_key = stage_entered&.iso8601
 
+    # 🔴 o .dup é OBRIGATÓRIO — sem ele, o << do mark_steps mutava o MESMO
+    # array que vive no additional_attributes carregado, o with_lock do
+    # merge atômico recusava o registro "sujo" e a rodada caía em erro TODA
+    # VEZ após a 1ª cutucada (só o primeiro follow-up saía — bug de produção
+    # 03/08; mesma lição do item 98: deep_dup antes do lock)
     {
-      'sent' => mine['anchor'] == anchor.iso8601 ? Array(mine['sent']) : [],
-      'stage_sent' => mine['stage_key'] == stage_key ? Array(mine['stage_sent']) : [],
+      'sent' => mine['anchor'] == anchor.iso8601 ? Array(mine['sent']).dup : [],
+      'stage_sent' => mine['stage_key'] == stage_key ? Array(mine['stage_sent']).dup : [],
       'stage_key' => stage_key
     }
   end
