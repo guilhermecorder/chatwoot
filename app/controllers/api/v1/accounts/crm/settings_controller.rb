@@ -670,7 +670,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     return render json: { error: error }, status: :unprocessable_entity if error
 
     Cevico::PublicSite.save_tracking!('meta_pixel_id' => params[:meta_pixel_id].to_s,
-                                      'ga4_id' => params[:ga4_id].to_s)
+                                      'ga4_id' => params[:ga4_id].to_s,
+                                      'gtm_id' => params[:gtm_id].to_s)
     render json: public_domain_json
   end
 
@@ -701,6 +702,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
     pixel = params[:meta_pixel_id].to_s.strip
     return 'ID do Pixel inválido — é só o número que a Meta mostra, ex.: 1234567890123456' if pixel.present? && pixel.gsub(/\D/, '').blank?
+
+    gtm = params[:gtm_id].to_s.strip.upcase
+    return 'ID do Tag Manager inválido — é o código que começa com GTM-, ex.: GTM-MWDV8T35' if gtm.present? && !gtm.match?(/\AGTM-[A-Z0-9]{4,12}\z/)
 
     nil
   end

@@ -121,7 +121,8 @@ module Cevico::PublicSite
   def save_tracking!(attrs)
     value = {
       'meta_pixel_id' => attrs['meta_pixel_id'].to_s.gsub(/\D/, '')[0, 20],
-      'ga4_id' => attrs['ga4_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20]
+      'ga4_id' => attrs['ga4_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20],
+      'gtm_id' => attrs['gtm_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20]
     }.compact_blank
     config = InstallationConfig.where(name: 'CEVICO_TRACKING').first_or_initialize
     config.value = value

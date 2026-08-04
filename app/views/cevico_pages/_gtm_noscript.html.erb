@@ -1,0 +1,9 @@
+<%# Google Tag Manager — fallback <noscript>, logo após a abertura do
+    <body> (como o Google pede). Par do _gtm_head. %>
+<% gtm_id = Cevico::PublicSite.tracking_config['gtm_id'].presence %>
+<% if gtm_id %>
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=<%= j gtm_id %>"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+<% end %>

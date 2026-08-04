@@ -111,12 +111,13 @@ const saveHub = async () => {
 // ── 📊 RASTREAMENTO central (item 117): Pixel da Meta + GA4 ──
 // Preenche uma vez; toda página publicada (e o hub) sai carimbada, com o
 // nome da página dentro dos eventos. Clique no WhatsApp = evento de Lead.
-const tracking = ref({ meta_pixel_id: '', ga4_id: '' });
+const tracking = ref({ meta_pixel_id: '', ga4_id: '', gtm_id: '' });
 const isSavingTracking = ref(false);
 const loadTracking = data => {
   tracking.value = {
     meta_pixel_id: data.tracking?.meta_pixel_id || '',
     ga4_id: data.tracking?.ga4_id || '',
+    gtm_id: data.tracking?.gtm_id || '',
   };
 };
 const saveTracking = async () => {
@@ -308,6 +309,11 @@ const hasChanges = computed(() => (info.value?.host || '') !== cleanedInput.valu
                 <input v-model="tracking.ga4_id" type="text" placeholder="G-AB12CD34EF" class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
                 <span class="text-[10px] text-n-slate-9">GA4 → Administrador → Fluxos de dados → seu site → ID da métrica.</span>
               </label>
+              <label class="block">
+                <span class="text-[11px] font-medium text-n-slate-11">Google Tag Manager (código GTM-…)</span>
+                <input v-model="tracking.gtm_id" type="text" placeholder="GTM-ABC1234" class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
+                <span class="text-[10px] text-n-slate-9">tagmanager.google.com → seu contêiner → o código GTM- do topo. Entra sozinho no head e no body de todas as páginas, como o Google pede.</span>
+              </label>
             </div>
             <div class="flex items-center gap-3 mt-3 flex-wrap">
               <button
@@ -320,7 +326,8 @@ const hasChanges = computed(() => (info.value?.host || '') !== cleanedInput.valu
               </button>
               <span v-if="info?.tracking?.meta_pixel_id" class="text-[11px] text-emerald-600 font-semibold">✓ Pixel ativo em todas as páginas</span>
               <span v-if="info?.tracking?.ga4_id" class="text-[11px] text-emerald-600 font-semibold">✓ GA4 ativo em todas as páginas</span>
-              <span v-if="!info?.tracking?.meta_pixel_id && !info?.tracking?.ga4_id" class="text-[11px] text-n-slate-9">Sem IDs, as páginas seguem só com o rastreio interno (Protocolo).</span>
+              <span v-if="info?.tracking?.gtm_id" class="text-[11px] text-emerald-600 font-semibold">✓ Tag Manager ativo em todas as páginas</span>
+              <span v-if="!info?.tracking?.meta_pixel_id && !info?.tracking?.ga4_id && !info?.tracking?.gtm_id" class="text-[11px] text-n-slate-9">Sem IDs, as páginas seguem só com o rastreio interno (Protocolo).</span>
             </div>
           </div>
         </div>

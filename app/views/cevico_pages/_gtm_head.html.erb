@@ -1,0 +1,13 @@
+<%# Google Tag Manager — parte do <head> (o mais alto possível, como o
+    Google pede). O container vem do card 📊 de Configurações → Domínio
+    (CEVICO_TRACKING.gtm_id) e entra sozinho em TODA página pública. %>
+<% gtm_id = Cevico::PublicSite.tracking_config['gtm_id'].presence %>
+<% if gtm_id %>
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','<%= j gtm_id %>');</script>
+<!-- End Google Tag Manager -->
+<% end %>

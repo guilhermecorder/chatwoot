@@ -9,6 +9,13 @@
 <% cfg = Cevico::PublicSite.tracking_config %>
 <% pixel_id = cfg['meta_pixel_id'].presence %>
 <% ga4_id = cfg['ga4_id'].presence %>
+<%# GTM: quem faz a colocação certa (head + pós-body) passa include_gtm:
+    false; onde o snippet é o único ponto de injeção (ex.: hub), o
+    container entra aqui mesmo — funciona igual, só carrega mais tarde %>
+<% unless defined?(include_gtm) && include_gtm == false %>
+  <%= render 'cevico_pages/gtm_head' %>
+  <%= render 'cevico_pages/gtm_noscript' %>
+<% end %>
 <% if pixel_id || ga4_id %>
   <% page_name = page ? page.slug : 'hub' %>
   <% page_category = (page&.category).presence || 'hub' %>

@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+  <%# GTM o mais alto possível no head (Configurações → Domínio → card 📊) %>
+  <%= render 'cevico_pages/gtm_head' unless @preview %>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <%# SEO: título e descrição próprios da página (Google mostra exatamente isso) %>
@@ -206,6 +208,7 @@
   </style>
 </head>
 <body>
+  <%= render 'cevico_pages/gtm_noscript' unless @preview %>
   <% if @preview %>
     <%# tarja da PRÉVIA: deixa claro que é rascunho e que cliques não contam %>
     <div style="position:sticky;top:0;z-index:99;background:linear-gradient(90deg,#0b3b66,#152C61);color:#fff;padding:10px 16px;text-align:center;font-size:14px;border-bottom:2px solid #D4AF37">
@@ -701,7 +704,7 @@
   <% end %>
 
   <%# rastreio de origem (Google Ads/SEO/Meta → funil → protocolo no WhatsApp) %>
-  <%= render 'cevico_pages/analytics_snippet', page: @page unless @preview %>
+  <%= render 'cevico_pages/analytics_snippet', page: @page, include_gtm: false unless @preview %>
   <%= render 'cevico_pages/tracking_snippet', page: @page unless @preview %>
 </body>
 </html>
