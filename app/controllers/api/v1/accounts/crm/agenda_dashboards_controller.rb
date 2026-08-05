@@ -121,7 +121,10 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
     end.sort_by { |r| -r[:count] }
   end
 
-  UNIT_LABELS = { 'tatuape' => 'Tatuapé', 'paulista' => 'Av. Paulista' }.freeze
+  # nomes das unidades vêm do segmento (preset clínica = Tatuapé/Av. Paulista)
+  def unit_labels
+    Segmento.unit_labels
+  end
 
   def by_unit(since, until_at)
     scope = consultas(since, until_at)
@@ -131,7 +134,7 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
       missed = u.where(attendance: 'missed').count
       {
         key: unit.presence || 'sem_unidade',
-        label: UNIT_LABELS[unit] || unit.presence || 'Sem unidade',
+        label: unit_labels[unit] || unit.presence || 'Sem unidade',
         count: count,
         attended: attended,
         missed: missed,

@@ -235,7 +235,7 @@ class Crm::OpportunityRadarService
     {
       'conversation_id' => conversation.display_id,
       'contact_id' => conversation.contact_id,
-      'contact_name' => contact&.name.presence || 'Paciente',
+      'contact_name' => contact&.name.presence || Segmento.termo_cap(:cliente),
       'phone' => contact&.phone_number,
       'stage_name' => stage&.name,
       'assignee_name' => conversation.assignee&.available_name,
@@ -319,12 +319,12 @@ class Crm::OpportunityRadarService
 
     waiting_min = ((Time.current - conversation.waiting_since) / 60).round
     lines = messages.map do |m|
-      author = m.incoming? ? 'PACIENTE' : 'CLÍNICA'
+      author = m.incoming? ? Segmento.termo(:cliente).upcase : Segmento.termo(:empresa).upcase
       "[#{m.created_at.strftime('%d/%m %H:%M')}] #{author}: #{m.content.to_s.strip.truncate(500)}"
     end
 
     stage_line = stage_name.present? ? "Etapa da jornada (coluna do CRM): #{stage_name}.\n" : ''
-    "Paciente #{conversation.contact&.name || 'sem nome'} aguarda resposta há #{waiting_min} minutos.\n" \
+    "#{Segmento.termo_cap(:cliente)} #{conversation.contact&.name || 'sem nome'} aguarda resposta há #{waiting_min} minutos.\n" \
       "#{stage_line}Conversa:\n\n#{lines.join("\n")}"
   end
 end

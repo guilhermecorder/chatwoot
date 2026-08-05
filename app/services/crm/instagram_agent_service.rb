@@ -38,7 +38,7 @@ class Crm::InstagramAgentService
           telefone: { type: 'string' },
           dia: { type: 'string', description: 'YYYY-MM-DD' },
           hora: { type: 'string', description: 'HH:MM' },
-          unidade: { type: 'string', enum: %w[tatuape paulista] },
+          unidade: { type: 'string', enum: Segmento.unidade_keys },
           procedimento: { type: 'string' }
         },
         required: %w[nome telefone dia hora unidade procedimento],

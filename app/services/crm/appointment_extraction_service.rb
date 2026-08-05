@@ -22,8 +22,9 @@ class Crm::AppointmentExtractionService
       hora: { type: 'string', description: 'Hora da consulta no formato HH:MM 24h (vazio se não confirmada)' },
       unidade: {
         type: 'string',
-        enum: %w[tatuape paulista nao_identificada],
-        description: 'Unidade da clínica combinada na conversa: Tatuapé, Av. Paulista, ou nao_identificada'
+        # unidades do SEGMENTO (preset clínica = tatuape/paulista, como sempre)
+        enum: Segmento.unidade_keys + %w[nao_identificada],
+        description: "Unidade combinada na conversa (#{Segmento.unidades.map { |u| u['nome'] }.join(', ')}), ou nao_identificada"
       },
       problema: {
         type: 'string',

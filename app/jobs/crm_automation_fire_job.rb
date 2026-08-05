@@ -408,17 +408,24 @@ class CrmAutomationFireJob < ApplicationJob
 
       local_time = result[:starts_at].in_time_zone('America/Sao_Paulo')
       when_str = local_time.strftime('%d/%m/%Y às %H:%M')
-      verb = outcome == :rescheduled ? 'REAGENDADA' : 'agendada'
+      # frases do segmento p/ concordância certa ("Consulta agendada" ×
+      # "Atendimento agendado")
+      titulo = if outcome == :rescheduled
+                 Segmento.frase('atendimento_reagendado_ia', 'Consulta REAGENDADA pela IA')
+               else
+                 Segmento.frase('atendimento_agendado_ia', 'Consulta agendada pela IA')
+               end
       agenda_url = "/app/accounts/#{account.id}/agenda?date=#{local_time.strftime('%Y-%m-%d')}"
-      note = "📅 Consulta #{verb} pela IA: #{name} — #{when_str}" \
-             "#{unit ? " (#{unit == 'tatuape' ? 'Tatuapé' : 'Av. Paulista'})" : ''}. " \
+      note = "📅 #{titulo}: #{name} — #{when_str}" \
+             "#{unit ? " (#{Segmento.unit_label(unit)})" : ''}. " \
              "Registrada na Agenda. [📆 Ver na agenda](#{agenda_url})"
     else
       # sem dia/hora confirmados → tarefa de revisão para a equipe
-      return if account.tasks.where(status: %i[todo doing]).exists?(title: "⚠️ Confirmar consulta: #{name}")
+      confirmar = Segmento.frase('confirmar_atendimento', 'Confirmar consulta')
+      return if account.tasks.where(status: %i[todo doing]).exists?(title: "⚠️ #{confirmar}: #{name}")
 
       account.tasks.create!(
-        title: "⚠️ Confirmar consulta: #{name}",
+        title: "⚠️ #{confirmar}: #{name}",
         description: "A IA não encontrou dia e hora confirmados na conversa.\n#{notes}",
         unit: unit,
         phone: phone,

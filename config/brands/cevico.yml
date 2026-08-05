@@ -2,6 +2,7 @@
 id: cevico
 nome: 'Sistema CEVICO'
 brand_name: 'Sistema CEVICO'
+segmento: clinica   # pré-seleção de fábrica: clínica oftalmológica (config/segmentos/clinica.yml)
 logos:
   logo: '/brand-assets/logo.png'
   logo_dark: '/brand-assets/logo_dark.png'

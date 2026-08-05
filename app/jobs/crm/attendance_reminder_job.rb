@@ -31,8 +31,8 @@ class Crm::AttendanceReminderJob < ApplicationJob
     deadline = parse_deadline(owners['deadline'], now)
     return if now < deadline
 
-    remind(account, owners['consulta_user_id'], 'consulta', 'Consultas', now)
-    remind(account, owners['cirurgia_user_id'], 'cirurgia', 'Cirurgias', now)
+    remind(account, owners['consulta_user_id'], 'consulta', Segmento.frase('conferencia_atendimentos', 'Consultas'), now)
+    remind(account, owners['cirurgia_user_id'], 'cirurgia', Segmento.frase('conferencia_vendas', 'Cirurgias'), now)
   end
 
   def parse_deadline(value, now)

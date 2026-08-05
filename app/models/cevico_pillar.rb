@@ -39,19 +39,14 @@ class CevicoPillar < ApplicationRecord
   validates :status, inclusion: { in: STATUSES }
   validates :color, inclusion: { in: COLORS }
 
-  # os 3 pilares combinados com o Guilherme nascem prontos na primeira visita
-  DEFAULTS = [
-    { name: 'Aquisição de Pacientes', subtitle: 'Marketing e vendas — do anúncio ao agendamento',
-      emoji: '🧲', color: 'navy', position: 0 },
-    { name: 'Operação Clínica', subtitle: 'Exames, consultas (avaliação e pós-operatório) e procedimentos cirúrgicos',
-      emoji: '🏥', color: 'emerald', position: 1 },
-    { name: 'Financeiro & Tributário', subtitle: 'Caixa, custos, impostos e margem',
-      emoji: '💰', color: 'gold', position: 2 }
-  ].freeze
-
+  # os pilares padrão nascem prontos na primeira visita — conteúdo do
+  # segmento (preset clínica = os 3 pilares combinados com o Guilherme)
   def self.seed_defaults!(account)
     return if exists?(account: account)
 
-    DEFAULTS.each { |attrs| create!(attrs.merge(account: account)) }
+    Segmento.pilares.each do |p|
+      create!(account: account, name: p['nome'], subtitle: p['subtitulo'],
+              emoji: p['emoji'], color: p['cor'], position: p['posicao'].to_i)
+    end
   end
 end

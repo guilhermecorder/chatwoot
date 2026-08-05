@@ -156,7 +156,7 @@ class Crm::SalesCoachService
     message = client.messages.create(
       model: model,
       max_tokens: 3000,
-      system_: custom_prompt.presence || INSIGHTS_PROMPT,
+      system_: custom_prompt.presence || Segmento.prompt('sales_coach_insights') || INSIGHTS_PROMPT,
       messages: [{ role: 'user', content: "Analise estas #{convs.size} conversas que geraram fechamento de cirurgia:\n\n#{corpus.truncate(120_000)}" }]
     )
     record_usage(message)
