@@ -1,15 +1,40 @@
-// Dados e helpers da agenda de avaliação da CEVICO — usados pela Agenda e
-// pelos indicadores do Meu Painel.
+// Dados e helpers da agenda — usados pela Agenda e pelos indicadores do
+// Meu Painel. Profissionais, janelas, unidades e modalidades vêm do
+// SEGMENTO (window.SEGMENTO ← config/segmentos/<id>.yml, sistema coringa);
+// os valores chumbados abaixo são o preset clínica, usado como fallback
+// quando não há pacote (testes, contexto sem layout).
+import { SEGMENTO } from './segmento';
 
-export const DOCTORS = [
+const FALLBACK_DOCTORS = [
   { name: 'Dr. Gustavo Bittar', short: 'Gustavo', color: '#0F5FA6' },
   { name: 'Dr. Henrique Gemelli', short: 'Henrique', color: '#B8860B' },
   { name: 'Dra. Roberta Negri', short: 'Roberta', color: '#7C3AED' },
 ];
 
+// os "médicos" do segmento (na clínica, os 3 de sempre)
+export const DOCTORS = Array.isArray(SEGMENTO.profissionais) && SEGMENTO.profissionais.length
+  ? SEGMENTO.profissionais.map(p => ({
+      name: p.nome,
+      short: p.apelido || p.nome,
+      color: p.cor || '#64748B',
+    }))
+  : FALLBACK_DOCTORS;
+
+// unidades do segmento (keys gravadas nas tasks; label/cor p/ exibição)
+const FALLBACK_UNITS = [
+  { key: 'tatuape', nome: 'Tatuapé', cor: '#2563EB' },
+  { key: 'paulista', nome: 'Av. Paulista', cor: '#EA580C' },
+];
+export const UNITS_LIST = Array.isArray(SEGMENTO.unidades) && SEGMENTO.unidades.length
+  ? SEGMENTO.unidades
+  : FALLBACK_UNITS;
+export const UNIT_LABELS = Object.fromEntries(UNITS_LIST.map(u => [u.key, u.nome]));
+export const unitLabel = key => UNIT_LABELS[key] || key || '';
+export const DEFAULT_UNIT = UNITS_LIST[0]?.key || '';
+
 // dow: 0=Dom … 6=Sáb; end é exclusivo (último bloco = end - block).
 // Mapa padrão — editável em Agenda → "Janelas dos médicos".
-export const DEFAULT_WINDOWS = [
+const FALLBACK_WINDOWS = [
   { dow: 1, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '10:00', block: 15 },
   { dow: 2, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Manhã', start: '08:00', end: '11:30', block: 15 },
   { dow: 2, unit: 'paulista', doctor: 'Dra. Roberta Negri',   turno: 'Tarde', start: '14:30', end: '16:30', block: 15 },
@@ -18,6 +43,13 @@ export const DEFAULT_WINDOWS = [
   { dow: 4, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 15 },
   { dow: 5, unit: 'tatuape',  doctor: 'Dra. Roberta Negri',   turno: 'Manhã', start: '10:30', end: '13:00', block: 10 },
 ];
+export const DEFAULT_WINDOWS = Array.isArray(SEGMENTO.janelas_padrao)
+  ? SEGMENTO.janelas_padrao.map(w => ({
+      ...w,
+      dow: Number(w.dow),
+      block: Number(w.block) || 15,
+    }))
+  : FALLBACK_WINDOWS;
 
 // médicos com a agenda FECHADA (item 76) — as janelas deles somem em
 // TODO consumidor (agenda, ocupação, saúde do Meu Painel)
@@ -70,12 +102,20 @@ export const dateKey = d => {
 
 export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 
-// modalidades de consulta — alimentam a ocupação por tipo
-export const MODALITIES = [
+// modalidades de atendimento — alimentam a ocupação por tipo
+// (keys fixas — gravadas nas tasks; labels/cores do segmento)
+const FALLBACK_MODALITIES = [
   { key: 'avaliacao', label: 'Avaliação', color: '#0F5FA6' },
   { key: 'retorno', label: 'Retorno', color: '#D4A017' },
   { key: 'exames', label: 'Exames', color: '#7C3AED' },
 ];
+export const MODALITIES = Array.isArray(SEGMENTO.modalidades) && SEGMENTO.modalidades.length
+  ? SEGMENTO.modalidades.map(m => ({
+      key: m.key,
+      label: m.label,
+      color: m.cor || '#64748B',
+    }))
+  : FALLBACK_MODALITIES;
 
 // varre um intervalo de dias e devolve estatísticas + primeiras vagas livres:
 // tasks = consultas (com due_at); blockedSet = Set de blockKey.

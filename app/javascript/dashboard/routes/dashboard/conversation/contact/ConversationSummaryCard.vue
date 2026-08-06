@@ -7,6 +7,7 @@ import { useRoute, useRouter } from 'vue-router';
 import CrmAPI from 'dashboard/api/crm';
 import { useAlert } from 'dashboard/composables';
 import { frontendURL } from 'dashboard/helper/URLHelper';
+import { frase } from 'dashboard/helper/segmento';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 
 const props = defineProps({
@@ -218,11 +219,11 @@ const analyzedAgo = computed(() => {
       <button
         v-if="contact?.id"
         class="flex items-center gap-1.5 text-xs font-semibold text-n-slate-12 hover:text-n-brand text-left mt-0.5"
-        title="Abrir o Espaço do Paciente"
+        :title="`Abrir o ${frase('espaco_cliente', 'Espaço do Paciente')}`"
         @click="openPatientSpace"
       >
         <PatientSpaceIcon :size="18" />
-        Espaço do Paciente
+        {{ frase('espaco_cliente', 'Espaço do Paciente') }}
       </button>
     </div>
 

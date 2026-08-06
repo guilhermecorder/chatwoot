@@ -19,6 +19,7 @@ import {
   DOCTORS, resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
+import { termo, termoCap, frase, meta as metaSegmento, painelQuem, nomeSistemaHero, isClinica } from 'dashboard/helper/segmento';
 
 const router = useRouter();
 const store = useStore();
@@ -46,23 +47,23 @@ const selectedPeriod = ref('today');
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
 const PANELS = [
   {
-    key: 'agendamento', label: 'Agendamento', who: 'Vaneide',
+    key: 'agendamento', label: 'Agendamento', who: painelQuem('agendamento', 'Vaneide'),
     icon: 'i-lucide-calendar-check', desc: 'do lead ao agendamento',
     grad: 'linear-gradient(135deg, #0F5FA6 0%, #7C3AED 100%)',
   },
   {
-    key: 'conducao', label: 'Condução', who: 'Elizangela',
+    key: 'conducao', label: 'Condução', who: painelQuem('conducao', 'Elizangela'),
     icon: 'i-lucide-route', desc: 'do agendamento à indicação',
     grad: 'linear-gradient(135deg, #0F766E 0%, #2DD4BF 100%)',
   },
   {
-    key: 'cirurgia', label: 'Cirurgias', who: 'Gabriela',
-    icon: 'i-lucide-heart-pulse', desc: 'fechamento e pós-operatório',
+    key: 'cirurgia', label: termoCap('vendas'), who: painelQuem('fechamento', 'Gabriela'),
+    icon: 'i-lucide-heart-pulse', desc: frase('desc_painel_fechamento', 'fechamento e pós-operatório'),
     grad: 'linear-gradient(135deg, #9D174D 0%, #F472B6 100%)',
   },
   {
-    key: 'medico', label: 'Médicos', who: '',
-    icon: 'i-lucide-stethoscope', desc: 'a agenda de cada médico',
+    key: 'medico', label: termoCap('profissionais'), who: '',
+    icon: 'i-lucide-stethoscope', desc: `a agenda de cada ${termo('profissional')}`,
     grad: 'linear-gradient(135deg, #0369A1 0%, #38BDF8 100%)',
   },
   {
@@ -153,42 +154,42 @@ const panelTiles = computed(() => {
   const d = pd.value;
   if (selectedPanel.value === 'conducao') {
     return [
-      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', sub: 'agenda das unidades', grad: 'linear-gradient(135deg, #0F766E, #115E59)' },
+      { label: frase('atendimentos_periodo', 'Consultas no período'), icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', sub: 'agenda das unidades', grad: 'linear-gradient(135deg, #0F766E, #115E59)' },
       { label: 'Compareceram', icon: 'i-lucide-user-check', value: d.attended ?? 0, gk: 'attended', sub: 'conferência do dia (Agenda)', grad: 'linear-gradient(135deg, #14B8A6, #0D9488)' },
       { label: 'Comparecimento', icon: 'i-lucide-percent', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.missed ?? 0} falta(s) no período`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: 'saíram da consulta indicados', grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
+      { label: frase('indicacoes_venda', 'Indicações de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: frase('sub_saidos_indicados', 'saíram da consulta indicados'), grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
     ];
   }
   if (selectedPanel.value === 'cirurgia') {
     return [
-      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: 'pacientes indicados no período', grad: 'linear-gradient(135deg, #9D174D, #BE185D)' },
-      { label: 'Cirurgias agendadas', icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, gk: 'surgeries_booked', sub: 'fechadas no período', grad: 'linear-gradient(135deg, #BE185D, #EC4899)' },
+      { label: frase('indicacoes_venda', 'Indicações de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: `${termo('clientes')} indicados no período`, grad: 'linear-gradient(135deg, #9D174D, #BE185D)' },
+      { label: frase('vendas_agendadas', 'Cirurgias agendadas'), icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, gk: 'surgeries_booked', sub: 'fechadas no período', grad: 'linear-gradient(135deg, #BE185D, #EC4899)' },
       { label: 'Taxa de fechamento', icon: 'i-lucide-percent', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: 'agendadas ÷ indicações', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-      { label: 'Cirurgias realizadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, gk: 'surgeries_done', sub: `${d.surgeries_missed ?? 0} não vieram`, grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
+      { label: frase('vendas_realizadas', 'Cirurgias realizadas'), icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, gk: 'surgeries_done', sub: `${d.surgeries_missed ?? 0} não vieram`, grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
     ];
   }
   if (selectedPanel.value === 'medico') {
     return [
-      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`, grad: 'linear-gradient(135deg, #0369A1, #075985)' },
-      { label: 'Com indicação de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: `${d.indication_rate ?? 0}% de quem compareceu`, grad: 'linear-gradient(135deg, #0EA5E9, #38BDF8)' },
+      { label: frase('atendimentos_periodo', 'Consultas no período'), icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`, grad: 'linear-gradient(135deg, #0369A1, #075985)' },
+      { label: frase('com_indicacao_venda', 'Com indicação de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: `${d.indication_rate ?? 0}% de quem compareceu`, grad: 'linear-gradient(135deg, #0EA5E9, #38BDF8)' },
       { label: 'Sem indicação', icon: 'i-lucide-user-minus', value: d.no_indication ?? 0, sub: `${d.no_indication_rate ?? 0}% de quem compareceu`, grad: 'linear-gradient(135deg, #64748B, #94A3B8)' },
-      { label: 'Conversão em cirurgia', icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, gk: 'conversion_rate', pct: true, sub: `${d.conversions ?? 0} viraram cirurgia · NPS ${d.nps_avg ?? '—'}`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+      { label: frase('conversao_venda', 'Conversão em cirurgia'), icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, gk: 'conversion_rate', pct: true, sub: `${d.conversions ?? 0} viraram ${termo('venda')} · NPS ${d.nps_avg ?? '—'}`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
     ];
   }
   if (selectedPanel.value === 'gestor') {
     return [
       { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
       { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`, sub2: 'avançaram até "Agendamento" no CRM', grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
-      { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.indications ?? 0} indicação(ões) de cirurgia`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-      { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`, grad: 'linear-gradient(135deg, #065F46, #10B981)' },
+      { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.indications ?? 0} indicação(ões) de ${termo('venda')}`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+      { label: frase('fechamento_vendas', 'Fechamento de cirurgias'), icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`, grad: 'linear-gradient(135deg, #065F46, #10B981)' },
     ];
   }
   // agendamento (padrão — Vaneide)
   return [
     { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
-    { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
+    { label: frase('atendimentos_agendados', 'Consultas agendadas'), icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
     { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, chip: conversionVerdict.value, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`, sub2: 'avançaram até "Agendamento" no CRM', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-    { label: 'Cirurgias fechadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', sub: 'coluna Cirurgia Agendada (CRM)', grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
+    { label: frase('vendas_fechadas', 'Cirurgias fechadas'), icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', sub: frase('sub_coluna_venda', 'coluna Cirurgia Agendada (CRM)'), grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
   ];
 });
 
@@ -340,11 +341,11 @@ const gestorSignals = computed(() => {
     else if (st.status === 'warn') sigs.push({ level: 'amber', icon: 'i-lucide-alert-triangle', text: `${tile.label}: abaixo do ritmo da meta (${tile.value})` });
   });
   const alerts = radarAlerts.value.length;
-  if (alerts) sigs.push({ level: 'red', icon: 'i-lucide-radar', text: `${alerts} paciente(s) quente(s) sem atendimento (Radar)` });
+  if (alerts) sigs.push({ level: 'red', icon: 'i-lucide-radar', text: `${alerts} ${termo('cliente')}(s) quente(s) sem atendimento (Radar)` });
   const waiting = data.value.unanswered ?? 0;
   if (waiting > 8) sigs.push({ level: 'amber', icon: 'i-lucide-message-circle', text: `${waiting} conversas abertas aguardando resposta` });
   const unconfirmed = data.value.panel_data?.unconfirmed ?? 0;
-  if (unconfirmed > 0) sigs.push({ level: 'amber', icon: 'i-lucide-clipboard-alert', text: `${unconfirmed} consulta(s) sem conferência na Agenda` });
+  if (unconfirmed > 0) sigs.push({ level: 'amber', icon: 'i-lucide-clipboard-alert', text: `${unconfirmed} ${termo('atendimento')}(s) sem conferência na Agenda` });
   const bugs = data.value.my_tasks?.count ?? 0;
   if (bugs > 0) sigs.push({ level: 'info', icon: 'i-lucide-list-todo', text: `${bugs} tarefa(s) esperando você no board` });
   return sigs;
@@ -667,8 +668,8 @@ const surgUsageLast7 = computed(() => {
 // da sala configuradas (as barras mostram "—" até configurar)
 const showSurgeryHealth = computed(() => true);
 
-// 🎯 META DO MÊS: 100 cirurgias — barra de progresso no retângulo
-const SURGERY_GOAL = 100;
+// 🎯 META DO MÊS (do segmento; clínica = 100 cirurgias) — barra de progresso
+const SURGERY_GOAL = metaSegmento('vendas_mes', 100);
 const surgeriesDoneMonth = computed(() => {
   const now = new Date();
   return surgeryTasks.value.filter(t => {
@@ -843,11 +844,11 @@ onUnmounted(() => {
           </div>
           <h1 class="text-2xl sm:text-4xl font-bold leading-tight" style="color: #fff">{{ greeting }}, {{ firstName }}! 👋</h1>
           <p class="text-sm mt-2" style="color: rgba(255,255,255,0.85)">
-            Boas-vindas ao CEVICO S.I —
+            Boas-vindas ao {{ nomeSistemaHero() }} —
             <b>Painel de {{ currentPanel.label }}</b><template v-if="currentPanel.who"> ({{ currentPanel.who }})</template>: {{ currentPanel.desc }}.
           </p>
         </div>
-        <span class="i-lucide-eye absolute -right-6 -bottom-8 text-[160px] text-white/10" />
+        <span class="absolute -right-6 -bottom-8 text-[160px] text-white/10" :class="isClinica ? 'i-lucide-eye' : 'i-lucide-briefcase'" />
       </div>
 
       <!-- SKELETON Homem de Ferro (item 89): o painel se monta por partes -->

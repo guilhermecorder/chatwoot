@@ -22,6 +22,7 @@ import ChannelIcon from 'next/icon/ChannelIcon.vue';
 import SidebarAccountSwitcher from './SidebarAccountSwitcher.vue';
 import Logo from 'next/icon/Logo.vue';
 import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
+import { frase } from 'dashboard/helper/segmento';
 import {
   SIDEBAR_SORT_SECTIONS,
   getSidebarSortOptions,
@@ -691,7 +692,7 @@ const menuItems = computed(() => {
             ? [{ name: 'Campaigns Dashboard', key: 'campaigns_dashboard', label: 'Dashboard Campanhas', route: 'crm_campaigns_dashboard' }]
             : []),
           { name: 'Traffic Funnel', key: 'traffic_funnel', label: 'Funil de Tráfego', route: 'traffic_funnel_reports' },
-          { name: 'Doctors Dashboard', key: 'doctors', label: 'Dashboard dos Médicos', route: 'doctors_reports' },
+          { name: 'Doctors Dashboard', key: 'doctors', label: frase('dashboard_profissionais', 'Dashboard dos Médicos'), route: 'doctors_reports' },
           { name: 'Agents Dashboard', key: 'agents_dashboard', label: 'Dashboard dos Agentes', route: 'agents_dashboard_reports' },
           { name: 'Agenda Dashboard', key: 'agenda_dashboard', label: 'Dashboard da Agenda', route: 'agenda_dashboard_reports' },
           { name: 'Ads Report', key: 'ads', label: 'Anúncios (Meta)', route: 'ads_reports' },
@@ -889,7 +890,7 @@ const menuItems = computed(() => {
     },
     {
       name: 'Academy',
-      label: 'Academia CEVICO',
+      label: frase('academia', 'Academia CEVICO'),
       icon: 'i-lucide-graduation-cap',
       to: accountScopedRoute('academy_home'),
     },

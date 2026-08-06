@@ -9,6 +9,7 @@ import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import CrmAPI from 'dashboard/api/crm';
 import { DOCTORS } from 'dashboard/helper/cevicoAgenda';
+import { frase } from 'dashboard/helper/segmento';
 
 const { isAdmin } = useAdmin();
 const isLoading = ref(true);
@@ -170,7 +171,7 @@ onMounted(() => {
           <span class="i-lucide-stethoscope text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Dashboard dos Médicos</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">{{ frase('dashboard_profissionais', 'Dashboard dos Médicos') }}</h1>
           <p class="text-xs text-n-slate-10">quem mais converte consulta em cirurgia · indicações · NPS · cirurgias por clínica</p>
         </div>
       </div>

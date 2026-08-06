@@ -12,6 +12,7 @@ import {
   DOCTORS, MODALITIES, resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
+import { termo } from 'dashboard/helper/segmento';
 
 const store = useStore();
 const isLoading = ref(true);
@@ -106,7 +107,7 @@ onMounted(() => {
         </span>
         <div class="flex-1 min-w-0">
           <h1 class="text-lg font-bold text-n-slate-12">Dashboard da Agenda</h1>
-          <p class="text-xs text-n-slate-10">comparecimento · modalidades · médicos · unidades · cirurgias · ocupação</p>
+          <p class="text-xs text-n-slate-10">comparecimento · modalidades · {{ termo('profissionais') }} · unidades · {{ termo('vendas') }} · ocupação</p>
         </div>
       </div>
 

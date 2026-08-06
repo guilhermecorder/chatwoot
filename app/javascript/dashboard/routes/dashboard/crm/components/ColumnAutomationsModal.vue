@@ -4,6 +4,7 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
+import { UNITS_LIST } from 'dashboard/helper/cevicoAgenda';
 import {
   inboxGradientFor,
   inboxSolidFor,
@@ -717,8 +718,7 @@ const save = async () => {
                 class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
               >
                 <option value="">Deixar sem unidade</option>
-                <option value="tatuape">Tatuapé</option>
-                <option value="paulista">Av. Paulista</option>
+                <option v-for="u in UNITS_LIST" :key="u.key" :value="u.key">{{ u.nome }}</option>
               </select>
             </div>
           </template>
