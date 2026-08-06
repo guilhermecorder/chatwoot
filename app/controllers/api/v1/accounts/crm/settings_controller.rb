@@ -259,6 +259,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg['gemini_api_key'] = params[:gemini_api_key] if params[:gemini_api_key].present?
     cfg['model']   = params[:model]   if params.key?(:model)
     cfg['effort']  = params[:effort]  if params.key?(:effort)
+    # sistema coringa: descrição do negócio injetada em {{CONTEXTO_DO_NEGOCIO}}
+    # nos prompts dos robôs (sem ela, vale o contexto do segmento)
+    cfg['business_context'] = params[:business_context].to_s[0, 8000] if params.key?(:business_context)
     # agentes internos: ligar/pausar, prompt, modelo e esforço por agente
     # (o Radar de Oportunidades ainda tem as vigias: coluna + painel do
     # atendente + janela de tempo, além dos minutos de espera).
@@ -836,25 +839,28 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def ai_json(s)
     cfg = s.ai_config || {}
     agents = cfg['agents'] || {}
+    # prompt padrão exibido na UI: o do SEGMENTO quando existir (sistema
+    # coringa), senão o chumbado no serviço (preset clínica)
     default_prompts = {
-      'conversation' => Crm::ConversationInsightService::SYSTEM_PROMPT,
-      'form' => Crm::FormInsightService::SYSTEM_PROMPT,
-      'scheduler' => Crm::AppointmentExtractionService::SYSTEM_PROMPT,
-      'opportunity' => Crm::OpportunityRadarService::SYSTEM_PROMPT,
-      'closing' => Crm::SurgeryClosingService::SYSTEM_PROMPT,
-      'nps' => Crm::NpsService::SYSTEM_PROMPT,
-      'sales' => Crm::SalesCoachService::SYSTEM_PROMPT,
-      'instagram' => Crm::InstagramAgentService::SYSTEM_PROMPT,
-      'copywriter' => Crm::CopywriterService::SYSTEM_PROMPT,
-      'pagebuilder' => Crm::PageBuilderService::SYSTEM_PROMPT,
-      'mentor' => Crm::WeeklyMentorService::SYSTEM_PROMPT,
-      'comments' => Crm::CommentsAgentService::SYSTEM_PROMPT
+      'conversation' => Segmento.prompt('conversation_insight') || Crm::ConversationInsightService::SYSTEM_PROMPT,
+      'form' => Segmento.prompt('form_insight') || Crm::FormInsightService::SYSTEM_PROMPT,
+      'scheduler' => Segmento.prompt('appointment_extraction') || Crm::AppointmentExtractionService::SYSTEM_PROMPT,
+      'opportunity' => Segmento.prompt('opportunity_radar') || Crm::OpportunityRadarService::SYSTEM_PROMPT,
+      'closing' => Segmento.prompt('surgery_closing') || Crm::SurgeryClosingService::SYSTEM_PROMPT,
+      'nps' => Segmento.prompt('nps') || Crm::NpsService::SYSTEM_PROMPT,
+      'sales' => Segmento.prompt('sales_coach') || Crm::SalesCoachService::SYSTEM_PROMPT,
+      'instagram' => Segmento.prompt('instagram_agent') || Crm::InstagramAgentService::SYSTEM_PROMPT,
+      'copywriter' => Segmento.prompt('copywriter') || Crm::CopywriterService::SYSTEM_PROMPT,
+      'pagebuilder' => Segmento.prompt('page_builder') || Crm::PageBuilderService::SYSTEM_PROMPT,
+      'mentor' => Segmento.prompt('weekly_mentor') || Crm::WeeklyMentorService::SYSTEM_PROMPT,
+      'comments' => Segmento.prompt('comments_agent') || Crm::CommentsAgentService::SYSTEM_PROMPT
     }
     {
       api_key_set: cfg['api_key'].present?,
       gemini_key_set: cfg['gemini_api_key'].present?,
       model: cfg['model'].presence || Crm::AiAgentConfig::DEFAULT_MODEL,
       effort: cfg['effort'].presence || 'high',
+      business_context: cfg['business_context'].presence,
       configured: cfg['api_key'].present?,
       opportunity_last_run_at: cfg.dig('opportunity_state', 'last_run_at'),
       opportunity_alerts_count: visible_alerts_count(cfg),
