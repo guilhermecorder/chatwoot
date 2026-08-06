@@ -1006,6 +1006,13 @@ const menuItems = computed(() => {
                 icon: 'i-lucide-badge-dollar-sign',
                 to: accountScopedRoute('precos_settings_index'),
               },
+              // Personalização (sistema coringa): profissionais/unidades/listas
+              {
+                name: 'Settings Segment',
+                label: 'Personalização',
+                icon: 'i-lucide-puzzle',
+                to: accountScopedRoute('personalizacao_settings_index'),
+              },
             ]
           : []),
         // {

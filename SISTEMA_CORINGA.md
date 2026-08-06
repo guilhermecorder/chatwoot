@@ -52,6 +52,20 @@ Placeholders disponíveis em qualquer prompt:
   da conta, senão `contexto:` do segmento);
 - `{{NOME_DA_EMPRESA}}` — nome da instalação (pacote de marca).
 
+## Personalização pelo ADMIN (sem código)
+
+**Configurações → Personalização** (menu do admin): edita por conta —
+profissionais (nome, apelido, cor, grafias), unidades, motivos do
+atendimento, opções de indicação/venda, meta do mês e o **contexto do
+negócio** dos robôs. Salvo em `crm_settings.agenda_config['segment']`
+(+ `ai_config['business_context']`); resolução em todo lugar:
+**conta > segmento > preset clínica**. "Restaurar padrão do segmento"
+apaga os ajustes da conta. Também por conta (telas que já existiam):
+tabela de preços, janelas da agenda e prompts por agente.
+
+O que ainda é só por segmento (yml): terminologia (termos/frases),
+modalidades, jornada/pilares/indicadores/categorias e os prompts padrão.
+
 ## Como criar um segmento novo (ex.: energia solar)
 
 1. `cp config/segmentos/empresa.yml config/segmentos/solar.yml`
@@ -85,7 +99,7 @@ chumbados permanecem nos helpers para contexto sem pacote).
 - **Textos secundários** de telas menores (Academy, AutomationsHub,
   questionário pré-consulta do CrmForms, placeholders do Estoque/Financeiro,
   descrições dos agentes em telas de automação).
-- **Edição de profissionais pela UI** (hoje: editar o yml do segmento e
-  buildar; o desejo é editar em Agenda → Janelas, junto com as janelas).
+- **Terminologia por conta** (paciente→cliente é por segmento/yml; por
+  conta exigiria reatividade em todas as telas — fase C se precisar).
 - Schemas de saída dos robôs mantêm descrições com vocabulário clínico
   (as CHAVES são neutras; só texto de orientação ao modelo).

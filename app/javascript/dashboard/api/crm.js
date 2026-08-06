@@ -227,6 +227,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_price_table`, { items });
   }
 
+  // Personalização (sistema coringa): profissionais/unidades/listas/metas — admin
+  updateSegment(data) {
+    return axios.post(`${this.url}/settings/update_segment`, data);
+  }
+
   // investimento por caixa + portas de entrada (ROI/CAC do Dashboard) — admin
   updateInboxInvestments(investments, captureInboxIds) {
     const payload = { investments };
