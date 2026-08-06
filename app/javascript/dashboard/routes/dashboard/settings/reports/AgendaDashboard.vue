@@ -9,7 +9,7 @@ import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import CrmAPI from 'dashboard/api/crm';
 import {
-  DOCTORS, MODALITIES, resolveWindows, resolveBlocked, resolveBlockedDays,
+  resolveDoctors, MODALITIES, resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
 import { termo } from 'dashboard/helper/segmento';
@@ -75,7 +75,8 @@ const surgFillNext7 = computed(() =>
   scan(surgeryTasks.value, resolveSurgeryWindows(crmSettings.value), { from: new Date(), days: 7, futureOnly: true })
 );
 
-const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
+const DOCTORS = computed(() => resolveDoctors(crmSettings.value));
+const doctorColor = name => DOCTORS.value.find(d => d.name === name)?.color || '#64748B';
 const modColor = key => MODALITIES.find(m => m.key === key)?.color || '#64748B';
 const rateColor = pct => {
   if (pct >= 80) return '#059669';

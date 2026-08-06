@@ -11,7 +11,7 @@ import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { frontendURL } from 'dashboard/helper/URLHelper';
-import { DOCTORS as SEGMENT_DOCTORS, MODALITIES, UNIT_LABELS as SEGMENT_UNIT_LABELS } from 'dashboard/helper/cevicoAgenda';
+import { resolveDoctors, resolveUnitLabels, MODALITIES } from 'dashboard/helper/cevicoAgenda';
 import { termo, termoCap, frase } from 'dashboard/helper/segmento';
 import PatientSpaceIcon from './PatientSpaceIcon.vue';
 
@@ -207,9 +207,11 @@ const fmtDuration = minutes => {
   return `${Math.round(minutes / 60 / 24)} dia(s)`;
 };
 
-// modalidades e unidades do segmento (preset clínica = os de sempre)
+// modalidades e unidades do segmento (preset clínica = os de sempre);
+// unidades respeitam a Personalização da conta (computed lê crmSettings,
+// declarado mais abaixo — avaliação preguiçosa)
 const MODALITY_LABELS = Object.fromEntries(MODALITIES.map(m => [m.key, m.label]));
-const UNIT_LABELS = SEGMENT_UNIT_LABELS;
+const UNIT_LABELS = computed(() => resolveUnitLabels(crmSettings.value));
 const CHANNEL_LABELS = {
   Whatsapp: 'WhatsApp',
   FacebookPage: 'Instagram/Facebook',
@@ -443,8 +445,8 @@ const selectedProcedure = computed(() =>
 );
 
 const EYES = ['OD', 'OE', 'AO'];
-// nomes oficiais vêm do segmento (antes: lista duplicada dos 3 médicos)
-const DOCTORS = SEGMENT_DOCTORS.map(d => d.name);
+// nomes oficiais: conta (Personalização) > segmento (antes: lista duplicada)
+const DOCTORS = computed(() => resolveDoctors(crmSettings.value).map(d => d.name));
 
 // formulário de anotação (campos rápidos — a vida do médico fácil)
 const showNoteForm = ref(false);

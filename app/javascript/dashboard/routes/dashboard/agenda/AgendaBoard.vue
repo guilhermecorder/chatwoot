@@ -18,9 +18,9 @@ import {
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import {
-  DOCTORS, MODALITIES, UNITS_LIST, DEFAULT_UNIT, resolveWindows, resolveBlocked,
-  resolveBlockedDays, resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey,
-  blockKey, scanAgenda,
+  MODALITIES, resolveDoctors, resolveUnits, resolveSegmentList, resolveWindows,
+  resolveBlocked, resolveBlockedDays, resolveSurgeryWindows,
+  slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
 import { termoCap, frase, listaSegmento } from 'dashboard/helper/segmento';
 import { ALL_THEMES, resolveTheme } from 'dashboard/helper/cevicoThemes';
@@ -200,26 +200,29 @@ const VIEW_MODES = [
   { key: 'custom', label: 'Personalizado', icon: 'i-lucide-calendar-search' },
 ];
 
-// Unidades (agendas paralelas compartilhadas) — vêm do segmento
-const UNITS = Object.fromEntries(
-  UNITS_LIST.map(u => [u.key, { label: u.nome, color: u.cor || '#64748B' }])
+// Unidades (agendas paralelas compartilhadas) — conta > segmento.
+// (computed lê crmSettings, declarado logo abaixo; avaliação é preguiçosa)
+const unitsList = computed(() => resolveUnits(crmSettings.value));
+const UNITS = computed(() =>
+  Object.fromEntries(unitsList.value.map(u => [u.key, { label: u.nome, color: u.cor || '#64748B' }]))
 );
 
-// motivo do atendimento — lista do segmento (preset clínica = patologias)
-const PROBLEMAS = listaSegmento('problemas', [
+// motivo do atendimento — conta > segmento (preset clínica = patologias)
+const PROBLEMAS = computed(() => resolveSegmentList(crmSettings.value, 'problemas', listaSegmento('problemas', [
   'Catarata', 'Refrativa', 'Ceratocone', 'Lentes Fácicas',
   'Exames', 'Consulta geral', 'Pós-operatório', 'Plástica ocular',
-]);
+])));
 
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 07h às 20h (grade do DIA)
 // item 76: a SEMANA mostra só o expediente real (08h às 18h), espichada
 const WEEK_HOURS = Array.from({ length: 11 }, (_, i) => i + 8);
 
-// ── Médicos e janelas de avaliação da clínica ───────────────
-// (DOCTORS/DEFAULT_WINDOWS/slotsFor vivem em helper/cevicoAgenda.js,
-// compartilhados com os indicadores do Meu Painel)
+// ── Profissionais e janelas de avaliação ────────────────────
+// (resolvers vivem em helper/cevicoAgenda.js, compartilhados com os
+// indicadores do Meu Painel; conta > segmento > preset clínica)
+const DOCTORS = computed(() => resolveDoctors(crmSettings.value));
 const doctorColor = name =>
-  DOCTORS.find(d => d.name === name)?.color || '#64748B';
+  DOCTORS.value.find(d => d.name === name)?.color || '#64748B';
 
 const WEEKDAY_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -320,8 +323,8 @@ const startEditWindows = () => {
 
 const addWindow = () => {
   editWindows.value.push({
-    dow: 1, unit: UNITS_LIST[UNITS_LIST.length - 1]?.key || DEFAULT_UNIT,
-    doctor: DOCTORS[0]?.name || '',
+    dow: 1, unit: unitsList.value[unitsList.value.length - 1]?.key || '',
+    doctor: DOCTORS.value[0]?.name || '',
     turno: 'Manhã', start: '08:00', end: '11:00', block: 15,
   });
 };
@@ -590,7 +593,7 @@ const displayName = task => (task.title || '').replace(/^Consulta:\s*/i, '');
 const chipTime = task =>
   new Date(task.due_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const unitOf = task => {
-  if (task.unit && UNITS[task.unit]) return UNITS[task.unit];
+  if (task.unit && UNITS.value[task.unit]) return UNITS.value[task.unit];
   if (isSurgeryTask(task)) {
     const loc = surgeryLocationOf(task);
     if (loc) return { label: loc.label, color: loc.color || SURGERY_COLOR };
@@ -686,7 +689,7 @@ const winColor = win =>
     ? doctorColor(win.doctor)
     : surgeryLocations.value.find(l => l.key === win.unit)?.color || SURGERY_COLOR;
 const winTitle = win => win.doctor || `Sala cirúrgica — ${surgeryLocationLabel(win.unit)}`;
-const winUnitLabel = win => (win.doctor ? UNITS[win.unit]?.label : surgeryLocationLabel(win.unit));
+const winUnitLabel = win => (win.doctor ? UNITS.value[win.unit]?.label : surgeryLocationLabel(win.unit));
 
 const winOccupancy = (day, win) => {
   const slots = slotsFor(win).filter(s => !isBlocked(day, win, s));
@@ -716,7 +719,7 @@ const kpiByUnitMonth = computed(() => {
   );
   const keys = isSurgeryMode.value
     ? surgeryLocations.value.map(l => l.key)
-    : Object.keys(UNITS);
+    : Object.keys(UNITS.value);
   return Object.fromEntries(
     keys.map(key => [key, inCursorMonth.filter(x => x.unit === key).length])
   );
@@ -764,7 +767,7 @@ const emptyForm = (day, prefill = {}) => ({
   date: format(day || cursor.value, 'yyyy-MM-dd'),
   time: prefill.time || '09:00',
   unit: prefill.unit ||
-    (isSurgeryMode.value ? surgeryLocations.value[0]?.key : activeUnit.value || DEFAULT_UNIT) || '',
+    (isSurgeryMode.value ? surgeryLocations.value[0]?.key : activeUnit.value || unitsList.value[0]?.key) || '',
   status: 'todo',
   canceled: false,
   description: prefill.description || '',
@@ -882,11 +885,11 @@ const removeTask = async () => {
 // Marcar reflete no CRM: o card do paciente move para a coluna configurada
 // (modal "Janelas dos médicos" → Conferência do dia) e as automações da
 // coluna de destino disparam (régua de conversão/reagendamento).
-const PROCEDURES = listaSegmento('procedimentos', [
+const PROCEDURES = computed(() => resolveSegmentList(crmSettings.value, 'procedimentos', listaSegmento('procedimentos', [
   'Catarata', 'Refrativa PRK', 'Refrativa Lasik', 'Lente Fácica',
   'Lente de Foco Estendido', 'Trifocal', 'Anel de Ferrara', 'Pterígio',
   'Capsulotomia YAG', 'Outro',
-]);
+])));
 const savingAttendanceId = ref(0);
 const indicationPickerId = ref(0); // consulta com o seletor de procedimento aberto
 

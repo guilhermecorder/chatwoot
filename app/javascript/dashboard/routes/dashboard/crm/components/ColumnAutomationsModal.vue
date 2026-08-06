@@ -4,7 +4,7 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
-import { UNITS_LIST } from 'dashboard/helper/cevicoAgenda';
+import { resolveUnits } from 'dashboard/helper/cevicoAgenda';
 import {
   inboxGradientFor,
   inboxSolidFor,
@@ -25,6 +25,9 @@ const { t } = useI18n();
 
 const isSaving     = ref(false);
 const n8nWorkflows = useMapGetter('crm/getN8nWorkflows');
+const crmSettings = useMapGetter('crm/getSettings');
+// unidades da conta (Personalização) > segmento
+const unitsList = computed(() => resolveUnits(crmSettings.value));
 
 // formulários ativos para a ação "Enviar formulário"
 const availableForms = ref([]);
@@ -718,7 +721,7 @@ const save = async () => {
                 class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
               >
                 <option value="">Deixar sem unidade</option>
-                <option v-for="u in UNITS_LIST" :key="u.key" :value="u.key">{{ u.nome }}</option>
+                <option v-for="u in unitsList" :key="u.key" :value="u.key">{{ u.nome }}</option>
               </select>
             </div>
           </template>

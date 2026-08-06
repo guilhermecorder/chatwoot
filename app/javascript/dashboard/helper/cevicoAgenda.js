@@ -51,6 +51,38 @@ export const DEFAULT_WINDOWS = Array.isArray(SEGMENTO.janelas_padrao)
     }))
   : FALLBACK_WINDOWS;
 
+// ── Personalização por conta (Configurações → Personalização) ──
+// resolução: conta (settings.segment) > segmento (window.SEGMENTO) >
+// preset clínica. Sem nada salvo, comportamento idêntico ao de sempre.
+export const resolveDoctors = settings => {
+  const saved = settings?.segment?.professionals;
+  return Array.isArray(saved) && saved.some(p => p.nome)
+    ? saved
+        .filter(p => p.nome)
+        .map(p => ({ name: p.nome, short: p.apelido || p.nome, color: p.cor || '#64748B' }))
+    : DOCTORS;
+};
+
+export const resolveUnits = settings => {
+  const saved = settings?.segment?.units;
+  return Array.isArray(saved) && saved.some(u => u.key) ? saved.filter(u => u.key) : UNITS_LIST;
+};
+
+export const resolveUnitLabels = settings =>
+  Object.fromEntries(resolveUnits(settings).map(u => [u.key, u.nome || u.key]));
+
+// listas editáveis (problemas, procedimentos) — conta > segmento > fallback
+export const resolveSegmentList = (settings, key, fallback) => {
+  const saved = settings?.segment?.[key];
+  return Array.isArray(saved) && saved.length ? saved : fallback;
+};
+
+// metas ({vendas_mes: 100}) — conta > segmento > fallback
+export const resolveGoal = (settings, key, fallback) => {
+  const v = Number(settings?.segment?.metas?.[key]);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+};
+
 // médicos com a agenda FECHADA (item 76) — as janelas deles somem em
 // TODO consumidor (agenda, ocupação, saúde do Meu Painel)
 export const resolveClosedDoctors = settings =>

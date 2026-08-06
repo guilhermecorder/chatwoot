@@ -16,8 +16,8 @@ import ConversationChatModal from 'dashboard/routes/dashboard/crm/components/Con
 import CrmAPI from 'dashboard/api/crm';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import {
-  DOCTORS, resolveWindows, resolveBlocked, resolveBlockedDays,
-  resolveSurgeryWindows, blockKey, scanAgenda,
+  resolveDoctors, resolveGoal, resolveWindows, resolveBlocked,
+  resolveBlockedDays, resolveSurgeryWindows, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
 import { termo, termoCap, frase, meta as metaSegmento, painelQuem, nomeSistemaHero, isClinica } from 'dashboard/helper/segmento';
 
@@ -27,6 +27,8 @@ const { accountId } = useAccount();
 const currentUser = useMapGetter('getCurrentUser');
 const allTasks = useMapGetter('tasks/getTasks');
 const crmSettings = useMapGetter('crm/getSettings');
+// profissionais da conta (Personalização) > segmento > preset clínica
+const DOCTORS = computed(() => resolveDoctors(crmSettings.value));
 const teamAgents = useMapGetter('agents/getAgents');
 const { isAdmin } = useAdmin();
 
@@ -668,8 +670,10 @@ const surgUsageLast7 = computed(() => {
 // da sala configuradas (as barras mostram "—" até configurar)
 const showSurgeryHealth = computed(() => true);
 
-// 🎯 META DO MÊS (do segmento; clínica = 100 cirurgias) — barra de progresso
-const SURGERY_GOAL = metaSegmento('vendas_mes', 100);
+// 🎯 META DO MÊS (conta > segmento; clínica = 100 cirurgias) — barra
+const SURGERY_GOAL = computed(() =>
+  resolveGoal(crmSettings.value, 'vendas_mes', metaSegmento('vendas_mes', 100))
+);
 const surgeriesDoneMonth = computed(() => {
   const now = new Date();
   return surgeryTasks.value.filter(t => {
@@ -679,7 +683,7 @@ const surgeriesDoneMonth = computed(() => {
   }).length;
 });
 const goalPct = computed(() =>
-  Math.min(Math.round((surgeriesDoneMonth.value / SURGERY_GOAL) * 100), 100)
+  Math.min(Math.round((surgeriesDoneMonth.value / SURGERY_GOAL.value) * 100), 100)
 );
 const nextSurgery = computed(() =>
   surgeryTasks.value
@@ -723,8 +727,8 @@ const booking30Verdict = computed(() => {
 
 const slotLabel = f =>
   `${f.day.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} ${f.slot}`;
-const slotDoctorShort = f => DOCTORS.find(d => d.name === f.win.doctor)?.short || '';
-const slotColor = f => DOCTORS.find(d => d.name === f.win.doctor)?.color || '#64748B';
+const slotDoctorShort = f => DOCTORS.value.find(d => d.name === f.win.doctor)?.short || '';
+const slotColor = f => DOCTORS.value.find(d => d.name === f.win.doctor)?.color || '#64748B';
 
 const nextAppointment = computed(() => (data.value?.next_appointments || [])[0] || null);
 const apptTime = iso =>
@@ -1612,7 +1616,7 @@ onUnmounted(() => {
               <!-- 🎯 META: 100 cirurgias -->
               <div>
                 <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-n-slate-11">🎯 Meta do mês <span class="text-n-slate-9">({{ SURGERY_GOAL }} cirurgias)</span></span>
+                  <span class="text-n-slate-11">🎯 Meta do mês <span class="text-n-slate-9">({{ SURGERY_GOAL }} {{ termo('vendas') }})</span></span>
                   <span class="font-bold text-base text-n-slate-12">{{ surgeriesDoneMonth }} de {{ SURGERY_GOAL }}</span>
                 </div>
                 <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
