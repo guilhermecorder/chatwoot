@@ -285,8 +285,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     surgery_scope = cirurgias.where(due_at: since..until_at)
     if params[:doctor].present?
       # tolerante a grafia ("Roberta Negri" e "Dra. Roberta Negri" são a mesma)
-      scope = Crm::DoctorNames.filter(scope, params[:doctor])
-      surgery_scope = Crm::DoctorNames.filter(surgery_scope, params[:doctor])
+      scope = Crm::DoctorNames.filter(scope, params[:doctor], account: Current.account)
+      surgery_scope = Crm::DoctorNames.filter(surgery_scope, params[:doctor], account: Current.account)
     end
     compareceu = scope.where(attendance: 'attended').count
     faltou = scope.where(attendance: 'missed').count

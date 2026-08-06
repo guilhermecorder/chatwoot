@@ -417,7 +417,7 @@ class CrmAutomationFireJob < ApplicationJob
                end
       agenda_url = "/app/accounts/#{account.id}/agenda?date=#{local_time.strftime('%Y-%m-%d')}"
       note = "📅 #{titulo}: #{name} — #{when_str}" \
-             "#{unit ? " (#{Segmento.unit_label(unit)})" : ''}. " \
+             "#{unit ? " (#{Crm::SegmentoConta.unit_label(account, unit)})" : ''}. " \
              "Registrada na Agenda. [📆 Ver na agenda](#{agenda_url})"
     else
       # sem dia/hora confirmados → tarefa de revisão para a equipe

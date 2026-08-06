@@ -17,8 +17,9 @@ module Crm::AgendaSlots
     Segmento.janelas_padrao
   end
 
-  def unit_labels
-    Segmento.unit_labels
+  # nomes das unidades: conta (Personalização) > segmento
+  def unit_labels(account = nil)
+    Crm::SegmentoConta.unit_labels(account)
   end
 
   def windows(account)
@@ -76,7 +77,7 @@ module Crm::AgendaSlots
     return 'NENHUM horário livre nos próximos dias — diga que vai verificar com a equipe.' if grouped.empty?
 
     grouped.map do |(date, unit, doctor), list|
-      "#{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{unit_labels[unit] || unit} · #{doctor}: " +
+      "#{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{unit_labels(account)[unit] || unit} · #{doctor}: " +
         list.map { |s| s[:time] }.join(', ')
     end.join("\n")
   end
