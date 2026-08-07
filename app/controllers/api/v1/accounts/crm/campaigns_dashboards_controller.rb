@@ -3,6 +3,7 @@
 # agendadas / cirurgias via stage_logs) — no mesmo espírito do Dashboard CRM.
 class Api::V1::Accounts::Crm::CampaignsDashboardsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  include Crm::ResolvesPeriod
 
   before_action -> { require_capability(:campaigns) }
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
@@ -28,8 +29,13 @@ class Api::V1::Accounts::Crm::CampaignsDashboardsController < Api::V1::Accounts:
 
   private
 
-  # período no fuso da clínica (São Paulo), como os demais painéis
+  # régua padrão CEVICO (06/08) via concern; presets antigos (week / N dias)
+  # continuam valendo por compatibilidade
   def resolve_range
+    standard_period_range || legacy_range
+  end
+
+  def legacy_range
     now = TZ.now
     case params[:preset]
     when 'today'     then [now.beginning_of_day, now]

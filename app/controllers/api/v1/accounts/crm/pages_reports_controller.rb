@@ -6,9 +6,11 @@
 # aqui a pergunta é "qual PÁGINA e qual ORIGEM trazem paciente de verdade".
 class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  include Crm::ResolvesPeriod
   before_action -> { require_capability(:pages) }
 
-  # GET /api/v1/accounts/:id/crm/pages_report?since=YYYY-MM-DD&until=YYYY-MM-DD
+  # GET /api/v1/accounts/:id/crm/pages_report?preset=month (régua padrão)
+  # ou ?since=YYYY-MM-DD&until=YYYY-MM-DD (legado)
   def show
     render json: {
       since: since_date,
@@ -21,20 +23,33 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
 
   private
 
+  # régua padrão CEVICO (06/08) via concern; since/until soltos = legado
+  def standard_range
+    @standard_range ||= standard_period_range
+  end
+
   def since_date
-    @since_date ||= begin
-      Date.parse(params[:since])
-    rescue StandardError
-      30.days.ago.to_date
-    end
+    @since_date ||= if standard_range
+                      standard_range.first.to_date
+                    else
+                      begin
+                        Date.parse(params[:since])
+                      rescue StandardError
+                        30.days.ago.to_date
+                      end
+                    end
   end
 
   def until_date
-    @until_date ||= begin
-      Date.parse(params[:until])
-    rescue StandardError
-      Date.current
-    end
+    @until_date ||= if standard_range
+                      standard_range.last.to_date
+                    else
+                      begin
+                        Date.parse(params[:until])
+                      rescue StandardError
+                        Date.current
+                      end
+                    end
   end
 
   # ── tráfego agregado (visitas/cliques por página × origem × campanha) ──

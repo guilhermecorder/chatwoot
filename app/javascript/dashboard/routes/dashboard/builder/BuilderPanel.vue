@@ -6,71 +6,31 @@
 // O layout fica salvo por pessoa (neste navegador).
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useMapGetter } from 'dashboard/composables/store';
+import { useStore, useMapGetter } from 'dashboard/composables/store';
+import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useAlert } from 'dashboard/composables';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import CrmAPI from 'dashboard/api/crm';
+// catálogo ÚNICO (06/08): widgets, paletas e tamanhos agora moram no helper
+// compartilhado — o Meu Painel usa as MESMAS definições para exibir os
+// painéis da conta salvos aqui
+import {
+  CATALOG,
+  CATALOG_SECTIONS,
+  PALETTES,
+  SIZE_CLASS,
+  paletteByKey,
+  catalogMetaOf,
+} from 'dashboard/helper/cevicoBuilderCatalog';
 
+const store = useStore();
 const currentUser = useMapGetter('getCurrentUser');
+const crmSettings = useMapGetter('crm/getSettings');
+const teamAgents = useMapGetter('agents/getAgents');
+const { isAdmin } = useAdmin();
 const route = useRoute();
 const router = useRouter();
 
-// ── catálogo COMPLETO (pedido 19/07): TODOS os indicadores que o sistema
-// já calcula + os blocos vivos + atalhos para TODOS os dashboards criados,
-// organizados em seções para montar o painel do seu jeito ──
-const CATALOG = [
-  // Indicadores de agora (independem do período)
-  { section: 'Indicadores — agora', key: 'open_conversations', label: 'Conversas abertas', icon: 'i-lucide-message-circle', kind: 'kpi' },
-  { section: 'Indicadores — agora', key: 'unanswered', label: 'Aguardando resposta', icon: 'i-lucide-clock-alert', kind: 'kpi' },
-  { section: 'Indicadores — agora', key: 'appointments_today', label: 'Consultas hoje', icon: 'i-lucide-calendar-check', kind: 'kpi' },
-  { section: 'Indicadores — agora', key: 'new_contacts_30d', label: 'Novos leads (30 dias)', icon: 'i-lucide-user-plus', kind: 'kpi' },
-  { section: 'Indicadores — agora', key: 'appointments_30d', label: 'Agendamentos (30 dias)', icon: 'i-lucide-calendar-plus', kind: 'kpi' },
-  // Indicadores do dia (processo inteiro — mesmos números do Meu Painel)
-  { section: 'Indicadores — hoje', key: 'new_leads', label: 'Novos leads (hoje)', icon: 'i-lucide-user-round-plus', kind: 'kpi' },
-  { section: 'Indicadores — hoje', key: 'appointments_created', label: 'Consultas agendadas (hoje)', icon: 'i-lucide-calendar-plus-2', kind: 'kpi' },
-  { section: 'Indicadores — hoje', key: 'appointments_booked', label: 'Marcadas na Agenda (hoje)', icon: 'i-lucide-notebook-pen', kind: 'kpi' },
-  { section: 'Indicadores — hoje', key: 'appointments_same_day', label: 'Chegou e agendou no dia', icon: 'i-lucide-zap', kind: 'kpi' },
-  { section: 'Indicadores — hoje', key: 'booking_conversion', label: 'Taxa de agendamento', icon: 'i-lucide-percent', kind: 'kpi', pct: true },
-  { section: 'Indicadores — hoje', key: 'show_rate', label: 'Comparecimento', icon: 'i-lucide-door-open', kind: 'kpi', pct: true },
-  { section: 'Indicadores — hoje', key: 'surgery_indications', label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', kind: 'kpi' },
-  { section: 'Indicadores — hoje', key: 'surgeries_booked', label: 'Cirurgias agendadas', icon: 'i-lucide-calendar-heart', kind: 'kpi' },
-  { section: 'Indicadores — hoje', key: 'closing_rate', label: 'Fechamento pós-indicação', icon: 'i-lucide-handshake', kind: 'kpi', pct: true },
-  { section: 'Indicadores — hoje', key: 'surgeries_done', label: 'Cirurgias realizadas', icon: 'i-lucide-heart-pulse', kind: 'kpi' },
-  { section: 'Indicadores — hoje', key: 'nps_satisfaction', label: 'NPS — satisfação', icon: 'i-lucide-star', kind: 'kpi', pct: true },
-  // Blocos vivos
-  { section: 'Blocos vivos', key: 'goals', label: 'Metas do mês', icon: 'i-lucide-target', kind: 'goals' },
-  { section: 'Blocos vivos', key: 'radar', label: 'Radar de Oportunidades', icon: 'i-lucide-radar', kind: 'radar' },
-  { section: 'Blocos vivos', key: 'tasks', label: 'Tarefas esperando você', icon: 'i-lucide-list-checks', kind: 'tasks' },
-  { section: 'Blocos vivos', key: 'next_appointments', label: 'Próximas consultas', icon: 'i-lucide-calendar-range', kind: 'appointments' },
-  { section: 'Blocos vivos', key: 'response_goal', label: 'Minha meta de tempo', icon: 'i-lucide-timer', kind: 'response' },
-  // Dashboards criados (atalhos vivos — clique e abra)
-  { section: 'Dashboards', key: 'dash_crm', label: 'Dashboard CRM', icon: 'i-lucide-layout-dashboard', kind: 'dash', to: 'reports/crm_dashboard' },
-  { section: 'Dashboards', key: 'dash_campanhas', label: 'Painel de Campanhas', icon: 'i-lucide-megaphone', kind: 'dash', to: 'crm/campaigns?tab=panel' },
-  { section: 'Dashboards', key: 'dash_funil', label: 'Funil de Tráfego', icon: 'i-lucide-filter', kind: 'dash', to: 'reports/traffic_funnel' },
-  { section: 'Dashboards', key: 'dash_medicos', label: 'Dashboard dos Médicos', icon: 'i-lucide-stethoscope', kind: 'dash', to: 'reports/doctors' },
-  { section: 'Dashboards', key: 'dash_agentes', label: 'Dashboard dos Agentes', icon: 'i-lucide-users', kind: 'dash', to: 'reports/agents_dashboard' },
-  { section: 'Dashboards', key: 'dash_agenda', label: 'Dashboard da Agenda', icon: 'i-lucide-calendar-days', kind: 'dash', to: 'reports/agenda_dashboard' },
-  { section: 'Dashboards', key: 'dash_google', label: 'Google (Ads + GA4)', icon: 'i-lucide-trending-up', kind: 'dash', to: 'reports/google_dashboard' },
-  { section: 'Dashboards', key: 'dash_ads', label: 'Anúncios (Meta)', icon: 'i-lucide-badge-dollar-sign', kind: 'dash', to: 'reports/ads' },
-  { section: 'Dashboards', key: 'dash_whatsapp', label: 'Saúde do WhatsApp', icon: 'i-lucide-message-square-heart', kind: 'dash', to: 'reports/whatsapp_health' },
-  { section: 'Dashboards', key: 'dash_financeiro', label: 'Gestão Financeira', icon: 'i-lucide-wallet', kind: 'dash', to: 'finance' },
-  { section: 'Dashboards', key: 'dash_metas', label: 'Painel de Metas', icon: 'i-lucide-goal', kind: 'dash', to: 'goals' },
-  { section: 'Dashboards', key: 'dash_estrategia', label: 'Painel Estratégico', icon: 'i-lucide-compass', kind: 'dash', to: 'strategy' },
-  { section: 'Dashboards', key: 'dash_ia', label: 'Painel dos agentes de IA', icon: 'i-lucide-activity', kind: 'dash', to: 'cevico-automations?tab=painel_ia' },
-];
-const CATALOG_SECTIONS = [...new Set(CATALOG.map(c => c.section))];
-
-// ── paletas de cor (o mesmo indicador, o clima que a pessoa quiser) ──
-const PALETTES = [
-  { key: 'cevico', label: 'CEVICO', grads: ['linear-gradient(135deg, #0F5FA6, #7C3AED)', 'linear-gradient(135deg, #B8860B, #D4A017)', 'linear-gradient(135deg, #047857, #34D399)', 'linear-gradient(135deg, #0284C7, #38BDF8)'] },
-  { key: 'dourado', label: 'Dourado', grads: ['linear-gradient(135deg, #92600A, #D4AF37)', 'linear-gradient(135deg, #B8860B, #F1C40F)', 'linear-gradient(135deg, #7C5E10, #D4A017)', 'linear-gradient(135deg, #A16207, #FACC15)'] },
-  { key: 'oceano', label: 'Oceano', grads: ['linear-gradient(135deg, #075985, #38BDF8)', 'linear-gradient(135deg, #0E7490, #67E8F9)', 'linear-gradient(135deg, #1D4ED8, #93C5FD)', 'linear-gradient(135deg, #0F766E, #5EEAD4)'] },
-  { key: 'verde', label: 'Verde vivo', grads: ['linear-gradient(135deg, #047857, #4ADE80)', 'linear-gradient(135deg, #15803D, #86EFAC)', 'linear-gradient(135deg, #0F766E, #2DD4BF)', 'linear-gradient(135deg, #3F6212, #A3E635)'] },
-  { key: 'rosa', label: 'Flor del Mar', grads: ['linear-gradient(135deg, #9D174D, #F472B6)', 'linear-gradient(135deg, #BE123C, #FDA4AF)', 'linear-gradient(135deg, #7C3AED, #C4B5FD)', 'linear-gradient(135deg, #C2410C, #FDBA74)'] },
-];
-
-// tamanhos na grade de 12 colunas (P/M/G) — o "espaço pré-configurado"
-// (classes por extenso: o Tailwind só gera o que enxerga literalmente)
-const SIZE_CLASS = { sm: 'sm:col-span-3', md: 'sm:col-span-6', lg: 'sm:col-span-12' };
 const nextSize = s => (s === 'sm' ? 'md' : s === 'md' ? 'lg' : 'sm');
 
 // ── layout salvo por pessoa ──
@@ -105,9 +65,9 @@ const saveLayout = () => {
   localStorage.setItem(storageKey.value, JSON.stringify({ palette: paletteKey.value, widgets: widgets.value }));
 };
 
-const palette = computed(() => PALETTES.find(p => p.key === paletteKey.value) || PALETTES[0]);
+const palette = computed(() => paletteByKey(paletteKey.value));
 const gradFor = idx => palette.value.grads[idx % palette.value.grads.length];
-const metaOf = key => CATALOG.find(c => c.key === key) || {};
+const metaOf = catalogMetaOf;
 const availableToAdd = computed(() => CATALOG.filter(c => !widgets.value.some(w => w.key === c.key)));
 const availableBySection = computed(() =>
   CATALOG_SECTIONS.map(section => ({
@@ -158,6 +118,141 @@ const applyPreset = preset => {
 const removePreset = preset => {
   presets.value = presets.value.filter(p => p.name !== preset.name);
   persistPresets();
+};
+
+// ── PAINÉIS DA CONTA (06/08): o admin salva o painel montado para a conta
+// inteira — vira pílula no Meu Painel de todo mundo; dá para eleger o
+// principal (★) e travar cada atendente num painel (👥) ──
+const accountPanels = computed(() => crmSettings.value?.custom_panels || []);
+const mainPanelKey = computed(() => crmSettings.value?.main_panel || '');
+const accountPanelName = ref('');
+const isSavingAccountPanel = ref(false);
+
+// id legível: nome slugificado + 4 caracteres aleatórios (fica estável
+// quando o painel é substituído pelo mesmo nome)
+const slugify = name =>
+  name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // tira acentos (Condução → conducao)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+const saveAccountPanel = async () => {
+  const name = accountPanelName.value.trim();
+  if (!name || !widgets.value.length || isSavingAccountPanel.value) return;
+  const existing = accountPanels.value.find(p => p.name === name);
+  if (!existing && accountPanels.value.length >= 24) {
+    useAlert('Limite de 24 painéis da conta — exclua algum antes.');
+    return;
+  }
+  isSavingAccountPanel.value = true;
+  try {
+    // mesmo nome = substitui mantendo o id (as atribuições continuam valendo)
+    const id = existing
+      ? existing.id
+      : `${slugify(name) || 'painel'}-${Math.random().toString(36).slice(2, 6)}`;
+    const panel = {
+      id,
+      name,
+      palette: paletteKey.value,
+      widgets: widgets.value.map(w => ({ ...w })),
+    };
+    const list = existing
+      ? accountPanels.value.map(p => (p.id === existing.id ? panel : p))
+      : [...accountPanels.value, panel];
+    await CrmAPI.updateCustomPanels(list);
+    await store.dispatch('crm/fetchSettings');
+    accountPanelName.value = '';
+    useAlert('Painel salvo — já aparece no Meu Painel.');
+  } catch {
+    useAlert('Não deu para salvar o painel da conta. Tente de novo.');
+  } finally {
+    isSavingAccountPanel.value = false;
+  }
+};
+
+// clicar no nome = aplicar no construtor local (widgets + paleta)
+const applyAccountPanel = panel => {
+  widgets.value = (panel.widgets || [])
+    .filter(w => CATALOG.some(c => c.key === w.key))
+    .map(w => ({ ...w }));
+  paletteKey.value = PALETTES.some(p => p.key === panel.palette) ? panel.palette : 'cevico';
+  saveLayout();
+};
+
+const isMainPanel = panel => mainPanelKey.value === `custom:${panel.id}`;
+const isTogglingMain = ref(false);
+const toggleMainPanel = async panel => {
+  if (isTogglingMain.value) return;
+  isTogglingMain.value = true;
+  try {
+    // ★ no principal atual = volta o Meu Painel ao padrão de fábrica
+    const makingMain = !isMainPanel(panel);
+    await CrmAPI.updateMainPanel(makingMain ? `custom:${panel.id}` : '');
+    await store.dispatch('crm/fetchSettings');
+    useAlert(
+      makingMain
+        ? '★ Painel definido como principal da conta.'
+        : 'O Meu Painel voltou ao padrão de fábrica.'
+    );
+  } catch {
+    useAlert('Não deu para mudar o painel principal. Tente de novo.');
+  } finally {
+    isTogglingMain.value = false;
+  }
+};
+
+const removeAccountPanel = async panel => {
+  if (isSavingAccountPanel.value) return;
+  isSavingAccountPanel.value = true;
+  try {
+    await CrmAPI.updateCustomPanels(accountPanels.value.filter(p => p.id !== panel.id));
+    // se era o principal, o Meu Painel volta ao padrão de fábrica
+    if (isMainPanel(panel)) await CrmAPI.updateMainPanel('');
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Painel da conta excluído.');
+  } catch {
+    useAlert('Não deu para excluir o painel. Tente de novo.');
+  } finally {
+    isSavingAccountPanel.value = false;
+  }
+};
+
+// ── Atribuir ao time (mesmo modal do Meu Painel): mapa completo
+// { user_id: chave } — painéis fixos ou 'custom:<id>' ──
+const FIXED_PANELS = [
+  { key: 'agendamento', label: 'Agendamento' },
+  { key: 'conducao', label: 'Condução' },
+  { key: 'cirurgia', label: 'Cirurgias' },
+  { key: 'medico', label: 'Médicos' },
+  { key: 'gestor', label: 'Gestor' },
+];
+const showAssignModal = ref(false);
+const assignDraft = ref({});
+const isSavingAssign = ref(false);
+const openAssignModal = () => {
+  assignDraft.value = { ...(crmSettings.value?.panel_assignments || {}) };
+  if (!teamAgents.value.length) store.dispatch('agents/get');
+  showAssignModal.value = true;
+};
+const saveAssignments = async () => {
+  if (isSavingAssign.value) return;
+  isSavingAssign.value = true;
+  try {
+    // só fica no mapa quem tem painel travado ('' = livre, sai do mapa)
+    const clean = Object.fromEntries(
+      Object.entries(assignDraft.value).filter(([, v]) => v)
+    );
+    await CrmAPI.updatePanelAssignments(clean);
+    await store.dispatch('crm/fetchSettings');
+    showAssignModal.value = false;
+    useAlert('Atribuições salvas.');
+  } catch {
+    useAlert('Não deu para salvar as atribuições. Tente de novo.');
+  } finally {
+    isSavingAssign.value = false;
+  }
 };
 
 // atalho de dashboard: clique abre o ambiente (fora do modo edição)
@@ -248,6 +343,10 @@ const fmtDue = iso =>
 onMounted(() => {
   loadLayout();
   loadPresets();
+  // painéis da conta chegam nos settings do CRM — busca se ainda não vieram
+  if (crmSettings.value?.custom_panels === undefined) {
+    store.dispatch('crm/fetchSettings');
+  }
   load();
 });
 </script>
@@ -308,10 +407,80 @@ onMounted(() => {
         </div>
         <p v-if="!availableToAdd.length" class="text-xs text-n-slate-9">todos os elementos já estão no painel.</p>
 
-        <!-- predefinições: salvar o painel montado com nome e reaplicar -->
+        <!-- 🏢 painéis da CONTA: o admin salva o painel montado e ele vira
+        pílula no Meu Painel de todo mundo; ★ elege o principal, 👥 trava
+        cada atendente num painel, ✕ exclui -->
+        <div class="border-t border-n-weak mt-3 pt-3">
+          <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">
+            🏢 Painéis da conta
+          </p>
+          <p class="text-[11px] text-n-slate-10 mb-1.5">
+            Painéis da conta aparecem como pílulas no Meu Painel de todo mundo.
+            Atribuir um painel trava o atendente naquele painel.
+          </p>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <template v-if="isAdmin">
+              <input
+                v-model="accountPanelName"
+                type="text"
+                placeholder="nome do painel da conta (ex: Recepção)"
+                class="h-8 rounded-xl border border-n-weak bg-n-solid-1 px-2.5 text-xs text-n-slate-12"
+                style="width: 16rem; margin-bottom: 0"
+                @keyup.enter="saveAccountPanel"
+              />
+              <button
+                class="px-3 h-8 rounded-xl text-xs font-bold text-white disabled:opacity-50"
+                :style="{ background: palette.grads[0] }"
+                :disabled="!accountPanelName.trim() || !widgets.length || isSavingAccountPanel"
+                @click="saveAccountPanel"
+              >
+                {{ isSavingAccountPanel ? 'Salvando…' : 'Salvar painel da conta' }}
+              </button>
+            </template>
+            <span
+              v-for="p in accountPanels"
+              :key="p.id"
+              class="flex items-center gap-1 pl-2.5 pr-1 h-8 rounded-xl border border-n-weak text-xs text-n-slate-11 bg-n-solid-1"
+            >
+              <button class="font-semibold hover:text-n-slate-12" title="Aplicar este painel no construtor" @click="applyAccountPanel(p)">
+                {{ p.name }}
+              </button>
+              <template v-if="isAdmin">
+                <button
+                  class="w-5 h-5 rounded-md flex items-center justify-center text-sm leading-none"
+                  :class="isMainPanel(p) ? '' : 'text-n-slate-9 hover:text-n-slate-12'"
+                  :style="isMainPanel(p) ? { color: '#D4A017' } : {}"
+                  :title="isMainPanel(p) ? 'Painel principal da conta — clique para voltar ao padrão' : 'Definir como painel principal da conta'"
+                  @click="toggleMainPanel(p)"
+                >
+                  {{ isMainPanel(p) ? '★' : '☆' }}
+                </button>
+                <button
+                  class="w-5 h-5 rounded-md flex items-center justify-center text-n-slate-9 hover:text-n-slate-12"
+                  title="Atribuir ao time (trava o atendente neste painel)"
+                  @click="openAssignModal"
+                >
+                  <span class="i-lucide-users text-[11px]" />
+                </button>
+                <button
+                  class="w-5 h-5 rounded-md flex items-center justify-center text-n-slate-9 hover:text-red-500"
+                  title="Excluir painel da conta"
+                  @click="removeAccountPanel(p)"
+                >
+                  <span class="i-lucide-x text-[10px]" />
+                </button>
+              </template>
+            </span>
+            <span v-if="!accountPanels.length && !isAdmin" class="text-xs text-n-slate-9">
+              nenhum painel da conta ainda — o admin salva por aqui.
+            </span>
+          </div>
+        </div>
+
+        <!-- predefinições LOCAIS: salvar o painel montado com nome e reaplicar -->
         <div class="border-t border-n-weak mt-3 pt-3">
           <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5">
-            Predefinições — salve este painel e troque com um clique
+            Minhas predefinições (só neste navegador)
           </p>
           <div class="flex items-center gap-1.5 flex-wrap">
             <input
@@ -480,6 +649,54 @@ onMounted(() => {
       <p v-if="!widgets.length" class="text-center text-sm text-n-slate-9 py-16">
         painel vazio — clique em <b>🧲 Personalizar</b> e adicione seus elementos.
       </p>
+    </div>
+
+    <!-- Admin: atribuir painéis ao time (mesmo padrão do modal do Meu Painel) -->
+    <div
+      v-if="showAssignModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      @click.self="showAssignModal = false"
+    >
+      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden">
+        <div class="h-1.5 w-full flex-shrink-0" :style="{ background: palette.grads[0] }" />
+        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
+          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
+            <span class="i-lucide-users text-n-brand" />
+            Atribuir painéis ao time
+          </h2>
+          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showAssignModal = false" />
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-2">
+          <p class="text-xs text-n-slate-10 mb-2">
+            A pessoa abre o Meu Painel já no painel dela (e só vê esse).
+            "— livre —" = pode alternar entre todos.
+          </p>
+          <div v-for="agent in teamAgents" :key="agent.id" class="flex items-center gap-2">
+            <span class="text-sm text-n-slate-12 flex-1 truncate">{{ agent.name }}</span>
+            <select
+              v-model="assignDraft[String(agent.id)]"
+              class="h-8 text-xs border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12"
+            >
+              <option value="">— livre —</option>
+              <option v-for="p in FIXED_PANELS" :key="p.key" :value="p.key">{{ p.label }}</option>
+              <option v-for="p in accountPanels" :key="`custom:${p.id}`" :value="`custom:${p.id}`">{{ p.name }}</option>
+            </select>
+          </div>
+        </div>
+        <div class="px-5 py-4 border-t border-n-weak flex gap-2 flex-shrink-0">
+          <button
+            class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+            :style="{ background: palette.grads[0] }"
+            :disabled="isSavingAssign"
+            @click="saveAssignments"
+          >
+            {{ isSavingAssign ? 'Salvando…' : 'Salvar' }}
+          </button>
+          <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showAssignModal = false">
+            Cancelar
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

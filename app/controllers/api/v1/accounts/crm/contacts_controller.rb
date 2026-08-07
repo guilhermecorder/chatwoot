@@ -4,13 +4,24 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
 
   # scope=preview: os N cards mais recentes de CADA coluna (carga inicial
   #   instantânea — o board completa em background com a janela de trabalho).
-  # scope=days&days=N: leads com atividade nos últimos N dias (janela de
-  #   trabalho — leve para máquinas fracas; padrão do board).
+  # scope=period&date_from&date_to&date_mode: período por CALENDÁRIO no
+  #   servidor — contagem VERDADEIRA por coluna + entrega limitada por coluna
+  #   (o board pagina dentro de cada coluna com scope=stage_page).
+  #   date_mode=activity (padrão): leads com atividade no período.
+  #   date_mode=created: leads que CHEGARAM no período (data real do contato).
+  # scope=stage_page&stage_id&offset&limit: próxima página de UMA coluna,
+  #   mesmo período/ordenação do scope=period.
+  # scope=days&days=N: leads com atividade nos últimos N dias (legado).
   # scope=all: tudo desde o início (sob demanda: busca ou "Carregar todos").
   # scope=recent (legado): ativos nos últimos 30 dias.
   PREVIEW_PER_STAGE = 15
+  PERIOD_PER_STAGE = 50
+  BOARD_TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def index
+    return render_period if params[:scope] == 'period'
+    return render_stage_page if params[:scope] == 'stage_page'
+
     base = @pipeline.crm_contacts
     total = base.count
 
@@ -191,15 +202,113 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     @pipeline ||= Current.account.crm_pipelines.find(params[:pipeline_id])
   end
 
+  # ── Período por calendário (a régua Hoje/Ontem/7 dias/Mês/Ano/Personalizado) ──
+
+  def period_range
+    from = begin
+      BOARD_TZ.parse(params[:date_from].to_s)&.beginning_of_day
+    rescue ArgumentError
+      nil
+    end
+    to = begin
+      BOARD_TZ.parse(params[:date_to].to_s)&.end_of_day
+    rescue ArgumentError
+      nil
+    end
+    from ||= 30.days.ago
+    to ||= Time.current
+    to = from if to < from
+    [from, to]
+  end
+
+  def period_scope(base)
+    from, to = period_range
+    if params[:date_mode] == 'created'
+      # data REAL de chegada do lead (contacts.created_at — corrigida pela
+      # rake de importação para a data da primeira conversa)
+      base.joins(:contact).where(contacts: { created_at: from..to })
+    else
+      # atividade: mensagem, card criado ou card movido dentro do período
+      base.joins(:contact).where(
+        '(contacts.last_activity_at BETWEEN :from AND :to) ' \
+        'OR (crm_contacts.created_at BETWEEN :from AND :to) ' \
+        'OR (crm_contacts.stage_moved_at BETWEEN :from AND :to)',
+        from: from, to: to
+      )
+    end
+  end
+
+  def per_stage_limit
+    (params[:per_stage].presence || PERIOD_PER_STAGE).to_i.clamp(10, 200)
+  end
+
+  def render_period
+    base = @pipeline.crm_contacts
+    scoped = period_scope(base)
+    stage_counts = scoped.group(:stage_id).count
+    stage_values = scoped.group(:stage_id).sum(:value)
+
+    cards = base.where(id: ranked_ids(scoped, per_stage_limit))
+                .includes(:stage, :assignee, contact: { avatar_attachment: :blob }).to_a
+    preload_card_data(cards)
+
+    from, to = period_range
+    render json: {
+      payload: cards.map { |c| contact_json(c) },
+      meta: {
+        total: base.count,
+        matching: stage_counts.values.sum,
+        stage_counts: stage_counts,
+        stage_values: stage_values.transform_values(&:to_f),
+        shown: cards.size,
+        per_stage: per_stage_limit,
+        with_conversations: base.joins(contact: :conversations).distinct.count,
+        scope: 'period',
+        date_mode: params[:date_mode] == 'created' ? 'created' : 'activity',
+        date_from: from.to_date.iso8601,
+        date_to: to.to_date.iso8601
+      }
+    }
+  end
+
+  # Próxima página de UMA coluna — mesma ordenação do ranking do scope=period
+  # (última atividade DESC), então offset = quantos cards a coluna já tem.
+  def render_stage_page
+    stage = @pipeline.stages.find(params[:stage_id])
+    scoped = period_scope(@pipeline.crm_contacts).where(stage_id: stage.id)
+    limit = (params[:limit].presence || PERIOD_PER_STAGE).to_i.clamp(10, 200)
+    offset = params[:offset].to_i.clamp(0, 1_000_000)
+
+    cards = scoped.order(Arel.sql('contacts.last_activity_at DESC NULLS LAST, crm_contacts.id DESC'))
+                  .offset(offset).limit(limit)
+                  .includes(:stage, :assignee, contact: { avatar_attachment: :blob }).to_a
+    preload_card_data(cards)
+
+    render json: {
+      payload: cards.map { |c| contact_json(c) },
+      meta: {
+        scope: 'stage_page',
+        stage_id: stage.id,
+        offset: offset,
+        limit: limit,
+        stage_total: scoped.count
+      }
+    }
+  end
+
   # IDs dos N cards mais recentes (por última atividade do contato) de cada
   # coluna — window function, uma consulta só.
   def preview_ids(base)
+    ranked_ids(base, PREVIEW_PER_STAGE)
+  end
+
+  def ranked_ids(base, per_stage)
     ranked = base.joins(:contact).select(
       'crm_contacts.id AS cid, ' \
       'ROW_NUMBER() OVER (PARTITION BY crm_contacts.stage_id ' \
       'ORDER BY contacts.last_activity_at DESC NULLS LAST, crm_contacts.id DESC) AS rn'
     )
-    Crm::Contact.from(ranked, :ranked).where('ranked.rn <= ?', PREVIEW_PER_STAGE).pluck('ranked.cid')
+    Crm::Contact.from(ranked, :ranked).where('ranked.rn <= ?', per_stage).pluck('ranked.cid')
   end
 
   def crm_contact

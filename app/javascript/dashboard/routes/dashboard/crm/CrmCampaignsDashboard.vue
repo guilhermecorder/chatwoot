@@ -4,6 +4,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 
@@ -11,15 +12,8 @@ const isLoading = ref(true);
 const data = ref(null);
 const error = ref(null);
 
-const PERIOD_PRESETS = [
-  { key: 'today', label: 'Hoje' },
-  { key: 'yesterday', label: 'Ontem' },
-  { key: 'week', label: 'Essa semana' },
-  { key: '30', label: '30 dias' },
-  { key: '90', label: '90 dias' },
-  { key: '365', label: '1 ano' },
-];
-const selectedPeriodKey = ref('30');
+// régua de período PADRÃO CEVICO (06/08) — default 'month' (antes: 30 dias)
+const period = ref({ preset: 'month', from: '', to: '' });
 
 // custo por mensagem modelo (R$) — fica salvo no navegador
 const costPerMessage = ref(
@@ -30,10 +24,13 @@ const fetchData = async () => {
   isLoading.value = true;
   error.value = null;
   try {
-    const preset = selectedPeriodKey.value;
-    const params = { cost_per_message: costPerMessage.value || 0 };
-    if (['today', 'yesterday', 'week'].includes(preset)) params.preset = preset;
-    else params.period = preset;
+    const params = {
+      cost_per_message: costPerMessage.value || 0,
+      preset: period.value.preset,
+      ...(period.value.preset === 'custom'
+        ? { from: period.value.from, to: period.value.to }
+        : {}),
+    };
     const { data: payload } = await CrmAPI.getCampaignsDashboard(params);
     data.value = payload;
   } catch {
@@ -49,7 +46,7 @@ watch(costPerMessage, value => {
   clearTimeout(costTimer);
   costTimer = setTimeout(fetchData, 600);
 });
-watch(selectedPeriodKey, fetchData);
+watch(period, fetchData, { deep: true });
 onMounted(fetchData);
 
 const totals = computed(() => data.value?.totals || {});
@@ -76,18 +73,8 @@ const formatDate = iso =>
           Resultados das campanhas de mensagem modelo (WhatsApp)
         </p>
 
-        <div class="flex items-center gap-1 ml-auto flex-wrap">
-          <button
-            v-for="p in PERIOD_PRESETS"
-            :key="p.key"
-            class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
-            :class="selectedPeriodKey === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="selectedPeriodKey === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
-            @click="selectedPeriodKey = p.key"
-          >
-            {{ p.label }}
-          </button>
-        </div>
+        <!-- Régua de período padrão CEVICO -->
+        <PeriodRuler v-model="period" class="ml-auto" />
       </div>
 
       <!-- Custo por mensagem -->

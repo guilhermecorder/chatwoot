@@ -5,6 +5,7 @@
 # Fonte: crm_ai_usages (uma linha por chamada) + config em crm_settings.
 class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  include Crm::ResolvesPeriod
   before_action :require_administrator!
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
@@ -39,8 +40,8 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
   }.freeze
 
   def show # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-    from = period_start
-    usages = all_usages.where(created_at: from..)
+    from, to = period_range
+    usages = all_usages.where(created_at: from..to)
     # aliases distintos: 3 SUMs sem alias viram colunas homônimas "sum" e
     # o cast do pluck mistura os tipos (custo virava 0)
     by_agent = usages.group(:agent_key).pluck(:agent_key, Arel.sql('COUNT(*) AS calls'), Arel.sql('SUM(cost_usd) AS sum_cost'),
@@ -65,7 +66,7 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
     end
 
     render json: {
-      period: { preset: preset, from: from.iso8601 },
+      period: { preset: params[:preset].presence || 'last7', from: from.iso8601, to: to.iso8601 },
       totals: {
         calls: usages.count,
         cost_usd: usages.sum(:cost_usd).to_f.round(4),
@@ -86,15 +87,18 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
     Crm::AiUsage.where(account_id: Current.account.id)
   end
 
-  def preset
-    %w[today 7d 30d].include?(params[:preset]) ? params[:preset] : '7d'
+  # régua padrão CEVICO (06/08) via concern; presets antigos (7d/30d)
+  # continuam valendo por compatibilidade
+  def period_range
+    @period_range ||= standard_period_range || legacy_range
   end
 
-  def period_start
-    case preset
-    when 'today' then TZ.now.beginning_of_day
-    when '30d' then 30.days.ago
-    else 7.days.ago
+  def legacy_range
+    now = TZ.now
+    case params[:preset]
+    when 'today' then [now.beginning_of_day, now.end_of_day]
+    when '30d' then [30.days.ago, now]
+    else [7.days.ago, now] # '7d' (padrão)
     end
   end
 

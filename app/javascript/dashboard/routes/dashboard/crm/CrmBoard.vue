@@ -52,54 +52,100 @@ const newStageColor = ref('#6B7280');
 
 // Add contact modal
 // Carga em DUAS FASES: primeiro os 15 cards mais recentes de cada coluna
-// (abertura instantânea), depois a JANELA DE TRABALHO completa em background.
-// A base inteira (9k+ cards) só entra sob demanda (busca / botão "Tudo") —
-// carregar tudo sempre travava máquinas fracas (i3/celular).
-// padrão: ÚLTIMOS 7 DIAS — garantia de abertura leve no celular (pedido
-// 16/07). A troca de janela vale só para a sessão do navegador
-// (sessionStorage): fechar/abrir de novo volta pros 7 dias. Mês/ano/15/30d
-// e "Tudo" continuam; "Personalizado" abre o De/Até com a base completa.
-localStorage.removeItem('cevico_crm_window_days'); // chave antiga (persistia janela pesada)
-const savedWindow = sessionStorage.getItem('cevico_crm_window_days') || '7';
-const windowMode = ref(
-  ['7', '15', '30', 'week', 'month', 'year'].includes(String(savedWindow)) ? String(savedWindow) : '7'
-);
-const dayOfYear = () =>
-  Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1).getTime()) / 86400000);
-const windowDays = computed(() => {
-  if (windowMode.value === 'week') return new Date().getDay() + 1; // desde domingo
-  if (windowMode.value === 'month') return new Date().getDate();
-  if (windowMode.value === 'year') return dayOfYear();
-  return Number(windowMode.value);
-});
-const contactsScope = ref('days');
+// (abertura instantânea), depois o PERÍODO escolhido em background.
+// O período agora é 100% do SERVIDOR (scope=period): a régua de datas manda
+// a janela por calendário, o servidor devolve a CONTAGEM VERDADEIRA por
+// coluna e entrega até 50 cards por coluna — o resto entra por demanda com
+// "Carregar mais" dentro de cada coluna. Isso acabou com o "163 de 11024":
+// o filtro no navegador (data de criação) brigava com a janela do servidor
+// (atividade em dias corridos) e escondia a base.
+sessionStorage.removeItem('cevico_crm_window_days'); // chaves antigas
+localStorage.removeItem('cevico_crm_window_days');
+const contactsScope = ref('period');
 const isLoadingAll = ref(false);
 const isBackgroundLoading = ref(false);
 
-// payload de escopo atual (janela de N dias ou base completa)
-const scopePayload = () =>
-  contactsScope.value === 'days'
-    ? { scope: 'days', days: windowDays.value }
-    : { scope: contactsScope.value };
+// Modo do período: 'activity' = leads com ATIVIDADE no período (padrão —
+// é o que faz "Este ano" mostrar a base ativa toda); 'created' = leads que
+// CHEGARAM no período (data real do contato).
+const dateMode = ref(
+  ['activity', 'created'].includes(localStorage.getItem('cevico_crm_date_mode'))
+    ? localStorage.getItem('cevico_crm_date_mode')
+    : 'activity'
+);
+
+const localDateStr = d => {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+// De/Até (YYYY-MM-DD) de cada pílula da régua
+const presetRange = key => {
+  const now = new Date();
+  const today = localDateStr(now);
+  if (key === 'yesterday') {
+    const y = new Date(now);
+    y.setDate(y.getDate() - 1);
+    const d = localDateStr(y);
+    return { from: d, to: d };
+  }
+  if (key === 'last7') {
+    const s = new Date(now);
+    s.setDate(s.getDate() - 6);
+    return { from: localDateStr(s), to: today };
+  }
+  if (key === 'month') {
+    return { from: localDateStr(new Date(now.getFullYear(), now.getMonth(), 1)), to: today };
+  }
+  if (key === 'year') {
+    return { from: localDateStr(new Date(now.getFullYear(), 0, 1)), to: today };
+  }
+  return { from: today, to: today }; // today
+};
+
+// período em jogo agora (pílula ativa ou De/Até personalizado)
+const currentRange = () => {
+  if (activeDatePreset.value) return presetRange(activeDatePreset.value);
+  const from = filters.value.dateFrom;
+  const to = filters.value.dateTo || localDateStr(new Date());
+  return { from: from || '2000-01-01', to };
+};
+
+const periodPayload = () => {
+  if (contactsScope.value !== 'period') return { scope: contactsScope.value };
+  const { from, to } = currentRange();
+  return { scope: 'period', dateFrom: from, dateTo: to, dateMode: dateMode.value };
+};
+
+const fetchPeriod = async ({ silent = false } = {}) => {
+  if (!selectedPipelineId.value) return;
+  contactsScope.value = 'period';
+  isBackgroundLoading.value = silent;
+  try {
+    await store.dispatch('crm/fetchContacts', {
+      pipelineId: selectedPipelineId.value,
+      ...periodPayload(),
+      silent,
+    });
+  } finally {
+    isBackgroundLoading.value = false;
+  }
+};
 
 const loadBoard = async pipelineId => {
   await store.dispatch('crm/fetchContacts', { pipelineId, scope: 'preview' });
   isBackgroundLoading.value = true;
   store
-    .dispatch('crm/fetchContacts', { pipelineId, ...scopePayload(), silent: true })
+    .dispatch('crm/fetchContacts', { pipelineId, ...periodPayload(), silent: true })
     .catch(() => {})
     .finally(() => { isBackgroundLoading.value = false; });
 };
 
-const setWindowDays = async mode => {
-  windowMode.value = String(mode);
-  sessionStorage.setItem('cevico_crm_window_days', String(mode));
-  contactsScope.value = 'days';
-  if (!selectedPipelineId.value) return;
-  await store.dispatch('crm/fetchContacts', {
-    pipelineId: selectedPipelineId.value,
-    ...scopePayload(),
-  });
+const setDateMode = mode => {
+  if (dateMode.value === mode) return;
+  dateMode.value = mode;
+  localStorage.setItem('cevico_crm_date_mode', mode);
+  if (contactsScope.value === 'period') fetchPeriod();
 };
 const addContactStageId = ref(null);
 const contactSearchQuery = ref('');
@@ -298,16 +344,12 @@ const filteredContacts = computed(() => {
     if (filters.value.stageIds.length > 0 && !filters.value.stageIds.map(Number).includes(Number(c.stage_id))) {
       return false;
     }
-    // Created at — usa a data real do lead (contato), não a de importação
+    // Datas (régua e De/Até) agora filtram NO SERVIDOR (scope=period) —
+    // refiltrar aqui era o que escondia a base ("163 de 11024"): o servidor
+    // filtrava por atividade e o navegador refiltrava por data de criação.
+    // Created at (select legado do painel) segue como refinamento local.
     if (!searching && filters.value.createdAt && !matchesDatePreset(c.contact_created_at, filters.value.createdAt)) {
       return false;
-    }
-    // Período customizado De/Até (data real do lead)
-    if (!searching && (filters.value.dateFrom || filters.value.dateTo)) {
-      const d = c.contact_created_at ? new Date(c.contact_created_at) : null;
-      if (!d) return false;
-      if (filters.value.dateFrom && d < new Date(filters.value.dateFrom + 'T00:00:00')) return false;
-      if (filters.value.dateTo && d > new Date(filters.value.dateTo + 'T23:59:59')) return false;
     }
     // Last activity
     if (filters.value.lastActivity) {
@@ -401,24 +443,32 @@ const loadAllContacts = async () => {
 };
 
 const clearFilters = () => {
-  filters.value = { ...makeDefaultFilters(), createdAt: '' }; // limpar = ver tudo
-  activeDatePreset.value = '';
+  filters.value = { ...makeDefaultFilters(), createdAt: '' };
   panelDraft.value = null;
   showFilters.value = false;
+  // volta para o período padrão da régua
+  if (activeDatePreset.value !== DEFAULT_PERIOD) {
+    activeDatePreset.value = DEFAULT_PERIOD;
+    sessionStorage.setItem('cevico_crm_period', DEFAULT_PERIOD);
+  }
+  fetchPeriod();
 };
 
-// ── Presets de período (data real do lead) — pílulas douradas ─────────
-// Atalhos que preenchem o De/Até do filtro; clicar de novo desliga.
+// ── Régua de período PADRÃO (06/08): Hoje | Ontem | Últimos 7 dias |
+// Este mês | Este ano | Personalizado. Sempre há um período ativo (padrão:
+// Últimos 7 dias) e o filtro roda NO SERVIDOR (scope=period).
 const DATE_PRESETS = [
   { key: 'today', label: 'Hoje' },
   { key: 'yesterday', label: 'Ontem' },
-  { key: 'week', label: 'Essa semana' },
   { key: 'last7', label: 'Últimos 7 dias' },
   { key: 'month', label: 'Este mês' },
   { key: 'year', label: 'Este ano' },
-  { key: 'all', label: 'Desde o início' },
 ];
-const activeDatePreset = ref('');
+const DEFAULT_PERIOD = 'last7';
+const savedPeriod = sessionStorage.getItem('cevico_crm_period');
+const activeDatePreset = ref(
+  DATE_PRESETS.some(p => p.key === savedPeriod) ? savedPeriod : DEFAULT_PERIOD
+);
 const activeDatePresetLabel = computed(
   () => DATE_PRESETS.find(p => p.key === activeDatePreset.value)?.label ?? ''
 );
@@ -428,104 +478,53 @@ const customDateActive = computed(
   () => !activeDatePreset.value && Boolean(filters.value.dateFrom || filters.value.dateTo)
 );
 const onCustomDate = () => {
+  if (!filters.value.dateFrom && !filters.value.dateTo) return;
   activeDatePreset.value = '';
-  // datas antigas precisam da base toda carregada (a pílula alarga a janela)
-  if ((filters.value.dateFrom || filters.value.dateTo) && contactsScope.value !== 'all') loadAllContacts();
+  sessionStorage.setItem('cevico_crm_period', '');
+  fetchPeriod();
 };
 const clearCustomDate = () => {
   filters.value.dateFrom = '';
   filters.value.dateTo = '';
   showCustomDate.value = false;
+  if (!activeDatePreset.value) applyDatePreset(DEFAULT_PERIOD);
 };
-// o filtro de data (chegada do lead) está em jogo? — usado no empty state
+// o filtro de data está em jogo? — usado no empty state
 const dateFilterActive = computed(
   () => Boolean(activeDatePreset.value || filters.value.dateFrom || filters.value.dateTo)
 );
 
-const localDateStr = d => {
-  const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-
-// A pílula de período também ABRE A JANELA de carregamento que ela
-// precisa (controle ÚNICO — pedido 17/07: a barra "Janela:" com botões
-// duplicava as opções e confundia). Só ALARGA, nunca encolhe.
-const ensureWindowForPreset = key => {
-  if (contactsScope.value === 'all' || isLoadingAll.value) return;
-  if (key === 'all') {
-    loadAllContacts();
-    return;
-  }
-  const wanted = {
-    today: null, // 7 dias mínimos já cobrem
-    yesterday: ['7', 2],
-    week: ['week', new Date().getDay() + 1],
-    last7: ['7', 7],
-    month: ['month', new Date().getDate()],
-    year: ['year', dayOfYear()],
-  }[key];
-  if (!wanted) return;
-  const [mode, days] = wanted;
-  if (days > windowDays.value) setWindowDays(mode);
-};
-
 const applyDatePreset = key => {
-  if (activeDatePreset.value === key) {
-    activeDatePreset.value = '';
-    filters.value.dateFrom = '';
-    filters.value.dateTo = '';
-    return;
-  }
-  ensureWindowForPreset(key);
-  const now = new Date();
-  const today = localDateStr(now);
-  let from = today;
-  let to = today;
-  if (key === 'yesterday') {
-    const y = new Date(now);
-    y.setDate(y.getDate() - 1);
-    from = to = localDateStr(y);
-  } else if (key === 'week') {
-    const s = new Date(now);
-    s.setDate(s.getDate() - s.getDay()); // domingo
-    from = localDateStr(s);
-  } else if (key === 'last7') {
-    const s = new Date(now);
-    s.setDate(s.getDate() - 6);
-    from = localDateStr(s);
-  } else if (key === 'month') {
-    from = localDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
-  } else if (key === 'year') {
-    from = localDateStr(new Date(now.getFullYear(), 0, 1));
-  } else if (key === 'all') {
-    from = ''; // sem "De" = desde o primeiro lead da base
-  }
+  if (activeDatePreset.value === key) return; // sempre há um período ativo
   activeDatePreset.value = key;
-  filters.value.dateFrom = from;
-  filters.value.dateTo = to;
+  sessionStorage.setItem('cevico_crm_period', key);
+  filters.value.dateFrom = '';
+  filters.value.dateTo = '';
+  fetchPeriod();
 };
 
-// De/Até MANUAL (painel de Filtros) também garante a base necessária:
-// intervalo mais antigo que a janela atual → carrega a base completa
-// (os presets não passam por aqui — eles já ajustam a própria janela).
-watch(() => [filters.value.dateFrom, filters.value.dateTo], ([from]) => {
-  if (!from || activeDatePreset.value) return;
-  if (contactsScope.value === 'all' || isLoadingAll.value) return;
-  const days =
-    Math.ceil((Date.now() - new Date(`${from}T00:00:00`).getTime()) / 86400000) + 1;
-  if (days > windowDays.value) loadAllContacts();
+// De/Até digitado no PAINEL de filtros também vira período de servidor
+// (o onCustomDate cobre a janelinha da régua; o watch cobre o painel).
+watch(() => [filters.value.dateFrom, filters.value.dateTo], ([from, to]) => {
+  if (!from && !to) return;
+  if (activeDatePreset.value) return; // preset ativo manda na régua
+  fetchPeriod();
 });
 
 // Buscar precisa enxergar a base toda: se ela ainda não foi carregada,
 // dispara o carregamento completo na primeira busca (o loadAllContacts
-// já se protege contra chamadas duplicadas).
-watch(() => filters.value.search, term => {
+// já se protege contra chamadas duplicadas). Ao LIMPAR a busca, volta
+// para o período da régua.
+watch(() => filters.value.search, (term, oldTerm) => {
   if (
     term &&
     contactsMeta.value.scope !== 'all' &&
     contactsMeta.value.total > contactsMeta.value.shown
   ) {
     loadAllContacts();
+  }
+  if (!term && oldTerm && contactsScope.value === 'all') {
+    fetchPeriod({ silent: true });
   }
 });
 
@@ -573,6 +572,62 @@ const contactsByStage = computed(() => {
   }
   return map;
 });
+
+// ── Contagem VERDADEIRA por coluna + "Carregar mais" ─────────────────
+// No scope=period o servidor entrega até N cards por coluna, mas manda a
+// contagem (e o R$ somado) REAL de cada coluna no período. Quando um filtro
+// local (busca, responsável, etiqueta, caixa…) está em jogo, a contagem
+// verdadeira deixaria de bater com o que se vê — aí voltamos ao nº local.
+const clientRefineActive = computed(() =>
+  Boolean(
+    filters.value.search ||
+    filters.value.assigneeId !== '' ||
+    filters.value.labels.length > 0 ||
+    filters.value.inboxName ||
+    filters.value.createdAt ||
+    filters.value.lastActivity ||
+    filters.value.awaitingOnly
+  )
+);
+
+const stageTrueCount = stageId => {
+  if (contactsMeta.value.scope !== 'period' || clientRefineActive.value) return null;
+  const counts = contactsMeta.value.stage_counts || {};
+  return counts[stageId] ?? counts[String(stageId)] ?? 0;
+};
+
+const stageTrueValue = stageId => {
+  if (contactsMeta.value.scope !== 'period' || clientRefineActive.value) return null;
+  const values = contactsMeta.value.stage_values || {};
+  return values[stageId] ?? values[String(stageId)] ?? null;
+};
+
+// nº de leads do período (o "total verdadeiro" da régua)
+const periodMatching = computed(() =>
+  contactsMeta.value.scope === 'period' ? (contactsMeta.value.matching ?? 0) : null
+);
+
+const loadingMoreStages = ref({}); // { stageId: true } enquanto pagina
+const loadMoreStage = async stageId => {
+  if (contactsMeta.value.scope !== 'period') return;
+  if (loadingMoreStages.value[stageId]) return;
+  loadingMoreStages.value = { ...loadingMoreStages.value, [stageId]: true };
+  try {
+    const loaded = allContacts.value.filter(c => c.stage_id === stageId).length;
+    const { from, to } = currentRange();
+    await store.dispatch('crm/fetchMoreStage', {
+      pipelineId: selectedPipelineId.value,
+      stageId,
+      offset: loaded,
+      limit: 50,
+      dateFrom: from,
+      dateTo: to,
+      dateMode: dateMode.value,
+    });
+  } finally {
+    loadingMoreStages.value = { ...loadingMoreStages.value, [stageId]: false };
+  }
+};
 
 // ── Navegador de colunas no CELULAR (pedido 16/07) ────────────────────
 // No celular cada coluna ocupa ~86vw com snap; com 12 colunas o deslize
@@ -726,7 +781,7 @@ const onContactUpdated = () => {
 const onContactMerged = async () => {
   selectedContact.value = null;
   if (selectedPipelineId.value) {
-    await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, ...scopePayload() });
+    await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, ...periodPayload() });
   }
 };
 
@@ -739,7 +794,7 @@ const createPipeline = async () => {
     newPipelineName.value = '';
     showNewPipelineForm.value = false;
     selectedPipelineId.value = p.id;
-    await store.dispatch('crm/fetchContacts', { pipelineId: p.id, ...scopePayload() });
+    await store.dispatch('crm/fetchContacts', { pipelineId: p.id, ...periodPayload() });
     useAlert(t('CRM.SUCCESS.PIPELINE_CREATED'));
   } catch {
     useAlert(t('CRM.ERROR.GENERIC'));
@@ -773,7 +828,7 @@ const deletePipeline = async () => {
     const remaining = pipelines.value;
     selectedPipelineId.value = remaining.length ? remaining[0].id : null;
     if (selectedPipelineId.value) {
-      await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, ...scopePayload() });
+      await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, ...periodPayload() });
     }
     useAlert(t('CRM.SUCCESS.PIPELINE_DELETED'));
   } catch {
@@ -1034,19 +1089,21 @@ const createAndAddContact = async () => {
       </div>
     </div>
 
-    <!-- Janela de trabalho: agora é SÓ um aviso (os botões duplicavam as
-         pílulas de período — pedido 17/07). Quem manda na janela são as
-         pílulas da linha 2: cada uma alarga o carregamento que precisar. -->
+    <!-- Resumo do período: contagem VERDADEIRA vinda do servidor. As colunas
+         mostram o nº real de leads do período; os cards entram aos poucos
+         ("Carregar mais" em cada coluna) para o board ficar leve. -->
     <div
-      v-if="!isFocusMode && ['days', 'recent'].includes(contactsMeta.scope) && contactsMeta.total > contactsMeta.shown"
+      v-if="!isFocusMode && contactsMeta.scope === 'period' && periodMatching !== null"
       class="flex items-center gap-2 px-3 md:px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible"
     >
       <span class="i-lucide-zap text-n-gold flex-shrink-0" />
       <span class="whitespace-nowrap flex-shrink-0">
-        {{ windowMode === 'week' ? 'Leads ativos desta semana' : (windowMode === 'month' ? 'Leads ativos deste mês' : (windowMode === 'year' ? 'Leads ativos deste ano' : `Leads ativos dos últimos ${windowDays} dias`)) }}
-        ({{ contactsMeta.shown }} de {{ contactsMeta.total }})
+        <b>{{ periodMatching.toLocaleString('pt-BR') }}</b>
+        {{ contactsMeta.date_mode === 'created' ? 'leads que chegaram' : 'leads com atividade' }}
+        {{ activeDatePresetLabel ? `— ${activeDatePresetLabel.toLowerCase()}` : 'no período' }}
+        · funil todo: {{ (contactsMeta.total ?? 0).toLocaleString('pt-BR') }}
       </span>
-      <span class="hidden md:inline">— leve e rápido. A busca enxerga a base toda, e o período abaixo carrega mais quando precisa.</span>
+      <span class="hidden md:inline">— o número de cada coluna é o total real do período; os cards entram aos poucos para não pesar.</span>
       <span v-if="isLoadingAll || isBackgroundLoading" class="flex items-center gap-1 text-n-brand whitespace-nowrap flex-shrink-0">
         <span class="i-lucide-loader-circle animate-spin text-xs" />
         carregando…
@@ -1234,9 +1291,17 @@ const createAndAddContact = async () => {
           <option v-for="l in availableLabels" :key="l" :value="l">{{ l }}</option>
         </select>
 
-        <!-- Contador (fim da linha 1) -->
+        <!-- Contador (fim da linha 1): "no período" é a contagem VERDADEIRA
+             do servidor; com filtro local em jogo mostra também o refinado -->
         <span class="text-xs text-n-slate-9 whitespace-nowrap ml-auto hidden md:inline">
-          {{ $t('CRM.FILTER.SHOWING', { count: filteredCount, total: contactsMeta.total ?? totalContacts }) }}
+          <template v-if="periodMatching !== null">
+            <b>{{ periodMatching.toLocaleString('pt-BR') }}</b> no período
+            <template v-if="clientRefineActive"> · {{ filteredCount.toLocaleString('pt-BR') }} após filtros</template>
+            · {{ (contactsMeta.total ?? totalContacts).toLocaleString('pt-BR') }} no funil
+          </template>
+          <template v-else>
+            {{ $t('CRM.FILTER.SHOWING', { count: filteredCount, total: contactsMeta.total ?? totalContacts }) }}
+          </template>
           <template v-if="contactsMeta.with_conversations">
             · {{ $t('CRM.FILTER.WITH_CONVERSATION', { count: contactsMeta.with_conversations }) }}
           </template>
@@ -1277,12 +1342,12 @@ const createAndAddContact = async () => {
           </button>
         </div>
 
-        <!-- Período do lead (data de CHEGADA — azul/roxo) -->
+        <!-- Período (régua padrão — azul/roxo). O servidor filtra e conta. -->
         <div class="flex items-center h-[34px] bg-n-solid-2 rounded-xl px-0.5 gap-0.5 flex-nowrap md:flex-wrap border border-n-weak flex-shrink-0">
           <span
             class="i-lucide-calendar-clock text-sm ml-2 mr-0.5"
             style="color: #7C3AED"
-            title="Filtra pela data em que o lead CHEGOU"
+            :title="dateMode === 'created' ? 'Filtra pela data em que o lead CHEGOU' : 'Filtra pela ATIVIDADE do lead no período'"
           />
           <button
             v-for="p in DATE_PRESETS"
@@ -1290,7 +1355,9 @@ const createAndAddContact = async () => {
             class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
             :class="activeDatePreset === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
             :style="activeDatePreset === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
-            :title="`Só leads que CHEGARAM ${p.label.toLowerCase()} (clique de novo para limpar)`"
+            :title="dateMode === 'created'
+              ? `Leads que CHEGARAM ${p.label.toLowerCase()}`
+              : `Leads com ATIVIDADE ${p.label.toLowerCase()}`"
             @click="applyDatePreset(p.key)"
           >
             {{ p.label }}
@@ -1338,6 +1405,28 @@ const createAndAddContact = async () => {
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- Modo do período: ATIVOS (teve atividade) × NOVOS (chegou) -->
+        <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 flex-shrink-0">
+          <button
+            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+            :class="dateMode === 'activity' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="dateMode === 'activity' ? { background: 'linear-gradient(135deg, #059669, #10B981)' } : {}"
+            title="Leads que TIVERAM ATIVIDADE no período (mensagem, card criado ou movido)"
+            @click="setDateMode('activity')"
+          >
+            Ativos
+          </button>
+          <button
+            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+            :class="dateMode === 'created' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="dateMode === 'created' ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
+            title="Leads que CHEGARAM no período (data real do contato)"
+            @click="setDateMode('created')"
+          >
+            Novos
+          </button>
         </div>
 
         <!-- Tela cheia (item 82): o board toma a janela toda -->
@@ -1599,11 +1688,12 @@ const createAndAddContact = async () => {
         <span class="i-lucide-search-x text-4xl mb-3" v-else />
         <template v-if="dateFilterActive">
           <p class="text-sm font-medium text-n-slate-11">
-            Nenhum lead <b>chegou</b> {{ activeDatePresetLabel ? `em "${activeDatePresetLabel}"` : 'no período escolhido' }}.
+            Nenhum lead {{ dateMode === 'created' ? 'chegou' : 'teve atividade' }} {{ activeDatePresetLabel ? `em "${activeDatePresetLabel}"` : 'no período escolhido' }}.
           </p>
           <p class="text-xs mt-1 max-w-md">
-            Esse filtro olha a <b>data de chegada</b> do lead — os cards continuam
-            no funil, só estão escondidos pelo filtro.
+            {{ dateMode === 'created'
+              ? 'Esse filtro olha a data de CHEGADA do lead — os cards continuam no funil, só estão escondidos pelo período.'
+              : 'Esse filtro olha a ATIVIDADE do lead (mensagens e movimentações) — os cards continuam no funil, só estão escondidos pelo período.' }}
           </p>
         </template>
         <p v-else class="text-sm">{{ $t('CRM.FILTER.EMPTY') }}</p>
@@ -1630,6 +1720,9 @@ const createAndAddContact = async () => {
             :stage="stage"
             :pipeline-id="selectedPipelineId"
             :contacts="contactsByStage[stage.id] ?? []"
+            :total-count="stageTrueCount(stage.id)"
+            :total-value="stageTrueValue(stage.id)"
+            :loading-more="Boolean(loadingMoreStages[stage.id])"
             :edit-mode="isEditMode"
             :programming-mode="isProgrammingMode"
             :all-stages="selectedPipeline.stages"
@@ -1637,6 +1730,7 @@ const createAndAddContact = async () => {
             @stage-drop="onStageDrop"
             @add-contact="openAddContact"
             @open-chat="openChat"
+            @load-more="loadMoreStage(stage.id)"
           />
         </template>
 

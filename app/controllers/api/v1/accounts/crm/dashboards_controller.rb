@@ -1,5 +1,6 @@
 class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  include Crm::ResolvesPeriod
 
   before_action -> { require_capability(:reports) }
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
@@ -101,8 +102,14 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
 
   # período no fuso da clínica (São Paulo) — antes usava o fuso do servidor
   # (UTC): "hoje" começava às 21h da véspera e os números não batiam com o
-  # Meu Painel/Agenda (que já eram SP). Presets hoje/ontem/semana ou N dias.
+  # Meu Painel/Agenda (que já eram SP).
+  # Régua padrão CEVICO (06/08) via concern; presets antigos (week / N dias)
+  # continuam valendo por compatibilidade.
   def resolve_range
+    standard_period_range || legacy_range
+  end
+
+  def legacy_range
     now = TZ.now
     case params[:preset]
     when 'today'     then [now.beginning_of_day, now]

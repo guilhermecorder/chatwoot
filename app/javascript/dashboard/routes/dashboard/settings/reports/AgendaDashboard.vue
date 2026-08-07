@@ -2,10 +2,11 @@
 // Dashboard da AGENDA (análise do gestor): comparecimento, faltas,
 // cancelamentos, reagendamentos, conferência pendente, mix por modalidade,
 // médicos, unidades, dias da semana, cirurgias por clínica e ocupação.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import CrmAPI from 'dashboard/api/crm';
 import {
@@ -17,19 +18,17 @@ const store = useStore();
 const isLoading = ref(true);
 const data = ref(null);
 
-const PERIODS = [
-  { key: 'today', label: 'Hoje' },
-  { key: 'week', label: 'Essa semana' },
-  { key: 'month', label: 'Este mês' },
-  { key: 'last_month', label: 'Mês passado' },
-  { key: 'year', label: 'Este ano' },
-];
-const selectedPeriod = ref('month');
+// régua padrão CEVICO (06/08): Hoje | Ontem | 7 dias | Este mês | Este ano | Personalizado
+const period = ref({ preset: 'month', from: '', to: '' });
 
 const fetchData = async () => {
   isLoading.value = true;
   try {
-    const { data: payload } = await CrmAPI.getAgendaDashboard({ preset: selectedPeriod.value });
+    const p = period.value;
+    const { data: payload } = await CrmAPI.getAgendaDashboard({
+      preset: p.preset,
+      ...(p.preset === 'custom' ? { from: p.from, to: p.to } : {}),
+    });
     data.value = payload;
   } catch {
     data.value = data.value || {};
@@ -38,10 +37,7 @@ const fetchData = async () => {
   }
 };
 
-const setPeriod = key => {
-  selectedPeriod.value = key;
-  fetchData();
-};
+watch(period, fetchData, { deep: true });
 
 // ── Ocupação (mesma conta da Agenda/Meu Painel: janelas × blocos) ──
 const allTasks = useMapGetter('tasks/getTasks');
@@ -110,19 +106,8 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- Período -->
-      <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto mb-6">
-        <button
-          v-for="p in PERIODS"
-          :key="p.key"
-          class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-          :class="selectedPeriod === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="selectedPeriod === p.key ? { background: 'linear-gradient(135deg, #5B21B6, #7C3AED)' } : {}"
-          @click="setPeriod(p.key)"
-        >
-          {{ p.label }}
-        </button>
-      </div>
+      <!-- Período (régua padrão CEVICO) -->
+      <PeriodRuler v-model="period" class="mb-6" />
 
       <div v-if="isLoading || !data" class="flex justify-center py-16">
         <Spinner :size="32" class="text-n-brand" />

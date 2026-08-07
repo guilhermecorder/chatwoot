@@ -22,9 +22,14 @@ const props = defineProps({
   // preset de visualização: coluna fora do preset fica oculta
   // (v-show externo não funciona em componente multi-root)
   hidden:          { type: Boolean, default: false },
+  // contagem/soma VERDADEIRAS da coluna no período (servidor) — null quando
+  // um filtro local está em jogo (aí vale o nº de cards visíveis)
+  totalCount:      { type: Number, default: null },
+  totalValue:      { type: Number, default: null },
+  loadingMore:     { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat']);
+const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat', 'loadMore']);
 
 const store = useStore();
 const { t } = useI18n();
@@ -238,8 +243,23 @@ const localContacts = computed({
   set: (val) => emit('stageDrop', { stageId: props.stage.id, contacts: val }),
 });
 
-const totalValue = computed(() =>
+// soma local dos cards carregados; a prop totalValue (servidor) vence quando
+// existe — com paginação por coluna, a soma local seria só uma fatia
+const localValue = computed(() =>
   props.contacts.reduce((sum, c) => sum + (Number(c.value) || 0), 0)
+);
+const totalValue = computed(() =>
+  props.totalValue !== null ? props.totalValue : localValue.value
+);
+
+// contagem do cabeçalho: total REAL do período (servidor) quando disponível
+const headerCount = computed(() =>
+  props.totalCount !== null ? props.totalCount : props.contacts.length
+);
+
+// tem mais cards no servidor do que os carregados?
+const hasMoreCards = computed(() =>
+  props.totalCount !== null && props.totalCount > props.contacts.length
 );
 
 const confirmDelete = () => {
@@ -423,7 +443,7 @@ const delayLabel = (minutes) => {
                 ? 'text-yellow-600 bg-yellow-500/15'
                 : 'text-n-slate-10 bg-n-alpha-2'"
             >
-              {{ programmingMode ? automations.length : contacts.length }}
+              {{ programmingMode ? automations.length : headerCount.toLocaleString('pt-BR') }}
             </span>
           </div>
 
@@ -690,6 +710,21 @@ const delayLabel = (minutes) => {
           />
         </template>
       </draggable>
+
+      <!-- Paginação da coluna: a contagem do cabeçalho é a REAL do período;
+           os cards entram em lotes para o board não pesar -->
+      <button
+        v-if="hasMoreCards && !editMode"
+        class="w-full flex items-center justify-center gap-1.5 text-xs text-n-brand hover:text-n-brand/80 py-2 mt-1 rounded-lg border border-dashed border-n-brand/40 hover:bg-n-brand/5 transition-colors"
+        :disabled="loadingMore"
+        @click="emit('loadMore')"
+      >
+        <span v-if="loadingMore" class="i-lucide-loader-circle animate-spin text-sm" />
+        <span v-else class="i-lucide-chevrons-down text-sm" />
+        {{ loadingMore
+          ? 'Carregando…'
+          : `Carregar mais (${contacts.length.toLocaleString('pt-BR')} de ${totalCount.toLocaleString('pt-BR')})` }}
+      </button>
     </div>
 
     <!-- ── Footer ─────────────────────────────────────────────── -->

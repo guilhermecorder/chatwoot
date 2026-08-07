@@ -3,6 +3,7 @@
 # de linha, lançamentos (CRUD) e comparação de dois meses lado a lado.
 class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  include Crm::ResolvesPeriod
   before_action -> { require_capability(:finance) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
@@ -73,19 +74,17 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     }
   end
 
-  # presets iguais aos dos outros painéis + "personalizado" (from/to livres)
-  def resolve_period # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  # régua padrão CEVICO (06/08) via concern — este painel trabalha com
+  # DATAS (Date), então o range vira .to_date; presets antigos (week /
+  # last_month) continuam valendo por compatibilidade
+  def resolve_period
+    range = standard_period_range
+    return [range.first.to_date, range.last.to_date] if range
+
     today = TZ.now.to_date
     case params[:preset].presence
-    when 'today' then [today, today]
-    when 'yesterday' then [today - 1, today - 1]
     when 'week' then [today.beginning_of_week, today]
     when 'last_month' then [(today << 1).beginning_of_month, (today << 1).end_of_month]
-    when 'year' then [today.beginning_of_year, today]
-    when 'custom'
-      from = Date.parse(params[:from].to_s) rescue nil # rubocop:disable Style/RescueModifier
-      to = Date.parse(params[:to].to_s) rescue nil # rubocop:disable Style/RescueModifier
-      from && to && from <= to ? [from, to] : [today.beginning_of_month, today]
     else [today.beginning_of_month, today] # 'month' (padrão)
     end
   end

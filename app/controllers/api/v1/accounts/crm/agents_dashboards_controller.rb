@@ -7,6 +7,7 @@
 # Fontes: reporting_events do core + histórico do Radar + Agenda.
 class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  include Crm::ResolvesPeriod
   before_action -> { require_capability(:reports) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
@@ -31,11 +32,13 @@ class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::Ba
 
 
   def resolve_range
+    # régua padrão CEVICO (06/08) resolve primeiro; presets antigos seguem abaixo
+    range = standard_period_range
+    return range if range
+
     now = TZ.now
     case params[:preset]
-    when 'today' then [now.beginning_of_day, now.end_of_day]
     when 'week'  then [now.beginning_of_week.beginning_of_day, now.end_of_week.end_of_day]
-    when 'year'  then [now.beginning_of_year.beginning_of_day, now.end_of_year.end_of_day]
     when 'all'   then [Time.zone.at(0), now.end_of_day]
     when 'last_month' then [now.last_month.beginning_of_month, now.last_month.end_of_month]
     else [now.beginning_of_month.beginning_of_day, now.end_of_month.end_of_day]

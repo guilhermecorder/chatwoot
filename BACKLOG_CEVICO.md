@@ -3861,3 +3861,79 @@ crm_opportunity_radar_job registrados.
   fluxo N8N em JSON que o Guilherme vai enviar; ferramenta opcional
   "arquivar cards inativos".
 - SMTP (Gmail) configurado para convites de equipe.
+
+# ═══ RODADA 06/08 — item 126: CRM verdadeiro + dashboards remodelados ═══
+
+## 126A. ✅ FIX "163 de 11024" no CRM (CONSTRUÍDO 06/08, não commitado)
+- Causa: dois filtros brigando — servidor filtrava por ATIVIDADE (dias corridos)
+  e o navegador refiltrava por DATA DE CRIAÇÃO do contato (que a rake de
+  importação reescreveu p/ a data da 1ª conversa). "Este ano" só deixava
+  passar os 163 contatos realmente criados em 2026.
+- Solução: período 100% no SERVIDOR (contacts_controller scope=period, com
+  date_from/date_to por calendário em São Paulo) + contagem VERDADEIRA por
+  coluna (e R$ por coluna) no cabeçalho + entrega de 50 cards/coluna com
+  "Carregar mais" (scope=stage_page) + alternador Ativos×Novos (date_mode
+  activity/created). Board leve mesmo com 11k cards.
+- CrmBoard: régua padrão (Hoje|Ontem|Últimos 7 dias|Este mês|Este ano|
+  Personalizado), refiltro de datas no navegador REMOVIDO, contador honesto
+  ("X no período · Y no funil · Z com conversa").
+
+## 126B. ✅ RÉGUA DE PERÍODO PADRÃO em TODOS os dashboards
+- Componente único components-next/cevico/PeriodRuler.vue + concern
+  Crm::ResolvesPeriod (presets today/yesterday/last7/month/year/custom).
+- Migrados: Meu Painel, Dashboard CRM, Campanhas, Funil de Tráfego, Anúncios
+  Meta, Médicos, Agenda, Agentes, Financeiro, Google, Resultados de Tráfego,
+  Agentes de IA, Central de Automações (aba Resultados). Presets legados
+  seguem aceitos nos backends (compatibilidade).
+- Agenda: "Este mês/ano" estendem até o FIM do calendário (consulta futura conta).
+- Meu Painel: metas/recordes mapeados p/ last7 (base semana) e custom (sem recorde).
+
+## 126C. ✅ FUNIL DE TRÁFEGO REMODELADO (4 visões do mesmo dado)
+- Etapas do CRM agora RESPEITAM o período: contam quem ENTROU na coluna na
+  janela (crm_contact_stage_logs) + retrato atual ao lado ("agora: N").
+- Visões: Funil simétrico | Barras (3 maiores GARGALOS marcados em vermelho) |
+  Tendência (linhas semanais chart.js, até 4 etapas, média 12 semanas
+  tracejada com 1 etapa) | Mapa de calor (etapas × 12 semanas, tom único).
+- Selo ▲/▼ média em cada etapa: ritmo semanal do período × média 12 semanas.
+- KPIs migrados p/ DashKpi (kit CEVICO).
+
+## 126D. ✅ DASHBOARD GOOGLE com PALAVRAS-CHAVE
+- Crm::GoogleKeywordsService (herda auth do GoogleAdCostService — conta de
+  serviço GA4, SEM developer token): keywords/termos de pesquisa/campanhas
+  com cliques, custo, CPC, sessões e conversões (GA4 Data API, cache 10min).
+- "Do termo à cirurgia": leads google_ads do page_ads agrupados por utm_term
+  (fallback campanha) × agendou/compareceu/fechou cirurgia/receita (mesma
+  régua do relatório de Páginas). Dica na tela: colocar utm_term={keyword}
+  no modelo de acompanhamento do Google Ads quando faltar termo.
+- Régua de período na tela; série de conversões enviadas respeita o período.
+
+## 126E. ✅ PAINÉIS DO CONSTRUTOR NO SERVIDOR (salvar/atribuir/principal)
+- agenda_config['custom_panels'] (máx 24, sanitizado, só admin) +
+  agenda_config['main_panel'] via update_agenda — SEM migration.
+- Construtor: "Painéis da conta" (salvar c/ nome, aplicar, ★ principal,
+  👥 atribuir ao time, excluir); predefinições locais viraram "só neste navegador".
+- Meu Painel: painéis custom viram pílulas (CustomPanelGrid renderiza os
+  widgets; métricas do superset gestor); main_panel substitui o painel
+  padrão; atribuição aceita 'custom:<id>' e trava o atendente.
+- Catálogo único em helper/cevicoBuilderCatalog.js (Construtor + Meu Painel).
+
+## 126F. ✅ FERRAMENTA "CIRURGIAS FEITAS FORA DO SISTEMA"
+- Tratamento de dados → novo card: cola lista de telefones (aceita
+  telefone;valor;data — cola do Excel), casa por sufixo 8/9 dígitos
+  (com/sem 55, com/sem nono dígito), PRÉVIA (casados/ambíguos/não
+  encontrados/já na coluna) → aplica em job (queue low, lotes de 200):
+  move/cria card na coluna-alvo (padrão "Cirurgia Realizada"), valor via
+  update_column (NÃO dispara automações/conversões p/ cirurgia antiga),
+  etiqueta sugerida cirurgia_externa.
+- external_surgeries_controller + Crm::ExternalSurgeryJob + rotas + UI.
+
+## Estado/deploy da rodada 06/08
+- SEM migrations. Deploy = Implantar WEB+SIDEKIQ juntos.
+- Working tree também carrega o trabalho ANTERIOR de Meta Leads (webhook
+  meta_leads_controller + jobs/services + MetaAds.vue) não commitado —
+  separar na hora de commitar.
+- Testado local (conta 3): scope=period/stage_page, traffic_report novo,
+  google_dashboard novo, custom_panels ponta a ponta (salvar→principal→home),
+  os 10 backends de régua com presets novos, preview de cirurgias externas —
+  tudo 200. Lint: só regras de estilo já toleradas no padrão CEVICO.
+- AGUARDANDO "pode subir".

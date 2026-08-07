@@ -12,6 +12,8 @@
 # - medico (?doctor=Nome): a agenda de cada médico — consultas, presença,
 #   indicações e cirurgias dele.
 class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
+  include Crm::ResolvesPeriod
+
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show
@@ -147,14 +149,27 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     Current.account
   end
 
+  BUILTIN_PANELS = %w[agendamento conducao cirurgia medico gestor].freeze
+
+  # painéis salvos no Construtor ('custom:<id>') — valem como painel do Meu
+  # Painel e como atribuição do time
+  def custom_panel_keys
+    Array(crm_settings&.agenda_config&.dig('custom_panels')).map { |p| "custom:#{p['id']}" }
+  end
+
   def panel_key
-    key = params[:panel].presence || 'agendamento'
-    # agente com painel ATRIBUÍDO pelo admin fica travado nele
-    unless Current.account_user.administrator?
-      assigned = crm_settings&.agenda_config&.dig('panel_assignments', Current.user.id.to_s)
-      key = assigned if assigned.present?
+    @panel_key ||= begin
+      valid = BUILTIN_PANELS + custom_panel_keys
+      default_key = crm_settings&.agenda_config&.dig('main_panel').presence || 'agendamento'
+      default_key = 'agendamento' unless valid.include?(default_key)
+      key = params[:panel].presence || default_key
+      # agente com painel ATRIBUÍDO pelo admin fica travado nele
+      unless Current.account_user.administrator?
+        assigned = crm_settings&.agenda_config&.dig('panel_assignments', Current.user.id.to_s)
+        key = assigned if assigned.present?
+      end
+      valid.include?(key) ? key : default_key
     end
-    %w[agendamento conducao cirurgia medico gestor].include?(key) ? key : 'agendamento'
   end
 
   def crm_settings
@@ -163,12 +178,14 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
 
   def panel_data(since, until_at)
     # painéis da AGENDA contam o período-calendário inteiro (a consulta de
-    # hoje à tarde conta em "Hoje"); o de leads corta em "agora" (coorte)
+    # hoje à tarde conta em "Hoje"); o de leads corta em "agora" (coorte).
+    # Painéis do Construtor (custom:*) usam o superset do gestor — é dele
+    # que os widgets do Construtor leem os indicadores.
     @panel_data ||= case panel_key
                     when 'conducao' then conducao_metrics(since, agenda_until(until_at))
                     when 'cirurgia' then cirurgia_metrics(since, agenda_until(until_at))
                     when 'medico'   then medico_metrics(since, agenda_until(until_at))
-                    when 'gestor'   then gestor_metrics(since, until_at)
+                    when 'gestor', /\Acustom:/ then gestor_metrics(since, until_at)
                     else agendamento_metrics(since, until_at)
                     end
   end
@@ -344,13 +361,15 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   end
 
   def resolve_range
+    # régua padrão (06/08): today/yesterday/last7/month/year/custom
+    if (range = standard_period_range)
+      return range
+    end
+
     now = TZ.now
     case params[:preset]
-    when 'yesterday'  then [now.yesterday.beginning_of_day, now.yesterday.end_of_day]
-    when 'week'       then [now.beginning_of_week.beginning_of_day, now]
-    when 'month'      then [now.beginning_of_month.beginning_of_day, now]
+    when 'week'       then [now.beginning_of_week.beginning_of_day, now] # legado
     when 'last_month' then [now.last_month.beginning_of_month, now.last_month.end_of_month]
-    when 'year'       then [now.beginning_of_year.beginning_of_day, now]
     else [now.beginning_of_day, now] # hoje (padrão)
     end
   end
@@ -626,10 +645,13 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     now = TZ.now
     days_in_month = now.end_of_month.day.to_f
     case params[:preset]
-    when 'week' then 7 / days_in_month
+    when 'week', 'last7' then 7 / days_in_month
     when 'month' then now.day / days_in_month
     when 'last_month' then 1.0
     when 'year' then (now.month - 1) + (now.day / days_in_month)
+    when 'custom'
+      from, to = custom_period_range
+      (((to.to_date - from.to_date).to_i + 1) / days_in_month)
     else 1 / days_in_month # hoje e ontem = fatia diária
     end.round(4)
   end
@@ -638,7 +660,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     now = TZ.now
     case params[:preset]
     when 'yesterday' then (now - 1.day).strftime('%Y-%m-%d')
-    when 'week' then now.strftime('%G-w%V')
+    when 'week', 'last7' then now.strftime('%G-w%V')
     when 'month' then now.strftime('%Y-%m')
     when 'last_month' then (now - 1.month).strftime('%Y-%m')
     when 'year' then now.strftime('%Y')
@@ -647,11 +669,13 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   end
 
   def record_basis
-    { 'yesterday' => 'day', 'week' => 'week', 'month' => 'month',
+    { 'yesterday' => 'day', 'week' => 'week', 'last7' => 'week', 'month' => 'month',
       'last_month' => 'month', 'year' => 'year' }[params[:preset]] || 'day'
   end
 
   def records_json # rubocop:disable Metrics/AbcSize
+    return {} if params[:preset] == 'custom' # intervalo livre não compete com recorde
+
     keys = RECORD_KEYS[panel_key] || []
     return {} if keys.empty?
 

@@ -9,6 +9,7 @@ import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import FollowupBotModal from 'dashboard/routes/dashboard/crm/components/FollowupBotModal.vue';
 import DataTreatmentTools from 'dashboard/routes/dashboard/crm/components/DataTreatmentTools.vue';
 import AiAgentsDashboard from './AiAgentsDashboard.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import CrmAPI from 'dashboard/api/crm';
 
 const store = useStore();
@@ -862,15 +863,8 @@ const openProgrammingMode = () => {
   window.location.href = `/app/accounts/${accountId.value}/crm?programming=1`;
 };
 
-// ── Resultados das automações (dashboard com presets de período) ──
-const RESULT_PERIODS = [
-  { key: 'today', label: 'Hoje' },
-  { key: 'yesterday', label: 'Ontem' },
-  { key: 'week', label: 'Essa semana' },
-  { key: 'month', label: 'Este mês' },
-  { key: 'last_month', label: 'Mês passado' },
-];
-const resultsPeriod = ref('today');
+// ── Resultados das automações — régua de período PADRÃO CEVICO (06/08) ──
+const resultsPeriod = ref({ preset: 'today', from: '', to: '' });
 const resultsData = ref(null);
 const loadingResults = ref(false);
 
@@ -887,7 +881,12 @@ const TRIGGER_LABELS = {
 const loadResults = async () => {
   loadingResults.value = true;
   try {
-    const { data } = await CrmAPI.getAutomationsDashboard({ preset: resultsPeriod.value });
+    const { data } = await CrmAPI.getAutomationsDashboard({
+      preset: resultsPeriod.value.preset,
+      ...(resultsPeriod.value.preset === 'custom'
+        ? { from: resultsPeriod.value.from, to: resultsPeriod.value.to }
+        : {}),
+    });
     resultsData.value = data;
   } catch {
     resultsData.value = null;
@@ -897,10 +896,7 @@ const loadResults = async () => {
   }
 };
 
-const setResultsPeriod = key => {
-  resultsPeriod.value = key;
-  loadResults();
-};
+watch(resultsPeriod, loadResults, { deep: true });
 
 // carrega quando a aba abre pela primeira vez
 watch(activeTab, tab => {
@@ -2295,19 +2291,8 @@ onMounted(async () => {
           pacientes alcançados. Réguas de mensagem têm resultados na Campanha WhatsApp.
         </p>
 
-        <!-- Presets de período (mesmos do Meu Painel) -->
-        <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto">
-          <button
-            v-for="p in RESULT_PERIODS"
-            :key="p.key"
-            class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-            :class="resultsPeriod === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="resultsPeriod === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
-            @click="setResultsPeriod(p.key)"
-          >
-            {{ p.label }}
-          </button>
-        </div>
+        <!-- Régua de período padrão CEVICO -->
+        <PeriodRuler v-model="resultsPeriod" />
 
         <div v-if="loadingResults" class="flex items-center gap-2 text-sm text-n-slate-10 py-8">
           <Spinner class="w-4 h-4" /> Carregando resultados…

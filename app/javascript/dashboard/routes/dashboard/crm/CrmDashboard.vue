@@ -13,6 +13,7 @@ import {
 } from 'chart.js';
 import { Bar, Doughnut, Line } from 'vue-chartjs';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import {
@@ -104,17 +105,8 @@ onMounted(() => {
 const loading = ref(false);
 const error   = ref(false);
 
-const PERIODS = [
-  { key: 'today',     preset: 'today',     label: 'Hoje' },
-  { key: 'yesterday', preset: 'yesterday', label: 'Ontem' },
-  { key: 'week',      preset: 'week',      label: 'Essa semana' },
-  { key: '30',        period: 30,          label: '30 dias' },
-  { key: '90',        period: 90,          label: '90 dias' },
-  { key: '365',       period: 365,         label: '1 ano' },
-  { key: '1095',      period: 1095,        label: '3 anos' },
-];
-const selectedPeriodKey = ref('30');
-const selectedPeriod = computed(() => PERIODS.find(p => p.key === selectedPeriodKey.value));
+// régua de período PADRÃO CEVICO (06/08) — default 'month' (antes: 30 dias)
+const period = ref({ preset: 'month', from: '', to: '' });
 
 // ── Load ─────────────────────────────────────────────────────────────
 
@@ -176,8 +168,10 @@ const load = async () => {
   try {
     data.value = await store.dispatch('crm/fetchDashboard', {
       pipelineId: props.pipeline.id,
-      period: selectedPeriod.value?.period,
-      preset: selectedPeriod.value?.preset,
+      preset: period.value.preset,
+      ...(period.value.preset === 'custom'
+        ? { from: period.value.from, to: period.value.to }
+        : {}),
       inboxIds: inboxFilterActive.value
         ? [...selectedInboxIds.value]
         : undefined,
@@ -199,7 +193,7 @@ onMounted(() => {
     store.dispatch('inboxes/get').catch(() => {});
   }
 });
-watch(selectedPeriodKey, load);
+watch(period, load, { deep: true });
 watch(selectedInboxIds, load);
 watch(() => props.pipeline?.id, load);
 
@@ -698,21 +692,8 @@ const agentView = computed(() => {
         <h2 class="text-lg font-bold text-n-slate-12">Dashboard — {{ pipeline.name }}</h2>
         <p class="text-xs text-n-slate-10 mt-0.5">Métricas automáticas com base nas conversas do funil</p>
       </div>
-      <!-- Seletor de período -->
-      <div class="flex items-center gap-1.5 bg-n-solid-2 border border-n-weak rounded-xl p-1 flex-wrap">
-        <button
-          v-for="p in PERIODS"
-          :key="p.key"
-          class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
-          :class="selectedPeriodKey === p.key
-            ? 'text-white shadow'
-            : 'text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1'"
-          :style="selectedPeriodKey === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
-          @click="selectedPeriodKey = p.key"
-        >
-          {{ p.label }}
-        </button>
-      </div>
+      <!-- Régua de período padrão CEVICO -->
+      <PeriodRuler v-model="period" />
     </div>
 
     <!-- 📥 Filtro por caixa de entrada — o dashboard INTEIRO responde:

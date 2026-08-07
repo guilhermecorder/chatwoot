@@ -473,6 +473,26 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         'team_view' => ActiveModel::Type::Boolean.new.cast(access['team_view']) == true
       }
     end
+    # PAINÉIS DO CONSTRUTOR salvos por CONTA (06/08): cada um vira uma pílula
+    # no Meu Painel e pode ser atribuído ao time — só admin mexe
+    if params.key?(:custom_panels) && Current.account_user.administrator?
+      cfg['custom_panels'] = Array(params[:custom_panels]).first(24).map do |p|
+        panel = p.permit(:id, :name, :palette, widgets: [:key, :size]).to_h
+        {
+          'id' => panel['id'].to_s.downcase.gsub(/[^a-z0-9\-]/, '')[0, 40],
+          'name' => panel['name'].to_s[0, 60],
+          'palette' => panel['palette'].to_s[0, 20],
+          'widgets' => Array(panel['widgets']).first(40).map do |w|
+            { 'key' => w['key'].to_s[0, 40], 'size' => %w[sm md lg].include?(w['size']) ? w['size'] : 'sm' }
+          end
+        }
+      end.select { |p| p['id'].present? && p['name'].present? && p['widgets'].any? }
+    end
+    # painel PRINCIPAL da conta: o padrão do Meu Painel para quem não tem
+    # painel atribuído ('' volta ao padrão de fábrica) — só admin
+    if params.key?(:main_panel) && Current.account_user.administrator?
+      cfg['main_panel'] = params[:main_panel].to_s[0, 60].presence
+    end
     crm_settings.update!(agenda_config: cfg)
     render json: {
       agenda_windows: cfg['windows'] || [],
@@ -807,6 +827,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       },
       panel_assignments: (s.agenda_config || {})['panel_assignments'] || {},
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},
+      custom_panels: (s.agenda_config || {})['custom_panels'] || [],
+      main_panel: (s.agenda_config || {})['main_panel'].presence,
       clinical_access: (s.agenda_config || {})['clinical_access'] || {},
       agenda_backfill_last_run: (s.agenda_config || {})['backfill_last_run'],
       scheduler_log: Array((s.agenda_config || {})['scheduler_log']).first(30),

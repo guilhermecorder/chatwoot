@@ -204,6 +204,10 @@ Rails.application.routes.draw do
               post :preview
               post :apply
             end
+            resource :external_surgeries, only: [] do
+              post :preview
+              post :apply
+            end
             resource :label_replacements, only: [] do
               post :preview
               post :apply

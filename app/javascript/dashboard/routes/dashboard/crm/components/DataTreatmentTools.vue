@@ -5,7 +5,7 @@
 // IDENTIFICAÇÃO TRADICIONAL (filtros e etiquetas em massa, com prévia
 // antes de aplicar) e COM INTELIGÊNCIA (detecção de valores nas
 // conversas). Extraído da Campanha WhatsApp, mesma lógica testada.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
@@ -331,6 +331,77 @@ const applyUnify = async () => {
     useAlert('Erro ao iniciar a unificação');
   } finally {
     isUnifyApplying.value = false;
+  }
+};
+
+// ── Cirurgias feitas FORA do sistema ────────────────────────────────
+// Pacientes que operaram fora do CRM e o card nunca chegou na coluna
+// "Cirurgia Realizada" (os funis ficam mentindo). Cola a lista de
+// telefones, o sistema casa com os contatos e coloca todo mundo na coluna.
+const showSurgeryPanel = ref(false);
+const surgeryList = ref('');
+const surgeryStageId = ref('');
+const surgeryLabel = ref('cirurgia_externa');
+const surgerySetValue = ref(true);
+const surgeryOverwriteValue = ref(false);
+const surgeryPreview = ref(null);
+const isSurgeryLoading = ref(false);
+const isSurgeryApplying = ref(false);
+
+// pré-seleciona a coluna "Cirurgia Realizada" assim que os funis chegam
+// (senão a primeira com "cirurgia" no nome que não seja de indicação)
+watch(
+  allStages,
+  stages => {
+    if (surgeryStageId.value || !stages.length) return;
+    const target =
+      stages.find(s => /cirurgia realizada/i.test(s.name)) ||
+      stages.find(s => /cirurgia/i.test(s.name) && !/indica/i.test(s.name));
+    if (target) surgeryStageId.value = target.id;
+  },
+  { immediate: true }
+);
+
+const surgeryLineCount = computed(
+  () => surgeryList.value.split('\n').filter(l => l.trim()).length
+);
+
+const surgeryPayload = () => ({
+  list: surgeryList.value,
+  target_stage_id: surgeryStageId.value,
+  label: surgeryLabel.value.trim(),
+  set_value: surgerySetValue.value,
+  overwrite_value: surgerySetValue.value && surgeryOverwriteValue.value,
+});
+
+const previewSurgery = async () => {
+  if (!surgeryList.value.trim() || !surgeryStageId.value) return;
+  isSurgeryLoading.value = true;
+  surgeryPreview.value = null;
+  try {
+    const { data } = await CrmAPI.previewExternalSurgeries(surgeryPayload());
+    surgeryPreview.value = data;
+  } catch (error) {
+    useAlert(error?.response?.data?.message || 'Erro ao ler a lista.');
+  } finally {
+    isSurgeryLoading.value = false;
+  }
+};
+
+const applySurgery = async () => {
+  if (!surgeryPreview.value?.matched || isSurgeryApplying.value) return;
+  isSurgeryApplying.value = true;
+  try {
+    await CrmAPI.applyExternalSurgeries(surgeryPayload());
+    useAlert(
+      'Aplicando em segundo plano — os pacientes chegarão na coluna em alguns minutos.'
+    );
+    surgeryPreview.value = null;
+    surgeryList.value = '';
+  } catch (error) {
+    useAlert(error?.response?.data?.message || 'Erro ao aplicar.');
+  } finally {
+    isSurgeryApplying.value = false;
   }
 };
 </script>
@@ -928,6 +999,159 @@ const applyUnify = async () => {
         <p class="text-[11px] text-n-slate-9">
           Contatos sem telefone (ex: só Instagram) não são unificados automaticamente —
           use o botão "Mesclar" no card do CRM para esses casos.
+        </p>
+      </div>
+    </div>
+
+    <!-- Cirurgias feitas fora do sistema -->
+    <div class="mb-4 bg-n-solid-2 border border-n-weak rounded-2xl overflow-hidden">
+      <button
+        class="w-full flex items-center gap-3 p-4 text-left hover:bg-n-alpha-1 transition-colors"
+        @click="showSurgeryPanel = !showSurgeryPanel"
+      >
+        <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #BE123C, #15803D)">
+          <span class="i-lucide-stethoscope text-white text-base" />
+        </span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-n-slate-12">🏥 Cirurgias feitas fora do sistema</p>
+          <p class="text-xs text-n-slate-10">
+            Pacientes que operaram por fora e o card nunca chegou em "Cirurgia Realizada".
+            Cole a lista de telefones → o sistema encontra cada contato e coloca o card na
+            coluna certa, com valor e etiqueta se você quiser. Os funis param de mentir.
+          </p>
+        </div>
+        <span
+          class="text-n-slate-10 flex-shrink-0"
+          :class="showSurgeryPanel ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+        />
+      </button>
+
+      <div v-if="showSurgeryPanel" class="px-4 pb-4 space-y-3 border-t border-n-weak pt-4">
+        <div>
+          <label class="text-xs font-medium text-n-slate-11 block mb-1">Lista de pacientes (um telefone por linha)</label>
+          <textarea
+            v-model="surgeryList"
+            rows="8"
+            class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12 font-mono"
+            placeholder="Aceita 3 formatos (pode misturar):&#10;&#10;11987654321&#10;11987654321;3900&#10;11987654321;3.900,00;15/03/2026&#10;&#10;Só o telefone é obrigatório. Valor e data separados por ; ou colados direto do Excel."
+            @input="surgeryPreview = null"
+          />
+          <p class="text-[11px] text-n-slate-9 mt-1">
+            {{ surgeryLineCount }} linha(s) — máximo 3000 por vez. Pode colar de uma planilha:
+            o telefone casa com ou sem o 55 do Brasil e com ou sem o 9 na frente.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-3">
+          <div class="flex-1 min-w-48">
+            <label class="text-xs font-medium text-n-slate-11 block mb-1">Colocar todo mundo na coluna</label>
+            <select
+              v-model="surgeryStageId"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+              @change="surgeryPreview = null"
+            >
+              <option value="">Escolha a coluna…</option>
+              <option v-for="s in allStages" :key="s.id" :value="s.id">
+                {{ s.pipeline_name }} › {{ s.name }}
+              </option>
+            </select>
+          </div>
+          <div class="flex-1 min-w-48">
+            <label class="text-xs font-medium text-n-slate-11 block mb-1">
+              Etiqueta no contato <span class="text-n-slate-9">(opcional — apague para não etiquetar)</span>
+            </label>
+            <input
+              v-model="surgeryLabel"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12"
+              placeholder="cirurgia_externa"
+              @input="surgeryPreview = null"
+            />
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-4">
+          <label class="flex items-center gap-1.5 text-xs text-n-slate-11 cursor-pointer">
+            <input
+              v-model="surgerySetValue"
+              type="checkbox"
+              class="rounded"
+              @change="surgeryPreview = null"
+            />
+            Preencher o valor do card com o valor da lista
+          </label>
+          <label
+            v-if="surgerySetValue"
+            class="flex items-center gap-1.5 text-xs text-n-slate-11 cursor-pointer"
+          >
+            <input
+              v-model="surgeryOverwriteValue"
+              type="checkbox"
+              class="rounded"
+              @change="surgeryPreview = null"
+            />
+            Sobrescrever valor que o card já tem
+          </label>
+        </div>
+
+        <!-- Prévia: o retrato antes de aplicar -->
+        <div v-if="surgeryPreview" class="bg-n-alpha-1 rounded-lg p-3 space-y-2">
+          <p class="text-sm text-n-slate-12">
+            <b>{{ surgeryPreview.total_lines }}</b> linha(s) lida(s) ·
+            <b class="text-green-600">{{ surgeryPreview.matched }}</b> paciente(s) encontrado(s) ·
+            <b>{{ surgeryPreview.already_in_target }}</b> já na coluna "{{ surgeryPreview.target_stage?.name }}"
+          </p>
+          <p v-if="surgeryPreview.matched_sample?.length" class="text-xs text-n-slate-9">
+            Ex: {{ surgeryPreview.matched_sample.join(', ') }}
+          </p>
+          <div v-if="surgeryPreview.ambiguous_count" class="space-y-0.5">
+            <p class="text-xs text-amber-600 font-medium">
+              {{ surgeryPreview.ambiguous_count }} telefone(s) com MAIS DE UM contato — esses não
+              serão aplicados (resolva antes com "Unificar contatos duplicados"):
+            </p>
+            <p
+              v-for="(a, i) in surgeryPreview.ambiguous"
+              :key="i"
+              class="text-[11px] text-n-slate-10"
+            >
+              {{ a.phone }} → {{ a.names.join(' / ') }}
+            </p>
+          </div>
+          <div v-if="surgeryPreview.unmatched_count">
+            <p class="text-xs text-n-slate-10 font-medium">
+              {{ surgeryPreview.unmatched_count }} telefone(s) sem contato no sistema (não serão aplicados):
+            </p>
+            <p class="text-[11px] text-n-slate-9 break-all">
+              {{ surgeryPreview.unmatched.join(', ') }}<span v-if="surgeryPreview.unmatched_count > surgeryPreview.unmatched.length">…</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <button
+            class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1 disabled:opacity-50"
+            :disabled="!surgeryList.trim() || !surgeryStageId || isSurgeryLoading"
+            @click="previewSurgery"
+          >
+            <span class="i-lucide-search" />
+            {{ isSurgeryLoading ? 'Lendo a lista…' : 'Prévia' }}
+          </button>
+
+          <div class="flex-1" />
+          <button
+            class="text-xs px-4 py-2 rounded-lg text-white hover:opacity-90 flex items-center gap-1.5 disabled:opacity-50"
+            style="background: linear-gradient(135deg, #DC2626, #16A34A)"
+            :disabled="!surgeryPreview || !surgeryPreview.matched || isSurgeryApplying"
+            @click="applySurgery"
+          >
+            <span class="i-lucide-wand-2" />
+            {{ isSurgeryApplying ? 'Aplicando…' : 'Aplicar' }}
+          </button>
+        </div>
+        <p v-if="surgeryPreview && !surgeryPreview.matched" class="text-xs text-amber-600">
+          Nenhum telefone da lista casou com um contato — confira o formato dos números.
+        </p>
+        <p v-else-if="!surgeryPreview" class="text-xs text-n-slate-9">
+          Primeiro a Prévia (não mexe em nada), depois o Aplicar.
         </p>
       </div>
     </div>

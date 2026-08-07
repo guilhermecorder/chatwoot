@@ -6,8 +6,9 @@
 // indicadores do período (presets + PERSONALIZADO com datas livres),
 // histórico de 12 meses em LINHA (mesma linguagem dos outros painéis)
 // e comparação de dois meses lado a lado.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import StockTab from './StockTab.vue';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
@@ -60,32 +61,18 @@ const TABS = [
   { key: 'compare', label: 'Comparar meses', icon: 'i-lucide-columns-2' },
 ];
 
-// ── período (presets + personalizado) ──
-const PERIODS = [
-  { key: 'today', label: 'Hoje' },
-  { key: 'yesterday', label: 'Ontem' },
-  { key: 'week', label: 'Essa semana' },
-  { key: 'month', label: 'Este mês' },
-  { key: 'last_month', label: 'Mês passado' },
-  { key: 'year', label: 'Este ano' },
-  { key: 'custom', label: 'Personalizado' },
-];
-const preset = ref('month');
-const customFrom = ref('');
-const customTo = ref('');
+// ── período: régua PADRÃO CEVICO (06/08) — default 'month' ──
+const period = ref({ preset: 'month', from: '', to: '' });
 
 const load = async () => {
   isLoading.value = true;
   try {
-    const params = { preset: preset.value };
-    if (preset.value === 'custom') {
-      if (!customFrom.value || !customTo.value) {
-        isLoading.value = false;
-        return;
-      }
-      params.from = customFrom.value;
-      params.to = customTo.value;
-    }
+    const params = {
+      preset: period.value.preset,
+      ...(period.value.preset === 'custom'
+        ? { from: period.value.from, to: period.value.to }
+        : {}),
+    };
     const { data: payload } = await CrmAPI.getFinance(params);
     data.value = payload;
   } catch {
@@ -95,12 +82,7 @@ const load = async () => {
   }
 };
 
-const pickPeriod = key => {
-  preset.value = key;
-  if (key !== 'custom') load();
-  // personalizado espera o "Aplicar" com as duas datas
-};
-
+watch(period, load, { deep: true });
 onMounted(load);
 
 // ── formatação ──
@@ -422,45 +404,9 @@ const compareCosts = computed(() => {
         </button>
       </div>
 
-      <!-- período (vale para Visão geral e Lançamentos) -->
+      <!-- período (vale para Visão geral e Lançamentos) — régua padrão CEVICO -->
       <div v-if="tab !== 'compare' && tab !== 'stock'" class="mb-5">
-        <div class="flex items-center gap-1.5 flex-wrap">
-          <button
-            v-for="p in PERIODS"
-            :key="p.key"
-            class="px-3 h-8 rounded-lg text-xs font-medium transition-colors"
-            :class="preset === p.key ? 'text-white' : 'text-n-slate-11 bg-n-solid-2 border border-n-weak hover:bg-n-alpha-1'"
-            :style="preset === p.key ? { background: '#0F766E' } : {}"
-            @click="pickPeriod(p.key)"
-          >
-            {{ p.label }}
-          </button>
-        </div>
-        <!-- personalizado: a pessoa escolhe o período de análise -->
-        <div v-if="preset === 'custom'" class="flex items-center gap-2 flex-wrap mt-2.5">
-          <label class="text-[11px] font-medium text-n-slate-11">De</label>
-          <input
-            v-model="customFrom"
-            type="date"
-            class="h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-            style="width: 10rem; margin-bottom: 0"
-          />
-          <label class="text-[11px] font-medium text-n-slate-11">até</label>
-          <input
-            v-model="customTo"
-            type="date"
-            class="h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-            style="width: 10rem; margin-bottom: 0"
-          />
-          <button
-            class="px-3.5 h-8 rounded-lg text-xs font-bold text-white disabled:opacity-50"
-            style="background: #0F766E"
-            :disabled="!customFrom || !customTo"
-            @click="load"
-          >
-            Aplicar
-          </button>
-        </div>
+        <PeriodRuler v-model="period" />
         <p v-if="data?.period" class="text-[11px] text-n-slate-9 mt-2">
           Analisando: <b class="text-n-slate-11">{{ periodLabel }}</b> · {{ summary.lancamentos || 0 }} lançamento(s)
         </p>

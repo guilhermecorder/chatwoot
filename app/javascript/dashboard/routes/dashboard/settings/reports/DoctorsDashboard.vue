@@ -5,6 +5,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import CrmAPI from 'dashboard/api/crm';
@@ -99,19 +100,17 @@ const removeDoctor = name => {
 const initialsOf = name =>
   name.replace(/^Dra?\.?\s*/i, '').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
-const PERIODS = [
-  { key: 'week', label: 'Essa semana' },
-  { key: 'month', label: 'Este mês' },
-  { key: 'last_month', label: 'Mês passado' },
-  { key: 'year', label: 'Este ano' },
-  { key: 'all', label: 'Desde o início' },
-];
-const selectedPeriod = ref('month');
+// régua padrão CEVICO (06/08): Hoje | Ontem | 7 dias | Este mês | Este ano | Personalizado
+const period = ref({ preset: 'month', from: '', to: '' });
 
 const fetchData = async () => {
   isLoading.value = true;
   try {
-    const { data: payload } = await CrmAPI.getDoctorsDashboard({ preset: selectedPeriod.value });
+    const p = period.value;
+    const { data: payload } = await CrmAPI.getDoctorsDashboard({
+      preset: p.preset,
+      ...(p.preset === 'custom' ? { from: p.from, to: p.to } : {}),
+    });
     data.value = payload;
     // perfis de gestão (item 104): hidrata uma vez, sem atropelar edição em curso
     if (payload.profiles !== null && payload.profiles !== undefined && !profilesHydrated) {
@@ -125,10 +124,7 @@ const fetchData = async () => {
   }
 };
 
-const setPeriod = key => {
-  selectedPeriod.value = key;
-  fetchData();
-};
+watch(period, fetchData, { deep: true });
 
 const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
 const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}º`;
@@ -195,19 +191,8 @@ onMounted(() => {
         </button>
       </div>
 
-      <!-- Período -->
-      <div v-if="activeTab === 'desempenho'" class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto mb-6">
-        <button
-          v-for="p in PERIODS"
-          :key="p.key"
-          class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-          :class="selectedPeriod === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="selectedPeriod === p.key ? { background: 'linear-gradient(135deg, #0369A1, #38BDF8)' } : {}"
-          @click="setPeriod(p.key)"
-        >
-          {{ p.label }}
-        </button>
-      </div>
+      <!-- Período (régua padrão CEVICO) -->
+      <PeriodRuler v-if="activeTab === 'desempenho'" v-model="period" class="mb-6" />
 
       <div v-if="isLoading" class="flex justify-center py-16">
         <Spinner :size="32" class="text-n-brand" />

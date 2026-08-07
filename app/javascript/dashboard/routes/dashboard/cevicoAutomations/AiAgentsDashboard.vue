@@ -2,25 +2,27 @@
 // DASHBOARD DOS AGENTES DE IA (item 85, só admin): um card por agente —
 // quem está ligado, o que cada um faz, quantas vezes trabalhou no
 // período, custo, última atividade e o ritmo diário (14 dias).
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useAlert } from 'dashboard/composables';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import CrmAPI from 'dashboard/api/crm';
 
 const isLoading = ref(true);
 const data = ref(null);
-const preset = ref('7d');
-
-const PERIODS = [
-  { key: 'today', label: 'Hoje' },
-  { key: '7d', label: '7 dias' },
-  { key: '30d', label: '30 dias' },
-];
+// régua de período PADRÃO CEVICO (06/08) — default 'last7' (antes: 7 dias)
+const period = ref({ preset: 'last7', from: '', to: '' });
 
 const load = async () => {
   isLoading.value = true;
   try {
-    const { data: payload } = await CrmAPI.getAiDashboard(preset.value);
+    const params = {
+      preset: period.value.preset,
+      ...(period.value.preset === 'custom'
+        ? { from: period.value.from, to: period.value.to }
+        : {}),
+    };
+    const { data: payload } = await CrmAPI.getAiDashboard(params);
     data.value = payload;
   } catch {
     useAlert('Não consegui carregar o painel dos agentes.');
@@ -28,10 +30,7 @@ const load = async () => {
     isLoading.value = false;
   }
 };
-const pickPeriod = key => {
-  preset.value = key;
-  load();
-};
+watch(period, load, { deep: true });
 onMounted(load);
 
 const totals = computed(() => data.value?.totals || {});
@@ -66,18 +65,9 @@ const sparkMax = agent => Math.max(...(agent.daily || [1]), 1);
 
 <template>
   <div class="max-w-4xl">
-    <!-- período -->
-    <div class="flex items-center gap-1.5 flex-wrap mb-4">
-      <button
-        v-for="p in PERIODS"
-        :key="p.key"
-        class="px-3 h-8 rounded-lg text-xs font-medium transition-colors"
-        :class="preset === p.key ? 'text-white' : 'text-n-slate-11 bg-n-solid-2 border border-n-weak hover:bg-n-alpha-1'"
-        :style="preset === p.key ? { background: 'linear-gradient(135deg, #9D174D, #DB2777)' } : {}"
-        @click="pickPeriod(p.key)"
-      >
-        {{ p.label }}
-      </button>
+    <!-- período — régua padrão CEVICO -->
+    <div class="mb-4">
+      <PeriodRuler v-model="period" />
     </div>
 
     <SkeletonScreen v-if="isLoading" variant="dashboard" />

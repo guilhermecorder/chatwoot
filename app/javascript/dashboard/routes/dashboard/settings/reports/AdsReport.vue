@@ -7,6 +7,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import CrmAPI from 'dashboard/api/crm';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import { useAlert } from 'dashboard/composables';
 import { Bar, Doughnut } from 'vue-chartjs';
 import {
@@ -21,7 +22,8 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
 
-const period = ref(30);
+// régua padrão CEVICO (06/08): Hoje | Ontem | 7 dias | Este mês | Este ano | Personalizado
+const period = ref({ preset: 'month', from: '', to: '' });
 const data = ref(null);
 const isLoading = ref(false);
 const hasError = ref(false);
@@ -30,13 +32,6 @@ const isSavingStages = ref(false);
 const showStagePicker = ref(false);
 const draftStageIds = ref([]);
 
-const PERIODS = [
-  { value: 7, label: '7 dias' },
-  { value: 30, label: '30 dias' },
-  { value: 90, label: '90 dias' },
-  { value: 180, label: '6 meses' },
-];
-
 const AZUL = '#0F5FA6';
 const ROXO = '#7C3AED';
 const VERDE = '#059669';
@@ -44,18 +39,14 @@ const OURO = '#D4A017';
 const AMBAR = '#D97706';
 const CIANO = '#0E7490';
 
-const sinceDate = computed(() => {
-  const d = new Date();
-  d.setDate(d.getDate() - period.value);
-  return d.toISOString().slice(0, 10);
-});
-
 const load = async () => {
   isLoading.value = true;
   hasError.value = false;
   try {
+    const p = period.value;
     const { data: response } = await CrmAPI.getAdsReport({
-      since: sinceDate.value,
+      preset: p.preset,
+      ...(p.preset === 'custom' ? { from: p.from, to: p.to } : {}),
     });
     data.value = response;
     draftStageIds.value = [...(response.conversion_stage_ids || [])];
@@ -67,7 +58,7 @@ const load = async () => {
 };
 
 onMounted(load);
-watch(period, load);
+watch(period, load, { deep: true });
 
 const rows = computed(() => data.value?.rows ?? []);
 
@@ -300,15 +291,8 @@ const conversionSentence = computed(() => {
               Qual anúncio trouxe cada lead — e qual virou cirurgia. Investimento, custo por lead e retorno real.
             </p>
           </div>
-          <div class="flex items-center gap-1 bg-white/15 rounded-xl p-1 backdrop-blur-sm">
-            <button
-              v-for="p in PERIODS"
-              :key="p.value"
-              class="px-3 py-1.5 text-xs font-bold rounded-lg transition-colors"
-              :class="period === p.value ? 'bg-white text-blue-900 shadow-sm' : 'text-white/85 hover:bg-white/10'"
-              @click="period = p.value"
-            >{{ p.label }}</button>
-          </div>
+          <!-- Período (régua padrão CEVICO) -->
+          <PeriodRuler v-model="period" />
         </div>
         <span class="i-lucide-megaphone absolute -right-4 -bottom-8 text-[130px] text-white/10" />
       </div>

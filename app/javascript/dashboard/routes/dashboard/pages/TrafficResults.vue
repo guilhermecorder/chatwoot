@@ -3,9 +3,10 @@
 // de onde veio cada visita (Google Ads, Google orgânico/SEO, Meta, funil,
 // direto) e o que ela virou — clique no WhatsApp, lead na caixa (via
 // Protocolo), consulta agendada, cirurgia fechada e receita.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
 
@@ -14,13 +15,8 @@ const rows = ref([]);
 const sources = ref({});
 const protocol = ref({ minted: 0, matched: 0 });
 
-// período: pílulas 7/30/90 dias (padrão 30)
-const PERIODS = [
-  { days: 7, label: '7 dias' },
-  { days: 30, label: '30 dias' },
-  { days: 90, label: '90 dias' },
-];
-const periodDays = ref(30);
+// período: régua PADRÃO CEVICO (06/08) — default 'month' (antes: 30 dias)
+const period = ref({ preset: 'month', from: '', to: '' });
 
 // filtro de origem ('' = todas) — visual por pílulas coloridas
 const SOURCE_META = {
@@ -38,10 +34,13 @@ const sourceFilter = ref('');
 const load = async () => {
   isLoading.value = true;
   try {
-    const since = new Date(Date.now() - periodDays.value * 86400000)
-      .toISOString()
-      .slice(0, 10);
-    const { data } = await CrmAPI.getPagesReport({ since });
+    const params = {
+      preset: period.value.preset,
+      ...(period.value.preset === 'custom'
+        ? { from: period.value.from, to: period.value.to }
+        : {}),
+    };
+    const { data } = await CrmAPI.getPagesReport(params);
     rows.value = data.rows || [];
     sources.value = data.sources || {};
     protocol.value = data.protocol || { minted: 0, matched: 0 };
@@ -51,10 +50,7 @@ const load = async () => {
     isLoading.value = false;
   }
 };
-const setPeriod = days => {
-  periodDays.value = days;
-  load();
-};
+watch(period, load, { deep: true });
 
 // linha da página respeitando o filtro de origem
 const rowFor = page => {
@@ -120,19 +116,8 @@ onMounted(load);
         </p>
       </div>
       <div class="flex-1" />
-      <!-- pílulas de período -->
-      <div class="flex items-center gap-1.5">
-        <button
-          v-for="p in PERIODS"
-          :key="p.days"
-          class="px-3 h-8 rounded-full border text-[11px] font-semibold transition-colors"
-          :class="periodDays === p.days ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-          :style="periodDays === p.days ? { background: 'linear-gradient(135deg, #0F5FA6, #1E7FBF)' } : {}"
-          @click="setPeriod(p.days)"
-        >
-          {{ p.label }}
-        </button>
-      </div>
+      <!-- Régua de período padrão CEVICO -->
+      <PeriodRuler v-model="period" />
     </div>
 
     <SkeletonScreen v-if="isLoading" />

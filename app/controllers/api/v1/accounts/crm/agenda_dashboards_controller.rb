@@ -8,6 +8,7 @@
 class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::BaseController
   # LIBERADO PARA A EQUIPE (item 86): dado operacional da agenda, sem
   # valores financeiros — todo o time acompanha comparecimento e ocupação.
+  include Crm::ResolvesPeriod
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
@@ -34,11 +35,20 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
 
 
   def resolve_range
+    # régua padrão CEVICO (06/08) resolve primeiro; presets antigos seguem
+    # abaixo. AGENDA olha para a FRENTE: em "Este mês"/"Este ano" o fim do
+    # período vai até o fim do calendário (a consulta de amanhã conta).
+    if (range = standard_period_range)
+      now = TZ.now
+      since, until_at = range
+      until_at = now.end_of_month if params[:preset] == 'month'
+      until_at = now.end_of_year if params[:preset] == 'year'
+      return [since, until_at]
+    end
+
     now = TZ.now
     case params[:preset]
-    when 'today' then [now.beginning_of_day, now.end_of_day]
     when 'week'  then [now.beginning_of_week.beginning_of_day, now.end_of_week.end_of_day]
-    when 'year'  then [now.beginning_of_year.beginning_of_day, now.end_of_year.end_of_day]
     when 'all'   then [Time.zone.at(0), now.end_of_day]
     when 'last_month' then [now.last_month.beginning_of_month, now.last_month.end_of_month]
     else [now.beginning_of_month.beginning_of_day, now.end_of_month.end_of_day]

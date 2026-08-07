@@ -3,6 +3,7 @@
 # contatos alcançados e série por dia. Fonte: crm_automation_logs.
 class Api::V1::Accounts::Crm::AutomationsDashboardsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  include Crm::ResolvesPeriod
 
   before_action -> { require_capability(:automations) }
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
@@ -73,8 +74,13 @@ class Api::V1::Accounts::Crm::AutomationsDashboardsController < Api::V1::Account
     end
   end
 
-  # mesmos presets do Meu Painel (fuso São Paulo)
+  # régua padrão CEVICO (06/08) via concern; presets antigos (week /
+  # last_month) continuam valendo por compatibilidade
   def preset_range
+    standard_period_range || legacy_range
+  end
+
+  def legacy_range
     now = TZ.now
     case params[:preset]
     when 'yesterday'  then [now.yesterday.beginning_of_day, now.yesterday.end_of_day]

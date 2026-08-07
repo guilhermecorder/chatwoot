@@ -1,20 +1,23 @@
 <script setup>
 // Meu Painel (tela inicial) — visível para admin E atendentes.
-// Boas-vindas, avisos do Radar, indicadores por período (hoje/ontem/semana/
-// mês/mês passado) e a saúde da agenda — com atalhos para agir rápido.
+// Boas-vindas, avisos do Radar, indicadores por período (régua padrão:
+// hoje/ontem/últimos 7/mês/ano/personalizado) e a saúde da agenda —
+// com atalhos para agir rápido.
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
-import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import SkeletonPiece from 'dashboard/components-next/cevico/SkeletonPiece.vue';
 import EmojiFx from 'dashboard/components-next/cevico/EmojiFx.vue';
 import TileAura from 'dashboard/components-next/radar/TileAura.vue';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import ConversationChatModal from 'dashboard/routes/dashboard/crm/components/ConversationChatModal.vue';
+import CustomPanelGrid from 'dashboard/components-next/cevico/CustomPanelGrid.vue';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
+import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
 import {
   DOCTORS, resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, blockKey, scanAgenda,
@@ -33,18 +36,18 @@ const isLoading = ref(true);
 const data = ref(null);
 
 // ── Período ─────────────────────────────────────────────────
-const PERIODS = [
-  { key: 'today', label: 'Hoje' },
-  { key: 'yesterday', label: 'Ontem' },
-  { key: 'week', label: 'Essa semana' },
-  { key: 'month', label: 'Este mês' },
-  { key: 'last_month', label: 'Mês passado' },
-  { key: 'year', label: 'Este ano' },
-];
-const selectedPeriod = ref('today');
+// Régua PADRÃO dos dashboards (PeriodRuler): Hoje/Ontem/Últimos 7 dias/
+// Este mês/Este ano + Personalizado (De/Até). O v-model traz sempre
+// { preset, from, to } — nos presets o backend resolve as datas sozinho.
+const pad2 = n => String(n).padStart(2, '0');
+const hojeStr = (() => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+})();
+const period = ref({ preset: 'today', from: hojeStr, to: hojeStr });
 
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
-const PANELS = [
+const BASE_PANELS = [
   {
     key: 'agendamento', label: 'Agendamento', who: 'Vaneide',
     icon: 'i-lucide-calendar-check', desc: 'do lead ao agendamento',
@@ -72,15 +75,34 @@ const PANELS = [
   },
 ];
 
+// painéis do CONSTRUTOR salvos pela conta viram pílulas junto dos fixos
+// (key 'custom:<id>' — o backend do home já entende esse formato)
+const allPanels = computed(() => [
+  ...BASE_PANELS,
+  ...(crmSettings.value?.custom_panels || []).map(p => ({
+    key: `custom:${p.id}`,
+    label: p.name,
+    who: '',
+    icon: 'i-lucide-magnet',
+    desc: 'painel do Construtor',
+    grad: paletteByKey(p.palette).grads[0],
+    custom: true,
+    panelDef: p,
+  })),
+]);
+
 // painel ATRIBUÍDO pelo admin: o agente fica travado nele
 const assignedPanel = computed(() => {
   if (isAdmin.value) return null;
   const map = crmSettings.value?.panel_assignments || {};
   return map[String(currentUser.value?.id)] || null;
 });
-const visiblePanels = computed(() =>
-  assignedPanel.value ? PANELS.filter(p => p.key === assignedPanel.value) : PANELS
-);
+const visiblePanels = computed(() => {
+  if (!assignedPanel.value) return allPanels.value;
+  const only = allPanels.value.filter(p => p.key === assignedPanel.value);
+  // atribuição órfã (painel custom excluído) libera todos de novo
+  return only.length ? only : allPanels.value;
+});
 
 // ── Admin: quem vê qual painel (engrenagem ao lado das pílulas) ──
 const showAssignModal = ref(false);
@@ -105,22 +127,56 @@ const saveAssignments = async () => {
     isSavingAssign.value = false;
   }
 };
-const selectedPanel = ref(localStorage.getItem('cevico_meu_painel') || 'agendamento');
+// escolha manual NESTE aparelho manda; sem ela, o painel PRINCIPAL da
+// conta (settings.main_panel) assume quando as configurações chegarem
+const storedPanel = localStorage.getItem('cevico_meu_painel');
+const selectedPanel = ref(storedPanel || 'agendamento');
 watch(assignedPanel, key => {
-  if (key && selectedPanel.value !== key) {
+  if (key && selectedPanel.value !== key && allPanels.value.some(p => p.key === key)) {
     selectedPanel.value = key;
     fetchData();
   }
 });
 const selectedDoctor = ref(localStorage.getItem('cevico_meu_painel_medico') || '');
-const currentPanel = computed(() => PANELS.find(p => p.key === selectedPanel.value) || PANELS[0]);
+const currentPanel = computed(
+  () => allPanels.value.find(p => p.key === selectedPanel.value) || BASE_PANELS[0]
+);
+
+// settings chegaram: (1) aplica o painel principal UMA vez — só se a
+// pessoa nunca escolheu manualmente; (2) painel custom excluído cai
+// para o padrão de fábrica
+let mainPanelApplied = false;
+watch(crmSettings, settings => {
+  if (!settings || !Object.keys(settings).length) return;
+  if (!mainPanelApplied) {
+    mainPanelApplied = true;
+    const main = settings.main_panel;
+    if (
+      !storedPanel && !assignedPanel.value && main &&
+      main !== selectedPanel.value && allPanels.value.some(p => p.key === main)
+    ) {
+      selectedPanel.value = main;
+      fetchData();
+    }
+  }
+  if (
+    selectedPanel.value.startsWith('custom:') &&
+    !allPanels.value.some(p => p.key === selectedPanel.value)
+  ) {
+    selectedPanel.value = 'agendamento';
+    fetchData();
+  }
+});
 
 const fetchData = async () => {
   try {
+    const { preset, from, to } = period.value;
     const { data: payload } = await CrmAPI.getHome({
-      preset: selectedPeriod.value,
+      preset,
       panel: selectedPanel.value,
       doctor: selectedPanel.value === 'medico' ? selectedDoctor.value || undefined : undefined,
+      // só o Personalizado manda De/Até; nos presets o backend resolve
+      ...(preset === 'custom' ? { from, to } : {}),
     });
     data.value = payload;
   } catch {
@@ -130,10 +186,8 @@ const fetchData = async () => {
   }
 };
 
-const setPeriod = key => {
-  selectedPeriod.value = key;
-  fetchData();
-};
+// régua nova: qualquer mudança (preset ou De/Até) recarrega o painel
+watch(period, fetchData);
 
 const setPanel = key => {
   selectedPanel.value = key;
@@ -150,6 +204,8 @@ const setDoctor = name => {
 // indicadores de cada painel (mesmo formato de tiles, cores próprias)
 const pd = computed(() => data.value?.panel_data || {});
 const panelTiles = computed(() => {
+  // painel do Construtor tem grade própria (CustomPanelGrid) — sem tiles fixas
+  if (currentPanel.value.custom) return [];
   const d = pd.value;
   if (selectedPanel.value === 'conducao') {
     return [
@@ -1281,18 +1337,9 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Seletor de período -->
-        <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto mb-4">
-          <button
-            v-for="p in PERIODS"
-            :key="p.key"
-            class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-            :class="selectedPeriod === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="selectedPeriod === p.key ? { background: currentPanel.grad } : {}"
-            @click="setPeriod(p.key)"
-          >
-            {{ p.label }}
-          </button>
+        <!-- Régua de período PADRÃO (presets + Personalizado De/Até) -->
+        <div class="mb-4 max-w-full">
+          <PeriodRuler v-model="period" class="max-w-full" />
         </div>
 
         <!-- ✈️ GESTOR: o indicador de decisão — posso viajar ou é ação imediata? -->
@@ -1329,6 +1376,18 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- Painel do CONSTRUTOR (custom:<id>): a grade montada pelo gestor
+             substitui as tiles fixas; o resto da página continua igual -->
+        <CustomPanelGrid
+          v-if="currentPanel.custom"
+          :widgets="currentPanel.panelDef.widgets"
+          :palette="currentPanel.panelDef.palette"
+          :home="data"
+          :goals="goalsData"
+          class="mb-6"
+        />
+
+        <template v-else>
         <!-- Indicadores do período — mudam com o painel escolhido -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <div
@@ -1390,6 +1449,7 @@ onUnmounted(() => {
           </div>
           <p class="text-2xl font-bold text-n-slate-12">{{ panelHighlight.value }}</p>
         </div>
+        </template>
 
         <!-- ⏱ Meta de tempo de atendimento — relatório pessoal (config no
              agente Radar). Atendente vê a própria meta; admin vê o time. -->
@@ -1776,7 +1836,8 @@ onUnmounted(() => {
                 class="h-8 text-xs border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12"
               >
                 <option value="">Livre (todos)</option>
-                <option v-for="p in PANELS" :key="p.key" :value="p.key">
+                <!-- lista também os painéis do Construtor (custom:<id>) -->
+                <option v-for="p in allPanels" :key="p.key" :value="p.key">
                   {{ p.label }}<template v-if="p.who"> · {{ p.who }}</template>
                 </option>
               </select>

@@ -4,9 +4,11 @@
 # na etapa de conversão, ex. Cirurgia).
 class Api::V1::Accounts::Crm::AdsReportsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  include Crm::ResolvesPeriod
   before_action -> { require_capability(:reports) }
 
-  # GET /api/v1/accounts/:account_id/crm/ads_report?since=YYYY-MM-DD&until=YYYY-MM-DD
+  # GET /api/v1/accounts/:account_id/crm/ads_report?preset=month (régua padrão)
+  # ou ?since=YYYY-MM-DD&until=YYYY-MM-DD (legado)
   def show
     meta = Crm::MetaAdsReportService.new(
       account: Current.account,
@@ -38,8 +40,13 @@ class Api::V1::Accounts::Crm::AdsReportsController < Api::V1::Accounts::BaseCont
   private
 
 
+  # régua padrão CEVICO (06/08): preset → datas no formato do MetaAdsReportService
+  def period_dates
+    @period_dates ||= (standard_period_range || []).map(&:to_date)
+  end
+
   def since_date
-    @since_date ||= begin
+    @since_date ||= period_dates.first || begin
       Date.parse(params[:since])
     rescue StandardError
       30.days.ago.to_date
@@ -47,7 +54,7 @@ class Api::V1::Accounts::Crm::AdsReportsController < Api::V1::Accounts::BaseCont
   end
 
   def until_date
-    @until_date ||= begin
+    @until_date ||= period_dates.last || begin
       Date.parse(params[:until])
     rescue StandardError
       Date.current

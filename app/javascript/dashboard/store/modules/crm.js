@@ -188,6 +188,10 @@ const actions = {
     const pipelineId = typeof payload === 'object' ? payload.pipelineId : payload;
     const scope = typeof payload === 'object' ? payload.scope : undefined;
     const days = typeof payload === 'object' ? payload.days : undefined;
+    const dateFrom = typeof payload === 'object' ? payload.dateFrom : undefined;
+    const dateTo = typeof payload === 'object' ? payload.dateTo : undefined;
+    const dateMode = typeof payload === 'object' ? payload.dateMode : undefined;
+    const perStage = typeof payload === 'object' ? payload.perStage : undefined;
     // silent: completa em background sem spinner (board continua usável)
     const silent = typeof payload === 'object' ? payload.silent : false;
     if (!silent) commit('setUIFlag', { isFetchingContacts: true });
@@ -195,6 +199,10 @@ const actions = {
       const params = {};
       if (scope) params.scope = scope;
       if (days) params.days = days;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      if (dateMode) params.date_mode = dateMode;
+      if (perStage) params.per_stage = perStage;
       const { data } = await CrmAPI.getContacts(pipelineId, params);
       // formato novo { payload, meta }; aceita o antigo (array) por segurança
       commit('setContacts', data.payload ?? data);
@@ -202,6 +210,17 @@ const actions = {
     } finally {
       if (!silent) commit('setUIFlag', { isFetchingContacts: false });
     }
+  },
+
+  // Próxima página de UMA coluna (scope=period) — anexa sem substituir o board
+  async fetchMoreStage({ commit }, { pipelineId, stageId, offset, limit, dateFrom, dateTo, dateMode }) {
+    const params = { scope: 'stage_page', stage_id: stageId, offset, limit };
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    if (dateMode) params.date_mode = dateMode;
+    const { data } = await CrmAPI.getContacts(pipelineId, params);
+    commit('appendContacts', data.payload ?? []);
+    return data.meta ?? {};
   },
 
   async addContact({ commit }, { pipelineId, ...contactData }) {
@@ -232,10 +251,15 @@ const actions = {
     return data;
   },
 
-  async fetchDashboard(_, { pipelineId, period, preset, inboxIds }) {
+  async fetchDashboard(_, { pipelineId, period, preset, from, to, inboxIds }) {
     const params = {};
     if (preset) params.preset = preset;
     else if (period) params.period = period;
+    // régua padrão: preset 'custom' viaja com as datas escolhidas
+    if (preset === 'custom' && from && to) {
+      params.from = from;
+      params.to = to;
+    }
     if (inboxIds?.length) params.inbox_ids = inboxIds;
     const { data } = await CrmAPI.getDashboard(pipelineId, params);
     return data;
@@ -311,7 +335,6 @@ const actions = {
     const { data } = await CrmAPI.testMetaAds();
     return data;
   },
-
   async updateGoogleAds({ commit }, params) {
     const { data } = await CrmAPI.updateGoogleAds(params);
     commit('setSettings', { google_ads: data });
@@ -374,6 +397,10 @@ const mutations = {
   setN8nWorkflows(s, workflows) { s.settings.n8n_workflows = workflows; },
   setContacts(s, data) { s.contacts = data; },
   setContactsMeta(s, meta) { s.contactsMeta = meta; },
+  appendContacts(s, list) {
+    const seen = new Set(s.contacts.map(c => c.id));
+    list.forEach(c => { if (!seen.has(c.id)) s.contacts.push(c); });
+  },
   addContact(s, c) { s.contacts.push(c); },
   editContact(s, c) {
     const idx = s.contacts.findIndex(x => x.id === c.id);

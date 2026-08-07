@@ -242,6 +242,16 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { panel_assignments: panelAssignments });
   }
 
+  // painéis do Construtor salvos por CONTA (aparecem no Meu Painel) — admin
+  updateCustomPanels(customPanels) {
+    return axios.post(`${this.url}/settings/update_agenda`, { custom_panels: customPanels });
+  }
+
+  // painel PRINCIPAL da conta (padrão do Meu Painel; '' volta ao de fábrica) — admin
+  updateMainPanel(mainPanel) {
+    return axios.post(`${this.url}/settings/update_agenda`, { main_panel: mainPanel });
+  }
+
   // metas mensais por painel — os cards mudam de cor contra a meta
   updatePanelGoals(panelGoals) {
     return axios.post(`${this.url}/settings/update_agenda`, { panel_goals: panelGoals });
@@ -363,6 +373,15 @@ class CrmAPI extends ApiClient {
 
   applyBatchUpdate(data) {
     return axios.post(`${this.url}/batch_updates/apply`, data);
+  }
+
+  // cirurgias feitas FORA do sistema (lista de telefones → coluna do CRM)
+  previewExternalSurgeries(data) {
+    return axios.post(`${this.url}/external_surgeries/preview`, data);
+  }
+
+  applyExternalSurgeries(data) {
+    return axios.post(`${this.url}/external_surgeries/apply`, data);
   }
 
   previewLabelReplace(data) {
@@ -736,8 +755,8 @@ class CrmAPI extends ApiClient {
   }
 
   // ── Dashboard Google (Ads + GA4) ───────────────────────────────────
-  getGoogleDashboard() {
-    return axios.get(`${this.url}/google_dashboard`);
+  getGoogleDashboard(params = {}) {
+    return axios.get(`${this.url}/google_dashboard`, { params });
   }
 
   // ── Gestão Financeira (só admin) ───────────────────────────────────
@@ -767,8 +786,10 @@ class CrmAPI extends ApiClient {
   }
 
   // ── Dashboard dos agentes de IA (só admin) ──────────────────────────
-  getAiDashboard(preset) {
-    return axios.get(`${this.url}/ai_dashboard`, { params: { preset } });
+  // aceita { preset, from, to } (régua padrão) ou string legada de preset
+  getAiDashboard(params = {}) {
+    const query = typeof params === 'string' ? { preset: params } : params;
+    return axios.get(`${this.url}/ai_dashboard`, { params: query });
   }
 
   // ── Ferramentas da Academia (time lê; admin escreve) ────────────────
