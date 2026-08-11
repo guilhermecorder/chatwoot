@@ -36,7 +36,15 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
     'copywriter' => { name: 'Copywriter', icon: 'i-lucide-pen-tool', color: '#5B21B6',
                       what: 'escreve copies multi-formato com os valores da marca' },
     'pagebuilder' => { name: 'Construtor de Páginas', icon: 'i-lucide-layout-template', color: '#1D4ED8',
-                       what: 'monta páginas públicas inteiras a partir de uma copy pronta' }
+                       what: 'monta páginas públicas inteiras a partir de uma copy pronta' },
+    'harvest' => { name: 'Colheitadeira da Base', icon: 'i-lucide-wheat', color: '#CA8A04',
+                   what: 'pontua a base fria todo mês e reativa os leads mais propensos' },
+    'manager' => { name: 'Gestor Autônomo', icon: 'i-lucide-gauge', color: '#0F5FA6',
+                   what: 'lê o funil todo dia, abre tarefas nos desvios e escreve o briefing' },
+    'auditor' => { name: 'Auditor de Conversas', icon: 'i-lucide-clipboard-check', color: '#0F766E',
+                   what: 'dá nota diária nas conversas contra o script — coaching contínuo por atendente' },
+    'creative' => { name: 'Criativo Perpétuo', icon: 'i-lucide-wand-sparkles', color: '#DB2777',
+                    what: 'toda semana escreve variações dos anúncios e termos que mais viram cirurgia' }
   }.freeze
 
   def show # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity

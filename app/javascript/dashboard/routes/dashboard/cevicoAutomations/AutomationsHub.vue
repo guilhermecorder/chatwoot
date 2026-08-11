@@ -1,11 +1,13 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
+import TemplatesPicker from 'dashboard/components/widgets/conversation/WhatsappTemplates/TemplatesPicker.vue';
+import WhatsAppTemplateParser from 'dashboard/components-next/whatsapp/WhatsAppTemplateParser.vue';
 import FollowupBotModal from 'dashboard/routes/dashboard/crm/components/FollowupBotModal.vue';
 import DataTreatmentTools from 'dashboard/routes/dashboard/crm/components/DataTreatmentTools.vue';
 import AiAgentsDashboard from './AiAgentsDashboard.vue';
@@ -19,6 +21,10 @@ const { accountId } = useAccount();
 const { isAdmin } = useAdmin();
 
 const inboxes = useMapGetter('inboxes/getInboxes');
+// caixas de WhatsApp (Colheitadeira envia por uma delas)
+const whatsappInboxes = computed(() =>
+  inboxes.value.filter(i => i.channel_type === 'Channel::Whatsapp')
+);
 const settings = useMapGetter('crm/getSettings');
 const accountLabels = useMapGetter('labels/getLabels');
 const teamAgents = useMapGetter('agents/getAgents');
@@ -79,6 +85,10 @@ const aiAgents = ref({
   instagram: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', inbox_ids: [] },
   copywriter: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', references: '' },
   pagebuilder: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', references: '', max_tokens: '' },
+  harvest: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', mode: 'organize', monthly_size: '', cold_days: '', daily_cap: '', day_of_month: '', inbox_id: null, require_approval: true, message_preview: '', template_params: null, stage_ids: [] },
+  manager: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', drop_pct: '' },
+  auditor: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', daily_cap: '' },
+  creative: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', winners_count: '', variations_count: '' },
 });
 
 const LOOKBACK_OPTIONS = [
@@ -225,6 +235,398 @@ const generateSalesInsights = async () => {
   }
 };
 
+// ── 🌾 OPERAÇÃO DA COLHEITA (Colheitadeira da Base) ──
+// A prévia é gerada em segundo plano (~1-2 min) — a tela avisa e fica
+// repollando o status a cada 15s até a lista ficar pronta.
+const harvest = ref(null); // estado da colheita do mês (GET harvest_status)
+const harvestActing = ref(''); // qual botão está trabalhando agora
+const harvestGenerating = ref(false);
+const showHarvestTable = ref(false);
+let harvestPollTimer = null;
+let harvestPollTicks = 0;
+
+const loadHarvestStatus = async () => {
+  try {
+    const { data } = await CrmAPI.getHarvestStatus();
+    harvest.value = data;
+  } catch {
+    // silencioso — o card mostra "sem colheita ainda"
+  }
+};
+
+const stopHarvestPolling = () => {
+  clearInterval(harvestPollTimer);
+  harvestPollTimer = null;
+};
+
+const startHarvestPolling = (baseGeneratedAt, baseError) => {
+  stopHarvestPolling();
+  harvestPollTicks = 0;
+  harvestPollTimer = setInterval(async () => {
+    harvestPollTicks += 1;
+    await loadHarvestStatus();
+    const h = harvest.value;
+    const ready =
+      h?.status === 'preview' && h?.generated_at && h.generated_at !== baseGeneratedAt;
+    const failed = h?.last_error && h.last_error !== baseError;
+    if (ready || failed || harvestPollTicks > 24) {
+      harvestGenerating.value = false;
+      stopHarvestPolling();
+      if (ready) {
+        showHarvestTable.value = true;
+        useAlert('🌾 Prévia da colheita pronta — revise a lista e aprove quando quiser.');
+      } else if (failed) {
+        useAlert(`⚠️ A prévia não saiu: ${h.last_error}`);
+      }
+    }
+  }, 15000);
+};
+
+const runHarvestPreview = async () => {
+  if (harvestActing.value || harvestGenerating.value) return;
+  harvestActing.value = 'preview';
+  const baseGeneratedAt = harvest.value?.generated_at || null;
+  const baseError = harvest.value?.last_error || null;
+  try {
+    await CrmAPI.harvestPreview();
+    harvestGenerating.value = true;
+    useAlert('🌾 Gerando a prévia — leva uns 2 minutos, a lista aparece aqui sozinha.');
+    startHarvestPolling(baseGeneratedAt, baseError);
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao gerar a prévia da colheita.');
+  } finally {
+    harvestActing.value = '';
+  }
+};
+
+const refreshHarvestPreview = async () => {
+  if (harvestActing.value) return;
+  harvestActing.value = 'refresh';
+  await loadHarvestStatus();
+  showHarvestTable.value = true;
+  harvestActing.value = '';
+};
+
+// ação simples da colheita: aprovar / pausar / retomar / enviar lote
+const harvestAction = async (name, fn, okMessage) => {
+  if (harvestActing.value) return;
+  harvestActing.value = name;
+  try {
+    const { data } = await fn();
+    if (data?.error) {
+      useAlert(`⚠️ ${data.error}`);
+    } else {
+      useAlert(okMessage);
+      await loadHarvestStatus();
+    }
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro na operação da colheita.');
+  } finally {
+    harvestActing.value = '';
+  }
+};
+
+const approveHarvest = () =>
+  harvestAction(
+    'approve',
+    () => CrmAPI.harvestApprove(),
+    aiAgents.value.harvest.mode === 'send'
+      ? '✅ Colheita aprovada — os envios começam aos poucos, dentro do teto diário.'
+      : '✅ Colheita aprovada — a IA etiqueta os leads escolhidos; filtre pela etiqueta no CRM.'
+  );
+const pauseHarvest = () =>
+  harvestAction('pause', () => CrmAPI.harvestPause(), '⏸ Colheita pausada — nada sai até você retomar.');
+const resumeHarvest = () =>
+  harvestAction('resume', () => CrmAPI.harvestResume(), '▶️ Colheita retomada — os envios continuam de onde pararam.');
+const harvestSendNow = () =>
+  harvestAction('send_now', () => CrmAPI.harvestSendNow(), '📤 Lote de hoje disparado — os envios saem em alguns minutos.');
+
+const skipHarvestLead = async lead => {
+  try {
+    await CrmAPI.harvestSkipLead(lead.contact_id);
+    lead.skipped = true;
+    const st = harvest.value?.stats;
+    if (st) {
+      st.skipped = (st.skipped || 0) + 1;
+      st.pending = Math.max(0, (st.pending || 0) - 1);
+    }
+    useAlert(`${lead.name || 'Lead'} pulado — não recebe a mensagem desta colheita.`);
+  } catch {
+    useAlert('Erro ao pular o lead.');
+  }
+};
+
+// status do mês em linguagem humana
+const HARVEST_STATUS_INFO = {
+  preview: { label: 'Prévia pronta — revise a lista e aprove para começar', class: 'bg-amber-500/15 text-amber-600' },
+  approved: { label: 'Aprovada — enviando aos poucos, dentro do teto diário', class: 'bg-green-500/15 text-green-600' },
+  paused: { label: 'Pausada — nada sai até você retomar', class: 'bg-n-alpha-2 text-n-slate-10' },
+  done: { label: 'Concluída — colheita do mês encerrada 🎉', class: 'bg-sky-500/15 text-sky-600' },
+};
+const harvestStatusInfo = () =>
+  HARVEST_STATUS_INFO[harvest.value?.status] || {
+    label: 'Nenhuma colheita neste mês ainda — gere a prévia quando quiser.',
+    class: 'bg-n-alpha-2 text-n-slate-11',
+  };
+const harvestMonthLabel = () => {
+  const mk = harvest.value?.month_key;
+  if (!mk) return '';
+  return new Date(`${mk}-01T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+};
+// modo organize: quantos leads já ganharam a etiqueta oportunidade_AAAA_MM
+const harvestOrganizedCount = () =>
+  harvest.value?.organized_count ??
+  harvest.value?.stats?.organized ??
+  harvest.value?.stats?.sent ??
+  0;
+const fmtBrl = v => (v ? `R$ ${Number(v).toLocaleString('pt-BR')}` : '—');
+// pílula do score: verde ≥70, âmbar ≥40, cinza <40
+const scoreClass = score => {
+  if (Number(score) >= 70) return 'bg-green-500/15 text-green-600';
+  if (Number(score) >= 40) return 'bg-amber-500/15 text-amber-600';
+  return 'bg-n-alpha-2 text-n-slate-10';
+};
+
+// escolher a mensagem modelo da colheita (mesmo fluxo do robô de follow-up)
+const showHarvestTemplatePicker = ref(false);
+const harvestPickerTemplate = ref(null);
+const harvestPickerInboxId = computed(
+  () => aiAgents.value.harvest.inbox_id ?? whatsappInboxes.value[0]?.id
+);
+const openHarvestTemplatePicker = () => {
+  harvestPickerTemplate.value = null;
+  showHarvestTemplatePicker.value = true;
+};
+const closeHarvestTemplatePicker = () => {
+  showHarvestTemplatePicker.value = false;
+  harvestPickerTemplate.value = null;
+};
+const useHarvestTemplate = payload => {
+  aiAgents.value.harvest.template_params = payload.templateParams;
+  aiAgents.value.harvest.message_preview = payload.message;
+  closeHarvestTemplatePicker();
+};
+
+// ── 📊 Gestor Autônomo: estado + rodar agora ──
+const managerState = () => settings.value?.ai?.manager_state || null;
+// chip do desvio: "Taxa de comparecimento −38%"
+const managerFindingLabel = f =>
+  `${f.label || f.indicator} ${Number(f.deviation_pct) < 0 ? '−' : '+'}${Math.abs(Math.round(f.deviation_pct || 0))}%`;
+const isRunningManager = ref(false);
+const runManagerNow = async () => {
+  if (isRunningManager.value) return;
+  isRunningManager.value = true;
+  try {
+    const { data } = await CrmAPI.runManager();
+    useAlert(data.message || '📊 Gestor rodando! O briefing aparece aqui em ~30 segundos.');
+    setTimeout(async () => {
+      await store.dispatch('crm/fetchSettings');
+      isRunningManager.value = false;
+    }, 30000);
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao rodar o Gestor.');
+    isRunningManager.value = false;
+  }
+};
+
+// ── 🎓 Auditor de Conversas: qualidade do time ──
+// O resumo (ranking + falhas) é carregado LAZY: só quando o card expande
+// pela primeira vez. "Auditar agora" re-audita ontem em segundo plano
+// (~1-2 min) — a tela repolla o resumo a cada 20s por até 5 minutos.
+const auditorSummary = ref(null);
+const auditorDays = ref(7);
+const loadingAuditorSummary = ref(false);
+const isRunningAuditor = ref(false);
+let auditorPollTimer = null;
+let auditorPollTicks = 0;
+
+// último dia auditado (vem no GET settings, bloco auditor_last)
+const auditorLast = () => settings.value?.ai?.auditor_last || null;
+
+const loadAuditorSummary = async () => {
+  loadingAuditorSummary.value = true;
+  try {
+    const { data } = await CrmAPI.getAuditorSummary(auditorDays.value);
+    auditorSummary.value = data;
+  } catch {
+    // silencioso — a seção mostra "nenhuma auditoria ainda"
+  } finally {
+    loadingAuditorSummary.value = false;
+  }
+};
+
+const stopAuditorPolling = () => {
+  clearInterval(auditorPollTimer);
+  auditorPollTimer = null;
+};
+
+const runAuditorNow = async () => {
+  if (isRunningAuditor.value) return;
+  isRunningAuditor.value = true;
+  const baseRunAt = auditorSummary.value?.last_run_at || null;
+  try {
+    await CrmAPI.runAuditor();
+    useAlert('🎓 Auditando as conversas de ontem — leva ~2 minutos, o ranking atualiza aqui sozinho.');
+    stopAuditorPolling();
+    auditorPollTicks = 0;
+    auditorPollTimer = setInterval(async () => {
+      auditorPollTicks += 1;
+      await loadAuditorSummary();
+      const done =
+        auditorSummary.value?.last_run_at &&
+        auditorSummary.value.last_run_at !== baseRunAt;
+      if (done || auditorPollTicks >= 15) {
+        stopAuditorPolling();
+        isRunningAuditor.value = false;
+        if (done) {
+          useAlert('🎓 Auditoria concluída — ranking atualizado.');
+          // atualiza o "último dia auditado" (auditor_last vem do settings)
+          store.dispatch('crm/fetchSettings').catch(() => {});
+        }
+      }
+    }, 20000);
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao iniciar a auditoria.');
+    isRunningAuditor.value = false;
+  }
+};
+
+const setAuditorDays = d => {
+  if (auditorDays.value === d) return;
+  auditorDays.value = d;
+  loadAuditorSummary();
+};
+
+// pílula da média: verde ≥8, âmbar ≥6, vermelho <6 (uma casa decimal)
+const auditorAvgClass = avg => {
+  if (Number(avg) >= 8) return 'bg-green-500/15 text-green-600';
+  if (Number(avg) >= 6) return 'bg-amber-500/15 text-amber-600';
+  return 'bg-red-500/10 text-red-500';
+};
+const fmtAvg = avg => Number(avg || 0).toFixed(1).replace('.', ',');
+// "Atendente 0" = conversas sem atendente humano (robô/fluxo)
+const auditorRowName = row =>
+  row.user_id === 0 || row.name === 'Atendente 0'
+    ? 'Sem atendente (robô/fluxo)'
+    : row.name;
+
+// ── 🎨 Criativo Perpétuo: criativos da semana ──
+// O estado (vencedores + variações + despensa) é carregado LAZY: só quando
+// o card expande pela primeira vez. "Gerar agora" roda em segundo plano
+// (~1-2 min) — a tela repolla o estado a cada 20s por até 5 minutos.
+const creativeState = ref(null);
+const loadingCreative = ref(false);
+const isRunningCreative = ref(false);
+const reviewingCreative = ref('');
+let creativePollTimer = null;
+let creativePollTicks = 0;
+
+// resumo da última geração (vem no GET settings, bloco creative_last)
+const creativeLast = () => settings.value?.ai?.creative_last || null;
+
+const loadCreativeState = async () => {
+  loadingCreative.value = true;
+  try {
+    const { data } = await CrmAPI.getCreativeState();
+    creativeState.value = data;
+  } catch {
+    // silencioso — a seção mostra "nenhum criativo ainda"
+  } finally {
+    loadingCreative.value = false;
+  }
+};
+
+const stopCreativePolling = () => {
+  clearInterval(creativePollTimer);
+  creativePollTimer = null;
+};
+
+const runCreativeNow = async () => {
+  if (isRunningCreative.value) return;
+  isRunningCreative.value = true;
+  const baseGeneratedAt = creativeState.value?.generated_at || null;
+  try {
+    await CrmAPI.runCreative();
+    useAlert('🎨 Gerando os criativos da semana — leva ~2 minutos, eles aparecem aqui sozinhos.');
+    stopCreativePolling();
+    creativePollTicks = 0;
+    creativePollTimer = setInterval(async () => {
+      creativePollTicks += 1;
+      await loadCreativeState();
+      const done =
+        creativeState.value?.generated_at &&
+        creativeState.value.generated_at !== baseGeneratedAt;
+      if (done || creativePollTicks >= 15) {
+        stopCreativePolling();
+        isRunningCreative.value = false;
+        if (done) {
+          useAlert('🎨 Criativos da semana prontos — revise e aprove os que quiser usar.');
+          // atualiza o resumo do topo (creative_last vem do settings)
+          store.dispatch('crm/fetchSettings').catch(() => {});
+        }
+      }
+    }, 20000);
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao gerar os criativos.');
+    isRunningCreative.value = false;
+  }
+};
+
+// aprovar/recusar UMA variação — atualiza o estado local com a resposta
+const reviewCreativeVariation = async (wi, vi, status) => {
+  if (reviewingCreative.value) return;
+  reviewingCreative.value = `${wi}-${vi}`;
+  try {
+    const { data } = await CrmAPI.reviewCreative(wi, vi, status);
+    if (data?.error) {
+      useAlert(`⚠️ ${data.error}`);
+    } else {
+      const variation = creativeState.value?.winners?.[wi]?.variations?.[vi];
+      if (variation) {
+        variation.status = data?.status || status;
+        // aprovada entra na despensa na hora (o servidor grava no approved_log)
+        if (variation.status === 'approved' && creativeState.value) {
+          creativeState.value.approved_log = [
+            ...(creativeState.value.approved_log || []),
+            {
+              week_key: creativeState.value.week_key,
+              source: creativeState.value.winners[wi]?.name,
+              kind: creativeState.value.winners[wi]?.kind,
+              gancho: variation.gancho,
+              texto: variation.texto,
+              cta: variation.cta,
+              approved_at: new Date().toISOString(),
+            },
+          ];
+        }
+      }
+      useAlert(
+        status === 'approved'
+          ? '✓ Variação aprovada — guardada na despensa do Estúdio Criativo.'
+          : 'Variação recusada — ela fica esmaecida e fora da despensa.'
+      );
+    }
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao registrar a revisão.');
+  } finally {
+    reviewingCreative.value = '';
+  }
+};
+
+// copiar a variação pronta (gancho + texto + CTA) p/ o Gerenciador/Estúdio
+const copyCreativeVariation = async v => {
+  await navigator.clipboard.writeText([v.gancho, '', v.texto, '', v.cta].filter(Boolean).join('\n'));
+  useAlert('Criativo copiado! 📋 Cole no Gerenciador de Anúncios ou no Estúdio.');
+};
+
+// semana em dd/mm (week_key vem como data da segunda-feira)
+const fmtWeekKey = wk => {
+  if (!wk) return '';
+  const d = new Date(`${wk}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return wk;
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+};
+
 // registro de atividade do Secretário (últimas leituras — entender os números)
 const schedulerLog = () => settings.value?.scheduler_log || [];
 const showSchedulerLog = ref(false);
@@ -358,7 +760,16 @@ const saveBuilderPro = async () => {
 // (são muitos agentes — assim dá para navegar pela página com controle)
 const expandedAgents = ref({});
 const toggleAgentExpand = key => {
-  expandedAgents.value = { ...expandedAgents.value, [key]: !expandedAgents.value[key] };
+  const next = !expandedAgents.value[key];
+  expandedAgents.value = { ...expandedAgents.value, [key]: next };
+  // 🎓 Auditor: carrega o resumo de qualidade ao expandir pela 1ª vez (lazy)
+  if (key === 'auditor' && next && !auditorSummary.value && !loadingAuditorSummary.value) {
+    loadAuditorSummary();
+  }
+  // 🎨 Criativo: carrega os criativos da semana ao expandir pela 1ª vez (lazy)
+  if (key === 'creative' && next && !creativeState.value && !loadingCreative.value) {
+    loadCreativeState();
+  }
 };
 
 // RASCUNHO que NÃO muda o agente no ar; Publicar é o que passa a valer.
@@ -379,6 +790,24 @@ const snapshotAgent = key => {
   if (key === 'comments') {
     snap.fb_page_id = a.fb_page_id;
     snap.ig_user_id = a.ig_user_id;
+  }
+  if (key === 'harvest') {
+    snap.mode = a.mode;
+    snap.monthly_size = a.monthly_size;
+    snap.cold_days = a.cold_days;
+    snap.daily_cap = a.daily_cap;
+    snap.day_of_month = a.day_of_month;
+    snap.inbox_id = a.inbox_id;
+    snap.require_approval = a.require_approval;
+    snap.message_preview = a.message_preview;
+    snap.template_params = a.template_params ? JSON.parse(JSON.stringify(a.template_params)) : null;
+    snap.stage_ids = [...(a.stage_ids || [])];
+  }
+  if (key === 'manager') snap.drop_pct = a.drop_pct;
+  if (key === 'auditor') snap.daily_cap = a.daily_cap;
+  if (key === 'creative') {
+    snap.winners_count = a.winners_count;
+    snap.variations_count = a.variations_count;
   }
   return snap;
 };
@@ -405,6 +834,24 @@ const discardEdit = key => {
       a.fb_page_id = snap.fb_page_id;
       a.ig_user_id = snap.ig_user_id;
       a.page_access_token = '';
+    }
+    if (key === 'harvest') {
+      a.mode = snap.mode || 'organize';
+      a.monthly_size = snap.monthly_size;
+      a.cold_days = snap.cold_days;
+      a.daily_cap = snap.daily_cap;
+      a.day_of_month = snap.day_of_month;
+      a.inbox_id = snap.inbox_id;
+      a.require_approval = snap.require_approval;
+      a.message_preview = snap.message_preview;
+      a.template_params = snap.template_params ? JSON.parse(JSON.stringify(snap.template_params)) : null;
+      a.stage_ids = [...(snap.stage_ids || [])];
+    }
+    if (key === 'manager') a.drop_pct = snap.drop_pct;
+    if (key === 'auditor') a.daily_cap = snap.daily_cap;
+    if (key === 'creative') {
+      a.winners_count = snap.winners_count;
+      a.variations_count = snap.variations_count;
     }
   }
   editingAgent.value = { ...editingAgent.value, [key]: false };
@@ -433,6 +880,28 @@ const packAgentFields = key => {
     fields.ig_user_id = (a.ig_user_id || '').trim();
     // token só viaja quando digitado (nunca volta preenchido do servidor)
     if ((a.page_access_token || '').trim()) fields.page_access_token = a.page_access_token.trim();
+  }
+  if (key === 'harvest') {
+    fields.mode = a.mode === 'send' ? 'send' : 'organize';
+    fields.monthly_size = Number(a.monthly_size) || 300;
+    fields.cold_days = Number(a.cold_days) || 60;
+    fields.daily_cap = Number(a.daily_cap) || 50;
+    fields.day_of_month = Math.min(28, Math.max(1, Number(a.day_of_month) || 1));
+    fields.inbox_id = a.inbox_id || null;
+    fields.require_approval = a.require_approval !== false;
+    fields.message_preview = a.message_preview || '';
+    fields.template_params = a.template_params || null;
+    fields.stage_ids = (a.stage_ids || []).map(Number);
+  }
+  if (key === 'manager') {
+    fields.drop_pct = Number(a.drop_pct) || 25;
+  }
+  if (key === 'auditor') {
+    fields.daily_cap = Number(a.daily_cap) || 150;
+  }
+  if (key === 'creative') {
+    fields.winners_count = Number(a.winners_count) || 3;
+    fields.variations_count = Number(a.variations_count) || 3;
   }
   return fields;
 };
@@ -681,7 +1150,91 @@ const AGENT_META = {
     ],
     suggestion: 'Feedback humano e fino, 1x por semana — Sonnet no esforço alto.',
   },
+  harvest: {
+    title: 'Colheitadeira da Base',
+    icon: 'i-lucide-wheat',
+    gradient: 'linear-gradient(135deg, #CA8A04, #FACC15)',
+    color: '#CA8A04',
+    tag: 'Reativação',
+    description: 'Pontua a base fria todo mês e reativa os leads mais propensos, um a um, com aprovação sua. A IA escreve um gancho pessoal para cada paciente e os envios saem aos poucos, dentro do teto diário — anti-bloqueio.',
+    triggers: [
+      { icon: 'i-lucide-calendar-clock', label: 'Todo mês, no dia escolhido, gera a prévia da colheita' },
+      { icon: 'i-lucide-list-checks', label: 'Você revisa a lista e aprova antes de qualquer envio' },
+      { icon: 'i-lucide-message-circle', label: 'Envia pelo WhatsApp com gancho pessoal por lead' },
+      { icon: 'i-lucide-shield', label: 'Teto de envios por dia — menos é mais seguro' },
+    ],
+    suggestion: 'Pontuar a base e escrever ganchos — Sonnet no esforço médio equilibra bem.',
+  },
+  manager: {
+    title: 'Gestor Autônomo',
+    icon: 'i-lucide-gauge',
+    gradient: 'linear-gradient(135deg, #0F5FA6, #3B82F6)',
+    color: '#0F5FA6',
+    tag: 'Gestão',
+    description: 'Lê o funil todos os dias contra a média de 12 semanas, abre tarefas nos desvios e escreve o briefing do dia. Você abre o Meu Painel e já sabe onde o processo está vazando — sem planilha.',
+    triggers: [
+      { icon: 'i-lucide-clock', label: 'Roda todos os dias, sozinho, de manhã' },
+      { icon: 'i-lucide-trending-down', label: 'Compara cada indicador com a média de 12 semanas' },
+      { icon: 'i-lucide-list-checks', label: 'Desvio encontrado → abre tarefa para o time agir' },
+      { icon: 'i-lucide-house', label: 'Briefing do dia no Meu Painel (admin)' },
+    ],
+    suggestion: 'Leitura fina de números todo dia — Sonnet no esforço alto escreve o melhor briefing.',
+  },
+  auditor: {
+    title: 'Auditor de Conversas',
+    icon: 'i-lucide-clipboard-check',
+    gradient: 'linear-gradient(135deg, #0F766E, #2DD4BF)',
+    color: '#0F766E',
+    tag: 'Evolução do time',
+    description: 'Dá nota 0-10 nas conversas de ontem contra o script — coaching contínuo por atendente. Todo dia audita o atendimento da véspera e monta o ranking do time com as falhas mais comuns.',
+    triggers: [
+      { icon: 'i-lucide-clock', label: 'Roda todo dia, sozinho, auditando as conversas de ontem' },
+      { icon: 'i-lucide-list-checks', label: 'Nota 0-10 por conversa contra o script da clínica' },
+      { icon: 'i-lucide-trophy', label: 'Ranking por atendente + falhas mais comuns do time' },
+      { icon: 'i-lucide-shield', label: 'Nunca fala com o paciente — só lê e avalia' },
+    ],
+    suggestion: 'Avaliar contra o script é leitura fina — Sonnet no esforço médio equilibra qualidade e custo.',
+  },
+  creative: {
+    title: 'Criativo Perpétuo',
+    icon: 'i-lucide-wand-sparkles',
+    gradient: 'linear-gradient(135deg, #9D174D, #DB2777)',
+    color: '#DB2777',
+    tag: 'Marketing',
+    description: 'Toda semana encontra os termos do Google e os anúncios do Meta que mais viraram cirurgia — na jornada real do banco — e escreve variações de copy prontas para os próximos anúncios. Você só aprova; as aprovadas ficam guardadas para o Estúdio Criativo.',
+    triggers: [
+      { icon: 'i-lucide-calendar-clock', label: 'Toda segunda 08:30 gera as variações da semana' },
+      { icon: 'i-lucide-trophy', label: 'Vencedores reais: o que mais virou consulta e cirurgia (90 dias)' },
+      { icon: 'i-lucide-list-checks', label: 'Você aprova ou recusa cada variação — nada vai ao ar sozinho' },
+      { icon: 'i-lucide-copy', label: 'Aprovou? Copia e cola no Gerenciador de Anúncios / Estúdio' },
+    ],
+    suggestion: 'Copy é fino — Sonnet no esforço alto escreve as melhores variações.',
+  },
 };
+
+// ── Seções da aba "agentes": os 16 agentes agrupados por área ──
+// (são muitos — o agrupamento dá o mapa; card/sanfona continuam os mesmos)
+const AGENT_GROUPS = [
+  { title: 'Atendimento ao paciente', icon: '🗣️', keys: ['conversation', 'scheduler', 'instagram', 'comments', 'nps'] },
+  { title: 'Vendas e fechamento', icon: '💰', keys: ['sales', 'closing', 'opportunity', 'form'] },
+  { title: 'Marketing e aquisição', icon: '📣', keys: ['copywriter', 'pagebuilder', 'creative', 'harvest'] },
+  { title: 'Gestão e evolução do time', icon: '📈', keys: ['manager', 'auditor', 'mentor'] },
+];
+// agente novo que ainda não entrou em nenhum grupo cai em "Outros" (à prova
+// de futuro — nada some da tela)
+const agentGroups = computed(() => {
+  const known = AGENT_GROUPS.flatMap(g => g.keys);
+  const groups = AGENT_GROUPS.map(g => ({
+    ...g,
+    keys: g.keys.filter(k => aiAgents.value[k]),
+  }));
+  const leftovers = Object.keys(aiAgents.value).filter(k => !known.includes(k));
+  if (leftovers.length) groups.push({ title: 'Outros', icon: '🧩', keys: leftovers });
+  return groups.filter(g => g.keys.length);
+});
+// mesmo formato do v-for original — (agent, key) — só que restrito ao grupo
+const groupAgents = group =>
+  Object.fromEntries(group.keys.map(k => [k, aiAgents.value[k]]));
 
 // opções de modelo/esforço por agente ('' = usa o RECOMENDADO do agente)
 const AGENT_MODELS = [
@@ -766,6 +1319,10 @@ const loadAgents = async () => {
     lookback_hours: a.opportunity?.lookback_hours || 24,
   }));
   const oppDraft = a.opportunity?.draft || null;
+  const harvestDraft = a.harvest?.draft || null;
+  const managerDraft = a.manager?.draft || null;
+  const auditorDraft = a.auditor?.draft || null;
+  const creativeDraft = a.creative?.draft || null;
   aiAgents.value = {
     conversation: load('conversation'),
     form: load('form'),
@@ -799,6 +1356,33 @@ const loadAgents = async () => {
       ig_user_id: a.comments?.ig_user_id || '',
       page_token_set: a.comments?.page_token_set === true,
     },
+    harvest: {
+      ...load('harvest'),
+      // null/vazio = organize (novo padrão): a IA etiqueta em vez de enviar
+      mode: (harvestDraft?.mode ?? a.harvest?.mode) || 'organize',
+      monthly_size: (harvestDraft?.monthly_size ?? a.harvest?.monthly_size) ?? '',
+      cold_days: (harvestDraft?.cold_days ?? a.harvest?.cold_days) ?? '',
+      daily_cap: (harvestDraft?.daily_cap ?? a.harvest?.daily_cap) ?? '',
+      day_of_month: (harvestDraft?.day_of_month ?? a.harvest?.day_of_month) ?? '',
+      inbox_id: (harvestDraft?.inbox_id ?? a.harvest?.inbox_id) ?? null,
+      require_approval: (harvestDraft?.require_approval ?? a.harvest?.require_approval) !== false,
+      message_preview: (harvestDraft?.message_preview ?? a.harvest?.message_preview) || '',
+      template_params: (harvestDraft?.template_params ?? a.harvest?.template_params) || null,
+      stage_ids: [...((harvestDraft?.stage_ids ?? a.harvest?.stage_ids) || [])],
+    },
+    manager: {
+      ...load('manager'),
+      drop_pct: (managerDraft?.drop_pct ?? a.manager?.drop_pct) ?? '',
+    },
+    auditor: {
+      ...load('auditor'),
+      daily_cap: (auditorDraft?.daily_cap ?? a.auditor?.daily_cap) ?? '',
+    },
+    creative: {
+      ...load('creative'),
+      winners_count: (creativeDraft?.winners_count ?? a.creative?.winners_count) ?? '',
+      variations_count: (creativeDraft?.variations_count ?? a.creative?.variations_count) ?? '',
+    },
   };
   Object.keys(aiAgents.value).forEach(key => {
     loadedValues.value[key] = snapshotAgent(key);
@@ -808,8 +1392,9 @@ const loadAgents = async () => {
   STAGE_AGENTS.forEach(a => {
     agentStageIds.value[a] = [...(saved[a] || [])];
   });
-  // relatório de gastos + colunas para o Radar (em paralelo)
+  // relatório de gastos + colunas para o Radar + colheita do mês (em paralelo)
   loadStages().catch(() => {});
+  loadHarvestStatus();
   CrmAPI.getAiUsage()
     .then(({ data }) => { aiUsage.value = data; })
     .catch(() => {});
@@ -1076,6 +1661,14 @@ onMounted(async () => {
   await loadAgents();
   aiConfigured.value = !!settings.value?.ai?.configured;
   loadColumnAutomations();
+});
+
+// não deixa repoll nenhum rodando depois de sair da tela
+// (colheita + auditor + criativo)
+onUnmounted(() => {
+  stopHarvestPolling();
+  stopAuditorPolling();
+  stopCreativePolling();
 });
 </script>
 
@@ -1357,8 +1950,15 @@ onMounted(async () => {
           <p v-else class="text-xs text-n-slate-10">Nenhuma análise registrada ainda — os custos aparecem aqui conforme os agentes rodarem.</p>
         </div>
 
+        <template v-for="group in agentGroups" :key="group.title">
+        <!-- Cabeçalho da seção (mesmo padrão dos cabeçalhos do hub) -->
+        <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5 pt-1">
+          <span class="text-sm">{{ group.icon }}</span>
+          {{ group.title }}
+          <span class="text-n-slate-9 font-normal normal-case">({{ group.keys.length }})</span>
+        </p>
         <div
-          v-for="(agent, key) in aiAgents"
+          v-for="(agent, key) in groupAgents(group)"
           :key="key"
           class="rounded-2xl border-2 bg-n-solid-2 overflow-hidden"
           :style="{ borderColor: AGENT_META[key].color + '40' }"
@@ -2074,6 +2674,654 @@ onMounted(async () => {
               </div>
             </div>
 
+            <!-- 🌾 Config da Colheitadeira da Base -->
+            <div v-if="key === 'harvest'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <div class="rounded-lg px-3 py-2 text-[11px] text-white" :style="{ background: AGENT_META.harvest.gradient }">
+                🌾 Todo mês ele pontua a base fria, escolhe os leads mais propensos e manda a
+                mensagem modelo com um <b>gancho pessoal</b> escrito pela IA — um a um, dentro do
+                teto diário. Com a caixinha marcada, <b>nada sai sem a sua aprovação</b>.
+              </div>
+
+              <!-- Modo de trabalho: organizar (etiqueta no CRM) × enviar (mensagem) -->
+              <div>
+                <p class="text-xs font-medium text-n-slate-11 mb-1.5">O que ele faz com os leads aprovados</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup">
+                  <button
+                    role="radio"
+                    :aria-checked="agent.mode !== 'send'"
+                    class="text-left rounded-xl border-2 p-3 transition-colors disabled:cursor-not-allowed"
+                    :class="agent.mode !== 'send' ? '' : 'border-n-weak hover:bg-n-alpha-1'"
+                    :style="agent.mode !== 'send' ? { borderColor: AGENT_META.harvest.color, background: AGENT_META.harvest.color + '14' } : {}"
+                    :disabled="!editingAgent[key]"
+                    @click="agent.mode = 'organize'"
+                  >
+                    <p class="text-xs font-bold text-n-slate-12">
+                      🗂️ Organizar oportunidades <span class="font-normal text-n-slate-9">(recomendado)</span>
+                    </p>
+                    <p class="text-[11px] text-n-slate-10 mt-0.5 leading-relaxed">
+                      a IA escolhe e etiqueta os melhores leads frios como oportunidade_AAAA_MM —
+                      nenhuma mensagem sai; o time trabalha a lista no CRM filtrando pela etiqueta
+                    </p>
+                  </button>
+                  <button
+                    role="radio"
+                    :aria-checked="agent.mode === 'send'"
+                    class="text-left rounded-xl border-2 p-3 transition-colors disabled:cursor-not-allowed"
+                    :class="agent.mode === 'send' ? '' : 'border-n-weak hover:bg-n-alpha-1'"
+                    :style="agent.mode === 'send' ? { borderColor: AGENT_META.harvest.color, background: AGENT_META.harvest.color + '14' } : {}"
+                    :disabled="!editingAgent[key]"
+                    @click="agent.mode = 'send'"
+                  >
+                    <p class="text-xs font-bold text-n-slate-12">📤 Enviar mensagem modelo</p>
+                    <p class="text-[11px] text-n-slate-10 mt-0.5 leading-relaxed">
+                      envia a mensagem modelo aprovada com gancho pessoal, respeitando o teto diário
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <label class="block">
+                  <span class="text-[10px] font-medium text-n-slate-9">Quantos leads por mês</span>
+                  <input
+                    v-model.number="agent.monthly_size"
+                    type="number"
+                    min="1"
+                    placeholder="300"
+                    :disabled="!editingAgent[key]"
+                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                  />
+                </label>
+                <label class="block">
+                  <span class="text-[10px] font-medium text-n-slate-9">Frio há pelo menos (dias)</span>
+                  <input
+                    v-model.number="agent.cold_days"
+                    type="number"
+                    min="1"
+                    placeholder="60"
+                    :disabled="!editingAgent[key]"
+                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                  />
+                </label>
+                <label v-if="agent.mode === 'send'" class="block">
+                  <span class="text-[10px] font-medium text-n-slate-9">Teto de envios por dia</span>
+                  <input
+                    v-model.number="agent.daily_cap"
+                    type="number"
+                    min="1"
+                    placeholder="50"
+                    :disabled="!editingAgent[key]"
+                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                  />
+                  <span class="text-[10px] text-n-slate-9 block mt-0.5">anti-bloqueio: menos é mais seguro</span>
+                </label>
+                <label class="block">
+                  <span class="text-[10px] font-medium text-n-slate-9">Dia do mês que a colheita gera a prévia</span>
+                  <input
+                    v-model.number="agent.day_of_month"
+                    type="number"
+                    min="1"
+                    max="28"
+                    placeholder="1"
+                    :disabled="!editingAgent[key]"
+                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                  />
+                </label>
+              </div>
+
+              <div v-if="agent.mode === 'send'">
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Caixa de WhatsApp que envia</label>
+                <select
+                  v-model="agent.inbox_id"
+                  :disabled="!editingAgent[key]"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  <option :value="null" disabled>Escolha a caixa…</option>
+                  <option v-for="ib in whatsappInboxes" :key="ib.id" :value="ib.id">{{ ib.name }}</option>
+                </select>
+                <p v-if="!whatsappInboxes.length" class="text-[11px] text-n-slate-10 mt-1">
+                  Nenhuma caixa de WhatsApp na conta ainda (Configurações → Caixas de Entrada).
+                </p>
+              </div>
+
+              <div v-if="agent.mode === 'send'">
+                <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                  Mensagem modelo <span class="text-n-slate-9 font-normal">(template aprovado pela Meta — sem ele a colheita não envia)</span>
+                </p>
+                <div class="flex items-center gap-2">
+                  <div class="flex-1 min-w-0">
+                    <p v-if="agent.template_params" class="text-xs text-n-slate-12 truncate">
+                      📋 {{ agent.template_params.name }}
+                      <span v-if="agent.message_preview" class="text-n-slate-9">— "{{ agent.message_preview.slice(0, 60) }}…"</span>
+                    </p>
+                    <p v-else class="text-xs text-amber-600">Nenhum modelo escolhido ainda.</p>
+                  </div>
+                  <button
+                    class="text-xs px-2.5 py-1.5 rounded-lg border border-n-brand text-n-brand hover:bg-n-brand/10 flex-shrink-0 disabled:opacity-60"
+                    :disabled="!editingAgent[key]"
+                    :title="editingAgent[key] ? '' : 'Clique em Editar lá embaixo para trocar o modelo'"
+                    @click="openHarvestTemplatePicker"
+                  >
+                    {{ agent.template_params ? 'Trocar modelo' : 'Escolher modelo' }}
+                  </button>
+                </div>
+                <p class="text-[10px] text-n-slate-9 mt-1">
+                  💡 Use <code class="bg-n-alpha-2 px-1 rounded">[gancho]</code> numa variável do modelo —
+                  a IA escreve um gancho pessoal para cada paciente;
+                  <code class="bg-n-alpha-2 px-1 rounded">[procedimento]</code> também funciona.
+                </p>
+              </div>
+
+              <label class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer">
+                <input
+                  v-model="agent.require_approval"
+                  type="checkbox"
+                  class="rounded accent-n-brand"
+                  :disabled="!editingAgent[key]"
+                />
+                Exigir minha aprovação antes de enviar
+                <span class="text-n-slate-9">(recomendado — a prévia espera o seu ok)</span>
+              </label>
+            </div>
+
+            <!-- 🌾 OPERAÇÃO DA COLHEITA: o mês em andamento -->
+            <div v-if="key === 'harvest'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">
+                Operação da colheita<template v-if="harvestMonthLabel()"> · {{ harvestMonthLabel() }}</template>
+              </p>
+
+              <!-- status do mês em linguagem humana -->
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full" :class="harvestStatusInfo().class">
+                  {{ harvestStatusInfo().label }}
+                </span>
+                <span v-if="harvest?.approved_at" class="text-[10px] text-n-slate-9">
+                  aprovada<template v-if="harvest.approved_by"> por {{ harvest.approved_by }}</template> · {{ fmtLogDate(harvest.approved_at) }}
+                </span>
+              </div>
+
+              <!-- modo organize: a lista virou etiqueta — ambiente de trabalho no CRM -->
+              <div
+                v-if="harvest?.organized_label"
+                class="rounded-lg bg-green-500/10 border border-green-500/30 px-3 py-2 text-[11px] text-green-700 dark:text-green-400"
+              >
+                ✅ {{ harvestOrganizedCount() }} lead(s) etiquetado(s) como
+                <b>{{ harvest.organized_label }}</b> — filtre por essa etiqueta no CRM para trabalhar a lista.
+              </div>
+
+              <div
+                v-if="harvestGenerating"
+                class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400"
+              >
+                ⏳ Gerando a prévia… leva uns 2 minutos — esta tela atualiza sozinha a cada 15 segundos.
+              </div>
+              <div
+                v-if="harvest?.last_error"
+                class="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-[11px] text-red-600 dark:text-red-400"
+              >
+                ⚠️ {{ harvest.last_error }}
+              </div>
+
+              <!-- números do mês -->
+              <div v-if="harvest?.stats" class="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
+                  <p class="text-[10px] text-n-slate-10">Base fria</p>
+                  <p class="text-sm font-bold text-n-slate-12">{{ harvest.stats.pool ?? 0 }}</p>
+                </div>
+                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
+                  <p class="text-[10px] text-n-slate-10">Planejados</p>
+                  <p class="text-sm font-bold text-n-slate-12">{{ harvest.stats.planned ?? 0 }}</p>
+                </div>
+                <div class="rounded-lg px-3 py-2 bg-green-500/10">
+                  <p class="text-[10px] text-n-slate-10">Enviados</p>
+                  <p class="text-sm font-bold text-green-600 dark:text-green-400">{{ harvest.stats.sent ?? 0 }}</p>
+                </div>
+                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
+                  <p class="text-[10px] text-n-slate-10">Responderam</p>
+                  <p class="text-sm font-bold text-n-slate-12">{{ harvest.stats.replied ?? 0 }}</p>
+                </div>
+                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
+                  <p class="text-[10px] text-n-slate-10">Pendentes</p>
+                  <p class="text-sm font-bold text-n-slate-12">{{ harvest.stats.pending ?? 0 }}</p>
+                </div>
+              </div>
+              <p v-if="harvest?.stats?.skipped" class="text-[10px] text-n-slate-9">
+                {{ harvest.stats.skipped }} lead(s) pulado(s) por você neste mês.
+              </p>
+
+              <!-- botões conforme o status -->
+              <div class="flex items-center gap-2 flex-wrap">
+                <button
+                  v-if="!harvest?.status || ['preview', 'done'].includes(harvest.status)"
+                  class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
+                  :style="{ background: AGENT_META.harvest.gradient }"
+                  :disabled="harvestGenerating || harvestActing === 'preview'"
+                  @click="runHarvestPreview"
+                >
+                  <span :class="harvestGenerating || harvestActing === 'preview' ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-sparkles'" class="text-xs" />
+                  {{ harvestGenerating ? 'Gerando… (~2 min)' : 'Gerar prévia agora' }}
+                </button>
+                <button
+                  v-if="harvest?.selected?.length"
+                  class="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50"
+                  :disabled="harvestActing === 'refresh'"
+                  @click="refreshHarvestPreview"
+                >
+                  <span :class="harvestActing === 'refresh' ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-eye'" class="text-xs" />
+                  Ver/atualizar prévia
+                </button>
+                <button
+                  v-if="harvest?.status === 'preview'"
+                  class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 shadow"
+                  style="background: linear-gradient(135deg, #059669, #34D399)"
+                  :disabled="!!harvestActing"
+                  @click="approveHarvest"
+                >
+                  <span :class="harvestActing === 'approve' ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-xs" />
+                  {{ agent.mode === 'send' ? 'Aprovar e começar' : 'Aprovar e etiquetar' }}
+                </button>
+                <button
+                  v-if="harvest?.status === 'approved'"
+                  class="text-xs font-medium px-3 py-2 rounded-lg border border-n-weak text-yellow-600 hover:bg-n-alpha-1 disabled:opacity-50"
+                  :disabled="!!harvestActing"
+                  @click="pauseHarvest"
+                >
+                  ⏸ Pausar
+                </button>
+                <button
+                  v-if="harvest?.status === 'paused'"
+                  class="text-xs font-medium px-3 py-2 rounded-lg border border-n-weak text-green-600 hover:bg-n-alpha-1 disabled:opacity-50"
+                  :disabled="!!harvestActing"
+                  @click="resumeHarvest"
+                >
+                  ▶️ Retomar
+                </button>
+                <button
+                  v-if="harvest?.status === 'approved'"
+                  class="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-n-brand text-n-brand hover:bg-n-brand/10 disabled:opacity-50"
+                  :disabled="!!harvestActing"
+                  title="Dispara o lote de hoje agora, respeitando o teto diário"
+                  @click="harvestSendNow"
+                >
+                  <span :class="harvestActing === 'send_now' ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-send'" class="text-xs" />
+                  Enviar lote agora
+                </button>
+              </div>
+
+              <!-- prévia: a lista dos escolhidos do mês -->
+              <div v-if="showHarvestTable && harvest?.selected?.length" class="space-y-1 max-h-80 overflow-y-auto pr-1">
+                <div
+                  v-for="lead in harvest.selected"
+                  :key="lead.contact_id"
+                  class="flex items-center gap-2 flex-wrap text-[11px] rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5"
+                  :class="lead.skipped ? 'opacity-50' : ''"
+                >
+                  <span v-if="lead.sent_at" class="text-green-600 font-bold flex-shrink-0" title="Mensagem já enviada">✓</span>
+                  <span class="font-semibold text-n-slate-12 truncate max-w-[150px]">{{ lead.name }}</span>
+                  <span v-if="lead.stage_name" class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-1 text-n-slate-10 whitespace-nowrap">{{ lead.stage_name }}</span>
+                  <span v-if="lead.procedure" class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-1 text-n-slate-10 whitespace-nowrap">{{ lead.procedure }}</span>
+                  <span v-if="lead.value" class="text-n-slate-11 whitespace-nowrap">{{ fmtBrl(lead.value) }}</span>
+                  <span class="text-n-slate-10 whitespace-nowrap">frio há {{ lead.cold_days }}d</span>
+                  <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" :class="scoreClass(lead.score)">{{ lead.score }}</span>
+                  <span v-if="lead.hook" class="italic text-n-slate-10 basis-full sm:basis-auto sm:flex-1 truncate" :title="lead.hook">“{{ lead.hook }}”</span>
+                  <span v-if="lead.skipped" class="text-[10px] text-n-slate-9 ml-auto">pulado</span>
+                  <button
+                    v-else-if="!lead.sent_at"
+                    class="text-n-slate-9 hover:text-red-500 i-lucide-x text-sm flex-shrink-0 ml-auto"
+                    title="Pular este lead (não recebe a mensagem desta colheita)"
+                    @click="skipHarvestLead(lead)"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <!-- 📊 Config + estado do Gestor Autônomo -->
+            <div v-if="key === 'manager'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <div class="rounded-lg px-3 py-2 text-[11px] text-white" :style="{ background: AGENT_META.manager.gradient }">
+                📊 Todo dia ele compara o funil com a <b>média das últimas 12 semanas</b>. Caiu além
+                da sensibilidade? Ele <b>abre uma tarefa</b> para o time e escreve o <b>briefing do
+                dia</b> no Meu Painel. <b>Nunca fala com o paciente</b> — só lê números.
+              </div>
+
+              <div class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11">
+                Sensibilidade: avisar quando cair mais de
+                <input
+                  v-model.number="agent.drop_pct"
+                  type="number"
+                  min="1"
+                  max="90"
+                  placeholder="25"
+                  :disabled="!editingAgent[key]"
+                  class="border border-n-weak rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
+                  style="width: 4.5rem"
+                />
+                % vs a média
+              </div>
+
+              <!-- último briefing + desvios encontrados -->
+              <div v-if="managerState()" class="border-t border-n-weak pt-3 space-y-2">
+                <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">
+                  Última rodada<template v-if="managerState().last_run_at"> · {{ fmtLogDate(managerState().last_run_at) }}</template>
+                </p>
+                <div v-if="managerState().brief" class="rounded-lg bg-n-alpha-1 p-3">
+                  <p class="text-xs text-n-slate-11 leading-relaxed whitespace-pre-wrap">{{ managerState().brief }}</p>
+                </div>
+                <div v-if="(managerState().findings || []).length" class="flex flex-wrap gap-1.5">
+                  <span
+                    v-for="(f, fi) in managerState().findings"
+                    :key="fi"
+                    class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25"
+                    :title="f.window ? `janela: ${f.window}` : ''"
+                  >
+                    {{ managerFindingLabel(f) }}
+                  </span>
+                </div>
+                <p class="text-[11px] text-n-slate-10">abriu {{ managerState().tasks_opened || 0 }} tarefa(s)</p>
+              </div>
+
+              <div class="flex items-center gap-2 flex-wrap border-t border-n-weak pt-3">
+                <button
+                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                  :style="{ background: AGENT_META.manager.gradient }"
+                  :disabled="isRunningManager || !agent.enabled"
+                  :title="agent.enabled ? '' : 'Ligue o Gestor no interruptor acima primeiro'"
+                  @click="runManagerNow"
+                >
+                  {{ isRunningManager ? 'Rodando… (~30 s)' : 'Rodar agora' }}
+                </button>
+                <span class="text-[11px] text-n-slate-9">lê o funil agora e atualiza o briefing do dia</span>
+              </div>
+            </div>
+
+            <!-- 🎓 Config do Auditor de Conversas -->
+            <div v-if="key === 'auditor'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <div class="rounded-lg px-3 py-2 text-[11px] text-white" :style="{ background: AGENT_META.auditor.gradient }">
+                🎓 Todo dia ele relê as conversas de <b>ontem</b> e dá <b>nota 0-10</b> contra o
+                script da clínica, apontando o que faltou em cada uma. O ranking por atendente
+                vira <b>coaching contínuo</b> — e ele <b>nunca fala com o paciente</b>.
+              </div>
+
+              <label class="block sm:w-64">
+                <span class="text-[10px] font-medium text-n-slate-9">Teto de conversas auditadas por dia</span>
+                <input
+                  v-model.number="agent.daily_cap"
+                  type="number"
+                  min="1"
+                  placeholder="150"
+                  :disabled="!editingAgent[key]"
+                  class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                />
+                <span class="text-[10px] text-n-slate-9 block mt-0.5">controla o custo da auditoria diária</span>
+              </label>
+            </div>
+
+            <!-- 🎓 QUALIDADE DO TIME: ranking + falhas mais comuns -->
+            <div v-if="key === 'auditor'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Qualidade do time</p>
+
+              <div class="flex items-center gap-2 flex-wrap">
+                <button
+                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                  :style="{ background: AGENT_META.auditor.gradient }"
+                  :disabled="isRunningAuditor || !agent.enabled"
+                  :title="agent.enabled ? 'Re-audita as conversas de ontem (~2 min)' : 'Ligue o Auditor no interruptor acima primeiro'"
+                  @click="runAuditorNow"
+                >
+                  {{ isRunningAuditor ? 'Auditando… (~2 min)' : 'Auditar agora' }}
+                </button>
+                <span v-if="auditorLast()?.days_done" class="text-[11px] text-n-slate-10">
+                  último dia auditado: <b class="text-n-slate-12">{{ fmtDay(auditorLast().days_done) }}</b>
+                  <template v-if="auditorLast()?.last_run_at"> · rodou {{ fmtLogDate(auditorLast().last_run_at) }}</template>
+                </span>
+                <span v-else class="text-[11px] text-n-slate-10">nenhuma auditoria ainda — o primeiro ranking sai depois da primeira rodada</span>
+              </div>
+
+              <div
+                v-if="isRunningAuditor"
+                class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400"
+              >
+                ⏳ Auditando… leva ~2 minutos — o ranking abaixo atualiza aqui sozinho a cada 20 segundos.
+              </div>
+
+              <!-- janela de análise: 7 / 14 / 30 dias -->
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-[11px] text-n-slate-10">Janela:</span>
+                <button
+                  v-for="d in [7, 14, 30]"
+                  :key="d"
+                  class="text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors"
+                  :class="auditorDays === d ? 'text-white border-transparent shadow-sm' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                  :style="auditorDays === d ? { background: AGENT_META.auditor.gradient } : {}"
+                  @click="setAuditorDays(d)"
+                >
+                  {{ d }} dias
+                </button>
+                <span v-if="auditorSummary" class="text-[11px] text-n-slate-9 ml-auto">
+                  {{ auditorSummary.audited_total || 0 }} conversa(s) auditada(s) no período
+                </span>
+              </div>
+
+              <div v-if="loadingAuditorSummary && !auditorSummary" class="flex items-center gap-2 text-xs text-n-slate-10 py-2">
+                <Spinner :size="16" class="text-n-brand" /> Carregando a qualidade do time…
+              </div>
+
+              <template v-else-if="auditorSummary">
+                <!-- ranking por atendente (já vem ordenado pela média) -->
+                <div v-if="(auditorSummary.ranking || []).length" class="space-y-1.5">
+                  <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Ranking por atendente</p>
+                  <div
+                    v-for="row in auditorSummary.ranking"
+                    :key="row.user_id"
+                    class="rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5"
+                  >
+                    <div class="flex items-center gap-2 flex-wrap text-xs">
+                      <span class="font-semibold text-n-slate-12 truncate max-w-[180px]">{{ auditorRowName(row) }}</span>
+                      <span class="text-n-slate-10 whitespace-nowrap">{{ row.audited }} auditada(s)</span>
+                      <span
+                        class="text-[11px] font-bold px-2 py-0.5 rounded-full ml-auto flex-shrink-0"
+                        :class="auditorAvgClass(row.avg)"
+                        title="média das notas 0-10 no período"
+                      >
+                        {{ fmtAvg(row.avg) }}
+                      </span>
+                    </div>
+                    <div v-if="(row.top_gaps || []).length" class="flex flex-wrap gap-1 mt-1">
+                      <span
+                        v-for="(gap, gi) in row.top_gaps"
+                        :key="gi"
+                        class="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/25"
+                      >
+                        {{ gap }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <p v-else class="text-xs text-n-slate-10">
+                  Nenhuma conversa auditada no período ainda — o ranking aparece depois da primeira auditoria.
+                </p>
+
+                <!-- falhas mais comuns do time -->
+                <div v-if="(auditorSummary.team_gaps || []).length" class="space-y-1 border-t border-n-weak pt-2">
+                  <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Falhas mais comuns do time</p>
+                  <p v-for="(g, gi) in auditorSummary.team_gaps" :key="gi" class="text-xs text-n-slate-11">
+                    <span class="font-medium text-amber-700 dark:text-amber-400">{{ g.gap }}</span>
+                    <span class="text-n-slate-9"> · {{ g.count }}×</span>
+                  </p>
+                </div>
+              </template>
+            </div>
+
+            <!-- 🎨 Config do Criativo Perpétuo -->
+            <div v-if="key === 'creative'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <div class="rounded-lg px-3 py-2 text-[11px] text-white" :style="{ background: AGENT_META.creative.gradient }">
+                🎨 Toda <b>segunda 08:30</b> ele encontra os <b>vencedores da semana</b> — os termos
+                do Google e os anúncios do Meta que mais viraram <b>consulta e cirurgia</b> na
+                jornada real do banco (últimos 90 dias) — e escreve variações de copy prontas.
+                <b>Nada vai ao ar sozinho</b>: você aprova, copia e cola no Gerenciador de Anúncios.
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 sm:w-96">
+                <label class="block">
+                  <span class="text-[10px] font-medium text-n-slate-9">Vencedores por semana</span>
+                  <input
+                    v-model.number="agent.winners_count"
+                    type="number"
+                    min="1"
+                    placeholder="3"
+                    :disabled="!editingAgent[key]"
+                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                  />
+                </label>
+                <label class="block">
+                  <span class="text-[10px] font-medium text-n-slate-9">Variações por vencedor</span>
+                  <input
+                    v-model.number="agent.variations_count"
+                    type="number"
+                    min="1"
+                    placeholder="3"
+                    :disabled="!editingAgent[key]"
+                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <!-- 🎨 CRIATIVOS DA SEMANA: vencedores + variações p/ aprovar -->
+            <div v-if="key === 'creative'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">
+                Criativos da semana<template v-if="creativeState?.week_key"> · semana de {{ fmtWeekKey(creativeState.week_key) }}</template>
+              </p>
+
+              <div class="flex items-center gap-2 flex-wrap">
+                <button
+                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                  :style="{ background: AGENT_META.creative.gradient }"
+                  :disabled="isRunningCreative || !agent.enabled"
+                  :title="agent.enabled ? 'Gera os vencedores + variações da semana agora (~2 min)' : 'Ligue o Criativo no interruptor acima primeiro'"
+                  @click="runCreativeNow"
+                >
+                  {{ isRunningCreative ? 'Gerando… (~2 min)' : 'Gerar agora' }}
+                </button>
+                <span v-if="creativeState?.generated_at" class="text-[11px] text-n-slate-10">
+                  gerado {{ fmtLogDate(creativeState.generated_at) }}
+                </span>
+                <span v-else-if="creativeLast()?.generated_at" class="text-[11px] text-n-slate-10">
+                  última geração {{ fmtLogDate(creativeLast().generated_at) }}
+                </span>
+                <span
+                  class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 ml-auto cursor-help"
+                  title="aprovadas ficam guardadas para o Estúdio Criativo"
+                >
+                  📦 {{ (creativeState?.approved_log || []).length }} aprovada(s) na despensa
+                </span>
+              </div>
+
+              <div
+                v-if="isRunningCreative"
+                class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400"
+              >
+                ⏳ Gerando as variações… leva ~2 minutos — esta tela atualiza sozinha a cada 20 segundos.
+              </div>
+
+              <div v-if="loadingCreative && !creativeState" class="flex items-center gap-2 text-xs text-n-slate-10 py-2">
+                <Spinner :size="16" class="text-n-brand" /> Carregando os criativos da semana…
+              </div>
+
+              <template v-else-if="(creativeState?.winners || []).length">
+                <div
+                  v-for="(w, wi) in creativeState.winners"
+                  :key="wi"
+                  class="rounded-lg border border-n-weak bg-n-solid-2 p-3 space-y-2"
+                >
+                  <!-- cabeçalho do vencedor -->
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-sm flex-shrink-0">🥇</span>
+                    <p class="text-xs font-bold text-n-slate-12 truncate max-w-[240px]" :title="w.name">{{ w.name }}</p>
+                    <span
+                      class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0"
+                      :style="{ backgroundColor: AGENT_META.creative.color + '1A', color: AGENT_META.creative.color }"
+                    >
+                      {{ w.kind_label }}
+                    </span>
+                  </div>
+
+                  <!-- jornada real em pílulas -->
+                  <div class="flex items-center gap-1 flex-wrap text-[10px] font-medium">
+                    <span class="px-1.5 py-0.5 rounded-full bg-n-alpha-2 text-n-slate-11">{{ w.stats?.leads ?? 0 }} leads</span>
+                    <span class="text-n-slate-9">→</span>
+                    <span class="px-1.5 py-0.5 rounded-full bg-n-alpha-2 text-n-slate-11">{{ w.stats?.booked ?? 0 }} consultas</span>
+                    <span class="text-n-slate-9">→</span>
+                    <span class="px-1.5 py-0.5 rounded-full bg-n-alpha-2 text-n-slate-11">{{ w.stats?.attended ?? 0 }} compareceram</span>
+                    <span class="text-n-slate-9">→</span>
+                    <span class="px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-600">{{ w.stats?.surgeries ?? 0 }} cirurgias</span>
+                    <span v-if="w.stats?.revenue" class="text-n-slate-10">· {{ fmtBrl(w.stats.revenue) }}</span>
+                  </div>
+
+                  <!-- variações: cartõezinhos p/ aprovar/recusar/copiar -->
+                  <div class="space-y-2">
+                    <div
+                      v-for="(v, vi) in w.variations"
+                      :key="vi"
+                      class="rounded-lg border border-n-weak bg-n-solid-1 px-3 py-2.5 space-y-1.5"
+                      :class="v.status === 'rejected' ? 'opacity-50' : ''"
+                    >
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          v-if="v.angulo"
+                          class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-n-alpha-2 text-n-slate-11"
+                        >
+                          {{ v.angulo }}
+                        </span>
+                        <span
+                          v-if="v.status === 'approved'"
+                          class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-green-500/15 text-green-600"
+                          :title="v.reviewed_by ? `aprovada por ${v.reviewed_by}` : ''"
+                        >
+                          ✓ aprovada
+                        </span>
+                        <span
+                          v-else-if="v.status === 'rejected'"
+                          class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-n-alpha-2 text-n-slate-10"
+                        >
+                          ✗ recusada
+                        </span>
+                        <button
+                          class="text-[11px] font-medium text-n-brand hover:underline flex items-center gap-1 ml-auto flex-shrink-0"
+                          title="Copia gancho + texto + CTA — cole no Gerenciador de Anúncios ou no Estúdio"
+                          @click="copyCreativeVariation(v)"
+                        >
+                          <span class="i-lucide-copy text-[10px]" /> 📋 Copiar
+                        </button>
+                      </div>
+                      <p class="text-xs font-bold text-n-slate-12">{{ v.gancho }}</p>
+                      <p class="text-[11px] text-n-slate-11 leading-relaxed" style="white-space: pre-line">{{ v.texto }}</p>
+                      <p v-if="v.cta" class="text-[11px] text-n-slate-10"><b>CTA:</b> {{ v.cta }}</p>
+                      <div v-if="v.status === 'pending'" class="flex items-center gap-2 pt-1">
+                        <button
+                          class="text-[11px] font-semibold text-white px-2.5 py-1 rounded-lg hover:opacity-90 disabled:opacity-50"
+                          style="background: linear-gradient(135deg, #059669, #34D399)"
+                          :disabled="reviewingCreative === `${wi}-${vi}`"
+                          @click="reviewCreativeVariation(wi, vi, 'approved')"
+                        >
+                          ✓ Aprovar
+                        </button>
+                        <button
+                          class="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-n-weak text-n-slate-10 hover:bg-n-alpha-1 disabled:opacity-50"
+                          :disabled="reviewingCreative === `${wi}-${vi}`"
+                          @click="reviewCreativeVariation(wi, vi, 'rejected')"
+                        >
+                          ✗ Recusar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <p v-else-if="!loadingCreative && !isRunningCreative" class="text-xs text-n-slate-10">
+                Nenhum criativo nesta semana ainda — toda segunda 08:30 ele gera sozinho, ou clique em "Gerar agora".
+              </p>
+            </div>
+
             <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
               Prompt do agente <span class="text-n-slate-9 font-normal">(vazio = usa o prompt padrão abaixo)</span>
             </label>
@@ -2141,6 +3389,7 @@ onMounted(async () => {
             </div>
           </div>
         </div>
+        </template>
       </div>
 
       <!-- ══ MODO PROGRAMAÇÃO — painel panorâmico de automações ══ -->
@@ -2502,6 +3751,58 @@ onMounted(async () => {
           <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showSweepModal = false">
             Fechar
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Janela: escolher a mensagem modelo da Colheitadeira -->
+    <div
+      v-if="showHarvestTemplatePicker"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      @click.self="closeHarvestTemplatePicker"
+    >
+      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden">
+        <div class="h-1.5 w-full flex-shrink-0" :style="{ background: AGENT_META.harvest.gradient }" />
+        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
+          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
+            <span class="i-lucide-wheat" style="color: #CA8A04" />
+            {{ harvestPickerTemplate ? 'Preencher variáveis do modelo' : 'Escolher mensagem modelo' }}
+          </h2>
+          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="closeHarvestTemplatePicker" />
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-3">
+          <p class="text-[11px] text-n-slate-10">
+            💡 Escreva <code class="bg-n-alpha-2 px-1 rounded">[gancho]</code> numa variável do corpo —
+            a IA troca por um gancho pessoal para cada paciente;
+            <code class="bg-n-alpha-2 px-1 rounded">[procedimento]</code> também funciona.
+            O <code class="bg-n-alpha-2 px-1 rounded">{{ '\{\{contact.first_name\}\}' }}</code> vira o nome do paciente.
+          </p>
+          <WhatsAppTemplateParser
+            v-if="harvestPickerTemplate"
+            :template="harvestPickerTemplate"
+            @send-message="useHarvestTemplate"
+            @reset-template="harvestPickerTemplate = null"
+          >
+            <template #actions="{ sendMessage, resetTemplate, disabled }">
+              <footer class="flex gap-2 justify-end">
+                <button class="px-3 py-1.5 text-sm border border-n-weak rounded-lg text-n-slate-11" @click="resetTemplate">
+                  Trocar modelo
+                </button>
+                <button
+                  class="px-4 py-1.5 text-sm bg-n-brand text-white rounded-lg disabled:opacity-50"
+                  :disabled="disabled"
+                  @click="sendMessage"
+                >
+                  Usar este modelo
+                </button>
+              </footer>
+            </template>
+          </WhatsAppTemplateParser>
+          <TemplatesPicker
+            v-else
+            :inbox-id="harvestPickerInboxId"
+            @on-select="harvestPickerTemplate = $event"
+          />
         </div>
       </div>
     </div>

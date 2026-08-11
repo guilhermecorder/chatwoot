@@ -156,6 +156,11 @@
       "NO_WHATSAPP_INBOX": "No WhatsApp inbox available.",
       "CARD_PANEL": "Move card / labels",
       "CARD_MOVED": "Card moved!",
+      "CARD_MOVED_TO": "Card moved to \"{stage}\"",
+      "ADD_LABEL": "label",
+      "REMOVE_LABEL": "Remove label",
+      "FOLLOWUP_TITLE": "Follow-up bot",
+      "FOLLOWUP_EMPTY": "No follow-up bot configured for this conversation.",
       "COPY_PHONE": "Copy phone",
       "PHONE_COPIED": "Phone copied!"
     },

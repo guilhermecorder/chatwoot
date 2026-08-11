@@ -53,7 +53,8 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
   def bot_params
     params.require(:followup_bot).permit(
       :name, :inbox_id, :pipeline_id, :stage_id, :active, :starts_at, :ends_at,
-      steps: [:delay_hours, :delay_value, :delay_unit, :kind, :message, { template_params: {} }],
+      steps: [:delay_hours, :delay_value, :delay_unit, :delay_from, :kind, :message,
+              { template_params: {}, skip_labels: [], only_labels: [] }],
       required_labels: [], exclude_labels: []
     )
   end

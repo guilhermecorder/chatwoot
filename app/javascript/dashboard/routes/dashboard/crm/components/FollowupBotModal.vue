@@ -30,6 +30,8 @@ const newStep = () => ({
   kind: 'text',
   message: 'Oi, pode falar?',
   template_params: null,
+  skip_labels: [],
+  only_labels: [],
 });
 
 // aceita etapas legadas ({delay_hours}) e as novas
@@ -40,7 +42,17 @@ const normalizeStep = s => ({
   kind: s.template_params ? 'template' : 'text',
   message: s.message ?? '',
   template_params: s.template_params ?? null,
+  skip_labels: [...(s.skip_labels ?? [])],
+  only_labels: [...(s.only_labels ?? [])],
 });
+
+// regras de etiqueta POR ETAPA (item 127) — aberto quando a etapa já tem regra
+const labelRulesOpen = ref({});
+const toggleLabelRules = i => {
+  labelRulesOpen.value = { ...labelRulesOpen.value, [i]: !labelRulesOpen.value[i] };
+};
+const stepHasLabelRules = step =>
+  (step.skip_labels?.length ?? 0) > 0 || (step.only_labels?.length ?? 0) > 0;
 
 const toLocalInput = iso => {
   if (!iso) return '';
@@ -153,6 +165,8 @@ const save = async () => {
         kind: s.kind,
         message: s.kind === 'template' ? s.message : s.message.trim(),
         template_params: s.kind === 'template' ? s.template_params : null,
+        skip_labels: s.skip_labels ?? [],
+        only_labels: s.only_labels ?? [],
       })),
       required_labels: form.value.required_labels,
       exclude_labels: form.value.exclude_labels,
@@ -348,6 +362,70 @@ const save = async () => {
                 >
                   {{ step.template_params ? 'Trocar modelo' : 'Escolher modelo' }}
                 </button>
+              </div>
+
+              <!-- Regras de etiqueta DESTA etapa (item 127): proteger quem já
+                   avançou (ex.: cta_agendamento fora da cutucada de 24h) sem
+                   tirar essas pessoas das etapas longas -->
+              <div>
+                <button
+                  class="text-[11px] flex items-center gap-1 transition-colors"
+                  :class="stepHasLabelRules(step) ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-n-slate-9 hover:text-n-slate-11'"
+                  @click="toggleLabelRules(i)"
+                >
+                  <span class="i-lucide-tags text-xs" />
+                  {{ stepHasLabelRules(step)
+                    ? `Regras de etiqueta ativas (${(step.skip_labels?.length ?? 0) + (step.only_labels?.length ?? 0)})`
+                    : 'Regras de etiqueta desta etapa' }}
+                  <span class="text-xs" :class="labelRulesOpen[i] ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" />
+                </button>
+
+                <div v-if="labelRulesOpen[i]" class="mt-2 space-y-2.5 bg-n-alpha-1 rounded-lg p-2.5">
+                  <div>
+                    <label class="text-[11px] font-medium text-n-slate-11 block mb-1">
+                      PULAR quem tem <span class="text-n-slate-9 font-normal">(a etapa não sai para quem tiver alguma destas — as outras etapas seguem valendo)</span>
+                    </label>
+                    <div class="flex flex-wrap gap-1.5">
+                      <button
+                        v-for="l in accountLabels"
+                        :key="`skip-${i}-${l.id}`"
+                        class="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors"
+                        :class="step.skip_labels.includes(l.title)
+                          ? 'bg-red-500/15 border-red-500 text-red-600 font-medium line-through'
+                          : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                        @click="toggleListItem(step.skip_labels, l.title)"
+                      >
+                        <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: l.color ?? '#6B7280' }" />
+                        {{ l.title }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="text-[11px] font-medium text-n-slate-11 block mb-1">
+                      SÓ para quem tem <span class="text-n-slate-9 font-normal">(vazio = etapa para todos)</span>
+                    </label>
+                    <div class="flex flex-wrap gap-1.5">
+                      <button
+                        v-for="l in accountLabels"
+                        :key="`only-${i}-${l.id}`"
+                        class="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors"
+                        :class="step.only_labels.includes(l.title)
+                          ? 'bg-sky-500/15 border-sky-500 text-sky-700 dark:text-sky-400 font-medium'
+                          : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                        @click="toggleListItem(step.only_labels, l.title)"
+                      >
+                        <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: l.color ?? '#6B7280' }" />
+                        {{ l.title }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <p class="text-[10px] text-n-slate-9">
+                    Ex.: na cutucada de 24h, marque <strong>cta_agendamento</strong> em "PULAR quem tem" —
+                    quem já topou agendar não é reabordado cedo, mas continua recebendo as etapas de 30 dias+.
+                  </p>
+                </div>
               </div>
             </div>
           </div>

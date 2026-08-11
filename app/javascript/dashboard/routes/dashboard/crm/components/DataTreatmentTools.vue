@@ -404,6 +404,106 @@ const applySurgery = async () => {
     isSurgeryApplying.value = false;
   }
 };
+
+// ── 📄 Planilha de fechamento (item 132): o sistema ENTENDE o .xlsx ──
+// uma aba por mês, casa por NOME, retrodata a cirurgia pra data real
+const sheetFile = ref(null);
+const sheetPreview = ref(null);
+const sheetResult = ref(null);
+const isSheetLoading = ref(false);
+const isSheetApplying = ref(false);
+const sheetCreateMissing = ref(true);
+const sheetOverwriteValue = ref(false);
+
+const onSheetFile = event => {
+  sheetFile.value = event.target.files?.[0] ?? null;
+  sheetPreview.value = null;
+  sheetResult.value = null;
+};
+
+const previewSheet = async () => {
+  if (!sheetFile.value || !surgeryStageId.value || isSheetLoading.value) return;
+  isSheetLoading.value = true;
+  sheetPreview.value = null;
+  try {
+    const formData = new FormData();
+    formData.append('file', sheetFile.value);
+    formData.append('target_stage_id', surgeryStageId.value);
+    const { data } = await CrmAPI.previewClosingSheet(formData);
+    sheetPreview.value = data;
+  } catch (error) {
+    useAlert(error?.response?.data?.message || 'Não consegui ler a planilha.');
+  } finally {
+    isSheetLoading.value = false;
+  }
+};
+
+const applySheet = async () => {
+  if (!sheetPreview.value?.token || isSheetApplying.value) return;
+  isSheetApplying.value = true;
+  try {
+    const { data } = await CrmAPI.applyClosingSheet({
+      token: sheetPreview.value.token,
+      target_stage_id: surgeryStageId.value,
+      label: surgeryLabel.value,
+      set_value: true,
+      overwrite_value: sheetOverwriteValue.value,
+      create_missing: sheetCreateMissing.value,
+    });
+    sheetResult.value = data;
+    sheetPreview.value = null;
+    sheetFile.value = null;
+    useAlert(
+      `Importação do histórico iniciada: ${data.matched} pacientes casados + ${data.to_create} criados da planilha.`
+    );
+  } catch (error) {
+    useAlert(error?.response?.data?.message || 'Erro ao importar a planilha.');
+  } finally {
+    isSheetApplying.value = false;
+  }
+};
+
+const sheetMonthsRange = computed(() => {
+  const months = sheetPreview.value?.months ?? [];
+  if (!months.length) return '';
+  const fmt = m =>
+    /^\d{4}-\d{2}$/.test(m.month)
+      ? `${m.month.slice(5)}/${m.month.slice(2, 4)}`
+      : m.month;
+  return `${fmt(months[0])} → ${fmt(months[months.length - 1])}`;
+});
+
+// ── ↩️ Desfazer a última importação (item 133) ──
+const importStatus = ref(null);
+const isUndoing = ref(false);
+
+const loadImportStatus = async () => {
+  try {
+    const { data } = await CrmAPI.getImportStatus();
+    importStatus.value = data;
+  } catch {
+    importStatus.value = null;
+  }
+};
+
+watch(showSurgeryPanel, open => {
+  if (open) loadImportStatus();
+});
+
+const undoImport = async () => {
+  if (!importStatus.value?.undoable || isUndoing.value) return;
+  isUndoing.value = true;
+  try {
+    await CrmAPI.undoLastImport(importStatus.value.id);
+    useAlert('Desfazendo em segundo plano — tudo volta ao estado anterior em alguns minutos.');
+    importStatus.value = null;
+    sheetResult.value = null;
+  } catch (error) {
+    useAlert(error?.response?.data?.message || 'Erro ao desfazer.');
+  } finally {
+    isUndoing.value = false;
+  }
+};
 </script>
 
 <template>
@@ -1153,6 +1253,113 @@ const applySurgery = async () => {
         <p v-else-if="!surgeryPreview" class="text-xs text-n-slate-9">
           Primeiro a Prévia (não mexe em nada), depois o Aplicar.
         </p>
+
+        <!-- 📄 PLANILHA DE FECHAMENTO (item 132): o sistema entende o .xlsx -->
+        <div class="border-t border-n-weak pt-3 mt-3 space-y-3">
+          <p class="text-xs font-semibold text-n-slate-12 flex items-center gap-1.5">
+            <span class="i-lucide-file-spreadsheet text-sm" style="color: #15803D" />
+            Ou envie a planilha de fechamento (.xlsx) — o sistema entende sozinho
+          </p>
+          <p class="text-[11px] text-n-slate-9">
+            Uma aba por mês (Status · Data · Paciente · Procedimento · valor total). O sistema lê TODAS as
+            abas, ignora duplicadas/canceladas, casa cada paciente pelo NOME e coloca o card na coluna
+            escolhida acima com o valor e a <b>data real da cirurgia</b> — os dashboards passam a contar
+            cada mês no mês certo.
+          </p>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <input
+              type="file"
+              accept=".xlsx"
+              class="text-xs text-n-slate-11 file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-n-alpha-2 file:text-n-slate-12 file:cursor-pointer"
+              @change="onSheetFile"
+            />
+            <button
+              class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1 disabled:opacity-50"
+              :disabled="!sheetFile || !surgeryStageId || isSheetLoading"
+              @click="previewSheet"
+            >
+              <span class="i-lucide-scan-search" />
+              {{ isSheetLoading ? 'Lendo a planilha…' : 'Ler planilha' }}
+            </button>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-4">
+            <label class="flex items-center gap-1.5 text-xs text-n-slate-11 cursor-pointer">
+              <input v-model="sheetCreateMissing" type="checkbox" class="rounded" />
+              Criar paciente que não existe no sistema (recomendado — o histórico entra inteiro)
+            </label>
+            <label class="flex items-center gap-1.5 text-xs text-n-slate-11 cursor-pointer">
+              <input v-model="sheetOverwriteValue" type="checkbox" class="rounded" />
+              Sobrescrever valor que o card já tem
+            </label>
+          </div>
+
+          <!-- prévia da planilha -->
+          <div v-if="sheetPreview" class="bg-n-alpha-1 rounded-lg p-3 space-y-2">
+            <p class="text-sm text-n-slate-12">
+              <b>{{ sheetPreview.sheets }}</b> meses lidos ({{ sheetMonthsRange }}) ·
+              <b>{{ sheetPreview.total_rows }}</b> cirurgias válidas ·
+              <b class="text-green-600">R$ {{ Number(sheetPreview.total_value).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}</b>
+            </p>
+            <p class="text-xs text-n-slate-10">
+              <b class="text-green-600">{{ sheetPreview.matched }}</b> casaram pelo nome
+              <template v-if="sheetPreview.matched_sample?.length"> (ex: {{ sheetPreview.matched_sample.slice(0, 3).join(', ') }})</template> ·
+              <b>{{ sheetPreview.unmatched_count }}</b> não existem no sistema
+              <template v-if="sheetCreateMissing"> → <b class="text-sky-600">serão criados</b></template>
+              <template v-else> → ficarão de fora</template> ·
+              <b>{{ sheetPreview.already_in_target }}</b> já na coluna
+            </p>
+            <p v-if="sheetPreview.ambiguous_count" class="text-xs text-amber-600">
+              {{ sheetPreview.ambiguous_count }} nome(s) com MAIS DE UM contato (ficam de fora — resolva com
+              "Unificar contatos duplicados"): {{ sheetPreview.ambiguous.slice(0, 5).join(' · ') }}
+            </p>
+            <p class="text-[11px] text-n-slate-9">
+              Ignoradas da planilha: {{ sheetPreview.skipped?.duplicada || 0 }} duplicadas ·
+              {{ sheetPreview.skipped?.cancelada || 0 }} canceladas · {{ sheetPreview.skipped?.sem_valor || 0 }} sem valor
+            </p>
+            <button
+              class="text-xs px-4 py-2 rounded-lg text-white hover:opacity-90 flex items-center gap-1.5 disabled:opacity-50"
+              style="background: linear-gradient(135deg, #15803D, #16A34A)"
+              :disabled="isSheetApplying"
+              @click="applySheet"
+            >
+              <span class="i-lucide-database-zap" />
+              {{ isSheetApplying ? 'Importando…' : 'Importar histórico completo' }}
+            </button>
+          </div>
+          <p v-else-if="sheetResult" class="text-xs text-green-600">
+            ✅ Importação em andamento: {{ sheetResult.matched }} casados + {{ sheetResult.to_create }} criados.
+            Em alguns minutos os dashboards refletem o histórico — confira no PRO MAX com "Este ano".
+          </p>
+
+          <!-- ↩️ botão VOLTAR: desfaz a última importação inteira -->
+          <div
+            v-if="importStatus?.undoable"
+            class="flex flex-wrap items-center gap-3 rounded-lg p-3 border"
+            style="background: rgba(217, 119, 6, 0.06); border-color: rgba(217, 119, 6, 0.3)"
+          >
+            <span class="i-lucide-undo-2 text-lg flex-shrink-0" style="color: #B45309" />
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-semibold text-n-slate-12">
+                Última importação: {{ importStatus.entries }} mudança(s) em "{{ importStatus.stage_name }}"
+                <template v-if="importStatus.created_contacts"> · {{ importStatus.created_contacts }} paciente(s) criado(s)</template>
+              </p>
+              <p class="text-[11px] text-n-slate-9">
+                Se bagunçou, desfaz TUDO: cards voltam pra coluna/valor/data de antes e os pacientes criados são removidos.
+              </p>
+            </div>
+            <button
+              class="text-xs px-3 py-1.5 rounded-lg border font-medium hover:opacity-80 disabled:opacity-50 flex items-center gap-1"
+              style="border-color: #B45309; color: #B45309"
+              :disabled="isUndoing"
+              @click="undoImport"
+            >
+              <span class="i-lucide-undo-2" />
+              {{ isUndoing ? 'Desfazendo…' : 'Desfazer importação' }}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 

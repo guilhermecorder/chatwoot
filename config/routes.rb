@@ -207,6 +207,12 @@ Rails.application.routes.draw do
             resource :external_surgeries, only: [] do
               post :preview
               post :apply
+              # 📄 planilha de fechamento (item 132): upload + prévia + aplicar
+              post :preview_sheet
+              post :apply_sheet
+              # ↩️ desfazer a última importação (item 133)
+              get :import_status
+              post :undo_last
             end
             resource :label_replacements, only: [] do
               post :preview
@@ -249,6 +255,22 @@ Rails.application.routes.draw do
                 post :sales_insights
               post :radar_scan
               post :run_mentor
+              # 🌾 Colheitadeira da Base + 📊 Gestor Autônomo (item 128)
+              get :harvest_status
+              post :harvest_preview
+              post :harvest_approve
+              post :harvest_pause
+              post :harvest_resume
+              post :harvest_skip_lead
+              post :harvest_send_now
+              post :run_manager
+              # 🎓 Auditor de Conversas (item 130)
+              post :run_auditor
+              get :auditor_summary
+              # 🎨 Criativo Perpétuo (item 131)
+              post :run_creative
+              get :creative_state
+              post :creative_review
               get :ai_usage
               # concessão de acessos por atendente (allow-list, admin)
               post :update_agent_grants
@@ -381,7 +403,10 @@ Rails.application.routes.draw do
                   post :detect_values_bulk
                 end
               end
-              resource :dashboard, only: [:show]
+              resource :dashboard, only: [:show] do
+                # PRO MAX (item 129): séries diárias p/ o estúdio de análise
+                get :pro_series
+              end
             end
           end
           resources :dashboard_apps, only: [:index, :show, :create, :update, :destroy]

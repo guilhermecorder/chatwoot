@@ -46,7 +46,111 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     }
   end
 
+  # ── 📈 PRO MAX (item 129): séries DIÁRIAS para o estúdio de análise ──
+  # Devolve o dia a dia de cada variável no período; o navegador agrega em
+  # semana/mês, monta candles e desenha as AÇÕES DA EMPRESA por cima.
+  PRO_MAX_TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
+  PRO_MAX_MAX_DAYS = 366
+
+  def pro_series
+    pipeline = Current.account.crm_pipelines.includes(:stages).find(params[:pipeline_id])
+    from, to = pro_range
+    dates = (from..to).to_a
+    range = PRO_MAX_TZ.parse(from.iso8601).beginning_of_day..PRO_MAX_TZ.parse(to.iso8601).end_of_day
+
+    day = ->(col) { Arel.sql("to_char(#{col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD')") }
+    fill = ->(counts) { dates.map { |d| (counts[d.iso8601] || 0).to_f.round(2) } }
+
+    new_conversations = Current.account.conversations.where(created_at: range)
+                               .group(day.call('conversations.created_at')).count
+    new_leads = pipeline.crm_contacts.joins(:contact)
+                        .where(contacts: { created_at: range })
+                        .group(day.call('contacts.created_at')).count
+    stage_logs = Crm::StageLog.joins(:crm_contact)
+                              .where(crm_contacts: { pipeline_id: pipeline.id })
+                              .where(entered_at: range)
+    entered = stage_logs.group(:stage_id).group(day.call('crm_contact_stage_logs.entered_at'))
+                        .distinct.count(:crm_contact_id)
+    revenue = stage_logs.where("crm_contact_stage_logs.stage_name ILIKE '%cirurgia realizada%'")
+                        .group(day.call('crm_contact_stage_logs.entered_at'))
+                        .sum('COALESCE(crm_contacts.value, 0)')
+
+    series = [
+      { key: 'new_conversations', label: 'Novas conversas', color: '#0EA5E9', unit: 'n',
+        values: fill.call(new_conversations), default_on: true },
+      { key: 'new_leads', label: 'Leads novos (funil)', color: '#6366F1', unit: 'n',
+        values: fill.call(new_leads), default_on: true }
+    ]
+    pipeline.stages.order(:position).each do |stage|
+      by_day = entered.each_with_object({}) { |((sid, d), n), h| h[d] = n if sid == stage.id }
+      series << { key: "stage_#{stage.id}", label: "Entrou em #{stage.name}", color: stage.color,
+                  unit: 'n', values: fill.call(by_day), default_on: false }
+    end
+    series << { key: 'revenue', label: 'Faturamento fechado (R$)', color: '#059669', unit: 'brl',
+                values: fill.call(revenue), default_on: false }
+
+    # ── por CAIXA DE ENTRADA (item 129B) ──────────────────────────────
+    # conversas novas por caixa (dia a dia) + faturamento pela caixa de
+    # ENTRADA do paciente (mesma régua de atribuição do dashboard:
+    # primeira conversa numa porta de captação)
+    inbox_palette = %w[#1D4ED8 #DB2777 #B8860B #059669 #7C3AED #0D9488 #EA580C #DC2626]
+    inboxes = Current.account.inboxes.order(:id).to_a
+    conv_by_inbox = Current.account.conversations.where(created_at: range)
+                           .group(:inbox_id).group(day.call('conversations.created_at')).count
+    rev_by_contact_day = stage_logs.where("crm_contact_stage_logs.stage_name ILIKE '%cirurgia realizada%'")
+                                   .group('crm_contacts.contact_id')
+                                   .group(day.call('crm_contact_stage_logs.entered_at'))
+                                   .sum('COALESCE(crm_contacts.value, 0)')
+    rev_by_inbox = Hash.new { |h, k| h[k] = {} }
+    rev_by_contact_day.each do |(contact_id, d), value|
+      inbox_id = entry_inbox_map[contact_id]
+      next unless inbox_id
+
+      rev_by_inbox[inbox_id][d] = (rev_by_inbox[inbox_id][d] || 0) + value.to_f
+    end
+
+    inboxes.each_with_index do |inbox, i|
+      color = inbox_palette[i % inbox_palette.size]
+      conv_days = conv_by_inbox.each_with_object({}) { |((iid, d), n), h| h[d] = n if iid == inbox.id }
+      series << { key: "inbox_conv_#{inbox.id}", label: "Conversas · #{inbox.name}", color: color,
+                  unit: 'n', values: fill.call(conv_days), default_on: false, group: 'inbox_conv' } if conv_days.any?
+      rev_days = rev_by_inbox[inbox.id]
+      series << { key: "inbox_rev_#{inbox.id}", label: "Faturamento · #{inbox.name}", color: color,
+                  unit: 'brl', values: fill.call(rev_days), default_on: false, group: 'inbox_rev' } if rev_days.any?
+    end
+
+    actions = Array((crm_settings&.agenda_config || {})['company_actions'])
+              .select { |a| a['date'].to_s.between?(from.iso8601, to.iso8601) }
+
+    render json: {
+      from: from.iso8601, to: to.iso8601,
+      dates: dates.map(&:iso8601),
+      labels: dates.map { |d| d.strftime('%d/%m') },
+      series: series,
+      actions: actions
+    }
+  end
+
   private
+
+  def pro_range
+    to = begin
+      Date.iso8601(params[:to].to_s)
+    rescue StandardError
+      PRO_MAX_TZ.today
+    end
+    from = begin
+      Date.iso8601(params[:from].to_s)
+    rescue StandardError
+      to - 89
+    end
+    from = to - (PRO_MAX_MAX_DAYS - 1) if (to - from).to_i >= PRO_MAX_MAX_DAYS
+    [from, [to, from].max]
+  end
+
+  def crm_settings
+    @crm_settings ||= CrmSetting.find_by(account: Current.account)
+  end
 
   # ── Filtro por caixa de entrada ───────────────────────────────────
   # Regra de atribuição: a caixa "dona" do lead é a da primeira conversa

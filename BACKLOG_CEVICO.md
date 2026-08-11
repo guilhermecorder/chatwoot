@@ -3936,4 +3936,166 @@ crm_opportunity_radar_job registrados.
   google_dashboard novo, custom_panels ponta a ponta (salvar→principal→home),
   os 10 backends de régua com presets novos, preview de cirurgias externas —
   tudo 200. Lint: só regras de estilo já toleradas no padrão CEVICO.
+- AGUARDANDO "pode subir". (129 idem — mesma rodada.)
+
+---
+
+# RODADA 10/08 — itens 127-128 (follow-up inteligente + sistema que age sozinho)
+
+## 127. ✅ FOLLOW-UP COM REGRAS DE ETIQUETA POR ETAPA (fix "reaborda 100%")
+- Problema: a cutucada de 24h reabordava TODO paciente em silêncio — inclusive
+  quem já tinha dito "pode agendar" (etiqueta cta_agendamento).
+- Cada ETAPA da cadência agora tem regras próprias: "PULAR quem tem" (skip_labels)
+  e "SÓ para quem tem" (only_labels) — etapa protegida é marcada como tratada SEM
+  enviar e a cadência segue (as etapas de 30d+ continuam valendo). Motivo novo no
+  registro de atividade: protegida_por_etiqueta.
+- Etiquetas olhadas no CONTATO **e** na CONVERSA (a cadeia automática etiqueta a
+  conversa primeiro — o filtro do robô inteiro também passou a ver as duas).
+- De quebra: permit do controller não aceitava delay_from (passos "desde a
+  entrada na coluna" salvavam como silêncio) — corrigido.
+- UI: FollowupBotModal → "Regras de etiqueta desta etapa" (sanfona por passo,
+  chips vermelhos PULAR / azuis SÓ PARA, dica do caso cta_agendamento).
+- CONFIG DELE pós-deploy: editar a régua de 24h → nas etapas curtas, PULAR quem
+  tem cta_agendamento. Réguas de 30d+ (MessageAutomation) não mudam.
+- Teste: 12/12 verde (etiqueta em conversa/contato, only/skip, fluxo completo
+  sem envio + estado + evento, permit).
+
+## 128A. ✅ 🌾 COLHEITADEIRA DA BASE (agente 'harvest')
+- Cron horário (9h-17h SP, seg-sáb): no dia configurado do mês gera a PRÉVIA
+  (pool SQL de leads frios → IA pontua em lotes de 25 c/ haiku → top N) e abre
+  tarefa de aprovação; aprovada, envia por SendTemplateService respeitando teto
+  DIÁRIO (padrão 50, anti-ban) em fatias horárias de 12.
+- Pool: colunas abertas (fora realizada/pós/perda), telefone presente, frio há
+  60d+, sem nao_perturbe/perda_*, sem colheita nos últimos 4 meses (etiqueta
+  colheita_YYYY_MM aplicada no envio). Pontuação com último recado do paciente
+  + ai_insight quando existe; heurística de reserva além do teto de 40 lotes.
+- Personalização POR LEAD: IA escreve [gancho] (1 frase citando o histórico);
+  [procedimento] também substitui nas variáveis do modelo aprovado do WhatsApp.
+- Estado em ai_config['harvest_state'] (sem migration), com_lock, idempotente.
+- Config: monthly_size/cold_days/daily_cap/day_of_month/inbox/template/
+  require_approval (padrão exige aprovação) + prompt/modelo padrão dos agentes.
+- Endpoints settings: harvest_status/preview/approve/pause/resume/skip_lead/
+  send_now. Resultados: enviados, responderam (incoming pós-envio), pendentes.
+
+## 128B. ✅ 📊 GESTOR AUTÔNOMO (agente 'manager')
+- Cron diário útil 08:10 SP: semana atual (projetada por ritmo) e semana fechada
+  vs MÉDIA de 12 semanas (GoalPeriodHistoryService) em 8 indicadores; desvio
+  além do limiar (padrão 25%) vira ACHADO (máx 3, os piores).
+- Guarda de volume (MIN_BASELINE por indicador; taxa julgada pelo volume que a
+  alimenta) — base pequena não gera alarme falso. Começo de semana amortecido.
+- AGE: abre tarefa (task_type gestao, prioridade alta, idempotente por dia) para
+  o responsável certo (attendance_owners consulta/cirurgia → admin) + briefing
+  diário de 4 frases pela IA (haiku) + estado em ai_config['manager_state'].
+- Meu Painel: card "Briefing do Gestor" (admin) com brief + chips dos desvios.
+- Endpoint run_manager (rodar agora). Config: drop_pct.
+- Teste 128: 27/27 verde (pool/bloqueios/prévia/aprovação/pulos/envio sem caixa/
+  personalização/fallbacks + desvios sintéticos/guarda de volume/idempotência) —
+  na base local o Gestor detectou 1 desvio REAL e abriu a tarefa sozinho.
+
+## 129. ✅ 📈 VISUALIZAÇÃO PRO MAX (Dashboard CRM)
+- Responsividade: barras viraram CURVA DE QUEDA (chart.js Line, % acumulado
+  por etapa — a inclinação mostra o vazamento; tooltip com contagens).
+- Botão "✨ Visualização PRO MAX" no card → estúdio em tela cheia:
+  - régua padrão de período + granularidade Dia/Semana/Mês;
+  - 4 estilos: Linha, Área, Barras e CANDLES (OHLC do balde montado com
+    barras flutuantes [min,max] do chart.js — sem lib nova; candle usa a
+    1ª variável ligada, abre no 1º dia e fecha no último);
+  - variáveis ligáveis: novas conversas, leads novos, ENTROU em cada etapa
+    do funil (stage_logs por dia), faturamento fechado;
+  - 📌 HISTÓRICO DE AÇÕES DA EMPRESA: admin registra "LP nova no ar",
+    "campanha X", "sistema atualizado" (data+título+categoria+nota) →
+    linhas verticais numeradas no gráfico (plugin inline) + legenda com
+    gestão (add/remove). Persistência: agenda_config['company_actions']
+    via update_agenda (sanitizado, máx 200, sem migration).
+- Backend: GET pipelines/:id/dashboard/pro_series (séries DIÁRIAS; front
+  agrega) — dashboards_controller#pro_series, cap 366 dias, TZ SP.
+- API: getProSeries + updateCompanyActions; settings_json expõe company_actions.
+
+## 129B. ✅ PRO MAX ESTENDIDO (conversas + faturamento por caixa)
+- pro_series ganhou séries POR CAIXA DE ENTRADA: "Conversas · <caixa>" (dia a
+  dia por inbox) e "Faturamento · <caixa>" (receita de cirurgia realizada
+  atribuída pela caixa de ENTRADA do paciente — mesma régua entry_inbox_map
+  do dashboard); paleta própria por caixa, group inbox_conv/inbox_rev.
+- Botões "✨ PRO MAX" nos cards "Conversas ao longo do tempo" (foco timeline:
+  abre com novas conversas + por caixa) e "Faturamento por caixa de entrada"
+  (foco revenue: abre com o faturamento por caixa) — prop focus no estúdio.
+
+## 130. ✅ 🎓 AUDITOR DE CONVERSAS (agente 'auditor') — coaching contínuo
+- Cron diário 10:40 UTC (07:40 SP): audita as conversas de ONTEM (com >= 2
+  mensagens, priorizando as mais ricas, teto diário padrão 150) em lotes de
+  5 por chamada (haiku): nota 0-10 contra o script oficial (abertura →
+  acolhimento → investigação → orçamento ancorado → quebra de objeção → CTA
+  → confirmação), etapa alcançada, 1 acerto, 1-2 falhas acionáveis, próxima
+  ação — gravado em conversation.additional_attributes['audit'].
+- Agregado por ATENDENTE/dia em ai_config['auditor_state'] (30 dias, poda
+  automática, with_lock); "atendente 0" = conversas do robô/fluxo.
+- summary(days): ranking por média + falhas mais comuns do TIME → base do
+  coaching contínuo (Mentor pode beber daqui numa rodada futura).
+- Endpoints: run_auditor (pontual) + auditor_summary?days=N; card na aba
+  Agentes com ranking e falhas do time. Idempotente por dia (days_done).
+- Teste: 12/12 verde (fila de ontem, transcript, nota gravada, ranking com
+  média/top_gaps, idempotência, poda).
+
+## 131. ✅ 🎨 CRIATIVO PERPÉTUO (agente 'creative')
+- Cron semanal seg 11:30 UTC (08:30 SP): acha os VENCEDORES por jornada REAL
+  do banco (últimos 90d) — termos do Google (page_ads.utm_term) e anúncios do
+  Meta (meta_ads.ad_name) ranqueados por cirurgias → compareceu → marcou →
+  leads (vencedor exige >= 1 consulta marcada) — e gera N variações de copy
+  por vencedor (sonnet/high) seguindo as REGRAS DE CRIATIVOS do Guilherme
+  (1 frase/linha, gancho <=40 chars, rapport antes da oferta, sem "digite",
+  sem promessa médica) + objeções reais do Mapa de Objeções nos ângulos.
+- Fluxo: gera → tarefa "🎨 Criativos da semana prontos" → ele aprova/recusa
+  na tela → APROVADAS entram no approved_log (cap 100) = despensa do Estúdio
+  Criativo. Idempotente por semana (week_key = segunda SP).
+- Estado em ai_config['creative_state'] (sem migration, with_lock).
+- Endpoints: run_creative / creative_state / creative_review. Card na aba
+  Agentes c/ jornada do vencedor + variações + copiar p/ Gerenciador.
+- Teste: 13/13 verde (coleta c/ jornada completa, geração, idempotência
+  semanal, aprovar/recusar/erros, despensa).
+
+## 132. ✅ 📄 IMPORTAR PLANILHA DE FECHAMENTO (o sistema "entende" o .xlsx)
+- Pedido 11/08: FECHAMENTO COMERCIAL.xlsx (26 abas mensais abr/24→jul/26,
+  Status|Data|Paciente|Procedimento|Olho|valor total) entrando no sistema com
+  leads atualizados na coluna Cirurgia Realizada COM VALOR E DATA REAIS.
+- Crm::ClosingSheetReader: parser xlsx SEM gem nova (binário unzip da imagem
+  + Nokogiri; IO.popen com array = sem shell), acha o cabeçalho por aliases,
+  ignora duplicadas/canceladas/sem valor/linhas de total, datas em texto
+  dd/mm/aaaa E serial do Excel. TESTE COM O ARQUIVO REAL: 25 abas, 877
+  cirurgias válidas, R$ 3.675.205, 851 com data (166 pulos corretos).
+- Casamento por NOME (normalizado sem acento/caixa/pontuação): 1 contato =
+  casa; homônimos = ambíguo (fica de fora); não existe = opção CRIAR o
+  paciente (additional_attributes.origem=planilha_fechamento, sem telefone).
+- RETRODATAÇÃO: o StageLog recém-criado e o stage_moved_at recebem a data
+  real da cirurgia → funis/PRO MAX/faturamento contam no MÊS CERTO (job não
+  toca em log antigo; automações continuam sem disparar; valor por
+  update_column como antes). Formato antigo [contact_id, valor] segue aceito.
+- Fluxo: upload → preview_sheet (linhas em cache 2h por token) → prévia
+  (meses, total R$, casados/criar/ambíguos/já na coluna/ignoradas) →
+  apply_sheet recasa no servidor → ExternalSurgeryJob. UI dentro do card
+  Cirurgias feitas fora (Tratamento de dados). Teste pipeline: 10/10 verde
+  (casamento com acento/caixa, retrodatação 2024/2026, criação, etiqueta).
+
+## 133. ✅ RODADA DE REFINO 11/08 (pedidos do Guilherme)
+- ↩️ BOTÃO DESFAZER da importação: ExternalSurgeryJob grava RECIBO da última
+  importação (agenda_config['surgery_import_undo']: prev_stage/prev_value/
+  prev_stage_moved_at/log criado/contato criado, cap 5000) →
+  ExternalSurgeryUndoJob reverte tudo (cards voltam, logs do import apagados,
+  pacientes criados removidos, etiqueta removida) e limpa o recibo. Endpoints
+  import_status/undo_last + banner âmbar na tela. Teste 9/9 verde.
+- 🗂️ COLHEITADEIRA modo ORGANIZE (novo PADRÃO): em vez de enviar, etiqueta os
+  aprovados como oportunidade_AAAA_MM (lista de trabalho no CRM via etiqueta);
+  modo 'send' (mensagem modelo + teto) continua disponível. Nota: o envio JÁ
+  era por mensagem modelo (dúvida dele respondida), mas organize é mais
+  seguro como padrão. Config agents.harvest.mode. Teste verde.
+- 🗃️ AGENTES POR CATEGORIA (16 agentes): aba Agentes agrupada em Atendimento /
+  Vendas / Marketing / Gestão (AGENT_GROUPS).
+- 💬 JANELINHAS DE CONVERSA (CRM + Radar): barra de ações com ETIQUETAS
+  (add/remover) e MOVER COLUNA sem sair da janelinha.
+
+## Estado/deploy da rodada 10/08
+- SEM migrations. Crons novos (crm_harvest_job + crm_auto_manager_job +
+  crm_conversation_auditor_job + crm_creative_job) → reimplantar SIDEKIQ
+  junto do web. schedule_spec verde (22 crons, 0 duplicados).
+- Agentes novos nascem DESLIGADOS (opt-in): ligar em Automações → Agentes.
+- Working tree segue carregando Meta Leads não commitado — separar no commit.
 - AGUARDANDO "pode subir".

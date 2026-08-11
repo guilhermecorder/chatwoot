@@ -14,6 +14,7 @@ import {
 import { Bar, Doughnut, Line } from 'vue-chartjs';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import ProMaxStudio from './components/ProMaxStudio.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import {
@@ -646,21 +647,61 @@ const RESP_GRADS = [
   ['#B8860B', '#D4A017'],
 ];
 
-const respMilestones = computed(() => {
-  if (!resp.value?.stages?.length) return [];
+// item 129: barras viraram CURVA DE QUEDA — a inclinação entre dois pontos
+// é o tamanho do vazamento entre as etapas (pedido 10/08)
+const respCurve = computed(() => {
+  if (!resp.value?.stages?.length) return null;
   const rows = resp.value.stages.slice(1);
-  // largura relativa à MAIOR etapa (não ao total) — barras cheias e
-  // legíveis, com o % real do total escrito dentro
-  const max = Math.max(...rows.map(s => s.reached), 1);
-  return rows.map((s, i) => ({
-    name: s.stage_name,
-    grad: RESP_GRADS[i % RESP_GRADS.length],
-    reached: s.reached,
-    pct: s.reached_pct,
-    // pelo menos 33% preenchido: barra curta demais fica feia de ler
-    width: Math.max((s.reached / max) * 100, 33),
-  }));
+  return {
+    data: {
+      labels: rows.map(s => s.stage_name),
+      datasets: [
+        {
+          label: '% que chegou até a etapa',
+          data: rows.map(s => s.reached_pct),
+          borderColor: '#7C3AED',
+          backgroundColor: 'rgba(124, 58, 237, 0.16)',
+          fill: true,
+          tension: 0.4,
+          borderWidth: 3,
+          pointRadius: 4.5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: rows.map((s, i) => RESP_GRADS[i % RESP_GRADS.length][0]),
+          pointBorderColor: '#fff',
+          pointBorderWidth: 1.5,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const s = rows[ctx.dataIndex];
+              return `${s.reached_pct}% · ${s.reached.toLocaleString('pt-BR')} conversas chegaram até aqui`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } },
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(148,163,184,0.15)' },
+          ticks: { callback: v => `${v}%` },
+        },
+      },
+    },
+  };
 });
+
+// estúdio PRO MAX (item 129/129B): null = fechado; '' = variáveis padrão;
+// 'timeline' = conversas por caixa; 'revenue' = faturamento por caixa
+const proMaxFocus = ref(null);
 
 // ── Atendimento por agente ────────────────────────────────────────────
 const selectedAgentId = ref('all');
@@ -1113,36 +1154,22 @@ const agentView = computed(() => {
             </span>
             Responsividade das conversas
           </h3>
-          <span class="text-xs text-n-slate-10">leads do período escolhido · % = quanto do total chegou até a etapa · barras proporcionais entre si</span>
+          <div class="flex items-center gap-3 flex-wrap">
+            <span class="text-xs text-n-slate-10 hidden lg:inline">leads do período · % = quanto do total chegou até a etapa · a inclinação mostra o vazamento</span>
+            <button
+              class="text-xs font-bold px-3.5 py-1.5 rounded-xl text-white hover:opacity-90 shadow flex items-center gap-1.5"
+              style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)"
+              title="Análise por período, estilos de gráfico (até candles) e ações da empresa na linha do tempo"
+              @click="proMaxFocus = ''"
+            >
+              <span class="i-lucide-sparkles text-sm" />
+              Visualização PRO MAX
+            </button>
+          </div>
         </div>
 
-        <div class="space-y-2.5">
-          <div v-for="m in respMilestones" :key="m.name" class="flex items-center gap-3">
-            <div class="w-40 text-right flex-shrink-0">
-              <p class="text-xs text-n-slate-12 font-medium truncate">{{ m.name }}</p>
-            </div>
-            <div class="flex-1 h-9 rounded-xl bg-n-alpha-1 relative overflow-hidden">
-              <div
-                class="absolute inset-y-0 left-0 rounded-xl transition-all shadow-sm"
-                :style="{ width: m.width + '%', background: `linear-gradient(90deg, ${m.grad[0]}, ${m.grad[1]})` }"
-              />
-              <div class="absolute inset-0 flex items-center">
-                <span
-                  v-if="m.width >= 34"
-                  class="text-[11px] font-bold text-white drop-shadow pl-3"
-                >
-                  {{ m.pct }}% · {{ m.reached.toLocaleString('pt-BR') }} conversas
-                </span>
-                <span
-                  v-else
-                  class="text-[11px] font-bold whitespace-nowrap"
-                  :style="{ marginLeft: `calc(${m.width}% + 10px)`, color: m.grad[0] }"
-                >
-                  {{ m.pct }}% · {{ m.reached.toLocaleString('pt-BR') }} conversas
-                </span>
-              </div>
-            </div>
-          </div>
+        <div class="h-72">
+          <Line v-if="respCurve" :data="respCurve.data" :options="respCurve.options" />
         </div>
 
         <div class="mt-5 flex items-center gap-3 rounded-xl p-4 flex-wrap border-2" style="background: rgba(212,160,23,0.08); border-color: rgba(212,160,23,0.35)">
@@ -1174,7 +1201,18 @@ const agentView = computed(() => {
           class="xl:col-span-2 rounded-2xl p-6 shadow-lg"
           style="background: linear-gradient(160deg, #0A1130, #101A45 55%, #0C1338); border: 1px solid rgba(148, 163, 184, 0.18)"
         >
-          <h3 class="text-sm font-bold text-white mb-1">Conversas ao longo do tempo</h3>
+          <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
+            <h3 class="text-sm font-bold text-white">Conversas ao longo do tempo</h3>
+            <button
+              class="text-[11px] font-bold px-3 py-1.5 rounded-lg text-white hover:opacity-90 flex items-center gap-1.5"
+              style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)"
+              title="Abrir no estúdio: conversas por caixa de entrada, estilos de gráfico e ações da empresa"
+              @click="proMaxFocus = 'timeline'"
+            >
+              <span class="i-lucide-sparkles text-xs" />
+              PRO MAX
+            </button>
+          </div>
           <p class="text-[11px] mb-4" style="color: #94A3B8">
             {{ timelineGranularity }}, pela data em que o lead chegou — e, desses leads, quantos avançaram até agendar ou operar
           </p>
@@ -1223,9 +1261,20 @@ const agentView = computed(() => {
             </span>
             Faturamento por caixa de entrada
           </h3>
-          <span v-if="revenueTotal" class="text-sm font-bold" style="color: #FBBF24">
-            {{ formatCurrency(revenueTotal) }} no período
-          </span>
+          <div class="flex items-center gap-3">
+            <span v-if="revenueTotal" class="text-sm font-bold" style="color: #FBBF24">
+              {{ formatCurrency(revenueTotal) }} no período
+            </span>
+            <button
+              class="text-[11px] font-bold px-3 py-1.5 rounded-lg text-white hover:opacity-90 flex items-center gap-1.5"
+              style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+              title="Abrir no estúdio: faturamento por caixa de entrada, candles e ações da empresa"
+              @click="proMaxFocus = 'revenue'"
+            >
+              <span class="i-lucide-sparkles text-xs" />
+              PRO MAX
+            </button>
+          </div>
         </div>
         <p class="text-[11px] mb-4" style="color: #94A3B8">
           {{ revenueGranularityLabel }} · receita das cirurgias fechadas, pela data de chegada do lead · cada camada é uma caixa de entrada
@@ -1558,6 +1607,16 @@ const agentView = computed(() => {
       <p class="text-sm">Nenhum dado disponível ainda.</p>
       <p class="text-xs mt-1">Adicione conversas ao funil para ver as métricas.</p>
     </div>
+
+    <!-- 📈 Estúdio PRO MAX (item 129/129B) -->
+    <ProMaxStudio
+      v-if="proMaxFocus !== null"
+      :pipeline-id="props.pipeline.id"
+      :initial-from="period.from"
+      :initial-to="period.to"
+      :focus="proMaxFocus"
+      @close="proMaxFocus = null"
+    />
 
   </div>
 </template>

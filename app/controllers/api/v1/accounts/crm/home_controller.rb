@@ -39,9 +39,27 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       bug_reports: bug_reports_json,
       # status dos números de WhatsApp (item 88 — só o gestor vê)
       whatsapp_status: whatsapp_status_json,
+      # 📊 Gestor Autônomo (item 128): briefing do dia + desvios (gestão)
+      manager_brief: manager_brief_json,
       # metas do painel + fator do período + recordes (cards vivos)
       goals: goals_json
     }.merge(panel_key == 'agendamento' ? panel_data(since, until_at) : {}) # compat: campos antigos no topo
+  end
+
+  # briefing diário do Gestor Autônomo — admin vê tudo; atendente comum não
+  # (as tarefas dos desvios já chegam a cada responsável pelo "esperando você")
+  def manager_brief_json
+    return nil unless Current.account_user.administrator?
+
+    state = (CrmSetting.find_by(account: account)&.ai_config || {})['manager_state']
+    return nil if state.blank? || state['last_run_at'].blank?
+
+    {
+      last_run_at: state['last_run_at'],
+      brief: state['brief'],
+      findings: Array(state['findings']).first(3),
+      tasks_opened: state['tasks_opened']
+    }
   end
 
   # item 88: cada número de WhatsApp com o estado evidente — precisa

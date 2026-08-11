@@ -15,6 +15,7 @@ import CannedResponse from 'dashboard/components/widgets/conversation/CannedResp
 import WhatsAppTemplateReply from 'dashboard/components/widgets/conversation/WhatsappTemplates/WhatsAppTemplateReply.vue';
 import EmojiPicker from 'shared/components/emoji/EmojiPicker.vue';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
+import ChatQuickActions from './ChatQuickActions.vue';
 import { onClickOutside } from '@vueuse/core';
 
 const props = defineProps({
@@ -216,56 +217,9 @@ const startPolling = () => {
 
 onBeforeUnmount(stopPolling);
 
-// ── Painel do card: mover de coluna + etiquetas rápidas ──
+// ── Painel do robô de follow-up (etiquetas e coluna agora ficam na
+// barra de ações rápidas, sempre visível abaixo do cabeçalho) ──
 const showCardPanel = ref(false);
-const isMovingStage = ref(false);
-const isSavingLabels = ref(false);
-const accountLabels = useMapGetter('labels/getLabels');
-
-const moveToStage = async stageId => {
-  if (!stageId || Number(stageId) === Number(props.contact.stage_id) || isMovingStage.value) return;
-  isMovingStage.value = true;
-  try {
-    await store.dispatch('crm/moveContact', {
-      pipelineId: props.pipelineId,
-      id: props.contact.id,
-      stageId: Number(stageId),
-    });
-    useAlert(t('CRM.CHAT.CARD_MOVED'));
-  } catch {
-    useAlert(t('CRM.ERROR.GENERIC'));
-  } finally {
-    isMovingStage.value = false;
-  }
-};
-
-const toggleLabel = async label => {
-  if (isSavingLabels.value) return;
-  const current = [...(props.contact.labels ?? [])];
-  const idx = current.indexOf(label);
-  const added = idx === -1;
-  if (added) current.push(label);
-  else current.splice(idx, 1);
-
-  isSavingLabels.value = true;
-  try {
-    await store.dispatch('contactLabels/update', {
-      contactId: props.contact.contact_id,
-      labels: current,
-    });
-    store.commit('crm/patchContact', { id: props.contact.id, data: { labels: current } });
-    store.dispatch('crm/triggerLabelChange', {
-      pipelineId: props.pipelineId,
-      contactId: props.contact.id,
-      added: added ? [label] : [],
-      removed: added ? [] : [label],
-    }).catch(() => {});
-  } catch {
-    useAlert(t('CRM.ERROR.GENERIC'));
-  } finally {
-    isSavingLabels.value = false;
-  }
-};
 
 // ── Trava do follow-up: pausa por PACIENTE + chave por ROBÔ ──
 // A atendente para o robô sem depender de admin: ou silencia só este
@@ -428,7 +382,6 @@ const onTemplateSend = async payload => {
 };
 
 onMounted(() => {
-  if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
   if (hasConversation.value) {
     loadMessages();
     startPolling();
@@ -508,15 +461,15 @@ watch(conversationId, id => {
         >
           <PatientSpaceIcon :size="22" />
         </button>
-        <!-- Painel do card (mover coluna / etiquetas) -->
+        <!-- Painel do robô de follow-up -->
         <button
-          v-if="stages.length"
+          v-if="hasConversation"
           class="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0 transition-colors"
           :class="showCardPanel ? 'bg-n-brand text-white' : 'text-n-slate-10 hover:text-n-brand hover:bg-n-brand/10'"
-          :title="$t('CRM.CHAT.CARD_PANEL')"
+          :title="$t('CRM.CHAT.FOLLOWUP_TITLE')"
           @click="showCardPanel = !showCardPanel"
         >
-          <span class="i-lucide-kanban text-base" />
+          <span class="i-lucide-bot text-base" />
         </button>
         <button
           class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl flex-shrink-0"
@@ -524,40 +477,27 @@ watch(conversationId, id => {
         />
       </div>
 
-      <!-- ── Painel do card: mover de coluna + etiquetas ── -->
+      <!-- ── Barra de ações rápidas: etiquetas + mover de coluna ── -->
+      <ChatQuickActions
+        :contact="contact"
+        :pipeline-id="pipelineId"
+        :stages="stages"
+      />
+
+      <!-- ── Painel do robô de follow-up ── -->
       <div v-if="showCardPanel" class="px-4 py-3 border-b border-n-weak flex-shrink-0 space-y-2.5 bg-n-alpha-1">
-        <div class="flex items-center gap-2">
-          <label class="text-xs font-medium text-n-slate-11 flex-shrink-0">{{ $t('CRM.MODAL.STAGE') }}:</label>
-          <select
-            :value="contact.stage_id"
-            :disabled="isMovingStage"
-            class="flex-1 border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-60"
-            @change="moveToStage($event.target.value)"
-          >
-            <option v-for="s in stages" :key="s.id" :value="s.id">{{ s.name }}</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-xs font-medium text-n-slate-11 block mb-1.5">{{ $t('CRM.MODAL.LABELS') }}</label>
-          <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-            <button
-              v-for="l in accountLabels"
-              :key="l.id"
-              class="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors disabled:opacity-50"
-              :class="(contact.labels ?? []).includes(l.title)
-                ? 'bg-n-brand/15 border-n-brand text-n-brand font-medium'
-                : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
-              :disabled="isSavingLabels"
-              @click="toggleLabel(l.title)"
-            >
-              <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: l.color ?? '#6B7280' }" />
-              {{ l.title }}
-            </button>
-          </div>
-        </div>
+        <p v-if="!followup" class="text-xs text-n-slate-10">
+          {{ $t('CRM.MODAL.LOADING') }}
+        </p>
+        <p
+          v-else-if="!followup.bots.length && !followup.paused"
+          class="text-xs text-n-slate-10"
+        >
+          {{ $t('CRM.CHAT.FOLLOWUP_EMPTY') }}
+        </p>
 
         <!-- 🤖 Trava do robô de follow-up -->
-        <div v-if="followup && (followup.bots.length || followup.paused)" class="pt-2.5 border-t border-n-weak">
+        <div v-if="followup && (followup.bots.length || followup.paused)">
           <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
             🤖 {{ $t('CRM.CHAT.FOLLOWUP_TITLE') }}
           </label>

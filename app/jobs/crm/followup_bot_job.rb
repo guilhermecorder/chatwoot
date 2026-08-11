@@ -112,7 +112,7 @@ class Crm::FollowupBotJob < ApplicationJob
     # (botão na janelinha da conversa) — nenhum robô cutuca
     return run[:reasons]['pausado_para_paciente'] += 1 if conversation.contact&.additional_attributes&.[]('cevico_followup_paused').present?
 
-    return run[:reasons]['etiquetas'] += 1 unless labels_match?(bot, conversation.contact)
+    return run[:reasons]['etiquetas'] += 1 unless labels_match?(bot, conversation)
 
     anchor = silence_anchor(conversation)
     # paciente falou por último → quem deve responder é o atendimento, não o robô
@@ -122,6 +122,25 @@ class Crm::FollowupBotJob < ApplicationJob
     state = followup_state(conversation, bot, anchor, stage_entered)
 
     due = overdue_steps(steps, state, anchor, stage_entered)
+
+    # Regras de etiqueta POR ETAPA (item 127): etapa vencida cuja etiqueta
+    # protege ESTE paciente é tratada SEM enviar — a cadência segue viva e as
+    # etapas seguintes (ex.: as longas) continuam valendo normalmente.
+    # Caso típico: paciente com "cta_agendamento" (já topou agendar) não
+    # recebe a cutucada de 24h, mas continua elegível ao toque de 30 dias.
+    blocked, due = due.partition { |d| step_blocked_by_labels?(d[:step], conversation) }
+    if blocked.any?
+      mark_steps(state, blocked)
+      persist_state(conversation, bot, anchor, state)
+      blocked.each do |d|
+        events << event_for(conversation, 'skipped',
+                            note: "#{step_label(d[:step])} não enviada — protegida por etiqueta")
+      end
+      if due.empty?
+        run[:reasons]['protegida_por_etiqueta'] += 1
+        return
+      end
+    end
 
     if due.empty?
       if (state['sent'] + state['stage_sent']).size >= steps.size
@@ -263,19 +282,42 @@ class Crm::FollowupBotJob < ApplicationJob
   end
 
   # Filtros "tem / não tem": só cutuca quem TEM todas as etiquetas exigidas
-  # e NÃO TEM nenhuma das excluídas (etiquetas do contato).
-  def labels_match?(bot, contact)
-    return false if contact.blank?
+  # e NÃO TEM nenhuma das excluídas. Olha as etiquetas do CONTATO **e** da
+  # CONVERSA (item 127: a cadeia automática etiqueta a conversa primeiro —
+  # olhar só o contato deixava a proteção furada).
+  def labels_match?(bot, conversation)
+    return false if conversation.contact.blank?
 
     required = Array(bot.required_labels).map(&:to_s)
     excluded = Array(bot.exclude_labels).map(&:to_s)
     return true if required.empty? && excluded.empty?
 
-    contact_labels = contact.label_list.map(&:to_s)
-    return false if required.any? && (required - contact_labels).any?
-    return false if excluded.any? && contact_labels.intersect?(excluded)
+    labels = all_labels_for(conversation)
+    return false if required.any? && (required - labels).any?
+    return false if excluded.any? && labels.intersect?(excluded)
 
     true
+  end
+
+  # Regras de etiqueta POR ETAPA: skip_labels = pula quem TEM alguma;
+  # only_labels = só envia para quem TEM alguma. Vazias = etapa para todos.
+  def step_blocked_by_labels?(step, conversation)
+    skip = Array(step['skip_labels']).map(&:to_s)
+    only = Array(step['only_labels']).map(&:to_s)
+    return false if skip.empty? && only.empty?
+
+    labels = all_labels_for(conversation)
+    return true if skip.any? && labels.intersect?(skip)
+    return true if only.any? && !labels.intersect?(only)
+
+    false
+  end
+
+  # etiquetas do contato + da conversa, uma vez por conversa por rodada
+  def all_labels_for(conversation)
+    @all_labels_for ||= {}
+    @all_labels_for[conversation.id] ||=
+      (Array(conversation.contact&.label_list) + Array(conversation.label_list)).map(&:to_s).uniq
   end
 
   # primeira outgoing depois da última incoming; nil se a última msg for do paciente.

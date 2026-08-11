@@ -115,6 +115,17 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/traffic_report`, { params });
   }
 
+  // ── 📈 Estúdio PRO MAX (item 129) ─────────────────────────────────
+  // séries diárias do período (o estúdio agrega em semana/mês e faz candles)
+  getProSeries(pipelineId, params = {}) {
+    return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard/pro_series`, { params });
+  }
+
+  // histórico de AÇÕES DA EMPRESA (marcadores da linha do tempo) — admin
+  updateCompanyActions(companyActions) {
+    return axios.post(`${this.url}/settings/update_agenda`, { company_actions: companyActions });
+  }
+
   // ── Relatório de anúncios (Meta, atribuição CTWA) ─────────────────
   getAdsReport(params) {
     return axios.get(`${this.url}/ads_report`, { params });
@@ -384,6 +395,26 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/external_surgeries/apply`, data);
   }
 
+  // 📄 planilha de fechamento (item 132): upload .xlsx → prévia por NOME → importar
+  previewClosingSheet(formData) {
+    return axios.post(`${this.url}/external_surgeries/preview_sheet`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  }
+
+  applyClosingSheet(data) {
+    return axios.post(`${this.url}/external_surgeries/apply_sheet`, data);
+  }
+
+  // ↩️ desfazer a última importação de cirurgias (item 133)
+  getImportStatus() {
+    return axios.get(`${this.url}/external_surgeries/import_status`);
+  }
+
+  undoLastImport(id) {
+    return axios.post(`${this.url}/external_surgeries/undo_last`, { id });
+  }
+
   previewLabelReplace(data) {
     return axios.post(`${this.url}/label_replacements/preview`, data);
   }
@@ -636,6 +667,76 @@ class CrmAPI extends ApiClient {
   // Mentor do Time: gera o feedback semanal agora (últimos 7 dias, admin)
   runMentor() {
     return axios.post(`${this.url}/settings/run_mentor`);
+  }
+
+  // ── 🌾 Colheitadeira da Base (reativação mensal da base fria) ─────
+  getHarvestStatus() {
+    return axios.get(`${this.url}/settings/harvest_status`);
+  }
+
+  // gera a prévia do mês em segundo plano (~1-2 min; repollar o status)
+  harvestPreview() {
+    return axios.post(`${this.url}/settings/harvest_preview`);
+  }
+
+  harvestApprove() {
+    return axios.post(`${this.url}/settings/harvest_approve`);
+  }
+
+  harvestPause() {
+    return axios.post(`${this.url}/settings/harvest_pause`);
+  }
+
+  harvestResume() {
+    return axios.post(`${this.url}/settings/harvest_resume`);
+  }
+
+  // tira UM lead da colheita do mês (ele não recebe a mensagem)
+  harvestSkipLead(contactId) {
+    return axios.post(`${this.url}/settings/harvest_skip_lead`, {
+      contact_id: contactId,
+    });
+  }
+
+  // dispara o lote de hoje agora (só com a colheita aprovada)
+  harvestSendNow() {
+    return axios.post(`${this.url}/settings/harvest_send_now`);
+  }
+
+  // 📊 Gestor Autônomo: lê o funil agora e atualiza o briefing do dia
+  runManager() {
+    return axios.post(`${this.url}/settings/run_manager`);
+  }
+
+  // 🎓 Auditor de Conversas: re-audita as conversas de ontem (~1-2 min)
+  runAuditor() {
+    return axios.post(`${this.url}/settings/run_auditor`);
+  }
+
+  // ranking por atendente + falhas mais comuns do time (janela em dias)
+  getAuditorSummary(days = 7) {
+    return axios.get(`${this.url}/settings/auditor_summary`, {
+      params: { days },
+    });
+  }
+
+  // 🎨 Criativo Perpétuo: gera as variações da semana agora (~1-2 min)
+  runCreative() {
+    return axios.post(`${this.url}/settings/run_creative`);
+  }
+
+  // vencedores da semana + variações + despensa de aprovadas
+  getCreativeState() {
+    return axios.get(`${this.url}/settings/creative_state`);
+  }
+
+  // aprova/recusa UMA variação (pelos índices do vencedor e da variação)
+  reviewCreative(winnerIndex, variationIndex, status) {
+    return axios.post(`${this.url}/settings/creative_review`, {
+      winner_index: winnerIndex,
+      variation_index: variationIndex,
+      status,
+    });
   }
 
   // ── PÁGINAS PRO: análise, funis, comentários ──────────────────────

@@ -10,6 +10,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
     sales_insights radar_scan run_mentor copywriter_content update_price_table
     update_inbox_investments
+    harvest_status harvest_preview harvest_approve harvest_pause harvest_resume
+    harvest_skip_lead harvest_send_now run_manager run_auditor auditor_summary
+    run_creative creative_state creative_review
   ].freeze
   before_action -> { require_capability(:settings) }, only: ADMIN_SETTINGS_ACTIONS
   # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
@@ -224,6 +227,75 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: result
   end
 
+  # ── 🌾 Colheitadeira da Base (item 128) ──────────────────────────────────────
+  # A tela opera a colheita por aqui; o cron faz o mesmo caminho sozinho.
+
+  def harvest_status
+    render json: Crm::HarvestService.new(account: Current.account).results
+  end
+
+  def harvest_preview
+    Crm::HarvestJob.perform_later(Current.account.id, 'preview')
+    render json: { enqueued: true }
+  end
+
+  def harvest_approve
+    render json: Crm::HarvestService.new(account: Current.account).approve!(Current.user)
+  end
+
+  def harvest_pause
+    render json: Crm::HarvestService.new(account: Current.account).pause!
+  end
+
+  def harvest_resume
+    render json: Crm::HarvestService.new(account: Current.account).resume!
+  end
+
+  def harvest_skip_lead
+    render json: Crm::HarvestService.new(account: Current.account).skip_lead!(params[:contact_id])
+  end
+
+  def harvest_send_now
+    Crm::HarvestJob.perform_later(Current.account.id, 'batch')
+    render json: { enqueued: true }
+  end
+
+  # ── 📊 Gestor Autônomo (item 128): rodar agora ───────────────────────────────
+  def run_manager
+    Crm::AutoManagerJob.perform_later(Current.account.id)
+    render json: { enqueued: true }
+  end
+
+  # ── 🎓 Auditor de Conversas (item 130) ───────────────────────────────────────
+  def run_auditor
+    Crm::ConversationAuditorJob.perform_later(Current.account.id)
+    render json: { enqueued: true }
+  end
+
+  # ranking dos atendentes + falhas mais comuns do time (últimos N dias)
+  def auditor_summary
+    days = params[:days].to_i.clamp(1, 30)
+    days = 7 if days.zero?
+    render json: Crm::ConversationAuditorService.new(account: Current.account).summary(days: days)
+  end
+
+  # ── 🎨 Criativo Perpétuo (item 131) ──────────────────────────────────────────
+  def run_creative
+    Crm::CreativeJob.perform_later(Current.account.id)
+    render json: { enqueued: true }
+  end
+
+  def creative_state
+    render json: Crm::CreativeService.new(account: Current.account).state
+  end
+
+  # body: { winner_index:, variation_index:, status: 'approved'|'rejected' }
+  def creative_review
+    result = Crm::CreativeService.new(account: Current.account)
+                                 .review!(params[:winner_index], params[:variation_index], params[:status].to_s, Current.user)
+    render json: result, status: result[:error] ? :unprocessable_entity : :ok
+  end
+
   # ── Google Ads ───────────────────────────────────────────────────────────────
 
   def update_google_ads
@@ -284,7 +356,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 comments: agent_fields + [:page_access_token, :fb_page_id, :ig_user_id],
                                 opportunity: agent_fields + [:wait_minutes, :lookback_hours, :response_goal_minutes,
                                                              { stage_ids: [],
-                                                               watchers: %i[stage_id user_id lookback_hours] }])
+                                                               watchers: %i[stage_id user_id lookback_hours] }],
+                                # 🌾 Colheitadeira (item 128): tamanho/frio/teto/dia + caixa e modelo
+                                harvest: agent_fields + [:monthly_size, :cold_days, :daily_cap, :day_of_month,
+                                                         :inbox_id, :require_approval, :message_preview, :mode,
+                                                         { stage_ids: [], template_params: {} }],
+                                # 📊 Gestor Autônomo (item 128): limiar de desvio
+                                manager: agent_fields + [:drop_pct],
+                                # 🎓 Auditor de Conversas (item 130): teto diário
+                                auditor: agent_fields + [:daily_cap],
+                                # 🎨 Criativo Perpétuo (item 131)
+                                creative: agent_fields + [:winners_count, :variations_count])
                         .to_h
       existing = cfg['agents'] || {}
       cfg['agents'] = existing.merge(permitted) do |_key, old_agent, new_agent|
@@ -492,6 +574,29 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # painel atribuído ('' volta ao padrão de fábrica) — só admin
     if params.key?(:main_panel) && Current.account_user.administrator?
       cfg['main_panel'] = params[:main_panel].to_s[0, 60].presence
+    end
+    # 📌 PRO MAX (item 129): histórico de AÇÕES DA EMPRESA (LP nova no ar,
+    # campanha X, deploy…) — marcadores na linha do tempo do estúdio, para
+    # entender o que cada ação gerou. Lista inteira substituída a cada save.
+    if params.key?(:company_actions) && Current.account_user.administrator?
+      cfg['company_actions'] = Array(params[:company_actions]).first(200).filter_map do |raw|
+        a = raw.permit(:id, :date, :title, :category, :notes).to_h
+        date = begin
+          Date.iso8601(a['date'].to_s).iso8601
+        rescue StandardError
+          nil
+        end
+        title = a['title'].to_s.strip[0, 80]
+        next if date.blank? || title.blank?
+
+        {
+          'id' => a['id'].presence || SecureRandom.hex(4),
+          'date' => date,
+          'title' => title,
+          'category' => %w[campanha pagina sistema whatsapp outro].include?(a['category']) ? a['category'] : 'outro',
+          'notes' => a['notes'].to_s[0, 240].presence
+        }.compact
+      end.sort_by { |a| a['date'] }
     end
     crm_settings.update!(agenda_config: cfg)
     render json: {
@@ -829,6 +934,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},
       custom_panels: (s.agenda_config || {})['custom_panels'] || [],
       main_panel: (s.agenda_config || {})['main_panel'].presence,
+      company_actions: (s.agenda_config || {})['company_actions'] || [],
       clinical_access: (s.agenda_config || {})['clinical_access'] || {},
       agenda_backfill_last_run: (s.agenda_config || {})['backfill_last_run'],
       scheduler_log: Array((s.agenda_config || {})['scheduler_log']).first(30),
@@ -870,7 +976,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'copywriter' => Crm::CopywriterService::SYSTEM_PROMPT,
       'pagebuilder' => Crm::PageBuilderService::SYSTEM_PROMPT,
       'mentor' => Crm::WeeklyMentorService::SYSTEM_PROMPT,
-      'comments' => Crm::CommentsAgentService::SYSTEM_PROMPT
+      'comments' => Crm::CommentsAgentService::SYSTEM_PROMPT,
+      'harvest' => Crm::HarvestService::SYSTEM_PROMPT,
+      'manager' => Crm::AutoManagerService::SYSTEM_PROMPT,
+      'auditor' => Crm::ConversationAuditorService::SYSTEM_PROMPT,
+      'creative' => Crm::CreativeService::SYSTEM_PROMPT
     }
     {
       api_key_set: cfg['api_key'].present?,
@@ -885,6 +995,19 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       instagram_events: Array(cfg.dig('instagram_state', 'events')).first(30),
       comments_events: Array(cfg.dig('comments_state', 'events')).first(30),
       comments_last_run_at: cfg.dig('comments_state', 'last_run_at'),
+      # 🌾 resumo da colheita do mês (a lista completa vem por harvest_status)
+      harvest_last: (cfg['harvest_state'] || {}).slice('month_key', 'status', 'generated_at', 'approved_at', 'stats', 'last_error'),
+      # 📊 último diagnóstico do Gestor Autônomo
+      manager_state: (cfg['manager_state'] || {}).slice('last_run_at', 'brief', 'findings', 'tasks_opened'),
+      # 🎓 resumo do Auditor (ranking 7 dias sai por auditor_summary)
+      auditor_last: { last_run_at: cfg.dig('auditor_state', 'last_run_at'),
+                      days_done: (cfg.dig('auditor_state', 'days_done') || {}).keys.max },
+      # 🎨 semana atual do Criativo Perpétuo (lista completa por creative_state)
+      creative_last: { week_key: cfg.dig('creative_state', 'week_key'),
+                       generated_at: cfg.dig('creative_state', 'generated_at'),
+                       winners: Array(cfg.dig('creative_state', 'winners')).size,
+                       pending: Array(cfg.dig('creative_state', 'winners'))
+                         .sum { |w| Array(w['variations']).count { |v| v['status'] == 'pending' } } },
       agents: default_prompts.to_h do |key, default_prompt|
         recommended = Crm::AiAgentConfig::RECOMMENDED[key] || {}
         [key, {
@@ -905,6 +1028,18 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           page_token_set: agents.dig(key, 'page_access_token').present?,
           fb_page_id: agents.dig(key, 'fb_page_id').presence,
           ig_user_id: agents.dig(key, 'ig_user_id').presence,
+          # 🌾 Colheitadeira (item 128)
+          monthly_size: agents.dig(key, 'monthly_size').presence&.to_i,
+          cold_days: agents.dig(key, 'cold_days').presence&.to_i,
+          daily_cap: agents.dig(key, 'daily_cap').presence&.to_i,
+          day_of_month: agents.dig(key, 'day_of_month').presence&.to_i,
+          inbox_id: agents.dig(key, 'inbox_id').presence&.to_i,
+          require_approval: agents.dig(key, 'require_approval') != false,
+          message_preview: agents.dig(key, 'message_preview').presence,
+          mode: agents.dig(key, 'mode').presence,
+          template_params: agents.dig(key, 'template_params').presence,
+          # 📊 Gestor Autônomo (item 128)
+          drop_pct: agents.dig(key, 'drop_pct').presence&.to_i,
           watchers: Array(agents.dig(key, 'watchers')).map do |w|
             {
               stage_id: w['stage_id'].to_i,

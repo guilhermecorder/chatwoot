@@ -852,6 +852,28 @@ const WA_TIERS = {
   TIER_10K: '10 mil/dia', TIER_100K: '100 mil/dia', TIER_UNLIMITED: 'sem limite',
 };
 const waTier = tier => WA_TIERS[tier] || null;
+
+// ── 📊 Briefing do Gestor Autônomo (só admin — null para o time) ──
+// O agente lê o funil todo dia contra a média de 12 semanas e deixa aqui
+// o resumo do dia + os desvios encontrados (chips) + as tarefas abertas.
+const managerBrief = computed(() => data.value?.manager_brief || null);
+// até 4 frases — briefing é café, não relatório
+const managerBriefText = computed(() => {
+  const text = (managerBrief.value?.brief || '').trim();
+  if (!text) return '';
+  const sentences = text.match(/[^.!?]+[.!?]*/g) || [text];
+  return sentences.slice(0, 4).join('').trim();
+});
+const managerFindings = computed(() => managerBrief.value?.findings || []);
+// chip do desvio: "Taxa de comparecimento −38%"
+const managerFindingLabel = f =>
+  `${f.label || f.indicator} ${Number(f.deviation_pct) < 0 ? '−' : '+'}${Math.abs(Math.round(f.deviation_pct || 0))}%`;
+const managerLastRunTime = computed(() => {
+  const iso = managerBrief.value?.last_run_at;
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+});
+
 const radarSignature = computed(
   () => `radar:${radarAlerts.value.map(a => a.conversation_id).sort((a, b) => a - b).join(',')}`
 );
@@ -982,6 +1004,44 @@ onUnmounted(() => {
               <span v-if="w.failed_24h" class="text-amber-600 whitespace-nowrap">· {{ w.failed_24h }} falha(s) 24h</span>
             </template>
           </span>
+        </div>
+
+        <!-- 📊 Briefing do Gestor Autônomo (só admin): o resumo do dia +
+             os desvios do funil vs a média de 12 semanas. Sem briefing
+             escrito, o card fica discreto e mostra só os desvios. -->
+        <div
+          v-if="managerBrief && (managerBriefText || managerFindings.length)"
+          class="rounded-xl border border-n-weak bg-n-solid-2 overflow-hidden mb-6"
+        >
+          <div class="h-1 w-full" style="background: linear-gradient(90deg, #0F5FA6, #3B82F6)" />
+          <div class="p-4">
+            <div class="flex items-center gap-2 mb-2 flex-wrap">
+              <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #0F5FA6, #3B82F6)">
+                <span class="i-lucide-gauge text-white text-sm" />
+              </span>
+              <h2 class="text-sm font-bold text-n-slate-12">📊 Briefing do Gestor</h2>
+              <span class="text-[11px] text-n-slate-9 ml-auto">funil de hoje vs a média de 12 semanas</span>
+            </div>
+
+            <p v-if="managerBriefText" class="text-sm text-n-slate-11 leading-relaxed mb-2">
+              {{ managerBriefText }}
+            </p>
+
+            <div v-if="managerFindings.length" class="flex flex-wrap gap-1.5 mb-2">
+              <span
+                v-for="(f, fi) in managerFindings"
+                :key="fi"
+                class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25"
+                :title="f.window ? `janela: ${f.window}` : ''"
+              >
+                {{ managerFindingLabel(f) }}
+              </span>
+            </div>
+
+            <p class="text-[11px] text-n-slate-9">
+              abriu {{ managerBrief.tasks_opened || 0 }} tarefa(s) hoje<template v-if="managerLastRunTime"> · {{ managerLastRunTime }}</template>
+            </p>
+          </div>
         </div>
 
         <!-- 💚 Avisos do Radar de Oportunidades — cartão BRANCO (contraste
