@@ -65,11 +65,15 @@ const contactsScope = ref('period');
 const isLoadingAll = ref(false);
 const isBackgroundLoading = ref(false);
 
-// Modo do período: 'activity' = leads com ATIVIDADE no período (padrão —
-// é o que faz "Este ano" mostrar a base ativa toda); 'created' = leads que
-// CHEGARAM no período (data real do contato).
+// Modo do período — os botões "Mostrar quem:": 'created' = CHEGOU no
+// período (data real do contato); 'moved' = ENTROU AQUI, na coluna atual,
+// no período ("Consulta Confirmada em julho" = confirmou EM julho — o modo
+// certo pra agir no momento certo); 'activity' = CONVERSOU/se moveu no
+// período (padrão — é o que faz "Este ano" mostrar a base ativa toda).
 const dateMode = ref(
-  ['activity', 'created'].includes(localStorage.getItem('cevico_crm_date_mode'))
+  ['activity', 'created', 'moved'].includes(
+    localStorage.getItem('cevico_crm_date_mode')
+  )
     ? localStorage.getItem('cevico_crm_date_mode')
     : 'activity'
 );
@@ -94,8 +98,23 @@ const presetRange = key => {
     s.setDate(s.getDate() - 6);
     return { from: localDateStr(s), to: today };
   }
+  if (key === 'last_week') {
+    // semana passada = segunda a domingo anteriores
+    const dow = (now.getDay() + 6) % 7;
+    const end = new Date(now);
+    end.setDate(now.getDate() - dow - 1);
+    const start = new Date(end);
+    start.setDate(end.getDate() - 6);
+    return { from: localDateStr(start), to: localDateStr(end) };
+  }
   if (key === 'month') {
     return { from: localDateStr(new Date(now.getFullYear(), now.getMonth(), 1)), to: today };
+  }
+  if (key === 'last_month') {
+    return {
+      from: localDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+      to: localDateStr(new Date(now.getFullYear(), now.getMonth(), 0)),
+    };
   }
   if (key === 'year') {
     return { from: localDateStr(new Date(now.getFullYear(), 0, 1)), to: today };
@@ -461,7 +480,9 @@ const DATE_PRESETS = [
   { key: 'today', label: 'Hoje' },
   { key: 'yesterday', label: 'Ontem' },
   { key: 'last7', label: 'Últimos 7 dias' },
+  { key: 'last_week', label: 'Semana passada' },
   { key: 'month', label: 'Este mês' },
+  { key: 'last_month', label: 'Mês passado' },
   { key: 'year', label: 'Este ano' },
 ];
 const DEFAULT_PERIOD = 'last7';
@@ -1099,7 +1120,7 @@ const createAndAddContact = async () => {
       <span class="i-lucide-zap text-n-gold flex-shrink-0" />
       <span class="whitespace-nowrap flex-shrink-0">
         <b>{{ periodMatching.toLocaleString('pt-BR') }}</b>
-        {{ contactsMeta.date_mode === 'created' ? 'leads que chegaram' : 'leads com atividade' }}
+        {{ contactsMeta.date_mode === 'created' ? 'leads que chegaram' : contactsMeta.date_mode === 'moved' ? 'leads que entraram na coluna' : 'leads que conversaram ou se moveram' }}
         {{ activeDatePresetLabel ? `— ${activeDatePresetLabel.toLowerCase()}` : 'no período' }}
         · funil todo: {{ (contactsMeta.total ?? 0).toLocaleString('pt-BR') }}
       </span>
@@ -1347,7 +1368,7 @@ const createAndAddContact = async () => {
           <span
             class="i-lucide-calendar-clock text-sm ml-2 mr-0.5"
             style="color: #7C3AED"
-            :title="dateMode === 'created' ? 'Filtra pela data em que o lead CHEGOU' : 'Filtra pela ATIVIDADE do lead no período'"
+            :title="dateMode === 'created' ? 'O período filtra por quando o lead CHEGOU' : dateMode === 'moved' ? 'O período filtra por quando o lead ENTROU na coluna' : 'O período filtra pelo MOVIMENTO do lead (conversa ou mudança)'"
           />
           <button
             v-for="p in DATE_PRESETS"
@@ -1356,8 +1377,10 @@ const createAndAddContact = async () => {
             :class="activeDatePreset === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
             :style="activeDatePreset === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
             :title="dateMode === 'created'
-              ? `Leads que CHEGARAM ${p.label.toLowerCase()}`
-              : `Leads com ATIVIDADE ${p.label.toLowerCase()}`"
+              ? `Quem CHEGOU ${p.label.toLowerCase()}`
+              : dateMode === 'moved'
+                ? `Quem ENTROU na coluna ${p.label.toLowerCase()}`
+                : `Quem CONVERSOU ou se moveu ${p.label.toLowerCase()}`"
             @click="applyDatePreset(p.key)"
           >
             {{ p.label }}
@@ -1407,25 +1430,36 @@ const createAndAddContact = async () => {
           </div>
         </div>
 
-        <!-- Modo do período: ATIVOS (teve atividade) × NOVOS (chegou) -->
+        <!-- Modo do período, lê como frase — Mostrar quem: CHEGOU (entrada
+             do lead) × ENTROU AQUI (na coluna) × CONVERSOU (atividade) -->
         <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 flex-shrink-0">
-          <button
-            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
-            :class="dateMode === 'activity' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="dateMode === 'activity' ? { background: 'linear-gradient(135deg, #059669, #10B981)' } : {}"
-            title="Leads que TIVERAM ATIVIDADE no período (mensagem, card criado ou movido)"
-            @click="setDateMode('activity')"
-          >
-            Ativos
-          </button>
+          <span class="text-[11px] text-n-slate-10 pl-2 pr-0.5 whitespace-nowrap hidden md:inline">Mostrar quem:</span>
           <button
             class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
             :class="dateMode === 'created' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
             :style="dateMode === 'created' ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
-            title="Leads que CHEGARAM no período (data real do contato)"
+            title="Quem CHEGOU no período (data real de entrada do lead)"
             @click="setDateMode('created')"
           >
-            Novos
+            Chegou
+          </button>
+          <button
+            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+            :class="dateMode === 'moved' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="dateMode === 'moved' ? { background: 'linear-gradient(135deg, #0F5FA6, #3B82F6)' } : {}"
+            title="Quem ENTROU na coluna no período — ex.: Consulta Confirmada em julho = confirmou EM julho"
+            @click="setDateMode('moved')"
+          >
+            Entrou aqui
+          </button>
+          <button
+            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+            :class="dateMode === 'activity' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="dateMode === 'activity' ? { background: 'linear-gradient(135deg, #059669, #10B981)' } : {}"
+            title="Quem teve movimento no período (mensagem, chegada ou mudança de etapa) — mostra a base ativa"
+            @click="setDateMode('activity')"
+          >
+            Conversou
           </button>
         </div>
 

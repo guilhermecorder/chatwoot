@@ -312,6 +312,7 @@ const revenueGranularityLabel = computed(() => {
   const g = data.value?.revenue_over_time?.granularity;
   if (g === 'hour') return 'por hora do dia';
   if (g === 'week') return 'por semana';
+  if (g === 'month') return 'por mês';
   return 'por dia';
 });
 
@@ -464,6 +465,7 @@ const timelineGranularity = computed(() => {
   const g = data.value?.created_over_time?.[0]?.granularity;
   if (g === 'hour') return 'por hora do dia';
   if (g === 'week') return 'por semana';
+  if (g === 'month') return 'por mês';
   return 'por dia';
 });
 

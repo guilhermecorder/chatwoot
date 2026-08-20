@@ -189,6 +189,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { windows });
   }
 
+  // responsável por painel do Meu Painel (Configurações → Painéis)
+  updatePanelOwners(panelOwners) {
+    return axios.post(`${this.url}/settings/update_agenda`, { panel_owners: panelOwners });
+  }
+
   // médicos com a agenda fechada (item 76)
   updateClosedDoctors(closedDoctors) {
     return axios.post(`${this.url}/settings/update_agenda`, { closed_doctors: closedDoctors });

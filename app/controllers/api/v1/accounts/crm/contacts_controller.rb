@@ -9,6 +9,8 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   #   (o board pagina dentro de cada coluna com scope=stage_page).
   #   date_mode=activity (padrão): leads com atividade no período.
   #   date_mode=created: leads que CHEGARAM no período (data real do contato).
+  #   date_mode=moved: leads que ENTRARAM na coluna atual no período
+  #     (stage_moved_at — "Consulta Confirmada em julho" = confirmou em julho).
   # scope=stage_page&stage_id&offset&limit: próxima página de UMA coluna,
   #   mesmo período/ordenação do scope=period.
   # scope=days&days=N: leads com atividade nos últimos N dias (legado).
@@ -223,10 +225,19 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
 
   def period_scope(base)
     from, to = period_range
-    if params[:date_mode] == 'created'
+    case params[:date_mode]
+    when 'created'
       # data REAL de chegada do lead (contacts.created_at — corrigida pela
       # rake de importação para a data da primeira conversa)
       base.joins(:contact).where(contacts: { created_at: from..to })
+    when 'moved'
+      # MOVIMENTAÇÃO: quando o card ENTROU na coluna em que está hoje —
+      # "Consulta Confirmada em julho" = confirmou EM julho, não importa
+      # quando o lead chegou. Card antigo sem carimbo cai na criação.
+      base.joins(:contact).where(
+        'COALESCE(crm_contacts.stage_moved_at, crm_contacts.created_at) BETWEEN :from AND :to',
+        from: from, to: to
+      )
     else
       # atividade: mensagem, card criado ou card movido dentro do período
       base.joins(:contact).where(
@@ -264,7 +275,7 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
         per_stage: per_stage_limit,
         with_conversations: base.joins(contact: :conversations).distinct.count,
         scope: 'period',
-        date_mode: params[:date_mode] == 'created' ? 'created' : 'activity',
+        date_mode: %w[created moved].include?(params[:date_mode]) ? params[:date_mode] : 'activity',
         date_from: from.to_date.iso8601,
         date_to: to.to_date.iso8601
       }

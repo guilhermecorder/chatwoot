@@ -524,6 +524,13 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['panel_assignments'] = params.require(:panel_assignments)
                                        .permit!.to_h.transform_values(&:to_s)
     end
+    # RESPONSÁVEL por painel ({painel => user_id}) — o nome aparece na
+    # pílula do Meu Painel ("Cirurgias · Elizangela"). Configurações → Painéis.
+    if params.key?(:panel_owners)
+      raw = params.require(:panel_owners).permit!.to_h
+      cfg['panel_owners'] = raw.slice('agendamento', 'conducao', 'cirurgia')
+                               .transform_values { |v| v.presence&.to_i }.compact
+    end
     # METAS por painel ({painel => {indicador => meta mensal}}): os cards
     # do Meu Painel mudam de cor conforme o desempenho contra a meta
     if params.key?(:panel_goals)
@@ -610,6 +617,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       surgery_windows: cfg['surgery_windows'] || [],
       agenda_theme: cfg['theme'],
       panel_assignments: cfg['panel_assignments'] || {},
+      panel_owners: panel_owners_json(cfg),
       clinical_access: cfg['clinical_access'] || {}
     }
   end
@@ -820,6 +828,21 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   private
 
+  # {painel => user_id} vira {painel => {user_id, name}} — o front mostra o
+  # 1º nome na pílula do Meu Painel sem depender da lista de agentes
+  def panel_owners_json(cfg)
+    owners = cfg['panel_owners'] || {}
+    return {} if owners.blank?
+
+    users = Current.account.users.where(id: owners.values).index_by(&:id)
+    owners.each_with_object({}) do |(panel, uid), out|
+      user = users[uid.to_i]
+      next unless user
+
+      out[panel] = { user_id: user.id, name: user.available_name }
+    end
+  end
+
   # validação amigável dos IDs do card 📊 Rastreamento
   def tracking_params_error
     ga4 = params[:ga4_id].to_s.strip.upcase
@@ -931,6 +954,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         updated_at: (s.agenda_config || {}).dig('price_table', 'updated_at')
       },
       panel_assignments: (s.agenda_config || {})['panel_assignments'] || {},
+      panel_owners: panel_owners_json(s.agenda_config || {}),
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},
       custom_panels: (s.agenda_config || {})['custom_panels'] || [],
       main_panel: (s.agenda_config || {})['main_panel'].presence,

@@ -4099,3 +4099,79 @@ crm_opportunity_radar_job registrados.
 - Agentes novos nascem DESLIGADOS (opt-in): ligar em Automações → Agentes.
 - Working tree segue carregando Meta Leads não commitado — separar no commit.
 - AGUARDANDO "pode subir".
+
+## 134. ✅ SAÍDA DA GABRIELA + GRÁFICOS LEGÍVEIS (pedidos 11/08 pós-deploy)
+- NOMES REMOVIDOS DO CÓDIGO: painéis do Meu Painel sem "who" (só temas
+  Agendamento/Condução/Cirurgias), placeholders das predefinições por TEMA,
+  prompt padrão do Analista ("encaminhar para a responsável pelo agendamento"
+  em vez de Vaneide), comentários e exemplo do Financeiro. Zero ocorrências.
+- DADOS DE PRODUÇÃO: script de console entregue ao Guilherme (prévia → apply)
+  que renomeia as predefinições (Vaneide→Agendamento, Elizangela→Consultas,
+  Gabriela→Cirurgias) e TRANSFERE tudo da Gabriela p/ Elizangela:
+  attendance_owners, painel atribuído, dona de coluna (task_owner_id),
+  vigias do Radar, cards e tarefas abertas, metas com responsável.
+  ⚠️ rodar o script ANTES de remover a Gabriela dos agentes.
+- GRÁFICOS DE PERÍODO LONGO: balde MENSAL acima de ~13 meses (conversas ao
+  longo do tempo + faturamento por caixa, rótulos pt jan/25) + APARA os
+  meses vazios da esquerda (era pré-sistema não espreme mais o gráfico).
+  Testes: 6/6 verde. Sem migration, sem cron novo.
+- AGUARDANDO "pode subir".
+
+## 135. ✅ FILTRO "MOVIDOS" NO BOARD DO CRM (pedido 20/08)
+- Problema relatado: filtrando julho, "Consulta Confirmada" mostrava paciente
+  confirmado em agosto (lead de julho) e de outros meses. Não era bug do
+  filtro: "Ativos" casa por atividade OU chegada OU movimentação — o que
+  faltava era um modo que respondesse "quem ENTROU NESTA COLUNA no período".
+- Alternador do período com 3 modos e NOMENCLATURA que o Guilherme escolheu
+  (20/08) — rótulo "Mostrar quem:" + CHEGOU (contacts.created_at) ×
+  ENTROU AQUI (novo: entrou na coluna atual — COALESCE(stage_moved_at,
+  created_at)) × CONVERSOU (atividade, padrão; internamente segue
+  activity/created/moved). "Consulta Confirmada · julho · Entrou aqui" =
+  confirmou EM julho.
+- Backend: date_mode=moved no period_scope (contacts_controller) — vale pro
+  board (scope=period) E pro "Carregar mais" (scope=stage_page, herda).
+  Front: 3 botões (Chegou dourado · Entrou aqui azul · Conversou verde) c/
+  rótulo "Mostrar quem:", tooltips e frase da faixa por modo, localStorage
+  cevico_crm_date_mode aceita 'moved'.
+- NOTA DE USO: o card mora numa coluna só — quem confirmou em julho e já
+  avançou pra Realizada aparece em Realizada (se o avanço foi no período),
+  não em Confirmada. "Quem PASSOU por Confirmada em julho" = Funil de
+  Tráfego (stage_logs), que já existe.
+- Teste local ponta a ponta (conta 3, API real): card chegou-julho/confirmou-
+  agosto some de julho·Movidos e aparece em agosto·Movidos + created;
+  card chegou-junho/confirmou-julho aparece em julho·Movidos e some de
+  julho·Novos. Vite compila; rubocop sem ocorrência nova; rastro limpo.
+  Sem migration, sem cron novo. Working tree junto com a 134.
+- AGUARDANDO "pode subir".
+
+## 136. ✅ MEU PAINEL REPAGINADO + RESPONSÁVEL POR PAINEL + PRESETS NOVOS (pedidos 20/08)
+- 🧑‍💼 RESPONSÁVEL POR PAINEL: ambiente novo Configurações → Painéis (só
+  admin, padrão da tela Domínio): botões em linha p/ escolher quem responde
+  por Agendamento/Condução/Cirurgias — o 1º nome volta às pílulas do Meu
+  Painel ("Cirurgias · Elizangela"). Persistência agenda_config.panel_owners
+  ({painel=>user_id}, sanitizado: só os 3 painéis, ids válidos), exposto no
+  settings_json/update_agenda como {painel=>{user_id,name}} (nome resolvido
+  no servidor). Substitui os nomes fixos que a 134 removeu do código —
+  trocou a pessoa, troca na tela. Médicos/Gestor ficam sem responsável.
+- ⏱ META DE TEMPO DE ATENDIMENTO saiu do Meu Painel → agora mora no
+  Dashboard dos Agentes (Relatórios), entre o Radar e o desempenho por
+  pessoa. Métodos extraídos p/ concern Crm::ResponseGoal (home continua
+  SERVINDO response_goal no payload porque os widgets do Construtor bebem
+  dele — só a tela do Meu Painel deixou de mostrar).
+- 📆 PRESETS "SEMANA PASSADA" e "MÊS PASSADO" em TODO lugar: PeriodRuler
+  padrão (todos os dashboards), Crm::ResolvesPeriod (last_week/last_month
+  no servidor), board do CRM (DATE_PRESETS + ranges no cliente) e Meu
+  Painel (goal_factor/record_period_key/record_basis/agenda_until tratam
+  last_week; last_month já existia como legado).
+- 📅 DASHBOARD DA AGENDA EMBUTIDO no Meu Painel, em TODAS as predefinições
+  (agendamento/condução/cirurgias/médicos/gestor/custom): miolo extraído p/
+  components-next/cevico/AgendaDashboardCore.vue (recebe period por prop);
+  a página de Relatórios virou casca (header+régua+core). No Meu Painel o
+  card "Dashboard da Agenda" segue o período da régua e tem botão
+  "Relatório completo"; a SAÚDE DA AGENDA fica logo abaixo dele.
+- Teste local conta 3 via API real: panel_owners salva/devolve nomes e
+  REJEITA chave inválida (gestor) e valor nulo; home preset last_week/
+  last_month resolve (jul=21 leads reais); agents_dashboard devolve
+  response_goal (2 atendentes); agenda_dashboard last_month = 10 consultas.
+  Vite compila tudo (7 arquivos). Sem migration, sem cron novo.
+- AGUARDANDO "pode subir" (junto das rodadas 134+135).

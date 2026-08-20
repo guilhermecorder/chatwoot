@@ -2,17 +2,18 @@
 # (hoje/ontem/essa semana/este mês/mês passado/este ano) + avisos do Radar.
 # Tudo no fuso da clínica (São Paulo).
 #
-# PAINÉIS POR PESSOA (?panel=): mesmo layout, indicadores da função de cada uma:
-# - agendamento (Vaneide, padrão): espelha o CRM em coorte — leads que
+# PAINÉIS POR TEMA (?panel=): mesmo layout, indicadores da função:
+# - agendamento (padrão): espelha o CRM em coorte — leads que
 #   chegaram no período e até onde avançaram no funil.
-# - conducao (Elizangela): condução do paciente na clínica — consultas do
+# - conducao: condução do paciente na clínica — consultas do
 #   período, comparecimento, faltas e indicações de cirurgia (Agenda).
-# - cirurgia (Gabriela): fechamento — indicações, cirurgias agendadas/
+# - cirurgia: fechamento — indicações, cirurgias agendadas/
 #   realizadas e taxa de fechamento.
 # - medico (?doctor=Nome): a agenda de cada médico — consultas, presença,
 #   indicações e cirurgias dele.
 class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   include Crm::ResolvesPeriod
+  include Crm::ResponseGoal
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
@@ -250,12 +251,12 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     when 'week'  then now.end_of_week.end_of_day
     when 'month' then now.end_of_month.end_of_day
     when 'year'  then now.end_of_year.end_of_day
-    when 'yesterday', 'last_month' then until_at
+    when 'yesterday', 'last_week', 'last_month' then until_at
     else now.end_of_day # hoje
     end
   end
 
-  # ── Painel Agendamento (Vaneide) — coorte pelo dia em que o lead chegou ──
+  # ── Painel Agendamento — coorte pelo dia em que o lead chegou ──
   def agendamento_metrics(since, until_at)
     universe = leads_scope(since, until_at)
     leads = universe.count
@@ -264,7 +265,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       new_leads: leads,
       appointments_created: agendadas,
       # volume CONCRETO: consultas registradas na Agenda no período, mesmo
-      # que o lead tenha chegado em outro dia (Vaneide agenda 15 → mostra 15;
+      # que o lead tenha chegado em outro dia (a atendente agenda 15 → mostra 15;
       # o recorte por coorte continua na taxa de agendamento).
       # Consulta marcada PARA O PASSADO = preenchimento de histórico
       # (Preencher histórico / disparo retroativo) — fica FORA do contador
@@ -281,7 +282,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }
   end
 
-  # ── Painel Condução (Elizangela) — a jornada dentro da clínica (Agenda) ──
+  # ── Painel Condução — a jornada dentro da clínica (Agenda) ──
   def conducao_metrics(since, until_at)
     periodo = consultas.where(canceled_at: nil, due_at: since..until_at)
     compareceu = periodo.where(attendance: 'attended').count
@@ -297,7 +298,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }
   end
 
-  # ── Painel Cirurgias (Gabriela) — fechamento e pós-operatório ──
+  # ── Painel Cirurgias — fechamento e pós-operatório ──
   def cirurgia_metrics(since, until_at)
     indicacoes = consultas.where(canceled_at: nil, due_at: since..until_at, surgery_indication: 'indicated').count
     agendadas = cirurgias.where(created_at: since..until_at).count
@@ -518,61 +519,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }
   end
 
-  # ── Meta de tempo de atendimento (relatório pessoal) ──
-  # Usa os reporting_events 'reply_time' que o Chatwoot já grava a cada
-  # resposta (quanto tempo o paciente esperou por ela). A meta é configurada
-  # no agente Radar (Automações → Radar de Oportunidades). Atendente vê o
-  # próprio relatório; admin vê a quebra por atendente.
-  # meta configurada no agente Radar (nil = admin ainda não definiu; usa 15)
-  def response_goal_minutes
-    @response_goal_minutes ||= crm_settings&.ai_config&.dig('agents', 'opportunity', 'response_goal_minutes').presence&.to_i
-  end
-
-  def response_goal_json(since, until_at)
-    rows = response_goal_rows(since, until_at, response_goal_minutes || 15)
-    {
-      goal_minutes: response_goal_minutes || 15,
-      configured: response_goal_minutes.present?,
-      mine: rows.find { |r| r[:user_id] == Current.user.id },
-      agents: Current.account_user.administrator? ? rows : []
-    }
-  end
-
-  # Pedido 22/07: a meta só vale no HORÁRIO COMERCIAL (seg–sex 08–17h, sem
-  # feriado) — é quando as meninas estão presentes. O que o paciente mandou
-  # de noite/madrugada/fim de semana vira uma segunda média, informativa
-  # ("fora do horário"), sem julgar ninguém por resposta às 3h da manhã.
-  def response_goal_rows(since, until_at, goal_minutes) # rubocop:disable Metrics/AbcSize
-    scope = account.reporting_events.where(name: 'reply_time', created_at: since..until_at).where('value > 0')
-    scope = scope.where(user_id: Current.user.id) unless Current.account_user.administrator?
-    commercial = Crm::BusinessHours.sql_condition('reporting_events.created_at', since, until_at)
-    biz = scope.where(commercial)
-    off = scope.where("NOT (#{commercial})")
-
-    counts = biz.group(:user_id).count
-    avgs = biz.group(:user_id).average(:value)
-    within = biz.where(value: ..goal_minutes * 60).group(:user_id).count
-    off_counts = off.group(:user_id).count
-    off_avgs = off.group(:user_id).average(:value)
-
-    user_ids = (counts.keys + off_counts.keys).compact.uniq
-    names = account.users.where(id: user_ids).index_by(&:id)
-    rows = user_ids.map do |uid|
-      replies = counts.fetch(uid, 0)
-      hits = within.fetch(uid, 0)
-      {
-        user_id: uid,
-        name: names[uid]&.available_name || 'Atendente',
-        replies: replies,
-        avg_minutes: replies.positive? ? (avgs[uid].to_f / 60).round(1) : nil,
-        within_goal: hits,
-        within_rate: pct(hits, replies),
-        off_replies: off_counts.fetch(uid, 0),
-        off_avg_minutes: off_counts[uid].to_i.positive? ? (off_avgs[uid].to_f / 60).round(1) : nil
-      }
-    end
-    rows.sort_by { |r| -(r[:replies] + r[:off_replies]) }
-  end
+  # Meta de tempo de atendimento: métodos no concern Crm::ResponseGoal
+  # (compartilhado com o Dashboard dos Agentes — o payload continua aqui
+  # porque os widgets do Construtor bebem dele).
 
   def opportunity_alerts_json
     settings = CrmSetting.find_by(account: account)
@@ -663,7 +612,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     now = TZ.now
     days_in_month = now.end_of_month.day.to_f
     case params[:preset]
-    when 'week', 'last7' then 7 / days_in_month
+    when 'week', 'last7', 'last_week' then 7 / days_in_month
     when 'month' then now.day / days_in_month
     when 'last_month' then 1.0
     when 'year' then (now.month - 1) + (now.day / days_in_month)
@@ -679,6 +628,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     case params[:preset]
     when 'yesterday' then (now - 1.day).strftime('%Y-%m-%d')
     when 'week', 'last7' then now.strftime('%G-w%V')
+    when 'last_week' then (now - 1.week).strftime('%G-w%V')
     when 'month' then now.strftime('%Y-%m')
     when 'last_month' then (now - 1.month).strftime('%Y-%m')
     when 'year' then now.strftime('%Y')
@@ -687,8 +637,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   end
 
   def record_basis
-    { 'yesterday' => 'day', 'week' => 'week', 'last7' => 'week', 'month' => 'month',
-      'last_month' => 'month', 'year' => 'year' }[params[:preset]] || 'day'
+    { 'yesterday' => 'day', 'week' => 'week', 'last7' => 'week', 'last_week' => 'week',
+      'month' => 'month', 'last_month' => 'month', 'year' => 'year' }[params[:preset]] || 'day'
   end
 
   def records_json # rubocop:disable Metrics/AbcSize

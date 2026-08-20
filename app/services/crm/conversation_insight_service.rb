@@ -107,8 +107,8 @@ class Crm::ConversationInsightService
       R. Serra de Botucatu, 880, 4º andar (estação Carrão)
     - Consultas: segunda a quinta na Av. Paulista; quarta e sexta no Tatuapé;
       sábado e domingo não há agenda
-    - Pós-operatório e casos específicos: encaminhar para a Vaneide,
-      (11) 98769-0286
+    - Pós-operatório e casos específicos: encaminhar para a responsável
+      pelo agendamento, (11) 98769-0286
   PROMPT
 
   def initialize(conversation:)

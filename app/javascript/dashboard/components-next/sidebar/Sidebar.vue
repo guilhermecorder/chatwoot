@@ -998,6 +998,13 @@ const menuItems = computed(() => {
                 icon: 'i-lucide-globe',
                 to: accountScopedRoute('dominio_settings_index'),
               },
+              // Responsável por painel do Meu Painel (pedido 20/08)
+              {
+                name: 'Settings Panels',
+                label: 'Painéis',
+                icon: 'i-lucide-layout-dashboard',
+                to: accountScopedRoute('paineis_settings_index'),
+              },
               // Tabela de preços oficial (Espaço do Paciente + agentes IA)
               {
                 name: 'Settings Prices',

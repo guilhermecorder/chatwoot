@@ -178,13 +178,13 @@
     },
     "PRESETS": {
       "TITLE": "Visualizações de colunas",
-      "SUBTITLE": "Crie atalhos com as colunas de cada pessoa (ex.: Vaneide, Elizangela...).",
+      "SUBTITLE": "Crie atalhos com as colunas de cada tema da jornada (ex.: Agendamento, Consultas, Cirurgias...).",
       "ALL_COLUMNS": "Todas as colunas",
       "MANAGE": "Gerenciar visualizações",
       "EMPTY": "Nenhuma visualização criada ainda.",
       "ADD": "Nova visualização",
       "REMOVE": "Remover visualização",
-      "NAME_PLACEHOLDER": "Nome (ex.: Vaneide)",
+      "NAME_PLACEHOLDER": "Nome (ex.: Agendamento)",
       "SAVED": "Visualizações salvas!"
     },
     "MERGE": {

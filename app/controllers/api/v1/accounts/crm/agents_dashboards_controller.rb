@@ -8,6 +8,7 @@
 class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
   include Crm::ResolvesPeriod
+  include Crm::ResponseGoal
   before_action -> { require_capability(:reports) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
@@ -20,7 +21,9 @@ class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::Ba
     render json: {
       period: params[:preset].presence || 'month',
       agents: agents_rows(since, until_at, radar[:by_responder]),
-      radar: radar.except(:by_responder)
+      radar: radar.except(:by_responder),
+      # Meta de tempo de atendimento (veio do Meu Painel no item 136)
+      response_goal: response_goal_json(since, until_at)
     }
   end
 

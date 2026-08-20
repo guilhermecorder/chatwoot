@@ -22,7 +22,9 @@ const ALL_PRESETS = [
   { key: 'today', label: 'Hoje' },
   { key: 'yesterday', label: 'Ontem' },
   { key: 'last7', label: 'Últimos 7 dias' },
+  { key: 'last_week', label: 'Semana passada' },
   { key: 'month', label: 'Este mês' },
+  { key: 'last_month', label: 'Mês passado' },
   { key: 'year', label: 'Este ano' },
 ];
 
@@ -48,10 +50,25 @@ const rangeFor = key => {
     s.setDate(s.getDate() - 6);
     return { from: dateStr(s), to: today };
   }
+  if (key === 'last_week') {
+    // semana passada = segunda a domingo ANTERIORES (fuso local)
+    const dow = (now.getDay() + 6) % 7; // seg=0 … dom=6
+    const end = new Date(now);
+    end.setDate(now.getDate() - dow - 1); // domingo passado
+    const start = new Date(end);
+    start.setDate(end.getDate() - 6); // segunda passada
+    return { from: dateStr(start), to: dateStr(end) };
+  }
   if (key === 'month') {
     return {
       from: dateStr(new Date(now.getFullYear(), now.getMonth(), 1)),
       to: today,
+    };
+  }
+  if (key === 'last_month') {
+    return {
+      from: dateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+      to: dateStr(new Date(now.getFullYear(), now.getMonth(), 0)),
     };
   }
   if (key === 'year') {

@@ -452,7 +452,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     granularity = timeline_granularity(since, until_at)
     series = timeline_series(pipeline, contacts, since, until_at, timeline_bucket_sql(granularity))
 
-    timeline_keys(granularity, since, until_at).map do |key, label|
+    rows = timeline_keys(granularity, since, until_at).map do |key, label|
       {
         date: key,
         label: label,
@@ -462,6 +462,10 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
         cirurgias: series[:cirurgias][key] || 0,
       }
     end
+    # apara o VAZIO da esquerda (era pré-sistema): o gráfico começa no
+    # primeiro balde com movimento — pedido 11/08
+    first = rows.index { |r| r[:count].positive? || r[:agendamentos].positive? || r[:cirurgias].positive? }
+    first ? rows.drop(first) : rows
   end
 
   def timeline_series(pipeline, contacts, since, until_at, bucket_sql)
@@ -481,6 +485,9 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
   def timeline_granularity(since, until_at)
     days = [((until_at.to_date - since.to_date).to_i + 1), 1].max
     return :hour if days <= 1
+    # período longo (1 ano+) em semanas virava parede de agulhas ilegível
+    # (pedido 11/08) — acima de ~13 meses o balde vira MÊS
+    return :month if days > 400
     return :week if days > 31
 
     :day
@@ -492,6 +499,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     case granularity
     when :hour then "to_char(#{TIMELINE_TZ_SQL}, 'HH24')"
     when :week then "to_char(date_trunc('week', #{TIMELINE_TZ_SQL}), 'YYYY-MM-DD')"
+    when :month then "to_char(date_trunc('month', #{TIMELINE_TZ_SQL}), 'YYYY-MM-DD')"
     else "to_char(#{TIMELINE_TZ_SQL}, 'YYYY-MM-DD')"
     end
   end
@@ -501,8 +509,21 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     case granularity
     when :hour then (0..23).map { |h| [format('%02d', h), "#{format('%02d', h)}h"] }
     when :week then week_keys(since, until_at)
+    when :month then month_keys(since, until_at)
     else (since.to_date..until_at.to_date).map { |d| [d.iso8601, d.strftime('%d/%m')] }
     end
+  end
+
+  MESES_PT = %w[jan fev mar abr mai jun jul ago set out nov dez].freeze
+
+  def month_keys(since, until_at)
+    keys = []
+    d = since.to_date.beginning_of_month
+    while d <= until_at.to_date
+      keys << [d.iso8601, "#{MESES_PT[d.month - 1]}/#{d.strftime('%y')}"]
+      d = d.next_month
+    end
+    keys
   end
 
   def week_keys(since, until_at)
@@ -833,10 +854,18 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     keys = timeline_keys(granularity, since, until_at)
     by_inbox, totals = revenue_buckets(full_cohort, closed_ids, granularity)
 
+    series = revenue_series(by_inbox, totals, keys)
+    # mesmo corte do gráfico de conversas: sem meses vazios na esquerda
+    first = keys.each_index.find { |i| series.any? { |s| s[:values][i].to_f.positive? } }
+    if first&.positive?
+      keys = keys.drop(first)
+      series = series.map { |s| s.merge(values: s[:values].drop(first)) }
+    end
+
     {
       granularity: granularity,
       points: keys.map { |k, label| { date: k, label: label } },
-      series: revenue_series(by_inbox, totals, keys)
+      series: series
     }
   end
 
@@ -884,6 +913,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     case granularity
     when :hour then format('%02d', t.hour)
     when :week then t.to_date.beginning_of_week.iso8601
+    when :month then t.to_date.beginning_of_month.iso8601
     else t.to_date.iso8601
     end
   end

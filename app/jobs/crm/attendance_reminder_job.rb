@@ -1,8 +1,8 @@
 # Prazo da CONFERÊNCIA DO DIA: se o horário limite passou e ainda há
 # consultas/cirurgias do dia sem Compareceu/Faltou marcados, cria a tarefa
 # "Concluir a conferência do dia" para a responsável configurada
-# (agenda_config.attendance_owners — consultas: Elizangela, cirurgias:
-# Gabriela). A tarefa acende o badge dourado da sidebar e o aviso
+# (agenda_config.attendance_owners — uma pessoa para consultas, outra
+# para cirurgias). A tarefa acende o badge dourado da sidebar e o aviso
 # "esperando você" no Meu Painel dela. Cron a cada 30 min; cria no máximo
 # 1 tarefa por tipo por dia.
 class Crm::AttendanceReminderJob < ApplicationJob

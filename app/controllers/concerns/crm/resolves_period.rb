@@ -1,5 +1,7 @@
-# Régua de período PADRÃO dos dashboards CEVICO (06/08):
-#   Hoje | Ontem | Últimos 7 dias | Este mês | Este ano | Personalizado
+# Régua de período PADRÃO dos dashboards CEVICO (06/08; 20/08 ganhou
+# Semana passada e Mês passado):
+#   Hoje | Ontem | Últimos 7 dias | Semana passada | Este mês | Mês passado |
+#   Este ano | Personalizado
 #
 # Uso no controller:
 #   include Crm::ResolvesPeriod
@@ -17,7 +19,9 @@ module Crm
       when 'today'     then [now.beginning_of_day, now.end_of_day]
       when 'yesterday' then [now.yesterday.beginning_of_day, now.yesterday.end_of_day]
       when 'last7'     then [(now - 6.days).beginning_of_day, now.end_of_day]
+      when 'last_week' then [now.last_week.beginning_of_week, now.last_week.end_of_week]
       when 'month'     then [now.beginning_of_month, now.end_of_day]
+      when 'last_month' then [now.last_month.beginning_of_month, now.last_month.end_of_month]
       when 'year'      then [now.beginning_of_year, now.end_of_day]
       when 'custom'    then custom_period_range(now)
       end

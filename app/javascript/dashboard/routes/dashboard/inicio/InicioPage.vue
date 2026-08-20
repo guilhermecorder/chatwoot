@@ -15,6 +15,7 @@ import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIco
 import ConversationChatModal from 'dashboard/routes/dashboard/crm/components/ConversationChatModal.vue';
 import CustomPanelGrid from 'dashboard/components-next/cevico/CustomPanelGrid.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import AgendaDashboardCore from 'dashboard/components-next/cevico/AgendaDashboardCore.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
@@ -49,17 +50,17 @@ const period = ref({ preset: 'today', from: hojeStr, to: hojeStr });
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
 const BASE_PANELS = [
   {
-    key: 'agendamento', label: 'Agendamento', who: 'Vaneide',
+    key: 'agendamento', label: 'Agendamento', who: '',
     icon: 'i-lucide-calendar-check', desc: 'do lead ao agendamento',
     grad: 'linear-gradient(135deg, #0F5FA6 0%, #7C3AED 100%)',
   },
   {
-    key: 'conducao', label: 'Condução', who: 'Elizangela',
+    key: 'conducao', label: 'Condução', who: '',
     icon: 'i-lucide-route', desc: 'do agendamento à indicação',
     grad: 'linear-gradient(135deg, #0F766E 0%, #2DD4BF 100%)',
   },
   {
-    key: 'cirurgia', label: 'Cirurgias', who: 'Gabriela',
+    key: 'cirurgia', label: 'Cirurgias', who: '',
     icon: 'i-lucide-heart-pulse', desc: 'fechamento e pós-operatório',
     grad: 'linear-gradient(135deg, #9D174D 0%, #F472B6 100%)',
   },
@@ -75,10 +76,16 @@ const BASE_PANELS = [
   },
 ];
 
+// RESPONSÁVEL por painel (Configurações → Painéis): o 1º nome aparece na
+// pílula — "Cirurgias · Elizangela". Sem responsável = só o tema.
+const panelOwners = computed(() => crmSettings.value?.panel_owners || {});
+const ownerFirstName = key =>
+  (panelOwners.value[key]?.name || '').split(' ')[0] || '';
+
 // painéis do CONSTRUTOR salvos pela conta viram pílulas junto dos fixos
 // (key 'custom:<id>' — o backend do home já entende esse formato)
 const allPanels = computed(() => [
-  ...BASE_PANELS,
+  ...BASE_PANELS.map(p => ({ ...p, who: ownerFirstName(p.key) || p.who })),
   ...(crmSettings.value?.custom_panels || []).map(p => ({
     key: `custom:${p.id}`,
     label: p.name,
@@ -239,7 +246,7 @@ const panelTiles = computed(() => {
       { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`, grad: 'linear-gradient(135deg, #065F46, #10B981)' },
     ];
   }
-  // agendamento (padrão — Vaneide)
+  // agendamento (padrão)
   return [
     { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
     { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
@@ -256,7 +263,7 @@ const goalsInfo = computed(() => data.value?.goals || { targets: {}, factor: 1, 
 
 // 🎯 METAS OFICIAIS (Painel de Metas) como FALLBACK dos alvos da mira —
 // a régua de cores (abaixo/dentro/acima da meta) vale em TODOS os painéis
-// (Vaneide, Elizangela, Gabriela, Médicos, Gestor), mesmo sem mira própria
+// (Agendamento, Condução, Cirurgias, Médicos, Gestor), mesmo sem mira própria
 // configurada. Pedido 18/07 (item 79).
 const officialGoals = useCevicoGoals();
 onMounted(() => officialGoals.load());
@@ -650,27 +657,8 @@ const fbWeekLabel = fb => {
   return `semana de ${f(d)} a ${f(end)}`;
 };
 
-// ── Meta de tempo de atendimento (configurada no agente Radar) ──
-// Relatório PESSOAL: cada atendente acompanha a própria meta; admin vê a
-// quebra do time. Os números vêm dos reporting_events (reply_time) que o
-// Chatwoot grava a cada resposta ao paciente.
-const responseGoal = computed(() => data.value?.response_goal || null);
-const goalMinutes = computed(() => responseGoal.value?.goal_minutes || 15);
-const myResponse = computed(() => responseGoal.value?.mine || null);
-const teamResponse = computed(() => responseGoal.value?.agents || []);
-const respVerdict = row => {
-  if (!row || !row.replies) return null;
-  if (row.avg_minutes <= goalMinutes.value && row.within_rate >= 70)
-    return { label: '🏅 Meta batida', bg: 'rgba(16,185,129,0.14)', color: '#047857' };
-  if (row.avg_minutes <= goalMinutes.value)
-    return { label: '💪 No ritmo', bg: 'rgba(59,130,246,0.12)', color: '#1D4ED8' };
-  return { label: '⏳ Fora da meta', bg: 'rgba(239,68,68,0.12)', color: '#B91C1C' };
-};
-const fmtMin = m => {
-  if (m === null || m === undefined) return '—';
-  if (m >= 60) return `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, '0')}`;
-  return `${String(m).replace('.', ',')} min`;
-};
+// Meta de tempo de atendimento: agora mora no Dashboard dos Agentes
+// (Relatórios) — pedido 20/08. O widget do Construtor continua valendo.
 
 // ── Indicadores do período ──────────────────────────────────
 const conversionVerdict = computed(() => {
@@ -1511,113 +1499,28 @@ onUnmounted(() => {
         </div>
         </template>
 
-        <!-- ⏱ Meta de tempo de atendimento — relatório pessoal (config no
-             agente Radar). Atendente vê a própria meta; admin vê o time. -->
-        <div
-          v-if="responseGoal && (myResponse || teamResponse.length)"
-          class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6"
-        >
-          <div class="flex items-center gap-2 mb-4 flex-wrap">
-            <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #059669, #4ADE80)">
-              <span class="i-lucide-target text-white text-base" />
-            </span>
-            <h2 class="text-sm font-bold text-n-slate-12">Meta de tempo de atendimento</h2>
-            <span
-              class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-              style="background: rgba(16, 185, 129, 0.12); color: #047857"
-            >
-              responder em até {{ goalMinutes }} min
-            </span>
-            <span
-              class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-n-alpha-1 text-n-slate-10"
-              title="A meta vale no horário em que a equipe está presente. Noite, madrugada, fim de semana e feriado entram na média 'fora do horário', sem meta."
-            >
-              vale seg–sex · 08h–17h
-            </span>
-            <span v-if="isAdmin && !responseGoal.configured" class="text-[10px] text-n-slate-9 ml-auto">
-              ajuste a meta em Automações → Radar de Oportunidades
-            </span>
-          </div>
-
-          <!-- meu resultado no período (4 medidores + selo): a meta julga só
-               o horário comercial; "fora do horário" é informativo -->
-          <div v-if="myResponse" class="mb-1">
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center">
-                <p class="text-[10px] text-n-slate-9 mb-0.5">Tempo médio (08–17h)</p>
-                <p class="text-xl sm:text-2xl font-bold" :style="{ color: myResponse.avg_minutes === null ? undefined : myResponse.avg_minutes <= goalMinutes ? '#059669' : '#DC2626' }">
-                  {{ fmtMin(myResponse.avg_minutes) }}
-                </p>
-              </div>
-              <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center" title="Mensagens que chegaram de noite, madrugada, fim de semana ou feriado — sem meta, só informação">
-                <p class="text-[10px] text-n-slate-9 mb-0.5">🌙 Fora do horário</p>
-                <p class="text-xl sm:text-2xl font-bold text-n-slate-11">{{ fmtMin(myResponse.off_avg_minutes) }}</p>
-                <p class="text-[9px] text-n-slate-9">{{ myResponse.off_replies }} resposta(s)</p>
-              </div>
-              <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center">
-                <p class="text-[10px] text-n-slate-9 mb-0.5">Dentro da meta</p>
-                <p class="text-xl sm:text-2xl font-bold text-n-slate-12">{{ myResponse.within_rate }}%</p>
-              </div>
-              <div class="rounded-xl border border-n-weak bg-n-solid-2 p-3 text-center">
-                <p class="text-[10px] text-n-slate-9 mb-0.5">Respostas (08–17h)</p>
-                <p class="text-xl sm:text-2xl font-bold text-n-slate-12">{{ myResponse.replies }}</p>
-              </div>
-            </div>
-            <div class="mt-2.5">
-              <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                <div
-                  class="h-full rounded-full transition-all duration-700"
-                  :style="{
-                    width: Math.max(myResponse.within_rate, 3) + '%',
-                    background: myResponse.within_rate >= 70 ? 'linear-gradient(90deg, #059669, #4ADE80)' : 'linear-gradient(90deg, #D97706, #F59E0B)',
-                  }"
-                />
-              </div>
-              <div class="flex items-center justify-between mt-1.5 flex-wrap gap-1">
-                <p class="text-[10px] text-n-slate-9">
-                  {{ myResponse.within_goal }} de {{ myResponse.replies }} respostas do horário comercial dentro da meta
-                </p>
-                <span
-                  v-if="respVerdict(myResponse)"
-                  class="text-[10px] px-2 py-0.5 rounded-full font-bold"
-                  :style="{ background: respVerdict(myResponse).bg, color: respVerdict(myResponse).color }"
-                >
-                  {{ respVerdict(myResponse).label }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- admin: quebra por atendente -->
-          <div v-if="isAdmin && teamResponse.length" class="space-y-1.5" :class="myResponse ? 'mt-4 pt-3 border-t border-n-weak' : ''">
-            <p v-if="myResponse" class="text-xs font-medium text-n-slate-11 mb-1.5">Time no período</p>
-            <div
-              v-for="row in teamResponse"
-              :key="row.user_id"
-              class="flex items-center gap-2 flex-wrap rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2"
-            >
-              <span class="text-sm font-semibold text-n-slate-12 truncate">{{ row.name }}</span>
-              <span class="text-[10px] text-n-slate-9">{{ row.replies }} resposta(s) 08–17h</span>
-              <span class="text-xs font-bold ml-auto" :style="{ color: row.avg_minutes === null ? undefined : row.avg_minutes <= goalMinutes ? '#059669' : '#DC2626' }">
-                {{ fmtMin(row.avg_minutes) }}
+        <!-- 📅 Dashboard da Agenda EMBUTIDO (pedido 20/08): o dashboard
+             inteiro faz parte do Meu Painel em TODAS as predefinições,
+             seguindo o período da régua; a Saúde da Agenda vem logo abaixo -->
+        <div class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6">
+          <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div class="flex items-center gap-2">
+              <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
+                <span class="i-lucide-calendar-days text-white text-base" />
               </span>
-              <span class="text-[10px] text-n-slate-10">{{ row.within_rate }}% na meta</span>
-              <span
-                v-if="row.off_replies"
-                class="text-[10px] text-n-slate-9"
-                title="Média das respostas fora do horário comercial (noite, madrugada, fim de semana, feriado) — sem meta"
-              >
-                🌙 {{ fmtMin(row.off_avg_minutes) }} fora ({{ row.off_replies }})
-              </span>
-              <span
-                v-if="respVerdict(row)"
-                class="text-[10px] px-2 py-0.5 rounded-full font-bold"
-                :style="{ background: respVerdict(row).bg, color: respVerdict(row).color }"
-              >
-                {{ respVerdict(row).label }}
-              </span>
+              <h2 class="text-sm font-bold text-n-slate-12">Dashboard da Agenda</h2>
+              <span class="text-[10px] text-n-slate-9">segue o período escolhido acima</span>
             </div>
+            <button
+              class="px-3 h-8 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1.5"
+              title="Abrir o relatório completo em Relatórios"
+              @click="goToAgendaDashboard"
+            >
+              <span class="i-lucide-expand text-sm" />
+              Relatório completo
+            </button>
           </div>
+          <AgendaDashboardCore :period="period" />
         </div>
 
         <!-- Saúde da Agenda -->

@@ -274,7 +274,7 @@ const saveEntry = async () => {
     return;
   }
   if (!form.value.description.trim()) {
-    useAlert('Descreva o lançamento (ex: comissão da Gabriela, lente Galaxy…).');
+    useAlert('Descreva o lançamento (ex: comissão da equipe, lente Galaxy…).');
     return;
   }
   savingEntry.value = true;

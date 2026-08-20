@@ -990,8 +990,8 @@ const attendanceStages = ref({
   attended_stage_id: '', missed_stage_id: '', indicated_stage_id: '',
   surgery_done_stage_id: '', surgery_missed_stage_id: '',
 });
-// responsáveis pela conferência + prazo (consultas = Elizangela,
-// cirurgias = Gabriela — o admin escolhe); passou do prazo sem conferir →
+// responsáveis pela conferência + prazo (uma pessoa para consultas, outra
+// para cirurgias — o admin escolhe); passou do prazo sem conferir →
 // tarefa automática "Concluir a conferência do dia" pra pessoa certa
 const attendanceOwners = ref({ consulta_user_id: '', cirurgia_user_id: '', deadline: '19:00' });
 const isSavingAttendanceCfg = ref(false);
