@@ -240,7 +240,7 @@ const panelTiles = computed(() => {
   }
   if (selectedPanel.value === 'gestor') {
     return [
-      { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
+      { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: leadsInboxSub.value, sub2: leadsInboxConversion.value, grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
       { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`, sub2: 'avançaram até "Agendamento" no CRM', grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
       { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.indications ?? 0} indicação(ões) de cirurgia`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
       { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`, grad: 'linear-gradient(135deg, #065F46, #10B981)' },
@@ -248,9 +248,9 @@ const panelTiles = computed(() => {
   }
   // agendamento (padrão)
   return [
-    { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: 'caixas Google + Instagram', grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
-    { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
-    { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, chip: conversionVerdict.value, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`, sub2: 'avançaram até "Agendamento" no CRM', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+    { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: leadsInboxSub.value, sub2: leadsInboxConversion.value, grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
+    { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, sub3: decisionSub.value, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
+    { label: 'Agendamentos hoje', icon: 'i-lucide-calendar-plus', value: d.booked_today ?? 0, chip: bookingDayVerdict.value, sub: cohortLine('today', 'chegaram hoje'), sub2: cohortLine('yesterday', 'chegaram ontem'), grad: bookingDayVerdict.value.grad },
     { label: 'Cirurgias fechadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', sub: 'coluna Cirurgia Agendada (CRM)', grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
   ];
 });
@@ -661,19 +661,109 @@ const fbWeekLabel = fb => {
 // (Relatórios) — pedido 20/08. O widget do Construtor continua valendo.
 
 // ── Indicadores do período ──────────────────────────────────
-const conversionVerdict = computed(() => {
-  const r = data.value?.booking_conversion ?? 0;
-  // "Muito bom" é VERDE (pedido 22/07) — e leva o card junto pelo grad
-  if (r >= 15)
-    return {
-      label: 'Muito bom 🚀',
-      color: '#10B981',
-      grad: 'linear-gradient(135deg, #065F46, #10B981)',
-    };
-  if (r >= 10) return { label: 'Bom 👍', color: '#3B82F6' };
-  if (r >= 5) return { label: 'Regular', color: '#D4A017' };
-  return { label: 'Fraco', color: '#EF4444' };
+// ── Início do funil detalhado (item 138) ──
+// card 1: total + quebra por caixa de captação
+const shortInboxName = n =>
+  (n || '').replace(/caixa/i, '').replace(/\(teste\)/i, '').trim().split(' ')[0] || n;
+const leadsInboxSub = computed(() => {
+  const list = data.value?.leads_by_inbox || [];
+  if (!list.length) return 'caixas Google + Instagram';
+  return list.map(i => `${shortInboxName(i.name)} ${i.count}`).join(' · ');
 });
+// conversão POR CAIXA: dos que chegaram por ela, % que avançou a Agendamento
+const leadsInboxConversion = computed(() => {
+  const list = (data.value?.leads_by_inbox || []).filter(i => i.count > 0);
+  if (!list.length) return '';
+  return `agendaram: ${list.map(i => `${shortInboxName(i.name)} ${i.rate}%`).join(' · ')}`;
+});
+// card 2: tempo de DECISÃO (dias entre chegar e agendar)
+const decisionSub = computed(() => {
+  const t = data.value?.decision_time;
+  if (!t) return '';
+  return `🤔 decisão média ${String(t.avg_days).replace('.', ',')}d · ${t.same_day} no dia · ${t.next_day} em 1d · ${t.within_week} em 2-7d · ${t.later} em 8d+`;
+});
+// card 3: o DIA julgado contra a fatia diária da meta oficial do mês
+const cohortLine = (key, label) => {
+  const c = data.value?.booking_cohorts?.[key];
+  if (!c) return '';
+  return `${label}: ${c.booked} de ${c.leads} agendaram (${c.rate}%)`;
+};
+const bookingDayVerdict = computed(() => {
+  const booked = data.value?.booked_today ?? 0;
+  const target = officialGoals.goalFor('appointments_booked')?.target || 0;
+  if (!target)
+    return { label: 'defina a meta no Painel de Metas', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' };
+  const now = new Date();
+  const daily = target / new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const ratio = daily > 0 ? booked / daily : 1;
+  if (ratio >= 1) return { label: 'Muito bom 🚀', grad: 'linear-gradient(135deg, #065F46, #10B981)' };
+  if (ratio >= 0.6) return { label: 'Bom 👍', grad: 'linear-gradient(135deg, #1D4ED8, #3B82F6)' };
+  if (ratio >= 0.3) return { label: 'Regular', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' };
+  return { label: 'Fraco', grad: 'linear-gradient(135deg, #B91C1C, #EF4444)' };
+});
+
+// ── 🎯 Meu desempenho (item 138): a pessoa + o Atendimento IA ──
+const perf = computed(() => data.value?.my_performance || null);
+const perfCols = computed(() => {
+  if (!perf.value) return [];
+  const cols = [{ key: 'me', title: 'Você', row: perf.value.me }];
+  if (perf.value.ai) cols.push({ key: 'ai', title: '🤖 Atendimento IA', row: perf.value.ai });
+  return cols.filter(c => c.row);
+});
+const perfFmtMin = m => {
+  if (m === null || m === undefined) return '—';
+  if (m >= 60) return `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, '0')}`;
+  return `${String(m).replace('.', ',')}min`;
+};
+const perfBrl = v =>
+  (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+// você × você: setinha vs o período anterior (invert = menor é melhor)
+const perfDelta = (curr, prevVal, invert = false) => {
+  if (prevVal === null || prevVal === undefined || curr === null || curr === undefined) return null;
+  if (curr === prevVal) return null;
+  const up = curr > prevVal;
+  const good = invert ? !up : up;
+  return { arrow: up ? '▲' : '▼', color: good ? '#059669' : '#DC2626', prev: prevVal };
+};
+// item 139: cada pessoa tem SUAS métricas (o admin propõe em Configurações
+// → Painéis); row.metrics traz as chaves escolhidas (ou o padrão)
+const perfTilesFor = col => {
+  const r = col.row;
+  const prev = col.key === 'me' ? perf.value?.previous || {} : {};
+  const goal = perf.value?.goal_minutes || 15;
+  const clinic = perf.value?.clinic || {};
+  const mk = key => {
+    switch (key) {
+      case 'touched':
+        return { key, display: r.conversations_touched ?? 0, label: 'conversas em que atuou', delta: perfDelta(r.conversations_touched, prev.conversations_touched) };
+      case 'assigned':
+        return { key, display: r.conversations_assigned ?? 0, label: 'conversas atribuídas' };
+      case 'messages':
+        return { key, display: r.messages_sent ?? 0, label: 'mensagens enviadas', delta: perfDelta(r.messages_sent, prev.messages_sent) };
+      case 'reply_commercial': {
+        const v = r.commercial?.avg_minutes ?? null;
+        return { key, display: perfFmtMin(v), label: `resposta média (08–17h) · ${r.commercial?.within_rate ?? 0}% na meta`, color: v === null ? '' : v <= goal ? '#059669' : '#DC2626', delta: perfDelta(v, prev.avg_reply_min, true) };
+      }
+      case 'first_response':
+        return { key, display: perfFmtMin(r.avg_first_response_min), label: '1ª resposta (média)' };
+      case 'resolved':
+        return { key, display: r.conversations_resolved ?? 0, label: 'resolvidas', delta: perfDelta(r.conversations_resolved, prev.conversations_resolved) };
+      case 'appointments':
+        return { key, display: r.appointments_created ?? 0, label: 'consultas agendadas', delta: perfDelta(r.appointments_created, prev.appointments_created) };
+      case 'surgeries_created':
+        return { key, display: r.surgeries_created ?? 0, label: 'cirurgias agendadas' };
+      case 'surgeries_closed':
+        return { key, display: r.surgeries?.count ?? 0, label: `cirurgias fechadas · ${perfBrl(r.surgeries?.revenue)}` };
+      case 'attendance':
+        return { key, display: `${clinic.rate ?? 0}%`, label: `comparecimento (clínica) · ${clinic.attended ?? 0} vieram · ${clinic.missed ?? 0} faltaram`, color: (clinic.rate ?? 0) >= 80 ? '#059669' : (clinic.rate ?? 0) >= 60 ? '#D4A017' : '#DC2626' };
+      case 'days_worked':
+        return { key, display: r.workday?.days_active ?? 0, label: 'dias trabalhados' };
+      default:
+        return null;
+    }
+  };
+  return (r.metrics || []).map(mk).filter(Boolean);
+};
 
 // ── Saúde da agenda (janelas × consultas, calculada aqui) ───
 const consultaTasks = computed(() =>
@@ -1468,6 +1558,7 @@ onUnmounted(() => {
                 <!-- linhas curtas propositais: nada de frase quebrando no meio -->
                 <p class="text-[10px] text-white/70 truncate">{{ tile.sub }}</p>
                 <p v-if="tile.sub2" class="text-[10px] text-white/80 truncate">{{ tile.sub2 }}</p>
+                <p v-if="tile.sub3" class="text-[10px] text-white/80 truncate">{{ tile.sub3 }}</p>
               </template>
               <!-- medidor da meta (aparece quando o admin definiu meta) -->
               <div v-if="tileVisual(tile).ratio !== null" class="mt-2">
@@ -1498,6 +1589,74 @@ onUnmounted(() => {
           <p class="text-2xl font-bold text-n-slate-12">{{ panelHighlight.value }}</p>
         </div>
         </template>
+
+        <!-- 🎯 MEU DESEMPENHO (item 138): auto-avaliação — a pessoa e o
+             Atendimento IA como referência; sem ranking de colegas (o
+             ranking do time vive no Dashboard dos Agentes, do gestor) -->
+        <div v-if="perfCols.length" class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6">
+          <div class="flex items-center gap-2 mb-4 flex-wrap">
+            <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
+              <span class="i-lucide-target text-white text-base" />
+            </span>
+            <h2 class="text-sm font-bold text-n-slate-12">Meu desempenho</h2>
+            <span class="text-[10px] px-2 py-0.5 rounded-full bg-n-alpha-1 text-n-slate-11">velocidades no horário comercial · 08h–17h</span>
+            <span v-if="perf?.previous?.label" class="text-[10px] text-n-slate-9 ml-auto">setinhas comparam com {{ perf.previous.label }}</span>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div
+              v-for="col in perfCols"
+              :key="col.key"
+              class="rounded-2xl border p-4"
+              :class="col.key === 'me' ? 'border-violet-400/40 bg-n-solid-1' : 'border-n-weak bg-n-alpha-1'"
+            >
+              <div class="flex items-center gap-2 mb-3">
+                <p class="text-sm font-bold text-n-slate-12 flex-1">{{ col.title }}</p>
+                <span class="text-[10px] text-n-slate-10">{{ col.row.messages_sent }} mensagens</span>
+              </div>
+
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center">
+                <div v-for="t in perfTilesFor(col)" :key="t.key" class="rounded-xl bg-n-alpha-1 px-2 py-2">
+                  <p class="text-base font-bold" :class="t.color ? '' : 'text-n-slate-12'" :style="t.color ? { color: t.color } : {}">
+                    {{ t.display }}
+                    <span v-if="t.delta" class="text-[10px] font-bold" :title="'antes: ' + t.delta.prev" :style="{ color: t.delta.color }">{{ t.delta.arrow }}</span>
+                  </p>
+                  <p class="text-[10px] text-n-slate-10">{{ t.label }}</p>
+                </div>
+              </div>
+
+              <!-- Radar + jornada -->
+              <div class="flex items-center gap-x-4 gap-y-1 flex-wrap mt-3 text-xs text-n-slate-11">
+                <span class="inline-flex items-center gap-1.5">
+                  <span class="i-lucide-radar text-sm" style="color: #EA580C" />
+                  {{ col.row.radar_responded }} aviso(s) do Radar
+                  <template v-if="col.row.radar_avg_response_min !== null"> · respondeu em <b class="text-n-slate-12">{{ perfFmtMin(col.row.radar_avg_response_min) }}</b></template>
+                </span>
+                <span v-if="col.row.workday" class="inline-flex items-center gap-1.5">
+                  <span class="i-lucide-sunrise text-sm" style="color: #D97706" />
+                  1ª msg <b class="text-n-slate-12">{{ col.row.workday.avg_first_msg }}</b> · última <b class="text-n-slate-12">{{ col.row.workday.avg_last_msg }}</b>
+                </span>
+              </div>
+              <div v-if="col.row.workday?.top_gaps?.length || col.row.off_hours?.count" class="flex items-center gap-1.5 flex-wrap mt-2">
+                <span
+                  v-for="(g, gi) in (col.row.workday?.top_gaps || []).slice(0, 2)"
+                  :key="gi"
+                  class="text-[10px] px-2 py-0.5 rounded-full bg-n-alpha-1 border border-n-weak text-n-slate-11"
+                  title="Maior pausa entre uma mensagem e outra no período"
+                >
+                  pausa {{ g.day }} · {{ g.from }}→{{ g.to }} · <b>{{ perfFmtMin(g.minutes) }}</b>
+                </span>
+                <span
+                  v-if="col.row.off_hours?.count"
+                  class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 font-medium"
+                  :title="'Dias com mensagens fora de seg–sex 08h–17h: ' + (col.row.off_hours.days || []).join(' · ')"
+                >
+                  🌙 {{ col.row.off_hours.count }} dia(s) fora do horário<template v-if="col.row.off_hours.days?.length">: {{ col.row.off_hours.days.slice(0, 3).join(' · ') }}</template>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- 📅 Dashboard da Agenda EMBUTIDO (pedido 20/08): o dashboard
              inteiro faz parte do Meu Painel em TODAS as predefinições,

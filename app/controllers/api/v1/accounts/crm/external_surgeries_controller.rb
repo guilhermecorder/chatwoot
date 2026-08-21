@@ -20,6 +20,7 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
                         else
                           0
                         end
+    ahead = ahead_of_target_count(matched_ids, stage)
 
     render json: {
       total_lines: lines.size,
@@ -30,6 +31,7 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
       unmatched: result[:unmatched].first(50),
       unmatched_count: result[:unmatched].size,
       already_in_target: already_in_target,
+      ahead_of_target: ahead,
       target_stage: { id: stage.id, name: stage.name }
     }
   end
@@ -76,6 +78,7 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
     match = match_rows_by_name(parsed[:rows])
     matched_ids = match[:matched].map { |m| m[:contact_id] }.uniq
     already = matched_ids.any? ? Crm::Contact.where(pipeline_id: stage.pipeline_id, stage_id: stage.id, contact_id: matched_ids).count : 0
+    ahead = ahead_of_target_count(matched_ids, stage)
 
     render json: {
       token: token,
@@ -91,6 +94,7 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
       unmatched: match[:unmatched].first(30).map { |r| r[:name] },
       unmatched_count: match[:unmatched].size,
       already_in_target: already,
+      ahead_of_target: ahead,
       target_stage: { id: stage.id, name: stage.name }
     }
   end
@@ -154,6 +158,17 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
   end
 
   private
+
+  # 🛡️ quantos casados estão numa coluna DEPOIS do alvo (ex.: Pós
+  # Operatório) — o job preserva esses; a prévia avisa (rodada 137)
+  def ahead_of_target_count(matched_ids, stage)
+    return 0 if matched_ids.blank?
+
+    Crm::Contact.joins(:stage)
+                .where(pipeline_id: stage.pipeline_id, contact_id: matched_ids)
+                .where('crm_stages.position > ?', stage.position)
+                .count
+  end
 
   def crm_settings
     @crm_settings ||= CrmSetting.find_by(account: Current.account)

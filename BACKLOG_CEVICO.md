@@ -4175,3 +4175,86 @@ crm_opportunity_radar_job registrados.
   response_goal (2 atendentes); agenda_dashboard last_month = 10 consultas.
   Vite compila tudo (7 arquivos). Sem migration, sem cron novo.
 - AGUARDANDO "pode subir" (junto das rodadas 134+135).
+
+## 137. ✅ 🛡️ IMPORTAÇÃO NÃO VOLTA QUEM JÁ AVANÇOU (pedido 20/08, pré-import)
+- Antes de importar a planilha em produção, o Guilherme pediu: quem já está
+  no Pós Operatório não pode ser "atualizado" — e o job de fato puxaria o
+  card DE VOLTA pra Cirurgia Realizada.
+- ExternalSurgeryJob.place_in_stage: card numa coluna com position MAIOR
+  que a coluna-alvo (mesma pipeline) devolve :ahead → preservado por
+  completo (não move, não retrodata, não mexe em valor, não etiqueta, fora
+  do recibo do Desfazer). Vale pros DOIS caminhos (telefones colados e
+  planilha). Contador "preservados" no log do job.
+- Prévias (telefones + planilha) ganharam ahead_of_target (helper
+  ahead_of_target_count via join crm_stages.position) e a tela mostra a
+  linha verde "🛡️ N já estão ADIANTE — ficam exatamente como estão".
+- Teste conta 3: card no Pós Operatório ficou intocado (coluna/valor/data/
+  sem etiqueta) com o job tentando 9999; card no Agendamento moveu c/ valor
+  2800 + retrodata 10/07 + etiqueta; recibo só com 1 entrada; prévia via
+  API = 2 casados · 1 já na coluna · 1 adiante. Sem migration, sem cron.
+- ⚠️ IMPORTANTE: importar a planilha SÓ DEPOIS desta rodada no ar (job roda
+  no SIDEKIQ — implantar web+sidekiq juntos).
+- AGUARDANDO "pode subir".
+
+## 138. ✅ INÍCIO DO FUNIL DETALHADO + "MEU DESEMPENHO" (pedidos 20/08 noite)
+- CARD 1 Novos contatos: total + quebra POR CAIXA embaixo ("Google 14 ·
+  Instagram 10") — leads_by_inbox via caixas de captação do LeadsUniverse.
+- CARD 2 Consultas agendadas: + TEMPO DE DECISÃO (dias entre o lead chegar
+  e agendar): média + faixas no dia/1d/2-7d/8d+ (decision_time via
+  booked_scope × contacts.created_at).
+- CARD 3 virou "AGENDAMENTOS HOJE": número e COR = total do dia julgado
+  contra a fatia diária da meta oficial (Painel de Metas ÷ dias do mês);
+  embaixo as coortes "chegaram hoje: X de N (%)" e "chegaram ontem" —
+  a taxa madura. booking_cohorts fixas hoje/ontem no servidor.
+- 🎯 BLOCO "MEU DESEMPENHO" em todos os painéis do Meu Painel (decisões
+  dele 20/08: EU + ATENDIMENTO IA, SEM ranking de colegas; nota do Auditor
+  NÃO aparece — segue só com o gestor): conversas, mensagens, resposta
+  média COMERCIAL 08-17h vs meta (+% na meta), 1ª resposta, resolvidas,
+  consultas agendadas, cirurgias fechadas c/ R$ (assignee em Cirurgia
+  Realizada por stage_moved_at), Radar respondidos + tempo, jornada (1ª/
+  última msg + maiores pausas) e 🌙 DIAS FORA DO HORÁRIO (fds ou <8h/≥17h,
+  chips c/ os dias); VOCÊ×VOCÊ: setinhas ▲▼ vs período anterior de mesmo
+  tamanho (my_previous_snapshot).
+- Backend: concern Crm::AgentPerformance (agents_rows/workday_stats/
+  radar_stats extraídos do Dashboard dos Agentes, agora c/ filtro user_ids)
+  + response_goal_rows(user_ids:) + my_performance_json no home.
+  ATENDIMENTO IA = agenda_config.ai_user_id, configurado na seção nova 🤖
+  de Configurações → Painéis (o robô responde pelo login escolhido).
+- Teste conta 3 API real: leads_by_inbox 2 caixas; decision_time jul (23d);
+  cohorts hoje/ontem; my_performance me+ai c/ previous real (17 msgs jul);
+  agents_dashboard intacto pós-refactor (Guilherme 17 · Atendente 8).
+  Sem migration, sem cron novo.
+- AGUARDANDO "pode subir" (junto da 137).
+
+## 139. ✅ "MEU DESEMPENHO" POR FUNÇÃO — métricas propostas pelo admin (20/08)
+- Pedido: cada pessoa tem um papel (Elizangela agenda CIRURGIAS, Natália
+  confirma consultas e cuida do COMPARECIMENTO) → o bloco "Meu desempenho"
+  precisa de métricas POR PESSOA, propostas pelo Guilherme.
+- CATÁLOGO de 11 métricas individuais (Crm::AgentPerformance::METRIC_KEYS):
+  touched (conversas em que ATUOU, independente de atribuição — novo),
+  assigned, messages, reply_commercial (08-17h + % na meta), first_response,
+  resolved, appointments, surgeries_created (cirurgias agendadas POR ELA —
+  novo, tasks cirurgia por creator), surgeries_closed (+R$), attendance
+  (comparecimento da clínica no período — novo, p/ quem confirma) e
+  days_worked (dias trabalhados). Padrão sem config: touched +
+  reply_commercial + days_worked + resolved + appointments +
+  surgeries_closed.
+- CONFIG: Configurações → Painéis, seção "🎯 Métricas do Meu desempenho":
+  escolhe a pessoa → chips liga/desliga (1º clique parte do padrão; botão
+  "voltar ao padrão"; nunca zera). agenda_config.performance_metrics
+  {user_id=>[chaves]}, sanitizado (só usuários da conta + chaves do
+  catálogo). Payload my_performance ganhou metrics por pessoa + clinic
+  (comparecimento) + previous.conversations_touched.
+- Front: tiles do bloco montados pelo catálogo (perfTilesFor) — setinhas
+  você×você continuam onde há base (touched/messages/resolved/appointments/
+  reply). AI usa a config do próprio login.
+- Teste conta 3 API real: config salva c/ sanitização (user 99 e chave
+  inválida descartados), me c/ 5 métricas escolhidas (touched 2 · cirurgias
+  agendadas 5 · 4 dias · comparecimento 100%), previous.touched ok.
+  Sem migration, sem cron novo.
+- + CONVERSÃO POR CAIXA no card 1 (pergunta dele 20/08): leads_by_inbox
+  ganhou booked/rate (universo da caixa × avançou até Agendamento) e o card
+  mostra a 2ª linha "agendaram: Google 50% · Instagram 87,5%" — agora o
+  card compara VOLUME e QUALIDADE de cada porta de entrada. Testado julho
+  local (Google 14→7 · Insta 8→7).
+- AGUARDANDO "pode subir" (junto de 137+138).

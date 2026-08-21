@@ -1200,6 +1200,9 @@ const undoImport = async () => {
             <b class="text-green-600">{{ surgeryPreview.matched }}</b> paciente(s) encontrado(s) ·
             <b>{{ surgeryPreview.already_in_target }}</b> já na coluna "{{ surgeryPreview.target_stage?.name }}"
           </p>
+          <p v-if="surgeryPreview.ahead_of_target" class="text-xs text-emerald-700 font-medium">
+            🛡️ {{ surgeryPreview.ahead_of_target }} já estão ADIANTE (ex.: Pós Operatório) — ficam exatamente como estão.
+          </p>
           <p v-if="surgeryPreview.matched_sample?.length" class="text-xs text-n-slate-9">
             Ex: {{ surgeryPreview.matched_sample.join(', ') }}
           </p>
@@ -1309,6 +1312,10 @@ const undoImport = async () => {
               <template v-if="sheetCreateMissing"> → <b class="text-sky-600">serão criados</b></template>
               <template v-else> → ficarão de fora</template> ·
               <b>{{ sheetPreview.already_in_target }}</b> já na coluna
+            </p>
+            <p v-if="sheetPreview.ahead_of_target" class="text-xs text-emerald-700 font-medium">
+              🛡️ {{ sheetPreview.ahead_of_target }} paciente(s) já estão ADIANTE da coluna (ex.: Pós Operatório) — o
+              sistema preserva: não move, não mexe no valor, não etiqueta.
             </p>
             <p v-if="sheetPreview.ambiguous_count" class="text-xs text-amber-600">
               {{ sheetPreview.ambiguous_count }} nome(s) com MAIS DE UM contato (ficam de fora — resolva com

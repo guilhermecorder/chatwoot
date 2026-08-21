@@ -14,6 +14,7 @@
 class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   include Crm::ResolvesPeriod
   include Crm::ResponseGoal
+  include Crm::AgentPerformance
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
@@ -34,6 +35,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       opportunity_alerts: opportunity_alerts_json,
       # meta de tempo de atendimento (relatório pessoal por atendente)
       response_goal: response_goal_json(since, until_at),
+      # bloco "Meu desempenho" (item 138): a pessoa + o Atendimento IA
+      my_performance: my_performance_json(since, until_at),
       # Mentor do Time: feedback semanal individual (admin vê o time)
       weekly_feedback: weekly_feedback_json,
       my_tasks: my_tasks_json,
@@ -277,6 +280,11 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
         .joins(:contact).where(contacts: { created_at: since..until_at })
         .distinct.count(:contact_id),
       booking_conversion: pct(agendadas, leads),
+      # item 138: quebra por caixa, tempo de decisão e coortes hoje/ontem
+      leads_by_inbox: leads_by_inbox_json(since, until_at),
+      decision_time: decision_time_json(since, until_at),
+      booked_today: booked_scope(account, TZ.now.beginning_of_day, TZ.now.end_of_day).count,
+      booking_cohorts: booking_cohorts_json,
       surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i, universe: universe),
       surgery_indications: reached_stage_count(/indica/i, since, until_at, universe: universe)
     }
@@ -409,6 +417,157 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # com movimentações em massa (a data usada é a do LEAD, não a do card).
   # universe: restringe ao MESMO conjunto de leads do card "Novos contatos"
   # (caixas de marketing) — numerador e denominador na mesma régua.
+  # ── Item 138: início do funil detalhado + "Meu desempenho" ──────────────
+
+  # leads do período POR CAIXA de captação + CONVERSÃO de cada caixa
+  # (dos que chegaram por ela, quantos avançaram até "Agendamento")
+  def leads_by_inbox_json(since, until_at)
+    inbox_ids = Crm::LeadsUniverse.capture_inbox_ids(account)
+    return [] if inbox_ids.empty?
+
+    counts = account.contacts.where(created_at: since..until_at)
+                    .joins(:conversations).where(conversations: { inbox_id: inbox_ids })
+                    .group('conversations.inbox_id').count('DISTINCT contacts.id')
+    names = account.inboxes.where(id: counts.keys).pluck(:id, :name).to_h
+    counts.map do |id, c|
+      universe = account.contacts.where(created_at: since..until_at)
+                        .joins(:conversations).where(conversations: { inbox_id: id }).distinct
+      booked = reached_stage_count(/agendamento/i, since, until_at, universe: universe)
+      { name: names[id].to_s, count: c, booked: booked, rate: pct(booked, c) }
+    end.sort_by { |h| -h[:count] }
+  end
+
+  # TEMPO DE DECISÃO: das consultas registradas no período, quantos dias
+  # entre o lead CHEGAR e AGENDAR — média + faixas (no dia/1 dia/2-7/8+)
+  def decision_time_json(since, until_at)
+    rows = booked_scope(account, since, until_at).joins(:contact)
+                                                 .pluck(Arel.sql('tasks.created_at'), Arel.sql('contacts.created_at'))
+    days = rows.map { |t, c| (t.in_time_zone(TZ).to_date - c.in_time_zone(TZ).to_date).to_i }
+               .reject(&:negative?)
+    return nil if days.empty?
+
+    {
+      count: days.size,
+      avg_days: (days.sum.to_f / days.size).round(1),
+      same_day: days.count(0),
+      next_day: days.count(1),
+      within_week: days.count { |d| d.between?(2, 7) },
+      later: days.count { |d| d > 7 }
+    }
+  end
+
+  # coortes fixas HOJE e ONTEM: dos leads que chegaram no dia, quantos já
+  # avançaram até "Agendamento" — a de ontem é a taxa madura (teve tempo)
+  def booking_cohorts_json
+    now = TZ.now
+    { 'today' => [now.beginning_of_day, now.end_of_day],
+      'yesterday' => [now.yesterday.beginning_of_day, now.yesterday.end_of_day] }.transform_values do |(s, u)|
+      universe = leads_scope(s, u)
+      leads = universe.count
+      booked = reached_stage_count(/agendamento/i, s, u, universe: universe)
+      { leads: leads, booked: booked, rate: pct(booked, leads) }
+    end
+  end
+
+  # "Meu desempenho": a pessoa logada + o usuário do Atendimento IA
+  # (Configurações → Painéis define qual login o robô usa; sem config = só eu)
+  def my_performance_json(since, until_at)
+    ai_id = crm_settings&.agenda_config&.dig('ai_user_id').presence&.to_i
+    ids = [Current.user.id, ai_id].compact.uniq
+    radar = radar_stats(since, until_at)
+    rows = agents_rows(since, until_at, radar[:by_responder], user_ids: ids).index_by { |r| r[:id] }
+    commercial = response_goal_rows(since, until_at, response_goal_minutes || 15, user_ids: ids)
+                 .index_by { |r| r[:user_id] }
+    off = off_hours_days(ids, since, until_at)
+    surgeries = surgeries_by_user(ids, since, until_at)
+    metric_cfg = crm_settings&.agenda_config&.dig('performance_metrics') || {}
+    build = lambda do |uid|
+      row = rows[uid]
+      next nil if row.blank?
+
+      picked = Array(metric_cfg[uid.to_s]) & Crm::AgentPerformance::METRIC_KEYS
+      row.merge(
+        commercial: commercial[uid],
+        off_hours: off[uid] || { count: 0, days: [] },
+        surgeries: surgeries[uid] || { count: 0, revenue: 0.0 },
+        # métricas propostas pelo admin p/ esta pessoa (item 139)
+        metrics: picked.presence || Crm::AgentPerformance::DEFAULT_METRICS
+      )
+    end
+    {
+      goal_minutes: response_goal_minutes || 15,
+      me: build.call(Current.user.id),
+      ai: ai_id && ai_id != Current.user.id ? build.call(ai_id) : nil,
+      previous: my_previous_snapshot(since, until_at),
+      # comparecimento do período (métrica de quem cuida da confirmação)
+      clinic: clinic_attendance_json(since, until_at)
+    }
+  end
+
+  # comparecimento da clínica no período — o resultado do trabalho de quem
+  # confirma consulta (Natália): consultas do período com presença marcada
+  def clinic_attendance_json(since, until_at)
+    periodo = consultas.where(canceled_at: nil, due_at: since..until_at)
+    attended = periodo.where(attendance: 'attended').count
+    missed = periodo.where(attendance: 'missed').count
+    { attended: attended, missed: missed, rate: pct(attended, attended + missed) }
+  end
+
+  # dias em que a pessoa mandou mensagem FORA do horário comercial
+  # (fim de semana ou fora de 08–17h) — visibilidade, sem julgamento
+  def off_hours_days(user_ids, since, until_at)
+    rows = account.messages.reorder(nil)
+                  .where(message_type: :outgoing, private: false, created_at: since..until_at,
+                         sender_type: 'User', sender_id: user_ids)
+                  .pluck(:sender_id, :created_at)
+    per_user = Hash.new { |h, k| h[k] = {} }
+    rows.each do |uid, at|
+      t = at.in_time_zone(TZ)
+      next unless t.on_weekend? || t.hour < 8 || t.hour >= 17
+
+      per_user[uid][t.to_date] ||= "#{Crm::AgentPerformance::WEEKDAYS_PT[t.wday]} #{t.strftime('%d/%m')}"
+    end
+    per_user.transform_values { |days| { count: days.size, days: days.values.first(6) } }
+  end
+
+  # cirurgias fechadas atribuídas à pessoa (card em "Cirurgia Realizada"
+  # com ela como responsável, pela data de entrada na coluna) + R$
+  def surgeries_by_user(user_ids, since, until_at)
+    scope = Crm::Contact.joins(:pipeline, :stage)
+                        .where(crm_pipelines: { account_id: account.id }, assignee_id: user_ids)
+                        .where('crm_stages.name ~* ?', 'cirurgia realizada')
+                        .where(stage_moved_at: since..until_at)
+    counts = scope.group(:assignee_id).count
+    revenue = scope.group(:assignee_id).sum(:value)
+    counts.to_h { |uid, c| [uid, { count: c, revenue: revenue[uid].to_f.round(2) }] }
+  end
+
+  # "você × você": o MESMO tamanho de janela, imediatamente anterior
+  def my_previous_snapshot(since, until_at)
+    span = until_at - since
+    prev_until = since - 1.second
+    prev_since = prev_until - span
+    uid = Current.user.id
+    range = prev_since..prev_until
+    commercial = Crm::BusinessHours.sql_condition('reporting_events.created_at', prev_since, prev_until)
+    avg = account.reporting_events.where(name: 'reply_time', created_at: range, user_id: uid)
+                 .where('value > 0').where(commercial).average(:value)
+    {
+      label: "#{prev_since.strftime('%d/%m')}–#{prev_until.strftime('%d/%m')}",
+      messages_sent: account.messages.reorder(nil)
+                            .where(message_type: :outgoing, private: false, created_at: range,
+                                   sender_type: 'User', sender_id: uid).count,
+      conversations_touched: account.messages.reorder(nil)
+                                    .where(message_type: :outgoing, private: false, created_at: range,
+                                           sender_type: 'User', sender_id: uid)
+                                    .distinct.count(:conversation_id),
+      appointments_created: account.tasks.where(task_type: 'consulta', created_at: range, creator_id: uid).count,
+      conversations_resolved: account.reporting_events.where(name: 'conversation_resolved',
+                                                             created_at: range, user_id: uid).count,
+      avg_reply_min: avg ? (avg.to_f / 60).round(1) : nil
+    }
+  end
+
   def reached_stage_count(pattern, since, until_at, exclude: /pós/i, universe: nil)
     account.crm_pipelines.includes(:stages).sum do |pipeline|
       stage_ids = reached_stage_ids(pipeline, pattern, exclude)

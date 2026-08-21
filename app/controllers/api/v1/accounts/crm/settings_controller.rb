@@ -524,6 +524,21 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['panel_assignments'] = params.require(:panel_assignments)
                                        .permit!.to_h.transform_values(&:to_s)
     end
+    # qual LOGIN o Atendimento IA usa pra responder (Configurações → Painéis)
+    # — alimenta o bloco "Meu desempenho" (a pessoa se compara com o robô)
+    if params.key?(:ai_user_id)
+      uid = params[:ai_user_id].presence&.to_i
+      cfg['ai_user_id'] = uid && Current.account.users.exists?(id: uid) ? uid : nil
+    end
+    # MÉTRICAS do "Meu desempenho" por pessoa ({user_id => [chaves]}) —
+    # o admin propõe o painel individual de cada função (item 139)
+    if params.key?(:performance_metrics)
+      raw = params.require(:performance_metrics).permit!.to_h
+      valid_ids = Current.account.users.pluck(:id).map(&:to_s)
+      cfg['performance_metrics'] = raw.slice(*valid_ids).transform_values do |keys|
+        Array(keys).map(&:to_s) & Crm::AgentPerformance::METRIC_KEYS
+      end.reject { |_, v| v.empty? }
+    end
     # RESPONSÁVEL por painel ({painel => user_id}) — o nome aparece na
     # pílula do Meu Painel ("Cirurgias · Elizangela"). Configurações → Painéis.
     if params.key?(:panel_owners)
@@ -618,6 +633,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_theme: cfg['theme'],
       panel_assignments: cfg['panel_assignments'] || {},
       panel_owners: panel_owners_json(cfg),
+      ai_user_id: cfg['ai_user_id'],
+      performance_metrics: cfg['performance_metrics'] || {},
       clinical_access: cfg['clinical_access'] || {}
     }
   end
@@ -955,6 +972,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       },
       panel_assignments: (s.agenda_config || {})['panel_assignments'] || {},
       panel_owners: panel_owners_json(s.agenda_config || {}),
+      ai_user_id: (s.agenda_config || {})['ai_user_id'],
+      performance_metrics: (s.agenda_config || {})['performance_metrics'] || {},
+      performance_metric_keys: Crm::AgentPerformance::METRIC_KEYS,
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},
       custom_panels: (s.agenda_config || {})['custom_panels'] || [],
       main_panel: (s.agenda_config || {})['main_panel'].presence,

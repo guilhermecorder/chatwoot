@@ -21,9 +21,17 @@ module Crm
       }
     end
 
-    def response_goal_rows(since, until_at, goal_minutes) # rubocop:disable Metrics/AbcSize
+    # user_ids: pedido explícito (Meu Painel: a pessoa + o Atendimento IA) —
+    # com ele o recorte por papel não se aplica (os dados do robô são de todos)
+    def response_goal_rows(since, until_at, goal_minutes, user_ids: nil) # rubocop:disable Metrics/AbcSize
       scope = Current.account.reporting_events.where(name: 'reply_time', created_at: since..until_at).where('value > 0')
-      scope = scope.where(user_id: Current.user.id) unless Current.account_user.administrator?
+      scope = if user_ids
+                scope.where(user_id: user_ids)
+              elsif Current.account_user.administrator?
+                scope
+              else
+                scope.where(user_id: Current.user.id)
+              end
       commercial = Crm::BusinessHours.sql_condition('reporting_events.created_at', since, until_at)
       biz = scope.where(commercial)
       off = scope.where("NOT (#{commercial})")

@@ -194,6 +194,16 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { panel_owners: panelOwners });
   }
 
+  // qual login o Atendimento IA usa (bloco "Meu desempenho")
+  updateAiUser(userId) {
+    return axios.post(`${this.url}/settings/update_agenda`, { ai_user_id: userId });
+  }
+
+  // métricas individuais do "Meu desempenho" por pessoa (item 139)
+  updatePerformanceMetrics(performanceMetrics) {
+    return axios.post(`${this.url}/settings/update_agenda`, { performance_metrics: performanceMetrics });
+  }
+
   // médicos com a agenda fechada (item 76)
   updateClosedDoctors(closedDoctors) {
     return axios.post(`${this.url}/settings/update_agenda`, { closed_doctors: closedDoctors });

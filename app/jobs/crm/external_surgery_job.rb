@@ -30,6 +30,7 @@ class Crm::ExternalSurgeryJob < ApplicationJob
     set_value = options['set_value'] != false
     overwrite_value = options['overwrite_value'] == true
     processed = 0
+    preserved = 0 # 🛡️ já adiante da coluna-alvo (ex.: Pós Operatório) — intocados
     undo_entries = [] # ↩️ recibo de tudo que mudou — alimenta o "Desfazer"
 
     Array(matched_pairs).each_slice(200) do |batch|
@@ -42,6 +43,12 @@ class Crm::ExternalSurgeryJob < ApplicationJob
         next if contact.blank?
 
         entry = place_in_stage(stage, contact, value, set_value, overwrite_value, date, procedure)
+        # 🛡️ paciente já ADIANTE da coluna-alvo (ex.: Pós Operatório):
+        # fica exatamente como está — sem mover, sem valor, sem etiqueta
+        if entry == :ahead
+          preserved += 1
+          next
+        end
         undo_entries << entry if entry
         fast_add_label(contact, label_title) if label_title
         processed += 1
@@ -78,7 +85,8 @@ class Crm::ExternalSurgeryJob < ApplicationJob
     end
 
     save_undo_receipt(account, stage, label_title, undo_entries)
-    Rails.logger.info "[Crm::ExternalSurgeryJob] #{processed} pacientes colocados em #{stage.name} (+#{created} criados da planilha)"
+    Rails.logger.info "[Crm::ExternalSurgeryJob] #{processed} pacientes colocados em #{stage.name} " \
+                      "(+#{created} criados da planilha; #{preserved} já adiante preservados)"
   end
 
   private
@@ -95,6 +103,11 @@ class Crm::ExternalSurgeryJob < ApplicationJob
     entry = { 'contact_id' => contact.id }
 
     if card.persisted?
+      # 🛡️ card numa coluna DEPOIS do alvo (ex.: Pós Operatório quando o
+      # alvo é Cirurgia Realizada): a jornada dele já passou desse ponto —
+      # não volta o card nem mexe em nada (pedido 20/08, rodada 137)
+      return :ahead if card.stage_id != stage.id && card.stage&.position.to_i > stage.position.to_i
+
       entry['prev_stage_id'] = card.stage_id
       entry['prev_value'] = card.value&.to_f
       entry['prev_stage_moved_at'] = card.stage_moved_at&.iso8601
