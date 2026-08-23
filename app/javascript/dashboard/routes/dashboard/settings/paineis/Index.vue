@@ -9,6 +9,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
+import { ALL_THEMES } from 'dashboard/helper/cevicoThemes';
 
 const store = useStore();
 const agents = useMapGetter('agents/getAgents');
@@ -37,6 +38,35 @@ const PANELS = [
     grad: 'linear-gradient(135deg, #9D174D 0%, #F472B6 100%)',
   },
 ];
+
+// 🎨 tema por painel (item 140): a família de cores de cada ambiente do
+// Meu Painel — "Padrão" = a família própria do painel (azul/teal/vinho…)
+const THEME_PANELS = [
+  { key: 'agendamento', label: 'Agendamento' },
+  { key: 'conducao', label: 'Condução' },
+  { key: 'cirurgia', label: 'Cirurgias' },
+  { key: 'medico', label: 'Médicos' },
+  { key: 'gestor', label: 'Gestor' },
+];
+const panelThemes = ref({}); // { painel => tema }
+const pickTheme = async (panelKey, themeKey) => {
+  const previous = { ...panelThemes.value };
+  const next = { ...panelThemes.value };
+  if (themeKey) next[panelKey] = themeKey;
+  else delete next[panelKey];
+  panelThemes.value = next;
+  savingKey.value = `theme:${panelKey}`;
+  try {
+    await CrmAPI.updatePanelThemes(panelThemes.value);
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Salvo! As cores do painel já mudaram.');
+  } catch {
+    panelThemes.value = previous;
+    useAlert('Não consegui salvar — tenta de novo.');
+  } finally {
+    savingKey.value = '';
+  }
+};
 
 const owners = ref({}); // { painel => user_id }
 const aiUserId = ref(null); // login que o Atendimento IA usa
@@ -112,6 +142,7 @@ const loadFromSettings = () => {
   owners.value = map;
   aiUserId.value = crmSettings.value?.ai_user_id || null;
   metricsCfg.value = { ...(crmSettings.value?.performance_metrics || {}) };
+  panelThemes.value = { ...(crmSettings.value?.panel_themes || {}) };
   if (!selPersonId.value && sortedAgents.value.length) selPersonId.value = sortedAgents.value[0].id;
 };
 
@@ -333,6 +364,51 @@ onMounted(async () => {
             </button>
           </div>
         </template>
+      </div>
+      <!-- 🎨 Tema por painel (item 140) -->
+      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mt-4">
+        <div class="flex items-center gap-3 mb-1 flex-wrap">
+          <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
+            <span class="i-lucide-palette text-white text-base" />
+          </span>
+          <div class="flex-1 min-w-[180px]">
+            <p class="text-sm font-bold text-n-slate-12">Cores de cada painel</p>
+            <p class="text-[11px] text-n-slate-10">
+              cada ambiente tem uma família de cor (os cards vão do escuro ao claro); a cor
+              verde/âmbar/vermelha fica só no card que está sendo julgado contra a meta.
+              "Padrão" usa a família própria do painel; os temas usam os lugares da CEVICO.
+            </p>
+          </div>
+        </div>
+        <div class="space-y-3 mt-3">
+          <div v-for="tp in THEME_PANELS" :key="tp.key">
+            <div class="flex items-center gap-2 mb-1">
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">{{ tp.label }}</p>
+              <span v-if="savingKey === `theme:${tp.key}`" class="i-lucide-loader-circle animate-spin text-xs text-n-brand" />
+            </div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button
+                class="h-8 px-3 rounded-lg text-xs font-medium border transition-colors"
+                :class="!panelThemes[tp.key] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                :style="!panelThemes[tp.key] ? { background: '#64748B' } : {}"
+                @click="pickTheme(tp.key, null)"
+              >
+                Padrão
+              </button>
+              <button
+                v-for="t in ALL_THEMES"
+                :key="t.key"
+                class="h-8 px-3 rounded-lg text-xs font-medium border transition-colors"
+                :class="panelThemes[tp.key] === t.key ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                :style="panelThemes[tp.key] === t.key ? { background: t.primary } : {}"
+                :title="t.desc"
+                @click="pickTheme(tp.key, t.key)"
+              >
+                {{ t.emoji }} {{ t.label }}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

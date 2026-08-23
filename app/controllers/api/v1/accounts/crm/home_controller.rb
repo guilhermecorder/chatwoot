@@ -157,6 +157,13 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     render json: { radar: radar_status(cfg) }
   end
 
+  # Cesto de indicadores (item 141): números-base do período com série e
+  # período anterior — gráficos dos popups, cards do "+" e fórmulas
+  def kpis
+    since, until_at = resolve_range
+    render json: Crm::KpiBagService.new(account: account, since: since, until_at: until_at).call
+  end
+
   private
 
   def radar_status(cfg)
@@ -500,8 +507,32 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       ai: ai_id && ai_id != Current.user.id ? build.call(ai_id) : nil,
       previous: my_previous_snapshot(since, until_at),
       # comparecimento do período (métrica de quem cuida da confirmação)
-      clinic: clinic_attendance_json(since, until_at)
+      clinic: clinic_attendance_json(since, until_at),
+      # painel do GESTOR (item 140): a equipe inteira que trabalhou no período
+      team: params[:panel] == 'gestor' && Current.account_user.administrator? ? team_performance_rows(since, until_at, radar, metric_cfg, ai_id) : nil
     }
+  end
+
+  # todas as pessoas ativas no período, cada uma com as métricas propostas
+  # pelo admin (mesma receita do "me", em lote)
+  def team_performance_rows(since, until_at, radar, metric_cfg, ai_id)
+    rows = agents_rows(since, until_at, radar[:by_responder])
+    ids = rows.map { |r| r[:id] }
+    return [] if ids.empty?
+
+    commercial = response_goal_rows(since, until_at, response_goal_minutes || 15, user_ids: ids).index_by { |r| r[:user_id] }
+    off = off_hours_days(ids, since, until_at)
+    surgeries = surgeries_by_user(ids, since, until_at)
+    rows.map do |row|
+      picked = Array(metric_cfg[row[:id].to_s]) & Crm::AgentPerformance::METRIC_KEYS
+      row.merge(
+        is_ai: row[:id] == ai_id,
+        commercial: commercial[row[:id]],
+        off_hours: off[row[:id]] || { count: 0, days: [] },
+        surgeries: surgeries[row[:id]] || { count: 0, revenue: 0.0 },
+        metrics: picked.presence || Crm::AgentPerformance::DEFAULT_METRICS
+      )
+    end
   end
 
   # comparecimento da clínica no período — o resultado do trabalho de quem

@@ -199,6 +199,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { ai_user_id: userId });
   }
 
+  // tema (família de cores) por painel do Meu Painel (item 140)
+  updatePanelThemes(panelThemes) {
+    return axios.post(`${this.url}/settings/update_agenda`, { panel_themes: panelThemes });
+  }
+
   // métricas individuais do "Meu desempenho" por pessoa (item 139)
   updatePerformanceMetrics(performanceMetrics) {
     return axios.post(`${this.url}/settings/update_agenda`, { performance_metrics: performanceMetrics });
@@ -558,6 +563,21 @@ class CrmAPI extends ApiClient {
   }
 
   // ── Meu Painel ────────────────────────────────────────────────────
+  // cesto de indicadores c/ série + período anterior (item 141)
+  getKpiBag(params = {}) {
+    return axios.get(`${this.url}/home/kpis`, { params });
+  }
+
+  // ordem + ocultos da fileira de indicadores por painel (item 142)
+  updateKpiLayout(kpiLayout) {
+    return axios.post(`${this.url}/settings/update_agenda`, { kpi_layout: kpiLayout });
+  }
+
+  // cards de indicador criados pelo admin no "+" do Meu Painel (item 141)
+  updateCustomKpis(customKpis) {
+    return axios.post(`${this.url}/settings/update_agenda`, { custom_kpis: customKpis });
+  }
+
   getHome(params = {}) {
     return axios.get(`${this.url}/home`, { params });
   }

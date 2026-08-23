@@ -530,6 +530,47 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       uid = params[:ai_user_id].presence&.to_i
       cfg['ai_user_id'] = uid && Current.account.users.exists?(id: uid) ? uid : nil
     end
+    # LAYOUT da fileira de indicadores por painel (item 142): ordem dos cards
+    # (arrasto magnético) + cards ocultos — {painel => {order: [], hidden: []}}
+    if params.key?(:kpi_layout)
+      raw = params.require(:kpi_layout).permit!.to_h
+      cfg['kpi_layout'] = raw.slice('agendamento', 'conducao', 'cirurgia', 'medico', 'gestor').transform_values do |v|
+        h = v.to_h
+        {
+          'order' => Array(h['order']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40),
+          'hidden' => Array(h['hidden']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40)
+        }
+      end
+    end
+    # CARDS DE INDICADOR criados pelo admin no "+" do Meu Painel (item 141):
+    # indicador pronto OU fórmula sobre o cesto de indicadores, com cor,
+    # formato e painel de destino. Sanitizado campo a campo.
+    if params.key?(:custom_kpis)
+      cfg['custom_kpis'] = Array(params[:custom_kpis]).first(40).filter_map do |raw|
+        k = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+        expr = k['expr'].to_s.strip[0, 200]
+        next if expr.blank? || expr !~ %r{\A[a-z0-9_+\-*/().\s]+\z}i
+        next if k['label'].to_s.strip.blank?
+
+        {
+          'id' => k['id'].to_s[/\A[a-z0-9_-]{1,40}\z/i] || SecureRandom.hex(4),
+          'label' => k['label'].to_s.strip[0, 60],
+          'expr' => expr,
+          'format' => %w[number percent currency].include?(k['format'].to_s) ? k['format'].to_s : 'number',
+          'color' => k['color'].to_s[0, 120],
+          'icon' => k['icon'].to_s[/\Ai-lucide-[a-z0-9-]{1,40}\z/] || 'i-lucide-sparkles',
+          'panel' => %w[all agendamento conducao cirurgia medico gestor].include?(k['panel'].to_s) ? k['panel'].to_s : 'all',
+          'note' => k['note'].to_s.strip[0, 200]
+        }
+      end
+    end
+    # TEMA por painel do Meu Painel ({painel => tema}) — opção do admin
+    # (item 140): cada ambiente com sua família de cores
+    if params.key?(:panel_themes)
+      raw = params.require(:panel_themes).permit!.to_h
+      cfg['panel_themes'] = raw.slice('agendamento', 'conducao', 'cirurgia', 'medico', 'gestor')
+                               .transform_values { |v| v.to_s[/\A[a-z_]{1,30}\z/] }.compact
+    end
     # MÉTRICAS do "Meu desempenho" por pessoa ({user_id => [chaves]}) —
     # o admin propõe o painel individual de cada função (item 139)
     if params.key?(:performance_metrics)
@@ -634,6 +675,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       panel_assignments: cfg['panel_assignments'] || {},
       panel_owners: panel_owners_json(cfg),
       ai_user_id: cfg['ai_user_id'],
+      panel_themes: cfg['panel_themes'] || {},
+      custom_kpis: cfg['custom_kpis'] || [],
+      kpi_layout: cfg['kpi_layout'] || {},
       performance_metrics: cfg['performance_metrics'] || {},
       clinical_access: cfg['clinical_access'] || {}
     }
@@ -973,6 +1017,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       panel_assignments: (s.agenda_config || {})['panel_assignments'] || {},
       panel_owners: panel_owners_json(s.agenda_config || {}),
       ai_user_id: (s.agenda_config || {})['ai_user_id'],
+      panel_themes: (s.agenda_config || {})['panel_themes'] || {},
+      custom_kpis: (s.agenda_config || {})['custom_kpis'] || [],
+      kpi_layout: (s.agenda_config || {})['kpi_layout'] || {},
       performance_metrics: (s.agenda_config || {})['performance_metrics'] || {},
       performance_metric_keys: Crm::AgentPerformance::METRIC_KEYS,
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},

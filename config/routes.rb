@@ -374,6 +374,8 @@ Rails.application.routes.draw do
               # pausa manual do radar pela atendente (com registro)
               get :radar_ping
               post :toggle_radar
+              # cesto de indicadores c/ série + período anterior (item 141)
+              get :kpis
             end
             resource :campaigns_dashboard, only: [:show], controller: 'campaigns_dashboards'
             resource :automations_dashboard, only: [:show], controller: 'automations_dashboards'

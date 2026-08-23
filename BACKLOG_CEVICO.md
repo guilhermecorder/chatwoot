@@ -4258,3 +4258,103 @@ crm_opportunity_radar_job registrados.
   card compara VOLUME e QUALIDADE de cada porta de entrada. Testado julho
   local (Google 14→7 · Insta 8→7).
 - AGUARDANDO "pode subir" (junto de 137+138).
+
+## 140. ✅ CARDS MACRO + POPUP DE DETALHES + PALETA POR PAINEL + EQUIPE NO GESTOR (feedback 20/08 com print de produção)
+- Problema: as linhas extras dos cards (conversão por caixa, decisão, coortes)
+  ficavam TRUNCADAS. Solução dele: card mostra só o MACRO; botão 🔍 (canto do
+  card) abre POPUP com as linhas completas + "como é calculado" (about).
+  Tiles ganharam details[] + about; modal Teleport com cabeçalho na cor do
+  card. Visível: card 1 = total + leads POR CAIXA (ele quis manter); card 2
+  = total + "registradas no período"; card 3 "Agendamentos hoje" = número +
+  chip + "hoje X% · ontem Y% agendaram" (as TAXAS que faltavam); card 4 =
+  igual. Conversão por caixa, decisão média/faixas, coortes completas e
+  taxa do período foram pro popup.
+- 🎨 PALETA (recomendação adotada): uma FAMÍLIA de cor por painel em degraus
+  escuro→claro (agendamento azul-marinho, condução teal, cirurgias vinho,
+  médicos céu, gestor marinho+ouro) e a cor SEMÂNTICA (verde/âmbar/vermelho)
+  só no card JULGADO (chip de veredito / status de meta) — acabou o
+  arco-íris, o olho vai no que importa. OPÇÃO ADMIN "separar os temas":
+  Configurações → Painéis → "Cores de cada painel": Padrão ou um tema CEVICO
+  (Santorini, Flor del Mar, Flamingo, Caribe, Aloe Vera) por painel;
+  agenda_config.panel_themes sanitizado (5 painéis, chave [a-z_]).
+  Painéis do Construtor mantêm a paleta própria.
+- 👥 GESTOR: bloco vira "Desempenho da equipe" — todas as pessoas que
+  trabalharam no período (team_performance_rows em lote: agents_rows +
+  comercial + fora do horário + cirurgias + métricas propostas de cada um),
+  robô marcado 🤖; grade 3 colunas. Só admin e só no painel gestor.
+- Teste conta 3: panel_themes salva e descarta painel inválido/valor sujo;
+  team do gestor = 2 pessoas c/ configs próprias e is_ai; agendamento sem
+  team. Vite compila. Sem migration, sem cron.
+- LEMBRETE p/ ele: o chip "defina a meta no Painel de Metas" some quando a
+  meta mensal de consultas agendadas existir — é ela que colore o card 3.
+- AGUARDANDO "pode subir".
+
+## 141. ✅ GRÁFICOS NOS POPUPS + BOTÃO "+" DE INDICADORES (prontos, FÓRMULAS, histórico, cor) (pedido 21/08)
+- 🧺 CESTO DE INDICADORES: Crm::KpiBagService + GET crm/home/kpis
+  (preset/from/to): ~19 números-base do período c/ SÉRIE (dia ≤45d,
+  semana ≤400d, mês) e PERÍODO ANTERIOR de mesmo tamanho — leads
+  (LeadsUniverse), conversas novas, consultas agendadas/presença/faltas,
+  cirurgias agendadas/realizadas (Agenda), "Entrou em <cada coluna>" e
+  faturamento (stage_logs, mesma fonte do PRO MAX). Totais batem c/ séries.
+- 📊 POPUP COM GRÁFICO: MiniBars.vue (SVG, sem lib — barras do período,
+  maior barra em destaque, linha tracejada = média do período anterior,
+  rótulos nas pontas, tooltip nativo) + linha "▲ 24% vs 30/05–30/06 (17)".
+  Cards fixos ganharam chartKey (leads, consultas, cirurgia agendada por
+  nome da coluna); card 1 tem barras por caixa; card 3 barras comparativas
+  hoje/ontem/período.
+- ➕ CARD "NOVO INDICADOR" (admin, fim da fileira): construtor em popup —
+  nome; modo INDICADOR PRONTO (catálogo do cesto c/ valor ao vivo) ou
+  FÓRMULA (textarea + chips que inserem a chave; + − × ÷ parênteses; %
+  = ×100); formato Número/%/R$; "Aparece em" (todos ou 1 painel); COR
+  (automática = degrau da família do painel, 4 degraus, 6 temas CEVICO,
+  verde/ouro/vermelho, ou hex livre); nota; PRÉVIA VIVA no cabeçalho
+  (valor + variação vs anterior). Editar/Remover pelo popup do card.
+  Persistência agenda_config.custom_kpis (≤40, sanitizado: expr só
+  [a-z0-9_+-*/(). ], formato/painel/ícone validados).
+- 🔒 helper/cevicoFormula.js: avaliador SEGURO (tokenizer + shunting-yard,
+  sem eval) — 9/9 no teste: math certa, "alert(1)", "x; drop", chave
+  desconhecida, divisão por zero e parêntese aberto → null ("—").
+- Card-fórmula no painel: valor, "▲/▼ x% vs período anterior", série
+  balde a balde da fórmula no popup, histórico = mesmo cesto.
+- Testado VISUALMENTE no local (usuário temporário criado/removido, sessão
+  via API): popup do card 1 c/ gráfico diário + barras por caixa + 24% vs
+  anterior; construtor criou "Ticket médio por cirurgia" = revenue /
+  appointments_booked → R$ 3.610 em ouro; "Taxa de agendamento" = 38,1%.
+  Sem migration, sem cron. ⚠️ routes.rb ficou MISTO c/ Meta Leads (rota
+  get :kpis) — separar no commit como settings_controller/api.
+- AGUARDANDO "pode subir" (junto da 140).
+
+## 142. ✅ ORGANIZAR A FILEIRA DE INDICADORES — arrasto magnético + ocultar (pedido 23/08)
+- Pedido: remover indicadores e ajustar posições (lado/cima/baixo) com
+  drag and drop "magnético" como nas colunas; existe uma ordem padrão e o
+  admin reorganiza.
+- Botão "⠿ Organizar" (junto do "+", admin): cards ganham anel tracejado,
+  cursor de arrasto e ✕ no cabeçalho; arrasto via vuedraggable (mesmo das
+  colunas do CRM, animation 220, ghost) na grade 4 colunas — soltar salva a
+  ORDEM; ✕ OCULTA (qualquer card, fixo ou do "+"); bandeja "ocultos: + Nome"
+  restaura em 1 clique; "voltar à ordem padrão" zera. "✓ Pronto" sai do modo.
+- IDs ESTÁVEIS por card: gk do indicador (new_leads…), slug do nome
+  (agendamentos_hoje) ou "kpi:<id>" dos cards do "+" — por painel.
+  Persistência agenda_config.kpi_layout {painel => {order[], hidden[]}}
+  (sanitizado, ≤40 ids de ≤40 chars, só os 5 painéis). Vale pra TODO MUNDO
+  que vê o painel (ordem padrão do sistema quando vazio; card novo entra no
+  fim); painéis do Construtor ficam fora.
+- 🐛 LIÇÃO NOVA (2 horas de caça): watch(computedX) no setup AVALIA o getter
+  na hora pra rastrear dependências — se o computed toca numa const
+  declarada mais abaixo no <script setup> dá TDZ e o computed fica
+  "envenenado" com undefined (erros "reading 'filter'" em cascata, página
+  branca). Solução: registrar o watch DENTRO do onMounted (ou declarar tudo
+  antes). Também: import novo (vuedraggable) no Meu Painel fez o Vite
+  reotimizar deps → reiniciar o container vite resolve os 404 de chunk.
+- Testado VISUALMENTE (usuário temporário removido): ocultar → bandeja;
+  arrasto "Taxa de agendamento" → 1º card; kpi_layout salvo no servidor
+  com a ordem e o oculto; reset deixou o local limpo.
+- AGUARDANDO "pode subir" (junto de 140+141).
+- + ESTENDIDO A TODOS OS PAINÉIS (23/08): cards fixos de Condução, Cirurgias,
+  Médicos e Gestor ganharam chartKey/compare/details/about → popup c/ gráfico
+  do período (consultas pela data, presenças, indicações, cirurgias
+  agendadas/realizadas), barras comparativas (compareceram×faltaram,
+  indicações×agendadas×realizadas, com×sem indicação, leads×avançaram) e
+  texto "como é calculado". Cesto ganhou appointments_due, indications e
+  surgeries_missed (23 métricas). "+", Organizar e paleta já valiam em todos.
+  Médicos: número é do médico, gráfico é da clínica (nota no popup).

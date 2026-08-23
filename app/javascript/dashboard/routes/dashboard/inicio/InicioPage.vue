@@ -19,6 +19,10 @@ import AgendaDashboardCore from 'dashboard/components-next/cevico/AgendaDashboar
 import CrmAPI from 'dashboard/api/crm';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
+import { ALL_THEMES } from 'dashboard/helper/cevicoThemes';
+import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
+import draggable from 'vuedraggable';
+import { evaluateFormula, variablesIn, formatKpi } from 'dashboard/helper/cevicoFormula';
 import {
   DOCTORS, resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, blockKey, scanAgenda,
@@ -186,10 +190,24 @@ const fetchData = async () => {
       ...(preset === 'custom' ? { from, to } : {}),
     });
     data.value = payload;
+    fetchKpiBag();
   } catch {
     data.value = data.value || {};
   } finally {
     isLoading.value = false;
+  }
+};
+
+// cesto de indicadores (item 141): série + período anterior — alimenta os
+// gráficos dos popups e os cards do "+"; carrega em paralelo, sem travar
+const kpiBag = ref(null);
+const fetchKpiBag = async () => {
+  try {
+    const { preset, from, to } = period.value;
+    const { data: bag } = await CrmAPI.getKpiBag({ preset, ...(preset === 'custom' ? { from, to } : {}) });
+    kpiBag.value = bag;
+  } catch {
+    kpiBag.value = kpiBag.value || null;
   }
 };
 
@@ -210,50 +228,401 @@ const setDoctor = name => {
 
 // indicadores de cada painel (mesmo formato de tiles, cores próprias)
 const pd = computed(() => data.value?.panel_data || {});
-const panelTiles = computed(() => {
+const rawPanelTiles = computed(() => {
   // painel do Construtor tem grade própria (CustomPanelGrid) — sem tiles fixas
   if (currentPanel.value.custom) return [];
   const d = pd.value;
   if (selectedPanel.value === 'conducao') {
     return [
-      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', sub: 'agenda das unidades', grad: 'linear-gradient(135deg, #0F766E, #115E59)' },
-      { label: 'Compareceram', icon: 'i-lucide-user-check', value: d.attended ?? 0, gk: 'attended', sub: 'conferência do dia (Agenda)', grad: 'linear-gradient(135deg, #14B8A6, #0D9488)' },
-      { label: 'Comparecimento', icon: 'i-lucide-percent', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.missed ?? 0} falta(s) no período`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: 'saíram da consulta indicados', grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
+      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: 'agenda das unidades',
+        details: [
+          { label: 'Compareceram', value: `${d.attended ?? 0}` },
+          { label: 'Faltaram', value: `${d.missed ?? 0}` },
+          { label: 'Comparecimento', value: `${d.show_rate ?? 0}%` },
+        ],
+        about: 'Consultas marcadas na Agenda com data dentro do período (canceladas ficam fora). O gráfico mostra quantas caíram em cada dia/semana/mês.' },
+      { label: 'Compareceram', icon: 'i-lucide-user-check', value: d.attended ?? 0, gk: 'attended', chartKey: 'appointments_attended', sub: 'conferência do dia (Agenda)',
+        details: [{ label: 'Faltaram', value: `${d.missed ?? 0}` }, { label: 'Taxa de comparecimento', value: `${d.show_rate ?? 0}%` }],
+        about: 'Marcadas como "Compareceu" na conferência do dia da Agenda — a base da taxa de comparecimento e do funil de indicações.' },
+      { label: 'Comparecimento', icon: 'i-lucide-percent', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.missed ?? 0} falta(s) no período`,
+        compare: [{ label: 'compareceram', value: d.attended ?? 0 }, { label: 'faltaram', value: d.missed ?? 0 }],
+        details: [{ label: 'Compareceram ÷ (compareceram + faltaram)', value: `${d.attended ?? 0} ÷ ${(d.attended ?? 0) + (d.missed ?? 0)} = ${d.show_rate ?? 0}%` }],
+        about: 'Quem confirmou consulta e veio. Referência de clínica boa: acima de 80%. É o indicador de quem cuida da confirmação (lembrete, reconfirmação, remarcação).' },
+      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: 'saíram da consulta indicados',
+        details: [{ label: 'Indicados ÷ compareceram', value: `${d.indications ?? 0} de ${d.attended ?? 0}` }],
+        about: 'Consultas do período em que o médico registrou indicação de cirurgia (botão 🎯 na Agenda ou conduta no Espaço do Paciente). Começa aqui o funil de fechamento.' },
     ];
   }
   if (selectedPanel.value === 'cirurgia') {
     return [
-      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: 'pacientes indicados no período', grad: 'linear-gradient(135deg, #9D174D, #BE185D)' },
-      { label: 'Cirurgias agendadas', icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, gk: 'surgeries_booked', sub: 'fechadas no período', grad: 'linear-gradient(135deg, #BE185D, #EC4899)' },
-      { label: 'Taxa de fechamento', icon: 'i-lucide-percent', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: 'agendadas ÷ indicações', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-      { label: 'Cirurgias realizadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, gk: 'surgeries_done', sub: `${d.surgeries_missed ?? 0} não vieram`, grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
+      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: 'pacientes indicados no período',
+        details: [{ label: 'Viraram cirurgia agendada', value: `${d.surgeries_booked ?? 0} · ${d.closing_rate ?? 0}%` }],
+        about: 'Pacientes que saíram da consulta com indicação de cirurgia no período — é a matéria-prima do fechamento.' },
+      { label: 'Cirurgias agendadas', icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, gk: 'surgeries_booked', chartKey: 'surgeries_booked', sub: 'fechadas no período',
+        details: [{ label: 'Realizadas', value: `${d.surgeries_done ?? 0}` }, { label: 'Não vieram', value: `${d.surgeries_missed ?? 0}` }],
+        about: 'Cirurgias registradas na Agenda de Cirurgias no período (o fechamento de fato). O gráfico mostra o ritmo de fechamento ao longo do período.' },
+      { label: 'Taxa de fechamento', icon: 'i-lucide-percent', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: 'agendadas ÷ indicações',
+        compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
+        details: [{ label: 'Agendadas ÷ indicações', value: `${d.surgeries_booked ?? 0} ÷ ${d.indications ?? 0} = ${d.closing_rate ?? 0}%` }],
+        about: 'De cada 100 pacientes indicados, quantos fecharam cirurgia. É o indicador do trabalho de fechamento (orçamento ancorado, quebra de objeção, ligação em 48h).' },
+      { label: 'Cirurgias realizadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, gk: 'surgeries_done', chartKey: 'surgeries_done', sub: `${d.surgeries_missed ?? 0} não vieram`,
+        compare: [{ label: 'realizadas', value: d.surgeries_done ?? 0 }, { label: 'não vieram', value: d.surgeries_missed ?? 0 }],
+        about: 'Cirurgias marcadas como realizadas na Agenda de Cirurgias. "Não vieram" = agendou e não apareceu; "veio e não fez" entra separado no Dashboard da Agenda.' },
     ];
   }
   if (selectedPanel.value === 'medico') {
+    const docNote = 'O número é do médico escolhido; o gráfico mostra a clínica inteira no período (a série por médico fica no Dashboard dos Médicos).';
     return [
-      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`, grad: 'linear-gradient(135deg, #0369A1, #075985)' },
-      { label: 'Com indicação de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', sub: `${d.indication_rate ?? 0}% de quem compareceu`, grad: 'linear-gradient(135deg, #0EA5E9, #38BDF8)' },
-      { label: 'Sem indicação', icon: 'i-lucide-user-minus', value: d.no_indication ?? 0, sub: `${d.no_indication_rate ?? 0}% de quem compareceu`, grad: 'linear-gradient(135deg, #64748B, #94A3B8)' },
-      { label: 'Conversão em cirurgia', icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, gk: 'conversion_rate', pct: true, sub: `${d.conversions ?? 0} viraram cirurgia · NPS ${d.nps_avg ?? '—'}`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
+      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`,
+        details: [{ label: 'Faltas', value: `${d.missed ?? 0}` }, { label: 'Comparecimento', value: `${d.show_rate ?? 0}%` }],
+        about: `Consultas deste médico com data no período. ${docNote}` },
+      { label: 'Com indicação de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: `${d.indication_rate ?? 0}% de quem compareceu`,
+        compare: [{ label: 'com indicação', value: d.indications ?? 0 }, { label: 'sem indicação', value: d.no_indication ?? 0 }],
+        about: `Consultas em que o médico indicou cirurgia. ${docNote}` },
+      { label: 'Sem indicação', icon: 'i-lucide-user-minus', value: d.no_indication ?? 0, sub: `${d.no_indication_rate ?? 0}% de quem compareceu`,
+        compare: [{ label: 'com indicação', value: d.indications ?? 0 }, { label: 'sem indicação', value: d.no_indication ?? 0 }],
+        about: 'Consultas que não resultaram em indicação — não é perda: vira plano de cuidado, retorno e indicação futura (catarata inicial hoje é cirurgia daqui a um ano).' },
+      { label: 'Conversão em cirurgia', icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, gk: 'conversion_rate', pct: true, sub: `${d.conversions ?? 0} viraram cirurgia · NPS ${d.nps_avg ?? '—'}`,
+        compare: [{ label: 'indicados', value: d.indications ?? 0 }, { label: 'viraram cirurgia', value: d.conversions ?? 0 }],
+        details: [{ label: 'NPS médio dos pacientes deste médico', value: `${d.nps_avg ?? '—'}` }],
+        about: 'Dos pacientes que este médico atendeu no período, quantos chegaram à cirurgia (pelo telefone do contato no CRM).' },
     ];
   }
   if (selectedPanel.value === 'gestor') {
+    const inboxesG = d.leads_by_inbox || [];
     return [
-      { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: leadsInboxSub.value, sub2: leadsInboxConversion.value, grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
-      { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`, sub2: 'avançaram até "Agendamento" no CRM', grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
-      { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.indications ?? 0} indicação(ões) de cirurgia`, grad: 'linear-gradient(135deg, #B8860B, #D4A017)' },
-      { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`, grad: 'linear-gradient(135deg, #065F46, #10B981)' },
+      { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', chartKey: 'new_leads', sub: leadsInboxSub.value,
+        compareInboxes: inboxesG.map(i => ({ label: shortInboxName(i.name), value: i.count })),
+        details: inboxesG.map(i => ({ label: i.name, value: `${i.count} lead(s) · ${i.booked} agendaram · ${i.rate}%` })),
+        about: 'Contatos novos do período pelas caixas de captação. A conversão por caixa mostra qual porta de entrada traz lead que decide.' },
+      { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`,
+        compare: [{ label: 'leads', value: d.new_leads ?? 0 }, { label: 'avançaram a Agendamento', value: d.appointments_created ?? 0 }],
+        about: 'Dos leads que chegaram no período, quantos já avançaram até "Agendamento de Consulta" no CRM (coorte). A taxa madura é a de períodos já fechados — a de hoje ainda amadurece.' },
+      { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, chartKey: 'appointments_attended', sub: `${d.indications ?? 0} indicação(ões) de cirurgia`,
+        details: [{ label: 'Indicações de cirurgia no período', value: `${d.indications ?? 0}` }],
+        about: 'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.' },
+      { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, chartKey: 'surgeries_done', sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`,
+        compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
+        about: 'Agendadas ÷ indicações: a eficiência do fechamento. O gráfico mostra as cirurgias realizadas ao longo do período.' },
     ];
   }
-  // agendamento (padrão)
+  // agendamento (padrão) — macro no card, detalhe no popup (item 140)
+  const inboxes = d.leads_by_inbox || [];
+  const dt = d.decision_time;
+  const ch = d.booking_cohorts || {};
   return [
-    { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', sub: leadsInboxSub.value, sub2: leadsInboxConversion.value, grad: 'linear-gradient(135deg, #0F5FA6, #0B4A82)' },
-    { label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', sub: 'registradas no período', sub2: `⚡ ${d.appointments_same_day ?? 0} chegaram e agendaram`, sub3: decisionSub.value, grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)' },
-    { label: 'Agendamentos hoje', icon: 'i-lucide-calendar-plus', value: d.booked_today ?? 0, chip: bookingDayVerdict.value, sub: cohortLine('today', 'chegaram hoje'), sub2: cohortLine('yesterday', 'chegaram ontem'), grad: bookingDayVerdict.value.grad },
-    { label: 'Cirurgias fechadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', sub: 'coluna Cirurgia Agendada (CRM)', grad: 'linear-gradient(135deg, #65A30D, #84CC16)' },
+    {
+      label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', chartKey: 'new_leads',
+      sub: leadsInboxSub.value,
+      details: inboxes.map(i => ({ label: `${i.name}`, value: `${i.count} lead(s) · ${i.booked} agendaram · ${i.rate}%` })),
+      compareInboxes: inboxes.map(i => ({ label: shortInboxName(i.name), value: i.count })),
+      about: 'Contatos novos do período que chegaram pelas caixas de captação (Google, Instagram…). A conversão de cada caixa é: dos que chegaram por ela, quantos já avançaram até "Agendamento de Consulta" no CRM.',
+    },
+    {
+      label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', chartKey: 'appointments_booked',
+      sub: 'registradas no período',
+      details: [
+        { label: '⚡ Chegaram e agendaram no mesmo período', value: `${d.appointments_same_day ?? 0}` },
+        ...(dt ? [
+          { label: '🤔 Tempo médio de decisão (chegar → agendar)', value: `${String(dt.avg_days).replace('.', ',')} dia(s) · ${dt.count} consulta(s)` },
+          { label: 'Decidiram no mesmo dia', value: `${dt.same_day}` },
+          { label: 'Em 1 dia', value: `${dt.next_day}` },
+          { label: 'Em 2 a 7 dias', value: `${dt.within_week}` },
+          { label: 'Demoraram 8 dias ou mais', value: `${dt.later}` },
+        ] : []),
+      ],
+      about: 'Consultas registradas na Agenda no período (consulta marcada para o passado = preenchimento de histórico, fica fora). O tempo de decisão mede quantos dias o paciente levou entre chegar e marcar — mostra se o funil converte por impulso ou por insistência.',
+    },
+    {
+      label: 'Agendamentos hoje', icon: 'i-lucide-calendar-plus', value: d.booked_today ?? 0, chip: bookingDayVerdict.value, judged: true, grad: bookingDayVerdict.value.grad,
+      pct: true,
+      compare: [
+        { label: `hoje (${ch.today?.booked ?? 0}/${ch.today?.leads ?? 0})`, value: ch.today?.rate ?? 0 },
+        { label: `ontem (${ch.yesterday?.booked ?? 0}/${ch.yesterday?.leads ?? 0})`, value: ch.yesterday?.rate ?? 0 },
+        { label: 'período', value: d.booking_conversion ?? 0 },
+      ],
+      sub: `hoje ${ch.today?.rate ?? 0}% · ontem ${ch.yesterday?.rate ?? 0}% agendaram`,
+      details: [
+        { label: 'Chegaram HOJE e já agendaram', value: `${ch.today?.booked ?? 0} de ${ch.today?.leads ?? 0} · ${ch.today?.rate ?? 0}%` },
+        { label: 'Chegaram ONTEM e agendaram', value: `${ch.yesterday?.booked ?? 0} de ${ch.yesterday?.leads ?? 0} · ${ch.yesterday?.rate ?? 0}%` },
+        { label: 'Taxa do período (leads do período → Agendamento)', value: `${d.appointments_created ?? 0} de ${d.new_leads ?? 0} · ${d.booking_conversion ?? 0}%` },
+      ],
+      about: 'O número grande é quantas consultas foram registradas HOJE, julgado contra a fatia diária da meta do mês (Painel de Metas ÷ dias do mês). As taxas abaixo dizem quem decidiu: a de hoje ainda amadurece; a de ontem é a taxa justa pra avaliar o atendimento.',
+    },
+    {
+      label: 'Cirurgias fechadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', chartKey: 'auto', chartMatch: /cirurgia agendada/i,
+      sub: 'coluna Cirurgia Agendada (CRM)',
+      about: 'Leads do período que chegaram à coluna "Cirurgia Agendada" no CRM — o fechamento que nasceu dos contatos deste período.',
+    },
   ];
 });
+
+// ── CARDS DO "+" (item 141): indicador pronto ou FÓRMULA sobre o cesto ──
+const bagMetrics = computed(() => kpiBag.value?.metrics || {});
+const bagTotals = computed(() =>
+  Object.fromEntries(Object.entries(bagMetrics.value).map(([k, m]) => [k, m.value]))
+);
+const bagPrev = computed(() =>
+  Object.fromEntries(Object.entries(bagMetrics.value).map(([k, m]) => [k, m.prev]))
+);
+const bagAt = i =>
+  Object.fromEntries(Object.entries(bagMetrics.value).map(([k, m]) => [k, m.series?.[i] ?? 0]));
+const bagLabels = computed(() => (kpiBag.value?.points || []).map(p => p.label));
+const bagMetricByLabel = re =>
+  Object.keys(bagMetrics.value).find(k => re.test(bagMetrics.value[k].label || ''));
+// variação vs período anterior (texto curto pro card)
+const deltaLine = (value, prev, format) => {
+  if (value === null || value === undefined || prev === null || prev === undefined) return '';
+  if (!prev) return `anterior: ${formatKpi(prev, format)}`;
+  const pct = ((value - prev) / Math.abs(prev)) * 100;
+  const arrow = pct >= 0 ? '▲' : '▼';
+  return `${arrow} ${Math.abs(pct).toFixed(0)}% vs ${kpiBag.value?.previous_label || 'período anterior'} (${formatKpi(prev, format)})`;
+};
+const customKpiDefs = computed(() =>
+  (crmSettings.value?.custom_kpis || []).filter(k => k.panel === 'all' || k.panel === selectedPanel.value)
+);
+const customTiles = computed(() =>
+  customKpiDefs.value.map(def => {
+    const value = evaluateFormula(def.expr, bagTotals.value);
+    const prev = evaluateFormula(def.expr, bagPrev.value);
+    const series = (kpiBag.value?.points || []).map((_, i) => evaluateFormula(def.expr, bagAt(i)) ?? 0);
+    const isReady = Object.keys(bagMetrics.value).includes(def.expr.trim());
+    return {
+      label: def.label,
+      icon: def.icon || 'i-lucide-sparkles',
+      value: formatKpi(value, def.format),
+      rawValue: value,
+      prevValue: prev,
+      format: def.format,
+      kpi: true,
+      def,
+      grad: def.color || null,
+      sub: deltaLine(value, prev, def.format),
+      series,
+      details: [
+        { label: 'Neste período', value: formatKpi(value, def.format) },
+        { label: `Período anterior (${kpiBag.value?.previous_label || '—'})`, value: formatKpi(prev, def.format) },
+        { label: isReady ? 'Indicador' : 'Fórmula', value: isReady ? bagMetrics.value[def.expr.trim()]?.label : def.expr },
+      ],
+      about: def.note || (isReady ? 'Indicador pronto do cesto do sistema, no período da régua.' : 'Calculado pela fórmula acima sobre os indicadores do período; a série do gráfico aplica a fórmula balde a balde.'),
+    };
+  })
+);
+
+// gráfico do popup: série do próprio card (fórmula) ou do indicador
+// equivalente no cesto (cards fixos); comparação com o período anterior
+const kpiChart = tile => {
+  if (!tile) return null;
+  const labels = bagLabels.value;
+  if (tile.compare?.length) {
+    return { values: tile.compare.map(c => c.value), labels: tile.compare.map(c => c.label), color: '#fff', compare: true };
+  }
+  if (tile.series?.length) return { values: tile.series, labels, prev: tile.prevValue };
+  const key = tile.chartKey === 'auto' ? bagMetricByLabel(tile.chartMatch) : tile.chartKey;
+  const m = key && bagMetrics.value[key];
+  if (!m) return null;
+  return { values: m.series || [], labels, prev: m.prev, unit: m.unit, total: m.value, label: m.label };
+};
+const chartFormat = tile => v => formatKpi(v, tile?.format || (tile?.pct ? 'percent' : 'number'));
+
+// ── CONSTRUTOR DO "+" (admin): indicador pronto ou fórmula, cor, painel ──
+const kpiBuilder = ref(null); // def em edição (novo ou existente)
+const kpiBuilderMode = ref('ready'); // 'ready' | 'formula'
+const isSavingKpi = ref(false);
+const kpiHexColor = ref('');
+const newKpiDef = () => ({
+  id: '',
+  label: '',
+  expr: '',
+  format: 'number',
+  color: '',
+  icon: 'i-lucide-sparkles',
+  panel: selectedPanel.value.startsWith('custom:') ? 'all' : selectedPanel.value,
+  note: '',
+});
+const openKpiBuilder = def => {
+  kpiBuilder.value = def ? { ...def } : newKpiDef();
+  kpiBuilderMode.value = def && !Object.keys(bagMetrics.value).includes(def.expr?.trim()) ? 'formula' : 'ready';
+  kpiHexColor.value = '';
+  kpiModal.value = null;
+};
+const kpiCatalog = computed(() =>
+  Object.entries(bagMetrics.value).map(([key, m]) => ({ key, label: m.label, value: formatKpi(m.value, m.unit === 'brl' ? 'currency' : 'number') }))
+);
+const kpiPreview = computed(() => {
+  if (!kpiBuilder.value) return { ok: false, text: '—' };
+  const unknown = variablesIn(kpiBuilder.value.expr).filter(v => !(v in bagTotals.value));
+  if (unknown.length) return { ok: false, text: `não conheço: ${unknown.join(', ')}` };
+  const v = evaluateFormula(kpiBuilder.value.expr, bagTotals.value);
+  if (v === null) return { ok: false, text: kpiBuilder.value.expr ? 'fórmula inválida (ou divisão por zero)' : 'prévia aparece aqui' };
+  const prev = evaluateFormula(kpiBuilder.value.expr, bagPrev.value);
+  return { ok: true, text: formatKpi(v, kpiBuilder.value.format), delta: deltaLine(v, prev, kpiBuilder.value.format) };
+});
+const insertKpiVar = key => {
+  const cur = kpiBuilder.value.expr || '';
+  kpiBuilder.value.expr = cur && !/[\s(+\-*/]$/.test(cur) ? `${cur} ${key}` : `${cur}${key}`;
+};
+const kpiColorOptions = computed(() => [
+  ...panelFamily.value.map((g, i) => ({ key: `fam${i}`, grad: g, title: `família do painel · ${i + 1}` })),
+  ...ALL_THEMES.map(t => ({ key: t.key, grad: t.primary, title: t.label })),
+  { key: 'ok', grad: 'linear-gradient(135deg, #065F46, #10B981)', title: 'verde' },
+  { key: 'gold', grad: 'linear-gradient(135deg, #B8860B, #D4A017)', title: 'ouro' },
+  { key: 'red', grad: 'linear-gradient(135deg, #991B1B, #EF4444)', title: 'vermelho' },
+]);
+const applyHexColor = () => {
+  const hex = (kpiHexColor.value || '').trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(hex)) kpiBuilder.value.color = `linear-gradient(135deg, ${hex}, ${hex}CC)`;
+};
+const saveKpiBuilder = async () => {
+  const def = kpiBuilder.value;
+  if (!def?.label?.trim() || !kpiPreview.value.ok) return;
+  isSavingKpi.value = true;
+  try {
+    const list = [...(crmSettings.value?.custom_kpis || [])];
+    const idx = def.id ? list.findIndex(k => k.id === def.id) : -1;
+    if (idx >= 0) list[idx] = def;
+    else list.push({ ...def, id: `k${Date.now().toString(36)}` });
+    await CrmAPI.updateCustomKpis(list);
+    await store.dispatch('crm/fetchSettings');
+    kpiBuilder.value = null;
+  } finally {
+    isSavingKpi.value = false;
+  }
+};
+const deleteKpi = async def => {
+  const list = (crmSettings.value?.custom_kpis || []).filter(k => k.id !== def.id);
+  isSavingKpi.value = true;
+  try {
+    await CrmAPI.updateCustomKpis(list);
+    await store.dispatch('crm/fetchSettings');
+    kpiBuilder.value = null;
+    kpiModal.value = null;
+  } finally {
+    isSavingKpi.value = false;
+  }
+};
+
+// família de cores do painel em cima dos tiles (item 140): cada card pega
+// um degrau da família; o card JULGADO (chip de veredito) mantém a cor
+// semântica; painéis do Construtor seguem sua paleta própria
+// ── PALETA DO PAINEL (item 140): uma FAMÍLIA de cor por ambiente, em
+// degraus (escuro → claro); a cor SEMÂNTICA (verde/âmbar/vermelho) fica
+// reservada pro card que está sendo JULGADO — o olho vai direto nele.
+// O admin pode trocar a família por um tema (Configurações → Painéis).
+const PANEL_FAMILY = {
+  agendamento: [
+    'linear-gradient(135deg, #152C61, #0F5FA6)',
+    'linear-gradient(135deg, #0F5FA6, #3B82F6)',
+    'linear-gradient(135deg, #1D4ED8, #60A5FA)',
+    'linear-gradient(135deg, #2563EB, #93C5FD)',
+  ],
+  conducao: [
+    'linear-gradient(135deg, #134E4A, #0F766E)',
+    'linear-gradient(135deg, #0F766E, #14B8A6)',
+    'linear-gradient(135deg, #0D9488, #2DD4BF)',
+    'linear-gradient(135deg, #14B8A6, #99F6E4)',
+  ],
+  cirurgia: [
+    'linear-gradient(135deg, #831843, #9D174D)',
+    'linear-gradient(135deg, #9D174D, #DB2777)',
+    'linear-gradient(135deg, #BE185D, #F472B6)',
+    'linear-gradient(135deg, #DB2777, #F9A8D4)',
+  ],
+  medico: [
+    'linear-gradient(135deg, #0C4A6E, #0369A1)',
+    'linear-gradient(135deg, #0369A1, #0284C7)',
+    'linear-gradient(135deg, #0284C7, #38BDF8)',
+    'linear-gradient(135deg, #0EA5E9, #7DD3FC)',
+  ],
+  gestor: [
+    'linear-gradient(135deg, #152C61, #0F5FA6)',
+    'linear-gradient(135deg, #0B4A82, #1D4ED8)',
+    'linear-gradient(135deg, #1E3A8A, #3B82F6)',
+    'linear-gradient(135deg, #B8860B, #D4A017)',
+  ],
+};
+const panelFamily = computed(() => {
+  const key = selectedPanel.value;
+  const themeKey = crmSettings.value?.panel_themes?.[key];
+  const theme = themeKey && ALL_THEMES.find(t => t.key === themeKey);
+  if (theme) return [theme.primary, theme.pill, theme.action, theme.accent];
+  return PANEL_FAMILY[key] || PANEL_FAMILY.agendamento;
+});
+
+// 🔍 POPUP do card de KPI (item 140): o card mostra só o macro; o detalhe
+// (linhas completas + "como é calculado") abre aqui
+const kpiModal = ref(null);
+const openKpi = tile => {
+  kpiModal.value = tile;
+};
+
+// ids ESTÁVEIS por card (item 142): indicador de meta (gk) ou o nome em
+// slug; cards do "+" usam o id salvo — é por eles que ordem/ocultos valem
+const slugId = label =>
+  String(label || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').slice(0, 40);
+const allPanelTiles = computed(() => {
+  const fam = panelFamily.value;
+  const fixed = rawPanelTiles.value.map((t, i) => ({
+    ...t,
+    id: t.id || t.gk || slugId(t.label),
+    grad: t.judged ? t.grad : currentPanel.value?.custom ? t.grad : fam[i % fam.length],
+  }));
+  const custom = customTiles.value.map((t, i) => ({
+    ...t,
+    id: `kpi:${t.def.id}`,
+    grad: t.grad || fam[(fixed.length + i) % fam.length],
+  }));
+  return [...fixed, ...custom];
+});
+
+// ── ORGANIZAR A FILEIRA (admin, item 142): ordem por arrasto + ocultar ──
+const organizeMode = ref(false);
+const kpiLayout = computed(
+  () => crmSettings.value?.kpi_layout?.[selectedPanel.value] || { order: [], hidden: [] }
+);
+// ordem padrão = a do sistema; a ordem salva reorganiza; card novo entra no fim
+const panelTiles = computed(() => {
+  const order = kpiLayout.value.order || [];
+  const hidden = new Set(kpiLayout.value.hidden || []);
+  const all = allPanelTiles.value;
+  const rank = t => {
+    const i = order.indexOf(t.id);
+    return i === -1 ? 1000 + all.indexOf(t) : i;
+  };
+  return all.filter(t => !hidden.has(t.id)).sort((a, b) => rank(a) - rank(b));
+});
+const hiddenTiles = computed(() => {
+  const hidden = new Set(kpiLayout.value.hidden || []);
+  return allPanelTiles.value.filter(t => hidden.has(t.id));
+});
+// lista viva do arrasto (vuedraggable precisa de v-model próprio)
+const dragTiles = ref([]);
+// o watcher nasce DENTRO do onMounted: registrar watch(panelTiles) no setup
+// avaliaria os tiles antes de várias consts lá de baixo existirem (TDZ) e
+// envenenaria os computeds com undefined
+onMounted(() => {
+  dragTiles.value = [...panelTiles.value];
+  watch(panelTiles, v => { dragTiles.value = [...v]; });
+});
+const isSavingLayout = ref(false);
+const saveKpiLayout = async patch => {
+  const all = { ...(crmSettings.value?.kpi_layout || {}) };
+  const cur = all[selectedPanel.value] || { order: [], hidden: [] };
+  all[selectedPanel.value] = { order: patch.order ?? cur.order ?? [], hidden: patch.hidden ?? cur.hidden ?? [] };
+  isSavingLayout.value = true;
+  try {
+    await CrmAPI.updateKpiLayout(all);
+    await store.dispatch('crm/fetchSettings');
+  } finally {
+    isSavingLayout.value = false;
+  }
+};
+const onKpiReorder = () => saveKpiLayout({ order: dragTiles.value.map(t => t.id) });
+const hideTile = tile =>
+  saveKpiLayout({ hidden: [...new Set([...(kpiLayout.value.hidden || []), tile.id])] });
+const restoreTile = tile =>
+  saveKpiLayout({ hidden: (kpiLayout.value.hidden || []).filter(id => id !== tile.id) });
+const resetKpiLayout = () => saveKpiLayout({ order: [], hidden: [] });
 
 // ── CARDS VIVOS: metas, recordes e cores por desempenho ──
 // Meta é MENSAL (config do admin na mira 🎯); o backend manda o fator do
@@ -706,6 +1075,14 @@ const bookingDayVerdict = computed(() => {
 const perf = computed(() => data.value?.my_performance || null);
 const perfCols = computed(() => {
   if (!perf.value) return [];
+  // painel do GESTOR (item 140): a equipe inteira que trabalhou no período
+  if (selectedPanel.value === 'gestor' && perf.value.team?.length) {
+    return perf.value.team.map(r => ({
+      key: `u${r.id}`,
+      title: r.is_ai ? `🤖 ${r.name} (Atendimento IA)` : r.name,
+      row: r,
+    }));
+  }
   const cols = [{ key: 'me', title: 'Você', row: perf.value.me }];
   if (perf.value.ai) cols.push({ key: 'ai', title: '🤖 Atendimento IA', row: perf.value.ai });
   return cols.filter(c => c.row);
@@ -1527,14 +1904,22 @@ onUnmounted(() => {
 
         <template v-else>
         <!-- Indicadores do período — mudam com o painel escolhido -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <draggable
+          v-model="dragTiles"
+          item-key="id"
+          :animation="220"
+          :disabled="!organizeMode"
+          ghost-class="opacity-30"
+          class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4"
+          @end="onKpiReorder"
+        >
+          <template #item="{ element: tile }">
           <div
-            v-for="tile in panelTiles"
-            :key="tile.label"
             class="relative rounded-2xl p-4 sm:p-5 text-white shadow-lg transition-all duration-700"
             :class="[
               tileVisual(tile).pulse ? 'cevico-meta-pulse' : '',
               tileVisual(tile).isRecord ? 'ring-2 ring-amber-300/80' : '',
+              organizeMode ? 'cursor-grab active:cursor-grabbing ring-2 ring-dashed ring-white/60' : '',
             ]"
             :style="{ background: tileVisual(tile).grad }"
           >
@@ -1548,6 +1933,22 @@ onUnmounted(() => {
               <div class="flex items-center gap-1.5 mb-1 text-white/80">
                 <span :class="tile.icon" class="text-sm" />
                 <p class="text-xs font-medium flex-1 truncate">{{ tile.label }}</p>
+                <button
+                  v-if="organizeMode"
+                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-500/80 transition-colors"
+                  title="Ocultar este card (dá pra restaurar depois)"
+                  @click.stop="hideTile(tile)"
+                >
+                  <span class="i-lucide-x text-[11px]" />
+                </button>
+                <button
+                  v-else-if="tile.details?.length || tile.about"
+                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/30 transition-colors"
+                  title="Ver detalhes deste indicador"
+                  @click.stop="openKpi(tile)"
+                >
+                  <span class="i-lucide-maximize-2 text-[11px]" />
+                </button>
                 <span v-if="tileVisual(tile).isRecord" class="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-300 text-amber-900" title="Melhor resultado já registrado neste tipo de período">🏆 RECORDE</span>
                 <span v-else-if="tileVisual(tile).status === 'meta'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/25" title="Meta batida">✓ META</span>
                 <span v-else-if="tileVisual(tile).status === 'bad'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/25" title="Muito abaixo do ritmo da meta">⚠️</span>
@@ -1575,6 +1976,56 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+          </template>
+
+          <!-- ➕ card novo + ⠿ organizar (admin, itens 141/142) -->
+          <template #footer>
+            <div v-if="isAdmin && !currentPanel.custom" class="rounded-2xl border-2 border-dashed border-n-weak flex flex-col items-stretch justify-center gap-1.5 p-3 min-h-[120px]">
+              <button
+                class="flex-1 rounded-xl text-n-slate-10 hover:bg-n-brand/10 hover:text-n-brand transition-colors flex flex-col items-center justify-center gap-0.5 py-2"
+                title="Criar um card de indicador: indicador pronto, fórmula (ex.: agendamentos / leads) e cor"
+                @click="openKpiBuilder(null)"
+              >
+                <span class="i-lucide-plus text-2xl" />
+                <span class="text-xs font-medium">Novo indicador</span>
+              </button>
+              <button
+                class="h-8 rounded-xl text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors"
+                :class="organizeMode ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1 border border-n-weak'"
+                :style="organizeMode ? { background: panelFamily[0] } : {}"
+                :title="organizeMode ? 'Terminar de organizar' : 'Arrastar cards pra reordenar e ocultar os que não quer ver'"
+                @click="organizeMode = !organizeMode"
+              >
+                <span :class="organizeMode ? 'i-lucide-check' : 'i-lucide-grip'" class="text-sm" />
+                {{ organizeMode ? 'Pronto' : 'Organizar' }}
+                <span v-if="isSavingLayout" class="i-lucide-loader-circle animate-spin text-xs" />
+              </button>
+            </div>
+          </template>
+        </draggable>
+
+        <!-- bandeja dos ocultos (modo organizar): restaurar com 1 clique -->
+        <div v-if="organizeMode" class="flex items-center gap-2 flex-wrap mb-4 text-xs">
+          <span class="text-n-slate-10">⠿ arraste os cards pra reordenar · ✕ oculta</span>
+          <template v-if="hiddenTiles.length">
+            <span class="text-n-slate-9">· ocultos:</span>
+            <button
+              v-for="t in hiddenTiles"
+              :key="t.id"
+              class="h-7 px-2.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1"
+              title="Mostrar de novo"
+              @click="restoreTile(t)"
+            >
+              <span class="i-lucide-plus text-[10px]" />{{ t.label }}
+            </button>
+          </template>
+          <button
+            v-if="(kpiLayout.order || []).length || (kpiLayout.hidden || []).length"
+            class="h-7 px-2.5 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 ml-auto"
+            @click="resetKpiLayout"
+          >
+            voltar à ordem padrão
+          </button>
         </div>
 
         <!-- Linha de destaque do painel -->
@@ -1598,12 +2049,12 @@ onUnmounted(() => {
             <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
               <span class="i-lucide-target text-white text-base" />
             </span>
-            <h2 class="text-sm font-bold text-n-slate-12">Meu desempenho</h2>
+            <h2 class="text-sm font-bold text-n-slate-12">{{ selectedPanel === 'gestor' ? 'Desempenho da equipe' : 'Meu desempenho' }}</h2>
             <span class="text-[10px] px-2 py-0.5 rounded-full bg-n-alpha-1 text-n-slate-11">velocidades no horário comercial · 08h–17h</span>
             <span v-if="perf?.previous?.label" class="text-[10px] text-n-slate-9 ml-auto">setinhas comparam com {{ perf.previous.label }}</span>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 gap-3" :class="perfCols.length > 2 ? 'lg:grid-cols-3' : 'lg:grid-cols-2'">
             <div
               v-for="col in perfCols"
               :key="col.key"
@@ -2043,6 +2494,181 @@ onUnmounted(() => {
 
     <EmojiFx ref="radarFx" />
   </div>
+  <!-- 🔍 Popup de detalhes do card de KPI (item 140) -->
+  <Teleport to="body">
+    <div
+      v-if="kpiModal"
+      class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
+      @click.self="kpiModal = null"
+    >
+      <div class="w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1">
+        <div class="p-5 text-white" :style="{ background: tileVisual(kpiModal).grad }">
+          <div class="flex items-center gap-2 text-white/85">
+            <span :class="kpiModal.icon" class="text-base" />
+            <p class="text-sm font-medium flex-1">{{ kpiModal.label }}</p>
+            <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="kpiModal = null">
+              <span class="i-lucide-x text-sm" />
+            </button>
+          </div>
+          <p class="text-4xl font-bold mt-2">{{ kpiModal.value }}</p>
+          <span v-if="kpiModal.chip" class="inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ kpiModal.chip.label }}</span>
+          <p v-if="kpiModal.sub" class="text-xs text-white/80 mt-1">{{ kpiModal.sub }}</p>
+        </div>
+        <div class="p-5 space-y-3">
+          <!-- 📊 gráfico do período (item 141): série do cesto ou barras comparativas -->
+          <div v-if="kpiChart(kpiModal)" class="rounded-xl bg-n-alpha-1 px-3 py-2">
+            <div class="flex items-center justify-between text-[10px] text-n-slate-10 mb-1">
+              <span>{{ kpiChart(kpiModal).compare ? 'comparativo' : `${kpiChart(kpiModal).label || kpiModal.label} · ${kpiBag?.granularity === 'month' ? 'por mês' : kpiBag?.granularity === 'week' ? 'por semana' : 'por dia'}` }}</span>
+              <span v-if="kpiChart(kpiModal).prev !== undefined && kpiChart(kpiModal).prev !== null && !kpiChart(kpiModal).compare">
+                linha tracejada = média do período anterior
+              </span>
+            </div>
+            <MiniBars
+              :values="kpiChart(kpiModal).values"
+              :labels="kpiChart(kpiModal).labels"
+              :color="kpiChart(kpiModal).compare ? '#0F5FA6' : '#0F5FA6'"
+              :height="110"
+              :reference="!kpiChart(kpiModal).compare && kpiChart(kpiModal).prev ? kpiChart(kpiModal).prev / Math.max(1, kpiChart(kpiModal).values.length) : null"
+              :format="chartFormat(kpiModal)"
+            />
+            <p
+              v-if="!kpiChart(kpiModal).compare && kpiChart(kpiModal).prev !== undefined && kpiChart(kpiModal).prev !== null"
+              class="text-[11px] mt-1"
+              :class="(kpiModal.rawValue ?? kpiChart(kpiModal).total ?? 0) >= kpiChart(kpiModal).prev ? 'text-emerald-600' : 'text-red-500'"
+            >
+              {{ deltaLine(kpiModal.rawValue ?? kpiChart(kpiModal).total ?? 0, kpiChart(kpiModal).prev, kpiModal.format || (kpiChart(kpiModal).unit === 'brl' ? 'currency' : 'number')) }}
+            </p>
+          </div>
+          <!-- leads por caixa (card 1): barras lado a lado -->
+          <div v-if="kpiModal.compareInboxes?.length" class="rounded-xl bg-n-alpha-1 px-3 py-2">
+            <p class="text-[10px] text-n-slate-10 mb-1">leads por caixa de entrada</p>
+            <MiniBars :values="kpiModal.compareInboxes.map(i => i.value)" :labels="kpiModal.compareInboxes.map(i => i.label)" color="#7C3AED" :height="80" />
+          </div>
+          <div v-if="kpiModal.details?.length" class="space-y-1.5">
+            <div
+              v-for="(row, ri) in kpiModal.details"
+              :key="ri"
+              class="flex items-start justify-between gap-3 text-xs rounded-xl bg-n-alpha-1 px-3 py-2"
+            >
+              <span class="text-n-slate-11">{{ row.label }}</span>
+              <b class="text-n-slate-12 text-right whitespace-nowrap">{{ row.value }}</b>
+            </div>
+          </div>
+          <p v-if="kpiModal.about" class="text-[11px] text-n-slate-10 leading-relaxed">
+            <span class="i-lucide-info text-xs align-middle mr-1" />{{ kpiModal.about }}
+          </p>
+          <div v-if="isAdmin && kpiModal.kpi" class="flex items-center gap-2 pt-1">
+            <button class="h-8 px-3 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" @click="openKpiBuilder(kpiModal.def)">✏️ Editar</button>
+            <button class="h-8 px-3 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10" :disabled="isSavingKpi" @click="deleteKpi(kpiModal.def)">🗑️ Remover</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+  <!-- ➕ Construtor de indicador (admin, item 141) -->
+  <Teleport to="body">
+    <div
+      v-if="kpiBuilder"
+      class="fixed inset-0 z-[71] flex items-center justify-center bg-black/50 p-4"
+      @click.self="kpiBuilder = null"
+    >
+      <div class="w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1 max-h-[92vh] flex flex-col">
+        <div class="p-5 text-white flex items-center gap-3" :style="{ background: kpiBuilder.color || panelFamily[0] }">
+          <span class="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center"><span :class="kpiBuilder.icon" class="text-lg" /></span>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-bold">{{ kpiBuilder.id ? 'Editar indicador' : 'Novo indicador' }}</p>
+            <p class="text-[11px] text-white/80 hidden sm:block">aparece no Meu Painel com o período da régua, histórico e comparação com o anterior</p>
+          </div>
+          <!-- prévia viva -->
+          <div class="text-right max-w-[40%] flex-shrink-0">
+            <p v-if="kpiPreview.ok" class="text-2xl font-bold leading-none">{{ kpiPreview.text }}</p>
+            <p v-else class="text-[11px] text-white/85 leading-snug">{{ kpiPreview.text }}</p>
+            <p v-if="kpiPreview.delta" class="text-[10px] text-white/80 mt-1">{{ kpiPreview.delta }}</p>
+          </div>
+          <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="kpiBuilder = null"><span class="i-lucide-x text-sm" /></button>
+        </div>
+
+        <div class="p-5 space-y-4 overflow-y-auto">
+          <!-- nome -->
+          <div>
+            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Nome do card</p>
+            <input v-model="kpiBuilder.label" type="text" maxlength="60" placeholder="ex.: Taxa de agendamento" class="w-full h-9 px-3 rounded-lg border border-n-weak bg-n-solid-2 text-sm text-n-slate-12" />
+          </div>
+
+          <!-- modo -->
+          <div class="flex items-center gap-1.5">
+            <button class="h-8 px-3 rounded-lg text-xs font-medium border" :class="kpiBuilderMode === 'ready' ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilderMode === 'ready' ? { background: panelFamily[1] } : {}" @click="kpiBuilderMode = 'ready'">Indicador pronto</button>
+            <button class="h-8 px-3 rounded-lg text-xs font-medium border" :class="kpiBuilderMode === 'formula' ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilderMode === 'formula' ? { background: panelFamily[1] } : {}" @click="kpiBuilderMode = 'formula'">Fórmula</button>
+            <span class="text-[10px] text-n-slate-9 ml-1">os números abaixo são do período da régua</span>
+          </div>
+
+          <!-- indicadores prontos -->
+          <div v-if="kpiBuilderMode === 'ready'" class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-1">
+            <button
+              v-for="m in kpiCatalog"
+              :key="m.key"
+              class="flex items-center justify-between gap-2 px-3 h-9 rounded-lg border text-xs text-left"
+              :class="kpiBuilder.expr.trim() === m.key ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="kpiBuilder.expr.trim() === m.key ? { background: panelFamily[1] } : {}"
+              @click="kpiBuilder.expr = m.key; if (!kpiBuilder.label) kpiBuilder.label = m.label"
+            >
+              <span class="truncate">{{ m.label }}</span><b class="whitespace-nowrap">{{ m.value }}</b>
+            </button>
+          </div>
+
+          <!-- fórmula -->
+          <div v-else class="space-y-2">
+            <textarea v-model="kpiBuilder.expr" rows="2" placeholder="ex.: appointments_booked / new_leads * 100" class="w-full px-3 py-2 rounded-lg border border-n-weak bg-n-solid-2 text-sm font-mono text-n-slate-12" />
+            <p class="text-[10px] text-n-slate-9">clique num indicador pra inserir na fórmula · use + − × ÷ e parênteses · % = multiplique por 100</p>
+            <div class="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+              <button v-for="m in kpiCatalog" :key="m.key" class="text-[10px] px-2 py-1 rounded-md border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" :title="m.key" @click="insertKpiVar(m.key)">{{ m.label }}</button>
+            </div>
+          </div>
+
+          <!-- formato + painel -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Formato</p>
+              <div class="flex items-center gap-1.5">
+                <button v-for="f in [['number', 'Número'], ['percent', '%'], ['currency', 'R$']]" :key="f[0]" class="h-8 px-3 rounded-lg text-xs font-medium border" :class="kpiBuilder.format === f[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilder.format === f[0] ? { background: panelFamily[2] } : {}" @click="kpiBuilder.format = f[0]">{{ f[1] }}</button>
+              </div>
+            </div>
+            <div>
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Aparece em</p>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <button v-for="pp in [['all', 'Todos os painéis'], ['agendamento', 'Agendamento'], ['conducao', 'Condução'], ['cirurgia', 'Cirurgias'], ['medico', 'Médicos'], ['gestor', 'Gestor']]" :key="pp[0]" class="h-8 px-2.5 rounded-lg text-xs font-medium border" :class="kpiBuilder.panel === pp[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilder.panel === pp[0] ? { background: panelFamily[2] } : {}" @click="kpiBuilder.panel = pp[0]">{{ pp[1] }}</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- cor -->
+          <div>
+            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Cor do card</p>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button class="h-8 px-3 rounded-lg text-xs border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" :class="!kpiBuilder.color ? 'ring-2 ring-n-brand' : ''" @click="kpiBuilder.color = ''">automática</button>
+              <button v-for="c in kpiColorOptions" :key="c.key" class="w-8 h-8 rounded-lg border-2" :class="kpiBuilder.color === c.grad ? 'border-n-slate-12 scale-110' : 'border-transparent'" :style="{ background: c.grad }" :title="c.title" @click="kpiBuilder.color = c.grad" />
+              <input v-model="kpiHexColor" type="text" placeholder="#152C61" maxlength="7" class="h-8 w-24 px-2 rounded-lg border border-n-weak bg-n-solid-2 text-xs font-mono text-n-slate-12" @change="applyHexColor" @keydown.enter.prevent="applyHexColor" />
+            </div>
+          </div>
+
+          <!-- nota -->
+          <div>
+            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Nota (aparece no popup do card)</p>
+            <input v-model="kpiBuilder.note" type="text" maxlength="200" placeholder="ex.: meta da clínica é 15%" class="w-full h-9 px-3 rounded-lg border border-n-weak bg-n-solid-2 text-sm text-n-slate-12" />
+          </div>
+        </div>
+
+        <div class="px-5 py-3 border-t border-n-weak flex items-center gap-2">
+          <button v-if="kpiBuilder.id" class="h-9 px-3 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10" :disabled="isSavingKpi" @click="deleteKpi(kpiBuilder)">🗑️ Remover</button>
+          <span class="flex-1" />
+          <button class="h-9 px-4 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" @click="kpiBuilder = null">Cancelar</button>
+          <button class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-50" :style="{ background: panelFamily[0] }" :disabled="isSavingKpi || !kpiPreview.ok || !kpiBuilder.label.trim()" @click="saveKpiBuilder">
+            {{ isSavingKpi ? 'Salvando…' : 'Salvar card' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
