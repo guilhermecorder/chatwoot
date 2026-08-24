@@ -3,7 +3,10 @@
 // dourado #D4A017; verde-limão #84CC16 reservado para o que é MUITO bom
 // (valor em pipeline, cirurgias). "Conversa" no lugar de "lead".
 import { ref, computed, watch, onMounted } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
+import CrmAPI from 'dashboard/api/crm';
+import KpiDetailPopup from 'dashboard/components-next/cevico/KpiDetailPopup.vue';
 import {
   Chart as ChartJS,
   Title, Tooltip, Legend,
@@ -41,6 +44,8 @@ const LIME = '#84CC16';
 const PALETTE = [AZUL, ROXO, OURO, LIME, '#3B82F6', '#A78BFA', '#F0C420', '#22D3EE', '#EA580C', '#10B981', '#F472B6', '#94A3B8'];
 
 const store   = useStore();
+const router  = useRouter();
+const route   = useRoute();
 const data    = ref(null);
 
 // ── 🟥 item 103 (20/07): ambiente de PERDAS — padrão de etiquetas + análise ──
@@ -81,25 +86,80 @@ const createLossLabels = async () => {
     creatingLossLabels.value = false;
   }
 };
-// perdas por motivo no período (vem do by_label que o dashboard já calcula)
+// perdas por motivo no período — v2 (item 145): o bloco próprio `losses`
+// traz também a tendência vs o período anterior e o VALOR dos cards
+// perdidos (dos que têm valor preenchido)
 const lossRows = computed(() => {
-  const counted = (data.value?.by_label?.items || []).filter(i =>
-    i.label?.startsWith('perda_')
-  );
-  const rows = LOSS_LABELS.map(l => ({
-    title: l.title,
-    name: l.name,
-    count: counted.find(c => c.label === l.title)?.count || 0,
-  }));
+  const counted = data.value?.losses?.items ||
+    (data.value?.by_label?.items || []).filter(i => i.label?.startsWith('perda_'));
+  const rows = LOSS_LABELS.map(l => {
+    const c = counted.find(x => x.label === l.title) || {};
+    return {
+      title: l.title,
+      name: l.name,
+      count: c.count || 0,
+      prev: c.prev ?? null,
+      value: c.value || 0,
+      valueCount: c.value_count || 0,
+    };
+  });
   // etiquetas perda_* extras criadas à mão também entram
   counted.forEach(c => {
     if (!rows.some(r => r.title === c.label)) {
-      rows.push({ title: c.label, name: lossNameOf(c.label), count: c.count });
+      rows.push({
+        title: c.label, name: lossNameOf(c.label), count: c.count || 0,
+        prev: c.prev ?? null, value: c.value || 0, valueCount: c.value_count || 0,
+      });
     }
   });
   return rows.sort((a, b) => b.count - a.count);
 });
 const lossTotal = computed(() => lossRows.value.reduce((s, r) => s + r.count, 0));
+const lossValueTotal = computed(() => lossRows.value.reduce((s, r) => s + (r.value || 0), 0));
+const lossPrevLabel = computed(() => data.value?.losses?.previous_label || 'período anterior');
+// % sobre os leads do período (a coorte do funil) — perda relativa à entrada
+const lossPctOfLeads = row => {
+  const base = data.value?.kpis?.cohort_total || 0;
+  return base ? Math.round((row.count / base) * 1000) / 10 : null;
+};
+// tendência: perda SUBIR é ruim (vermelho); cair é bom (verde)
+const lossTrend = row => {
+  if (row.prev === null || row.prev === undefined) return null;
+  if (row.count === row.prev) return null;
+  const up = row.count > row.prev;
+  return {
+    arrow: up ? '▲' : '▼',
+    color: up ? '#DC2626' : '#059669',
+    title: `${up ? 'subiu' : 'caiu'} vs ${lossPrevLabel.value} (antes: ${row.prev})`,
+  };
+};
+// 🛟 lista de resgate: clique no motivo → os pacientes que estão lá
+const lossModal = ref(null);
+const lossContacts = ref([]);
+const loadingLossContacts = ref(false);
+const openLossModal = async row => {
+  if (!row.count) return;
+  lossModal.value = row;
+  loadingLossContacts.value = true;
+  lossContacts.value = [];
+  try {
+    const { data: res } = await CrmAPI.getLossContacts(props.pipeline.id, {
+      label: row.title,
+      preset: period.value.preset,
+      ...(period.value.preset === 'custom'
+        ? { from: period.value.from, to: period.value.to }
+        : {}),
+      ...(inboxFilterActive.value ? { inbox_ids: [...selectedInboxIds.value] } : {}),
+    });
+    lossContacts.value = res.items || [];
+  } catch {
+    lossContacts.value = [];
+  } finally {
+    loadingLossContacts.value = false;
+  }
+};
+const openPatientSpace = c =>
+  router.push(`/app/accounts/${route.params.accountId}/patient/${c.contact_id}`);
 onMounted(() => {
   if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
 });
@@ -186,6 +246,69 @@ const load = async () => {
 
 // metas oficiais do mês (Painel de Metas) → selos de recorde/meta nos KPIs
 const goals = useCevicoGoals();
+
+// ── 🔍 POPUP dos KPIs (item 145): o mesmo popup-análise do Meu Painel —
+// gráfico do cesto c/ mini-régua, período anterior, meta e 📌 ações ──
+const kpiPopup = ref(null);
+const openKpiPopup = key => {
+  const k = data.value?.kpis || {};
+  const defs = {
+    new_leads: {
+      label: 'Novas no período', icon: 'i-lucide-user-plus',
+      grad: 'linear-gradient(135deg, #0F5FA6, #3B82F6)',
+      value: k.new_in_period ?? 0,
+      sub: 'caixas de captação · igual ao Meu Painel',
+      chartKey: 'new_leads',
+      goalTarget: goals.goalFor('new_leads')?.target || null,
+      about: 'Contatos novos do período pelas caixas de captação — mesma régua do Meu Painel. O gráfico mostra a chegada balde a balde, com o período anterior tracejado.',
+    },
+    closed_value: {
+      label: 'Valor fechado', icon: 'i-lucide-badge-dollar-sign',
+      grad: 'linear-gradient(135deg, #65A30D, #84CC16)',
+      value: formatCurrency(k.closed_value),
+      sub: 'cirurgias dos leads do período',
+      chartKey: 'revenue', format: 'currency',
+      about: 'O número do card soma o valor dos leads do período que fecharam (coorte). O gráfico mostra o faturamento REGISTRADO em cada balde (entrou em "Cirurgia Realizada") — dois ângulos do mesmo fechamento.',
+    },
+    closed_count: {
+      label: 'Fechamentos', icon: 'i-lucide-heart-pulse',
+      grad: 'linear-gradient(135deg, #B8860B, #D4A017)',
+      value: k.closed_count ?? 0,
+      sub: 'leads do período que chegaram à cirurgia',
+      chartMatch: 'cirurgia agendada',
+      goalTarget: goals.goalFor('surgeries_booked')?.target || null,
+      components: ['indications'],
+      about: 'O card conta a coorte (leads do período que já fecharam). O gráfico mostra o ritmo: entradas na coluna "Cirurgia Agendada" em cada balde.',
+    },
+    close_rate: {
+      label: 'Taxa de fechamento', icon: 'i-lucide-percent',
+      grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)',
+      value: `${k.close_rate ?? 0}%`,
+      sub: `${k.closed_count ?? 0} de ${k.cohort_total ?? 0} leads do período`,
+      chartMatch: 'cirurgia agendada',
+      components: ['new_leads', 'indications'],
+      about: 'De cada 100 leads do período, quantos chegaram à cirurgia. O gráfico mostra o ritmo de fechamento; as séries abaixo mostram a matéria-prima (entrada e indicações).',
+    },
+  };
+  kpiPopup.value = defs[key] || null;
+};
+
+// ── 💰 DINHEIRO PARADO (item 145): a coluna ativa com mais R$ estagnado
+// (cards sem se mexer há 15+ dias) vira aviso com atalho pro board ──
+const stalledSpot = computed(() => {
+  const rows = data.value?.value_by_stage || [];
+  const candidates = rows.filter(
+    s => (s.stalled_value || 0) > 0 && !/realizada|pós|sem indica/i.test(s.stage_name || '')
+  );
+  if (!candidates.length) return null;
+  return [...candidates].sort((a, b) => b.stalled_value - a.stalled_value)[0];
+});
+const goToBoardStage = stage =>
+  router.push({
+    name: 'crm_board',
+    params: { accountId: route.params.accountId },
+    query: { focus_stage: stage.stage_id },
+  });
 
 onMounted(() => {
   load();
@@ -795,6 +918,8 @@ const agentView = computed(() => {
       <!-- KPIs (padrão CEVICO: DashKpi c/ selos de recorde/meta do mês) —
            auto-ajuste (item 80): os cards sempre CABEM no espaço, em
            qualquer largura, sem cortar rótulo -->
+      <!-- item 145: os KPIs com série viram botões — clique abre o popup
+           c/ gráfico, mini-régua, período anterior, meta e 📌 ações -->
       <div class="grid gap-4 mb-8" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr))">
         <DashKpi
           label="Total no funil"
@@ -803,38 +928,46 @@ const agentView = computed(() => {
           from="#0F5FA6"
           to="#0B4A82"
         />
-        <DashKpi
-          label="Novas no período"
-          :value="data.kpis.new_in_period"
-          sub="caixas Google + Instagram · igual ao Meu Painel"
-          value-color="#0F5FA6"
-          :state="goals.stateFor('new_leads')"
-          :goal="goals.goalFor('new_leads')"
-        />
-        <DashKpi
-          label="Valor fechado"
-          :value="Math.round(data.kpis.closed_value || 0)"
-          prefix="R$ "
-          sub="cirurgias dos leads do período"
-          from="#65A30D"
-          to="#84CC16"
-        />
-        <DashKpi
-          label="Fechamentos"
-          :value="data.kpis.closed_count"
-          sub="leads do período que chegaram à cirurgia"
-          from="#B8860B"
-          to="#D4A017"
-          :state="goals.stateFor('surgeries_booked')"
-          :goal="goals.goalFor('surgeries_booked')"
-        />
-        <DashKpi
-          label="Taxa de fechamento"
-          :value="`${data.kpis.close_rate}%`"
-          :sub="`${data.kpis.closed_count} de ${data.kpis.cohort_total} leads do período`"
-          from="#5B21B6"
-          to="#7C3AED"
-        />
+        <div class="cursor-pointer transition-transform hover:scale-[1.02]" title="Ver o gráfico e a análise deste indicador" @click="openKpiPopup('new_leads')">
+          <DashKpi
+            label="Novas no período"
+            :value="data.kpis.new_in_period"
+            sub="caixas Google + Instagram · igual ao Meu Painel"
+            value-color="#0F5FA6"
+            :state="goals.stateFor('new_leads')"
+            :goal="goals.goalFor('new_leads')"
+          />
+        </div>
+        <div class="cursor-pointer transition-transform hover:scale-[1.02]" title="Ver o gráfico e a análise deste indicador" @click="openKpiPopup('closed_value')">
+          <DashKpi
+            label="Valor fechado"
+            :value="Math.round(data.kpis.closed_value || 0)"
+            prefix="R$ "
+            sub="cirurgias dos leads do período"
+            from="#65A30D"
+            to="#84CC16"
+          />
+        </div>
+        <div class="cursor-pointer transition-transform hover:scale-[1.02]" title="Ver o gráfico e a análise deste indicador" @click="openKpiPopup('closed_count')">
+          <DashKpi
+            label="Fechamentos"
+            :value="data.kpis.closed_count"
+            sub="leads do período que chegaram à cirurgia"
+            from="#B8860B"
+            to="#D4A017"
+            :state="goals.stateFor('surgeries_booked')"
+            :goal="goals.goalFor('surgeries_booked')"
+          />
+        </div>
+        <div class="cursor-pointer transition-transform hover:scale-[1.02]" title="Ver o gráfico e a análise deste indicador" @click="openKpiPopup('close_rate')">
+          <DashKpi
+            label="Taxa de fechamento"
+            :value="`${data.kpis.close_rate}%`"
+            :sub="`${data.kpis.closed_count} de ${data.kpis.cohort_total} leads do período`"
+            from="#5B21B6"
+            to="#7C3AED"
+          />
+        </div>
         <DashKpi
           label="Tempo médio"
           :value="formatDuration(data.kpis.avg_conversion_minutes)"
@@ -1375,7 +1508,8 @@ const agentView = computed(() => {
           </span>
           <h3 class="text-sm font-bold text-n-slate-12">🟥 Perdas por motivo <span class="font-normal text-n-slate-10">· período escolhido</span></h3>
           <span v-if="lossTotal" class="text-[11px] text-n-slate-9 ml-auto">
-            {{ lossTotal }} etiqueta(s) de perda aplicadas nos leads deste funil
+            {{ lossTotal }} etiqueta(s) de perda
+            <template v-if="lossValueTotal"> · {{ formatCurrency(lossValueTotal) }} em cards perdidos</template>
           </span>
         </div>
 
@@ -1417,8 +1551,20 @@ const agentView = computed(() => {
           <span>Nenhuma perda etiquetada no período — quando um lead esfriar, aplique o motivo <b>perda_*</b> no balão do card.</span>
         </div>
         <div v-else-if="lossTotal" class="space-y-2 max-w-2xl">
-          <div v-for="r in lossRows" :key="r.title" class="flex items-center gap-2 text-xs">
-            <span class="text-n-slate-12 w-32 truncate flex-shrink-0">{{ r.name }}</span>
+          <!-- item 145: linha clicável → lista de resgate; ▲/▼ vs período
+               anterior (perda subir é RUIM = vermelho); % sobre os leads
+               do período; valor dos cards perdidos -->
+          <button
+            v-for="r in lossRows"
+            :key="r.title"
+            class="w-full flex items-center gap-2 text-xs group"
+            :class="r.count ? 'cursor-pointer' : 'cursor-default'"
+            :title="r.count ? 'Ver os pacientes deste motivo (lista de resgate)' : ''"
+            @click="openLossModal(r)"
+          >
+            <span class="text-n-slate-12 w-32 truncate flex-shrink-0 text-left group-hover:underline">{{ r.name }}</span>
+            <span v-if="lossTrend(r)" class="w-4 flex-shrink-0 font-bold" :style="{ color: lossTrend(r).color }" :title="lossTrend(r).title">{{ lossTrend(r).arrow }}</span>
+            <span v-else class="w-4 flex-shrink-0" />
             <div class="flex-1 h-5 rounded-full bg-n-alpha-1 overflow-hidden">
               <div
                 class="h-full rounded-full flex items-center justify-end pr-2 transition-all duration-500"
@@ -1430,13 +1576,16 @@ const agentView = computed(() => {
                 <span v-if="r.count" class="text-[10px] font-bold text-white drop-shadow">{{ r.count }}</span>
               </div>
             </div>
-            <span class="text-n-slate-9 w-10 text-right flex-shrink-0">
-              {{ lossTotal ? Math.round((r.count / lossTotal) * 100) : 0 }}%
+            <span class="text-n-slate-9 w-14 text-right flex-shrink-0" :title="'% sobre os leads do período'">
+              {{ lossPctOfLeads(r) !== null ? String(lossPctOfLeads(r)).replace('.', ',') + '% dos leads' : (lossTotal ? Math.round((r.count / lossTotal) * 100) + '%' : '0%') }}
             </span>
-          </div>
+            <span class="w-20 text-right flex-shrink-0" :class="r.value ? 'text-red-500 font-semibold' : 'text-n-slate-9'" :title="r.value ? `valor dos ${r.valueCount} card(s) perdidos com valor preenchido` : ''">
+              {{ r.value ? formatCurrency(r.value) : '—' }}
+            </span>
+          </button>
           <p class="text-[11px] text-n-slate-9 pt-1 flex items-center gap-1.5">
             <span class="i-lucide-info text-xs" />
-            O motivo campeão é onde o dinheiro está vazando — leve para a reunião da equipe e ataque com script/oferta.
+            Clique no motivo pra ver os pacientes — é a matéria-prima da campanha de resgate (Colheitadeira / Tratamento de dados). R$ = valor dos cards perdidos que tinham valor preenchido.
           </p>
         </div>
       </div>
@@ -1545,6 +1694,37 @@ const agentView = computed(() => {
         </template>
       </div>
 
+      <!-- 💰 DINHEIRO PARADO (item 145): a coluna ativa com mais R$ sem se
+           mexer há 15+ dias — do gráfico direto pra fila de trabalho -->
+      <div
+        v-if="stalledSpot"
+        class="rounded-2xl border-2 overflow-hidden mb-6"
+        style="border-color: rgba(212, 160, 23, 0.5); background: rgba(212, 160, 23, 0.06)"
+      >
+        <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #B8860B, #D4A017)" />
+        <div class="p-4 sm:p-5 flex items-center gap-3 flex-wrap">
+          <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
+            <span class="i-lucide-hourglass text-white text-base" />
+          </span>
+          <div class="flex-1 min-w-[240px]">
+            <p class="text-sm font-bold text-n-slate-12">
+              {{ formatCurrency(stalledSpot.stalled_value) }} parados em "{{ stalledSpot.stage_name }}"
+            </p>
+            <p class="text-xs text-n-slate-10 mt-0.5">
+              {{ stalledSpot.stalled_count }} paciente(s) sem se mexer há mais de {{ stalledSpot.stalled_days }} dias
+              · a coluna tem {{ stalledSpot.count }} no total ({{ formatCurrency(stalledSpot.value) }})
+            </p>
+          </div>
+          <button
+            class="text-xs font-semibold text-white px-4 py-2.5 rounded-xl hover:opacity-90 shadow flex items-center gap-1.5"
+            style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+            @click="goToBoardStage(stalledSpot)"
+          >
+            Ver no board →
+          </button>
+        </div>
+      </div>
+
       <!-- Funil + Valor + Tempo -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -1619,6 +1799,73 @@ const agentView = computed(() => {
       :focus="proMaxFocus"
       @close="proMaxFocus = null"
     />
+
+    <!-- 🔍 popup-análise dos KPIs (item 145) -->
+    <KpiDetailPopup
+      v-if="kpiPopup"
+      :tile="kpiPopup"
+      :period="period"
+      accent="#0F5FA6"
+      @close="kpiPopup = null"
+    />
+
+    <!-- 🛟 Lista de resgate de um motivo de perda (item 145) -->
+    <Teleport to="body">
+      <div
+        v-if="lossModal"
+        class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
+        @click.self="lossModal = null"
+      >
+        <div class="w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1 max-h-[85vh] flex flex-col">
+          <div class="p-5 text-white flex-shrink-0" style="background: linear-gradient(135deg, #B91C1C, #EF4444)">
+            <div class="flex items-center gap-2 text-white/90">
+              <span class="i-lucide-heart-crack text-base" />
+              <p class="text-sm font-bold flex-1">Perda: {{ lossModal.name }}</p>
+              <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="lossModal = null">
+                <span class="i-lucide-x text-sm" />
+              </button>
+            </div>
+            <p class="text-xs text-white/85 mt-1">
+              {{ lossModal.count }} paciente(s) no período
+              <template v-if="lossModal.value"> · {{ formatCurrency(lossModal.value) }} em cards com valor</template>
+            </p>
+          </div>
+          <div class="p-4 overflow-y-auto">
+            <div v-if="loadingLossContacts" class="flex items-center justify-center py-8 text-n-slate-10 text-sm gap-2">
+              <span class="i-lucide-loader-circle animate-spin" /> buscando os pacientes…
+            </div>
+            <template v-else>
+              <button
+                v-for="c in lossContacts"
+                :key="c.contact_id"
+                class="w-full flex items-center gap-2.5 rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2 mb-1.5 text-left hover:border-red-400/60 transition-colors"
+                title="Abrir o Espaço do Paciente"
+                @click="openPatientSpace(c)"
+              >
+                <span class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style="background: linear-gradient(135deg, #B91C1C, #EF4444)">
+                  {{ (c.name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() }}
+                </span>
+                <span class="flex-1 min-w-0">
+                  <span class="block text-xs font-semibold text-n-slate-12 truncate">{{ c.name }}</span>
+                  <span class="block text-[10px] text-n-slate-10 truncate">
+                    {{ c.phone || 'sem telefone' }}<template v-if="c.stage_name"> · {{ c.stage_name }}</template>
+                  </span>
+                </span>
+                <span v-if="c.days_still !== null" class="text-[10px] text-n-slate-9 flex-shrink-0">{{ c.days_still }}d parado</span>
+                <span v-if="c.value" class="text-[11px] font-bold text-red-500 flex-shrink-0">{{ formatCurrency(c.value) }}</span>
+              </button>
+              <p v-if="!lossContacts.length" class="text-center text-xs text-n-slate-10 py-6">
+                Nenhum paciente encontrado neste recorte.
+              </p>
+              <p v-else class="text-[11px] text-n-slate-9 mt-2 flex items-start gap-1.5">
+                <span class="i-lucide-lightbulb text-xs mt-0.5" />
+                Essa lista é a matéria-prima do resgate: a 🌾 Colheitadeira (Automações → Agentes) ou o Tratamento de dados atacam esses pacientes em massa com etiqueta e mensagem aprovada.
+              </p>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
   </div>
 </template>

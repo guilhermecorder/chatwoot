@@ -408,6 +408,8 @@ Rails.application.routes.draw do
               resource :dashboard, only: [:show] do
                 # PRO MAX (item 129): séries diárias p/ o estúdio de análise
                 get :pro_series
+                # lista de resgate das perdas por motivo (item 145)
+                get :loss_contacts
               end
             end
           end

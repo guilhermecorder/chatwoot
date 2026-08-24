@@ -39,6 +39,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       agents: build_agents(since, until_at),
       sheet_surgeries: build_sheet_surgeries(since, until_at),
       by_label: build_by_label(cohort),
+      losses: build_losses(contacts, cohort, since, until_at),
       radar: build_radar(since, until_at),
       nps: build_nps(pipeline, cohort),
       inbox_results: build_inbox_results(pipeline, full_cohort, since, until_at),
@@ -128,6 +129,43 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       labels: dates.map { |d| d.strftime('%d/%m') },
       series: series,
       actions: actions
+    }
+  end
+
+  # ── 🟥 Lista de resgate (item 145): os pacientes de UM motivo de perda ──
+  # A tela de perdas clica no motivo e recebe quem está lá — nome, telefone,
+  # coluna, valor e há quantos dias parou. Matéria-prima da campanha de
+  # resgate (Colheitadeira / Tratamento de dados).
+  def loss_contacts # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    pipeline = Current.account.crm_pipelines.includes(:stages).find(params[:pipeline_id])
+    since, until_at = resolve_range
+    tag = params[:label].to_s
+    return render json: { items: [] } unless tag.start_with?('perda_')
+
+    contacts = filter_by_entry_inbox(pipeline.crm_contacts)
+    cohort = contacts.joins(:contact).where(contacts: { created_at: since..until_at })
+    rows = cohort
+           .joins("INNER JOIN taggings tg ON tg.taggable_type = 'Contact' AND tg.context = 'labels' " \
+                  'AND tg.taggable_id = crm_contacts.contact_id')
+           .joins('INNER JOIN tags ON tags.id = tg.tag_id')
+           .where(tags: { name: tag })
+           .select('crm_contacts.*, contacts.name AS contact_name, contacts.phone_number AS contact_phone')
+           .order(Arel.sql('COALESCE(crm_contacts.value, 0) DESC, crm_contacts.id DESC'))
+           .limit(100)
+    stage_names = pipeline.stages.index_by(&:id)
+    render json: {
+      label: tag,
+      items: rows.map do |c|
+        moved = c.stage_moved_at || c.created_at
+        {
+          contact_id: c.contact_id,
+          name: c.contact_name.presence || 'Sem nome',
+          phone: c.contact_phone,
+          value: c.value.to_f.round(2),
+          stage_name: stage_names[c.stage_id]&.name,
+          days_still: moved ? ((Time.current - moved) / 1.day).floor : nil
+        }
+      end
     }
   end
 
@@ -386,19 +424,32 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
 
   # ── Valor por etapa ───────────────────────────────────────────────
 
-  def build_value_by_stage(pipeline, contacts)
+  # item 145: além do valor total, quanto está PARADO na etapa (cards que
+  # não se mexem há 15+ dias) — vira o aviso "R$ X parados em <coluna>"
+  STALLED_AFTER_DAYS = 15
+
+  def build_value_by_stage(pipeline, contacts) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     values_by_stage = contacts
       .where.not(value: nil)
       .group(:stage_id)
       .sum('COALESCE(value, 0)')
       .transform_values { |v| v.to_f.round(2) }
+    counts_by_stage = contacts.group(:stage_id).count
+    stalled = contacts.where('COALESCE(crm_contacts.stage_moved_at, crm_contacts.created_at) < ?',
+                             STALLED_AFTER_DAYS.days.ago)
+    stalled_counts = stalled.group(:stage_id).count
+    stalled_values = stalled.group(:stage_id).sum('COALESCE(value, 0)').transform_values { |v| v.to_f.round(2) }
 
     pipeline.stages.order(:position).map do |stage|
       {
-        stage_id:    stage.id,
-        stage_name:  stage.name,
-        stage_color: stage.color,
-        value:       values_by_stage[stage.id] || 0,
+        stage_id:      stage.id,
+        stage_name:    stage.name,
+        stage_color:   stage.color,
+        value:         values_by_stage[stage.id] || 0,
+        count:         counts_by_stage[stage.id] || 0,
+        stalled_count: stalled_counts[stage.id] || 0,
+        stalled_value: stalled_values[stage.id] || 0,
+        stalled_days:  STALLED_AFTER_DAYS,
       }
     end
   end
@@ -555,6 +606,47 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
       }
     end
     { total: total, items: items }
+  end
+
+  # ── 🟥 Perdas por motivo v2 (item 145) ────────────────────────────
+  # Por etiqueta perda_*: quantidade no período, tendência vs o período
+  # anterior e o VALOR dos cards perdidos (só dos que têm valor preenchido —
+  # sem estimativa inventada). Bloco próprio: não disputa espaço com o
+  # top-12 do by_label.
+  def build_losses(contacts, cohort, since, until_at) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    prev_until = since - 1.second
+    prev_since = prev_until - (until_at - since)
+    prev_cohort = contacts.joins(:contact).where(contacts: { created_at: prev_since..prev_until })
+
+    tag_scope = ActsAsTaggableOn::Tagging
+                .joins(:tag)
+                .where(taggable_type: 'Contact', context: 'labels')
+                .where("tags.name LIKE 'perda\\_%'")
+    counts = tag_scope.where(taggable_id: cohort.select(:contact_id)).group('tags.name').count
+    prev_counts = tag_scope.where(taggable_id: prev_cohort.select(:contact_id)).group('tags.name').count
+
+    value_rows = cohort
+                 .joins("INNER JOIN taggings tg ON tg.taggable_type = 'Contact' AND tg.context = 'labels' " \
+                        'AND tg.taggable_id = crm_contacts.contact_id')
+                 .joins('INNER JOIN tags ON tags.id = tg.tag_id')
+                 .where("tags.name LIKE 'perda\\_%'")
+                 .where('COALESCE(crm_contacts.value, 0) > 0')
+                 .group('tags.name')
+    values = value_rows.sum('crm_contacts.value')
+    value_counts = value_rows.count
+
+    {
+      previous_label: "#{prev_since.strftime('%d/%m')}–#{prev_until.strftime('%d/%m')}",
+      items: (counts.keys + prev_counts.keys).uniq.map do |name|
+        {
+          label: name,
+          count: counts[name] || 0,
+          prev: prev_counts[name] || 0,
+          value: (values[name] || 0).to_f.round(2),
+          value_count: value_counts[name] || 0
+        }
+      end
+    }
   end
 
   # ── NPS do pós-operatório ──────────────────────────────────────────

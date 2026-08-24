@@ -161,7 +161,10 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # período anterior — gráficos dos popups, cards do "+" e fórmulas
   def kpis
     since, until_at = resolve_range
-    render json: Crm::KpiBagService.new(account: account, since: since, until_at: until_at).call
+    # granularity opcional (item 144): a mini-régua do popup pode pedir o
+    # balde (dia/semana/mês) em vez do automático pelo tamanho do período
+    render json: Crm::KpiBagService.new(account: account, since: since, until_at: until_at,
+                                        granularity: params[:granularity]).call
   end
 
   private

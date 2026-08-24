@@ -11,38 +11,47 @@ class Crm::KpiBagService
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   MESES_PT = %w[jan fev mar abr mai jun jul ago set out nov dez].freeze
 
-  def initialize(account:, since:, until_at:)
+  # granularity: opcional (item 144) — a mini-régua do popup pode forçar o
+  # balde; sem ela vale o automático pelo tamanho do período
+  def initialize(account:, since:, until_at:, granularity: nil)
     @account = account
     @since = since
     @until_at = until_at
-    @granularity = pick_granularity
+    forced = granularity.to_s.to_sym
+    @granularity = %i[day week month].include?(forced) ? forced : pick_granularity
   end
 
   def call
     prev_until = @since - 1.second
     prev_since = prev_until - (@until_at - @since)
-    keys = bucket_keys
+    keys = bucket_keys(@since, @until_at)
+    # baldes do período ANTERIOR (item 144): a série sobreposta no gráfico
+    # compara balde a balde, não só a média
+    prev_keys = bucket_keys(prev_since, prev_until)
     {
       granularity: @granularity,
       points: keys.map { |k, label| { key: k, label: label } },
+      prev_points: prev_keys.map { |k, label| { key: k, label: label } },
       previous_label: "#{prev_since.strftime('%d/%m')}–#{prev_until.strftime('%d/%m')}",
-      metrics: base_metrics(@since, @until_at, prev_since, prev_until, keys.map(&:first))
+      metrics: base_metrics(@since, @until_at, prev_since, prev_until, keys.map(&:first), prev_keys.map(&:first))
     }
   end
 
   private
 
   # ── catálogo ──────────────────────────────────────────────────────────
-  def base_metrics(since, until_at, prev_since, prev_until, keys) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+  def base_metrics(since, until_at, prev_since, prev_until, keys, prev_keys) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
     metrics = {}
     add = lambda do |key, label, unit, cur_scope, prev_scope, column, sum: nil|
       series = bucketize(cur_scope, column, sum: sum)
+      prev_series = bucketize(prev_scope, column, sum: sum)
       metrics[key] = {
         label: label,
         unit: unit,
         value: total_of(cur_scope, sum: sum),
         prev: total_of(prev_scope, sum: sum),
-        series: keys.map { |k| (series[k] || 0).to_f.round(2) }
+        series: keys.map { |k| (series[k] || 0).to_f.round(2) },
+        prev_series: prev_keys.map { |k| (prev_series[k] || 0).to_f.round(2) }
       }
     end
 
@@ -135,23 +144,23 @@ class Crm::KpiBagService
     end
   end
 
-  def bucket_keys
+  def bucket_keys(since, until_at)
     keys = []
     case @granularity
     when :week
-      d = @since.to_date.beginning_of_week
-      while d <= @until_at.to_date
+      d = since.to_date.beginning_of_week
+      while d <= until_at.to_date
         keys << [d.iso8601, d.strftime('%d/%m')]
         d += 7
       end
     when :month
-      d = @since.to_date.beginning_of_month
-      while d <= @until_at.to_date
+      d = since.to_date.beginning_of_month
+      while d <= until_at.to_date
         keys << [d.iso8601, "#{MESES_PT[d.month - 1]}/#{d.strftime('%y')}"]
         d = d.next_month
       end
     else
-      (@since.to_date..@until_at.to_date).each { |d| keys << [d.iso8601, d.strftime('%d/%m')] }
+      (since.to_date..until_at.to_date).each { |d| keys << [d.iso8601, d.strftime('%d/%m')] }
     end
     keys
   end

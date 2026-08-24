@@ -746,6 +746,34 @@ onMounted(async () => {
   if (new URLSearchParams(window.location.search).get('programming') === '1' && isAdmin.value) {
     isProgrammingMode.value = true;
   }
+  // ?focus_stage=<id> (item 145): o aviso "R$ parados em <coluna>" do
+  // Dashboard CRM cai direto na coluna — abre o período "Este ano" (os
+  // parados são antigos, a janela padrão de 7 dias os esconderia), rola
+  // até a coluna e dá um brilho. As colunas montam DEPOIS do fetch e
+  // re-renders resetam o scroll — por isso as tentativas + reforço.
+  const focusStage = new URLSearchParams(window.location.search).get('focus_stage');
+  if (focusStage) {
+    applyDatePreset('year');
+    const scrollToStage = () => {
+      const el = document.querySelector(`[data-stage-id="${focusStage}"]`);
+      if (!el) return false;
+      el.scrollIntoView({ behavior: 'auto', inline: 'center', block: 'nearest' });
+      el.classList.add('cevico-stage-flash');
+      setTimeout(() => el.classList.remove('cevico-stage-flash'), 3600);
+      return true;
+    };
+    let tries = 0;
+    const tryFocus = () => {
+      if (!scrollToStage()) {
+        tries += 1;
+        if (tries < 20) setTimeout(tryFocus, 400);
+        return;
+      }
+      // reforço: um re-render logo depois do fetch pode voltar o scroll
+      setTimeout(scrollToStage, 1500);
+    };
+    setTimeout(tryFocus, 600);
+  }
 });
 
 // ── Chat popup (conversa oficial) ─────────────────────────
@@ -1750,6 +1778,7 @@ const createAndAddContact = async () => {
         <template #item="{ element: stage }">
           <KanbanColumn
             :key="stage.id"
+            :data-stage-id="stage.id"
             :hidden="!isStageVisible(stage.id)"
             :stage="stage"
             :pipeline-id="selectedPipelineId"
@@ -1969,3 +1998,16 @@ const createAndAddContact = async () => {
     </div>
   </div>
 </template>
+
+<style>
+/* brilho da coluna focada (item 145): o "Ver no board" do aviso de
+   dinheiro parado aterrissa aqui — classe aplicada por JS, sem scope */
+.cevico-stage-flash {
+  animation: cevicoStageFlash 1.2s ease-in-out 3;
+  border-radius: 12px;
+}
+@keyframes cevicoStageFlash {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 160, 23, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(212, 160, 23, 0.7), 0 0 24px rgba(212, 160, 23, 0.5); }
+}
+</style>

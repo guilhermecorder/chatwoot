@@ -531,14 +531,29 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['ai_user_id'] = uid && Current.account.users.exists?(id: uid) ? uid : nil
     end
     # LAYOUT da fileira de indicadores por painel (item 142): ordem dos cards
-    # (arrasto magnético) + cards ocultos — {painel => {order: [], hidden: []}}
+    # (arrasto magnético) + cards ocultos + COR escolhida por card (item 143)
+    # — {painel => {order: [], hidden: [], colors: {id => grad}}}
     if params.key?(:kpi_layout)
       raw = params.require(:kpi_layout).permit!.to_h
       cfg['kpi_layout'] = raw.slice('agendamento', 'conducao', 'cirurgia', 'medico', 'gestor').transform_values do |v|
         h = v.to_h
         {
           'order' => Array(h['order']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40),
-          'hidden' => Array(h['hidden']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40)
+          'hidden' => Array(h['hidden']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40),
+          'colors' => sanitize_kpi_colors(h['colors'])
+        }
+      end
+    end
+    # ORDEM DOS BLOCOS do Meu Painel (item 143): arrasto magnético em TODOS
+    # os blocos — duas áreas (acima e abaixo do seletor de painel), pode
+    # cruzar entre elas — {painel => {top: [ids], main: [ids]}}
+    if params.key?(:block_layout)
+      raw = params.require(:block_layout).permit!.to_h
+      cfg['block_layout'] = raw.slice('agendamento', 'conducao', 'cirurgia', 'medico', 'gestor').transform_values do |v|
+        h = v.to_h
+        {
+          'top' => Array(h['top']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
+          'main' => Array(h['main']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20)
         }
       end
     end
@@ -678,6 +693,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       panel_themes: cfg['panel_themes'] || {},
       custom_kpis: cfg['custom_kpis'] || [],
       kpi_layout: cfg['kpi_layout'] || {},
+      block_layout: cfg['block_layout'] || {},
       performance_metrics: cfg['performance_metrics'] || {},
       clinical_access: cfg['clinical_access'] || {}
     }
@@ -1020,6 +1036,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       panel_themes: (s.agenda_config || {})['panel_themes'] || {},
       custom_kpis: (s.agenda_config || {})['custom_kpis'] || [],
       kpi_layout: (s.agenda_config || {})['kpi_layout'] || {},
+      block_layout: (s.agenda_config || {})['block_layout'] || {},
       performance_metrics: (s.agenda_config || {})['performance_metrics'] || {},
       performance_metric_keys: Crm::AgentPerformance::METRIC_KEYS,
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},
@@ -1164,6 +1181,19 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       configured: cfg['pixel_id'].present? && cfg['access_token'].present?,
       insights_configured: cfg['ad_account_id'].present? && cfg['access_token'].present?
     }
+  end
+
+  # cor escolhida pelo admin por card da fileira (item 143): só strings de
+  # cor/gradiente CSS simples — nada de caracteres que escapem do style
+  def sanitize_kpi_colors(raw)
+    (raw || {}).to_h.to_a.first(40).each_with_object({}) do |(k, v), acc|
+      key = k.to_s[0, 40]
+      color = v.to_s.strip[0, 160]
+      next if key.blank? || color.blank?
+      next unless color.match?(/\A[#(),.%a-zA-Z0-9\s-]+\z/)
+
+      acc[key] = color
+    end
   end
 
   def google_ads_json(s)

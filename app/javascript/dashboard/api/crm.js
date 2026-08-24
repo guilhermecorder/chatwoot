@@ -121,6 +121,11 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard/pro_series`, { params });
   }
 
+  // 🟥 lista de resgate de UM motivo de perda (item 145)
+  getLossContacts(pipelineId, params = {}) {
+    return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard/loss_contacts`, { params });
+  }
+
   // histórico de AÇÕES DA EMPRESA (marcadores da linha do tempo) — admin
   updateCompanyActions(companyActions) {
     return axios.post(`${this.url}/settings/update_agenda`, { company_actions: companyActions });
@@ -568,9 +573,14 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/home/kpis`, { params });
   }
 
-  // ordem + ocultos da fileira de indicadores por painel (item 142)
+  // ordem + ocultos + cores da fileira de indicadores por painel (itens 142/143)
   updateKpiLayout(kpiLayout) {
     return axios.post(`${this.url}/settings/update_agenda`, { kpi_layout: kpiLayout });
+  }
+
+  // ordem dos BLOCOS do Meu Painel por painel (item 143)
+  updateBlockLayout(blockLayout) {
+    return axios.post(`${this.url}/settings/update_agenda`, { block_layout: blockLayout });
   }
 
   // cards de indicador criados pelo admin no "+" do Meu Painel (item 141)

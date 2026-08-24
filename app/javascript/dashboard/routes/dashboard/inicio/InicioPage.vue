@@ -245,6 +245,7 @@ const rawPanelTiles = computed(() => {
         details: [{ label: 'Faltaram', value: `${d.missed ?? 0}` }, { label: 'Taxa de comparecimento', value: `${d.show_rate ?? 0}%` }],
         about: 'Marcadas como "Compareceu" na conferência do dia da Agenda — a base da taxa de comparecimento e do funil de indicações.' },
       { label: 'Comparecimento', icon: 'i-lucide-percent', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.missed ?? 0} falta(s) no período`,
+        components: ['appointments_attended', 'appointments_missed'],
         compare: [{ label: 'compareceram', value: d.attended ?? 0 }, { label: 'faltaram', value: d.missed ?? 0 }],
         details: [{ label: 'Compareceram ÷ (compareceram + faltaram)', value: `${d.attended ?? 0} ÷ ${(d.attended ?? 0) + (d.missed ?? 0)} = ${d.show_rate ?? 0}%` }],
         about: 'Quem confirmou consulta e veio. Referência de clínica boa: acima de 80%. É o indicador de quem cuida da confirmação (lembrete, reconfirmação, remarcação).' },
@@ -262,6 +263,7 @@ const rawPanelTiles = computed(() => {
         details: [{ label: 'Realizadas', value: `${d.surgeries_done ?? 0}` }, { label: 'Não vieram', value: `${d.surgeries_missed ?? 0}` }],
         about: 'Cirurgias registradas na Agenda de Cirurgias no período (o fechamento de fato). O gráfico mostra o ritmo de fechamento ao longo do período.' },
       { label: 'Taxa de fechamento', icon: 'i-lucide-percent', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: 'agendadas ÷ indicações',
+        components: ['indications', 'surgeries_booked'],
         compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
         details: [{ label: 'Agendadas ÷ indicações', value: `${d.surgeries_booked ?? 0} ÷ ${d.indications ?? 0} = ${d.closing_rate ?? 0}%` }],
         about: 'De cada 100 pacientes indicados, quantos fecharam cirurgia. É o indicador do trabalho de fechamento (orçamento ancorado, quebra de objeção, ligação em 48h).' },
@@ -296,12 +298,14 @@ const rawPanelTiles = computed(() => {
         details: inboxesG.map(i => ({ label: i.name, value: `${i.count} lead(s) · ${i.booked} agendaram · ${i.rate}%` })),
         about: 'Contatos novos do período pelas caixas de captação. A conversão por caixa mostra qual porta de entrada traz lead que decide.' },
       { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`,
+        components: ['new_leads', 'appointments_booked'],
         compare: [{ label: 'leads', value: d.new_leads ?? 0 }, { label: 'avançaram a Agendamento', value: d.appointments_created ?? 0 }],
         about: 'Dos leads que chegaram no período, quantos já avançaram até "Agendamento de Consulta" no CRM (coorte). A taxa madura é a de períodos já fechados — a de hoje ainda amadurece.' },
       { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, chartKey: 'appointments_attended', sub: `${d.indications ?? 0} indicação(ões) de cirurgia`,
         details: [{ label: 'Indicações de cirurgia no período', value: `${d.indications ?? 0}` }],
         about: 'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.' },
       { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, chartKey: 'surgeries_done', sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`,
+        components: ['indications', 'surgeries_booked'],
         compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
         about: 'Agendadas ÷ indicações: a eficiência do fechamento. O gráfico mostra as cirurgias realizadas ao longo do período.' },
     ];
@@ -317,6 +321,23 @@ const rawPanelTiles = computed(() => {
       details: inboxes.map(i => ({ label: `${i.name}`, value: `${i.count} lead(s) · ${i.booked} agendaram · ${i.rate}%` })),
       compareInboxes: inboxes.map(i => ({ label: shortInboxName(i.name), value: i.count })),
       about: 'Contatos novos do período que chegaram pelas caixas de captação (Google, Instagram…). A conversão de cada caixa é: dos que chegaram por ela, quantos já avançaram até "Agendamento de Consulta" no CRM.',
+    },
+    {
+      // 🌟 % de agendamento em EVIDÊNCIA (item 143): o indicador da linha
+      // compacta da Saúde da Agenda promovido pra fileira principal
+      label: '% de agendamento', icon: 'i-lucide-percent', id: 'booking_rate_30',
+      value: bookingRate30.value === null ? '—' : `${String(bookingRate30.value).replace('.', ',')}%`,
+      judged: true, chip: booking30Chip.value, grad: booking30Chip.value.grad,
+      sub: `${data.value?.appointments_30d ?? 0} consultas ÷ ${data.value?.new_contacts_30d ?? 0} leads · 30 dias`,
+      compare: [
+        { label: 'leads (30d)', value: data.value?.new_contacts_30d ?? 0 },
+        { label: 'consultas (30d)', value: data.value?.appointments_30d ?? 0 },
+      ],
+      details: [
+        { label: 'Consultas ÷ leads (Google+Instagram)', value: `${data.value?.appointments_30d ?? 0} ÷ ${data.value?.new_contacts_30d ?? 0} = ${bookingRate30.value ?? '—'}%` },
+        { label: 'Referência', value: '15% muito bom · 10% bom · 5% fraco' },
+      ],
+      about: 'Dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos viraram consulta agendada. É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência.',
     },
     {
       label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', chartKey: 'appointments_booked',
@@ -367,16 +388,13 @@ const bagPrev = computed(() =>
 );
 const bagAt = i =>
   Object.fromEntries(Object.entries(bagMetrics.value).map(([k, m]) => [k, m.series?.[i] ?? 0]));
-const bagLabels = computed(() => (kpiBag.value?.points || []).map(p => p.label));
-const bagMetricByLabel = re =>
-  Object.keys(bagMetrics.value).find(k => re.test(bagMetrics.value[k].label || ''));
 // variação vs período anterior (texto curto pro card)
-const deltaLine = (value, prev, format) => {
+const deltaLine = (value, prev, format, bag = null) => {
   if (value === null || value === undefined || prev === null || prev === undefined) return '';
   if (!prev) return `anterior: ${formatKpi(prev, format)}`;
   const pct = ((value - prev) / Math.abs(prev)) * 100;
   const arrow = pct >= 0 ? '▲' : '▼';
-  return `${arrow} ${Math.abs(pct).toFixed(0)}% vs ${kpiBag.value?.previous_label || 'período anterior'} (${formatKpi(prev, format)})`;
+  return `${arrow} ${Math.abs(pct).toFixed(0)}% vs ${(bag || kpiBag.value)?.previous_label || 'período anterior'} (${formatKpi(prev, format)})`;
 };
 const customKpiDefs = computed(() =>
   (crmSettings.value?.custom_kpis || []).filter(k => k.panel === 'all' || k.panel === selectedPanel.value)
@@ -409,21 +427,170 @@ const customTiles = computed(() =>
   })
 );
 
-// gráfico do popup: série do próprio card (fórmula) ou do indicador
-// equivalente no cesto (cards fixos); comparação com o período anterior
-const kpiChart = tile => {
-  if (!tile) return null;
-  const labels = bagLabels.value;
-  if (tile.compare?.length) {
-    return { values: tile.compare.map(c => c.value), labels: tile.compare.map(c => c.label), color: '#fff', compare: true };
-  }
-  if (tile.series?.length) return { values: tile.series, labels, prev: tile.prevValue };
-  const key = tile.chartKey === 'auto' ? bagMetricByLabel(tile.chartMatch) : tile.chartKey;
-  const m = key && bagMetrics.value[key];
-  if (!m) return null;
-  return { values: m.series || [], labels, prev: m.prev, unit: m.unit, total: m.value, label: m.label };
-};
 const chartFormat = tile => v => formatKpi(v, tile?.format || (tile?.pct ? 'percent' : 'number'));
+
+// ── 📊 GRÁFICO DO POPUP v2 (item 144): mini-régua própria, período anterior
+// sobreposto balde a balde, linha de meta, ações da empresa 📌 e a
+// DECOMPOSIÇÃO das taxas (as séries que formam a conta) ──
+// leitores genéricos sobre QUALQUER cesto (o da página ou o do recorte)
+const bagTotalsOf = bag =>
+  Object.fromEntries(Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.value]));
+const bagPrevTotalsOf = bag =>
+  Object.fromEntries(Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.prev]));
+const bagAtOf = (bag, i) =>
+  Object.fromEntries(Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.series?.[i] ?? 0]));
+const bagPrevAtOf = (bag, i) =>
+  Object.fromEntries(Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.prev_series?.[i] ?? 0]));
+const bagMetricByLabelOf = (bag, re) =>
+  Object.keys(bag?.metrics || {}).find(k => re.test(bag.metrics[k].label || ''));
+
+// recorte escolhido DENTRO do popup (null = segue a régua da página)
+const kpiModalPreset = ref(null);
+const kpiModalGranularity = ref(null);
+const kpiModalBag = ref(null);
+const isLoadingModalBag = ref(false);
+const fetchKpiModalBag = async () => {
+  if (!kpiModalPreset.value && !kpiModalGranularity.value) {
+    kpiModalBag.value = null;
+    return;
+  }
+  isLoadingModalBag.value = true;
+  try {
+    const { preset, from, to } = period.value;
+    const params = kpiModalPreset.value
+      ? { preset: kpiModalPreset.value }
+      : { preset, ...(preset === 'custom' ? { from, to } : {}) };
+    if (kpiModalGranularity.value) params.granularity = kpiModalGranularity.value;
+    const { data: bag } = await CrmAPI.getKpiBag(params);
+    kpiModalBag.value = bag;
+  } catch {
+    kpiModalBag.value = null;
+  } finally {
+    isLoadingModalBag.value = false;
+  }
+};
+const setModalPreset = p => {
+  kpiModalPreset.value = p;
+  fetchKpiModalBag();
+};
+const setModalGranularity = g => {
+  kpiModalGranularity.value = g;
+  fetchKpiModalBag();
+};
+const MODAL_PRESETS = [
+  [null, 'Régua de cima'],
+  ['last7', '7 dias'],
+  ['month', 'Este mês'],
+  ['year', 'Este ano'],
+];
+const MODAL_GRAINS = [
+  [null, 'Auto'],
+  ['day', 'Dia'],
+  ['week', 'Semana'],
+  ['month', 'Mês'],
+];
+// o cesto que vale pro popup: o do recorte escolhido, senão o da página
+const modalBag = computed(() => kpiModalBag.value || kpiBag.value);
+
+// meta do balde: fatia da meta MENSAL oficial pela granularidade do cesto
+const goalPerBucket = tile => {
+  if (!tile?.gk || tile.pct) return null;
+  const target = officialTargetFor(tile.gk);
+  if (!target) return null;
+  const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daily = target / daysInMonth;
+  const g = modalBag.value?.granularity;
+  if (g === 'week') return Math.round(daily * 7 * 10) / 10;
+  if (g === 'month') return target;
+  return Math.round(daily * 10) / 10;
+};
+// 📌 ações da empresa (PRO MAX) que caem nos baldes do gráfico
+const modalMarkers = computed(() => {
+  const bag = modalBag.value;
+  const actions = crmSettings.value?.company_actions || [];
+  if (!bag?.points?.length || !actions.length) return [];
+  const keys = bag.points.map(p => p.key);
+  const idxFor = date => {
+    if (bag.granularity === 'month') return keys.findIndex(k => k.slice(0, 7) === date.slice(0, 7));
+    if (bag.granularity === 'week') {
+      for (let i = keys.length - 1; i >= 0; i -= 1) if (keys[i] <= date) return i;
+      return -1;
+    }
+    return keys.indexOf(date);
+  };
+  return actions
+    .map(a => ({ index: idxFor(a.date), title: a.title }))
+    .filter(m => m.index >= 0);
+});
+// o gráfico do popup, calculado sobre o cesto ativo
+const modalChart = computed(() => {
+  const tile = kpiModal.value;
+  const bag = modalBag.value;
+  if (!tile) return null;
+  if (tile.compare?.length && !tile.def && !tile.chartKey) {
+    return { values: tile.compare.map(c => c.value), labels: tile.compare.map(c => c.label), compare: true };
+  }
+  if (!bag) return null;
+  const labels = (bag.points || []).map(p => p.label);
+  if (tile.def) {
+    const values = (bag.points || []).map((_, i) => evaluateFormula(tile.def.expr, bagAtOf(bag, i)) ?? 0);
+    const prevValues = (bag.prev_points || []).map((_, i) => evaluateFormula(tile.def.expr, bagPrevAtOf(bag, i)) ?? 0);
+    return {
+      values,
+      labels,
+      prevValues: prevValues.length ? prevValues : null,
+      total: evaluateFormula(tile.def.expr, bagTotalsOf(bag)),
+      prev: evaluateFormula(tile.def.expr, bagPrevTotalsOf(bag)),
+      goal: null,
+      isFormula: true,
+    };
+  }
+  const key = tile.chartKey === 'auto' ? bagMetricByLabelOf(bag, tile.chartMatch) : tile.chartKey;
+  const m = key && bag.metrics?.[key];
+  if (!m) {
+    if (tile.compare?.length) return { values: tile.compare.map(c => c.value), labels: tile.compare.map(c => c.label), compare: true };
+    return null;
+  }
+  return {
+    values: m.series || [],
+    labels,
+    prevValues: m.prev_series?.length ? m.prev_series : null,
+    prev: m.prev,
+    unit: m.unit,
+    total: m.value,
+    label: m.label,
+    goal: goalPerBucket(tile),
+  };
+});
+// decomposição: as séries que FORMAM a taxa (numerador/denominador) —
+// cards de fórmula usam as variáveis da conta; fixos usam components[]
+const modalComponents = computed(() => {
+  const tile = kpiModal.value;
+  const bag = modalBag.value;
+  if (!tile || !bag?.metrics) return [];
+  const keys = tile.def ? variablesIn(tile.def.expr) : tile.components || [];
+  return keys
+    .slice(0, 3)
+    .filter(k => bag.metrics[k])
+    .map(k => {
+      const m = bag.metrics[k];
+      return {
+        key: k,
+        label: m.label,
+        values: m.series || [],
+        prevValues: m.prev_series?.length ? m.prev_series : null,
+        total: m.value,
+        unit: m.unit,
+      };
+    });
+});
+const componentFormat = comp => v => formatKpi(v, comp.unit === 'brl' ? 'currency' : 'number');
+// rótulo curto do recorte ativo (cabeçalho do gráfico)
+const modalRangeLabel = computed(() => {
+  const found = MODAL_PRESETS.find(p => p[0] === kpiModalPreset.value);
+  return found && found[0] ? found[1] : 'período da régua';
+});
 
 // ── CONSTRUTOR DO "+" (admin): indicador pronto ou fórmula, cor, painel ──
 const kpiBuilder = ref(null); // def em edição (novo ou existente)
@@ -449,6 +616,70 @@ const openKpiBuilder = def => {
 const kpiCatalog = computed(() =>
   Object.entries(bagMetrics.value).map(([key, m]) => ({ key, label: m.label, value: formatKpi(m.value, m.unit === 'brl' ? 'currency' : 'number') }))
 );
+// ── 📚 INDICADORES JÁ FORMULADOS (item 143): taxas e contas importantes
+// prontas pra virar card com 1 clique, separadas por categoria ──
+const READY_FORMULAS = [
+  {
+    cat: '🎯 Taxas do funil',
+    items: [
+      { label: 'Taxa de agendamento', expr: 'appointments_booked / new_leads * 100', format: 'percent', icon: 'i-lucide-percent', note: 'consultas agendadas ÷ leads · referência: 15% muito bom · 10% bom · 5% fraco' },
+      { label: 'Comparecimento', expr: 'appointments_attended / (appointments_attended + appointments_missed) * 100', format: 'percent', icon: 'i-lucide-user-check', note: 'quem confirmou e veio · referência de clínica boa: acima de 80%' },
+      { label: 'Taxa de indicação', expr: 'indications / appointments_attended * 100', format: 'percent', icon: 'i-lucide-stethoscope', note: 'de quem compareceu, quantos saíram da consulta indicados pra cirurgia' },
+      { label: 'Fechamento de cirurgias', expr: 'surgeries_booked / indications * 100', format: 'percent', icon: 'i-lucide-heart-pulse', note: 'dos indicados, quantos fecharam cirurgia — o trabalho de fechamento' },
+      { label: 'Lead → cirurgia', expr: 'surgeries_booked / new_leads * 100', format: 'percent', icon: 'i-lucide-trending-up', note: 'o funil inteiro numa taxa só: de cada 100 leads, quantos viram cirurgia' },
+    ],
+  },
+  {
+    cat: '💰 Financeiro',
+    items: [
+      { label: 'Ticket médio por cirurgia', expr: 'revenue / surgeries_done', format: 'currency', icon: 'i-lucide-badge-dollar-sign', note: 'faturamento fechado ÷ cirurgias realizadas no período' },
+      { label: 'Faturamento por lead', expr: 'revenue / new_leads', format: 'currency', icon: 'i-lucide-coins', note: 'quanto cada contato que chega vale em faturamento — norteia quanto pagar por lead' },
+      { label: 'Faturamento por consulta', expr: 'revenue / appointments_attended', format: 'currency', icon: 'i-lucide-wallet', note: 'faturamento fechado ÷ consultas com presença' },
+    ],
+  },
+  {
+    cat: '📅 Agenda',
+    items: [
+      { label: 'Faltas em consultas (%)', expr: 'appointments_missed / (appointments_attended + appointments_missed) * 100', format: 'percent', icon: 'i-lucide-user-minus', note: 'o inverso do comparecimento: acima de 20% é hora de reforçar a confirmação' },
+      { label: 'Realização de cirurgias', expr: 'surgeries_done / surgeries_booked * 100', format: 'percent', icon: 'i-lucide-check-circle-2', note: 'das cirurgias agendadas, quantas aconteceram de fato' },
+      { label: 'Cirurgias perdidas (%)', expr: 'surgeries_missed / (surgeries_done + surgeries_missed) * 100', format: 'percent', icon: 'i-lucide-alert-triangle', note: 'agendou e não veio — cada uma vale um resgate imediato' },
+    ],
+  },
+];
+// valor ao vivo de cada fórmula pronta (mesmo cesto/período da régua)
+const readyFormulaSections = computed(() =>
+  READY_FORMULAS.map(sec => ({
+    cat: sec.cat,
+    items: sec.items.map(f => ({
+      ...f,
+      value: formatKpi(evaluateFormula(f.expr, bagTotals.value), f.format),
+    })),
+  }))
+);
+const applyReadyFormula = f => {
+  kpiBuilder.value.expr = f.expr;
+  kpiBuilder.value.format = f.format;
+  kpiBuilder.value.icon = f.icon;
+  if (!kpiBuilder.value.label) kpiBuilder.value.label = f.label;
+  if (!kpiBuilder.value.note) kpiBuilder.value.note = f.note;
+};
+// números-base do cesto agrupados por categoria (item 143)
+const KPI_CAT = key => {
+  if (key.startsWith('stage_')) return '🧭 Funil (entrou na coluna)';
+  if (key === 'revenue') return '💰 Financeiro';
+  if (key.startsWith('surgeries_')) return '🔪 Cirurgias';
+  if (key.startsWith('appointments_') || key === 'indications') return '📅 Consultas';
+  return '👥 Chegada';
+};
+const kpiCatalogSections = computed(() => {
+  const order = ['👥 Chegada', '📅 Consultas', '🔪 Cirurgias', '🧭 Funil (entrou na coluna)', '💰 Financeiro'];
+  const bySec = {};
+  kpiCatalog.value.forEach(m => {
+    const cat = KPI_CAT(m.key);
+    (bySec[cat] ||= []).push(m);
+  });
+  return order.filter(cat => bySec[cat]?.length).map(cat => ({ cat, items: bySec[cat] }));
+});
 const kpiPreview = computed(() => {
   if (!kpiBuilder.value) return { ok: false, text: '—' };
   const unknown = variablesIn(kpiBuilder.value.expr).filter(v => !(v in bagTotals.value));
@@ -554,6 +785,10 @@ const panelFamily = computed(() => {
 const kpiModal = ref(null);
 const openKpi = tile => {
   kpiModal.value = tile;
+  // cada abertura começa no período da régua, sem recorte próprio (item 144)
+  kpiModalPreset.value = null;
+  kpiModalGranularity.value = null;
+  kpiModalBag.value = null;
 };
 
 // ids ESTÁVEIS por card (item 142): indicador de meta (gk) ou o nome em
@@ -575,21 +810,33 @@ const allPanelTiles = computed(() => {
   return [...fixed, ...custom];
 });
 
-// ── ORGANIZAR A FILEIRA (admin, item 142): ordem por arrasto + ocultar ──
+// ── MODO EDIÇÃO (admin, itens 142/143): botão no topo liga o modo — cards
+// arrastam/ocultam/mudam de cor e os BLOCOS recolhem em barrinhas pra
+// reordenar sem rolagem infinita; a barra grudada segura os controles ──
 const organizeMode = ref(false);
+const toggleEditMode = () => {
+  organizeMode.value = !organizeMode.value;
+  // saiu da edição: busca o que a pausa do auto-refresh segurou
+  if (!organizeMode.value) refreshAll();
+};
 const kpiLayout = computed(
-  () => crmSettings.value?.kpi_layout?.[selectedPanel.value] || { order: [], hidden: [] }
+  () => crmSettings.value?.kpi_layout?.[selectedPanel.value] || { order: [], hidden: [], colors: {} }
 );
-// ordem padrão = a do sistema; a ordem salva reorganiza; card novo entra no fim
+// ordem padrão = a do sistema; a ordem salva reorganiza; card novo entra no
+// fim; a COR escolhida pelo admin (item 143) veste o card por cima da família
 const panelTiles = computed(() => {
   const order = kpiLayout.value.order || [];
   const hidden = new Set(kpiLayout.value.hidden || []);
+  const colors = kpiLayout.value.colors || {};
   const all = allPanelTiles.value;
   const rank = t => {
     const i = order.indexOf(t.id);
     return i === -1 ? 1000 + all.indexOf(t) : i;
   };
-  return all.filter(t => !hidden.has(t.id)).sort((a, b) => rank(a) - rank(b));
+  return all
+    .filter(t => !hidden.has(t.id))
+    .sort((a, b) => rank(a) - rank(b))
+    .map(t => (colors[t.id] ? { ...t, customGrad: colors[t.id] } : t));
 });
 const hiddenTiles = computed(() => {
   const hidden = new Set(kpiLayout.value.hidden || []);
@@ -607,8 +854,12 @@ onMounted(() => {
 const isSavingLayout = ref(false);
 const saveKpiLayout = async patch => {
   const all = { ...(crmSettings.value?.kpi_layout || {}) };
-  const cur = all[selectedPanel.value] || { order: [], hidden: [] };
-  all[selectedPanel.value] = { order: patch.order ?? cur.order ?? [], hidden: patch.hidden ?? cur.hidden ?? [] };
+  const cur = all[selectedPanel.value] || { order: [], hidden: [], colors: {} };
+  all[selectedPanel.value] = {
+    order: patch.order ?? cur.order ?? [],
+    hidden: patch.hidden ?? cur.hidden ?? [],
+    colors: patch.colors ?? cur.colors ?? {},
+  };
   isSavingLayout.value = true;
   try {
     await CrmAPI.updateKpiLayout(all);
@@ -622,7 +873,108 @@ const hideTile = tile =>
   saveKpiLayout({ hidden: [...new Set([...(kpiLayout.value.hidden || []), tile.id])] });
 const restoreTile = tile =>
   saveKpiLayout({ hidden: (kpiLayout.value.hidden || []).filter(id => id !== tile.id) });
-const resetKpiLayout = () => saveKpiLayout({ order: [], hidden: [] });
+const resetKpiLayout = () => {
+  saveKpiLayout({ order: [], hidden: [], colors: {} });
+  resetBlockLayout();
+};
+
+// ── 🎨 COR DE QUALQUER CARD (item 143): no modo organizar, o pincel do
+// card abre a palheta (família do painel, temas CEVICO, semânticas ou hex);
+// a escolha vale pra todo mundo que vê o painel ──
+const colorPicker = ref(null); // tile em edição de cor
+const tileHexColor = ref('');
+const openColorPicker = tile => {
+  colorPicker.value = tile;
+  tileHexColor.value = '';
+};
+const setTileColor = grad => {
+  const colors = { ...(kpiLayout.value.colors || {}) };
+  if (grad) colors[colorPicker.value.id] = grad;
+  else delete colors[colorPicker.value.id];
+  saveKpiLayout({ colors });
+  colorPicker.value = null;
+};
+const applyTileHexColor = () => {
+  const hex = (tileHexColor.value || '').trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(hex)) setTileColor(`linear-gradient(135deg, ${hex}, ${hex}CC)`);
+};
+
+// ── ⠿ ORGANIZAR OS BLOCOS (item 143): TODOS os blocos do Meu Painel se
+// movem com o mesmo arrasto magnético dos cards — duas áreas (avisos em
+// cima do seletor de painel, conteúdo embaixo) e dá pra cruzar entre elas ──
+const BLOCK_LABELS = {
+  whatsapp: '💬 Status do WhatsApp',
+  briefing: '📊 Briefing do gestor',
+  radar: '💚 Radar de Oportunidades',
+  tarefas: '📋 Tarefas esperando você',
+  mentor: '🧭 Feedback da semana',
+  indicadores: '📌 Indicadores do período',
+  desempenho: '🎯 Meu desempenho',
+  agenda_dashboard: '📅 Dashboard da Agenda',
+  saude_agenda: '🩺 Saúde da Agenda',
+  metas_strip: '🎯 Metas · Rotinas · Ferramentas',
+  atalhos: '🚀 Acesso rápido',
+  termometro: '🌡️ Termômetro do momento',
+};
+const TOP_BLOCKS_DEFAULT = ['whatsapp', 'briefing', 'radar', 'tarefas', 'mentor'];
+const MAIN_BLOCKS_DEFAULT = ['indicadores', 'desempenho', 'agenda_dashboard', 'saude_agenda', 'metas_strip', 'atalhos', 'termometro'];
+const blockLayout = computed(
+  () => crmSettings.value?.block_layout?.[selectedPanel.value] || {}
+);
+// ordem salva + blocos novos (que ainda não estavam salvos) no lugar padrão;
+// cada área só aceita os SEUS blocos (sem cruzar — o conteúdo de cada bloco
+// só existe na área dele, então cruzar deixaria a barrinha vazia)
+const orderedBlocks = computed(() => {
+  const savedTop = (blockLayout.value.top || []).filter(id => TOP_BLOCKS_DEFAULT.includes(id));
+  const savedMain = (blockLayout.value.main || []).filter(id => MAIN_BLOCKS_DEFAULT.includes(id));
+  const placed = new Set([...savedTop, ...savedMain]);
+  return {
+    top: [...savedTop, ...TOP_BLOCKS_DEFAULT.filter(id => !placed.has(id))],
+    main: [...savedMain, ...MAIN_BLOCKS_DEFAULT.filter(id => !placed.has(id))],
+  };
+});
+const dragTopBlocks = ref([]);
+const dragMainBlocks = ref([]);
+// mesmo cuidado do dragTiles: o watch nasce dentro do onMounted (TDZ)
+onMounted(() => {
+  dragTopBlocks.value = [...orderedBlocks.value.top];
+  dragMainBlocks.value = [...orderedBlocks.value.main];
+  watch(orderedBlocks, v => {
+    dragTopBlocks.value = [...v.top];
+    dragMainBlocks.value = [...v.main];
+  });
+});
+const saveBlockLayout = async () => {
+  const all = { ...(crmSettings.value?.block_layout || {}) };
+  all[selectedPanel.value] = { top: [...dragTopBlocks.value], main: [...dragMainBlocks.value] };
+  isSavingLayout.value = true;
+  try {
+    await CrmAPI.updateBlockLayout(all);
+    await store.dispatch('crm/fetchSettings');
+  } finally {
+    isSavingLayout.value = false;
+  }
+};
+const resetBlockLayout = async () => {
+  const all = { ...(crmSettings.value?.block_layout || {}) };
+  if (!all[selectedPanel.value]) return;
+  delete all[selectedPanel.value];
+  try {
+    await CrmAPI.updateBlockLayout(all);
+    await store.dispatch('crm/fetchSettings');
+  } catch {
+    // sem drama: o padrão volta no próximo carregamento
+  }
+};
+const layoutTouched = computed(() =>
+  Boolean(
+    (kpiLayout.value.order || []).length ||
+    (kpiLayout.value.hidden || []).length ||
+    Object.keys(kpiLayout.value.colors || {}).length ||
+    (blockLayout.value.top || []).length ||
+    (blockLayout.value.main || []).length
+  )
+);
 
 // ── CARDS VIVOS: metas, recordes e cores por desempenho ──
 // Meta é MENSAL (config do admin na mira 🎯); o backend manda o fator do
@@ -691,10 +1043,12 @@ const tileVisual = tile => {
   return {
     ...st,
     // sem status de meta mandando, um chip "Muito bom" pinta o card de
-    // verde (pedido 22/07 — o dourado confundia com "neutro")
+    // verde (pedido 22/07 — o dourado confundia com "neutro"); a cor
+    // ESCOLHIDA pelo admin (item 143) vence o chip e a família, mas o
+    // alerta de meta (vermelho/âmbar/verde-meta) continua por cima
     grad: ['bad', 'warn', 'meta'].includes(st.status)
       ? grads[st.status]
-      : tile.chip?.grad || tile.grad,
+      : tile.customGrad || tile.chip?.grad || tile.grad,
     aura: st.isRecord,
     auraIntensity: Math.max(0.5, Math.min(1.2, st.ratio ?? 0.7)),
     pulse: st.status === 'meta' || st.isRecord,
@@ -1230,6 +1584,16 @@ const booking30Verdict = computed(() => {
   if (r >= 5) return { label: 'Regular', color: '#D4A017' };
   return { label: 'Fraco — hora de agir', color: '#EF4444' };
 });
+// o mesmo veredito em formato de CHIP do card julgado (item 143): a cor
+// semântica pinta o card "% de agendamento" da fileira
+const booking30Chip = computed(() => {
+  const r = bookingRate30.value;
+  if (r === null) return { label: 'sem dados de 30 dias', grad: 'linear-gradient(135deg, #334155, #64748B)' };
+  if (r >= 15) return { label: 'Muito bom 🚀', grad: 'linear-gradient(135deg, #065F46, #10B981)' };
+  if (r >= 10) return { label: 'Bom 👍', grad: 'linear-gradient(135deg, #1D4ED8, #3B82F6)' };
+  if (r >= 5) return { label: 'Regular', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' };
+  return { label: 'Fraco — hora de agir', grad: 'linear-gradient(135deg, #B91C1C, #EF4444)' };
+});
 
 const slotLabel = f =>
   `${f.day.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} ${f.slot}`;
@@ -1253,6 +1617,9 @@ const go = route => router.push({ name: route, params: { accountId: accountId.va
 // pessoa volta para a aba (sem precisar recarregar a página)
 let refreshTimer = null;
 const refreshAll = () => {
+  // no MODO EDIÇÃO a atualização automática pausa: um refresh no meio do
+  // arrasto trocava as listas do vuedraggable e quebrava o movimento
+  if (organizeMode.value) return;
   store.dispatch('tasks/fetch').catch(() => {});
   fetchData();
 };
@@ -1363,16 +1730,33 @@ onUnmounted(() => {
         <div class="relative z-10" style="color: #fff">
           <div class="flex items-start justify-between gap-2 mb-1">
             <p class="text-sm font-medium" style="color: rgba(255,255,255,0.75)">{{ todayLabel }}</p>
-            <!-- 🐞 Reportar problema — padrão no painel de TODOS (pedido 17/07) -->
-            <button
-              class="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[11px] font-semibold transition-colors flex-shrink-0"
-              style="background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.25)"
-              title="Algo não funcionou? Vira um card no board do Guilherme e você recebe o aviso quando resolver."
-              @click="reportBug"
-            >
-              <span class="i-lucide-bug text-xs" />
-              Reportar problema
-            </button>
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              <!-- ✏️ MODO EDIÇÃO (item 143): o botão vive AQUI no topo, num
+                   lugar fixo — liga o modo que reordena blocos, muda cor e
+                   oculta cards; a barra grudada logo abaixo segura os controles -->
+              <button
+                v-if="isAdmin && !currentPanel.custom"
+                class="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[11px] font-semibold transition-colors"
+                :style="organizeMode
+                  ? 'background: #fff; color: #152C61; border: 1px solid #fff'
+                  : 'background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.25)'"
+                :title="organizeMode ? 'Concluir a edição do painel' : 'Personalizar este painel: arrastar blocos e cards, trocar cores, ocultar'"
+                @click="toggleEditMode"
+              >
+                <span :class="organizeMode ? 'i-lucide-check' : 'i-lucide-pencil-ruler'" class="text-xs" />
+                {{ organizeMode ? 'Concluir edição' : 'Modo edição' }}
+              </button>
+              <!-- 🐞 Reportar problema — padrão no painel de TODOS (pedido 17/07) -->
+              <button
+                class="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[11px] font-semibold transition-colors"
+                style="background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.25)"
+                title="Algo não funcionou? Vira um card no board do Guilherme e você recebe o aviso quando resolver."
+                @click="reportBug"
+              >
+                <span class="i-lucide-bug text-xs" />
+                Reportar problema
+              </button>
+            </div>
           </div>
           <h1 class="text-2xl sm:text-4xl font-bold leading-tight" style="color: #fff">{{ greeting }}, {{ firstName }}! 👋</h1>
           <p class="text-sm mt-2" style="color: rgba(255,255,255,0.85)">
@@ -1381,6 +1765,51 @@ onUnmounted(() => {
           </p>
         </div>
         <span class="i-lucide-eye absolute -right-6 -bottom-8 text-[160px] text-white/10" />
+      </div>
+
+      <!-- ✏️ BARRA DO MODO EDIÇÃO (item 143): gruda no topo enquanto o modo
+           está ativo — dicas, cards ocultos, voltar ao padrão e Concluir
+           sempre à mão, em qualquer ponto da rolagem -->
+      <div
+        v-if="organizeMode"
+        class="sticky top-0 z-40 rounded-2xl border-2 border-n-brand/50 bg-n-solid-1 shadow-lg px-4 py-3 mb-6"
+      >
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="i-lucide-pencil-ruler text-sm text-n-brand" />
+          <b class="text-xs text-n-slate-12">Modo edição</b>
+          <span class="text-[11px] text-n-slate-10">⠿ arraste as barrinhas e os cards · 🖌 troca a cor · ✕ oculta</span>
+          <span v-if="isSavingLayout" class="i-lucide-loader-circle animate-spin text-sm text-n-slate-10" />
+          <span v-else class="text-[10px] text-n-slate-9">salva sozinho</span>
+          <span class="flex-1" />
+          <button
+            v-if="layoutTouched"
+            class="h-8 px-3 rounded-lg text-[11px] font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
+            title="Ordem dos blocos, cards, cores e ocultos voltam ao padrão do sistema neste painel"
+            @click="resetKpiLayout"
+          >
+            voltar ao padrão
+          </button>
+          <button
+            class="h-8 px-4 rounded-lg text-[11px] font-bold text-white flex items-center gap-1.5"
+            :style="{ background: panelFamily[0] }"
+            @click="toggleEditMode"
+          >
+            <span class="i-lucide-check text-xs" />
+            Concluir
+          </button>
+        </div>
+        <div v-if="hiddenTiles.length" class="flex items-center gap-1.5 flex-wrap mt-2 text-[11px]">
+          <span class="text-n-slate-9">cards ocultos:</span>
+          <button
+            v-for="t in hiddenTiles"
+            :key="t.id"
+            class="h-7 px-2.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1"
+            title="Mostrar de novo"
+            @click="restoreTile(t)"
+          >
+            <span class="i-lucide-plus text-[10px]" />{{ t.label }}
+          </button>
+        </div>
       </div>
 
       <!-- SKELETON Homem de Ferro (item 89): o painel se monta por partes -->
@@ -1432,6 +1861,34 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- ⠿ BLOCOS MÓVEIS (item 143) — área de AVISOS (acima do seletor
+             de painel): no modo organizar, cada bloco ganha a barrinha de
+             arrasto e pode trocar de lugar — inclusive cruzar pra área de
+             conteúdo lá embaixo (mesmo grupo do vuedraggable) -->
+        <draggable
+          v-model="dragTopBlocks"
+          :item-key="id => id"
+          handle=".cevico-block-handle"
+          :animation="220"
+          :disabled="!organizeMode"
+          ghost-class="opacity-30"
+          @end="saveBlockLayout"
+        >
+          <template #item="{ element: blockId }">
+          <section>
+            <div
+              v-if="organizeMode"
+              class="cevico-block-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 rounded-xl border-2 border-dashed border-n-brand/40 bg-n-solid-2 text-xs font-semibold text-n-slate-12"
+            >
+              <span class="i-lucide-grip-vertical text-sm text-n-slate-9" />
+              {{ BLOCK_LABELS[blockId] }}
+              <span class="text-n-slate-9 font-normal ml-auto hidden sm:inline">⠿ arraste pra mudar a ordem</span>
+            </div>
+
+            <!-- no modo edição os blocos RECOLHEM em barrinhas: arrasto curto,
+                 sem rolagem infinita no meio do movimento -->
+            <template v-if="!organizeMode">
+            <template v-if="blockId === 'whatsapp'">
         <!-- 💬 Números de WhatsApp (item 88 v2 — pedido 20/07): faixa MINI
              e discreta com o STATUS DA CONTA na Meta; fica vermelha só
              quando existe problema de verdade -->
@@ -1460,7 +1917,9 @@ onUnmounted(() => {
             </template>
           </span>
         </div>
+            </template>
 
+            <template v-else-if="blockId === 'briefing'">
         <!-- 📊 Briefing do Gestor Autônomo (só admin): o resumo do dia +
              os desvios do funil vs a média de 12 semanas. Sem briefing
              escrito, o card fica discreto e mostra só os desvios. -->
@@ -1498,7 +1957,9 @@ onUnmounted(() => {
             </p>
           </div>
         </div>
+            </template>
 
+            <template v-else-if="blockId === 'radar'">
         <!-- 💚 Avisos do Radar de Oportunidades — cartão BRANCO (contraste
              nos dois temas) + verde dopamine + botão que emana energia
              (pedido 17/07: convite, não bronca) -->
@@ -1653,7 +2114,9 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+            </template>
 
+            <template v-else-if="blockId === 'tarefas'">
         <!-- 📋 Tarefas esperando você (aviso DOURADO — coisa boa a fazer) -->
         <div
           v-if="myTasks.length && !avisoChecado(tasksSignature)"
@@ -1708,7 +2171,9 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+            </template>
 
+            <template v-else-if="blockId === 'mentor'">
         <!-- 🧭 Mentor do Time: feedback da semana (individual; admin vê o time) -->
         <div
           v-if="visibleFeedback && !avisoChecado(fbSignature)"
@@ -1786,7 +2251,11 @@ onUnmounted(() => {
             </p>
           </div>
         </div>
-
+            </template>
+            </template>
+          </section>
+          </template>
+        </draggable>
 
         <!-- Seletor de painel (cada pessoa no seu) -->
         <div class="flex items-center gap-2 flex-wrap mb-3">
@@ -1902,7 +2371,34 @@ onUnmounted(() => {
           class="mb-6"
         />
 
-        <template v-else>
+        <!-- ⠿ BLOCOS MÓVEIS (item 143) — área de CONTEÚDO: os blocos abaixo
+             do seletor se movem com o mesmo arrasto magnético dos cards -->
+        <draggable
+          v-model="dragMainBlocks"
+          :item-key="id => id"
+          handle=".cevico-block-handle"
+          :animation="220"
+          :disabled="!organizeMode"
+          ghost-class="opacity-30"
+          @end="saveBlockLayout"
+        >
+          <template #item="{ element: blockId }">
+          <section>
+            <div
+              v-if="organizeMode"
+              class="cevico-block-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 rounded-xl border-2 border-dashed border-n-brand/40 bg-n-solid-2 text-xs font-semibold text-n-slate-12"
+            >
+              <span class="i-lucide-grip-vertical text-sm text-n-slate-9" />
+              {{ BLOCK_LABELS[blockId] }}
+              <span v-if="blockId === 'indicadores'" class="text-n-slate-9 font-normal ml-auto hidden sm:inline">os cards ficam abertos pra editar cor e ordem</span>
+              <span v-else class="text-n-slate-9 font-normal ml-auto hidden sm:inline">⠿ arraste pra mudar a ordem</span>
+            </div>
+
+            <!-- no modo edição só a FILEIRA fica aberta (é nela que se mexe
+                 nos cards); os demais blocos recolhem em barrinhas -->
+            <template v-if="!organizeMode || blockId === 'indicadores'">
+            <template v-if="blockId === 'indicadores'">
+            <template v-if="!currentPanel.custom">
         <!-- Indicadores do período — mudam com o painel escolhido -->
         <draggable
           v-model="dragTiles"
@@ -1933,6 +2429,14 @@ onUnmounted(() => {
               <div class="flex items-center gap-1.5 mb-1 text-white/80">
                 <span :class="tile.icon" class="text-sm" />
                 <p class="text-xs font-medium flex-1 truncate">{{ tile.label }}</p>
+                <button
+                  v-if="organizeMode"
+                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
+                  title="Trocar a cor deste card"
+                  @click.stop="openColorPicker(tile)"
+                >
+                  <span class="i-lucide-paintbrush text-[11px]" />
+                </button>
                 <button
                   v-if="organizeMode"
                   class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-500/80 transition-colors"
@@ -1978,9 +2482,10 @@ onUnmounted(() => {
           </div>
           </template>
 
-          <!-- ➕ card novo + ⠿ organizar (admin, itens 141/142) -->
+          <!-- ➕ card novo (admin, item 141) — o modo edição agora liga no
+               botão "Modo edição" do topo (item 143) -->
           <template #footer>
-            <div v-if="isAdmin && !currentPanel.custom" class="rounded-2xl border-2 border-dashed border-n-weak flex flex-col items-stretch justify-center gap-1.5 p-3 min-h-[120px]">
+            <div v-if="isAdmin && !currentPanel.custom" class="rounded-2xl border-2 border-dashed border-n-weak flex flex-col items-stretch justify-center p-3 min-h-[120px]">
               <button
                 class="flex-1 rounded-xl text-n-slate-10 hover:bg-n-brand/10 hover:text-n-brand transition-colors flex flex-col items-center justify-center gap-0.5 py-2"
                 title="Criar um card de indicador: indicador pronto, fórmula (ex.: agendamentos / leads) e cor"
@@ -1989,44 +2494,9 @@ onUnmounted(() => {
                 <span class="i-lucide-plus text-2xl" />
                 <span class="text-xs font-medium">Novo indicador</span>
               </button>
-              <button
-                class="h-8 rounded-xl text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors"
-                :class="organizeMode ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1 border border-n-weak'"
-                :style="organizeMode ? { background: panelFamily[0] } : {}"
-                :title="organizeMode ? 'Terminar de organizar' : 'Arrastar cards pra reordenar e ocultar os que não quer ver'"
-                @click="organizeMode = !organizeMode"
-              >
-                <span :class="organizeMode ? 'i-lucide-check' : 'i-lucide-grip'" class="text-sm" />
-                {{ organizeMode ? 'Pronto' : 'Organizar' }}
-                <span v-if="isSavingLayout" class="i-lucide-loader-circle animate-spin text-xs" />
-              </button>
             </div>
           </template>
         </draggable>
-
-        <!-- bandeja dos ocultos (modo organizar): restaurar com 1 clique -->
-        <div v-if="organizeMode" class="flex items-center gap-2 flex-wrap mb-4 text-xs">
-          <span class="text-n-slate-10">⠿ arraste os cards pra reordenar · ✕ oculta</span>
-          <template v-if="hiddenTiles.length">
-            <span class="text-n-slate-9">· ocultos:</span>
-            <button
-              v-for="t in hiddenTiles"
-              :key="t.id"
-              class="h-7 px-2.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1"
-              title="Mostrar de novo"
-              @click="restoreTile(t)"
-            >
-              <span class="i-lucide-plus text-[10px]" />{{ t.label }}
-            </button>
-          </template>
-          <button
-            v-if="(kpiLayout.order || []).length || (kpiLayout.hidden || []).length"
-            class="h-7 px-2.5 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 ml-auto"
-            @click="resetKpiLayout"
-          >
-            voltar à ordem padrão
-          </button>
-        </div>
 
         <!-- Linha de destaque do painel -->
         <div class="bg-n-solid-2 border border-n-weak rounded-2xl px-4 py-3 mb-6 flex items-center gap-3">
@@ -2039,8 +2509,10 @@ onUnmounted(() => {
           </div>
           <p class="text-2xl font-bold text-n-slate-12">{{ panelHighlight.value }}</p>
         </div>
-        </template>
+            </template>
+            </template>
 
+            <template v-else-if="blockId === 'desempenho'">
         <!-- 🎯 MEU DESEMPENHO (item 138): auto-avaliação — a pessoa e o
              Atendimento IA como referência; sem ranking de colegas (o
              ranking do time vive no Dashboard dos Agentes, do gestor) -->
@@ -2109,6 +2581,9 @@ onUnmounted(() => {
           </div>
         </div>
 
+            </template>
+
+            <template v-else-if="blockId === 'agenda_dashboard'">
         <!-- 📅 Dashboard da Agenda EMBUTIDO (pedido 20/08): o dashboard
              inteiro faz parte do Meu Painel em TODAS as predefinições,
              seguindo o período da régua; a Saúde da Agenda vem logo abaixo -->
@@ -2132,7 +2607,9 @@ onUnmounted(() => {
           </div>
           <AgendaDashboardCore :period="period" />
         </div>
+            </template>
 
+            <template v-else-if="blockId === 'saude_agenda'">
         <!-- Saúde da Agenda -->
         <div class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6">
           <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -2262,21 +2739,12 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- % de agendamento (linha compacta) -->
-          <div class="mt-4 rounded-xl border border-n-weak bg-n-solid-2 px-4 py-3">
-            <div class="flex items-center justify-between">
-              <span class="text-xs text-n-slate-11">% de agendamento <span class="text-n-slate-9">(30 dias)</span></span>
-              <span v-if="bookingRate30 !== null" class="font-bold text-xl" :style="{ color: booking30Verdict.color }">{{ bookingRate30 }}%</span>
-              <span v-else class="text-n-slate-9 text-xs">sem dados</span>
-            </div>
-            <div v-if="booking30Verdict" class="flex items-center justify-between mt-1 flex-wrap gap-1">
-              <span class="text-[10px] text-n-slate-9">{{ data.appointments_30d || 0 }} consultas ÷ {{ data.new_contacts_30d || 0 }} leads (Google+Instagram)</span>
-              <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold text-white" :style="{ background: booking30Verdict.color }">{{ booking30Verdict.label }}</span>
-            </div>
-            <p class="text-[9px] text-n-slate-9 mt-1">Referência: 15% muito bom · 10% bom · 5% fraco</p>
-          </div>
+          <!-- o "% de agendamento" que morava aqui foi PROMOVIDO pra fileira
+               de indicadores do painel Agendamento (item 143) -->
         </div>
+            </template>
 
+            <template v-else-if="blockId === 'metas_strip'">
         <!-- 🎯 Metas · Rotinas · Ferramentas (alimentado pelo Painel de Metas) -->
         <div v-if="goalsData" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
           <!-- METAS do mês -->
@@ -2357,6 +2825,9 @@ onUnmounted(() => {
           </div>
         </div>
 
+            </template>
+
+            <template v-else-if="blockId === 'atalhos'">
         <!-- Acesso rápido (compacto, largura toda) -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <button
@@ -2372,14 +2843,22 @@ onUnmounted(() => {
           </button>
         </div>
 
+            </template>
+
+            <template v-else-if="blockId === 'termometro'">
         <!-- Termômetro do momento -->
-        <div class="flex flex-wrap gap-4 text-xs text-n-slate-10">
+        <div class="flex flex-wrap gap-4 text-xs text-n-slate-10 mb-4">
           <span class="flex items-center gap-1.5"><span class="i-lucide-inbox text-sm" /> {{ data.open_conversations ?? 0 }} conversas abertas agora</span>
           <span class="flex items-center gap-1.5" :class="(data.unanswered ?? 0) > 0 ? 'text-amber-500 font-medium' : ''">
             <span class="i-lucide-clock-alert text-sm" /> {{ data.unanswered ?? 0 }} aguardando resposta
           </span>
           <span class="flex items-center gap-1.5"><span class="i-lucide-calendar-check text-sm" /> {{ data.appointments_today ?? 0 }} consultas hoje</span>
         </div>
+            </template>
+            </template>
+          </section>
+          </template>
+        </draggable>
       </template>
 
       <!-- Admin: quem vê qual painel -->
@@ -2515,29 +2994,82 @@ onUnmounted(() => {
           <p v-if="kpiModal.sub" class="text-xs text-white/80 mt-1">{{ kpiModal.sub }}</p>
         </div>
         <div class="p-5 space-y-3">
-          <!-- 📊 gráfico do período (item 141): série do cesto ou barras comparativas -->
-          <div v-if="kpiChart(kpiModal)" class="rounded-xl bg-n-alpha-1 px-3 py-2">
-            <div class="flex items-center justify-between text-[10px] text-n-slate-10 mb-1">
-              <span>{{ kpiChart(kpiModal).compare ? 'comparativo' : `${kpiChart(kpiModal).label || kpiModal.label} · ${kpiBag?.granularity === 'month' ? 'por mês' : kpiBag?.granularity === 'week' ? 'por semana' : 'por dia'}` }}</span>
-              <span v-if="kpiChart(kpiModal).prev !== undefined && kpiChart(kpiModal).prev !== null && !kpiChart(kpiModal).compare">
-                linha tracejada = média do período anterior
-              </span>
+          <!-- 📊 gráfico do período v2 (item 144): mini-régua própria, período
+               anterior sobreposto, linha de meta e 📌 ações da empresa -->
+          <div v-if="modalChart" class="rounded-xl bg-n-alpha-1 px-3 py-2">
+            <div class="flex items-center justify-between gap-2 text-[10px] text-n-slate-10 mb-1">
+              <span class="truncate">{{ modalChart.compare ? 'comparativo' : `${modalChart.label || kpiModal.label} · ${modalBag?.granularity === 'month' ? 'por mês' : modalBag?.granularity === 'week' ? 'por semana' : 'por dia'}` }}</span>
+              <span v-if="isLoadingModalBag" class="i-lucide-loader-circle animate-spin text-xs flex-shrink-0" />
+              <span v-else-if="modalChart.prevValues" class="flex-shrink-0">tracejado = período anterior</span>
+              <span v-else-if="modalChart.prev !== undefined && modalChart.prev !== null && !modalChart.compare" class="flex-shrink-0">tracejado = média do anterior</span>
             </div>
             <MiniBars
-              :values="kpiChart(kpiModal).values"
-              :labels="kpiChart(kpiModal).labels"
-              :color="kpiChart(kpiModal).compare ? '#0F5FA6' : '#0F5FA6'"
+              :values="modalChart.values"
+              :labels="modalChart.labels"
+              color="#0F5FA6"
               :height="110"
-              :reference="!kpiChart(kpiModal).compare && kpiChart(kpiModal).prev ? kpiChart(kpiModal).prev / Math.max(1, kpiChart(kpiModal).values.length) : null"
+              :prev-values="modalChart.prevValues || null"
+              :goal="modalChart.goal ?? null"
+              :markers="modalChart.compare ? [] : modalMarkers"
+              :reference="!modalChart.compare && !modalChart.prevValues && modalChart.prev ? modalChart.prev / Math.max(1, modalChart.values.length) : null"
               :format="chartFormat(kpiModal)"
             />
-            <p
-              v-if="!kpiChart(kpiModal).compare && kpiChart(kpiModal).prev !== undefined && kpiChart(kpiModal).prev !== null"
-              class="text-[11px] mt-1"
-              :class="(kpiModal.rawValue ?? kpiChart(kpiModal).total ?? 0) >= kpiChart(kpiModal).prev ? 'text-emerald-600' : 'text-red-500'"
-            >
-              {{ deltaLine(kpiModal.rawValue ?? kpiChart(kpiModal).total ?? 0, kpiChart(kpiModal).prev, kpiModal.format || (kpiChart(kpiModal).unit === 'brl' ? 'currency' : 'number')) }}
-            </p>
+            <div v-if="!modalChart.compare" class="flex items-center justify-between gap-2 flex-wrap mt-1">
+              <p
+                v-if="modalChart.prev !== undefined && modalChart.prev !== null"
+                class="text-[11px]"
+                :class="(modalChart.total ?? 0) >= modalChart.prev ? 'text-emerald-600' : 'text-red-500'"
+              >
+                {{ deltaLine(modalChart.total ?? 0, modalChart.prev, kpiModal.format || (modalChart.unit === 'brl' ? 'currency' : 'number'), modalBag) }}
+              </p>
+              <p v-if="modalChart.goal" class="text-[10px]" style="color: #B8860B">
+                ⭑ meta ≈ {{ chartFormat(kpiModal)(modalChart.goal) }} por {{ modalBag?.granularity === 'month' ? 'mês' : modalBag?.granularity === 'week' ? 'semana' : 'dia' }}
+              </p>
+            </div>
+            <!-- mini-régua do popup: o recorte é DESTE gráfico, sem mexer na
+                 régua da página -->
+            <div v-if="!modalChart.compare" class="flex items-center gap-1 flex-wrap mt-2 pt-2 border-t border-n-weak/60">
+              <button
+                v-for="p in MODAL_PRESETS"
+                :key="String(p[0])"
+                class="h-6 px-2 rounded-md text-[10px] font-medium border transition-colors"
+                :class="kpiModalPreset === p[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                :style="kpiModalPreset === p[0] ? { background: panelFamily[1] } : {}"
+                @click="setModalPreset(p[0])"
+              >
+                {{ p[1] }}
+              </button>
+              <span class="text-n-weak text-[10px]">·</span>
+              <button
+                v-for="g in MODAL_GRAINS"
+                :key="String(g[0])"
+                class="h-6 px-2 rounded-md text-[10px] font-medium border transition-colors"
+                :class="kpiModalGranularity === g[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                :style="kpiModalGranularity === g[0] ? { background: panelFamily[2] } : {}"
+                @click="setModalGranularity(g[0])"
+              >
+                {{ g[1] }}
+              </button>
+            </div>
+          </div>
+          <!-- 🧩 DE ONDE VEM ESTA TAXA (item 144): as séries que formam a
+               conta — responde se o problema foi entrada ou conversão -->
+          <div v-if="modalComponents.length" class="rounded-xl bg-n-alpha-1 px-3 py-2 space-y-2">
+            <p class="text-[10px] text-n-slate-10">🧩 de onde vem: as séries da conta ({{ modalRangeLabel }})</p>
+            <div v-for="comp in modalComponents" :key="comp.key">
+              <div class="flex items-center justify-between text-[10px] mb-0.5">
+                <span class="text-n-slate-11">{{ comp.label }}</span>
+                <b class="text-n-slate-12">{{ componentFormat(comp)(comp.total) }}</b>
+              </div>
+              <MiniBars
+                :values="comp.values"
+                :labels="modalChart?.labels || []"
+                color="#64748B"
+                :height="46"
+                :prev-values="comp.prevValues"
+                :format="componentFormat(comp)"
+              />
+            </div>
           </div>
           <!-- leads por caixa (card 1): barras lado a lado -->
           <div v-if="kpiModal.compareInboxes?.length" class="rounded-xl bg-n-alpha-1 px-3 py-2">
@@ -2602,18 +3134,40 @@ onUnmounted(() => {
             <span class="text-[10px] text-n-slate-9 ml-1">os números abaixo são do período da régua</span>
           </div>
 
-          <!-- indicadores prontos -->
-          <div v-if="kpiBuilderMode === 'ready'" class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-1">
-            <button
-              v-for="m in kpiCatalog"
-              :key="m.key"
-              class="flex items-center justify-between gap-2 px-3 h-9 rounded-lg border text-xs text-left"
-              :class="kpiBuilder.expr.trim() === m.key ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-              :style="kpiBuilder.expr.trim() === m.key ? { background: panelFamily[1] } : {}"
-              @click="kpiBuilder.expr = m.key; if (!kpiBuilder.label) kpiBuilder.label = m.label"
-            >
-              <span class="truncate">{{ m.label }}</span><b class="whitespace-nowrap">{{ m.value }}</b>
-            </button>
+          <!-- indicadores prontos: primeiro as TAXAS já formuladas por
+               categoria (item 143), depois os números-base do período -->
+          <div v-if="kpiBuilderMode === 'ready'" class="max-h-72 overflow-y-auto pr-1 space-y-3">
+            <div v-for="sec in readyFormulaSections" :key="sec.cat">
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">{{ sec.cat }} <span class="normal-case font-normal">· taxas prontas</span></p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <button
+                  v-for="f in sec.items"
+                  :key="f.label"
+                  class="flex items-center justify-between gap-2 px-3 h-9 rounded-lg border text-xs text-left"
+                  :class="kpiBuilder.expr.trim() === f.expr ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                  :style="kpiBuilder.expr.trim() === f.expr ? { background: panelFamily[1] } : {}"
+                  :title="f.note"
+                  @click="applyReadyFormula(f)"
+                >
+                  <span class="truncate">{{ f.label }}</span><b class="whitespace-nowrap">{{ f.value }}</b>
+                </button>
+              </div>
+            </div>
+            <div v-for="sec in kpiCatalogSections" :key="sec.cat">
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">{{ sec.cat }}</p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <button
+                  v-for="m in sec.items"
+                  :key="m.key"
+                  class="flex items-center justify-between gap-2 px-3 h-9 rounded-lg border text-xs text-left"
+                  :class="kpiBuilder.expr.trim() === m.key ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                  :style="kpiBuilder.expr.trim() === m.key ? { background: panelFamily[1] } : {}"
+                  @click="kpiBuilder.expr = m.key; if (!kpiBuilder.label) kpiBuilder.label = m.label"
+                >
+                  <span class="truncate">{{ m.label }}</span><b class="whitespace-nowrap">{{ m.value }}</b>
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- fórmula -->
@@ -2665,6 +3219,66 @@ onUnmounted(() => {
           <button class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-50" :style="{ background: panelFamily[0] }" :disabled="isSavingKpi || !kpiPreview.ok || !kpiBuilder.label.trim()" @click="saveKpiBuilder">
             {{ isSavingKpi ? 'Salvando…' : 'Salvar card' }}
           </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+  <!-- 🎨 Cor de qualquer card (item 143): palheta do modo organizar -->
+  <Teleport to="body">
+    <div
+      v-if="colorPicker"
+      class="fixed inset-0 z-[72] flex items-center justify-center bg-black/50 p-4"
+      @click.self="colorPicker = null"
+    >
+      <div class="w-full max-w-md rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1">
+        <div class="p-4 text-white flex items-center gap-2" :style="{ background: tileVisual(colorPicker).grad }">
+          <span :class="colorPicker.icon" class="text-base" />
+          <p class="text-sm font-bold flex-1 truncate">Cor do card "{{ colorPicker.label }}"</p>
+          <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="colorPicker = null">
+            <span class="i-lucide-x text-sm" />
+          </button>
+        </div>
+        <div class="p-4 space-y-3">
+          <p class="text-[11px] text-n-slate-10 leading-relaxed">
+            A cor vale pra todo mundo que vê este painel. Se o card estiver julgado
+            por meta (vermelho/âmbar/verde), o alerta continua por cima da cor escolhida.
+          </p>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <button
+              class="h-9 px-3 rounded-lg text-xs border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
+              :class="!colorPicker.customGrad ? 'ring-2 ring-n-brand' : ''"
+              title="Volta pra cor automática (família do painel)"
+              @click="setTileColor(null)"
+            >
+              automática
+            </button>
+            <button
+              v-for="c in kpiColorOptions"
+              :key="c.key"
+              class="w-9 h-9 rounded-lg border-2 transition-transform"
+              :class="colorPicker.customGrad === c.grad ? 'border-n-slate-12 scale-110' : 'border-transparent hover:scale-105'"
+              :style="{ background: c.grad }"
+              :title="c.title"
+              @click="setTileColor(c.grad)"
+            />
+          </div>
+          <div class="flex items-center gap-2">
+            <input
+              v-model="tileHexColor"
+              type="text"
+              placeholder="#152C61"
+              maxlength="7"
+              class="h-9 w-28 px-2 rounded-lg border border-n-weak bg-n-solid-2 text-xs font-mono text-n-slate-12"
+              @keydown.enter.prevent="applyTileHexColor"
+            />
+            <button
+              class="h-9 px-3 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
+              @click="applyTileHexColor"
+            >
+              usar este tom
+            </button>
+            <span v-if="isSavingLayout" class="i-lucide-loader-circle animate-spin text-sm text-n-slate-10 ml-auto" />
+          </div>
         </div>
       </div>
     </div>

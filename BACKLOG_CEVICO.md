@@ -4358,3 +4358,176 @@ crm_opportunity_radar_job registrados.
   texto "como é calculado". Cesto ganhou appointments_due, indications e
   surgeries_missed (23 métricas). "+", Organizar e paleta já valiam em todos.
   Médicos: número é do médico, gráfico é da clínica (nota no popup).
+
+## 143. ✅ CUSTOMIZAÇÃO TOTAL DO MEU PAINEL (pedidos 23/08 c/ print do % de agendamento)
+- Pedidos dele: (a) editar a COR de qualquer card num modo edição; (b)
+  indicadores prontos JÁ FORMULADOS (taxas importantes) separados por
+  categoria; (c) o "% de agendamento" do print em evidência perto dos
+  primeiros indicadores; (d) TODOS os blocos do Meu Painel móveis com o
+  arrasto magnético. Tema da rodada: "possibilidade de customização".
+- 🎨 COR POR CARD: no modo "⠿ Organizar", cada card ganha o pincel 🖌 ao
+  lado do ✕ → popup com "automática" + palheta (4 degraus da família do
+  painel, temas CEVICO, verde/ouro/vermelho, hex livre). A cor vale pra
+  todo mundo que vê o painel; o julgamento de meta (vermelho/âmbar/verde)
+  continua por cima da cor escolhida (semântica preservada). Persistência
+  em agenda_config.kpi_layout[painel].colors {id => grad}, sanitizada no
+  servidor (sanitize_kpi_colors: só chars de cor/gradiente, nada escapa do
+  style). "voltar ao padrão" agora limpa ordem+ocultos+cores+blocos.
+- 📚 INDICADORES FORMULADOS POR CATEGORIA: o modo "Indicador pronto" do
+  construtor "+" abre com TAXAS PRONTAS por categoria — 🎯 Taxas do funil
+  (taxa de agendamento, comparecimento, taxa de indicação, fechamento,
+  lead→cirurgia), 💰 Financeiro (ticket médio por cirurgia, faturamento
+  por lead/por consulta), 📅 Agenda (faltas %, realização, cirurgias
+  perdidas %) — cada uma com valor AO VIVO do período; 1 clique preenche
+  nome/fórmula/formato/nota. Os números-base do cesto também ganharam
+  categorias (👥 Chegada · 📅 Consultas · 🔪 Cirurgias · 🧭 Funil · 💰).
+  Catálogo READY_FORMULAS no frontend (sem backend novo).
+- 🌟 % DE AGENDAMENTO EM EVIDÊNCIA: o card da linha compacta da Saúde da
+  Agenda foi PROMOVIDO pra fileira principal do painel Agendamento (id
+  booking_rate_30, 2º card por padrão): 77,8% grande, chip julgado pela
+  referência (15% muito bom · 10% bom · 5% fraco), sub "X consultas ÷ Y
+  leads · 30 dias", popup c/ barras leads×consultas 30d + fórmula +
+  referência + "como é calculado". Fixo em 30 dias (não segue a régua)
+  pra taxa ser madura. A linha compacta da Saúde da Agenda saiu (evitar
+  duplicata). Como é card da fileira: dá pra mover, ocultar e colorir.
+- ⠿ TODOS OS BLOCOS MÓVEIS: no modo Organizar, CADA bloco do Meu Painel
+  ganha barrinha "⠿ nome do bloco" e anel tracejado — WhatsApp, Briefing,
+  Radar, Tarefas, Feedback da semana (área de AVISOS, acima do seletor) e
+  Indicadores, Meu desempenho, Dashboard da Agenda, Saúde da Agenda,
+  Metas·Rotinas·Ferramentas, Acesso rápido, Termômetro (área de CONTEÚDO)
+  — vuedraggable com group compartilhado: dá pra reordenar E cruzar bloco
+  de uma área pra outra. Bloco sem conteúdo no momento aparece só como
+  barrinha (dá pra mover mesmo assim). Persistência em
+  agenda_config.block_layout {painel => {top: [], main: []}} (sanitizado,
+  só os 5 painéis fixos); vale pra todo mundo; bloco novo do sistema entra
+  no lugar padrão. Seletor de painel + régua + veredito do gestor +
+  grade do Construtor ficam fixos.
+- ✏️ REFINO "MODO EDIÇÃO" (feedback dele 23/08: "a ideia é essa mas não
+  está funcionando muito bem — botão no topo, estável e funcional"):
+  (1) botão "✏️ Modo edição" AGORA NO TOPO, no cartão de boas-vindas ao
+  lado de "Reportar problema" (admin; vira "✓ Concluir edição") — saiu do
+  card do "+" onde ficava escondido e pulava de lugar; (2) BARRA GRUDADA
+  (sticky top-0) enquanto o modo está ativo: dicas, "salva sozinho",
+  cards ocultos restauráveis, "voltar ao padrão" e "✓ Concluir" sempre à
+  vista em qualquer rolagem (a bandeja antiga sob a fileira saiu);
+  (3) blocos RECOLHEM em barrinhas compactas no modo edição (só a fileira
+  de indicadores fica aberta, que é onde se edita card) — arrasto curto e
+  preciso, sem rolagem infinita no meio do movimento; (4) AUTO-REFRESH DE
+  2min PAUSA durante a edição (um refresh no meio do arrasto trocava as
+  listas do vuedraggable e quebrava o movimento — causa real da
+  instabilidade); ao concluir, refreshAll() busca o que ficou preso;
+  (5) SEM CRUZAR DE ÁREA: cada área (avisos × conteúdo) só aceita os seus
+  blocos (groups separados no vuedraggable) — cruzar deixava a barrinha
+  sem conteúdo na outra área (o template do bloco só existe na área dele);
+  orderedBlocks agora filtra por área e SE AUTO-CORRIGE se o banco tiver
+  bloco na área errada (dado antigo).
+- Testado visualmente no local (conta 3, admin): botão do topo liga/desliga
+  (label muda); barra sticky segue a rolagem; blocos viram barrinhas;
+  arrasto "Indicadores do período" do fim pro meio da área → block_layout
+  salvo E auto-corrigido (indicadores tinha ido parar no top por dado de
+  teste antigo — voltou pro main sozinho); pincel no card % de agendamento
+  → dourado aplicado e salvo (kpi_layout.colors confirmado no banco);
+  construtor com taxas prontas → "Taxa de agendamento" preencheu tudo e
+  mostrou prévia 16,3% (Este ano); popup do card promovido c/ cabeçalho na
+  cor escolhida; Concluir → blocos reabrem na ordem nova. update_agenda 200
+  em todos os saves. Sem migration, sem cron. routes.rb não mudou nesta
+  rodada; settings_controller/api crm.js seguem MISTOS c/ Meta Leads
+  (separar no commit como sempre). Nota local: crm/home demora ~10s no
+  dev porque o health do WhatsApp bate na Meta c/ token inválido —
+  pré-existente, não é desta rodada.
+- PRÓXIMO combinado da conversa: rodada de SEGURANÇA (hardening contra
+  invasão) depois desta.
+- AGUARDANDO "pode subir".
+
+## 144. ✅ POPUP DOS INDICADORES v2 — análise, não só número (aprovado 23/08: "vamos avançar neste sentido")
+- Minha proposta aceita por ele: mini-régua no popup, período anterior
+  sobreposto, linha de meta, decomposição das taxas, ações da empresa no
+  gráfico e tooltip próprio. ("Ver na barra → lista" e modo "ver tudo" +
+  diagnóstico por IA ficaram pra rodada futura.)
+- 🧺 BACKEND (Crm::KpiBagService): cada métrica ganhou prev_series (série
+  do período ANTERIOR balde a balde, baldes próprios em prev_points) e o
+  serviço aceita granularity forçada (day/week/month, validada; sem ela
+  vale o automático). GET home/kpis repassa params[:granularity].
+  bucket_keys parametrizado (since/until). Sem migration, sem cron.
+- 📊 MiniBars v2: série anterior como LINHA tracejada balde a balde
+  (substitui a média reta quando existe), linha de META pontilhada OURO,
+  marcadores 📌 (linha vertical + bolinha no balde da ação) e TOOLTIP
+  PRÓPRIO (hover no mouse, toque no celular — pointerdown só age no touch,
+  senão o clique desmarcava o hover; box com rótulo, valor, anterior c/
+  ▲/▼ e o título da ação 📌). Área de toque = balde inteiro.
+- 🎛 MINI-RÉGUA DO POPUP: chips "Régua de cima · 7 dias · Este mês · Este
+  ano" + balde "Auto · Dia · Semana · Mês" — muda só o gráfico do popup
+  (cesto próprio kpiModalBag), a régua da página fica intacta; delta "▲/▼
+  vs anterior" recalculado pro recorte (deltaLine ganhou o bag como parâm).
+- ⭑ LINHA DE META: fatia da meta MENSAL oficial pela granularidade
+  (dia = meta÷dias do mês; semana = ×7; mês = inteira) nos cards de
+  contagem c/ meta definida (gk em OFFICIAL_GK, não-% só).
+- 🧩 DECOMPOSIÇÃO ("de onde vem"): cards de FÓRMULA mostram as séries das
+  variáveis da conta (variablesIn, até 3); cards fixos de taxa ganharam
+  components[] (Comparecimento = presenças×faltas; Taxa de fechamento e
+  Fechamento de cirurgias = indicações×agendadas; Taxa de agendamento
+  gestor = leads×consultas) — mini-gráficos c/ série anterior junto.
+- 📌 AÇÕES DA EMPRESA (company_actions do PRO MAX, já no settings payload):
+  mapeadas pro balde certo (dia exato / semana / mês) e plotadas em
+  qualquer indicador com série — conecta causa e efeito fora do estúdio.
+- Testado visualmente no local (conta 3, régua Este ano): popup "Novos
+  contatos" por semana c/ linha fantasma + 📌 da ação semeada (10/08);
+  recorte "Este mês" → por dia, curva fantasma do mês anterior dia a dia,
+  delta "▼ 88% vs 08/07–31/07" recalculado; tooltip no balde 10/08 =
+  "10/08 · 0 · anterior: 0 · 📌 Campanha refrativa nova no ar"; card de
+  fórmula "Taxa de agendamento" → decomposição c/ consultas (8) × leads
+  (49). Rubocop: só ParameterLists nova → disable inline no método (já
+  tinha AbcSize/MethodLength). kpis 200 em todos os recortes.
+- AGUARDANDO "pode subir" (junto da 143).
+
+## 145. ✅ DASHBOARD CRM — do número pra AÇÃO (aprovado 23/08: "vamos neste sentido")
+- Minha proposta aceita (itens 1+2+3 da análise): tecnologia 143/144 nos
+  KPIs, dinheiro parado no funil com atalho pro board, perdas com valor/
+  tendência/lista de resgate. (Coortes por safra, comparar períodos,
+  semáforo de desvios, custo por resultado e índice/lazy ficaram pra
+  rodadas futuras.)
+- 🔍 KPIs CLICÁVEIS: componente NOVO reutilizável
+  components-next/cevico/KpiDetailPopup.vue — o motor do popup 144
+  empacotado (busca o próprio cesto no período da tela, mini-régua "Régua
+  da tela · 7d · mês · ano" + balde, MiniBars v2 c/ série fantasma, linha
+  de meta via goalTarget, 📌 company_actions, decomposição via
+  components[], details/about). No Dashboard CRM: "Novas no período"
+  (new_leads + meta), "Valor fechado" (revenue, nota honesta de que card =
+  coorte e gráfico = registrado), "Fechamentos" (match "cirurgia agendada"
+  + meta + indicações) e "Taxa de fechamento" (match + leads/indicações).
+  "Total no funil" e "Tempo médio" ficam sem popup (não têm série).
+  ⚠️ InicioPage mantém a implementação própria do 144 — unificar no
+  componente é refino futuro.
+- 💰 DINHEIRO PARADO: value_by_stage ganhou count/stalled_count/
+  stalled_value (cards c/ COALESCE(stage_moved_at, created_at) > 15 dias —
+  STALLED_AFTER_DAYS). Banner dourado antes do bloco Funil: "R$ X parados
+  em <coluna> · N pacientes há mais de 15 dias" + "Ver no board →" →
+  crm_board?focus_stage=<id>. O board: aplica o período "Este ano" (a
+  janela padrão de 7d esconderia os parados), rola até a coluna
+  (data-stage-id no KanbanColumn via fallthrough, tentativas até as
+  colunas montarem + reforço 1,5s contra reset de re-render) e dá o brilho
+  .cevico-stage-flash (style global no CrmBoard). Colunas
+  realizada/pós/sem indicação ficam fora do aviso (dinheiro lá não está
+  "parado").
+- 🟥 PERDAS v2: payload novo `losses` (build_losses): por etiqueta perda_*
+  → count, prev (período anterior de mesmo tamanho), value (SÓ dos cards
+  c/ valor preenchido — sem estimativa inventada) e value_count; bloco
+  próprio, não disputa o top-12 do by_label. Na tela: ▲/▼ vs anterior
+  (perda subir = vermelho), "% dos leads" (sobre kpis.cohort_total), R$
+  por motivo e total no header. Linha clicável → 🛟 LISTA DE RESGATE:
+  GET pipelines/:id/dashboard/loss_contacts?label=perda_* (rota nova em
+  routes.rb; respeita período + filtro de caixa; até 100, ordem por valor)
+  → modal c/ nome/telefone/coluna/dias parado/valor, clique abre o Espaço
+  do Paciente; dica da Colheitadeira/Tratamento como próximo passo.
+- Testado visualmente no local (conta 3, Este mês): popup "Fechamentos" c/
+  fantasma + 📌 + decomposição de indicações; banner "R$ 3.200 parados em
+  Cirurgia Agendada" → Ver no board abriu Este ano, rolou até a coluna
+  (16 cards, R$ 113.790); perda_valor semeada na Gabriela Almeida (teste)
+  → linha Valor ▲ · 33,3% dos leads · R$ 4.800 → lista de resgate c/ "37d
+  parado". Rubocop: disables inline só nos métodos novos (o arquivo já
+  tinha 79 ofensas pré-existentes). Sem migration, sem cron. ⚠️ routes.rb
+  MEXIDO nesta rodada (rota loss_contacts) — na hora do commit, separar
+  do Meta Leads como sempre (routes/settings_controller/api crm.js).
+- Seeds de teste deixados no local: ação "Campanha refrativa nova no ar"
+  (10/08) e perda_valor na Gabriela Almeida teste (R$ 4.800).
+- AGUARDANDO "pode subir" (junto da 143+144).
