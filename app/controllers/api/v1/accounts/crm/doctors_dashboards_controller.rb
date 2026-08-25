@@ -98,7 +98,7 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
   # normalizada pelo sobrenome/nome e AGREGADA no médico oficial; nomes de
   # fora (ex. médico citado no script) ficam fora do ranking.
   def canonical_doctor(raw)
-    Crm::DoctorNames.canonical(raw)
+    Crm::DoctorNames.canonical(raw, account: Current.account)
   end
 
   def doctors_rows(since, until_at)
@@ -165,7 +165,10 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
   end
 
   # volume de consultas + comparecimento por UNIDADE (Tatuapé / Av. Paulista)
-  UNIT_LABELS = { 'tatuape' => 'Tatuapé', 'paulista' => 'Av. Paulista' }.freeze
+  # nomes das unidades: conta (Personalização) > segmento
+  def unit_labels
+    Crm::SegmentoConta.unit_labels(Current.account)
+  end
 
   def consultations_by_unit(since, until_at)
     scope = consultas(since, until_at)
@@ -175,7 +178,7 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
       missed = u_scope.where(attendance: 'missed').count
       {
         key: unit.presence || 'sem_unidade',
-        label: UNIT_LABELS[unit] || unit.presence || 'Sem unidade',
+        label: unit_labels[unit] || unit.presence || 'Sem unidade',
         count: count,
         attended: attended,
         missed: missed,

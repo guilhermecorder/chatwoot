@@ -32,12 +32,14 @@ class CevicoStockItem < ApplicationRecord
   belongs_to :account
   has_many :orders, class_name: 'CevicoStockOrder', foreign_key: :stock_item_id, dependent: :nullify, inverse_of: :stock_item
 
-  CATEGORIES = {
+  # KEYS fixas (gravadas nos itens); RÓTULOS do segmento (preset clínica
+  # = Lentes/Insumos/Medicamentos, como sempre)
+  CATEGORIES = (Segmento.estoque_categorias.presence || {
     'lentes' => 'Lentes',
     'insumos' => 'Insumos',
     'medicamentos' => 'Medicamentos',
     'outros' => 'Outros'
-  }.freeze
+  }).freeze
 
   validates :name, presence: true
   validates :category, inclusion: { in: CATEGORIES.keys }

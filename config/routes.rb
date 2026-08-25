@@ -243,6 +243,8 @@ Rails.application.routes.draw do
               # OftalmoFácil: conexão nativa (endereço + chave)
               post :update_oftalmofacil
               post :update_agenda
+              # Personalização (sistema coringa): profissionais/unidades/listas/metas
+              post :update_segment
               post :agenda_backfill
               # Configurações → Domínio (público das páginas/formulários)
               get :public_domain

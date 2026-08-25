@@ -108,17 +108,46 @@ module Crm::AiAgentConfig
     agent_config['enabled'] != true
   end
 
-  # prompt do agente (custom ou padrão) SEMPRE com a trava certa no fim:
-  # respondedor (fala com paciente) tem trava própria; os demais, a de leitura
+  # prompt do agente SEMPRE com a trava certa no fim. Ordem de escolha:
+  # custom da conta > prompt do SEGMENTO (config/segmentos/) > padrão
+  # chumbado no serviço (que É o preset da clínica). Respondedor (fala
+  # com o cliente) tem trava própria; os demais, a de leitura.
   def system_prompt
-    base = agent_config['prompt'].presence || self.class::SYSTEM_PROMPT
-    # {{TABELA_DE_PRECOS}} vira a tabela de preços oficial na hora da chamada
-    # (Configurações → Tabela de preços; sem tabela salva = valores padrão)
+    base = agent_config['prompt'].presence ||
+           Segmento.prompt(segment_prompt_key) ||
+           self.class::SYSTEM_PROMPT
+    base = substitute_placeholders(base)
+    responder = RESPONDER_AGENTS.include?(self.class::AGENT_KEY)
+    guard = Segmento.guardrail(respondedor: responder) ||
+            (responder ? RESPONDER_GUARDRAIL : OPERATIONAL_GUARDRAIL)
+    base + guard
+  end
+
+  # chave do serviço nos `prompts:` do segmento (Crm::ConversationInsightService
+  # → 'conversation_insight'); AGENT_KEY não serve — 'sales' e 'pagebuilder'
+  # são compartilhados por 2 serviços cada
+  def segment_prompt_key
+    self.class.name.demodulize.underscore.sub(/_service\z/, '')
+  end
+
+  # {{TABELA_DE_PRECOS}}  → tabela oficial (Configurações → Tabela de preços;
+  #                         sem tabela salva = padrão do segmento)
+  # {{CONTEXTO_DO_NEGOCIO}} → descrição do negócio (CRM → Integrações → IA →
+  #                         Contexto do negócio; senão a do segmento)
+  # {{NOME_DA_EMPRESA}}   → nome da instalação (pacote de marca)
+  def substitute_placeholders(base)
     if base.include?('{{TABELA_DE_PRECOS}}')
       base = base.gsub('{{TABELA_DE_PRECOS}}', Cevico::PriceList.prompt_block(@account))
     end
-    guard = RESPONDER_AGENTS.include?(self.class::AGENT_KEY) ? RESPONDER_GUARDRAIL : OPERATIONAL_GUARDRAIL
-    base + guard
+    if base.include?('{{CONTEXTO_DO_NEGOCIO}}')
+      contexto = ai_config['business_context'].presence || Segmento.contexto_negocio
+      base = base.gsub('{{CONTEXTO_DO_NEGOCIO}}', contexto.to_s)
+    end
+    if base.include?('{{NOME_DA_EMPRESA}}')
+      nome = GlobalConfig.get('INSTALLATION_NAME')['INSTALLATION_NAME'].presence || 'empresa'
+      base = base.gsub('{{NOME_DA_EMPRESA}}', nome)
+    end
+    base
   end
 
   def recommended

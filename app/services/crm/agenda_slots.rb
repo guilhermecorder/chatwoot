@@ -1,30 +1,31 @@
 # Vagas LIVRES da agenda de consultas, calculadas no servidor — mesma conta
 # da Agenda/Meu Painel (janelas dos médicos × consultas marcadas × cadeados).
 # Usado pelo Atendente Instagram para oferecer só horários que existem.
+#
+# Janelas padrão e nomes de unidade vêm do SEGMENTO (config/segmentos/) —
+# espelho do que o frontend (cevicoAgenda.js) usa via window.SEGMENTO.
 module Crm::AgendaSlots
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
-  # espelho do DEFAULT_WINDOWS do frontend (cevicoAgenda.js) — vale enquanto
-  # as janelas não forem editadas na tela (agenda_config['windows'] vazio)
-  DEFAULT_WINDOWS = [
-    { 'dow' => 1, 'unit' => 'paulista', 'doctor' => 'Dr. Gustavo Bittar',   'start' => '08:30', 'end' => '10:00', 'block' => 15 },
-    { 'dow' => 2, 'unit' => 'paulista', 'doctor' => 'Dr. Henrique Gemelli', 'start' => '08:00', 'end' => '11:30', 'block' => 15 },
-    { 'dow' => 2, 'unit' => 'paulista', 'doctor' => 'Dra. Roberta Negri',   'start' => '14:30', 'end' => '16:30', 'block' => 15 },
-    { 'dow' => 3, 'unit' => 'paulista', 'doctor' => 'Dr. Henrique Gemelli', 'start' => '13:00', 'end' => '17:00', 'block' => 15 },
-    { 'dow' => 3, 'unit' => 'tatuape',  'doctor' => 'Dr. Gustavo Bittar',   'start' => '08:30', 'end' => '11:00', 'block' => 10 },
-    { 'dow' => 4, 'unit' => 'paulista', 'doctor' => 'Dr. Gustavo Bittar',   'start' => '08:30', 'end' => '11:00', 'block' => 15 },
-    { 'dow' => 5, 'unit' => 'tatuape',  'doctor' => 'Dra. Roberta Negri',   'start' => '10:30', 'end' => '13:00', 'block' => 10 }
-  ].freeze
-
-  UNIT_LABELS = { 'tatuape' => 'Tatuapé', 'paulista' => 'Av. Paulista' }.freeze
   WEEKDAYS = %w[domingo segunda terça quarta quinta sexta sábado].freeze
 
   module_function
 
+  # vale enquanto as janelas não forem editadas na tela
+  # (agenda_config['windows'] vazio)
+  def default_windows
+    Segmento.janelas_padrao
+  end
+
+  # nomes das unidades: conta (Personalização) > segmento
+  def unit_labels(account = nil)
+    Crm::SegmentoConta.unit_labels(account)
+  end
+
   def windows(account)
     cfg = agenda_config(account)
     saved = Array(cfg['windows'])
-    (saved.presence || DEFAULT_WINDOWS).map do |w|
+    (saved.presence || default_windows).map do |w|
       w.merge('dow' => w['dow'].to_i, 'block' => w['block'].to_i.positive? ? w['block'].to_i : 15)
     end
   end
@@ -76,7 +77,7 @@ module Crm::AgendaSlots
     return 'NENHUM horário livre nos próximos dias — diga que vai verificar com a equipe.' if grouped.empty?
 
     grouped.map do |(date, unit, doctor), list|
-      "#{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{UNIT_LABELS[unit] || unit} · #{doctor}: " +
+      "#{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{unit_labels(account)[unit] || unit} · #{doctor}: " +
         list.map { |s| s[:time] }.join(', ')
     end.join("\n")
   end

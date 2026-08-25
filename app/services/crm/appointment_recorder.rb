@@ -33,7 +33,7 @@ class Crm::AppointmentRecorder
   def self.do_record(account:, result:, contact: nil, conversation: nil, default_unit: nil)
     return :skipped unless result[:found] && result[:starts_at].present?
 
-    name  = result[:name].presence || contact&.name.presence || 'Paciente'
+    name  = result[:name].presence || contact&.name.presence || Segmento.termo_cap(:cliente)
     phone = result[:phone].presence || contact&.phone_number
     unit  = result[:unit].presence || default_unit
     creator = account.administrators.first || account.users.first

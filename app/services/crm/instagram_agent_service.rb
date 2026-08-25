@@ -38,7 +38,7 @@ class Crm::InstagramAgentService
           telefone: { type: 'string' },
           dia: { type: 'string', description: 'YYYY-MM-DD' },
           hora: { type: 'string', description: 'HH:MM' },
-          unidade: { type: 'string', enum: %w[tatuape paulista] },
+          unidade: { type: 'string', enum: Segmento.unidade_keys },
           procedimento: { type: 'string' }
         },
         required: %w[nome telefone dia hora unidade procedimento],
@@ -144,6 +144,13 @@ class Crm::InstagramAgentService
     @account = conversation.account
   end
 
+  # schema com as unidades DA CONTA no enum (Personalização > segmento)
+  def output_schema
+    schema = Marshal.load(Marshal.dump(OUTPUT_SCHEMA))
+    schema[:properties][:agendamento][:properties][:unidade][:enum] = Crm::SegmentoConta.unidade_keys(@account)
+    schema
+  end
+
   def call
     return { error: 'Atendente Instagram desligado.' } if agent_paused?
     return { error: 'Configure a chave da API em Integrações → Claude.' } if api_key.blank?
@@ -155,7 +162,7 @@ class Crm::InstagramAgentService
       model: model,
       max_tokens: 2048,
       system_: system_prompt,
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      output_config: output_config_for({ type: 'json_schema', schema: output_schema }),
       messages: [{ role: 'user', content: context_block + transcript }]
     )
     record_usage(message)

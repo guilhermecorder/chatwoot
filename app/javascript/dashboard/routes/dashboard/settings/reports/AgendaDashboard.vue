@@ -5,6 +5,7 @@
 import { ref } from 'vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import AgendaDashboardCore from 'dashboard/components-next/cevico/AgendaDashboardCore.vue';
+import { termo } from 'dashboard/helper/segmento';
 
 const period = ref({ preset: 'month', from: '', to: '' });
 </script>
@@ -19,7 +20,7 @@ const period = ref({ preset: 'month', from: '', to: '' });
         </span>
         <div class="flex-1 min-w-0">
           <h1 class="text-lg font-bold text-n-slate-12">Dashboard da Agenda</h1>
-          <p class="text-xs text-n-slate-10">comparecimento · modalidades · médicos · unidades · cirurgias · ocupação</p>
+          <p class="text-xs text-n-slate-10">comparecimento · modalidades · {{ termo('profissionais') }} · unidades · {{ termo('vendas') }} · ocupação</p>
         </div>
       </div>
 

@@ -1,0 +1,240 @@
+# ═══════════════════════════════════════════════════════════════════
+# SEGMENTO: CLÍNICA OFTALMOLÓGICA — a pré-seleção de fábrica.
+#
+# Este pacote guarda EXATAMENTE os valores que sempre estiveram
+# chumbados no código (médicos, unidades, janelas, termos, preços).
+# Sem SEGMENTO no ambiente e sem `segmento:` na marca, é ele que vale —
+# ou seja, a CEVICO continua idêntica ao que sempre foi.
+#
+# Os prompts dos robôs NÃO ficam aqui de propósito: os SYSTEM_PROMPT
+# chumbados nos serviços SÃO o preset da clínica (fonte única, sem
+# risco de divergência). Outros segmentos sobrescrevem em `prompts:`.
+# ═══════════════════════════════════════════════════════════════════
+id: clinica
+nome: 'Clínica oftalmológica'
+
+# Como este mercado chama cada papel/evento do sistema.
+# As CHAVES são os conceitos genéricos; os VALORES, a voz do segmento.
+termos:
+  cliente: paciente
+  clientes: pacientes
+  profissional: médico
+  profissionais: médicos
+  atendimento: consulta
+  atendimentos: consultas
+  venda: cirurgia
+  vendas: cirurgias
+  empresa: clínica
+  unidade: unidade
+  unidades: unidades
+
+# Rótulos compostos (onde gênero/concordância mudam entre segmentos).
+frases:
+  novo_atendimento: 'Nova consulta'
+  agendar_venda: 'Agendar cirurgia'
+  agenda_atendimentos: 'Agenda de Consultas'
+  agenda_vendas: 'Agenda de Cirurgias'
+  espaco_cliente: 'Espaço do Paciente'
+  espaco_profissional: 'Espaço do Médico'
+  janelas_profissionais: 'Janelas dos médicos'
+  janelas_avaliacao: 'Janelas de avaliação dos médicos'
+  sem_agenda_avaliacao: 'Sem agenda de avaliação'
+  dashboard_profissionais: 'Dashboard dos Médicos'
+  atendimento_atualizado: 'Consulta atualizada'
+  atendimento_removido: 'Consulta removida'
+  venda_marcada: 'Cirurgia agendada 🔪'
+  erro_salvar_atendimento: 'Erro ao salvar a consulta.'
+  erro_remover_atendimento: 'Erro ao remover a consulta.'
+  indicacao_venda: 'Indicação de cirurgia'
+  vendas_realizadas: 'Cirurgias realizadas'
+  vendas_agendadas: 'Cirurgias agendadas'
+  atendimentos_periodo: 'Consultas no período'
+  atendimentos_agendados: 'Consultas agendadas'
+  conversao_venda: 'Conversão em cirurgia'
+  fechamento_vendas: 'Fechamento de cirurgias'
+  indicacoes_venda: 'Indicações de cirurgia'
+  trilho_vendas: 'Trilho de cirurgias'
+  sala_execucao: 'Sala cirúrgica'
+  tipo_atendimento: 'Tipo de consulta'
+  conferencia_atendimentos: 'Consultas'
+  conferencia_vendas: 'Cirurgias'
+  atendimento_agendado: 'Consulta agendada'
+  venda_atualizada: 'Cirurgia atualizada'
+  compareceu_marcar_indicacao: '✓ Compareceu — agora marque se houve indicação de cirurgia.'
+  veio_nao_fez: 'Registrado: o paciente veio, mas a cirurgia não aconteceu.'
+  academia: 'Academia CEVICO'
+  impressao_titulo: 'CEVICO — Consultas'
+  todos_atendimentos: 'Todas as consultas'
+  desc_painel_fechamento: 'fechamento e pós-operatório'
+  com_indicacao_venda: 'Com indicação de cirurgia'
+  vendas_fechadas: 'Cirurgias fechadas'
+  sub_saidos_indicados: 'saíram da consulta indicados'
+  sub_coluna_venda: 'coluna Cirurgia Agendada (CRM)'
+  indicacao_impressao: 'Cirurgia indicada'
+  atendimento_agendado_ia: 'Consulta agendada pela IA'
+  atendimento_reagendado_ia: 'Consulta REAGENDADA pela IA'
+  confirmar_atendimento: 'Confirmar consulta'
+
+# Os "médicos" do segmento: nome oficial + apelido curto + cor +
+# grafias toleradas (o campo doctor das tasks é texto livre).
+profissionais:
+  - nome: 'Dr. Gustavo Bittar'
+    apelido: 'Gustavo'
+    cor: '#0F5FA6'
+    grafias: 'gustavo|bittar'
+  - nome: 'Dr. Henrique Gemelli'
+    apelido: 'Henrique'
+    cor: '#B8860B'
+    grafias: 'henrique|gemelli'
+  - nome: 'Dra. Roberta Negri'
+    apelido: 'Roberta'
+    cor: '#7C3AED'
+    grafias: 'roberta|negri'
+
+# Unidades (agendas paralelas). key é o valor gravado nas tasks —
+# NUNCA renomeie a key de uma unidade com dados já gravados.
+unidades:
+  - key: tatuape
+    nome: 'Tatuapé'
+    cor: '#2563EB'
+    endereco: 'R. Serra de Botucatu, 880 – 4º andar, próximo à estação Carrão'
+  - key: paulista
+    nome: 'Av. Paulista'
+    cor: '#EA580C'
+    endereco: 'Av. Paulista, 1499 – 9º andar (acesso: Alameda Casa Branca, 35), próximo à estação Trianon-MASP'
+
+# Janelas padrão de agenda — valem enquanto o admin não editar as dele
+# em Agenda → "Janelas dos médicos" (crm_settings.agenda_config.windows).
+# dow: 0=Dom … 6=Sáb; end é exclusivo (último bloco = end - block).
+janelas_padrao:
+  - { dow: 1, unit: paulista, doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '10:00', block: 15 }
+  - { dow: 2, unit: paulista, doctor: 'Dr. Henrique Gemelli', turno: 'Manhã', start: '08:00', end: '11:30', block: 15 }
+  - { dow: 2, unit: paulista, doctor: 'Dra. Roberta Negri',   turno: 'Tarde', start: '14:30', end: '16:30', block: 15 }
+  - { dow: 3, unit: paulista, doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '13:00', end: '17:00', block: 15 }
+  - { dow: 3, unit: tatuape,  doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 10 }
+  - { dow: 4, unit: paulista, doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 15 }
+  - { dow: 5, unit: tatuape,  doctor: 'Dra. Roberta Negri',   turno: 'Manhã', start: '10:30', end: '13:00', block: 10 }
+
+# Modalidades de atendimento. As KEYS são gravadas nas tasks (modality) —
+# mude os labels à vontade, nunca as keys.
+modalidades:
+  - { key: avaliacao, label: 'Avaliação', cor: '#0F5FA6' }
+  - { key: retorno,   label: 'Retorno',   cor: '#D4A017' }
+  - { key: exames,    label: 'Exames',    cor: '#7C3AED' }
+
+# Motivo/problema do atendimento (seletor da Agenda).
+problemas:
+  - 'Catarata'
+  - 'Refrativa'
+  - 'Ceratocone'
+  - 'Lentes Fácicas'
+  - 'Exames'
+  - 'Consulta geral'
+  - 'Pós-operatório'
+  - 'Plástica ocular'
+
+# O que pode ser indicado/vendido na conferência do dia.
+procedimentos:
+  - 'Catarata'
+  - 'Refrativa PRK'
+  - 'Refrativa Lasik'
+  - 'Lente Fácica'
+  - 'Lente de Foco Estendido'
+  - 'Trifocal'
+  - 'Anel de Ferrara'
+  - 'Pterígio'
+  - 'Capsulotomia YAG'
+  - 'Outro'
+
+# Tabela de preços padrão (Configurações → Tabela de preços sobrepõe).
+precos:
+  - { group: 'Refrativa (2 olhos)', name: 'PRK',              price: 4900 }
+  - { group: 'Refrativa (2 olhos)', name: 'Lasik',            price: 5700 }
+  - { group: 'Catarata (por olho)', name: 'Nacional',         price: 2800 }
+  - { group: 'Catarata (por olho)', name: 'Mono Rayner',      price: 3200 }
+  - { group: 'Catarata (por olho)', name: 'Tórica monofocal', price: 5600 }
+  - { group: 'Catarata (por olho)', name: 'Foco estendido',   price: 5690 }
+  - { group: 'Catarata (por olho)', name: 'Trifocal',         price: 8490 }
+  - { group: 'Catarata (por olho)', name: 'Galaxy',           price: 14990 }
+  - { group: 'Fácica',              name: 'Artisan',          price: 11900 }
+
+# Metas de referência dos painéis.
+metas:
+  vendas_mes: 100
+
+# Nome de quem cuida de cada painel do Início (vazio = sem nome exibido).
+paineis:
+  agendamento: 'Vaneide'
+  conducao: 'Elizangela'
+  fechamento: 'Gabriela'
+
+# Jornada padrão do Painel Estratégico (nasce pronta na primeira visita).
+jornada:
+  id: 'jornada-padrao'
+  nome: 'Jornada do paciente (padrão)'
+  emoji: '🏥'
+  etapas:
+    - { id: p1, titulo: 'Agendamento', desc: 'Lead atendido no WhatsApp e consulta marcada na Agenda.', handoff: 'Confirmação enviada; card vai para "Consulta Confirmada".' }
+    - { id: p2, titulo: 'Comparecimento', desc: 'Recepção confirma a chegada; conferência do dia marca Compareceu/Faltou.', handoff: 'Quem faltou entra na régua de reagendamento.' }
+    - { id: p3, titulo: 'Consulta', desc: 'Avaliação com o médico; anotações clínicas no Espaço do Paciente.', handoff: 'Médico registra a conduta: indicação de cirurgia ou não.' }
+    - { id: p4, titulo: 'Indicação de cirurgia (ou não)', desc: 'Com indicação: orçamento oficial pela tabela de preços. Sem indicação: orientação e retorno.', handoff: 'Card vai para "Indicação de Cirurgia" e o fechamento assume.' }
+    - { id: p5, titulo: 'Fechamento (ou não)', desc: 'Negociação com o mapa de objeções e o script validado; agendar a cirurgia.', handoff: 'Fechou: Agenda de Cirurgias. Não fechou: régua "Não Fechou Ainda".' }
+
+# Pilares padrão do Painel Estratégico.
+pilares:
+  - { nome: 'Aquisição de Pacientes', subtitulo: 'Marketing e vendas — do anúncio ao agendamento', emoji: '🧲', cor: navy, posicao: 0 }
+  - { nome: 'Operação Clínica', subtitulo: 'Exames, consultas (avaliação e pós-operatório) e procedimentos cirúrgicos', emoji: '🏥', cor: emerald, posicao: 1 }
+  - { nome: 'Financeiro & Tributário', subtitulo: 'Caixa, custos, impostos e margem', emoji: '💰', cor: gold, posicao: 2 }
+
+# Rótulos dos indicadores do Painel de Metas (keys nunca mudam).
+indicadores:
+  new_leads: 'Novos leads'
+  appointments_booked: 'Consultas agendadas'
+  consultations_attended: 'Consultas realizadas'
+  surgeries_booked: 'Cirurgias agendadas'
+  surgeries_done: 'Cirurgias realizadas'
+  revenue_closed: 'Valor fechado (R$)'
+indicadores_percentuais:
+  rate_scheduling: '% de agendamento (lead → consulta)'
+  rate_attendance: '% de comparecimento (agendada → realizada)'
+  rate_surgery: '% de conversão (consulta → cirurgia)'
+
+# Subcategorias financeiras (keys gravadas nos lançamentos — não mudar).
+financeiro_categorias:
+  receita:
+    consultas: 'Consultas'
+    cirurgias: 'Cirurgias'
+    exames: 'Exames'
+    convenios: 'Convênios'
+    outras: 'Outras receitas'
+  tributo:
+    impostos: 'Impostos'
+    taxas: 'Taxas e contribuições'
+    outros: 'Outros tributos'
+  custo:
+    servicos: 'Serviços'
+    comissoes: 'Comissões'
+    distribuicao_lucros: 'Distribuição de lucros'
+    servicos_medicos: 'Serviços médicos'
+    sala_cirurgica: 'Sala cirúrgica'
+    outros: 'Outros custos'
+  investimento_produto:
+    lentes: 'Lentes'
+    insumos: 'Insumos'
+    medicamentos: 'Medicamentos'
+    estoque: 'Estoque geral'
+  investimento_equipamento:
+    equipamentos: 'Equipamentos'
+    manutencao: 'Manutenção'
+    tecnologia: 'Tecnologia & software'
+
+# Categorias do estoque (keys gravadas nos itens — não mudar).
+estoque_categorias:
+  lentes: 'Lentes'
+  insumos: 'Insumos'
+  medicamentos: 'Medicamentos'
+  outros: 'Outros'
+
+# contexto extra p/ {{CONTEXTO_DO_NEGOCIO}} — a clínica não precisa:
+# os prompts chumbados já carregam todo o contexto da CEVICO.
+contexto: ''

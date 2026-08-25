@@ -38,7 +38,9 @@ class CevicoFinanceEntry < ApplicationRecord
     'investimento_equipamento' => 'Equipamentos'
   }.freeze
 
-  CATEGORIES = {
+  # KEYS fixas (gravadas nos lançamentos); RÓTULOS do segmento (preset
+  # clínica = Consultas/Cirurgias/Lentes, como sempre)
+  CATEGORIES = (Segmento.financeiro_categorias.presence || {
     'receita' => {
       'consultas' => 'Consultas',
       'cirurgias' => 'Cirurgias',
@@ -70,7 +72,7 @@ class CevicoFinanceEntry < ApplicationRecord
       'manutencao' => 'Manutenção',
       'tecnologia' => 'Tecnologia & software'
     }
-  }.freeze
+  }).freeze
 
   validates :entry_date, presence: true
   validates :kind, inclusion: { in: KINDS.keys }

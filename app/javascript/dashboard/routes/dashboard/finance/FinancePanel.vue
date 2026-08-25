@@ -13,6 +13,7 @@ import StockTab from './StockTab.vue';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { termo } from 'dashboard/helper/segmento';
 import {
   Chart as ChartJS,
   Tooltip, Legend,
@@ -383,7 +384,7 @@ const compareCosts = computed(() => {
         <div class="relative z-10" style="color: #fff">
           <h1 class="text-2xl sm:text-3xl font-bold leading-tight" style="color: #fff">Gestão Financeira</h1>
           <p class="text-sm mt-1.5" style="color: rgba(255,255,255,0.85)">
-            Receitas, tributos, custos e investimentos — a saúde do caixa da CEVICO, com histórico e comparação de meses.
+            Receitas, tributos, custos e investimentos — a saúde do caixa da {{ termo('empresa') }}, com histórico e comparação de meses.
           </p>
         </div>
         <span class="i-lucide-wallet absolute -right-5 -bottom-7 text-[140px] text-white/10" />

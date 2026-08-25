@@ -8,10 +8,16 @@ import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useStore, useMapGetter } from 'dashboard/composables/store';
 import CrmAPI from 'dashboard/api/crm';
-import { DOCTORS } from 'dashboard/helper/cevicoAgenda';
+import { resolveDoctors } from 'dashboard/helper/cevicoAgenda';
+import { frase } from 'dashboard/helper/segmento';
 
 const { isAdmin } = useAdmin();
+const store = useStore();
+const crmSettings = useMapGetter('crm/getSettings');
+// profissionais da conta (Personalização) > segmento > preset clínica
+const DOCTORS = computed(() => resolveDoctors(crmSettings.value));
 const isLoading = ref(true);
 const data = ref(null);
 
@@ -35,7 +41,7 @@ const hydrateProfiles = src => {
     out[name] = { ...emptyProfile(), ...p, strengths: [...(p.strengths || [])], weaknesses: [...(p.weaknesses || [])] };
   });
   // médicos oficiais + os que aparecem nos números já nascem com perfil
-  [...DOCTORS.map(d => d.name), ...(data.value?.doctors || []).map(r => r.doctor)].forEach(n => {
+  [...DOCTORS.value.map(d => d.name), ...(data.value?.doctors || []).map(r => r.doctor)].forEach(n => {
     if (n && !out[n]) out[n] = emptyProfile();
   });
   return out;
@@ -126,7 +132,7 @@ const fetchData = async () => {
 
 watch(period, fetchData, { deep: true });
 
-const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
+const doctorColor = name => DOCTORS.value.find(d => d.name === name)?.color || '#64748B';
 const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}º`;
 const fmtBRL = v =>
   Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
@@ -154,6 +160,7 @@ const totals = computed(() => {
 onMounted(() => {
   fetchData();
   goals.load();
+  if (!crmSettings.value?.segment) store.dispatch('crm/fetchSettings').catch(() => {});
 });
 </script>
 
@@ -166,7 +173,7 @@ onMounted(() => {
           <span class="i-lucide-stethoscope text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Dashboard dos Médicos</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">{{ frase('dashboard_profissionais', 'Dashboard dos Médicos') }}</h1>
           <p class="text-xs text-n-slate-10">quem mais converte consulta em cirurgia · indicações · NPS · cirurgias por clínica</p>
         </div>
       </div>

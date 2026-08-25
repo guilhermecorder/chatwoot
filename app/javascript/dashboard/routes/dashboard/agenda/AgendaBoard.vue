@@ -18,9 +18,11 @@ import {
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import {
-  DOCTORS, MODALITIES, resolveWindows, resolveBlocked, resolveBlockedDays,
-  resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
+  MODALITIES, resolveDoctors, resolveUnits, resolveSegmentList, resolveWindows,
+  resolveBlocked, resolveBlockedDays, resolveSurgeryWindows,
+  slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
+import { termoCap, frase, listaSegmento } from 'dashboard/helper/segmento';
 import { ALL_THEMES, resolveTheme } from 'dashboard/helper/cevicoThemes';
 
 const store = useStore();
@@ -198,26 +200,29 @@ const VIEW_MODES = [
   { key: 'custom', label: 'Personalizado', icon: 'i-lucide-calendar-search' },
 ];
 
-// Unidades da clínica (agendas paralelas compartilhadas)
-const UNITS = {
-  tatuape:  { label: 'Tatuapé',      color: '#2563EB' },
-  paulista: { label: 'Av. Paulista', color: '#EA580C' },
-};
+// Unidades (agendas paralelas compartilhadas) — conta > segmento.
+// (computed lê crmSettings, declarado logo abaixo; avaliação é preguiçosa)
+const unitsList = computed(() => resolveUnits(crmSettings.value));
+const UNITS = computed(() =>
+  Object.fromEntries(unitsList.value.map(u => [u.key, { label: u.nome, color: u.cor || '#64748B' }]))
+);
 
-const PROBLEMAS = [
+// motivo do atendimento — conta > segmento (preset clínica = patologias)
+const PROBLEMAS = computed(() => resolveSegmentList(crmSettings.value, 'problemas', listaSegmento('problemas', [
   'Catarata', 'Refrativa', 'Ceratocone', 'Lentes Fácicas',
   'Exames', 'Consulta geral', 'Pós-operatório', 'Plástica ocular',
-];
+])));
 
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 07h às 20h (grade do DIA)
 // item 76: a SEMANA mostra só o expediente real (08h às 18h), espichada
 const WEEK_HOURS = Array.from({ length: 11 }, (_, i) => i + 8);
 
-// ── Médicos e janelas de avaliação da clínica ───────────────
-// (DOCTORS/DEFAULT_WINDOWS/slotsFor vivem em helper/cevicoAgenda.js,
-// compartilhados com os indicadores do Meu Painel)
+// ── Profissionais e janelas de avaliação ────────────────────
+// (resolvers vivem em helper/cevicoAgenda.js, compartilhados com os
+// indicadores do Meu Painel; conta > segmento > preset clínica)
+const DOCTORS = computed(() => resolveDoctors(crmSettings.value));
 const doctorColor = name =>
-  DOCTORS.find(d => d.name === name)?.color || '#64748B';
+  DOCTORS.value.find(d => d.name === name)?.color || '#64748B';
 
 const WEEKDAY_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -318,7 +323,8 @@ const startEditWindows = () => {
 
 const addWindow = () => {
   editWindows.value.push({
-    dow: 1, unit: 'paulista', doctor: DOCTORS[0].name,
+    dow: 1, unit: unitsList.value[unitsList.value.length - 1]?.key || '',
+    doctor: DOCTORS.value[0]?.name || '',
     turno: 'Manhã', start: '08:00', end: '11:00', block: 15,
   });
 };
@@ -334,7 +340,7 @@ const saveWindows = async () => {
     await CrmAPI.updateAgendaWindows(clean);
     await store.dispatch('crm/fetchSettings');
     isEditingWindows.value = false;
-    useAlert('Janelas dos médicos salvas!');
+    useAlert(`${frase('janelas_profissionais', 'Janelas dos médicos')} salvas!`);
   } catch {
     useAlert('Erro ao salvar as janelas.');
   } finally {
@@ -587,7 +593,7 @@ const displayName = task => (task.title || '').replace(/^Consulta:\s*/i, '');
 const chipTime = task =>
   new Date(task.due_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const unitOf = task => {
-  if (task.unit && UNITS[task.unit]) return UNITS[task.unit];
+  if (task.unit && UNITS.value[task.unit]) return UNITS.value[task.unit];
   if (isSurgeryTask(task)) {
     const loc = surgeryLocationOf(task);
     if (loc) return { label: loc.label, color: loc.color || SURGERY_COLOR };
@@ -683,7 +689,7 @@ const winColor = win =>
     ? doctorColor(win.doctor)
     : surgeryLocations.value.find(l => l.key === win.unit)?.color || SURGERY_COLOR;
 const winTitle = win => win.doctor || `Sala cirúrgica — ${surgeryLocationLabel(win.unit)}`;
-const winUnitLabel = win => (win.doctor ? UNITS[win.unit]?.label : surgeryLocationLabel(win.unit));
+const winUnitLabel = win => (win.doctor ? UNITS.value[win.unit]?.label : surgeryLocationLabel(win.unit));
 
 const winOccupancy = (day, win) => {
   const slots = slotsFor(win).filter(s => !isBlocked(day, win, s));
@@ -713,7 +719,7 @@ const kpiByUnitMonth = computed(() => {
   );
   const keys = isSurgeryMode.value
     ? surgeryLocations.value.map(l => l.key)
-    : Object.keys(UNITS);
+    : Object.keys(UNITS.value);
   return Object.fromEntries(
     keys.map(key => [key, inCursorMonth.filter(x => x.unit === key).length])
   );
@@ -761,7 +767,7 @@ const emptyForm = (day, prefill = {}) => ({
   date: format(day || cursor.value, 'yyyy-MM-dd'),
   time: prefill.time || '09:00',
   unit: prefill.unit ||
-    (isSurgeryMode.value ? surgeryLocations.value[0]?.key : activeUnit.value || 'tatuape') || '',
+    (isSurgeryMode.value ? surgeryLocations.value[0]?.key : activeUnit.value || unitsList.value[0]?.key) || '',
   status: 'todo',
   canceled: false,
   description: prefill.description || '',
@@ -847,14 +853,18 @@ const save = async () => {
     };
     if (editingTask.value) {
       await store.dispatch('tasks/update', { id: editingTask.value.id, ...payload });
-      useAlert(isSurgeryTask(payload) ? 'Cirurgia atualizada' : 'Consulta atualizada');
+      useAlert(isSurgeryTask(payload)
+        ? frase('venda_atualizada', 'Cirurgia atualizada')
+        : frase('atendimento_atualizado', 'Consulta atualizada'));
     } else {
       await store.dispatch('tasks/create', payload);
-      useAlert(isSurgeryMode.value ? 'Cirurgia agendada 🔪' : 'Consulta agendada');
+      useAlert(isSurgeryMode.value
+        ? frase('venda_marcada', 'Cirurgia agendada 🔪')
+        : frase('atendimento_agendado', 'Consulta agendada'));
     }
     showModal.value = false;
   } catch {
-    useAlert('Erro ao salvar a consulta.');
+    useAlert(frase('erro_salvar_atendimento', 'Erro ao salvar a consulta.'));
   } finally {
     isSaving.value = false;
   }
@@ -865,9 +875,9 @@ const removeTask = async () => {
   try {
     await store.dispatch('tasks/remove', editingTask.value.id);
     showModal.value = false;
-    useAlert('Consulta removida');
+    useAlert(frase('atendimento_removido', 'Consulta removida'));
   } catch {
-    useAlert('Erro ao remover a consulta.');
+    useAlert(frase('erro_remover_atendimento', 'Erro ao remover a consulta.'));
   }
 };
 
@@ -875,11 +885,11 @@ const removeTask = async () => {
 // Marcar reflete no CRM: o card do paciente move para a coluna configurada
 // (modal "Janelas dos médicos" → Conferência do dia) e as automações da
 // coluna de destino disparam (régua de conversão/reagendamento).
-const PROCEDURES = [
+const PROCEDURES = computed(() => resolveSegmentList(crmSettings.value, 'procedimentos', listaSegmento('procedimentos', [
   'Catarata', 'Refrativa PRK', 'Refrativa Lasik', 'Lente Fácica',
   'Lente de Foco Estendido', 'Trifocal', 'Anel de Ferrara', 'Pterígio',
   'Capsulotomia YAG', 'Outro',
-];
+])));
 const savingAttendanceId = ref(0);
 const indicationPickerId = ref(0); // consulta com o seletor de procedimento aberto
 
@@ -899,7 +909,7 @@ const setAttendance = async (task, value) => {
       indicationPickerId.value = 0;
     }
     await store.dispatch('tasks/update', payload);
-    if (next === 'attended') useAlert('✓ Compareceu — agora marque se houve indicação de cirurgia.');
+    if (next === 'attended') useAlert(frase('compareceu_marcar_indicacao', '✓ Compareceu — agora marque se houve indicação de cirurgia.'));
     else if (next === 'missed') useAlert('✗ Falta registrada — card movido no CRM (se a coluna estiver configurada).');
   } catch {
     useAlert('Erro ao registrar a conferência.');
@@ -924,7 +934,7 @@ const setIndication = async (task, value, procedure = null) => {
       indicated_procedure: next === 'indicated' ? procedure : null,
     });
     indicationPickerId.value = 0;
-    if (next === 'indicated') useAlert(`🎯 Cirurgia de ${procedure} indicada — card movido no CRM (se configurado).`);
+    if (next === 'indicated') useAlert(`🎯 ${termoCap('venda')} de ${procedure} indicada — card movido no CRM (se configurado).`);
   } catch {
     useAlert('Erro ao registrar a indicação.');
   } finally {
@@ -957,7 +967,7 @@ const confirmNoSurgery = async task => {
         : task.description,
     });
     noSurgeryReasonId.value = 0;
-    useAlert('Registrado: o paciente veio, mas a cirurgia não aconteceu.');
+    useAlert(frase('veio_nao_fez', 'Registrado: o paciente veio, mas a cirurgia não aconteceu.'));
   } catch {
     useAlert('Erro ao registrar.');
   } finally {
@@ -1049,7 +1059,7 @@ const saveAttendanceStages = async () => {
 const printDayList = () => {
   const day = cursor.value;
   const list = [...dayViewTasks.value].sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
-  const title = `CEVICO — Consultas de ${day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}`;
+  const title = `${frase('impressao_titulo', 'CEVICO — Consultas')} de ${day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}`;
   const esc = s => String(s ?? '').replace(/</g, '&lt;');
   const rows = list.map(t => `
     <tr>
@@ -1081,8 +1091,8 @@ const printDayList = () => {
     <h1>${title}</h1>
     <p class="sub">${list.length} consulta(s) · Conferência do fim do dia: marque Compareceu, Faltou e Cirurgia indicada — depois registre no sistema (Agenda → visão Dia).</p>
     <table><thead><tr>
-      <th>Hora</th><th>Paciente</th><th>Telefone</th><th>Problema</th><th>Médico</th><th>Unidade</th><th>Observações</th>
-      <th>Compareceu</th><th>Faltou</th><th>Cirurgia indicada</th>
+      <th>Hora</th><th>${termoCap('cliente')}</th><th>Telefone</th><th>Problema</th><th>${termoCap('profissional')}</th><th>${termoCap('unidade')}</th><th>Observações</th>
+      <th>Compareceu</th><th>Faltou</th><th>${frase('indicacao_impressao', 'Cirurgia indicada')}</th>
     </tr></thead><tbody>${rows}</tbody></table>
     <script>window.onload = () => window.print();<\/script>
     </body></html>`;
@@ -1141,8 +1151,8 @@ const onDropCell = (day, hour) => {
               v-if="isSurgeryMode"
               class="bg-clip-text text-transparent"
               :style="{ backgroundImage: theme.key === 'cevico' ? 'linear-gradient(135deg, #0369A1, #38BDF8)' : theme.primary }"
-            >Agenda de Cirurgias</span>
-            <template v-else>Agenda de Consultas</template>
+            >{{ frase('agenda_vendas', 'Agenda de Cirurgias') }}</span>
+            <template v-else>{{ frase('agenda_atendimentos', 'Agenda de Consultas') }}</template>
           </h1>
           <button
             class="flex items-center justify-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-white hover:opacity-90 transition-opacity shadow w-fit"
@@ -1151,7 +1161,7 @@ const onDropCell = (day, hour) => {
             @click="openCreateOnDay(new Date())"
           >
             <span class="i-lucide-plus text-sm" />
-            {{ isSurgeryMode ? 'Agendar cirurgia' : 'Nova consulta' }}
+            {{ isSurgeryMode ? frase('agendar_venda', 'Agendar cirurgia') : frase('novo_atendimento', 'Nova consulta') }}
           </button>
         </div>
 
@@ -1296,11 +1306,11 @@ const onDropCell = (day, hour) => {
           <button
             v-if="!isSurgeryMode"
             class="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors whitespace-nowrap"
-            title="Janelas de avaliação dos médicos"
+            :title="frase('janelas_avaliacao', 'Janelas de avaliação dos médicos')"
             @click="showWindowsModal = true"
           >
             <span class="i-lucide-clock text-sm" />
-            Janelas dos médicos
+            {{ frase('janelas_profissionais', 'Janelas dos médicos') }}
           </button>
           <button
             v-else
@@ -1316,11 +1326,11 @@ const onDropCell = (day, hour) => {
             v-model="view"
             class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
           >
-            <option value="clinic">Todas as consultas</option>
+            <option value="clinic">{{ frase('todos_atendimentos', 'Todas as consultas') }}</option>
             <optgroup label="Unidades">
               <option v-for="(u, key) in UNITS" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
             </optgroup>
-            <optgroup label="Médicos">
+            <optgroup :label="termoCap('profissionais')">
               <option v-for="d in DOCTORS" :key="d.name" :value="`doctor:${d.name}`">{{ d.name }}</option>
             </optgroup>
             <option value="me">Minha agenda pessoal</option>
@@ -1341,7 +1351,7 @@ const onDropCell = (day, hour) => {
           :style="view === 'clinic' ? { background: isSurgeryMode ? surgeryGrad : theme.pill, color: isSurgeryMode ? surgeryInk : '#fff' } : {}"
           @click="view = 'clinic'"
         >
-          {{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}
+          {{ isSurgeryMode ? 'Todos os locais' : `Toda a ${termo('empresa')}` }}
         </button>
         <template v-if="!isSurgeryMode">
           <button
@@ -1646,7 +1656,7 @@ const onDropCell = (day, hour) => {
               >
                 {{ day.getDate() }}
               </span>
-              <span v-if="isDayOff(day)" class="i-lucide-lock text-[10px]" :class="isDayBlocked(day) ? 'text-red-400' : 'text-n-slate-8'" :title="isDayBlocked(day) ? 'Dia fechado' : 'Sem agenda de avaliação'" />
+              <span v-if="isDayOff(day)" class="i-lucide-lock text-[10px]" :class="isDayBlocked(day) ? 'text-red-400' : 'text-n-slate-8'" :title="isDayBlocked(day) ? 'Dia fechado' : frase('sem_agenda_avaliacao', 'Sem agenda de avaliação')" />
               <span v-else class="flex items-center gap-0.5">
                 <span
                   v-for="w in windowsForDay(day)"
@@ -2205,11 +2215,11 @@ const onDropCell = (day, hour) => {
             <button
               v-if="editingTask?.contact_id"
               class="flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 hover:text-n-brand"
-              title="Abrir o Espaço do Paciente"
+              :title="`Abrir o ${frase('espaco_cliente', 'Espaço do Paciente')}`"
               @click="openPatientSpace(editingTask)"
             >
               <PatientSpaceIcon :size="18" />
-              Espaço do Paciente
+              {{ frase('espaco_cliente', 'Espaço do Paciente') }}
             </button>
             <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showModal = false" />
           </div>
@@ -2226,7 +2236,7 @@ const onDropCell = (day, hour) => {
           </div>
           <!-- Modalidade — só no trilho de consultas -->
           <div v-if="!isSurgeryMode">
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Tipo de consulta</label>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">{{ frase('tipo_atendimento', 'Tipo de consulta') }}</label>
             <div class="flex gap-1.5">
               <button
                 v-for="m in MODALITIES"
@@ -2279,7 +2289,7 @@ const onDropCell = (day, hour) => {
               />
             </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">Médico</label>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ termoCap('profissional') }}</label>
               <select
                 v-model="form.doctor"
                 class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -2541,7 +2551,7 @@ const onDropCell = (day, hour) => {
         <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
           <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
             <span class="i-lucide-clock text-n-brand" />
-            Janelas de avaliação dos médicos
+            {{ frase('janelas_avaliacao', 'Janelas de avaliação dos médicos') }}
           </h2>
           <div class="flex items-center gap-2">
             <button
@@ -2574,14 +2584,14 @@ const onDropCell = (day, hour) => {
                   ? 'text-green-600 border-green-500/40 hover:bg-green-500/10'
                   : 'text-red-500 border-red-500/40 hover:bg-red-500/10'"
                 :disabled="togglingDoctor === d.name"
-                :title="isDoctorClosed(d.name) ? 'Reabrir a agenda deste médico' : 'Fechar a agenda deste médico (as janelas somem até reabrir; para abrir em dias/horários personalizados use o Editar)'"
+                :title="isDoctorClosed(d.name) ? `Reabrir a agenda deste ${termo('profissional')}` : `Fechar a agenda deste ${termo('profissional')} (as janelas somem até reabrir; para abrir em dias/horários personalizados use o Editar)`"
                 @click="toggleDoctorClosed(d.name)"
               >
                 {{ isDoctorClosed(d.name) ? '▶️ Reabrir agenda' : '⏸ Fechar agenda' }}
               </button>
             </div>
             <p v-if="isAdmin" class="text-[10px] text-n-slate-9">
-              fechar tira o médico de toda a agenda na hora; para abrir em dias/horários personalizados, use o <b>Editar</b>.
+              fechar tira o {{ termo('profissional') }} de toda a agenda na hora; para abrir em dias/horários personalizados, use o <b>Editar</b>.
             </p>
           </div>
 

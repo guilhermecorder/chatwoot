@@ -24,9 +24,10 @@ import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
 import draggable from 'vuedraggable';
 import { evaluateFormula, variablesIn, formatKpi } from 'dashboard/helper/cevicoFormula';
 import {
-  DOCTORS, resolveWindows, resolveBlocked, resolveBlockedDays,
-  resolveSurgeryWindows, blockKey, scanAgenda,
+  resolveDoctors, resolveGoal, resolveWindows, resolveBlocked,
+  resolveBlockedDays, resolveSurgeryWindows, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
+import { termo, termoCap, frase, meta as metaSegmento, painelQuem, nomeSistemaHero, isClinica } from 'dashboard/helper/segmento';
 
 const router = useRouter();
 const store = useStore();
@@ -34,6 +35,8 @@ const { accountId } = useAccount();
 const currentUser = useMapGetter('getCurrentUser');
 const allTasks = useMapGetter('tasks/getTasks');
 const crmSettings = useMapGetter('crm/getSettings');
+// profissionais da conta (Personalização) > segmento > preset clínica
+const DOCTORS = computed(() => resolveDoctors(crmSettings.value));
 const teamAgents = useMapGetter('agents/getAgents');
 const { isAdmin } = useAdmin();
 
@@ -64,13 +67,13 @@ const BASE_PANELS = [
     grad: 'linear-gradient(135deg, #0F766E 0%, #2DD4BF 100%)',
   },
   {
-    key: 'cirurgia', label: 'Cirurgias', who: '',
-    icon: 'i-lucide-heart-pulse', desc: 'fechamento e pós-operatório',
+    key: 'cirurgia', label: termoCap('vendas'), who: '',
+    icon: 'i-lucide-heart-pulse', desc: frase('desc_painel_fechamento', 'fechamento e pós-operatório'),
     grad: 'linear-gradient(135deg, #9D174D 0%, #F472B6 100%)',
   },
   {
-    key: 'medico', label: 'Médicos', who: '',
-    icon: 'i-lucide-stethoscope', desc: 'a agenda de cada médico',
+    key: 'medico', label: termoCap('profissionais'), who: '',
+    icon: 'i-lucide-stethoscope', desc: `a agenda de cada ${termo('profissional')}`,
     grad: 'linear-gradient(135deg, #0369A1 0%, #38BDF8 100%)',
   },
   {
@@ -234,7 +237,7 @@ const rawPanelTiles = computed(() => {
   const d = pd.value;
   if (selectedPanel.value === 'conducao') {
     return [
-      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: 'agenda das unidades',
+      { label: frase('atendimentos_periodo', 'Consultas no período'), icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: 'agenda das unidades',
         details: [
           { label: 'Compareceram', value: `${d.attended ?? 0}` },
           { label: 'Faltaram', value: `${d.missed ?? 0}` },
@@ -249,17 +252,17 @@ const rawPanelTiles = computed(() => {
         compare: [{ label: 'compareceram', value: d.attended ?? 0 }, { label: 'faltaram', value: d.missed ?? 0 }],
         details: [{ label: 'Compareceram ÷ (compareceram + faltaram)', value: `${d.attended ?? 0} ÷ ${(d.attended ?? 0) + (d.missed ?? 0)} = ${d.show_rate ?? 0}%` }],
         about: 'Quem confirmou consulta e veio. Referência de clínica boa: acima de 80%. É o indicador de quem cuida da confirmação (lembrete, reconfirmação, remarcação).' },
-      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: 'saíram da consulta indicados',
+      { label: frase('indicacoes_venda', 'Indicações de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: frase('sub_saidos_indicados', 'saíram da consulta indicados'),
         details: [{ label: 'Indicados ÷ compareceram', value: `${d.indications ?? 0} de ${d.attended ?? 0}` }],
         about: 'Consultas do período em que o médico registrou indicação de cirurgia (botão 🎯 na Agenda ou conduta no Espaço do Paciente). Começa aqui o funil de fechamento.' },
     ];
   }
   if (selectedPanel.value === 'cirurgia') {
     return [
-      { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: 'pacientes indicados no período',
+      { label: frase('indicacoes_venda', 'Indicações de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: `${termo('clientes')} indicados no período`,
         details: [{ label: 'Viraram cirurgia agendada', value: `${d.surgeries_booked ?? 0} · ${d.closing_rate ?? 0}%` }],
         about: 'Pacientes que saíram da consulta com indicação de cirurgia no período — é a matéria-prima do fechamento.' },
-      { label: 'Cirurgias agendadas', icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, gk: 'surgeries_booked', chartKey: 'surgeries_booked', sub: 'fechadas no período',
+      { label: frase('vendas_agendadas', 'Cirurgias agendadas'), icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, gk: 'surgeries_booked', chartKey: 'surgeries_booked', sub: 'fechadas no período',
         details: [{ label: 'Realizadas', value: `${d.surgeries_done ?? 0}` }, { label: 'Não vieram', value: `${d.surgeries_missed ?? 0}` }],
         about: 'Cirurgias registradas na Agenda de Cirurgias no período (o fechamento de fato). O gráfico mostra o ritmo de fechamento ao longo do período.' },
       { label: 'Taxa de fechamento', icon: 'i-lucide-percent', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: 'agendadas ÷ indicações',
@@ -267,7 +270,7 @@ const rawPanelTiles = computed(() => {
         compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
         details: [{ label: 'Agendadas ÷ indicações', value: `${d.surgeries_booked ?? 0} ÷ ${d.indications ?? 0} = ${d.closing_rate ?? 0}%` }],
         about: 'De cada 100 pacientes indicados, quantos fecharam cirurgia. É o indicador do trabalho de fechamento (orçamento ancorado, quebra de objeção, ligação em 48h).' },
-      { label: 'Cirurgias realizadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, gk: 'surgeries_done', chartKey: 'surgeries_done', sub: `${d.surgeries_missed ?? 0} não vieram`,
+      { label: frase('vendas_realizadas', 'Cirurgias realizadas'), icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, gk: 'surgeries_done', chartKey: 'surgeries_done', sub: `${d.surgeries_missed ?? 0} não vieram`,
         compare: [{ label: 'realizadas', value: d.surgeries_done ?? 0 }, { label: 'não vieram', value: d.surgeries_missed ?? 0 }],
         about: 'Cirurgias marcadas como realizadas na Agenda de Cirurgias. "Não vieram" = agendou e não apareceu; "veio e não fez" entra separado no Dashboard da Agenda.' },
     ];
@@ -275,16 +278,16 @@ const rawPanelTiles = computed(() => {
   if (selectedPanel.value === 'medico') {
     const docNote = 'O número é do médico escolhido; o gráfico mostra a clínica inteira no período (a série por médico fica no Dashboard dos Médicos).';
     return [
-      { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`,
+      { label: frase('atendimentos_periodo', 'Consultas no período'), icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`,
         details: [{ label: 'Faltas', value: `${d.missed ?? 0}` }, { label: 'Comparecimento', value: `${d.show_rate ?? 0}%` }],
         about: `Consultas deste médico com data no período. ${docNote}` },
-      { label: 'Com indicação de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: `${d.indication_rate ?? 0}% de quem compareceu`,
+      { label: frase('com_indicacao_venda', 'Com indicação de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: `${d.indication_rate ?? 0}% de quem compareceu`,
         compare: [{ label: 'com indicação', value: d.indications ?? 0 }, { label: 'sem indicação', value: d.no_indication ?? 0 }],
         about: `Consultas em que o médico indicou cirurgia. ${docNote}` },
       { label: 'Sem indicação', icon: 'i-lucide-user-minus', value: d.no_indication ?? 0, sub: `${d.no_indication_rate ?? 0}% de quem compareceu`,
         compare: [{ label: 'com indicação', value: d.indications ?? 0 }, { label: 'sem indicação', value: d.no_indication ?? 0 }],
         about: 'Consultas que não resultaram em indicação — não é perda: vira plano de cuidado, retorno e indicação futura (catarata inicial hoje é cirurgia daqui a um ano).' },
-      { label: 'Conversão em cirurgia', icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, gk: 'conversion_rate', pct: true, sub: `${d.conversions ?? 0} viraram cirurgia · NPS ${d.nps_avg ?? '—'}`,
+      { label: frase('conversao_venda', 'Conversão em cirurgia'), icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, gk: 'conversion_rate', pct: true, sub: `${d.conversions ?? 0} viraram ${termo('venda')} · NPS ${d.nps_avg ?? '—'}`,
         compare: [{ label: 'indicados', value: d.indications ?? 0 }, { label: 'viraram cirurgia', value: d.conversions ?? 0 }],
         details: [{ label: 'NPS médio dos pacientes deste médico', value: `${d.nps_avg ?? '—'}` }],
         about: 'Dos pacientes que este médico atendeu no período, quantos chegaram à cirurgia (pelo telefone do contato no CRM).' },
@@ -301,10 +304,10 @@ const rawPanelTiles = computed(() => {
         components: ['new_leads', 'appointments_booked'],
         compare: [{ label: 'leads', value: d.new_leads ?? 0 }, { label: 'avançaram a Agendamento', value: d.appointments_created ?? 0 }],
         about: 'Dos leads que chegaram no período, quantos já avançaram até "Agendamento de Consulta" no CRM (coorte). A taxa madura é a de períodos já fechados — a de hoje ainda amadurece.' },
-      { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, chartKey: 'appointments_attended', sub: `${d.indications ?? 0} indicação(ões) de cirurgia`,
+      { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, chartKey: 'appointments_attended', sub: `${d.indications ?? 0} indicação(ões) de ${termo('venda')}`,
         details: [{ label: 'Indicações de cirurgia no período', value: `${d.indications ?? 0}` }],
         about: 'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.' },
-      { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, chartKey: 'surgeries_done', sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`,
+      { label: frase('fechamento_vendas', 'Fechamento de cirurgias'), icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, chartKey: 'surgeries_done', sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`,
         components: ['indications', 'surgeries_booked'],
         compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
         about: 'Agendadas ÷ indicações: a eficiência do fechamento. O gráfico mostra as cirurgias realizadas ao longo do período.' },
@@ -340,7 +343,7 @@ const rawPanelTiles = computed(() => {
       about: 'Dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos viraram consulta agendada. É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência.',
     },
     {
-      label: 'Consultas agendadas', icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', chartKey: 'appointments_booked',
+      label: frase('atendimentos_agendados', 'Consultas agendadas'), icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', chartKey: 'appointments_booked',
       sub: 'registradas no período',
       details: [
         { label: '⚡ Chegaram e agendaram no mesmo período', value: `${d.appointments_same_day ?? 0}` },
@@ -371,8 +374,8 @@ const rawPanelTiles = computed(() => {
       about: 'O número grande é quantas consultas foram registradas HOJE, julgado contra a fatia diária da meta do mês (Painel de Metas ÷ dias do mês). As taxas abaixo dizem quem decidiu: a de hoje ainda amadurece; a de ontem é a taxa justa pra avaliar o atendimento.',
     },
     {
-      label: 'Cirurgias fechadas', icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', chartKey: 'auto', chartMatch: /cirurgia agendada/i,
-      sub: 'coluna Cirurgia Agendada (CRM)',
+      label: frase('vendas_fechadas', 'Cirurgias fechadas'), icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', chartKey: 'auto', chartMatch: /cirurgia agendada/i,
+      sub: frase('sub_coluna_venda', 'coluna Cirurgia Agendada (CRM)'),
       about: 'Leads do período que chegaram à coluna "Cirurgia Agendada" no CRM — o fechamento que nasceu dos contatos deste período.',
     },
   ];
@@ -1126,11 +1129,11 @@ const gestorSignals = computed(() => {
     else if (st.status === 'warn') sigs.push({ level: 'amber', icon: 'i-lucide-alert-triangle', text: `${tile.label}: abaixo do ritmo da meta (${tile.value})` });
   });
   const alerts = radarAlerts.value.length;
-  if (alerts) sigs.push({ level: 'red', icon: 'i-lucide-radar', text: `${alerts} paciente(s) quente(s) sem atendimento (Radar)` });
+  if (alerts) sigs.push({ level: 'red', icon: 'i-lucide-radar', text: `${alerts} ${termo('cliente')}(s) quente(s) sem atendimento (Radar)` });
   const waiting = data.value.unanswered ?? 0;
   if (waiting > 8) sigs.push({ level: 'amber', icon: 'i-lucide-message-circle', text: `${waiting} conversas abertas aguardando resposta` });
   const unconfirmed = data.value.panel_data?.unconfirmed ?? 0;
-  if (unconfirmed > 0) sigs.push({ level: 'amber', icon: 'i-lucide-clipboard-alert', text: `${unconfirmed} consulta(s) sem conferência na Agenda` });
+  if (unconfirmed > 0) sigs.push({ level: 'amber', icon: 'i-lucide-clipboard-alert', text: `${unconfirmed} ${termo('atendimento')}(s) sem conferência na Agenda` });
   const bugs = data.value.my_tasks?.count ?? 0;
   if (bugs > 0) sigs.push({ level: 'info', icon: 'i-lucide-list-todo', text: `${bugs} tarefa(s) esperando você no board` });
   return sigs;
@@ -1532,8 +1535,10 @@ const surgUsageLast7 = computed(() => {
 // da sala configuradas (as barras mostram "—" até configurar)
 const showSurgeryHealth = computed(() => true);
 
-// 🎯 META DO MÊS: 100 cirurgias — barra de progresso no retângulo
-const SURGERY_GOAL = 100;
+// 🎯 META DO MÊS (conta > segmento; clínica = 100 cirurgias) — barra
+const SURGERY_GOAL = computed(() =>
+  resolveGoal(crmSettings.value, 'vendas_mes', metaSegmento('vendas_mes', 100))
+);
 const surgeriesDoneMonth = computed(() => {
   const now = new Date();
   return surgeryTasks.value.filter(t => {
@@ -1543,7 +1548,7 @@ const surgeriesDoneMonth = computed(() => {
   }).length;
 });
 const goalPct = computed(() =>
-  Math.min(Math.round((surgeriesDoneMonth.value / SURGERY_GOAL) * 100), 100)
+  Math.min(Math.round((surgeriesDoneMonth.value / SURGERY_GOAL.value) * 100), 100)
 );
 const nextSurgery = computed(() =>
   surgeryTasks.value
@@ -1597,8 +1602,8 @@ const booking30Chip = computed(() => {
 
 const slotLabel = f =>
   `${f.day.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} ${f.slot}`;
-const slotDoctorShort = f => DOCTORS.find(d => d.name === f.win.doctor)?.short || '';
-const slotColor = f => DOCTORS.find(d => d.name === f.win.doctor)?.color || '#64748B';
+const slotDoctorShort = f => DOCTORS.value.find(d => d.name === f.win.doctor)?.short || '';
+const slotColor = f => DOCTORS.value.find(d => d.name === f.win.doctor)?.color || '#64748B';
 
 const nextAppointment = computed(() => (data.value?.next_appointments || [])[0] || null);
 const apptTime = iso =>
@@ -1760,11 +1765,11 @@ onUnmounted(() => {
           </div>
           <h1 class="text-2xl sm:text-4xl font-bold leading-tight" style="color: #fff">{{ greeting }}, {{ firstName }}! 👋</h1>
           <p class="text-sm mt-2" style="color: rgba(255,255,255,0.85)">
-            Boas-vindas ao CEVICO S.I —
+            Boas-vindas ao {{ nomeSistemaHero() }} —
             <b>Painel de {{ currentPanel.label }}</b><template v-if="currentPanel.who"> ({{ currentPanel.who }})</template>: {{ currentPanel.desc }}.
           </p>
         </div>
-        <span class="i-lucide-eye absolute -right-6 -bottom-8 text-[160px] text-white/10" />
+        <span class="absolute -right-6 -bottom-8 text-[160px] text-white/10" :class="isClinica ? 'i-lucide-eye' : 'i-lucide-briefcase'" />
       </div>
 
       <!-- ✏️ BARRA DO MODO EDIÇÃO (item 143): gruda no topo enquanto o modo
@@ -2721,7 +2726,7 @@ onUnmounted(() => {
               <!-- 🎯 META: 100 cirurgias -->
               <div>
                 <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-n-slate-11">🎯 Meta do mês <span class="text-n-slate-9">({{ SURGERY_GOAL }} cirurgias)</span></span>
+                  <span class="text-n-slate-11">🎯 Meta do mês <span class="text-n-slate-9">({{ SURGERY_GOAL }} {{ termo('vendas') }})</span></span>
                   <span class="font-bold text-base text-n-slate-12">{{ surgeriesDoneMonth }} de {{ SURGERY_GOAL }}</span>
                 </div>
                 <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">

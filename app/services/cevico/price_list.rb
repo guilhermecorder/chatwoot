@@ -1,25 +1,20 @@
-# Tabela de preços OFICIAL da clínica (decisão 17/07): um lugar só para
-# preço atual e preço promocional de cada procedimento. Alimenta o Espaço
-# do Paciente (orçamento de indicação) e os prompts dos agentes de IA.
+# Tabela de preços OFICIAL (decisão 17/07): um lugar só para preço atual
+# e preço promocional de cada procedimento/produto. Alimenta o Espaço do
+# Paciente/Cliente (orçamento de indicação) e os prompts dos agentes de IA.
 # Fica em crm_settings.agenda_config['price_table'] (admin edita em
 # Configurações → Tabela de preços). Sem tabela salva, valem os padrões
-# abaixo — os MESMOS valores que os prompts sempre usaram.
+# do SEGMENTO (config/segmentos/<id>.yml → precos) — no preset clínica,
+# os MESMOS valores que os prompts sempre usaram.
 class Cevico::PriceList
-  DEFAULT_ITEMS = [
-    { 'group' => 'Refrativa (2 olhos)', 'name' => 'PRK',                   'price' => 4900 },
-    { 'group' => 'Refrativa (2 olhos)', 'name' => 'Lasik',                 'price' => 5700 },
-    { 'group' => 'Catarata (por olho)', 'name' => 'Nacional',              'price' => 2800 },
-    { 'group' => 'Catarata (por olho)', 'name' => 'Mono Rayner',           'price' => 3200 },
-    { 'group' => 'Catarata (por olho)', 'name' => 'Tórica monofocal',      'price' => 5600 },
-    { 'group' => 'Catarata (por olho)', 'name' => 'Foco estendido',        'price' => 5690 },
-    { 'group' => 'Catarata (por olho)', 'name' => 'Trifocal',              'price' => 8490 },
-    { 'group' => 'Catarata (por olho)', 'name' => 'Galaxy',                'price' => 14_990 },
-    { 'group' => 'Fácica',              'name' => 'Artisan',               'price' => 11_900 }
-  ].freeze
+  def self.default_items
+    Segmento.precos_padrao.map do |item|
+      item.transform_keys(&:to_s).slice('group', 'name', 'price', 'promo_price')
+    end
+  end
 
   def self.items(account)
     table = CrmSetting.find_by(account: account)&.agenda_config&.dig('price_table', 'items')
-    list = table.presence || DEFAULT_ITEMS
+    list = table.presence || default_items
     list.map { |item| item.slice('group', 'name', 'price', 'promo_price') }
   end
 
@@ -38,7 +33,10 @@ class Cevico::PriceList
   # bloco de texto para os PROMPTS dos agentes (Atendente IA / Analista):
   # uma linha por grupo, com promoção explícita quando existir
   def self.prompt_block(account)
-    items(account).group_by { |i| i['group'] }.map do |group, group_items|
+    list = items(account)
+    return '- Nenhum preço cadastrado ainda (Configurações → Tabela de preços). Não cite valores.' if list.blank?
+
+    list.group_by { |i| i['group'] }.map do |group, group_items|
       lines = group_items.map do |item|
         price = format_money(item['price'])
         if item['promo_price'].present?

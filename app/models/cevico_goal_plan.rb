@@ -30,22 +30,24 @@
 class CevicoGoalPlan < ApplicationRecord
   belongs_to :account
 
-  # indicadores oficiais do painel (histórico calculado período a período)
-  INDICATORS = {
+  # indicadores oficiais do painel (histórico calculado período a período).
+  # As KEYS são fixas (o cálculo depende delas); os RÓTULOS vêm do
+  # segmento (preset clínica = consultas/cirurgias, como sempre)
+  INDICATORS = (Segmento.indicadores.presence || {
     'new_leads' => 'Novos leads',
     'appointments_booked' => 'Consultas agendadas',
     'consultations_attended' => 'Consultas realizadas',
     'surgeries_booked' => 'Cirurgias agendadas',
     'surgeries_done' => 'Cirurgias realizadas',
     'revenue_closed' => 'Valor fechado (R$)'
-  }.freeze
+  }).freeze
 
   # metas de INDICADORES (%): derivadas dos números acima, meta em percentual
-  RATE_INDICATORS = {
+  RATE_INDICATORS = (Segmento.indicadores_percentuais.presence || {
     'rate_scheduling' => '% de agendamento (lead → consulta)',
     'rate_attendance' => '% de comparecimento (agendada → realizada)',
     'rate_surgery' => '% de conversão (consulta → cirurgia)'
-  }.freeze
+  }).freeze
 
   ALL_INDICATORS = INDICATORS.merge(RATE_INDICATORS).freeze
 

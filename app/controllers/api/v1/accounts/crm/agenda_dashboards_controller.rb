@@ -113,7 +113,7 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
 
   def by_doctor(since, until_at)
     scope = consultas(since, until_at).where.not(doctor: [nil, ''])
-    variants = scope.distinct.pluck(:doctor).group_by { |raw| Crm::DoctorNames.canonical(raw) }
+    variants = scope.distinct.pluck(:doctor).group_by { |raw| Crm::DoctorNames.canonical(raw, account: Current.account) }
     variants.delete(nil)
 
     variants.map do |doc, raw_names|
@@ -131,7 +131,10 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
     end.sort_by { |r| -r[:count] }
   end
 
-  UNIT_LABELS = { 'tatuape' => 'Tatuapé', 'paulista' => 'Av. Paulista' }.freeze
+  # nomes das unidades: conta (Personalização) > segmento
+  def unit_labels
+    Crm::SegmentoConta.unit_labels(Current.account)
+  end
 
   def by_unit(since, until_at)
     scope = consultas(since, until_at)
@@ -141,7 +144,7 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
       missed = u.where(attendance: 'missed').count
       {
         key: unit.presence || 'sem_unidade',
-        label: UNIT_LABELS[unit] || unit.presence || 'Sem unidade',
+        label: unit_labels[unit] || unit.presence || 'Sem unidade',
         count: count,
         attended: attended,
         missed: missed,

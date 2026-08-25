@@ -22,8 +22,9 @@ class Crm::AppointmentExtractionService
       hora: { type: 'string', description: 'Hora da consulta no formato HH:MM 24h (vazio se não confirmada)' },
       unidade: {
         type: 'string',
-        enum: %w[tatuape paulista nao_identificada],
-        description: 'Unidade da clínica combinada na conversa: Tatuapé, Av. Paulista, ou nao_identificada'
+        # unidades do SEGMENTO (preset clínica = tatuape/paulista, como sempre)
+        enum: Segmento.unidade_keys + %w[nao_identificada],
+        description: "Unidade combinada na conversa (#{Segmento.unidades.map { |u| u['nome'] }.join(', ')}), ou nao_identificada"
       },
       problema: {
         type: 'string',
@@ -94,6 +95,13 @@ class Crm::AppointmentExtractionService
     @account = conversation.account
   end
 
+  # schema com as unidades DA CONTA no enum (Personalização > segmento)
+  def output_schema
+    schema = Marshal.load(Marshal.dump(OUTPUT_SCHEMA))
+    schema[:properties][:unidade][:enum] = Crm::SegmentoConta.unidade_keys(@account) + %w[nao_identificada]
+    schema
+  end
+
   def call
     return { error: 'IA não configurada. Adicione a chave da API em Integrações → Claude.' } if api_key.blank?
     return { error: 'O Secretário da Agenda está pausado. Reative em Automações → Agentes de IA.' } if agent_paused?
@@ -105,7 +113,7 @@ class Crm::AppointmentExtractionService
       model: model,
       max_tokens: 1024,
       system_: system_prompt,
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      output_config: output_config_for({ type: 'json_schema', schema: output_schema }),
       messages: [{ role: 'user', content: transcript }]
     )
     record_usage(message)

@@ -11,6 +11,8 @@ import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { frontendURL } from 'dashboard/helper/URLHelper';
+import { resolveDoctors, resolveUnitLabels, MODALITIES } from 'dashboard/helper/cevicoAgenda';
+import { termo, termoCap, frase } from 'dashboard/helper/segmento';
 import PatientSpaceIcon from './PatientSpaceIcon.vue';
 
 const route = useRoute();
@@ -205,12 +207,11 @@ const fmtDuration = minutes => {
   return `${Math.round(minutes / 60 / 24)} dia(s)`;
 };
 
-const MODALITY_LABELS = {
-  avaliacao: 'Avaliação',
-  retorno: 'Retorno',
-  exames: 'Exames',
-};
-const UNIT_LABELS = { tatuape: 'Tatuapé', paulista: 'Av. Paulista' };
+// modalidades e unidades do segmento (preset clínica = os de sempre);
+// unidades respeitam a Personalização da conta (computed lê crmSettings,
+// declarado mais abaixo — avaliação preguiçosa)
+const MODALITY_LABELS = Object.fromEntries(MODALITIES.map(m => [m.key, m.label]));
+const UNIT_LABELS = computed(() => resolveUnitLabels(crmSettings.value));
 const CHANNEL_LABELS = {
   Whatsapp: 'WhatsApp',
   FacebookPage: 'Instagram/Facebook',
@@ -444,11 +445,8 @@ const selectedProcedure = computed(() =>
 );
 
 const EYES = ['OD', 'OE', 'AO'];
-const DOCTORS = [
-  'Dr. Gustavo Bittar',
-  'Dr. Henrique Gemelli',
-  'Dra. Roberta Negri',
-];
+// nomes oficiais: conta (Personalização) > segmento (antes: lista duplicada)
+const DOCTORS = computed(() => resolveDoctors(crmSettings.value).map(d => d.name));
 
 // formulário de anotação (campos rápidos — a vida do médico fácil)
 const showNoteForm = ref(false);
@@ -1544,7 +1542,7 @@ watch(contactId, () => {
                     class="i-lucide-notebook-pen text-base"
                     style="color: #b8860b"
                   />
-                  Espaço do Médico
+                  {{ frase('espaco_profissional', 'Espaço do Médico') }}
                 </h2>
                 <div class="flex items-center gap-1.5">
                   <button
@@ -1566,7 +1564,7 @@ watch(contactId, () => {
                 </div>
               </div>
               <p class="text-[10px] text-n-slate-9 mb-3">
-                Anotações internas da clínica · dado sensível (LGPD) · acesso
+                Anotações internas da {{ termo('empresa') }} · dado sensível (LGPD) · acesso
                 restrito
               </p>
 
@@ -1576,7 +1574,7 @@ watch(contactId, () => {
                 class="mb-4 bg-n-alpha-1 rounded-xl p-3"
               >
                 <p class="text-[11px] font-semibold text-n-slate-12 mb-2">
-                  Médicos (podem anotar):
+                  {{ termoCap('profissionais') }} (podem anotar):
                 </p>
                 <label
                   v-for="agent in agents"

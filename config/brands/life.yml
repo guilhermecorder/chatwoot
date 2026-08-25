@@ -2,6 +2,7 @@
 id: life
 nome: 'Sistema LIFE'
 brand_name: 'Sistema LIFE'
+segmento: empresa   # sistema coringa: linguagem genérica de negócio (config/segmentos/empresa.yml)
 logos:
   logo: '/brand-assets/life/logo.png'
   logo_dark: '/brand-assets/life/logo_dark.png'

@@ -60,6 +60,9 @@
         selectedLocale: '<%= I18n.locale %>'
       }
       window.globalConfig = <%= raw @global_config.to_json %>
+      <%# pacote de SEGMENTO (sistema coringa): terminologia, profissionais,
+          unidades e janelas — o frontend lê via helper/segmento.js %>
+      window.SEGMENTO = <%= raw Segmento.frontend.to_json %>
       window.browserConfig = {
         browser_name: '<%= browser.name %>',
       }
