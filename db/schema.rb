@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_28_000001) do
+ActiveRecord::Schema[7.1].define(version: 2026_08_25_000001) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1328,6 +1328,18 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_28_000001) do
     t.datetime "updated_at", precision: nil, null: false
   end
 
+  create_table "hub_health_records", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.integer "user_id"
+    t.string "kind", null: false
+    t.date "record_date", null: false
+    t.jsonb "data", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "kind", "record_date"], name: "idx_on_account_id_kind_record_date_d8c9fb4010"
+    t.index ["account_id"], name: "index_hub_health_records_on_account_id"
+  end
+
   create_table "inbox_assignment_policies", force: :cascade do |t|
     t.bigint "inbox_id", null: false
     t.bigint "assignment_policy_id", null: false
@@ -1908,6 +1920,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_28_000001) do
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "crm_weekly_feedbacks", "accounts"
   add_foreign_key "crm_weekly_feedbacks", "users"
+  add_foreign_key "hub_health_records", "accounts"
   add_foreign_key "inboxes", "portals"
   add_foreign_key "tasks", "accounts"
   add_foreign_key "tasks", "contacts"

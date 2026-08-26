@@ -1,5 +1,6 @@
 <script setup>
 import { h, ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { provideSidebarContext, useSidebarResize } from './provider';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
@@ -22,7 +23,7 @@ import ChannelIcon from 'next/icon/ChannelIcon.vue';
 import SidebarAccountSwitcher from './SidebarAccountSwitcher.vue';
 import Logo from 'next/icon/Logo.vue';
 import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
-import { frase } from 'dashboard/helper/segmento';
+import { frase, segmentoId } from 'dashboard/helper/segmento';
 import {
   SIDEBAR_SORT_SECTIONS,
   getSidebarSortOptions,
@@ -46,6 +47,7 @@ const emit = defineEmits([
 
 const { accountScopedRoute, isOnChatwootCloud } = useAccount();
 const { isAdmin } = useAdmin();
+const router = useRouter();
 const store = useStore();
 const searchShortcut = useKbd([`$mod`, 'k']);
 const { t } = useI18n();
@@ -510,8 +512,42 @@ const menuItemsForRole = computed(() => {
   ];
 });
 
+// ── HUB (segmento saude): mundos isolados — desenho do Guilherme 25/08.
+// hub_mode (localStorage) decide o menu inteiro: 'saude' = só o mundo da
+// saúde; 'negocios' (ou nada) = o sistema normal, com o item HUB no topo
+// pra voltar à porta de entrada. A tela /hub troca o modo e avisa por evento.
+const hubMode = ref(localStorage.getItem('hub_mode') || '');
+const onHubModeChange = e => {
+  hubMode.value = e?.detail || localStorage.getItem('hub_mode') || '';
+};
+
+const hubItem = () => ({
+  name: 'HubHome',
+  label: 'HUB',
+  icon: 'i-lucide-layout-grid',
+  to: accountScopedRoute('hub_home'),
+});
+
+const hubMenuSaude = () => [
+  hubItem(),
+  { name: 'HealthTreino', label: 'Treino', icon: 'i-lucide-dumbbell', to: accountScopedRoute('hub_health') },
+  { name: 'HealthBoxe', label: 'Boxe', icon: 'i-lucide-swords', to: accountScopedRoute('hub_health_boxe') },
+  { name: 'HealthDieta', label: 'Dieta', icon: 'i-lucide-utensils', to: accountScopedRoute('hub_health_dieta') },
+  { name: 'HealthCorpo', label: 'Corpo', icon: 'i-lucide-ruler', to: accountScopedRoute('hub_health_corpo') },
+  { name: 'HealthDash', label: 'Dashboard', icon: 'i-lucide-area-chart', to: accountScopedRoute('hub_health_dash') },
+];
+
 const visibleMenuItems = computed(() => {
-  const items = menuItemsForRole.value
+  // mundo 2 — Saúde: menu isolado, nada de negócios
+  if (segmentoId === 'saude' && hubMode.value === 'saude') {
+    const items = hubMenuSaude();
+    const denominator = Math.max(items.length - 1, 1);
+    return items.map((item, index) => ({
+      ...item,
+      iconColor: gradientColorAt(index / denominator),
+    }));
+  }
+  let items = menuItemsForRole.value
     .filter(item => {
       const key = FEATURE_BY_ITEM_NAME[item.name];
       if (!key) return true;
@@ -521,6 +557,11 @@ const visibleMenuItems = computed(() => {
     })
     // ordem escolhida no Personalizar menu (padrão por papel)
     .sort((a, b) => orderIndex(a.name) - orderIndex(b.name));
+  // mundo 1 — Negócios: Saúde mora no mundo 2 (não aparece aqui);
+  // o HUB fica no topo pra transitar entre os mundos
+  if (segmentoId === 'saude') {
+    items = [hubItem(), ...items.filter(i => i.name !== 'Health')];
+  }
   const denominator = Math.max(items.length - 1, 1);
   return items.map((item, index) => ({
     ...item,
@@ -537,10 +578,23 @@ onMounted(() => {
   radarBadgeTimer = setInterval(() => {
     store.dispatch('crm/fetchSettings').catch(() => {});
   }, 5 * 60 * 1000);
+  // HUB: a tela /hub avisa a troca de mundo por evento
+  window.addEventListener('hub:mode', onHubModeChange);
+  // primeira entrada sem mundo escolhido → porta de entrada do HUB
+  if (
+    segmentoId === 'saude' &&
+    !localStorage.getItem('hub_mode') &&
+    router.currentRoute.value.name !== 'hub_home'
+  ) {
+    router.push(accountScopedRoute('hub_home'));
+  }
 });
 
 let radarBadgeTimer = null;
-onUnmounted(() => clearInterval(radarBadgeTimer));
+onUnmounted(() => {
+  clearInterval(radarBadgeTimer);
+  window.removeEventListener('hub:mode', onHubModeChange);
+});
 // ──────────────────────────────────────────────────────────────────────────
 
 const menuItems = computed(() => {
@@ -1264,8 +1318,8 @@ const menuItems = computed(() => {
           :key="item.name"
           v-bind="item"
         />
-        <!-- Personalizar menu (só admin) -->
-        <li v-if="isAdmin" class="list-none mt-1">
+        <!-- Personalizar menu (só admin; no mundo Saúde o menu é fixo) -->
+        <li v-if="isAdmin && hubMode !== 'saude'" class="list-none mt-1">
           <button
             class="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-n-slate-9 hover:text-n-slate-11 rounded-lg hover:bg-n-alpha-1 transition-colors"
             :class="{ 'justify-center': isEffectivelyCollapsed }"

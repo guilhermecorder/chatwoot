@@ -1,0 +1,14 @@
+# Pacote de marca: HUB (sistema pessoal do Guilherme — ativado com MARCA=hub)
+id: hub
+nome: 'HUB'
+brand_name: 'HUB'
+segmento: saude   # sistema coringa: treino/dieta/corpo (config/segmentos/saude.yml)
+logos:
+  # provisórios (arte própria do HUB entra depois; trocar aqui quando existir)
+  logo: '/brand-assets/logo.png'
+  logo_dark: '/brand-assets/logo_dark.png'
+  logo_thumbnail: '/brand-assets/logo_thumbnail.png'
+favicons_dir: ''   # vazio = favicons padrão da raiz
+cores:
+  primaria: '#0B1220'   # grafite profundo
+  destaque: '#10B981'   # verde energia

@@ -20,6 +20,8 @@ import cevicoPeopleRoutes from './people/routes';
 import cevicoGoalsRoutes from './goals/routes';
 import cevicoBuilderRoutes from './builder/routes';
 import cevicoFinanceRoutes from './finance/routes';
+import hubHealthRoutes from './health/routes';
+import hubHomeRoutes from './hub/routes';
 import inicioRoutes from './inicio/routes';
 import cevicoAutomationsRoutes from './cevicoAutomations/routes';
 import AppContainer from './Dashboard.vue';
@@ -54,6 +56,8 @@ export default {
         ...cevicoGoalsRoutes.routes,
         ...cevicoBuilderRoutes.routes,
         ...cevicoFinanceRoutes.routes,
+        ...hubHealthRoutes.routes,
+        ...hubHomeRoutes.routes,
         ...inicioRoutes.routes,
         ...cevicoAutomationsRoutes.routes,
       ],

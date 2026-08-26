@@ -931,6 +931,29 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/finance/compare`, { params: { month_a: monthA, month_b: monthB } });
   }
 
+  // ── Saúde (HUB, segmento saude): treino, dieta e corpo ─────────────
+  getHealth() {
+    return axios.get(`${this.url}/health`);
+  }
+
+  createHealthRecord(payload) {
+    return axios.post(`${this.url}/health/create_record`, payload);
+  }
+
+  updateHealthRecord(recordId, data, recordDate = null) {
+    const payload = { record_id: recordId, data };
+    if (recordDate) payload.record_date = recordDate;
+    return axios.post(`${this.url}/health/update_record`, payload);
+  }
+
+  deleteHealthRecord(recordId) {
+    return axios.post(`${this.url}/health/delete_record`, { record_id: recordId });
+  }
+
+  updateHealthConfig(config) {
+    return axios.post(`${this.url}/health/update_config`, { config });
+  }
+
   // ── OftalmoFácil (conexão nativa) ───────────────────────────────────
   updateOftalmofacil(payload) {
     return axios.post(`${this.url}/settings/update_oftalmofacil`, payload);

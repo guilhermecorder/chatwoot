@@ -86,6 +86,11 @@ export default {
       } = this.uiSettings;
       return conversationDisplayType;
     },
+    // HUB: a porta de entrada é tela cheia — a barra lateral só existe
+    // DENTRO de um mundo (Negócios ou Saúde)
+    isHubHome() {
+      return this.$route.name === 'hub_home';
+    },
   },
   watch: {
     isSmallScreen: {
@@ -134,6 +139,7 @@ export default {
 <template>
   <div class="flex flex-grow overflow-hidden text-n-slate-12">
     <NextSidebar
+      v-if="!isHubHome"
       :is-mobile-sidebar-open="isMobileSidebarOpen"
       @toggle-account-modal="toggleAccountModal"
       @open-key-shortcut-modal="toggleKeyShortcutModal"

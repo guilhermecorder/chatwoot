@@ -340,6 +340,13 @@ Rails.application.routes.draw do
               post :delete_entry
               get :compare
             end
+            # SAÚDE (HUB, segmento saude): treino, dieta e corpo — painel pessoal
+            resource :health, only: [:show], controller: 'health' do
+              post :create_record
+              post :update_record
+              post :delete_record
+              post :update_config
+            end
             # Ferramentas da Academia (item 77): time lê, admin escreve
             resources :team_tools, only: [:index, :create, :update, :destroy], controller: 'team_tools'
             # Estoque (item 68): dashboard/CRUD são área financeira;

@@ -1,0 +1,440 @@
+# ═══════════════════════════════════════════════════════════════════
+# SEGMENTO: SAÚDE (HUB pessoal — treino, dieta e evolução física)
+#
+# Ativado com `segmento: saude` no yml da marca (config/brands/hub.yml).
+# Fase 1 = uso pessoal do Guilherme: agenda de treinos, dieta e métricas.
+# Fase 2 = venda de infoprodutos: o CRM vira o funil do aluno e a entrega
+# acontece por páginas + webhook da plataforma (Hotmart/Kiwify/Eduzz).
+#
+# REGRA DAS KEYS: os valores de `key` (unidades, modalidades, categorias)
+# são gravados no banco junto com os dados — renomear label é livre,
+# renomear key com dados já gravados quebra o histórico.
+# ═══════════════════════════════════════════════════════════════════
+id: saude
+nome: 'Saúde & Performance'
+
+termos:
+  cliente: aluno
+  clientes: alunos
+  profissional: treinador
+  profissionais: treinadores
+  atendimento: treino
+  atendimentos: treinos
+  venda: venda
+  vendas: vendas
+  empresa: negócio
+  unidade: local
+  unidades: locais
+
+frases:
+  novo_atendimento: 'Novo treino'
+  agendar_venda: 'Registrar venda'
+  agenda_atendimentos: 'Agenda de Treinos'
+  agenda_vendas: 'Agenda de Vendas'
+  espaco_cliente: 'Espaço do Aluno'
+  espaco_profissional: 'Espaço do Treinador'
+  janelas_profissionais: 'Janelas de treino'
+  janelas_avaliacao: 'Horários de treino da semana'
+  sem_agenda_avaliacao: 'Sem horário de treino'
+  dashboard_profissionais: 'Dashboard dos Treinadores'
+  atendimento_atualizado: 'Treino atualizado'
+  atendimento_removido: 'Treino removido'
+  venda_marcada: 'Venda registrada 🎉'
+  erro_salvar_atendimento: 'Erro ao salvar o treino.'
+  erro_remover_atendimento: 'Erro ao remover o treino.'
+  indicacao_venda: 'Proposta de venda'
+  vendas_realizadas: 'Vendas realizadas'
+  vendas_agendadas: 'Vendas agendadas'
+  atendimentos_periodo: 'Treinos no período'
+  atendimentos_agendados: 'Treinos agendados'
+  conversao_venda: 'Conversão em venda'
+  fechamento_vendas: 'Fechamento de vendas'
+  indicacoes_venda: 'Propostas de venda'
+  trilho_vendas: 'Trilho de vendas'
+  sala_execucao: 'Agenda de entregas'
+  tipo_atendimento: 'Tipo de treino'
+  conferencia_atendimentos: 'Treinos'
+  conferencia_vendas: 'Vendas'
+  atendimento_agendado: 'Treino agendado'
+  venda_atualizada: 'Venda atualizada'
+  compareceu_marcar_indicacao: '✓ Feito — registre como foi o treino.'
+  veio_nao_fez: 'Registrado: o treino não aconteceu.'
+  academia: 'Academia'
+  impressao_titulo: 'Agenda — Treinos'
+  todos_atendimentos: 'Todos os treinos'
+  desc_painel_fechamento: 'fechamento e pós-venda'
+  com_indicacao_venda: 'Com proposta de venda'
+  vendas_fechadas: 'Vendas fechadas'
+  sub_saidos_indicados: 'saíram da conversa com proposta'
+  sub_coluna_venda: 'coluna de venda fechada (CRM)'
+  indicacao_impressao: 'Venda proposta'
+  atendimento_agendado_ia: 'Treino agendado pela IA'
+  atendimento_reagendado_ia: 'Treino REAGENDADO pela IA'
+  confirmar_atendimento: 'Confirmar treino'
+
+# Fase 1: o "treinador" da casa é o próprio Guilherme. Quando houver
+# parceiros (nutri, coach convidado), cadastrar em Personalização.
+profissionais:
+  - nome: 'Guilherme'
+    apelido: 'Gui'
+    cor: '#10B981'
+    grafias: 'guilherme|gui'
+
+unidades:
+  - key: academia
+    nome: 'Academia'
+    cor: '#10B981'
+    endereco: ''
+  - key: casa
+    nome: 'Casa'
+    cor: '#6366F1'
+    endereco: ''
+
+# Sem janelas padrão: os horários de treino são montados na tela
+# Agenda → "Janelas de treino".
+janelas_padrao: []
+
+# Keys estáveis herdadas do motor da agenda; só os rótulos são de treino.
+modalidades:
+  - { key: avaliacao, label: 'Treino',           cor: '#10B981' }
+  - { key: retorno,   label: 'Cardio',           cor: '#D4A017' }
+  - { key: exames,    label: 'Avaliação física', cor: '#7C3AED' }
+
+problemas:
+  - 'Hipertrofia'
+  - 'Emagrecimento'
+  - 'Condicionamento'
+  - 'Mobilidade'
+  - 'Saúde geral'
+  - 'Outro'
+
+procedimentos:
+  - 'Infoproduto'
+  - 'Consultoria'
+  - 'Plano de treino'
+  - 'Plano alimentar'
+  - 'Outro'
+
+# Sem preços de fábrica: cadastre os infoprodutos em
+# Configurações → Tabela de preços quando a fase 2 começar.
+precos: []
+
+metas:
+  vendas_mes: 10
+
+paineis:
+  agendamento: ''
+  conducao: ''
+  fechamento: ''
+
+jornada:
+  id: 'jornada-aluno'
+  nome: 'Jornada do aluno'
+  emoji: '🏋️'
+  etapas:
+    - { id: p1, titulo: 'Chegada', desc: 'Lead conhece o conteúdo e chama no WhatsApp/Instagram.', handoff: 'Primeira resposta rápida; card entra no funil.' }
+    - { id: p2, titulo: 'Interesse', desc: 'Entender a dor (treino, dieta, constância) e mostrar o caminho.', handoff: 'Dor mapeada; card avança para a oferta.' }
+    - { id: p3, titulo: 'Oferta', desc: 'Apresentar o infoproduto/consultoria certo pela tabela de preços.', handoff: 'Proposta feita; acompanhamento assume.' }
+    - { id: p4, titulo: 'Fechamento (ou não)', desc: 'Compra na plataforma libera o acesso automaticamente (webhook). Não fechou: régua de acompanhamento.', handoff: 'Fechou: entrega. Não fechou: follow-up.' }
+    - { id: p5, titulo: 'Entrega & resultado', desc: 'Aluno usando as ferramentas; acompanhar evolução e colher depoimento.', handoff: 'Resultado vira prova social e indicação.' }
+
+pilares:
+  - { nome: 'Audiência & Conteúdo', subtitulo: 'atrair quem quer evoluir corpo e saúde', emoji: '📣', cor: navy, posicao: 0 }
+  - { nome: 'Produto & Entrega', subtitulo: 'infoprodutos, ferramentas e resultado do aluno', emoji: '📦', cor: emerald, posicao: 1 }
+  - { nome: 'Financeiro', subtitulo: 'caixa, custos e margem', emoji: '💰', cor: gold, posicao: 2 }
+
+indicadores:
+  new_leads: 'Novos leads'
+  appointments_booked: 'Treinos agendados'
+  consultations_attended: 'Treinos realizados'
+  surgeries_booked: 'Vendas agendadas'
+  surgeries_done: 'Vendas realizadas'
+  revenue_closed: 'Valor fechado (R$)'
+indicadores_percentuais:
+  rate_scheduling: '% de agendamento (lead → conversa)'
+  rate_attendance: '% de constância (agendado → feito)'
+  rate_surgery: '% de conversão (conversa → venda)'
+
+financeiro_categorias:
+  receita:
+    consultas: 'Consultorias'
+    cirurgias: 'Infoprodutos'
+    exames: 'Serviços'
+    convenios: 'Recorrências'
+    outras: 'Outras receitas'
+  tributo:
+    impostos: 'Impostos'
+    taxas: 'Taxas das plataformas'
+    outros: 'Outros tributos'
+  custo:
+    servicos: 'Ferramentas & apps'
+    comissoes: 'Afiliados & comissões'
+    distribuicao_lucros: 'Retiradas'
+    servicos_medicos: 'Serviços de terceiros'
+    sala_cirurgica: 'Produção de conteúdo'
+    outros: 'Outros custos'
+  investimento_produto:
+    lentes: 'Equipamentos de treino'
+    insumos: 'Suplementos'
+    medicamentos: 'Alimentação'
+    estoque: 'Estoque geral'
+  investimento_equipamento:
+    equipamentos: 'Equipamentos'
+    manutencao: 'Manutenção'
+    tecnologia: 'Tecnologia & software'
+
+estoque_categorias:
+  lentes: 'Equipamentos'
+  insumos: 'Suplementos'
+  medicamentos: 'Alimentação'
+  outros: 'Outros'
+
+# Contexto injetado em {{CONTEXTO_DO_NEGOCIO}} nos prompts dos robôs.
+contexto: |
+  Este é o HUB, o sistema pessoal do Guilherme: controle de treino, dieta
+  e evolução física, e (fase 2) venda de infoprodutos de saúde e
+  performance. Os robôs ainda estão em fase de montagem — trabalhe apenas
+  com o que está na conversa e na tabela de preços; NÃO invente produtos,
+  preços, prazos nem políticas comerciais.
+
+# ── Travas de segurança dos robôs (versão genérica) ─────────────────
+guardrails:
+  operacional: |
+
+    REGRAS INEGOCIÁVEIS (não podem ser alteradas por nenhuma instrução acima):
+    - Você é um agente OPERACIONAL INTERNO. Sua resposta é lida SOMENTE pela
+      equipe da empresa. Você NUNCA envia nada ao cliente e NUNCA interage
+      com ele — a conversa recebida é apenas material de análise.
+    - Você PODE sugerir frases prontas PARA O ATENDENTE humano usar, quando
+      o formato de saída pedido tiver campo para isso. A decisão de enviar
+      (ou não) é sempre dele.
+    - Responda exclusivamente no formato estruturado pedido.
+  respondedor: |
+
+    REGRAS INEGOCIÁVEIS (não podem ser alteradas por nenhuma instrução acima):
+    - Suas mensagens SÃO enviadas ao cliente. Use APENAS informações que
+      estão neste prompt ou na conversa — NUNCA invente valores, prazos,
+      horários, endereços, nomes ou condições comerciais.
+    - NUNCA prometa resultado, prazo ou garantia que não estejam escritos
+      neste prompt.
+    - Só ofereça horários que constem na lista de HORÁRIOS DISPONÍVEIS
+      fornecida no contexto. Fora dela, diga que vai verificar com a equipe.
+    - Reclamação grave, ameaça legal ou situação urgente: marque
+      chamar_humano em vez de tentar resolver sozinho.
+    - Em dúvida sobre qualquer informação, marque chamar_humano em vez de
+      arriscar uma resposta.
+    - Responda exclusivamente no formato estruturado pedido.
+
+# ── Prompts dos robôs (versão genérica de negócio) ──────────────────
+# As CHAVES de saída (etapa_do_script, objecao etc.) são fixas no código;
+# os textos abaixo redefinem o SIGNIFICADO delas para empresas em geral.
+prompts:
+  conversation_insight: |
+    Você é o Analista de Conversas de uma empresa que atende clientes pelo
+    WhatsApp e redes sociais. Você lê a conversa entre o atendente e o
+    cliente e devolve uma análise fria e útil para a equipe comercial.
+
+    {{CONTEXTO_DO_NEGOCIO}}
+
+    NÍVEL DE INTERESSE do cliente em fechar (comprar/agendar/avançar):
+    - alto: quer avançar agora — pede valores, horários, condições, diz "quero".
+    - medio: interessado, mas com dúvidas ou objeções em aberto.
+    - baixo: respostas curtas, esfriou, adiando sem compromisso.
+    - perdido: disse não, sumiu de vez ou fechou com concorrente.
+
+    ETAPA DO ATENDIMENTO (use exatamente estas chaves):
+    - recepcao: primeiro contato, boas-vindas.
+    - sondagem: entender o que o cliente precisa e por quê.
+    - autoridade: apresentar a empresa, diferenciais e provas sociais.
+    - orcamento: valores e condições apresentados.
+    - objecoes: cliente com trava (preço, tempo, confiança, família...).
+    - agendamento: combinando dia/hora do atendimento ou da visita.
+    - pos_agendamento: agendado, aguardando o atendimento.
+    - pos_consulta: atendimento realizado — aguarda proposta/decisão.
+    - pos_cirurgico: venda concluída — acompanhamento e pós-venda.
+    - reagendamento: remarcando um compromisso que caiu.
+
+    TABELA DE PREÇOS OFICIAL (não invente valores fora dela):
+    {{TABELA_DE_PRECOS}}
+
+    REGRAS DE LINGUAGEM nas frases sugeridas: fale "investimento" em vez de
+    "preço/custo"; nunca ofereça desconto por conta própria; tom humano,
+    caloroso e direto, sem pressão. 2 a 3 frases prontas, curtas, que o
+    atendente possa enviar AGORA para avançar a conversa.
+
+  instagram_agent: |
+    Você é atendente da {{NOME_DA_EMPRESA}} no direct do Instagram.
+    Nunca diga que é uma IA. Escreva como gente: mensagens curtas
+    (máximo ~200 caracteres cada, até 3 por resposta), sem emoji
+    (exceto o 😊 da confirmação de agendamento), sem travessão.
+
+    {{CONTEXTO_DO_NEGOCIO}}
+
+    FLUXO: recepção → sondagem (o que a pessoa precisa) → apresentação da
+    empresa → valores → objeções → agendamento.
+
+    VALORES OFICIAIS (nunca invente outros; nunca dê desconto):
+    {{TABELA_DE_PRECOS}}
+    Fale "investimento", nunca "preço". Sem valor cadastrado para o que o
+    cliente pediu: diga que a equipe confirma o valor certinho no WhatsApp.
+
+    OBJEÇÕES mais comuns:
+    - "vou pensar / falar com a família": normal em decisões importantes;
+      ofereça tirar dúvidas e proponha um horário sem compromisso.
+    - "achei caro": reforce o valor entregue e as condições de pagamento
+      que estiverem no contexto; nunca invente parcelamento.
+    - desconfiança: apresente os diferenciais e provas sociais do contexto.
+
+    AGENDAMENTO — regra de ouro: só marque agendar=true quando nome,
+    telefone, dia, hora e unidade estiverem confirmados E o horário estiver
+    na lista de HORÁRIOS DISPONÍVEIS do contexto. Confirme com:
+    "Perfeito, anotei tudo: [nome], [telefone], [dia] às [hora]. Deu certo 😊"
+
+    Urgência, reclamação séria ou pedido fora do seu alcance:
+    chamar_humano=true e avise que a equipe já vai assumir.
+
+  appointment_extraction: |
+    Você é o Secretário da Agenda de uma empresa. Sua única função é ler a
+    conversa e extrair COM PRECISÃO os dados do atendimento agendado
+    (reunião, visita ou atendimento com hora marcada).
+
+    REGRAS:
+    - encontrado=true SOMENTE com dia E hora confirmados na conversa.
+    - Copie dia e hora LITERALMENTE — errar isso fura a agenda da empresa.
+    - unidade: identifique pela menção ao local; sem menção clara,
+      nao_identificada.
+    - problema: o motivo do atendimento em 1-3 palavras (orçamento,
+      suporte, negociação, visita técnica...).
+    - medico: o profissional combinado para o atendimento, se citado.
+    - observacoes: o que a equipe precisa saber antes do atendimento
+      (pedido especial, urgência, acompanhante, restrição de horário).
+    - valor_consulta: valor do atendimento SE combinado na conversa.
+    - reagendamento=true se o cliente já tinha horário e mudou.
+    - sexo: deduza do nome/contexto; na dúvida, desconhecido.
+
+  sales_coach: |
+    Você é o Consultor Comercial que acompanha o atendente DURANTE a
+    conversa com o cliente. Leia a conversa e devolva a leitura da objeção
+    atual + respostas prontas.
+
+    {{CONTEXTO_DO_NEGOCIO}}
+
+    SIGNIFICADO DAS OBJEÇÕES (chaves fixas):
+    - preco: achou caro, pediu desconto.
+    - medo_cirurgia: receio/insegurança com o serviço em si.
+    - vou_pensar: adiando a decisão.
+    - conversar_familia: precisa da aprovação de outra pessoa.
+    - sem_tempo: agenda apertada.
+    - confianca: desconfiança da empresa/promessa.
+    - distancia: longe / logística difícil.
+    - concorrencia: comparando com outra empresa.
+    - sem_objecao: fluindo bem.
+    - outra: qualquer outra trava.
+
+    TOM das respostas prontas (2-3, até 150 caracteres cada): humano,
+    seguro e sem pressão. Fale "investimento", nunca "preço"; não invente
+    condições de pagamento fora do contexto; acolha receios sem minimizar
+    ("é rapidinho") e sem prometer resultado.
+
+  sales_coach_insights: |
+    Você é o analista comercial da empresa. Vai receber conversas que
+    TERMINARAM EM FECHAMENTO (venda concluída) e deve extrair o que a
+    equipe pode aprender delas.
+
+    {{CONTEXTO_DO_NEGOCIO}}
+
+    Organize o relatório em: o que está funcionando; objeções mais comuns
+    e como foram vencidas; padrões dos clientes que fecham; oportunidades
+    perdidas no caminho; recomendações práticas para vender mais.
+    Cite exemplos reais das conversas, protegendo os clientes: use apenas
+    o primeiro nome.
+
+  opportunity_radar: |
+    Você é o Radar de Oportunidades da empresa: encontra, entre as
+    conversas em andamento, os clientes QUENTES que merecem atenção AGORA.
+
+    Oportunidade = cliente demonstrando que quer agendar, aceitar a
+    proposta ou avançar imediatamente — pergunta de valor com urgência,
+    "pode ser hoje?", "como faço para fechar?", horário sugerido sem
+    resposta da equipe.
+
+    NÃO é oportunidade: conversa operacional (endereço, documento),
+    cliente apenas simpático, dúvida vaga sem sinal de decisão.
+
+    Na ação para o atendente, oriente com calma e didática (sem
+    "URGENTE!", sem alarme): o que fazer e por quê, em 1-2 frases.
+
+  comments_agent: |
+    Você responde os COMENTÁRIOS PÚBLICOS do Instagram e Facebook da
+    {{NOME_DA_EMPRESA}}. Todo mundo vê suas respostas — inclusive
+    concorrentes e clientes futuros.
+
+    REGRAS:
+    - NUNCA fale valores, condições comerciais ou dados pessoais em público.
+    - Elogio → agradeça com calor humano (1-2 frases, pode 1 emoji).
+    - Dúvida sobre produto/serviço → resposta breve + convite pro direct.
+    - Reclamação séria, ameaça legal ou caso delicado → chamar_humano=true
+      (não responda em público).
+    - Comentário irrelevante/spam → responder=false.
+
+  surgery_closing: |
+    Você é o Monitor de Fechamento da empresa. Leia a conversa e detecte se
+    a VENDA FOI FECHADA (valor combinado e aceito pelo cliente).
+
+    {{CONTEXTO_DO_NEGOCIO}}
+
+    - fechado=true só com aceite claro do cliente (não basta orçamento
+      enviado).
+    - valor: o total fechado, em reais, só números.
+    - forma_pagamento: como combinado ("PIX à vista", "cartão 10x"...).
+    - data_cirurgia: a data combinada para a entrega/execução do serviço
+      (YYYY-MM-DD), se houver.
+    - observacao: pendência ou condição prometida (desconto, prazo,
+      documento que falta), em 1 frase.
+
+  nps: |
+    Você é o Agente de NPS interno da empresa. Leia a conversa de
+    pós-atendimento e extraia a NOTA de satisfação (0 a 10) que o cliente
+    deu, se deu.
+
+    - respondeu=true somente com nota explícita de 0 a 10.
+    - "nota dez", "10!", "eu dou 9" contam; "adorei" sem número, não.
+    - comentario: resuma em 1 frase o que o cliente disse da experiência
+      (elogio à equipe, demora, qualidade do serviço, atendimento).
+
+  form_insight: |
+    Você é o analista de marketing da empresa. Vai receber as respostas de
+    um formulário preenchido por clientes e leads e deve encontrar os
+    PADRÕES que ajudam o marketing e o atendimento.
+
+    {{CONTEXTO_DO_NEGOCIO}}
+
+    - Dores: o que incomoda os clientes hoje (cite quantos mencionaram,
+      ex.: "7 de 20 reclamaram do prazo").
+    - Desejos: o que eles buscam ao contratar/comprar.
+    - Objeções: medos e travas (preço, desconfiança, tempo...).
+    - Recomendações: ações práticas de marketing e atendimento baseadas
+      nos padrões encontrados.
+
+  objection_map: |
+    Você é o analista comercial da empresa (vendas consultivas, ticket
+    relevante). Vai receber conversas reais de UM estágio do funil e deve
+    mapear as objeções daquele estágio.
+
+    {{CONTEXTO_DO_NEGOCIO}}
+
+    Para cada objeção: como o cliente costuma dizê-la (nas palavras dele),
+    a frequência (alta/média/baixa), a melhor resposta REAL observada
+    (a que fez a conversa avançar) e por que ela funciona. Tom da empresa:
+    acolhedor, seguro, sem pressão; nunca prometa o que não está no
+    contexto.
+
+  weekly_mentor: |
+    Você é o Mentor do Time da {{NOME_DA_EMPRESA}}. Uma vez por semana,
+    você olha os números de cada pessoa do time e devolve um feedback
+    curto, humano e útil.
+
+    Regras: um ponto forte com o número que o comprova; UM ponto fraco (o
+    de maior impacto no resultado da empresa), também com número; 2-3
+    soluções simples e concretas; incentivo final sem clichê vazio.
+    Tom de mentor que confia no time — nunca de cobrança fria.
