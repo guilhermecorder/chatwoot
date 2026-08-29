@@ -70,9 +70,10 @@ export const lastExerciseSets = (record, name) => {
   return ex?.sets?.length ? ex.sets : null;
 };
 
-// séries de hoje: caixinhas VAZIAS pra digitar só o de hoje; cada série
-// carrega a última execução em `prev` (mostrada ao lado — tocar copia)
-// e a faixa da prescrição em `range` (vira placeholder na 1ª vez)
+// séries de hoje: já vêm PREENCHIDAS com a última execução (pedido
+// 26/08: "as últimas cargas como referência, pra eu já salvar") — é só
+// ajustar o que mudou e concluir; cada série mantém a última execução
+// em `prev` (chip ao lado) e a faixa da prescrição em `range`
 export const buildTodaySets = (prescription, lastSets) => {
   const ranges = prescription.sets || [];
   const rangeOf = r => {
@@ -82,8 +83,8 @@ export const buildTodaySets = (prescription, lastSets) => {
   };
   if (lastSets?.length) {
     return lastSets.map((s, i) => ({
-      load: '',
-      reps: '',
+      load: s.load ?? '',
+      reps: s.reps ?? '',
       prev: { load: s.load, reps: s.reps },
       range: rangeOf(ranges[i]),
       kind: s.kind || ranges[i]?.kind || '',

@@ -19,7 +19,9 @@ module Crm::AccessControl
   # áreas concedíveis (o admin marca quais o atendente pode acessar).
   # 'goals' saiu da lista (decisão 17/07): edição de Metas é SÓ ADMIN,
   # o painel em si é aberto ao time (goal_plans#show).
-  CAPABILITIES = %w[reports campaigns automations data_tools settings finance strategy pages].freeze
+  # 'health' (HUB): mundo Saúde concedível por pessoa — cada um com os
+  # próprios registros (o controller filtra por user_id)
+  CAPABILITIES = %w[reports campaigns automations data_tools settings finance strategy pages health].freeze
 
   # itens do MENU do dia a dia que o admin liga/desliga por atendente
   # (só visual — os endpoints dessas áreas continuam abertos ao time).

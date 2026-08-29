@@ -26,7 +26,8 @@
 class HubHealthRecord < ApplicationRecord
   belongs_to :account
 
-  KINDS = %w[workout boxing diet body].freeze
+  # profile = ficha da pessoa (peso-alvo, sessões/semana) — 1 por usuário
+  KINDS = %w[workout boxing diet body profile].freeze
 
   validates :kind, inclusion: { in: KINDS }
   validates :record_date, presence: true

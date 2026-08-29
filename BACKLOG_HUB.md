@@ -12,6 +12,82 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 10 — 28/08 ✅ MULTIUSUÁRIO: CONVIDADOS SÓ-SAÚDE C/ DADOS PRÓPRIOS
+Pedido dele: dar acesso a outras pessoas SÓ ao mundo Saúde, cada uma
+com registros e indicadores próprios, sem influenciar os dele.
+Decisão dele: prescrição (programa Warrior + dieta) COMPARTILHADA;
+execução/cargas/alvos por pessoa.
+
+- **Isolamento por pessoa**: HealthController#scope agora filtra
+  user_id = Current.user.id (todo registro já nascia com dono desde a
+  rodada 1 — os dados dele ficaram intactos). KPIs/planilha/dashboards
+  viram automaticamente "da pessoa logada". Upserts (dieta/corpo por
+  dia) também por pessoa.
+- **Kind novo `profile`** (1 registro por usuário, independente de
+  data): peso-alvo e sessões/semana POR PESSOA. GET /health devolve
+  `profile`; HealthHome grava o alvo via create_record kind=profile
+  (goals saiu do config compartilhado).
+- **Concessão 'health'**: entrou em Crm::AccessControl::CAPABILITIES e
+  no AgentAccessModal ("Saúde (HUB)") — admin marca a área no modal de
+  acessos do agente (mesma tranca allow-list do CEVICO; backend vale).
+- **Convidado só-Saúde** (não-admin c/ grant health): menu = mundo
+  Saúde SEMPRE (sem item HUB, sem Negócios — Sidebar.healthOnly);
+  caiu fora do mundo → redirect pro /health/painel; HubPage esconde o
+  card Negócios de não-admin (mundos = computed por isAdmin).
+- **TESTADO ponta a ponta local**: convidado@hub.local /
+  ConvidadoTeste@2026 (user 3 local, agent, grant ['health'] — MANTIDO
+  no banco local pra ele testar): logou → HUB só c/ card Saúde ✓ →
+  menu isolado sem HUB ✓ → painel ZERADO (0/3, sem peso) c/ prescrição
+  compartilhada (2460 kcal · Treino C) ✓ → salvou peso 70,5 ✓ → banco:
+  user 2 intacto (55/122/62/29) + user 3 c/ 1 body ✓ → relogou admin:
+  painel dele 81,5 kg intacto, Negócios de volta ✓. Registro de teste
+  do convidado apagado.
+- CONVITE na VPS: e-mail de convite precisa de SMTP (não configurado)
+  → criar usuário via console (comando pronto quando ele pedir).
+- ⚠️ Nota: convidado NÃO-admin em rotas de negócios do dia a dia
+  (conversas/CRM abertas a agents por design CEVICO) — menu esconde,
+  mas endpoint responde se a pessoa souber a URL. Aceitável pro caso
+  (convidados de confiança); trancar de verdade = rodada futura.
+
+## RODADA 9 — 28/08 ✅ PAINEL DA SAÚDE + EDITOR DE EXERCÍCIOS + MARCA
+Pedidos dele 26/08 (já usando NA VPS): cargas antigas JÁ PREENCHIDAS
+pra salvar rápido (inverte parte da rodada 8 — mas o chip "última vez"
+FICA, então antigo × novo continuam distinguíveis); adicionar/
+substituir exercício e variação como tag; ícone próprio do HUB;
+"Meu Painel" duplicado pro ambiente Saúde e remodelado.
+
+- **Pré-preenchimento de volta**: buildTodaySets enche as caixinhas
+  com a última execução; chip cinza continua ao lado como referência.
+  Testado: 78,5×8 etc. já preenchidos ao abrir.
+- **Editor de exercícios da prescrição** (✎ ao lado de cada Treino
+  A/B/C): renomear (= substituição, histórico do zero — avisado na
+  tela), campo VARIAÇÃO (tag halteres/barra/máquina — troca equipamento
+  SEM perder histórico), remover (🗑/↩), + adicionar (método 'sets'
+  3×8–12). Backend: sanitize_prescription ganhou 'tag'. Tag vira chip
+  tracejado na sessão e "· tag" na planilha.
+- **MEU PAINEL DA SAÚDE** (HealthHome.vue, /health/painel, item "Meu
+  Painel" no menu; o mundo Saúde ENTRA por ele agora): hero semana/
+  fase + "▶ Treino X de hoje"; 🎯 ALVOS (peso-alvo editável inline →
+  config.goals novo c/ sanitize_goals; kcal/proteína de diet.targets;
+  sessões/semana); ✅ HOJE (treino do dia por weekday, refeições N/M,
+  boxe, pesagem da semana — cards clicáveis); 📶 SEMANA (sessões,
+  placar ▲▬▼ calculado dos dados brutos, kcal média); 🦋 TRANSFORMAÇÃO
+  (peso, Δ com sinal, ritmo 30d mínimos quadrados, falta pro alvo,
+  projeção, curva das 24 pesagens).
+- **MARCA HUB própria**: símbolo hub-and-spoke (6 nós verdes + núcleo
+  sobre grafite) — public/brand-assets/hub/ (logo/logo_dark/thumbnail/
+  favicons 16-32-96, Chrome headless + sips); hub.yml apontado. Login
+  local já vestiu.
+- TESTADO local conta 3 (sim): painel cheio (ritmo −4,7 kg/mês ✓,
+  placar ▲4▬2▼3 ✓, alvo 80 → falta 1,5 kg ✓), editor salvou tag +
+  exercício novo (conferido no banco), sessão pré-preenchida. Rastros
+  de teste do config limpos. AGUARDA "pode subir" (etiqueta nova).
+- 🐛 VPS pendente: "peso não salvou" — não reproduz local; aguarda os
+  LOGS do POST create_record dele. (Na subida da VPS descobrimos
+  migration faltando — db:migrate resolveu o painel de saúde.)
+- FILA nova (pedidos 26/08): data do modo treino já vir com o DIA
+  PLANEJADO do treino na semana; OBSERVAÇÃO POR EXERCÍCIO.
+
 ## RODADA 8 — 26/08 ✅ REGISTRO DE TREINO LIMPO (feedback dele)
 Pedido: "selecionar a data e por o valor certo nas caixinhas; ver o
 exercício, a carga antiga e a nova na MESMA visualização — está

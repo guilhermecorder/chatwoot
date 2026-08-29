@@ -3,11 +3,14 @@
 // 1 · Negócios (todo o sistema atual) · 2 · Saúde (mundo isolado, só
 // treino/dieta/corpo) · 3 · reservado pro futuro. A escolha define o
 // hub_mode (localStorage) e o Sidebar troca o menu inteiro de acordo.
+import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 
 const router = useRouter();
 const { accountScopedRoute } = useAccount();
+const { isAdmin } = useAdmin();
 
 const setMode = mode => {
   localStorage.setItem('hub_mode', mode);
@@ -21,10 +24,11 @@ const abrirNegocios = () => {
 
 const abrirSaude = () => {
   setMode('saude');
-  router.push(accountScopedRoute('hub_health'));
+  router.push(accountScopedRoute('hub_health_painel'));
 };
 
-const MUNDOS = [
+// convidado (não-admin) não vê o mundo Negócios — o HUB dele é a Saúde
+const MUNDOS_ALL = [
   {
     numero: 1,
     titulo: 'Negócios',
@@ -42,6 +46,9 @@ const MUNDOS = [
     action: abrirSaude,
   },
 ];
+const MUNDOS = computed(() =>
+  isAdmin.value ? MUNDOS_ALL : MUNDOS_ALL.filter(m => m.numero !== 1)
+);
 </script>
 
 <template>

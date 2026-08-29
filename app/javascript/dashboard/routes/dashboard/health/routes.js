@@ -1,9 +1,17 @@
 import { frontendURL } from '../../../helper/URLHelper';
 import HealthPage from './HealthPage.vue';
 import HealthDashboard from './HealthDashboard.vue';
+import HealthHome from './HealthHome.vue';
 
 export default {
   routes: [
+    {
+      // Meu Painel da Saúde: porta de entrada do mundo (alvos + execuções)
+      path: frontendURL('accounts/:accountId/health/painel'),
+      name: 'hub_health_painel',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: HealthHome,
+    },
     {
       // Saúde (HUB, segmento saude): treino, dieta e corpo — painel pessoal.
       // Cada aba tem rota própria pro item certo acender no menu do modo Saúde.

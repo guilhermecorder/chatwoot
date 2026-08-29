@@ -4,11 +4,11 @@ nome: 'HUB'
 brand_name: 'HUB'
 segmento: saude   # sistema coringa: treino/dieta/corpo (config/segmentos/saude.yml)
 logos:
-  # provisórios (arte própria do HUB entra depois; trocar aqui quando existir)
-  logo: '/brand-assets/logo.png'
-  logo_dark: '/brand-assets/logo_dark.png'
-  logo_thumbnail: '/brand-assets/logo_thumbnail.png'
-favicons_dir: ''   # vazio = favicons padrão da raiz
+  # arte própria do HUB (26/08): símbolo hub-and-spoke verde sobre grafite
+  logo: '/brand-assets/hub/logo.png'
+  logo_dark: '/brand-assets/hub/logo_dark.png'
+  logo_thumbnail: '/brand-assets/hub/logo_thumbnail.png'
+favicons_dir: '/brand-assets/hub'   # favicon-16x16 / 32 / 96 (nós do hub)
 cores:
   primaria: '#0B1220'   # grafite profundo
   destaque: '#10B981'   # verde energia

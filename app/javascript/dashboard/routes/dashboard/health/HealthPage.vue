@@ -158,6 +158,67 @@ const setActiveProgram = p => {
   pushConfig({ ...config.value, programs: list });
 };
 
+// ═══ EDITOR DE EXERCÍCIOS DA PRESCRIÇÃO (pedido 26/08) ══════════════
+// Adicionar exercício num treino, substituir (renomear) e marcar a
+// VARIAÇÃO como tag (ex.: halteres/barra/máquina). Mexe só na
+// prescrição (config) — os registros já feitos ficam como estão.
+const exEditor = ref(null);
+const openExerciseEditor = sessionDef => {
+  const prog = program.value;
+  const cycle = programCycle.value;
+  exEditor.value = {
+    programId: prog.id,
+    cycleId: cycle?.id,
+    sessionKey: sessionDef.key,
+    title: `Treino ${sessionDef.key} — ${cycle?.name || prog.name}`,
+    rows: (sessionDef.exercises || []).map(e => ({ ...e, _del: false })),
+  };
+};
+const addEditorExercise = () =>
+  exEditor.value.rows.push({
+    name: '',
+    tag: '',
+    method: 'sets',
+    scheme: '3 × 8–12',
+    rest: '',
+    warmup: '',
+    progression: '',
+    progression_type: '',
+    note: '',
+    sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }],
+    _del: false,
+  });
+const saveExerciseEditor = async () => {
+  const ed = exEditor.value;
+  if (!ed) return;
+  const rows = ed.rows.filter(r => !r._del && r.name?.trim());
+  const progs = programs.value.map(p => {
+    if (p.id !== ed.programId) return p;
+    return {
+      ...p,
+      cycles: (p.cycles || []).map(c =>
+        c.id !== ed.cycleId
+          ? c
+          : {
+              ...c,
+              sessions: (c.sessions || []).map(s =>
+                s.key !== ed.sessionKey
+                  ? s
+                  : { ...s, exercises: rows.map(({ _del, ...e }) => e) }
+              ),
+            }
+      ),
+    };
+  });
+  const ok = await pushConfig({ ...config.value, programs: progs });
+  if (ok) {
+    exEditor.value = null;
+    useAlert('✏️ Treino atualizado.');
+  } else {
+    useAlert('Não consegui salvar a edição.');
+  }
+};
+
 // sessão em andamento (programa OU ficha avulsa) — nada salvo até concluir
 const session = ref(null);
 const savingSession = ref(false);
@@ -170,6 +231,7 @@ const startProgramSession = sessionDef => {
     const last = lastExerciseSets(lastRecord, p.name);
     return {
       name: p.name,
+      tag: p.tag,
       method: p.method,
       scheme: p.scheme,
       rest: p.rest,
@@ -917,18 +979,94 @@ onMounted(async () => {
               <template v-if="program.note"> · {{ program.note }}</template>
             </p>
             <div class="flex gap-2 flex-wrap">
-              <button
+              <div
                 v-for="s in programCycle?.sessions || []"
                 :key="s.key"
-                class="h-11 px-4 rounded-xl text-xs font-bold flex items-center gap-2 border"
-                :class="s.key === nextKey ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                :style="s.key === nextKey ? { background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` } : {}"
-                @click="startProgramSession(s)"
+                class="flex items-center gap-1"
               >
-                <span class="i-lucide-play" />
-                Treino {{ s.key }}
-                <span class="font-normal opacity-80">· {{ s.weekday }}</span>
-                <span v-if="s.key === nextKey" class="text-[10px] font-normal opacity-90">▶ próximo</span>
+                <button
+                  class="h-11 px-4 rounded-xl text-xs font-bold flex items-center gap-2 border"
+                  :class="s.key === nextKey ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
+                  :style="s.key === nextKey ? { background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` } : {}"
+                  @click="startProgramSession(s)"
+                >
+                  <span class="i-lucide-play" />
+                  Treino {{ s.key }}
+                  <span class="font-normal opacity-80">· {{ s.weekday }}</span>
+                  <span v-if="s.key === nextKey" class="text-[10px] font-normal opacity-90">▶ próximo</span>
+                </button>
+                <button
+                  class="h-11 w-8 rounded-xl text-sm text-n-slate-10 border border-n-weak hover:bg-n-alpha-1"
+                  title="Editar exercícios deste treino (adicionar, substituir, variação)"
+                  @click="openExerciseEditor(s)"
+                >
+                  ✎
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Editor de exercícios da prescrição -->
+          <div v-if="exEditor" class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+            <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
+              <span class="text-sm font-bold" :style="{ color: VERDE }">✎ {{ exEditor.title }}</span>
+              <button
+                class="h-8 px-3 rounded-lg text-xs text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
+                @click="exEditor = null"
+              >
+                Cancelar
+              </button>
+            </div>
+            <p class="text-[11px] text-n-slate-10 mb-3">
+              <b>Variação</b> = marcador do jeito que você faz (halteres, barra, máquina…) — use ela
+              pra trocar o equipamento SEM perder o histórico do exercício. <b>Renomear</b> vale como
+              substituição: o exercício novo começa histórico do zero.
+            </p>
+            <div class="flex flex-col gap-2 mb-3">
+              <div
+                v-for="(row, i) in exEditor.rows"
+                :key="i"
+                class="flex items-center gap-1.5 flex-wrap rounded-xl border border-n-weak p-2"
+                :class="row._del ? 'opacity-40' : ''"
+              >
+                <input
+                  v-model="row.name"
+                  type="text"
+                  placeholder="Nome do exercício"
+                  class="h-9 flex-1 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
+                  style="min-width: 11rem; margin-bottom: 0"
+                />
+                <input
+                  v-model="row.tag"
+                  type="text"
+                  placeholder="variação (ex.: halteres)"
+                  class="h-9 rounded-lg border border-dashed border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-11"
+                  style="width: 9rem; margin-bottom: 0"
+                />
+                <span class="text-[10px] text-n-slate-10">{{ row.scheme }}</span>
+                <button
+                  class="h-9 w-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1"
+                  :title="row._del ? 'Desfazer remoção' : 'Remover deste treino'"
+                  @click="row._del = !row._del"
+                >
+                  {{ row._del ? '↩' : '🗑' }}
+                </button>
+              </div>
+            </div>
+            <div class="flex gap-2 flex-wrap">
+              <button
+                class="h-9 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
+                @click="addEditorExercise"
+              >
+                + adicionar exercício
+              </button>
+              <button
+                class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
+                :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+                :disabled="savingConfig"
+                @click="saveExerciseEditor"
+              >
+                {{ savingConfig ? 'Salvando…' : '✓ Salvar treino' }}
               </button>
             </div>
           </div>
@@ -972,7 +1110,15 @@ onMounted(async () => {
 
             <div v-for="ex in session.exercises" :key="ex.name" class="mb-3 rounded-xl border border-n-weak p-3">
               <div class="flex items-center justify-between gap-2 flex-wrap mb-0.5">
-                <span class="text-xs font-bold text-n-slate-12">{{ ex.name }}</span>
+                <span class="text-xs font-bold text-n-slate-12">
+                  {{ ex.name }}
+                  <span
+                    v-if="ex.tag"
+                    class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-n-weak text-n-slate-10"
+                  >
+                    {{ ex.tag }}
+                  </span>
+                </span>
                 <span class="flex items-center gap-1.5">
                   <span
                     v-if="ex.method"
@@ -1125,7 +1271,10 @@ onMounted(async () => {
                     </tr>
                     <tr v-for="ex in s.exercises" :key="`${s.key}-${ex.name}`" class="border-b border-n-weak/60">
                       <td class="sticky left-0 z-10 bg-n-solid-1 px-2 py-1.5" style="min-width: 13rem">
-                        <p class="text-[11px] font-medium text-n-slate-12 leading-tight">{{ ex.name }}</p>
+                        <p class="text-[11px] font-medium text-n-slate-12 leading-tight">
+                          {{ ex.name }}
+                          <span v-if="ex.tag" class="text-[9px] font-normal text-n-slate-10">· {{ ex.tag }}</span>
+                        </p>
                         <p class="text-[10px] text-n-slate-10">{{ ex.scheme }}</p>
                       </td>
                       <td v-for="w in gridWeeks" :key="w" class="px-0.5 py-1">

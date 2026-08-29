@@ -36,6 +36,7 @@ const GRANT_ITEMS = [
   { key: 'finance',    label: 'Financeiro',            hint: 'livro caixa da clínica — receitas, custos, margem' },
   { key: 'strategy',   label: 'Estratégia',            hint: 'painel estratégico por pilares' },
   { key: 'pages',      label: 'Análise de Páginas',    hint: 'análise de funis e testes A/B (rascunhos já são do time)' },
+  { key: 'health',     label: 'Saúde (HUB)',           hint: 'mundo pessoal de treino/dieta/corpo — cada pessoa vê só os próprios registros' },
 ];
 
 // ── Perfis rápidos (preenchem os checkboxes; dá para ajustar depois) ──

@@ -13,6 +13,7 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
   def show
     render json: {
       config: health_cfg,
+      profile: scope.of_kind('profile').recent_first.first&.data || {},
       workouts: records('workout', WORKOUTS_LIMIT),
       boxings: records('boxing', WORKOUTS_LIMIT),
       diets: records('diet', DIETS_LIMIT),
@@ -31,6 +32,9 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
     record =
       if %w[workout boxing].include?(kind)
         scope.new(kind: kind, record_date: date)
+      elsif kind == 'profile'
+        # ficha da pessoa: 1 registro por usuário, independente da data
+        scope.of_kind('profile').order(:id).first || scope.new(kind: 'profile', record_date: date)
       else
         scope.of_kind(kind).find_or_initialize_by(record_date: date)
       end
@@ -65,8 +69,10 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
 
   private
 
+  # cada pessoa vê e grava SÓ os próprios registros (pedido 26/08:
+  # convidados com dados e indicadores independentes dos do dono)
   def scope
-    HubHealthRecord.where(account: Current.account)
+    HubHealthRecord.where(account: Current.account, user_id: Current.user.id)
   end
 
   def records(kind, limit)
@@ -101,6 +107,8 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       'diet' => sanitize_diet(raw['diet'])
     }
   end
+  # (alvos pessoais — peso-alvo, sessões/semana — moram no registro
+  # kind='profile' de cada usuário, não no config compartilhado)
 
   # Boxe: biblioteca de sequências (combos numerados) pra praticar
   def sanitize_boxing(boxing)
@@ -162,6 +170,8 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
 
     {
       'name' => ex['name'].to_s.strip.first(120),
+      # variação/marcador do exercício (ex.: "halteres", "barra", "máquina")
+      'tag' => ex['tag'].to_s.strip.first(30),
       'method' => ex['method'].to_s.first(20),
       'scheme' => ex['scheme'].to_s.first(60),
       'rest' => ex['rest'].to_s.first(40),

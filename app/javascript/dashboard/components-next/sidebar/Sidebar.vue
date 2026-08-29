@@ -378,6 +378,13 @@ const myGrants = computed(() => {
 const canSee = capability =>
   isAdmin.value || myGrants.value.includes(capability);
 
+// HUB: convidado SÓ da Saúde (não-admin com a área 'health' concedida)
+// → o sistema dele é o mundo Saúde inteiro, sem Negócios
+const healthOnly = computed(
+  () =>
+    segmentoId === 'saude' && !isAdmin.value && myGrants.value.includes('health')
+);
+
 // item 62: relatórios ESPECÍFICOS concedidos (lista vazia = todos)
 const myReportKeys = computed(() => {
   const perms = crmSettings.value?.agent_permissions ?? {};
@@ -530,6 +537,7 @@ const hubItem = () => ({
 
 const hubMenuSaude = () => [
   hubItem(),
+  { name: 'HealthPainel', label: 'Meu Painel', icon: 'i-lucide-gauge', to: accountScopedRoute('hub_health_painel') },
   { name: 'HealthTreino', label: 'Treino', icon: 'i-lucide-dumbbell', to: accountScopedRoute('hub_health') },
   { name: 'HealthBoxe', label: 'Boxe', icon: 'i-lucide-swords', to: accountScopedRoute('hub_health_boxe') },
   { name: 'HealthDieta', label: 'Dieta', icon: 'i-lucide-utensils', to: accountScopedRoute('hub_health_dieta') },
@@ -538,6 +546,15 @@ const hubMenuSaude = () => [
 ];
 
 const visibleMenuItems = computed(() => {
+  // convidado só-Saúde: menu do mundo Saúde SEMPRE, sem item HUB
+  if (healthOnly.value) {
+    const items = hubMenuSaude().filter(i => i.name !== 'HubHome');
+    const denominator = Math.max(items.length - 1, 1);
+    return items.map((item, index) => ({
+      ...item,
+      iconColor: gradientColorAt(index / denominator),
+    }));
+  }
   // mundo 2 — Saúde: menu isolado, nada de negócios
   if (segmentoId === 'saude' && hubMode.value === 'saude') {
     const items = hubMenuSaude();
@@ -587,6 +604,15 @@ onMounted(() => {
     router.currentRoute.value.name !== 'hub_home'
   ) {
     router.push(accountScopedRoute('hub_home'));
+  }
+});
+
+// convidado só-Saúde caindo fora do mundo Saúde → leva pro painel dele
+watch(healthOnly, only => {
+  if (!only) return;
+  const name = String(router.currentRoute.value.name || '');
+  if (!name.startsWith('hub_health')) {
+    router.push(accountScopedRoute('hub_health_painel'));
   }
 });
 
