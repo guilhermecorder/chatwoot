@@ -235,6 +235,7 @@ const rawPanelTiles = computed(() => {
   if (selectedPanel.value === 'conducao') {
     return [
       { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: 'agenda das unidades',
+        units: d.by_unit,
         details: [
           { label: 'Compareceram', value: `${d.attended ?? 0}` },
           { label: 'Faltaram', value: `${d.missed ?? 0}` },
@@ -245,6 +246,7 @@ const rawPanelTiles = computed(() => {
         details: [{ label: 'Faltaram', value: `${d.missed ?? 0}` }, { label: 'Taxa de comparecimento', value: `${d.show_rate ?? 0}%` }],
         about: 'Marcadas como "Compareceu" na conferência do dia da Agenda — a base da taxa de comparecimento e do funil de indicações.' },
       { label: 'Comparecimento', icon: 'i-lucide-percent', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.missed ?? 0} falta(s) no período`,
+        units: d.by_unit,
         components: ['appointments_attended', 'appointments_missed'],
         compare: [{ label: 'compareceram', value: d.attended ?? 0 }, { label: 'faltaram', value: d.missed ?? 0 }],
         details: [{ label: 'Compareceram ÷ (compareceram + faltaram)', value: `${d.attended ?? 0} ÷ ${(d.attended ?? 0) + (d.missed ?? 0)} = ${d.show_rate ?? 0}%` }],
@@ -302,6 +304,7 @@ const rawPanelTiles = computed(() => {
         compare: [{ label: 'leads', value: d.new_leads ?? 0 }, { label: 'avançaram a Agendamento', value: d.appointments_created ?? 0 }],
         about: 'Dos leads que chegaram no período, quantos já avançaram até "Agendamento de Consulta" no CRM (coorte). A taxa madura é a de períodos já fechados — a de hoje ainda amadurece.' },
       { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, chartKey: 'appointments_attended', sub: `${d.indications ?? 0} indicação(ões) de cirurgia`,
+        units: d.by_unit,
         details: [{ label: 'Indicações de cirurgia no período', value: `${d.indications ?? 0}` }],
         about: 'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.' },
       { label: 'Fechamento de cirurgias', icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, chartKey: 'surgeries_done', sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`,
@@ -3069,6 +3072,40 @@ onUnmounted(() => {
                 :prev-values="comp.prevValues"
                 :format="componentFormat(comp)"
               />
+            </div>
+          </div>
+          <!-- 🏥 POR UNIDADE (item 146): Paulista × Tatuapé lado a lado —
+               consultas, comparecimento e a taxa de cada casa -->
+          <div v-if="kpiModal.units?.length" class="rounded-xl bg-n-alpha-1 px-3 py-2 space-y-2">
+            <p class="text-[10px] text-n-slate-10">🏥 por unidade · consultas do período e comparecimento</p>
+            <div
+              v-for="u in kpiModal.units"
+              :key="u.unit || 'sem'"
+              class="rounded-lg bg-n-solid-1 border border-n-weak px-3 py-2"
+            >
+              <div class="flex items-center justify-between gap-2 text-xs mb-1">
+                <b class="text-n-slate-12">{{ u.label }}</b>
+                <span
+                  class="text-[10px] px-2 py-0.5 rounded-full font-bold text-white"
+                  :style="{ background: (u.show_rate ?? 0) >= 80 ? 'linear-gradient(135deg, #065F46, #10B981)' : (u.show_rate ?? 0) >= 60 ? 'linear-gradient(135deg, #B8860B, #D4A017)' : 'linear-gradient(135deg, #B91C1C, #EF4444)' }"
+                >
+                  {{ u.show_rate ?? 0 }}% compareceram
+                </span>
+              </div>
+              <div class="flex items-center gap-3 text-[10px] text-n-slate-10 flex-wrap">
+                <span>{{ u.consultations }} consulta(s)</span>
+                <span style="color: #059669">✓ {{ u.attended }} vieram</span>
+                <span style="color: #DC2626">✗ {{ u.missed }} faltaram</span>
+                <span v-if="u.consultations - u.attended - u.missed > 0" class="text-n-slate-9">
+                  {{ u.consultations - u.attended - u.missed }} sem conferência
+                </span>
+              </div>
+              <div class="h-1.5 rounded-full bg-n-alpha-2 overflow-hidden mt-1.5">
+                <div
+                  class="h-full rounded-full transition-all"
+                  :style="{ width: Math.max(u.show_rate ?? 0, 2) + '%', background: (u.show_rate ?? 0) >= 80 ? 'linear-gradient(90deg, #065F46, #10B981)' : (u.show_rate ?? 0) >= 60 ? 'linear-gradient(90deg, #B8860B, #D4A017)' : 'linear-gradient(90deg, #B91C1C, #EF4444)' }"
+                />
+              </div>
             </div>
           </div>
           <!-- leads por caixa (card 1): barras lado a lado -->

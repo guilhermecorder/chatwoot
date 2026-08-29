@@ -2730,6 +2730,10 @@ const onDropCell = (day, hour) => {
                 <span class="text-n-slate-9">(fim exclusivo)</span>
                 · blocos de
                 <select v-model.number="w.block" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
+                  <!-- 5 min (item 146): "abrir mais agenda" no Tatuapé — os
+                       agentes oferecem os horários novos sozinhos (o prompt
+                       nasce das janelas via Crm::AgendaSlots) -->
+                  <option :value="5">5 min</option>
                   <option :value="10">10 min</option>
                   <option :value="15">15 min</option>
                   <option :value="20">20 min</option>

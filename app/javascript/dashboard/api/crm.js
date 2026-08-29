@@ -194,6 +194,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { windows });
   }
 
+  // 🕐 horário de envio dos robôs de follow-up (Automações → Robôs, item 147)
+  updateFollowupHours(hours) {
+    return axios.post(`${this.url}/settings/update_agenda`, { followup_hours: hours });
+  }
+
   // responsável por painel do Meu Painel (Configurações → Painéis)
   updatePanelOwners(panelOwners) {
     return axios.post(`${this.url}/settings/update_agenda`, { panel_owners: panelOwners });

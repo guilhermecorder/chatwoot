@@ -23,12 +23,17 @@ class Whatsapp::HealthService
   def fetch_phone_health_data
     phone_number_id = @channel.provider_config['phone_number_id']
 
+    # timeout curto (CEVICO): sem ele o Net::HTTP espera até 60s+60s — quando
+    # a Meta demora/trava, o Meu Painel inteiro ficava travado atrás desta
+    # chamada (o payload do crm/home espera o health). Falha vira cache de
+    # 10 min no chamador, então errar rápido é barato.
     response = HTTParty.get(
       "#{BASE_URI}/#{@api_version}/#{phone_number_id}",
       query: {
         fields: health_fields,
         access_token: @access_token
-      }
+      },
+      timeout: 5
     )
 
     handle_response(response)

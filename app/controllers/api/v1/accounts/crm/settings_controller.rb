@@ -676,6 +676,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         }.compact
       end.sort_by { |a| a['date'] }
     end
+    # 🕐 HORÁRIO DE ENVIO dos robôs de follow-up (item 147): janela em que as
+    # cutucadas podem sair — padrão 08h–20h SP; 0–24 = a qualquer hora do dia
+    # (aproveita a janela de 24h do WhatsApp em vez de empilhar pro dia
+    # seguinte). Etapa que vence fora da janela espera ela reabrir. Só admin.
+    if params.key?(:followup_hours) && Current.account_user.administrator?
+      raw = params.require(:followup_hours).permit(:start, :end).to_h
+      h_start = raw['start'].to_i.clamp(0, 23)
+      h_end = raw['end'].to_i.clamp(1, 24)
+      cfg['followup_hours'] = { 'start' => h_start, 'end' => h_end } if h_start < h_end
+    end
     crm_settings.update!(agenda_config: cfg)
     render json: {
       agenda_windows: cfg['windows'] || [],
@@ -695,7 +705,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       kpi_layout: cfg['kpi_layout'] || {},
       block_layout: cfg['block_layout'] || {},
       performance_metrics: cfg['performance_metrics'] || {},
-      clinical_access: cfg['clinical_access'] || {}
+      clinical_access: cfg['clinical_access'] || {},
+      followup_hours: cfg['followup_hours'] || { 'start' => 8, 'end' => 20 }
     }
   end
 
@@ -704,6 +715,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # criadas/removidas de acordo. Só mexe nas automações com o nome-marcador —
   # automações criadas à mão no Modo Programação ficam intactas.
   SCHEDULER_MARKER = 'Secretário da Agenda (automático)'.freeze
+  # rodada 148: automação IRMÃ por coluna — o card entra ANTES da confirmação
+  # e a leitura única perdia o horário combinado depois; a irmã escuta as
+  # MENSAGENS do paciente na coluna e relê a conversa (1 min de espera junta
+  # mensagens picadas; freio de 3 min por paciente; o Applier ainda corta
+  # leituras quase simultâneas)
+  SCHEDULER_MSG_MARKER = 'Secretário da Agenda (mensagens)'.freeze
 
   def sync_scheduler_stages
     unless Current.account_user.administrator?
@@ -727,8 +744,31 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                               trigger_type: 'card_entered', action_type: 'schedule_appointment',
                               action_config: {}, active: true)
     end
+    sync_scheduler_message_automations(wanted)
 
     render json: { scheduler_stage_ids: managed.reload.pluck(:stage_id) }
+  end
+
+  # mantém as automações-irmãs "Mensagem criada" espelhando as colunas de
+  # atuação do Secretário (criadas/removidas junto; as manuais ficam)
+  def sync_scheduler_message_automations(wanted)
+    managed = Crm::Automation.joins(stage: :pipeline)
+                             .where(crm_pipelines: { account_id: Current.account.id })
+                             .where(action_type: 'schedule_appointment', name: SCHEDULER_MSG_MARKER)
+    managed.where.not(stage_id: wanted).destroy_all
+    existing_ids = managed.pluck(:stage_id)
+    (wanted - existing_ids).each do |stage_id|
+      stage = Crm::Stage.joins(:pipeline)
+                        .where(crm_pipelines: { account_id: Current.account.id })
+                        .find_by(id: stage_id)
+      next if stage.blank?
+
+      Crm::Automation.create!(stage_id: stage.id, name: SCHEDULER_MSG_MARKER,
+                              trigger_type: 'message_created', action_type: 'schedule_appointment',
+                              delay_minutes: 1,
+                              action_config: { 'message_direction' => 'incoming', 'throttle_minutes' => 3 },
+                              active: true)
+    end
   end
 
   # Insights comerciais do Consultor Comercial: analisa as conversas que
@@ -783,6 +823,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                               trigger_type: 'card_entered', action_type: action,
                               action_config: {}, active: true)
     end
+    # Secretário: as irmãs "Mensagem criada" acompanham as colunas (rodada 148)
+    sync_scheduler_message_automations(wanted) if agent == 'scheduler'
 
     render json: { agent: agent, stage_ids: managed.reload.pluck(:stage_id) }
   end
@@ -1024,6 +1066,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       surgery_locations: (s.agenda_config || {})['surgery_locations'] || [],
       surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
       agenda_theme: (s.agenda_config || {})['theme'],
+      # 🕐 janela de envio dos robôs de follow-up (item 147; padrão 08h–20h)
+      followup_hours: (s.agenda_config || {})['followup_hours'] || { 'start' => 8, 'end' => 20 },
       # tabela de preços vigente (com os padrões quando não há tabela salva)
       price_table: {
         items: Cevico::PriceList.items(Current.account),

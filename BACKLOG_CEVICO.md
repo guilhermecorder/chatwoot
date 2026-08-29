@@ -4531,3 +4531,135 @@ crm_opportunity_radar_job registrados.
 - Seeds de teste deixados no local: ação "Campanha refrativa nova no ar"
   (10/08) e perda_valor na Gabriela Almeida teste (R$ 4.800).
 - AGUARDANDO "pode subir" (junto da 143+144).
+
+## 146. ✅ COMPARECIMENTO POR UNIDADE + CONSULTA DE 5 MIN (pedidos 26/08: "comparecimento é uma chave")
+- Pedidos dele: (a) filtrar consultas agendadas e comparecimento por
+  UNIDADE (Paulista × Tatuapé); (b) "abrir mais agenda" no Tatuapé:
+  consulta de 5 min em vez de 15, ajustando os agentes; (c) ideias de
+  automação pra subir a taxa de comparecimento.
+- 🏥 POR UNIDADE: home_controller ganhou unit_breakdown(periodo) —
+  group(:unit, :attendance) das consultas do período (tasks.unit) →
+  by_unit: [{unit, label, consultations, attended, missed, show_rate}]
+  nos painéis CONDUÇÃO e GESTOR (UNIT_LABELS = mesmos do AgendaSlots).
+  Nos popups dos cards "Consultas no período" e "Comparecimento"
+  (condução) + "Comparecimento" (gestor): seção "🏥 por unidade" com
+  cartão por casa — chip semafórico (≥80% verde · ≥60% ouro · <60%
+  vermelho), ✓ vieram / ✗ faltaram / sem conferência e barra da taxa.
+  Teste local: Av. Paulista 94,1% × Tatuapé 57,1% lado a lado.
+- ⏱ CONSULTA DE 5 MIN: a duração JÁ era por janela (windows[].block) e os
+  prompts dos agentes JÁ nascem das janelas (Crm::AgendaSlots.free_slots
+  → free_slots_text no prompt do Secretário/Atendente) — faltava só a
+  OPÇÃO no editor: "5 min" adicionado ao seletor de blocos das Janelas
+  dos médicos (AgendaBoard). Sanitizer do windows já aceita (permit
+  :block). Teste ponta a ponta local: janelas do Tatuapé → 5 min →
+  free_slots_text passou a oferecer "Tatuapé: 10:30, 10:35, 10:40…"
+  enquanto Paulista segue 08:30, 08:45… — ou seja, os agentes se ajustam
+  SOZINHOS, sem mexer em prompt.
+- ⚠️ PÓS-DEPLOY (ELE): Agenda → Janelas dos médicos → Editar → janelas do
+  Tatuapé → blocos de 5 min → Salvar. E ATENÇÃO: o Atendente IA do
+  WhatsApp (N8N, externo) tem grade PRÓPRIA no prompt do supervisor —
+  se ainda estiver com a grade de 15 min escrita, precisa ajustar lá no
+  N8N também (o interno segue as janelas sozinho).
+- 📦 N8N ENTREGUE (26/08): ele mandou o JSON do workflow (v19 em uso;
+  Tatuapé estava em 10min nas janelas 5 e 7) → gerei os prompts prontos
+  em ~/Downloads/TATUAPE 5MIN/ (SUPERVISOR systemMessage + CALENDAR_AGENT
+  systemMessage c/ Tatuapé 5min: grade, exemplo de blocos, duração e
+  "fim do evento = início + 5 min"; toolDescription e nodes do Google
+  Calendar NÃO mudam — o fim do evento vem do prompt). LEIA-ME junto:
+  2 colagens no N8N + teste real numa quarta no Tatuapé.
+- Ideias de automação p/ comparecimento entregues na conversa (D-1/D-0,
+  resgate no dia da falta, etiqueta risco_falta etc.) — viram itens
+  quando ele escolher.
+- Sem migration, sem cron. Testado local conta 3 (seeds Teste146
+  paulista/tatuape deixados no banco local).
+- ✅ SUBIDA 29/08 junto de 147+148 (develop; Meta Leads separado como sempre).
+  Aguarda build verde → implantar WEB+SIDEKIQ (pula a 785fa58 — esta etiqueta
+  carrega 140–148); reversão = 781aa6b.
+
+## 147. ✅ 🕐 HORÁRIO DE ENVIO DO FOLLOW-UP CONFIGURÁVEL + MEU PAINEL SEM TRAVA DO WHATSAPP (pedidos 28/08)
+- Pedido dele: "quero que ele envie mensagens durante a janela de 24h do
+  dia, não quero que empilhe tudo pro dia seguinte" — controle mais
+  preciso da cadência. (Contexto: o expediente fixo 08h–20h fazia etapa
+  vencida à noite esperar as 08h e sair empilhada de manhã, às vezes já
+  fora da janela de 24h do WhatsApp.)
+- 🕐 EXPEDIENTE VIROU JANELA CONFIGURÁVEL por conta: Automações → Robôs →
+  cartão "Horário de envio das cutucadas" (só admin): selects das/às +
+  chips "Padrão 08h–20h" e "24 horas". Persistência
+  agenda_config.followup_hours {start 0–23, end 1–24}, sanitizada no
+  update_agenda (start >= end não salva; lixo cai no padrão — o robô nunca
+  fica sem janela). FollowupBotJob.send_hours(account) cacheado por rodada;
+  effective_overdue_hours passou a usar a janela da conta (etapa que vence
+  fora espera a janela REABRIR — o atraso conta a partir dali, nada é
+  descartado por vencer de madrugada). Com 0–24, o "empilhamento" some:
+  cada etapa sai na hora certa. As demais travas (piso 30min, teto 4/dia,
+  momento perdido 3h, 1 por rodada) continuam valendo.
+- Rótulo "fora do expediente 08h–20h" da aba Robôs agora mostra a janela
+  configurada. Aviso no cartão: texto simples só chega dentro da janela de
+  24h do WhatsApp — madrugada/cadência em dias pede mensagem modelo.
+- ⚡ MEU PAINEL DESTRAVADO: timeout de 5s no Whatsapp::HealthService
+  (HTTParty sem timeout = Net::HTTP espera 60s+60s; quando a Meta
+  demorava, o payload do crm/home inteiro ficava preso atrás do health —
+  a 1ª carga a cada 10min de cache pagava o pato). Falha segue caindo no
+  cache de 10 minutos do home_controller — errar rápido é barato.
+- Testes: runner (sem config=8...20, 24h=0...24 cobre 3h, 07–22, inválida
+  22→10 cai no padrão, overdue 2.0h certinho na janela 24h), HTTP na conta
+  3 (salva 24h, GET devolve, inválida mantém a anterior, volta ao padrão)
+  e VISUAL (cartão na aba Robôs, chip 24 horas → toast "liberadas 24 horas
+  por dia" + banco confirmado, chip Padrão restaura). Sem migration, sem
+  cron. Banco local deixado no padrão 08–20.
+- ⚠️ settings_controller/api crm.js seguem MISTOS c/ Meta Leads — separar
+  no commit como sempre.
+- Na MESMA conversa (28/08): varredura do follow-up explicada (precisão
+  ~2–4min, 5 travas) + diagnóstico do Secretário da Agenda "não pega todo
+  mundo" — virou a RODADA 148 na sequência.
+- ✅ SUBIDA 29/08 junto de 146+148 (mesmo commit; ver nota de deploy no 146).
+
+## 148. ✅ 🎯 AGENDAMENTO 100% — Secretário v2 (releitura, reagendamento, cancelamento) (direção dele 28/08)
+- Direção dele: "preciso favorecer que o agendamento fique redondo e 100%
+  preciso, inclusive reagendamentos — a conferência da agenda depende
+  disso; hoje o agente interno só 'duplica a agenda' do N8N". FUTURO
+  ANOTADO (conversa grande a ter): CENTRALIZAÇÃO da operação no sistema,
+  com agenda PRÓPRIA como fonte da verdade (aposentar o Google Calendar).
+- CAUSA RAIZ corrigida: o Secretário lia a conversa UMA vez ("Entrou na
+  coluna"), geralmente ANTES de dia/hora estarem confirmados → tarefa de
+  revisão e a confirmação posterior nunca era lida.
+- 🧠 Crm::AppointmentApplier NOVO — caminho ÚNICO do Secretário (usado
+  pela automação de coluna E pela releitura): extrai → cria/REAGENDA/
+  CANCELA/tarefa de revisão + nota privada + linha no registro. Trava
+  MIN_GAP 2min (leituras quase simultâneas não gastam IA 2x).
+  CrmAutomationFireJob#schedule_appointment virou delegação de 8 linhas.
+- 👂 AUTOMAÇÃO-IRMÃ por coluna de atuação: sync_scheduler_stages e
+  sync_agent_stages(scheduler) agora criam/removem JUNTO uma automação
+  "Secretário da Agenda (mensagens)" (message_created incoming, delay 1min
+  junta mensagens picadas, throttle 3min) — o card entra E cada mensagem
+  do paciente na coluna redispara a leitura. Config ZERO pra ele: basta
+  salvar as colunas de atuação (que ele já tem) — resincronizar 1x após o
+  deploy pra criar as irmãs.
+- 🔁 RELEITURA FORA DAS COLUNAS (CrmListener → Crm::SchedulerRecheckJob
+  novo, wait 20s, throttle 10min/paciente): (a) quem tem tarefa
+  "⚠️ Confirmar consulta"/"⚠️ Pediu cancelar" aberta → QUALQUER mensagem
+  dele relê (é a confirmação chegando); (b) mensagem c/ remarcar/
+  reagendar/desmarcar/cancelar/adiar/"mudar o horario"/etc (sem acento,
+  RECHECK_TERMS) de quem TEM consulta futura → relê. Roda mesmo sem card.
+- ❌ CANCELAMENTO: campo cancelamento no schema da extração (regra: SÓ
+  sem novo horário; remarcou = reagendamento) → Recorder.cancel_future
+  seta canceled_at na consulta futura + rastro na descrição + nota
+  "CANCELADA a pedido do paciente"; sem consulta futura achada → tarefa
+  "⚠️ Pediu cancelar/remarcar: nome" (pode estar só no Google Calendar).
+- 🧾 ANTI-DUPLICATA da tarefa de revisão POR CONTATO (bug antigo: dedup
+  por título — dois pacientes sem nome = "Paciente" e o 2º era pulado em
+  silêncio; título exato agora só segura tarefas antigas sem contact_id).
+- 👁 VISIBILIDADE: erro da IA e "sem dia/hora" (1ª detecção) agora entram
+  no scheduler_log — outcomes novos canceled/cancel_no_match/erro c/
+  rótulos no card do agente; banner do card reescrito (relê mensagens,
+  cancela, releitura fora das colunas).
+- Testes (extração STUBADA, sem IA): 15/15 ✅ — revisão+log, MIN_GAP,
+  não-duplica, homônimo "Paciente" destravado, criação c/ nota,
+  reagendamento sem duplicar, cancelamento c/ canceled_at+nota, cancelar
+  sem consulta → tarefa, log c/ 5 desfechos, gatilhos do listener (a/b,
+  acento, negativo, freio 10min); HTTP: sync cria/remove o PAR; visual:
+  banner novo no card. Limpeza completa (contatos/tarefas/log de teste).
+- Sem migration, sem cron. PÓS-DEPLOY (ELE): abrir o card do Secretário →
+  Salvar colunas de atuação (recria e já cria as irmãs "mensagens").
+- ⚠️ settings_controller segue MISTO c/ Meta Leads — separar no commit.
+- ✅ SUBIDA 29/08 junto de 146+147 (mesmo commit; ver nota de deploy no 146).

@@ -40,6 +40,11 @@ class CrmListener < BaseListener
     contact = message.conversation&.contact
     return if contact.blank?
 
+    # releitura do Secretário da Agenda (rodada 148): resposta de quem tem
+    # tarefa de revisão aberta, ou pedido de remarcar/cancelar de quem tem
+    # consulta futura — roda MESMO sem card no funil
+    handle_scheduler_recheck(message, contact)
+
     # 2 consultas leves por mensagem, indexadas — barato mesmo em produção
     stage_ids = Crm::Contact.where(contact_id: contact.id).pluck(:stage_id).compact
     return if stage_ids.empty?
@@ -60,6 +65,62 @@ class CrmListener < BaseListener
   end
 
   private
+
+  # ── RELEITURA DO SECRETÁRIO DA AGENDA (rodada 148) ──
+  # O gatilho de coluna lê a conversa quando o card ENTRA — muitas vezes antes
+  # de dia/hora estarem combinados. Aqui a leitura ganha segunda chance:
+  # (a) paciente com tarefa "⚠️ Confirmar consulta"/"⚠️ Pediu cancelar" aberta
+  #     responde → relê (qualquer mensagem dele; é a confirmação chegando);
+  # (b) mensagem fala em remarcar/cancelar E o paciente tem consulta futura
+  #     na Agenda → relê (reagendamento/cancelamento entram sozinhos).
+  # Freios: 1 releitura por paciente a cada 10 min + espera de 20s (junta
+  # mensagens picadas) + o próprio Applier corta leituras quase simultâneas.
+  RECHECK_TERMS = [
+    'remarcar', 'reagendar', 'desmarcar', 'cancelar', 'adiar',
+    'mudar o horario', 'trocar o horario', 'outro horario', 'outro dia',
+    'nao vou conseguir', 'nao vou poder', 'nao poderei'
+  ].freeze
+  RECHECK_THROTTLE = 10.minutes
+
+  def handle_scheduler_recheck(message, contact)
+    return unless message.message_type == 'incoming'
+    return if recheck_recently?(contact)
+
+    account = message.conversation.account
+    return unless recheck_trigger?(account, contact, message)
+
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      attrs.merge('cevico_scheduler_recheck_at' => Time.current.iso8601)
+    end
+    Crm::SchedulerRecheckJob.set(wait: 20.seconds).perform_later(message.conversation_id)
+  rescue StandardError => e
+    Rails.logger.error "[CrmListener] releitura do Secretário: #{e.message}"
+  end
+
+  def recheck_recently?(contact)
+    last = contact.additional_attributes&.dig('cevico_scheduler_recheck_at')
+    return false if last.blank?
+
+    Time.zone.parse(last.to_s) > RECHECK_THROTTLE.ago
+  rescue ArgumentError, TypeError
+    false
+  end
+
+  def recheck_trigger?(account, contact, message)
+    open_tasks = account.tasks.where(status: %i[todo doing], contact_id: contact.id)
+    # (a) tarefa de revisão aberta do paciente → qualquer resposta reabre a leitura
+    return true if open_tasks.where("title LIKE '⚠️ Confirmar consulta%' OR title LIKE '⚠️ Pediu cancelar%'").exists?
+
+    # (b) palavras de remarcação/cancelamento de quem TEM consulta futura
+    content = normalize_text(message.content)
+    return false if content.blank?
+    return false unless RECHECK_TERMS.any? { |t| content.include?(t) }
+
+    account.tasks.where(task_type: 'consulta', canceled_at: nil, contact_id: contact.id)
+           .where('due_at > ?', Time.current)
+           .where.not(status: 'done')
+           .exists?
+  end
 
   # ── ATENDENTE INSTAGRAM (agente respondedor por caixa) ──
   # incoming na caixa configurada → agenda o job com 12s de espera (junta

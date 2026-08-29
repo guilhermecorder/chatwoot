@@ -634,7 +634,11 @@ const SCHEDULER_OUTCOMES = {
   created: { label: 'criada', class: 'bg-green-500/15 text-green-600' },
   rescheduled: { label: 'reagendada', class: 'bg-amber-500/15 text-amber-600' },
   already: { label: 'já existia', class: 'bg-n-alpha-2 text-n-slate-10' },
-  skipped: { label: 'sem dia/hora', class: 'bg-red-500/10 text-red-500' },
+  skipped: { label: 'sem dia/hora (tarefa criada)', class: 'bg-red-500/10 text-red-500' },
+  // rodada 148: cancelamento + erros visíveis — é assim que se vê quem escapou
+  canceled: { label: 'cancelada', class: 'bg-rose-500/15 text-rose-600' },
+  cancel_no_match: { label: 'pediu cancelar — consulta não achada', class: 'bg-red-500/10 text-red-500' },
+  erro: { label: 'erro na leitura', class: 'bg-red-500/10 text-red-500' },
 };
 const fmtLogDate = iso =>
   iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -1650,6 +1654,45 @@ const delayLabel = step => {
   return `${Math.round(hours / 24)}d`;
 };
 
+// 🕐 HORÁRIO DE ENVIO das cutucadas (item 147) — vale pra todos os robôs da
+// conta. Padrão 08h–20h; 0–24 = a qualquer hora do dia (aproveita a janela
+// de 24h do WhatsApp em vez de empilhar as cutucadas pro dia seguinte).
+const followupHours = ref({ start: 8, end: 20 });
+const savingFollowupHours = ref(false);
+watch(
+  settings,
+  s => {
+    const h = s?.followup_hours;
+    if (h && h.start != null)
+      followupHours.value = { start: Number(h.start), end: Number(h.end) };
+  },
+  { immediate: true }
+);
+const followupHoursLabel = computed(() => {
+  const { start, end } = followupHours.value;
+  if (start === 0 && end === 24) return '24 horas por dia';
+  return `das ${String(start).padStart(2, '0')}h às ${end === 24 ? '00h' : `${String(end).padStart(2, '0')}h`}`;
+});
+const saveFollowupHours = async (start, end) => {
+  // janela sempre válida: o fim precisa vir depois do começo
+  const s = Math.min(Math.max(start, 0), 23);
+  const e = Math.min(Math.max(end, s + 1), 24);
+  followupHours.value = { start: s, end: e };
+  savingFollowupHours.value = true;
+  try {
+    await CrmAPI.updateFollowupHours({ start: s, end: e });
+    useAlert(
+      s === 0 && e === 24
+        ? 'Cutucadas liberadas 24 horas por dia'
+        : `Cutucadas saem ${followupHoursLabel.value}`
+    );
+  } catch {
+    useAlert('Erro ao salvar o horário de envio');
+  } finally {
+    savingFollowupHours.value = false;
+  }
+};
+
 onMounted(async () => {
   loadStudioForms();
   if (!inboxes.value.length) store.dispatch('inboxes/get');
@@ -1759,6 +1802,51 @@ onUnmounted(() => {
           </button>
         </div>
 
+        <!-- 🕐 Horário de envio (item 147): janela em que as cutucadas podem
+             sair — o admin estende até 24h pra não empilhar pro dia seguinte -->
+        <div v-if="isAdmin" class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="i-lucide-clock text-sm" style="color: #0F5FA6" />
+            <p class="text-sm font-semibold text-n-slate-12">Horário de envio das cutucadas</p>
+            <span class="text-xs font-medium text-n-brand">{{ followupHoursLabel }}</span>
+            <Spinner v-if="savingFollowupHours" :size="14" class="text-n-brand" />
+          </div>
+          <div class="mt-2.5 flex items-center gap-2 flex-wrap">
+            <span class="text-xs text-n-slate-11">das</span>
+            <select
+              :value="followupHours.start"
+              class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-1"
+              style="width: 86px; margin-bottom: 0"
+              @change="saveFollowupHours(Number($event.target.value), followupHours.end)"
+            >
+              <option v-for="h in 24" :key="`fh-s-${h}`" :value="h - 1">{{ String(h - 1).padStart(2, '0') }}h</option>
+            </select>
+            <span class="text-xs text-n-slate-11">às</span>
+            <select
+              :value="followupHours.end"
+              class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-1"
+              style="width: 86px; margin-bottom: 0"
+              @change="saveFollowupHours(followupHours.start, Number($event.target.value))"
+            >
+              <option v-for="h in 24" :key="`fh-e-${h}`" :value="h">{{ h === 24 ? '24h' : `${String(h).padStart(2, '0')}h` }}</option>
+            </select>
+            <button
+              class="text-[11px] px-2.5 py-1 rounded-full border transition-colors"
+              :class="followupHours.start === 8 && followupHours.end === 20 ? 'border-n-brand text-n-brand font-semibold' : 'border-n-weak text-n-slate-10 hover:text-n-brand'"
+              @click="saveFollowupHours(8, 20)"
+            >Padrão 08h–20h</button>
+            <button
+              class="text-[11px] px-2.5 py-1 rounded-full border transition-colors"
+              :class="followupHours.start === 0 && followupHours.end === 24 ? 'border-n-brand text-n-brand font-semibold' : 'border-n-weak text-n-slate-10 hover:text-n-brand'"
+              @click="saveFollowupHours(0, 24)"
+            >24 horas</button>
+          </div>
+          <p class="mt-2 text-[11px] text-n-slate-10 leading-relaxed">
+            Vale para todos os robôs. Cutucada que vence fora do horário espera ele reabrir (não é descartada).
+            💡 Texto simples só chega dentro da janela de 24h do WhatsApp — para envio de madrugada ou cadências em dias, prefira etapas com mensagem modelo.
+          </p>
+        </div>
+
         <div v-if="loadingBots" class="flex justify-center py-10"><Spinner :size="28" class="text-n-brand" /></div>
         <div v-else-if="!bots.length" class="text-center py-12 text-n-slate-10">
           <span class="i-lucide-bot text-4xl mb-2 block mx-auto" />
@@ -1808,7 +1896,7 @@ onUnmounted(() => {
                 <span>
                   Última rodada {{ fmtLogDate(bot.activity.last_run.at) }} ·
                   <template v-if="bot.activity.last_run.status === 'fora_da_janela'">fora da janela (não enviou)</template>
-                  <template v-else-if="bot.activity.last_run.status === 'fora_do_expediente'">fora do expediente 08h–20h (não envia de madrugada)</template>
+                  <template v-else-if="bot.activity.last_run.status === 'fora_do_expediente'">fora do horário de envio ({{ followupHoursLabel }})</template>
                   <template v-else>
                     {{ bot.activity.last_run.candidates }} conversa(s) na mira ·
                     <b :class="bot.activity.last_run.sent ? 'text-green-600' : ''">{{ bot.activity.last_run.sent }} enviada(s)</b>
@@ -2590,15 +2678,19 @@ onUnmounted(() => {
             <div v-if="key === 'scheduler'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
               <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
                 📥 Anota consultas na Agenda do sistema lendo as conversas — <b>nunca fala com o
-                paciente</b> (quem conversa é o Atendente IA do N8N). Roda quando um card ENTRA nas
-                colunas escolhidas abaixo; reagendamentos atualizam a consulta existente.
+                paciente</b> (quem conversa é o Atendente IA do N8N). Lê quando o card ENTRA nas
+                colunas escolhidas <b>e relê a cada mensagem do paciente nessas colunas</b> — a
+                confirmação que chega depois não escapa mais. Reagendamentos atualizam a consulta
+                existente; <b>cancelamento sem novo horário tira a consulta da Agenda</b>. Fora das
+                colunas: quem tem tarefa "⚠️ Confirmar consulta" aberta ou fala em
+                remarcar/cancelar também redispara a leitura sozinho.
               </div>
 
               <!-- Colunas onde o Secretário atua -->
               <div>
                 <p class="text-xs font-medium text-n-slate-11 mb-1.5">
                   Colunas onde o Secretário atua
-                  <span class="text-n-slate-9 font-normal">(card entrou → lê a conversa e anota na Agenda; nenhuma marcada = só manual)</span>
+                  <span class="text-n-slate-9 font-normal">(card entrou + mensagens do paciente na coluna → lê a conversa e anota na Agenda; nenhuma marcada = só manual)</span>
                 </p>
                 <div v-if="!allStages.length" class="text-xs text-n-slate-9">Carregando colunas…</div>
                 <div v-else class="flex flex-wrap gap-1.5">

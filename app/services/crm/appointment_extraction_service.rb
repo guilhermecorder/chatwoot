@@ -43,6 +43,12 @@ class Crm::AppointmentExtractionService
         type: 'boolean',
         description: 'true se esta confirmação é um REAGENDAMENTO (o paciente já tinha consulta e mudou dia/horário)'
       },
+      cancelamento: {
+        type: 'boolean',
+        description: 'true se o paciente CANCELOU/desmarcou a consulta SEM combinar novo horário ' \
+                     '("não vou poder ir", "cancela pra mim", "desmarca"). Se remarcou para outro ' \
+                     'dia/hora confirmados, é reagendamento (não cancelamento).'
+      },
       sexo: {
         type: 'string',
         enum: %w[masculino feminino desconhecido],
@@ -50,7 +56,7 @@ class Crm::AppointmentExtractionService
                      '("minha mãe", "meu pai", "ele/ela"). Na dúvida, desconhecido.'
       }
     },
-    required: %w[encontrado nome telefone data hora unidade problema medico observacoes valor_consulta reagendamento sexo],
+    required: %w[encontrado nome telefone data hora unidade problema medico observacoes valor_consulta reagendamento cancelamento sexo],
     additionalProperties: false
   }.freeze
 
@@ -80,6 +86,11 @@ class Crm::AppointmentExtractionService
       R$ 300 para glaucoma), registre; senão deixe vazio.
     - reagendamento=true quando a conversa mostra que o paciente JÁ TINHA uma
       consulta e trocou o dia/horário ("preciso remarcar", "mudar o horário").
+    - cancelamento=true SÓ quando o paciente desistiu/desmarcou SEM novo
+      horário combinado ("não vou poder ir", "cancela", "desmarca pra mim").
+      Se ele remarcou para um novo dia/hora CONFIRMADOS, isso é reagendamento
+      (encontrado=true com a nova data), NÃO cancelamento. Vale o estado MAIS
+      RECENTE da conversa: cancelou e depois marcou de novo = agendamento.
     - sexo: deduza o sexo do PACIENTE da consulta pelo nome (Maria → feminino,
       João → masculino) ou pelo contexto ("minha mãe", "meu avô", "ela"). Atenção:
       quem conversa pode estar marcando para OUTRA pessoa — o que vale é o
@@ -125,6 +136,7 @@ class Crm::AppointmentExtractionService
       notes: parsed['observacoes'].to_s.strip,
       price: parsed['valor_consulta'].to_s.strip,
       reschedule: parsed['reagendamento'] == true,
+      cancel: parsed['cancelamento'] == true,
       gender: %w[masculino feminino].include?(parsed['sexo']) ? parsed['sexo'] : nil,
       model: model
     }

@@ -238,7 +238,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       surgeries_booked: agendadas,
       closing_rate: pct(agendadas, indicacoes),
       surgeries_done: realizadas_scope.where(attendance: 'attended').or(realizadas_scope.where(status: :done)).count,
-      nps: nps_summary
+      nps: nps_summary,
+      # item 146: comparecimento por unidade também no painel do gestor
+      by_unit: unit_breakdown(periodo)
     )
   end
 
@@ -312,8 +314,32 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       show_rate: pct(compareceu, compareceu + faltou),
       indications: periodo.where(surgery_indication: 'indicated').count,
       # consultas que já passaram e ninguém marcou Compareceu/Faltou
-      unconfirmed: periodo.where(attendance: nil).where('due_at < ?', Time.current).count
+      unconfirmed: periodo.where(attendance: nil).where('due_at < ?', Time.current).count,
+      # item 146: Paulista × Tatuapé lado a lado (consultas + comparecimento)
+      by_unit: unit_breakdown(periodo)
     }
+  end
+
+  # rótulos oficiais das unidades (mesmos do Crm::AgendaSlots)
+  UNIT_LABELS = { 'paulista' => 'Av. Paulista', 'tatuape' => 'Tatuapé' }.freeze
+
+  # item 146: consultas do período POR UNIDADE (tasks.unit) com o
+  # comparecimento de cada uma — a quebra que mostra onde a taxa vaza
+  def unit_breakdown(periodo)
+    rows = periodo.group(:unit, :attendance).count
+    rows.keys.map(&:first).uniq.map do |unit|
+      total = rows.sum { |(u, _), v| u == unit ? v : 0 }
+      attended = rows[[unit, 'attended']] || 0
+      missed = rows[[unit, 'missed']] || 0
+      {
+        unit: unit,
+        label: UNIT_LABELS[unit.to_s] || (unit.presence || 'Sem unidade'),
+        consultations: total,
+        attended: attended,
+        missed: missed,
+        show_rate: pct(attended, attended + missed)
+      }
+    end.sort_by { |r| -r[:consultations] }
   end
 
   # ── Painel Cirurgias — fechamento e pós-operatório ──

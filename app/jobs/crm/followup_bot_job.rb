@@ -20,7 +20,10 @@ class Crm::FollowupBotJob < ApplicationJob
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   LOOKBACK = 3.days # não cutuca conversas antigas demais
   EVENTS_CAP = 60   # histórico de envios/erros guardado por robô
-  # EXPEDIENTE: cutucada só entre 08h e 20h (SP) — nada de mensagem às 6h
+  # EXPEDIENTE PADRÃO: cutucada só entre 08h e 20h (SP). O admin pode mudar a
+  # janela em Automações → Robôs → "Horário de envio" (até 24h por dia) —
+  # agenda_config.followup_hours {start, end}. Item 147: etapa que vencia à
+  # noite empilhava pro dia seguinte e perdia a janela de 24h do WhatsApp.
   BUSINESS_HOURS = (8...20)
   # etapa que venceu há mais de N horas PERDEU O MOMENTO: é marcada como
   # tratada SEM enviar (evita rajada após deploy/queda — o robô não manda
@@ -57,7 +60,8 @@ class Crm::FollowupBotJob < ApplicationJob
       return
     end
 
-    unless BUSINESS_HOURS.cover?(TZ.now.hour) # expediente 08h–20h SP
+    @hours = send_hours(bot.account) # janela de envio da conta (padrão 08h–20h)
+    unless @hours.cover?(TZ.now.hour)
       record_run(bot, status: 'fora_do_expediente')
       return
     end
@@ -266,19 +270,33 @@ class Crm::FollowupBotJob < ApplicationJob
     (Time.current - time) / 3600.0
   end
 
-  # atraso "justo" de uma etapa: se ela venceu FORA do expediente (madrugada/
-  # noite), o relógio do atraso só começa às 08h seguintes — o envio estava
-  # fechado, a etapa não tem culpa. Nunca negativo.
+  # atraso "justo" de uma etapa: se ela venceu FORA da janela de envio
+  # (madrugada/noite), o relógio do atraso só começa quando a janela reabre —
+  # o envio estava fechado, a etapa não tem culpa. Nunca negativo.
   def effective_overdue_hours(due_at)
+    hours = @hours || BUSINESS_HOURS
     due_local = due_at.in_time_zone(TZ)
-    effective = if BUSINESS_HOURS.cover?(due_local.hour)
+    effective = if hours.cover?(due_local.hour)
                   due_local
-                elsif due_local.hour < BUSINESS_HOURS.first
-                  due_local.change(hour: BUSINESS_HOURS.first)
+                elsif due_local.hour < hours.first
+                  due_local.change(hour: hours.first)
                 else
-                  (due_local + 1.day).change(hour: BUSINESS_HOURS.first)
+                  (due_local + 1.day).change(hour: hours.first)
                 end
     [(Time.current - effective) / 3600.0, 0.0].max
+  end
+
+  # Janela de envio da CONTA (Automações → Robôs → "Horário de envio"):
+  # padrão 08h–20h; 0–24 = envia a qualquer hora do dia. Config inválida
+  # (start >= end, lixo) cai no padrão — o robô nunca fica sem janela.
+  def send_hours(account)
+    @send_hours_cache ||= {}
+    @send_hours_cache[account.id] ||= begin
+      cfg = CrmSetting.find_by(account_id: account.id)&.agenda_config&.dig('followup_hours') || {}
+      h_start = cfg.key?('start') ? cfg['start'].to_i.clamp(0, 23) : BUSINESS_HOURS.first
+      h_end = cfg.key?('end') ? cfg['end'].to_i.clamp(1, 24) : BUSINESS_HOURS.last
+      h_start < h_end ? (h_start...h_end) : BUSINESS_HOURS
+    end
   end
 
   # Filtros "tem / não tem": só cutuca quem TEM todas as etiquetas exigidas

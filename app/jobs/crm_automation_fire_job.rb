@@ -376,70 +376,16 @@ class CrmAutomationFireJob < ApplicationJob
     end
   end
 
-  # Agente de Agendamento: lê a conversa, extrai nome/telefone/dia/hora/unidade
-  # e cria o compromisso na Agenda (tarefa com unidade). Se a IA não confirmar
-  # dia e hora, cria uma tarefa de revisão para a equipe completar.
+  # Agente de Agendamento: lê a conversa e escreve o resultado na Agenda —
+  # cria, REAGENDA ou CANCELA a consulta; sem dia/hora confirmados, cria uma
+  # tarefa de revisão. A lógica inteira mora no Crm::AppointmentApplier
+  # (rodada 148) — mesmo caminho da releitura automática do CrmListener.
   def schedule_appointment(automation, contact, pipeline)
-    conversation = latest_conversation(contact)
-    return unless conversation
-
-    result = Crm::AppointmentExtractionService.new(conversation: conversation).call
-    if result[:error]
-      Rails.logger.warn("[CrmAutomation] schedule_appointment: #{result[:error]}")
-      return
-    end
-
-    account = pipeline.account
-    name    = result[:name].presence || contact.name.presence || 'Paciente'
-    phone   = result[:phone].presence || contact.phone_number
-    unit    = result[:unit].presence || automation.action_config['default_unit'].presence
-    creator = account.administrators.first || account.users.first
-    return unless creator
-
-    notes = [result[:notes].presence, "Conversa ##{conversation.display_id} — agendado pela IA"].compact.join("\n")
-
-    if result[:found] && result[:starts_at].present?
-      # cria OU reagenda (consulta futura do mesmo paciente vira o novo horário)
-      outcome = Crm::AppointmentRecorder.record(
-        account: account, result: result, contact: contact,
-        conversation: conversation, default_unit: automation.action_config['default_unit'].presence
-      )
-      return if outcome == :already
-
-      local_time = result[:starts_at].in_time_zone('America/Sao_Paulo')
-      when_str = local_time.strftime('%d/%m/%Y às %H:%M')
-      verb = outcome == :rescheduled ? 'REAGENDADA' : 'agendada'
-      agenda_url = "/app/accounts/#{account.id}/agenda?date=#{local_time.strftime('%Y-%m-%d')}"
-      note = "📅 Consulta #{verb} pela IA: #{name} — #{when_str}" \
-             "#{unit ? " (#{unit == 'tatuape' ? 'Tatuapé' : 'Av. Paulista'})" : ''}. " \
-             "Registrada na Agenda. [📆 Ver na agenda](#{agenda_url})"
-    else
-      # sem dia/hora confirmados → tarefa de revisão para a equipe
-      return if account.tasks.where(status: %i[todo doing]).exists?(title: "⚠️ Confirmar consulta: #{name}")
-
-      account.tasks.create!(
-        title: "⚠️ Confirmar consulta: #{name}",
-        description: "A IA não encontrou dia e hora confirmados na conversa.\n#{notes}",
-        unit: unit,
-        phone: phone,
-        contact: contact,
-        procedure: result[:procedure].presence,
-        doctor: result[:doctor].presence,
-        task_type: 'consulta',
-        priority: :high,
-        status: :todo,
-        creator: creator,
-        assignee: Crm::TaskOwner.resolve(account, contact: contact, task_type: 'consulta')
-      )
-      note = "📅 A IA não conseguiu confirmar dia e hora da consulta de #{name} — criei uma tarefa de revisão para a equipe."
-    end
-
-    conversation.messages.create!(
-      account: account,
-      inbox: conversation.inbox,
-      message_type: :activity,
-      content: note,
-      private: true
+    Crm::AppointmentApplier.call(
+      account: pipeline.account,
+      contact: contact,
+      conversation: latest_conversation(contact),
+      default_unit: automation.action_config['default_unit'].presence
     )
   end
 

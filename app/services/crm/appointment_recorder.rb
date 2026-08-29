@@ -88,9 +88,28 @@ class Crm::AppointmentRecorder
     :created
   end
 
+  # CANCELAMENTO (rodada 148): o paciente desmarcou sem novo horário → a
+  # consulta futura dele sai da agenda (canceled_at), com rastro na descrição.
+  # Sem consulta futura encontrada → :no_future (o chamador cria tarefa de
+  # conferência — a consulta pode existir só no Google Calendar).
+  def self.cancel_future(account:, result:, contact: nil, conversation: nil)
+    phone = result[:phone].presence || contact&.phone_number
+    future = future_appointment(account, phone, nil, contact)
+    return :no_future if future.blank?
+
+    future.update!(
+      canceled_at: Time.current,
+      description: [future.description.presence,
+                    "Cancelada pela conversa ##{conversation&.display_id} (Secretário da Agenda)"].compact.join("\n\n")
+    )
+    log_activity(account, result.merge(starts_at: future.due_at), contact, conversation, :canceled)
+    :canceled
+  end
+
   # Registro de atividade do Secretário (visível no card do agente):
-  # cada leitura vira uma linha — criada/reagendada/já existia/sem dados —
-  # para a equipe ENTENDER os números e conferir o funcionamento.
+  # cada leitura vira uma linha — criada/reagendada/já existia/sem dados/
+  # cancelada/erro — para a equipe ENTENDER os números, conferir o
+  # funcionamento e ENXERGAR quem escapou (rodada 148).
   def self.log_activity(account, result, contact, conversation, outcome)
     settings = CrmSetting.find_by(account: account)
     return if settings.blank?
