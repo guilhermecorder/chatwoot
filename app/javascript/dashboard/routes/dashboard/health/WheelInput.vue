@@ -13,7 +13,7 @@ const props = defineProps({
 });
 const emit = defineEmits(['update:modelValue']);
 
-const ITEM = 32; // altura de cada número (px) — 3 visíveis por vez
+const ITEM = 36; // altura de cada número (px) — 3 visíveis por vez
 
 const el = ref(null);
 const num = v => {
@@ -133,10 +133,10 @@ const pick = i => scrollToIdx(i, true); // tocar num número rola até ele
   border-radius: 0.75rem;
 }
 .hub-wheel-scroll {
-  height: 96px; /* 3 × 32px */
+  height: 108px; /* 3 × 36px */
   overflow-y: auto;
   scroll-snap-type: y mandatory;
-  padding: 32px 0;
+  padding: 36px 0;
   overscroll-behavior: contain; /* segura o encadeamento mas mantém o amortecedor do iOS nas pontas */
   overflow-anchor: none; /* a janela virtual muda os espaçadores — sem isso o navegador "reancora" o scroll */
   scrollbar-width: none;
@@ -147,10 +147,10 @@ const pick = i => scrollToIdx(i, true); // tocar num número rola até ele
   display: none;
 }
 .hub-wheel-item {
-  height: 32px;
-  line-height: 32px;
+  height: 36px;
+  line-height: 36px;
   text-align: center;
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: 0.01em;
   scroll-snap-align: center;
   cursor: pointer;
@@ -158,14 +158,14 @@ const pick = i => scrollToIdx(i, true); // tocar num número rola até ele
 }
 .hub-wheel-item.is-sel {
   font-weight: 700;
-  font-size: 17px;
+  font-size: 19px;
 }
 .hub-wheel-lines {
   position: absolute;
   left: 7px;
   right: 7px;
-  top: 32px;
-  height: 32px;
+  top: 36px;
+  height: 36px;
   border-top: 1px solid rgba(128, 128, 128, 0.3);
   border-bottom: 1px solid rgba(128, 128, 128, 0.3);
   pointer-events: none;

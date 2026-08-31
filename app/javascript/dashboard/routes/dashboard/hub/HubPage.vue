@@ -32,7 +32,7 @@ const MUNDOS_ALL = [
   {
     numero: 1,
     titulo: 'Negócios',
-    desc: 'CRM · conversas · agenda · financeiro · páginas',
+    desc: 'CRM · conversas · financeiro · páginas',
     icon: 'i-lucide-briefcase',
     grad: 'linear-gradient(135deg, #0F5FA6 0%, #7C3AED 100%)',
     action: abrirNegocios,

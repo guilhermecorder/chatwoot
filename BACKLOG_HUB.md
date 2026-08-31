@@ -12,6 +12,54 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 15 — 31/08 ✅ ÍCONES 100% HUB + TREINO "1 EXERCÍCIO = 1 TELA" + NEGÓCIOS SEM CIRURGIA
+Feedback dele 31/08 (print da VPS já na e7b2440): ícones CEVICO ainda
+presentes (favicon principalmente); roletas maiores e mais à direita c/
+respiros; nome do exercício em destaque ocupando ~80% da tela do mobile
+(tela "fixa" no exercício); remover menções de cirurgia/agendamento no
+HUB (negócios 100% coringa fica pra depois).
+
+- **ÍCONES**: os 30 arquivos de ícone da RAIZ do public/ (apple-icon-*,
+  android-icon-*, ms-icon-*, favicon-*, favicon-badge-* — o badge é o
+  favicon c/ bolinha vermelha de notificação que o Chatwoot troca em
+  runtime!) eram arte CEVICO — TODOS substituídos pela arte hub
+  (gerados do square512 + variante badge via Chrome headless); root
+  manifest.json → name HUB/grafite. Vale só nesta branch (CEVICO usa
+  develop). Favicon 512 do head usa LOGO_THUMBNAIL (marca.rb já veste).
+- **TREINO mobile**: roleta cresceu de novo (item 36px, selecionado
+  19px, altura 108px); série virou "rótulo+✕ e chip à esquerda ·
+  roletas GRANDES ancoradas à direita" (justify-between); nome do
+  exercício text-lg extrabold em linha própria; chavinha maior
+  (1.6rem); card hub-ex-card c/ min-height 78vh no mobile + scroll-
+  snap proximity no scroller da página (só durante a sessão) — 1
+  exercício ≈ 1 tela (medido: 85% do viewport), o scroll assenta no
+  começo do card. Sem overflow horizontal (375px ok).
+- **CIRURGIA/AGENDAMENTO fora do HUB**: showSurgeryHealth → isClinica
+  (bloco Agenda de Cirurgias do Meu Painel some fora da clínica);
+  38 substituições isClinica ? original : genérico no InicioPage
+  (painel Agendamento→Captação, abouts/details/metas/cesto/pílulas do
+  construtor/grupos de gráfico '🔪 Cirurgias'→'💰 Vendas', '% de
+  agendamento'→'% de marcação', 'Agendamentos hoje'→'Marcações de
+  hoje') — CEVICO fica byte-idêntica (ramo clinica); AgendaDashboard
+  Core (pendência da rodada 1!) ganhou frase/isClinica: KPI Indicações
+  via frase, bloco Cirurgias e barra Sala cirúrgica gateados, "próximos
+  7 dias" sem a parte de cirurgia; HubPage desc sem "agenda"; saude.yml
+  já cobria as frases (dedup de chaves duplicadas que criei sem ver).
+- **CORPO alinhado** (pedido na sequência): "Registrar medidas" virou
+  data em destaque (padrão do treino) + GRADE uniforme
+  (.hub-measure-grid, minmax 5.8rem → 3 colunas no 375px; rótulo c/
+  altura reservada de 2 linhas pra TODAS as roletas alinharem; roleta
+  100% da célula; chip "última⤵" ou "1ª vez" com altura fixa) +
+  observações e "✓ Salvar medidas" full-width no mobile. Detalhe:
+  rótulo é flex (alinha embaixo) — texto embrulhado num span único
+  senão o flex engole o espaço ("Pescoçocm").
+- TESTADO local conta 3: Meu Painel do negócio c/ ZERO menções de
+  cirurgia/agendamento (varredura no innerText), hero "Painel de
+  Captação", treino mobile 85% viewport c/ snap, rolagem/chip ok no
+  item 36px, ícones raiz servindo arte hub (badge conferido visual),
+  Corpo c/ grade alinhada (tops idênticos medidos) e sem scroll-x.
+  AGUARDA "pode subir".
+
 ## RODADA 14 — 31/08 ✅ MEU PAINEL ESSENCIAL (royal/laranja) + BOXE LIGÁVEL + DIETA CALCULADA
 Pedidos dele 30/08: painel pré-configurado com o essencial (ciclos de
 24 semanas, caixinhas de consistência c/ reagendado, metas de kcal,

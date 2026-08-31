@@ -12,6 +12,7 @@ import {
   DOCTORS, MODALITIES, resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
+import { frase, isClinica } from 'dashboard/helper/segmento';
 
 // Recebe o período de FORA (Meu Painel ou página de Relatórios)
 const props = defineProps({
@@ -124,7 +125,7 @@ onMounted(() => {
           />
           <DashKpi
             compact
-            label="Indicações de cirurgia"
+            :label="frase('indicacoes_venda', 'Indicações de cirurgia')"
             :value="data.consultas?.indications ?? 0"
             :sub="`${data.consultas?.indication_rate ?? 0}% de quem compareceu`"
             from="#B8860B"
@@ -222,8 +223,8 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- Cirurgias -->
-        <div class="bg-n-solid-2 border border-sky-400/30 rounded-2xl p-5 mb-6">
+        <!-- Cirurgias (só faz sentido na clínica — fora dela o bloco some) -->
+        <div v-if="isClinica" class="bg-n-solid-2 border border-sky-400/30 rounded-2xl p-5 mb-6">
           <h2 class="text-sm font-bold text-n-slate-12 mb-4 flex items-center gap-2">
             <span class="i-lucide-slice text-base" style="color: #0284C7" />
             Agenda de Cirurgias
@@ -299,7 +300,7 @@ onMounted(() => {
               </div>
               <p class="text-[10px] text-n-slate-9 mt-0.5">blocos que viraram consulta</p>
             </div>
-            <div>
+            <div v-if="isClinica">
               <div class="flex items-center justify-between text-xs mb-1">
                 <span class="text-n-slate-11">Sala cirúrgica cheia <span class="text-n-slate-9">(próx. 7 dias)</span></span>
                 <span class="font-bold text-n-slate-12">{{ surgFillNext7.total ? surgFillNext7.pct + '%' : '—' }}</span>
@@ -312,7 +313,7 @@ onMounted(() => {
           </div>
           <div class="flex flex-wrap gap-2">
             <span class="text-xs px-3 py-1.5 rounded-full bg-n-alpha-1 text-n-slate-11">
-              📅 Próximos 7 dias: <b class="text-n-slate-12">{{ data.upcoming?.consultas_next7 ?? 0 }}</b> consulta(s) · <b class="text-n-slate-12">{{ data.upcoming?.cirurgias_next7 ?? 0 }}</b> cirurgia(s)
+              📅 Próximos 7 dias: <b class="text-n-slate-12">{{ data.upcoming?.consultas_next7 ?? 0 }}</b> agendado(s)<template v-if="isClinica"> · <b class="text-n-slate-12">{{ data.upcoming?.cirurgias_next7 ?? 0 }}</b> cirurgia(s)</template>
             </span>
             <span
               class="text-xs px-3 py-1.5 rounded-full"

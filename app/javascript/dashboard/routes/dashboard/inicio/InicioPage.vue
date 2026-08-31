@@ -57,13 +57,13 @@ const period = ref({ preset: 'today', from: hojeStr, to: hojeStr });
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
 const BASE_PANELS = [
   {
-    key: 'agendamento', label: 'Agendamento', who: '',
-    icon: 'i-lucide-calendar-check', desc: 'do lead ao agendamento',
+    key: 'agendamento', label: isClinica ? 'Agendamento' : 'Captação', who: '',
+    icon: 'i-lucide-calendar-check', desc: isClinica ? 'do lead ao agendamento' : 'do lead ao cliente marcado',
     grad: 'linear-gradient(135deg, #0F5FA6 0%, #7C3AED 100%)',
   },
   {
     key: 'conducao', label: 'Condução', who: '',
-    icon: 'i-lucide-route', desc: 'do agendamento à indicação',
+    icon: 'i-lucide-route', desc: isClinica ? 'do agendamento à indicação' : 'da chegada à proposta',
     grad: 'linear-gradient(135deg, #0F766E 0%, #2DD4BF 100%)',
   },
   {
@@ -254,25 +254,25 @@ const rawPanelTiles = computed(() => {
         about: 'Quem confirmou consulta e veio. Referência de clínica boa: acima de 80%. É o indicador de quem cuida da confirmação (lembrete, reconfirmação, remarcação).' },
       { label: frase('indicacoes_venda', 'Indicações de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: frase('sub_saidos_indicados', 'saíram da consulta indicados'),
         details: [{ label: 'Indicados ÷ compareceram', value: `${d.indications ?? 0} de ${d.attended ?? 0}` }],
-        about: 'Consultas do período em que o médico registrou indicação de cirurgia (botão 🎯 na Agenda ou conduta no Espaço do Paciente). Começa aqui o funil de fechamento.' },
+        about: isClinica ? 'Consultas do período em que o médico registrou indicação de cirurgia (botão 🎯 na Agenda ou conduta no Espaço do Paciente). Começa aqui o funil de fechamento.' : 'Atendimentos do período em que saiu proposta de venda. Começa aqui o funil de fechamento.' },
     ];
   }
   if (selectedPanel.value === 'cirurgia') {
     return [
       { label: frase('indicacoes_venda', 'Indicações de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: `${termo('clientes')} indicados no período`,
-        details: [{ label: 'Viraram cirurgia agendada', value: `${d.surgeries_booked ?? 0} · ${d.closing_rate ?? 0}%` }],
-        about: 'Pacientes que saíram da consulta com indicação de cirurgia no período — é a matéria-prima do fechamento.' },
+        details: [{ label: isClinica ? 'Viraram cirurgia agendada' : 'Viraram venda fechada', value: `${d.surgeries_booked ?? 0} · ${d.closing_rate ?? 0}%` }],
+        about: isClinica ? 'Pacientes que saíram da consulta com indicação de cirurgia no período — é a matéria-prima do fechamento.' : 'Clientes que saíram do atendimento com proposta no período — é a matéria-prima do fechamento.' },
       { label: frase('vendas_agendadas', 'Cirurgias agendadas'), icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, gk: 'surgeries_booked', chartKey: 'surgeries_booked', sub: 'fechadas no período',
         details: [{ label: 'Realizadas', value: `${d.surgeries_done ?? 0}` }, { label: 'Não vieram', value: `${d.surgeries_missed ?? 0}` }],
-        about: 'Cirurgias registradas na Agenda de Cirurgias no período (o fechamento de fato). O gráfico mostra o ritmo de fechamento ao longo do período.' },
+        about: isClinica ? 'Cirurgias registradas na Agenda de Cirurgias no período (o fechamento de fato). O gráfico mostra o ritmo de fechamento ao longo do período.' : 'Vendas fechadas no período (o fechamento de fato). O gráfico mostra o ritmo ao longo do período.' },
       { label: 'Taxa de fechamento', icon: 'i-lucide-percent', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: 'agendadas ÷ indicações',
         components: ['indications', 'surgeries_booked'],
         compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
         details: [{ label: 'Agendadas ÷ indicações', value: `${d.surgeries_booked ?? 0} ÷ ${d.indications ?? 0} = ${d.closing_rate ?? 0}%` }],
-        about: 'De cada 100 pacientes indicados, quantos fecharam cirurgia. É o indicador do trabalho de fechamento (orçamento ancorado, quebra de objeção, ligação em 48h).' },
+        about: isClinica ? 'De cada 100 pacientes indicados, quantos fecharam cirurgia. É o indicador do trabalho de fechamento (orçamento ancorado, quebra de objeção, ligação em 48h).' : 'De cada 100 clientes com proposta, quantos fecharam. É o indicador do trabalho de fechamento.' },
       { label: frase('vendas_realizadas', 'Cirurgias realizadas'), icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, gk: 'surgeries_done', chartKey: 'surgeries_done', sub: `${d.surgeries_missed ?? 0} não vieram`,
         compare: [{ label: 'realizadas', value: d.surgeries_done ?? 0 }, { label: 'não vieram', value: d.surgeries_missed ?? 0 }],
-        about: 'Cirurgias marcadas como realizadas na Agenda de Cirurgias. "Não vieram" = agendou e não apareceu; "veio e não fez" entra separado no Dashboard da Agenda.' },
+        about: isClinica ? 'Cirurgias marcadas como realizadas na Agenda de Cirurgias. "Não vieram" = agendou e não apareceu; "veio e não fez" entra separado no Dashboard da Agenda.' : 'Vendas realizadas (entregues) no período. "Não vieram" = marcou e não apareceu.' },
     ];
   }
   if (selectedPanel.value === 'medico') {
@@ -283,14 +283,14 @@ const rawPanelTiles = computed(() => {
         about: `Consultas deste médico com data no período. ${docNote}` },
       { label: frase('com_indicacao_venda', 'Com indicação de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: `${d.indication_rate ?? 0}% de quem compareceu`,
         compare: [{ label: 'com indicação', value: d.indications ?? 0 }, { label: 'sem indicação', value: d.no_indication ?? 0 }],
-        about: `Consultas em que o médico indicou cirurgia. ${docNote}` },
+        about: isClinica ? `Consultas em que o médico indicou cirurgia. ${docNote}` : `Atendimentos que saíram com proposta de venda. ${docNote}` },
       { label: 'Sem indicação', icon: 'i-lucide-user-minus', value: d.no_indication ?? 0, sub: `${d.no_indication_rate ?? 0}% de quem compareceu`,
         compare: [{ label: 'com indicação', value: d.indications ?? 0 }, { label: 'sem indicação', value: d.no_indication ?? 0 }],
-        about: 'Consultas que não resultaram em indicação — não é perda: vira plano de cuidado, retorno e indicação futura (catarata inicial hoje é cirurgia daqui a um ano).' },
+        about: isClinica ? 'Consultas que não resultaram em indicação — não é perda: vira plano de cuidado, retorno e indicação futura (catarata inicial hoje é cirurgia daqui a um ano).' : 'Atendimentos que não resultaram em proposta — não é perda: vira acompanhamento e proposta futura.' },
       { label: frase('conversao_venda', 'Conversão em cirurgia'), icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, gk: 'conversion_rate', pct: true, sub: `${d.conversions ?? 0} viraram ${termo('venda')} · NPS ${d.nps_avg ?? '—'}`,
-        compare: [{ label: 'indicados', value: d.indications ?? 0 }, { label: 'viraram cirurgia', value: d.conversions ?? 0 }],
+        compare: [{ label: 'indicados', value: d.indications ?? 0 }, { label: isClinica ? 'viraram cirurgia' : 'viraram venda', value: d.conversions ?? 0 }],
         details: [{ label: 'NPS médio dos pacientes deste médico', value: `${d.nps_avg ?? '—'}` }],
-        about: 'Dos pacientes que este médico atendeu no período, quantos chegaram à cirurgia (pelo telefone do contato no CRM).' },
+        about: isClinica ? 'Dos pacientes que este médico atendeu no período, quantos chegaram à cirurgia (pelo telefone do contato no CRM).' : 'Dos clientes que este profissional atendeu no período, quantos chegaram à venda.' },
     ];
   }
   if (selectedPanel.value === 'gestor') {
@@ -305,12 +305,12 @@ const rawPanelTiles = computed(() => {
         compare: [{ label: 'leads', value: d.new_leads ?? 0 }, { label: 'avançaram a Agendamento', value: d.appointments_created ?? 0 }],
         about: 'Dos leads que chegaram no período, quantos já avançaram até "Agendamento de Consulta" no CRM (coorte). A taxa madura é a de períodos já fechados — a de hoje ainda amadurece.' },
       { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, chartKey: 'appointments_attended', sub: `${d.indications ?? 0} indicação(ões) de ${termo('venda')}`,
-        details: [{ label: 'Indicações de cirurgia no período', value: `${d.indications ?? 0}` }],
+        details: [{ label: `${frase('indicacoes_venda', 'Indicações de cirurgia')} no período`, value: `${d.indications ?? 0}` }],
         about: 'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.' },
       { label: frase('fechamento_vendas', 'Fechamento de cirurgias'), icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, chartKey: 'surgeries_done', sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`,
         components: ['indications', 'surgeries_booked'],
         compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
-        about: 'Agendadas ÷ indicações: a eficiência do fechamento. O gráfico mostra as cirurgias realizadas ao longo do período.' },
+        about: isClinica ? 'Agendadas ÷ indicações: a eficiência do fechamento. O gráfico mostra as cirurgias realizadas ao longo do período.' : 'Fechadas ÷ propostas: a eficiência do fechamento. O gráfico mostra as vendas realizadas ao longo do período.' },
     ];
   }
   // agendamento (padrão) — macro no card, detalhe no popup (item 140)
@@ -328,7 +328,7 @@ const rawPanelTiles = computed(() => {
     {
       // 🌟 % de agendamento em EVIDÊNCIA (item 143): o indicador da linha
       // compacta da Saúde da Agenda promovido pra fileira principal
-      label: '% de agendamento', icon: 'i-lucide-percent', id: 'booking_rate_30',
+      label: isClinica ? '% de agendamento' : '% de marcação', icon: 'i-lucide-percent', id: 'booking_rate_30',
       value: bookingRate30.value === null ? '—' : `${String(bookingRate30.value).replace('.', ',')}%`,
       judged: true, chip: booking30Chip.value, grad: booking30Chip.value.grad,
       sub: `${data.value?.appointments_30d ?? 0} consultas ÷ ${data.value?.new_contacts_30d ?? 0} leads · 30 dias`,
@@ -358,7 +358,7 @@ const rawPanelTiles = computed(() => {
       about: 'Consultas registradas na Agenda no período (consulta marcada para o passado = preenchimento de histórico, fica fora). O tempo de decisão mede quantos dias o paciente levou entre chegar e marcar — mostra se o funil converte por impulso ou por insistência.',
     },
     {
-      label: 'Agendamentos hoje', icon: 'i-lucide-calendar-plus', value: d.booked_today ?? 0, chip: bookingDayVerdict.value, judged: true, grad: bookingDayVerdict.value.grad,
+      label: isClinica ? 'Agendamentos hoje' : 'Marcações de hoje', icon: 'i-lucide-calendar-plus', value: d.booked_today ?? 0, chip: bookingDayVerdict.value, judged: true, grad: bookingDayVerdict.value.grad,
       pct: true,
       compare: [
         { label: `hoje (${ch.today?.booked ?? 0}/${ch.today?.leads ?? 0})`, value: ch.today?.rate ?? 0 },
@@ -376,7 +376,7 @@ const rawPanelTiles = computed(() => {
     {
       label: frase('vendas_fechadas', 'Cirurgias fechadas'), icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', chartKey: 'auto', chartMatch: /cirurgia agendada/i,
       sub: frase('sub_coluna_venda', 'coluna Cirurgia Agendada (CRM)'),
-      about: 'Leads do período que chegaram à coluna "Cirurgia Agendada" no CRM — o fechamento que nasceu dos contatos deste período.',
+      about: isClinica ? 'Leads do período que chegaram à coluna "Cirurgia Agendada" no CRM — o fechamento que nasceu dos contatos deste período.' : 'Leads do período que chegaram à coluna de venda fechada no CRM — o fechamento que nasceu dos contatos deste período.',
     },
   ];
 });
@@ -627,15 +627,15 @@ const READY_FORMULAS = [
     items: [
       { label: 'Taxa de agendamento', expr: 'appointments_booked / new_leads * 100', format: 'percent', icon: 'i-lucide-percent', note: 'consultas agendadas ÷ leads · referência: 15% muito bom · 10% bom · 5% fraco' },
       { label: 'Comparecimento', expr: 'appointments_attended / (appointments_attended + appointments_missed) * 100', format: 'percent', icon: 'i-lucide-user-check', note: 'quem confirmou e veio · referência de clínica boa: acima de 80%' },
-      { label: 'Taxa de indicação', expr: 'indications / appointments_attended * 100', format: 'percent', icon: 'i-lucide-stethoscope', note: 'de quem compareceu, quantos saíram da consulta indicados pra cirurgia' },
-      { label: 'Fechamento de cirurgias', expr: 'surgeries_booked / indications * 100', format: 'percent', icon: 'i-lucide-heart-pulse', note: 'dos indicados, quantos fecharam cirurgia — o trabalho de fechamento' },
-      { label: 'Lead → cirurgia', expr: 'surgeries_booked / new_leads * 100', format: 'percent', icon: 'i-lucide-trending-up', note: 'o funil inteiro numa taxa só: de cada 100 leads, quantos viram cirurgia' },
+      { label: 'Taxa de indicação', expr: 'indications / appointments_attended * 100', format: 'percent', icon: 'i-lucide-stethoscope', note: isClinica ? 'de quem compareceu, quantos saíram da consulta indicados pra cirurgia' : 'de quem compareceu, quantos saíram com proposta' },
+      { label: frase('fechamento_vendas', 'Fechamento de cirurgias'), expr: 'surgeries_booked / indications * 100', format: 'percent', icon: 'i-lucide-heart-pulse', note: isClinica ? 'dos indicados, quantos fecharam cirurgia — o trabalho de fechamento' : 'das propostas, quantas fecharam — o trabalho de fechamento' },
+      { label: isClinica ? 'Lead → cirurgia' : 'Lead → venda', expr: 'surgeries_booked / new_leads * 100', format: 'percent', icon: 'i-lucide-trending-up', note: isClinica ? 'o funil inteiro numa taxa só: de cada 100 leads, quantos viram cirurgia' : 'o funil inteiro numa taxa só: de cada 100 leads, quantos viram venda' },
     ],
   },
   {
     cat: '💰 Financeiro',
     items: [
-      { label: 'Ticket médio por cirurgia', expr: 'revenue / surgeries_done', format: 'currency', icon: 'i-lucide-badge-dollar-sign', note: 'faturamento fechado ÷ cirurgias realizadas no período' },
+      { label: isClinica ? 'Ticket médio por cirurgia' : 'Ticket médio por venda', expr: 'revenue / surgeries_done', format: 'currency', icon: 'i-lucide-badge-dollar-sign', note: isClinica ? 'faturamento fechado ÷ cirurgias realizadas no período' : 'faturamento fechado ÷ vendas realizadas no período' },
       { label: 'Faturamento por lead', expr: 'revenue / new_leads', format: 'currency', icon: 'i-lucide-coins', note: 'quanto cada contato que chega vale em faturamento — norteia quanto pagar por lead' },
       { label: 'Faturamento por consulta', expr: 'revenue / appointments_attended', format: 'currency', icon: 'i-lucide-wallet', note: 'faturamento fechado ÷ consultas com presença' },
     ],
@@ -644,8 +644,8 @@ const READY_FORMULAS = [
     cat: '📅 Agenda',
     items: [
       { label: 'Faltas em consultas (%)', expr: 'appointments_missed / (appointments_attended + appointments_missed) * 100', format: 'percent', icon: 'i-lucide-user-minus', note: 'o inverso do comparecimento: acima de 20% é hora de reforçar a confirmação' },
-      { label: 'Realização de cirurgias', expr: 'surgeries_done / surgeries_booked * 100', format: 'percent', icon: 'i-lucide-check-circle-2', note: 'das cirurgias agendadas, quantas aconteceram de fato' },
-      { label: 'Cirurgias perdidas (%)', expr: 'surgeries_missed / (surgeries_done + surgeries_missed) * 100', format: 'percent', icon: 'i-lucide-alert-triangle', note: 'agendou e não veio — cada uma vale um resgate imediato' },
+      { label: isClinica ? 'Realização de cirurgias' : 'Realização de vendas', expr: 'surgeries_done / surgeries_booked * 100', format: 'percent', icon: 'i-lucide-check-circle-2', note: isClinica ? 'das cirurgias agendadas, quantas aconteceram de fato' : 'das vendas fechadas, quantas foram entregues de fato' },
+      { label: isClinica ? 'Cirurgias perdidas (%)' : 'Vendas perdidas (%)', expr: 'surgeries_missed / (surgeries_done + surgeries_missed) * 100', format: 'percent', icon: 'i-lucide-alert-triangle', note: isClinica ? 'agendou e não veio — cada uma vale um resgate imediato' : 'fechou e não aconteceu — cada uma vale um resgate imediato' },
     ],
   },
 ];
@@ -670,12 +670,12 @@ const applyReadyFormula = f => {
 const KPI_CAT = key => {
   if (key.startsWith('stage_')) return '🧭 Funil (entrou na coluna)';
   if (key === 'revenue') return '💰 Financeiro';
-  if (key.startsWith('surgeries_')) return '🔪 Cirurgias';
+  if (key.startsWith('surgeries_')) return isClinica ? '🔪 Cirurgias' : '💰 Vendas';
   if (key.startsWith('appointments_') || key === 'indications') return '📅 Consultas';
   return '👥 Chegada';
 };
 const kpiCatalogSections = computed(() => {
-  const order = ['👥 Chegada', '📅 Consultas', '🔪 Cirurgias', '🧭 Funil (entrou na coluna)', '💰 Financeiro'];
+  const order = ['👥 Chegada', '📅 Consultas', isClinica ? '🔪 Cirurgias' : '💰 Vendas', '🧭 Funil (entrou na coluna)', '💰 Financeiro'];
   const bySec = {};
   kpiCatalog.value.forEach(m => {
     const cat = KPI_CAT(m.key);
@@ -1065,9 +1065,9 @@ const isSavingGoals = ref(false);
 const GOAL_FIELDS = {
   agendamento: [
     { gk: 'new_leads', label: 'Novos contatos no mês' },
-    { gk: 'appointments_booked', label: 'Consultas agendadas no mês' },
+    { gk: 'appointments_booked', label: isClinica ? 'Consultas agendadas no mês' : 'Clientes marcados no mês' },
     { gk: 'booking_conversion', label: 'Taxa de agendamento (%)', pct: true },
-    { gk: 'surgeries_closed', label: 'Cirurgias fechadas no mês' },
+    { gk: 'surgeries_closed', label: isClinica ? 'Cirurgias fechadas no mês' : 'Vendas fechadas no mês' },
   ],
   conducao: [
     { gk: 'consultations', label: 'Consultas no mês' },
@@ -1077,20 +1077,20 @@ const GOAL_FIELDS = {
   ],
   cirurgia: [
     { gk: 'indications', label: 'Indicações no mês' },
-    { gk: 'surgeries_booked', label: 'Cirurgias agendadas no mês' },
+    { gk: 'surgeries_booked', label: isClinica ? 'Cirurgias agendadas no mês' : 'Vendas fechadas no mês' },
     { gk: 'closing_rate', label: 'Taxa de fechamento (%)', pct: true },
-    { gk: 'surgeries_done', label: 'Cirurgias realizadas no mês' },
+    { gk: 'surgeries_done', label: isClinica ? 'Cirurgias realizadas no mês' : 'Vendas realizadas no mês' },
   ],
   medico: [
     { gk: 'consultations', label: 'Consultas no mês' },
     { gk: 'indications', label: 'Indicações no mês' },
-    { gk: 'conversion_rate', label: 'Conversão em cirurgia (%)', pct: true },
+    { gk: 'conversion_rate', label: isClinica ? 'Conversão em cirurgia (%)' : 'Conversão em venda (%)', pct: true },
   ],
   gestor: [
     { gk: 'new_leads', label: 'Novos contatos no mês' },
     { gk: 'booking_conversion', label: 'Taxa de agendamento (%)', pct: true },
     { gk: 'show_rate', label: 'Comparecimento (%)', pct: true },
-    { gk: 'closing_rate', label: 'Fechamento de cirurgias (%)', pct: true },
+    { gk: 'closing_rate', label: isClinica ? 'Fechamento de cirurgias (%)' : 'Fechamento de vendas (%)', pct: true },
   ],
 };
 const openGoalsModal = () => {
@@ -1163,14 +1163,14 @@ const panelHighlight = computed(() => {
     return {
       icon: 'i-lucide-hourglass', color: '#BE185D', value: d.awaiting_closing ?? 0,
       label: 'Indicados aguardando fechamento',
-      sub: `indicações do período ainda sem cirurgia marcada · ${d.upcoming_surgeries ?? 0} cirurgia(s) futura(s) na agenda`,
+      sub: isClinica ? `indicações do período ainda sem cirurgia marcada · ${d.upcoming_surgeries ?? 0} cirurgia(s) futura(s) na agenda` : 'propostas do período ainda sem fechamento',
     };
   }
   if (selectedPanel.value === 'medico') {
     return {
       icon: 'i-lucide-slice', color: '#0369A1', value: d.surgeries ?? 0,
-      label: 'Cirurgias no período',
-      sub: d.doctor ? `realizadas/agendadas por ${d.doctor}` : 'todos os médicos',
+      label: isClinica ? 'Cirurgias no período' : 'Vendas no período',
+      sub: d.doctor ? (isClinica ? `realizadas/agendadas por ${d.doctor}` : `realizadas/fechadas por ${d.doctor}`) : (isClinica ? 'todos os médicos' : `todos os ${termo('profissionais')}`),
     };
   }
   if (selectedPanel.value === 'gestor') {
@@ -1186,8 +1186,8 @@ const panelHighlight = computed(() => {
   }
   return {
     icon: 'i-lucide-stethoscope', color: '#EA580C', value: d.surgery_indications ?? 0,
-    label: 'Indicações de cirurgia',
-    sub: 'leads do período que chegaram à coluna "Indicação de Cirurgia"',
+    label: frase('indicacoes_venda', 'Indicações de cirurgia'),
+    sub: isClinica ? 'leads do período que chegaram à coluna "Indicação de Cirurgia"' : 'leads do período que chegaram à coluna de proposta',
   };
 });
 
@@ -1485,9 +1485,9 @@ const perfTilesFor = col => {
       case 'appointments':
         return { key, display: r.appointments_created ?? 0, label: 'consultas agendadas', delta: perfDelta(r.appointments_created, prev.appointments_created) };
       case 'surgeries_created':
-        return { key, display: r.surgeries_created ?? 0, label: 'cirurgias agendadas' };
+        return { key, display: r.surgeries_created ?? 0, label: isClinica ? 'cirurgias agendadas' : 'vendas fechadas' };
       case 'surgeries_closed':
-        return { key, display: r.surgeries?.count ?? 0, label: `cirurgias fechadas · ${perfBrl(r.surgeries?.revenue)}` };
+        return { key, display: r.surgeries?.count ?? 0, label: `${isClinica ? 'cirurgias' : 'vendas'} fechadas · ${perfBrl(r.surgeries?.revenue)}` };
       case 'attendance':
         return { key, display: `${clinic.rate ?? 0}%`, label: `comparecimento (clínica) · ${clinic.attended ?? 0} vieram · ${clinic.missed ?? 0} faltaram`, color: (clinic.rate ?? 0) >= 80 ? '#059669' : (clinic.rate ?? 0) >= 60 ? '#D4A017' : '#DC2626' };
       case 'days_worked':
@@ -1533,7 +1533,7 @@ const surgUsageLast7 = computed(() => {
 // bloco de cirurgias SEMPRE lado a lado com o de consultas (pedido
 // 2026-07-15) — meta do mês e próxima cirurgia valem mesmo sem janelas
 // da sala configuradas (as barras mostram "—" até configurar)
-const showSurgeryHealth = computed(() => true);
+const showSurgeryHealth = computed(() => isClinica);
 
 // 🎯 META DO MÊS (conta > segmento; clínica = 100 cirurgias) — barra
 const SURGERY_GOAL = computed(() =>
@@ -2296,7 +2296,7 @@ onUnmounted(() => {
             <button
               class="h-8 px-3 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 hover:opacity-90 whitespace-nowrap"
               style="background: linear-gradient(135deg, #0369A1, #38BDF8)"
-              title="Dashboard da Agenda — comparecimento, ocupação, cirurgias"
+              :title="isClinica ? 'Dashboard da Agenda — comparecimento, ocupação, cirurgias' : 'Dashboard da Agenda — comparecimento e ocupação'"
               @click="goToAgendaDashboard"
             >
               <span class="i-lucide-calendar-range text-sm" />
@@ -3195,7 +3195,7 @@ onUnmounted(() => {
             <div>
               <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Aparece em</p>
               <div class="flex items-center gap-1.5 flex-wrap">
-                <button v-for="pp in [['all', 'Todos os painéis'], ['agendamento', 'Agendamento'], ['conducao', 'Condução'], ['cirurgia', 'Cirurgias'], ['medico', 'Médicos'], ['gestor', 'Gestor']]" :key="pp[0]" class="h-8 px-2.5 rounded-lg text-xs font-medium border" :class="kpiBuilder.panel === pp[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilder.panel === pp[0] ? { background: panelFamily[2] } : {}" @click="kpiBuilder.panel = pp[0]">{{ pp[1] }}</button>
+                <button v-for="pp in [['all', 'Todos os painéis'], ['agendamento', isClinica ? 'Agendamento' : 'Captação'], ['conducao', 'Condução'], ['cirurgia', isClinica ? 'Cirurgias' : 'Vendas'], ['medico', isClinica ? 'Médicos' : termoCap('profissionais')], ['gestor', 'Gestor']]" :key="pp[0]" class="h-8 px-2.5 rounded-lg text-xs font-medium border" :class="kpiBuilder.panel === pp[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilder.panel === pp[0] ? { background: panelFamily[2] } : {}" @click="kpiBuilder.panel = pp[0]">{{ pp[1] }}</button>
               </div>
             </div>
           </div>

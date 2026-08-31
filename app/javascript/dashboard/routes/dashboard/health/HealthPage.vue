@@ -1105,7 +1105,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
+  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1" :class="{ 'hub-snap': session }">
     <div class="max-w-5xl mx-auto w-full p-4 sm:p-8">
       <!-- Header -->
       <div class="flex items-center gap-3 flex-wrap mb-5">
@@ -1329,60 +1329,63 @@ onMounted(async () => {
               tocar nele traz a roleta de volta pra esse valor.
             </p>
 
-            <div v-for="ex in session.exercises" :key="ex.name" class="mb-4 rounded-2xl border border-n-weak p-4">
-              <div class="flex items-center justify-between gap-2 flex-wrap mb-1.5">
-                <span class="text-sm font-bold text-n-slate-12 flex items-center flex-wrap gap-1.5">
+            <!-- 1 exercício ≈ 1 tela no celular (pedido 30/08): o card
+                 ocupa ~80% do viewport e o scroll "trava" nele — a tela
+                 fica parada no exercício durante o treino -->
+            <div v-for="ex in session.exercises" :key="ex.name" class="hub-ex-card mb-5 rounded-2xl border border-n-weak p-4 sm:p-5">
+              <div class="flex items-start justify-between gap-2 mb-1">
+                <h3 class="text-lg font-extrabold leading-snug text-n-slate-12">
                   {{ ex.name }}
-                  <!-- chavinha de variação (halteres ⇄ barra): troca o
-                       equipamento de HOJE e re-prefill com a última
-                       execução daquela variação -->
-                  <span v-if="ex.altTag" class="hub-switch">
-                    <button
-                      v-for="t in [ex.baseTag, ex.altTag]"
-                      :key="t"
-                      class="hub-switch-opt"
-                      :class="{ 'is-on': normTag(ex.tag) === normTag(t) }"
-                      :style="normTag(ex.tag) === normTag(t) ? { background: VERDE } : {}"
-                      @click="switchVariation(ex, t)"
-                    >
-                      {{ t }}
-                    </button>
-                  </span>
-                  <span
-                    v-else-if="ex.tag"
-                    class="px-1.5 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-n-weak text-n-slate-10"
-                  >
-                    {{ ex.tag }}
-                  </span>
                   <span
                     v-if="ex.extra"
-                    class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold border border-dashed"
+                    class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold border border-dashed align-middle"
                     :style="{ color: OURO, borderColor: OURO }"
                   >
                     extra
                   </span>
-                </span>
-                <span class="flex items-center gap-1.5">
-                  <button
-                    v-if="ex.extra"
-                    class="w-5 h-5 rounded text-n-slate-10 hover:bg-n-alpha-1"
-                    title="Tirar este exercício extra do treino de hoje"
-                    @click="removeExtraExercise(ex)"
-                  >
-                    ✕
-                  </button>
-                  <span
-                    v-if="ex.method"
-                    class="px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
-                    :style="{ background: ex.method === 'rest_pause' ? ROXO : ex.method === 'pyramid' ? OURO : AZUL }"
-                    :title="METHOD_HINTS[ex.method]"
-                  >
-                    {{ METHOD_LABELS[ex.method] || ex.method }}
-                  </span>
-                  <span class="text-[11px] text-n-slate-10">{{ ex.scheme }}</span>
-                </span>
+                </h3>
+                <button
+                  v-if="ex.extra"
+                  class="w-6 h-6 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0"
+                  title="Tirar este exercício extra do treino de hoje"
+                  @click="removeExtraExercise(ex)"
+                >
+                  ✕
+                </button>
               </div>
-              <p v-if="ex.rest || ex.warmup" class="text-[11px] text-n-slate-10 mb-1.5">
+              <div class="flex items-center gap-2 flex-wrap mb-2">
+                <!-- chavinha de variação (halteres ⇄ barra): troca o
+                     equipamento de HOJE e re-prefill com a última
+                     execução daquela variação -->
+                <span v-if="ex.altTag" class="hub-switch">
+                  <button
+                    v-for="t in [ex.baseTag, ex.altTag]"
+                    :key="t"
+                    class="hub-switch-opt"
+                    :class="{ 'is-on': normTag(ex.tag) === normTag(t) }"
+                    :style="normTag(ex.tag) === normTag(t) ? { background: VERDE } : {}"
+                    @click="switchVariation(ex, t)"
+                  >
+                    {{ t }}
+                  </button>
+                </span>
+                <span
+                  v-else-if="ex.tag"
+                  class="px-2 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-n-weak text-n-slate-10"
+                >
+                  {{ ex.tag }}
+                </span>
+                <span
+                  v-if="ex.method"
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
+                  :style="{ background: ex.method === 'rest_pause' ? ROXO : ex.method === 'pyramid' ? OURO : AZUL }"
+                  :title="METHOD_HINTS[ex.method]"
+                >
+                  {{ METHOD_LABELS[ex.method] || ex.method }}
+                </span>
+                <span class="text-[11px] text-n-slate-10">{{ ex.scheme }}</span>
+              </div>
+              <p v-if="ex.rest || ex.warmup" class="text-[11px] text-n-slate-10 mb-2.5">
                 <template v-if="ex.rest">⏱ descanso {{ ex.rest }}</template>
                 <template v-if="ex.rest && ex.warmup"> · </template>
                 <template v-if="ex.warmup">🔥 aquecimento: {{ ex.warmup }}</template>
@@ -1391,7 +1394,7 @@ onMounted(async () => {
                    (tocar num alvo posiciona as roletas da série) -->
               <div
                 v-if="ex.hint || ex.targets?.length"
-                class="hub-glass rounded-xl px-3 py-2.5 mb-3"
+                class="hub-glass rounded-xl px-3 py-3 mb-4"
                 :class="{ 'hub-glass-gold': ex.hint?.startsWith('🎯') }"
               >
                 <p
@@ -1417,56 +1420,53 @@ onMounted(async () => {
                 </div>
               </div>
 
-              <div class="flex flex-col gap-2">
-                <div v-for="(set, i) in ex.sets" :key="i" class="flex items-center gap-1">
-                  <span class="text-[10px] text-n-slate-10 shrink-0" style="width: 2.6rem">
-                    {{ SET_LABELS(ex.method, i) }}
-                  </span>
-                  <button
-                    v-if="set.prev"
-                    class="h-10 px-1 rounded-xl text-[11px] text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2 border border-dashed border-n-weak whitespace-nowrap shrink-0"
-                    style="min-width: 3.9rem"
-                    title="Foi isso na última vez — toque pra voltar a roleta pra esse valor"
-                    @click="copyPrev(set)"
-                  >
-                    {{ fmtPrev(set.prev) }}⤵
-                  </button>
-                  <span
-                    v-else
-                    class="text-[10px] text-n-slate-10 text-center shrink-0"
-                    style="min-width: 3.9rem"
-                  >
-                    1ª vez
-                  </span>
-                  <WheelInput
-                    v-model="set.load"
-                    :step="0.5"
-                    :max="200"
-                    decimal
-                    :placeholder="set.prev ? String(set.prev.load).replace('.', ',') : 'kg'"
-                    class="shrink-0"
-                    style="width: 4.2rem"
-                  />
-                  <span class="text-sm text-n-slate-10 shrink-0">×</span>
-                  <WheelInput
-                    v-model="set.reps"
-                    :step="1"
-                    :max="30"
-                    :placeholder="set.prev ? String(set.prev.reps) : set.range || 'reps'"
-                    class="shrink-0"
-                    style="width: 3rem"
-                  />
-                  <button
-                    class="w-4 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0"
-                    title="Remover série"
-                    @click="removeSet(ex, i)"
-                  >
-                    ✕
-                  </button>
+              <!-- série: rótulo + chip à esquerda, roletas GRANDES
+                   ancoradas à direita (pedido 30/08) -->
+              <div class="flex flex-col gap-3">
+                <div v-for="(set, i) in ex.sets" :key="i" class="flex items-center justify-between gap-2">
+                  <div class="flex flex-col items-start gap-1 min-w-0">
+                    <span class="flex items-center gap-1.5 text-xs font-bold text-n-slate-11">
+                      {{ SET_LABELS(ex.method, i) }}
+                      <button
+                        class="w-4 h-4 rounded text-[10px] text-n-slate-10 hover:bg-n-alpha-1 opacity-60"
+                        title="Remover série"
+                        @click="removeSet(ex, i)"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                    <button
+                      v-if="set.prev"
+                      class="h-8 px-2 rounded-lg text-[11px] text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2 border border-dashed border-n-weak whitespace-nowrap"
+                      title="Foi isso na última vez — toque pra voltar a roleta pra esse valor"
+                      @click="copyPrev(set)"
+                    >
+                      {{ fmtPrev(set.prev) }}⤵
+                    </button>
+                    <span v-else class="text-[10px] text-n-slate-10">1ª vez</span>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <WheelInput
+                      v-model="set.load"
+                      :step="0.5"
+                      :max="200"
+                      decimal
+                      :placeholder="set.prev ? String(set.prev.load).replace('.', ',') : 'kg'"
+                      style="width: 5rem"
+                    />
+                    <span class="text-base text-n-slate-10">×</span>
+                    <WheelInput
+                      v-model="set.reps"
+                      :step="1"
+                      :max="30"
+                      :placeholder="set.prev ? String(set.prev.reps) : set.range || 'reps'"
+                      style="width: 3.6rem"
+                    />
+                  </div>
                 </div>
               </div>
               <button
-                class="mt-3 h-8 px-3 rounded-lg text-[11px] font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
+                class="mt-4 h-9 px-3.5 rounded-xl text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
                 @click="addSet(ex)"
               >
                 + série
@@ -2236,41 +2236,51 @@ onMounted(async () => {
 
         <!-- ═══ CORPO ═══ -->
         <template v-if="tab === 'corpo'">
-          <!-- Registrar medidas -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <!-- Registrar medidas: data em destaque + GRADE uniforme
+               (rodada 15 — cada célula: rótulo · roleta · chip da última) -->
+          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 sm:p-5 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">📏 Registrar medidas</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               Protocolo: braço RELAXADO · coxa no meio virilha–joelho · cintura após expiração normal, sem encolher · pescoço abaixo do pomo de Adão, sem apertar. Sempre do mesmo jeito.
             </p>
-            <div class="flex items-end gap-2.5 flex-wrap">
-              <label class="block">
-                <span class="text-[11px] font-medium text-n-slate-11">Data</span>
-                <input
-                  v-model="bodyForm.date"
-                  type="date"
-                  class="mt-1 block h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-                  style="width: 10rem; margin-bottom: 0"
-                />
-              </label>
-              <div v-for="m in MEASURES" :key="m.key" class="flex flex-col items-center">
-                <span class="text-[11px] font-medium text-n-slate-11 mb-1">{{ m.label }}{{ m.suffix }}</span>
+
+            <div class="flex items-center gap-2 flex-wrap mb-4 rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2.5">
+              <span class="text-[11px] font-medium text-n-slate-11">📅 Data da medição</span>
+              <input
+                v-model="bodyForm.date"
+                type="date"
+                class="h-9 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-xs text-n-slate-12"
+                style="width: 9.5rem; margin-bottom: 0"
+              />
+              <span class="text-[10px] text-n-slate-10">mediu outro dia? troque a data</span>
+            </div>
+
+            <div class="hub-measure-grid mb-4">
+              <div v-for="m in MEASURES" :key="m.key" class="flex flex-col gap-1.5">
+                <span class="hub-measure-label text-n-slate-11">
+                  <span>{{ m.label }}<span class="opacity-60 font-normal">{{ m.suffix }}</span></span>
+                </span>
                 <WheelInput
                   v-model="bodyForm[m.key]"
                   :step="m.step"
                   :max="m.max"
                   decimal
                   :placeholder="m.suffix.trim()"
-                  style="width: 5.4rem"
+                  style="width: 100%"
                 />
                 <button
                   v-if="lastBodyValue(m.key) !== null"
-                  class="mt-1 px-1.5 h-6 rounded-lg text-[10px] text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2 border border-dashed border-n-weak"
+                  class="h-6 rounded-lg text-[10px] text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2 border border-dashed border-n-weak whitespace-nowrap"
                   title="Última medição — toque pra posicionar a roleta"
                   @click="copyLastBody(m.key)"
                 >
                   {{ String(lastBodyValue(m.key)).replace('.', ',') }}⤵
                 </button>
+                <span v-else class="h-6 text-[10px] text-n-slate-10 text-center leading-6">1ª vez</span>
               </div>
+            </div>
+
+            <div class="flex items-end gap-2.5 flex-wrap">
               <label class="block flex-1" style="min-width: 12rem">
                 <span class="text-[11px] font-medium text-n-slate-11">Observações</span>
                 <input
@@ -2282,12 +2292,12 @@ onMounted(async () => {
                 />
               </label>
               <button
-                class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
+                class="h-10 px-6 rounded-xl text-sm font-bold text-white disabled:opacity-60 w-full sm:w-auto"
                 :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
                 :disabled="savingBody"
                 @click="saveBody"
               >
-                {{ savingBody ? 'Salvando…' : 'Salvar' }}
+                {{ savingBody ? 'Salvando…' : '✓ Salvar medidas' }}
               </button>
             </div>
           </div>
@@ -2416,10 +2426,10 @@ onMounted(async () => {
   border: 1px solid rgba(127, 127, 127, 0.18);
 }
 .hub-switch-opt {
-  height: 1.35rem;
-  padding: 0 0.55rem;
+  height: 1.6rem;
+  padding: 0 0.7rem;
   border-radius: 9999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: inherit;
   opacity: 0.65;
@@ -2429,5 +2439,35 @@ onMounted(async () => {
   color: #fff;
   opacity: 1;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+/* aba Corpo: grade uniforme de medidas — colunas iguais, rótulo com
+   altura reservada (2 linhas) pra TODAS as roletas ficarem alinhadas */
+.hub-measure-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5.8rem, 1fr));
+  gap: 0.75rem;
+}
+.hub-measure-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
+  min-height: 2.3em;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+/* modo treino no celular: cada exercício vira "uma tela" (~80% do
+   viewport) e o scroll assenta no começo do card — a tela fica parada
+   no exercício durante o treino */
+.hub-snap {
+  scroll-snap-type: y proximity;
+}
+@media (max-width: 640px) {
+  .hub-ex-card {
+    min-height: 78vh;
+    scroll-snap-align: start;
+    scroll-margin-top: 0.5rem;
+  }
 }
 </style>
