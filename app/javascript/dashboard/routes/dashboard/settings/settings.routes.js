@@ -26,6 +26,7 @@ import dominio from './dominio/dominio.routes';
 import paineis from './paineis/paineis.routes';
 import precos from './precos/precos.routes';
 import personalizacao from './personalizacao/personalizacao.routes';
+import hub from './hub/hub.routes';
 import profile from './profile/profile.routes';
 import security from './security/security.routes';
 import conversationWorkflow from './conversationWorkflow/conversationWorkflow.routes';
@@ -71,6 +72,7 @@ export default {
     ...paineis.routes,
     ...precos.routes,
     ...personalizacao.routes,
+    ...hub.routes,
     ...profile.routes,
     ...security.routes,
     ...conversationWorkflow.routes,

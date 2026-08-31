@@ -1057,6 +1057,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_theme: (s.agenda_config || {})['theme'],
       # Personalização da conta (sistema coringa): ajustes sobre o segmento
       segment: (s.agenda_config || {})['segment'] || {},
+      # HUB: recursos ligáveis da saúde (ex.: boxe) — o menu lê daqui
+      health_features: (s.agenda_config || {}).dig('health', 'features') || {},
       # tabela de preços vigente (com os padrões quando não há tabela salva)
       price_table: {
         items: Cevico::PriceList.items(Current.account),

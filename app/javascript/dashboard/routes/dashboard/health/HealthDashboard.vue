@@ -759,7 +759,7 @@ onMounted(async () => {
         </div>
         <div class="flex gap-2">
           <button
-            v-for="t in [{ key: 'visao', label: '🎯 Visão geral' }, { key: 'treino', label: '🏋️ Treino' }, { key: 'boxe', label: '🥊 Boxe' }, { key: 'dieta', label: '🍽 Dieta' }]"
+            v-for="t in [{ key: 'visao', label: '🎯 Visão geral' }, { key: 'treino', label: '🏋️ Treino' }, ...(config?.features?.boxing === true ? [{ key: 'boxe', label: '🥊 Boxe' }] : []), { key: 'dieta', label: '🍽 Dieta' }]"
             :key="t.key"
             class="h-9 px-4 rounded-full text-xs font-bold border"
             :class="dashTab === t.key ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"

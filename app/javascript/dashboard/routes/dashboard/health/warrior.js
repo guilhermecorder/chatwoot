@@ -161,6 +161,102 @@ export const targetHint = (prescription, lastSets) => {
   return 'Supere a última sessão mantendo boa execução.';
 };
 
+// META SÉRIE A SÉRIE (pedido 30/08): sugestão de carga×reps pra CADA
+// série de hoje, seguindo o fundamento do método — vira os chips
+// tocáveis do cartão de vidro. Regras:
+//   faixas (RPT/séries/rest-pause): topo de TODAS → +2,3 kg e reps no
+//     piso da faixa; senão mesma carga buscando +1 rep até o teto
+//     (minis do rest-pause acompanham a carga da ativação);
+//   independent_set: cada série que bateu o teto sobe +2,3 sozinha;
+//   rest_reduction/pirâmide: mesma carga, reps do esquema (foco é o
+//     descanso 60→30 s);
+//   add_each_session: +1,1 kg em todas;
+//   sem prescrição (extra/ficha): mesma carga da última, +1 rep.
+const INC = 2.3;
+// alvo cai na grade de 0,5 kg — é o passo da roleta e das anilhas reais
+const round1 = n => Math.round(n * 2) / 2;
+
+export const setTargets = (prescription, lastSets) => {
+  const ranges = prescription.sets || [];
+  const method = prescription.method;
+  const ptype = prescription.progression_type;
+
+  // sem histórico: mostra as faixas como alvo (sem carga pra copiar)
+  if (!lastSets?.length) {
+    if (!ranges.length) return [];
+    return ranges.map((r, i) => ({
+      label: SET_LABELS(method, i),
+      load: null,
+      reps: r.min && r.max ? `${r.min}–${r.max}` : String(r.min || r.max || ''),
+    }));
+  }
+
+  // exercício sem prescrição (extra/ficha): última execução + 1 rep
+  if (!ranges.length) {
+    return lastSets.map((s, i) => ({
+      label: SET_LABELS(method, i),
+      load: num(s.load),
+      reps: num(s.reps) + 1,
+    }));
+  }
+
+  const pairs = Math.min(lastSets.length, ranges.length);
+
+  if (ptype === 'add_each_session') {
+    return lastSets.map((s, i) => ({
+      label: SET_LABELS(method, i),
+      load: round1(num(s.load) + 1.1),
+      reps: num(s.reps) || ranges[i]?.max || ranges[i]?.min || '',
+    }));
+  }
+
+  if (ptype === 'rest_reduction' || method === 'pyramid') {
+    const load = num(lastSets[0]?.load);
+    return ranges.map((r, i) => ({
+      label: SET_LABELS(method, i),
+      load,
+      reps: r.max || r.min || num(lastSets[i]?.reps) || '',
+    }));
+  }
+
+  if (ptype === 'independent_set') {
+    return ranges.map((r, i) => {
+      const last = lastSets[i];
+      if (!last) return { label: SET_LABELS(method, i), load: null, reps: `${r.min}–${r.max}` };
+      const hitTop = r.max && num(last.reps) >= r.max;
+      return {
+        label: SET_LABELS(method, i),
+        load: hitTop ? round1(num(last.load) + INC) : num(last.load),
+        reps: hitTop ? r.min || 1 : Math.min(num(last.reps) + 1, r.max || 99),
+      };
+    });
+  }
+
+  // faixas (RPT / séries / rest-pause)
+  let allTop = pairs > 0;
+  for (let i = 0; i < pairs; i += 1) {
+    if (ranges[i].max && num(lastSets[i].reps) < ranges[i].max) allTop = false;
+  }
+  const activationLoad = num(lastSets[0]?.load);
+  return ranges.map((r, i) => {
+    const last = lastSets[i];
+    const isMini = method === 'rest_pause' && i > 0;
+    if (!last && !isMini) {
+      return { label: SET_LABELS(method, i), load: null, reps: `${r.min}–${r.max}` };
+    }
+    if (allTop) {
+      // subiu a carga: minis do rest-pause seguem a ativação
+      const base = isMini ? activationLoad : num(last?.load);
+      return { label: SET_LABELS(method, i), load: round1(base + INC), reps: r.min || 1 };
+    }
+    const load = last ? num(last.load) : activationLoad;
+    const reps = r.max
+      ? Math.min((num(last?.reps) || r.min || 0) + 1, r.max)
+      : (num(last?.reps) || 0) + 1;
+    return { label: SET_LABELS(method, i), load, reps };
+  });
+};
+
 export const sessionSummary = exercises => {
   const counts = { progress: 0, tie: 0, regress: 0, first: 0 };
   exercises.forEach(ex => {

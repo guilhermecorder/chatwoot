@@ -18,7 +18,7 @@ import {
   METHOD_LABELS, METHOD_HINTS, SET_LABELS,
   activeProgram, weekOf, cycleForWeek, suggestedSessionKey,
   lastSessionRecord, lastExerciseSets, buildTodaySets,
-  exerciseVerdict, targetHint, sessionSummary, summaryPhrase, fmtSets,
+  exerciseVerdict, targetHint, setTargets, sessionSummary, summaryPhrase, fmtSets,
 } from './warrior';
 
 const VERDE = '#10B981';
@@ -59,12 +59,17 @@ const goTab = key => {
   if (name && route.name !== name) router.push({ name, params: route.params });
 };
 
-const TABS = [
+// boxe é ligável em Configurações → HUB — desligado, a pílula some
+const boxingOn = computed(() => config.value?.features?.boxing === true);
+const TABS_ALL = [
   { key: 'treino', label: 'Treino', icon: 'i-lucide-dumbbell' },
   { key: 'boxe', label: 'Boxe', icon: 'i-lucide-swords' },
   { key: 'dieta', label: 'Dieta', icon: 'i-lucide-utensils' },
   { key: 'corpo', label: 'Corpo', icon: 'i-lucide-ruler' },
 ];
+const TABS = computed(() =>
+  TABS_ALL.filter(t => t.key !== 'boxe' || boxingOn.value)
+);
 
 // ordena registros do mais novo pro mais velho (entradas retroativas)
 const sortRecs = arr => [...arr].sort((a, b) => (a.record_date < b.record_date ? 1 : -1));
@@ -233,6 +238,9 @@ const startProgramSession = sessionDef => {
     return {
       name: p.name,
       tag: p.tag,
+      baseTag: p.tag || '',
+      altTag: p.alt_tag || '',
+      presc: p,
       method: p.method,
       scheme: p.scheme,
       rest: p.rest,
@@ -241,6 +249,7 @@ const startProgramSession = sessionDef => {
       note: p.note,
       last,
       hint: targetHint(p, last),
+      targets: setTargets(p, last),
       sets: buildTodaySets(p, last),
     };
   });
@@ -428,6 +437,51 @@ const copyPrev = set => {
 };
 const fmtPrev = prev => `${String(prev.load ?? '').replace('.', ',')}×${prev.reps ?? ''}`;
 
+// ═══ CHAVINHA DE VARIAÇÃO (rodada 13): halteres ⇄ barra etc. ════════
+// A prescrição tem tag (variação A) e alt_tag (variação B, no editor ✎).
+// Trocar a chavinha re-prefill as roletas com a última execução DAQUELA
+// variação (carga de barra ≠ carga de halter) e recalcula meta/alvos.
+// O registro salva a variação usada (out.tag) pra busca futura.
+const normTag = t => String(t || '').trim().toLowerCase();
+// última execução do exercício NESSA variação, em qualquer treino;
+// registros antigos sem tag contam como a variação principal (base)
+const lastSetsForTag = (name, tag, baseTag) => {
+  const alvoNome = name.trim().toLowerCase();
+  const alvoTag = normTag(tag);
+  const ehBase = alvoTag === normTag(baseTag);
+  for (const w of workouts.value) {
+    const ex = (w.data?.exercises || []).find(e => {
+      if (String(e.name || '').trim().toLowerCase() !== alvoNome) return false;
+      const t = normTag(e.tag);
+      return t === alvoTag || (ehBase && !t);
+    });
+    if (ex?.sets?.length) return ex.sets;
+  }
+  return null;
+};
+const switchVariation = (ex, tag) => {
+  if (normTag(ex.tag) === normTag(tag)) return;
+  ex.tag = tag;
+  const last = lastSetsForTag(ex.name, tag, ex.baseTag);
+  ex.last = last;
+  ex.hint = last
+    ? targetHint(ex.presc || { sets: [] }, last)
+    : `Primeira vez com ${tag} — encontre a carga desta variação.`;
+  ex.targets = setTargets(ex.presc || { sets: [] }, last);
+  ex.sets = buildTodaySets(ex.presc || { sets: [] }, last);
+};
+
+// tocar num alvo do cartão de vidro → roletas da série vão pra meta
+const applyTarget = (ex, i) => {
+  const t = ex.targets?.[i];
+  const set = ex.sets?.[i];
+  if (!t || !set || t.load === null || t.load === undefined) return;
+  set.load = String(t.load).replace('.', ',');
+  if (Number.isFinite(Number(t.reps))) set.reps = String(t.reps);
+};
+const fmtTarget = t =>
+  `${String(t.load ?? '').replace('.', ',')}×${t.reps}`;
+
 // ═══ EXERCÍCIO EXTRA no treino de hoje (rodada 11): crucifixo,
 // panturrilha etc. entram na MESMA sessão e salvam junto no histórico
 // (flag extra: true no registro). Última execução vem do histórico
@@ -497,8 +551,10 @@ const addExtraExercise = () => {
     extra: true,
     method: 'sets',
     scheme: `${sets.length} séries`,
+    presc: { sets: [] },
     last,
     hint: last ? targetHint({ sets: [] }, last) : 'Exercício extra — primeira vez, encontre a carga.',
+    targets: setTargets({ sets: [] }, last),
     sets,
   });
   extraName.value = '';
@@ -534,6 +590,7 @@ const saveSession = async () => {
         });
       const out = { name: ex.name, sets, skipped: sets.length === 0 };
       if (ex.extra) out.extra = true;
+      if (ex.tag) out.tag = ex.tag; // variação usada hoje (chavinha)
       if (ex.method) out.method = ex.method;
       if (isProgram && !out.skipped) out.verdict = exerciseVerdict(sets, ex.last);
       return out;
@@ -854,6 +911,64 @@ const openDietEditor = () => {
 const addMeal = () =>
   dietForm.value.meals.push({ id: '', name: '', time: '', desc: '', kcal: 0, protein: 0, carbs: 0, fat: 0 });
 const removeMeal = i => dietForm.value.meals.splice(i, 1);
+
+// ═══ METAS CALCULADAS (rodada 14) ═══════════════════════════════════
+// Passou as CALORIAS → o resto sai do método: proteína 1,8 g/kg do peso
+// atual (cutting Warrior), gordura 25% das kcal, carbo com o que sobra;
+// e as refeições recebem a divisão proporcional às kcal que já têm
+// (sem kcal ainda = divisão igual). Tudo continua editável depois.
+const pesoAtual = () =>
+  Number(bodies.value.find(b => Number(b.data?.weight) > 0)?.data?.weight) || 0;
+const autoTargets = kcal => {
+  const k = Number(kcal) || 0;
+  if (!k) return null;
+  const peso = pesoAtual();
+  const protein = peso ? Math.round(peso * 1.8) : Math.round((k * 0.3) / 4);
+  const fat = Math.round((k * 0.25) / 9);
+  const carbs = Math.max(0, Math.round((k - protein * 4 - fat * 9) / 4));
+  return { protein, fat, carbs };
+};
+const splitMeals = () => {
+  const f = dietForm.value;
+  if (!f?.meals?.length) return;
+  const k = Number(f.targets.kcal) || 0;
+  if (!k) return;
+  const kcals = f.meals.map(m => Number(m.kcal) || 0);
+  const total = kcals.reduce((a, b) => a + b, 0);
+  const shares = total
+    ? kcals.map(v => v / total)
+    : f.meals.map(() => 1 / f.meals.length);
+  f.meals.forEach((m, i) => {
+    m.kcal = Math.round((k * shares[i]) / 5) * 5;
+    m.protein = Math.round(Number(f.targets.protein) * shares[i]);
+    m.carbs = Math.round(Number(f.targets.carbs) * shares[i]);
+    m.fat = Math.round(Number(f.targets.fat) * shares[i]);
+  });
+};
+// digitou as kcal no editor → recalcula macros e refeições sozinho
+watch(
+  () => dietForm.value?.targets?.kcal,
+  (kcal, old) => {
+    if (!dietForm.value || old === undefined || String(kcal) === String(old)) return;
+    const t = autoTargets(kcal);
+    if (!t) return;
+    dietForm.value.targets.protein = t.protein;
+    dietForm.value.targets.carbs = t.carbs;
+    dietForm.value.targets.fat = t.fat;
+    splitMeals();
+  }
+);
+
+// equivalência PRÁTICA da proteína da refeição em comida crua
+// (frango cru ~23 g/100 g · patinho cru ~21 g/100 g · ovo ~6 g/un)
+const mealEquiv = meal => {
+  const p = Number(meal.protein) || 0;
+  if (!p) return '';
+  const frango = Math.round(p / 0.23 / 10) * 10;
+  const carne = Math.round(p / 0.21 / 10) * 10;
+  const ovos = Math.ceil(p / 6);
+  return `≈ ${frango} g de frango cru · ${carne} g de patinho cru · ${ovos} ovos`;
+};
 const saveDietCfg = async () => {
   dietForm.value.meals = dietForm.value.meals.filter(m => m.name?.trim());
   const ok = await pushConfig({ ...config.value, diet: dietForm.value });
@@ -874,17 +989,19 @@ const dietDayPct = d => {
 // entre virilha e joelho, cintura após expiração normal sem encolher,
 // pescoço abaixo do pomo de Adão sem apertar.
 const MEASURES = [
-  { key: 'weight', label: 'Peso', suffix: ' kg' },
-  { key: 'waist_navel', label: 'Cintura (umbigo)', suffix: ' cm' },
-  { key: 'waist_narrow', label: 'Cintura estreita', suffix: ' cm' },
-  { key: 'hips', label: 'Quadril', suffix: ' cm' },
-  { key: 'chest', label: 'Peito/tórax', suffix: ' cm' },
-  { key: 'arm_r', label: 'Braço D', suffix: ' cm' },
-  { key: 'arm_l', label: 'Braço E', suffix: ' cm' },
-  { key: 'thigh_r', label: 'Coxa D', suffix: ' cm' },
-  { key: 'thigh_l', label: 'Coxa E', suffix: ' cm' },
-  { key: 'neck', label: 'Pescoço', suffix: ' cm' },
-  { key: 'shoulders', label: 'Ombros (escapular)', suffix: ' cm' },
+  // step/max alimentam a roleta (rodada 12): peso fino de 0,1 em 0,1 kg;
+  // circunferências de 0,5 em 0,5 cm até 220 (teto fixo, sem infinito)
+  { key: 'weight', label: 'Peso', suffix: ' kg', step: 0.1, max: 200 },
+  { key: 'waist_navel', label: 'Cintura (umbigo)', suffix: ' cm', step: 0.1, max: 220 },
+  { key: 'waist_narrow', label: 'Cintura estreita', suffix: ' cm', step: 0.1, max: 220 },
+  { key: 'hips', label: 'Quadril', suffix: ' cm', step: 0.1, max: 220 },
+  { key: 'chest', label: 'Peito/tórax', suffix: ' cm', step: 0.1, max: 220 },
+  { key: 'arm_r', label: 'Braço D', suffix: ' cm', step: 0.1, max: 220 },
+  { key: 'arm_l', label: 'Braço E', suffix: ' cm', step: 0.1, max: 220 },
+  { key: 'thigh_r', label: 'Coxa D', suffix: ' cm', step: 0.1, max: 220 },
+  { key: 'thigh_l', label: 'Coxa E', suffix: ' cm', step: 0.1, max: 220 },
+  { key: 'neck', label: 'Pescoço', suffix: ' cm', step: 0.1, max: 220 },
+  { key: 'shoulders', label: 'Ombros (escapular)', suffix: ' cm', step: 0.1, max: 220 },
 ];
 const bodyForm = ref({
   date: todayISO,
@@ -892,6 +1009,17 @@ const bodyForm = ref({
   ...Object.fromEntries(MEASURES.map(m => [m.key, ''])),
 });
 const savingBody = ref(false);
+
+// última medição de cada medida (chip embaixo da roleta — tocar posiciona
+// a roleta no valor da última vez, aí é só o ajuste fino)
+const lastBodyValue = key => {
+  const rec = bodies.value.find(b => b.data?.[key] !== undefined && b.data?.[key] !== null && b.data?.[key] !== '');
+  return rec ? rec.data[key] : null;
+};
+const copyLastBody = key => {
+  const v = lastBodyValue(key);
+  if (v !== null) bodyForm.value[key] = String(v).replace('.', ',');
+};
 
 const saveBody = async () => {
   const data = {};
@@ -1102,9 +1230,10 @@ onMounted(async () => {
               </button>
             </div>
             <p class="text-[11px] text-n-slate-10 mb-3">
-              <b>Variação</b> = marcador do jeito que você faz (halteres, barra, máquina…) — use ela
-              pra trocar o equipamento SEM perder o histórico do exercício. <b>Renomear</b> vale como
-              substituição: o exercício novo começa histórico do zero.
+              <b>Variação</b> = o jeito que você faz (halteres, barra, máquina…). Preenchendo
+              <b>A e B</b>, o treino ganha uma <b>chavinha A ⇄ B</b> — cada variação guarda as
+              próprias cargas. <b>Renomear</b> vale como substituição: o exercício novo começa
+              histórico do zero.
             </p>
             <div class="flex flex-col gap-2 mb-3">
               <div
@@ -1123,7 +1252,15 @@ onMounted(async () => {
                 <input
                   v-model="row.tag"
                   type="text"
-                  placeholder="variação (ex.: halteres)"
+                  placeholder="variação A (ex.: halteres)"
+                  class="h-9 rounded-lg border border-dashed border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-11"
+                  style="width: 9rem; margin-bottom: 0"
+                />
+                <input
+                  v-model="row.alt_tag"
+                  type="text"
+                  placeholder="variação B (ex.: barra)"
+                  title="Preenchendo as duas variações, o treino ganha a chavinha A ⇄ B"
                   class="h-9 rounded-lg border border-dashed border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-11"
                   style="width: 9rem; margin-bottom: 0"
                 />
@@ -1192,13 +1329,28 @@ onMounted(async () => {
               tocar nele traz a roleta de volta pra esse valor.
             </p>
 
-            <div v-for="ex in session.exercises" :key="ex.name" class="mb-3 rounded-xl border border-n-weak p-3">
-              <div class="flex items-center justify-between gap-2 flex-wrap mb-0.5">
-                <span class="text-xs font-bold text-n-slate-12">
+            <div v-for="ex in session.exercises" :key="ex.name" class="mb-4 rounded-2xl border border-n-weak p-4">
+              <div class="flex items-center justify-between gap-2 flex-wrap mb-1.5">
+                <span class="text-sm font-bold text-n-slate-12 flex items-center flex-wrap gap-1.5">
                   {{ ex.name }}
+                  <!-- chavinha de variação (halteres ⇄ barra): troca o
+                       equipamento de HOJE e re-prefill com a última
+                       execução daquela variação -->
+                  <span v-if="ex.altTag" class="hub-switch">
+                    <button
+                      v-for="t in [ex.baseTag, ex.altTag]"
+                      :key="t"
+                      class="hub-switch-opt"
+                      :class="{ 'is-on': normTag(ex.tag) === normTag(t) }"
+                      :style="normTag(ex.tag) === normTag(t) ? { background: VERDE } : {}"
+                      @click="switchVariation(ex, t)"
+                    >
+                      {{ t }}
+                    </button>
+                  </span>
                   <span
-                    v-if="ex.tag"
-                    class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-n-weak text-n-slate-10"
+                    v-else-if="ex.tag"
+                    class="px-1.5 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-n-weak text-n-slate-10"
                   >
                     {{ ex.tag }}
                   </span>
@@ -1230,58 +1382,82 @@ onMounted(async () => {
                   <span class="text-[11px] text-n-slate-10">{{ ex.scheme }}</span>
                 </span>
               </div>
-              <p v-if="ex.rest || ex.warmup" class="text-[10px] text-n-slate-10 mb-1">
+              <p v-if="ex.rest || ex.warmup" class="text-[11px] text-n-slate-10 mb-1.5">
                 <template v-if="ex.rest">⏱ descanso {{ ex.rest }}</template>
                 <template v-if="ex.rest && ex.warmup"> · </template>
                 <template v-if="ex.warmup">🔥 aquecimento: {{ ex.warmup }}</template>
               </p>
-              <p
-                v-if="ex.hint"
-                class="text-[11px] font-medium mb-2"
-                :style="{ color: ex.hint.startsWith('🎯') ? OURO : VERDE }"
+              <!-- cartão de vidro: a meta de hoje + alvo POR SÉRIE
+                   (tocar num alvo posiciona as roletas da série) -->
+              <div
+                v-if="ex.hint || ex.targets?.length"
+                class="hub-glass rounded-xl px-3 py-2.5 mb-3"
+                :class="{ 'hub-glass-gold': ex.hint?.startsWith('🎯') }"
               >
-                {{ ex.hint }}
-              </p>
+                <p
+                  v-if="ex.hint"
+                  class="text-xs font-medium"
+                  :class="ex.targets?.length ? 'mb-2' : ''"
+                  :style="{ color: ex.hint.startsWith('🎯') ? OURO : VERDE }"
+                >
+                  {{ ex.hint }}
+                </p>
+                <div v-if="ex.targets?.length" class="flex gap-1.5 flex-wrap">
+                  <button
+                    v-for="(t, ti) in ex.targets"
+                    :key="ti"
+                    class="hub-target-chip"
+                    :disabled="t.load === null || t.load === undefined"
+                    :title="t.load != null ? 'Toque pra levar as roletas da série até a meta' : 'Faixa da prescrição'"
+                    @click="applyTarget(ex, ti)"
+                  >
+                    <span class="opacity-60">{{ t.label }}</span>
+                    <b>{{ t.load != null ? fmtTarget(t) : t.reps }}</b>
+                  </button>
+                </div>
+              </div>
 
-              <div class="flex flex-col gap-1.5">
-                <div v-for="(set, i) in ex.sets" :key="i" class="flex items-center gap-1 flex-wrap">
-                  <span class="text-[10px] text-n-slate-10" style="width: 3rem">
+              <div class="flex flex-col gap-2">
+                <div v-for="(set, i) in ex.sets" :key="i" class="flex items-center gap-1">
+                  <span class="text-[10px] text-n-slate-10 shrink-0" style="width: 2.6rem">
                     {{ SET_LABELS(ex.method, i) }}
                   </span>
                   <button
                     v-if="set.prev"
-                    class="h-9 px-1 rounded-lg text-[11px] text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2 border border-dashed border-n-weak whitespace-nowrap"
-                    style="min-width: 4rem"
-                    title="Foi isso na última vez — toque pra copiar pras caixinhas"
+                    class="h-10 px-1 rounded-xl text-[11px] text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2 border border-dashed border-n-weak whitespace-nowrap shrink-0"
+                    style="min-width: 3.9rem"
+                    title="Foi isso na última vez — toque pra voltar a roleta pra esse valor"
                     @click="copyPrev(set)"
                   >
                     {{ fmtPrev(set.prev) }}⤵
                   </button>
                   <span
                     v-else
-                    class="text-[10px] text-n-slate-10 text-center"
-                    style="min-width: 4rem"
+                    class="text-[10px] text-n-slate-10 text-center shrink-0"
+                    style="min-width: 3.9rem"
                   >
                     1ª vez
                   </span>
                   <WheelInput
                     v-model="set.load"
                     :step="0.5"
-                    :max="100"
+                    :max="200"
                     decimal
                     :placeholder="set.prev ? String(set.prev.load).replace('.', ',') : 'kg'"
-                    style="width: 3.8rem"
+                    class="shrink-0"
+                    style="width: 4.2rem"
                   />
-                  <span class="text-[11px] text-n-slate-10">×</span>
+                  <span class="text-sm text-n-slate-10 shrink-0">×</span>
                   <WheelInput
                     v-model="set.reps"
                     :step="1"
                     :max="30"
                     :placeholder="set.prev ? String(set.prev.reps) : set.range || 'reps'"
-                    style="width: 2.8rem"
+                    class="shrink-0"
+                    style="width: 3rem"
                   />
                   <button
-                    class="w-5 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0"
+                    class="w-4 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0"
                     title="Remover série"
                     @click="removeSet(ex, i)"
                   >
@@ -1290,7 +1466,7 @@ onMounted(async () => {
                 </div>
               </div>
               <button
-                class="mt-2 h-7 px-2.5 rounded-lg text-[11px] font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
+                class="mt-3 h-8 px-3 rounded-lg text-[11px] font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
                 @click="addSet(ex)"
               >
                 + série
@@ -1649,22 +1825,24 @@ onMounted(async () => {
               </label>
               <label class="block">
                 <span class="text-[11px] font-medium text-n-slate-11">Duração (min)</span>
-                <input
+                <WheelInput
                   v-model="boxForm.duration"
-                  type="text"
-                  inputmode="numeric"
-                  class="mt-1 block h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 text-right"
-                  style="width: 6.5rem; margin-bottom: 0"
+                  :step="5"
+                  :max="180"
+                  placeholder="min"
+                  class="mt-1"
+                  style="width: 5.4rem"
                 />
               </label>
               <label class="block">
                 <span class="text-[11px] font-medium text-n-slate-11">Rounds</span>
-                <input
+                <WheelInput
                   v-model="boxForm.rounds"
-                  type="text"
-                  inputmode="numeric"
-                  class="mt-1 block h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 text-right"
-                  style="width: 5rem; margin-bottom: 0"
+                  :step="1"
+                  :max="30"
+                  placeholder="nº"
+                  class="mt-1"
+                  style="width: 4.2rem"
                 />
               </label>
               <label class="block flex-1" style="min-width: 12rem">
@@ -1893,8 +2071,14 @@ onMounted(async () => {
                     {{ meal.name }} <span v-if="meal.time" class="font-normal text-n-slate-10">· {{ meal.time }}</span>
                   </p>
                   <p v-if="meal.desc" class="text-[11px] text-n-slate-10 truncate">{{ meal.desc }}</p>
+                  <p v-if="mealEquiv(meal)" class="text-[10px]" :style="{ color: VERDE }">
+                    🍗 {{ mealEquiv(meal) }}
+                  </p>
                 </div>
-                <span class="text-[11px] text-n-slate-10 shrink-0">{{ meal.kcal }} kcal</span>
+                <span class="text-[11px] text-n-slate-10 shrink-0 text-right">
+                  {{ meal.kcal }} kcal
+                  <span v-if="meal.protein" class="block text-[10px]">P {{ meal.protein }} g</span>
+                </span>
               </button>
             </div>
 
@@ -1919,14 +2103,12 @@ onMounted(async () => {
                   style="min-width: 10rem; margin-bottom: 0"
                   @keyup.enter="addExtra"
                 />
-                <input
+                <WheelInput
                   v-model="extraForm.kcal"
-                  type="text"
-                  inputmode="numeric"
+                  :step="10"
+                  :max="2000"
                   placeholder="kcal"
-                  class="h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 text-right"
-                  style="width: 4.5rem; margin-bottom: 0"
-                  @keyup.enter="addExtra"
+                  style="width: 5rem"
                 />
                 <button
                   class="h-9 px-3 rounded-lg text-xs font-bold text-white"
@@ -1941,7 +2123,12 @@ onMounted(async () => {
 
           <!-- Editor do plano alimentar -->
           <div v-if="dietForm" class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3">🎯 Metas do dia</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🎯 Metas do dia</h2>
+            <p class="text-[11px] text-n-slate-10 mb-3">
+              É só passar as <b>calorias</b>: proteína (1,8 g/kg do seu peso), carbo e
+              gordura são calculados na hora e divididos entre as refeições — ajuste
+              depois o que quiser.
+            </p>
             <div class="flex items-end gap-2.5 flex-wrap mb-4">
               <label v-for="m in MACROS" :key="m.key" class="block">
                 <span class="text-[11px] font-medium text-n-slate-11">{{ m.label }}{{ m.suffix }}</span>
@@ -2065,16 +2252,25 @@ onMounted(async () => {
                   style="width: 10rem; margin-bottom: 0"
                 />
               </label>
-              <label v-for="m in MEASURES" :key="m.key" class="block">
-                <span class="text-[11px] font-medium text-n-slate-11">{{ m.label }}{{ m.suffix }}</span>
-                <input
+              <div v-for="m in MEASURES" :key="m.key" class="flex flex-col items-center">
+                <span class="text-[11px] font-medium text-n-slate-11 mb-1">{{ m.label }}{{ m.suffix }}</span>
+                <WheelInput
                   v-model="bodyForm[m.key]"
-                  type="text"
-                  inputmode="decimal"
-                  class="mt-1 block h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 text-right"
-                  style="width: 6rem; margin-bottom: 0"
+                  :step="m.step"
+                  :max="m.max"
+                  decimal
+                  :placeholder="m.suffix.trim()"
+                  style="width: 5.4rem"
                 />
-              </label>
+                <button
+                  v-if="lastBodyValue(m.key) !== null"
+                  class="mt-1 px-1.5 h-6 rounded-lg text-[10px] text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2 border border-dashed border-n-weak"
+                  title="Última medição — toque pra posicionar a roleta"
+                  @click="copyLastBody(m.key)"
+                >
+                  {{ String(lastBodyValue(m.key)).replace('.', ',') }}⤵
+                </button>
+              </div>
               <label class="block flex-1" style="min-width: 12rem">
                 <span class="text-[11px] font-medium text-n-slate-11">Observações</span>
                 <input
@@ -2154,3 +2350,84 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Cartão de vidro da meta (rodada 13): translúcido c/ blur, borda fina
+   e brilho interno — verde no dia a dia, ouro quando a meta foi batida */
+.hub-glass {
+  background: linear-gradient(
+    135deg,
+    rgba(16, 185, 129, 0.1),
+    rgba(16, 185, 129, 0.03) 45%,
+    rgba(255, 255, 255, 0.04)
+  );
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 6px 18px -12px rgba(16, 185, 129, 0.45);
+}
+.hub-glass-gold {
+  background: linear-gradient(
+    135deg,
+    rgba(212, 160, 23, 0.12),
+    rgba(212, 160, 23, 0.03) 45%,
+    rgba(255, 255, 255, 0.04)
+  );
+  border-color: rgba(212, 160, 23, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 6px 18px -12px rgba(212, 160, 23, 0.5);
+}
+/* alvo por série dentro do vidro — tocável, leva as roletas até a meta */
+.hub-target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 1.75rem;
+  padding: 0 0.55rem;
+  border-radius: 9999px;
+  font-size: 11px;
+  color: var(--slate-12, inherit);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.hub-target-chip:not(:disabled):active {
+  transform: scale(0.94);
+}
+.hub-target-chip:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.hub-target-chip:disabled {
+  opacity: 0.75;
+}
+/* chavinha de variação — segmentada estilo iOS */
+.hub-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9999px;
+  background: rgba(127, 127, 127, 0.14);
+  border: 1px solid rgba(127, 127, 127, 0.18);
+}
+.hub-switch-opt {
+  height: 1.35rem;
+  padding: 0 0.55rem;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0.65;
+  transition: all 0.15s ease;
+}
+.hub-switch-opt.is-on {
+  color: #fff;
+  opacity: 1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+</style>

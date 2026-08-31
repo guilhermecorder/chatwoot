@@ -104,8 +104,16 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       'workout_plans' => Array(raw['workout_plans']).first(30).filter_map { |p| sanitize_plan(p) },
       'programs' => Array(raw['programs']).first(10).filter_map { |p| sanitize_program(p) },
       'boxing' => sanitize_boxing(raw['boxing']),
-      'diet' => sanitize_diet(raw['diet'])
+      'diet' => sanitize_diet(raw['diet']),
+      # recursos ligáveis do HUB (Configurações → HUB, só admin):
+      # boxe nasce DESLIGADO pra todo mundo até o admin liberar
+      'features' => sanitize_features(raw['features'])
     }
+  end
+
+  def sanitize_features(features)
+    features = {} unless features.is_a?(Hash)
+    { 'boxing' => features['boxing'] == true }
   end
   # (alvos pessoais — peso-alvo, sessões/semana — moram no registro
   # kind='profile' de cada usuário, não no config compartilhado)
@@ -170,8 +178,10 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
 
     {
       'name' => ex['name'].to_s.strip.first(120),
-      # variação/marcador do exercício (ex.: "halteres", "barra", "máquina")
+      # variação/marcador do exercício (ex.: "halteres", "barra", "máquina");
+      # alt_tag = segunda opção da chavinha de variação (ex.: halteres ⇄ barra)
       'tag' => ex['tag'].to_s.strip.first(30),
+      'alt_tag' => ex['alt_tag'].to_s.strip.first(30),
       'method' => ex['method'].to_s.first(20),
       'scheme' => ex['scheme'].to_s.first(60),
       'rest' => ex['rest'].to_s.first(40),

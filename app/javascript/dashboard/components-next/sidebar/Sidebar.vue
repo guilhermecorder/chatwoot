@@ -535,11 +535,18 @@ const hubItem = () => ({
   to: accountScopedRoute('hub_home'),
 });
 
+// boxe é recurso LIGÁVEL (Configurações → HUB): desligado, some pra todos
+const boxingOn = computed(
+  () => crmSettings.value?.health_features?.boxing === true
+);
+
 const hubMenuSaude = () => [
   hubItem(),
   { name: 'HealthPainel', label: 'Meu Painel', icon: 'i-lucide-gauge', to: accountScopedRoute('hub_health_painel') },
   { name: 'HealthTreino', label: 'Treino', icon: 'i-lucide-dumbbell', to: accountScopedRoute('hub_health') },
-  { name: 'HealthBoxe', label: 'Boxe', icon: 'i-lucide-swords', to: accountScopedRoute('hub_health_boxe') },
+  ...(boxingOn.value
+    ? [{ name: 'HealthBoxe', label: 'Boxe', icon: 'i-lucide-swords', to: accountScopedRoute('hub_health_boxe') }]
+    : []),
   { name: 'HealthDieta', label: 'Dieta', icon: 'i-lucide-utensils', to: accountScopedRoute('hub_health_dieta') },
   { name: 'HealthCorpo', label: 'Corpo', icon: 'i-lucide-ruler', to: accountScopedRoute('hub_health_corpo') },
   { name: 'HealthDash', label: 'Dashboard', icon: 'i-lucide-area-chart', to: accountScopedRoute('hub_health_dash') },
@@ -1100,6 +1107,17 @@ const menuItems = computed(() => {
                 icon: 'i-lucide-puzzle',
                 to: accountScopedRoute('personalizacao_settings_index'),
               },
+              // HUB (segmento saude): recursos ligáveis do sistema pessoal
+              ...(segmentoId === 'saude'
+                ? [
+                    {
+                      name: 'Settings Hub',
+                      label: 'HUB',
+                      icon: 'i-lucide-layout-grid',
+                      to: accountScopedRoute('hub_settings_index'),
+                    },
+                  ]
+                : []),
             ]
           : []),
         // {

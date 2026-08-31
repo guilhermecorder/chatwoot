@@ -12,6 +12,149 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 14 — 31/08 ✅ MEU PAINEL ESSENCIAL (royal/laranja) + BOXE LIGÁVEL + DIETA CALCULADA
+Pedidos dele 30/08: painel pré-configurado com o essencial (ciclos de
+24 semanas, caixinhas de consistência c/ reagendado, metas de kcal,
+projeções, elogio da semana completa, medidas e peso); omitir boxe de
+todos até o admin liberar em Configurações (ambiente do HUB lá);
+paleta AZUL ROYAL + LARANJA BRILHANTE c/ subtons; na Dieta, passar as
+kcal → calcular proteína/carbo/gordura e metas por refeição c/ peso
+CRU de carne.
+
+- **Paleta do painel**: ROYAL #4169E1 · profundo #27408B · noite
+  #111C3F · claro #8FA9F5 + LARANJA #FF8A00 · vivo #FF6B1A · claro
+  #FFB25E (verde #30A46C só nas caixinhas de feito).
+- **HealthHome reescrito**: HERO royal c/ badge laranja "Ciclo N"
+  (conta de ciclos de 24 sem: cycleNumber/weekInCycle/cyclesDone —
+  semana 25+ = ciclo 2; frase especial no 1º ciclo e "N ciclos
+  completos" depois) + botão laranja do treino de hoje; CAIXINHAS DE
+  CONSISTÊNCIA do ciclo (24 colunas × sessões planejadas: VERDE =
+  feito no dia planejado · LARANJA = reagendado, ou seja feito noutro
+  dia — automático comparando record_date × data planejada · VERMELHO
+  = passou e não foi · cinza = a fazer; semana atual contornada;
+  totais na legenda; tooltip por caixinha); ELOGIO da semana completa
+  (vidro laranja, 4 frases rotacionando por semana, aparece quando os
+  3 treinos da semana foram feitos); ALVOS recoloridos (peso-alvo
+  royal, kcal laranja, proteína royal); HOJE sem card de boxe (salvo
+  liberado); PROJEÇÕES: ritmo 30d, peso em 30d, CHEGADA AO ALVO (data
+  estimada ≈ dd/mm + dias no ritmo atual, mín. de queda −0,1 kg/30d,
+  teto 400 dias), kcal média × meta (Δ verde/vermelho), placar ▲▬▼;
+  MEDIDAS E PESO: chips de cada medida c/ Δ vs medição anterior
+  (semântica por medida: cintura caindo = verde, braço caindo =
+  laranja) + curva royal c/ linha tracejada laranja do peso-alvo.
+- **BOXE LIGÁVEL** (omitido de todos por padrão): health config ganhou
+  features.boxing (sanitize_features, default false); settings_json
+  expõe health_features (o menu lê do store); NOVO ambiente
+  Configurações → HUB (settings/hub/Index.vue + rota
+  hub_settings_index admin-only + item no menu de Configurações só no
+  segmento saude) c/ chavinha iOS "Mundo Boxe" → salva via
+  updateHealthConfig + refetch do settings (menu reage na hora).
+  Escondido quando off: item Boxe do menu saúde, pílula Boxe do
+  HealthPage, visão Boxe do dashboard, card Boxe do painel, e
+  sessões/semana conta só musculação.
+- **DIETA CALCULADA**: no editor Plano & metas, digitar as CALORIAS
+  recalcula na hora proteína (1,8 g/kg do peso atual — cutting
+  Warrior; fallback 30% kcal sem pesagem), gordura (25% kcal) e carbo
+  (resto), e REDISTRIBUI kcal/P/C/G nas refeições mantendo as
+  proporções que elas já têm (sem kcal = divisão igual) — tudo
+  editável depois; no checklist da Dieta cada refeição mostra a
+  EQUIVALÊNCIA da proteína em comida crua ("≈ 220 g de frango cru ·
+  240 g de patinho cru · 9 ovos"; frango 23%, patinho 21%, ovo 6 g).
+- TESTADO local conta 3: painel completo renderizado (ciclo 1 sem 22,
+  55 no dia + 8 não foi da simulação, projeções −4,8/76,7, medidas c/
+  Δ, curva royal), toggle do boxe ON→item no menu na hora→OFF→sumiu,
+  kcal 2460→2000 recalculou 147P/56G/227C e refeições 570/1055/375
+  proporcionais ✓, equivalências no checklist ✓ (editor cancelado sem
+  salvar; bug de redeclaração latestWeight→pesoAtual corrigido).
+  Sem migration. AGUARDA "pode subir" junto com 12 e 13.
+
+## RODADA 13 — 30/08 ✅ CHAVINHA DE VARIAÇÃO + META POR SÉRIE NO VIDRO
+Pedidos dele 30/08 (mesma conversa da 12): chavinha ativar/desativar
+variação nos exercícios (barra ⇄ halter, máquina ⇄ halter…); sugestão
+pra TODAS as séries seguindo os fundamentos; orientação "especial, com
+fundo de vidro", destaque elegante — ele se importa muito com design.
+
+- **Chavinha de variação**: prescrição ganhou `alt_tag` (variação B;
+  sanitize_prescription aceita; editor ✎ tem os 2 campos "variação A/
+  B" — preencheu os dois, o treino ganha a chavinha segmentada estilo
+  iOS no cabeçalho do exercício). Trocar a chavinha RE-PREFILL as
+  roletas com a última execução DAQUELA variação (lastSetsForTag
+  busca no histórico inteiro pelo nome+tag salvo; registros antigos
+  sem tag contam como variação principal), recalcula hint/alvos, e o
+  registro salva a variação usada (out.tag) — carga de barra ≠ carga
+  de halter, cada uma progride sozinha (verdict "first" na 1ª vez da
+  variação).
+- **Meta POR SÉRIE (setTargets no warrior.js)**: alvo carga×reps pra
+  cada série pelos fundamentos — faixas (RPT/séries/rest-pause): topo
+  de TODAS → +2,3 e reps no piso, senão mesma carga +1 rep até o teto
+  (minis do rest-pause acompanham a carga da ativação no salto);
+  independent_set: série que bateu o teto sobe sozinha; pirâmide/
+  rest_reduction: mesma carga, reps do esquema; add_each_session:
+  +1,1 em todas; extra/ficha: última execução +1 rep. Alvos caem na
+  GRADE DE 0,5 kg (passo da roleta e das anilhas — sem 32,8 que a
+  roleta não alcança).
+- **Cartão de VIDRO (glassmorphism)**: hint + chips de alvo por série
+  num cartão translúcido c/ backdrop-blur 14px, borda fina, brilho
+  interno e sombra colorida — verde no dia a dia, OURO quando "meta
+  atingida". Chips tocáveis: levar as roletas da série até a meta
+  (applyTarget); série sem histórico mostra a faixa (não tocável).
+  Chavinha e chips c/ micro-transições (scale no toque).
+- TESTADO local conta 3: editor salvou A/B, chavinha ON halteres,
+  vidro ouro, alvos conferidos na mão em TODOS os métodos (32,8→
+  arredondado 33/30/27 ✓ RPT; rest-pause minis 17,8 seguindo ativação
+  ✓), toque no alvo moveu roletas, barra → vazio "Primeira vez com
+  barra", salvou tag="barra" verdict=first no banco, reabriu → barra
+  lembrou 20×8 c/ alvo 22,5×4 e faixas nas séries sem histórico ✓.
+  Teste apagado + config revertida (banco só sim). Sem migration.
+  AGUARDA "pode subir" junto com a rodada 12.
+
+## RODADA 12 — 30/08 ✅ ÍCONE DO HUB + ROLETA v2 (leve/Apple/em tudo)
+Pedidos dele 30/08 (já usando as roletas na VPS, etiqueta 5140c43):
+ícone do app estava CEVICO (tela de início do iPhone); "demorou pra
+carregar, deixar leve"; roleta e infos maiores c/ respiros "ambiente
+Apple"; roleta em TODOS os campos de número (Corpo etc.); teto fixo
+(200 kg/220 cm, "não precisa ir até o infinito") c/ amortecedor do
+iPhone nas pontas.
+
+- **ÍCONE por marca**: o vazamento era o vueapp.html.erb — apple-touch
+  -icons fixos em /apple-icon-*.png (arte CEVICO) + manifest.json da
+  raiz (Android). Agora: marca c/ favicons_dir → apple-touch-icon
+  180 + icon-192 + manifest.json DA PASTA DA MARCA + theme-color da
+  cor primária; sem pacote (CEVICO) → tudo da raiz como sempre,
+  theme-color azul padrão intacto. Gerados (Chrome headless achatando
+  o logo_thumbnail 512 em quadrado grafite #0B1220 sem alpha, o iOS
+  arredonda): apple-touch-icon.png 180 · icon-192 · icon-512 +
+  manifest.json (name HUB, standalone, grafite) em brand-assets/hub/.
+- **Roleta v2 (WheelInput)**: VIRTUALIZADA — só ~120 números em volta
+  do valor no DOM (janela ±60 itens), espaçadores mantêm a altura;
+  a janela NÃO segue o scroll ao vivo (mudar DOM no meio da rolagem
+  faz o snap reancorar e derrapa — descoberto no teste) — congela,
+  recentra no ASSENTAR e recoloca o scrollTop exato; overflow-anchor:
+  none. DOM da sessão: ~4.700 → ~1.961 itens. TETO FIXO: carga 200 kg
+  · reps 30 · medidas 220 cm · duração 180 · kcal 2.000 (régua
+  infinita removida; roleta com fim = amortecedor nativo do iOS nas
+  pontas; overscroll contain preserva o bounce). VISUAL: itens 32px,
+  selecionado 17px bold, vizinhos 14px, fade suave, rounded-xl.
+- **Treino estilo Apple**: card do exercício p-4/rounded-2xl/mb-4,
+  nome text-sm, meta text-xs, séries gap-2, linha compacta que cabe
+  nos 375px (label 2.6rem · chip 3.9rem · roletas 4.2/3rem · ✕) —
+  conferido por screenshot (1ª versão quebrava a linha, apertada).
+- **Roletas em tudo**: CORPO (11 medidas, passo 0,1 exato, prefill da
+  última medição que JÁ EXISTIA desde a rodada 1 + chip "última
+  medição ⤵" embaixo de cada roleta — lastBodyValue/copyLastBody);
+  BOXE (duração passo 5 até 180 + rounds até 30); DIETA (kcal do
+  extra, passo 10 até 2.000); PAINEL (peso-alvo passo 0,5). Editores
+  de config (fichas, plano alimentar) continuam digitáveis de
+  propósito (rolar até 2.460 kcal seria tortura).
+- TESTADO local conta 3: salto 38 passos exato (49,5), rolagem
+  seguinte após recentrar (74,5), chip treino (30,5×6) e corpo
+  (81,5), boxe 30min via roleta, head do HTML c/ ícones da marca
+  (curl), assets 200, Corpo salvo de ponta a ponta c/ peso rolado
+  81,2 + medidas exatas 91,7 (registro de teste apagado; banco só
+  sim). Sobre a demora: causa provável = 1º load pós-implantação
+  (cache frio) + DOM das roletas v1 (agora 2,4× menor).
+  AGUARDA "pode subir" (etiqueta nova, sem migration).
+
 ## RODADA 11 — 30/08 ✅ ROLETAS ESTILO iPHONE + EXERCÍCIO EXTRA DO DIA
 Pedidos dele 30/08 (print do modo treino no celular): números das
 caixinhas virarem roleta de rolar com o dedo ("roleta com ímã"), já
