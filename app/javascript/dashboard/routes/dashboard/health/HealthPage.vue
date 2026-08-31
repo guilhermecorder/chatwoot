@@ -13,6 +13,7 @@ import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import WheelInput from './WheelInput.vue';
 import {
   METHOD_LABELS, METHOD_HINTS, SET_LABELS,
   activeProgram, weekOf, cycleForWeek, suggestedSessionKey,
@@ -427,6 +428,86 @@ const copyPrev = set => {
 };
 const fmtPrev = prev => `${String(prev.load ?? '').replace('.', ',')}×${prev.reps ?? ''}`;
 
+// ═══ EXERCÍCIO EXTRA no treino de hoje (rodada 11): crucifixo,
+// panturrilha etc. entram na MESMA sessão e salvam junto no histórico
+// (flag extra: true no registro). Última execução vem do histórico
+// inteiro (qualquer treino em que o nome apareceu) — o motor compara.
+const extraOpen = ref(false);
+const extraName = ref('');
+const EXTRA_COMUNS = [
+  'Crucifixo na máquina',
+  'Panturrilha em pé',
+  'Panturrilha sentado',
+  'Elevação lateral com halteres',
+  'Face pull',
+  'Abdominal na polia',
+];
+const extraSuggestions = computed(() => {
+  const names = new Set(EXTRA_COMUNS);
+  programs.value.forEach(p =>
+    (p.cycles || []).forEach(c =>
+      (c.sessions || []).forEach(s =>
+        (s.exercises || []).forEach(e => e.name && names.add(e.name))
+      )
+    )
+  );
+  workouts.value.forEach(w =>
+    (w.data?.exercises || []).forEach(e => e.name && names.add(e.name))
+  );
+  const inSession = new Set(
+    (session.value?.exercises || []).map(e => e.name.trim().toLowerCase())
+  );
+  return [...names]
+    .filter(n => !inSession.has(n.trim().toLowerCase()))
+    .sort((a, b) => a.localeCompare(b));
+});
+// última vez deste exercício em QUALQUER treino registrado
+const lastAnySets = name => {
+  const alvo = name.trim().toLowerCase();
+  for (const w of workouts.value) {
+    const ex = (w.data?.exercises || []).find(
+      e => String(e.name || '').trim().toLowerCase() === alvo
+    );
+    if (ex?.sets?.length) return ex.sets;
+  }
+  return null;
+};
+const addExtraExercise = () => {
+  const name = extraName.value.trim();
+  if (!name || !session.value) return;
+  if (
+    session.value.exercises.some(
+      e => e.name.trim().toLowerCase() === name.toLowerCase()
+    )
+  ) {
+    useAlert('Esse exercício já está no treino de hoje.');
+    return;
+  }
+  const last = lastAnySets(name);
+  const sets = last
+    ? last.map(s => ({
+        load: String(s.load ?? '').replace('.', ','),
+        reps: String(s.reps ?? ''),
+        prev: { load: s.load, reps: s.reps },
+        range: '',
+      }))
+    : Array.from({ length: 3 }, () => ({ load: '', reps: '', prev: null, range: '' }));
+  session.value.exercises.push({
+    name,
+    extra: true,
+    method: 'sets',
+    scheme: `${sets.length} séries`,
+    last,
+    hint: last ? targetHint({ sets: [] }, last) : 'Exercício extra — primeira vez, encontre a carga.',
+    sets,
+  });
+  extraName.value = '';
+  extraOpen.value = false;
+};
+const removeExtraExercise = ex => {
+  session.value.exercises = session.value.exercises.filter(e => e !== ex);
+};
+
 // a SEMANA do registro segue a DATA escolhida (registro retroativo cai
 // na semana certa do programa, não na semana de hoje)
 watch(
@@ -452,10 +533,13 @@ const saveSession = async () => {
           return set;
         });
       const out = { name: ex.name, sets, skipped: sets.length === 0 };
+      if (ex.extra) out.extra = true;
       if (ex.method) out.method = ex.method;
       if (isProgram && !out.skipped) out.verdict = exerciseVerdict(sets, ex.last);
       return out;
-    });
+    })
+      // extra adicionado mas deixado em branco não entra no registro
+      .filter(e => !(e.extra && e.skipped));
     const data = {
       plan_name: session.value.plan_name,
       notes: session.value.notes,
@@ -1103,9 +1187,9 @@ onMounted(async () => {
             </div>
 
             <p class="text-[11px] text-n-slate-10 mb-3">
-              Digite <b>só o de hoje</b> nas caixinhas: <b>carga (kg) × repetições</b>. O valor
-              cinza ao lado de cada série é o da <b>última vez</b> — tocar nele copia pra
-              caixinha (aí é só ajustar).
+              <b>Role as roletas</b> até o valor de hoje: <b>carga (kg) × repetições</b> — elas
+              já vêm na última execução. O chip cinza ao lado é o da <b>última vez</b>;
+              tocar nele traz a roleta de volta pra esse valor.
             </p>
 
             <div v-for="ex in session.exercises" :key="ex.name" class="mb-3 rounded-xl border border-n-weak p-3">
@@ -1118,8 +1202,23 @@ onMounted(async () => {
                   >
                     {{ ex.tag }}
                   </span>
+                  <span
+                    v-if="ex.extra"
+                    class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold border border-dashed"
+                    :style="{ color: OURO, borderColor: OURO }"
+                  >
+                    extra
+                  </span>
                 </span>
                 <span class="flex items-center gap-1.5">
+                  <button
+                    v-if="ex.extra"
+                    class="w-5 h-5 rounded text-n-slate-10 hover:bg-n-alpha-1"
+                    title="Tirar este exercício extra do treino de hoje"
+                    @click="removeExtraExercise(ex)"
+                  >
+                    ✕
+                  </button>
                   <span
                     v-if="ex.method"
                     class="px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
@@ -1165,22 +1264,21 @@ onMounted(async () => {
                   >
                     1ª vez
                   </span>
-                  <input
+                  <WheelInput
                     v-model="set.load"
-                    type="text"
-                    inputmode="decimal"
+                    :step="0.5"
+                    :max="100"
+                    decimal
                     :placeholder="set.prev ? String(set.prev.load).replace('.', ',') : 'kg'"
-                    class="h-9 rounded-lg border border-n-weak bg-n-solid-2 px-1.5 text-xs text-n-slate-12 text-right"
-                    style="width: 3.8rem; margin-bottom: 0"
+                    style="width: 3.8rem"
                   />
                   <span class="text-[11px] text-n-slate-10">×</span>
-                  <input
+                  <WheelInput
                     v-model="set.reps"
-                    type="text"
-                    inputmode="numeric"
+                    :step="1"
+                    :max="30"
                     :placeholder="set.prev ? String(set.prev.reps) : set.range || 'reps'"
-                    class="h-9 rounded-lg border border-n-weak bg-n-solid-2 px-1.5 text-xs text-n-slate-12 text-right"
-                    style="width: 2.8rem; margin-bottom: 0"
+                    style="width: 2.8rem"
                   />
                   <button
                     class="w-5 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0"
@@ -1197,6 +1295,49 @@ onMounted(async () => {
               >
                 + série
               </button>
+            </div>
+
+            <!-- Exercício extra do dia (rodada 11): entra na sessão e salva
+                 junto no histórico, marcado como "extra" -->
+            <div class="mb-3">
+              <button
+                v-if="!extraOpen"
+                class="w-full h-9 rounded-xl text-xs font-medium text-n-slate-11 border border-dashed border-n-weak hover:bg-n-alpha-1"
+                @click="extraOpen = true"
+              >
+                ➕ Adicionar exercício extra no treino de hoje
+              </button>
+              <div
+                v-else
+                class="rounded-xl border border-dashed border-n-weak p-3 flex items-center gap-2 flex-wrap"
+              >
+                <input
+                  v-model="extraName"
+                  type="text"
+                  list="hub-extra-exercicios"
+                  placeholder="Ex.: Crucifixo na máquina, Panturrilha em pé…"
+                  class="flex-1 h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
+                  style="min-width: 12rem; margin-bottom: 0"
+                  @keyup.enter="addExtraExercise"
+                />
+                <datalist id="hub-extra-exercicios">
+                  <option v-for="n in extraSuggestions" :key="n" :value="n" />
+                </datalist>
+                <button
+                  class="h-9 px-3 rounded-lg text-xs font-bold text-white disabled:opacity-60"
+                  :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+                  :disabled="!extraName.trim()"
+                  @click="addExtraExercise"
+                >
+                  Adicionar
+                </button>
+                <button
+                  class="h-9 px-2 rounded-lg text-xs text-n-slate-10 border border-n-weak hover:bg-n-alpha-1"
+                  @click="extraOpen = false; extraName = ''"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             <input

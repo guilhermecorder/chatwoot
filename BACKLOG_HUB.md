@@ -12,6 +12,46 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 11 — 30/08 ✅ ROLETAS ESTILO iPHONE + EXERCÍCIO EXTRA DO DIA
+Pedidos dele 30/08 (print do modo treino no celular): números das
+caixinhas virarem roleta de rolar com o dedo ("roleta com ímã"), já
+trazendo os valores pra só ajustar; e poder incluir exercícios
+eventuais (crucifixo na máquina, panturrilha…) no treino de hoje,
+salvando junto no histórico.
+
+- **WheelInput.vue** (novo, na pasta health): roleta vertical com ímã
+  via CSS scroll-snap (momentum nativo no iOS), 3 números visíveis
+  (26px cada), fade em cima/embaixo (mask-image), linhas de mira,
+  tocar num número rola até ele. v-model string compatível c/ toNum
+  (vírgula decimal; '' = vazio, item "—" acima do 0 — série não feita
+  continua não contando). Régua dinâmica: teto inicial
+  max(prop, valor+20·step) e ESTICA sozinha ao chegar perto do fim
+  (nunca muda os itens acima — o scroll não pula). Carga step 0,5
+  máx 100 (estica) · reps step 1 máx 30.
+- **Modo treino**: as duas caixinhas viraram roletas (largura igual,
+  3,8/2,8rem — linha cabe nos 375px: 283px medidos); nascem na última
+  execução (rodada 9 mantida); chip cinza "última vez" continua e
+  tocar nele TRAZ A ROLETA DE VOLTA pro valor (copyPrev → watch).
+  Instrução da sessão reescrita.
+- **Exercício extra**: botão "➕ Adicionar exercício extra no treino de
+  hoje" antes das observações/concluir → campo com datalist de
+  sugestões (comuns fixos + toda a prescrição + histórico, menos os
+  já na sessão) → card igual aos demais c/ chip dourado "extra" e ✕
+  pra tirar. Última execução vem do histórico INTEIRO (lastAnySets:
+  qualquer treino em que o nome apareceu) → roletas pré-preenchidas +
+  chips + hint; 1ª vez = 3 séries vazias. Salva no MESMO registro com
+  extra: true (backend já aceitava — data é permit! livre); verdict
+  entra no placar; extra deixado em branco é filtrado do registro.
+- TESTADO local conta 3 (banco = simulação): roletas nascem na última
+  execução (conferido 3 exercícios vs chips), rolagem commita (30,5→33),
+  chip devolve (33→30,5 c/ scrollTop exato), extra criado c/ 6 roletas
+  vazias, preenchido 40×12/40×10 via roleta, salvo → banco: registro
+  novo c/ [EXTRA] verdict=first, 3ª série vazia descartada, summary
+  {tie:5, first:1}; nova sessão + mesmo extra → chips 40×12⤵/40×10⤵ e
+  hint "Supere a última" ✓; ✕ removeu o extra ✓; mobile 375px 1 linha
+  por série ✓. Registro de teste apagado (55 workouts, todos _sim).
+  AGUARDA "pode subir" (etiqueta nova, sem migration).
+
 ## RODADA 10 — 28/08 ✅ MULTIUSUÁRIO: CONVIDADOS SÓ-SAÚDE C/ DADOS PRÓPRIOS
 Pedido dele: dar acesso a outras pessoas SÓ ao mundo Saúde, cada uma
 com registros e indicadores próprios, sem influenciar os dele.
