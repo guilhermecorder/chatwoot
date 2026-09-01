@@ -406,7 +406,9 @@ class CrmAutomationFireJob < ApplicationJob
     conversation = latest_conversation(contact)
     return unless conversation
 
-    link = form.public_link_for(contact)
+    # link LIMPO, sem token (decisão dele 01/09): o paciente se identifica
+    # com nome + WhatsApp no formulário e a resposta atrela pelo telefone
+    link = form.public_short_link
     template = automation.action_config['message'].presence ||
                'Para agilizar seu atendimento, responda nosso formulário (leva 2 minutinhos): {{link}}'
     content = template.gsub('{{link}}', link)

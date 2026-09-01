@@ -4729,3 +4729,23 @@ crm_opportunity_radar_job registrados.
 - LEMBRETE p/ ele: a mensagem modelo c/ o link do formulário precisa estar
   APROVADA no Gerenciador da Meta antes de ligar a automação.
 - AGUARDANDO "pode subir".
+
+## 149B. ✅ AJUSTE: "ENVIAR FORMULÁRIO" MANDA O LINK LIMPO (decisão dele 01/09: "quero sem token")
+- Na conversa pós-149 ele cravou: o {{link}} da ação "Enviar formulário"
+  deve ser o link LIMPO (clinica.cevico.com.br/forms/pre-avaliacao), sem
+  token nenhum (proposta de código curto /i/<código> foi REJEITADA no meio
+  da construção e revertida por completo — nada dela ficou no código).
+- Mudança: send_form no CrmAutomationFireJob usa form.public_short_link
+  (todo paciente recebe o mesmo link bonito; identifica-se com nome +
+  WhatsApp no 1º card e a resposta atrela pelo telefone). Texto do modal
+  atualizado. Link ASSINADO antigo continua aceito (mensagens já enviadas
+  não quebram). Travas mantidas (não reenvia a quem respondeu + cooldown 7d).
+- Testes: runner 4/4 (mensagem criada, link limpo no texto, SEM token,
+  {{nome}} renderizado) + regressão HTTP (limpo 200, assinado antigo 200,
+  identidade inválida 422). Limpeza completa.
+- Arquivos: crm_automation_fire_job.rb + ColumnAutomationsModal.vue +
+  comentário em routes.rb. Sem migration, sem cron; WEB+SIDEKIQ juntos
+  (a ação roda no sidekiq).
+- ⚠️ A etiqueta fbfc8e5 (149 pura) fica SUPERADA — implantar direto a
+  etiqueta deste ajuste quando o build ficar verde.
+- AGUARDANDO "pode subir".

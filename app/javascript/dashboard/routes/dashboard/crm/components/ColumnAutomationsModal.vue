@@ -732,8 +732,9 @@ const save = async () => {
               <option v-for="f in availableForms" :key="f.id" :value="f.id">{{ f.name }}</option>
             </select>
             <p class="text-xs text-n-slate-9 mt-1">
-              Cada contato recebe um link único na conversa mais recente. Quem já
-              respondeu não recebe de novo. Crie formulários na página "Formulários".
+              O link limpo do formulário vai na conversa mais recente do paciente —
+              ele se identifica com nome + WhatsApp e a resposta cai no card certo.
+              Quem já respondeu não recebe de novo. Crie formulários na página "Formulários".
             </p>
           </div>
           <div>

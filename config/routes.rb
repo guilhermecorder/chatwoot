@@ -54,7 +54,7 @@ Rails.application.routes.draw do
   post 'forms/:slug/track', to: 'cevico_forms#track'
   get 'forms/:slug', to: 'cevico_forms#show', as: :cevico_form_short
   post 'forms/:slug', to: 'cevico_forms#submit'
-  # link assinado (disparos automáticos: já sabe QUEM é, pula a identificação)
+  # link assinado antigo (compatibilidade: mensagens já enviadas continuam valendo)
   get 'forms/:slug/:token', to: 'cevico_forms#show', as: :cevico_form
   post 'forms/:slug/:token', to: 'cevico_forms#submit'
   post 'forms/:slug/:token/track', to: 'cevico_forms#track'
