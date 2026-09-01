@@ -47,6 +47,14 @@ Rails.application.routes.draw do
   end
 
   # Formulário público CEVICO (paciente responde pelo link do WhatsApp, sem login)
+  # LINK LIMPO (sem token): o paciente se identifica com nome + WhatsApp no
+  # próprio formulário e o sistema atrela a resposta ao card pelo telefone.
+  # O 'track' literal precisa vir ANTES da rota com :token (senão o Rails
+  # entenderia "track" como um token).
+  post 'forms/:slug/track', to: 'cevico_forms#track'
+  get 'forms/:slug', to: 'cevico_forms#show', as: :cevico_form_short
+  post 'forms/:slug', to: 'cevico_forms#submit'
+  # link assinado (disparos automáticos: já sabe QUEM é, pula a identificação)
   get 'forms/:slug/:token', to: 'cevico_forms#show', as: :cevico_form
   post 'forms/:slug/:token', to: 'cevico_forms#submit'
   post 'forms/:slug/:token/track', to: 'cevico_forms#track'

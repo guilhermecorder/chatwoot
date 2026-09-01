@@ -169,6 +169,12 @@
       font-family: inherit; min-height: 110px; resize: vertical; margin-top: 14px; color: #1a2333;
     }
     textarea:focus { outline: none; border-color: var(--brand); }
+    .id-field {
+      width: 100%; border: 2px solid #dde5ee; border-radius: 12px; padding: 14px; font-size: 16px;
+      font-family: inherit; margin-top: 14px; color: #1a2333; background: #fff;
+    }
+    .id-field:focus { outline: none; border-color: var(--brand); }
+    .id-hint { font-size: 13px; color: #6b7280; margin: 6px 0 0 4px; }
     .scale { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
     .scale button {
       width: 44px; height: 44px; border: 2px solid #dde5ee; border-radius: 10px; background: #fff;
@@ -258,6 +264,13 @@
   <script>
     // STEPS = perguntas + cards de mensagem, na ordem montada no criador
     const STEPS = <%= raw @form.questions.to_json %>;
+    // link limpo (sem paciente no token): 1º card pede nome + WhatsApp pra
+    // atrelar a resposta ao cadastro — ver CevicoFormsController#submit
+    const ASK_IDENTITY = <%= @ask_identity ? 'true' : 'false' %>;
+    const identity = { name: '', phone: '' };
+    if (ASK_IDENTITY) {
+      STEPS.unshift({ id: '_identity', type: 'identity', label: 'Primeiro, me diga quem é você 😊', required: true });
+    }
     const SUBMIT_URL = window.location.pathname;
     // beacon de retenção: avisa 1x quando o paciente CHEGA em cada card —
     // alimenta o gráfico de abandono do hub (falhar não atrapalha nada)
@@ -283,7 +296,7 @@
     // numeração só das perguntas de verdade (mensagem não conta)
     const qIndexOf = []; let qTotal = 0;
     STEPS.forEach(s => {
-      if (s.type === 'message') { qIndexOf.push(null); }
+      if (s.type === 'message' || s.type === 'identity') { qIndexOf.push(null); }
       else { qIndexOf.push(qTotal); qTotal += 1; }
     });
 
@@ -376,6 +389,24 @@
       step.className = q.type === 'message' ? 'step step-msg' : 'step';
       step.id = 'step-' + i;
       let body = '';
+
+      if (q.type === 'identity') {
+        // 1º card do link limpo: nome + WhatsApp amarram a resposta ao
+        // cadastro do paciente (validação leve aqui; a de verdade é no servidor)
+        body += `<h2>${esc(q.label)}</h2>`;
+        body += `<p class="subtitle" style="margin-top:8px">Assim suas respostas já chegam pro seu médico no seu cadastro.</p>`;
+        body += `<input class="id-field" id="id-name" type="text" placeholder="Seu nome completo" autocomplete="name" oninput="identity.name = this.value">`;
+        body += `<input class="id-field" id="id-phone" type="tel" placeholder="Seu WhatsApp com DDD" autocomplete="tel" inputmode="numeric" oninput="identity.phone = this.value">`;
+        body += `<p class="id-hint">Ex.: (11) 91234-5678</p>`;
+        body += `<p class="error" id="err-${i}">Preencha seu nome e um WhatsApp válido com DDD 🙏</p>`;
+        body += `<div class="nav">
+          <button class="btn btn-ghost" onclick="go(${i - 1})">Voltar</button>
+          <button class="btn btn-primary" onclick="nextIdentity(${i})">Continuar</button>
+        </div>`;
+        step.innerHTML = body;
+        root.appendChild(step);
+        return;
+      }
 
       if (q.type === 'message') {
         // card só de frase + cor: um respiro/celebração no meio do caminho
@@ -474,6 +505,15 @@
       setTimeout(() => next(i), 220);
     }
 
+    function nextIdentity(i) {
+      const digits = identity.phone.replace(/\D/g, '');
+      const ok = identity.name.trim().length >= 2 && digits.length >= 10 && digits.length <= 13;
+      document.getElementById('err-' + i).style.display = ok ? 'none' : 'block';
+      if (!ok) return;
+      if (i === STEPS.length - 1) { submit(); return; }
+      go(i + 1);
+    }
+
     function next(i) {
       const q = STEPS[i];
       const v = answers[q.id];
@@ -488,15 +528,28 @@
     }
 
     async function submit() {
-      const payload = STEPS.filter(q => q.type !== 'message').map(q => ({
+      const payload = STEPS.filter(q => q.type !== 'message' && q.type !== 'identity').map(q => ({
         id: q.id, label: q.label, type: q.type, value: answers[q.id] ?? ''
       }));
+      const body = { answers: payload };
+      if (ASK_IDENTITY) body.identity = { name: identity.name.trim(), phone: identity.phone };
       try {
-        await fetch(SUBMIT_URL, {
+        const res = await fetch(SUBMIT_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ answers: payload })
+          body: JSON.stringify(body)
         });
+        // servidor recusou a identificação (telefone inválido): volta pro
+        // card de nome/WhatsApp em vez de agradecer em falso
+        if (ASK_IDENTITY && res.status === 422) {
+          const data = await res.json().catch(() => ({}));
+          if (data.error === 'identity') {
+            const idIdx = STEPS.findIndex(s => s.type === 'identity');
+            go(idIdx);
+            document.getElementById('err-' + idIdx).style.display = 'block';
+            return;
+          }
+        }
       } catch (e) { /* mesmo offline, mostra o obrigado — melhor UX que travar */ }
       current = STEPS.length;
       const bar = document.getElementById('bar');

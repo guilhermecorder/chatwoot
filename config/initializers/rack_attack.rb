@@ -193,6 +193,32 @@ class Rack::Attack
   ##-----------------------------------------------##
 
   ###-----------------------------------------------###
+  ###--------CEVICO: endpoints PÚBLICOS-------------###
+  ###-----------------------------------------------###
+  # Formulários e páginas são abertos na internet (sem login). Sem trava
+  # própria, um script pode encher o banco de respostas/pacientes falsos ou
+  # gastar IA pelo construtor de rascunho. Limites folgados pro uso real.
+
+  ## Envio de resposta de formulário (cria registros; pode criar paciente+card)
+  throttle('cevico/form_submit', limit: 10, period: 1.minute) do |req|
+    req.ip if req.post? && %r{\A/forms/[^/]+(/[^/]+)?\z}.match?(req.path) && !req.path.end_with?('/track')
+  end
+
+  ## Beacons de retenção/protocolo (só contadores — limite mais alto)
+  throttle('cevico/public_beacons', limit: 90, period: 1.minute) do |req|
+    req.ip if req.post? &&
+              (req.path.end_with?('/track') && (req.path.start_with?('/forms/', '/p/')) ||
+               %r{\A/p/[^/]+/ref\z}.match?(req.path) || req.path == '/hub/ref')
+  end
+
+  ## Ambiente de montagem do rascunho (construtor gasta IA — o mais apertado)
+  throttle('cevico/builder', limit: 6, period: 1.minute) do |req|
+    req.ip if req.post? && req.path.start_with?('/p/rascunho/')
+  end
+
+  ##-----------------------------------------------##
+
+  ###-----------------------------------------------###
   ###----------Application API Throttling-----------###
   ###-----------------------------------------------###
 

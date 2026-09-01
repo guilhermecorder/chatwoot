@@ -67,7 +67,7 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
   end
 
   def form_params
-    params.permit(:name, :active, :intro_title, :intro_text, :thank_you_text,
+    params.permit(:name, :active, :slug, :intro_title, :intro_text, :thank_you_text,
                   questions: [:id, :label, :type, :required, :text, :color, { options: [] }])
   end
 
@@ -116,6 +116,7 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
       id: f.id,
       name: f.name,
       slug: f.slug,
+      short_link: f.public_short_link,
       active: f.active,
       intro_title: f.intro_title,
       intro_text: f.intro_text,

@@ -36,6 +36,8 @@ class CrmAutomationFireJob < ApplicationJob
       fire_google_ads(automation, contact, pipeline)
     when 'send_form'
       send_form(automation, contact, pipeline)
+    when 'send_template'
+      send_template(automation, contact, pipeline)
     when 'ai_analyze'
       ai_analyze(contact)
     when 'schedule_appointment'
@@ -419,6 +421,51 @@ class CrmAutomationFireJob < ApplicationJob
     mark_form_sent(contact, form)
     # contador de ENVIOS do hub dos Formulários (envio × respostas × %)
     Crm::Form.where(id: form.id).update_all('sent_count = sent_count + 1') # rubocop:disable Rails/SkipsModelValidations
+  end
+
+  # ── enviar MENSAGEM MODELO do WhatsApp (aprovada na Meta) ───────────────
+  # Reusa o Crm::SendTemplateService (o mesmo das Campanhas/Automações de
+  # mensagem) com uma fonte leve montada da action_config. Trava: não
+  # reenvia a MESMA automação pro mesmo contato dentro do cooldown — card
+  # que entra-e-sai da coluna não vira rajada.
+  TemplateSource = Struct.new(:account, :inbox, :sender, :template_params, :message_preview, :name) do
+    def account_id = account.id
+    def inbox_id = inbox.id
+  end
+
+  TEMPLATE_RESEND_COOLDOWN = 7.days
+
+  def send_template(automation, contact, pipeline)
+    cfg = automation.action_config || {}
+    inbox = pipeline.account.inboxes.find_by(id: cfg['inbox_id'])
+    return if inbox.nil? || cfg['template_params'].blank?
+    return if contact.phone_number.blank?
+    return if template_sent_recently?(contact, automation)
+
+    source = TemplateSource.new(pipeline.account, inbox, nil,
+                                cfg['template_params'], cfg['message_preview'].presence,
+                                automation.name)
+    conversation = Crm::SendTemplateService.new(source: source, contact: contact).perform
+    mark_template_sent(contact, automation) if conversation
+  end
+
+  def template_sent_recently?(contact, automation)
+    sent_at = contact.additional_attributes&.dig('cevico_templates_sent', automation.id.to_s)
+    return false if sent_at.blank?
+
+    Time.zone.parse(sent_at.to_s) > TEMPLATE_RESEND_COOLDOWN.ago
+  rescue ArgumentError, TypeError
+    false
+  end
+
+  def mark_template_sent(contact, automation)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      sent = attrs['cevico_templates_sent'] || {}
+      sent[automation.id.to_s] = Time.current.iso8601
+      attrs.merge('cevico_templates_sent' => sent)
+    end
+  rescue StandardError => e
+    Rails.logger.warn "[CrmAutomationFire] mark_template_sent: #{e.message}"
   end
 
   FORM_RESEND_COOLDOWN = 7.days

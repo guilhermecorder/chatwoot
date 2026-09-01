@@ -109,9 +109,69 @@ const ACTIONS = [
   { value: 'meta_ads_event',       label: 'Evento Meta Ads',         icon: 'i-lucide-bar-chart-2' },
   { value: 'google_ads_conversion',label: 'Conversão Google Ads',    icon: 'i-lucide-trending-up' },
   { value: 'send_form',            label: 'Enviar formulário',       icon: 'i-lucide-clipboard-list' },
+  { value: 'send_template',        label: 'Enviar mensagem modelo',  icon: 'i-lucide-message-square-text' },
   { value: 'ai_agent',             label: 'Adicionar agente de IA',  icon: 'i-lucide-bot' },
   { value: 'set_value',            label: 'Adicionar preço no card', icon: 'i-lucide-circle-dollar-sign' },
 ];
+
+// ── Enviar mensagem modelo (template aprovado do WhatsApp) ─────────────
+// mesmo padrão das Campanhas: caixa WhatsApp → templates da Meta →
+// variáveis {{n}} → prévia. O envio em si reusa o Crm::SendTemplateService.
+const templates = ref([]);
+const selectedTemplateName = ref('');
+const varValues = ref({});
+const isLoadingTemplates = ref(false);
+const wrapToken = t => '{{' + t + '}}';
+const TOKEN_HINT = wrapToken('contact.name');
+const whatsappInboxes = computed(() =>
+  (accountInboxes.value || []).filter(i => i.channel_type === 'Channel::Whatsapp')
+);
+const selectedTemplate = computed(
+  () => templates.value.find(t => t.name === selectedTemplateName.value) ?? null
+);
+const templateBodyText = computed(() => {
+  const body = selectedTemplate.value?.components?.find(c => c.type === 'BODY');
+  return body?.text ?? '';
+});
+const variableTokens = computed(() => {
+  const tokens = new Set();
+  const re = /\{\{\s*(\d+)\s*\}\}/g;
+  let m = re.exec(templateBodyText.value);
+  while (m !== null) {
+    tokens.add(m[1]);
+    m = re.exec(templateBodyText.value);
+  }
+  return [...tokens];
+});
+const renderedTemplatePreview = computed(() =>
+  templateBodyText.value.replace(/\{\{\s*(\d+)\s*\}\}/g, (full, token) =>
+    varValues.value[token]?.trim() ? varValues.value[token] : full
+  )
+);
+const loadTemplates = async inboxId => {
+  if (!inboxId) return;
+  isLoadingTemplates.value = true;
+  try {
+    const data = await store.dispatch('crm/fetchWhatsappTemplates', inboxId);
+    // resposta inesperada (token inválido etc.) vem como objeto — nunca
+    // deixar algo que não é lista chegar nos computed (quebrava o modal)
+    templates.value = Array.isArray(data) ? data : [];
+    if (!Array.isArray(data) || !data.length) {
+      useAlert('Nenhuma mensagem modelo encontrada nesta caixa — confira a conexão com a Meta.');
+    }
+  } catch {
+    templates.value = [];
+    useAlert('Erro ao carregar as mensagens modelo do WhatsApp');
+  } finally {
+    isLoadingTemplates.value = false;
+  }
+};
+const onTemplateInboxChange = () => {
+  selectedTemplateName.value = '';
+  varValues.value = {};
+  templates.value = [];
+  loadTemplates(form.value.action_config.inbox_id);
+};
 
 const emptyForm = () => ({
   name:          '',
@@ -138,6 +198,10 @@ const emptyForm = () => ({
     currency:           'BRL',
     // Formulário
     form_id:            '',
+    // Mensagem modelo (WhatsApp)
+    inbox_id:           null,
+    template_params:    null,
+    message_preview:    '',
     // Agendar consulta (IA)
     default_unit:       '',
     // Gatilho "Mensagem criada"
@@ -183,6 +247,9 @@ watch(() => props.initialAutomation, (auto) => {
       conversion_value:   auto.action_config?.conversion_value ?? '',
       currency:           auto.action_config?.currency         ?? 'BRL',
       form_id:            auto.action_config?.form_id          ?? '',
+      inbox_id:           auto.action_config?.inbox_id         ?? null,
+      template_params:    auto.action_config?.template_params  ?? null,
+      message_preview:    auto.action_config?.message_preview  ?? '',
       default_unit:       auto.action_config?.default_unit     ?? '',
       message_direction:  auto.action_config?.message_direction ?? 'incoming',
       message_contains:   auto.action_config?.message_contains  ?? '',
@@ -194,6 +261,13 @@ watch(() => props.initialAutomation, (auto) => {
         : [],
     },
   };
+  // edição de "mensagem modelo": recarrega os templates da caixa e repõe
+  // a seleção + variáveis salvas
+  if (auto.action_type === 'send_template' && auto.action_config?.inbox_id) {
+    selectedTemplateName.value = auto.action_config?.template_params?.name ?? '';
+    varValues.value = { ...(auto.action_config?.template_params?.processed_params?.body || {}) };
+    loadTemplates(auto.action_config.inbox_id);
+  }
 }, { immediate: true });
 
 const isCustomDelay = computed(() => form.value.delay_minutes === -1);
@@ -229,6 +303,25 @@ const onWorkflowSelected = () => {
 
 const save = async () => {
   if (!form.value.name.trim()) return;
+  // mensagem modelo: precisa da caixa + template escolhido + variáveis
+  if (form.value.action_type === 'send_template') {
+    if (!form.value.action_config.inbox_id || !selectedTemplate.value) {
+      useAlert('Escolha a caixa do WhatsApp e a mensagem modelo.');
+      return;
+    }
+    if (!variableTokens.value.every(t => varValues.value[t]?.trim())) {
+      useAlert('Preencha todas as variáveis da mensagem modelo.');
+      return;
+    }
+    form.value.action_config.template_params = {
+      name: selectedTemplate.value.name,
+      namespace: selectedTemplate.value.namespace ?? '',
+      language: selectedTemplate.value.language,
+      category: selectedTemplate.value.category,
+      processed_params: { body: { ...varValues.value } },
+    };
+    form.value.action_config.message_preview = templateBodyText.value;
+  }
   isSaving.value = true;
   try {
     const payload = {
@@ -651,6 +744,64 @@ const save = async () => {
               class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
               placeholder="Oi {{nome}}! Para agilizar sua consulta, responda nosso formulário (2 minutinhos): {{link}}"
             />
+          </div>
+        </div>
+
+        <!-- Enviar mensagem modelo (template aprovado do WhatsApp) -->
+        <div v-else-if="form.action_type === 'send_template'" class="space-y-3">
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Caixa do WhatsApp</label>
+            <select
+              v-model="form.action_config.inbox_id"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+              @change="onTemplateInboxChange"
+            >
+              <option :value="null">Selecione...</option>
+              <option v-for="i in whatsappInboxes" :key="i.id" :value="i.id">{{ i.name }}</option>
+            </select>
+          </div>
+          <div v-if="form.action_config.inbox_id">
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Mensagem modelo</label>
+            <select
+              v-model="selectedTemplateName"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            >
+              <option value="" disabled>{{ isLoadingTemplates ? 'Carregando…' : 'Selecione o template…' }}</option>
+              <option v-for="tpl in templates" :key="`${tpl.name}-${tpl.language}`" :value="tpl.name">
+                {{ tpl.name }} ({{ tpl.language }})
+              </option>
+            </select>
+            <p class="text-xs text-n-slate-9 mt-1">
+              São as mensagens aprovadas no Gerenciador da Meta — as mesmas das
+              Campanhas. Chegam mesmo fora da janela de 24h do WhatsApp.
+            </p>
+          </div>
+          <div v-if="selectedTemplate" class="space-y-3">
+            <div class="bg-n-alpha-1 border border-n-weak rounded-lg p-3">
+              <p class="text-xs text-n-slate-10 mb-1">Prévia da mensagem</p>
+              <p class="text-sm text-n-slate-12 whitespace-pre-wrap">{{ renderedTemplatePreview }}</p>
+            </div>
+            <div v-for="token in variableTokens" :key="token">
+              <label class="text-xs font-medium text-n-slate-11 block mb-1">
+                Variável {{ wrapToken(token) }}
+              </label>
+              <input
+                v-model="varValues[token]"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                :placeholder="'Valor fixo ou ' + TOKEN_HINT + ' para personalizar'"
+              />
+            </div>
+            <p v-if="variableTokens.length" class="text-xs text-n-slate-9">
+              Dica: use <span class="font-mono">{{ TOKEN_HINT }}</span> para inserir o nome do paciente automaticamente.
+            </p>
+          </div>
+          <div class="rounded-xl p-3 text-xs border-2 flex items-start gap-2" style="border-color: rgba(212,160,23,0.4); background: rgba(212,160,23,0.08)">
+            <span class="i-lucide-shield-check text-sm flex-shrink-0 mt-0.5" style="color: #B8860B" />
+            <p class="text-n-slate-11">
+              Trava anti-rajada: esta automação <b>não reenvia</b> a mesma mensagem
+              pro mesmo paciente dentro de 7 dias — card que entra e sai da coluna
+              não vira spam.
+            </p>
           </div>
         </div>
 

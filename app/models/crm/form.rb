@@ -43,9 +43,11 @@ class Crm::Form < ApplicationRecord
   has_many :responses, class_name: 'Crm::FormResponse', foreign_key: :crm_form_id, dependent: :destroy
 
   validates :name, presence: true
-  validates :slug, presence: true, uniqueness: true
+  validates :slug, presence: true, uniqueness: true,
+                   format: { with: /\A[a-z0-9-]+\z/, message: 'só aceita letras minúsculas, números e hífens' } # rubocop:disable Rails/I18nLocaleTexts
 
   before_validation :ensure_slug, on: :create
+  before_validation :normalize_slug
 
   QUESTION_TYPES = %w[choice multi text scale yesno message].freeze
 
@@ -76,6 +78,12 @@ class Crm::Form < ApplicationRecord
     nil
   end
 
+  # link LIMPO, amigável de mandar no WhatsApp (sem token): o paciente
+  # se identifica com nome + WhatsApp dentro do próprio formulário
+  def public_short_link
+    "#{base_url}/forms/#{slug}"
+  end
+
   private
 
   def ensure_slug
@@ -83,6 +91,12 @@ class Crm::Form < ApplicationRecord
 
     base = name.to_s.parameterize.presence || 'form'
     self.slug = "#{base}-#{SecureRandom.alphanumeric(6).downcase}"
+  end
+
+  # o admin edita o "endereço do link" livremente — aqui vira slug limpo
+  # ("Pré Avaliação" → "pre-avaliacao")
+  def normalize_slug
+    self.slug = slug.to_s.parameterize if slug.present?
   end
 
   def base_url

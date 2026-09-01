@@ -114,6 +114,7 @@ const openBuilder = form => {
     ? {
         id: form.id,
         name: form.name,
+        slug: form.slug || '',
         intro_title: form.intro_title || '',
         intro_text: form.intro_text || '',
         thank_you_text: form.thank_you_text || '',
@@ -128,6 +129,7 @@ const openBuilder = form => {
     : {
         id: null,
         name: '',
+        slug: '',
         intro_title: 'Antes da sua consulta na CEVICO',
         intro_text: 'Suas respostas ajudam nossa equipe a preparar o melhor atendimento para você. Leva menos de 3 minutos.',
         thank_you_text: 'Recebemos suas respostas! Nossa equipe já está se preparando para te receber. Até breve! 💙',
@@ -177,6 +179,8 @@ const saveForm = async () => {
   isSavingForm.value = true;
   const payload = {
     name: draft.value.name.trim(),
+    // endereço do link limpo: vazio no criar = o sistema gera sozinho
+    ...(draft.value.slug?.trim() ? { slug: draft.value.slug.trim() } : {}),
     intro_title: draft.value.intro_title,
     intro_text: draft.value.intro_text,
     thank_you_text: draft.value.thank_you_text,
@@ -214,6 +218,17 @@ const copyTestLink = async form => {
     useAlert('Link de teste copiado! Abra numa aba anônima para ver como o paciente vê.');
   } catch {
     useAlert('Erro ao gerar o link.');
+  }
+};
+
+// link LIMPO (sem token): o que se manda pro paciente no WhatsApp —
+// quem abre se identifica com nome + WhatsApp no próprio formulário
+const copyShortLink = async form => {
+  try {
+    await navigator.clipboard.writeText(form.short_link);
+    useAlert('Link copiado! É esse que você manda pro paciente no WhatsApp.');
+  } catch {
+    useAlert('Erro ao copiar o link.');
   }
 };
 
@@ -353,8 +368,11 @@ const retentionColor = p => (p >= 70 ? '#047857' : p >= 40 ? '#B45309' : '#B91C1
         <button class="h-8 flex items-center gap-1.5 text-xs px-3 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" @click="openBuilder(selectedForm)">
           <span class="i-lucide-pencil text-xs" /> Editar perguntas
         </button>
+        <button class="h-8 flex items-center gap-1.5 text-xs px-3 rounded-lg border-2 text-n-slate-12 hover:bg-n-alpha-1 font-medium" style="border-color: rgba(212,175,55,0.55)" @click="copyShortLink(selectedForm)">
+          <span class="i-lucide-link text-xs" style="color: #B8860B" /> Copiar link do paciente
+        </button>
         <button class="h-8 flex items-center gap-1.5 text-xs px-3 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" @click="copyTestLink(selectedForm)">
-          <span class="i-lucide-link text-xs" /> Copiar link de teste
+          <span class="i-lucide-flask-conical text-xs" /> Copiar link de teste
         </button>
         <button class="h-8 flex items-center gap-1.5 text-xs px-3 rounded-lg border border-n-weak text-n-slate-11 hover:text-red-500 hover:bg-n-alpha-1" @click="removeForm(selectedForm)">
           <span class="i-lucide-trash-2 text-xs" /> Excluir
@@ -560,6 +578,19 @@ const retentionColor = p => (p >= 70 ? '#047857' : p >= 40 ? '#B45309' : '#B91C1
           <div>
             <label class="text-xs font-medium text-n-slate-11 block mb-1">Nome (interno)</label>
             <input v-model="draft.name" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12" placeholder="Perguntas Pré-Operatórias" />
+          </div>
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1">Endereço do link (o paciente vê na barra)</label>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-n-slate-10 whitespace-nowrap font-mono">…/forms/</span>
+              <input v-model="draft.slug" class="flex-1 border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="pre-avaliacao" />
+            </div>
+            <p class="text-[11px] text-n-slate-9 mt-1">
+              Só letras minúsculas, números e hífens — vira o link limpo pra mandar no WhatsApp
+              (ex.: <span class="font-mono">clinica.cevico.com.br/forms/pre-avaliacao</span>).
+              Quem abre por ele se identifica com nome + WhatsApp e a resposta cai no card certo.
+              Deixe em branco ao criar que o sistema gera um.
+            </p>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>

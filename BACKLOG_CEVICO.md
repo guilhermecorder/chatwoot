@@ -4663,3 +4663,69 @@ crm_opportunity_radar_job registrados.
   Salvar colunas de atuação (recria e já cria as irmãs "mensagens").
 - ⚠️ settings_controller segue MISTO c/ Meta Leads — separar no commit.
 - ✅ SUBIDA 29/08 junto de 146+147 (mesmo commit; ver nota de deploy no 146).
+
+# RODADA 01/09 — item 149 (formulários oficiais: link amigável + atrelamento por telefone)
+
+## 149. ✅ 📋 FORMULÁRIOS: LINK LIMPO + IDENTIFICAÇÃO POR TELEFONE + AÇÃO "ENVIAR MENSAGEM MODELO" (pedidos 01/09)
+- Pedidos dele: (a) o link do formulário tinha um token gigante e feio
+  ("precisamos construir essa extensão do link de uma forma mais amigável
+  pra enviar pro paciente"); (b) pedir o telefone pra "relacionar e atrelar
+  o formulário ao card e deixar no ambiente do paciente" (aprovado:
+  obrigatório nome + WhatsApp); (c) ação "Enviar mensagem modelo" no
+  "O que fazer?" das automações de coluna (print da tela Nova automação).
+  Contexto do uso: automação envia o link só pra quem JÁ decidiu agendar.
+- 🔗 LINK LIMPO: rotas novas sem token (GET/POST /forms/:slug + POST
+  /forms/:slug/track ANTES das rotas c/ :token — 'track' literal primeiro
+  senão o Rails leria "track" como token). Editor ganhou campo "Endereço
+  do link" (…/forms/ + slug editável; normalize_slug parameteriza
+  "Avaliação Teste" → avaliacao-teste; validação só [a-z0-9-] c/ unicidade;
+  em branco no criar = ensure_slug gera). form_json devolve short_link
+  (Cevico::PublicSite.base_url — produção sai clinica.cevico.com.br) e a
+  tela tem botão dourado "Copiar link do paciente" ao lado do de teste.
+  Link ASSINADO continua funcionando (disparos automáticos personalizados
+  pulam a identificação; token genérico antigo TAMBÉM pede identificação).
+- 🙋 IDENTIFICAÇÃO: card novo (type 'identity') como 1º passo quando não
+  há paciente no token — nome + WhatsApp obrigatórios (validação leve no
+  JS, real no servidor: nome + 10-13 dígitos). No submit:
+  resolve_identity_contact acha o paciente pelos últimos 8 dígitos +
+  same_phone_line? do AppointmentRecorder (mesma máscara do resto do
+  CEVICO); achou → resposta atrela ao contato (nome só COMPLETA cadastro
+  sem nome); não achou → cria contato (E.164 +55) + card na coluna
+  "AGENDAMENTO DE CONSULTA" (booking_stage por ILIKE, fallback 1ª coluna;
+  origin 'formulario') — decisão dele 01/09. Corrida/duplicata → re-busca
+  antes de 422. Erro de identidade → volta pro card c/ mensagem (não
+  agradece em falso).
+- 📨 AÇÃO "ENVIAR MENSAGEM MODELO" (send_template): ACTION_TYPES +
+  despacho no CrmAutomationFireJob → TemplateSource leve (account/inbox/
+  sender nil/template_params/message_preview) no Crm::SendTemplateService
+  (o MESMO das Campanhas — cria conversa + mensagem c/ template_params,
+  entrega via webhook). Trava anti-rajada: cooldown 7d POR automação/
+  contato (additional_attributes.cevico_templates_sent, mesmo padrão do
+  send_form). Modal: caixa WhatsApp → templates da Meta (mesmo
+  fetchWhatsappTemplates das Campanhas) → variáveis {{n}} c/ prévia →
+  save valida tudo preenchido; aviso da trava no card. FIX de quebra:
+  resposta não-array do endpoint de templates (token inválido) quebrava o
+  modal — coerção Array.isArray + aviso.
+- 🛡️ THROTTLES Rack::Attack (da rodada de segurança, viraram requisito):
+  cevico/form_submit 10/min por IP (POST /forms/* cria registros/paciente),
+  cevico/public_beacons 90/min (track/ref/hub_ref) e cevico/builder 6/min
+  (construtor gasta IA). Rack::Attack já vem ligado em produção.
+- Testes: runner 7/7 (slug normaliza, short_link, send_template dispara 1x
+  c/ variável renderizada + template_params na mensagem, 2º disparo
+  BLOQUEADO pelo cooldown, marcador no contato) + HTTP 8/8 (GET limpo 200
+  c/ ASK_IDENTITY, POST telefone EXISTENTE atrela sem duplicar, telefone
+  NOVO cria paciente E.164 + card em Agendamento de Consulta origem
+  formulario, reenvio REUSA paciente, identidade inválida 422, track 204,
+  404, link assinado 200 c/ "Olá, Guilherme") + VISUAL conta 3 (card de
+  identificação dopamine c/ validação, editor c/ campo endereço salvando
+  normalizado, botão Copiar link do paciente [toast de erro no teste =
+  clipboard bloqueado no browser automatizado, não é bug], modal c/ ação
+  nova + caixa + "Selecione o template…" + validação do salvar). Limpeza
+  completa (respostas 14-16, pacientes e automações de teste removidos;
+  slug revertido). Rubocop: só ofensa pré-existente (InverseOf).
+- Sem migration, sem cron — deploy só WEB. ⚠️ routes.rb segue MISTO c/
+  Meta Leads (minhas rotas de forms + as de meta_leads) — separar no
+  commit como sempre.
+- LEMBRETE p/ ele: a mensagem modelo c/ o link do formulário precisa estar
+  APROVADA no Gerenciador da Meta antes de ligar a automação.
+- AGUARDANDO "pode subir".
