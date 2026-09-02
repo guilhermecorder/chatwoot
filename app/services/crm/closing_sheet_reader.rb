@@ -16,6 +16,10 @@ class Crm::ClosingSheetReader
     'data' => :date,
     'paciente' => :name,
     'nome' => :name,
+    'telefone' => :phone,
+    'celular' => :phone,
+    'whatsapp' => :phone,
+    'fone' => :phone,
     'procedimento' => :procedure,
     'valor total' => :value,
     'valor' => :value
@@ -123,20 +127,43 @@ class Crm::ClosingSheetReader
     name = fields[:name].to_s.strip
     return :sem_nome if name.blank? # linha de totais/vazia
 
-    status = fields[:status].to_s.strip.downcase
-    return :duplicada if status.include?('duplicad')
-    return :cancelada if status.include?('cancelad')
+    skip = status_skip(fields[:status])
+    return skip if skip
 
     value = parse_value(fields[:value])
     return :sem_valor unless value.positive?
 
     {
       name: name,
+      phone: parse_phone(fields[:phone]),
       date: parse_date(fields[:date]),
       procedure: fields[:procedure].to_s.strip.presence,
       value: value,
       sheet: sheet_name
     }
+  end
+
+  def status_skip(raw)
+    status = raw.to_s.strip.downcase
+    return :duplicada if status.include?('duplicad')
+    return :cancelada if status.include?('cancelad')
+
+    nil
+  end
+
+  # coluna Telefone/Celular/WhatsApp (opcional — pedido 01/09: casar pelo
+  # telefone). Célula numérica do Excel pode vir '11987654321.0' ou em
+  # notação científica — normaliza pra só dígitos antes de devolver.
+  def parse_phone(raw)
+    str = raw.to_s.strip
+    return nil if str.blank?
+
+    str = format('%.0f', Float(str)) if str.match?(/\A-?\d+(\.\d+)?([eE][+-]?\d+)?\z/) && str.match?(/[.eE]/)
+    digits = str.gsub(/\D/, '')
+    digits.length >= 8 ? digits : nil
+  rescue ArgumentError
+    digits = str.gsub(/\D/, '')
+    digits.length >= 8 ? digits : nil
   end
 
   # no XML o número vem cru ('3900', '24187.8'); só cai no formato BRL

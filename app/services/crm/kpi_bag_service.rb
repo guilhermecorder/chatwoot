@@ -71,6 +71,22 @@ class Crm::KpiBagService
              attendance('consulta', 'attended', since, until_at), attendance('consulta', 'attended', prev_since, prev_until), 'tasks.due_at')
     add.call('appointments_missed', 'Faltas em consultas', 'n',
              attendance('consulta', 'missed', since, until_at), attendance('consulta', 'missed', prev_since, prev_until), 'tasks.due_at')
+
+    # 🏥 POR UNIDADE (pedido 02/09: "indicador que separe as consultas da
+    # Paulista e do Tatuapé") — consultas pela data, presenças e faltas de
+    # cada casa: viram cards de 1 clique no "+ Novo indicador" e alimentam
+    # a taxa de comparecimento por unidade nas fórmulas prontas
+    Crm::AgendaSlots::UNIT_LABELS.each do |unit, unit_label|
+      add.call("appointments_due_#{unit}", "Consultas · #{unit_label}", 'n',
+               due_tasks('consulta', since, until_at).where(unit: unit),
+               due_tasks('consulta', prev_since, prev_until).where(unit: unit), 'tasks.due_at')
+      add.call("appointments_attended_#{unit}", "Presenças · #{unit_label}", 'n',
+               attendance('consulta', 'attended', since, until_at).where(unit: unit),
+               attendance('consulta', 'attended', prev_since, prev_until).where(unit: unit), 'tasks.due_at')
+      add.call("appointments_missed_#{unit}", "Faltas · #{unit_label}", 'n',
+               attendance('consulta', 'missed', since, until_at).where(unit: unit),
+               attendance('consulta', 'missed', prev_since, prev_until).where(unit: unit), 'tasks.due_at')
+    end
     add.call('surgeries_booked', 'Cirurgias agendadas (registradas)', 'n',
              created_tasks('cirurgia', since, until_at), created_tasks('cirurgia', prev_since, prev_until), 'tasks.created_at')
     add.call('surgeries_done', 'Cirurgias realizadas (Agenda)', 'n',

@@ -86,7 +86,18 @@ class CrmAutomationFireJob < ApplicationJob
                     automation.delay_minutes.to_i.positive? &&
                     !card_in_stage?(automation, contact)
 
-    entry_inbox_matches?(automation, contact)
+    entry_inbox_matches?(automation, contact) && required_label_matches?(automation, contact)
+  end
+
+  # condição extra de QUALQUER gatilho (pedido 01/09): "card entrou E tem a
+  # etiqueta XYZ" → dispara; sem a etiqueta, não faz nada. Checada na hora
+  # do DISPARO (vale também pra automação com tempo de espera — se a
+  # etiqueta saiu no meio do caminho, não dispara mais).
+  def required_label_matches?(automation, contact)
+    wanted = automation.action_config&.dig('required_label').to_s.strip
+    return true if wanted.blank?
+
+    contact.label_list.map(&:downcase).include?(wanted.downcase)
   end
 
   def entry_inbox_matches?(automation, contact)

@@ -186,6 +186,7 @@ const emptyForm = () => ({
     n8n_workflow_name:  '',
     n8n_webhook_url:    '',
     label:              '',
+    required_label:     '',
     target_stage_id:    '',
     message:            '',
     assignee_id:        '',
@@ -238,6 +239,7 @@ watch(() => props.initialAutomation, (auto) => {
       n8n_workflow_name: auto.action_config?.n8n_workflow_name ?? '',
       n8n_webhook_url:   auto.action_config?.n8n_webhook_url   ?? '',
       label:              auto.action_config?.label             ?? '',
+      required_label:     auto.action_config?.required_label   ?? '',
       target_stage_id:    auto.action_config?.target_stage_id  ?? '',
       message:            auto.action_config?.message          ?? '',
       assignee_id:        auto.action_config?.assignee_id      ?? '',
@@ -413,6 +415,25 @@ const save = async () => {
               <span :class="tr.icon" class="text-base flex-shrink-0" />
               {{ tr.label }}
             </button>
+          </div>
+
+          <!-- Condição extra de QUALQUER gatilho: só dispara com a etiqueta -->
+          <div class="mt-2 bg-n-alpha-1 border border-n-weak rounded-lg p-3 space-y-1.5">
+            <label class="text-xs font-medium text-n-slate-11 block">
+              🏷️ Só dispara se o paciente tiver a etiqueta <span class="text-n-slate-9 font-normal">(opcional)</span>
+            </label>
+            <select
+              v-model="form.action_config.required_label"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            >
+              <option value="">Sem exigência — dispara para qualquer card</option>
+              <option v-for="l in accountLabels" :key="l.id" :value="l.title">{{ l.title }}</option>
+            </select>
+            <p class="text-xs text-n-slate-9">
+              Ex.: "Card entrou nesta coluna" + etiqueta escolhida → só quem tem a
+              etiqueta dispara a ação (mover de coluna, enviar formulário...). A
+              checagem é na hora do disparo — vale também com tempo de espera.
+            </p>
           </div>
 
           <!-- Qual etiqueta dispara (para gatilhos de etiqueta) -->

@@ -69,8 +69,15 @@ class Crm::ExternalSurgeryJob < ApplicationJob
         name = row['name'].to_s.strip
         next if name.blank?
 
+        # telefone da planilha (quando a coluna existir) entra no cadastro —
+        # o paciente criado já nasce alcançável no WhatsApp
+        digits = row['phone'].to_s.gsub(/\D/, '')
+        e164 = if digits.length >= 10
+                 digits.start_with?('55') && digits.length >= 12 ? "+#{digits}" : "+55#{digits}"
+               end
         contact = account.contacts.create!(
           name: name,
+          phone_number: e164,
           additional_attributes: { 'origem' => 'planilha_fechamento' }
         )
         entry = place_in_stage(stage, contact, row['value'], set_value, overwrite_value, row['date'], row['procedure'])

@@ -1306,7 +1306,12 @@ const undoImport = async () => {
               <b class="text-green-600">R$ {{ Number(sheetPreview.total_value).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}</b>
             </p>
             <p class="text-xs text-n-slate-10">
-              <b class="text-green-600">{{ sheetPreview.matched }}</b> casaram pelo nome
+              <b class="text-green-600">{{ sheetPreview.matched }}</b>
+              <template v-if="sheetPreview.matched_by_phone">
+                casaram — <b>{{ sheetPreview.matched_by_phone }} pelo 📱 telefone</b> e
+                {{ sheetPreview.matched - sheetPreview.matched_by_phone }} pelo nome
+              </template>
+              <template v-else>casaram pelo nome</template>
               <template v-if="sheetPreview.matched_sample?.length"> (ex: {{ sheetPreview.matched_sample.slice(0, 3).join(', ') }})</template> ·
               <b>{{ sheetPreview.unmatched_count }}</b> não existem no sistema
               <template v-if="sheetCreateMissing"> → <b class="text-sky-600">serão criados</b></template>
@@ -1320,6 +1325,10 @@ const undoImport = async () => {
             <p v-if="sheetPreview.ambiguous_count" class="text-xs text-amber-600">
               {{ sheetPreview.ambiguous_count }} nome(s) com MAIS DE UM contato (ficam de fora — resolva com
               "Unificar contatos duplicados"): {{ sheetPreview.ambiguous.slice(0, 5).join(' · ') }}
+            </p>
+            <p v-if="!sheetPreview.has_phone_column" class="text-[11px] text-sky-600">
+              💡 Adicione uma coluna <b>Telefone</b> na planilha (com DDD) e o casamento passa a ser
+              pelo número — resolve homônimos e cria pacientes já com WhatsApp.
             </p>
             <p class="text-[11px] text-n-slate-9">
               Ignoradas da planilha: {{ sheetPreview.skipped?.duplicada || 0 }} duplicadas ·

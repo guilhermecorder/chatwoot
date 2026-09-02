@@ -423,7 +423,9 @@ const customTiles = computed(() =>
       details: [
         { label: 'Neste período', value: formatKpi(value, def.format) },
         { label: `Período anterior (${kpiBag.value?.previous_label || '—'})`, value: formatKpi(prev, def.format) },
-        { label: isReady ? 'Indicador' : 'Fórmula', value: isReady ? bagMetrics.value[def.expr.trim()]?.label : def.expr },
+        // fórmula traduzida pros nomes do cesto — ninguém precisa ler
+        // "appointments_booked / new_leads" (item 152)
+        { label: isReady ? 'Indicador' : 'Fórmula', value: isReady ? bagMetrics.value[def.expr.trim()]?.label : prettyFormula(def.expr) },
       ],
       about: def.note || (isReady ? 'Indicador pronto do cesto do sistema, no período da régua.' : 'Calculado pela fórmula acima sobre os indicadores do período; a série do gráfico aplica a fórmula balde a balde.'),
     };
@@ -648,6 +650,16 @@ const READY_FORMULAS = [
       { label: 'Cirurgias perdidas (%)', expr: 'surgeries_missed / (surgeries_done + surgeries_missed) * 100', format: 'percent', icon: 'i-lucide-alert-triangle', note: 'agendou e não veio — cada uma vale um resgate imediato' },
     ],
   },
+  // 🏥 por unidade (pedido 02/09): cada casa com o próprio card — os
+  // números-base Consultas/Presenças/Faltas de cada unidade também estão
+  // na lista de indicadores prontos logo abaixo
+  {
+    cat: '🏥 Por unidade',
+    items: [
+      { label: 'Comparecimento · Av. Paulista', expr: 'appointments_attended_paulista / (appointments_attended_paulista + appointments_missed_paulista) * 100', format: 'percent', icon: 'i-lucide-building-2', note: 'só a casa da Paulista — coloque ao lado do Tatuapé e compare no mesmo olhar' },
+      { label: 'Comparecimento · Tatuapé', expr: 'appointments_attended_tatuape / (appointments_attended_tatuape + appointments_missed_tatuape) * 100', format: 'percent', icon: 'i-lucide-building', note: 'só a casa do Tatuapé — coloque ao lado da Paulista e compare no mesmo olhar' },
+    ],
+  },
 ];
 // valor ao vivo de cada fórmula pronta (mesmo cesto/período da régua)
 const readyFormulaSections = computed(() =>
@@ -792,6 +804,35 @@ const openKpi = tile => {
   kpiModalPreset.value = null;
   kpiModalGranularity.value = null;
   kpiModalBag.value = null;
+};
+
+// ── UX do popup (item 152): Esc fecha, a rolagem fica presa no popup
+// (a página atrás não anda junto) e a transição respeita reduzir-movimento
+const closeKpiModal = () => {
+  kpiModal.value = null;
+};
+watch(kpiModal, open => {
+  document.body.style.overflow = open ? 'hidden' : '';
+});
+const onKpiModalKey = e => {
+  if (e.key === 'Escape' && kpiModal.value) closeKpiModal();
+};
+// gráfico sem nenhum movimento no recorte = mensagem gentil no lugar do vazio
+const modalChartIsEmpty = computed(() => {
+  const c = modalChart.value;
+  if (!c || isLoadingModalBag.value) return false;
+  return (c.values || []).every(v => !v) && !(c.prevValues || []).some(v => v);
+});
+// fórmula em PORTUGUÊS: troca as chaves técnicas pelos nomes do cesto
+// (appointments_booked / new_leads → Consultas agendadas ÷ Novos contatos)
+const prettyFormula = expr => {
+  let out = ` ${String(expr || '')} `;
+  Object.entries(bagMetrics.value)
+    .sort((a, b) => b[0].length - a[0].length)
+    .forEach(([k, m]) => {
+      if (m?.label) out = out.split(k).join(m.label);
+    });
+  return out.replaceAll('*', '×').replaceAll('/', '÷').replace(/\s+/g, ' ').trim();
 };
 
 // ids ESTÁVEIS por card (item 142): indicador de meta (gk) ou o nome em
@@ -1716,9 +1757,12 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisible);
 });
 
+onMounted(() => window.addEventListener('keydown', onKpiModalKey));
 onUnmounted(() => {
   clearInterval(refreshTimer);
   document.removeEventListener('visibilitychange', onVisible);
+  window.removeEventListener('keydown', onKpiModalKey);
+  document.body.style.overflow = '';
 });
 </script>
 
@@ -2976,89 +3020,114 @@ onUnmounted(() => {
 
     <EmojiFx ref="radarFx" />
   </div>
-  <!-- 🔍 Popup de detalhes do card de KPI (item 140) -->
+  <!-- 🔍 Popup de detalhes do card de KPI (itens 140/144; UX 152: transição
+       suave, Esc fecha, rolagem própria — nunca maior que a tela) -->
   <Teleport to="body">
-    <div
-      v-if="kpiModal"
-      class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
-      @click.self="kpiModal = null"
-    >
-      <div class="w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1">
-        <div class="p-5 text-white" :style="{ background: tileVisual(kpiModal).grad }">
-          <div class="flex items-center gap-2 text-white/85">
-            <span :class="kpiModal.icon" class="text-base" />
-            <p class="text-sm font-medium flex-1">{{ kpiModal.label }}</p>
-            <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="kpiModal = null">
-              <span class="i-lucide-x text-sm" />
-            </button>
+    <Transition name="cevico-kpi-pop">
+      <div
+        v-if="kpiModal"
+        class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeKpiModal"
+      >
+        <div class="cevico-kpi-panel w-full max-w-lg max-h-[88vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1">
+          <div class="p-5 pb-4 text-white flex-shrink-0" :style="{ background: tileVisual(kpiModal).grad }">
+            <div class="flex items-center gap-2 text-white/85">
+              <span :class="kpiModal.icon" class="text-base" />
+              <p class="text-sm font-medium flex-1">{{ kpiModal.label }}</p>
+              <button
+                class="w-8 h-8 rounded-full bg-white/15 hover:bg-white/30 flex items-center justify-center transition-colors"
+                aria-label="Fechar (Esc)"
+                title="Fechar (Esc)"
+                @click="closeKpiModal"
+              >
+                <span class="i-lucide-x text-base" />
+              </button>
+            </div>
+            <p class="text-4xl font-bold mt-2 tabular-nums">{{ kpiModal.value }}</p>
+            <span v-if="kpiModal.chip" class="inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ kpiModal.chip.label }}</span>
+            <p v-if="kpiModal.sub" class="text-xs text-white/80 mt-1">{{ kpiModal.sub }}</p>
           </div>
-          <p class="text-4xl font-bold mt-2">{{ kpiModal.value }}</p>
-          <span v-if="kpiModal.chip" class="inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ kpiModal.chip.label }}</span>
-          <p v-if="kpiModal.sub" class="text-xs text-white/80 mt-1">{{ kpiModal.sub }}</p>
-        </div>
-        <div class="p-5 space-y-3">
-          <!-- 📊 gráfico do período v2 (item 144): mini-régua própria, período
-               anterior sobreposto, linha de meta e 📌 ações da empresa -->
+          <div class="p-5 space-y-3 overflow-y-auto overscroll-contain">
+          <!-- 📊 gráfico do período v2 (item 144; UX 152: legenda visual,
+               estado vazio gentil, carregamento suave, régua com rótulos) -->
           <div v-if="modalChart" class="rounded-xl bg-n-alpha-1 px-3 py-2">
             <div class="flex items-center justify-between gap-2 text-[10px] text-n-slate-10 mb-1">
               <span class="truncate">{{ modalChart.compare ? 'comparativo' : `${modalChart.label || kpiModal.label} · ${modalBag?.granularity === 'month' ? 'por mês' : modalBag?.granularity === 'week' ? 'por semana' : 'por dia'}` }}</span>
               <span v-if="isLoadingModalBag" class="i-lucide-loader-circle animate-spin text-xs flex-shrink-0" />
-              <span v-else-if="modalChart.prevValues" class="flex-shrink-0">tracejado = período anterior</span>
-              <span v-else-if="modalChart.prev !== undefined && modalChart.prev !== null && !modalChart.compare" class="flex-shrink-0">tracejado = média do anterior</span>
             </div>
-            <MiniBars
-              :values="modalChart.values"
-              :labels="modalChart.labels"
-              color="#0F5FA6"
-              :height="110"
-              :prev-values="modalChart.prevValues || null"
-              :goal="modalChart.goal ?? null"
-              :markers="modalChart.compare ? [] : modalMarkers"
-              :reference="!modalChart.compare && !modalChart.prevValues && modalChart.prev ? modalChart.prev / Math.max(1, modalChart.values.length) : null"
-              :format="chartFormat(kpiModal)"
-            />
-            <div v-if="!modalChart.compare" class="flex items-center justify-between gap-2 flex-wrap mt-1">
-              <p
-                v-if="modalChart.prev !== undefined && modalChart.prev !== null"
-                class="text-[11px]"
-                :class="(modalChart.total ?? 0) >= modalChart.prev ? 'text-emerald-600' : 'text-red-500'"
-              >
-                {{ deltaLine(modalChart.total ?? 0, modalChart.prev, kpiModal.format || (modalChart.unit === 'brl' ? 'currency' : 'number'), modalBag) }}
-              </p>
-              <p v-if="modalChart.goal" class="text-[10px]" style="color: #B8860B">
+            <div class="transition-opacity duration-200" :class="isLoadingModalBag ? 'opacity-40' : ''">
+              <MiniBars
+                :values="modalChart.values"
+                :labels="modalChart.labels"
+                color="#0F5FA6"
+                :height="110"
+                :prev-values="modalChart.prevValues || null"
+                :goal="modalChart.goal ?? null"
+                :markers="modalChart.compare ? [] : modalMarkers"
+                :reference="!modalChart.compare && !modalChart.prevValues && modalChart.prev ? modalChart.prev / Math.max(1, modalChart.values.length) : null"
+                :format="chartFormat(kpiModal)"
+              />
+            </div>
+            <!-- recorte sem nenhum movimento: fala com a pessoa em vez do vazio -->
+            <p v-if="modalChartIsEmpty" class="text-[11px] text-n-slate-10 text-center mt-1 rounded-lg bg-n-alpha-1 px-2 py-1.5">
+              Sem movimento neste recorte — experimente <b>Este mês</b> ou <b>Este ano</b> aqui embaixo.
+            </p>
+            <!-- legenda VISUAL: cada elemento do gráfico explicado com a
+                 própria forma (tracinho, estrela, pino) -->
+            <div v-if="!modalChart.compare" class="flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[10px] text-n-slate-10 mt-0.5">
+              <span v-if="modalChart.prevValues || (modalChart.prev !== undefined && modalChart.prev !== null)" class="flex items-center gap-1">
+                <span class="inline-block w-4 border-t-2 border-dashed" style="border-color: #94A3B8" />
+                {{ modalChart.prevValues ? 'período anterior' : 'média do anterior' }}
+              </span>
+              <span v-if="modalChart.goal" class="flex items-center gap-1" style="color: #B8860B">
                 ⭑ meta ≈ {{ chartFormat(kpiModal)(modalChart.goal) }} por {{ modalBag?.granularity === 'month' ? 'mês' : modalBag?.granularity === 'week' ? 'semana' : 'dia' }}
-              </p>
+              </span>
+              <span v-if="modalMarkers.length" class="flex items-center gap-1">📌 ação da empresa</span>
             </div>
-            <!-- mini-régua do popup: o recorte é DESTE gráfico, sem mexer na
-                 régua da página -->
-            <div v-if="!modalChart.compare" class="flex items-center gap-1 flex-wrap mt-2 pt-2 border-t border-n-weak/60">
-              <button
-                v-for="p in MODAL_PRESETS"
-                :key="String(p[0])"
-                class="h-6 px-2 rounded-md text-[10px] font-medium border transition-colors"
-                :class="kpiModalPreset === p[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
-                :style="kpiModalPreset === p[0] ? { background: panelFamily[1] } : {}"
-                @click="setModalPreset(p[0])"
-              >
-                {{ p[1] }}
-              </button>
-              <span class="text-n-weak text-[10px]">·</span>
-              <button
-                v-for="g in MODAL_GRAINS"
-                :key="String(g[0])"
-                class="h-6 px-2 rounded-md text-[10px] font-medium border transition-colors"
-                :class="kpiModalGranularity === g[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
-                :style="kpiModalGranularity === g[0] ? { background: panelFamily[2] } : {}"
-                @click="setModalGranularity(g[0])"
-              >
-                {{ g[1] }}
-              </button>
+            <p
+              v-if="!modalChart.compare && modalChart.prev !== undefined && modalChart.prev !== null"
+              class="text-[11px] mt-1 font-medium"
+              :class="(modalChart.total ?? 0) >= modalChart.prev ? 'text-emerald-600' : 'text-red-500'"
+            >
+              {{ deltaLine(modalChart.total ?? 0, modalChart.prev, kpiModal.format || (modalChart.unit === 'brl' ? 'currency' : 'number'), modalBag) }}
+            </p>
+            <!-- mini-régua do popup: recorte SÓ deste gráfico (a régua da
+                 página fica intacta) — grupos com nome, sem adivinhação -->
+            <div v-if="!modalChart.compare" class="mt-2 pt-2 border-t border-n-weak/60 space-y-1.5">
+              <div class="flex items-center gap-1 flex-wrap">
+                <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0">Período</span>
+                <button
+                  v-for="p in MODAL_PRESETS"
+                  :key="String(p[0])"
+                  class="h-7 px-2.5 rounded-lg text-[11px] font-medium border transition-colors"
+                  :class="kpiModalPreset === p[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                  :style="kpiModalPreset === p[0] ? { background: panelFamily[1] } : {}"
+                  @click="setModalPreset(p[0])"
+                >
+                  {{ p[1] }}
+                </button>
+              </div>
+              <div class="flex items-center gap-1 flex-wrap">
+                <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0">Ver por</span>
+                <button
+                  v-for="g in MODAL_GRAINS"
+                  :key="String(g[0])"
+                  class="h-7 px-2.5 rounded-lg text-[11px] font-medium border transition-colors"
+                  :class="kpiModalGranularity === g[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                  :style="kpiModalGranularity === g[0] ? { background: panelFamily[2] } : {}"
+                  @click="setModalGranularity(g[0])"
+                >
+                  {{ g[1] }}
+                </button>
+              </div>
             </div>
           </div>
           <!-- 🧩 DE ONDE VEM ESTA TAXA (item 144): as séries que formam a
                conta — responde se o problema foi entrada ou conversão -->
           <div v-if="modalComponents.length" class="rounded-xl bg-n-alpha-1 px-3 py-2 space-y-2">
-            <p class="text-[10px] text-n-slate-10">🧩 de onde vem: as séries da conta ({{ modalRangeLabel }})</p>
+            <p class="text-[11px] font-medium text-n-slate-11">🧩 De onde vem este número <span class="font-normal text-n-slate-9">· {{ modalRangeLabel }}</span></p>
             <div v-for="comp in modalComponents" :key="comp.key">
               <div class="flex items-center justify-between text-[10px] mb-0.5">
                 <span class="text-n-slate-11">{{ comp.label }}</span>
@@ -3077,7 +3146,7 @@ onUnmounted(() => {
           <!-- 🏥 POR UNIDADE (item 146): Paulista × Tatuapé lado a lado —
                consultas, comparecimento e a taxa de cada casa -->
           <div v-if="kpiModal.units?.length" class="rounded-xl bg-n-alpha-1 px-3 py-2 space-y-2">
-            <p class="text-[10px] text-n-slate-10">🏥 por unidade · consultas do período e comparecimento</p>
+            <p class="text-[11px] font-medium text-n-slate-11">🏥 Por unidade <span class="font-normal text-n-slate-9">· consultas e comparecimento do período</span></p>
             <div
               v-for="u in kpiModal.units"
               :key="u.unit || 'sem'"
@@ -3110,7 +3179,7 @@ onUnmounted(() => {
           </div>
           <!-- leads por caixa (card 1): barras lado a lado -->
           <div v-if="kpiModal.compareInboxes?.length" class="rounded-xl bg-n-alpha-1 px-3 py-2">
-            <p class="text-[10px] text-n-slate-10 mb-1">leads por caixa de entrada</p>
+            <p class="text-[11px] font-medium text-n-slate-11 mb-1">📥 Leads por caixa de entrada</p>
             <MiniBars :values="kpiModal.compareInboxes.map(i => i.value)" :labels="kpiModal.compareInboxes.map(i => i.label)" color="#7C3AED" :height="80" />
           </div>
           <div v-if="kpiModal.details?.length" class="space-y-1.5">
@@ -3119,20 +3188,21 @@ onUnmounted(() => {
               :key="ri"
               class="flex items-start justify-between gap-3 text-xs rounded-xl bg-n-alpha-1 px-3 py-2"
             >
-              <span class="text-n-slate-11">{{ row.label }}</span>
-              <b class="text-n-slate-12 text-right whitespace-nowrap">{{ row.value }}</b>
+              <span class="text-n-slate-11 flex-shrink-0">{{ row.label }}</span>
+              <b class="text-n-slate-12 text-right break-words min-w-0">{{ row.value }}</b>
             </div>
           </div>
           <p v-if="kpiModal.about" class="text-[11px] text-n-slate-10 leading-relaxed">
             <span class="i-lucide-info text-xs align-middle mr-1" />{{ kpiModal.about }}
           </p>
           <div v-if="isAdmin && kpiModal.kpi" class="flex items-center gap-2 pt-1">
-            <button class="h-8 px-3 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" @click="openKpiBuilder(kpiModal.def)">✏️ Editar</button>
-            <button class="h-8 px-3 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10" :disabled="isSavingKpi" @click="deleteKpi(kpiModal.def)">🗑️ Remover</button>
+            <button class="h-9 px-3.5 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors" @click="openKpiBuilder(kpiModal.def)">✏️ Editar</button>
+            <button class="h-9 px-3.5 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10 transition-colors" :disabled="isSavingKpi" @click="deleteKpi(kpiModal.def)">🗑️ Remover</button>
+          </div>
           </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
   <!-- ➕ Construtor de indicador (admin, item 141) -->
   <Teleport to="body">
@@ -3433,6 +3503,44 @@ onUnmounted(() => {
   .cevico-energy-btn,
   .cevico-energy-btn::after {
     animation: none;
+  }
+}
+
+/* 🔍 popup dos indicadores (item 152): entrada suave estilo folha — o fundo
+   escurece em fade e o cartão sobe com leve escala; saída mais rápida.
+   Quem pede menos movimento no sistema recebe só o fade. */
+.cevico-kpi-pop-enter-active {
+  transition: opacity 0.22s ease;
+}
+.cevico-kpi-pop-leave-active {
+  transition: opacity 0.15s ease;
+}
+.cevico-kpi-pop-enter-active .cevico-kpi-panel {
+  transition:
+    transform 0.26s cubic-bezier(0.32, 1.25, 0.5, 1),
+    opacity 0.2s ease;
+}
+.cevico-kpi-pop-leave-active .cevico-kpi-panel {
+  transition:
+    transform 0.15s ease-in,
+    opacity 0.15s ease-in;
+}
+.cevico-kpi-pop-enter-from,
+.cevico-kpi-pop-leave-to {
+  opacity: 0;
+}
+.cevico-kpi-pop-enter-from .cevico-kpi-panel {
+  transform: translateY(14px) scale(0.97);
+  opacity: 0;
+}
+.cevico-kpi-pop-leave-to .cevico-kpi-panel {
+  transform: translateY(8px) scale(0.98);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cevico-kpi-pop-enter-from .cevico-kpi-panel,
+  .cevico-kpi-pop-leave-to .cevico-kpi-panel {
+    transform: none;
   }
 }
 </style>

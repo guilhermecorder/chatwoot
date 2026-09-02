@@ -4749,3 +4749,118 @@ crm_opportunity_radar_job registrados.
 - ⚠️ A etiqueta fbfc8e5 (149 pura) fica SUPERADA — implantar direto a
   etiqueta deste ajuste quando o build ficar verde.
 - AGUARDANDO "pode subir".
+
+## 150. ✅ 🏷️ CONDIÇÃO DE ETIQUETA EM QUALQUER GATILHO das automações de coluna (pedido 01/09 c/ print)
+- Pedido dele: "automação que reconheça na coluna, quando o card entrar,
+  SE tiver uma etiqueta XYZ, dispare e mova o card para a coluna que eu
+  escolher" — card entrou + contém etiqueta → ação.
+- Motor: should_fire? do CrmAutomationFireJob ganhou
+  required_label_matches? — action_config.required_label (opcional); sem
+  a etiqueta no paciente, a automação NÃO dispara (nem gera log).
+  Checagem NA HORA DO DISPARO (case-insensitive via label_list) — vale
+  também p/ automação com tempo de espera (etiqueta saiu no meio do
+  caminho = não dispara mais). Vale pra QUALQUER gatilho e QUALQUER ação
+  (mover coluna, enviar formulário, mensagem modelo...).
+- Modal: bloco novo "🏷️ Só dispara se o paciente tiver a etiqueta
+  (opcional)" na seção Quando disparar? (select das etiquetas da conta +
+  "Sem exigência — dispara para qualquer card" + explicação). required_label
+  no emptyForm/hydrate; action_config: {} do backend já permitia.
+- Testes: runner 5/5 (SEM etiqueta: card não move + zero log; COM
+  etiqueta: move pra coluna alvo + log fired; MAIÚSCULA casa) + visual
+  conta 3 (bloco no modal, select c/ etiquetas reais da conta). Limpeza
+  completa. Sem migration, sem cron; WEB+SIDEKIQ juntos (motor no sidekiq).
+- Nota de uso: mover card por automação dispara as automações da coluna
+  DESTINO (encadeamento é proposital) — evitar pares A→B e B→A.
+- AGUARDANDO "pode subir".
+
+## 151. ✅ 📱 PLANILHA DE FECHAMENTO CASA PELO TELEFONE (pedido 01/09: "case pelo telefone, não pelo nome")
+- FATO IMPORTANTE descoberto ao espiar a planilha REAL dele (10_2025 até
+  07_2026.xlsx): as colunas são Status·Data·Paciente·Procedimento·Olho·
+  valor total·Comissão·FIXO·REPASSE TOTAL — NÃO EXISTE coluna de telefone.
+  O casamento por nome era o único possível com o dado disponível.
+- Solução: o leitor agora reconhece a coluna Telefone/Celular/WhatsApp/
+  Fone QUANDO ELA EXISTIR e o casamento vira TELEFONE PRIMEIRO (últimos 8
+  dígitos + same_phone_line?, mesmo critério do resto do CEVICO — resolve
+  homônimos), nome normalizado como RESERVA pra linha sem telefone.
+  Planilha sem a coluna = comportamento idêntico ao de antes.
+- ClosingSheetReader: HEADER_ALIASES + parse_phone (célula numérica
+  '11987654321.0'/notação científica normalizada p/ dígitos; <8 dígitos =
+  nil) + status_skip extraído (AbcSize). Controller: match_rows_by_name c/
+  phone_index + phone_match_ids (2+ contatos na mesma linha = ambíguo);
+  payload novo matched_by_phone + has_phone_column. Job: paciente criado
+  da planilha agora NASCE COM phone_number E.164 (+55) quando a linha tem
+  telefone — alcançável no WhatsApp. UI: prévia mostra "X pelo 📱 telefone
+  e Y pelo nome" + dica azul quando a planilha não tem a coluna.
+- Testes: leitor 5/5 (numérico, formatado "(11) 93333-4444", sem fone=nil,
+  planilha real 550 linhas sem phone) + preview HTTP conta 3 c/ planilha
+  sintética (matched 2 = 1 por fone [nome diferente de propósito] + 1 por
+  nome; 1 unmatched; has_phone_column true) + job criou paciente c/
+  +5511933334444 e card na coluna c/ valor + regressão da planilha real
+  (has_phone_column false). Limpeza completa (contato/card/recibo undo).
+  Rubocop: só pré-existentes.
+- AÇÃO DELE: adicionar a coluna "Telefone" (com DDD) na planilha de
+  fechamento — daí em diante o casamento é por número.
+- Sem migration, sem cron; WEB+SIDEKIQ juntos. AGUARDANDO "pode subir"
+  (junto do 150).
+
+## 152. ✅ ✨ POPUP DOS INDICADORES "PADRÃO APPLE" — varredura de usabilidade (pedido 02/09)
+- Pedido dele: "melhorar a expansão de indicadores dos cards do Meu Painel,
+  varredura com carinho, usabilidade padrão Apple". Varredura AO VIVO achou
+  problemas reais: popup MAIOR QUE A TELA (cabeçalho e botões cortados, sem
+  rolagem própria), gráfico vazio mudo, fórmula em tecniquês
+  (appointments_booked / new_leads * 100), legenda ilegível, chips
+  minúsculos, sem Esc, fundo rolava junto, abertura seca sem transição.
+- 🍎 REFORMA (InicioPage.vue, popup dos itens 140/144):
+  (1) NUNCA maior que a tela: max-h 88vh + corpo c/ rolagem própria
+  (overscroll-contain) e cabeçalho fixo; (2) TRANSIÇÃO tipo folha: fundo em
+  fade c/ leve blur, cartão sobe c/ escala (cubic-bezier suave; saída mais
+  rápida; prefers-reduced-motion = só fade); (3) Esc FECHA + clique no
+  fundo + rolagem da página TRAVA enquanto aberto (watch kpiModal →
+  body.overflow; listener no ciclo de vida); (4) FÓRMULA EM PORTUGUÊS:
+  prettyFormula troca as chaves pelos nomes do cesto ("Consultas agendadas
+  (registradas) ÷ Novos contatos (leads) × 100") — chaves ordenadas por
+  tamanho p/ não colidir; linha de detalhe quebra em vez de estourar;
+  (5) ESTADO VAZIO gentil: série toda zero → "Sem movimento neste recorte —
+  experimente Este mês ou Este ano"; some sozinho quando o recorte tem
+  dado; (6) LEGENDA VISUAL: tracinho tracejado + "período anterior", ⭑
+  meta, 📌 ação da empresa (substitui o "tracejado = ..." escondido);
+  (7) MINI-RÉGUA com grupos NOMEADOS "Período" e "Ver por" em linhas
+  separadas, chips h-7 maiores; (8) carregamento SUAVE (gráfico esmaece a
+  40% enquanto busca o recorte); (9) toques: ✕ redondo 32px c/ aria-label
+  "Fechar (Esc)", role=dialog/aria-modal, títulos de seção legíveis
+  ("🧩 De onde vem este número", "🏥 Por unidade", "📥 Leads por caixa"),
+  valor grande tabular-nums, botões admin h-9.
+- Testes AO VIVO (conta 3): popup cabe na tela c/ rolagem própria; body
+  trava/destrava; Esc e fundo fecham c/ transição completando (classes
+  enter/leave limpas); fórmula traduzida na tela; vazio aparece na régua
+  curta e some no "Este ano" (dados carregam c/ 📌 e decomposição 8×49);
+  chips 28px; grupos rotulados. ⚠️ LIÇÃO DE AMBIENTE: o browser pane de
+  teste roda como aba OCULTA (document.hidden) → requestAnimationFrame
+  congela e a <Transition> do Vue fica presa no 1º frame — NÃO é bug do
+  produto (usuário real tem aba visível); p/ testar ciclo completo, stub
+  rAF→setTimeout na sessão de teste.
+- Refino futuro anotado: aplicar o mesmo pacote UX no KpiDetailPopup.vue
+  (Dashboard CRM) quando unificar o popup 144 (já estava na lista).
+- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
+  150+151).
+
+## 153. ✅ 🏥 INDICADORES POR UNIDADE no cesto (pedido 02/09: "separar as consultas da Paulista e do Tatuapé")
+- Pedido dele: visualização das métricas cada vez mais fácil + dados
+  relevantes; indicador que SEPARE as consultas por unidade.
+- KpiBagService: 6 métricas novas com série + período anterior, geradas de
+  Crm::AgendaSlots::UNIT_LABELS (tasks.unit, mesma fonte do 146) —
+  Consultas · Av. Paulista/Tatuapé (pela data), Presenças · cada casa,
+  Faltas · cada casa. Categoria "📅 Consultas" no construtor é automática
+  (prefixo appointments_). Cesto foi de 29 p/ 35 métricas.
+- READY_FORMULAS: categoria nova "🏥 Por unidade" c/ 2 taxas prontas de 1
+  clique — Comparecimento · Av. Paulista e · Tatuapé (presenças ÷
+  (presenças+faltas) × 100) — coloca os 2 cards lado a lado e compara as
+  casas no mesmo olhar.
+- Testes: runner 6/6 (labels/séries; soma paulista+tatuape = total 21 ✅) +
+  visual conta 3 ponta a ponta (construtor lista a categoria e os 6
+  números-base; 1 clique na taxa pronta → prévia viva 94,4% na régua Este
+  ano → Salvar card → card na fileira c/ 94,4% → popup → Remover [limpeza]).
+  Nota: prévia mostra "—" quando o recorte da régua não tem consulta
+  (divisão por zero protegida) — comportamento correto.
+- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
+  150+151+152).
