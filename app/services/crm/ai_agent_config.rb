@@ -28,6 +28,7 @@ module Crm::AiAgentConfig
     'copywriter'   => { 'model' => 'claude-opus-4-8', 'effort' => 'high' },   # copy persuasiva multi-formato
     'pagebuilder'  => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # montar página a partir de copy pronta
     'mentor'       => { 'model' => 'claude-sonnet-5', 'effort' => 'high' },   # feedback semanal do time (1x/semana)
+    'sheet_match'  => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # mesma pessoa escrita diferente (planilha)
     'comments'     => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # comentário público: curto, mas é a cara da clínica
     'harvest'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # pontuar leads em lote: volume alto, tarefa simples
     'manager'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # briefing diário curto (a matemática é do Ruby)

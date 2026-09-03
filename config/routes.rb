@@ -218,6 +218,8 @@ Rails.application.routes.draw do
               # 📄 planilha de fechamento (item 132): upload + prévia + aplicar
               post :preview_sheet
               post :apply_sheet
+              # 🤖 IA acha "mesma pessoa escrita diferente" nos não-casados (item 154)
+              post :ai_match_sheet
               # ↩️ desfazer a última importação (item 133)
               get :import_status
               post :undo_last

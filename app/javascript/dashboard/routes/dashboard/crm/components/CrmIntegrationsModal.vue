@@ -160,7 +160,10 @@ const testSheets = async () => {
 };
 
 // ── Google ─────────────────────────────────────────────────
-const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '' });
+// ga4_property_id + service_account_json (item 155): a LEITURA (cliques,
+// custo, palavras-chave, investimento automático) usa a GA4 Data API —
+// esses 2 campos só existiam na tela antiga e o aviso apontava pra cá
+const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '', ga4_property_id: '', service_account_json: '' });
 const isGoogleSaving = ref(false);
 const isGoogleTesting = ref(false);
 const googleTestResult = ref(null);
@@ -190,6 +193,8 @@ onMounted(async () => {
     client_id: g.client_id || '',
     developer_token: '',
     customer_id: g.customer_id || '',
+    ga4_property_id: g.ga4_property_id || '',
+    service_account_json: '', // write-only, nunca volta do servidor
   };
 
   sheets.value = { sheet_url: settings.value.sheets?.sheet_url || '' };
@@ -266,9 +271,12 @@ const saveGoogle = async () => {
     if (google.value.client_id.trim()) payload.client_id = google.value.client_id.trim();
     if (google.value.developer_token.trim()) payload.developer_token = google.value.developer_token.trim();
     payload.customer_id = google.value.customer_id.trim();
+    payload.ga4_property_id = google.value.ga4_property_id.trim();
+    if (google.value.service_account_json.trim()) payload.service_account_json = google.value.service_account_json.trim();
     await store.dispatch('crm/updateGoogleAds', payload);
     google.value.api_secret = '';
     google.value.developer_token = '';
+    google.value.service_account_json = '';
     useAlert('Configurações do Google salvas');
   } catch {
     useAlert('Erro ao salvar configurações do Google.');
@@ -738,6 +746,44 @@ const fetchWorkflows = async () => {
                 class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
                 placeholder="123-456-7890"
               />
+            </div>
+          </div>
+
+          <!-- 📖 LEITURA automática via GA4 Data API (item 155): cliques, custo
+               e CPC por palavra-chave + investimento da caixa GOOGLE — sem
+               precisar do developer token. Os avisos das telas apontam pra cá. -->
+          <div class="mt-3 rounded-xl border border-n-weak bg-n-alpha-1 p-3 space-y-3">
+            <p class="text-xs font-medium text-n-slate-12">
+              📖 Leitura automática (GA4)
+              <span v-if="googleStatus.cost_configured" class="text-green-600 font-normal">· conectada ✓</span>
+              <span v-else class="text-amber-600 font-normal">· falta configurar — é o que acende cliques, custo por palavra-chave e o investimento da caixa GOOGLE</span>
+            </p>
+            <div class="text-[11px] text-n-slate-10 leading-relaxed space-y-0.5">
+              <p><b>1.</b> console.cloud.google.com → ative a API <b>"Google Analytics Data API"</b> → IAM → <b>Contas de serviço</b> → criar (sem papel) → Chaves → <b>Adicionar chave JSON</b> (baixa o arquivo).</p>
+              <p><b>2.</b> No GA4: Administrador → <b>Gerenciamento de acesso à propriedade</b> → adicione o e-mail da conta de serviço como <b>Leitor</b>.</p>
+              <p><b>3.</b> Propriedade: GA4 → Administrador → Configurações da propriedade → número (ex.: 123456789).</p>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Propriedade do GA4</label>
+                <input
+                  v-model="google.ga4_property_id"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                  placeholder="123456789"
+                />
+              </div>
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                  JSON da conta de serviço
+                  <span v-if="googleStatus.service_account_set" class="text-green-600 font-normal">(já configurado)</span>
+                </label>
+                <textarea
+                  v-model="google.service_account_json"
+                  rows="2"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-xs bg-n-solid-2 text-n-slate-12 font-mono"
+                  :placeholder="googleStatus.service_account_set ? 'Cole para substituir' : 'Cole o conteúdo do arquivo .json inteiro'"
+                />
+              </div>
             </div>
           </div>
 

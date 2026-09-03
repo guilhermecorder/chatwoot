@@ -436,6 +436,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/external_surgeries/apply_sheet`, data);
   }
 
+  // 🤖 IA acha "mesma pessoa escrita diferente" nos não-casados (item 154)
+  aiMatchClosingSheet(data) {
+    return axios.post(`${this.url}/external_surgeries/ai_match_sheet`, data);
+  }
+
   // ↩️ desfazer a última importação de cirurgias (item 133)
   getImportStatus() {
     return axios.get(`${this.url}/external_surgeries/import_status`);

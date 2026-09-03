@@ -101,10 +101,38 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
     }
   end
 
+  # 🤖 POST ai_match_sheet — item 154: a IA compara os nomes que NÃO casaram
+  # com candidatos do banco (mesma pessoa escrita diferente). Só sugere:
+  # nada é gravado aqui; os pares de confiança ALTA entram no apply quando
+  # o admin marcar "usar os achados da IA".
+  def ai_match_sheet
+    rows = Rails.cache.read(sheet_cache_key(params[:token].to_s))
+    return render_could_not_create_error('A prévia expirou — envie a planilha de novo') if rows.blank?
+
+    match = match_rows_by_name(rows)
+    result = Crm::SheetNameMatchService.new(account: Current.account, rows: match[:unmatched]).call
+    return render_could_not_create_error(result[:error]) if result[:error]
+
+    # guarda no MESMO cache da prévia: o apply relê daqui (nunca do navegador)
+    Rails.cache.write("#{sheet_cache_key(params[:token].to_s)}:ai", result[:matches], expires_in: 2.hours)
+
+    alta = result[:matches].select { |m| m[:confidence] == 'alta' }
+    media = result[:matches].select { |m| m[:confidence] == 'media' }
+    render json: {
+      found_high: alta.size,
+      found_medium: media.size,
+      still_unmatched: match[:unmatched].size - alta.size,
+      pairs_high: alta.first(30).map { |m| { sheet: m[:name], system: m[:contact_name] } },
+      pairs_medium: media.first(15).map { |m| { sheet: m[:name], system: m[:contact_name] } }
+    }
+  end
+
   # POST apply_sheet — recasa no servidor a partir do cache (nunca confia em
   # ids do navegador) e dispara o job com DATA REAL + procedimento por linha.
   # create_missing: cria contato (sem telefone) para as linhas não casadas —
   # o histórico entra inteiro e os dashboards passam a contar a realidade.
+  # use_ai_matches: os pares de confiança ALTA achados pela IA (do cache,
+  # derivados no servidor) também entram como casados.
   def apply_sheet
     rows = Rails.cache.read(sheet_cache_key(params[:token].to_s))
     return render_could_not_create_error('A prévia expirou — envie a planilha de novo') if rows.blank?
@@ -116,7 +144,18 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
     entries = match[:matched].map do |m|
       [m[:contact_id], m[:row][:value], m[:row][:date], m[:row][:procedure]]
     end
-    create_rows = params[:create_missing] == true ? match[:unmatched].first(2000) : []
+    unmatched = match[:unmatched]
+
+    if params[:use_ai_matches] == true
+      ai = Array(Rails.cache.read("#{sheet_cache_key(params[:token].to_s)}:ai"))
+      ai_by_name = ai.select { |m| m[:confidence] == 'alta' }.to_h { |m| [normalize_name(m[:name]), m[:contact_id]] }
+      if ai_by_name.any?
+        ai_rows, unmatched = unmatched.partition { |r| ai_by_name.key?(normalize_name(r[:name])) }
+        entries += ai_rows.map { |r| [ai_by_name[normalize_name(r[:name])], r[:value], r[:date], r[:procedure]] }
+      end
+    end
+
+    create_rows = params[:create_missing] == true ? unmatched.first(2000) : []
     return render_could_not_create_error('Nenhuma linha casou — ative "criar pacientes não encontrados" para importar o histórico') if entries.empty? && create_rows.empty?
 
     Crm::ExternalSurgeryJob.perform_later(

@@ -4864,3 +4864,65 @@ crm_opportunity_radar_job registrados.
   (divisão por zero protegida) — comportamento correto.
 - Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
   150+151+152).
+
+# RODADA 03/09 — item 154 (IA casa nomes da planilha)
+
+## 154. ✅ 🤖 CASADOR DE NOMES POR IA na planilha de fechamento (pedido 03/09: "recurso de IA pra comparar a planilha com o banco")
+- Contexto: prévia em PRODUÇÃO mostrou 224 casados × 294 "não existem" —
+  ele cravou "todos estão no sistema" → maioria é MESMA PESSOA ESCRITA
+  DIFERENTE (abreviação, nome do meio, apelido), que o casamento exato não
+  pega. (O backup pré-import foi feito: 57M em
+  /root/backup_antes_planilha_20260903_1647.sql.gz — importação PAUSADA
+  até resolver os 294.)
+- Crm::SheetNameMatchService NOVO (Crm::AiAgentConfig, AGENT_KEY
+  sheet_match, recomendado sonnet/medium): funil de CANDIDATOS
+  determinístico (tokens sem preposição; 1º+último nome, último+inicial,
+  2 nomes em comum; máx 6) → lotes de 40 pra IA decidir ENTRE os
+  candidatos apresentados (nunca inventa id — trava re-valida no retorno);
+  prompt conservador (na dúvida NÃO casa; alta × media); gasto registrado
+  no painel (crm_ai_usages). SEM interruptor na aba Agentes de propósito:
+  só roda no clique explícito do admin e não grava nada.
+- Controller: POST ai_match_sheet (token da prévia → roda nos unmatched →
+  cacheia matches 2h em <token>:ai) devolve found_high/medium/pairs;
+  apply_sheet ganhou use_ai_matches (relê o cache NO SERVIDOR, só
+  confiança ALTA entra como casado; media/sem par seguem pro criar).
+- UI (DataTreatmentTools): botão roxo "🤖 Procurar os N com IA" na prévia
+  → painel c/ altas/duvidosos/novos + lista dos pares ("planilha" → sistema)
+  + checkbox "usar os achados de confiança alta na importação".
+- Testes: funil 4/4 (Jose C. Silva acha José Carlos E João Carlos como
+  candidatos [IA decide]; Maria Ap. → Maria Aparecida; inexistente = 0) +
+  service stubado 2/2 + HTTP: sem chave de IA → erro claro; fluxo COMPLETO
+  prévia→semear ai→apply c/ use_ai_matches → matched 1 (card R$4.500 na
+  coluna certa via IA) + to_create 1 (media/sem par criado como novo, id
+  falso da IA descartado). Limpeza completa. LIÇÕES DE AMBIENTE: dev usa
+  :null_store sem tmp/caching-dev.txt (cache dev→redis TEMPORÁRIO p/ o
+  teste, revertido); zsh come "$TOKEN:ai" como modificador de histórico
+  (usar ${TOKEN}) — o 1º apply de teste rodou sem IA por isso.
+- Custo estimado pros 294 dele: ~8 chamadas sonnet ≈ centavos de dólar.
+- ⚠️ api/crm.js e routes.rb MISTOS c/ Meta Leads — separar no commit.
+- Sem migration, sem cron; deploy só WEB (roda no request). AGUARDANDO
+  "pode subir".
+
+## 155. ✅ 📖 CAMPOS DA LEITURA DO GA4 NO MODAL DE INTEGRAÇÕES (pedido 03/09: "fizemos a integração mas o sistema não pega os dados")
+- Diagnóstico: o ENVIO funcionava (31 conversões via Measurement Protocol);
+  a LEITURA (cliques/custo/CPC por palavra-chave + investimento automático
+  da caixa GOOGLE) usa a GA4 Data API e depende de ga4_property_id +
+  service_account_json — campos que SÓ existiam na tela antiga
+  (settings/integrations/GoogleAds.vue), enquanto os avisos laranja
+  apontavam pro modal novo (CrmIntegrationsModal) que não os tinha.
+  Fragmentação de UI, não bug de dados.
+- Fix: seção "📖 Leitura automática (GA4)" no modal — status conectada/
+  falta configurar (cost_configured do payload, que o backend já devolvia),
+  guia de 3 passos (ativar Google Analytics Data API, conta de serviço +
+  chave JSON, Leitor na propriedade, nº da propriedade) e os 2 campos
+  (propriedade + JSON write-only "cole pra substituir"). Save envia
+  ga4_property_id sempre (permite limpar) e service_account_json só quando
+  preenchido; limpa o textarea após salvar. Backend intocado (update_google_ads
+  → apply_google_cost_config já existia do 126D).
+- Testes: HTTP round-trip (salva property+JSON → cost_configured true;
+  limpa property → false) + visual conta 3 (seção no modal c/ aviso âmbar,
+  guia e campos). JSON de teste removido do banco local.
+- AÇÃO DELE (destrava HOJE, sem deploy, pela tela antiga OU depois do
+  deploy pelo modal): criar conta de serviço no Google Cloud + ativar a
+  Data API + Leitor na propriedade GA4 + colar propriedade/JSON.
+- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto do 154).

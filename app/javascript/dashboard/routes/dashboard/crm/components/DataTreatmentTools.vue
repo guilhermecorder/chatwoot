@@ -414,17 +414,38 @@ const isSheetLoading = ref(false);
 const isSheetApplying = ref(false);
 const sheetCreateMissing = ref(true);
 const sheetOverwriteValue = ref(false);
+// 🤖 casador de nomes por IA (item 154): acha "mesma pessoa escrita
+// diferente" entre os não-casados; só os de confiança ALTA entram no apply
+const sheetAiResult = ref(null);
+const isSheetAiLoading = ref(false);
+const sheetUseAi = ref(true);
 
 const onSheetFile = event => {
   sheetFile.value = event.target.files?.[0] ?? null;
   sheetPreview.value = null;
   sheetResult.value = null;
+  sheetAiResult.value = null;
+};
+
+const aiMatchSheet = async () => {
+  if (!sheetPreview.value?.token || isSheetAiLoading.value) return;
+  isSheetAiLoading.value = true;
+  try {
+    const { data } = await CrmAPI.aiMatchClosingSheet({ token: sheetPreview.value.token });
+    sheetAiResult.value = data;
+    sheetUseAi.value = data.found_high > 0;
+  } catch (error) {
+    useAlert(error?.response?.data?.message || 'Erro ao consultar a IA.');
+  } finally {
+    isSheetAiLoading.value = false;
+  }
 };
 
 const previewSheet = async () => {
   if (!sheetFile.value || !surgeryStageId.value || isSheetLoading.value) return;
   isSheetLoading.value = true;
   sheetPreview.value = null;
+  sheetAiResult.value = null;
   try {
     const formData = new FormData();
     formData.append('file', sheetFile.value);
@@ -449,10 +470,12 @@ const applySheet = async () => {
       set_value: true,
       overwrite_value: sheetOverwriteValue.value,
       create_missing: sheetCreateMissing.value,
+      use_ai_matches: !!(sheetUseAi.value && sheetAiResult.value?.found_high),
     });
     sheetResult.value = data;
     sheetPreview.value = null;
     sheetFile.value = null;
+    sheetAiResult.value = null;
     useAlert(
       `Importação do histórico iniciada: ${data.matched} pacientes casados + ${data.to_create} criados da planilha.`
     );
@@ -1330,6 +1353,41 @@ const undoImport = async () => {
               💡 Adicione uma coluna <b>Telefone</b> na planilha (com DDD) e o casamento passa a ser
               pelo número — resolve homônimos e cria pacientes já com WhatsApp.
             </p>
+            <!-- 🤖 casador por IA (item 154): mesma pessoa escrita diferente -->
+            <div v-if="sheetPreview.unmatched_count" class="rounded-lg border border-n-weak bg-n-solid-1 px-3 py-2 space-y-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                <button
+                  class="h-8 px-3 rounded-lg text-xs font-medium text-white disabled:opacity-60 flex items-center gap-1.5"
+                  style="background: linear-gradient(135deg, #6D28D9, #8B5CF6)"
+                  :disabled="isSheetAiLoading"
+                  @click="aiMatchSheet"
+                >
+                  <span :class="isSheetAiLoading ? 'i-lucide-loader-circle animate-spin' : 'i-lucide-sparkles'" class="text-sm" />
+                  {{ isSheetAiLoading ? 'Comparando com o banco…' : `🤖 Procurar os ${sheetPreview.unmatched_count} com IA` }}
+                </button>
+                <span class="text-[11px] text-n-slate-9">
+                  a IA compara com o cadastro e acha "mesma pessoa escrita diferente"
+                  (José C. Silva = José Carlos da Silva) · custa centavos
+                </span>
+              </div>
+              <template v-if="sheetAiResult">
+                <p class="text-xs text-n-slate-12">
+                  <b class="text-emerald-600">{{ sheetAiResult.found_high }}</b> encontrados com confiança ALTA ·
+                  <b>{{ sheetAiResult.found_medium }}</b> com dúvida (ficam de fora) ·
+                  <b>{{ sheetAiResult.still_unmatched }}</b> realmente novos
+                  <template v-if="sheetCreateMissing"> → serão criados</template>
+                </p>
+                <div v-if="sheetAiResult.pairs_high?.length" class="text-[11px] text-n-slate-10 space-y-0.5 max-h-32 overflow-y-auto">
+                  <p v-for="(p, pi) in sheetAiResult.pairs_high" :key="pi">
+                    "{{ p.sheet }}" <span class="text-n-slate-8">→</span> <b>{{ p.system }}</b>
+                  </p>
+                </div>
+                <label v-if="sheetAiResult.found_high" class="flex items-center gap-2 text-xs text-n-slate-12 cursor-pointer">
+                  <input v-model="sheetUseAi" type="checkbox" class="rounded" />
+                  Usar os <b>{{ sheetAiResult.found_high }}</b> achados de confiança alta na importação
+                </label>
+              </template>
+            </div>
             <p class="text-[11px] text-n-slate-9">
               Ignoradas da planilha: {{ sheetPreview.skipped?.duplicada || 0 }} duplicadas ·
               {{ sheetPreview.skipped?.cancelada || 0 }} canceladas · {{ sheetPreview.skipped?.sem_valor || 0 }} sem valor
