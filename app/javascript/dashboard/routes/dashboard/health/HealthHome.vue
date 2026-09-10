@@ -195,6 +195,7 @@ const executionsOf = name => {
         verdict: e.verdict || '',
         cycle_id: w.data?.cycle_id,
         session_key: w.data?.session_key,
+        week: Number(w.data?.week) || null,
       });
     });
   });
@@ -234,9 +235,15 @@ const weekScore = computed(() => {
   return acc;
 });
 
-// ── PRÓXIMO TREINO: metas por exercício (o que fazer na academia) ───
+// ── METAS: chavinha A | B | C (rodada 18) — nasce no treino da vez ──
+const metasKey = ref('');
+const cycleSessions = computed(() => programCycle.value?.sessions || []);
+const metasSession = computed(
+  () =>
+    cycleSessions.value.find(x => x.key === metasKey.value) || upcomingSession.value
+);
 const upcomingPlan = computed(() => {
-  const s = upcomingSession.value;
+  const s = metasSession.value;
   if (!s) return [];
   return (s.exercises || []).map(p => {
     const eq = equipmentOf(p);
@@ -311,12 +318,18 @@ const loadProgress = computed(() => {
           last,
           count: execs.length,
           deltaCycle: last && first && last !== first ? last.top - first.top : null,
+          pctCycle:
+            last && first && last !== first && first.top
+              ? Math.round(((last.top - first.top) / first.top) * 1000) / 10
+              : null,
+          firstE1: first?.e1 ?? null,
           deltaPrev: last && prev ? last.top - prev.top : null,
           verdict,
           pr: Boolean(last && execs.length > 1 && last.e1 > bestBefore + 0.01),
           e1: last ? Math.round(last.e1 * 10) / 10 : null,
           spark: sparkPoints(spark),
           sparkUp: spark.length > 1 ? spark[spark.length - 1] >= spark[0] : true,
+          execs,
         };
       }),
   }));
@@ -326,18 +339,64 @@ const loadProgress = computed(() => {
 const cycleRecords = computed(() =>
   workouts.value.filter(w => w.data?.cycle_id === programCycle.value?.id)
 );
-// conta pelo veredito de cada exercício (registros da planilha/simulação
-// não têm summary — o veredito por exercício sempre existe no modo treino)
-const cycleProgressions = computed(() =>
-  cycleRecords.value.reduce((a, w) => {
-    if (w.data?.summary) return a + (Number(w.data.summary.progress) || 0);
-    return a + (w.data?.exercises || []).filter(e => e.verdict === 'progress').length;
-  }, 0)
+// vereditos do ciclo: usa o salvo no registro; se não tiver (planilha/
+// simulação), calcula contra a execução anterior do mesmo exercício
+const verdictsFor = exercises => {
+  const acc = { progress: 0, tie: 0, regress: 0 };
+  const cyId = programCycle.value?.id;
+  exercises.forEach(e => {
+    (e.execs || []).forEach((x, i) => {
+      if (x.cycle_id !== cyId) return;
+      const prev = e.execs[i + 1];
+      const v = x.verdict || (prev ? exerciseVerdict(x.sets, prev.sets) : 'first');
+      if (acc[v] !== undefined) acc[v] += 1;
+    });
+  });
+  return acc;
+};
+const cycleVerdicts = computed(() =>
+  verdictsFor(loadProgress.value.flatMap(s => s.exercises))
 );
+const cycleProgressions = computed(() => cycleVerdicts.value.progress);
 const cyclePRs = computed(() =>
   loadProgress.value.reduce((a, s) => a + s.exercises.filter(e => e.pr).length, 0)
 );
 const VERDICT_LABEL = { progress: '▲ progrediu', tie: '▬ empatou', regress: '▼ regrediu', first: '🏁 1ª vez' };
+
+// ── CARROSSEL do progresso (rodada 18): 1 slide por treino A/B/C, desliza
+// com o dedo (scroll-snap) e tem chavinha + setas; o slide ativo segue
+// o scroll
+// (um "carrossel" por bloco: el + índice + ir + acompanhar o scroll)
+const useCarousel = countOf => {
+  const el = ref(null);
+  const idx = ref(0);
+  const go = i => {
+    if (!el.value) return;
+    const n = countOf();
+    const target = Math.max(0, Math.min(n - 1, i));
+    el.value.scrollTo({ left: target * el.value.clientWidth, behavior: 'smooth' });
+    idx.value = target;
+  };
+  // só atualiza quando a rolagem ASSENTA (no meio do deslize suave o
+  // scrollLeft passa por valores intermediários e a pílula piscaria)
+  let timer = null;
+  const onScroll = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (!el.value || !el.value.clientWidth) return;
+      idx.value = Math.round(el.value.scrollLeft / el.value.clientWidth);
+    }, 120);
+  };
+  return { el, idx, go, onScroll };
+};
+const { el: carousel, idx: slideIdx, go: goSlide, onScroll: onCarouselScroll } = useCarousel(
+  () => loadProgress.value.length
+);
+const SESSION_HINT = {
+  A: 'empurrar + braços',
+  B: 'pernas + core',
+  C: 'puxar + ombros',
+};
 
 // ── CAIXINHAS DE CONSISTÊNCIA (rodada 14) ───────────────────────────
 const WEEKDAY_OFFSET = {
@@ -466,6 +525,203 @@ const measures = computed(() =>
   }).filter(Boolean)
 );
 
+// ── PROGRESSO DE FORÇA (rodada 17): jeitos de MEDIR a evolução das cargas
+// além do Δ kg por exercício:
+//   força total    = Σ do melhor e-1RM (última execução) dos exercícios do
+//                    ciclo — um número só pra toda a força, comparável
+//                    com o mesmo Σ na 1ª execução do ciclo;
+//   força relativa = força total ÷ peso corporal (kg por kg) — no cutting
+//                    o peso cai e a força sobe: este é o índice que prova;
+//   taxa de progressão = % de exercícios ▲ entre os comparáveis do ciclo;
+//   tonelagem      = Σ carga×reps do ciclo + média por semana.
+const weightAt = iso => {
+  const before = weighins.value.filter(p => p.date <= iso);
+  return (before.at(-1) || weighins.value[0])?.v || 0;
+};
+const cycleStartISO = computed(() => {
+  const prog = program.value;
+  const cy = programCycle.value;
+  if (!prog?.start_date || !cy) return null;
+  const absWeek = (cycleNumber.value - 1) * CYCLE_LEN + (cy.week_start || 1);
+  return shiftISO(prog.start_date, (absWeek - 1) * 7);
+});
+// força total semana a semana (carry-forward: cada exercício vale o
+// último e-1RM conhecido até aquela semana) + força relativa ao peso
+const strengthChartFor = exercises => {
+  const cy = programCycle.value;
+  const prog = program.value;
+  if (!cy || !prog?.start_date) return null;
+  const names = exercises.map(e => e.name);
+  const execsByName = {};
+  exercises.forEach(e => {
+    execsByName[e.name] = e.execs || [];
+  });
+  const wStart = cy.week_start || 1;
+  const wEnd = Math.min(weekInCycle.value, cy.week_end || CYCLE_LEN);
+  const labels = [];
+  const total = [];
+  const rel = [];
+  for (let w = wStart; w <= wEnd; w += 1) {
+    const absWeek = (cycleNumber.value - 1) * CYCLE_LEN + w;
+    let sum = 0;
+    let any = false;
+    names.forEach(name => {
+      const known = (execsByName[name] || []).find(x => x.week && x.week <= absWeek);
+      if (known) {
+        sum += known.e1;
+        any = true;
+      }
+    });
+    if (!any) continue;
+    labels.push(`S${w}`);
+    total.push(Math.round(sum));
+    const peso = weightAt(shiftISO(prog.start_date, absWeek * 7 - 1));
+    rel.push(peso ? Math.round((sum / peso) * 100) / 100 : null);
+  }
+  if (labels.length < 2) return null;
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Força total (Σ e-1RM, kg)',
+        data: total,
+        borderColor: ROYAL,
+        backgroundColor: 'rgba(65,105,225,0.14)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 2,
+        borderWidth: 2,
+        yAxisID: 'y',
+      },
+      {
+        label: 'Força relativa (× peso corporal)',
+        data: rel,
+        borderColor: LARANJA,
+        borderDash: [6, 4],
+        fill: false,
+        tension: 0.3,
+        pointRadius: 2,
+        borderWidth: 2,
+        spanGaps: true,
+        yAxisID: 'y1',
+      },
+    ],
+  };
+};
+
+// métricas de um conjunto de exercícios (sessionKey null = GERAL, A+B+C)
+const strengthFor = sessionKey => {
+  const groups = sessionKey
+    ? loadProgress.value.filter(g => g.key === sessionKey)
+    : loadProgress.value;
+  const exercises = groups.flatMap(g => g.exercises);
+  const recs = sessionKey
+    ? cycleRecords.value.filter(w => w.data?.session_key === sessionKey)
+    : cycleRecords.value;
+  let now = 0;
+  let start = 0;
+  let n = 0;
+  exercises.forEach(e => {
+    if (!e.last) return;
+    now += e.last.e1;
+    start += e.firstE1 ?? e.last.e1;
+    n += 1;
+  });
+  const pesoNow = currentWeight.value || 0;
+  const pesoStart = cycleStartISO.value ? weightAt(cycleStartISO.value) : firstWeight.value;
+  const rel = pesoNow ? now / pesoNow : null;
+  const relStart = pesoStart ? start / pesoStart : null;
+  const verdicts = verdictsFor(exercises);
+  const comparable = verdicts.progress + verdicts.tie + verdicts.regress;
+  const tonnage = volumeOf(recs);
+  const cy = programCycle.value;
+  const weeksElapsed = cy ? Math.max(1, weekInCycle.value - (cy.week_start || 1) + 1) : 1;
+  return {
+    n,
+    now: Math.round(now),
+    start: Math.round(start),
+    delta: Math.round(now - start),
+    pct: start ? Math.round(((now - start) / start) * 1000) / 10 : null,
+    rel: rel === null ? null : Math.round(rel * 100) / 100,
+    relStart: relStart === null ? null : Math.round(relStart * 100) / 100,
+    relDelta: rel !== null && relStart !== null ? Math.round((rel - relStart) * 100) / 100 : null,
+    rate: comparable ? Math.round((verdicts.progress / comparable) * 100) : null,
+    verdicts,
+    comparable,
+    tonnage,
+    tonnagePerWeek: tonnage / weeksElapsed,
+    chart: strengthChartFor(exercises),
+    exercises: exercises.length,
+  };
+};
+const strength = computed(() => strengthFor(null));
+// slides do carrossel de força: Geral + um por treino
+const strengthSlides = computed(() => [
+  {
+    key: 'geral',
+    letter: 'Σ',
+    title: 'Geral',
+    sub: 'A + B + C · todos os exercícios do ciclo',
+    m: strength.value,
+  },
+  ...loadProgress.value.map(g => ({
+    key: g.key,
+    letter: g.key,
+    title: `Treino ${g.key}`,
+    sub: `${g.weekday} · ${g.exercises.length} exercícios${SESSION_HINT[g.key] ? ` · ${SESSION_HINT[g.key]}` : ''}`,
+    m: strengthFor(g.key),
+  })),
+]);
+
+const {
+  el: forceCarousel,
+  idx: forceIdx,
+  go: goForce,
+  onScroll: onForceScroll,
+} = useCarousel(() => strengthSlides.value.length);
+
+// ── BALANÇO DE CENTÍMETROS (rodada 17): quanto o corpo mudou, no total ──
+// "perdidos onde importa" = cintura/cintura estreita/quadril/pescoço
+// (queda é vitória) · "ganhos onde importa" = peito/braços/coxas/ombros
+// (subida é vitória) · saldo = soma de tudo com sinal.
+const round1 = v => Math.round(v * 10) / 10;
+const cmBalance = computed(() => {
+  const all = [{ key: 'waist_navel', label: 'Cintura (umbigo)', down: true }, ...MEASURE_VIEW];
+  const rows = all
+    .map(m => {
+      const s = seriesOf(m.key);
+      if (s.length < 2) return null;
+      const first = s[0].v;
+      const last = s.at(-1).v;
+      const prev = s.at(-2).v;
+      return {
+        ...m,
+        first,
+        last,
+        dStart: round1(last - first),
+        dPrev: round1(last - prev),
+        firstDate: s[0].date,
+        good: m.down ? last - first < 0 : last - first > 0,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Math.abs(b.dStart) - Math.abs(a.dStart));
+  const sum = (list, f) => round1(list.reduce((a, r) => a + f(r), 0));
+  const lose = rows.filter(r => r.down);
+  const gain = rows.filter(r => !r.down);
+  return {
+    rows,
+    lostStart: sum(lose, r => r.dStart),
+    lostPrev: sum(lose, r => r.dPrev),
+    gainStart: sum(gain, r => r.dStart),
+    gainPrev: sum(gain, r => r.dPrev),
+    netStart: sum(rows, r => r.dStart),
+    netPrev: sum(rows, r => r.dPrev),
+    movedStart: sum(rows, r => Math.abs(r.dStart)),
+    since: rows.length ? rows.reduce((a, r) => (r.firstDate < a ? r.firstDate : a), rows[0].firstDate) : null,
+  };
+});
+
 // gráfico: cintura (laranja, eixo esq.) × peso (royal, eixo dir.)
 const bodyChart = computed(() => {
   const dates = [...new Set([...waists.value, ...weighins.value].map(p => p.date))]
@@ -559,7 +815,7 @@ const kcalDelta = computed(() => {
           <div class="flex items-center justify-between flex-wrap gap-3">
             <div>
               <div class="flex items-center gap-2 flex-wrap mb-1">
-                <h1 class="text-lg font-bold">Meu Painel · Treino</h1>
+                <h1 class="text-lg font-bold text-white" style="color: #fff">Meu Painel · Treino</h1>
                 <span
                   class="px-2 py-0.5 rounded-full text-[10px] font-bold"
                   :style="{ background: LARANJA, color: '#1a0e00' }"
@@ -643,10 +899,32 @@ const kcalDelta = computed(() => {
         </div>
 
         <!-- PRÓXIMO TREINO: metas por exercício -->
-        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">
-          🎯 Metas do Treino {{ upcomingSession?.key || '' }}
-          <span v-if="upcomingSession?.weekday" class="font-normal normal-case text-n-slate-10">· {{ upcomingSession.weekday }}</span>
-        </h2>
+        <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
+          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">
+            🎯 Metas do Treino {{ metasSession?.key || '' }}
+            <span v-if="metasSession?.weekday" class="font-normal normal-case text-n-slate-10">· {{ metasSession.weekday }}</span>
+            <span
+              v-if="metasSession && upcomingSession && metasSession.key === upcomingSession.key"
+              class="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold normal-case"
+              :style="{ background: LARANJA, color: '#1a0e00' }"
+            >
+              da vez
+            </span>
+          </h2>
+          <span v-if="cycleSessions.length > 1" class="hub-seg">
+            <button
+              v-for="sx in cycleSessions"
+              :key="sx.key"
+              class="hub-seg-opt"
+              :class="{ 'is-on': metasSession?.key === sx.key }"
+              :style="metasSession?.key === sx.key ? { background: ROYAL } : {}"
+              :title="`Treino ${sx.key} · ${sx.weekday}`"
+              @click="metasKey = sx.key"
+            >
+              Treino {{ sx.key }}
+            </button>
+          </span>
+        </div>
         <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
           <p v-if="!upcomingPlan.length" class="text-[11px] text-n-slate-10">
             Sem programa ativo — configure o Warrior na aba Treino.
@@ -692,17 +970,66 @@ const kcalDelta = computed(() => {
         </div>
 
         <!-- PROGRESSO DAS CARGAS: todos os exercícios do ciclo -->
-        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">🏋️ Progresso das cargas</h2>
+        <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
+          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">🏋️ Progresso das cargas</h2>
+          <span v-if="loadProgress.length > 1" class="hub-seg">
+            <button
+              v-for="(s, i) in loadProgress"
+              :key="s.key"
+              class="hub-seg-opt"
+              :class="{ 'is-on': slideIdx === i }"
+              :style="slideIdx === i ? { background: ROYAL } : {}"
+              @click="goSlide(i)"
+            >
+              Treino {{ s.key }}
+            </button>
+          </span>
+        </div>
         <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
           <p class="text-[11px] text-n-slate-10 mb-3">
             Carga máxima de cada exercício, execução a execução. <b>Δ ciclo</b> = quanto subiu
             desde a 1ª vez neste ciclo · 🏅 = melhor força estimada (e-1RM) de todos os tempos.
+            <span class="opacity-80">Deslize pro lado pra ver os outros treinos.</span>
           </p>
-          <div v-for="s in loadProgress" :key="s.key" class="mb-3 last:mb-0">
-            <p class="text-[11px] font-bold text-n-slate-12 mb-1.5">
-              Treino {{ s.key }} <span class="font-normal text-n-slate-10">· {{ s.weekday }}</span>
-            </p>
-            <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
+          <!-- carrossel: 1 slide por treino -->
+          <div ref="carousel" class="hub-carousel" @scroll.passive="onCarouselScroll">
+            <div v-for="(s, i) in loadProgress" :key="s.key" class="hub-slide">
+              <!-- cabeçalho grande do treino -->
+              <div class="flex items-center gap-3 rounded-2xl px-4 py-3 mb-3 text-white" :style="{ background: GRAD_NOITE }">
+                <span
+                  class="w-11 h-11 rounded-xl flex items-center justify-center text-2xl font-black shrink-0"
+                  :style="{ background: LARANJA, color: '#1a0e00' }"
+                >
+                  {{ s.key }}
+                </span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-base font-extrabold leading-tight">Treino {{ s.key }}</p>
+                  <p class="text-[11px] opacity-85">
+                    {{ s.weekday }} · {{ s.exercises.length }} exercícios
+                    <template v-if="SESSION_HINT[s.key]"> · {{ SESSION_HINT[s.key] }}</template>
+                  </p>
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button
+                    class="hub-arrow"
+                    :disabled="i === 0"
+                    title="Treino anterior"
+                    @click="goSlide(i - 1)"
+                  >
+                    ‹
+                  </button>
+                  <span class="text-[10px] opacity-80">{{ i + 1 }}/{{ loadProgress.length }}</span>
+                  <button
+                    class="hub-arrow"
+                    :disabled="i === loadProgress.length - 1"
+                    title="Próximo treino"
+                    @click="goSlide(i + 1)"
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+              <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
               <div
                 v-for="e in s.exercises"
                 :key="e.name"
@@ -725,7 +1052,7 @@ const kcalDelta = computed(() => {
                       class="font-bold"
                       :style="{ color: e.deltaCycle > 0 ? VERDE_OK : e.deltaCycle < 0 ? VERMELHO : CINZA }"
                     >
-                      Δ ciclo {{ signed(e.deltaCycle) }} kg
+                      Δ ciclo {{ signed(e.deltaCycle) }} kg<template v-if="e.pctCycle !== null"> ({{ signed(e.pctCycle) }}%)</template>
                     </span>
                     <span v-if="e.verdict" :style="{ color: VERDICT_COLORS[e.verdict] || LARANJA }">
                       {{ VERDICT_LABEL[e.verdict] }}
@@ -751,6 +1078,122 @@ const kcalDelta = computed(() => {
                 </div>
               </div>
             </div>
+            </div>
+          </div>
+          <!-- bolinhas do carrossel -->
+          <div v-if="loadProgress.length > 1" class="flex justify-center gap-1.5 mt-3">
+            <button
+              v-for="(s, i) in loadProgress"
+              :key="s.key"
+              class="w-2 h-2 rounded-full transition-all"
+              :style="{ background: slideIdx === i ? ROYAL : 'rgba(127,127,127,0.3)', transform: slideIdx === i ? 'scale(1.35)' : 'none' }"
+              :title="`Treino ${s.key}`"
+              @click="goSlide(i)"
+            />
+          </div>
+        </div>
+
+        <!-- PROGRESSO DE FORÇA: carrossel Geral | A | B | C -->
+        <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
+          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">📈 Progresso de força</h2>
+          <span v-if="strengthSlides.length > 1" class="hub-seg">
+            <button
+              v-for="(sl, i) in strengthSlides"
+              :key="sl.key"
+              class="hub-seg-opt"
+              :class="{ 'is-on': forceIdx === i }"
+              :style="forceIdx === i ? { background: sl.key === 'geral' ? LARANJA : ROYAL } : {}"
+              @click="goForce(i)"
+            >
+              {{ sl.key === 'geral' ? 'Geral' : `Treino ${sl.key}` }}
+            </button>
+          </span>
+        </div>
+        <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
+          <p class="text-[11px] text-n-slate-10 mb-3">
+            <b>Força total</b> = soma da força estimada (e-1RM) dos exercícios, um número só.
+            <b>Força relativa</b> = essa força dividida pelo seu peso: no cutting, é o que prova que
+            você emagreceu ficando mais forte. <span class="opacity-80">Deslize pro lado: geral e cada treino.</span>
+          </p>
+          <div ref="forceCarousel" class="hub-carousel" @scroll.passive="onForceScroll">
+            <div v-for="(sl, i) in strengthSlides" :key="sl.key" class="hub-slide">
+              <div
+                class="flex items-center gap-3 rounded-2xl px-4 py-3 mb-3 text-white"
+                :style="{ background: sl.key === 'geral' ? GRAD_LARANJA : GRAD_NOITE }"
+              >
+                <span
+                  class="w-11 h-11 rounded-xl flex items-center justify-center text-2xl font-black shrink-0"
+                  :style="sl.key === 'geral' ? { background: '#fff', color: LARANJA_VIVO } : { background: LARANJA, color: '#1a0e00' }"
+                >
+                  {{ sl.letter }}
+                </span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-base font-extrabold leading-tight">{{ sl.title }}</p>
+                  <p class="text-[11px] opacity-85">{{ sl.sub }}</p>
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button class="hub-arrow" :disabled="i === 0" title="Anterior" @click="goForce(i - 1)">‹</button>
+                  <span class="text-[10px] opacity-80">{{ i + 1 }}/{{ strengthSlides.length }}</span>
+                  <button class="hub-arrow" :disabled="i === strengthSlides.length - 1" title="Próximo" @click="goForce(i + 1)">›</button>
+                </div>
+              </div>
+              <div class="grid gap-3 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
+                <div class="rounded-2xl p-3 text-white" :style="{ background: GRAD_ROYAL }">
+                  <p class="text-[11px] opacity-90">Força total (Σ e-1RM)</p>
+                  <p class="text-xl font-bold">{{ sl.m.n ? `${sl.m.now} kg` : '—' }}</p>
+                  <p class="text-[10px] opacity-90">
+                    <template v-if="sl.m.n && sl.m.delta">
+                      {{ signed(sl.m.delta) }} kg no ciclo<template v-if="sl.m.pct !== null"> ({{ signed(sl.m.pct) }}%)</template>
+                    </template>
+                    <template v-else-if="sl.m.n">partiu de {{ sl.m.start }} kg</template>
+                    <template v-else>registre treinos</template>
+                  </p>
+                </div>
+                <div class="rounded-2xl p-3 text-white" :style="{ background: GRAD_LARANJA }">
+                  <p class="text-[11px] opacity-90">Força relativa</p>
+                  <p class="text-xl font-bold">{{ sl.m.rel !== null ? `${String(sl.m.rel).replace('.', ',')}×` : '—' }}</p>
+                  <p class="text-[10px] opacity-90">
+                    <template v-if="sl.m.relDelta !== null && sl.m.relDelta !== 0">
+                      {{ signed(sl.m.relDelta) }} × peso desde o início do ciclo
+                    </template>
+                    <template v-else>força por kg de peso corporal</template>
+                  </p>
+                </div>
+                <div class="rounded-2xl p-3 border border-n-weak bg-n-solid-1">
+                  <p class="text-[11px] text-n-slate-10">Taxa de progressão</p>
+                  <p class="text-xl font-bold" :style="{ color: sl.m.rate === null ? undefined : sl.m.rate >= 50 ? VERDE_OK : LARANJA }">
+                    {{ sl.m.rate === null ? '—' : `${sl.m.rate}%` }}
+                  </p>
+                  <p class="text-[10px] text-n-slate-10">
+                    <template v-if="sl.m.comparable">
+                      ▲{{ sl.m.verdicts.progress }} ▬{{ sl.m.verdicts.tie }} ▼{{ sl.m.verdicts.regress }} no ciclo
+                    </template>
+                    <template v-else>exercícios superados ÷ comparáveis</template>
+                  </p>
+                </div>
+                <div class="rounded-2xl p-3 border border-n-weak bg-n-solid-1">
+                  <p class="text-[11px] text-n-slate-10">Tonelagem do ciclo</p>
+                  <p class="text-xl font-bold" :style="{ color: ROYAL }">{{ fmtVol(sl.m.tonnage) }}</p>
+                  <p class="text-[10px] text-n-slate-10">≈ {{ fmtVol(sl.m.tonnagePerWeek) }} por semana</p>
+                </div>
+              </div>
+              <div v-if="sl.m.chart" style="height: 170px">
+                <Line :data="sl.m.chart" :options="bodyChartOpts" />
+              </div>
+              <p v-else class="text-[11px] text-n-slate-10">
+                A curva da força aparece a partir da 2ª semana com treinos registrados.
+              </p>
+            </div>
+          </div>
+          <div v-if="strengthSlides.length > 1" class="flex justify-center gap-1.5 mt-3">
+            <button
+              v-for="(sl, i) in strengthSlides"
+              :key="sl.key"
+              class="w-2 h-2 rounded-full transition-all"
+              :style="{ background: forceIdx === i ? (sl.key === 'geral' ? LARANJA : ROYAL) : 'rgba(127,127,127,0.3)', transform: forceIdx === i ? 'scale(1.35)' : 'none' }"
+              :title="sl.title"
+              @click="goForce(i)"
+            />
           </div>
         </div>
 
@@ -876,6 +1319,45 @@ const kcalDelta = computed(() => {
               </span>
             </span>
           </div>
+          <!-- balanço de centímetros (rodada 17) -->
+          <div v-if="cmBalance.rows.length" class="rounded-xl border border-n-weak p-3 mb-3">
+            <p class="text-[11px] font-bold text-n-slate-11 mb-2">
+              📐 Balanço de centímetros
+              <span class="font-normal text-n-slate-10">desde {{ cmBalance.since ? fmtDay(cmBalance.since) : 'o início' }}</span>
+            </p>
+            <div class="grid gap-2 mb-2" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
+              <div class="rounded-xl p-2.5" :style="{ background: 'rgba(255,138,0,0.10)', border: '1px solid rgba(255,138,0,0.35)' }">
+                <p class="text-[10px] text-n-slate-10">Onde quer perder</p>
+                <p class="text-lg font-extrabold leading-tight" :style="{ color: cmBalance.lostStart <= 0 ? LARANJA : VERMELHO }">
+                  {{ signed(cmBalance.lostStart) }} cm
+                </p>
+                <p class="text-[10px] text-n-slate-10">cintura · quadril · pescoço · {{ signed(cmBalance.lostPrev) }} vs última</p>
+              </div>
+              <div class="rounded-xl p-2.5" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
+                <p class="text-[10px] text-n-slate-10">Onde quer ganhar</p>
+                <p class="text-lg font-extrabold leading-tight" :style="{ color: cmBalance.gainStart >= 0 ? ROYAL : LARANJA }">
+                  {{ signed(cmBalance.gainStart) }} cm
+                </p>
+                <p class="text-[10px] text-n-slate-10">peito · braços · coxas · ombros · {{ signed(cmBalance.gainPrev) }} vs última</p>
+              </div>
+              <div class="rounded-xl p-2.5 border border-n-weak">
+                <p class="text-[10px] text-n-slate-10">Saldo total</p>
+                <p class="text-lg font-extrabold leading-tight text-n-slate-12">{{ signed(cmBalance.netStart) }} cm</p>
+                <p class="text-[10px] text-n-slate-10">{{ fmt1(cmBalance.movedStart) }} cm movidos no total · {{ signed(cmBalance.netPrev) }} vs última</p>
+              </div>
+            </div>
+            <div class="flex gap-1.5 flex-wrap">
+              <span
+                v-for="r in cmBalance.rows"
+                :key="r.key"
+                class="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] border border-n-weak bg-n-solid-2"
+                :title="`${r.label}: ${fmt1(r.first)} → ${fmt1(r.last)} cm`"
+              >
+                <span class="text-n-slate-10">{{ r.label }}</span>
+                <b :style="{ color: r.dStart === 0 ? CINZA : r.good ? VERDE_OK : LARANJA }">{{ signed(r.dStart) }}</b>
+              </span>
+            </div>
+          </div>
           <div v-if="weighins.length > 1 || waists.length > 1" style="height: 170px">
             <Line :data="bodyChart" :options="bodyChartOpts" />
           </div>
@@ -945,5 +1427,70 @@ const kcalDelta = computed(() => {
   width: 84px;
   height: 26px;
   display: block;
+}
+/* chavinha segmentada (A | B | C) — mesma cara da do treino */
+.hub-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9999px;
+  background: rgba(127, 127, 127, 0.14);
+  border: 1px solid rgba(127, 127, 127, 0.18);
+}
+.hub-seg-opt {
+  height: 1.6rem;
+  padding: 0 0.7rem;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0.65;
+  transition: all 0.15s ease;
+}
+.hub-seg-opt.is-on {
+  color: #fff;
+  opacity: 1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+/* carrossel dos treinos: desliza com o dedo, ímã em cada slide */
+.hub-carousel {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: 0;
+  margin: 0 -0.25rem;
+}
+.hub-carousel::-webkit-scrollbar {
+  display: none;
+}
+.hub-slide {
+  flex: 0 0 100%;
+  min-width: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  padding: 0 0.25rem;
+  box-sizing: border-box;
+}
+.hub-arrow {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.hub-arrow:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+.hub-arrow:not(:disabled):active {
+  transform: scale(0.92);
+}
+.hub-arrow:disabled {
+  opacity: 0.3;
 }
 </style>

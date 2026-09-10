@@ -12,6 +12,64 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 18 — 10/09 ✅ CHAVINHA A|B|C NAS METAS + CARROSSEL DO PROGRESSO (working tree)
+Pedido dele 10/09 (print das Metas): chavinha "Treino A/B/C" nas metas
+pra ver as metas de qualquer treino; no Progresso das cargas, "Treino A"
+mais evidente e separado — carrossel com os 3 treinos, passar pro lado.
+
+- **Metas**: hub-seg (mesma chavinha segmentada do treino) Treino A | B |
+  C no cabeçalho; metasKey vazio = treino da vez (selo laranja "da vez"
+  quando o escolhido é ele); upcomingPlan passou a ler metasSession.
+- **Carrossel** (.hub-carousel flex + scroll-snap x mandatory, 1 slide
+  = 100%, scrollbar escondida, snap-stop always): slide por treino com
+  CABEÇALHO grande (faixa royal noite, letra do treino num quadrado
+  laranja, dia da semana, nº de exercícios, dica "empurrar + braços"/
+  "pernas + core"/"puxar + ombros" — SESSION_HINT fixo por letra) e
+  setas ‹ › + contador i/n; chavinha A|B|C acima e bolinhas embaixo;
+  slideIdx segue o scroll (round(scrollLeft/clientWidth)); goSlide
+  scrollTo suave. No celular desliza com o dedo. Só HealthHome.vue.
+- **Complemento (print dele)**: título do hero "Meu Painel · Treino"
+  BRANCO (h1 global pintava escuro; class text-white + style); PROGRESSO
+  DE FORÇA também em carrossel **Geral | A | B | C** — useCarousel
+  (composable inline: el/idx/go/onScroll c/ debounce) reusado nos 2
+  blocos; strengthFor(sessionKey|null) calcula força total/relativa/
+  taxa/tonelagem/gráfico só c/ os exercícios do treino (verdictsFor,
+  strengthChartFor por conjunto); slide Geral = faixa laranja c/ "Σ",
+  treinos = faixa noite c/ letra laranja. Testado: Geral 806 kg/9,89×/
+  59%/63 t · A 272/3,34×/50%/19,9 t · B 294/3,61×/65%/26,5 t · C 240/
+  2,95×/67%/16,6 t, 4 gráficos, pílulas e bolinhas.
+
+## RODADA 17 — 10/09 ✅ BALANÇO DE CENTÍMETROS + PROGRESSO DE FORÇA (working tree)
+Pedido dele 10/09 (logo após a 16 subir): no Meu Painel, "volume total
+de centímetros ganhos ou perdidos" + "formas de mensurar o progresso de
+pesos". Só HealthHome.vue, sem migration.
+
+- **📐 Balanço de centímetros** (dentro do bloco Corpo, antes do
+  gráfico): 3 cards — "Onde quer perder" (cintura umbigo + estreita +
+  quadril + pescoço; Σ Δ desde a 1ª medição, laranja se caiu, vermelho
+  se subiu), "Onde quer ganhar" (peito + braços + coxas + ombros; royal
+  se subiu, laranja se caiu) e "Saldo total" (Σ com sinal + "cm movidos"
+  = Σ |Δ|); cada card traz também o Δ vs última medição; chips de cada
+  medida ordenados por |Δ| c/ cor semântica (verde = na direção certa).
+  cmBalance usa seriesOf(key) — só medidas com ≥2 registros entram.
+- **📈 Progresso de força** (bloco novo após "Progresso das cargas"):
+  FORÇA TOTAL = Σ e-1RM da última execução de cada exercício do ciclo
+  vs Σ na 1ª execução do ciclo (Δ kg e %); FORÇA RELATIVA = força total
+  ÷ peso corporal (peso do início do ciclo pelo weightAt(cycleStartISO))
+  — o índice do cutting; TAXA DE PROGRESSÃO = ▲ ÷ (▲+▬+▼) do ciclo;
+  TONELAGEM do ciclo + média/semana. GRÁFICO semana a semana: força
+  total c/ carry-forward (cada exercício vale o último e-1RM conhecido
+  até a semana; execuções ganharam `week`) × força relativa (eixo dir.).
+  Cards por exercício ganharam o % (Δ ciclo +3 kg (+4%)).
+- **cycleVerdicts**: vereditos do ciclo derivados das execuções quando
+  o registro não tem `verdict` (planilha/simulação) — alimenta
+  "Progressões no ciclo" e a taxa. Bloco todo mora depois das séries do
+  corpo (no-use-before-define limpo).
+- TESTADO local (simulação): força total 806 kg (+34, +4,4%), relativa
+  9,89× (+0,9), taxa 59% (▲35 ▬12 ▼12), tonelagem 63 t (≈9 t/sem),
+  gráfico S17–S23; balanço −30,6 cm onde quer perder / −12,3 onde quer
+  ganhar (cutting) / saldo −42,9 c/ chips. AGUARDA "pode subir".
+
 ## RODADA 16 — 10/09 ✅ CHAVINHA N OPÇÕES + ROLETAS|DIGITAR + EXTRA C/ TÉCNICA + PAINEL 95% TREINO + PALETA ROYAL/LARANJA EM TUDO
 Pedidos dele 10/09: (1) chavinhas de substituição com várias opções
 (supino inclinado → barra | halteres | máquina); (2) no treino, escolher
