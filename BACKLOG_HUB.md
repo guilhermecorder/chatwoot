@@ -97,7 +97,11 @@ painel em TODO o sistema (treino, corpo, dashboard).
   vez com barra" c/ faixas, Digitar → caixinhas, extra "Crucifixo na
   máquina" em Rest-Pause nasceu c/ Ativação/Mini 1-3 + faixas + hint
   laranja/royal; inferência conferida via node (13 nomes). Sem
-  migration. AGUARDA "pode subir".
+  migration.
+- **SUBIDA 10/09**: "pode subir" → commit c822ae686 na feat/hub-saude →
+  push → workflow_dispatch docker-build.yml (run 34502402898) BUILD
+  VERDE → **etiqueta `c822ae6`** (sem migration). Falta ele colar a
+  etiqueta no campo Imagem do web+sidekiq no EasyPanel e Implantar.
 
 ## RODADA 15 — 31/08 ✅ ÍCONES 100% HUB + TREINO "1 EXERCÍCIO = 1 TELA" + NEGÓCIOS SEM CIRURGIA
 Feedback dele 31/08 (print da VPS já na e7b2440): ícones CEVICO ainda
