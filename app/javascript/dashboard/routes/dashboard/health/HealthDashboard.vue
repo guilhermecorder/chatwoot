@@ -24,12 +24,12 @@ import { exerciseVerdict } from './warrior';
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler);
 
-const VERDE = '#10B981';
-const VERDE_ESCURO = '#065F46';
-const OURO = '#D4A017';
-const AZUL = '#0F5FA6';
-const ROXO = '#7C3AED';
-const ROSA = '#EC4899';
+// paleta azul royal + laranja (rodada 16) — a mesma do Meu Painel
+import {
+  ROYAL, ROYAL_PROFUNDO, ROYAL_NOITE, ROYAL_CLARO,
+  LARANJA, LARANJA_VIVO, LARANJA_CLARO, LARANJA_ESCURO,
+  VERMELHO, VERDE_OK, CINZA, GRAD_ROYAL,
+} from './palette';
 
 const isLoading = ref(true);
 const config = ref({});
@@ -154,10 +154,10 @@ const chartOptions = (extra = {}) => ({
 const volumeChart = computed(() => ({
   labels: weekLabels.value,
   datasets: [
-    lineBase('Total', VERDE, weeklyVolumes.value.map(w => w.total), { area: true }),
-    lineBase('Treino A', AZUL, weeklyVolumes.value.map(w => w.A)),
-    lineBase('Treino B', ROXO, weeklyVolumes.value.map(w => w.B)),
-    lineBase('Treino C', ROSA, weeklyVolumes.value.map(w => w.C)),
+    lineBase('Total', ROYAL_PROFUNDO, weeklyVolumes.value.map(w => w.total), { area: true }),
+    lineBase('Treino A', ROYAL, weeklyVolumes.value.map(w => w.A)),
+    lineBase('Treino B', LARANJA, weeklyVolumes.value.map(w => w.B)),
+    lineBase('Treino C', ROYAL_CLARO, weeklyVolumes.value.map(w => w.C)),
   ],
 }));
 
@@ -169,7 +169,7 @@ const cumulativeChart = computed(() => {
   });
   return {
     labels: weekLabels.value,
-    datasets: [lineBase('Volume acumulado', OURO, data, { area: true })],
+    datasets: [lineBase('Volume acumulado', LARANJA, data, { area: true })],
   };
 });
 
@@ -202,9 +202,9 @@ const exChart = computed(() => {
   return {
     labels: points.map(p => p.label),
     datasets: [
-      lineBase('Carga máxima (kg)', VERDE, points.map(p => p.top)),
-      lineBase('e-1RM (força estimada)', OURO, hist.map(p => p.e1), { dashed: true }),
-      lineBase('Volume (kg)', AZUL, points.map(p => p.vol), { area: true, axis: 'y1' }),
+      lineBase('Carga máxima (kg)', ROYAL, points.map(p => p.top)),
+      lineBase('e-1RM (força estimada)', LARANJA, hist.map(p => p.e1), { dashed: true }),
+      lineBase('Volume (kg)', ROYAL_CLARO, points.map(p => p.vol), { area: true, axis: 'y1' }),
     ],
   };
 });
@@ -262,7 +262,7 @@ const miniChart = name => {
   const pts = exSeriesAll.value[name] || [];
   return {
     labels: pts.map(p => p.label),
-    datasets: [lineBase('kg', VERDE, pts.map(p => p.top), { area: true })],
+    datasets: [lineBase('kg', ROYAL, pts.map(p => p.top), { area: true })],
   };
 };
 const miniOptions = {
@@ -307,9 +307,9 @@ const totalProgress = computed(() => weeklyVerdicts.value.reduce((s, w) => s + w
 const verdictChart = computed(() => ({
   labels: weekLabels.value,
   datasets: [
-    lineBase('▲ progressões', '#059669', weeklyVerdicts.value.map(w => w.progress), { area: true }),
-    lineBase('▬ empates', '#94A3B8', weeklyVerdicts.value.map(w => w.tie)),
-    lineBase('▼ regressões', '#DC2626', weeklyVerdicts.value.map(w => w.regress)),
+    lineBase('▲ progressões', VERDE_OK, weeklyVerdicts.value.map(w => w.progress), { area: true }),
+    lineBase('▬ empates', CINZA, weeklyVerdicts.value.map(w => w.tie)),
+    lineBase('▼ regressões', VERMELHO, weeklyVerdicts.value.map(w => w.regress)),
   ],
 }));
 
@@ -331,8 +331,8 @@ const weeklySetsReps = computed(() => {
 const setsRepsChart = computed(() => ({
   labels: weekLabels.value,
   datasets: [
-    lineBase('Séries', ROXO, weeklySetsReps.value.map(w => w.sets)),
-    lineBase('Repetições', ROSA, weeklySetsReps.value.map(w => w.reps), { area: true, axis: 'y1' }),
+    lineBase('Séries', ROYAL, weeklySetsReps.value.map(w => w.sets)),
+    lineBase('Repetições', LARANJA, weeklySetsReps.value.map(w => w.reps), { area: true, axis: 'y1' }),
   ],
 }));
 const setsRepsOptions = chartOptions({
@@ -367,8 +367,8 @@ const boxTimeline = computed(() => {
 const boxChart = computed(() => ({
   labels: boxTimeline.value.map(d => fmtDay(d.iso)),
   datasets: [
-    lineBase('Minutos', ROXO, boxTimeline.value.map(d => d.min), { area: true }),
-    lineBase('Rounds', OURO, boxTimeline.value.map(d => d.rounds), { axis: 'y1' }),
+    lineBase('Minutos', ROYAL, boxTimeline.value.map(d => d.min), { area: true }),
+    lineBase('Rounds', LARANJA, boxTimeline.value.map(d => d.rounds), { axis: 'y1' }),
   ],
 }));
 const boxChartOptions = chartOptions({
@@ -386,7 +386,7 @@ const boxCumChart = computed(() => {
   });
   return {
     labels: boxTimeline.value.map(d => fmtDay(d.iso)),
-    datasets: [lineBase('Horas acumuladas (30d)', ROXO, data, { area: true })],
+    datasets: [lineBase('Horas acumuladas (30d)', ROYAL, data, { area: true })],
   };
 });
 // ═══ VISÃO GERAL: transformação, projeções, constância, insights ═══
@@ -432,9 +432,9 @@ const transformationChart = computed(() => {
   return {
     labels: rows.map(r => r.label),
     datasets: [
-      lineBase('Peso (kg)', AZUL, rows.map(r => (r.peso === null ? null : Math.round(r.peso * 10) / 10))),
-      lineBase('Força e-1RM média (kg)', VERDE, rows.map(r => (r.forca === null ? null : Math.round(r.forca * 10) / 10)), { axis: 'y1' }),
-      lineBase('Calorias médias/dia', OURO, rows.map(r => (r.kcal === null ? null : Math.round(r.kcal))), { dashed: true, axis: 'y2' }),
+      lineBase('Peso (kg)', ROYAL, rows.map(r => (r.peso === null ? null : Math.round(r.peso * 10) / 10))),
+      lineBase('Força e-1RM média (kg)', LARANJA, rows.map(r => (r.forca === null ? null : Math.round(r.forca * 10) / 10)), { axis: 'y1' }),
+      lineBase('Calorias médias/dia', ROYAL_CLARO, rows.map(r => (r.kcal === null ? null : Math.round(r.kcal))), { dashed: true, axis: 'y2' }),
     ],
   };
 });
@@ -513,9 +513,9 @@ const heatmap = computed(() => {
   return cols;
 });
 const HEAT_COLORS = {
-  musc: VERDE,
-  boxe: ROXO,
-  ambos: `linear-gradient(135deg, ${VERDE} 50%, ${ROXO} 50%)`,
+  musc: ROYAL,
+  boxe: LARANJA,
+  ambos: `linear-gradient(135deg, ${ROYAL} 50%, ${LARANJA} 50%)`,
   vazio: 'rgba(148, 163, 184, 0.18)',
   futuro: 'transparent',
 };
@@ -533,7 +533,7 @@ const adherenceChart = computed(() => {
     ).size;
     data.push(Math.round((done / 3) * 100));
   }
-  return { labels, datasets: [lineBase('% das 3 sessões feitas', VERDE, data, { area: true })] };
+  return { labels, datasets: [lineBase('% das 3 sessões feitas', ROYAL, data, { area: true })] };
 });
 const adherenceOptions = chartOptions({
   scales: { y: { beginAtZero: true, max: 100, ticks: { font: { size: 10 } } }, x: { ticks: { font: { size: 10 } } } },
@@ -541,11 +541,11 @@ const adherenceOptions = chartOptions({
 
 // ── balanço muscular (volume por grupo, mapeado pelo nome) ─────────
 const MUSCLE_GROUPS = [
-  { label: 'Empurrar (peito)', match: /supino|crucifixo(?! inverso)|paralelas/i, cor: AZUL },
-  { label: 'Ombros', match: /desenvolvimento|elevação lateral|remada alta/i, cor: OURO },
-  { label: 'Puxar (costas)', match: /barra fixa|remada baixa|crucifixo inverso/i, cor: VERDE },
-  { label: 'Braços', match: /rosca|tríceps/i, cor: ROXO },
-  { label: 'Pernas', match: /agachamento|terra|extensora|afundo|hip thrust|pélvica|panturrilha/i, cor: ROSA },
+  { label: 'Empurrar (peito)', match: /supino|crucifixo(?! inverso)|paralelas/i, cor: ROYAL },
+  { label: 'Ombros', match: /desenvolvimento|elevação lateral|remada alta/i, cor: LARANJA },
+  { label: 'Puxar (costas)', match: /barra fixa|remada baixa|crucifixo inverso/i, cor: ROYAL_CLARO },
+  { label: 'Braços', match: /rosca|tríceps/i, cor: LARANJA_CLARO },
+  { label: 'Pernas', match: /agachamento|terra|extensora|afundo|hip thrust|pélvica|panturrilha/i, cor: ROYAL_PROFUNDO },
   { label: 'Core', match: /joelhos|abdominal|prancha/i, cor: '#64748B' },
 ];
 const muscleBalance = computed(() => {
@@ -576,7 +576,7 @@ const insights = computed(() => {
   if (recentPRs.value.length) {
     list.push({
       icon: '🏅',
-      tone: VERDE,
+      tone: VERDE_OK,
       text: `Recorde pessoal esta semana: ${recentPRs.value.slice(0, 2).map(r => r.name).join(' e ')}${recentPRs.value.length > 2 ? ` (+${recentPRs.value.length - 2})` : ''}.`,
     });
   }
@@ -589,16 +589,16 @@ const insights = computed(() => {
   if (estagnado) {
     list.push({
       icon: '🧊',
-      tone: OURO,
+      tone: LARANJA,
       text: `${estagnado[0]} está estagnado há 3 sessões — o Warrior sugere reduzir ~10% a carga e reconstruir.`,
     });
   }
   // peso: tendência de 30 dias
   if (pesoTrend.value !== null) {
     if (pesoTrend.value < -0.1) {
-      list.push({ icon: '📉', tone: VERDE, text: `Peso caindo ${fmtNum(Math.abs(pesoTrend.value))} kg/mês no ritmo atual — cutting funcionando.` });
+      list.push({ icon: '📉', tone: VERDE_OK, text: `Peso caindo ${fmtNum(Math.abs(pesoTrend.value))} kg/mês no ritmo atual — cutting funcionando.` });
     } else if (pesoTrend.value > 0.3) {
-      list.push({ icon: '⚠️', tone: OURO, text: `Peso subindo ${fmtNum(pesoTrend.value)} kg/mês — confira as calorias contra a meta.` });
+      list.push({ icon: '⚠️', tone: LARANJA, text: `Peso subindo ${fmtNum(pesoTrend.value)} kg/mês — confira as calorias contra a meta.` });
     }
   }
   // proteína baixa na semana
@@ -607,7 +607,7 @@ const insights = computed(() => {
   if (alvoProt && dias7.length >= 3) {
     const abaixo = dias7.filter(d => dayTotalsFor(d).protein < alvoProt * 0.8).length;
     if (abaixo >= 3) {
-      list.push({ icon: '🥩', tone: OURO, text: `Proteína abaixo de 80% da meta em ${abaixo} dos últimos ${dias7.length} dias registrados.` });
+      list.push({ icon: '🥩', tone: LARANJA, text: `Proteína abaixo de 80% da meta em ${abaixo} dos últimos ${dias7.length} dias registrados.` });
     }
   }
   // sessão planejada faltando nesta semana do programa
@@ -619,9 +619,9 @@ const insights = computed(() => {
     const esperadas = [dow >= 0 && 'A', dow >= 2 && 'B', dow >= 4 && 'C'].filter(Boolean);
     const faltando = esperadas.filter(k => !feitas.has(k));
     if (faltando.length) {
-      list.push({ icon: '⏰', tone: OURO, text: `Semana ${currentWeek.value}: falta o Treino ${faltando.join(' e o ')} previsto até aqui.` });
+      list.push({ icon: '⏰', tone: LARANJA, text: `Semana ${currentWeek.value}: falta o Treino ${faltando.join(' e o ')} previsto até aqui.` });
     } else if (esperadas.length) {
-      list.push({ icon: '✅', tone: VERDE, text: `Semana ${currentWeek.value} em dia: ${esperadas.length} de 3 sessões previstas até hoje, todas feitas.` });
+      list.push({ icon: '✅', tone: VERDE_OK, text: `Semana ${currentWeek.value} em dia: ${esperadas.length} de 3 sessões previstas até hoje, todas feitas.` });
     }
   }
   // melhor semana de volume
@@ -629,11 +629,11 @@ const insights = computed(() => {
   if (vols.length >= 2) {
     const ultima = vols[vols.length - 1];
     if (ultima.total === Math.max(...vols.map(w => w.total))) {
-      list.push({ icon: '🔥', tone: VERDE, text: `S${ultima.week} é a sua melhor semana de volume até agora (${fmtVol(ultima.total)}).` });
+      list.push({ icon: '🔥', tone: VERDE_OK, text: `S${ultima.week} é a sua melhor semana de volume até agora (${fmtVol(ultima.total)}).` });
     }
   }
   if (!list.length) {
-    list.push({ icon: '🏁', tone: AZUL, text: 'Registre treinos, peso e dieta — os insights nascem sozinhos daqui.' });
+    list.push({ icon: '🏁', tone: ROYAL, text: 'Registre treinos, peso e dieta — os insights nascem sozinhos daqui.' });
   }
   return list.slice(0, 6);
 });
@@ -687,15 +687,15 @@ const dietLabels = computed(() => dietTimeline.value.map(d => fmtDay(d.iso)));
 const kcalChart = computed(() => ({
   labels: dietLabels.value,
   datasets: [
-    lineBase('Calorias', VERDE, dietTimeline.value.map(d => dayTotalsFor(d.rec).kcal), { area: true }),
-    lineBase('Meta', OURO, dietTimeline.value.map(() => Number(dietCfg.value.targets?.kcal) || 0), { dashed: true }),
+    lineBase('Calorias', LARANJA, dietTimeline.value.map(d => dayTotalsFor(d.rec).kcal), { area: true }),
+    lineBase('Meta', ROYAL, dietTimeline.value.map(() => Number(dietCfg.value.targets?.kcal) || 0), { dashed: true }),
   ],
 }));
 const proteinChart = computed(() => ({
   labels: dietLabels.value,
   datasets: [
-    lineBase('Proteína (g)', AZUL, dietTimeline.value.map(d => dayTotalsFor(d.rec).protein), { area: true }),
-    lineBase('Meta', OURO, dietTimeline.value.map(() => Number(dietCfg.value.targets?.protein) || 0), { dashed: true }),
+    lineBase('Proteína (g)', ROYAL, dietTimeline.value.map(d => dayTotalsFor(d.rec).protein), { area: true }),
+    lineBase('Meta', LARANJA, dietTimeline.value.map(() => Number(dietCfg.value.targets?.protein) || 0), { dashed: true }),
   ],
 }));
 
@@ -749,7 +749,7 @@ onMounted(async () => {
       <div class="flex items-center gap-3 flex-wrap mb-5">
         <span
           class="w-9 h-9 rounded-xl flex items-center justify-center"
-          :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+          :style="{ background: GRAD_ROYAL }"
         >
           <span class="i-lucide-area-chart text-white text-lg" />
         </span>
@@ -763,7 +763,7 @@ onMounted(async () => {
             :key="t.key"
             class="h-9 px-4 rounded-full text-xs font-bold border"
             :class="dashTab === t.key ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-            :style="dashTab === t.key ? { background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` } : {}"
+            :style="dashTab === t.key ? { background: GRAD_ROYAL } : {}"
             @click="dashTab = t.key"
           >
             {{ t.label }}
@@ -802,7 +802,7 @@ onMounted(async () => {
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
               <div class="rounded-xl border border-n-weak p-2.5">
                 <p class="text-[11px] font-medium text-n-slate-11">⚖️ Peso — ritmo (30d)</p>
-                <p class="text-sm font-bold" :style="{ color: pesoTrend !== null && pesoTrend < 0 ? VERDE : OURO }">
+                <p class="text-sm font-bold" :style="{ color: pesoTrend !== null && pesoTrend < 0 ? VERDE_OK : LARANJA }">
                   {{ pesoTrend === null ? 'registre mais dias' : `${sinal(pesoTrend)} kg/mês` }}
                 </p>
                 <p v-if="pesoTrend !== null && latestWeight !== null" class="text-[11px] text-n-slate-10">
@@ -811,14 +811,14 @@ onMounted(async () => {
               </div>
               <div class="rounded-xl border border-n-weak p-2.5">
                 <p class="text-[11px] font-medium text-n-slate-11">💪 Força e-1RM — ritmo (30d)</p>
-                <p class="text-sm font-bold" :style="{ color: forcaTrend !== null && forcaTrend > 0 ? VERDE : OURO }">
+                <p class="text-sm font-bold" :style="{ color: forcaTrend !== null && forcaTrend > 0 ? VERDE_OK : LARANJA }">
                   {{ forcaTrend === null ? 'registre mais treinos' : `${sinal(forcaTrend)} kg/mês` }}
                 </p>
                 <p class="text-[11px] text-n-slate-10">média dos exercícios do programa</p>
               </div>
               <div class="rounded-xl border border-n-weak p-2.5">
                 <p class="text-[11px] font-medium text-n-slate-11">🏅 Recordes na semana</p>
-                <p class="text-sm font-bold" :style="{ color: recentPRs.length ? VERDE : undefined }">
+                <p class="text-sm font-bold" :style="{ color: recentPRs.length ? LARANJA : undefined }">
                   {{ recentPRs.length || '—' }}
                 </p>
                 <p class="text-[11px] text-n-slate-10 truncate">
@@ -832,8 +832,8 @@ onMounted(async () => {
           <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🟩 Mapa de constância</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
-              últimas 24 semanas — <span :style="{ color: VERDE }">■</span> musculação ·
-              <span :style="{ color: ROXO }">■</span> boxe · meio a meio = os dois no dia
+              últimas 24 semanas — <span :style="{ color: ROYAL }">■</span> musculação ·
+              <span :style="{ color: LARANJA }">■</span> boxe · meio a meio = os dois no dia
             </p>
             <div class="overflow-x-auto">
               <div class="flex gap-[3px]" style="min-width: 640px">
@@ -846,7 +846,7 @@ onMounted(async () => {
                       width: '14px',
                       height: '14px',
                       background: HEAT_COLORS[cell.tone],
-                      outline: cell.hoje ? `2px solid ${VERDE}` : 'none',
+                      outline: cell.hoje ? `2px solid ${LARANJA}` : 'none',
                     }"
                     :title="`${fmtDay(cell.iso)}${cell.tone === 'ambos' ? ' · musculação + boxe' : cell.tone === 'musc' ? ' · musculação' : cell.tone === 'boxe' ? ' · boxe' : ''}`"
                   />
@@ -869,15 +869,15 @@ onMounted(async () => {
         <!-- ═══ TREINO ═══ -->
         <template v-if="dashTab === 'treino'">
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-            <DashKpi label="Treinos feitos" :value="progRecords.length" sub="registros com séries" :from="VERDE_ESCURO" :to="VERDE" />
-            <DashKpi label="Volume total" :value="fmtVol(totalVolume)" sub="Σ carga × reps" :from="'#92400E'" :to="OURO" />
-            <DashKpi label="Progressões" :value="totalProgress" sub="exercícios superados" :from="'#0B4A82'" :to="AZUL" />
+            <DashKpi label="Treinos feitos" :value="progRecords.length" sub="registros com séries" :from="ROYAL_NOITE" :to="ROYAL" />
+            <DashKpi label="Volume total" :value="fmtVol(totalVolume)" sub="Σ carga × reps" :from="LARANJA_ESCURO" :to="LARANJA" />
+            <DashKpi label="Progressões" :value="totalProgress" sub="exercícios superados" :from="ROYAL_PROFUNDO" :to="ROYAL_CLARO" />
             <DashKpi
               label="Semana atual"
               :value="currentWeek === null ? '—' : `${currentWeek}/${totalWeeks}`"
               sub="do programa de 24"
-              :from="'#5B21B6'"
-              :to="ROXO"
+              :from="LARANJA_VIVO"
+              :to="LARANJA_CLARO"
             />
           </div>
 
@@ -938,7 +938,7 @@ onMounted(async () => {
               <div v-for="name in exercisesWithData" :key="name" class="rounded-xl border border-n-weak p-2.5">
                 <div class="flex items-baseline justify-between gap-2 mb-1">
                   <p class="text-[11px] font-bold text-n-slate-12 truncate">{{ name }}</p>
-                  <p class="text-[11px] font-bold shrink-0" :style="{ color: VERDE }">{{ fmtNum(lastTop(name)) }} kg</p>
+                  <p class="text-[11px] font-bold shrink-0" :style="{ color: ROYAL }">{{ fmtNum(lastTop(name)) }} kg</p>
                 </div>
                 <div style="height: 70px">
                   <Line :data="miniChart(name)" :options="miniOptions" />
@@ -972,7 +972,7 @@ onMounted(async () => {
                       {{ r.name }} <span v-if="r.recent" title="recorde recente">🏅</span>
                     </td>
                     <td class="px-2 py-1.5 text-[11px] text-right text-n-slate-11">{{ fmtNum(r.bestLoad.v) }} kg</td>
-                    <td class="px-2 py-1.5 text-[11px] text-right font-bold" :style="{ color: VERDE }">
+                    <td class="px-2 py-1.5 text-[11px] text-right font-bold" :style="{ color: ROYAL }">
                       {{ fmtNum(r.bestE1.v) }} kg
                     </td>
                     <td class="px-2 py-1.5 text-[11px] text-right text-n-slate-10">{{ fmtDay(r.bestE1.date) }}</td>
@@ -1010,16 +1010,16 @@ onMounted(async () => {
         <!-- ═══ BOXE ═══ -->
         <template v-if="dashTab === 'boxe'">
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-            <DashKpi label="Sessões" :value="boxings.length" sub="treinos de boxe" :from="'#5B21B6'" :to="ROXO" />
-            <DashKpi label="Tempo total" :value="fmtHours(boxTotalMin)" sub="acumulado" :from="'#92400E'" :to="OURO" />
+            <DashKpi label="Sessões" :value="boxings.length" sub="treinos de boxe" :from="LARANJA_VIVO" :to="LARANJA_CLARO" />
+            <DashKpi label="Tempo total" :value="fmtHours(boxTotalMin)" sub="acumulado" :from="LARANJA_ESCURO" :to="LARANJA" />
             <DashKpi
               label="Média por sessão"
               :value="boxings.length ? `${Math.round(boxTotalMin / boxings.length)} min` : '—'"
               sub="duração média"
-              :from="VERDE_ESCURO"
-              :to="VERDE"
+              :from="ROYAL_NOITE"
+              :to="ROYAL"
             />
-            <DashKpi label="Rounds" :value="boxTotalRounds" sub="no total" :from="'#0B4A82'" :to="AZUL" />
+            <DashKpi label="Rounds" :value="boxTotalRounds" sub="no total" :from="ROYAL_PROFUNDO" :to="ROYAL_CLARO" />
           </div>
 
           <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
@@ -1049,7 +1049,7 @@ onMounted(async () => {
               <div class="flex-1 h-2 rounded-full bg-n-alpha-1 overflow-hidden">
                 <div
                   class="h-full rounded-full"
-                  :style="{ width: `${(s.n / boxTopSeqs[0].n) * 100}%`, background: ROXO }"
+                  :style="{ width: `${(s.n / boxTopSeqs[0].n) * 100}%`, background: ROYAL }"
                 />
               </div>
               <span class="text-[11px] text-n-slate-10" style="width: 3.5rem; text-align: right">{{ s.n }}×</span>
@@ -1060,10 +1060,10 @@ onMounted(async () => {
         <!-- ═══ DIETA ═══ -->
         <template v-if="dashTab === 'dieta'">
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-            <DashKpi label="Calorias (média 7d)" :value="avg7('kcal')" sub="kcal por dia" :from="'#92400E'" :to="OURO" />
-            <DashKpi label="Proteína (média 7d)" :value="`${avg7('protein')} g`" sub="por dia" :from="VERDE_ESCURO" :to="VERDE" />
-            <DashKpi label="Aderência (7d)" :value="`${adherence7}%`" sub="refeições do plano feitas" :from="'#0B4A82'" :to="AZUL" />
-            <DashKpi label="Dias registrados" :value="diets.length" sub="no total" :from="'#5B21B6'" :to="ROXO" />
+            <DashKpi label="Calorias (média 7d)" :value="avg7('kcal')" sub="kcal por dia" :from="LARANJA_ESCURO" :to="LARANJA" />
+            <DashKpi label="Proteína (média 7d)" :value="`${avg7('protein')} g`" sub="por dia" :from="ROYAL_NOITE" :to="ROYAL" />
+            <DashKpi label="Aderência (7d)" :value="`${adherence7}%`" sub="refeições do plano feitas" :from="ROYAL_PROFUNDO" :to="ROYAL_CLARO" />
+            <DashKpi label="Dias registrados" :value="diets.length" sub="no total" :from="LARANJA_VIVO" :to="LARANJA_CLARO" />
           </div>
 
           <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
@@ -1106,11 +1106,11 @@ onMounted(async () => {
                   <tr v-for="day in mealDays" :key="day.iso" class="border-b border-n-weak/60">
                     <td class="px-2 py-1.5 text-[11px] font-bold text-n-slate-11">
                       {{ fmtDay(day.iso) }}
-                      <span v-if="day.iso === todayISO" class="font-normal" :style="{ color: VERDE }">hoje</span>
+                      <span v-if="day.iso === todayISO" class="font-normal" :style="{ color: ROYAL }">hoje</span>
                     </td>
                     <td v-for="meal in dietCfg.meals" :key="meal.id" class="px-2 py-1.5 text-center">
                       <template v-if="mealCell(day, meal)?.done">
-                        <span class="text-[11px] font-bold" :style="{ color: VERDE }">✓</span>
+                        <span class="text-[11px] font-bold" :style="{ color: ROYAL }">✓</span>
                         <span
                           class="text-[10px] ml-1"
                           :class="mealCell(day, meal).real ? 'text-n-slate-11 font-medium' : 'text-n-slate-9'"

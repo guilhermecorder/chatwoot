@@ -10,5 +10,5 @@ logos:
   logo_thumbnail: '/brand-assets/hub/logo_thumbnail.png'
 favicons_dir: '/brand-assets/hub'   # favicon-16x16 / 32 / 96 (nós do hub)
 cores:
-  primaria: '#0B1220'   # grafite profundo
-  destaque: '#10B981'   # verde energia
+  primaria: '#111C3F'   # azul royal noite (paleta azul + laranja, rodada 16)
+  destaque: '#4169E1'   # azul royal (laranja #FF8A00 é o acento)

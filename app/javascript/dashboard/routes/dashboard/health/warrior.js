@@ -279,3 +279,118 @@ export const fmtSets = sets =>
   (sets || [])
     .map(s => `${String(s.load ?? '').replace('.', ',')}×${s.reps}`)
     .join(' · ');
+
+// ═══ CHAVINHA DE EQUIPAMENTO com N opções (rodada 16) ════════════════
+// Pedido 10/09: "quando for supino inclinado, quero (barra | halteres |
+// máquina)". A prescrição pode trazer a lista (variants) — sem lista, as
+// opções saem do NOME do exercício por estas regras. A variação BASE é a
+// que está no nome (ex.: "com barra" → barra); registros antigos sem tag
+// contam como a base. Cada variação guarda as próprias cargas.
+const EQUIP_RULES = [
+  { match: /supino|desenvolvimento|remada alta/i, options: ['barra', 'halteres', 'máquina'] },
+  { match: /rosca martelo/i, options: ['halteres', 'corda'] },
+  { match: /rosca/i, options: ['halteres', 'barra', 'cabo'] },
+  { match: /crucifixo/i, options: ['halteres', 'máquina', 'cabo'] },
+  { match: /elevação lateral|elevacao lateral/i, options: ['halteres', 'cabo', 'máquina'] },
+  { match: /remada/i, options: ['polia', 'barra', 'halteres', 'máquina'] },
+  { match: /tríceps|triceps/i, options: ['corda', 'barra', 'halteres'] },
+  { match: /agachamento|afundo/i, options: ['halteres', 'barra', 'smith'] },
+  { match: /terra|stiff|rdl/i, options: ['barra', 'halteres'] },
+  { match: /hip thrust|pélvica|pelvica/i, options: ['barra', 'máquina'] },
+  { match: /panturrilha/i, options: ['máquina', 'halteres', 'smith'] },
+  { match: /face pull|pulldown|puxada/i, options: ['polia', 'máquina'] },
+];
+// equipamento citado no nome ("Tríceps na polia com corda" → corda)
+const TAG_IN_NAME = [
+  [/corda/i, 'corda'],
+  [/com barra|na barra|barra reta|barra w/i, 'barra'],
+  [/halter/i, 'halteres'],
+  [/máquina|maquina|cadeira/i, 'máquina'],
+  [/smith/i, 'smith'],
+  [/polia|cabo/i, 'polia'],
+];
+const lower = s => String(s || '').trim().toLowerCase();
+const uniqTags = list => {
+  const seen = new Set();
+  return list
+    .map(s => String(s || '').trim())
+    .filter(s => s && !seen.has(s.toLowerCase()) && seen.add(s.toLowerCase()));
+};
+
+// → { base, options } — options.length >= 2 = tem chavinha
+export const equipmentOf = presc => {
+  const name = presc?.name || '';
+  const explicit = uniqTags([presc?.tag, presc?.alt_tag, ...(presc?.variants || [])]);
+  if (explicit.length >= 2) return { base: explicit[0], options: explicit };
+  const rule = EQUIP_RULES.find(r => r.match.test(name));
+  if (!rule) return { base: explicit[0] || '', options: explicit };
+  if (explicit.length === 1) {
+    return { base: explicit[0], options: uniqTags([explicit[0], ...rule.options]) };
+  }
+  const inName = (TAG_IN_NAME.find(([re]) => re.test(name)) || [])[1];
+  const base = inName && rule.options.some(o => lower(o) === inName) ? inName : rule.options[0];
+  return { base, options: uniqTags([base, ...rule.options]) };
+};
+
+// nome sem o equipamento no fim (a chavinha passa a dizer o equipamento):
+// "Supino inclinado com barra" → "Supino inclinado"
+const EQUIP_SUFFIX = /\s+(com|na|no|em)\s+(a\s+|o\s+)?(barra|halteres?|máquina|maquina|corda|polia|cabo|smith)\s*$/i;
+export const nameWithoutEquipment = name => {
+  let out = String(name || '').trim();
+  for (let i = 0; i < 3 && EQUIP_SUFFIX.test(out); i += 1) out = out.replace(EQUIP_SUFFIX, '').trim();
+  return out || name;
+};
+
+// ═══ EXERCÍCIO EXTRA já com a TÉCNICA (rodada 16) ═══════════════════
+// Pedido 10/09: ao adicionar um extra, escolher a técnica e o exercício
+// nascer pré-configurado (séries/faixas/descanso) — o motor calcula
+// meta e alvos por série como faz com a prescrição do programa.
+const faixas = (...nums) => {
+  const out = [];
+  for (let i = 0; i < nums.length; i += 2) out.push({ min: nums[i], max: nums[i + 1] });
+  return out;
+};
+export const EXTRA_METHODS = [
+  {
+    key: 'sets',
+    label: 'Séries',
+    desc: '3 × 8–12 · mesma carga · 60–90 s',
+    presc: { method: 'sets', scheme: '3 × 8–12', rest: '60–90 s', progression_type: 'top_of_ranges', sets: faixas(8, 12, 8, 12, 8, 12) },
+  },
+  {
+    key: 'rpt',
+    label: 'RPT',
+    desc: '6–8 / 8–10 / 10–12 · −10% por série · 2–3 min',
+    presc: { method: 'rpt', scheme: '6–8 / 8–10 / 10–12', rest: '2–3 min', progression_type: 'top_of_ranges', sets: faixas(6, 8, 8, 10, 10, 12) },
+  },
+  {
+    key: 'rest_pause',
+    label: 'Rest-Pause',
+    desc: 'ativação 12–15 + 3 minis 4–6 · 10–20 s',
+    presc: {
+      method: 'rest_pause',
+      scheme: '12–15 + 4–6 + 4–6 + 4–6',
+      rest: '10–20 s',
+      progression_type: 'top_of_ranges',
+      sets: [
+        { min: 12, max: 15, kind: 'ativacao' },
+        { min: 4, max: 6, kind: 'mini' },
+        { min: 4, max: 6, kind: 'mini' },
+        { min: 4, max: 6, kind: 'mini' },
+      ],
+    },
+  },
+  {
+    key: 'pyramid',
+    label: 'Pirâmide',
+    desc: '12 / 10 / 8 / 6 · mesma carga · 30–60 s',
+    presc: {
+      method: 'pyramid',
+      scheme: '12 / 10 / 8 / 6',
+      rest: '30–60 s',
+      progression_type: 'rest_reduction',
+      sets: [12, 10, 8, 6].map(r => ({ min: r, max: r, kind: 'piramide' })),
+    },
+  },
+];
+export const extraMethod = key => EXTRA_METHODS.find(m => m.key === key) || EXTRA_METHODS[0];

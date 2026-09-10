@@ -182,6 +182,9 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       # alt_tag = segunda opção da chavinha de variação (ex.: halteres ⇄ barra)
       'tag' => ex['tag'].to_s.strip.first(30),
       'alt_tag' => ex['alt_tag'].to_s.strip.first(30),
+      # rodada 16: chavinha com N opções (barra | halteres | máquina…) —
+      # lista livre; sem lista, o front sugere as opções pelo nome
+      'variants' => Array(ex['variants']).map { |v| v.to_s.strip.first(30) }.reject(&:blank?).uniq.first(6),
       'method' => ex['method'].to_s.first(20),
       'scheme' => ex['scheme'].to_s.first(60),
       'rest' => ex['rest'].to_s.first(40),

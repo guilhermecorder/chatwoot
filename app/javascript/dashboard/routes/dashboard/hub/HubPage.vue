@@ -42,7 +42,7 @@ const MUNDOS_ALL = [
     titulo: 'Saúde',
     desc: 'treino · dieta · corpo',
     icon: 'i-lucide-heart-pulse',
-    grad: 'linear-gradient(135deg, #065F46 0%, #10B981 100%)',
+    grad: 'linear-gradient(135deg, #111C3F 0%, #27408B 55%, #4169E1 100%)',
     action: abrirSaude,
   },
 ];

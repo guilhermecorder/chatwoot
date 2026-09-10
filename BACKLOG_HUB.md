@@ -12,6 +12,93 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 16 — 10/09 ✅ CHAVINHA N OPÇÕES + ROLETAS|DIGITAR + EXTRA C/ TÉCNICA + PAINEL 95% TREINO + PALETA ROYAL/LARANJA EM TUDO
+Pedidos dele 10/09: (1) chavinhas de substituição com várias opções
+(supino inclinado → barra | halteres | máquina); (2) no treino, escolher
+entre roletas ou digitar; (3) exercício extra já com a técnica escolhida
+(ex.: rest-pause) vindo pré-configurado; (4) Meu Painel 95% treino/cargas/
+progresso, dieta só referência, indicadores de peso/medidas com a
+CIRCUNFERÊNCIA ABDOMINAL como principal; (5) paleta azul+laranja do
+painel em TODO o sistema (treino, corpo, dashboard).
+
+- **palette.js** (novo): ROYAL #4169E1 · profundo #27408B · noite
+  #111C3F · claro #8FA9F5 · LARANJA #FF8A00 · vivo #FF6B1A · claro
+  #FFB25E · escuro #B85C00 + VERDE_OK/VERMELHO/CINZA só p/ semântica
+  (▲▬▼, feito/não foi) + gradientes GRAD_ROYAL/NOITE/CLARO/LARANJA.
+  HealthPage, HealthDashboard e HealthHome importam daí (zero verde/
+  ouro/roxo/rosa sobrando); HubPage card Saúde → royal; hub.yml
+  cores primaria #111C3F / destaque #4169E1 (theme-color). A ARTE do
+  logo (hub-and-spoke verde) NÃO foi refeita — fica pra ele decidir.
+  Convenção: botão principal/pílulas/abas = GRAD_ROYAL; CTA "Concluir
+  treino"/"Adicionar" = GRAD_LARANJA; vidro royal, ouro→laranja na
+  meta atingida; método rest_pause = laranja vivo, pirâmide = laranja,
+  RPT/séries = royal; dieta kcal laranja/proteína royal/carbo royal
+  claro/gordura laranja claro; boxe (quando ligado) = royal noite.
+- **Chavinha com N opções (warrior.js equipmentOf)**: prescrição aceita
+  `variants` (lista, sanitize ≤6×30 chars; tag/alt_tag antigos ainda
+  valem = 2 primeiras opções). SEM lista, as opções saem do NOME por
+  regras (supino/desenvolvimento → barra|halteres|máquina; rosca →
+  halteres|barra|cabo; rosca martelo → halteres|corda; crucifixo →
+  halteres|máquina|cabo; elevação lateral → halteres|cabo|máquina;
+  remada → polia|barra|halteres|máquina; tríceps → corda|barra|
+  halteres; agachamento/afundo → halteres|barra|smith; terra/stiff →
+  barra|halteres; hip thrust → barra|máquina; panturrilha → máquina|
+  halteres|smith). BASE = equipamento citado no nome ("com barra" →
+  barra; "na polia com corda" → corda) se estiver nas opções, senão a
+  1ª; registros antigos sem tag contam como base. Cadeira extensora/
+  barra fixa/joelhos = sem chavinha. Nome no card perde o sufixo de
+  equipamento (nameWithoutEquipment: "Supino inclinado" + chavinha).
+  A sessão NASCE na variação usada da última vez (lastEntry.tag), e a
+  última execução vem por nome+variação em qualquer treino
+  (lastSetsForTag; normTag/lastSetsForTag subiram no arquivo). Editor
+  ✎: campo único "chavinha: barra | halteres | máquina" (pré-preenchido
+  c/ as opções atuais, inclusive as inferidas) — vazio = automático,
+  1 opção = SEM chavinha, 2+ = chavinha; salva variants + tag=1ª.
+- **Roletas | Digitar** (HealthPage): chavinha segmentada no topo da
+  sessão; preferência em localStorage `hub_input_mode`; modo digitar =
+  input inputmode decimal/numeric grande (.hub-type-input 3rem, 19px
+  bold, borda royal) no lugar das 2 roletas, mesmo v-model string
+  (chip "última vez⤵" continua funcionando). Só no ambiente de treino
+  (pedido); Corpo/Boxe/Dieta continuam com roleta.
+- **Extra com TÉCNICA** (EXTRA_METHODS no warrior.js): Séries 3×8–12
+  (60–90 s) · RPT 6–8/8–10/10–12 (2–3 min, top_of_ranges) · Rest-Pause
+  ativação 12–15 + 3 minis 4–6 (10–20 s) · Pirâmide 12/10/8/6 (30–60 s,
+  rest_reduction). Pílulas na caixa do extra; o exercício nasce com
+  presc completa → hint/alvos/labels (Ativação/Mini) do motor como no
+  programa; scheme/rest no card; salva `method` no registro. Se o nome
+  já foi feito antes: a técnica da última vez vem selecionada (watch);
+  comparação HOJE×última só na MESMA técnica — técnica diferente vira
+  referência no hint ("da última vez, em Séries: 40×12 · 40×10").
+- **Meu Painel 95% treino (HealthHome reescrito)**: hero royal c/ ciclo
+  + botão laranja do treino da vez (de hoje se não feito, senão o
+  próximo) + sessões da semana e placar ▲▬▼ no hero; KPIs Volume da
+  semana (vs passada) · Progressões no ciclo (summary ou vereditos por
+  exercício) · Recordes (exercícios cujo último e-1RM é o melhor de
+  todos) · Aderência do ciclo %; **🎯 Metas do Treino X**: cada
+  exercício da próxima sessão c/ variação, método, última execução e
+  alvos por série (setTargets) + hint — dá pra ir pra academia olhando
+  o painel; **🏋️ Progresso das cargas**: card por exercício do ciclo
+  (agrupado A/B/C, sem duplicar nome) c/ carga máx grande, últimas
+  séries, Δ ciclo (vs 1ª execução DESTE ciclo), veredito, e-1RM, 🏅 e
+  sparkline SVG das últimas 10 execuções (royal subindo/laranja
+  caindo); consistência mantida; **📏 Corpo**: CIRCUNFERÊNCIA
+  ABDOMINAL em card laranja grande (Δ vs anterior, Δ desde o início,
+  ritmo cm/mês, sparkline) + peso atual (royal) + peso-alvo editável
+  (roleta) + ritmo/peso em 30d/chegada ao alvo + chips das outras
+  medidas c/ Δ semântico + gráfico cintura (laranja, eixo esq.) × peso
+  (royal, eixo dir.) c/ linha do alvo; **🍽 Dieta (referência)**: 1
+  faixa só (meta kcal/proteína · refeições de hoje · média da semana
+  × meta) que abre a aba Dieta. Saíram do painel: cards de alvos de
+  kcal/proteína, "Hoje" com refeições, kcal×meta como KPI.
+- TESTADO local conta 3 (banco = simulação): painel completo via
+  texto+screenshot (Metas do Treino C c/ 5 exercícios e alvos, 14
+  cards de progresso c/ 🏅/Δ/sparkline, cintura 91,7 −4,8/−12,2,
+  gráfico), treino: chavinha halteres|barra|máquina, barra → "Primeira
+  vez com barra" c/ faixas, Digitar → caixinhas, extra "Crucifixo na
+  máquina" em Rest-Pause nasceu c/ Ativação/Mini 1-3 + faixas + hint
+  laranja/royal; inferência conferida via node (13 nomes). Sem
+  migration. AGUARDA "pode subir".
+
 ## RODADA 15 — 31/08 ✅ ÍCONES 100% HUB + TREINO "1 EXERCÍCIO = 1 TELA" + NEGÓCIOS SEM CIRURGIA
 Feedback dele 31/08 (print da VPS já na e7b2440): ícones CEVICO ainda
 presentes (favicon principalmente); roletas maiores e mais à direita c/

@@ -1,10 +1,10 @@
 <script setup>
-// MEU PAINEL DA SAÚDE — rodada 14: o ESSENCIAL do usuário num painel só,
-// vestido com a paleta do HUB pessoal (azul royal + laranja brilhante):
-// ciclo de 24 semanas (quantos já fez, em qual está), caixinhas de
-// consistência (verde = no dia · laranja = reagendado · vermelho = não
-// foi), elogio na semana completa, alvos, projeções, medidas e a curva
-// da transformação. Boxe só aparece se o admin liberar (Config → HUB).
+// MEU PAINEL DA SAÚDE — rodada 16: 95% TREINO. Pedido dele 10/09: o painel
+// focado no treino, nas cargas e na visualização do progresso; dieta e
+// calorias só como referência; indicadores de peso e medidas com a
+// CIRCUNFERÊNCIA ABDOMINAL em destaque (o indicador do momento).
+// Mantém da rodada 14: ciclo de 24 semanas, caixinhas de consistência,
+// elogio da semana completa, projeções de peso, paleta royal + laranja.
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
@@ -15,6 +15,7 @@ import WheelInput from './WheelInput.vue';
 import {
   Chart as ChartJS,
   Tooltip,
+  Legend,
   CategoryScale,
   LinearScale,
   PointElement,
@@ -28,26 +29,28 @@ import {
   cycleForWeek,
   suggestedSessionKey,
   exerciseVerdict,
+  setTargets,
+  targetHint,
+  equipmentOf,
+  nameWithoutEquipment,
+  fmtSets,
+  METHOD_LABELS,
 } from './warrior';
+import {
+  ROYAL, ROYAL_PROFUNDO, ROYAL_NOITE, ROYAL_CLARO,
+  LARANJA, LARANJA_VIVO, LARANJA_CLARO, LARANJA_ESCURO,
+  VERMELHO, VERDE_OK, CINZA, GRAD_NOITE, GRAD_LARANJA, GRAD_ROYAL,
+  VERDICT_COLORS,
+} from './palette';
 
-ChartJS.register(Tooltip, CategoryScale, LinearScale, PointElement, LineElement, Filler);
-
-// ── paleta do painel (pedido 30/08): azul royal + laranja brilhante ──
-const ROYAL = '#4169E1'; // azul royal
-const ROYAL_PROFUNDO = '#27408B'; // subtom escuro
-const ROYAL_NOITE = '#111C3F'; // quase-preto azulado (fundos)
-const ROYAL_CLARO = '#8FA9F5'; // subtom claro
-const LARANJA = '#FF8A00'; // laranja brilhante
-const LARANJA_VIVO = '#FF6B1A'; // subtom quente
-const LARANJA_CLARO = '#FFB25E'; // subtom suave
-const VERMELHO = '#E5484D';
-const VERDE_OK = '#30A46C'; // só nas caixinhas feitas no dia
+ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler);
 
 const router = useRouter();
 const accountScopedRoute = name => ({
   name,
   params: { accountId: router.currentRoute.value.params.accountId },
 });
+const go = name => router.push(accountScopedRoute(name));
 
 const isLoading = ref(true);
 const config = ref({});
@@ -59,8 +62,18 @@ const bodies = ref([]);
 
 const todayISO = new Date().toISOString().slice(0, 10);
 const num = v => Number(String(v ?? '').replace(',', '.')) || 0;
-const fmtKg = v => `${String(Math.round(v * 10) / 10).replace('.', ',')} kg`;
 const fmt1 = v => String(Math.round(v * 10) / 10).replace('.', ',');
+const fmtKg = v => `${fmt1(v)} kg`;
+const fmtCm = v => `${fmt1(v)} cm`;
+const fmtDay = iso => `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}`;
+const signed = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmt1(Math.abs(v))}`;
+const shiftISO = (iso, days) => {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+// 1RM estimado (Epley) — força comparável entre reps diferentes
+const e1rm = (load, reps) => (reps > 0 ? load * (1 + reps / 30) : load);
 
 const fetchAll = async () => {
   isLoading.value = true;
@@ -80,14 +93,12 @@ const fetchAll = async () => {
 };
 onMounted(fetchAll);
 
-// boxe é ligável em Configurações → HUB (desligado = omitido de tudo)
 const boxingOn = computed(() => config.value.features?.boxing === true);
 
 // ── programa, SEMANA e CICLO de 24 semanas ──────────────────────────
 const CYCLE_LEN = 24;
 const program = computed(() => activeProgram(config.value.programs));
 const programWeek = computed(() => weekOf(program.value, todayISO));
-// semana 25 em diante = novo ciclo do MESMO programa (a conta continua)
 const cycleNumber = computed(() =>
   programWeek.value ? Math.floor((programWeek.value - 1) / CYCLE_LEN) + 1 : 1
 );
@@ -100,7 +111,6 @@ const nextKey = computed(() =>
   suggestedSessionKey(workouts.value, program.value, programCycle.value)
 );
 
-// segunda-feira da semana atual (semana-calendário seg→dom)
 const mondayISO = computed(() => {
   const d = new Date(`${todayISO}T00:00:00`);
   const dow = (d.getDay() + 6) % 7;
@@ -108,12 +118,13 @@ const mondayISO = computed(() => {
   return d.toISOString().slice(0, 10);
 });
 const inThisWeek = iso => iso >= mondayISO.value && iso <= todayISO;
+const lastMondayISO = computed(() => shiftISO(mondayISO.value, -7));
+const inLastWeek = iso => iso >= lastMondayISO.value && iso < mondayISO.value;
 
-// ── ALVOS (por pessoa, registro 'profile') ──────────────────────────
+// ── ALVOS (registro 'profile' da pessoa) ────────────────────────────
 const dietTargets = computed(() => config.value.diet?.targets || {});
 const weeklyGoal = computed(() => Number(profile.value.weekly_sessions) || 3);
 const weightGoal = computed(() => Number(profile.value.weight_goal) || 0);
-
 const editingGoal = ref(false);
 const goalDraft = ref('');
 const saveGoal = async () => {
@@ -131,7 +142,7 @@ const saveGoal = async () => {
   }
 };
 
-// ── HOJE ────────────────────────────────────────────────────────────
+// ── HOJE / SEMANA ───────────────────────────────────────────────────
 const WEEKDAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const todayWeekday = WEEKDAYS_PT[new Date().getDay()];
 const todaysSession = computed(() =>
@@ -139,33 +150,21 @@ const todaysSession = computed(() =>
     (s.weekday || '').toLowerCase().startsWith(todayWeekday.slice(0, 4).toLowerCase())
   )
 );
-const workoutDoneToday = computed(() =>
-  workouts.value.some(w => w.record_date === todayISO)
-);
-const boxingDoneToday = computed(() =>
-  boxings.value.some(b => b.record_date === todayISO)
-);
-const dietToday = computed(() => diets.value.find(d => d.record_date === todayISO));
-const mealsTotal = computed(() => (config.value.diet?.meals || []).length);
-const mealsDoneToday = computed(
-  () => (dietToday.value?.data?.meals_done || []).length
-);
-const weightThisWeek = computed(() =>
-  bodies.value.some(b => inThisWeek(b.record_date) && Number(b.data?.weight) > 0)
-);
+const workoutDoneToday = computed(() => workouts.value.some(w => w.record_date === todayISO));
+// o treino "da vez": o de hoje se ainda não foi feito, senão o próximo
+const upcomingSession = computed(() => {
+  const sessions = programCycle.value?.sessions || [];
+  if (todaysSession.value && !workoutDoneToday.value) return todaysSession.value;
+  return sessions.find(s => s.key === nextKey.value) || sessions[0] || null;
+});
 
-// ── SEMANA ──────────────────────────────────────────────────────────
-const weekWorkouts = computed(() =>
-  workouts.value.filter(w => inThisWeek(w.record_date))
-);
-const weekBoxings = computed(() =>
-  boxings.value.filter(b => inThisWeek(b.record_date))
-);
+const weekWorkouts = computed(() => workouts.value.filter(w => inThisWeek(w.record_date)));
+const lastWeekWorkouts = computed(() => workouts.value.filter(w => inLastWeek(w.record_date)));
+const weekBoxings = computed(() => boxings.value.filter(b => inThisWeek(b.record_date)));
 const weekSessions = computed(
   () => weekWorkouts.value.length + (boxingOn.value ? weekBoxings.value.length : 0)
 );
 const weekComplete = computed(() => weekWorkouts.value.length >= weeklyGoal.value);
-// elogio da semana completa — frase estável dentro da mesma semana
 const PRAISES = [
   'Os 3 treinos da semana feitos. Consistência é o que constrói — orgulho! 🔥',
   'Semana fechada! Quem aparece TODA semana é imbatível. 👑',
@@ -173,6 +172,48 @@ const PRAISES = [
   'Semana 100%. Isso não é sorte — é disciplina. ⚡',
 ];
 const praise = computed(() => PRAISES[(programWeek.value || 0) % PRAISES.length]);
+
+// ── EXECUÇÕES por exercício (o dado central das cargas) ─────────────
+// workouts vêm do mais novo pro mais velho; cada execução = { date,
+// sets, top (carga máx), e1 (melhor e-1RM), vol, tag, verdict, cycle_id }
+const lowerName = s => String(s || '').trim().toLowerCase();
+const executionsOf = name => {
+  const alvo = lowerName(name);
+  const out = [];
+  workouts.value.forEach(w => {
+    (w.data?.exercises || []).forEach(e => {
+      if (lowerName(e.name) !== alvo || !e.sets?.length) return;
+      const sets = e.sets.map(s => ({ load: num(s.load), reps: num(s.reps) }));
+      out.push({
+        date: w.record_date,
+        sets,
+        top: Math.max(...sets.map(s => s.load)),
+        e1: Math.max(...sets.map(s => e1rm(s.load, s.reps))),
+        vol: sets.reduce((a, s) => a + s.load * s.reps, 0),
+        tag: e.tag || '',
+        method: e.method || '',
+        verdict: e.verdict || '',
+        cycle_id: w.data?.cycle_id,
+        session_key: w.data?.session_key,
+      });
+    });
+  });
+  return out; // mais novo primeiro
+};
+
+const volumeOf = list =>
+  list.reduce(
+    (a, w) =>
+      a +
+      (w.data?.exercises || []).reduce(
+        (b, e) => b + (e.sets || []).reduce((c, s) => c + num(s.load) * num(s.reps), 0),
+        0
+      ),
+    0
+  );
+const fmtVol = v => (v >= 1000 ? `${fmt1(v / 1000)} t` : `${Math.round(v)} kg`);
+const weekVolume = computed(() => volumeOf(weekWorkouts.value));
+const lastWeekVolume = computed(() => volumeOf(lastWeekWorkouts.value));
 
 const weekScore = computed(() => {
   const acc = { progress: 0, tie: 0, regress: 0 };
@@ -193,26 +234,112 @@ const weekScore = computed(() => {
   return acc;
 });
 
-const kcalOfDay = d => {
-  const meals = config.value.diet?.meals || [];
-  const done = d.data?.meals_done || [];
-  const base = meals
-    .filter(m => done.includes(m.id))
-    .reduce((s, m) => s + (Number(m.kcal) || 0), 0);
-  const extra = (d.data?.extras || []).reduce((s, e) => s + (Number(e.kcal) || 0), 0);
-  return base + extra;
+// ── PRÓXIMO TREINO: metas por exercício (o que fazer na academia) ───
+const upcomingPlan = computed(() => {
+  const s = upcomingSession.value;
+  if (!s) return [];
+  return (s.exercises || []).map(p => {
+    const eq = equipmentOf(p);
+    const execs = executionsOf(p.name);
+    // última execução na variação principal (registro antigo sem tag = base)
+    const last =
+      execs.find(x => !x.tag || lowerName(x.tag) === lowerName(eq.base)) || execs[0] || null;
+    const lastSets = last?.sets || null;
+    return {
+      name: eq.options.length > 1 ? nameWithoutEquipment(p.name) : p.name,
+      tag: last?.tag || eq.base,
+      method: p.method,
+      hint: targetHint(p, lastSets),
+      targets: setTargets(p, lastSets),
+      last: lastSets,
+      lastDate: last?.date,
+    };
+  });
+});
+const fmtTarget = t => `${String(t.load ?? '').replace('.', ',')}×${t.reps}`;
+
+// ── PROGRESSO DAS CARGAS: cada exercício do ciclo atual ─────────────
+const sparkPoints = values => {
+  if (values.length < 2) return '';
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const W = 84;
+  const H = 26;
+  return values
+    .map((v, i) => {
+      const x = (i / (values.length - 1)) * (W - 4) + 2;
+      const y = H - 3 - ((v - min) / span) * (H - 6);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
 };
-const weekKcalAvg = computed(() => {
-  const days = diets.value.filter(d => inThisWeek(d.record_date));
-  if (!days.length) return 0;
-  const total = days.reduce((sum, d) => sum + kcalOfDay(d), 0);
-  return Math.round(total / days.length);
+
+const loadProgress = computed(() => {
+  const cy = programCycle.value;
+  if (!cy) return [];
+  const seen = new Set();
+  return (cy.sessions || []).map(s => ({
+    key: s.key,
+    weekday: s.weekday,
+    exercises: (s.exercises || [])
+      .filter(p => {
+        const k = lowerName(p.name);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
+      .map(p => {
+        const eq = equipmentOf(p);
+        const execs = executionsOf(p.name);
+        const last = execs[0] || null;
+        const prev = execs[1] || null;
+        // primeira execução DESTE ciclo (Δ no ciclo); senão a mais antiga
+        const inCycle = execs.filter(x => x.cycle_id === cy.id);
+        const first = inCycle.length ? inCycle[inCycle.length - 1] : execs[execs.length - 1];
+        const bestBefore = execs.slice(1).reduce((m, x) => Math.max(m, x.e1), 0);
+        let verdict = last?.verdict || '';
+        if (!verdict && last) verdict = prev ? exerciseVerdict(last.sets, prev.sets) : 'first';
+        const spark = execs
+          .slice(0, 10)
+          .reverse()
+          .map(x => x.top);
+        return {
+          name: eq.options.length > 1 ? nameWithoutEquipment(p.name) : p.name,
+          tag: last?.tag || '',
+          method: p.method,
+          last,
+          count: execs.length,
+          deltaCycle: last && first && last !== first ? last.top - first.top : null,
+          deltaPrev: last && prev ? last.top - prev.top : null,
+          verdict,
+          pr: Boolean(last && execs.length > 1 && last.e1 > bestBefore + 0.01),
+          e1: last ? Math.round(last.e1 * 10) / 10 : null,
+          spark: sparkPoints(spark),
+          sparkUp: spark.length > 1 ? spark[spark.length - 1] >= spark[0] : true,
+        };
+      }),
+  }));
 });
 
-// ── CAIXINHAS DE CONSISTÊNCIA (pedido 30/08) ────────────────────────
-// Ciclo atual, semana a semana × sessão planejada (A/B/C):
-//   verde = feito no dia planejado · laranja = feito noutro dia da
-//   semana (REAGENDADO) · vermelho = passou e não foi · vazio = a fazer.
+// resumo do ciclo: progressões, recordes, sessões feitas
+const cycleRecords = computed(() =>
+  workouts.value.filter(w => w.data?.cycle_id === programCycle.value?.id)
+);
+// conta pelo veredito de cada exercício (registros da planilha/simulação
+// não têm summary — o veredito por exercício sempre existe no modo treino)
+const cycleProgressions = computed(() =>
+  cycleRecords.value.reduce((a, w) => {
+    if (w.data?.summary) return a + (Number(w.data.summary.progress) || 0);
+    return a + (w.data?.exercises || []).filter(e => e.verdict === 'progress').length;
+  }, 0)
+);
+const cyclePRs = computed(() =>
+  loadProgress.value.reduce((a, s) => a + s.exercises.filter(e => e.pr).length, 0)
+);
+const VERDICT_LABEL = { progress: '▲ progrediu', tie: '▬ empatou', regress: '▼ regrediu', first: '🏁 1ª vez' };
+
+// ── CAIXINHAS DE CONSISTÊNCIA (rodada 14) ───────────────────────────
 const WEEKDAY_OFFSET = {
   Segunda: 0, Terça: 1, Quarta: 2, Quinta: 3, Sexta: 4, Sábado: 5, Domingo: 6,
 };
@@ -252,6 +379,11 @@ const consistencyTotals = computed(() => {
   );
   return t;
 });
+const adherencePct = computed(() => {
+  const t = consistencyTotals.value;
+  const total = t.done + t.moved + t.missed;
+  return total ? Math.round(((t.done + t.moved) / total) * 100) : null;
+});
 const CELL_COLORS = {
   done: VERDE_OK,
   moved: LARANJA,
@@ -259,29 +391,28 @@ const CELL_COLORS = {
   future: 'rgba(127,127,127,0.18)',
 };
 
-// ── TRANSFORMAÇÃO + PROJEÇÕES ───────────────────────────────────────
-const weighins = computed(() =>
+// ── CORPO: circunferência abdominal em destaque + peso ──────────────
+const seriesOf = key =>
   bodies.value
-    .filter(b => Number(b.data?.weight) > 0)
-    .map(b => ({ date: b.record_date, w: Number(b.data.weight) }))
-    .sort((a, b) => (a.date > b.date ? 1 : -1))
-);
-const currentWeight = computed(() => weighins.value.at(-1)?.w || 0);
-const firstWeight = computed(() => weighins.value[0]?.w || 0);
-const deltaTotal = computed(() => currentWeight.value - firstWeight.value);
-const deltaLabel = computed(() => {
-  if (weighins.value.length < 2) return '—';
-  return `${deltaTotal.value < 0 ? '−' : '+'}${fmtKg(Math.abs(deltaTotal.value))}`;
-});
+    .filter(b => Number(b.data?.[key]) > 0)
+    .map(b => ({ date: b.record_date, v: Number(b.data[key]) }))
+    .sort((a, b) => (a.date > b.date ? 1 : -1));
+const weighins = computed(() => seriesOf('weight'));
+const waists = computed(() => seriesOf('waist_navel'));
+const currentWeight = computed(() => weighins.value.at(-1)?.v || 0);
+const firstWeight = computed(() => weighins.value[0]?.v || 0);
+const waistNow = computed(() => waists.value.at(-1) || null);
+const waistPrev = computed(() => waists.value.at(-2) || null);
+const waistFirst = computed(() => waists.value[0] || null);
+const waistSpark = computed(() => sparkPoints(waists.value.slice(-12).map(p => p.v)));
 
-const slope30 = computed(() => {
-  const cut = new Date(`${todayISO}T00:00:00`);
-  cut.setDate(cut.getDate() - 30);
-  const cutISO = cut.toISOString().slice(0, 10);
-  const pts = weighins.value.filter(p => p.date >= cutISO);
+const slopeOf = (series, days = 30) => {
+  const cut = shiftISO(todayISO, -days);
+  const pts = series.filter(p => p.date >= cut);
   if (pts.length < 3) return null;
-  const xs = pts.map(p => (new Date(`${p.date}T00:00:00`) - cut) / 86400000);
-  const ys = pts.map(p => p.w);
+  const x0 = new Date(`${cut}T00:00:00`);
+  const xs = pts.map(p => (new Date(`${p.date}T00:00:00`) - x0) / 86400000);
+  const ys = pts.map(p => p.v);
   const n = xs.length;
   const mx = xs.reduce((a, b) => a + b, 0) / n;
   const my = ys.reduce((a, b) => a + b, 0) / n;
@@ -292,36 +423,28 @@ const slope30 = computed(() => {
     varx += (x - mx) ** 2;
   });
   if (!varx) return null;
-  return (cov / varx) * 30;
-});
+  return (cov / varx) * days;
+};
+const slope30 = computed(() => slopeOf(weighins.value));
+const waistSlope30 = computed(() => slopeOf(waists.value));
 const projection30 = computed(() =>
   slope30.value === null ? null : currentWeight.value + slope30.value
 );
 const gapToGoal = computed(() =>
-  weightGoal.value > 0 && currentWeight.value > 0
-    ? currentWeight.value - weightGoal.value
-    : null
+  weightGoal.value > 0 && currentWeight.value > 0 ? currentWeight.value - weightGoal.value : null
 );
-// projeção: DATA estimada de chegada ao alvo no ritmo atual
 const goalEta = computed(() => {
   if (gapToGoal.value === null || gapToGoal.value <= 0) return null;
   if (slope30.value === null || slope30.value >= -0.1) return null;
   const days = Math.round((gapToGoal.value / Math.abs(slope30.value)) * 30);
   if (days > 400) return null;
-  const d = new Date(`${todayISO}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return { days, label: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}` };
+  return { days, label: fmtDay(shiftISO(todayISO, days)) };
 });
-// projeção: kcal média da semana vs meta
-const kcalDelta = computed(() => {
-  const meta = Number(dietTargets.value.kcal) || 0;
-  if (!meta || !weekKcalAvg.value) return null;
-  return weekKcalAvg.value - meta;
-});
+const weightThisWeek = computed(() =>
+  bodies.value.some(b => inThisWeek(b.record_date) && Number(b.data?.weight) > 0)
+);
 
-// ── MEDIDAS: última medição + variação ──────────────────────────────
 const MEASURE_VIEW = [
-  { key: 'waist_navel', label: 'Cintura', down: true },
   { key: 'waist_narrow', label: 'C. estreita', down: true },
   { key: 'hips', label: 'Quadril', down: true },
   { key: 'chest', label: 'Peito', down: false },
@@ -343,61 +466,100 @@ const measures = computed(() =>
   }).filter(Boolean)
 );
 
-const weightChart = computed(() => {
-  const pts = weighins.value.slice(-24);
+// gráfico: cintura (laranja, eixo esq.) × peso (royal, eixo dir.)
+const bodyChart = computed(() => {
+  const dates = [...new Set([...waists.value, ...weighins.value].map(p => p.date))]
+    .sort()
+    .slice(-30);
+  const at = (series, d) => series.find(p => p.date === d)?.v ?? null;
   const data = {
-    labels: pts.map(p => p.date.slice(8, 10) + '/' + p.date.slice(5, 7)),
+    labels: dates.map(fmtDay),
     datasets: [
       {
-        data: pts.map(p => p.w),
-        borderColor: ROYAL,
-        backgroundColor: 'rgba(65,105,225,0.14)',
+        label: 'Cintura (cm)',
+        data: dates.map(d => at(waists.value, d)),
+        borderColor: LARANJA,
+        backgroundColor: 'rgba(255,138,0,0.12)',
         fill: true,
         tension: 0.35,
         pointRadius: 2,
         borderWidth: 2,
+        spanGaps: true,
+        yAxisID: 'y',
+      },
+      {
+        label: 'Peso (kg)',
+        data: dates.map(d => at(weighins.value, d)),
+        borderColor: ROYAL,
+        backgroundColor: 'transparent',
+        fill: false,
+        tension: 0.35,
+        pointRadius: 2,
+        borderWidth: 2,
+        spanGaps: true,
+        yAxisID: 'y1',
       },
     ],
   };
   if (weightGoal.value > 0) {
     data.datasets.push({
-      data: pts.map(() => weightGoal.value),
-      borderColor: LARANJA,
+      label: 'Peso-alvo',
+      data: dates.map(() => weightGoal.value),
+      borderColor: ROYAL_CLARO,
       borderDash: [6, 5],
       borderWidth: 1.5,
       pointRadius: 0,
       fill: false,
+      yAxisID: 'y1',
     });
   }
   return data;
 });
-const chartOpts = {
+const bodyChartOpts = {
   responsive: true,
   maintainAspectRatio: false,
-  plugins: { legend: { display: false } },
+  plugins: { legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } } },
   scales: {
     x: { ticks: { font: { size: 9 } }, grid: { display: false } },
-    y: { ticks: { font: { size: 9 } } },
+    y: { position: 'left', ticks: { font: { size: 9 } } },
+    y1: { position: 'right', ticks: { font: { size: 9 } }, grid: { drawOnChartArea: false } },
   },
 };
 
-const go = name => router.push(accountScopedRoute(name));
+// ── DIETA: só referência ────────────────────────────────────────────
+const dietToday = computed(() => diets.value.find(d => d.record_date === todayISO));
+const mealsTotal = computed(() => (config.value.diet?.meals || []).length);
+const mealsDoneToday = computed(() => (dietToday.value?.data?.meals_done || []).length);
+const kcalOfDay = d => {
+  const meals = config.value.diet?.meals || [];
+  const done = d.data?.meals_done || [];
+  const base = meals.filter(m => done.includes(m.id)).reduce((s, m) => s + (Number(m.kcal) || 0), 0);
+  const extra = (d.data?.extras || []).reduce((s, e) => s + (Number(e.kcal) || 0), 0);
+  return base + extra;
+};
+const weekKcalAvg = computed(() => {
+  const days = diets.value.filter(d => inThisWeek(d.record_date));
+  if (!days.length) return 0;
+  return Math.round(days.reduce((sum, d) => sum + kcalOfDay(d), 0) / days.length);
+});
+const kcalDelta = computed(() => {
+  const meta = Number(dietTargets.value.kcal) || 0;
+  if (!meta || !weekKcalAvg.value) return null;
+  return weekKcalAvg.value - meta;
+});
 </script>
 
 <template>
-  <div class="flex-1 overflow-auto p-6">
+  <div class="flex-1 overflow-auto p-4 sm:p-6">
     <div class="max-w-5xl mx-auto">
       <div v-if="isLoading" class="flex justify-center py-16"><Spinner /></div>
       <template v-else>
-        <!-- HERO: ciclo de 24 semanas + treino de hoje -->
-        <div
-          class="rounded-2xl p-5 mb-4 text-white"
-          :style="{ background: `linear-gradient(135deg, ${ROYAL_NOITE}, ${ROYAL_PROFUNDO} 65%, ${ROYAL})` }"
-        >
+        <!-- HERO: ciclo + treino da vez + placar da semana -->
+        <div class="rounded-2xl p-5 mb-4 text-white" :style="{ background: GRAD_NOITE }">
           <div class="flex items-center justify-between flex-wrap gap-3">
             <div>
               <div class="flex items-center gap-2 flex-wrap mb-1">
-                <h1 class="text-lg font-bold">Meu Painel · Saúde</h1>
+                <h1 class="text-lg font-bold">Meu Painel · Treino</h1>
                 <span
                   class="px-2 py-0.5 rounded-full text-[10px] font-bold"
                   :style="{ background: LARANJA, color: '#1a0e00' }"
@@ -410,34 +572,37 @@ const go = name => router.push(accountScopedRoute(name));
                   Semana <b>{{ weekInCycle }} de {{ CYCLE_LEN }}</b> · {{ programCycle?.name }}
                   <template v-if="programCycle?.focus"> — {{ programCycle.focus }}</template>
                 </template>
-                <template v-else>Seu dia, seus alvos e sua transformação.</template>
+                <template v-else>Suas cargas, seu progresso, sua transformação.</template>
               </p>
               <p class="text-[11px] mt-1" :style="{ color: ROYAL_CLARO }">
-                <template v-if="cyclesDone === 0">
-                  🚀 Primeiro ciclo — é aqui que a base é construída.
-                </template>
+                <template v-if="cyclesDone === 0">🚀 Primeiro ciclo — é aqui que a base é construída.</template>
                 <template v-else>
-                  🏅 {{ cyclesDone }} {{ cyclesDone === 1 ? 'ciclo completo' : 'ciclos completos' }} de
-                  24 semanas — poucos chegam aí.
+                  🏅 {{ cyclesDone }} {{ cyclesDone === 1 ? 'ciclo completo' : 'ciclos completos' }} de 24 semanas.
                 </template>
               </p>
             </div>
-            <button
-              v-if="todaysSession || nextKey"
-              class="h-11 px-5 rounded-xl text-sm font-bold text-white shadow-lg"
-              :style="{ background: `linear-gradient(135deg, ${LARANJA_VIVO}, ${LARANJA})` }"
-              @click="go('hub_health')"
-            >
-              ▶ Treino {{ todaysSession?.key || nextKey }} de hoje
-            </button>
+            <div class="flex flex-col items-end gap-2">
+              <button
+                v-if="upcomingSession"
+                class="h-11 px-5 rounded-xl text-sm font-bold text-white shadow-lg"
+                :style="{ background: GRAD_LARANJA }"
+                @click="go('hub_health')"
+              >
+                ▶ Treino {{ upcomingSession.key }}
+                {{ todaysSession && !workoutDoneToday ? 'de hoje' : workoutDoneToday ? '· próximo' : '' }}
+              </button>
+              <p class="text-[11px] opacity-90">
+                Semana: <b>{{ weekSessions }} de {{ weeklyGoal }}</b> sessões ·
+                <span :style="{ color: '#7EE2A8' }">▲{{ weekScore.progress }}</span>
+                <span class="opacity-70 mx-1">▬{{ weekScore.tie }}</span>
+                <span :style="{ color: '#FF9C9C' }">▼{{ weekScore.regress }}</span>
+              </p>
+            </div>
           </div>
         </div>
 
         <!-- ELOGIO: semana completa -->
-        <div
-          v-if="weekComplete"
-          class="hub-praise rounded-2xl px-4 py-3 mb-4 flex items-center gap-3"
-        >
+        <div v-if="weekComplete" class="hub-praise rounded-2xl px-4 py-3 mb-4 flex items-center gap-3">
           <span class="text-2xl">🏆</span>
           <div>
             <p class="text-sm font-bold" :style="{ color: LARANJA_CLARO }">Semana completa!</p>
@@ -445,15 +610,155 @@ const go = name => router.push(accountScopedRoute(name));
           </div>
         </div>
 
-        <!-- CONSISTÊNCIA: caixinhas do ciclo -->
+        <!-- KPIs do treino -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          <DashKpi
+            label="Volume da semana"
+            :value="fmtVol(weekVolume)"
+            :sub="lastWeekVolume ? `semana passada ${fmtVol(lastWeekVolume)}` : 'Σ carga × reps'"
+            :from="ROYAL_NOITE"
+            :to="ROYAL"
+          />
+          <DashKpi
+            label="Progressões no ciclo"
+            :value="cycleProgressions"
+            sub="exercícios superados"
+            :from="LARANJA_ESCURO"
+            :to="LARANJA"
+          />
+          <DashKpi
+            label="Recordes"
+            :value="cyclePRs"
+            sub="exercícios no melhor e-1RM"
+            :from="ROYAL_PROFUNDO"
+            :to="ROYAL_CLARO"
+          />
+          <DashKpi
+            label="Aderência do ciclo"
+            :value="adherencePct === null ? '—' : `${adherencePct}%`"
+            :sub="`${consistencyTotals.done + consistencyTotals.moved} treinos feitos`"
+            :from="LARANJA_VIVO"
+            :to="LARANJA_CLARO"
+          />
+        </div>
+
+        <!-- PRÓXIMO TREINO: metas por exercício -->
         <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">
-          📦 Consistência do ciclo
+          🎯 Metas do Treino {{ upcomingSession?.key || '' }}
+          <span v-if="upcomingSession?.weekday" class="font-normal normal-case text-n-slate-10">· {{ upcomingSession.weekday }}</span>
         </h2>
         <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
-          <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
-            <p class="text-[11px] text-n-slate-10">
-              Cada coluna é uma semana; cada caixinha, um treino planejado.
+          <p v-if="!upcomingPlan.length" class="text-[11px] text-n-slate-10">
+            Sem programa ativo — configure o Warrior na aba Treino.
+          </p>
+          <div v-for="ex in upcomingPlan" :key="ex.name" class="py-2.5 border-b border-n-weak/60 last:border-0 last:pb-0 first:pt-0">
+            <div class="flex items-center gap-2 flex-wrap mb-1">
+              <p class="text-sm font-bold text-n-slate-12">{{ ex.name }}</p>
+              <span
+                v-if="ex.tag"
+                class="px-1.5 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-n-weak text-n-slate-10"
+              >
+                {{ ex.tag }}
+              </span>
+              <span
+                v-if="ex.method"
+                class="px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
+                :style="{ background: ex.method === 'rest_pause' ? LARANJA_VIVO : ex.method === 'pyramid' ? LARANJA : ROYAL }"
+              >
+                {{ METHOD_LABELS[ex.method] || ex.method }}
+              </span>
+              <span v-if="ex.last" class="text-[11px] text-n-slate-10">
+                última {{ ex.lastDate ? fmtDay(ex.lastDate) : '' }}: {{ fmtSets(ex.last) }}
+              </span>
+            </div>
+            <div class="flex gap-1.5 flex-wrap items-center">
+              <span
+                v-for="(t, ti) in ex.targets"
+                :key="ti"
+                class="hub-target"
+                :class="{ 'is-gold': ex.hint.startsWith('🎯') }"
+              >
+                <span class="opacity-60">{{ t.label }}</span>
+                <b>{{ t.load != null ? fmtTarget(t) : t.reps }}</b>
+              </span>
+              <span
+                class="text-[11px] font-medium"
+                :style="{ color: ex.hint.startsWith('🎯') ? LARANJA : ROYAL }"
+              >
+                {{ ex.hint }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROGRESSO DAS CARGAS: todos os exercícios do ciclo -->
+        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">🏋️ Progresso das cargas</h2>
+        <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
+          <p class="text-[11px] text-n-slate-10 mb-3">
+            Carga máxima de cada exercício, execução a execução. <b>Δ ciclo</b> = quanto subiu
+            desde a 1ª vez neste ciclo · 🏅 = melhor força estimada (e-1RM) de todos os tempos.
+          </p>
+          <div v-for="s in loadProgress" :key="s.key" class="mb-3 last:mb-0">
+            <p class="text-[11px] font-bold text-n-slate-12 mb-1.5">
+              Treino {{ s.key }} <span class="font-normal text-n-slate-10">· {{ s.weekday }}</span>
             </p>
+            <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
+              <div
+                v-for="e in s.exercises"
+                :key="e.name"
+                class="rounded-xl border border-n-weak p-2.5 flex items-center gap-3"
+              >
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs font-bold text-n-slate-12 truncate">
+                    {{ e.name }}
+                    <span v-if="e.tag" class="font-normal text-n-slate-10">· {{ e.tag }}</span>
+                    <span v-if="e.pr" title="Recorde de força estimada (e-1RM)">🏅</span>
+                  </p>
+                  <p v-if="e.last" class="text-[11px] text-n-slate-10 truncate">
+                    {{ fmtSets(e.last.sets) }}
+                    <span class="opacity-70">· {{ fmtDay(e.last.date) }}</span>
+                  </p>
+                  <p v-else class="text-[11px] text-n-slate-10">ainda não feito</p>
+                  <p v-if="e.last" class="text-[11px] flex items-center gap-2 flex-wrap mt-0.5">
+                    <span
+                      v-if="e.deltaCycle !== null"
+                      class="font-bold"
+                      :style="{ color: e.deltaCycle > 0 ? VERDE_OK : e.deltaCycle < 0 ? VERMELHO : CINZA }"
+                    >
+                      Δ ciclo {{ signed(e.deltaCycle) }} kg
+                    </span>
+                    <span v-if="e.verdict" :style="{ color: VERDICT_COLORS[e.verdict] || LARANJA }">
+                      {{ VERDICT_LABEL[e.verdict] }}
+                    </span>
+                    <span v-if="e.e1" class="text-n-slate-10">e-1RM {{ fmt1(e.e1) }}</span>
+                  </p>
+                </div>
+                <div class="shrink-0 text-right">
+                  <p class="text-lg font-extrabold leading-none" :style="{ color: e.last ? ROYAL : CINZA }">
+                    {{ e.last ? fmt1(e.last.top) : '—' }}<span class="text-[10px] font-medium text-n-slate-10"> kg</span>
+                  </p>
+                  <svg v-if="e.spark" viewBox="0 0 84 26" class="hub-spark mt-1">
+                    <polyline
+                      :points="e.spark"
+                      fill="none"
+                      :stroke="e.sparkUp ? ROYAL : LARANJA"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  <p v-else class="text-[9px] text-n-slate-10 mt-1">{{ e.count }} {{ e.count === 1 ? 'execução' : 'execuções' }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONSISTÊNCIA: caixinhas do ciclo -->
+        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">📦 Consistência do ciclo</h2>
+        <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
+          <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+            <p class="text-[11px] text-n-slate-10">Cada coluna é uma semana; cada caixinha, um treino planejado.</p>
             <p class="text-[11px] font-medium">
               <span :style="{ color: VERDE_OK }">■ no dia ({{ consistencyTotals.done }})</span>
               <span class="mx-1.5" :style="{ color: LARANJA }">■ reagendado ({{ consistencyTotals.moved }})</span>
@@ -473,15 +778,11 @@ const go = name => router.push(accountScopedRoute(name));
                     background: CELL_COLORS[c.state],
                     outline: w.current ? `1.5px solid ${ROYAL}` : 'none',
                   }"
-                  :title="`S${w.n} · Treino ${c.key} · ${c.plannedISO.slice(8, 10)}/${c.plannedISO.slice(5, 7)} — ${
+                  :title="`S${w.n} · Treino ${c.key} · ${fmtDay(c.plannedISO)} — ${
                     { done: 'feito no dia', moved: 'reagendado (feito noutro dia)', missed: 'não foi', future: 'a fazer' }[c.state]
                   }`"
                 />
-                <span
-                  class="text-[8px]"
-                  :class="w.current ? 'font-bold' : 'text-n-slate-10'"
-                  :style="w.current ? { color: ROYAL } : {}"
-                >
+                <span class="text-[8px]" :class="w.current ? 'font-bold' : 'text-n-slate-10'" :style="w.current ? { color: ROYAL } : {}">
                   {{ w.n }}
                 </span>
               </div>
@@ -489,146 +790,75 @@ const go = name => router.push(accountScopedRoute(name));
           </div>
         </div>
 
-        <!-- ALVOS -->
-        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">🎯 Alvos</h2>
-        <div class="grid gap-3 mb-5" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
-          <div class="rounded-2xl p-3 text-white" :style="{ background: `linear-gradient(135deg, ${ROYAL_PROFUNDO}, ${ROYAL})` }">
-            <p class="text-[11px] opacity-90">Peso-alvo</p>
-            <template v-if="!editingGoal">
-              <p class="text-xl font-bold">
-                {{ weightGoal > 0 ? fmtKg(weightGoal) : '—' }}
-              </p>
-              <button class="text-[10px] underline opacity-80" @click="editingGoal = true; goalDraft = weightGoal || ''">
-                {{ weightGoal > 0 ? 'ajustar' : 'definir alvo' }}
-              </button>
-            </template>
-            <template v-else>
-              <div class="flex items-center gap-1.5">
-                <WheelInput
-                  v-model="goalDraft"
-                  :step="0.5"
-                  :max="200"
-                  decimal
-                  placeholder="kg"
-                  style="width: 5rem"
-                />
-                <button class="h-8 px-2 rounded-lg text-[11px] font-bold bg-white/20" @click="saveGoal">✓</button>
-              </div>
-            </template>
-          </div>
-          <div class="rounded-2xl p-3" :style="{ background: 'rgba(255,138,0,0.10)', border: `1px solid rgba(255,138,0,0.35)` }">
-            <p class="text-[11px] text-n-slate-10">Calorias/dia</p>
-            <p class="text-xl font-bold" :style="{ color: LARANJA }">{{ dietTargets.kcal || '—' }}</p>
-            <p class="text-[10px] text-n-slate-10">meta do plano</p>
-          </div>
-          <div class="rounded-2xl p-3" :style="{ background: 'rgba(65,105,225,0.10)', border: `1px solid rgba(65,105,225,0.35)` }">
-            <p class="text-[11px] text-n-slate-10">Proteína/dia</p>
-            <p class="text-xl font-bold" :style="{ color: ROYAL_CLARO }">{{ dietTargets.protein ? `${dietTargets.protein} g` : '—' }}</p>
-            <p class="text-[10px] text-n-slate-10">meta do plano</p>
-          </div>
-          <div class="rounded-2xl p-3 border border-n-weak bg-n-solid-1">
-            <p class="text-[11px] text-n-slate-10">Sessões/semana</p>
-            <p class="text-xl font-bold" :style="{ color: weekComplete ? VERDE_OK : undefined }">
-              {{ weekSessions }} de {{ weeklyGoal }}
-            </p>
-            <p class="text-[10px] text-n-slate-10">{{ boxingOn ? 'musculação + boxe' : 'musculação' }}</p>
-          </div>
-        </div>
-
-        <!-- HOJE -->
-        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">✅ Hoje ({{ todayWeekday }})</h2>
-        <div class="grid gap-3 mb-5" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr))">
-          <button class="rounded-2xl border border-n-weak bg-n-solid-1 p-3 text-left hover:bg-n-alpha-1" @click="go('hub_health')">
-            <p class="text-[11px] text-n-slate-10">Treino do dia</p>
-            <p class="text-sm font-bold" :style="{ color: workoutDoneToday ? VERDE_OK : undefined }">
-              <template v-if="workoutDoneToday">✓ feito</template>
-              <template v-else-if="todaysSession">Treino {{ todaysSession.key }} — bora? →</template>
-              <template v-else>descanso (próximo: {{ nextKey || '—' }})</template>
-            </p>
-          </button>
-          <button class="rounded-2xl border border-n-weak bg-n-solid-1 p-3 text-left hover:bg-n-alpha-1" @click="go('hub_health_dieta')">
-            <p class="text-[11px] text-n-slate-10">Refeições marcadas</p>
-            <p class="text-sm font-bold" :style="{ color: mealsTotal && mealsDoneToday >= mealsTotal ? VERDE_OK : undefined }">
-              {{ mealsDoneToday }} de {{ mealsTotal || '—' }} →
-            </p>
-          </button>
-          <button
-            v-if="boxingOn"
-            class="rounded-2xl border border-n-weak bg-n-solid-1 p-3 text-left hover:bg-n-alpha-1"
-            @click="go('hub_health_boxe')"
-          >
-            <p class="text-[11px] text-n-slate-10">Boxe</p>
-            <p class="text-sm font-bold" :style="{ color: boxingDoneToday ? ROYAL : undefined }">
-              {{ boxingDoneToday ? '✓ treinou hoje' : 'registrar →' }}
-            </p>
-          </button>
-          <button class="rounded-2xl border border-n-weak bg-n-solid-1 p-3 text-left hover:bg-n-alpha-1" @click="go('hub_health_corpo')">
-            <p class="text-[11px] text-n-slate-10">Pesagem da semana</p>
-            <p class="text-sm font-bold" :style="{ color: weightThisWeek ? VERDE_OK : undefined }">
-              {{ weightThisWeek ? '✓ registrada' : 'registrar →' }}
-            </p>
-          </button>
-        </div>
-
-        <!-- SEMANA + PROJEÇÕES -->
-        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">🔭 Projeções</h2>
-        <div class="grid gap-3 mb-5" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
-          <DashKpi
-            label="Ritmo (30d)"
-            :value="slope30 === null ? '—' : `${slope30 > 0 ? '+' : '−'}${fmt1(Math.abs(slope30))} kg/mês`"
-            hint="tendência das pesagens"
-          />
-          <DashKpi
-            label="Peso em 30 dias"
-            :value="projection30 === null ? '—' : `~${fmtKg(projection30)}`"
-            hint="se o ritmo continuar"
-          />
-          <div class="rounded-2xl p-3" :style="{ background: 'rgba(255,138,0,0.10)', border: '1px solid rgba(255,138,0,0.35)' }">
-            <p class="text-[11px] text-n-slate-10">Chegada ao alvo</p>
-            <p class="text-xl font-bold" :style="{ color: LARANJA }">
-              <template v-if="gapToGoal !== null && gapToGoal <= 0">🎉 batido!</template>
-              <template v-else-if="goalEta">≈ {{ goalEta.label }}</template>
-              <template v-else>—</template>
-            </p>
-            <p class="text-[10px] text-n-slate-10">
-              {{ goalEta ? `~${goalEta.days} dias no ritmo atual` : 'precisa de ritmo de queda' }}
-            </p>
-          </div>
-          <div class="rounded-2xl p-3 border border-n-weak bg-n-solid-1">
-            <p class="text-[11px] text-n-slate-10">Kcal média × meta</p>
-            <p class="text-xl font-bold" :style="{ color: kcalDelta === null ? undefined : kcalDelta <= 0 ? VERDE_OK : VERMELHO }">
-              <template v-if="kcalDelta === null">—</template>
-              <template v-else>{{ kcalDelta > 0 ? '+' : '' }}{{ kcalDelta }}</template>
-            </p>
-            <p class="text-[10px] text-n-slate-10">{{ weekKcalAvg ? `média ${weekKcalAvg} esta semana` : 'marque as refeições' }}</p>
-          </div>
-          <div class="rounded-2xl p-3 border border-n-weak bg-n-solid-1">
-            <p class="text-[11px] text-n-slate-10">Placar da semana</p>
-            <p class="text-sm font-bold mt-1">
-              <span :style="{ color: VERDE_OK }">▲{{ weekScore.progress }}</span>
-              <span class="text-n-slate-10 mx-1">▬{{ weekScore.tie }}</span>
-              <span :style="{ color: VERMELHO }">▼{{ weekScore.regress }}</span>
-            </p>
-            <p class="text-[10px] text-n-slate-10">exercícios vs treino anterior</p>
-          </div>
-        </div>
-
-        <!-- MEDIDAS E PESO -->
-        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">📏 Medidas e peso</h2>
+        <!-- CORPO: circunferência abdominal em destaque + peso -->
+        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">📏 Corpo — indicadores</h2>
         <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
+          <div class="grid gap-3 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr))">
+            <!-- destaque: cintura no umbigo -->
+            <div class="rounded-2xl p-3 text-white sm:col-span-2 flex items-center gap-3" :style="{ background: GRAD_LARANJA }">
+              <div class="flex-1 min-w-0">
+                <p class="text-[11px] opacity-90">Circunferência abdominal (umbigo)</p>
+                <p class="text-2xl font-extrabold leading-tight">
+                  {{ waistNow ? fmtCm(waistNow.v) : '—' }}
+                </p>
+                <p class="text-[11px] opacity-90">
+                  <template v-if="waistPrev">
+                    {{ signed(waistNow.v - waistPrev.v) }} cm vs anterior
+                  </template>
+                  <template v-if="waistFirst && waistFirst !== waistNow">
+                    · {{ signed(waistNow.v - waistFirst.v) }} cm desde o início ({{ fmtDay(waistFirst.date) }})
+                  </template>
+                  <template v-if="waistSlope30 !== null"> · ritmo {{ signed(waistSlope30) }} cm/mês</template>
+                  <template v-if="!waistPrev && !waistNow">registre na aba Corpo — é o indicador do momento</template>
+                </p>
+              </div>
+              <svg v-if="waistSpark" viewBox="0 0 84 26" class="hub-spark shrink-0" style="width: 84px">
+                <polyline :points="waistSpark" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <div class="rounded-2xl p-3 text-white" :style="{ background: GRAD_ROYAL }">
+              <p class="text-[11px] opacity-90">Peso atual</p>
+              <p class="text-xl font-bold">{{ currentWeight ? fmtKg(currentWeight) : '—' }}</p>
+              <p class="text-[10px] opacity-85">
+                <template v-if="weighins.length > 1">{{ signed(currentWeight - firstWeight) }} kg desde o início</template>
+                <template v-else-if="!weightThisWeek">pesagem da semana pendente</template>
+                <template v-else>pesagem da semana ✓</template>
+              </p>
+            </div>
+            <div class="rounded-2xl p-3" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
+              <p class="text-[11px] text-n-slate-10">Peso-alvo</p>
+              <template v-if="!editingGoal">
+                <p class="text-xl font-bold" :style="{ color: ROYAL }">{{ weightGoal > 0 ? fmtKg(weightGoal) : '—' }}</p>
+                <p class="text-[10px] text-n-slate-10">
+                  <template v-if="gapToGoal !== null && gapToGoal <= 0">🎉 alvo batido!</template>
+                  <template v-else-if="gapToGoal !== null">faltam {{ fmtKg(gapToGoal) }}</template>
+                  <button class="underline ml-1" @click="editingGoal = true; goalDraft = weightGoal || ''">
+                    {{ weightGoal > 0 ? 'ajustar' : 'definir' }}
+                  </button>
+                </p>
+              </template>
+              <div v-else class="flex items-center gap-1.5">
+                <WheelInput v-model="goalDraft" :step="0.5" :max="200" decimal placeholder="kg" style="width: 5rem" />
+                <button class="h-8 px-2 rounded-lg text-[11px] font-bold text-white" :style="{ background: ROYAL }" @click="saveGoal">✓</button>
+              </div>
+            </div>
+          </div>
+
           <div class="grid gap-3 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
-            <DashKpi label="Peso atual" :value="currentWeight ? fmtKg(currentWeight) : '—'" hint="última pesagem" />
             <DashKpi
-              label="Desde o início"
-              :value="deltaLabel"
-              :hint="firstWeight ? `partiu de ${fmtKg(firstWeight)}` : ''"
+              label="Ritmo (30d)"
+              :value="slope30 === null ? '—' : `${slope30 > 0 ? '+' : '−'}${fmt1(Math.abs(slope30))} kg/mês`"
+              hint="tendência das pesagens"
             />
+            <DashKpi label="Peso em 30 dias" :value="projection30 === null ? '—' : `~${fmtKg(projection30)}`" hint="se o ritmo continuar" />
             <DashKpi
-              label="Falta pro alvo"
-              :value="gapToGoal === null ? '—' : gapToGoal <= 0 ? '🎉 alvo batido!' : fmtKg(gapToGoal)"
-              :hint="weightGoal ? `alvo ${fmtKg(weightGoal)}` : 'defina o peso-alvo'"
+              label="Chegada ao alvo"
+              :value="gapToGoal !== null && gapToGoal <= 0 ? '🎉 batido!' : goalEta ? `≈ ${goalEta.label}` : '—'"
+              :hint="goalEta ? `~${goalEta.days} dias no ritmo atual` : 'precisa de ritmo de queda'"
+              :value-color="LARANJA"
             />
           </div>
+
           <div v-if="measures.length" class="flex gap-1.5 flex-wrap mb-3">
             <span
               v-for="m in measures"
@@ -646,13 +876,33 @@ const go = name => router.push(accountScopedRoute(name));
               </span>
             </span>
           </div>
-          <div v-if="weighins.length > 1" style="height: 160px">
-            <Line :data="weightChart" :options="chartOpts" />
+          <div v-if="weighins.length > 1 || waists.length > 1" style="height: 170px">
+            <Line :data="bodyChart" :options="bodyChartOpts" />
           </div>
           <p v-else class="text-[11px] text-n-slate-10">
-            Registre seu peso na aba Corpo pra curva da transformação aparecer aqui.
+            Registre peso e cintura na aba Corpo pra curva aparecer aqui.
           </p>
         </div>
+
+        <!-- DIETA: só referência -->
+        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">🍽 Dieta (referência)</h2>
+        <button
+          class="w-full rounded-2xl border border-n-weak bg-n-solid-1 p-3 mb-5 text-left hover:bg-n-alpha-1 flex items-center gap-3 flex-wrap"
+          @click="go('hub_health_dieta')"
+        >
+          <span class="text-[11px] text-n-slate-11">
+            Meta <b :style="{ color: LARANJA }">{{ dietTargets.kcal || '—' }} kcal</b>
+            · proteína <b :style="{ color: ROYAL }">{{ dietTargets.protein ? `${dietTargets.protein} g` : '—' }}</b>
+          </span>
+          <span class="text-[11px] text-n-slate-10">
+            hoje {{ mealsDoneToday }} de {{ mealsTotal || '—' }} refeições
+          </span>
+          <span v-if="kcalDelta !== null" class="text-[11px] text-n-slate-10">
+            · média da semana {{ weekKcalAvg }} kcal
+            <b :style="{ color: kcalDelta <= 0 ? VERDE_OK : VERMELHO }">({{ kcalDelta > 0 ? '+' : '' }}{{ kcalDelta }})</b>
+          </span>
+          <span class="ml-auto text-[11px]" :style="{ color: ROYAL_CLARO }">abrir →</span>
+        </button>
 
         <div class="flex justify-end mb-8">
           <button class="text-[11px] underline" :style="{ color: ROYAL_CLARO }" @click="go('hub_health_dash')">
@@ -667,17 +917,33 @@ const go = name => router.push(accountScopedRoute(name));
 <style scoped>
 /* elogio da semana completa — vidro quente laranja */
 .hub-praise {
-  background: linear-gradient(
-    135deg,
-    rgba(255, 138, 0, 0.14),
-    rgba(255, 107, 26, 0.05) 55%,
-    rgba(255, 255, 255, 0.03)
-  );
+  background: linear-gradient(135deg, rgba(255, 138, 0, 0.14), rgba(255, 107, 26, 0.05) 55%, rgba(255, 255, 255, 0.03));
   -webkit-backdrop-filter: blur(12px) saturate(1.4);
   backdrop-filter: blur(12px) saturate(1.4);
   border: 1px solid rgba(255, 138, 0, 0.3);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 8px 22px -14px rgba(255, 138, 0, 0.55);
+}
+/* alvo por série do próximo treino (mesma cara do vidro da sessão) */
+.hub-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 1.6rem;
+  padding: 0 0.55rem;
+  border-radius: 9999px;
+  font-size: 11px;
+  background: rgba(65, 105, 225, 0.1);
+  border: 1px solid rgba(65, 105, 225, 0.28);
+}
+.hub-target.is-gold {
+  background: rgba(255, 138, 0, 0.12);
+  border-color: rgba(255, 138, 0, 0.35);
+}
+.hub-spark {
+  width: 84px;
+  height: 26px;
+  display: block;
 }
 </style>

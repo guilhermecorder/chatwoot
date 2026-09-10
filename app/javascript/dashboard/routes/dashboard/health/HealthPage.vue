@@ -19,14 +19,33 @@ import {
   activeProgram, weekOf, cycleForWeek, suggestedSessionKey,
   lastSessionRecord, lastExerciseSets, buildTodaySets,
   exerciseVerdict, targetHint, setTargets, sessionSummary, summaryPhrase, fmtSets,
+  equipmentOf, nameWithoutEquipment, EXTRA_METHODS, extraMethod,
 } from './warrior';
+// paleta azul royal + laranja (rodada 16) — a mesma do Meu Painel
+import {
+  ROYAL, ROYAL_PROFUNDO, ROYAL_NOITE, ROYAL_CLARO,
+  LARANJA, LARANJA_VIVO, LARANJA_CLARO, LARANJA_ESCURO,
+  VERMELHO, VERDE_OK, CINZA,
+  GRAD_ROYAL, GRAD_NOITE, GRAD_LARANJA,
+} from './palette';
 
-const VERDE = '#10B981';
-const VERDE_ESCURO = '#065F46';
-const OURO = '#D4A017';
-const AZUL = '#0F5FA6';
-const ROXO = '#7C3AED';
-const ROSA = '#EC4899';
+// MODO DE ENTRADA no treino (rodada 16): roletas (padrão) ou digitar —
+// preferência guardada no aparelho
+const INPUT_MODE_KEY = 'hub_input_mode';
+const inputMode = ref('wheel');
+try {
+  if (localStorage.getItem(INPUT_MODE_KEY) === 'type') inputMode.value = 'type';
+} catch {
+  /* sem localStorage: fica nas roletas */
+}
+const setInputMode = m => {
+  inputMode.value = m;
+  try {
+    localStorage.setItem(INPUT_MODE_KEY, m);
+  } catch {
+    /* ignora */
+  }
+};
 
 const isLoading = ref(true);
 const config = ref({});
@@ -177,13 +196,25 @@ const openExerciseEditor = sessionDef => {
     cycleId: cycle?.id,
     sessionKey: sessionDef.key,
     title: `Treino ${sessionDef.key} — ${cycle?.name || prog.name}`,
-    rows: (sessionDef.exercises || []).map(e => ({ ...e, _del: false })),
+    // campo único "barra | halteres | máquina": vazio = automático pelo
+    // nome · 1 opção = sem chavinha · 2+ = chavinha com essas opções
+    rows: (sessionDef.exercises || []).map(e => ({
+      ...e,
+      _variants: equipmentOf(e).options.join(' | '),
+      _del: false,
+    })),
   };
 };
+const parseVariants = text =>
+  String(text || '')
+    .split(/[|,;/]+/)
+    .map(v => v.trim())
+    .filter(Boolean);
 const addEditorExercise = () =>
   exEditor.value.rows.push({
     name: '',
     tag: '',
+    _variants: '',
     method: 'sets',
     scheme: '3 × 8–12',
     rest: '',
@@ -210,7 +241,13 @@ const saveExerciseEditor = async () => {
               sessions: (c.sessions || []).map(s =>
                 s.key !== ed.sessionKey
                   ? s
-                  : { ...s, exercises: rows.map(({ _del, ...e }) => e) }
+                  : {
+                      ...s,
+                      exercises: rows.map(({ _del, _variants, ...e }) => {
+                        const variants = parseVariants(_variants);
+                        return { ...e, variants, tag: variants[0] || '', alt_tag: '' };
+                      }),
+                    }
               ),
             }
       ),
@@ -225,6 +262,25 @@ const saveExerciseEditor = async () => {
   }
 };
 
+// (normTag/lastSetsForTag moram aqui em cima porque a sessão nasce já
+// na variação da última vez — rodada 16)
+const normTag = t => String(t || '').trim().toLowerCase();
+// última execução do exercício NESSA variação, em qualquer treino;
+// registros antigos sem tag contam como a variação principal (base)
+const lastSetsForTag = (name, tag, baseTag) => {
+  const alvoNome = name.trim().toLowerCase();
+  const alvoTag = normTag(tag);
+  const ehBase = alvoTag === normTag(baseTag);
+  for (const w of workouts.value) {
+    const ex = (w.data?.exercises || []).find(e => {
+      if (String(e.name || '').trim().toLowerCase() !== alvoNome) return false;
+      const t = normTag(e.tag);
+      return t === alvoTag || (ehBase && !t);
+    });
+    if (ex?.sets?.length) return ex.sets;
+  }
+  return null;
+};
 // sessão em andamento (programa OU ficha avulsa) — nada salvo até concluir
 const session = ref(null);
 const savingSession = ref(false);
@@ -234,12 +290,22 @@ const startProgramSession = sessionDef => {
   const cycle = programCycle.value;
   const lastRecord = lastSessionRecord(workouts.value, prog.id, sessionDef.key);
   const exercises = (sessionDef.exercises || []).map(p => {
-    const last = lastExerciseSets(lastRecord, p.name);
+    const eq = equipmentOf(p);
+    // a chavinha nasce na variação usada da ÚLTIMA vez (se ainda existir)
+    const lastEntry = (lastRecord?.data?.exercises || []).find(e => e.name === p.name);
+    const startTag =
+      lastEntry?.tag && eq.options.some(o => normTag(o) === normTag(lastEntry.tag))
+        ? eq.options.find(o => normTag(o) === normTag(lastEntry.tag))
+        : eq.base;
+    const last = eq.options.length > 1
+      ? lastSetsForTag(p.name, startTag, eq.base)
+      : lastExerciseSets(lastRecord, p.name);
     return {
       name: p.name,
-      tag: p.tag,
-      baseTag: p.tag || '',
-      altTag: p.alt_tag || '',
+      displayName: eq.options.length > 1 ? nameWithoutEquipment(p.name) : p.name,
+      tag: startTag,
+      baseTag: eq.base,
+      options: eq.options,
       presc: p,
       method: p.method,
       scheme: p.scheme,
@@ -437,28 +503,12 @@ const copyPrev = set => {
 };
 const fmtPrev = prev => `${String(prev.load ?? '').replace('.', ',')}×${prev.reps ?? ''}`;
 
-// ═══ CHAVINHA DE VARIAÇÃO (rodada 13): halteres ⇄ barra etc. ════════
-// A prescrição tem tag (variação A) e alt_tag (variação B, no editor ✎).
-// Trocar a chavinha re-prefill as roletas com a última execução DAQUELA
-// variação (carga de barra ≠ carga de halter) e recalcula meta/alvos.
-// O registro salva a variação usada (out.tag) pra busca futura.
-const normTag = t => String(t || '').trim().toLowerCase();
-// última execução do exercício NESSA variação, em qualquer treino;
-// registros antigos sem tag contam como a variação principal (base)
-const lastSetsForTag = (name, tag, baseTag) => {
-  const alvoNome = name.trim().toLowerCase();
-  const alvoTag = normTag(tag);
-  const ehBase = alvoTag === normTag(baseTag);
-  for (const w of workouts.value) {
-    const ex = (w.data?.exercises || []).find(e => {
-      if (String(e.name || '').trim().toLowerCase() !== alvoNome) return false;
-      const t = normTag(e.tag);
-      return t === alvoTag || (ehBase && !t);
-    });
-    if (ex?.sets?.length) return ex.sets;
-  }
-  return null;
-};
+// ═══ CHAVINHA DE EQUIPAMENTO (rodada 13 → N opções na 16) ═══════════
+// As opções vêm de equipmentOf (lista `variants` da prescrição ou, sem
+// lista, sugeridas pelo nome: barra | halteres | máquina…). Trocar a
+// chavinha re-prefill as roletas com a última execução DAQUELA variação
+// (carga de barra ≠ carga de halter) e recalcula meta/alvos. O registro
+// salva a variação usada (out.tag) pra busca futura.
 const switchVariation = (ex, tag) => {
   if (normTag(ex.tag) === normTag(tag)) return;
   ex.tag = tag;
@@ -488,6 +538,10 @@ const fmtTarget = t =>
 // inteiro (qualquer treino em que o nome apareceu) — o motor compara.
 const extraOpen = ref(false);
 const extraName = ref('');
+// técnica do extra (rodada 16): o exercício nasce pré-configurado
+// (séries/faixas/descanso) e o motor calcula meta e alvos como no programa
+const extraMethodKey = ref('sets');
+const extraPreset = computed(() => extraMethod(extraMethodKey.value));
 const EXTRA_COMUNS = [
   'Crucifixo na máquina',
   'Panturrilha em pé',
@@ -515,17 +569,24 @@ const extraSuggestions = computed(() => {
     .filter(n => !inSession.has(n.trim().toLowerCase()))
     .sort((a, b) => a.localeCompare(b));
 });
-// última vez deste exercício em QUALQUER treino registrado
-const lastAnySets = name => {
+// última vez deste exercício em QUALQUER treino registrado (séries + técnica)
+const lastAnyEntry = name => {
   const alvo = name.trim().toLowerCase();
   for (const w of workouts.value) {
     const ex = (w.data?.exercises || []).find(
       e => String(e.name || '').trim().toLowerCase() === alvo
     );
-    if (ex?.sets?.length) return ex.sets;
+    if (ex?.sets?.length) return ex;
   }
   return null;
 };
+// escolheu um exercício já feito → a técnica da última vez vem selecionada
+watch(extraName, name => {
+  const entry = name?.trim() ? lastAnyEntry(name) : null;
+  if (entry?.method && EXTRA_METHODS.some(m => m.key === entry.method)) {
+    extraMethodKey.value = entry.method;
+  }
+});
 const addExtraExercise = () => {
   const name = extraName.value.trim();
   if (!name || !session.value) return;
@@ -537,25 +598,31 @@ const addExtraExercise = () => {
     useAlert('Esse exercício já está no treino de hoje.');
     return;
   }
-  const last = lastAnySets(name);
-  const sets = last
-    ? last.map(s => ({
-        load: String(s.load ?? '').replace('.', ','),
-        reps: String(s.reps ?? ''),
-        prev: { load: s.load, reps: s.reps },
-        range: '',
-      }))
-    : Array.from({ length: 3 }, () => ({ load: '', reps: '', prev: null, range: '' }));
+  const preset = extraPreset.value;
+  const presc = { name, ...JSON.parse(JSON.stringify(preset.presc)) };
+  const entry = lastAnyEntry(name);
+  // a comparação HOJE × última só vale na MESMA técnica (rest-pause não
+  // se compara com séries retas) — técnica nova = referência no hint
+  const sameMethod = entry && (entry.method || 'sets') === presc.method;
+  const last = sameMethod ? entry.sets : null;
+  let hint;
+  if (last) hint = targetHint(presc, last);
+  else if (entry) {
+    hint = `Nova técnica (${preset.label}) — da última vez, em ${
+      METHOD_LABELS[entry.method || 'sets']
+    }: ${fmtSets(entry.sets)}. Encontre a carga nas faixas.`;
+  } else hint = `Extra em ${preset.label} — primeira vez, encontre a carga nas faixas.`;
   session.value.exercises.push({
     name,
     extra: true,
-    method: 'sets',
-    scheme: `${sets.length} séries`,
-    presc: { sets: [] },
+    method: presc.method,
+    scheme: presc.scheme,
+    rest: presc.rest,
+    presc,
     last,
-    hint: last ? targetHint({ sets: [] }, last) : 'Exercício extra — primeira vez, encontre a carga.',
-    targets: setTargets({ sets: [] }, last),
-    sets,
+    hint,
+    targets: setTargets(presc, last),
+    sets: buildTodaySets(presc, last),
   });
   extraName.value = '';
   extraOpen.value = false;
@@ -801,9 +868,9 @@ const workoutSummary = w => {
 };
 
 const VERDICT_CHIPS = {
-  progress: { label: '▲', color: '#059669', title: 'progrediu' },
-  tie: { label: '▬', color: '#94A3B8', title: 'empatou' },
-  regress: { label: '▼', color: '#DC2626', title: 'regrediu' },
+  progress: { label: '▲', color: VERDE_OK, title: 'progrediu' },
+  tie: { label: '▬', color: CINZA, title: 'empatou' },
+  regress: { label: '▼', color: VERMELHO, title: 'regrediu' },
 };
 
 // ═══ DIETA ══════════════════════════════════════════════════════════
@@ -884,10 +951,10 @@ const dayTotals = computed(() => {
   return totals;
 });
 const MACROS = [
-  { key: 'kcal', label: 'Calorias', suffix: ' kcal', cor: OURO },
-  { key: 'protein', label: 'Proteína', suffix: 'g', cor: VERDE },
-  { key: 'carbs', label: 'Carbo', suffix: 'g', cor: AZUL },
-  { key: 'fat', label: 'Gordura', suffix: 'g', cor: ROSA },
+  { key: 'kcal', label: 'Calorias', suffix: ' kcal', cor: LARANJA },
+  { key: 'protein', label: 'Proteína', suffix: 'g', cor: ROYAL },
+  { key: 'carbs', label: 'Carbo', suffix: 'g', cor: ROYAL_CLARO },
+  { key: 'fat', label: 'Gordura', suffix: 'g', cor: LARANJA_CLARO },
 ];
 const macroPct = key => {
   const target = Number(dietCfg.value.targets?.[key]) || 0;
@@ -1111,7 +1178,7 @@ onMounted(async () => {
       <div class="flex items-center gap-3 flex-wrap mb-5">
         <span
           class="w-9 h-9 rounded-xl flex items-center justify-center"
-          :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+          :style="{ background: GRAD_NOITE }"
         >
           <span class="i-lucide-heart-pulse text-white text-lg" />
         </span>
@@ -1126,27 +1193,27 @@ onMounted(async () => {
       <template v-else>
         <!-- KPIs -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          <DashKpi label="Treinos (7 dias)" :value="treinos7" sub="últimos 7 dias" :from="VERDE_ESCURO" :to="VERDE" />
+          <DashKpi label="Treinos (7 dias)" :value="treinos7" sub="últimos 7 dias" :from="ROYAL_NOITE" :to="ROYAL" />
           <DashKpi
             label="Sequência"
             :value="streak"
             :sub="streak === 1 ? 'dia seguido' : 'dias seguidos'"
-            :from="'#92400E'"
-            :to="OURO"
+            :from="LARANJA_ESCURO"
+            :to="LARANJA"
           />
           <DashKpi
             label="Peso atual"
             :value="latestWeight === null ? '—' : `${fmtNum(latestWeight)} kg`"
             sub="última medição"
-            :from="'#0B4A82'"
-            :to="AZUL"
+            :from="ROYAL_PROFUNDO"
+            :to="ROYAL_CLARO"
           />
           <DashKpi
             label="Variação (30d)"
             :value="weightDelta30 === null ? '—' : `${weightDelta30 > 0 ? '+' : ''}${fmtNum(weightDelta30)} kg`"
             sub="peso vs 30 dias atrás"
-            :from="'#5B21B6'"
-            :to="ROXO"
+            :from="LARANJA_VIVO"
+            :to="LARANJA_CLARO"
           />
         </div>
 
@@ -1157,7 +1224,7 @@ onMounted(async () => {
             :key="t.key"
             class="h-9 px-4 rounded-full text-xs font-bold flex items-center gap-1.5 border"
             :class="tab === t.key ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-            :style="tab === t.key ? { background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` } : {}"
+            :style="tab === t.key ? { background: GRAD_ROYAL } : {}"
             @click="goTab(t.key)"
           >
             <span :class="t.icon" /> {{ t.label }}
@@ -1176,7 +1243,7 @@ onMounted(async () => {
                   :key="p.id"
                   class="h-7 px-2.5 rounded-full text-[11px] font-medium border"
                   :class="p.active ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                  :style="p.active ? { background: VERDE } : {}"
+                  :style="p.active ? { background: ROYAL } : {}"
                   @click="setActiveProgram(p)"
                 >
                   {{ p.id === 'warrior24' ? '24 semanas' : 'Rotina Bônus' }}
@@ -1199,7 +1266,7 @@ onMounted(async () => {
                 <button
                   class="h-11 px-4 rounded-xl text-xs font-bold flex items-center gap-2 border"
                   :class="s.key === nextKey ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                  :style="s.key === nextKey ? { background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` } : {}"
+                  :style="s.key === nextKey ? { background: GRAD_ROYAL } : {}"
                   @click="startProgramSession(s)"
                 >
                   <span class="i-lucide-play" />
@@ -1221,7 +1288,7 @@ onMounted(async () => {
           <!-- Editor de exercícios da prescrição -->
           <div v-if="exEditor" class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
-              <span class="text-sm font-bold" :style="{ color: VERDE }">✎ {{ exEditor.title }}</span>
+              <span class="text-sm font-bold" :style="{ color: ROYAL }">✎ {{ exEditor.title }}</span>
               <button
                 class="h-8 px-3 rounded-lg text-xs text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
                 @click="exEditor = null"
@@ -1230,10 +1297,10 @@ onMounted(async () => {
               </button>
             </div>
             <p class="text-[11px] text-n-slate-10 mb-3">
-              <b>Variação</b> = o jeito que você faz (halteres, barra, máquina…). Preenchendo
-              <b>A e B</b>, o treino ganha uma <b>chavinha A ⇄ B</b> — cada variação guarda as
-              próprias cargas. <b>Renomear</b> vale como substituição: o exercício novo começa
-              histórico do zero.
+              <b>Chavinha</b> = as opções de equipamento do exercício, separadas por <b>|</b>
+              (ex.: <b>barra | halteres | máquina</b>) — a 1ª é a principal e cada uma guarda as
+              próprias cargas. Vazio = opções automáticas pelo nome; só 1 opção = sem chavinha.
+              <b>Renomear</b> vale como substituição: o exercício novo começa histórico do zero.
             </p>
             <div class="flex flex-col gap-2 mb-3">
               <div
@@ -1250,19 +1317,12 @@ onMounted(async () => {
                   style="min-width: 11rem; margin-bottom: 0"
                 />
                 <input
-                  v-model="row.tag"
+                  v-model="row._variants"
                   type="text"
-                  placeholder="variação A (ex.: halteres)"
+                  placeholder="chavinha: barra | halteres | máquina"
+                  title="Opções da chavinha separadas por | — vazio = automático pelo nome; 1 opção = sem chavinha"
                   class="h-9 rounded-lg border border-dashed border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-11"
-                  style="width: 9rem; margin-bottom: 0"
-                />
-                <input
-                  v-model="row.alt_tag"
-                  type="text"
-                  placeholder="variação B (ex.: barra)"
-                  title="Preenchendo as duas variações, o treino ganha a chavinha A ⇄ B"
-                  class="h-9 rounded-lg border border-dashed border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-11"
-                  style="width: 9rem; margin-bottom: 0"
+                  style="width: 15rem; margin-bottom: 0"
                 />
                 <span class="text-[10px] text-n-slate-10">{{ row.scheme }}</span>
                 <button
@@ -1283,7 +1343,7 @@ onMounted(async () => {
               </button>
               <button
                 class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
-                :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+                :style="{ background: GRAD_ROYAL }"
                 :disabled="savingConfig"
                 @click="saveExerciseEditor"
               >
@@ -1295,7 +1355,7 @@ onMounted(async () => {
           <!-- Sessão em andamento -->
           <div v-if="session" class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
-              <span class="text-sm font-bold" :style="{ color: VERDE }">{{ session.plan_name }}</span>
+              <span class="text-sm font-bold" :style="{ color: ROYAL }">{{ session.plan_name }}</span>
               <button
                 class="h-8 px-3 rounded-lg text-xs text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
                 @click="session = null"
@@ -1316,18 +1376,44 @@ onMounted(async () => {
               <span
                 v-if="session.mode === 'program' && session.week"
                 class="px-2 py-0.5 rounded-full text-[10px] font-bold text-white"
-                :style="{ background: VERDE }"
+                :style="{ background: ROYAL }"
               >
                 Semana {{ session.week }}
               </span>
               <span class="text-[10px] text-n-slate-10">treinou outro dia? troque a data</span>
             </div>
 
-            <p class="text-[11px] text-n-slate-10 mb-3">
-              <b>Role as roletas</b> até o valor de hoje: <b>carga (kg) × repetições</b> — elas
-              já vêm na última execução. O chip cinza ao lado é o da <b>última vez</b>;
-              tocar nele traz a roleta de volta pra esse valor.
-            </p>
+            <!-- modo de entrada (rodada 16): roletas ou digitar -->
+            <div class="flex items-center justify-between gap-2 flex-wrap mb-3">
+              <p class="text-[11px] text-n-slate-10 flex-1" style="min-width: 12rem">
+                <template v-if="inputMode === 'wheel'">
+                  <b>Role as roletas</b> até o valor de hoje: <b>carga (kg) × reps</b> — já vêm na
+                  última execução. O chip cinza é o da <b>última vez</b>; tocar nele traz a roleta de volta.
+                </template>
+                <template v-else>
+                  <b>Digite</b> carga (kg) × reps de cada série — as caixinhas já vêm com a última
+                  execução. O chip cinza é o da <b>última vez</b>; tocar nele recoloca o valor.
+                </template>
+              </p>
+              <span class="hub-switch shrink-0" title="Como você prefere lançar as séries">
+                <button
+                  class="hub-switch-opt"
+                  :class="{ 'is-on': inputMode === 'wheel' }"
+                  :style="inputMode === 'wheel' ? { background: ROYAL } : {}"
+                  @click="setInputMode('wheel')"
+                >
+                  🎡 Roletas
+                </button>
+                <button
+                  class="hub-switch-opt"
+                  :class="{ 'is-on': inputMode === 'type' }"
+                  :style="inputMode === 'type' ? { background: ROYAL } : {}"
+                  @click="setInputMode('type')"
+                >
+                  ⌨️ Digitar
+                </button>
+              </span>
+            </div>
 
             <!-- 1 exercício ≈ 1 tela no celular (pedido 30/08): o card
                  ocupa ~80% do viewport e o scroll "trava" nele — a tela
@@ -1335,11 +1421,11 @@ onMounted(async () => {
             <div v-for="ex in session.exercises" :key="ex.name" class="hub-ex-card mb-5 rounded-2xl border border-n-weak p-4 sm:p-5">
               <div class="flex items-start justify-between gap-2 mb-1">
                 <h3 class="text-lg font-extrabold leading-snug text-n-slate-12">
-                  {{ ex.name }}
+                  {{ ex.displayName || ex.name }}
                   <span
                     v-if="ex.extra"
                     class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold border border-dashed align-middle"
-                    :style="{ color: OURO, borderColor: OURO }"
+                    :style="{ color: LARANJA, borderColor: LARANJA }"
                   >
                     extra
                   </span>
@@ -1357,13 +1443,13 @@ onMounted(async () => {
                 <!-- chavinha de variação (halteres ⇄ barra): troca o
                      equipamento de HOJE e re-prefill com a última
                      execução daquela variação -->
-                <span v-if="ex.altTag" class="hub-switch">
+                <span v-if="ex.options?.length > 1" class="hub-switch">
                   <button
-                    v-for="t in [ex.baseTag, ex.altTag]"
+                    v-for="t in ex.options"
                     :key="t"
                     class="hub-switch-opt"
                     :class="{ 'is-on': normTag(ex.tag) === normTag(t) }"
-                    :style="normTag(ex.tag) === normTag(t) ? { background: VERDE } : {}"
+                    :style="normTag(ex.tag) === normTag(t) ? { background: ROYAL } : {}"
                     @click="switchVariation(ex, t)"
                   >
                     {{ t }}
@@ -1378,7 +1464,7 @@ onMounted(async () => {
                 <span
                   v-if="ex.method"
                   class="px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
-                  :style="{ background: ex.method === 'rest_pause' ? ROXO : ex.method === 'pyramid' ? OURO : AZUL }"
+                  :style="{ background: ex.method === 'rest_pause' ? LARANJA_VIVO : ex.method === 'pyramid' ? LARANJA : ROYAL }"
                   :title="METHOD_HINTS[ex.method]"
                 >
                   {{ METHOD_LABELS[ex.method] || ex.method }}
@@ -1401,7 +1487,7 @@ onMounted(async () => {
                   v-if="ex.hint"
                   class="text-xs font-medium"
                   :class="ex.targets?.length ? 'mb-2' : ''"
-                  :style="{ color: ex.hint.startsWith('🎯') ? OURO : VERDE }"
+                  :style="{ color: ex.hint.startsWith('🎯') ? LARANJA : ROYAL }"
                 >
                   {{ ex.hint }}
                 </p>
@@ -1445,7 +1531,7 @@ onMounted(async () => {
                     </button>
                     <span v-else class="text-[10px] text-n-slate-10">1ª vez</span>
                   </div>
-                  <div class="flex items-center gap-2 shrink-0">
+                  <div v-if="inputMode === 'wheel'" class="flex items-center gap-2 shrink-0">
                     <WheelInput
                       v-model="set.load"
                       :step="0.5"
@@ -1460,6 +1546,25 @@ onMounted(async () => {
                       :step="1"
                       :max="30"
                       :placeholder="set.prev ? String(set.prev.reps) : set.range || 'reps'"
+                      style="width: 3.6rem"
+                    />
+                  </div>
+                  <div v-else class="flex items-center gap-2 shrink-0">
+                    <input
+                      v-model="set.load"
+                      type="text"
+                      inputmode="decimal"
+                      :placeholder="set.prev ? String(set.prev.load).replace('.', ',') : 'kg'"
+                      class="hub-type-input"
+                      style="width: 5rem"
+                    />
+                    <span class="text-base text-n-slate-10">×</span>
+                    <input
+                      v-model="set.reps"
+                      type="text"
+                      inputmode="numeric"
+                      :placeholder="set.prev ? String(set.prev.reps) : set.range || 'reps'"
+                      class="hub-type-input"
                       style="width: 3.6rem"
                     />
                   </div>
@@ -1483,36 +1588,54 @@ onMounted(async () => {
               >
                 ➕ Adicionar exercício extra no treino de hoje
               </button>
-              <div
-                v-else
-                class="rounded-xl border border-dashed border-n-weak p-3 flex items-center gap-2 flex-wrap"
-              >
-                <input
-                  v-model="extraName"
-                  type="text"
-                  list="hub-extra-exercicios"
-                  placeholder="Ex.: Crucifixo na máquina, Panturrilha em pé…"
-                  class="flex-1 h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-                  style="min-width: 12rem; margin-bottom: 0"
-                  @keyup.enter="addExtraExercise"
-                />
-                <datalist id="hub-extra-exercicios">
-                  <option v-for="n in extraSuggestions" :key="n" :value="n" />
-                </datalist>
-                <button
-                  class="h-9 px-3 rounded-lg text-xs font-bold text-white disabled:opacity-60"
-                  :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
-                  :disabled="!extraName.trim()"
-                  @click="addExtraExercise"
-                >
-                  Adicionar
-                </button>
-                <button
-                  class="h-9 px-2 rounded-lg text-xs text-n-slate-10 border border-n-weak hover:bg-n-alpha-1"
-                  @click="extraOpen = false; extraName = ''"
-                >
-                  ✕
-                </button>
+              <div v-else class="rounded-xl border border-dashed border-n-weak p-3">
+                <div class="flex items-center gap-2 flex-wrap mb-2">
+                  <input
+                    v-model="extraName"
+                    type="text"
+                    list="hub-extra-exercicios"
+                    placeholder="Ex.: Crucifixo na máquina, Panturrilha em pé…"
+                    class="flex-1 h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
+                    style="min-width: 12rem; margin-bottom: 0"
+                    @keyup.enter="addExtraExercise"
+                  />
+                  <datalist id="hub-extra-exercicios">
+                    <option v-for="n in extraSuggestions" :key="n" :value="n" />
+                  </datalist>
+                  <button
+                    class="h-9 px-2 rounded-lg text-xs text-n-slate-10 border border-n-weak hover:bg-n-alpha-1"
+                    @click="extraOpen = false; extraName = ''"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <!-- técnica (rodada 16): o extra já nasce pré-configurado -->
+                <p class="text-[11px] font-medium text-n-slate-11 mb-1.5">Técnica</p>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="hub-switch">
+                    <button
+                      v-for="m in EXTRA_METHODS"
+                      :key="m.key"
+                      class="hub-switch-opt"
+                      :class="{ 'is-on': extraMethodKey === m.key }"
+                      :style="extraMethodKey === m.key ? { background: m.key === 'rest_pause' ? LARANJA_VIVO : m.key === 'pyramid' ? LARANJA : ROYAL } : {}"
+                      :title="m.desc"
+                      @click="extraMethodKey = m.key"
+                    >
+                      {{ m.label }}
+                    </button>
+                  </span>
+                  <span class="text-[11px] text-n-slate-10">{{ extraPreset.desc }}</span>
+                  <div class="flex-1" />
+                  <button
+                    class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
+                    :style="{ background: GRAD_LARANJA }"
+                    :disabled="!extraName.trim()"
+                    @click="addExtraExercise"
+                  >
+                    Adicionar
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1524,8 +1647,8 @@ onMounted(async () => {
               style="margin-bottom: 12px"
             />
             <button
-              class="w-full h-11 rounded-xl text-sm font-bold text-white disabled:opacity-60"
-              :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+              class="w-full h-11 rounded-xl text-sm font-bold text-white disabled:opacity-60 shadow-lg"
+              :style="{ background: GRAD_LARANJA }"
               :disabled="savingSession"
               @click="saveSession"
             >
@@ -1543,7 +1666,7 @@ onMounted(async () => {
                   :key="t.key"
                   class="h-9 px-3 rounded-lg text-xs font-bold border"
                   :class="gridTab?.key === t.key ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                  :style="gridTab?.key === t.key ? { background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` } : {}"
+                  :style="gridTab?.key === t.key ? { background: GRAD_ROYAL } : {}"
                   @click="gridCycleKey = t.key"
                 >
                   {{ t.label }} <span class="font-normal opacity-75 text-[10px]">{{ t.sub }}</span>
@@ -1569,7 +1692,7 @@ onMounted(async () => {
                       :key="w"
                       class="text-center text-[11px] font-bold px-1 py-1.5 border-b border-n-weak"
                       :class="gridTab?.programId === 'warrior24' && w === programWeek ? '' : 'text-n-slate-11'"
-                      :style="gridTab?.programId === 'warrior24' && w === programWeek ? { color: VERDE } : {}"
+                      :style="gridTab?.programId === 'warrior24' && w === programWeek ? { color: ROYAL } : {}"
                     >
                       S{{ w }}
                       <span v-if="gridTab?.programId === 'warrior24' && w === programWeek">•</span>
@@ -1630,7 +1753,7 @@ onMounted(async () => {
               v-if="evoSeries.values.length"
               :values="evoSeries.values"
               :labels="evoSeries.labels"
-              :color="VERDE"
+              :color="ROYAL"
               :height="110"
               :format="v => `${fmtNum(v)} kg`"
             />
@@ -1650,7 +1773,7 @@ onMounted(async () => {
             >
               <span
                 class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold shrink-0"
-                :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+                :style="{ background: GRAD_ROYAL }"
               >
                 {{ fmtDay(w.record_date) }}
               </span>
@@ -1795,7 +1918,7 @@ onMounted(async () => {
                   </button>
                   <button
                     class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
-                    :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+                    :style="{ background: GRAD_ROYAL }"
                     :disabled="savingConfig"
                     @click="savePlan"
                   >
@@ -1863,7 +1986,7 @@ onMounted(async () => {
                 :key="s.id"
                 class="h-9 px-3 rounded-lg text-[11px] font-bold border"
                 :class="boxForm.seqs.includes(s.id) ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                :style="boxForm.seqs.includes(s.id) ? { background: ROXO } : {}"
+                :style="boxForm.seqs.includes(s.id) ? { background: ROYAL } : {}"
                 @click="toggleSeq(s.id)"
               >
                 {{ s.name }} <span class="font-normal opacity-75">{{ s.steps }}</span>
@@ -1871,7 +1994,7 @@ onMounted(async () => {
             </div>
             <button
               class="h-10 px-6 rounded-xl text-xs font-bold text-white disabled:opacity-60"
-              :style="{ background: `linear-gradient(135deg, #5B21B6, ${ROXO})` }"
+              :style="{ background: GRAD_NOITE }"
               :disabled="savingBox"
               @click="saveBoxing"
             >
@@ -1937,7 +2060,7 @@ onMounted(async () => {
                 </button>
                 <button
                   class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
-                  :style="{ background: `linear-gradient(135deg, #5B21B6, ${ROXO})` }"
+                  :style="{ background: GRAD_NOITE }"
                   :disabled="savingConfig"
                   @click="saveSeq"
                 >
@@ -1955,7 +2078,7 @@ onMounted(async () => {
               >
                 <div class="flex-1 min-w-0">
                   <p class="text-[11px] font-bold text-n-slate-11">{{ s.name }}</p>
-                  <p class="text-xl font-black tracking-wide" :style="{ color: ROXO }">{{ s.steps }}</p>
+                  <p class="text-xl font-black tracking-wide" :style="{ color: ROYAL }">{{ s.steps }}</p>
                   <p v-if="s.desc" class="text-[11px] text-n-slate-10">{{ s.desc }}</p>
                 </div>
                 <button
@@ -1980,7 +2103,7 @@ onMounted(async () => {
             >
               <span
                 class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold shrink-0"
-                :style="{ background: `linear-gradient(135deg, #5B21B6, ${ROXO})` }"
+                :style="{ background: GRAD_NOITE }"
               >
                 {{ fmtDay(b.record_date) }}
               </span>
@@ -2056,13 +2179,13 @@ onMounted(async () => {
               <button
                 class="w-full flex items-center gap-3 rounded-xl border p-2.5 text-left transition-colors"
                 :class="mealsDone.includes(meal.id) ? 'border-transparent' : 'border-n-weak hover:bg-n-alpha-1'"
-                :style="mealsDone.includes(meal.id) ? { background: 'rgba(16, 185, 129, 0.12)' } : {}"
+                :style="mealsDone.includes(meal.id) ? { background: 'rgba(65, 105, 225, 0.12)' } : {}"
                 :disabled="savingDiet"
                 @click="toggleMeal(meal.id)"
               >
                 <span
                   class="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs shrink-0"
-                  :style="{ background: mealsDone.includes(meal.id) ? VERDE : 'rgba(148,163,184,0.4)' }"
+                  :style="{ background: mealsDone.includes(meal.id) ? ROYAL : 'rgba(148,163,184,0.4)' }"
                 >
                   {{ mealsDone.includes(meal.id) ? '✓' : '' }}
                 </span>
@@ -2071,7 +2194,7 @@ onMounted(async () => {
                     {{ meal.name }} <span v-if="meal.time" class="font-normal text-n-slate-10">· {{ meal.time }}</span>
                   </p>
                   <p v-if="meal.desc" class="text-[11px] text-n-slate-10 truncate">{{ meal.desc }}</p>
-                  <p v-if="mealEquiv(meal)" class="text-[10px]" :style="{ color: VERDE }">
+                  <p v-if="mealEquiv(meal)" class="text-[10px]" :style="{ color: ROYAL }">
                     🍗 {{ mealEquiv(meal) }}
                   </p>
                 </div>
@@ -2112,7 +2235,7 @@ onMounted(async () => {
                 />
                 <button
                   class="h-9 px-3 rounded-lg text-xs font-bold text-white"
-                  :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+                  :style="{ background: GRAD_ROYAL }"
                   @click="addExtra"
                 >
                   Adicionar
@@ -2205,7 +2328,7 @@ onMounted(async () => {
               </button>
               <button
                 class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
-                :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+                :style="{ background: GRAD_ROYAL }"
                 :disabled="savingConfig"
                 @click="saveDietCfg"
               >
@@ -2225,7 +2348,7 @@ onMounted(async () => {
             >
               <span class="text-[11px] font-bold text-n-slate-11" style="width: 3rem">{{ fmtDay(d.record_date) }}</span>
               <div class="flex-1 h-2 rounded-full bg-n-alpha-1 overflow-hidden">
-                <div class="h-full rounded-full" :style="{ width: `${dietDayPct(d)}%`, background: VERDE }" />
+                <div class="h-full rounded-full" :style="{ width: `${dietDayPct(d)}%`, background: ROYAL }" />
               </div>
               <span class="text-[11px] text-n-slate-10" style="width: 8rem; text-align: right">
                 {{ (d.data?.meals_done || []).length }}/{{ dietCfg.meals.length }} refeições · {{ dietDayPct(d) }}%
@@ -2293,7 +2416,7 @@ onMounted(async () => {
               </label>
               <button
                 class="h-10 px-6 rounded-xl text-sm font-bold text-white disabled:opacity-60 w-full sm:w-auto"
-                :style="{ background: `linear-gradient(135deg, ${VERDE_ESCURO}, ${VERDE})` }"
+                :style="{ background: GRAD_ROYAL }"
                 :disabled="savingBody"
                 @click="saveBody"
               >
@@ -2309,7 +2432,7 @@ onMounted(async () => {
               v-if="weightSeries.values.length > 1"
               :values="weightSeries.values"
               :labels="weightSeries.labels"
-              :color="AZUL"
+              :color="ROYAL"
               :height="110"
               :format="v => `${fmtNum(v)} kg`"
             />
@@ -2323,7 +2446,7 @@ onMounted(async () => {
               <p class="text-lg font-bold text-n-slate-12">
                 {{ m.value === null ? '—' : `${fmtNum(m.value)}${m.suffix}` }}
               </p>
-              <p v-if="m.delta !== null && m.delta !== 0" class="text-[11px]" :style="{ color: m.delta > 0 ? OURO : VERDE }">
+              <p v-if="m.delta !== null && m.delta !== 0" class="text-[11px]" :style="{ color: m.delta > 0 ? LARANJA : ROYAL }">
                 {{ m.delta > 0 ? '▲' : '▼' }} {{ fmtNum(Math.abs(m.delta)) }} desde a última
               </p>
             </div>
@@ -2363,32 +2486,48 @@ onMounted(async () => {
 
 <style scoped>
 /* Cartão de vidro da meta (rodada 13): translúcido c/ blur, borda fina
-   e brilho interno — verde no dia a dia, ouro quando a meta foi batida */
+   e brilho interno — royal no dia a dia, LARANJA quando a meta foi batida */
 .hub-glass {
   background: linear-gradient(
     135deg,
-    rgba(16, 185, 129, 0.1),
-    rgba(16, 185, 129, 0.03) 45%,
+    rgba(65, 105, 225, 0.12),
+    rgba(65, 105, 225, 0.04) 45%,
     rgba(255, 255, 255, 0.04)
   );
   -webkit-backdrop-filter: blur(14px) saturate(1.5);
   backdrop-filter: blur(14px) saturate(1.5);
-  border: 1px solid rgba(16, 185, 129, 0.22);
+  border: 1px solid rgba(65, 105, 225, 0.26);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 6px 18px -12px rgba(16, 185, 129, 0.45);
+    0 6px 18px -12px rgba(65, 105, 225, 0.5);
 }
 .hub-glass-gold {
   background: linear-gradient(
     135deg,
-    rgba(212, 160, 23, 0.12),
-    rgba(212, 160, 23, 0.03) 45%,
+    rgba(255, 138, 0, 0.14),
+    rgba(255, 138, 0, 0.04) 45%,
     rgba(255, 255, 255, 0.04)
   );
-  border-color: rgba(212, 160, 23, 0.28);
+  border-color: rgba(255, 138, 0, 0.32);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 6px 18px -12px rgba(212, 160, 23, 0.5);
+    0 6px 18px -12px rgba(255, 138, 0, 0.55);
+}
+/* modo "digitar" (rodada 16): caixinha grande no lugar da roleta */
+.hub-type-input {
+  height: 3rem;
+  margin-bottom: 0;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(65, 105, 225, 0.35);
+  background: transparent;
+  text-align: center;
+  font-size: 19px;
+  font-weight: 700;
+}
+.hub-type-input:focus {
+  outline: none;
+  border-color: #4169e1;
+  box-shadow: 0 0 0 3px rgba(65, 105, 225, 0.18);
 }
 /* alvo por série dentro do vidro — tocável, leva as roletas até a meta */
 .hub-target-chip {
