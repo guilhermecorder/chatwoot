@@ -6,6 +6,7 @@ import store from 'dashboard/store';
 import { validateLoggedInRoutes } from '../helper/routeHelpers';
 import { isOnOnboardingView } from 'v3/helpers/RouteHelper';
 import AnalyticsHelper from '../helper/AnalyticsHelper';
+import { segmentoId } from '../helper/segmento';
 
 const ONBOARDING_STEPS = ['account_details', 'enrichment'];
 const routes = [...dashboard.routes];
@@ -102,9 +103,19 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
   }
 
   // tela inicial do sistema = Meu Painel
-  if (!initialLandingDone && to.name === 'home') {
+  if (!initialLandingDone && (to.name === 'home' || to.name === 'inicio_home')) {
     initialLandingDone = true;
-    return next(frontendURL(`accounts/${routeAccountId}/inicio`));
+    // HUB (segmento saude, pedido 10/09): no mundo Saúde a porta de
+    // entrada é o Meu Painel da Saúde — vale também pro atalho do
+    // iPhone salvo em /inicio. Sem mundo escolhido, o Sidebar leva ao
+    // /hub; no mundo Negócios segue o Meu Painel do negócio.
+    if (segmentoId === 'saude' && localStorage.getItem('hub_mode') === 'saude') {
+      return next(frontendURL(`accounts/${routeAccountId}/health/painel`));
+    }
+    if (to.name === 'home') {
+      return next(frontendURL(`accounts/${routeAccountId}/inicio`));
+    }
+    return next();
   }
   initialLandingDone = true;
 

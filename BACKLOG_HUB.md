@@ -12,6 +12,36 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 19 — 10/09 ✅ PORTA DE ENTRADA = MEU PAINEL DA SAÚDE (working tree)
+Feedback dele com a 11ee29e no ar: (1) ícone do iPhone ainda era o
+olho da CEVICO; (2) abrir o app caía no /inicio (painel de negócios)
+mesmo no modo Saúde.
+
+- **Ícone**: a VPS já serve a arte hub (apple-touch-icon.png md5
+  5c059c69… idêntico ao local, head c/ /brand-assets/hub/…, theme-color
+  #111C3F). O iOS grava o ícone NA HORA em que o atalho é criado e não
+  atualiza — o atalho dele é anterior à rodada 12. Solução = apagar o
+  atalho "Hub" e adicionar de novo pelo Safari. Nada a mudar no código.
+- **Entrada**: routes/index.js, guard da primeira navegação — antes só
+  `home` → /inicio. Agora `home` OU `inicio_home` (atalho do iPhone
+  salvo em /inicio) na 1ª navegação: segmento saude + hub_mode 'saude'
+  → /health/painel; sem modo → segue (Sidebar leva ao /hub); 'negocios'
+  → /inicio como antes. Import de segmentoId no router. Testado local:
+  saude+/inicio → painel, saude+/dashboard → painel, negocios+/dashboard
+  → /inicio. subiu junto com a arte nova (abaixo).
+- **ARTE NOVA EM AZUL + LARANJA** (pedido dele na sequência): símbolo
+  hub-and-spoke redesenhado — fundo gradiente royal noite→profundo→royal,
+  raios azul-claro #8FA9F5, 6 nós laranja c/ brilho, centro anel laranja
+  c/ miolo laranja-claro. Gerado por HTML/SVG + Chrome headless
+  (scratchpad/icone/*.html → square/square_badge/thumb 1024, logo/
+  logo_dark 1280×400) e reduzido c/ sips: brand-assets/hub (icon-512/192,
+  apple-touch-icon 180, favicons 16/32/96, logo_thumbnail 512 c/ cantos
+  transparentes, logo + logo_dark 640×200 c/ "HUB" noite/branco e
+  tagline laranja) + os 30 ícones da RAIZ (apple/android/ms/favicon +
+  favicon-badge c/ bolinha vermelha) no tamanho de cada arquivo; os 2
+  manifest.json → #111C3F. Ele precisa APAGAR e RECRIAR o atalho no
+  iPhone pra ver o ícone novo.
+
 ## RODADA 18 — 10/09 ✅ CHAVINHA A|B|C NAS METAS + CARROSSEL DO PROGRESSO (working tree)
 Pedido dele 10/09 (print das Metas): chavinha "Treino A/B/C" nas metas
 pra ver as metas de qualquer treino; no Progresso das cargas, "Treino A"
