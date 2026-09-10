@@ -1,4 +1,4 @@
-class CrmListener < BaseListener
+class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   # Toda nova conversa garante um card no funil de entrada do CRM.
   # O card nasce na primeira coluna (menor position) do primeiro pipeline;
   # se o contato já tem card nesse pipeline, nada acontece.
@@ -44,6 +44,10 @@ class CrmListener < BaseListener
     # tarefa de revisão aberta, ou pedido de remarcar/cancelar de quem tem
     # consulta futura — roda MESMO sem card no funil
     handle_scheduler_recheck(message, contact)
+
+    # ✅ confirmação do lembrete D-1 (item 156): "sim/confirmo" de quem
+    # recebeu o lembrete da véspera → marca a consulta como confirmada
+    handle_appointment_confirmation(message, contact)
 
     # 2 consultas leves por mensagem, indexadas — barato mesmo em produção
     stage_ids = Crm::Contact.where(contact_id: contact.id).pluck(:stage_id).compact
@@ -95,6 +99,64 @@ class CrmListener < BaseListener
     Crm::SchedulerRecheckJob.set(wait: 20.seconds).perform_later(message.conversation_id)
   rescue StandardError => e
     Rails.logger.error "[CrmListener] releitura do Secretário: #{e.message}"
+  end
+
+  # ✅ confirmação do lembrete D-1 (item 156): só age em quem TEM lembrete
+  # enviado e consulta de hoje/amanhã ainda não confirmada — por isso um
+  # "sim" solto de outra conversa não marca nada por engano
+  CONFIRM_WORDS = Regexp.union(
+    /\b(sim|s|confirmo|confirmado|confirmada|confirmar|estarei)\b/i,
+    /\b(vou\s+sim|pode\s+confirmar|presenca\s+confirmada|ok|okay|blz|beleza|combinado|certo)\b/i
+  )
+
+  def handle_appointment_confirmation(message, contact) # rubocop:disable Metrics/CyclomaticComplexity
+    return unless message.message_type == 'incoming'
+    return unless confirmation_text?(message.content)
+
+    marks = (contact.additional_attributes || {})['cevico_appt_reminders'] || {}
+    return if marks.empty?
+
+    task = pending_confirmation_task(contact, marks)
+    return if task.nil?
+
+    record_confirmation(message, contact, task)
+  rescue StandardError => e
+    Rails.logger.error "[CrmListener] confirmação de consulta: #{e.message}"
+  end
+
+  def confirmation_text?(raw)
+    return true if raw.to_s.include?('👍')
+
+    text = raw.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase.strip
+    text.present? && text.match?(CONFIRM_WORDS)
+  end
+
+  # a consulta de hoje/amanhã que RECEBEU o lembrete D-1 e ainda não foi
+  # confirmada — sem lembrete enviado, um "sim" solto não marca nada
+  def pending_confirmation_task(contact, marks)
+    today = ActiveSupport::TimeZone['America/Sao_Paulo'].now.beginning_of_day
+    contact.account.tasks
+           .where(id: marks.keys.map(&:to_i), task_type: 'consulta', canceled_at: nil)
+           .where(due_at: today..(today + 2.days))
+           .where(attendance: [nil, ''])
+           .order(:due_at)
+           .find { |t| marks[t.id.to_s]['d1'].present? && marks[t.id.to_s]['confirmed'].blank? }
+  end
+
+  def record_confirmation(message, contact, task)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      all = attrs['cevico_appt_reminders'] || {}
+      (all[task.id.to_s] ||= {})['confirmed'] = Time.current.iso8601
+      attrs.merge('cevico_appt_reminders' => all)
+    end
+    dia = task.due_at.in_time_zone(ActiveSupport::TimeZone['America/Sao_Paulo'])
+    message.conversation.messages.create!(
+      account_id: contact.account_id,
+      inbox_id: message.conversation.inbox_id,
+      message_type: :outgoing,
+      private: true,
+      content: "✅ Paciente CONFIRMOU a consulta de #{dia.strftime('%d/%m às %H:%M')} respondendo ao lembrete."
+    )
   end
 
   def recheck_recently?(contact)

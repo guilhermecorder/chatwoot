@@ -199,6 +199,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { followup_hours: hours });
   }
 
+  // 📅 lembretes do dia da consulta D-1/D-0 (Automações → Robôs, item 156)
+  updateAppointmentReminders(reminders) {
+    return axios.post(`${this.url}/settings/update_agenda`, { appointment_reminders: reminders });
+  }
+
   // responsável por painel do Meu Painel (Configurações → Painéis)
   updatePanelOwners(panelOwners) {
     return axios.post(`${this.url}/settings/update_agenda`, { panel_owners: panelOwners });

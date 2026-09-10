@@ -1693,6 +1693,109 @@ const saveFollowupHours = async (start, end) => {
   }
 };
 
+// 📅 LEMBRETES DO DIA DA CONSULTA (item 156, pacote comparecimento):
+// D-1 = véspera pedindo confirmação por resposta · D-0 = no dia (ex.: 07h).
+// Cada régua: hora, caixa do WhatsApp e mensagem modelo ({{hora}} e
+// {{unidade}} nas variáveis viram o dado da consulta; {{contact.name}} = nome)
+const REMINDER_DEFAULTS = {
+  d1: { enabled: false, hour: 10, inbox_id: null, template_params: null, message_preview: '' },
+  d0: { enabled: false, hour: 7, inbox_id: null, template_params: null, message_preview: '' },
+};
+const REMINDER_LABELS = { d1: '📨 Véspera (D-1) — pede confirmação', d0: '☀️ No dia (D-0) — o lembrete da manhã' };
+const apptReminders = ref(JSON.parse(JSON.stringify(REMINDER_DEFAULTS)));
+const reminderTemplates = ref({ d1: [], d0: [] });
+const reminderTplName = ref({ d1: '', d0: '' });
+const reminderVars = ref({ d1: {}, d0: {} });
+const savingReminders = ref(false);
+
+const loadReminderTemplates = async (k, inboxId) => {
+  if (!inboxId) return;
+  try {
+    const data = await store.dispatch('crm/fetchWhatsappTemplates', inboxId);
+    reminderTemplates.value[k] = Array.isArray(data) ? data : [];
+  } catch {
+    reminderTemplates.value[k] = [];
+  }
+};
+watch(
+  settings,
+  s => {
+    const cfgAll = s?.appointment_reminders;
+    if (!cfgAll) return;
+    ['d1', 'd0'].forEach(k => {
+      const c = cfgAll[k];
+      if (!c) return;
+      apptReminders.value[k] = {
+        enabled: !!c.enabled,
+        hour: c.hour ?? REMINDER_DEFAULTS[k].hour,
+        inbox_id: c.inbox_id || null,
+        template_params: c.template_params || null,
+        message_preview: c.message_preview || '',
+      };
+      reminderTplName.value[k] = c.template_params?.name || '';
+      reminderVars.value[k] = { ...(c.template_params?.processed_params?.body || {}) };
+      if (c.inbox_id) loadReminderTemplates(k, c.inbox_id);
+    });
+  },
+  { immediate: true }
+);
+const whatsappInboxesRobos = computed(() =>
+  (inboxes.value || []).filter(i => i.channel_type === 'Channel::Whatsapp')
+);
+const onReminderInbox = k => {
+  reminderTplName.value[k] = '';
+  reminderVars.value[k] = {};
+  loadReminderTemplates(k, apptReminders.value[k].inbox_id);
+};
+const reminderTpl = k => reminderTemplates.value[k].find(t => t.name === reminderTplName.value[k]) || null;
+const reminderBody = k => reminderTpl(k)?.components?.find(c => c.type === 'BODY')?.text || '';
+const reminderTokens = k => {
+  const s = new Set();
+  const re = /\{\{\s*(\d+)\s*\}\}/g;
+  const b = reminderBody(k);
+  let m = re.exec(b);
+  while (m !== null) {
+    s.add(m[1]);
+    m = re.exec(b);
+  }
+  return [...s];
+};
+const saveReminders = async () => {
+  const payload = {};
+  for (const k of ['d1', 'd0']) {
+    const r = apptReminders.value[k];
+    const tpl = reminderTpl(k);
+    payload[k] = { enabled: r.enabled, hour: r.hour, inbox_id: r.inbox_id };
+    if (tpl) {
+      payload[k].template_params = {
+        name: tpl.name,
+        namespace: tpl.namespace ?? '',
+        language: tpl.language,
+        category: tpl.category,
+        processed_params: { body: { ...reminderVars.value[k] } },
+      };
+      payload[k].message_preview = reminderBody(k);
+    } else if (r.template_params) {
+      // mantém a modelo já salva quando o admin não re-selecionou
+      payload[k].template_params = r.template_params;
+      payload[k].message_preview = r.message_preview;
+    }
+    if (payload[k].enabled && (!payload[k].inbox_id || !payload[k].template_params)) {
+      useAlert(`Escolha a caixa e a mensagem modelo do lembrete "${k === 'd1' ? 'véspera' : 'no dia'}" antes de ligar.`);
+      return;
+    }
+  }
+  savingReminders.value = true;
+  try {
+    await CrmAPI.updateAppointmentReminders(payload);
+    useAlert('Lembretes de consulta salvos');
+  } catch {
+    useAlert('Erro ao salvar os lembretes');
+  } finally {
+    savingReminders.value = false;
+  }
+};
+
 onMounted(async () => {
   loadStudioForms();
   if (!inboxes.value.length) store.dispatch('inboxes/get');
@@ -1845,6 +1948,69 @@ onUnmounted(() => {
             Vale para todos os robôs. Cutucada que vence fora do horário espera ele reabrir (não é descartada).
             💡 Texto simples só chega dentro da janela de 24h do WhatsApp — para envio de madrugada ou cadências em dias, prefira etapas com mensagem modelo.
           </p>
+        </div>
+
+        <!-- 📅 Lembretes do dia da consulta (item 156): D-1 véspera com
+             confirmação por resposta + D-0 no dia — pacote comparecimento -->
+        <div v-if="isAdmin" class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="i-lucide-calendar-check text-sm" style="color: #B8860B" />
+            <p class="text-sm font-semibold text-n-slate-12">Lembretes do dia da consulta</p>
+            <Spinner v-if="savingReminders" :size="14" class="text-n-brand" />
+          </div>
+          <p class="mt-1 text-[11px] text-n-slate-10 leading-relaxed">
+            Pela <b>data da consulta</b>: a véspera pede a confirmação ("responde SIM") e a manhã do dia lembra o paciente.
+            Quem responde confirmando ganha o ✅ registrado na conversa. Envio por <b>mensagem modelo</b> — chega mesmo fora da janela de 24h.
+          </p>
+          <div v-for="k in ['d1', 'd0']" :key="`rem-${k}`" class="mt-3 p-3 rounded-lg bg-n-solid-1 border border-n-weak">
+            <div class="flex items-center gap-2 flex-wrap">
+              <button
+                class="w-9 h-5 rounded-full transition-colors relative flex-shrink-0"
+                :class="apptReminders[k].enabled ? 'bg-green-500' : 'bg-n-slate-6'"
+                :title="apptReminders[k].enabled ? 'Ligado — clique para desligar' : 'Desligado — clique para ligar'"
+                @click="apptReminders[k].enabled = !apptReminders[k].enabled"
+              >
+                <span class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" :class="apptReminders[k].enabled ? 'left-[18px]' : 'left-0.5'" />
+              </button>
+              <p class="text-xs font-semibold text-n-slate-12">{{ REMINDER_LABELS[k] }}</p>
+              <span class="text-[11px] text-n-slate-11 ml-auto">enviar às</span>
+              <select v-model.number="apptReminders[k].hour" class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-2" style="width: 84px; margin-bottom: 0">
+                <option v-for="h in 24" :key="`rh-${k}-${h}`" :value="h - 1">{{ String(h - 1).padStart(2, '0') }}h</option>
+              </select>
+            </div>
+            <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <select v-model.number="apptReminders[k].inbox_id" class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2" style="margin-bottom: 0" @change="onReminderInbox(k)">
+                <option :value="null">Caixa do WhatsApp…</option>
+                <option v-for="i in whatsappInboxesRobos" :key="`ri-${k}-${i.id}`" :value="i.id">{{ i.name }}</option>
+              </select>
+              <select v-model="reminderTplName[k]" class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2" style="margin-bottom: 0">
+                <option value="">{{ apptReminders[k].template_params?.name ? `Modelo salva: ${apptReminders[k].template_params.name}` : 'Mensagem modelo…' }}</option>
+                <option v-for="t in reminderTemplates[k]" :key="`rt-${k}-${t.name}-${t.language}`" :value="t.name">{{ t.name }} ({{ t.language }})</option>
+              </select>
+            </div>
+            <template v-if="reminderTpl(k)">
+              <p class="mt-2 text-[11px] text-n-slate-10 whitespace-pre-wrap bg-n-alpha-1 rounded-lg px-2 py-1.5">{{ reminderBody(k) }}</p>
+              <div class="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <input
+                  v-for="token in reminderTokens(k)"
+                  :key="`rv-${k}-${token}`"
+                  v-model="reminderVars[k][token]"
+                  class="text-xs border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2 font-mono"
+                  style="margin-bottom: 0"
+                  :placeholder="`Variável {{${token}}} — ex.: {{contact.name}}, {{hora}} ou {{unidade}}`"
+                />
+              </div>
+              <p class="mt-1 text-[10px] text-n-slate-9">
+                Nas variáveis: <code>{{ '\{\{contact.name\}\}' }}</code> = nome ·
+                <code>{{ '\{\{hora\}\}' }}</code> = horário da consulta ·
+                <code>{{ '\{\{unidade\}\}' }}</code> = Av. Paulista/Tatuapé
+              </p>
+            </template>
+          </div>
+          <div class="mt-3 flex items-center gap-2">
+            <button class="text-sm px-4 py-2 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 disabled:opacity-60" :disabled="savingReminders" @click="saveReminders">Salvar lembretes</button>
+            <span class="text-[11px] text-n-slate-10">1 envio por consulta em cada régua — reprocessar não duplica.</span>
+          </div>
         </div>
 
         <div v-if="loadingBots" class="flex justify-center py-10"><Spinner :size="28" class="text-n-brand" /></div>

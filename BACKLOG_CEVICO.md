@@ -4926,3 +4926,44 @@ crm_opportunity_radar_job registrados.
   deploy pelo modal): criar conta de serviço no Google Cloud + ativar a
   Data API + Leitor na propriedade GA4 + colar propriedade/JSON.
 - Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto do 154).
+
+# RODADA 09/09 — item 156 (lembretes D-1/D-0 pela data da consulta)
+
+## 156. ✅ 📅 LEMBRETES DO DIA DA CONSULTA — D-1 c/ confirmação + D-0 às 07h (pedido dele 09/09: "lembrete às 07h da manhã do dia da consulta"; peça central do pacote COMPARECIMENTO aprovado 29/08)
+- Crm::AppointmentReminderSendJob NOVO + CRON NOVO (schedule.yml, */15min,
+  23 crons) = ⚠️ REIMPLANTAR SIDEKIQ no deploy. Cada régua (d1=véspera,
+  d0=no dia) age só na HORA configurada da conta; consultas do dia-alvo
+  (task_type consulta, não cancelada/arquivada, sem presença marcada, com
+  contato+telefone) recebem MENSAGEM MODELO (Crm::SendTemplateService —
+  chega fora da janela de 24h); {{hora}}/{{unidade}} nos valores das
+  variáveis viram o dado da consulta ({{contact.name}} = Liquid). Marca
+  anti-duplicata POR CONSULTA em contact.additional_attributes
+  .cevico_appt_reminders[task_id] (poda >60 entradas) — reprocessar não
+  duplica.
+- ✅ CONFIRMAÇÃO POR RESPOSTA (CrmListener): "sim/confirmo/👍/blz..."
+  (sem acento) de quem TEM lembrete D-1 enviado e consulta hoje/amanhã
+  não confirmada → marca confirmed + NOTA PRIVADA na conversa ("✅
+  Paciente CONFIRMOU a consulta de dd/mm às hh:mm"). Um "sim" de quem não
+  recebeu lembrete não marca nada. Refactor em helpers (confirmation_text?/
+  pending_confirmation_task/record_confirmation).
+- Config: agenda_config.appointment_reminders {d1,d0} c/ enabled/hour/
+  inbox_id/template_params/message_preview (sanitizada, admin); payload no
+  GET e no update_agenda. UI: cartão "📅 Lembretes do dia da consulta" na
+  aba Robôs (toggle+hora+caixa+modelo da Meta c/ variáveis e prévia, dica
+  {{hora}}/{{unidade}}; "Modelo salva: X" quando não re-seleciona).
+  CrmAPI.updateAppointmentReminders.
+- Testes: 12/12 runner c/ relógio congelado (D-1 10h → só consulta de
+  amanhã, variável "às 14:30 na Tatuapé"; idempotência na mesma hora; D-0
+  07h → consulta de hoje "às 09:15 na Av. Paulista"; 13h nada; cancelada
+  nunca; confirmação marca + nota; pergunta neutra não marca) + regressão
+  pós-refactor + HTTP round-trip da config + visual (cartão na aba Robôs
+  hidratando config salva). Config de teste limpa do banco local.
+  schedule_spec só proíbe duplicata (chave única ok).
+- TEMPLATES pra ele submeter na Meta (Utility): lembrete_d1_confirma
+  ("consulta amanhã, {{2}} — responde SIM?") e lembrete_d0_hoje ("Bom dia
+  {{1}}! Hoje é sua consulta — {{2}}"), {{1}}=contact.name,
+  {{2}}="às {{hora}} na {{unidade}}".
+- PÓS-DEPLOY DELE: aba Robôs → cartão novo → ligar D-1 (10h) e D-0 (07h) +
+  caixa + templates aprovados + Salvar.
+- ⚠️ settings_controller e api/crm.js MISTOS c/ Meta Leads — separar no
+  commit. Deploy WEB+SIDEKIQ JUNTOS (cron novo). AGUARDANDO "pode subir".

@@ -156,3 +156,11 @@ crm_creative_job:
   cron: '30 11 * * 1'
   class: 'Crm::CreativeJob'
   queue: low
+
+# 📅 Lembretes do dia da consulta (item 156): D-1 véspera c/ confirmação +
+# D-0 no dia (ex.: 07h SP) — roda a cada 15 min e cada régua só age na HORA
+# configurada da conta; marca por consulta garante 1 envio no máximo
+crm_appointment_reminder_send_job:
+  cron: '*/15 * * * *'
+  class: 'Crm::AppointmentReminderSendJob'
+  queue: low

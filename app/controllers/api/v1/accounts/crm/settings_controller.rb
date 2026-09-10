@@ -686,6 +686,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       h_end = raw['end'].to_i.clamp(1, 24)
       cfg['followup_hours'] = { 'start' => h_start, 'end' => h_end } if h_start < h_end
     end
+    # 📅 LEMBRETES DO DIA DA CONSULTA (item 156): D-1 véspera c/ confirmação
+    # + D-0 no dia (ex.: 07h) — cada régua com hora, caixa e mensagem modelo
+    if params.key?(:appointment_reminders) && Current.account_user.administrator?
+      cfg['appointment_reminders'] = sanitize_appointment_reminders(params.require(:appointment_reminders))
+    end
     crm_settings.update!(agenda_config: cfg)
     render json: {
       agenda_windows: cfg['windows'] || [],
@@ -706,8 +711,25 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       block_layout: cfg['block_layout'] || {},
       performance_metrics: cfg['performance_metrics'] || {},
       clinical_access: cfg['clinical_access'] || {},
-      followup_hours: cfg['followup_hours'] || { 'start' => 8, 'end' => 20 }
+      followup_hours: cfg['followup_hours'] || { 'start' => 8, 'end' => 20 },
+      appointment_reminders: cfg['appointment_reminders'] || {}
     }
+  end
+
+  # cada régua (d1/d0) do lembrete: liga/desliga, hora cheia, caixa do
+  # WhatsApp e a mensagem modelo (mesmo formato das Campanhas); lixo cai fora
+  def sanitize_appointment_reminders(raw)
+    %w[d1 d0].index_with do |regua|
+      r = raw[regua].is_a?(ActionController::Parameters) ? raw[regua] : ActionController::Parameters.new
+      tp = r[:template_params].is_a?(ActionController::Parameters) ? r[:template_params].permit(:name, :namespace, :language, :category, processed_params: {}).to_h : nil
+      {
+        'enabled' => ActiveModel::Type::Boolean.new.cast(r[:enabled]) == true,
+        'hour' => r[:hour].to_i.clamp(0, 23),
+        'inbox_id' => r[:inbox_id].to_i,
+        'template_params' => tp.presence,
+        'message_preview' => r[:message_preview].to_s[0, 2000].presence
+      }.compact
+    end
   end
 
   # Colunas onde o Secretário da Agenda atua: a tela manda a lista de
@@ -1068,6 +1090,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_theme: (s.agenda_config || {})['theme'],
       # 🕐 janela de envio dos robôs de follow-up (item 147; padrão 08h–20h)
       followup_hours: (s.agenda_config || {})['followup_hours'] || { 'start' => 8, 'end' => 20 },
+      # 📅 lembretes do dia da consulta D-1/D-0 (item 156)
+      appointment_reminders: (s.agenda_config || {})['appointment_reminders'] || {},
       # tabela de preços vigente (com os padrões quando não há tabela salva)
       price_table: {
         items: Cevico::PriceList.items(Current.account),
