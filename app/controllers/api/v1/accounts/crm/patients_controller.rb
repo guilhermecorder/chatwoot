@@ -13,8 +13,26 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
       timeline: timeline(contact),
       label_events: label_events(contact),
       automations: automations(contact),
-      updates: updates(contact)
+      updates: updates(contact),
+      # 🏥 ficha cirúrgica do OftalmoFácil (item 157) — só admin vê o dinheiro
+      surgeries: Current.account_user.administrator? ? oftalmofacil_surgeries(contact) : nil
     }
+  end
+
+  def oftalmofacil_surgeries(contact)
+    doctors = (CrmSetting.find_by(account: Current.account)&.agenda_config || {}).dig('oftalmofacil', 'doctors') || {}
+    Crm::OftalmofacilSurgery.where(account: Current.account, contact_id: contact.id)
+                            .order(surgery_date: :desc, id: :desc).limit(30).map do |s|
+      {
+        id: s.id, date: s.surgery_date&.iso8601, hour: s.surgery_hour, status: s.status_kind, status_label: s.status_kind_label,
+        procedure: s.procedure_name, procedure_type: s.procedure_type, eye: s.eye, clinic: s.clinic_name,
+        doctor_crm: s.doctor_crm, doctor: doctors[s.doctor_crm.to_s].presence || (s.doctor_crm.present? ? "CRM #{s.doctor_crm}" : nil),
+        amount: s.amount&.to_f, clinic_price: s.clinic_price&.to_f, profit: s.profit&.to_f, rebate: s.rebate&.to_f,
+        resultado: s.resultado.round(2), paid_amount: s.paid_amount&.to_f,
+        paid: s.paid_amount.to_f.positive? && s.paid_amount.to_f >= s.amount.to_f * 0.99,
+        cpf: s.patient_cpf, match_via: s.match_via, applied_action: s.applied_action, synced_at: s.updated_at&.iso8601
+      }
+    end
   end
 
   # POST /crm/patients/:id/update_profile — sexo/nascimento do paciente

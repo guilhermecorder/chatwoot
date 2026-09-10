@@ -204,6 +204,20 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { appointment_reminders: reminders });
   }
 
+  // 🏥 OftalmoFácil (item 157): testar a conexão só-leitura + sincronizar agora
+  testOftalmofacil() {
+    return axios.post(`${this.url}/settings/test_oftalmofacil`);
+  }
+
+  syncOftalmofacil(full = false) {
+    return axios.post(`${this.url}/settings/sync_oftalmofacil`, { full });
+  }
+
+  // 💰 Lucratividade das cirurgias (Financeiro, item 157)
+  getProfitability(params = {}) {
+    return axios.get(`${this.url}/finance/profitability`, { params });
+  }
+
   // responsável por painel do Meu Painel (Configurações → Painéis)
   updatePanelOwners(panelOwners) {
     return axios.post(`${this.url}/settings/update_agenda`, { panel_owners: panelOwners });

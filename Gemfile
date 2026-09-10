@@ -65,6 +65,9 @@ gem 'aws-actionmailbox-ses', '~> 0'
 gem 'groupdate'
 gem 'pg'
 gem 'redis'
+# CEVICO (item 157): leitura do banco MySQL do OftalmoFácil — cliente 100%
+# Ruby (nada de compilar extensão nativa nem libmysqlclient na imagem)
+gem 'ruby-mysql', require: 'mysql'
 gem 'redis-namespace'
 # super fast record imports in bulk
 gem 'activerecord-import'

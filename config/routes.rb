@@ -252,6 +252,9 @@ Rails.application.routes.draw do
               post :test_sheets
               # OftalmoFácil: conexão nativa (endereço + chave)
               post :update_oftalmofacil
+              # 🏥 item 157: testar a conexão só-leitura + sincronizar agora
+              post :test_oftalmofacil
+              post :sync_oftalmofacil
               post :update_agenda
               post :agenda_backfill
               # Configurações → Domínio (público das páginas/formulários)
@@ -347,6 +350,8 @@ Rails.application.routes.draw do
               post :update_entry
               post :delete_entry
               get :compare
+              # 🏥 item 157: lucratividade real das cirurgias (OftalmoFácil)
+              get :profitability
             end
             # Ferramentas da Academia (item 77): time lê, admin escreve
             resources :team_tools, only: [:index, :create, :update, :destroy], controller: 'team_tools'

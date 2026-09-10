@@ -10,6 +10,7 @@ import { ref, computed, onMounted, watch } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import StockTab from './StockTab.vue';
+import ProfitabilityTab from './ProfitabilityTab.vue';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
@@ -58,6 +59,8 @@ const TABS = [
   { key: 'overview', label: 'Visão geral', icon: 'i-lucide-chart-line' },
   { key: 'entries', label: 'Lançamentos', icon: 'i-lucide-list-plus' },
   { key: 'stock', label: 'Estoque', icon: 'i-lucide-package' },
+  // 🏥 item 157: lucratividade real das cirurgias (dados do OftalmoFácil)
+  { key: 'profitability', label: 'Lucratividade', icon: 'i-lucide-trending-up' },
   { key: 'compare', label: 'Comparar meses', icon: 'i-lucide-columns-2' },
 ];
 
@@ -405,7 +408,7 @@ const compareCosts = computed(() => {
       </div>
 
       <!-- período (vale para Visão geral e Lançamentos) — régua padrão CEVICO -->
-      <div v-if="tab !== 'compare' && tab !== 'stock'" class="mb-5">
+      <div v-if="tab !== 'compare' && tab !== 'stock' && tab !== 'profitability'" class="mb-5">
         <PeriodRuler v-model="period" />
         <p v-if="data?.period" class="text-[11px] text-n-slate-9 mt-2">
           Analisando: <b class="text-n-slate-11">{{ periodLabel }}</b> · {{ summary.lancamentos || 0 }} lançamento(s)
@@ -414,6 +417,7 @@ const compareCosts = computed(() => {
 
       <!-- ════════ ESTOQUE (carrega os próprios dados) ════════ -->
       <StockTab v-if="tab === 'stock'" />
+      <ProfitabilityTab v-if="tab === 'profitability'" />
 
       <SkeletonScreen v-else-if="isLoading" variant="dashboard" />
 

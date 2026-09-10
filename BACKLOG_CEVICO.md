@@ -4967,3 +4967,79 @@ crm_opportunity_radar_job registrados.
   caixa + templates aprovados + Salvar.
 - ⚠️ settings_controller e api/crm.js MISTOS c/ Meta Leads — separar no
   commit. Deploy WEB+SIDEKIQ JUNTOS (cron novo). AGUARDANDO "pode subir".
+
+# RODADA 10/09 — item 157 (integração OftalmoFácil + Lucratividade)
+
+## 157. ✅ 🏥 INTEGRAÇÃO OFTALMOFÁCIL (leitura direta do banco) + 💰 LUCRATIVIDADE (direção dele 10/09)
+- CONTEXTO: o Henrique mandou o código do OftalmoFácil (tar.gz). Autópsia
+  (agente Explore, relatório completo entregue na conversa): PHP 7.4 vanilla
+  (~60k linhas, sem testes) + API Laravel 9 pequena (só TEF); MySQL com
+  tabelas MAIÚSCULAS; é um MARKETPLACE de cirurgias — PROVIDERS = fornecedor
+  (quem indica; CEVICO = CATARATA_SP, confirmado por ele), CLINICS =
+  prestador (onde opera), SCHEDULING_ITEMS = a cirurgia com AMOUNT (valor
+  cobrado), CLINIC_PRICE (custo do prestador) e PROFIT (taxa da plataforma);
+  split Zoop/Getnet; NF SP; SEM estoque; médico = string do CRM. Achados de
+  SEGURANÇA graves no sistema dele (senhas-mestras no login, cookie forjável,
+  SQLi em 5 pontos, endpoint que despeja a base de pacientes, crons por URL
+  c/ token fixo, credenciais vivas no pacote) — comunicados a ele; pacote é
+  material sensível. Sugerido relatório de hardening como valor pro sócio.
+- DECISÕES DELE: integração por LEITURA do banco (usuário só-leitura, ZERO
+  mudança no OftalmoFácil); valor da cirurgia no CARD; ficha completa no
+  Espaço do Paciente (só admin); 🛡️ nunca voltar card adiante; realizada
+  → Pós Operatório (aceito o refino: até 30d → Cirurgia Realizada p/ rodar a
+  jornada); histórico em silêncio, só cirurgia nova/futura dispara
+  automação; valor do OF vence sempre; cancelada/ausente só etiqueta
+  (cirurgia_cancelada / falta_cirurgia); paciente inexistente é criado;
+  de-para de médicos (CRM→nome) em Configurações.
+- CONSTRUÍDO: gem ruby-mysql (100% Ruby — trilogy não compilou no container e
+  poderia quebrar o build) · migration 20260910000001
+  cevico_oftalmofacil_surgeries (espelho por item, único por account+token) ·
+  Crm::OftalmofacilSurgery · Crm::OftalmofacilSyncService (conexão
+  só-leitura c/ SET SESSION TRANSACTION READ ONLY, prepared statements,
+  probe, pull incremental por SCH_ITE_LAST_MODIFICATION em lotes de 500,
+  upsert do espelho, classificação de status pelo rótulo, casamento telefone
+  → CPF (custom_attributes.cpf) → nome exato único → cria; enriquece CPF/
+  e-mail/nome; place_card c/ 🛡️, valor, StageLog retrodatado, automações só
+  em evento recente; etiquetas leves; erros amigáveis) ·
+  Crm::OftalmofacilSyncJob + CRON */15 (24 crons) ⚠️ REIMPLANTAR SIDEKIQ ·
+  settings: update_oftalmofacil (db_host/port/name/user/password write-only,
+  provider_name, enabled, doctors) + test_oftalmofacil (probe) +
+  sync_oftalmofacil (job agora / full) + oftalmofacil_json c/ last_result ·
+  patients#show ganha surgeries (admin) · finance#profitability (receita,
+  custo, taxa, resultado, margem, ticket, resultado/cirurgia, pago,
+  agendadas, marketing rateado do inbox_investments, resultado líquido, CAC
+  por cirurgia; cortes procedimento/prestador/médico; mês a mês) · UI:
+  card OftalmoFácil repaginado no modal (banco + toggle + de-para + testar +
+  sincronizar + última rodada), aba "Lucratividade" no Financeiro
+  (ProfitabilityTab.vue, cards dopamine + cortes + mês a mês + estado vazio
+  que ensina a ligar), seção "🏥 Cirurgias no OftalmoFácil" no Espaço do
+  Paciente (admin).
+- TESTES: MariaDB de teste (container of_mysql na rede do compose) c/ o
+  schema das 11 tabelas + usuário só-leitura c/ os MESMOS grants + 6 itens
+  (5 CEVICO + 1 de outro fornecedor). Sync 14/14: probe conta 5; realizada
+  45d → Pós Operatório c/ valor 5.690 e StageLog retrodatado; realizada 5d
+  casou por TELEFONE → Cirurgia Realizada; futura casou por CPF → Cirurgia
+  Agendada + e-mail preenchido; cancelada/ausente sem card + etiqueta; CPF
+  vira chave; outro fornecedor fora; cursor; incremental 0; 🛡️ Beatriz em
+  Pós não volta (ahead=1); sem duplicar. Job grava cursor+resumo; cron
+  incremental 0. HTTP: probe, update c/ de-para, profitability (9.590 −
+  2.910 − 700 = 5.980 · 62,4% · por médico c/ nome · mensal), ficha do
+  paciente. Rubocop: novo serviço c/ disables conscientes nos métodos
+  grandes.
+- GRANTS pro Henrique (adicionar EYES à lista enviada!): SCHEDULING,
+  SCHEDULING_ITEMS, CLINICS, PROVIDERS, PROCEDURES, PROCEDURES_TYPE, EYES,
+  TB_STATUS_APPOINTMENTS, PAT_PATIENTS, PAT_SCHEDULING_LINK, TRANSACTIONS —
+  SELECT only, host = IP da VPS (72.60.159.160) + liberar no Remote MySQL.
+- ⚠️ DEPLOY: MIGRATION (backup antes) + gem nova (build normal) + CRON novo
+  (WEB+SIDEKIQ juntos). Mixed c/ Meta Leads: settings_controller, routes,
+  api/crm.js (stage parcial por hunk). AGUARDANDO "pode subir".
+- PENDENTE de confirmação do Henrique: qual campo é o preço que o paciente
+  paga vs custo do prestador (o dashboard rotula AMOUNT=receita,
+  CLINIC_PRICE=custo, PROFIT=taxa — ajustar rótulos se a leitura for outra).
+- VISUAL (conta 3) ✅: aba Lucratividade (cards dopamine + tabela por
+  procedimento + mês a mês, "Este mês" = 1 realizada R$3.900 → resultado
+  R$2.315 · 59,4%), ficha "Cirurgias no OftalmoFácil" no Espaço do Paciente
+  (grade interna em 1 coluna — cabe na coluna estreita), card no modal c/
+  "Testar conexão" → "✅ Conectou! 5 cirurgia(s) do fornecedor lá desde
+  2026-07-27". Limpeza total (espelho, contatos de teste, config local
+  resetada, container of_mysql removido). Rubocop dos arquivos novos: zero.

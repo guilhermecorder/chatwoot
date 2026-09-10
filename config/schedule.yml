@@ -164,3 +164,10 @@ crm_appointment_reminder_send_job:
   cron: '*/15 * * * *'
   class: 'Crm::AppointmentReminderSendJob'
   queue: low
+
+# 🏥 Sincronização com o OftalmoFácil (item 157): a cada 15 min, só nas contas
+# com a conexão ligada — lê o banco dele (usuário só-leitura) e trata os cards
+crm_oftalmofacil_sync_job:
+  cron: '7,22,37,52 * * * *'
+  class: 'Crm::OftalmofacilSyncJob'
+  queue: low

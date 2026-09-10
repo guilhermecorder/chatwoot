@@ -174,6 +174,13 @@ onMounted(async () => {
   n8nUrl.value    = settings.value.n8n_base_url || '';
   n8nApiKey.value = '';  // nunca pré-preenche a key por segurança
   oftalmo.value.base_url = settings.value.oftalmofacil?.base_url || '';
+  const of = settings.value.oftalmofacil || {};
+  oftalmo.value = {
+    ...oftalmo.value,
+    db_host: of.db_host || '', db_port: of.db_port || 3306, db_name: of.db_name || '', db_user: of.db_user || '',
+    db_password: '', provider_name: of.provider_name || 'CATARATA_SP', enabled: !!of.enabled,
+  };
+  oftalmoDoctors.value = Object.entries(of.doctors || {}).map(([crm, name]) => ({ crm, name }));
 
   const m = settings.value.meta_ads || {};
   meta.value = {
@@ -206,7 +213,37 @@ const aiStatus = computed(() => settings.value.ai || {});
 const sheetsStatus = computed(() => settings.value.sheets || {});
 
 // ── OftalmoFácil (conexão nativa) ──────────────────────────
-const oftalmo = ref({ base_url: '', api_key: '' });
+// item 157: a conexão real é o BANCO (usuário só-leitura) + fornecedor + de-para de médicos
+const oftalmo = ref({ base_url: '', api_key: '', db_host: '', db_port: 3306, db_name: '', db_user: '', db_password: '', provider_name: 'CATARATA_SP', enabled: false });
+const oftalmoDoctors = ref([]); // [{ crm, name }]
+const isOftalmoTesting = ref(false);
+const oftalmoTest = ref(null);
+const isOftalmoSyncing = ref(false);
+const addOftalmoDoctor = () => oftalmoDoctors.value.push({ crm: '', name: '' });
+const testOftalmo = async () => {
+  isOftalmoTesting.value = true;
+  oftalmoTest.value = null;
+  try {
+    const { data } = await CrmAPI.testOftalmofacil();
+    oftalmoTest.value = data;
+  } catch {
+    oftalmoTest.value = { ok: false, error: 'Não consegui testar agora.' };
+  } finally {
+    isOftalmoTesting.value = false;
+  }
+};
+const syncOftalmo = async full => {
+  isOftalmoSyncing.value = true;
+  try {
+    await CrmAPI.syncOftalmofacil(full);
+    useAlert(full ? 'Recarga completa iniciada em segundo plano (histórico em silêncio)' : 'Sincronização iniciada em segundo plano');
+    setTimeout(() => store.dispatch('crm/fetchSettings').catch(() => {}), 4000);
+  } catch {
+    useAlert('Erro ao iniciar a sincronização.');
+  } finally {
+    isOftalmoSyncing.value = false;
+  }
+};
 const isOftalmoSaving = ref(false);
 const oftalmoStatus = computed(() => settings.value.oftalmofacil || {});
 
@@ -216,6 +253,14 @@ const saveOftalmo = async () => {
     await CrmAPI.updateOftalmofacil({
       base_url: oftalmo.value.base_url.trim(),
       api_key: oftalmo.value.api_key.trim(),
+      db_host: oftalmo.value.db_host.trim(),
+      db_port: Number(oftalmo.value.db_port) || 3306,
+      db_name: oftalmo.value.db_name.trim(),
+      db_user: oftalmo.value.db_user.trim(),
+      db_password: oftalmo.value.db_password,
+      provider_name: oftalmo.value.provider_name.trim(),
+      enabled: oftalmo.value.enabled,
+      doctors: Object.fromEntries(oftalmoDoctors.value.filter(d => d.crm && d.name).map(d => [String(d.crm).replace(/\D/g, ''), d.name.trim()])),
     });
     oftalmo.value.api_key = ''; // nunca fica na tela depois de salvar
     await store.dispatch('crm/fetchSettings');
@@ -1091,47 +1136,93 @@ const fetchWorkflows = async () => {
 
           <div class="bg-n-alpha-1 rounded-xl p-3.5 mb-4 text-xs text-n-slate-11 space-y-1.5">
             <p>
-              Guarde aqui o <b>endereço</b> e a <b>chave da API</b> do OftalmoFácil.
-              A chave fica protegida no servidor e <b>nunca</b> volta para a tela.
+              A conexão é <b>direto no banco do OftalmoFácil</b> com um usuário <b>só-leitura</b> —
+              nada é alterado lá. A cada 15 min o CEVICO lê as cirurgias do fornecedor
+              (<b>{{ oftalmo.provider_name || 'CATARATA_SP' }}</b>), casa o paciente por telefone → CPF,
+              põe o <b>valor no card</b>, retrodata a coluna e mostra a ficha completa no Espaço do Paciente (só admin).
             </p>
             <p class="text-n-slate-9">
-              Com a conexão salva, o fluxo de dados entre os dois sistemas é ligado
-              em cima dela assim que a documentação da API for plugada.
+              🛡️ Card que já está adiante nunca volta · realizada até 30 dias → "Cirurgia Realizada", mais antiga → "Pós Operatório" ·
+              cancelada/ausente só ganham etiqueta · primeira carga é silenciosa (sem disparar automações).
             </p>
           </div>
 
-          <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="col-span-2 sm:col-span-1">
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Servidor do banco (host)</label>
+              <input v-model="oftalmo.db_host" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="ex.: 187.45.xx.xx ou mysql.dominio.com.br" />
+            </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Endereço (URL base)</label>
-              <input
-                v-model="oftalmo.base_url"
-                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
-                placeholder="https://api.oftalmofacil.com.br"
-              />
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Porta</label>
+              <input v-model="oftalmo.db_port" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="3306" />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Banco</label>
+              <input v-model="oftalmo.db_name" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="app_oftalmo" />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Usuário (só leitura)</label>
+              <input v-model="oftalmo.db_user" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="cevico_leitura" />
             </div>
             <div>
               <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
-                Chave da API
-                <span v-if="oftalmoStatus.key_set" class="text-green-600 font-normal">· já configurada (preencha só para trocar)</span>
+                Senha <span v-if="oftalmoStatus.db_password_set" class="text-green-600 font-normal">(já configurada)</span>
               </label>
-              <input
-                v-model="oftalmo.api_key"
-                type="password"
-                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
-                :placeholder="oftalmoStatus.key_set ? '••••••••••••' : 'cole a chave aqui'"
-              />
+              <input v-model="oftalmo.db_password" type="password" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" :placeholder="oftalmoStatus.db_password_set ? 'Digite para substituir' : 'senha do usuário'" />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Fornecedor (a CEVICO lá dentro)</label>
+              <input v-model="oftalmo.provider_name" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="CATARATA_SP" />
+            </div>
+            <div class="flex items-center gap-2 pt-5">
+              <button
+                class="w-9 h-5 rounded-full transition-colors relative flex-shrink-0"
+                :class="oftalmo.enabled ? 'bg-green-500' : 'bg-n-slate-6'"
+                @click="oftalmo.enabled = !oftalmo.enabled"
+              >
+                <span class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" :class="oftalmo.enabled ? 'left-[18px]' : 'left-0.5'" />
+              </button>
+              <span class="text-xs text-n-slate-12">Sincronização automática {{ oftalmo.enabled ? 'ligada' : 'desligada' }}</span>
             </div>
           </div>
 
-          <div class="flex gap-2 mt-3">
-            <button
-              class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50 transition-colors"
-              style="background: #45B5AA"
-              :disabled="isOftalmoSaving"
-              @click="saveOftalmo"
-            >
+          <!-- de-para de médicos: lá o médico é só o CRM -->
+          <div class="mt-3 rounded-lg border border-n-weak bg-n-alpha-1 p-3">
+            <div class="flex items-center gap-2 mb-1.5">
+              <p class="text-xs font-medium text-n-slate-12">🩺 Médicos (CRM → nome)</p>
+              <span class="text-[10px] text-n-slate-9">no OftalmoFácil o médico é só o número do CRM</span>
+              <button class="ml-auto text-[11px] text-n-brand hover:underline" @click="addOftalmoDoctor">+ adicionar</button>
+            </div>
+            <div v-for="(d, di) in oftalmoDoctors" :key="di" class="grid grid-cols-[110px_1fr_auto] gap-2 mb-1.5">
+              <input v-model="d.crm" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2 font-mono" placeholder="170937" />
+              <input v-model="d.name" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2" placeholder="Dr. Nome Sobrenome" />
+              <button class="i-lucide-x text-n-slate-9 hover:text-red-500 text-sm" @click="oftalmoDoctors.splice(di, 1)" />
+            </div>
+            <p v-if="!oftalmoDoctors.length" class="text-[11px] text-n-slate-9">Nenhum ainda — até preencher, a ficha mostra "CRM 170937".</p>
+          </div>
+
+          <div class="flex gap-2 mt-3 flex-wrap">
+            <button class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50 transition-colors" style="background: #45B5AA" :disabled="isOftalmoSaving" @click="saveOftalmo">
               {{ isOftalmoSaving ? 'Salvando...' : 'Salvar conexão' }}
             </button>
+            <button class="px-3 rounded-lg py-2 text-sm font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50" :disabled="isOftalmoTesting || !oftalmoStatus.configured" @click="testOftalmo">
+              {{ isOftalmoTesting ? 'Testando…' : '🔌 Testar conexão' }}
+            </button>
+            <button class="px-3 rounded-lg py-2 text-sm font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50" :disabled="isOftalmoSyncing || !oftalmoStatus.configured" @click="syncOftalmo(false)">
+              {{ isOftalmoSyncing ? 'Iniciando…' : '🔄 Sincronizar agora' }}
+            </button>
+          </div>
+          <p v-if="oftalmoTest" class="mt-2 text-xs" :class="oftalmoTest.ok ? 'text-emerald-600' : 'text-red-500'">
+            <template v-if="oftalmoTest.ok">✅ Conectou! <b>{{ oftalmoTest.total }}</b> cirurgia(s) do fornecedor lá<template v-if="oftalmoTest.first_date"> desde {{ oftalmoTest.first_date }}</template>.</template>
+            <template v-else>❌ {{ oftalmoTest.error }}</template>
+          </p>
+          <div v-if="oftalmoStatus.last_run_at" class="mt-2 text-[11px] text-n-slate-10 rounded-lg bg-n-alpha-1 px-3 py-2">
+            Última sincronização: {{ new Date(oftalmoStatus.last_run_at).toLocaleString('pt-BR') }} ·
+            <b>{{ oftalmoStatus.last_result?.pulled || 0 }}</b> lidas · <b>{{ oftalmoStatus.last_result?.moved || 0 }}</b> cards movidos ·
+            <b>{{ oftalmoStatus.last_result?.created_contacts || 0 }}</b> pacientes criados · <b>{{ oftalmoStatus.last_result?.ahead || 0 }}</b> preservados 🛡️ ·
+            <b>{{ oftalmoStatus.mirror_count || 0 }}</b> cirurgias espelhadas no total
+            <span v-if="oftalmoStatus.last_result?.error_count" class="text-red-500"> · {{ oftalmoStatus.last_result.error_count }} erro(s): {{ (oftalmoStatus.last_result.errors || [])[0] }}</span>
+            <button class="ml-2 text-n-brand hover:underline" @click="syncOftalmo(true)">recarregar tudo do zero</button>
           </div>
 
           <p v-if="oftalmoStatus.updated_at" class="text-[11px] text-n-slate-9 mt-2">

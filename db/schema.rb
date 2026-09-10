@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_28_000001) do
+ActiveRecord::Schema[7.1].define(version: 2026_09_10_000001) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -481,6 +481,47 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_28_000001) do
     t.string "period_type", default: "month", null: false
     t.index ["account_id", "period_type", "month"], name: "index_cevico_goal_plans_on_account_period_start", unique: true
     t.index ["account_id"], name: "index_cevico_goal_plans_on_account_id"
+  end
+
+  create_table "cevico_oftalmofacil_surgeries", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "contact_id"
+    t.string "item_token", null: false
+    t.integer "scheduling_id"
+    t.integer "item_id"
+    t.string "status_id"
+    t.string "status_label"
+    t.string "status_kind", default: "outro", null: false
+    t.string "patient_name"
+    t.string "patient_cpf"
+    t.string "patient_phone"
+    t.string "patient_email"
+    t.string "provider_name"
+    t.string "clinic_name"
+    t.integer "clinic_id"
+    t.string "doctor_crm"
+    t.string "procedure_name"
+    t.string "procedure_type"
+    t.string "eye"
+    t.date "surgery_date"
+    t.string "surgery_hour"
+    t.decimal "amount", precision: 12, scale: 2
+    t.decimal "clinic_price", precision: 12, scale: 2
+    t.decimal "profit", precision: 12, scale: 2
+    t.decimal "rebate", precision: 12, scale: 2
+    t.decimal "paid_amount", precision: 12, scale: 2
+    t.datetime "of_created_at"
+    t.datetime "of_modified_at"
+    t.string "match_via"
+    t.string "applied_action"
+    t.datetime "applied_at"
+    t.jsonb "raw", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "item_token"], name: "index_of_surgeries_unique_token", unique: true
+    t.index ["account_id", "status_kind"], name: "idx_on_account_id_status_kind_028c0b09a6"
+    t.index ["account_id", "surgery_date"], name: "idx_on_account_id_surgery_date_a7392a9e19"
+    t.index ["contact_id"], name: "index_cevico_oftalmofacil_surgeries_on_contact_id"
   end
 
   create_table "cevico_page_refs", force: :cascade do |t|
@@ -1857,6 +1898,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_28_000001) do
   add_foreign_key "cevico_content_items", "accounts"
   add_foreign_key "cevico_finance_entries", "accounts"
   add_foreign_key "cevico_goal_plans", "accounts"
+  add_foreign_key "cevico_oftalmofacil_surgeries", "accounts"
+  add_foreign_key "cevico_oftalmofacil_surgeries", "contacts"
   add_foreign_key "cevico_page_refs", "accounts"
   add_foreign_key "cevico_page_refs", "cevico_pages"
   add_foreign_key "cevico_page_refs", "contacts"

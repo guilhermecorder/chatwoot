@@ -24,6 +24,52 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     }
   end
 
+  # 🏥 LUCRATIVIDADE (item 157): o que sobra de verdade por cirurgia, lido do
+  # espelho do OftalmoFácil — receita (valor cobrado) − custo do prestador −
+  # taxa da plataforma = resultado CEVICO. Cortes por procedimento, prestador,
+  # médico e mês; e o marketing do período (investimento por caixa) pra ver
+  # o resultado LÍQUIDO. Cirurgias canceladas/ausentes ficam fora da conta.
+  def profitability # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    from, to = resolve_period
+    scope = Crm::OftalmofacilSurgery.where(account: Current.account).in_period(from, to)
+                                    .where(status_kind: %w[realizada agendada aguardando_pagamento])
+    rows = scope.to_a
+    doctors = (CrmSetting.find_by(account: Current.account)&.agenda_config || {}).dig('oftalmofacil', 'doctors') || {}
+    marketing = marketing_spend(from, to)
+    sums = lambda do |list|
+      receita = list.sum { |s| s.amount.to_f }
+      custo = list.sum { |s| s.clinic_price.to_f }
+      taxa = list.sum { |s| s.profit.to_f }
+      { count: list.size, receita: receita.round(2), custo: custo.round(2), taxa: taxa.round(2),
+        resultado: (receita - custo - taxa).round(2),
+        margem_pct: receita.positive? ? (((receita - custo - taxa) / receita) * 100).round(1) : nil,
+        ticket: list.any? ? (receita / list.size).round(2) : 0.0,
+        resultado_por_cirurgia: list.any? ? ((receita - custo - taxa) / list.size).round(2) : 0.0 }
+    end
+    realizadas = rows.select { |s| s.status_kind == 'realizada' }
+    summary = sums.call(realizadas)
+    summary[:pago] = realizadas.sum { |s| s.paid_amount.to_f }.round(2)
+    summary[:agendadas] = rows.count { |s| s.status_kind != 'realizada' }
+    summary[:agendadas_receita] = rows.reject { |s| s.status_kind == 'realizada' }.sum { |s| s.amount.to_f }.round(2)
+    summary[:marketing] = marketing.round(2)
+    summary[:resultado_liquido] = (summary[:resultado] - marketing).round(2)
+    summary[:custo_aquisicao_por_cirurgia] = realizadas.any? ? (marketing / realizadas.size).round(2) : nil
+    group = lambda do |key_fn, label_fn|
+      realizadas.group_by(&key_fn).map { |k, list| sums.call(list).merge(key: k.to_s, label: label_fn.call(k)) }
+                .sort_by { |h| -h[:resultado] }
+    end
+    render json: {
+      period: { from: from.iso8601, to: to.iso8601, preset: params[:preset].presence },
+      has_data: Crm::OftalmofacilSurgery.where(account: Current.account).exists?,
+      summary: summary,
+      by_procedure: group.call(->(s) { s.procedure_name.to_s.presence || 'Sem procedimento' }, ->(k) { k }),
+      by_clinic: group.call(->(s) { s.clinic_name.to_s.presence || 'Sem prestador' }, ->(k) { k }),
+      by_doctor: group.call(->(s) { s.doctor_crm.to_s.presence || '—' }, ->(k) { doctors[k].presence || (k == '—' ? 'Sem médico' : "CRM #{k}") }),
+      monthly: realizadas.group_by { |s| s.surgery_date.strftime('%Y-%m') }.sort.map { |m, list| sums.call(list).merge(month: m) },
+      note: 'Receita = valor cobrado no OftalmoFácil · Custo = repasse ao prestador · Taxa = margem da plataforma · Resultado = o que fica na CEVICO. Marketing = investimento por caixa configurado, rateado pelo período.'
+    }
+  end
+
   def create_entry
     entry = entries.new(entry_params.merge(created_by_id: Current.user.id))
     return render json: { error: entry.errors.full_messages.first }, status: :unprocessable_entity unless entry.save
@@ -87,6 +133,17 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     when 'last_month' then [(today << 1).beginning_of_month, (today << 1).end_of_month]
     else [today.beginning_of_month, today] # 'month' (padrão)
     end
+  end
+
+  # investimento em anúncios do período: soma do "investimento mensal" de
+  # cada caixa (Resultados por caixa) rateado pelos dias do período
+  def marketing_spend(from, to)
+    raw = CrmSetting.find_by(account: Current.account)&.agenda_config&.dig('inbox_investments') || {}
+    monthly_total = raw.values.sum { |v| (v.is_a?(Hash) ? v['monthly'] : v).to_f }
+    return 0.0 if monthly_total.zero?
+
+    days = (to - from).to_i + 1
+    monthly_total * (days / 30.0)
   end
 
   def totals_by_kind(scope)

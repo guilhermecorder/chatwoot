@@ -461,15 +461,47 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # ── OftalmoFácil: conexão nativa (endereço + chave da API) ─────────────────
   # A chave nunca volta na resposta (só o selo key_set); o fluxo de dados
   # liga em cima desta conexão quando a documentação da API for plugada.
-  def update_oftalmofacil # rubocop:disable Metrics/AbcSize
+  # Item 157: a conexão de verdade é o BANCO do OftalmoFácil (usuário
+  # só-leitura): host/porta/banco/usuário/senha + o nome do fornecedor
+  # (CATARATA_SP = CEVICO) + o de-para de médicos (CRM → nome) + liga/desliga.
+  def update_oftalmofacil # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
     cfg = crm_settings.agenda_config || {}
     of = cfg['oftalmofacil'] || {}
     of['base_url'] = params[:base_url].to_s.strip if params.key?(:base_url)
     of['api_key'] = params[:api_key].to_s.strip if params[:api_key].to_s.strip.present?
+    %w[db_host db_name db_user provider_name].each do |k|
+      of[k] = params[k].to_s.strip[0, 200] if params.key?(k)
+    end
+    of['db_port'] = params[:db_port].to_i.clamp(1, 65_535) if params.key?(:db_port) && params[:db_port].to_i.positive?
+    of['db_password'] = params[:db_password].to_s if params[:db_password].to_s.present? # write-only
+    of['enabled'] = ActiveModel::Type::Boolean.new.cast(params[:enabled]) == true if params.key?(:enabled)
+    if params.key?(:doctors)
+      raw = params[:doctors].respond_to?(:to_unsafe_h) ? params[:doctors].to_unsafe_h : {}
+      of['doctors'] = raw.to_h { |crm, name| [crm.to_s.gsub(/\D/, '')[0, 12], name.to_s.strip[0, 80]] }
+                         .reject { |crm, name| crm.blank? || name.blank? }
+    end
     of['updated_at'] = Time.current.iso8601
     cfg['oftalmofacil'] = of
     crm_settings.update!(agenda_config: cfg)
     render json: { oftalmofacil: oftalmofacil_json(crm_settings) }
+  end
+
+  # testa a conexão só-leitura e conta as cirurgias do fornecedor lá
+  def test_oftalmofacil
+    of = (crm_settings.agenda_config || {})['oftalmofacil'] || {}
+    return render json: { ok: false, error: 'Preencha host, banco, usuário, senha e fornecedor.' } unless Crm::OftalmofacilSyncService.configured?(of)
+
+    render json: Crm::OftalmofacilSyncService.new(account: Current.account, config: of).probe
+  end
+
+  # "Sincronizar agora": roda em segundo plano (full = recarrega tudo desde o
+  # início, silencioso; senão incremental a partir do cursor)
+  def sync_oftalmofacil
+    of = (crm_settings.agenda_config || {})['oftalmofacil'] || {}
+    return render json: { ok: false, error: 'Conexão não configurada.' } unless Crm::OftalmofacilSyncService.configured?(of)
+
+    Crm::OftalmofacilSyncJob.perform_later(Current.account.id, full: params[:full] == true)
+    render json: { ok: true, queued: true }
   end
 
   def update_sheets
@@ -1061,7 +1093,15 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     {
       base_url: of['base_url'],
       key_set: of['api_key'].present?,
-      configured: of['base_url'].present? && of['api_key'].present?,
+      # item 157: conexão de banco só-leitura (senha nunca volta)
+      db_host: of['db_host'], db_port: of['db_port'] || 3306, db_name: of['db_name'], db_user: of['db_user'],
+      db_password_set: of['db_password'].present?,
+      provider_name: of['provider_name'].presence || 'CATARATA_SP',
+      enabled: of['enabled'] == true,
+      doctors: of['doctors'] || {},
+      configured: Crm::OftalmofacilSyncService.configured?(of),
+      last_sync_at: of['last_sync_at'], last_run_at: of['last_run_at'], last_result: of['last_result'],
+      mirror_count: Crm::OftalmofacilSurgery.where(account_id: s.account_id).count,
       updated_at: of['updated_at']
     }
   end

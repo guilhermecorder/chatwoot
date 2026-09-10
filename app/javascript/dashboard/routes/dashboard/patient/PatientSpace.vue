@@ -43,6 +43,12 @@ const fetchPatient = async () => {
 
 const identity = computed(() => data.value?.identity || {});
 const indicators = computed(() => data.value?.indicators || {});
+// 🏥 ficha cirúrgica do OftalmoFácil (item 157) — o servidor só manda p/ admin
+const surgeries = computed(() => data.value?.surgeries || []);
+const surgeryStatusClass = kind =>
+  ({ realizada: 'bg-emerald-500/15 text-emerald-700', agendada: 'bg-sky-500/15 text-sky-700',
+    aguardando_pagamento: 'bg-amber-500/15 text-amber-700', cancelada: 'bg-red-500/15 text-red-600',
+    ausente: 'bg-orange-500/15 text-orange-700' }[kind] || 'bg-n-alpha-2 text-n-slate-11');
 const timeline = computed(() => data.value?.timeline || []);
 const labelEvents = computed(() => data.value?.label_events || []);
 const automations = computed(() => data.value?.automations || {});
@@ -1026,6 +1032,33 @@ watch(contactId, () => {
                 >
                   ✗</span>
               </p>
+            </div>
+          </div>
+
+          <!-- 🏥 Cirurgias no OftalmoFácil (item 157) — só admin recebe -->
+          <div v-if="isAdmin && surgeries.length" class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+            <p class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-2">
+              <span class="i-lucide-hospital text-xs" :style="{ color: theme.accent }" />
+              Cirurgias no OftalmoFácil · {{ surgeries.length }}
+              <span class="ml-auto text-[10px] font-normal text-n-slate-9">só admin</span>
+            </p>
+            <div v-for="sg in surgeries" :key="sg.id" class="rounded-lg bg-n-alpha-1 px-3 py-2 mb-1.5 last:mb-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" :class="surgeryStatusClass(sg.status)">{{ sg.status_label }}</span>
+                <span class="text-[12px] font-bold text-n-slate-12">{{ sg.procedure || 'Procedimento' }}</span>
+                <span v-if="sg.eye" class="text-[10px] text-n-slate-10">· {{ sg.eye }}</span>
+                <span class="ml-auto text-[11px] text-n-slate-11 tabular-nums">{{ sg.date ? new Date(sg.date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' }}<template v-if="sg.hour"> · {{ sg.hour }}</template></span>
+              </div>
+              <div class="mt-1.5 grid grid-cols-1 gap-y-0.5 text-[10px] text-n-slate-10">
+                <span>🏥 {{ sg.clinic || '—' }}</span>
+                <span>🩺 {{ sg.doctor || '—' }}</span>
+                <span>Valor: <b class="text-n-slate-12">{{ fmtMoney(sg.amount) }}</b></span>
+                <span>Resultado: <b :class="sg.resultado >= 0 ? 'text-emerald-600' : 'text-red-500'">{{ fmtMoney(sg.resultado) }}</b></span>
+                <span>Custo prestador: {{ fmtMoney(sg.clinic_price) }}</span>
+                <span>Taxa plataforma: {{ fmtMoney(sg.profit) }}</span>
+                <span>{{ sg.paid ? '✅ pago' : sg.paid_amount ? `💳 pago ${fmtMoney(sg.paid_amount)}` : '⏳ pagamento pendente' }}</span>
+                <span v-if="sg.cpf">CPF ···{{ String(sg.cpf).slice(-4) }}</span>
+              </div>
             </div>
           </div>
 
