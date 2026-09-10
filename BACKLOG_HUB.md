@@ -41,6 +41,8 @@ mesmo no modo Saúde.
   favicon-badge c/ bolinha vermelha) no tamanho de cada arquivo; os 2
   manifest.json → #111C3F. Ele precisa APAGAR e RECRIAR o atalho no
   iPhone pra ver o ícone novo.
+- **SUBIDA 10/09**: commit 14538a8f7 → docker-build (run 34523796622)
+  VERDE → **etiqueta `14538a8`** (sem migration).
 
 ## RODADA 18 — 10/09 ✅ CHAVINHA A|B|C NAS METAS + CARROSSEL DO PROGRESSO (working tree)
 Pedido dele 10/09 (print das Metas): chavinha "Treino A/B/C" nas metas
