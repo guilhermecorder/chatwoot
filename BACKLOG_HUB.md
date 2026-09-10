@@ -38,6 +38,9 @@ mais evidente e separado — carrossel com os 3 treinos, passar pro lado.
   treinos = faixa noite c/ letra laranja. Testado: Geral 806 kg/9,89×/
   59%/63 t · A 272/3,34×/50%/19,9 t · B 294/3,61×/65%/26,5 t · C 240/
   2,95×/67%/16,6 t, 4 gráficos, pílulas e bolinhas.
+- **SUBIDA 10/09 (rodadas 17+18)**: "pode subir" → commit 11ee29eaf →
+  push → docker-build (run 34513630217) VERDE → **etiqueta `11ee29e`**
+  (sem migration). Falta ele colar no EasyPanel (web+sidekiq) e Implantar.
 
 ## RODADA 17 — 10/09 ✅ BALANÇO DE CENTÍMETROS + PROGRESSO DE FORÇA (working tree)
 Pedido dele 10/09 (logo após a 16 subir): no Meu Painel, "volume total
