@@ -5113,8 +5113,8 @@ crm_opportunity_radar_job registrados.
   mensagens RECEBIDAS; (3) abrir a conversa #15475: a previsão/registro mostra
   de onde saiu cada mensagem.
 - ⚠️ DEPLOY: sem migration, sem cron novo; o job roda no SIDEKIQ → WEB+SIDEKIQ
-  juntos. Mixed c/ Meta Leads: settings_controller e api/crm.js (stage por
-  hunk). AGUARDANDO "pode subir".
+  juntos. ✅ SUBIU 13/09 23h: commit cac8ef20b (job/summary/card/hub) + os
+  hunks de settings_controller/api/crm.js no 4761f9aaf. Meta Leads ficou fora.
 
 # RODADA 12/09 — item 159 (varredura de design do Meu Painel)
 
@@ -5182,7 +5182,7 @@ crm_opportunity_radar_job registrados.
   do pulso do hero) — pode ser ocultado no Modo edição se ele achar
   repetido; tirei de propósito NÃO mexer nos layouts salvos.
 - Sem migration, sem cron; deploy WEB (controller + front). Sem mistura c/
-  Meta Leads nesta rodada. AGUARDANDO "pode subir" (junto da 158).
+  Meta Leads nesta rodada. ✅ SUBIU 13/09 23h no commit 4761f9aaf.
 
 # RODADA 13/09 — item 160 (concluir o Meu Painel: cores do dia iMac + painéis por pessoa)
 
@@ -5239,8 +5239,7 @@ crm_opportunity_radar_job registrados.
   atribuição e layout limpos; voltou ao painel-base. Rubocop dos 2
   controllers: 0 aviso meu. Vite sem erro; console sem erro novo.
 - Sem migration, sem cron; deploy WEB. Mixed c/ Meta Leads NÃO (routes/
-  crm.js só hunks meus — conferir no commit). AGUARDANDO "pode subir"
-  (junto de 158+159).
+  crm.js só hunks meus — conferido). ✅ SUBIU 13/09 23h no commit 4761f9aaf.
 
 # RODADA 13/09 — item 161 (Meu Painel inteiro no formato novo: kit "iMac G3 + vidro")
 
@@ -5311,8 +5310,7 @@ crm_opportunity_radar_job registrados.
 - DECISÃO EM ABERTO p/ ele: com TEMA no painel, o banner segue a cor do dia
   e os blocos seguem o tema (regra da 160) — se preferir, o banner passa a
   seguir o tema também (1 linha em cvVars/hero).
-- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
-  158+159+160).
+- Sem migration, sem cron; deploy WEB. ✅ SUBIU 13/09 23h no commit 4761f9aaf.
 
 # RODADA 13/09 — item 162 (paletas: iMac G3 + frutas da Apple + salada, controle do admin por bloco)
 
@@ -5359,8 +5357,7 @@ crm_opportunity_radar_job registrados.
   {"agendamento"=>{"mode"=>"salad"}}; Modo edição mostra o chip de paleta em
   cada barrinha com a fruta certa; paleta por bloco (Feedback → Coco) pelo
   chip da barrinha. Vite sem erro; ESLint sem erro de regra no trecho novo.
-- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
-  158–161).
+- Sem migration, sem cron; deploy WEB. ✅ SUBIU 13/09 23h no commit 4761f9aaf.
 
 # RODADA 13/09 — item 163 (Relatórios e Dashboards no formato novo, com paletas do admin)
 
@@ -5457,5 +5454,6 @@ crm_opportunity_radar_job registrados.
   conversa #1 (37 msgs) renderiza com o cartão de previsão do robô, nota
   privada enviada e apareceu na hora, console sem erro; rastros dos
   testes (5 msgs + nota) apagados da conversa #1.
-- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
-  158–162).
+- Sem migration, sem cron; deploy WEB. ✅ SUBIU 13/09 23h no commit 4761f9aaf
+  (junto de 159–162; 158 no cac8ef20b). Deploy na VPS: WEB + SIDEKIQ (o job
+  do 158). Meta Leads segue no working tree, fora dos commits.
