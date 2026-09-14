@@ -1579,6 +1579,7 @@ const loadBots = async () => {
   loadingBots.value = true;
   try {
     bots.value = await store.dispatch('crm/fetchFollowupBots');
+    if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
   } catch {
     useAlert('Erro ao carregar robôs');
   } finally {
@@ -1618,11 +1619,18 @@ const deleteBot = async bot => {
 const expandedBotLog = ref(null);
 const REASON_LABELS = {
   aguardando_prazo: 'aguardando o prazo da cutucada',
+  aguardando_espacamento: 'aguardando o espaçamento da cadência (não sai empilhada)',
   paciente_falou_ultimo: 'paciente falou por último (vez do atendimento)',
   cadencia_completa: 'já recebeu todas as cutucadas',
   etiquetas: 'barrado pelo filtro de etiquetas',
+  etiqueta_de_encerramento: 'etiqueta de encerramento (nao_perturbe / perda_* / lista da conta)',
+  protegida_por_etiqueta: 'etapa protegida por etiqueta (não enviada)',
+  janela_whatsapp: 'fora da janela de 24h do WhatsApp — texto simples não entrega (use mensagem modelo)',
   momento_perdido: 'cutucada vencida há horas — descartada (anti-rajada)',
   pausado_para_paciente: 'follow-up pausado para o paciente (trava da atendente)',
+  trava_intervalo_minimo: 'trava: 30 min mínimos entre cutucadas',
+  trava_teto_diario: 'trava: teto de 4 cutucadas por dia',
+  trava_cadencia_completa: 'trava: cadência já saiu inteira (mensagens reais)',
   erro: 'erro ao enviar',
 };
 const reasonLine = run =>
@@ -1691,6 +1699,44 @@ const saveFollowupHours = async (start, end) => {
   } finally {
     savingFollowupHours.value = false;
   }
+};
+
+// 🏷️ ETIQUETAS QUE ENCERRAM O FOLLOW-UP (rodada 158) — contato ou conversa
+// com uma delas não recebe cutucada de robô nenhum (além das fixas
+// nao_perturbe e perda_*). Caso real 12/09: att_encerrado aplicada por
+// automação e a conversa seguia recebendo mensagem.
+const followupStopLabels = ref([]);
+const savingStopLabels = ref(false);
+watch(
+  settings,
+  s => {
+    if (Array.isArray(s?.followup_stop_labels)) followupStopLabels.value = [...s.followup_stop_labels];
+  },
+  { immediate: true }
+);
+const saveStopLabels = async labels => {
+  const previous = followupStopLabels.value;
+  followupStopLabels.value = labels;
+  savingStopLabels.value = true;
+  try {
+    await CrmAPI.updateFollowupStopLabels(labels);
+    useAlert(
+      labels.length
+        ? `Etiquetas de encerramento: ${labels.join(', ')}`
+        : 'Só as etiquetas fixas (nao_perturbe / perda_*) encerram o follow-up'
+    );
+  } catch {
+    followupStopLabels.value = previous;
+    useAlert('Erro ao salvar as etiquetas de encerramento');
+  } finally {
+    savingStopLabels.value = false;
+  }
+};
+const toggleStopLabel = title => {
+  const t = String(title || '').trim().toLowerCase();
+  if (!t || savingStopLabels.value) return;
+  const current = followupStopLabels.value;
+  saveStopLabels(current.includes(t) ? current.filter(l => l !== t) : [...current, t]);
 };
 
 // 📅 LEMBRETES DO DIA DA CONSULTA (item 156, pacote comparecimento):
@@ -1945,9 +1991,39 @@ onUnmounted(() => {
             >24 horas</button>
           </div>
           <p class="mt-2 text-[11px] text-n-slate-10 leading-relaxed">
-            Vale para todos os robôs. Cutucada que vence fora do horário espera ele reabrir (não é descartada).
-            💡 Texto simples só chega dentro da janela de 24h do WhatsApp — para envio de madrugada ou cadências em dias, prefira etapas com mensagem modelo.
+            Vale para todos os robôs. Cutucada que vence fora do horário espera ele reabrir (não é descartada) e,
+            ao reabrir, as etapas <b>não saem empilhadas</b>: entre uma e a seguinte vale a diferença de tempo da cadência, contada da cutucada anterior.
+            💡 Texto simples só chega dentro da janela de 24h do WhatsApp — fora dela a etapa de texto é pulada (fica no registro) e só mensagem modelo entrega.
           </p>
+
+          <!-- 🏷️ Etiquetas que encerram o follow-up (rodada 158) -->
+          <div class="mt-3 pt-3 border-t border-n-weak">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="i-lucide-octagon-x text-sm" style="color: #b91c1c" />
+              <p class="text-sm font-semibold text-n-slate-12">Etiquetas que encerram o follow-up</p>
+              <Spinner v-if="savingStopLabels" :size="14" class="text-n-brand" />
+            </div>
+            <p class="mt-1 text-[11px] text-n-slate-10 leading-relaxed">
+              Contato ou conversa com uma destas etiquetas não recebe cutucada de <b>nenhum</b> robô — ex.: <code>att_encerrado</code>.
+              Fixas (sempre valem): <code>nao_perturbe</code> e <code>perda_*</code>. Clique numa etiqueta para ligar/desligar.
+            </p>
+            <div class="mt-2 flex flex-wrap gap-1.5">
+              <button
+                v-for="l in accountLabels"
+                :key="`stop-${l.id}`"
+                class="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors"
+                :class="followupStopLabels.includes(l.title)
+                  ? 'bg-red-500/15 border-red-500 text-red-600 font-medium'
+                  : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                :disabled="savingStopLabels"
+                @click="toggleStopLabel(l.title)"
+              >
+                <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: l.color ?? '#6B7280' }" />
+                {{ l.title }}
+              </button>
+              <span v-if="!accountLabels.length" class="text-[11px] text-n-slate-9">Nenhuma etiqueta cadastrada na conta ainda.</span>
+            </div>
+          </div>
         </div>
 
         <!-- 📅 Lembretes do dia da consulta (item 156): D-1 véspera com

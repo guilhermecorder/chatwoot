@@ -139,6 +139,16 @@ const togglePatientPause = async () => {
   }
 };
 
+// ⏱ previsão do follow-up (rodada 158): cor por situação + ícone por etapa
+const TIMELINE_ICON = { enviada: '✅', pulada: '⏭️', proxima: '🔜', aguardando: '⏳', pendente: '·' };
+const forecastTone = status =>
+  ({
+    proxima: 'text-n-brand',
+    completa: 'text-green-600',
+    pausado: 'text-amber-600',
+    desligado: 'text-n-slate-9',
+  })[status] || 'text-n-slate-11';
+
 const INTEREST = {
   alto: { label: 'Interesse ALTO', class: 'bg-green-500/15 text-green-600', dot: 'bg-green-500' },
   medio: { label: 'Interesse MÉDIO', class: 'bg-amber-500/15 text-amber-600', dot: 'bg-amber-500' },
@@ -313,6 +323,33 @@ const analyzedAgo = computed(() => {
         </span>
         <span class="font-semibold flex-shrink-0">{{ summary.followup.paused ? 'Reativar' : 'Pausar' }}</span>
       </button>
+
+      <!-- ⏱ Previsão do follow-up (rodada 158): por robô, o que já saiu,
+           quando sai a próxima cutucada e por quê — o cronômetro visível -->
+      <div v-if="summary.followup?.bots?.length" class="mb-2 space-y-1.5">
+        <div
+          v-for="b in summary.followup.bots"
+          :key="`fu-${b.id}`"
+          class="rounded-lg border border-n-weak px-2 py-1.5 text-[11px]"
+        >
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span class="i-lucide-bot text-xs flex-shrink-0" :class="forecastTone(b.forecast?.status)" />
+            <span class="font-medium text-n-slate-12 truncate">{{ b.name }}</span>
+            <span v-if="!b.active" class="text-n-slate-9 flex-shrink-0">desligado</span>
+          </div>
+          <p v-if="b.forecast?.text" class="mt-0.5 leading-snug" :class="forecastTone(b.forecast.status)">
+            {{ b.forecast.text }}
+          </p>
+          <div v-if="b.forecast?.timeline?.length" class="mt-1 flex flex-wrap gap-1">
+            <span
+              v-for="(t, i) in b.forecast.timeline"
+              :key="`fu-${b.id}-${i}`"
+              class="rounded-full px-1.5 py-0.5 bg-n-alpha-2 text-n-slate-11"
+              :title="t.note || ''"
+            >{{ TIMELINE_ICON[t.status] || '·' }} {{ t.label }}<template v-if="t.when"> · {{ t.when }}</template></span>
+          </div>
+        </div>
+      </div>
 
       <!-- Análise de IA -->
       <div class="border-t border-n-weak pt-2">

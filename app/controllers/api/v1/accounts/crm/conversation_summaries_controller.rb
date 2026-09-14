@@ -101,21 +101,33 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
   # estado do follow-up para ESTA conversa: pausado para o paciente? e quais
   # robôs alcançam esta conversa (por coluna do card ou por caixa)
   def followup_json
-    contact = @conversation.contact
-    paused = contact&.additional_attributes&.[]('cevico_followup_paused')
-    card = find_card
-
-    bots = Current.account.crm_followup_bots.order(:id).select do |bot|
-      inbox_ok = bot.inbox_id.blank? || bot.inbox_id == @conversation.inbox_id
-      stage_ok = !bot.stage_scoped? || (card && bot.stage_id == card.stage_id)
-      inbox_ok && stage_ok
-    end
-
+    paused = @conversation.contact&.additional_attributes&.[]('cevico_followup_paused')
     {
       paused: paused.present?,
       paused_by: paused.is_a?(Hash) ? paused['by'] : nil,
-      bots: bots.map { |b| { id: b.id, name: b.name, active: b.active } }
+      bots: followup_bots_json
     }
+  end
+
+  # robôs que alcançam ESTA conversa (por coluna do card ou por caixa), cada
+  # um com a PREVISÃO (rodada 158): a mesma decisão do robô, sem enviar nada —
+  # o que já saiu, o que foi pulado, quando sai a próxima e por quê
+  def followup_bots_json
+    card = find_card
+    job = Crm::FollowupBotJob.new
+    Current.account.crm_followup_bots.order(:id).filter_map do |bot|
+      next unless bot.inbox_id.blank? || bot.inbox_id == @conversation.inbox_id
+      next if bot.stage_scoped? && !(card && bot.stage_id == card.stage_id)
+
+      { id: bot.id, name: bot.name, active: bot.active, forecast: safe_forecast(job, bot) }
+    end
+  end
+
+  def safe_forecast(job, bot)
+    job.forecast(bot, @conversation)
+  rescue StandardError => e
+    Rails.logger.warn("[CEVICO followup] previsão conversa #{@conversation.id}: #{e.message}")
+    nil
   end
 
   def find_card

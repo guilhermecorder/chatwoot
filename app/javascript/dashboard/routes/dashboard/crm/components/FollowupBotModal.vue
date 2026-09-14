@@ -433,7 +433,10 @@ const save = async () => {
             Use <code class="bg-n-alpha-2 px-1 rounded">[nome]</code> para o primeiro nome do paciente —
             o robô limpa emojis e símbolos do nome do WhatsApp e, se o contato não tiver nome aproveitável,
             escreve "oi" no lugar (sem "Oi oi").
-            Após 24h de silêncio, o WhatsApp só entrega mensagem MODELO — use etapas de modelo para prazos em dias.
+            Após 24h de silêncio, o WhatsApp só entrega mensagem MODELO — use etapas de modelo para prazos em dias
+            (etapa de texto fora dessa janela é pulada e fica no registro).
+            O tempo de cada etapa conta desde o silêncio do paciente; entre uma etapa e a seguinte o robô respeita a
+            diferença de tempo da cadência a partir da cutucada anterior — o que venceu à noite não sai empilhado de manhã.
           </p>
         </div>
 
@@ -460,7 +463,8 @@ const save = async () => {
           </div>
           <p class="text-[11px] text-n-slate-9 mt-2">
             O robô também para quando: você clicar em <strong>Pausar</strong>, o paciente <strong>responder</strong>
-            (a cadência daquela conversa é interrompida), ou o contato ganhar uma etiqueta da lista "NÃO TEM".
+            (a cadência daquela conversa é interrompida), o contato ganhar uma etiqueta da lista "NÃO TEM"
+            ou uma <strong>etiqueta de encerramento</strong> (nao_perturbe, perda_* e as escolhidas em Automações → Robôs — valem para todos os robôs).
           </p>
         </div>
 
