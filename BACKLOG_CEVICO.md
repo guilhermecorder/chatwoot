@@ -5043,3 +5043,419 @@ crm_opportunity_radar_job registrados.
   "Testar conexão" → "✅ Conectou! 5 cirurgia(s) do fornecedor lá desde
   2026-07-27". Limpeza total (espelho, contatos de teste, config local
   resetada, container of_mysql removido). Rubocop dos arquivos novos: zero.
+
+# RODADA 12/09 — item 158 (follow-up: espaçamento da cadência + janela 24h + etiquetas de encerramento + previsão por conversa)
+
+## 158. ✅ ⏱ FOLLOW-UP SEM EMPILHAMENTO + JANELA 24H + ETIQUETAS DE ENCERRAMENTO + PREVISÃO POR CONVERSA (pedido dele 12/09: "o timer e a automação de mensagens ainda não está ok — revisite e melhore")
+- CASO REAL (print da conversa #15475, Fabiana, caixa GOOGLE): silêncio desde
+  11/09 18:34 → "Oi, pode falar?" 18:52 ✓ (etapa de 15min) → "no seu tempo
+  ok?" 12/09 08:00 (venceu à noite, saiu na abertura da janela) → "avançar ou
+  encerrar?" 08:30 ✗ (a etapa de 10h venceu de madrugada e saiu 30 min depois
+  da anterior — só o piso MIN_GAP separava) → "Automation System added
+  att_encerrado" → 16:57 nova mensagem "Fabi, vc gostaria de consluir..."
+  ("Fabi" + erro de digitação = NÃO é etapa do robô; é humano ou outra
+  automação — só o registro de atividade/produção confirma).
+- DIAGNÓSTICO: (1) EMPILHAMENTO na abertura da janela — etapas vencidas à
+  noite saíam em sequência separadas só pelo piso de 30 min (o item 147 só
+  resolvia se ele liberasse 24h); (2) nada impedia cutucada depois de uma
+  etiqueta de encerramento aplicada por automação, se o robô não tivesse a
+  etiqueta em "NÃO TEM"; (3) texto simples fora da janela de 24h do WhatsApp
+  era enviado e falhava em silêncio; (4) sem previsão visível — ninguém sabia
+  QUANDO a próxima cutucada sairia (a desconfiança dele no "timer").
+- ⏱ ESPAÇAMENTO DA CADÊNCIA (Crm::FollowupBotJob): due_at da etapa i =
+  max(base + prazo_i, última cutucada REAL deste robô + (prazo_i − prazo_i−1)),
+  depois ajustado à janela de envio. Etapa vencida à noite sai na abertura e a
+  SEGUINTE espera a diferença de prazo (3h→10h = 7h depois: 08:00 e 15:00, não
+  08:00 e 08:30). Motivo novo: aguardando_espacamento. "Momento perdido" (3h)
+  conta a partir do due_at ajustado. Sem cutucada anterior, nada muda.
+- 🏷️ ETIQUETAS DE ENCERRAMENTO (globais, valem p/ todos os robôs):
+  nao_perturbe e perda_* fixas (mesma convenção da Colheitadeira) + lista da
+  conta agenda_config.followup_stop_labels — cartão "Etiquetas que encerram o
+  follow-up" em Automações → Robôs (chips clicáveis, só admin; update_agenda
+  sanitiza strip/downcase/uniq/máx 30; settings_json e update_agenda devolvem
+  followup_stop_labels; CrmAPI.updateFollowupStopLabels). Contato OU conversa
+  com uma delas → motivo etiqueta_de_encerramento, nenhum robô cutuca.
+- 📵 JANELA 24H DO WHATSAPP: etapa de TEXTO com conversation.can_reply? false
+  (core Conversations::MessageWindowService — WhatsApp/Instagram = 24h da
+  última msg do paciente; caixa sem janela = true) é tratada SEM enviar, nota
+  no registro "fora da janela de 24h — só mensagem modelo entrega", motivo
+  janela_whatsapp. Etapa de MODELO segue normal.
+- 👁 PREVISÃO POR CONVERSA: FollowupBotJob#forecast(bot, conversa) (público,
+  só leitura, usa o MESMO plan_for do robô) → conversation_summary devolve por
+  robô {status proxima|parado|pausado|completa|desligado, text PT-BR, sent,
+  total, next_at, timeline[{label, status enviada|pulada|proxima|aguardando|
+  pendente, when "hoje 15:00"/"amanhã 08:00", note}]}; card lateral da conversa
+  (ConversationSummaryCard) mostra robô + frase + chips ✅⏭️🔜⏳. Cada cutucada
+  passou a carregar cevico_followup_step (nº da etapa) na mensagem.
+- REFATORAÇÃO do job: DECISÃO (plan_for → pending_steps / apply_physical_locks
+  / no_send_reason) separada da AÇÃO (process_conversation → settle_handled +
+  envio). Mantidos: travas físicas (piso 30min, teto 4/dia, cadência completa
+  por mensagens), marcar-antes-de-enviar, 1 cutucada por rodada, momento
+  perdido, regras de etiqueta por etapa, estado por robô. Hub: REASON_LABELS
+  ganhou aguardando_espacamento, etiqueta_de_encerramento, janela_whatsapp,
+  protegida_por_etiqueta e trava_*; textos de ajuda do modal atualizados.
+- TESTES: tmp/test_followup_spacing.rb 30/30 ✅ (A: caso real 15min/3h/10h/24h
+  → 18:50, 08:00, 15:02, 13/09 08:01, cadência completa, nº da etapa nas msgs;
+  B: previsão texto + linha do tempo, fora do horário, paciente respondeu;
+  C: att_encerrado da conta, nao_perturbe e perda_* barram, sem etiqueta sai;
+  D: texto fora da janela pulado c/ nota + modelo sai + [nome] no modelo;
+  E: âncora à noite → 1ª na abertura, 2ª espaçada 2h45 depois) +
+  tmp/test_followup_guard.rb (incidente 18/07) PASSOU ✅. Rubocop: 0 aviso
+  novo (9 restantes = métodos intocados). VISUAL conta 3 ✅: card lateral
+  ("próxima: cutucada de 10h hoje 18:35 (espaçamento da cadência) · 2 de 4
+  enviadas" + chips ✅✅⏳⏳), cartão de etiquetas no Hub (clique → toast →
+  persistiu após reload; banco ["att_encerrado"]). Limpeza total feita.
+- AÇÕES DELE PÓS-DEPLOY: (1) Automações → Robôs → "Etiquetas que encerram o
+  follow-up" → marcar att_encerrado (e as demais de encerramento); (2) conferir
+  QUEM aplica att_encerrado (Regras da caixa de entrada / Tratamento de dados /
+  automação de coluna): se a regra é "mensagem contém 'encerrar'", ela casa com
+  o TEXTO DO PRÓPRIO ROBÔ ("prefere encerrar seu atendimento") — restringir a
+  mensagens RECEBIDAS; (3) abrir a conversa #15475: a previsão/registro mostra
+  de onde saiu cada mensagem.
+- ⚠️ DEPLOY: sem migration, sem cron novo; o job roda no SIDEKIQ → WEB+SIDEKIQ
+  juntos. Mixed c/ Meta Leads: settings_controller e api/crm.js (stage por
+  hunk). AGUARDANDO "pode subir".
+
+# RODADA 12/09 — item 159 (varredura de design do Meu Painel)
+
+## 159. ✅ 🎨 VARREDURA DE DESIGN DO MEU PAINEL — hero moderno, cards que contam a história, gráficos legíveis (pedido dele 12/09: "indicadores mais relevantes, gráficos (também os expandidos) mais bonitos e fáceis de entender, painel de boas-vindas modernizado")
+- VARREDURA AO VIVO (conta 3, tema claro/escuro, 1440 e 390px) achou:
+  (1) "Boa tarde, Guilherme,!" — vírgula do cadastro entrava no nome;
+  (2) selo 🏆 RECORDE truncava o nome do card ("Novos c… 🏆 RECORDE");
+  (3) card fixo sem contexto: número sem "vs período anterior" nem forma
+  do período (só o card de fórmula tinha variação); (4) gráfico do popup
+  plano (cor fixa #0F5FA6, sem eixo/valores, texto ESTICADO pelo
+  preserveAspectRatio=none em popup mais largo que o desenho); (5) 🐛 REAL:
+  "Volume por dia da semana" do Dashboard da Agenda SEMPRE zerado —
+  EXTRACT(DOW) devolve NUMERIC (BigDecimal) e o hash era lido por
+  Integer/Float (nunca casava); (6) meta de cirurgias da Saúde da Agenda
+  fixa em 100 mesmo com meta oficial no Painel de Metas; (7) termômetro
+  (conversas abertas/aguardando/consultas hoje) escondido no rodapé.
+- 🏠 HERO DE BOAS-VINDAS (InicioPage): chips de vidro (dia + painel ·
+  responsável), saudação 40px tracking negativo com nome LIMPO (só letras,
+  capitalizado), lead do painel em uma frase (HERO_LEADS por painel; o do
+  Construtor tem a sua), botões em pílula de vidro (Modo edição/Reportar),
+  o PULSO DO MOMENTO em vidros cristalinos clicáveis (conversas abertas →
+  Conversas · aguardando resposta [borda âmbar quando > 0] · consultas hoje
+  → Agenda · pacientes quentes → CRM quando o Radar tem fila), luzes
+  difusas e o OLHO CEVICO (public/brand-assets/cevico-eye.svg) como marca
+  d'água. Cor continua a do painel. Celular: chips e vidros em 2 por linha.
+  ⚠️ LIÇÃO: <img src="/brand-assets/…"> fixo vira import de módulo no Vite
+  (erro "Failed to resolve import") → binding dinâmico :src="HERO_EYE".
+- 📌 CARDS DE INDICADOR (todos os painéis): selos (🏆/✓ META/⚠️) saíram da
+  linha do nome (nome inteiro, sem truncar) e ficaram ao lado do número;
+  pílula de TENDÊNCIA ▲/▼ x% vs período anterior (tooltip com o valor
+  anterior e o rótulo do período) — fórmula usa o próprio valor, card fixo
+  usa o indicador do cesto do seu gráfico (só contagens; taxa fica sem;
+  painel Médicos fica sem porque a série é da clínica); SPARKLINE branca
+  (linha + área) com a série do período, mesma do popup; sub em 11px. O
+  card de fórmula passou a mostrar "anterior: X · dd/mm–dd/mm" no sub (a
+  variação virou a pílula). Sem mudança de dados/endpoint: tudo do kpiBag
+  que a página já carregava.
+- 📊 MINIBARS v3 (kit, vale pros popups do Meu Painel E do Dashboard CRM):
+  SVG com a largura REAL do contêiner (ResizeObserver; 1 unidade = 1px —
+  texto e barras não esticam mais), barras com degradê vertical na cor do
+  card e topo arredondado, eixo com calha, linhas-guia no teto "redondo"
+  (7→8, 23→25, 130→150) e na metade, linha de base, VALOR em cima de cada
+  barra quando cabe (≤16 baldes, barra ≥14px; compacta 1.234→1,2k),
+  rótulos de baixo por passo que cabe (34px), série anterior com
+  pontinhos, linha de meta com rótulo "meta N", tooltip 11px. Props novas
+  opcionais (axis, showValues) — API v2 intacta.
+- 🔍 POPUP: tendência ▲/▼ já no CABEÇALHO ao lado do número (com "vs
+  período · valor"); gráfico na COR DO CARD (hexFromGrad do gradiente);
+  128px de altura; linha de LEITURA em 1 frase ✨ "pico em 06/07: 7 · média
+  1,3 por semana · total 49 · 24 semanas sem movimento" (sem "sem
+  movimento" em fórmula/taxa). A linha antiga de delta sob o gráfico saiu
+  (virou o cabeçalho).
+- 📅 DASHBOARD DA AGENDA embutido: fix do by_weekday (transform_keys
+  &:to_i) + gráfico semanal com o dia mais cheio em destaque, base, título
+  no hover e "% da semana" no rótulo (Seg · 24%).
+- 🩺 SAÚDE DA AGENDA: meta de cirurgias = meta OFICIAL surgeries_done do
+  Painel de Metas quando existe (surgeryGoalTarget); 100 só como reserva.
+- TESTES: visual conta 3 — hero claro/escuro/celular; "Este ano" (cards c/
+  sparkline, popup Novos contatos c/ eixo 0/4/8 + valores + leitura + leads
+  por caixa; popup Taxa de agendamento c/ decomposição), "Mês passado"
+  (pílulas ▼ 100% / ▼ 90% c/ tooltip do anterior), painel Gestor (veredito
+  + 4 cards + sparkline). Vite compila; sem erro novo de console. Rubocop
+  do controller: 0 aviso meu (SymbolProc corrigido; 15 pré-existentes).
+- Nota: o bloco "Termômetro do momento" continua no rodapé (mesmos números
+  do pulso do hero) — pode ser ocultado no Modo edição se ele achar
+  repetido; tirei de propósito NÃO mexer nos layouts salvos.
+- Sem migration, sem cron; deploy WEB (controller + front). Sem mistura c/
+  Meta Leads nesta rodada. AGUARDANDO "pode subir" (junto da 158).
+
+# RODADA 13/09 — item 160 (concluir o Meu Painel: cores do dia iMac + painéis por pessoa)
+
+## 160. ✅ 🍎 COR DO DIA (iMac G3) NO BANNER E NOS CARDS + 🧑‍🤝‍🧑 PAINÉIS POR PESSOA (pedidos dele 13/09: "cada dia da semana uma cor principal, referência iMac, mesmo vidro; criar painéis específicos para outros funcionários com drag and drop de ímã; indicadores com cores que combinem, mais opacas")
+- 🍎 COR DO DIA (para todos os usuários): FLAVORS por dia da semana, nomes e
+  tons dos iMac G3 da foto dele — seg Bondi Blue (o original de 1998), ter
+  Blueberry, qua Strawberry, qui Lime, sex Tangerine, sáb Grape (a ordem
+  da foto, early 1999), dom Graphite (edição especial de 1999). O BANNER
+  veste a versão translúcida de vidro (mesmo hero da 159: luzes, olho
+  CEVICO, chips e vidros); os CARDS de indicador vestem a FAMÍLIA OPACA do
+  dia (4 degraus escuro→médio, número branco sempre legível — pedido "mais
+  opaco, melhor contraste"). Precedência nos cards: cor escolhida pelo
+  admin no card > alerta de meta (vermelho/âmbar/verde) > TEMA do painel
+  (Configurações → Painéis, se existir) > família do dia. Chip do sabor no
+  hero com bolinha da cor; CLICÁVEL = prévia das 7 cores só nesta tela
+  (não salva; ao recarregar o dia manda). Chips/botões do hero viraram
+  vidro "fumê" (rgba navy .22) — texto branco legível em qualquer cor.
+  PANEL_FAMILY (família fixa por painel) saiu do código.
+- 🧑‍🤝‍🧑 PAINÉIS POR PESSOA (chave 'variant:<id>'): admin cria uma versão de
+  um painel-base (5 fixos) para uma ou mais pessoas — mesmos números,
+  metas e recordes do base; LAYOUT PRÓPRIO (blocos, ordem/ocultos/cores
+  dos cards) organizado no Modo edição com o arrasto magnético já
+  existente. Botão "Painel por pessoa" no seletor de pílulas (admin) →
+  modal: painel-base em chips, "quem vê" em chips (agentes da conta),
+  nome (sugerido = primeiros nomes) → Criar abre a variante já
+  selecionada. Hero da variante ganha chip "Editar painel" (renomear,
+  trocar pessoas, Excluir em 2 cliques). A variante NASCE com o layout do
+  base (fallback) e passa a ter o seu ao primeiro ajuste; "voltar ao
+  padrão" apaga só o dela. Quem está na lista fica ATRIBUÍDO à variante
+  (abre o Meu Painel já nela); continua editável em "Painel de cada
+  pessoa" (o select lista as variantes).
+  BACKEND: settings_controller — panel_variants sanitizado (≤20; base ∈ 5
+  fixos; nome ≤40; user_ids só usuários da conta; id gerado "v"+hex);
+  sincroniza panel_assignments a partir de user_ids (entra quem está,
+  sai quem saiu e apontava pra ela); variante removida leva assignments
+  + kpi_layout + block_layout dela; kpi_layout/block_layout aceitam as
+  chaves 'variant:<id>' existentes (layout_panel_keys). home_controller —
+  valid_panel_keys inclui variantes; panel_key resolve 'variant:<id>' →
+  base (resolve_variant) p/ panel_data, metas e recordes; refatorado em
+  valid_panel_keys/default_panel_key/assigned_panel_key (rubocop limpo).
+  FRONT: allPanels lista variantes (cor/ícone do base, nome do admin);
+  computed panelBase = chave-base (tiles, destaque, metas, STATUS_GRADS,
+  tema, custom KPIs, médico, gestor…) enquanto selectedPanel segue a chave
+  real (layouts, atribuição, fetch). CrmAPI.updatePanelVariants.
+- TESTES (conta 3, ao vivo): hero em Graphite no domingo; prévia clicável
+  passou por Bondi/Blueberry/Strawberry/Lime; cards do Gestor mantiveram o
+  tema Flor del Mar (precedência ok). Variante: criada "Atendente" (base
+  Agendamento, pessoa Atendente Teste) → banco panel_variants
+  [{id v7e777d32…}] + panel_assignments {"2"=>"variant:v7e777d32"}; pílula
+  nova selecionada, hero "Painel de Atendente" + "Editar painel", cards do
+  base; Modo edição na variante → ocultou "Taxa de agendamento" →
+  kpi_layout ganhou SÓ a chave da variante (herdou os ocultos do base;
+  'agendamento' intacto); Excluir → confirmação em 2 cliques → variante,
+  atribuição e layout limpos; voltou ao painel-base. Rubocop dos 2
+  controllers: 0 aviso meu. Vite sem erro; console sem erro novo.
+- Sem migration, sem cron; deploy WEB. Mixed c/ Meta Leads NÃO (routes/
+  crm.js só hunks meus — conferir no commit). AGUARDANDO "pode subir"
+  (junto de 158+159).
+
+# RODADA 13/09 — item 161 (Meu Painel inteiro no formato novo: kit "iMac G3 + vidro")
+
+## 161. ✅ 🍎 TODO O MEU PAINEL NO FORMATO NOVO — kit de vidro na cor do dia em todos os blocos, modais e popup (pedido dele 13/09: "ainda não chegamos lá — todo o tema do Meu Painel deve entrar no novo formato; faça em todos de uma vez, capriche")
+- KIT `.cv-*` (CSS GLOBAL no InicioPage, sem scoped, tudo sob `.cv-page`): as
+  variáveis `--cv` (tom do dia), `--cv-deep`, `--cv-grad/2/3` (família) e
+  `--cv-rgb/--cv-deep-rgb` nascem no computed `cvVars` (root da página e nos
+  3 overlays teleportados). Sem tema no painel manda a cor do dia (iMac G3);
+  com tema (Configurações → Painéis) manda a família do tema — o BANNER
+  continua na cor do dia (regra da 160). Peças: `.cv-block` (carcaça
+  translúcida: branco leitoso + tom do dia por trás, borda de vidro, crista
+  de luz, luz difusa no canto), `.cv-strip` (faixa fina), `.cv-block-hover`,
+  `.cv-icon` (squircle no degradê do dia, ícone lucide branco; -sm/-lg/-xl),
+  `.cv-chip` (+ -lg), `.cv-btn` / `.cv-btn-ghost` / `-sm` / `-lg` /
+  `-danger` / `.cv-iconbtn` / `.cv-btn-pulse`, `.cv-sub` (sub-cartão) +
+  `-hover` / `-on`, `.cv-row`, `.cv-stat`, `.cv-track` / `.cv-fill` (barras),
+  `.cv-seg` / `.cv-seg-item` / `.cv-seg-on` / `-sm` (segmentado de vidro),
+  `.cv-tile` (acabamento de vidro nos cards coloridos), `.cv-tile-add`,
+  `.cv-editbar` / `.cv-handle` (modo edição), `.cv-glass` / `.cv-glass-chip`
+  / `.cv-glass-btn` (vidro cristalino sobre fundo colorido, agora global),
+  `.cv-modal` / `.cv-modal-head` (cabeçalho no degradê do dia c/ luzes) /
+  `.cv-modal-foot` / `.cv-pop` / `.cv-input` / `.cv-label`. Modificadores
+  semânticos `.cv-red/.cv-amber/.cv-green/.cv-gold/.cv-slate` trocam as
+  variáveis localmente (a mesma peça fica vermelha/âmbar/verde). Tema escuro
+  (`.dark .cv-page …`) e prefers-reduced-motion cobertos. A página ganha uma
+  luz suave do dia no alto (`.cv-page` background radial; `.cv-overlay` sem).
+- BLOCOS convertidos (todos): avisos do topo (WhatsApp faixa — vermelha SÓ
+  com problema real via `.cv-red`; Briefing; Radar — bloco do dia, card da
+  frente branco c/ pulso verde e "Atender agora" mantidos; Tarefas — botão
+  pílula, linhas `.cv-sub`, prioridade em chip; Feedback — pílulas do time
+  em `.cv-seg`, ponto forte/corrigir em `.cv-sub` verde/âmbar, soluções
+  numeradas), bug resolvido, barra sticky + alças do modo edição (ícones
+  lucide no lugar dos emojis: BLOCK_ICONS), seletor de painéis (`.cv-seg`,
+  ativo no degradê do dia; médicos mantêm a cor do médico; botão "Dashboard
+  da Agenda" saiu de dentro do segmentado → pílula própria, sem barra de
+  rolagem), PeriodRuler (prop `glass`), veredito do Gestor (cabeçalho de
+  vidro c/ luzes, avisos em `.cv-glass`), cards de indicador (`.cv-tile`) e
+  "Novo indicador", linha de destaque, Meu desempenho (colunas `.cv-sub`, a
+  sua `-on`, números em `.cv-stat`, chips), Dashboard da Agenda embutido
+  (AgendaDashboardCore props `glass` + `family`: KPIs no degradê do dia,
+  caixas `.cv-sub`, barras `.cv-track/.cv-fill`, chips; DashKpi props `grad`
+  + `glass`), Saúde da Agenda (barras do dia, vagas em chips c/ bolinha do
+  médico, meta verde ao bater, "Ir para agenda" pulsando no tom do dia),
+  Metas · Rotinas · Ferramentas (3 blocos), Acesso rápido (4 blocos c/
+  squircles nos 4 degraus da família), Termômetro (faixa de chips; âmbar
+  quando há espera), modais Painel de cada pessoa / Painel por pessoa /
+  Metas (concha `.cv-modal`, cabeçalho no degradê, inputs e botões do kit),
+  popup dos indicadores (cabeçalho na cor do card c/ luzes, seções `.cv-sub`,
+  mini-régua em `.cv-seg`, Editar/Remover em pílulas), Construtor e palheta
+  de cor (mesmo tratamento). Emojis das barrinhas/botões viraram lucide.
+- FORA DO MEU PAINEL nada muda: PeriodRuler/AgendaDashboardCore/DashKpi só
+  vestem o kit com as props novas (Relatórios → Dashboard da Agenda conferido
+  igual ao anterior).
+- TESTES (conta 3, ao vivo): desktop 1280 claro (Este ano: hero Graphite +
+  blocos na família do tema do painel Agendamento do banco local), escuro,
+  celular 390 (hero, WhatsApp, feedback, seletor, cards, desempenho, agenda),
+  popup do indicador (Taxa de agendamento), modal Metas, modal Painel por
+  pessoa, Modo edição (barra + alças + cards ocultos), Relatórios → Dashboard
+  da Agenda sem regressão. Vite HMR sem erro; console sem erro novo (os 500
+  do mini-profiler e o 404 do favicon são antigos). ESLint: só prettier
+  (o arquivo já falhava no prettier antes da rodada); zero erro de regra.
+- 🐛 REAL achado no teste: no Modo edição o BANNER aparecia "cortado" à
+  esquerda — as luzes difusas e o olho CEVICO saem ~90px pra fora do hero
+  (overflow: hidden) e o clique no botão da borda fazia o navegador ROLAR
+  o hero (scrollLeft 90). Fix: `overflow: clip` (não cria contêiner de
+  rolagem) no .cevico-hero e nas peças do kit com luz fora da caixa
+  (.cv-block/.cv-glass/.cv-modal/.cv-modal-head). Conferido: scrollLeft 0.
+- DECISÃO EM ABERTO p/ ele: com TEMA no painel, o banner segue a cor do dia
+  e os blocos seguem o tema (regra da 160) — se preferir, o banner passa a
+  seguir o tema também (1 linha em cvVars/hero).
+- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
+  158+159+160).
+
+# RODADA 13/09 — item 162 (paletas: iMac G3 + frutas da Apple + salada, controle do admin por bloco)
+
+## 162. ✅ 🍎🍊 PALETAS DO MEU PAINEL — frutas da Apple + salada de frutas + controle do admin bloco a bloco (pedido dele 13/09: "quero ter o controle das cores, como admin, editar cada seção do Meu Painel em relação às cores e paletas; cada fruta pode ser um tema de paleta e uma cor principal; gosto da ideia da salada de frutas")
+- CATÁLOGO (helper NOVO `dashboard/helper/cevicoPalettes.js`): 17 paletas —
+  as 7 dos iMac G3 (bondi, blueberry, strawberry, lime, tangerine, grape,
+  graphite; a cor do dia continua por dia da semana) + 10 FRUTAS 🍊 Laranja,
+  🍋 Limão, 🍉 Melancia, 🍇 Uva, 🥝 Kiwi, 🥥 Coco, 🍑 Pêssego, 🍒 Cereja,
+  🥑 Abacate, 🫐 Mirtilo. Cada paleta = dot (tom principal) + hero (degradê
+  translúcido do banner, 3 paradas) + family (4 degradês OPACOS escuro→médio,
+  número branco legível). 🥗 SALADA DE FRUTAS = cada bloco leva uma fruta
+  pela posição padrão (SALAD_ORDER: laranja, uva, kiwi, cereja, mirtilo,
+  pêssego, limão, melancia, abacate, coco — reordenar não troca), os cards da
+  fileira alternam as frutas, e o banner mistura laranja→melancia→uva→kiwi.
+  Utilidades `paletteVars(pal)` (as --cv* do kit) e `hexToRgb/hexFromGrad`.
+- CONTROLE DO ADMIN (InicioPage): por painel (variante herda do base),
+  `panel_palettes[painel] = { mode: day|fixed|salad, key, blocks: {bloco:
+  paleta} }`. Precedência de cada bloco: paleta própria do bloco > salada >
+  paleta do painel (cor do dia / fixa / tema legado de Configurações →
+  Painéis, que agora também veste o banner). Onde escolher: chip do banner
+  (admin abre o popup; quem não é admin continua passeando pela cor do dia
+  só na tela), botão "Paleta" na barra do Modo edição, e o CHIP da barrinha
+  de cada bloco (bolinha + nome da paleta; @pointerdown.stop para não
+  disputar com o arrasto). POPUP "Paleta de cores · <painel>": "Onde
+  aplicar" (Painel inteiro + os 12 blocos, cada um com a bolinha da paleta
+  em vigor) → modo do painel (Cor do dia / Salada) ou uma paleta fixa
+  (amostras `.cv-swatch` com a bolinha no degradê: iMac G3 e Frutas) — num
+  bloco, "Igual ao painel" volta a seguir o painel; resumo "Blocos com
+  paleta própria" com ✕; "Voltar ao padrão" apaga tudo do painel; salva
+  sozinho (CrmAPI.updatePanelPalettes → settings/update_agenda).
+  Cada `<section>` de bloco recebe `:style="blockVars(blockId)"` (as
+  variáveis --cv* do kit mudam por bloco); Dashboard da Agenda e Acesso
+  rápido usam `blockFamily(...)`; a fileira usa `tileGradAt(i)` (cor do
+  card/alerta de meta continuam por cima, item 143).
+- BACKEND (settings_controller): `panel_palettes` sanitizado por painel
+  (chaves de layout_panel_keys; mode ∈ day/fixed/salad; key ∈ PALETTE_KEYS;
+  blocks só PANEL_BLOCK_IDS × PALETTE_KEYS; "cor do dia" sem bloco próprio
+  não é guardada); variante excluída limpa a sua entrada; devolvido no
+  settings_json e na resposta do update_agenda. Rubocop: 0 aviso meu.
+- TESTES (conta 3, ao vivo): popup pelo chip do banner → Salada de frutas
+  (banner misto, blocos cada um numa fruta: Feedback mirtilo, Desempenho
+  limão, Agenda melancia, Saúde abacate, Metas coco, Atalhos laranja,
+  Termômetro uva; seletor/régua na laranja) → banco panel_palettes
+  {"agendamento"=>{"mode"=>"salad"}}; Modo edição mostra o chip de paleta em
+  cada barrinha com a fruta certa; paleta por bloco (Feedback → Coco) pelo
+  chip da barrinha. Vite sem erro; ESLint sem erro de regra no trecho novo.
+- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
+  158–161).
+
+# RODADA 13/09 — item 163 (Relatórios e Dashboards no formato novo, com paletas do admin)
+
+## 163. ✅ 🍎📊 RELATÓRIOS E DASHBOARDS NO FORMATO NOVO — kit "iMac G3 + vidro" e paleta do admin em todas as telas de Relatórios (pedido dele 13/09: "está ficando incrível; vamos estender essa customização para os nossos RELATÓRIOS E DASHBOARDS")
+- FUNDAÇÃO compartilhada (o kit saiu do InicioPage e virou peça de todos):
+  `assets/scss/_cevico-glass.scss` (todo o CSS `.cv-*` + o CSS do banner
+  `.cevico-hero*`, importado no app.scss — vale em qualquer tela com
+  `.cv-page` e as variáveis `--cv*`); composable NOVO
+  `composables/useCevicoPalette.js` (o motor das rodadas 162: escopo,
+  fallback de escopo, blocos, tema legado; devolve cvVars/blockVars/
+  blockFamily/tileGradAt + todo o estado do popup; salva sozinho via
+  CrmAPI.updatePanelPalettes); componentes NOVOS `components-next/cevico/
+  CevicoPalettePicker.vue` (o popup "Paleta de cores", agora com "Página
+  inteira"/"Igual à página") e `CevicoHero.vue` (banner de vidro compacto p/
+  relatórios: chip do dia + chip da paleta [admin abre o popup, os demais
+  passeiam pela cor do dia], ícone em vidro cristalino, título 28px, slots
+  chips/actions/default/pulse; já inclui o popup). O InicioPage passou a usar
+  o composable e o popup compartilhado (nada muda pra quem usa).
+  BACKEND: `REPORT_PALETTE_SCOPES` (report:crm, campanhas, funil, medicos,
+  agentes, agenda, meta, google, whatsapp, etiquetas) aceitos em
+  panel_palettes; ids de bloco viraram genéricos (/[a-z0-9_-]{1,40}/, até
+  30 por escopo) porque cada tela tem as suas seções.
+- PÁGINAS convertidas (cada uma: root `cv-page` + `cvVars`, CevicoHero com
+  título/subtítulo/ícone lucide, PeriodRuler `glass`, cada seção em
+  `cv-block` com `blockVars(id)` e título em `cv-icon`; DashKpi `glass` +
+  `grad` da família do bloco; sub-cartões `cv-sub`, tiles `cv-stat`, linhas
+  `cv-row`, chips `cv-chip`, barras `cv-track/cv-fill`, pílulas `cv-seg`;
+  verde/âmbar/vermelho/ouro SÓ onde têm significado; cores de identidade —
+  médico, caixa, etiqueta, coluna do CRM, série de gráfico — mantidas):
+  · Dashboard dos Agentes (report:agentes — radar, meta, pessoas) [referência]
+  · Dashboard CRM (report:crm — kpis, caixas, agentes, responsividade, tempo,
+    faturamento, etiquetas, radar, perdas, nps, cirurgias, dinheiro_parado,
+    funil; wrapper CrmDashboardReport sem ReportHeader, seletor de funil em
+    `cv-seg` no banner [≤6 funis] ou `cv-input`; blocos escuros de tempo/
+    faturamento em `cv-block-deep` no tom escuro da família; ícone do banner
+    i-lucide-kanban [layout-kanban não existe no set]; ProMaxStudio só a concha)
+  · Dashboard — Campanhas (report:campanhas — custo, kpis, modelos, campanhas)
+  · Funil de Tráfego (report:funil — indicadores, funil [4 visões num bloco],
+    etiquetas, agentes; etapas Alcance/Cliques/Conversas nos degraus do bloco,
+    etapas do CRM mantêm stage.color; mapa de calor em rgb(var(--cv-rgb)/α))
+  · Dashboard dos Médicos (report:medicos — kpis, ranking, clinicas,
+    unidades, gestao; abas em cv-seg; cor do médico mantida; faturamento verde)
+  · Dashboard da Agenda (report:agenda — kpis, tipos, semana, medicos,
+    unidades, cirurgias, ocupacao; AgendaDashboardCore ganhou prop opcional
+    `pal` → cada seção com a própria paleta; sem `pal` [Meu Painel] nada muda)
+  · Anúncios (Meta) (report:meta — kpis, formulas, investimento, fatia,
+    leads, tabela; faixa da conversão por extenso segue VERDE de propósito
+    [o texto cita "a faixa verde"]; rosca mantém 6 cores categóricas)
+  · Google (Ads + GA4) (report:google — integracao, palavras, funil,
+    conversoes, colunas; verde = conectado, âmbar = aguardando)
+  · Saúde do WhatsApp (report:whatsapp — numeros, legenda; Atualizar e
+    "atualizado às" no slot actions do banner; qualidade em cv-green/amber/red)
+  · Dashboard de Etiquetas (report:etiquetas — top, grafico, matriz; textos
+    seguem no $t; cor da etiqueta nas bolinhas/barras; mapa de calor da matriz
+    em `cv-heat-0..4` lendo as --cv*; OverviewReportFilters do core sem
+    cv-block porque o calendário abre em position:absolute e o clip cortaria)
+- TESTES (conta 3): as 10 páginas carregam com banner, blocos e `cv-page`
+  (checagem por JS: Agentes 3 blocos, CRM 13, Funil 4, Campanhas 1+strip,
+  Médicos 3, Agenda 6, Meta 5, Google 5, WhatsApp 2, Etiquetas 3); paleta
+  do relatório de Agentes trocada p/ Laranja pelo chip do banner → banco
+  panel_palettes["report:agentes"]={mode fixed, key laranja}; Meu Painel
+  íntegro (14 blocos, agenda embutida com 9 sub-cartões). ESLint: zero erro
+  de regra real nos arquivos tocados (restam prettier/bare-strings/inline-
+  styles/use-before-define, que o repo já tolera). Rubocop: 0 aviso meu.
+  PASSADA VISUAL feita (após o Docker Desktop ter desligado no meio e
+  voltado com `open -a Docker` + `docker compose up -d rails vite`; o
+  Vite recompila cada rota na 1ª visita, 20–40 s por tela): prints em
+  1280px claro de CRM (Graphite: KPIs, blocos escuros de tempo/faturamento,
+  perdas em vermelho, funil), Agentes (Laranja), Campanhas, Funil (faixa
+  âmbar da Meta, 4 visões em cv-seg, etapas do CRM com a cor da coluna),
+  Médicos (abas cv-seg, faturamento verde), Agenda (Core com pal),
+  Meta (faixas âmbar/verde, KPIs com squircle), Google (integração
+  âmbar), Etiquetas (cores das etiquetas, matriz); Agentes também no
+  ESCURO (blocos de vidro escuro, tiles laranja) e no CELULAR 375px
+  (banner empilhado, tiles 2 por linha) e Saúde do WhatsApp (chip
+  "atualizado às" + Atualizar no banner; a tela demora porque a chamada à
+  Meta falha por token inválido no local — comportamento antigo). Nada a corrigir
+  nesta passada; ajustes finos ficam para o feedback dele com prints.
+  Rubocop: sanitize_panel_palette quebrado em palette_mode +
+  sanitize_palette_blocks → 0 aviso meu.
+- REGRESSÃO OPERACIONAL/SEGURANÇA (13/09 22h30–23h, pedido dele "não zoou
+  nada operacional nem segurança?"): zeitwerk:check "All is good";
+  controllers/job tocados carregam; update_agenda continua admin-only —
+  atendente.teste recebeu 403 ao tentar gravar paleta; admin mandando chave
+  inválida + id de bloco malicioso + escopo desconhecido → saneado (mode day,
+  bloco fora, escopo fora), paletas restauradas depois. Robô de follow-up:
+  tmp/test_followup_spacing.rb 30/30 ✅; tmp/test_followup_guard.rb falhou
+  à noite ("0 cutucadas") porque o job lê a janela 08–20 de
+  agenda_config.followup_hours e o script só abre a constante — abrindo a
+  janela da conta (0–24) PASSOU ✅ e a janela voltou a 08–20 (não é
+  regressão: HEAD já lia a config). Sidekiq de pé, cron do robô */2 min
+  enabled; os "RecordNotFound" de SendReplyJob às 22:48 são das mensagens
+  920–928 apagadas pela limpeza do próprio teste. Conversas: lista abre,
+  conversa #1 (37 msgs) renderiza com o cartão de previsão do robô, nota
+  privada enviada e apareceu na hora, console sem erro; rastros dos
+  testes (5 msgs + nota) apagados da conversa #1.
+- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
+  158–162).

@@ -5,12 +5,27 @@ import { ref, computed, onMounted, watch } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 
 const isLoading = ref(true);
 const data = ref(null);
 const error = ref(null);
+
+// 🍎 formato novo (rodada 163): kit "iMac G3 + vidro" com a paleta desta
+// página (o admin escolhe pelo chip do banner; cada bloco pode ter a sua)
+const pal = useCevicoPalette({
+  scope: 'report:campanhas',
+  blocks: [
+    { id: 'custo', label: 'Custo por mensagem', icon: 'i-lucide-calculator' },
+    { id: 'kpis', label: 'Indicadores', icon: 'i-lucide-gauge' },
+    { id: 'modelos', label: 'Tipo de mensagem', icon: 'i-lucide-layout-template' },
+    { id: 'campanhas', label: 'Campanha por campanha', icon: 'i-lucide-list' },
+  ],
+});
+const { cvVars, blockVars, blockFamily } = pal;
 
 // régua de período PADRÃO CEVICO (06/08) — default 'month' (antes: 30 dias)
 const period = ref({ preset: 'month', from: '', to: '' });
@@ -59,35 +74,33 @@ const formatDate = iso =>
 </script>
 
 <template>
-  <div class="h-full w-full overflow-y-auto bg-n-surface-1">
-    <div class="max-w-6xl mx-auto p-8">
-      <!-- Header -->
-      <div class="flex items-center gap-3 flex-wrap mb-6">
-        <h1 class="text-lg font-bold text-n-slate-12 flex items-center gap-2">
-          <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-            <span class="i-lucide-megaphone text-white text-base" />
-          </span>
-          Dashboard — Campanhas
-        </h1>
-        <p class="text-xs text-n-slate-10 w-full sm:w-auto">
-          Resultados das campanhas de mensagem modelo (WhatsApp)
-        </p>
+  <div class="cv-page h-full w-full overflow-y-auto bg-n-surface-1" :style="cvVars">
+    <div class="max-w-6xl mx-auto p-4 sm:p-8">
+      <!-- banner de vidro na paleta da página (rodada 163) -->
+      <CevicoHero
+        :pal="pal"
+        title="Dashboard — Campanhas"
+        subtitle="Resultados das campanhas de mensagem modelo (WhatsApp)"
+        icon="i-lucide-megaphone"
+      />
 
-        <!-- Régua de período padrão CEVICO -->
-        <PeriodRuler v-model="period" class="ml-auto" />
-      </div>
+      <!-- Régua de período padrão CEVICO -->
+      <PeriodRuler v-model="period" glass class="mb-6" />
 
-      <!-- Custo por mensagem -->
-      <div class="flex items-center gap-2 mb-6 text-xs text-n-slate-11">
-        <span class="i-lucide-calculator text-sm text-n-slate-10" />
+      <!-- Custo por mensagem (faixa fina de vidro) -->
+      <div
+        class="cv-block cv-strip flex items-center gap-2 flex-wrap mb-6 px-4 py-3 text-xs text-n-slate-11"
+        :style="blockVars('custo')"
+      >
+        <span class="cv-icon cv-icon-sm"><span class="i-lucide-calculator text-xs" /></span>
         Custo por mensagem modelo:
-        <span class="font-medium">R$</span>
+        <span class="font-medium text-n-slate-12">R$</span>
         <input
           v-model.number="costPerMessage"
           type="number"
           step="0.01"
           min="0"
-          class="w-20 border border-n-weak rounded-lg px-2 py-1 text-xs bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+          class="cv-input !h-8 w-24 text-xs text-n-slate-12"
         />
         <span class="text-n-slate-9">(valor cobrado pela Meta por template enviado — usado no cálculo de investimento)</span>
       </div>
@@ -96,69 +109,70 @@ const formatDate = iso =>
       <div v-else-if="error" class="text-center py-16 text-n-slate-10 text-sm">{{ error }}</div>
 
       <template v-else>
-        <!-- KPIs linha 1 (padrão CEVICO: DashKpi) -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
-          <DashKpi
-            label="Investimento"
-            :value="Math.round(totals.investment || 0)"
-            prefix="R$ "
-            :sub="`${totals.campaigns || 0} campanha(s) no período`"
-            from="#0F5FA6"
-            to="#0B4A82"
-          />
-          <DashKpi
-            label="Volume de mensagens"
-            :value="totals.sent || 0"
-            sub="mensagens modelo enviadas"
-            from="#5B21B6"
-            to="#7C3AED"
-          />
-          <DashKpi
-            label="Taxa de responsividade"
-            :value="`${totals.reply_rate || 0}%`"
-            :sub="`${totals.replies || 0} responderam`"
-            from="#B8860B"
-            to="#D4A017"
-          />
-          <DashKpi
-            label="Valor em campanha"
-            :value="Math.round(totals.potential_value || 0)"
-            prefix="R$ "
-            sub="$ possível nos cards dos destinatários"
-            from="#65A30D"
-            to="#84CC16"
-          />
-        </div>
+        <div :style="blockVars('kpis')">
+          <!-- KPIs linha 1 (padrão CEVICO: DashKpi) nos degraus da família do bloco -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
+            <DashKpi
+              glass
+              label="Investimento"
+              :value="Math.round(totals.investment || 0)"
+              prefix="R$ "
+              :sub="`${totals.campaigns || 0} campanha(s) no período`"
+              :grad="blockFamily('kpis')[0]"
+            />
+            <DashKpi
+              glass
+              label="Volume de mensagens"
+              :value="totals.sent || 0"
+              sub="mensagens modelo enviadas"
+              :grad="blockFamily('kpis')[1]"
+            />
+            <DashKpi
+              glass
+              label="Taxa de responsividade"
+              :value="`${totals.reply_rate || 0}%`"
+              :sub="`${totals.replies || 0} responderam`"
+              :grad="blockFamily('kpis')[2]"
+            />
+            <DashKpi
+              glass
+              label="Valor em campanha"
+              :value="Math.round(totals.potential_value || 0)"
+              prefix="R$ "
+              sub="$ possível nos cards dos destinatários"
+              :grad="blockFamily('kpis')[3]"
+            />
+          </div>
 
-        <!-- KPIs linha 2: conversões -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-          <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
-            <p class="text-xs font-medium text-n-slate-10 mb-1">Avaliações agendadas</p>
-            <p class="text-3xl font-bold" style="color: #7C3AED">{{ totals.agendamentos || 0 }}</p>
-          </div>
-          <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
-            <p class="text-xs font-medium text-n-slate-10 mb-1">% de consultas agendadas</p>
-            <p class="text-3xl font-bold" style="color: #7C3AED">{{ totals.agendamentos_rate || 0 }}%</p>
-            <p class="text-[11px] text-n-slate-9 mt-1">dos destinatários</p>
-          </div>
-          <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
-            <p class="text-xs font-medium text-n-slate-10 mb-1">Cirurgias realizadas</p>
-            <p class="text-3xl font-bold" style="color: #65A30D">{{ totals.cirurgias || 0 }}</p>
-          </div>
-          <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
-            <p class="text-xs font-medium text-n-slate-10 mb-1">% cirurgias agendadas</p>
-            <p class="text-3xl font-bold" style="color: #65A30D">{{ totals.cirurgias_rate || 0 }}%</p>
-            <p class="text-[11px] text-n-slate-9 mt-1">dos destinatários</p>
+          <!-- KPIs linha 2: conversões (cartões claros de vidro; verde =
+               cirurgia realizada, cor com significado) -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+            <div class="cv-sub p-5">
+              <p class="text-xs font-medium text-n-slate-10 mb-1">Avaliações agendadas</p>
+              <p class="text-3xl font-bold" style="color: var(--cv)">{{ totals.agendamentos || 0 }}</p>
+            </div>
+            <div class="cv-sub p-5">
+              <p class="text-xs font-medium text-n-slate-10 mb-1">% de consultas agendadas</p>
+              <p class="text-3xl font-bold" style="color: var(--cv)">{{ totals.agendamentos_rate || 0 }}%</p>
+              <p class="text-[11px] text-n-slate-9 mt-1">dos destinatários</p>
+            </div>
+            <div class="cv-sub p-5">
+              <p class="text-xs font-medium text-n-slate-10 mb-1">Cirurgias realizadas</p>
+              <p class="text-3xl font-bold" style="color: #65A30D">{{ totals.cirurgias || 0 }}</p>
+            </div>
+            <div class="cv-sub p-5">
+              <p class="text-xs font-medium text-n-slate-10 mb-1">% cirurgias agendadas</p>
+              <p class="text-3xl font-bold" style="color: #65A30D">{{ totals.cirurgias_rate || 0 }}%</p>
+              <p class="text-[11px] text-n-slate-9 mt-1">dos destinatários</p>
+            </div>
           </div>
         </div>
 
         <!-- Tipo de mensagem -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-6">
-          <div class="flex items-center gap-2 mb-5">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-              <span class="i-lucide-layout-template text-white text-sm" />
-            </span>
-            <h3 class="text-sm font-bold text-n-slate-12">Tipo de mensagem (modelo)</h3>
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('modelos')">
+          <div class="flex items-center gap-2 mb-5 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-layout-template text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Tipo de mensagem (modelo)</h2>
           </div>
           <div v-if="!data.by_template?.length" class="text-sm text-n-slate-10 text-center py-6">
             Nenhuma campanha enviada no período.
@@ -166,13 +180,10 @@ const formatDate = iso =>
           <div v-else class="space-y-2.5">
             <div v-for="t in data.by_template" :key="t.template" class="flex items-center gap-3">
               <span class="text-sm text-n-slate-12 w-56 truncate font-mono">{{ t.template }}</span>
-              <div class="flex-1 h-6 bg-n-alpha-1 rounded-lg overflow-hidden">
+              <div class="cv-track !h-6 flex-1">
                 <div
-                  class="h-full rounded-lg flex items-center px-2"
-                  :style="{
-                    width: Math.max((t.sent / (data.by_template[0]?.sent || 1)) * 100, 6) + '%',
-                    background: 'linear-gradient(90deg, #0F5FA6, #7C3AED)',
-                  }"
+                  class="cv-fill flex items-center px-2"
+                  :style="{ width: Math.max((t.sent / (data.by_template[0]?.sent || 1)) * 100, 6) + '%' }"
                 >
                   <span class="text-[10px] text-white font-semibold">{{ t.sent }}</span>
                 </div>
@@ -183,12 +194,10 @@ const formatDate = iso =>
         </div>
 
         <!-- Tabela por campanha -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
-          <div class="flex items-center gap-2 mb-5">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-              <span class="i-lucide-list text-white text-sm" />
-            </span>
-            <h3 class="text-sm font-bold text-n-slate-12">Campanha por campanha</h3>
+        <div class="cv-block p-5 sm:p-6" :style="blockVars('campanhas')">
+          <div class="flex items-center gap-2 mb-5 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-list text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Campanha por campanha</h2>
           </div>
           <div v-if="!data.campaigns?.length" class="text-sm text-n-slate-10 text-center py-6">
             Nenhuma campanha no período selecionado.
@@ -196,19 +205,24 @@ const formatDate = iso =>
           <div v-else class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>
-                <tr class="text-left text-[11px] text-n-slate-10 uppercase">
-                  <th class="py-2 pr-3 font-medium">Campanha</th>
-                  <th class="py-2 pr-3 font-medium">Data</th>
-                  <th class="py-2 pr-3 font-medium text-right">Enviadas</th>
-                  <th class="py-2 pr-3 font-medium text-right">Respostas</th>
-                  <th class="py-2 pr-3 font-medium text-right">Agendamentos</th>
-                  <th class="py-2 pr-3 font-medium text-right">Cirurgias</th>
-                  <th class="py-2 pr-3 font-medium text-right">Valor possível</th>
-                  <th class="py-2 font-medium text-right">Investimento</th>
+                <tr class="text-left">
+                  <th class="py-2 pr-3 cv-label">Campanha</th>
+                  <th class="py-2 pr-3 cv-label">Data</th>
+                  <th class="py-2 pr-3 cv-label text-right">Enviadas</th>
+                  <th class="py-2 pr-3 cv-label text-right">Respostas</th>
+                  <th class="py-2 pr-3 cv-label text-right">Agendamentos</th>
+                  <th class="py-2 pr-3 cv-label text-right">Cirurgias</th>
+                  <th class="py-2 pr-3 cv-label text-right">Valor possível</th>
+                  <th class="py-2 cv-label text-right">Investimento</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="c in data.campaigns" :key="c.id" class="border-t border-n-weak text-n-slate-12">
+                <tr
+                  v-for="c in data.campaigns"
+                  :key="c.id"
+                  class="border-t text-n-slate-12"
+                  style="border-color: rgb(var(--cv-rgb) / 0.18)"
+                >
                   <td class="py-2.5 pr-3">
                     <p class="font-medium truncate max-w-[220px]">{{ c.name }}</p>
                     <p class="text-[10px] text-n-slate-9 font-mono truncate max-w-[220px]">{{ c.template || '—' }}</p>
@@ -219,7 +233,7 @@ const formatDate = iso =>
                     {{ c.replies }}
                     <span class="text-[10px] text-n-slate-9">({{ c.reply_rate }}%)</span>
                   </td>
-                  <td class="py-2.5 pr-3 text-right" style="color: #7C3AED">
+                  <td class="py-2.5 pr-3 text-right" style="color: var(--cv)">
                     {{ c.agendamentos }}
                     <span class="text-[10px] text-n-slate-9">({{ c.agendamentos_rate }}%)</span>
                   </td>

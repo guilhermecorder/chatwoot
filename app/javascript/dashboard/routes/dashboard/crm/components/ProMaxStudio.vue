@@ -379,7 +379,9 @@ const removeAction = async action => {
 
 <template>
   <div class="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6" style="background: rgba(2, 6, 23, 0.72)" @click.self="emit('close')">
-    <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-[1200px] h-[94vh] flex flex-col overflow-hidden border border-n-weak">
+    <!-- 🍎 rodada 163: só a concha externa veste o vidro (.cv-modal) quando
+         abre dentro de uma página do formato novo; fora dela, fica como era -->
+    <div class="cv-modal bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-[1200px] h-[94vh] flex flex-col overflow-hidden border border-n-weak">
       <!-- Cabeçalho -->
       <div class="flex items-center justify-between px-5 py-3.5 border-b border-n-weak flex-shrink-0">
         <h2 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">

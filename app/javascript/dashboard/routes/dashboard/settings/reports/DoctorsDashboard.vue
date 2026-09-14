@@ -6,6 +6,8 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import CrmAPI from 'dashboard/api/crm';
@@ -14,6 +16,21 @@ import { DOCTORS } from 'dashboard/helper/cevicoAgenda';
 const { isAdmin } = useAdmin();
 const isLoading = ref(true);
 const data = ref(null);
+
+// 🍎 formato novo (rodada 163): kit "iMac G3 + vidro" com a paleta desta
+// página (o admin escolhe pelo chip do banner; cada bloco pode ter a sua).
+// As cores dos médicos (DOCTORS[].color) são identidade e ficam como estão.
+const pal = useCevicoPalette({
+  scope: 'report:medicos',
+  blocks: [
+    { id: 'kpis', label: 'Resumo do período', icon: 'i-lucide-gauge' },
+    { id: 'ranking', label: 'Ranking de conversão', icon: 'i-lucide-trophy' },
+    { id: 'clinicas', label: 'Cirurgias por clínica', icon: 'i-lucide-building-2' },
+    { id: 'unidades', label: 'Consultas por unidade', icon: 'i-lucide-map-pin' },
+    { id: 'gestao', label: 'Gestão do time médico', icon: 'i-lucide-clipboard-list' },
+  ],
+});
+const { cvVars, blockVars, blockFamily, tileGradAt } = pal;
 
 // ── 🩺 item 104 (20/07): AMBIENTE DO MÉDICO — aba "Gestão do time médico"
 // (só admin): perfil de gestão por médico p/ contratações e desenvolvimento —
@@ -158,33 +175,28 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
+  <div class="cv-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1" :style="cvVars">
     <div class="max-w-5xl mx-auto w-full p-4 sm:p-8">
-      <!-- Header -->
-      <div class="flex items-center gap-3 flex-wrap mb-5">
-        <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, #0369A1, #38BDF8)">
-          <span class="i-lucide-stethoscope text-white text-lg" />
-        </span>
-        <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Dashboard dos Médicos</h1>
-          <p class="text-xs text-n-slate-10">quem mais converte consulta em cirurgia · indicações · NPS · cirurgias por clínica</p>
-        </div>
-      </div>
+      <!-- banner de vidro na paleta da página (rodada 163) -->
+      <CevicoHero
+        :pal="pal"
+        title="Dashboard dos Médicos"
+        subtitle="quem mais converte consulta em cirurgia · indicações · NPS · cirurgias por clínica"
+        icon="i-lucide-stethoscope"
+      />
 
       <!-- Abas: Desempenho | 🩺 Gestão do time médico (item 104, só admin) -->
-      <div v-if="isAdmin" class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full mb-3">
+      <div v-if="isAdmin" class="cv-seg overflow-x-auto mb-3">
         <button
-          class="px-3 h-8 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'desempenho' ? 'text-white font-bold' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'desempenho' ? 'background: linear-gradient(135deg, #0369A1, #38BDF8)' : ''"
+          class="cv-seg-item"
+          :class="activeTab === 'desempenho' ? 'cv-seg-on' : ''"
           @click="activeTab = 'desempenho'"
         >
           <span class="i-lucide-trending-up text-sm" /> Desempenho
         </button>
         <button
-          class="px-3 h-8 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'gestao' ? 'text-white font-bold' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'gestao' ? 'background: linear-gradient(135deg, #0F766E, #2DD4BF)' : ''"
+          class="cv-seg-item"
+          :class="activeTab === 'gestao' ? 'cv-seg-on' : ''"
           @click="activeTab = 'gestao'"
         >
           <span class="i-lucide-clipboard-list text-sm" /> Gestão do time médico
@@ -192,22 +204,20 @@ onMounted(() => {
       </div>
 
       <!-- Período (régua padrão CEVICO) -->
-      <PeriodRuler v-if="activeTab === 'desempenho'" v-model="period" class="mb-6" />
+      <PeriodRuler v-if="activeTab === 'desempenho'" v-model="period" glass class="mb-6" />
 
       <div v-if="isLoading" class="flex justify-center py-16">
         <Spinner :size="32" class="text-n-brand" />
       </div>
 
       <!-- ══ 🩺 GESTÃO DO TIME MÉDICO (item 104 — só admin) ══ -->
-      <div v-else-if="activeTab === 'gestao' && isAdmin" class="space-y-4">
-        <div class="flex items-center gap-2 flex-wrap">
-          <p class="text-xs text-n-slate-10">
-            O raio-X de gestão de cada médico — status, forças, pontos a desenvolver e as suas anotações.
-            Só administradores veem esta aba.
-          </p>
+      <div v-else-if="activeTab === 'gestao' && isAdmin" class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('gestao')">
+        <div class="flex items-center gap-2 mb-1 flex-wrap">
+          <span class="cv-icon"><span class="i-lucide-clipboard-list text-base" /></span>
+          <h2 class="text-sm font-bold text-n-slate-12">Gestão do time médico</h2>
           <span
-            class="ml-auto text-[11px] font-medium px-2.5 py-1 rounded-full flex items-center gap-1.5"
-            :class="profileSaveState === 'error' ? 'text-red-600 bg-red-500/10' : 'text-n-slate-10 bg-n-alpha-1'"
+            class="cv-chip cv-chip-wrap ml-auto"
+            :class="profileSaveState === 'error' ? 'cv-red' : ''"
           >
             <span v-if="profileSaveState === 'saving'" class="i-lucide-loader-2 animate-spin text-xs" />
             <span v-else-if="profileSaveState === 'saved'" class="i-lucide-check text-xs" style="color: #059669" />
@@ -218,12 +228,16 @@ onMounted(() => {
                   : 'Alterações salvam sozinhas' }}
           </span>
         </div>
+        <p class="text-xs text-n-slate-10 mb-5">
+          O raio-X de gestão de cada médico — status, forças, pontos a desenvolver e as suas anotações.
+          Só administradores veem esta aba.
+        </p>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div
             v-for="d in managedDoctors"
             :key="d.name"
-            class="bg-n-solid-2 border border-n-weak rounded-2xl p-4"
+            class="cv-sub p-4"
           >
             <!-- cabeçalho: medalhão + nome + status -->
             <div class="flex items-center gap-2.5 mb-3">
@@ -251,7 +265,7 @@ onMounted(() => {
               </button>
             </div>
 
-            <!-- status em botões em linha -->
+            <!-- status em botões em linha (cores com significado: ficam) -->
             <div class="flex items-center gap-1 flex-wrap mb-3">
               <button
                 v-for="s in DOCTOR_STATUS"
@@ -269,21 +283,21 @@ onMounted(() => {
 
             <!-- números reais do período (quando existem) -->
             <div v-if="d.row" class="grid grid-cols-3 gap-1.5 mb-3">
-              <div class="rounded-lg bg-n-alpha-1 px-2 py-1.5 text-center">
+              <div class="cv-stat text-center">
                 <p class="text-sm font-bold text-n-slate-12">{{ d.row.consultations }}</p>
-                <p class="text-[9px] text-n-slate-10 uppercase tracking-wide">consultas</p>
+                <p class="cv-label">consultas</p>
               </div>
-              <div class="rounded-lg bg-n-alpha-1 px-2 py-1.5 text-center">
+              <div class="cv-stat text-center">
                 <p class="text-sm font-bold" :style="{ color: d.row.conversion_rate >= 50 ? '#059669' : '#B45309' }">
                   {{ d.row.conversion_rate }}%
                 </p>
-                <p class="text-[9px] text-n-slate-10 uppercase tracking-wide">conversão</p>
+                <p class="cv-label">conversão</p>
               </div>
-              <div class="rounded-lg bg-n-alpha-1 px-2 py-1.5 text-center">
+              <div class="cv-stat text-center">
                 <p class="text-sm font-bold" :style="{ color: npsColor(d.row.nps_avg) }">
                   {{ d.row.nps_avg ?? '—' }}
                 </p>
-                <p class="text-[9px] text-n-slate-10 uppercase tracking-wide">NPS</p>
+                <p class="cv-label">NPS</p>
               </div>
             </div>
             <p v-else class="text-[10px] text-n-slate-9 mb-3">
@@ -296,8 +310,7 @@ onMounted(() => {
               <span
                 v-for="(f, i) in d.profile.strengths"
                 :key="`f-${i}`"
-                class="group inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full"
-                style="background: rgba(16, 185, 129, 0.1); color: #047857; border: 1px solid rgba(16, 185, 129, 0.35)"
+                class="cv-chip cv-chip-wrap cv-green group"
               >
                 {{ f }}
                 <button class="opacity-0 group-hover:opacity-100" @click="removeTrait(d.name, 'strengths', i)">
@@ -318,8 +331,7 @@ onMounted(() => {
               <span
                 v-for="(f, i) in d.profile.weaknesses"
                 :key="`w-${i}`"
-                class="group inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full"
-                style="background: rgba(245, 158, 11, 0.1); color: #B45309; border: 1px solid rgba(245, 158, 11, 0.4)"
+                class="cv-chip cv-chip-wrap cv-amber group"
               >
                 {{ f }}
                 <button class="opacity-0 group-hover:opacity-100" @click="removeTrait(d.name, 'weaknesses', i)">
@@ -338,27 +350,26 @@ onMounted(() => {
             <textarea
               v-model="d.profile.notes"
               rows="2"
-              class="w-full text-[11px] leading-snug rounded-lg border border-n-weak bg-n-solid-1 px-2.5 py-2 resize-none focus:outline-none focus:border-n-brand text-n-slate-12"
+              class="cv-input w-full !text-[11px] leading-snug resize-none text-n-slate-12"
               placeholder="Observações do gestor: acordos, plano de desenvolvimento, próxima conversa…"
             />
           </div>
 
           <!-- ➕ contratação futura -->
-          <div class="border-2 border-dashed border-n-weak rounded-2xl p-4 flex flex-col items-center justify-center gap-2.5 min-h-[180px]">
-            <span class="i-lucide-user-round-plus text-2xl text-n-slate-9" />
+          <div class="cv-tile-add p-4 flex flex-col items-center justify-center gap-2.5 min-h-[180px]">
+            <span class="i-lucide-user-round-plus text-2xl" style="color: var(--cv)" />
             <p class="text-xs text-n-slate-10 text-center">
               Contratando? Adicione o candidato aqui e acompanhe a avaliação.
             </p>
             <div class="flex gap-1.5 w-full max-w-[260px]">
               <input
                 v-model="newDoctorName"
-                class="flex-1 text-xs border border-n-weak rounded-lg px-2.5 py-1.5 bg-n-solid-1 focus:outline-none focus:border-n-brand text-n-slate-12"
+                class="cv-input flex-1 min-w-0 !text-xs text-n-slate-12"
                 placeholder="Dr(a). Nome"
                 @keydown.enter.prevent="addDoctor"
               />
               <button
-                class="text-xs font-semibold text-white px-3 rounded-lg disabled:opacity-40"
-                style="background: linear-gradient(135deg, #0F766E, #2DD4BF)"
+                class="cv-btn !h-9 !px-3"
                 :disabled="!newDoctorName.trim()"
                 @click="addDoctor"
               >
@@ -371,34 +382,36 @@ onMounted(() => {
 
       <template v-else>
         <!-- 📈 Resumo do período (c/ selos de recorde/meta do mês) -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6" :style="blockVars('kpis')">
           <DashKpi
             compact
+            glass
             label="Consultas realizadas"
             :value="totals.consultations"
-            from="#0369A1"
-            to="#38BDF8"
+            :grad="blockFamily('kpis')[0]"
             :state="goals.stateFor('consultations_attended')"
             :goal="goals.goalFor('consultations_attended')"
           />
           <DashKpi
             compact
+            glass
             label="Viraram cirurgia"
             :value="totals.conversions"
-            from="#5B21B6"
-            to="#7C3AED"
+            :grad="blockFamily('kpis')[1]"
           />
           <DashKpi
             compact
+            glass
             label="Cirurgias realizadas"
             :value="totals.surgeriesDone"
-            from="#059669"
-            to="#34D399"
+            :grad="blockFamily('kpis')[2]"
             :state="goals.stateFor('surgeries_done')"
             :goal="goals.goalFor('surgeries_done')"
           />
+          <!-- dinheiro continua verde (cor com significado) -->
           <DashKpi
             compact
+            glass
             label="Faturamento gerado"
             :value="Math.round(totals.revenue)"
             prefix="R$ "
@@ -410,11 +423,11 @@ onMounted(() => {
         </div>
 
         <!-- 🏆 Ranking de conversão -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-6">
-          <h2 class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-2">
-            <span class="i-lucide-trophy text-base" style="color: #D4A017" />
-            Conversão de consulta em cirurgia — ranking
-          </h2>
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('ranking')">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-trophy text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Conversão de consulta em cirurgia — ranking</h2>
+          </div>
           <p class="text-xs text-n-slate-10 mb-5">
             conversão = pacientes que o médico INDICOU e que têm cirurgia marcada (rastreado pelo telefone do contato)
           </p>
@@ -424,11 +437,12 @@ onMounted(() => {
           </div>
 
           <div v-else class="space-y-3">
+            <!-- a borda leva a cor do médico (identidade), por cima do vidro -->
             <div
               v-for="(row, i) in data.doctors"
               :key="row.doctor"
-              class="rounded-2xl border-2 bg-n-solid-1 p-4"
-              :style="{ borderColor: doctorColor(row.doctor) + '40' }"
+              class="cv-sub p-4"
+              :style="{ borderColor: doctorColor(row.doctor) + '40', borderWidth: '2px' }"
             >
               <!-- nome nunca vira "Dr. …": quebra linha no celular em vez de truncar -->
               <div class="flex items-center gap-2 flex-wrap mb-3">
@@ -443,33 +457,34 @@ onMounted(() => {
                 </span>
               </div>
               <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
-                <div class="rounded-xl bg-n-alpha-1 px-2 py-2">
+                <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.consultations }}</p>
                   <p class="text-[10px] text-n-slate-10">consultas</p>
                 </div>
-                <div class="rounded-xl bg-n-alpha-1 px-2 py-2">
+                <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.show_rate }}%</p>
                   <p class="text-[10px] text-n-slate-10">comparecimento</p>
                 </div>
-                <div class="rounded-xl bg-n-alpha-1 px-2 py-2">
+                <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.indications }}</p>
                   <p class="text-[10px] text-n-slate-10">indicações ({{ row.indication_rate }}%)</p>
                 </div>
-                <div class="rounded-xl bg-n-alpha-1 px-2 py-2">
+                <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.conversions }}</p>
                   <p class="text-[10px] text-n-slate-10">viraram cirurgia</p>
                 </div>
-                <div class="rounded-xl bg-n-alpha-1 px-2 py-2">
+                <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.surgeries_done }}</p>
                   <p class="text-[10px] text-n-slate-10">cirurgias realizadas</p>
                 </div>
-                <div class="rounded-xl bg-n-alpha-1 px-2 py-2">
+                <div class="cv-stat">
                   <p class="text-base font-bold" :style="{ color: npsColor(row.nps_avg) }">
                     {{ row.nps_avg === null ? '—' : row.nps_avg }}
                   </p>
                   <p class="text-[10px] text-n-slate-10">NPS médio ({{ row.nps_count }})</p>
                 </div>
-                <div class="rounded-xl px-2 py-2 text-white" style="background: linear-gradient(135deg, #065F46, #10B981)">
+                <!-- dinheiro continua verde (cor com significado) -->
+                <div class="cv-tile relative rounded-xl px-2 py-2 text-white" style="background: linear-gradient(135deg, #065F46, #10B981)">
                   <p class="text-sm font-bold leading-tight">{{ fmtBRL(row.revenue) }}</p>
                   <p class="text-[10px] text-white/80">faturamento gerado</p>
                 </div>
@@ -479,11 +494,11 @@ onMounted(() => {
         </div>
 
         <!-- 🏥 Cirurgias por clínica parceira -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-6">
-          <h2 class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-2">
-            <span class="i-lucide-building-2 text-base" style="color: #0284C7" />
-            Volume de cirurgias por clínica
-          </h2>
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('clinicas')">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-building-2 text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Volume de cirurgias por clínica</h2>
+          </div>
           <p class="text-xs text-n-slate-10 mb-5">IOP (geralmente PRK) · Ocular Surgery (geralmente Lasik) — no período selecionado</p>
 
           <div v-if="!data.surgeries_by_clinic?.length" class="text-center py-8 text-n-slate-10 text-sm">
@@ -491,10 +506,10 @@ onMounted(() => {
           </div>
           <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div
-              v-for="c in data.surgeries_by_clinic"
+              v-for="(c, i) in data.surgeries_by_clinic"
               :key="c.key"
-              class="rounded-2xl p-5 text-white shadow-lg"
-              style="background: linear-gradient(135deg, #0284C7, #38BDF8)"
+              class="cv-tile relative rounded-2xl p-5 text-white shadow-lg"
+              :style="{ background: tileGradAt(i, 'clinicas') }"
             >
               <p class="text-xs font-medium text-white/80 mb-1">{{ c.label }}</p>
               <p class="text-3xl font-bold">{{ c.count }}</p>
@@ -513,11 +528,11 @@ onMounted(() => {
         </div>
 
         <!-- 🏢 Consultas por UNIDADE (Tatuapé / Av. Paulista) -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-6">
-          <h2 class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-2">
-            <span class="i-lucide-map-pin text-base" style="color: #EA580C" />
-            Consultas por unidade
-          </h2>
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('unidades')">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-map-pin text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Consultas por unidade</h2>
+          </div>
           <p class="text-xs text-n-slate-10 mb-5">volume e taxa de comparecimento em cada unidade da clínica</p>
 
           <div v-if="!data.consultations_by_unit?.length" class="text-center py-6 text-n-slate-10 text-sm">
@@ -527,7 +542,7 @@ onMounted(() => {
             <div
               v-for="u in data.consultations_by_unit"
               :key="u.key"
-              class="rounded-2xl border border-n-weak bg-n-solid-1 p-4"
+              class="cv-sub p-4"
             >
               <div class="flex items-center gap-2 mb-2">
                 <p class="text-sm font-bold text-n-slate-12 flex-1">{{ u.label }}</p>
@@ -538,11 +553,8 @@ onMounted(() => {
                 <span class="text-n-slate-11">Comparecimento</span>
                 <span class="font-bold text-n-slate-12">{{ u.show_rate }}%</span>
               </div>
-              <div class="h-3 bg-n-alpha-1 rounded-full overflow-hidden">
-                <div
-                  class="h-full rounded-full"
-                  :style="{ width: Math.max(u.show_rate, 3) + '%', background: 'linear-gradient(90deg, #059669, #34D399)' }"
-                />
+              <div class="cv-track">
+                <div class="cv-fill" :style="{ width: Math.max(u.show_rate, 3) + '%' }" />
               </div>
               <p class="text-[10px] text-n-slate-9 mt-1">{{ u.attended }} compareceram · {{ u.missed }} faltaram</p>
             </div>

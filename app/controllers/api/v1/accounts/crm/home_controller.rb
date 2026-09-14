@@ -189,18 +189,49 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     Array(crm_settings&.agenda_config&.dig('custom_panels')).map { |p| "custom:#{p['id']}" }
   end
 
+  # painéis POR PESSOA (rodada 160, 'variant:<id>'): mesmo miolo do painel-base
+  # (dados, metas, recordes) com layout próprio — valem como painel e como
+  # atribuição do time
+  def panel_variants
+    Array(crm_settings&.agenda_config&.dig('panel_variants'))
+  end
+
+  def variant_keys
+    panel_variants.map { |v| "variant:#{v['id']}" }
+  end
+
+  # 'variant:<id>' → painel-base (agendamento/conducao/...) — é dele que saem
+  # os números, as metas e os recordes
+  def resolve_variant(key)
+    return key unless key.to_s.start_with?('variant:')
+
+    variant = panel_variants.find { |v| "variant:#{v['id']}" == key }
+    base = variant&.dig('base').to_s
+    BUILTIN_PANELS.include?(base) ? base : 'agendamento'
+  end
+
+  # chaves aceitas: fixos + Construtor + variantes por pessoa
+  def valid_panel_keys
+    @valid_panel_keys ||= BUILTIN_PANELS + custom_panel_keys + variant_keys
+  end
+
+  # painel PRINCIPAL da conta (main_panel) quando é válido; senão agendamento
+  def default_panel_key
+    key = crm_settings&.agenda_config&.dig('main_panel').presence || 'agendamento'
+    valid_panel_keys.include?(key) ? key : 'agendamento'
+  end
+
+  # agente com painel ATRIBUÍDO pelo admin fica travado nele
+  def assigned_panel_key
+    return nil if Current.account_user.administrator?
+
+    crm_settings&.agenda_config&.dig('panel_assignments', Current.user.id.to_s).presence
+  end
+
   def panel_key
     @panel_key ||= begin
-      valid = BUILTIN_PANELS + custom_panel_keys
-      default_key = crm_settings&.agenda_config&.dig('main_panel').presence || 'agendamento'
-      default_key = 'agendamento' unless valid.include?(default_key)
-      key = params[:panel].presence || default_key
-      # agente com painel ATRIBUÍDO pelo admin fica travado nele
-      unless Current.account_user.administrator?
-        assigned = crm_settings&.agenda_config&.dig('panel_assignments', Current.user.id.to_s)
-        key = assigned if assigned.present?
-      end
-      valid.include?(key) ? key : default_key
+      key = assigned_panel_key || params[:panel].presence || default_panel_key
+      resolve_variant(valid_panel_keys.include?(key) ? key : default_panel_key)
     end
   end
 

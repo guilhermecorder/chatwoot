@@ -8,6 +8,9 @@ import { ref, computed, onMounted, watch } from 'vue';
 import CrmAPI from 'dashboard/api/crm';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import { hexFromGrad } from 'dashboard/helper/cevicoPalettes';
 import { useAlert } from 'dashboard/composables';
 import { Bar, Doughnut } from 'vue-chartjs';
 import {
@@ -31,6 +34,21 @@ const isBackfilling = ref(false);
 const isSavingStages = ref(false);
 const showStagePicker = ref(false);
 const draftStageIds = ref([]);
+
+// 🍎 formato novo (rodada 163): kit "iMac G3 + vidro" com a paleta desta
+// página (o admin escolhe pelo chip do banner; cada bloco pode ter a sua)
+const pal = useCevicoPalette({
+  scope: 'report:meta',
+  blocks: [
+    { id: 'kpis', label: 'Números do período', icon: 'i-lucide-gauge' },
+    { id: 'formulas', label: 'Como se calcula', icon: 'i-lucide-info' },
+    { id: 'investimento', label: 'Investimento × retorno', icon: 'i-lucide-chart-bar' },
+    { id: 'fatia', label: 'Onde está o investimento', icon: 'i-lucide-chart-pie' },
+    { id: 'leads', label: 'Leads e conversões', icon: 'i-lucide-users' },
+    { id: 'tabela', label: 'Anúncio por anúncio', icon: 'i-lucide-list-ordered' },
+  ],
+});
+const { cvVars, blockVars, blockFamily } = pal;
 
 const AZUL = '#0F5FA6';
 const ROXO = '#7C3AED';
@@ -120,7 +138,7 @@ const medalFor = index => ['🥇', '🥈', '🥉'][index] || null;
 const shortName = n => ((n || '').length > 26 ? `${(n || '').slice(0, 25)}…` : n || '');
 
 // Investimento × Receita por anúncio: barras deitadas (nome legível);
-// anúncio bom = barra dourada maior que a azul
+// anúncio bom = barra dourada maior que a do investimento (cor do bloco)
 const investChart = computed(() => {
   const top = [...rows.value]
     .filter(r => r.spend > 0 || r.revenue > 0)
@@ -128,11 +146,12 @@ const investChart = computed(() => {
     .slice(0, 8);
   if (!top.length) return null;
   const barBase = { borderRadius: 6, borderSkipped: false, maxBarThickness: 16 };
+  const investColor = hexFromGrad(blockFamily('investimento')[1]) || AZUL;
   return {
     data: {
       labels: top.map(r => shortName(r.ad_name)),
       datasets: [
-        { label: 'Investimento', data: top.map(r => r.spend || 0), backgroundColor: AZUL + 'E6', ...barBase },
+        { label: 'Investimento', data: top.map(r => r.spend || 0), backgroundColor: investColor + 'E6', ...barBase },
         { label: 'Receita (CRM)', data: top.map(r => r.revenue || 0), backgroundColor: OURO + 'E6', ...barBase },
       ],
     },
@@ -161,11 +180,12 @@ const leadsChart = computed(() => {
     .slice(0, 8);
   if (!top.length) return null;
   const barBase = { borderRadius: 8, borderSkipped: false, maxBarThickness: 26 };
+  const leadsColor = hexFromGrad(blockFamily('leads')[1]) || ROXO;
   return {
     data: {
       labels: top.map(r => shortName(r.ad_name)),
       datasets: [
-        { label: 'Leads', data: top.map(r => r.leads || 0), backgroundColor: ROXO + 'E6', ...barBase },
+        { label: 'Leads', data: top.map(r => r.leads || 0), backgroundColor: leadsColor + 'E6', ...barBase },
         { label: 'Conversões', data: top.map(r => r.conversions || 0), backgroundColor: VERDE + 'E6', ...barBase },
       ],
     },
@@ -277,25 +297,18 @@ const conversionSentence = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full overflow-y-auto bg-n-surface-1">
+  <div class="cv-page flex flex-col h-full overflow-y-auto bg-n-surface-1" :style="cvVars">
     <div class="max-w-6xl mx-auto w-full p-4 sm:p-6">
-      <!-- cabeçalho no padrão CEVICO -->
-      <div
-        class="rounded-3xl p-6 text-white shadow-lg mb-5 relative overflow-hidden"
-        style="background: linear-gradient(135deg, #0d3a75, #1877f2)"
-      >
-        <div class="relative z-10 flex items-center gap-4 flex-wrap" style="color: #fff">
-          <div class="flex-1 min-w-[220px]">
-            <h1 class="text-2xl font-bold leading-tight" style="color: #fff">Anúncios (Meta)</h1>
-            <p class="text-sm mt-1" style="color: rgba(255,255,255,0.85)">
-              Qual anúncio trouxe cada lead — e qual virou cirurgia. Investimento, custo por lead e retorno real.
-            </p>
-          </div>
-          <!-- Período (régua padrão CEVICO) -->
-          <PeriodRuler v-model="period" />
-        </div>
-        <span class="i-lucide-megaphone absolute -right-4 -bottom-8 text-[130px] text-white/10" />
-      </div>
+      <!-- banner de vidro na paleta da página (rodada 163) -->
+      <CevicoHero
+        :pal="pal"
+        title="Anúncios (Meta)"
+        subtitle="Qual anúncio trouxe cada lead — e qual virou cirurgia. Investimento, custo por lead e retorno real."
+        icon="i-lucide-megaphone"
+      />
+
+      <!-- Período (régua padrão CEVICO) -->
+      <PeriodRuler v-model="period" glass class="mb-6" />
 
       <SkeletonScreen v-if="isLoading" variant="dashboard" />
 
@@ -304,69 +317,73 @@ const conversionSentence = computed(() => {
       </div>
 
       <template v-else-if="data">
-        <!-- Meta não configurada -->
+        <!-- Meta não configurada (âmbar = atenção) -->
         <div
           v-if="!data.configured"
-          class="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4 mb-4 text-sm text-n-slate-11"
+          class="cv-block cv-strip cv-amber flex items-start gap-3 px-4 py-3.5 mb-4 text-sm text-n-slate-11"
         >
-          <p class="font-medium text-n-slate-12 mb-1">Conecte a conta de anúncios da Meta</p>
-          <p>
-            Preencha o <b>token de acesso</b> e o <b>ID da conta de anúncios</b> em
-            Configurações → Integrações → Meta. Os leads atribuídos por anúncio (abaixo)
-            funcionam mesmo sem isso — só o investimento/impressões dependem da conexão.
-          </p>
+          <span class="cv-icon cv-icon-sm mt-0.5"><span class="i-lucide-plug-zap text-xs" /></span>
+          <div class="flex-1 min-w-0">
+            <p class="font-medium text-n-slate-12 mb-1">Conecte a conta de anúncios da Meta</p>
+            <p>
+              Preencha o <b>token de acesso</b> e o <b>ID da conta de anúncios</b> em
+              Configurações → Integrações → Meta. Os leads atribuídos por anúncio (abaixo)
+              funcionam mesmo sem isso — só o investimento/impressões dependem da conexão.
+            </p>
+          </div>
         </div>
 
-        <!-- Erro da API da Meta -->
+        <!-- Erro da API da Meta (vermelho = problema) -->
         <div
           v-else-if="data.error"
-          class="rounded-2xl border border-red-500/40 bg-red-500/5 p-4 mb-4 text-sm text-n-slate-11"
+          class="cv-block cv-strip cv-red flex items-start gap-3 px-4 py-3.5 mb-4 text-sm text-n-slate-11"
         >
-          <p class="font-medium text-n-slate-12 mb-1">A Meta respondeu com erro</p>
-          <p class="break-words">{{ data.error }}</p>
+          <span class="cv-icon cv-icon-sm mt-0.5"><span class="i-lucide-triangle-alert text-xs" /></span>
+          <div class="flex-1 min-w-0">
+            <p class="font-medium text-n-slate-12 mb-1">A Meta respondeu com erro</p>
+            <p class="break-words">{{ data.error }}</p>
+          </div>
         </div>
 
         <!-- Backfill pendente -->
         <div
           v-if="data.needs_backfill"
-          class="rounded-2xl border border-blue-500/40 bg-blue-500/5 p-4 mb-4 flex items-center gap-3 flex-wrap"
+          class="cv-block cv-strip px-4 py-3.5 mb-4 flex items-center gap-3 flex-wrap"
         >
+          <span class="cv-icon cv-icon-sm"><span class="i-lucide-history text-xs" /></span>
           <div class="flex-1 min-w-[240px] text-sm text-n-slate-11">
             <p class="font-medium text-n-slate-12">Há mensagens antigas com dados de anúncio</p>
             <p class="text-xs">Processe o histórico uma vez para carimbar a origem nos contatos antigos.</p>
           </div>
           <button
-            class="px-3 py-2 text-xs font-bold rounded-lg text-white disabled:opacity-50"
-            style="background: linear-gradient(135deg, #0d3a75, #1877f2)"
+            class="cv-btn cv-btn-sm"
             :disabled="isBackfilling"
             @click="runBackfill"
           >
-            <span v-if="isBackfilling" class="i-lucide-loader-2 animate-spin inline-block align-middle mr-1" />
+            <span v-if="isBackfilling" class="i-lucide-loader-2 animate-spin text-xs" />
+            <span v-else class="i-lucide-history text-xs" />
             Processar histórico
           </button>
         </div>
 
-        <!-- A CONVERSÃO POR EXTENSO (clareza total do que o painel conta) -->
-        <div
-          class="rounded-2xl border p-4 mb-4"
-          style="border-color: rgba(5, 150, 105, 0.35); background: rgba(5, 150, 105, 0.06)"
-        >
+        <!-- A CONVERSÃO POR EXTENSO (clareza total do que o painel conta).
+             Continua VERDE de propósito: é "a faixa verde" citada nas fórmulas -->
+        <div class="cv-block cv-strip cv-green p-4 mb-6">
           <div class="flex items-start gap-2.5 flex-wrap">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: #059669">
-              <span class="i-lucide-target text-white text-sm" />
-            </span>
+            <span class="cv-icon cv-icon-sm mt-0.5"><span class="i-lucide-target text-xs" /></span>
             <p class="flex-1 min-w-[240px] text-xs text-n-slate-11 leading-relaxed">
               <b class="text-n-slate-12">{{ conversionSentence }}</b>
             </p>
             <button
-              class="text-xs font-bold px-3 h-8 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex-shrink-0"
+              class="cv-btn cv-btn-ghost cv-btn-sm flex-shrink-0"
               @click="showStagePicker = !showStagePicker"
             >
+              <span :class="showStagePicker ? 'i-lucide-x' : 'i-lucide-pencil'" class="text-xs" />
               {{ showStagePicker ? 'fechar' : 'alterar' }}
             </button>
           </div>
 
-          <div v-if="showStagePicker" class="mt-3 pt-3 border-t" style="border-color: rgba(5, 150, 105, 0.2)">
+          <div v-if="showStagePicker" class="mt-3 pt-3" style="border-top: 1px solid rgb(var(--cv-rgb) / 0.2)">
             <p class="text-xs font-medium text-n-slate-12 mb-2">
               Colunas do CRM que contam como conversão (escolha as de venda fechada — indicação ainda não é venda):
             </p>
@@ -374,74 +391,78 @@ const conversionSentence = computed(() => {
               <button
                 v-for="stage in data.stages"
                 :key="stage.id"
-                class="px-2.5 py-1 text-xs rounded-lg border transition-colors"
-                :class="draftStageIds.includes(stage.id)
-                  ? 'font-bold text-white border-transparent'
-                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                :style="draftStageIds.includes(stage.id) ? { background: '#059669' } : {}"
+                class="cv-btn cv-btn-sm"
+                :class="draftStageIds.includes(stage.id) ? '' : 'cv-btn-ghost'"
                 @click="toggleDraftStage(stage.id)"
               >
+                <span v-if="draftStageIds.includes(stage.id)" class="i-lucide-check text-xs" />
                 {{ stage.name }}
               </button>
             </div>
             <button
-              class="px-3 py-1.5 text-xs font-bold rounded-lg text-white disabled:opacity-50"
-              style="background: #059669"
+              class="cv-btn cv-btn-sm"
               :disabled="isSavingStages"
               @click="saveStages"
             >
-              <span v-if="isSavingStages" class="i-lucide-loader-2 animate-spin inline-block align-middle mr-1" />
+              <span v-if="isSavingStages" class="i-lucide-loader-2 animate-spin text-xs" />
               Salvar
             </button>
           </div>
         </div>
 
-        <!-- KPIs dopamine -->
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
-          <div v-for="card in kpiCards" :key="card.key" class="rounded-2xl border border-n-weak bg-n-card p-3.5">
-            <div class="flex items-center gap-2 mb-1.5">
-              <span class="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ background: card.color }">
-                <span :class="card.icon" class="text-white text-xs" />
-              </span>
-              <p class="text-[10px] font-bold text-n-slate-11 leading-tight">{{ card.label }}</p>
-            </div>
-            <p class="text-lg font-bold tabular-nums" :style="{ color: card.color }">{{ card.value }}</p>
+        <!-- 📊 Números do período: KPIs dopamine + ROAS + campeão -->
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('kpis')">
+          <div class="flex items-center gap-2 mb-4 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-gauge text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Números do período</h2>
           </div>
-        </div>
 
-        <!-- ROAS + campeão do período -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-          <div class="rounded-2xl border border-n-weak bg-n-card p-4 flex items-center gap-3">
-            <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" :style="{ background: roasTone(totals.roas).color }">
-              <span class="i-lucide-trending-up text-white text-base" />
-            </span>
-            <div class="flex-1">
-              <p class="text-[11px] font-bold text-n-slate-11">ROAS — retorno do investimento</p>
-              <p class="text-xl font-bold tabular-nums" :style="{ color: roasTone(totals.roas).color }">
-                {{ totals.roas ? totals.roas.toFixed(2) + '×' : '—' }}
-              </p>
-              <p class="text-[10px] text-n-slate-9">
-                {{ totals.roas ? `cada R$ 1 investido virou R$ ${totals.roas.toFixed(2)} em cirurgias` : 'sem receita atribuída no período' }}
-              </p>
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
+            <div v-for="(card, ci) in kpiCards" :key="card.key" class="cv-sub p-3.5">
+              <div class="flex items-center gap-2 mb-1.5">
+                <span class="cv-icon cv-icon-sm" :style="{ background: blockFamily('kpis')[ci % 4] }">
+                  <span :class="card.icon" class="text-xs" />
+                </span>
+                <p class="text-[10px] font-bold text-n-slate-11 leading-tight">{{ card.label }}</p>
+              </div>
+              <p class="text-lg font-bold tabular-nums text-n-slate-12">{{ card.value }}</p>
             </div>
           </div>
-          <div v-if="champion" class="rounded-2xl border border-n-weak bg-n-card p-4 flex items-center gap-3">
-            <span class="text-3xl flex-shrink-0">🏆</span>
-            <div class="min-w-0">
-              <p class="text-[11px] font-bold text-n-slate-11">Campeão do período</p>
-              <p class="text-sm font-bold text-n-slate-12 truncate" :title="champion.ad_name">{{ champion.ad_name }}</p>
-              <p class="text-[10px] text-n-slate-9">
-                {{ formatNumber(champion.leads) }} lead(s) · {{ formatNumber(champion.conversions) }} conversão(ões)
-                <template v-if="champion.revenue"> · {{ formatMoneyShort(champion.revenue) }}</template>
-              </p>
+
+          <!-- ROAS + campeão do período -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="cv-sub p-4 flex items-center gap-3">
+              <span class="cv-icon" :style="{ background: roasTone(totals.roas).color }">
+                <span class="i-lucide-trending-up text-base" />
+              </span>
+              <div class="flex-1">
+                <p class="text-[11px] font-bold text-n-slate-11">ROAS — retorno do investimento</p>
+                <p class="text-xl font-bold tabular-nums" :style="{ color: roasTone(totals.roas).color }">
+                  {{ totals.roas ? totals.roas.toFixed(2) + '×' : '—' }}
+                </p>
+                <p class="text-[10px] text-n-slate-9">
+                  {{ totals.roas ? `cada R$ 1 investido virou R$ ${totals.roas.toFixed(2)} em cirurgias` : 'sem receita atribuída no período' }}
+                </p>
+              </div>
+            </div>
+            <div v-if="champion" class="cv-sub cv-sub-on p-4 flex items-center gap-3">
+              <span class="text-3xl flex-shrink-0">🏆</span>
+              <div class="min-w-0">
+                <p class="text-[11px] font-bold text-n-slate-11">Campeão do período</p>
+                <p class="text-sm font-bold text-n-slate-12 truncate" :title="champion.ad_name">{{ champion.ad_name }}</p>
+                <p class="text-[10px] text-n-slate-9">
+                  {{ formatNumber(champion.leads) }} lead(s) · {{ formatNumber(champion.conversions) }} conversão(ões)
+                  <template v-if="champion.revenue"> · {{ formatMoneyShort(champion.revenue) }}</template>
+                </p>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Como cada número é calculado — por extenso, sem mistério -->
-        <div class="rounded-2xl border border-n-weak bg-n-card px-4 py-3 mb-5">
+        <div class="cv-block cv-strip px-4 py-3 mb-6" :style="blockVars('formulas')">
           <div class="flex items-center gap-2 mb-2">
-            <span class="i-lucide-info text-n-slate-10 text-sm" />
+            <span class="cv-icon cv-icon-sm"><span class="i-lucide-info text-xs" /></span>
             <p class="text-[11px] font-bold text-n-slate-11">Como cada número é calculado</p>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-1">
@@ -452,36 +473,43 @@ const conversionSentence = computed(() => {
         </div>
 
         <!-- Gráficos: o impacto de cada anúncio, visual -->
-        <div v-if="investChart || spendShareChart" class="grid grid-cols-1 xl:grid-cols-3 gap-3 mb-5">
-          <div v-if="investChart" class="xl:col-span-2 rounded-2xl border border-n-weak bg-n-card p-4">
-            <h3 class="text-sm font-bold text-n-slate-12 mb-0.5">Investimento × retorno por anúncio</h3>
-            <p class="text-[11px] text-n-slate-10 mb-3">anúncio saudável = barra dourada (o que voltou) maior que a azul (o que saiu)</p>
+        <div v-if="investChart || spendShareChart" class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
+          <div v-if="investChart" class="xl:col-span-2 cv-block p-5 sm:p-6" :style="blockVars('investimento')">
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
+              <span class="cv-icon"><span class="i-lucide-chart-bar text-base" /></span>
+              <h3 class="text-sm font-bold text-n-slate-12">Investimento × retorno por anúncio</h3>
+            </div>
+            <p class="text-[11px] text-n-slate-10 mb-3">anúncio saudável = barra dourada (o que voltou) maior que a barra do investimento (o que saiu)</p>
             <div class="h-72">
               <Bar :data="investChart.data" :options="investChart.options" />
             </div>
           </div>
-          <div v-if="spendShareChart" class="rounded-2xl border border-n-weak bg-n-card p-4">
-            <h3 class="text-sm font-bold text-n-slate-12 mb-0.5">Onde está o investimento</h3>
+          <div v-if="spendShareChart" class="cv-block p-5 sm:p-6" :style="blockVars('fatia')">
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
+              <span class="cv-icon"><span class="i-lucide-chart-pie text-base" /></span>
+              <h3 class="text-sm font-bold text-n-slate-12">Onde está o investimento</h3>
+            </div>
             <p class="text-[11px] text-n-slate-10 mb-3">fatia de cada anúncio no total gasto do período</p>
             <div class="h-72">
               <Doughnut :data="spendShareChart.data" :options="spendShareChart.options" />
             </div>
           </div>
         </div>
-        <div v-if="leadsChart" class="rounded-2xl border border-n-weak bg-n-card p-4 mb-5">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-0.5">Leads e conversões por anúncio</h3>
-          <p class="text-[11px] text-n-slate-10 mb-3">quantos chegaram por cada anúncio (roxo) — e quantos desses viraram conversão (verde)</p>
+        <div v-if="leadsChart" class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('leads')">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-users text-base" /></span>
+            <h3 class="text-sm font-bold text-n-slate-12">Leads e conversões por anúncio</h3>
+          </div>
+          <p class="text-[11px] text-n-slate-10 mb-3">quantos chegaram por cada anúncio (barra na cor do bloco) — e quantos desses viraram conversão (verde)</p>
           <div class="h-64">
             <Bar :data="leadsChart.data" :options="leadsChart.options" />
           </div>
         </div>
 
         <!-- Tabela por anúncio -->
-        <div class="rounded-2xl border border-n-weak bg-n-card overflow-hidden">
-          <div class="px-4 py-3 border-b border-n-weak flex items-center gap-2 flex-wrap">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0d3a75, #1877f2)">
-              <span class="i-lucide-list-ordered text-white text-sm" />
-            </span>
+        <div class="cv-block mb-6" :style="blockVars('tabela')">
+          <div class="px-5 py-4 flex items-center gap-2 flex-wrap" style="border-bottom: 1px solid rgb(var(--cv-rgb) / 0.18)">
+            <span class="cv-icon"><span class="i-lucide-list-ordered text-base" /></span>
             <h2 class="text-sm font-bold text-n-slate-12">Anúncio por anúncio</h2>
             <span class="text-[11px] text-n-slate-9 ml-auto">
               {{ formatNumber(data.unattributed_leads) }} contato(s) novo(s) no período sem anúncio identificado
@@ -490,7 +518,7 @@ const conversionSentence = computed(() => {
           <div class="overflow-x-auto">
             <table class="w-full text-sm min-w-[900px]">
               <thead>
-                <tr class="text-left text-[10px] uppercase tracking-wide text-n-slate-9 border-b border-n-weak">
+                <tr class="text-left text-[10px] uppercase tracking-wide text-n-slate-9" style="border-bottom: 1px solid rgb(var(--cv-rgb) / 0.18)">
                   <th class="px-3 py-2.5 font-bold">Anúncio</th>
                   <th class="px-3 py-2.5 font-bold text-right">Investimento</th>
                   <th class="px-3 py-2.5 font-bold text-right">Impressões</th>
@@ -514,7 +542,8 @@ const conversionSentence = computed(() => {
                 <tr
                   v-for="(row, ri) in rows"
                   :key="row.ad_id"
-                  class="border-b border-n-weak/60 last:border-0 hover:bg-n-alpha-1"
+                  class="last:border-0 hover:bg-n-alpha-1"
+                  style="border-bottom: 1px solid rgb(var(--cv-rgb) / 0.1)"
                 >
                   <td class="px-3 py-2.5 max-w-[280px]">
                     <div class="flex items-center gap-1.5">
@@ -540,7 +569,7 @@ const conversionSentence = computed(() => {
                   <td class="px-3 py-2.5 text-right tabular-nums">{{ row.spend ? formatCurrency(row.spend) : '—' }}</td>
                   <td class="px-3 py-2.5 text-right tabular-nums">{{ row.impressions ? formatNumber(row.impressions) : '—' }}</td>
                   <td class="px-3 py-2.5 text-right tabular-nums">{{ row.link_clicks ? formatNumber(row.link_clicks) : '—' }}</td>
-                  <td class="px-3 py-2.5 text-right tabular-nums font-bold" :style="{ color: row.leads ? '#7C3AED' : undefined }">
+                  <td class="px-3 py-2.5 text-right tabular-nums font-bold" :style="{ color: row.leads ? 'var(--cv)' : undefined }">
                     {{ formatNumber(row.leads) }}
                   </td>
                   <td class="px-3 py-2.5 text-right tabular-nums">{{ row.cpl ? formatCurrency(row.cpl) : '—' }}</td>

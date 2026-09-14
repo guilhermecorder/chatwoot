@@ -20,6 +20,8 @@ import CrmAPI from 'dashboard/api/crm';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
 import { ALL_THEMES } from 'dashboard/helper/cevicoThemes';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import CevicoPalettePicker from 'dashboard/components-next/cevico/CevicoPalettePicker.vue';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
 import draggable from 'vuedraggable';
 import { evaluateFormula, variablesIn, formatKpi } from 'dashboard/helper/cevicoFormula';
@@ -90,6 +92,22 @@ const ownerFirstName = key =>
 // (key 'custom:<id>' — o backend do home já entende esse formato)
 const allPanels = computed(() => [
   ...BASE_PANELS.map(p => ({ ...p, who: ownerFirstName(p.key) || p.who })),
+  // 🧑‍🤝‍🧑 painéis POR PESSOA (rodada 160): versão de um painel-base com
+  // layout próprio — mesma cor/ícone do base, nome escolhido pelo admin
+  ...(crmSettings.value?.panel_variants || []).map(v => {
+    const base = BASE_PANELS.find(b => b.key === v.base) || BASE_PANELS[0];
+    return {
+      key: `variant:${v.id}`,
+      label: v.name,
+      who: '',
+      icon: base.icon,
+      desc: base.desc,
+      grad: base.grad,
+      base: base.key,
+      variant: true,
+      variantDef: v,
+    };
+  }),
   ...(crmSettings.value?.custom_panels || []).map(p => ({
     key: `custom:${p.id}`,
     label: p.name,
@@ -152,6 +170,11 @@ const selectedDoctor = ref(localStorage.getItem('cevico_meu_painel_medico') || '
 const currentPanel = computed(
   () => allPanels.value.find(p => p.key === selectedPanel.value) || BASE_PANELS[0]
 );
+// chave-BASE do painel escolhido: a variante por pessoa herda tudo do base
+// (cards, metas, cores semânticas, blocos) — só o layout é dela
+const panelBase = computed(() =>
+  currentPanel.value.base || (currentPanel.value.custom ? 'custom' : selectedPanel.value)
+);
 
 // settings chegaram: (1) aplica o painel principal UMA vez — só se a
 // pessoa nunca escolheu manualmente; (2) painel custom excluído cai
@@ -171,7 +194,7 @@ watch(crmSettings, settings => {
     }
   }
   if (
-    selectedPanel.value.startsWith('custom:') &&
+    (selectedPanel.value.startsWith('custom:') || selectedPanel.value.startsWith('variant:')) &&
     !allPanels.value.some(p => p.key === selectedPanel.value)
   ) {
     selectedPanel.value = 'agendamento';
@@ -185,7 +208,7 @@ const fetchData = async () => {
     const { data: payload } = await CrmAPI.getHome({
       preset,
       panel: selectedPanel.value,
-      doctor: selectedPanel.value === 'medico' ? selectedDoctor.value || undefined : undefined,
+      doctor: panelBase.value === 'medico' ? selectedDoctor.value || undefined : undefined,
       // só o Personalizado manda De/Até; nos presets o backend resolve
       ...(preset === 'custom' ? { from, to } : {}),
     });
@@ -232,7 +255,7 @@ const rawPanelTiles = computed(() => {
   // painel do Construtor tem grade própria (CustomPanelGrid) — sem tiles fixas
   if (currentPanel.value.custom) return [];
   const d = pd.value;
-  if (selectedPanel.value === 'conducao') {
+  if (panelBase.value === 'conducao') {
     return [
       { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: 'agenda das unidades',
         units: d.by_unit,
@@ -256,7 +279,7 @@ const rawPanelTiles = computed(() => {
         about: 'Consultas do período em que o médico registrou indicação de cirurgia (botão 🎯 na Agenda ou conduta no Espaço do Paciente). Começa aqui o funil de fechamento.' },
     ];
   }
-  if (selectedPanel.value === 'cirurgia') {
+  if (panelBase.value === 'cirurgia') {
     return [
       { label: 'Indicações de cirurgia', icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: 'pacientes indicados no período',
         details: [{ label: 'Viraram cirurgia agendada', value: `${d.surgeries_booked ?? 0} · ${d.closing_rate ?? 0}%` }],
@@ -274,7 +297,7 @@ const rawPanelTiles = computed(() => {
         about: 'Cirurgias marcadas como realizadas na Agenda de Cirurgias. "Não vieram" = agendou e não apareceu; "veio e não fez" entra separado no Dashboard da Agenda.' },
     ];
   }
-  if (selectedPanel.value === 'medico') {
+  if (panelBase.value === 'medico') {
     const docNote = 'O número é do médico escolhido; o gráfico mostra a clínica inteira no período (a série por médico fica no Dashboard dos Médicos).';
     return [
       { label: 'Consultas no período', icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`,
@@ -292,7 +315,7 @@ const rawPanelTiles = computed(() => {
         about: 'Dos pacientes que este médico atendeu no período, quantos chegaram à cirurgia (pelo telefone do contato no CRM).' },
     ];
   }
-  if (selectedPanel.value === 'gestor') {
+  if (panelBase.value === 'gestor') {
     const inboxesG = d.leads_by_inbox || [];
     return [
       { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', chartKey: 'new_leads', sub: leadsInboxSub.value,
@@ -400,7 +423,7 @@ const deltaLine = (value, prev, format, bag = null) => {
   return `${arrow} ${Math.abs(pct).toFixed(0)}% vs ${(bag || kpiBag.value)?.previous_label || 'período anterior'} (${formatKpi(prev, format)})`;
 };
 const customKpiDefs = computed(() =>
-  (crmSettings.value?.custom_kpis || []).filter(k => k.panel === 'all' || k.panel === selectedPanel.value)
+  (crmSettings.value?.custom_kpis || []).filter(k => k.panel === 'all' || k.panel === panelBase.value)
 );
 const customTiles = computed(() =>
   customKpiDefs.value.map(def => {
@@ -418,7 +441,8 @@ const customTiles = computed(() =>
       kpi: true,
       def,
       grad: def.color || null,
-      sub: deltaLine(value, prev, def.format),
+      // a variação virou a pílula ▲/▼ do card (varredura 12/09); aqui fica o valor anterior
+      sub: prev === null || prev === undefined ? '' : `anterior: ${formatKpi(prev, def.format)} · ${kpiBag.value?.previous_label || 'período anterior'}`,
       series,
       details: [
         { label: 'Neste período', value: formatKpi(value, def.format) },
@@ -433,6 +457,56 @@ const customTiles = computed(() =>
 );
 
 const chartFormat = tile => v => formatKpi(v, tile?.format || (tile?.pct ? 'percent' : 'number'));
+
+// ── varredura 12/09: cada card conta a HISTÓRIA do número ──
+// o indicador do cesto que alimenta o gráfico deste card (chartKey)
+const bagMetricFor = tile => {
+  if (!tile?.chartKey || !kpiBag.value?.metrics) return null;
+  const key = tile.chartKey === 'auto' ? bagMetricByLabelOf(kpiBag.value, tile.chartMatch) : tile.chartKey;
+  return key ? bagMetrics.value[key] || null : null;
+};
+// ▲/▼ vs período anterior: card de fórmula usa o próprio valor; card fixo
+// usa o indicador do cesto (só contagens — taxa não tem série comparável).
+// No painel Médicos o número é do médico e a série é da clínica: sem tendência.
+const tileTrend = tile => {
+  if (panelBase.value === 'medico') return null;
+  let value = null;
+  let prev = null;
+  let format = tile.format || 'number';
+  if (tile.def) {
+    value = tile.rawValue;
+    prev = tile.prevValue;
+  } else if (tile.chartKey && !tile.pct && !tile.compare) {
+    const m = bagMetricFor(tile);
+    if (!m) return null;
+    value = m.value;
+    prev = m.prev;
+    format = m.unit === 'brl' ? 'currency' : 'number';
+  } else {
+    return null;
+  }
+  if (value === null || value === undefined || !prev) return null;
+  const pct = ((value - prev) / Math.abs(prev)) * 100;
+  const up = pct >= 0;
+  return {
+    up,
+    text: `${up ? '▲' : '▼'} ${Math.abs(pct).toFixed(0)}%`,
+    title: `vs ${kpiBag.value?.previous_label || 'período anterior'}: ${formatKpi(prev, format)}`,
+  };
+};
+// sparkline do card (série do período): linha + área, em coordenadas 100×24
+const tileSpark = tile => {
+  if (panelBase.value === 'medico') return null;
+  const series = tile.def ? tile.series : bagMetricFor(tile)?.series;
+  if (!series || series.length < 3 || !series.some(v => Number(v) > 0)) return null;
+  const n = series.length;
+  const max = Math.max(1, ...series.map(v => Number(v) || 0));
+  const pts = series.map((v, i) => [(i / (n - 1)) * 100, 22 - ((Number(v) || 0) / max) * 20]);
+  const line = pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  return { line, area: `0,24 ${line} 100,24` };
+};
+// primeira cor de um gradiente CSS (o gráfico do popup na cor do card)
+const hexFromGrad = grad => (String(grad || '').match(/#[0-9a-f]{6}/gi) || [])[0] || null;
 
 // ── 📊 GRÁFICO DO POPUP v2 (item 144): mini-régua própria, período anterior
 // sobreposto balde a balde, linha de meta, ações da empresa 📌 e a
@@ -597,6 +671,41 @@ const modalRangeLabel = computed(() => {
   return found && found[0] ? found[1] : 'período da régua';
 });
 
+// ── varredura 12/09: tendência no cabeçalho, cor do gráfico e leitura em 1 frase ──
+const modalDelta = computed(() => {
+  const c = modalChart.value;
+  if (!c || c.compare || c.prev === undefined || c.prev === null || !c.prev) return null;
+  const total = c.total ?? 0;
+  const pct = ((total - c.prev) / Math.abs(c.prev)) * 100;
+  const fmt = kpiModal.value?.format || (c.unit === 'brl' ? 'currency' : kpiModal.value?.pct ? 'percent' : 'number');
+  return {
+    up: pct >= 0,
+    text: `${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(0)}%`,
+    sub: `vs ${modalBag.value?.previous_label || 'período anterior'} · ${formatKpi(c.prev, fmt)}`,
+  };
+});
+const modalChartColor = computed(() =>
+  (kpiModal.value && hexFromGrad(tileVisual(kpiModal.value).grad)) || '#0F5FA6'
+);
+const BUCKET_WORD = { day: ['dia', 'dias'], week: ['semana', 'semanas'], month: ['mês', 'meses'] };
+const modalInsight = computed(() => {
+  const c = modalChart.value;
+  if (!c || c.compare || isLoadingModalBag.value) return '';
+  const vals = (c.values || []).map(v => Number(v) || 0);
+  if (!vals.length || !vals.some(v => v > 0)) return '';
+  const fmt = chartFormat(kpiModal.value);
+  const [one, many] = BUCKET_WORD[modalBag.value?.granularity] || BUCKET_WORD.day;
+  const maxV = Math.max(...vals);
+  const maxI = vals.indexOf(maxV);
+  const avg = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+  const parts = [`pico ${c.labels?.[maxI] ? `em ${c.labels[maxI]}` : ''}: ${fmt(maxV)}`.replace('pico : ', 'pico: '), `média ${fmt(avg)} por ${one}`];
+  if (!c.isFormula && c.total !== undefined && c.total !== null) parts.push(`total ${fmt(c.total)}`);
+  // "sem movimento" só faz sentido pra contagem (taxa zerada não é ausência)
+  const zeros = vals.filter(v => v === 0).length;
+  if (!c.isFormula && zeros && vals.length > 3) parts.push(`${zeros} ${zeros > 1 ? many : one} sem movimento`);
+  return parts.join(' · ');
+});
+
 // ── CONSTRUTOR DO "+" (admin): indicador pronto ou fórmula, cor, painel ──
 const kpiBuilder = ref(null); // def em edição (novo ou existente)
 const kpiBuilderMode = ref('ready'); // 'ready' | 'formula'
@@ -609,7 +718,7 @@ const newKpiDef = () => ({
   format: 'number',
   color: '',
   icon: 'i-lucide-sparkles',
-  panel: selectedPanel.value.startsWith('custom:') ? 'all' : selectedPanel.value,
+  panel: currentPanel.value.custom ? 'all' : panelBase.value,
   note: '',
 });
 const openKpiBuilder = def => {
@@ -755,45 +864,73 @@ const deleteKpi = async def => {
 // degraus (escuro → claro); a cor SEMÂNTICA (verde/âmbar/vermelho) fica
 // reservada pro card que está sendo JULGADO — o olho vai direto nele.
 // O admin pode trocar a família por um tema (Configurações → Painéis).
-const PANEL_FAMILY = {
-  agendamento: [
-    'linear-gradient(135deg, #152C61, #0F5FA6)',
-    'linear-gradient(135deg, #0F5FA6, #3B82F6)',
-    'linear-gradient(135deg, #1D4ED8, #60A5FA)',
-    'linear-gradient(135deg, #2563EB, #93C5FD)',
-  ],
-  conducao: [
-    'linear-gradient(135deg, #134E4A, #0F766E)',
-    'linear-gradient(135deg, #0F766E, #14B8A6)',
-    'linear-gradient(135deg, #0D9488, #2DD4BF)',
-    'linear-gradient(135deg, #14B8A6, #99F6E4)',
-  ],
-  cirurgia: [
-    'linear-gradient(135deg, #831843, #9D174D)',
-    'linear-gradient(135deg, #9D174D, #DB2777)',
-    'linear-gradient(135deg, #BE185D, #F472B6)',
-    'linear-gradient(135deg, #DB2777, #F9A8D4)',
-  ],
-  medico: [
-    'linear-gradient(135deg, #0C4A6E, #0369A1)',
-    'linear-gradient(135deg, #0369A1, #0284C7)',
-    'linear-gradient(135deg, #0284C7, #38BDF8)',
-    'linear-gradient(135deg, #0EA5E9, #7DD3FC)',
-  ],
-  gestor: [
-    'linear-gradient(135deg, #152C61, #0F5FA6)',
-    'linear-gradient(135deg, #0B4A82, #1D4ED8)',
-    'linear-gradient(135deg, #1E3A8A, #3B82F6)',
-    'linear-gradient(135deg, #B8860B, #D4A017)',
-  ],
+// os BLOCOS do Meu Painel (item 143): nome, ícone e a posição padrão de
+// cada um — as paletas por bloco (abaixo) e o modo edição leem daqui
+// rodada 161: barrinhas do modo edição com ícone lucide (sem emoji)
+const BLOCK_LABELS = {
+  whatsapp: 'Status do WhatsApp',
+  briefing: 'Briefing do gestor',
+  radar: 'Radar de Oportunidades',
+  tarefas: 'Tarefas esperando você',
+  mentor: 'Feedback da semana',
+  indicadores: 'Indicadores do período',
+  desempenho: 'Meu desempenho',
+  agenda_dashboard: 'Dashboard da Agenda',
+  saude_agenda: 'Saúde da Agenda',
+  metas_strip: 'Metas · Rotinas · Ferramentas',
+  atalhos: 'Acesso rápido',
+  termometro: 'Termômetro do momento',
 };
-const panelFamily = computed(() => {
-  const key = selectedPanel.value;
-  const themeKey = crmSettings.value?.panel_themes?.[key];
+const BLOCK_ICONS = {
+  whatsapp: 'i-lucide-phone',
+  briefing: 'i-lucide-gauge',
+  radar: 'i-lucide-radar',
+  tarefas: 'i-lucide-list-checks',
+  mentor: 'i-lucide-graduation-cap',
+  indicadores: 'i-lucide-layout-grid',
+  desempenho: 'i-lucide-target',
+  agenda_dashboard: 'i-lucide-calendar-days',
+  saude_agenda: 'i-lucide-activity',
+  metas_strip: 'i-lucide-flag',
+  atalhos: 'i-lucide-rocket',
+  termometro: 'i-lucide-thermometer',
+};
+const TOP_BLOCKS_DEFAULT = ['whatsapp', 'briefing', 'radar', 'tarefas', 'mentor'];
+const MAIN_BLOCKS_DEFAULT = ['indicadores', 'desempenho', 'agenda_dashboard', 'saude_agenda', 'metas_strip', 'atalhos', 'termometro'];
+// 🍎🍊 PALETAS (rodadas 162/163): as 7 cores dos iMac G3 (uma por dia da
+// semana) + as 10 frutas da Apple + a salada de frutas. O motor mora no
+// composable useCevicoPalette (compartilhado com os Relatórios): por painel,
+// o admin escolhe o painel inteiro (cor do dia / fixa / salada) e cada bloco
+// por cima; salvo em crm settings panel_palettes[painel].
+// Tema legado de Configurações → Painéis (item 140) vira uma paleta: vale
+// quando o admin ainda não escolheu nada aqui.
+const themePalette = computed(() => {
+  const themeKey = crmSettings.value?.panel_themes?.[panelBase.value];
   const theme = themeKey && ALL_THEMES.find(t => t.key === themeKey);
-  if (theme) return [theme.primary, theme.pill, theme.action, theme.accent];
-  return PANEL_FAMILY[key] || PANEL_FAMILY.agendamento;
+  if (!theme) return null;
+  return {
+    key: `tema:${theme.key}`,
+    label: theme.label,
+    emoji: theme.emoji || '',
+    dot: hexFromGrad(theme.accent) || hexFromGrad(theme.pill) || '#152C61',
+    hero: theme.primary,
+    family: [theme.primary, theme.pill, theme.action, theme.accent],
+  };
 });
+const pal = useCevicoPalette({
+  scope: selectedPanel,
+  // a variante por pessoa herda a paleta do painel-base
+  fallbackScope: computed(() => (currentPanel.value.variant ? panelBase.value : null)),
+  blocks: [...TOP_BLOCKS_DEFAULT, ...MAIN_BLOCKS_DEFAULT].map(id => ({ id, label: BLOCK_LABELS[id], icon: BLOCK_ICONS[id] })),
+  themePalette,
+});
+const {
+  dayFlavor, flavorPreview, cycleFlavor, pagePalette, blockPalette, blockVars, blockFamily, cvVars,
+  tileGradAt, openPalettePicker, paletteLabel,
+} = pal;
+// família dos CARDS da fileira (= bloco "indicadores"); a cor escolhida por
+// card (item 143) e o alerta de meta continuam por cima
+const panelFamily = computed(() => blockPalette('indicadores').family);
 
 // 🔍 POPUP do card de KPI (item 140): o card mostra só o macro; o detalhe
 // (linhas completas + "como é calculado") abre aqui
@@ -840,16 +977,15 @@ const prettyFormula = expr => {
 const slugId = label =>
   String(label || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').slice(0, 40);
 const allPanelTiles = computed(() => {
-  const fam = panelFamily.value;
   const fixed = rawPanelTiles.value.map((t, i) => ({
     ...t,
     id: t.id || t.gk || slugId(t.label),
-    grad: t.judged ? t.grad : currentPanel.value?.custom ? t.grad : fam[i % fam.length],
+    grad: t.judged ? t.grad : currentPanel.value?.custom ? t.grad : tileGradAt(i),
   }));
   const custom = customTiles.value.map((t, i) => ({
     ...t,
     id: `kpi:${t.def.id}`,
-    grad: t.grad || fam[(fixed.length + i) % fam.length],
+    grad: t.grad || tileGradAt(fixed.length + i),
   }));
   return [...fixed, ...custom];
 });
@@ -863,8 +999,12 @@ const toggleEditMode = () => {
   // saiu da edição: busca o que a pausa do auto-refresh segurou
   if (!organizeMode.value) refreshAll();
 };
+// variante por pessoa sem layout próprio ainda NASCE com o layout do base
 const kpiLayout = computed(
-  () => crmSettings.value?.kpi_layout?.[selectedPanel.value] || { order: [], hidden: [], colors: {} }
+  () =>
+    crmSettings.value?.kpi_layout?.[selectedPanel.value] ||
+    (currentPanel.value.variant ? crmSettings.value?.kpi_layout?.[panelBase.value] : null) ||
+    { order: [], hidden: [], colors: {} }
 );
 // ordem padrão = a do sistema; a ordem salva reorganiza; card novo entra no
 // fim; a COR escolhida pelo admin (item 143) veste o card por cima da família
@@ -946,24 +1086,11 @@ const applyTileHexColor = () => {
 // ── ⠿ ORGANIZAR OS BLOCOS (item 143): TODOS os blocos do Meu Painel se
 // movem com o mesmo arrasto magnético dos cards — duas áreas (avisos em
 // cima do seletor de painel, conteúdo embaixo) e dá pra cruzar entre elas ──
-const BLOCK_LABELS = {
-  whatsapp: '💬 Status do WhatsApp',
-  briefing: '📊 Briefing do gestor',
-  radar: '💚 Radar de Oportunidades',
-  tarefas: '📋 Tarefas esperando você',
-  mentor: '🧭 Feedback da semana',
-  indicadores: '📌 Indicadores do período',
-  desempenho: '🎯 Meu desempenho',
-  agenda_dashboard: '📅 Dashboard da Agenda',
-  saude_agenda: '🩺 Saúde da Agenda',
-  metas_strip: '🎯 Metas · Rotinas · Ferramentas',
-  atalhos: '🚀 Acesso rápido',
-  termometro: '🌡️ Termômetro do momento',
-};
-const TOP_BLOCKS_DEFAULT = ['whatsapp', 'briefing', 'radar', 'tarefas', 'mentor'];
-const MAIN_BLOCKS_DEFAULT = ['indicadores', 'desempenho', 'agenda_dashboard', 'saude_agenda', 'metas_strip', 'atalhos', 'termometro'];
 const blockLayout = computed(
-  () => crmSettings.value?.block_layout?.[selectedPanel.value] || {}
+  () =>
+    crmSettings.value?.block_layout?.[selectedPanel.value] ||
+    (currentPanel.value.variant ? crmSettings.value?.block_layout?.[panelBase.value] : null) ||
+    {}
 );
 // ordem salva + blocos novos (que ainda não estavam salvos) no lugar padrão;
 // cada área só aceita os SEUS blocos (sem cruzar — o conteúdo de cada bloco
@@ -1083,7 +1210,7 @@ const tileState = tile => {
 
 const tileVisual = tile => {
   const st = tileState(tile);
-  const grads = STATUS_GRADS[selectedPanel.value] || STATUS_GRADS.agendamento;
+  const grads = STATUS_GRADS[panelBase.value] || STATUS_GRADS.agendamento;
   return {
     ...st,
     // sem status de meta mandando, um chip "Muito bom" pinta o card de
@@ -1137,7 +1264,7 @@ const GOAL_FIELDS = {
 const openGoalsModal = () => {
   const all = crmSettings.value?.panel_goals || {};
   goalsDraft.value = JSON.parse(JSON.stringify(all));
-  if (!goalsDraft.value[selectedPanel.value]) goalsDraft.value[selectedPanel.value] = {};
+  if (!goalsDraft.value[panelBase.value]) goalsDraft.value[panelBase.value] = {};
   showGoalsModal.value = true;
 };
 const saveGoals = async () => {
@@ -1162,7 +1289,7 @@ const saveGoals = async () => {
 // agrega metas em vermelho, radar, sem resposta e pendências num
 // semáforo único com os motivos prontos para agir
 const gestorSignals = computed(() => {
-  if (selectedPanel.value !== 'gestor' || !data.value) return [];
+  if (panelBase.value !== 'gestor' || !data.value) return [];
   const sigs = [];
   (panelTiles.value || []).forEach(tile => {
     const st = tileState(tile);
@@ -1193,28 +1320,28 @@ const gestorVerdict = computed(() => {
 // linha de destaque abaixo dos tiles — muda com o painel
 const panelHighlight = computed(() => {
   const d = pd.value;
-  if (selectedPanel.value === 'conducao') {
+  if (panelBase.value === 'conducao') {
     return {
       icon: 'i-lucide-clipboard-alert', color: '#D97706', value: d.unconfirmed ?? 0,
       label: 'Consultas sem conferência',
       sub: 'já passaram e ninguém marcou Compareceu/Faltou — confira na Agenda',
     };
   }
-  if (selectedPanel.value === 'cirurgia') {
+  if (panelBase.value === 'cirurgia') {
     return {
       icon: 'i-lucide-hourglass', color: '#BE185D', value: d.awaiting_closing ?? 0,
       label: 'Indicados aguardando fechamento',
       sub: `indicações do período ainda sem cirurgia marcada · ${d.upcoming_surgeries ?? 0} cirurgia(s) futura(s) na agenda`,
     };
   }
-  if (selectedPanel.value === 'medico') {
+  if (panelBase.value === 'medico') {
     return {
       icon: 'i-lucide-slice', color: '#0369A1', value: d.surgeries ?? 0,
       label: 'Cirurgias no período',
       sub: d.doctor ? `realizadas/agendadas por ${d.doctor}` : 'todos os médicos',
     };
   }
-  if (selectedPanel.value === 'gestor') {
+  if (panelBase.value === 'gestor') {
     const nps = d.nps || {};
     return {
       icon: 'i-lucide-smile', color: '#0D9488',
@@ -1235,7 +1362,10 @@ const panelHighlight = computed(() => {
 // ── Saudação ────────────────────────────────────────────────
 const firstName = computed(() => {
   const name = currentUser.value?.available_name || currentUser.value?.name || '';
-  return name.split(' ')[0];
+  // só letras: vírgula, emoji ou símbolo no cadastro viravam "Guilherme,!"
+  // no cabeçalho (bug real de produção, 12/09)
+  const first = name.replace(/[^\p{L}\p{M}\s'-]/gu, ' ').trim().split(/\s+/)[0] || '';
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : '';
 });
 const greeting = computed(() => {
   const h = new Date().getHours();
@@ -1474,7 +1604,7 @@ const perf = computed(() => data.value?.my_performance || null);
 const perfCols = computed(() => {
   if (!perf.value) return [];
   // painel do GESTOR (item 140): a equipe inteira que trabalhou no período
-  if (selectedPanel.value === 'gestor' && perf.value.team?.length) {
+  if (panelBase.value === 'gestor' && perf.value.team?.length) {
     return perf.value.team.map(r => ({
       key: `u${r.id}`,
       title: r.is_ai ? `🤖 ${r.name} (Atendimento IA)` : r.name,
@@ -1578,6 +1708,9 @@ const showSurgeryHealth = computed(() => true);
 
 // 🎯 META DO MÊS: 100 cirurgias — barra de progresso no retângulo
 const SURGERY_GOAL = 100;
+// a meta OFICIAL do Painel de Metas manda quando existe (varredura 12/09);
+// sem ela, a referência histórica de 100
+const surgeryGoalTarget = computed(() => officialTargetFor('surgeries_done') || SURGERY_GOAL);
 const surgeriesDoneMonth = computed(() => {
   const now = new Date();
   return surgeryTasks.value.filter(t => {
@@ -1587,7 +1720,7 @@ const surgeriesDoneMonth = computed(() => {
   }).length;
 });
 const goalPct = computed(() =>
-  Math.min(Math.round((surgeriesDoneMonth.value / SURGERY_GOAL) * 100), 100)
+  Math.min(Math.round((surgeriesDoneMonth.value / surgeryGoalTarget.value) * 100), 100)
 );
 const nextSurgery = computed(() =>
   surgeryTasks.value
@@ -1656,6 +1789,117 @@ const shortcuts = [
   { label: 'Tarefas', icon: 'i-lucide-list-checks', route: 'tasks_board', color: '#D4A017' },
 ];
 const go = route => router.push({ name: route, params: { accountId: accountId.value } });
+
+// ── 🧑‍🤝‍🧑 PAINÉIS POR PESSOA (rodada 160) ──
+// O admin cria uma versão de um painel-base para uma ou mais pessoas:
+// mesmos números e metas do base, layout PRÓPRIO (blocos, cards, cores)
+// organizado no Modo edição com o arrasto magnético. Quem está na lista
+// abre o Meu Painel já nele (atribuição sincronizada no servidor).
+const showVariantModal = ref(false);
+const variantDraft = ref({ id: '', name: '', base: 'agendamento', user_ids: [] });
+const isSavingVariant = ref(false);
+const variantDeleteArmed = ref(false);
+const openVariantModal = (existing = null) => {
+  if (!teamAgents.value.length) store.dispatch('agents/get');
+  variantDeleteArmed.value = false;
+  variantDraft.value = existing
+    ? { id: existing.id, name: existing.name, base: existing.base, user_ids: [...(existing.user_ids || [])] }
+    : {
+        id: '',
+        name: '',
+        base: BASE_PANELS.some(b => b.key === panelBase.value) ? panelBase.value : 'agendamento',
+        user_ids: [],
+      };
+  showVariantModal.value = true;
+};
+const variantBaseLabel = key => BASE_PANELS.find(b => b.key === key)?.label || key;
+// nome sugerido = primeiros nomes de quem vai ver ("Natália · Elizangela")
+const suggestedVariantName = () =>
+  variantDraft.value.user_ids
+    .map(id => (teamAgents.value.find(a => a.id === id)?.name || '').split(' ')[0])
+    .filter(Boolean)
+    .join(' · ');
+const toggleVariantUser = id => {
+  const list = variantDraft.value.user_ids;
+  const i = list.indexOf(id);
+  if (i === -1) list.push(id);
+  else list.splice(i, 1);
+};
+const saveVariant = async () => {
+  if (isSavingVariant.value) return;
+  const d = variantDraft.value;
+  const name = d.name.trim() || suggestedVariantName() || `${variantBaseLabel(d.base)} · pessoa`;
+  const others = (crmSettings.value?.panel_variants || []).filter(v => v.id !== d.id);
+  isSavingVariant.value = true;
+  try {
+    const { data: saved } = await CrmAPI.updatePanelVariants([
+      ...others,
+      { id: d.id || '', name, base: d.base, user_ids: d.user_ids },
+    ]);
+    await store.dispatch('crm/fetchSettings');
+    showVariantModal.value = false;
+    // abre o painel recém-criado (o id nasce no servidor)
+    const list = saved?.panel_variants || [];
+    const mine = d.id ? list.find(v => v.id === d.id) : list.find(v => !others.some(o => o.id === v.id));
+    if (mine) setPanel(`variant:${mine.id}`);
+  } catch {
+    useAlert('Não deu pra salvar o painel. Tente de novo.');
+  } finally {
+    isSavingVariant.value = false;
+  }
+};
+const deleteVariant = async () => {
+  const d = variantDraft.value;
+  if (!d.id || isSavingVariant.value) return;
+  const list = (crmSettings.value?.panel_variants || []).filter(v => v.id !== d.id);
+  isSavingVariant.value = true;
+  try {
+    await CrmAPI.updatePanelVariants(list);
+    await store.dispatch('crm/fetchSettings');
+    showVariantModal.value = false;
+    if (selectedPanel.value === `variant:${d.id}`) setPanel(d.base);
+  } catch {
+    useAlert('Não deu pra excluir o painel. Tente de novo.');
+  } finally {
+    isSavingVariant.value = false;
+    variantDeleteArmed.value = false;
+  }
+};
+
+// ── cabeçalho (varredura 12/09) ──
+// o olho CEVICO (public/brand-assets) como marca d'água — binding dinâmico
+// de propósito: src fixo com barra inicial vira import de módulo no Vite
+const HERO_EYE = '/brand-assets/cevico-eye.svg';
+// o que este painel acompanha, em uma frase
+const HERO_LEADS = {
+  agendamento: 'Do lead ao agendamento: quem chegou, quem marcou e o que ainda espera resposta.',
+  conducao: 'Do agendamento à indicação: consultas do período, comparecimento e indicações de cirurgia.',
+  cirurgia: 'Fechamento e pós-operatório: indicações, cirurgias agendadas e realizadas.',
+  medico: 'A agenda de cada médico: consultas, indicações e conversão em cirurgia.',
+  gestor: 'O processo inteiro num olhar: chegada, agendamento, comparecimento e fechamento.',
+};
+const heroLead = computed(() => {
+  const p = currentPanel.value || {};
+  if (p.custom) return 'Painel montado no Construtor — os seus indicadores, do seu jeito.';
+  // variante por pessoa herda a frase do painel-base
+  return HERO_LEADS[p.base || p.key] || `Boas-vindas ao CEVICO S.I — ${p.desc || ''}.`;
+});
+// 🌡️ o PULSO do momento no cabeçalho: responde "como está agora?" antes de
+// qualquer rolagem — conversas abertas, quem espera resposta, consultas de
+// hoje e, quando existe, a fila do Radar
+const heroPulse = computed(() => {
+  const d = data.value;
+  if (!d) return [];
+  const waiting = d.unanswered ?? 0;
+  const hot = radarQueue.value.length;
+  const items = [
+    { key: 'open', icon: 'i-lucide-inbox', value: d.open_conversations ?? 0, label: 'conversas abertas', route: 'home', title: 'Abrir as conversas' },
+    { key: 'waiting', icon: 'i-lucide-clock-alert', value: waiting, label: 'aguardando resposta', route: 'home', alert: waiting > 0, title: 'Conversas em que o paciente falou por último' },
+    { key: 'today', icon: 'i-lucide-calendar-check', value: d.appointments_today ?? 0, label: 'consultas hoje', route: 'agenda_board', title: 'Abrir a Agenda' },
+  ];
+  if (hot) items.push({ key: 'radar', icon: 'i-lucide-radar', value: hot, label: hot === 1 ? 'paciente quente' : 'pacientes quentes', route: 'crm_board', alert: true, title: 'Radar de Oportunidades: pacientes quentes sem atendimento' });
+  return items;
+});
 
 // mantém o painel VIVO: atualiza sozinho a cada 2 min e sempre que a
 // pessoa volta para a aba (sem precisar recarregar a página)
@@ -1767,26 +2011,58 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-full w-full overflow-y-auto bg-n-surface-1">
+  <div class="cv-page h-full w-full overflow-y-auto bg-n-surface-1" :style="cvVars">
     <div class="max-w-5xl mx-auto p-4 sm:p-8">
-      <!-- Boas-vindas -->
+      <!-- Boas-vindas (varredura de design 12/09): cabeçalho moderno — chips
+           de vidro com o dia e o painel, saudação grande, lead do painel, o
+           PULSO do momento em vidros clicáveis e o olho CEVICO como marca
+           d'água. A cor continua sendo a do painel escolhido. -->
       <div
-        class="rounded-3xl p-6 sm:p-9 text-white shadow-lg mb-6 relative overflow-hidden transition-all"
-        :style="{ background: currentPanel.grad }"
+        class="cevico-hero rounded-3xl p-6 sm:p-8 text-white shadow-lg mb-6 relative overflow-hidden transition-all"
+        :style="{ background: pagePalette.hero }"
       >
-        <div class="relative z-10" style="color: #fff">
-          <div class="flex items-start justify-between gap-2 mb-1">
-            <p class="text-sm font-medium" style="color: rgba(255,255,255,0.75)">{{ todayLabel }}</p>
+        <span class="cevico-hero-glow cevico-hero-glow-a" aria-hidden="true" />
+        <span class="cevico-hero-glow cevico-hero-glow-b" aria-hidden="true" />
+        <img :src="HERO_EYE" alt="" aria-hidden="true" class="cevico-hero-eye" />
+        <div class="relative z-10 flex flex-col gap-4" style="color: #fff">
+          <div class="flex items-start justify-between gap-3 flex-wrap">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="cevico-hero-chip"><span class="i-lucide-calendar-days text-xs" />{{ todayLabel }}</span>
+              <!-- 🍎🍊 a paleta do painel: cor do dia (iMac G3), uma fruta ou a
+                   salada — o admin escolhe aqui; quem não é admin passeia
+                   pelas cores do dia só nesta tela -->
+              <button
+                class="cevico-hero-chip cevico-hero-chip-btn"
+                :title="isAdmin ? 'Paleta do painel: cor do dia, iMac G3, frutas da Apple ou salada de frutas — e a cor de cada bloco' : 'Cada dia da semana tem a sua cor, inspirada nos iMac G3 (1998–99). Clique para experimentar as outras — só nesta tela.'"
+                @click="isAdmin ? openPalettePicker('panel') : cycleFlavor()"
+              >
+                <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: pagePalette.swatch || pagePalette.dot, boxShadow: '0 0 0 2px rgba(255,255,255,0.6)' }" />
+                {{ paletteLabel(pagePalette) }}<span v-if="flavorPreview !== null && pagePalette === dayFlavor" class="opacity-75 font-normal"> · prévia</span>
+                <span v-if="isAdmin" class="i-lucide-palette text-[10px] opacity-80" />
+              </button>
+              <span class="cevico-hero-chip" :title="currentPanel.desc">
+                <span :class="currentPanel.icon" class="text-xs" />
+                Painel de {{ currentPanel.label }}<template v-if="currentPanel.who"> · {{ currentPanel.who }}</template>
+              </span>
+              <!-- 🧑‍🤝‍🧑 painel por pessoa: o admin edita nome/pessoas daqui -->
+              <button
+                v-if="isAdmin && currentPanel.variant"
+                class="cevico-hero-chip cevico-hero-chip-btn"
+                title="Editar este painel por pessoa: nome, painel-base e quem vê"
+                @click="openVariantModal(currentPanel.variantDef)"
+              >
+                <span class="i-lucide-pencil text-xs" />
+                Editar painel
+              </button>
+            </div>
             <div class="flex items-center gap-1.5 flex-shrink-0">
               <!-- ✏️ MODO EDIÇÃO (item 143): o botão vive AQUI no topo, num
                    lugar fixo — liga o modo que reordena blocos, muda cor e
                    oculta cards; a barra grudada logo abaixo segura os controles -->
               <button
                 v-if="isAdmin && !currentPanel.custom"
-                class="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[11px] font-semibold transition-colors"
-                :style="organizeMode
-                  ? 'background: #fff; color: #152C61; border: 1px solid #fff'
-                  : 'background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.25)'"
+                class="cevico-hero-btn"
+                :class="organizeMode ? 'cevico-hero-btn-on' : ''"
                 :title="organizeMode ? 'Concluir a edição do painel' : 'Personalizar este painel: arrastar blocos e cards, trocar cores, ocultar'"
                 @click="toggleEditMode"
               >
@@ -1795,8 +2071,7 @@ onUnmounted(() => {
               </button>
               <!-- 🐞 Reportar problema — padrão no painel de TODOS (pedido 17/07) -->
               <button
-                class="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[11px] font-semibold transition-colors"
-                style="background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.25)"
+                class="cevico-hero-btn"
                 title="Algo não funcionou? Vira um card no board do Guilherme e você recebe o aviso quando resolver."
                 @click="reportBug"
               >
@@ -1805,13 +2080,33 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
-          <h1 class="text-2xl sm:text-4xl font-bold leading-tight" style="color: #fff">{{ greeting }}, {{ firstName }}! 👋</h1>
-          <p class="text-sm mt-2" style="color: rgba(255,255,255,0.85)">
-            Boas-vindas ao CEVICO S.I —
-            <b>Painel de {{ currentPanel.label }}</b><template v-if="currentPanel.who"> ({{ currentPanel.who }})</template>: {{ currentPanel.desc }}.
-          </p>
+          <div>
+            <h1 class="text-3xl sm:text-[40px] font-bold leading-none tracking-tight" style="color: #fff">
+              {{ greeting }}<template v-if="firstName">, {{ firstName }}</template>! 👋
+            </h1>
+            <p class="text-sm sm:text-[15px] mt-2.5 max-w-2xl leading-relaxed" style="color: rgba(255,255,255,0.86)">{{ heroLead }}</p>
+          </div>
+          <!-- 🌡️ o pulso do momento: números vivos em vidro, cada um leva
+               pro lugar certo (conversas, agenda, radar) -->
+          <div v-if="heroPulse.length" class="flex items-stretch gap-2 flex-wrap">
+            <button
+              v-for="p in heroPulse"
+              :key="p.key"
+              class="cevico-hero-glass flex items-center gap-2.5 text-left"
+              :class="p.alert ? 'cevico-hero-glass-alert' : ''"
+              :title="p.title"
+              @click="go(p.route)"
+            >
+              <span class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style="background: rgba(255,255,255,0.16)">
+                <span :class="p.icon" class="text-base" />
+              </span>
+              <span class="flex flex-col leading-none">
+                <span class="text-lg font-bold tabular-nums">{{ p.value }}</span>
+                <span class="text-[11px] mt-1" style="color: rgba(255,255,255,0.82)">{{ p.label }}</span>
+              </span>
+            </button>
+          </div>
         </div>
-        <span class="i-lucide-eye absolute -right-6 -bottom-8 text-[160px] text-white/10" />
       </div>
 
       <!-- ✏️ BARRA DO MODO EDIÇÃO (item 143): gruda no topo enquanto o modo
@@ -1819,26 +2114,33 @@ onUnmounted(() => {
            sempre à mão, em qualquer ponto da rolagem -->
       <div
         v-if="organizeMode"
-        class="sticky top-0 z-40 rounded-2xl border-2 border-n-brand/50 bg-n-solid-1 shadow-lg px-4 py-3 mb-6"
+        class="cv-editbar sticky top-0 z-40 px-4 py-3 mb-6"
       >
         <div class="flex items-center gap-2 flex-wrap">
-          <span class="i-lucide-pencil-ruler text-sm text-n-brand" />
+          <span class="cv-icon cv-icon-sm"><span class="i-lucide-pencil-ruler text-xs" /></span>
           <b class="text-xs text-n-slate-12">Modo edição</b>
           <span class="text-[11px] text-n-slate-10">⠿ arraste as barrinhas e os cards · 🖌 troca a cor · ✕ oculta</span>
+          <button
+            class="cv-btn cv-btn-ghost cv-btn-sm"
+            title="Cores do painel: cor do dia, uma paleta fixa (iMac G3 ou frutas da Apple) ou salada de frutas — e a paleta de cada bloco"
+            @click="openPalettePicker('panel')"
+          >
+            <span class="i-lucide-palette text-xs" />
+            Paleta
+          </button>
           <span v-if="isSavingLayout" class="i-lucide-loader-circle animate-spin text-sm text-n-slate-10" />
           <span v-else class="text-[10px] text-n-slate-9">salva sozinho</span>
           <span class="flex-1" />
           <button
             v-if="layoutTouched"
-            class="h-8 px-3 rounded-lg text-[11px] font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
+            class="cv-btn cv-btn-ghost cv-btn-sm"
             title="Ordem dos blocos, cards, cores e ocultos voltam ao padrão do sistema neste painel"
             @click="resetKpiLayout"
           >
             voltar ao padrão
           </button>
           <button
-            class="h-8 px-4 rounded-lg text-[11px] font-bold text-white flex items-center gap-1.5"
-            :style="{ background: panelFamily[0] }"
+            class="cv-btn cv-btn-sm"
             @click="toggleEditMode"
           >
             <span class="i-lucide-check text-xs" />
@@ -1850,7 +2152,7 @@ onUnmounted(() => {
           <button
             v-for="t in hiddenTiles"
             :key="t.id"
-            class="h-7 px-2.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1"
+            class="cv-chip"
             title="Mostrar de novo"
             @click="restoreTile(t)"
           >
@@ -1883,12 +2185,11 @@ onUnmounted(() => {
         <!-- 🎉 Seus reports de bug resolvidos (notificação p/ quem reportou) -->
         <div
           v-if="data?.bug_reports?.resolved?.length"
-          class="rounded-2xl border-2 border-green-500/40 bg-green-500/5 overflow-hidden mb-6"
+          class="cv-block cv-green mb-6"
         >
-          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #059669, #34D399)" />
           <div class="p-4 sm:p-5">
             <div class="flex items-center gap-2 mb-2">
-              <span class="text-xl">🎉</span>
+              <span class="cv-icon"><span class="i-lucide-party-popper text-base" /></span>
               <h2 class="text-sm font-bold text-n-slate-12">
                 {{ data.bug_reports.resolved.length === 1
                   ? 'Um problema que você reportou foi resolvido!'
@@ -1899,7 +2200,7 @@ onUnmounted(() => {
               <p
                 v-for="r in data.bug_reports.resolved"
                 :key="r.id"
-                class="text-xs text-n-slate-11 bg-n-solid-1 border border-green-500/25 rounded-lg px-3 py-2"
+                class="cv-sub text-xs text-n-slate-11 px-3 py-2"
               >
                 ✅ {{ r.title }}
                 <span class="text-n-slate-9">— resolvido {{ new Date(r.completed_at).toLocaleDateString('pt-BR') }}. Obrigado por avisar! 💙</span>
@@ -1922,13 +2223,26 @@ onUnmounted(() => {
           @end="saveBlockLayout"
         >
           <template #item="{ element: blockId }">
-          <section>
+          <section :style="blockVars(blockId)">
             <div
               v-if="organizeMode"
-              class="cevico-block-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 rounded-xl border-2 border-dashed border-n-brand/40 bg-n-solid-2 text-xs font-semibold text-n-slate-12"
+              class="cevico-block-handle cv-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 text-xs font-semibold"
             >
-              <span class="i-lucide-grip-vertical text-sm text-n-slate-9" />
+              <span class="i-lucide-grip-vertical text-sm opacity-60" />
+              <span class="cv-icon cv-icon-sm"><span :class="BLOCK_ICONS[blockId]" class="text-xs" /></span>
               {{ BLOCK_LABELS[blockId] }}
+              <button
+                v-if="isAdmin"
+                class="cv-chip"
+                :title="`Paleta deste bloco (hoje: ${paletteLabel(blockPalette(blockId))}) — clique para trocar`"
+                @pointerdown.stop
+                @mousedown.stop
+                @click.stop="openPalettePicker(blockId)"
+              >
+                <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: blockPalette(blockId).swatch || blockPalette(blockId).dot, boxShadow: '0 0 0 1.5px rgba(255,255,255,0.8)' }" />
+                <span class="i-lucide-palette text-[10px]" />
+                {{ blockPalette(blockId).label }}
+              </button>
               <span class="text-n-slate-9 font-normal ml-auto hidden sm:inline">⠿ arraste pra mudar a ordem</span>
             </div>
 
@@ -1941,11 +2255,11 @@ onUnmounted(() => {
              quando existe problema de verdade -->
         <div
           v-if="whatsappStatus"
-          class="flex items-center gap-x-3 gap-y-1 flex-wrap mb-6 px-3 py-1.5 rounded-xl border text-[11px]"
-          :class="waProblem ? 'border-red-500/40 bg-red-500/5' : 'border-n-weak bg-n-solid-2'"
+          class="cv-block cv-strip flex items-center gap-x-3 gap-y-1 flex-wrap mb-6 px-3.5 py-2 text-[11px]"
+          :class="waProblem ? 'cv-red' : ''"
           title="Status das contas de WhatsApp na Meta (atualiza a cada 10 min) — detalhes em Relatórios → Saúde do WhatsApp"
         >
-          <span class="i-lucide-phone text-xs flex-shrink-0" :class="waProblem ? 'text-red-500' : 'text-n-slate-9'" />
+          <span class="cv-icon cv-icon-sm"><span class="i-lucide-phone text-xs" /></span>
           <span
             v-for="w in whatsappStatus"
             :key="w.id"
@@ -1972,15 +2286,14 @@ onUnmounted(() => {
              escrito, o card fica discreto e mostra só os desvios. -->
         <div
           v-if="managerBrief && (managerBriefText || managerFindings.length)"
-          class="rounded-xl border border-n-weak bg-n-solid-2 overflow-hidden mb-6"
+          class="cv-block mb-6"
         >
-          <div class="h-1 w-full" style="background: linear-gradient(90deg, #0F5FA6, #3B82F6)" />
-          <div class="p-4">
+          <div class="p-4 sm:p-5">
             <div class="flex items-center gap-2 mb-2 flex-wrap">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #0F5FA6, #3B82F6)">
-                <span class="i-lucide-gauge text-white text-sm" />
+              <span class="cv-icon">
+                <span class="i-lucide-gauge text-base" />
               </span>
-              <h2 class="text-sm font-bold text-n-slate-12">📊 Briefing do Gestor</h2>
+              <h2 class="text-sm font-bold text-n-slate-12">Briefing do Gestor</h2>
               <span class="text-[11px] text-n-slate-9 ml-auto">funil de hoje vs a média de 12 semanas</span>
             </div>
 
@@ -1992,7 +2305,7 @@ onUnmounted(() => {
               <span
                 v-for="(f, fi) in managerFindings"
                 :key="fi"
-                class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25"
+                class="cv-chip cv-red"
                 :title="f.window ? `janela: ${f.window}` : ''"
               >
                 {{ managerFindingLabel(f) }}
@@ -2012,16 +2325,14 @@ onUnmounted(() => {
              (pedido 17/07: convite, não bronca) -->
         <div
           v-if="radarQueue.length && !avisoChecado(radarSignature)"
-          class="rounded-2xl overflow-hidden mb-6 bg-white shadow-lg"
-          style="border: 2px solid rgba(16, 185, 129, 0.35)"
+          class="cv-block mb-6"
         >
-          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #059669, #4ADE80)" />
           <div class="p-4 sm:p-5">
             <div class="flex items-center gap-2 mb-3 flex-wrap">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #059669, #4ADE80)">
-                <span class="i-lucide-radar text-white text-base" />
+              <span class="cv-icon">
+                <span class="i-lucide-radar text-base" />
               </span>
-              <h2 class="text-sm font-bold" style="color: #0f172a">
+              <h2 class="text-sm font-bold text-n-slate-12">
                 {{ radarQueue.length === 1
                   ? '1 paciente quente sem atendimento'
                   : `${radarQueue.length} pacientes quentes sem atendimento` }}
@@ -2029,26 +2340,24 @@ onUnmounted(() => {
               <!-- 📈 eficácia (item 83): o Radar gerando consulta de verdade -->
               <span
                 v-if="radarEfficacy"
-                class="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                style="background: rgba(16, 185, 129, 0.12); color: #047857; border: 1px solid rgba(16, 185, 129, 0.3)"
+                class="cv-chip cv-green"
                 :title="`Dos ${radarEfficacy.attended_30d} avisos atendidos nos últimos 30 dias, ${radarEfficacy.converted_30d} paciente(s) agendaram consulta depois do aviso`"
               >
-                📈 {{ radarEfficacy.converted_30d }} consulta(s) geradas · {{ radarEfficacy.rate }}%
+                <span class="i-lucide-trending-up text-xs" />{{ radarEfficacy.converted_30d }} consulta(s) geradas · {{ radarEfficacy.rate }}%
               </span>
-              <span v-if="radarLastRun" class="text-[11px] ml-auto" style="color: #94a3b8">auditoria às {{ radarLastRun }}</span>
+              <span v-if="radarLastRun" class="text-[11px] ml-auto text-n-slate-9">auditoria às {{ radarLastRun }}</span>
               <button
                 v-if="radarStatus && isAdmin"
-                class="text-[11px] font-medium px-2.5 py-1 rounded-lg border disabled:opacity-50"
-                style="border-color: #e2e8f0; color: #64748b"
+                class="cv-btn cv-btn-ghost cv-btn-sm"
                 :title="radarLastActionLabel"
                 :disabled="togglingRadar"
                 @click="toggleRadarManual"
               >
-                {{ radarStatus.enabled ? '⏸ Pausar radar' : '▶️ Reativar radar' }}
+                <span :class="radarStatus.enabled ? 'i-lucide-pause' : 'i-lucide-play'" class="text-xs" />
+                {{ radarStatus.enabled ? 'Pausar radar' : 'Reativar radar' }}
               </button>
               <button
-                class="w-7 h-7 rounded-lg border flex items-center justify-center transition-colors flex-shrink-0"
-                style="border-color: #e2e8f0; color: #059669"
+                class="cv-btn cv-btn-ghost cv-iconbtn flex-shrink-0"
                 title="Dar check: esconder este aviso (volta quando o Radar tiver novidade)"
                 @click="checkAviso(radarSignature)"
               >
@@ -2138,7 +2447,7 @@ onUnmounted(() => {
                   <div class="flex items-center gap-1.5">
                     <button
                       v-if="radarQueue.length > 1"
-                      class="text-[11px] font-medium px-2 py-1.5 rounded-lg border transition-colors"
+                      class="text-[11px] font-medium px-2.5 py-1.5 rounded-full border transition-colors hover:bg-slate-50"
                       style="border-color: #e2e8f0; color: #64748b"
                       title="Deixar para depois — vai para o fim da fila"
                       @click.stop="rotateRadar"
@@ -2155,7 +2464,7 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <p v-if="radarQueue.length > 4" class="text-center text-[11px] mt-1.5" style="color: #94a3b8">
+              <p v-if="radarQueue.length > 4" class="text-center text-[11px] mt-1.5 text-n-slate-9">
                 +{{ radarQueue.length - 4 }} na fila
               </p>
             </div>
@@ -2167,28 +2476,25 @@ onUnmounted(() => {
         <!-- 📋 Tarefas esperando você (aviso DOURADO — coisa boa a fazer) -->
         <div
           v-if="myTasks.length && !avisoChecado(tasksSignature)"
-          class="rounded-2xl border-2 overflow-hidden mb-6"
-          style="border-color: rgba(212, 160, 23, 0.5); background: rgba(212, 160, 23, 0.05)"
+          class="cv-block mb-6"
         >
-          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #B8860B, #D4A017)" />
           <div class="p-4 sm:p-5">
             <div class="flex items-center gap-2 mb-3 flex-wrap">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-                <span class="i-lucide-list-checks text-white text-base" />
+              <span class="cv-icon">
+                <span class="i-lucide-list-checks text-base" />
               </span>
               <h2 class="text-sm font-bold text-n-slate-12">
                 {{ myTasksCount }} tarefa(s) esperando você
               </h2>
               <button
-                class="ml-auto text-xs font-semibold text-white px-3 py-1.5 rounded-lg hover:opacity-90"
-                style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+                class="cv-btn cv-btn-sm ml-auto"
                 @click="goToTasks"
               >
-                Abrir Tarefas →
+                Abrir Tarefas
+                <span class="i-lucide-arrow-right text-xs" />
               </button>
               <button
-                class="w-7 h-7 rounded-lg border border-n-weak flex items-center justify-center transition-colors flex-shrink-0"
-                style="color: #B8860B"
+                class="cv-btn cv-btn-ghost cv-iconbtn flex-shrink-0"
                 title="Dar check: esconder este aviso (volta quando houver tarefa nova)"
                 @click="checkAviso(tasksSignature)"
               >
@@ -2199,21 +2505,20 @@ onUnmounted(() => {
               <button
                 v-for="task in myTasks"
                 :key="task.id"
-                class="w-full flex items-center gap-2 flex-wrap bg-n-solid-1 border rounded-xl px-3 py-2 text-left hover:shadow-sm transition-shadow"
-                style="border-color: rgba(212, 160, 23, 0.3)"
+                class="cv-sub cv-sub-hover w-full flex items-center gap-2 flex-wrap px-3 py-2 text-left"
                 @click="goToTasks"
               >
-                <span class="i-lucide-circle-dot text-sm" style="color: #B8860B" />
+                <span class="i-lucide-circle-dot text-sm" style="color: var(--cv)" />
                 <span class="text-sm font-medium text-n-slate-12 truncate">{{ task.title }}</span>
                 <span
-                  class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                  :class="['high', 'urgent'].includes(task.priority) ? 'bg-red-500/15 text-red-600' : 'bg-n-alpha-2 text-n-slate-11'"
+                  class="cv-chip"
+                  :class="['high', 'urgent'].includes(task.priority) ? 'cv-red' : 'cv-slate'"
                 >
                   {{ TASK_PRIORITY_LABEL[task.priority] || task.priority }}
                 </span>
                 <span v-if="task.creator_name" class="text-[10px] text-n-slate-9">de {{ task.creator_name.split(' ')[0] }}</span>
-                <span v-if="task.comments_count" class="text-[10px] text-n-slate-9">💬 {{ task.comments_count }}</span>
-                <span v-if="task.due_at" class="text-[10px] text-n-slate-10 ml-auto">⏰ {{ fmtTaskDue(task.due_at) }}</span>
+                <span v-if="task.comments_count" class="text-[10px] text-n-slate-9 inline-flex items-center gap-0.5"><span class="i-lucide-message-circle text-[10px]" />{{ task.comments_count }}</span>
+                <span v-if="task.due_at" class="text-[10px] text-n-slate-10 ml-auto inline-flex items-center gap-0.5"><span class="i-lucide-alarm-clock text-[10px]" />{{ fmtTaskDue(task.due_at) }}</span>
               </button>
             </div>
           </div>
@@ -2224,21 +2529,19 @@ onUnmounted(() => {
         <!-- 🧭 Mentor do Time: feedback da semana (individual; admin vê o time) -->
         <div
           v-if="visibleFeedback && !avisoChecado(fbSignature)"
-          class="rounded-2xl overflow-hidden mb-6 bg-n-card outline outline-1 outline-n-container"
+          class="cv-block mb-6"
         >
-          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #C2410C, #FB923C)" />
           <div class="p-4 sm:p-5">
             <div class="flex items-center gap-2 mb-3 flex-wrap">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #C2410C, #FB923C)">
-                <span class="i-lucide-graduation-cap text-white text-base" />
+              <span class="cv-icon">
+                <span class="i-lucide-graduation-cap text-base" />
               </span>
               <h2 class="text-sm font-bold text-n-slate-12">
                 {{ visibleFeedback.user_id === currentUser.id ? 'Seu feedback da semana' : `Feedback de ${visibleFeedback.user_name}` }}
               </h2>
               <span class="text-[11px] text-n-slate-9 ml-auto">{{ fbWeekLabel(visibleFeedback) }}</span>
               <button
-                class="w-7 h-7 rounded-lg border border-n-weak flex items-center justify-center transition-colors flex-shrink-0"
-                style="color: #C2410C"
+                class="cv-btn cv-btn-ghost cv-iconbtn flex-shrink-0"
                 title="Dar check: li meu feedback, pode esconder (volta na próxima semana)"
                 @click="checkAviso(fbSignature)"
               >
@@ -2247,13 +2550,12 @@ onUnmounted(() => {
             </div>
 
             <!-- admin: navega pelo time -->
-            <div v-if="isAdmin && teamFeedbacks.length > 1" class="flex items-center gap-1 flex-wrap mb-3">
+            <div v-if="isAdmin && teamFeedbacks.length > 1" class="cv-seg cv-seg-sm flex-wrap mb-3">
               <button
                 v-for="fb in teamFeedbacks"
                 :key="fb.user_id"
-                class="text-[11px] font-medium px-2.5 py-1 rounded-full transition-colors"
-                :class="visibleFeedback.user_id === fb.user_id ? 'text-white' : 'text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2'"
-                :style="visibleFeedback.user_id === fb.user_id ? { background: 'linear-gradient(135deg, #C2410C, #FB923C)' } : {}"
+                class="cv-seg-item"
+                :class="visibleFeedback.user_id === fb.user_id ? 'cv-seg-on' : ''"
                 @click="feedbackViewUserId = fb.user_id"
               >
                 {{ fb.user_name.split(' ')[0] }}
@@ -2263,26 +2565,26 @@ onUnmounted(() => {
             <p class="text-sm text-n-slate-11 leading-relaxed mb-3">{{ visibleFeedback.feedback.resumo }}</p>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
-              <div class="rounded-xl p-3" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25)">
-                <p class="text-[10px] font-bold uppercase tracking-wide mb-1" style="color: #047857">Ponto forte</p>
+              <div class="cv-sub cv-green p-3">
+                <p class="cv-label mb-1 flex items-center gap-1"><span class="i-lucide-thumbs-up text-xs" />Ponto forte</p>
                 <p class="text-xs text-n-slate-11 leading-snug">{{ visibleFeedback.feedback.ponto_forte }}</p>
               </div>
-              <div class="rounded-xl p-3" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3)">
-                <p class="text-[10px] font-bold uppercase tracking-wide mb-1" style="color: #B45309">O ponto a corrigir</p>
+              <div class="cv-sub cv-amber p-3">
+                <p class="cv-label mb-1 flex items-center gap-1"><span class="i-lucide-wrench text-xs" />O ponto a corrigir</p>
                 <p class="text-xs text-n-slate-11 leading-snug">{{ visibleFeedback.feedback.ponto_fraco }}</p>
               </div>
             </div>
 
             <div v-if="visibleFeedback.feedback.solucoes?.length" class="space-y-1.5 mb-3">
-              <p class="text-[10px] font-bold uppercase tracking-wide text-n-slate-9">Soluções simples desta semana</p>
+              <p class="cv-label">Soluções simples desta semana</p>
               <div
                 v-for="(sol, si) in visibleFeedback.feedback.solucoes"
                 :key="si"
-                class="flex items-start gap-2 rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2"
+                class="cv-sub flex items-start gap-2 px-3 py-2"
               >
                 <span
-                  class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 mt-0.5"
-                  style="background: linear-gradient(135deg, #C2410C, #FB923C)"
+                  class="cv-icon text-[10px] font-bold mt-0.5"
+                  style="width: 20px; height: 20px; border-radius: 9999px"
                 >
                   {{ si + 1 }}
                 </span>
@@ -2293,7 +2595,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <p v-if="visibleFeedback.feedback.incentivo" class="text-xs italic" style="color: #9A3412">
+            <p v-if="visibleFeedback.feedback.incentivo" class="text-xs italic" style="color: var(--cv-deep)">
               {{ visibleFeedback.feedback.incentivo }}
             </p>
           </div>
@@ -2306,13 +2608,12 @@ onUnmounted(() => {
 
         <!-- Seletor de painel (cada pessoa no seu) -->
         <div class="flex items-center gap-2 flex-wrap mb-3">
-          <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto">
+          <div class="cv-seg overflow-x-auto">
             <button
               v-for="p in visiblePanels"
               :key="p.key"
-              class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5"
-              :class="selectedPanel === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-              :style="selectedPanel === p.key ? { background: p.grad } : {}"
+              class="cv-seg-item"
+              :class="selectedPanel === p.key ? 'cv-seg-on' : ''"
               @click="setPanel(p.key)"
             >
               <span :class="p.icon" class="text-sm" />
@@ -2320,7 +2621,7 @@ onUnmounted(() => {
             </button>
             <button
               v-if="isAdmin"
-              class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 flex items-center justify-center"
+              class="cv-seg-item cv-seg-icon"
               title="Definir qual painel cada pessoa vê"
               @click="openAssignModal"
             >
@@ -2328,29 +2629,38 @@ onUnmounted(() => {
             </button>
             <button
               v-if="isAdmin"
-              class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 flex items-center justify-center"
+              class="cv-seg-item cv-seg-icon"
               title="Metas do painel (os cards mudam de cor contra a meta)"
               @click="openGoalsModal"
             >
               <span class="i-lucide-target text-sm" />
             </button>
-            <!-- atalho pro Dashboard da Agenda em TODOS os painéis (item 86) -->
+            <!-- 🧑‍🤝‍🧑 painel por pessoa (rodada 160): versão de um painel-base
+                 com layout próprio, para uma ou mais pessoas do time -->
             <button
-              class="h-8 px-3 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 hover:opacity-90 whitespace-nowrap"
-              style="background: linear-gradient(135deg, #0369A1, #38BDF8)"
-              title="Dashboard da Agenda — comparecimento, ocupação, cirurgias"
-              @click="goToAgendaDashboard"
+              v-if="isAdmin"
+              class="cv-seg-item"
+              title="Criar um painel para uma pessoa: escolhe o painel-base e quem vê; depois organiza blocos e cards no Modo edição"
+              @click="openVariantModal()"
             >
-              <span class="i-lucide-calendar-range text-sm" />
-              Dashboard da Agenda
+              <span class="i-lucide-user-plus text-sm" />
+              Painel por pessoa
             </button>
           </div>
+          <!-- atalho pro Dashboard da Agenda em TODOS os painéis (item 86) -->
+          <button
+            class="cv-btn"
+            title="Dashboard da Agenda — comparecimento, ocupação, cirurgias"
+            @click="goToAgendaDashboard"
+          >
+            <span class="i-lucide-calendar-range text-sm" />
+            Dashboard da Agenda
+          </button>
           <!-- pílulas de médico (só no painel Médicos) -->
-          <div v-if="selectedPanel === 'medico'" class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto">
+          <div v-if="panelBase === 'medico'" class="cv-seg overflow-x-auto">
             <button
-              class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-              :class="!selectedDoctor ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-              :style="!selectedDoctor ? { background: currentPanel.grad } : {}"
+              class="cv-seg-item"
+              :class="!selectedDoctor ? 'cv-seg-on' : ''"
               @click="setDoctor('')"
             >
               Todos
@@ -2358,8 +2668,8 @@ onUnmounted(() => {
             <button
               v-for="doc in DOCTORS"
               :key="doc.name"
-              class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-              :class="selectedDoctor === doc.name ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              class="cv-seg-item"
+              :class="selectedDoctor === doc.name ? 'cv-seg-on' : ''"
               :style="selectedDoctor === doc.name ? { background: doc.color } : {}"
               @click="setDoctor(doc.name)"
             >
@@ -2370,22 +2680,22 @@ onUnmounted(() => {
 
         <!-- Régua de período PADRÃO (presets + Personalizado De/Até) -->
         <div class="mb-4 max-w-full">
-          <PeriodRuler v-model="period" class="max-w-full" />
+          <PeriodRuler v-model="period" glass class="max-w-full" />
         </div>
 
         <!-- ✈️ GESTOR: o indicador de decisão — posso viajar ou é ação imediata? -->
         <div
-          v-if="selectedPanel === 'gestor' && data"
-          class="rounded-2xl text-white shadow-lg overflow-hidden mb-4"
+          v-if="panelBase === 'gestor' && data"
+          class="cv-modal-head rounded-3xl shadow-lg mb-4 !p-5"
           :style="{ background: gestorVerdict.grad }"
         >
-          <div class="p-4 sm:p-5">
+          <div>
             <div class="flex items-center gap-3 flex-wrap">
               <div class="flex-1 min-w-[220px]">
                 <p class="text-lg font-bold">{{ gestorVerdict.title }}</p>
                 <p class="text-xs text-white/80 mt-0.5">{{ gestorVerdict.sub }}</p>
               </div>
-              <span class="text-[10px] px-2.5 py-1 rounded-full bg-white/20 font-semibold">
+              <span class="cv-glass-chip">
                 {{ gestorSignals.length ? `${gestorSignals.length} aviso(s)` : 'nenhum aviso' }}
               </span>
             </div>
@@ -2394,7 +2704,7 @@ onUnmounted(() => {
               <div
                 v-for="(sig, si) in gestorSignals"
                 :key="si"
-                class="flex items-center gap-2 bg-black/15 rounded-lg px-3 py-1.5 text-xs"
+                class="cv-glass flex items-center gap-2 px-3 py-2 text-xs"
               >
                 <span :class="sig.icon" class="text-sm shrink-0" />
                 <span class="flex-1">{{ sig.text }}</span>
@@ -2430,13 +2740,26 @@ onUnmounted(() => {
           @end="saveBlockLayout"
         >
           <template #item="{ element: blockId }">
-          <section>
+          <section :style="blockVars(blockId)">
             <div
               v-if="organizeMode"
-              class="cevico-block-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 rounded-xl border-2 border-dashed border-n-brand/40 bg-n-solid-2 text-xs font-semibold text-n-slate-12"
+              class="cevico-block-handle cv-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 text-xs font-semibold"
             >
-              <span class="i-lucide-grip-vertical text-sm text-n-slate-9" />
+              <span class="i-lucide-grip-vertical text-sm opacity-60" />
+              <span class="cv-icon cv-icon-sm"><span :class="BLOCK_ICONS[blockId]" class="text-xs" /></span>
               {{ BLOCK_LABELS[blockId] }}
+              <button
+                v-if="isAdmin"
+                class="cv-chip"
+                :title="`Paleta deste bloco (hoje: ${paletteLabel(blockPalette(blockId))}) — clique para trocar`"
+                @pointerdown.stop
+                @mousedown.stop
+                @click.stop="openPalettePicker(blockId)"
+              >
+                <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: blockPalette(blockId).swatch || blockPalette(blockId).dot, boxShadow: '0 0 0 1.5px rgba(255,255,255,0.8)' }" />
+                <span class="i-lucide-palette text-[10px]" />
+                {{ blockPalette(blockId).label }}
+              </button>
               <span v-if="blockId === 'indicadores'" class="text-n-slate-9 font-normal ml-auto hidden sm:inline">os cards ficam abertos pra editar cor e ordem</span>
               <span v-else class="text-n-slate-9 font-normal ml-auto hidden sm:inline">⠿ arraste pra mudar a ordem</span>
             </div>
@@ -2458,7 +2781,7 @@ onUnmounted(() => {
         >
           <template #item="{ element: tile }">
           <div
-            class="relative rounded-2xl p-4 sm:p-5 text-white shadow-lg transition-all duration-700"
+            class="cv-tile relative rounded-2xl p-4 sm:p-5 text-white shadow-lg transition-all duration-700"
             :class="[
               tileVisual(tile).pulse ? 'cevico-meta-pulse' : '',
               tileVisual(tile).isRecord ? 'ring-2 ring-amber-300/80' : '',
@@ -2473,9 +2796,9 @@ onUnmounted(() => {
               gold
             />
             <div class="relative">
-              <div class="flex items-center gap-1.5 mb-1 text-white/80">
-                <span :class="tile.icon" class="text-sm" />
-                <p class="text-xs font-medium flex-1 truncate">{{ tile.label }}</p>
+              <div class="flex items-center gap-1.5 mb-1.5 text-white/85">
+                <span :class="tile.icon" class="text-sm flex-shrink-0" />
+                <p class="text-xs font-medium flex-1 min-w-0 truncate">{{ tile.label }}</p>
                 <button
                   v-if="organizeMode"
                   class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
@@ -2500,18 +2823,44 @@ onUnmounted(() => {
                 >
                   <span class="i-lucide-maximize-2 text-[11px]" />
                 </button>
-                <span v-if="tileVisual(tile).isRecord" class="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-300 text-amber-900" title="Melhor resultado já registrado neste tipo de período">🏆 RECORDE</span>
-                <span v-else-if="tileVisual(tile).status === 'meta'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/25" title="Meta batida">✓ META</span>
-                <span v-else-if="tileVisual(tile).status === 'bad'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/25" title="Muito abaixo do ritmo da meta">⚠️</span>
               </div>
-              <p class="text-3xl font-bold">{{ tile.value }}</p>
-              <span v-if="tile.chip" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ tile.chip.label }}</span>
+              <!-- número grande + selos + TENDÊNCIA vs período anterior
+                   (varredura 12/09: os selos saíram da linha do nome, que
+                   vivia truncado — "Novos c… 🏆 RECORDE") -->
+              <div class="flex items-end justify-between gap-2 flex-wrap">
+                <p class="text-3xl font-bold tabular-nums tracking-tight leading-none">{{ tile.value }}</p>
+                <div class="flex items-center gap-1 flex-wrap justify-end">
+                  <span v-if="tileVisual(tile).isRecord" class="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-300 text-amber-900" title="Melhor resultado já registrado neste tipo de período">🏆 RECORDE</span>
+                  <span v-else-if="tileVisual(tile).status === 'meta'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/25" title="Meta batida">✓ META</span>
+                  <span v-else-if="tileVisual(tile).status === 'bad'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/25" title="Muito abaixo do ritmo da meta">⚠️</span>
+                  <span
+                    v-if="tileTrend(tile)"
+                    class="text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums"
+                    :class="tileTrend(tile).up ? 'bg-white/25' : 'bg-black/20'"
+                    :title="tileTrend(tile).title"
+                  >{{ tileTrend(tile).text }}</span>
+                </div>
+              </div>
+              <span v-if="tile.chip" class="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ tile.chip.label }}</span>
               <template v-if="tile.sub">
                 <!-- linhas curtas propositais: nada de frase quebrando no meio -->
-                <p class="text-[10px] text-white/70 truncate">{{ tile.sub }}</p>
-                <p v-if="tile.sub2" class="text-[10px] text-white/80 truncate">{{ tile.sub2 }}</p>
-                <p v-if="tile.sub3" class="text-[10px] text-white/80 truncate">{{ tile.sub3 }}</p>
+                <p class="text-[11px] text-white/75 truncate mt-1">{{ tile.sub }}</p>
+                <p v-if="tile.sub2" class="text-[11px] text-white/80 truncate">{{ tile.sub2 }}</p>
+                <p v-if="tile.sub3" class="text-[11px] text-white/80 truncate">{{ tile.sub3 }}</p>
               </template>
+              <!-- ✨ sparkline: a forma do período num relance (mesma série do
+                   gráfico do popup; some quando não há série ou movimento) -->
+              <svg
+                v-if="tileSpark(tile)"
+                class="w-full mt-2"
+                viewBox="0 0 100 24"
+                preserveAspectRatio="none"
+                style="height: 24px"
+                aria-hidden="true"
+              >
+                <polygon :points="tileSpark(tile).area" fill="rgba(255,255,255,0.18)" />
+                <polyline :points="tileSpark(tile).line" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+              </svg>
               <!-- medidor da meta (aparece quando o admin definiu meta) -->
               <div v-if="tileVisual(tile).ratio !== null" class="mt-2">
                 <div class="h-1.5 rounded-full bg-black/20 overflow-hidden">
@@ -2532,9 +2881,9 @@ onUnmounted(() => {
           <!-- ➕ card novo (admin, item 141) — o modo edição agora liga no
                botão "Modo edição" do topo (item 143) -->
           <template #footer>
-            <div v-if="isAdmin && !currentPanel.custom" class="rounded-2xl border-2 border-dashed border-n-weak flex flex-col items-stretch justify-center p-3 min-h-[120px]">
+            <div v-if="isAdmin && !currentPanel.custom" class="cv-tile-add flex flex-col items-stretch justify-center p-3 min-h-[120px]">
               <button
-                class="flex-1 rounded-xl text-n-slate-10 hover:bg-n-brand/10 hover:text-n-brand transition-colors flex flex-col items-center justify-center gap-0.5 py-2"
+                class="flex-1 rounded-xl transition-colors flex flex-col items-center justify-center gap-0.5 py-2"
                 title="Criar um card de indicador: indicador pronto, fórmula (ex.: agendamentos / leads) e cor"
                 @click="openKpiBuilder(null)"
               >
@@ -2546,9 +2895,9 @@ onUnmounted(() => {
         </draggable>
 
         <!-- Linha de destaque do painel -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl px-4 py-3 mb-6 flex items-center gap-3">
-          <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" :style="{ background: panelHighlight.color + '1F' }">
-            <span :class="panelHighlight.icon" class="text-lg" :style="{ color: panelHighlight.color }" />
+        <div class="cv-block cv-strip px-4 py-3 mb-6 flex items-center gap-3">
+          <span class="cv-icon cv-icon-lg">
+            <span :class="panelHighlight.icon" class="text-lg" />
           </span>
           <div class="flex-1">
             <p class="text-xs font-medium text-n-slate-11">{{ panelHighlight.label }}</p>
@@ -2563,13 +2912,13 @@ onUnmounted(() => {
         <!-- 🎯 MEU DESEMPENHO (item 138): auto-avaliação — a pessoa e o
              Atendimento IA como referência; sem ranking de colegas (o
              ranking do time vive no Dashboard dos Agentes, do gestor) -->
-        <div v-if="perfCols.length" class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6">
+        <div v-if="perfCols.length" class="cv-block p-5 sm:p-6 mb-6">
           <div class="flex items-center gap-2 mb-4 flex-wrap">
-            <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-              <span class="i-lucide-target text-white text-base" />
+            <span class="cv-icon">
+              <span class="i-lucide-target text-base" />
             </span>
-            <h2 class="text-sm font-bold text-n-slate-12">{{ selectedPanel === 'gestor' ? 'Desempenho da equipe' : 'Meu desempenho' }}</h2>
-            <span class="text-[10px] px-2 py-0.5 rounded-full bg-n-alpha-1 text-n-slate-11">velocidades no horário comercial · 08h–17h</span>
+            <h2 class="text-sm font-bold text-n-slate-12">{{ panelBase === 'gestor' ? 'Desempenho da equipe' : 'Meu desempenho' }}</h2>
+            <span class="cv-chip">velocidades no horário comercial · 08h–17h</span>
             <span v-if="perf?.previous?.label" class="text-[10px] text-n-slate-9 ml-auto">setinhas comparam com {{ perf.previous.label }}</span>
           </div>
 
@@ -2577,8 +2926,8 @@ onUnmounted(() => {
             <div
               v-for="col in perfCols"
               :key="col.key"
-              class="rounded-2xl border p-4"
-              :class="col.key === 'me' ? 'border-violet-400/40 bg-n-solid-1' : 'border-n-weak bg-n-alpha-1'"
+              class="cv-sub p-4"
+              :class="col.key === 'me' ? 'cv-sub-on' : ''"
             >
               <div class="flex items-center gap-2 mb-3">
                 <p class="text-sm font-bold text-n-slate-12 flex-1">{{ col.title }}</p>
@@ -2586,7 +2935,7 @@ onUnmounted(() => {
               </div>
 
               <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center">
-                <div v-for="t in perfTilesFor(col)" :key="t.key" class="rounded-xl bg-n-alpha-1 px-2 py-2">
+                <div v-for="t in perfTilesFor(col)" :key="t.key" class="cv-stat">
                   <p class="text-base font-bold" :class="t.color ? '' : 'text-n-slate-12'" :style="t.color ? { color: t.color } : {}">
                     {{ t.display }}
                     <span v-if="t.delta" class="text-[10px] font-bold" :title="'antes: ' + t.delta.prev" :style="{ color: t.delta.color }">{{ t.delta.arrow }}</span>
@@ -2598,12 +2947,12 @@ onUnmounted(() => {
               <!-- Radar + jornada -->
               <div class="flex items-center gap-x-4 gap-y-1 flex-wrap mt-3 text-xs text-n-slate-11">
                 <span class="inline-flex items-center gap-1.5">
-                  <span class="i-lucide-radar text-sm" style="color: #EA580C" />
+                  <span class="i-lucide-radar text-sm" style="color: var(--cv)" />
                   {{ col.row.radar_responded }} aviso(s) do Radar
                   <template v-if="col.row.radar_avg_response_min !== null"> · respondeu em <b class="text-n-slate-12">{{ perfFmtMin(col.row.radar_avg_response_min) }}</b></template>
                 </span>
                 <span v-if="col.row.workday" class="inline-flex items-center gap-1.5">
-                  <span class="i-lucide-sunrise text-sm" style="color: #D97706" />
+                  <span class="i-lucide-sunrise text-sm" style="color: var(--cv)" />
                   1ª msg <b class="text-n-slate-12">{{ col.row.workday.avg_first_msg }}</b> · última <b class="text-n-slate-12">{{ col.row.workday.avg_last_msg }}</b>
                 </span>
               </div>
@@ -2611,17 +2960,17 @@ onUnmounted(() => {
                 <span
                   v-for="(g, gi) in (col.row.workday?.top_gaps || []).slice(0, 2)"
                   :key="gi"
-                  class="text-[10px] px-2 py-0.5 rounded-full bg-n-alpha-1 border border-n-weak text-n-slate-11"
+                  class="cv-chip"
                   title="Maior pausa entre uma mensagem e outra no período"
                 >
                   pausa {{ g.day }} · {{ g.from }}→{{ g.to }} · <b>{{ perfFmtMin(g.minutes) }}</b>
                 </span>
                 <span
                   v-if="col.row.off_hours?.count"
-                  class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 font-medium"
+                  class="cv-chip cv-slate"
                   :title="'Dias com mensagens fora de seg–sex 08h–17h: ' + (col.row.off_hours.days || []).join(' · ')"
                 >
-                  🌙 {{ col.row.off_hours.count }} dia(s) fora do horário<template v-if="col.row.off_hours.days?.length">: {{ col.row.off_hours.days.slice(0, 3).join(' · ') }}</template>
+                  <span class="i-lucide-moon text-[10px]" />{{ col.row.off_hours.count }} dia(s) fora do horário<template v-if="col.row.off_hours.days?.length">: {{ col.row.off_hours.days.slice(0, 3).join(' · ') }}</template>
                 </span>
               </div>
             </div>
@@ -2634,17 +2983,17 @@ onUnmounted(() => {
         <!-- 📅 Dashboard da Agenda EMBUTIDO (pedido 20/08): o dashboard
              inteiro faz parte do Meu Painel em TODAS as predefinições,
              seguindo o período da régua; a Saúde da Agenda vem logo abaixo -->
-        <div class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6">
+        <div class="cv-block p-5 sm:p-6 mb-6">
           <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div class="flex items-center gap-2">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-                <span class="i-lucide-calendar-days text-white text-base" />
+              <span class="cv-icon">
+                <span class="i-lucide-calendar-days text-base" />
               </span>
               <h2 class="text-sm font-bold text-n-slate-12">Dashboard da Agenda</h2>
               <span class="text-[10px] text-n-slate-9">segue o período escolhido acima</span>
             </div>
             <button
-              class="px-3 h-8 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1.5"
+              class="cv-btn cv-btn-ghost cv-btn-sm"
               title="Abrir o relatório completo em Relatórios"
               @click="goToAgendaDashboard"
             >
@@ -2652,37 +3001,37 @@ onUnmounted(() => {
               Relatório completo
             </button>
           </div>
-          <AgendaDashboardCore :period="period" />
+          <AgendaDashboardCore :period="period" glass :family="blockFamily('agenda_dashboard')" />
         </div>
             </template>
 
             <template v-else-if="blockId === 'saude_agenda'">
         <!-- Saúde da Agenda -->
-        <div class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6">
+        <div class="cv-block p-5 sm:p-6 mb-6">
           <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div class="flex items-center gap-2">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-                <span class="i-lucide-calendar-days text-white text-base" />
+              <span class="cv-icon">
+                <span class="i-lucide-activity text-base" />
               </span>
               <h2 class="text-sm font-bold text-n-slate-12">Saúde da Agenda</h2>
             </div>
             <!-- atalho pulsante para a Agenda (cor do ambiente) -->
             <button
-              class="cevico-pulse-btn px-4 h-9 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-md"
-              style="background: linear-gradient(135deg, #5B21B6, #7C3AED)"
+              class="cv-btn cv-btn-pulse"
               @click="go('agenda_board')"
             >
               <span class="i-lucide-calendar-days text-sm" />
-              Ir para agenda →
+              Ir para agenda
+              <span class="i-lucide-arrow-right text-xs" />
             </button>
           </div>
 
           <!-- DOIS retângulos simétricos: Consultas × Cirurgias -->
           <div class="grid grid-cols-1 gap-4" :class="showSurgeryHealth ? 'lg:grid-cols-2' : ''">
             <!-- 🩺 Agenda de CONSULTAS -->
-            <div class="rounded-xl border border-n-weak bg-n-solid-2 p-4 flex flex-col gap-4">
+            <div class="cv-sub p-4 flex flex-col gap-4">
               <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
-                <span class="i-lucide-stethoscope text-sm" style="color: #7C3AED" />
+                <span class="i-lucide-stethoscope text-sm" style="color: var(--cv)" />
                 Agenda de Consultas
               </p>
               <div>
@@ -2690,8 +3039,8 @@ onUnmounted(() => {
                   <span class="text-n-slate-11">Agenda cheia <span class="text-n-slate-9">(próx. 7 dias)</span></span>
                   <span class="font-bold text-base text-n-slate-12">{{ fillNext7.pct }}%</span>
                 </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(fillNext7.pct, 2) + '%', background: 'linear-gradient(90deg, #0F5FA6, #7C3AED)' }" />
+                <div class="cv-track">
+                  <div class="cv-fill" :style="{ width: Math.max(fillNext7.pct, 2) + '%' }" />
                 </div>
                 <p class="text-[10px] text-n-slate-9 mt-1">{{ fillNext7.filled }} de {{ fillNext7.total }} blocos</p>
               </div>
@@ -2700,8 +3049,8 @@ onUnmounted(() => {
                   <span class="text-n-slate-11">Aproveitamento <span class="text-n-slate-9">(últimos 7 dias)</span></span>
                   <span class="font-bold text-base text-n-slate-12">{{ usageLast7.pct }}%</span>
                 </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(usageLast7.pct, 2) + '%', background: 'linear-gradient(90deg, #B8860B, #D4A017)' }" />
+                <div class="cv-track">
+                  <div class="cv-fill" :style="{ width: Math.max(usageLast7.pct, 2) + '%' }" />
                 </div>
                 <p class="text-[10px] text-n-slate-9 mt-1">blocos que viraram consulta</p>
               </div>
@@ -2710,23 +3059,22 @@ onUnmounted(() => {
                   <span class="text-n-slate-11">Comparecimento <span class="text-n-slate-9">(30 dias)</span></span>
                   <span class="font-bold text-base text-n-slate-12">{{ attendance === null ? '—' : attendance + '%' }}</span>
                 </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(attendance || 0, 2) + '%', background: 'linear-gradient(90deg, #65A30D, #84CC16)' }" />
+                <div class="cv-track">
+                  <div class="cv-fill" :style="{ width: Math.max(attendance || 0, 2) + '%' }" />
                 </div>
                 <p class="text-[10px] text-n-slate-9 mt-1">consultas concluídas ÷ realizadas</p>
               </div>
               <!-- vagas livres, junto da agenda de consultas -->
-              <div class="mt-auto pt-1 border-t border-n-weak">
-                <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5 mt-2">Vagas livres mais próximas</p>
+              <div class="mt-auto pt-1" style="border-top: 1px solid rgb(var(--cv-rgb) / 0.18)">
+                <p class="cv-label mb-1.5 mt-2">Vagas livres mais próximas</p>
                 <div v-if="nextFreeSlots.length" class="flex flex-wrap gap-1.5">
                   <button
                     v-for="(f, i) in nextFreeSlots"
                     :key="i"
-                    class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-dashed hover:bg-n-alpha-1 transition-colors"
-                    :style="{ borderColor: slotColor(f) + '70', color: slotColor(f) }"
+                    class="cv-chip cv-chip-lg"
                     @click="go('agenda_board')"
                   >
-                    <span class="i-lucide-calendar-plus text-xs" />
+                    <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: slotColor(f) }" />
                     {{ slotLabel(f) }} · {{ slotDoctorShort(f) }}
                   </button>
                 </div>
@@ -2739,9 +3087,9 @@ onUnmounted(() => {
             </div>
 
             <!-- 🔪 Agenda de CIRURGIAS (simétrica) -->
-            <div v-if="showSurgeryHealth" class="rounded-xl border border-sky-400/30 bg-sky-400/5 p-4 flex flex-col gap-4">
+            <div v-if="showSurgeryHealth" class="cv-sub p-4 flex flex-col gap-4">
               <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
-                <span class="i-lucide-slice text-sm" style="color: #0284C7" />
+                <span class="i-lucide-slice text-sm" style="color: var(--cv)" />
                 Agenda de Cirurgias
                 <span class="text-[10px] font-normal text-n-slate-9">sala cirúrgica (IOP, Ocular Surgery...)</span>
               </p>
@@ -2750,8 +3098,8 @@ onUnmounted(() => {
                   <span class="text-n-slate-11">Sala cheia <span class="text-n-slate-9">(próx. 7 dias)</span></span>
                   <span class="font-bold text-base text-n-slate-12">{{ surgFillNext7.total ? surgFillNext7.pct + '%' : '—' }}</span>
                 </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(surgFillNext7.pct, 2) + '%', background: 'linear-gradient(90deg, #0284C7, #7DD3FC)' }" />
+                <div class="cv-track">
+                  <div class="cv-fill" :style="{ width: Math.max(surgFillNext7.pct, 2) + '%' }" />
                 </div>
                 <p class="text-[10px] text-n-slate-9 mt-1">{{ surgFillNext7.total ? `${surgFillNext7.filled} de ${surgFillNext7.total} blocos` : 'sem janelas da sala nos próximos dias' }}</p>
               </div>
@@ -2760,23 +3108,23 @@ onUnmounted(() => {
                   <span class="text-n-slate-11">Aproveitamento <span class="text-n-slate-9">(últimos 7 dias)</span></span>
                   <span class="font-bold text-base text-n-slate-12">{{ surgUsageLast7.total ? surgUsageLast7.pct + '%' : '—' }}</span>
                 </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(surgUsageLast7.pct, 2) + '%', background: 'linear-gradient(90deg, #0369A1, #38BDF8)' }" />
+                <div class="cv-track">
+                  <div class="cv-fill" :style="{ width: Math.max(surgUsageLast7.pct, 2) + '%' }" />
                 </div>
                 <p class="text-[10px] text-n-slate-9 mt-1">blocos da sala que viraram cirurgia</p>
               </div>
               <!-- 🎯 META: 100 cirurgias -->
               <div>
                 <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-n-slate-11">🎯 Meta do mês <span class="text-n-slate-9">({{ SURGERY_GOAL }} cirurgias)</span></span>
-                  <span class="font-bold text-base text-n-slate-12">{{ surgeriesDoneMonth }} de {{ SURGERY_GOAL }}</span>
+                  <span class="text-n-slate-11 inline-flex items-center gap-1"><span class="i-lucide-target text-xs" style="color: var(--cv)" />Meta do mês <span class="text-n-slate-9">({{ surgeryGoalTarget }} cirurgias)</span></span>
+                  <span class="font-bold text-base text-n-slate-12">{{ surgeriesDoneMonth }} de {{ surgeryGoalTarget }}</span>
                 </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(goalPct, 2) + '%', background: 'linear-gradient(90deg, #065F46, #10B981)' }" />
+                <div class="cv-track">
+                  <div class="cv-fill" :class="goalPct >= 100 ? 'cv-green' : ''" :style="{ width: Math.max(goalPct, 2) + '%' }" />
                 </div>
                 <p class="text-[10px] text-n-slate-9 mt-1">{{ goalPct }}% da meta · cirurgias realizadas no mês</p>
               </div>
-              <div class="mt-auto pt-1 border-t border-sky-400/20">
+              <div class="mt-auto pt-1" style="border-top: 1px solid rgb(var(--cv-rgb) / 0.18)">
                 <p v-if="nextSurgery" class="text-[11px] text-n-slate-10 flex items-center gap-1.5 mt-2">
                   <span class="i-lucide-clock text-xs" />
                   Próxima cirurgia: <b class="text-n-slate-12">{{ nextSurgery.title.replace(/^Consulta:\s*/i, '') }}</b> — {{ apptTime(nextSurgery.due_at) }}
@@ -2796,12 +3144,12 @@ onUnmounted(() => {
         <div v-if="goalsData" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
           <!-- METAS do mês -->
           <button
-            class="rounded-2xl border border-n-weak bg-n-card outline-none p-4 text-left hover:border-violet-500/60 hover:shadow-md transition-all"
+            class="cv-block cv-block-hover p-4 text-left"
             @click="goToGoals"
           >
             <div class="flex items-center gap-2 mb-2">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-                <span class="i-lucide-target text-white text-sm" />
+              <span class="cv-icon cv-icon-sm">
+                <span class="i-lucide-target text-xs" />
               </span>
               <p class="text-xs font-bold text-n-slate-12 flex-1">Metas do mês</p>
               <span class="i-lucide-chevron-right text-sm text-n-slate-9" />
@@ -2812,10 +3160,11 @@ onUnmounted(() => {
                   <span class="text-n-slate-10 truncate">{{ g.label }}</span>
                   <b class="text-n-slate-12">{{ g.current }}/{{ g.target }}</b>
                 </div>
-                <div class="h-1.5 bg-n-alpha-1 rounded-full overflow-hidden">
+                <div class="cv-track cv-track-sm">
                   <div
-                    class="h-full rounded-full transition-all duration-700"
-                    :style="{ width: `${Math.max(g.pct, 2)}%`, background: g.pct >= 100 ? 'linear-gradient(90deg, #047857, #34D399)' : 'linear-gradient(90deg, #5B21B6, #7C3AED)' }"
+                    class="cv-fill"
+                    :class="g.pct >= 100 ? 'cv-green' : ''"
+                    :style="{ width: `${Math.max(g.pct, 2)}%` }"
                   />
                 </div>
               </div>
@@ -2826,16 +3175,16 @@ onUnmounted(() => {
           </button>
 
           <!-- ROTINAS -->
-          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
+          <div class="cv-block p-4">
             <div class="flex items-center gap-2 mb-2">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F766E, #2DD4BF)">
-                <span class="i-lucide-repeat text-white text-sm" />
+              <span class="cv-icon cv-icon-sm">
+                <span class="i-lucide-repeat text-xs" />
               </span>
               <p class="text-xs font-bold text-n-slate-12">Rotinas</p>
             </div>
             <template v-if="teamRoutines.length">
               <p v-for="(r, ri) in teamRoutines.slice(0, 5)" :key="ri" class="text-[11px] text-n-slate-11 leading-relaxed flex items-start gap-1.5 mb-0.5">
-                <span class="i-lucide-check-circle-2 text-[11px] mt-0.5 flex-shrink-0" style="color: #0D9488" />
+                <span class="i-lucide-check-circle-2 text-[11px] mt-0.5 flex-shrink-0" style="color: var(--cv)" />
                 {{ r }}
               </p>
             </template>
@@ -2845,25 +3194,25 @@ onUnmounted(() => {
           </div>
 
           <!-- FERRAMENTAS importantes -->
-          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
+          <div class="cv-block p-4">
             <div class="flex items-center gap-2 mb-2">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #065F46, #34D399)">
-                <span class="i-lucide-wrench text-white text-sm" />
+              <span class="cv-icon cv-icon-sm">
+                <span class="i-lucide-wrench text-xs" />
               </span>
               <p class="text-xs font-bold text-n-slate-12">Ferramentas</p>
             </div>
             <button
-              class="w-full flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
+              class="cv-sub cv-sub-hover w-full flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 px-2.5 py-1.5 mb-1"
               @click="goToTools"
             >
-              <span class="i-lucide-swords text-[11px]" style="color: #047857" />
+              <span class="i-lucide-swords text-[11px]" style="color: var(--cv)" />
               Fechamento: script + mapa de objeções
               <span class="i-lucide-chevron-right text-[11px] ml-auto text-n-slate-9" />
             </button>
             <button
               v-for="(t, ti) in importantTools.slice(0, 4)"
               :key="ti"
-              class="w-full flex items-center gap-1.5 text-[11px] text-n-slate-11 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
+              class="cv-sub cv-sub-hover w-full flex items-center gap-1.5 text-[11px] text-n-slate-11 px-2.5 py-1.5 mb-1"
               @click="openTool(t)"
             >
               <span class="i-lucide-external-link text-[11px] text-n-slate-9" />
@@ -2878,13 +3227,13 @@ onUnmounted(() => {
         <!-- Acesso rápido (compacto, largura toda) -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <button
-            v-for="s in shortcuts"
+            v-for="(s, si) in shortcuts"
             :key="s.route"
-            class="flex items-center gap-2.5 px-4 py-3 rounded-2xl border border-n-weak bg-n-solid-2 hover:border-n-brand/60 transition-colors text-left"
+            class="cv-block cv-block-hover flex items-center gap-2.5 px-4 py-3 text-left"
             @click="go(s.route)"
           >
-            <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" :style="{ backgroundColor: s.color + '1A' }">
-              <span :class="s.icon" class="text-lg" :style="{ color: s.color }" />
+            <span class="cv-icon cv-icon-lg" :style="{ background: blockFamily('atalhos')[si % 4] }">
+              <span :class="s.icon" class="text-lg" />
             </span>
             <span class="text-sm font-semibold text-n-slate-12">{{ s.label }}</span>
           </button>
@@ -2894,12 +3243,13 @@ onUnmounted(() => {
 
             <template v-else-if="blockId === 'termometro'">
         <!-- Termômetro do momento -->
-        <div class="flex flex-wrap gap-4 text-xs text-n-slate-10 mb-4">
-          <span class="flex items-center gap-1.5"><span class="i-lucide-inbox text-sm" /> {{ data.open_conversations ?? 0 }} conversas abertas agora</span>
-          <span class="flex items-center gap-1.5" :class="(data.unanswered ?? 0) > 0 ? 'text-amber-500 font-medium' : ''">
-            <span class="i-lucide-clock-alert text-sm" /> {{ data.unanswered ?? 0 }} aguardando resposta
+        <div class="cv-block cv-strip flex flex-wrap items-center gap-2 px-3 py-2 mb-4">
+          <span class="cv-icon cv-icon-sm"><span class="i-lucide-thermometer text-xs" /></span>
+          <span class="cv-chip"><span class="i-lucide-inbox text-xs" />{{ data.open_conversations ?? 0 }} conversas abertas agora</span>
+          <span class="cv-chip" :class="(data.unanswered ?? 0) > 0 ? 'cv-amber' : ''">
+            <span class="i-lucide-clock-alert text-xs" />{{ data.unanswered ?? 0 }} aguardando resposta
           </span>
-          <span class="flex items-center gap-1.5"><span class="i-lucide-calendar-check text-sm" /> {{ data.appointments_today ?? 0 }} consultas hoje</span>
+          <span class="cv-chip"><span class="i-lucide-calendar-check text-xs" />{{ data.appointments_today ?? 0 }} consultas hoje</span>
         </div>
             </template>
             </template>
@@ -2914,14 +3264,14 @@ onUnmounted(() => {
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
         @click.self="showAssignModal = false"
       >
-        <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden">
-          <div class="h-1.5 w-full flex-shrink-0" style="background: linear-gradient(135deg, #111827, #94A3B8)" />
-          <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
-            <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-              <span class="i-lucide-settings-2 text-n-brand" />
-              Painel de cada pessoa
-            </h2>
-            <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showAssignModal = false" />
+        <div class="cv-modal w-full max-w-md max-h-[85vh] flex flex-col">
+          <div class="cv-modal-head flex items-center gap-3">
+            <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-settings-2 text-base" /></span>
+            <div class="flex-1 min-w-0">
+              <h2 class="text-base font-bold leading-tight">Painel de cada pessoa</h2>
+              <p class="text-[11px] opacity-85 mt-0.5">quem abre o Meu Painel em qual versão</p>
+            </div>
+            <button class="cv-glass-btn cv-iconbtn" aria-label="Fechar" @click="showAssignModal = false"><span class="i-lucide-x text-base" /></button>
           </div>
           <div class="flex-1 overflow-y-auto p-5 space-y-2">
             <p class="text-xs text-n-slate-10 mb-2">
@@ -2932,7 +3282,7 @@ onUnmounted(() => {
               <span class="text-sm text-n-slate-12 flex-1 truncate">{{ agent.name }}</span>
               <select
                 v-model="assignDraft[String(agent.id)]"
-                class="h-8 text-xs border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12"
+                class="cv-input !h-8 text-xs text-n-slate-12"
               >
                 <option value="">Livre (todos)</option>
                 <!-- lista também os painéis do Construtor (custom:<id>) -->
@@ -2942,21 +3292,109 @@ onUnmounted(() => {
               </select>
             </div>
           </div>
-          <div class="px-5 py-4 border-t border-n-weak flex gap-2 flex-shrink-0">
+          <div class="cv-modal-foot flex gap-2">
             <button
-              class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
-              style="background: linear-gradient(135deg, #111827, #475569)"
+              class="cv-btn cv-btn-lg flex-1"
               :disabled="isSavingAssign"
               @click="saveAssignments"
             >
               {{ isSavingAssign ? 'Salvando…' : 'Salvar' }}
             </button>
-            <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showAssignModal = false">
+            <button class="cv-btn cv-btn-ghost cv-btn-lg" @click="showAssignModal = false">
               Cancelar
             </button>
           </div>
         </div>
       </div>
+
+    <!-- 🧑‍🤝‍🧑 Painel por pessoa (admin, rodada 160) -->
+    <div
+      v-if="showVariantModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      @click.self="showVariantModal = false"
+    >
+      <div class="cv-modal w-full max-w-md max-h-[85vh] flex flex-col">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-user-plus text-base" /></span>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-base font-bold leading-tight">{{ variantDraft.id ? 'Editar painel por pessoa' : 'Painel por pessoa' }}</h2>
+            <p class="text-[11px] opacity-85 mt-0.5">uma versão do painel-base com layout próprio</p>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn" aria-label="Fechar" @click="showVariantModal = false"><span class="i-lucide-x text-base" /></button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-4">
+          <p class="text-xs text-n-slate-10 leading-relaxed">
+            Uma versão do painel-base só para quem você escolher: os mesmos números e metas, com blocos, cards e
+            cores organizados do jeito dela — no <b>Modo edição</b>, com o arrasto magnético. A pessoa abre o
+            Meu Painel já neste painel.
+          </p>
+          <div>
+            <p class="cv-label mb-1.5">Painel-base</p>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="b in BASE_PANELS"
+                :key="b.key"
+                class="cv-btn cv-btn-sm"
+                :class="variantDraft.base === b.key ? '' : 'cv-btn-ghost'"
+                @click="variantDraft.base = b.key"
+              >
+                <span :class="b.icon" class="text-sm" />
+                {{ b.label }}
+              </button>
+            </div>
+          </div>
+          <div>
+            <p class="cv-label mb-1.5">Quem vê este painel</p>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="agent in teamAgents"
+                :key="agent.id"
+                class="cv-btn cv-btn-sm"
+                :class="variantDraft.user_ids.includes(agent.id) ? '' : 'cv-btn-ghost'"
+                @click="toggleVariantUser(agent.id)"
+              >
+                {{ agent.name }}
+              </button>
+              <span v-if="!teamAgents.length" class="text-[11px] text-n-slate-9">carregando o time…</span>
+            </div>
+            <p class="text-[10px] text-n-slate-9 mt-1.5">
+              Quem está na lista fica travado neste painel (dá pra mudar depois em "Painel de cada pessoa").
+            </p>
+          </div>
+          <div>
+            <p class="cv-label mb-1">Nome do painel</p>
+            <input
+              v-model="variantDraft.name"
+              type="text"
+              maxlength="40"
+              :placeholder="suggestedVariantName() || 'ex.: Natália'"
+              class="cv-input w-full text-n-slate-12"
+            />
+          </div>
+        </div>
+        <div class="cv-modal-foot flex gap-2">
+          <button
+            class="cv-btn cv-btn-lg flex-1"
+            :disabled="isSavingVariant"
+            @click="saveVariant"
+          >
+            {{ isSavingVariant ? 'Salvando…' : variantDraft.id ? 'Salvar' : 'Criar painel' }}
+          </button>
+          <button
+            v-if="variantDraft.id"
+            class="cv-btn cv-btn-ghost cv-btn-lg cv-btn-danger"
+            :class="variantDeleteArmed ? 'cv-btn-danger-on' : ''"
+            :disabled="isSavingVariant"
+            @click="variantDeleteArmed ? deleteVariant() : (variantDeleteArmed = true)"
+          >
+            {{ variantDeleteArmed ? 'Confirmar exclusão' : 'Excluir' }}
+          </button>
+          <button class="cv-btn cv-btn-ghost cv-btn-lg" @click="showVariantModal = false">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- 🎯 Modal de METAS por painel (admin) -->
     <div
@@ -2964,41 +3402,43 @@ onUnmounted(() => {
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       @click.self="showGoalsModal = false"
     >
-      <div class="bg-n-solid-1 rounded-2xl shadow-xl w-full max-w-md p-5">
-        <div class="flex items-center justify-between mb-1">
-          <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-target text-base" style="color: #d4af37" />
-            Metas — {{ currentPanel.label }}
-          </h3>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showGoalsModal = false" />
+      <div class="cv-modal w-full max-w-md flex flex-col">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-target text-base" /></span>
+          <div class="flex-1 min-w-0">
+            <h3 class="text-base font-bold leading-tight">Metas — {{ currentPanel.label }}</h3>
+            <p class="text-[11px] opacity-85 mt-0.5">metas mensais; os cards mudam de cor pelo ritmo</p>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn" aria-label="Fechar" @click="showGoalsModal = false"><span class="i-lucide-x text-base" /></button>
         </div>
+        <div class="p-5">
         <p class="text-[11px] text-n-slate-10 mb-4">
           Metas MENSAIS (as taxas % são diretas). Os cards mudam de cor pelo ritmo:
           🔴 muito abaixo · 🟠 abaixo · cores normais no ritmo · 🟢 meta batida · 🏆 recorde com átomos.
         </p>
         <div class="space-y-3 mb-4">
           <label
-            v-for="field in GOAL_FIELDS[selectedPanel] || []"
+            v-for="field in GOAL_FIELDS[panelBase] || []"
             :key="field.gk"
             class="flex items-center gap-3"
           >
             <span class="text-xs text-n-slate-11 flex-1">{{ field.label }}</span>
             <input
-              v-model.number="goalsDraft[selectedPanel][field.gk]"
+              v-model.number="goalsDraft[panelBase][field.gk]"
               type="number"
               min="0"
               :step="field.pct ? 0.5 : 1"
-              class="w-24 h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-sm text-n-slate-12 text-right"
+              class="cv-input w-24 text-n-slate-12 text-right"
               placeholder="—"
             />
           </label>
         </div>
         <p class="text-[10px] text-n-slate-9 mb-3">Deixar vazio (ou 0) = sem meta para aquele card.</p>
-        <div class="flex justify-end gap-2">
-          <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showGoalsModal = false">Cancelar</button>
+        </div>
+        <div class="cv-modal-foot flex justify-end gap-2">
+          <button class="cv-btn cv-btn-ghost cv-btn-lg" @click="showGoalsModal = false">Cancelar</button>
           <button
-            class="px-4 rounded-lg py-2 text-sm font-semibold text-white disabled:opacity-60"
-            :style="{ background: currentPanel.grad }"
+            class="cv-btn cv-btn-lg"
             :disabled="isSavingGoals"
             @click="saveGoals"
           >
@@ -3026,18 +3466,19 @@ onUnmounted(() => {
     <Transition name="cevico-kpi-pop">
       <div
         v-if="kpiModal"
-        class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4"
+        class="cv-page cv-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4"
+        :style="cvVars"
         role="dialog"
         aria-modal="true"
         @click.self="closeKpiModal"
       >
-        <div class="cevico-kpi-panel w-full max-w-lg max-h-[88vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1">
-          <div class="p-5 pb-4 text-white flex-shrink-0" :style="{ background: tileVisual(kpiModal).grad }">
+        <div class="cevico-kpi-panel cv-modal w-full max-w-lg max-h-[88vh] flex flex-col">
+          <div class="cv-modal-head !p-5 !pb-4" :style="{ background: tileVisual(kpiModal).grad }">
             <div class="flex items-center gap-2 text-white/85">
               <span :class="kpiModal.icon" class="text-base" />
               <p class="text-sm font-medium flex-1">{{ kpiModal.label }}</p>
               <button
-                class="w-8 h-8 rounded-full bg-white/15 hover:bg-white/30 flex items-center justify-center transition-colors"
+                class="cv-glass-btn cv-iconbtn"
                 aria-label="Fechar (Esc)"
                 title="Fechar (Esc)"
                 @click="closeKpiModal"
@@ -3045,14 +3486,21 @@ onUnmounted(() => {
                 <span class="i-lucide-x text-base" />
               </button>
             </div>
-            <p class="text-4xl font-bold mt-2 tabular-nums">{{ kpiModal.value }}</p>
-            <span v-if="kpiModal.chip" class="inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ kpiModal.chip.label }}</span>
+            <div class="flex items-end gap-3 flex-wrap mt-2">
+              <p class="text-4xl font-bold tabular-nums tracking-tight leading-none">{{ kpiModal.value }}</p>
+              <!-- a tendência já no cabeçalho: a história antes do gráfico (varredura 12/09) -->
+              <div v-if="modalDelta" class="flex flex-col leading-tight pb-0.5">
+                <span class="text-sm font-bold" :class="modalDelta.up ? 'text-emerald-200' : 'text-red-200'">{{ modalDelta.text }}</span>
+                <span class="text-[10px] text-white/75">{{ modalDelta.sub }}</span>
+              </div>
+            </div>
+            <span v-if="kpiModal.chip" class="cv-glass-chip mt-1.5">{{ kpiModal.chip.label }}</span>
             <p v-if="kpiModal.sub" class="text-xs text-white/80 mt-1">{{ kpiModal.sub }}</p>
           </div>
           <div class="p-5 space-y-3 overflow-y-auto overscroll-contain">
           <!-- 📊 gráfico do período v2 (item 144; UX 152: legenda visual,
                estado vazio gentil, carregamento suave, régua com rótulos) -->
-          <div v-if="modalChart" class="rounded-xl bg-n-alpha-1 px-3 py-2">
+          <div v-if="modalChart" class="cv-sub px-3 py-2">
             <div class="flex items-center justify-between gap-2 text-[10px] text-n-slate-10 mb-1">
               <span class="truncate">{{ modalChart.compare ? 'comparativo' : `${modalChart.label || kpiModal.label} · ${modalBag?.granularity === 'month' ? 'por mês' : modalBag?.granularity === 'week' ? 'por semana' : 'por dia'}` }}</span>
               <span v-if="isLoadingModalBag" class="i-lucide-loader-circle animate-spin text-xs flex-shrink-0" />
@@ -3061,8 +3509,8 @@ onUnmounted(() => {
               <MiniBars
                 :values="modalChart.values"
                 :labels="modalChart.labels"
-                color="#0F5FA6"
-                :height="110"
+                :color="modalChartColor"
+                :height="128"
                 :prev-values="modalChart.prevValues || null"
                 :goal="modalChart.goal ?? null"
                 :markers="modalChart.compare ? [] : modalMarkers"
@@ -3071,7 +3519,7 @@ onUnmounted(() => {
               />
             </div>
             <!-- recorte sem nenhum movimento: fala com a pessoa em vez do vazio -->
-            <p v-if="modalChartIsEmpty" class="text-[11px] text-n-slate-10 text-center mt-1 rounded-lg bg-n-alpha-1 px-2 py-1.5">
+            <p v-if="modalChartIsEmpty" class="cv-row text-[11px] text-n-slate-10 text-center mt-1 px-2 py-1.5">
               Sem movimento neste recorte — experimente <b>Este mês</b> ou <b>Este ano</b> aqui embaixo.
             </p>
             <!-- legenda VISUAL: cada elemento do gráfico explicado com a
@@ -3086,47 +3534,48 @@ onUnmounted(() => {
               </span>
               <span v-if="modalMarkers.length" class="flex items-center gap-1">📌 ação da empresa</span>
             </div>
-            <p
-              v-if="!modalChart.compare && modalChart.prev !== undefined && modalChart.prev !== null"
-              class="text-[11px] mt-1 font-medium"
-              :class="(modalChart.total ?? 0) >= modalChart.prev ? 'text-emerald-600' : 'text-red-500'"
-            >
-              {{ deltaLine(modalChart.total ?? 0, modalChart.prev, kpiModal.format || (modalChart.unit === 'brl' ? 'currency' : 'number'), modalBag) }}
+            <!-- 💡 o gráfico lido em uma frase: pico, média e total — quem
+                 não lê gráfico entende o período mesmo assim -->
+            <p v-if="modalInsight" class="text-[11px] mt-1.5 text-n-slate-11 flex items-start gap-1.5 leading-snug">
+              <span class="i-lucide-sparkles text-xs mt-0.5 flex-shrink-0" style="color: #B8860B" />
+              <span>{{ modalInsight }}</span>
             </p>
             <!-- mini-régua do popup: recorte SÓ deste gráfico (a régua da
                  página fica intacta) — grupos com nome, sem adivinhação -->
-            <div v-if="!modalChart.compare" class="mt-2 pt-2 border-t border-n-weak/60 space-y-1.5">
-              <div class="flex items-center gap-1 flex-wrap">
+            <div v-if="!modalChart.compare" class="mt-2 pt-2 space-y-1.5" style="border-top: 1px solid rgb(var(--cv-rgb) / 0.18)">
+              <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0">Período</span>
-                <button
-                  v-for="p in MODAL_PRESETS"
-                  :key="String(p[0])"
-                  class="h-7 px-2.5 rounded-lg text-[11px] font-medium border transition-colors"
-                  :class="kpiModalPreset === p[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
-                  :style="kpiModalPreset === p[0] ? { background: panelFamily[1] } : {}"
-                  @click="setModalPreset(p[0])"
-                >
-                  {{ p[1] }}
-                </button>
+                <span class="cv-seg cv-seg-sm flex-wrap">
+                  <button
+                    v-for="p in MODAL_PRESETS"
+                    :key="String(p[0])"
+                    class="cv-seg-item"
+                    :class="kpiModalPreset === p[0] ? 'cv-seg-on' : ''"
+                    @click="setModalPreset(p[0])"
+                  >
+                    {{ p[1] }}
+                  </button>
+                </span>
               </div>
-              <div class="flex items-center gap-1 flex-wrap">
+              <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0">Ver por</span>
-                <button
-                  v-for="g in MODAL_GRAINS"
-                  :key="String(g[0])"
-                  class="h-7 px-2.5 rounded-lg text-[11px] font-medium border transition-colors"
-                  :class="kpiModalGranularity === g[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
-                  :style="kpiModalGranularity === g[0] ? { background: panelFamily[2] } : {}"
-                  @click="setModalGranularity(g[0])"
-                >
-                  {{ g[1] }}
-                </button>
+                <span class="cv-seg cv-seg-sm flex-wrap">
+                  <button
+                    v-for="g in MODAL_GRAINS"
+                    :key="String(g[0])"
+                    class="cv-seg-item"
+                    :class="kpiModalGranularity === g[0] ? 'cv-seg-on' : ''"
+                    @click="setModalGranularity(g[0])"
+                  >
+                    {{ g[1] }}
+                  </button>
+                </span>
               </div>
             </div>
           </div>
           <!-- 🧩 DE ONDE VEM ESTA TAXA (item 144): as séries que formam a
                conta — responde se o problema foi entrada ou conversão -->
-          <div v-if="modalComponents.length" class="rounded-xl bg-n-alpha-1 px-3 py-2 space-y-2">
+          <div v-if="modalComponents.length" class="cv-sub px-3 py-2 space-y-2">
             <p class="text-[11px] font-medium text-n-slate-11">🧩 De onde vem este número <span class="font-normal text-n-slate-9">· {{ modalRangeLabel }}</span></p>
             <div v-for="comp in modalComponents" :key="comp.key">
               <div class="flex items-center justify-between text-[10px] mb-0.5">
@@ -3145,12 +3594,12 @@ onUnmounted(() => {
           </div>
           <!-- 🏥 POR UNIDADE (item 146): Paulista × Tatuapé lado a lado —
                consultas, comparecimento e a taxa de cada casa -->
-          <div v-if="kpiModal.units?.length" class="rounded-xl bg-n-alpha-1 px-3 py-2 space-y-2">
+          <div v-if="kpiModal.units?.length" class="cv-sub px-3 py-2 space-y-2">
             <p class="text-[11px] font-medium text-n-slate-11">🏥 Por unidade <span class="font-normal text-n-slate-9">· consultas e comparecimento do período</span></p>
             <div
               v-for="u in kpiModal.units"
               :key="u.unit || 'sem'"
-              class="rounded-lg bg-n-solid-1 border border-n-weak px-3 py-2"
+              class="cv-row px-3 py-2"
             >
               <div class="flex items-center justify-between gap-2 text-xs mb-1">
                 <b class="text-n-slate-12">{{ u.label }}</b>
@@ -3178,7 +3627,7 @@ onUnmounted(() => {
             </div>
           </div>
           <!-- leads por caixa (card 1): barras lado a lado -->
-          <div v-if="kpiModal.compareInboxes?.length" class="rounded-xl bg-n-alpha-1 px-3 py-2">
+          <div v-if="kpiModal.compareInboxes?.length" class="cv-sub px-3 py-2">
             <p class="text-[11px] font-medium text-n-slate-11 mb-1">📥 Leads por caixa de entrada</p>
             <MiniBars :values="kpiModal.compareInboxes.map(i => i.value)" :labels="kpiModal.compareInboxes.map(i => i.label)" color="#7C3AED" :height="80" />
           </div>
@@ -3186,7 +3635,7 @@ onUnmounted(() => {
             <div
               v-for="(row, ri) in kpiModal.details"
               :key="ri"
-              class="flex items-start justify-between gap-3 text-xs rounded-xl bg-n-alpha-1 px-3 py-2"
+              class="cv-row flex items-start justify-between gap-3 text-xs px-3 py-2"
             >
               <span class="text-n-slate-11 flex-shrink-0">{{ row.label }}</span>
               <b class="text-n-slate-12 text-right break-words min-w-0">{{ row.value }}</b>
@@ -3196,8 +3645,8 @@ onUnmounted(() => {
             <span class="i-lucide-info text-xs align-middle mr-1" />{{ kpiModal.about }}
           </p>
           <div v-if="isAdmin && kpiModal.kpi" class="flex items-center gap-2 pt-1">
-            <button class="h-9 px-3.5 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors" @click="openKpiBuilder(kpiModal.def)">✏️ Editar</button>
-            <button class="h-9 px-3.5 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10 transition-colors" :disabled="isSavingKpi" @click="deleteKpi(kpiModal.def)">🗑️ Remover</button>
+            <button class="cv-btn cv-btn-ghost" @click="openKpiBuilder(kpiModal.def)"><span class="i-lucide-pencil text-xs" />Editar</button>
+            <button class="cv-btn cv-btn-ghost cv-btn-danger" :disabled="isSavingKpi" @click="deleteKpi(kpiModal.def)"><span class="i-lucide-trash-2 text-xs" />Remover</button>
           </div>
           </div>
         </div>
@@ -3208,12 +3657,13 @@ onUnmounted(() => {
   <Teleport to="body">
     <div
       v-if="kpiBuilder"
-      class="fixed inset-0 z-[71] flex items-center justify-center bg-black/50 p-4"
+      class="cv-page cv-overlay fixed inset-0 z-[71] flex items-center justify-center bg-black/50 p-4"
+      :style="cvVars"
       @click.self="kpiBuilder = null"
     >
-      <div class="w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1 max-h-[92vh] flex flex-col">
-        <div class="p-5 text-white flex items-center gap-3" :style="{ background: kpiBuilder.color || panelFamily[0] }">
-          <span class="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center"><span :class="kpiBuilder.icon" class="text-lg" /></span>
+      <div class="cv-modal w-full max-w-2xl max-h-[92vh] flex flex-col">
+        <div class="cv-modal-head !p-5 flex items-center gap-3" :style="{ background: kpiBuilder.color || panelFamily[0] }">
+          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span :class="kpiBuilder.icon" class="text-lg" /></span>
           <div class="flex-1 min-w-0">
             <p class="text-sm font-bold">{{ kpiBuilder.id ? 'Editar indicador' : 'Novo indicador' }}</p>
             <p class="text-[11px] text-white/80 hidden sm:block">aparece no Meu Painel com o período da régua, histórico e comparação com o anterior</p>
@@ -3224,20 +3674,22 @@ onUnmounted(() => {
             <p v-else class="text-[11px] text-white/85 leading-snug">{{ kpiPreview.text }}</p>
             <p v-if="kpiPreview.delta" class="text-[10px] text-white/80 mt-1">{{ kpiPreview.delta }}</p>
           </div>
-          <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="kpiBuilder = null"><span class="i-lucide-x text-sm" /></button>
+          <button class="cv-glass-btn cv-iconbtn" @click="kpiBuilder = null"><span class="i-lucide-x text-sm" /></button>
         </div>
 
         <div class="p-5 space-y-4 overflow-y-auto">
           <!-- nome -->
           <div>
-            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Nome do card</p>
-            <input v-model="kpiBuilder.label" type="text" maxlength="60" placeholder="ex.: Taxa de agendamento" class="w-full h-9 px-3 rounded-lg border border-n-weak bg-n-solid-2 text-sm text-n-slate-12" />
+            <p class="cv-label mb-1">Nome do card</p>
+            <input v-model="kpiBuilder.label" type="text" maxlength="60" placeholder="ex.: Taxa de agendamento" class="cv-input w-full text-n-slate-12" />
           </div>
 
           <!-- modo -->
           <div class="flex items-center gap-1.5">
-            <button class="h-8 px-3 rounded-lg text-xs font-medium border" :class="kpiBuilderMode === 'ready' ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilderMode === 'ready' ? { background: panelFamily[1] } : {}" @click="kpiBuilderMode = 'ready'">Indicador pronto</button>
-            <button class="h-8 px-3 rounded-lg text-xs font-medium border" :class="kpiBuilderMode === 'formula' ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilderMode === 'formula' ? { background: panelFamily[1] } : {}" @click="kpiBuilderMode = 'formula'">Fórmula</button>
+            <span class="cv-seg">
+              <button class="cv-seg-item" :class="kpiBuilderMode === 'ready' ? 'cv-seg-on' : ''" @click="kpiBuilderMode = 'ready'">Indicador pronto</button>
+              <button class="cv-seg-item" :class="kpiBuilderMode === 'formula' ? 'cv-seg-on' : ''" @click="kpiBuilderMode = 'formula'">Fórmula</button>
+            </span>
             <span class="text-[10px] text-n-slate-9 ml-1">os números abaixo são do período da régua</span>
           </div>
 
@@ -3245,14 +3697,13 @@ onUnmounted(() => {
                categoria (item 143), depois os números-base do período -->
           <div v-if="kpiBuilderMode === 'ready'" class="max-h-72 overflow-y-auto pr-1 space-y-3">
             <div v-for="sec in readyFormulaSections" :key="sec.cat">
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">{{ sec.cat }} <span class="normal-case font-normal">· taxas prontas</span></p>
+              <p class="cv-label mb-1">{{ sec.cat }} <span class="normal-case font-normal">· taxas prontas</span></p>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 <button
                   v-for="f in sec.items"
                   :key="f.label"
-                  class="flex items-center justify-between gap-2 px-3 h-9 rounded-lg border text-xs text-left"
-                  :class="kpiBuilder.expr.trim() === f.expr ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  :style="kpiBuilder.expr.trim() === f.expr ? { background: panelFamily[1] } : {}"
+                  class="cv-btn !justify-between !h-9 !rounded-xl text-left"
+                  :class="kpiBuilder.expr.trim() === f.expr ? '' : 'cv-btn-ghost'"
                   :title="f.note"
                   @click="applyReadyFormula(f)"
                 >
@@ -3261,14 +3712,13 @@ onUnmounted(() => {
               </div>
             </div>
             <div v-for="sec in kpiCatalogSections" :key="sec.cat">
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">{{ sec.cat }}</p>
+              <p class="cv-label mb-1">{{ sec.cat }}</p>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 <button
                   v-for="m in sec.items"
                   :key="m.key"
-                  class="flex items-center justify-between gap-2 px-3 h-9 rounded-lg border text-xs text-left"
-                  :class="kpiBuilder.expr.trim() === m.key ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  :style="kpiBuilder.expr.trim() === m.key ? { background: panelFamily[1] } : {}"
+                  class="cv-btn !justify-between !h-9 !rounded-xl text-left"
+                  :class="kpiBuilder.expr.trim() === m.key ? '' : 'cv-btn-ghost'"
                   @click="kpiBuilder.expr = m.key; if (!kpiBuilder.label) kpiBuilder.label = m.label"
                 >
                   <span class="truncate">{{ m.label }}</span><b class="whitespace-nowrap">{{ m.value }}</b>
@@ -3279,69 +3729,73 @@ onUnmounted(() => {
 
           <!-- fórmula -->
           <div v-else class="space-y-2">
-            <textarea v-model="kpiBuilder.expr" rows="2" placeholder="ex.: appointments_booked / new_leads * 100" class="w-full px-3 py-2 rounded-lg border border-n-weak bg-n-solid-2 text-sm font-mono text-n-slate-12" />
+            <textarea v-model="kpiBuilder.expr" rows="2" placeholder="ex.: appointments_booked / new_leads * 100" class="cv-input w-full font-mono text-n-slate-12" />
             <p class="text-[10px] text-n-slate-9">clique num indicador pra inserir na fórmula · use + − × ÷ e parênteses · % = multiplique por 100</p>
             <div class="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
-              <button v-for="m in kpiCatalog" :key="m.key" class="text-[10px] px-2 py-1 rounded-md border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" :title="m.key" @click="insertKpiVar(m.key)">{{ m.label }}</button>
+              <button v-for="m in kpiCatalog" :key="m.key" class="cv-chip" :title="m.key" @click="insertKpiVar(m.key)">{{ m.label }}</button>
             </div>
           </div>
 
           <!-- formato + painel -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Formato</p>
+              <p class="cv-label mb-1">Formato</p>
               <div class="flex items-center gap-1.5">
-                <button v-for="f in [['number', 'Número'], ['percent', '%'], ['currency', 'R$']]" :key="f[0]" class="h-8 px-3 rounded-lg text-xs font-medium border" :class="kpiBuilder.format === f[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilder.format === f[0] ? { background: panelFamily[2] } : {}" @click="kpiBuilder.format = f[0]">{{ f[1] }}</button>
+                <button v-for="f in [['number', 'Número'], ['percent', '%'], ['currency', 'R$']]" :key="f[0]" class="cv-btn cv-btn-sm" :class="kpiBuilder.format === f[0] ? '' : 'cv-btn-ghost'" @click="kpiBuilder.format = f[0]">{{ f[1] }}</button>
               </div>
             </div>
             <div>
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Aparece em</p>
+              <p class="cv-label mb-1">Aparece em</p>
               <div class="flex items-center gap-1.5 flex-wrap">
-                <button v-for="pp in [['all', 'Todos os painéis'], ['agendamento', 'Agendamento'], ['conducao', 'Condução'], ['cirurgia', 'Cirurgias'], ['medico', 'Médicos'], ['gestor', 'Gestor']]" :key="pp[0]" class="h-8 px-2.5 rounded-lg text-xs font-medium border" :class="kpiBuilder.panel === pp[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilder.panel === pp[0] ? { background: panelFamily[2] } : {}" @click="kpiBuilder.panel = pp[0]">{{ pp[1] }}</button>
+                <button v-for="pp in [['all', 'Todos os painéis'], ['agendamento', 'Agendamento'], ['conducao', 'Condução'], ['cirurgia', 'Cirurgias'], ['medico', 'Médicos'], ['gestor', 'Gestor']]" :key="pp[0]" class="cv-btn cv-btn-sm" :class="kpiBuilder.panel === pp[0] ? '' : 'cv-btn-ghost'" @click="kpiBuilder.panel = pp[0]">{{ pp[1] }}</button>
               </div>
             </div>
           </div>
 
           <!-- cor -->
           <div>
-            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Cor do card</p>
+            <p class="cv-label mb-1">Cor do card</p>
             <div class="flex items-center gap-1.5 flex-wrap">
-              <button class="h-8 px-3 rounded-lg text-xs border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" :class="!kpiBuilder.color ? 'ring-2 ring-n-brand' : ''" @click="kpiBuilder.color = ''">automática</button>
+              <button class="cv-btn cv-btn-sm" :class="!kpiBuilder.color ? '' : 'cv-btn-ghost'" @click="kpiBuilder.color = ''">automática</button>
               <button v-for="c in kpiColorOptions" :key="c.key" class="w-8 h-8 rounded-lg border-2" :class="kpiBuilder.color === c.grad ? 'border-n-slate-12 scale-110' : 'border-transparent'" :style="{ background: c.grad }" :title="c.title" @click="kpiBuilder.color = c.grad" />
-              <input v-model="kpiHexColor" type="text" placeholder="#152C61" maxlength="7" class="h-8 w-24 px-2 rounded-lg border border-n-weak bg-n-solid-2 text-xs font-mono text-n-slate-12" @change="applyHexColor" @keydown.enter.prevent="applyHexColor" />
+              <input v-model="kpiHexColor" type="text" placeholder="#152C61" maxlength="7" class="cv-input !h-8 w-24 text-xs font-mono text-n-slate-12" @change="applyHexColor" @keydown.enter.prevent="applyHexColor" />
             </div>
           </div>
 
           <!-- nota -->
           <div>
-            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Nota (aparece no popup do card)</p>
-            <input v-model="kpiBuilder.note" type="text" maxlength="200" placeholder="ex.: meta da clínica é 15%" class="w-full h-9 px-3 rounded-lg border border-n-weak bg-n-solid-2 text-sm text-n-slate-12" />
+            <p class="cv-label mb-1">Nota (aparece no popup do card)</p>
+            <input v-model="kpiBuilder.note" type="text" maxlength="200" placeholder="ex.: meta da clínica é 15%" class="cv-input w-full text-n-slate-12" />
           </div>
         </div>
 
-        <div class="px-5 py-3 border-t border-n-weak flex items-center gap-2">
-          <button v-if="kpiBuilder.id" class="h-9 px-3 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10" :disabled="isSavingKpi" @click="deleteKpi(kpiBuilder)">🗑️ Remover</button>
+        <div class="cv-modal-foot flex items-center gap-2">
+          <button v-if="kpiBuilder.id" class="cv-btn cv-btn-ghost cv-btn-danger" :disabled="isSavingKpi" @click="deleteKpi(kpiBuilder)"><span class="i-lucide-trash-2 text-xs" />Remover</button>
           <span class="flex-1" />
-          <button class="h-9 px-4 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" @click="kpiBuilder = null">Cancelar</button>
-          <button class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-50" :style="{ background: panelFamily[0] }" :disabled="isSavingKpi || !kpiPreview.ok || !kpiBuilder.label.trim()" @click="saveKpiBuilder">
+          <button class="cv-btn cv-btn-ghost" @click="kpiBuilder = null">Cancelar</button>
+          <button class="cv-btn" :disabled="isSavingKpi || !kpiPreview.ok || !kpiBuilder.label.trim()" @click="saveKpiBuilder">
             {{ isSavingKpi ? 'Salvando…' : 'Salvar card' }}
           </button>
         </div>
       </div>
     </div>
   </Teleport>
+  <!-- 🍎🍊 Paleta do painel e dos blocos (admin, rodada 162): componente
+       compartilhado com os Relatórios (rodada 163) -->
+  <CevicoPalettePicker :pal="pal" :title="`Paleta de cores · ${currentPanel.label}`" />
   <!-- 🎨 Cor de qualquer card (item 143): palheta do modo organizar -->
   <Teleport to="body">
     <div
       v-if="colorPicker"
-      class="fixed inset-0 z-[72] flex items-center justify-center bg-black/50 p-4"
+      class="cv-page cv-overlay fixed inset-0 z-[72] flex items-center justify-center bg-black/50 p-4"
+      :style="cvVars"
       @click.self="colorPicker = null"
     >
-      <div class="w-full max-w-md rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1">
-        <div class="p-4 text-white flex items-center gap-2" :style="{ background: tileVisual(colorPicker).grad }">
+      <div class="cv-modal w-full max-w-md">
+        <div class="cv-modal-head !p-4 flex items-center gap-2" :style="{ background: tileVisual(colorPicker).grad }">
           <span :class="colorPicker.icon" class="text-base" />
           <p class="text-sm font-bold flex-1 truncate">Cor do card "{{ colorPicker.label }}"</p>
-          <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="colorPicker = null">
+          <button class="cv-glass-btn cv-iconbtn" @click="colorPicker = null">
             <span class="i-lucide-x text-sm" />
           </button>
         </div>
@@ -3352,8 +3806,8 @@ onUnmounted(() => {
           </p>
           <div class="flex items-center gap-1.5 flex-wrap">
             <button
-              class="h-9 px-3 rounded-lg text-xs border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
-              :class="!colorPicker.customGrad ? 'ring-2 ring-n-brand' : ''"
+              class="cv-btn"
+              :class="!colorPicker.customGrad ? '' : 'cv-btn-ghost'"
               title="Volta pra cor automática (família do painel)"
               @click="setTileColor(null)"
             >
@@ -3375,11 +3829,11 @@ onUnmounted(() => {
               type="text"
               placeholder="#152C61"
               maxlength="7"
-              class="h-9 w-28 px-2 rounded-lg border border-n-weak bg-n-solid-2 text-xs font-mono text-n-slate-12"
+              class="cv-input w-28 text-xs font-mono text-n-slate-12"
               @keydown.enter.prevent="applyTileHexColor"
             />
             <button
-              class="h-9 px-3 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
+              class="cv-btn cv-btn-ghost"
               @click="applyTileHexColor"
             >
               usar este tom

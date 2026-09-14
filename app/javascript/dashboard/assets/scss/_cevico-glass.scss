@@ -1,0 +1,696 @@
+// ══════════════════════════════════════════════════════════════════════
+// 🍎 KIT "iMac G3 + vidro" do CEVICO (rodadas 161–163) — compartilhado pelo
+// Meu Painel, pelos Relatórios/Dashboards e pelos componentes do kit.
+// Nasceu como <style> global do InicioPage e veio pra cá na rodada 163 pra
+// todas as telas vestirem as mesmas peças. As classes lêem as variáveis
+// --cv* que a página define (composable useCevicoPalette).
+// ══════════════════════════════════════════════════════════════════════
+
+/* ══════════════════════════════════════════════════════════════════════
+   🍎 FORMATO NOVO do Meu Painel (rodada 161) — kit "iMac G3 + vidro".
+   GLOBAL de propósito (sem scoped): os componentes filhos (régua, Dashboard
+   da Agenda, DashKpi) e os modais teleportados vestem as MESMAS peças.
+   Tudo vive sob .cv-page e lê as variáveis --cv* que a página define:
+     --cv       tom principal do dia (ou do tema do painel)
+     --cv-deep  o escuro da família        --cv-grad/2/3  degradês da família
+     --cv-rgb / --cv-deep-rgb  os mesmos tons em "r, g, b" (para rgb(... / a))
+   Modificadores semânticos (.cv-red/.cv-amber/.cv-green/.cv-gold) trocam
+   as variáveis localmente — a mesma peça fica vermelha, âmbar ou verde.
+   ══════════════════════════════════════════════════════════════════════ */
+.cv-page {
+  /* a sala iluminada pelo iMac: uma luz suave do dia no alto da página */
+  background-image: radial-gradient(1100px 420px at 50% -180px, rgb(var(--cv-rgb) / 0.16), rgb(var(--cv-rgb) / 0) 70%);
+}
+.dark .cv-page {
+  background-image: radial-gradient(1100px 420px at 50% -180px, rgb(var(--cv-rgb) / 0.22), rgb(var(--cv-rgb) / 0) 70%);
+}
+.cv-page.cv-overlay { background-image: none; }
+.cv-page .cv-red   { --cv: #dc2626; --cv-deep: #991b1b; --cv-rgb: 220, 38, 38;  --cv-deep-rgb: 153, 27, 27;  --cv-grad: linear-gradient(135deg, #991b1b, #ef4444); --cv-grad-2: linear-gradient(135deg, #b91c1c, #f87171); --cv-grad-3: linear-gradient(135deg, #dc2626, #f87171); }
+.cv-page .cv-amber { --cv: #d97706; --cv-deep: #92400e; --cv-rgb: 217, 119, 6;  --cv-deep-rgb: 146, 64, 14;  --cv-grad: linear-gradient(135deg, #92400e, #f59e0b); --cv-grad-2: linear-gradient(135deg, #b45309, #fbbf24); --cv-grad-3: linear-gradient(135deg, #d97706, #fbbf24); }
+.cv-page .cv-green { --cv: #059669; --cv-deep: #065f46; --cv-rgb: 5, 150, 105;  --cv-deep-rgb: 6, 95, 70;    --cv-grad: linear-gradient(135deg, #065f46, #10b981); --cv-grad-2: linear-gradient(135deg, #047857, #34d399); --cv-grad-3: linear-gradient(135deg, #059669, #34d399); }
+.cv-page .cv-gold  { --cv: #d4a017; --cv-deep: #92600a; --cv-rgb: 212, 160, 23; --cv-deep-rgb: 146, 96, 10;  --cv-grad: linear-gradient(135deg, #92600a, #d4a017); --cv-grad-2: linear-gradient(135deg, #b8860b, #e5b93a); --cv-grad-3: linear-gradient(135deg, #d4a017, #f1cf5c); }
+.cv-page .cv-slate { --cv: #64748b; --cv-deep: #334155; --cv-rgb: 100, 116, 139; --cv-deep-rgb: 51, 65, 85; --cv-grad: linear-gradient(135deg, #334155, #64748b); --cv-grad-2: linear-gradient(135deg, #475569, #94a3b8); --cv-grad-3: linear-gradient(135deg, #64748b, #94a3b8); }
+
+/* ── BLOCO: a carcaça translúcida do iMac — branco leitoso com o tom do
+   dia por trás, borda de vidro, crista de luz no topo e uma luz difusa
+   colorida no canto. É a peça-mãe de todos os blocos da página. ── */
+.cv-page .cv-block {
+  position: relative;
+  overflow: clip; /* clip, não hidden: a luz do canto sai da caixa e não pode virar rolagem */
+  border-radius: 24px;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.94) 0%, rgba(255, 255, 255, 0.8) 60%, rgba(255, 255, 255, 0.88) 100%),
+    rgb(var(--cv-rgb) / 0.12);
+  border: 1px solid rgb(var(--cv-rgb) / 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -18px 40px rgb(var(--cv-rgb) / 0.05),
+    0 12px 32px -14px rgb(var(--cv-deep-rgb) / 0.3);
+}
+.cv-page .cv-block::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 44%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  pointer-events: none;
+  z-index: 0;
+}
+.cv-page .cv-block::after {
+  content: '';
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  right: -100px;
+  top: -130px;
+  border-radius: 9999px;
+  background: radial-gradient(closest-side, rgb(var(--cv-rgb) / 0.32), rgb(var(--cv-rgb) / 0));
+  pointer-events: none;
+  z-index: 0;
+}
+.cv-page .cv-block > * {
+  position: relative;
+  z-index: 1;
+}
+.dark .cv-page .cv-block {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03) 60%, rgba(255, 255, 255, 0.05)),
+    rgb(var(--cv-rgb) / 0.16);
+  border-color: rgb(var(--cv-rgb) / 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 14px 34px -14px rgba(0, 0, 0, 0.6);
+}
+.dark .cv-page .cv-block::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0));
+}
+/* faixa fina (WhatsApp, destaque, termômetro): o mesmo vidro, mais baixo */
+.cv-page .cv-strip {
+  border-radius: 18px;
+}
+.cv-page .cv-strip::after {
+  width: 170px;
+  height: 170px;
+  right: -60px;
+  top: -95px;
+}
+/* bloco clicável (atalhos): levanta ao passar o mouse */
+.cv-page .cv-block-hover {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  cursor: pointer;
+}
+.cv-page .cv-block-hover:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--cv-rgb) / 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 18px 36px -14px rgb(var(--cv-deep-rgb) / 0.45);
+}
+
+/* ── ÍCONE: squircle com o degradê do dia e o ícone lucide branco ── */
+.cv-page .cv-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  background: var(--cv-grad);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -6px 12px rgba(0, 0, 0, 0.12),
+    0 4px 10px -4px rgb(var(--cv-deep-rgb) / 0.6);
+}
+.cv-page .cv-icon-sm { width: 26px; height: 26px; border-radius: 8px; }
+.cv-page .cv-icon-lg { width: 40px; height: 40px; border-radius: 13px; }
+.cv-page .cv-icon-xl { width: 46px; height: 46px; border-radius: 15px; }
+
+/* ── CHIP: pílula tingida do dia ── */
+.cv-page .cv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--cv-deep);
+  background: rgb(var(--cv-rgb) / 0.1);
+  border: 1px solid rgb(var(--cv-rgb) / 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+.cv-page .cv-chip-lg { height: 30px; padding: 0 12px; font-size: 12px; font-weight: 500; }
+.cv-page .cv-chip-wrap { white-space: normal; height: auto; padding: 5px 10px; line-height: 1.3; }
+.cv-page button.cv-chip { cursor: pointer; transition: background 0.15s ease; }
+.cv-page button.cv-chip:hover { background: rgb(var(--cv-rgb) / 0.18); }
+.dark .cv-page .cv-chip {
+  color: #fff;
+  background: rgb(var(--cv-rgb) / 0.24);
+  border-color: rgb(var(--cv-rgb) / 0.5);
+  box-shadow: none;
+}
+
+/* ── BOTÕES: pílula cheia (degradê do dia) e pílula de vidro ── */
+.cv-page .cv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--cv-grad);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 6px 14px -6px rgb(var(--cv-deep-rgb) / 0.7);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, background 0.15s ease;
+}
+.cv-page .cv-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 10px 18px -6px rgb(var(--cv-deep-rgb) / 0.7);
+}
+.cv-page .cv-btn:disabled { opacity: 0.5; transform: none; filter: none; cursor: default; }
+.cv-page .cv-btn-sm { height: 28px; padding: 0 11px; font-size: 11px; }
+.cv-page .cv-btn-lg { height: 38px; padding: 0 18px; font-size: 13px; }
+.cv-page .cv-btn-ghost {
+  color: var(--cv-deep);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgb(var(--cv-rgb) / 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.cv-page .cv-btn-ghost:hover {
+  filter: none;
+  background: rgb(var(--cv-rgb) / 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+.dark .cv-page .cv-btn-ghost {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgb(var(--cv-rgb) / 0.5);
+  box-shadow: none;
+}
+.cv-page .cv-btn-danger { color: #dc2626; border-color: rgba(220, 38, 38, 0.35); }
+.cv-page .cv-btn-danger:hover { background: rgba(220, 38, 38, 0.1); }
+.cv-page .cv-btn-danger-on { color: #fff; background: linear-gradient(135deg, #991b1b, #ef4444); border-color: rgba(255, 255, 255, 0.35); }
+.cv-page .cv-iconbtn { width: 28px; height: 28px; padding: 0; }
+.cv-page .cv-iconbtn-lg { width: 32px; height: 32px; padding: 0; }
+/* botão que respira (Ir para agenda) no tom do dia */
+.cv-page .cv-btn-pulse { animation: cv-btn-pulse 2.2s ease-in-out infinite; }
+.cv-page .cv-btn-pulse:hover { animation-play-state: paused; }
+@keyframes cv-btn-pulse {
+  0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 0 0 0 rgb(var(--cv-rgb) / 0.45); }
+  50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 0 0 9px rgb(var(--cv-rgb) / 0); }
+}
+
+/* ── SUB-CARTÃO: a caixinha interna de um bloco ── */
+.cv-page .cv-sub {
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.6)),
+    rgb(var(--cv-rgb) / 0.04);
+  border: 1px solid rgb(var(--cv-rgb) / 0.24);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px rgb(var(--cv-deep-rgb) / 0.06);
+}
+.dark .cv-page .cv-sub {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgb(var(--cv-rgb) / 0.3);
+  box-shadow: none;
+}
+.cv-page .cv-sub-hover { transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease; }
+.cv-page .cv-sub-hover:hover {
+  border-color: rgb(var(--cv-rgb) / 0.48);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 18px -10px rgb(var(--cv-deep-rgb) / 0.45);
+}
+.cv-page .cv-sub-on { border-color: rgb(var(--cv-rgb) / 0.55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 3px rgb(var(--cv-rgb) / 0.12); }
+/* linha/tile de número (Meu desempenho, listas): tingida leve, sem borda pesada */
+.cv-page .cv-row {
+  border-radius: 12px;
+  background: rgb(var(--cv-rgb) / 0.07);
+  border: 1px solid rgb(var(--cv-rgb) / 0.14);
+}
+.cv-page .cv-stat {
+  border-radius: 14px;
+  padding: 8px 6px;
+  background: rgb(var(--cv-rgb) / 0.07);
+  border: 1px solid rgb(var(--cv-rgb) / 0.14);
+}
+.dark .cv-page .cv-row, .dark .cv-page .cv-stat { background: rgb(var(--cv-rgb) / 0.12); border-color: rgb(var(--cv-rgb) / 0.26); }
+
+/* ── BARRA de progresso: calha tingida + preenchimento com o degradê ── */
+.cv-page .cv-track {
+  height: 12px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: rgb(var(--cv-rgb) / 0.12);
+  box-shadow: inset 0 1px 2px rgb(var(--cv-deep-rgb) / 0.15);
+}
+.cv-page .cv-track-sm { height: 6px; }
+.cv-page .cv-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--cv-grad-2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  transition: width 0.7s ease;
+}
+.dark .cv-page .cv-track { background: rgb(var(--cv-rgb) / 0.18); box-shadow: none; }
+
+/* ── SEGMENTADO: seletor de pílulas em vidro (painéis, régua, modos) ── */
+.cv-page .cv-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 14px;
+  max-width: 100%;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgb(var(--cv-rgb) / 0.26);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 6px 16px -12px rgb(var(--cv-deep-rgb) / 0.5);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.dark .cv-page .cv-seg {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgb(var(--cv-rgb) / 0.38);
+  box-shadow: none;
+}
+.cv-page .cv-seg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--cv-deep);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.dark .cv-page .cv-seg-item { color: rgba(255, 255, 255, 0.85); }
+.cv-page .cv-seg-item:hover { background: rgb(var(--cv-rgb) / 0.1); }
+.cv-page .cv-seg-on,
+.cv-page .cv-seg-on:hover {
+  color: #fff;
+  font-weight: 700;
+  background: var(--cv-grad);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 4px 10px -4px rgb(var(--cv-deep-rgb) / 0.7);
+}
+.cv-page .cv-seg-icon { width: 30px; padding: 0; justify-content: center; }
+.cv-page .cv-seg-sm .cv-seg-item { height: 26px; padding: 0 9px; font-size: 11px; border-radius: 9px; }
+.cv-page .cv-seg-sm { padding: 2px; border-radius: 12px; }
+
+/* ── CARDS de indicador: a família opaca do dia ganha o acabamento de
+   vidro (borda clara, crista, brilho interno) ── */
+.cv-page .cv-tile {
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -16px 36px rgba(255, 255, 255, 0.06),
+    0 14px 30px -14px rgba(0, 0, 0, 0.4);
+}
+.cv-page .cv-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 48%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+.cv-page .cv-tile-add {
+  border-radius: 16px;
+  border: 2px dashed rgb(var(--cv-rgb) / 0.4);
+  background: rgb(var(--cv-rgb) / 0.05);
+  color: var(--cv-deep);
+}
+.cv-page .cv-tile-add:hover { background: rgb(var(--cv-rgb) / 0.1); }
+.dark .cv-page .cv-tile-add { color: #fff; }
+
+/* ── MODO EDIÇÃO: barra grudada e alças dos blocos, em vidro do dia ── */
+.cv-page .cv-editbar {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgb(var(--cv-rgb) / 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 14px 30px -14px rgb(var(--cv-deep-rgb) / 0.5);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+}
+.dark .cv-page .cv-editbar { background: rgba(20, 21, 23, 0.78); box-shadow: none; }
+.cv-page .cv-handle {
+  border-radius: 14px;
+  border: 2px dashed rgb(var(--cv-rgb) / 0.45);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--cv-deep);
+}
+.dark .cv-page .cv-handle { background: rgba(255, 255, 255, 0.05); color: #fff; }
+
+/* ── VIDRO CRISTALINO (sobre fundo colorido): a caixinha do hero, agora
+   global — cabeçalhos de modal, veredito do gestor ── */
+.cv-page .cv-glass {
+  position: relative;
+  overflow: clip;
+  border-radius: 14px;
+  color: #fff;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 55%, rgba(255, 255, 255, 0.1)),
+    rgba(15, 23, 42, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -14px 34px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+}
+.cv-page .cv-glass::after {
+  content: '';
+  position: absolute;
+  top: -60%;
+  left: -30%;
+  width: 60%;
+  height: 220%;
+  background: linear-gradient(115deg, transparent 20%, rgba(255, 255, 255, 0.2) 50%, transparent 80%);
+  transform: rotate(18deg);
+  pointer-events: none;
+}
+.cv-page .cv-glass-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.cv-page .cv-glass-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background 0.15s ease;
+}
+.cv-page .cv-glass-btn:hover { background: rgba(15, 23, 42, 0.38); }
+.cv-page .cv-glass-btn.cv-iconbtn { width: 30px; padding: 0; }
+
+/* ── MODAIS: concha de vidro com o cabeçalho na cor do dia ── */
+.cv-page .cv-modal {
+  border-radius: 24px;
+  overflow: clip;
+  background: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.5);
+}
+.dark .cv-page .cv-modal { background: #17191c; border-color: rgba(255, 255, 255, 0.1); }
+.cv-page .cv-modal-head {
+  position: relative;
+  overflow: clip;
+  padding: 16px 20px;
+  color: #fff;
+  background: var(--cv-hero, var(--cv-grad));
+  flex-shrink: 0;
+}
+.cv-page .cv-modal-head::before {
+  content: '';
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  right: -80px;
+  top: -150px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.28);
+  filter: blur(36px);
+  pointer-events: none;
+}
+.cv-page .cv-modal-head::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+.cv-page .cv-modal-head > * { position: relative; z-index: 1; }
+.cv-page .cv-modal-foot {
+  padding: 14px 20px;
+  border-top: 1px solid rgb(var(--cv-rgb) / 0.16);
+  background: rgb(var(--cv-rgb) / 0.04);
+  flex-shrink: 0;
+}
+.cv-page .cv-pop {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgb(var(--cv-rgb) / 0.3);
+  box-shadow: 0 20px 50px -18px rgb(var(--cv-deep-rgb) / 0.5);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.dark .cv-page .cv-pop { background: rgba(23, 25, 28, 0.94); }
+.cv-page .cv-input {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgb(var(--cv-rgb) / 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.cv-page .cv-input:focus {
+  outline: none;
+  border-color: var(--cv);
+  box-shadow: 0 0 0 3px rgb(var(--cv-rgb) / 0.2);
+}
+.cv-page textarea.cv-input { height: auto; padding: 8px 12px; }
+.dark .cv-page .cv-input { background: rgba(255, 255, 255, 0.06); box-shadow: none; }
+.cv-page .cv-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cv-deep);
+  opacity: 0.8;
+}
+.dark .cv-page .cv-label { color: #fff; opacity: 0.7; }
+
+/* ── AMOSTRAS de paleta (popup da paleta): neutras, a cor fica na bolinha ── */
+.cv-page .cv-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px 0 6px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.cv-page .cv-swatch:hover { transform: translateY(-1px); border-color: rgba(15, 23, 42, 0.3); }
+.cv-page .cv-swatch-on { border-color: #0f172a; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 2px rgba(15, 23, 42, 0.18); }
+.dark .cv-page .cv-swatch { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); box-shadow: none; }
+.dark .cv-page .cv-swatch-on { border-color: #fff; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25); }
+.cv-page .cv-swatch-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-page .cv-btn, .cv-page .cv-block-hover, .cv-page .cv-sub-hover, .cv-page .cv-fill { transition: none; }
+  .cv-page .cv-btn-pulse { animation: none; }
+}
+
+
+/* ── BANNER (hero) do Meu Painel e dos Relatórios (CevicoHero): luzes, olho
+   CEVICO, chips e vidros cristalinos por cima da cor do dia ── */
+/* ── cabeçalho de boas-vindas (varredura 12/09): luzes, olho CEVICO,
+   chips e vidros cristalinos por cima da cor do painel ── */
+.cevico-hero {
+  isolation: isolate;
+  /* clip (e não hidden): as luzes e o olho saem 90px pra fora e um clique
+     num botão da borda fazia o navegador ROLAR o hero (scrollLeft) — com
+     clip não existe contêiner de rolagem */
+  overflow: clip;
+}
+.cevico-hero-glow {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(42px);
+  pointer-events: none;
+  z-index: 0;
+}
+.cevico-hero-glow-a {
+  width: 360px;
+  height: 360px;
+  right: -90px;
+  top: -140px;
+  background: rgba(255, 255, 255, 0.28);
+}
+.cevico-hero-glow-b {
+  width: 280px;
+  height: 280px;
+  left: 28%;
+  bottom: -190px;
+  background: rgba(255, 255, 255, 0.14);
+}
+.cevico-hero-eye {
+  position: absolute;
+  right: -26px;
+  bottom: -40px;
+  width: 240px;
+  opacity: 0.16;
+  pointer-events: none;
+  z-index: 0;
+  filter: drop-shadow(0 0 28px rgba(255, 255, 255, 0.35));
+}
+.cevico-hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  /* vidro "fumê": o texto branco fica legível em qualquer cor do dia */
+  background: rgba(15, 23, 42, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.cevico-hero-chip-btn {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.cevico-hero-chip-btn:hover {
+  background: rgba(15, 23, 42, 0.38);
+}
+.cevico-hero-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.cevico-hero-btn:hover {
+  background: rgba(15, 23, 42, 0.38);
+  transform: translateY(-1px);
+}
+.cevico-hero-btn-on {
+  background: #fff;
+  color: #152c61;
+  border-color: #fff;
+}
+.cevico-hero-btn-on:hover {
+  background: #fff;
+}
+/* vidro cristalino (padrão CEVICO): duas camadas de brilho por cima de um
+   tom translúcido, borda clara e brilhos internos */
+.cevico-hero-glass {
+  position: relative;
+  overflow: hidden;
+  flex: 1 1 140px; /* celular: dois por linha; desktop: crescem até 260px */
+  max-width: 260px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  color: #fff;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 55%, rgba(255, 255, 255, 0.1)),
+    rgba(15, 23, 42, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -14px 34px rgba(255, 255, 255, 0.05),
+    0 8px 24px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.cevico-hero-glass::after {
+  content: '';
+  position: absolute;
+  top: -60%;
+  left: -30%;
+  width: 60%;
+  height: 220%;
+  background: linear-gradient(115deg, transparent 20%, rgba(255, 255, 255, 0.22) 50%, transparent 80%);
+  transform: rotate(18deg);
+  pointer-events: none;
+}
+.cevico-hero-glass:hover {
+  transform: translateY(-2px);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.08) 55%, rgba(255, 255, 255, 0.14)),
+    rgba(255, 255, 255, 0.1);
+}
+.cevico-hero-glass-alert {
+  border-color: rgba(253, 230, 138, 0.85);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 0 0 3px rgba(253, 230, 138, 0.18),
+    0 8px 24px rgba(0, 0, 0, 0.12);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cevico-hero-btn,
+  .cevico-hero-glass {
+    transition: none;
+  }
+}
+

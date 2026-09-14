@@ -17,7 +17,10 @@ import {
 import { Bar, Doughnut, Line } from 'vue-chartjs';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import ProMaxStudio from './components/ProMaxStudio.vue';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import { hexFromGrad, hexToRgb } from 'dashboard/helper/cevicoPalettes';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import {
@@ -26,6 +29,15 @@ import {
   ALL_INBOXES_GRADIENT,
 } from 'dashboard/helper/cevicoInboxColors.js';
 
+const props = defineProps({
+  pipeline: { type: Object, required: true },
+  // 🍎 rodada 163: o seletor de funil mora no banner — o wrapper
+  // (CrmDashboardReport) passa a lista e ouve a troca
+  pipelines: { type: Array, default: () => [] },
+  selectedPipelineId: { type: [Number, String], default: null },
+});
+const emit = defineEmits(['update:selectedPipelineId']);
+
 ChartJS.register(
   Title, Tooltip, Legend,
   BarElement, CategoryScale, LinearScale,
@@ -33,8 +45,9 @@ ChartJS.register(
   PointElement, LineElement, Filler,
 );
 
-const props = defineProps({
-  pipeline: { type: Object, required: true },
+const pipelineModel = computed({
+  get: () => props.selectedPipelineId,
+  set: v => emit('update:selectedPipelineId', v),
 });
 
 const AZUL = '#0F5FA6';
@@ -42,6 +55,32 @@ const ROXO = '#7C3AED';
 const OURO = '#D4A017';
 const LIME = '#84CC16';
 const PALETTE = [AZUL, ROXO, OURO, LIME, '#3B82F6', '#A78BFA', '#F0C420', '#22D3EE', '#EA580C', '#10B981', '#F472B6', '#94A3B8'];
+
+// 🍎 formato novo (rodada 163): kit "iMac G3 + vidro" com a paleta desta
+// página (o admin escolhe pelo chip do banner; cada bloco pode ter a sua)
+const pal = useCevicoPalette({
+  scope: 'report:crm',
+  blocks: [
+    { id: 'kpis', label: 'Indicadores', icon: 'i-lucide-gauge' },
+    { id: 'caixas', label: 'Resultados por caixa', icon: 'i-lucide-inbox' },
+    { id: 'agentes', label: 'Atendimento por agente', icon: 'i-lucide-headset' },
+    { id: 'responsividade', label: 'Responsividade', icon: 'i-lucide-activity' },
+    { id: 'tempo', label: 'Conversas no tempo', icon: 'i-lucide-chart-area' },
+    { id: 'faturamento', label: 'Faturamento por caixa', icon: 'i-lucide-trending-up' },
+    { id: 'etiquetas', label: 'Etiquetas', icon: 'i-lucide-tags' },
+    { id: 'radar', label: 'Radar × Consultas', icon: 'i-lucide-radar' },
+    { id: 'perdas', label: 'Perdas por motivo', icon: 'i-lucide-heart-crack' },
+    { id: 'nps', label: 'Satisfação (NPS)', icon: 'i-lucide-smile' },
+    { id: 'cirurgias', label: 'Cirurgias (planilha)', icon: 'i-lucide-sheet' },
+    { id: 'dinheiro_parado', label: 'Dinheiro parado', icon: 'i-lucide-hourglass' },
+    { id: 'funil', label: 'Etapas do funil', icon: 'i-lucide-funnel' },
+  ],
+});
+const { cvVars, blockVars, blockFamily } = pal;
+// tom sólido (hex) de um degrau da família do bloco — para os gráficos em
+// canvas e para o popup dos KPIs, que recebem cor por prop
+const blockHex = (id, i = 2) => hexFromGrad(blockFamily(id)[i]) || AZUL;
+const kpiAccent = computed(() => blockHex('kpis', 2));
 
 const store   = useStore();
 const router  = useRouter();
@@ -255,7 +294,7 @@ const openKpiPopup = key => {
   const defs = {
     new_leads: {
       label: 'Novas no período', icon: 'i-lucide-user-plus',
-      grad: 'linear-gradient(135deg, #0F5FA6, #3B82F6)',
+      grad: blockFamily('kpis')[0],
       value: k.new_in_period ?? 0,
       sub: 'caixas de captação · igual ao Meu Painel',
       chartKey: 'new_leads',
@@ -272,7 +311,7 @@ const openKpiPopup = key => {
     },
     closed_count: {
       label: 'Fechamentos', icon: 'i-lucide-heart-pulse',
-      grad: 'linear-gradient(135deg, #B8860B, #D4A017)',
+      grad: blockFamily('kpis')[1],
       value: k.closed_count ?? 0,
       sub: 'leads do período que chegaram à cirurgia',
       chartMatch: 'cirurgia agendada',
@@ -282,7 +321,7 @@ const openKpiPopup = key => {
     },
     close_rate: {
       label: 'Taxa de fechamento', icon: 'i-lucide-percent',
-      grad: 'linear-gradient(135deg, #5B21B6, #7C3AED)',
+      grad: blockFamily('kpis')[3],
       value: `${k.close_rate ?? 0}%`,
       sub: `${k.closed_count ?? 0} de ${k.cohort_total ?? 0} leads do período`,
       chartMatch: 'cirurgia agendada',
@@ -696,7 +735,7 @@ const valueChart = computed(() => {
       labels: v.map(s => s.stage_name),
       datasets: [{
         data: v.map(s => s.value),
-        backgroundColor: v.map((_, i) => [AZUL, ROXO, OURO, LIME][i % 4] + 'E6'),
+        backgroundColor: v.map((_, i) => blockHex('funil', i % 4) + 'E6'),
         borderRadius: 10,
         borderSkipped: false,
         maxBarThickness: 56,
@@ -784,8 +823,8 @@ const respCurve = computed(() => {
         {
           label: '% que chegou até a etapa',
           data: rows.map(s => s.reached_pct),
-          borderColor: '#7C3AED',
-          backgroundColor: 'rgba(124, 58, 237, 0.16)',
+          borderColor: blockHex('responsividade', 2),
+          backgroundColor: `rgba(${hexToRgb(blockHex('responsividade', 2))}, 0.16)`,
           fill: true,
           tension: 0.4,
           borderWidth: 3,
@@ -850,28 +889,48 @@ const agentView = computed(() => {
 </script>
 
 <template>
-  <div class="bg-n-solid-1 p-8 min-h-full">
+  <div class="cv-page p-4 sm:p-8 min-h-full" :style="cvVars">
 
-    <!-- Header do dashboard -->
-    <div class="flex items-center justify-between mb-8 flex-wrap gap-4">
-      <div>
-        <h2 class="text-lg font-bold text-n-slate-12">Dashboard — {{ pipeline.name }}</h2>
-        <p class="text-xs text-n-slate-10 mt-0.5">Métricas automáticas com base nas conversas do funil</p>
-      </div>
-      <!-- Régua de período padrão CEVICO -->
-      <PeriodRuler v-model="period" />
-    </div>
+    <!-- 🍎 banner de vidro na paleta da página (rodada 163) — o seletor do
+         funil mora aqui (o wrapper CrmDashboardReport passa os funis) -->
+    <CevicoHero
+      :pal="pal"
+      :title="`Dashboard CRM — ${pipeline.name}`"
+      subtitle="Métricas automáticas dos funis de vendas: leads, valor em pipeline, conversão e mais — com base nas conversas do funil"
+      icon="i-lucide-kanban"
+    >
+      <template v-if="pipelines.length > 1">
+        <span class="cevico-hero-chip"><span class="i-lucide-funnel text-xs" />Funil</span>
+        <div v-if="pipelines.length <= 6" class="cv-seg cv-seg-sm overflow-x-auto">
+          <button
+            v-for="p in pipelines"
+            :key="p.id"
+            class="cv-seg-item"
+            :class="p.id === selectedPipelineId ? 'cv-seg-on' : ''"
+            @click="pipelineModel = p.id"
+          >
+            {{ p.name }}
+          </button>
+        </div>
+        <select v-else v-model="pipelineModel" class="cv-input !h-8 text-xs text-n-slate-12">
+          <option v-for="p in pipelines" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
+      </template>
+    </CevicoHero>
+
+    <!-- Régua de período padrão CEVICO -->
+    <PeriodRuler v-model="period" glass class="mb-4" />
 
     <!-- 📥 Filtro por caixa de entrada — o dashboard INTEIRO responde:
          quem "pertence" à caixa é o lead cuja PRIMEIRA conversa foi nela.
          Mesmo modo de seleção das pílulas de Conversas: aceita VÁRIAS
          caixas, "Todas" limpa, escolha salva no navegador -->
-    <div class="flex items-center gap-2 mb-8 flex-wrap">
-      <div class="flex flex-wrap items-center min-h-[34px] bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5">
-        <span class="i-lucide-inbox text-sm ml-2 mr-0.5 text-n-slate-10 flex-shrink-0" />
+    <div class="flex items-center gap-2 mb-6 flex-wrap">
+      <div class="cv-seg flex-wrap">
+        <span class="i-lucide-inbox text-sm ml-2 mr-0.5 flex-shrink-0" style="color: var(--cv)" />
         <button
-          class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
-          :class="activeInboxSet.size === 0 ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          class="cv-seg-item"
+          :class="activeInboxSet.size === 0 ? 'cv-seg-on' : ''"
           :style="activeInboxSet.size === 0 ? { background: ALL_INBOXES_GRADIENT } : {}"
           @click="selectInboxPill(0)"
         >
@@ -880,8 +939,8 @@ const agentView = computed(() => {
         <button
           v-for="inbox in inboxOptions"
           :key="inbox.id"
-          class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 flex items-center gap-1.5"
-          :class="activeInboxSet.has(inbox.id) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          class="cv-seg-item"
+          :class="activeInboxSet.has(inbox.id) ? 'cv-seg-on' : ''"
           :style="activeInboxSet.has(inbox.id) ? { background: inboxGrad(inbox.id) } : {}"
           :title="activeInboxSet.has(inbox.id) ? 'Clique para tirar esta caixa da seleção' : 'Clique para somar esta caixa à seleção'"
           @click="selectInboxPill(inbox.id)"
@@ -909,7 +968,7 @@ const agentView = computed(() => {
     <div v-else-if="error" class="flex flex-col items-center justify-center py-24 text-n-slate-10">
       <span class="i-lucide-alert-circle text-3xl mb-2 text-red-400" />
       <p class="text-sm mb-3">Erro ao carregar o dashboard.</p>
-      <button class="text-xs text-n-brand hover:underline" @click="load">Tentar novamente</button>
+      <button class="cv-btn cv-btn-sm cv-btn-ghost" @click="load">Tentar novamente</button>
     </div>
 
     <!-- Content -->
@@ -920,26 +979,29 @@ const agentView = computed(() => {
            qualquer largura, sem cortar rótulo -->
       <!-- item 145: os KPIs com série viram botões — clique abre o popup
            c/ gráfico, mini-régua, período anterior, meta e 📌 ações -->
-      <div class="grid gap-4 mb-8" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr))">
+      <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('kpis')">
+      <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr))">
         <DashKpi
+          glass
           label="Total no funil"
           :value="data.kpis.total_leads"
           sub="desde o início (não muda com o período)"
-          from="#0F5FA6"
-          to="#0B4A82"
+          :grad="blockFamily('kpis')[0]"
         />
         <div class="cursor-pointer transition-transform hover:scale-[1.02]" title="Ver o gráfico e a análise deste indicador" @click="openKpiPopup('new_leads')">
           <DashKpi
+            glass
             label="Novas no período"
             :value="data.kpis.new_in_period"
             sub="caixas Google + Instagram · igual ao Meu Painel"
-            value-color="#0F5FA6"
+            :value-color="blockHex('kpis', 1)"
             :state="goals.stateFor('new_leads')"
             :goal="goals.goalFor('new_leads')"
           />
         </div>
         <div class="cursor-pointer transition-transform hover:scale-[1.02]" title="Ver o gráfico e a análise deste indicador" @click="openKpiPopup('closed_value')">
           <DashKpi
+            glass
             label="Valor fechado"
             :value="Math.round(data.kpis.closed_value || 0)"
             prefix="R$ "
@@ -950,46 +1012,45 @@ const agentView = computed(() => {
         </div>
         <div class="cursor-pointer transition-transform hover:scale-[1.02]" title="Ver o gráfico e a análise deste indicador" @click="openKpiPopup('closed_count')">
           <DashKpi
+            glass
             label="Fechamentos"
             :value="data.kpis.closed_count"
             sub="leads do período que chegaram à cirurgia"
-            from="#B8860B"
-            to="#D4A017"
+            :grad="blockFamily('kpis')[1]"
             :state="goals.stateFor('surgeries_booked')"
             :goal="goals.goalFor('surgeries_booked')"
           />
         </div>
         <div class="cursor-pointer transition-transform hover:scale-[1.02]" title="Ver o gráfico e a análise deste indicador" @click="openKpiPopup('close_rate')">
           <DashKpi
+            glass
             label="Taxa de fechamento"
             :value="`${data.kpis.close_rate}%`"
             :sub="`${data.kpis.closed_count} de ${data.kpis.cohort_total} leads do período`"
-            from="#5B21B6"
-            to="#7C3AED"
+            :grad="blockFamily('kpis')[3]"
           />
         </div>
         <DashKpi
+          glass
           label="Tempo médio"
           :value="formatDuration(data.kpis.avg_conversion_minutes)"
           sub="da chegada até fechar a cirurgia"
         />
       </div>
+      </div>
 
       <!-- 📥 Resultados por caixa de entrada (missão 03/08): Google ×
            Instagram lado a lado — conversão, receita e, p/ admin, o
            retorno do anúncio (CPL/CAC/ROAS/ROI) -->
-      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-10">
+      <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('caixas')">
         <div class="flex items-center justify-between flex-wrap gap-3 mb-2">
           <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-              <span class="i-lucide-inbox text-white text-sm" />
-            </span>
+            <span class="cv-icon"><span class="i-lucide-inbox text-base" /></span>
             Resultados por caixa de entrada
           </h3>
           <button
             v-if="showFinancials && !editingInvest"
-            class="text-xs font-semibold px-3.5 py-2 rounded-xl text-white hover:opacity-90 shadow flex items-center gap-1.5"
-            style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+            class="cv-btn cv-btn-sm cv-gold"
             @click="openInvestEditor"
           >
             <span class="i-lucide-circle-dollar-sign text-sm" />
@@ -1003,8 +1064,8 @@ const agentView = computed(() => {
         <!-- editor do investimento mensal (admin) -->
         <div
           v-if="editingInvest"
-          class="rounded-xl border border-dashed p-4 mb-5"
-          style="border-color: rgba(212, 160, 23, 0.45); background: rgba(212, 160, 23, 0.06)"
+          class="cv-sub cv-gold p-4 mb-5"
+          style="border-style: dashed"
         >
           <p class="text-xs text-n-slate-11 mb-3">
             De onde vem o investimento de cada caixa? <b>Meta (automático)</b> e
@@ -1022,18 +1083,17 @@ const agentView = computed(() => {
             >
               <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: inboxDot(inbox.id) }" />
               <span class="w-44 truncate">{{ inbox.name }}</span>
-              <div class="flex items-center bg-n-solid-1 border border-n-weak rounded-lg p-0.5 gap-0.5">
+              <div class="cv-seg cv-seg-sm">
                 <button
-                  class="px-2 h-6 rounded text-[11px] font-medium transition-colors"
-                  :class="investDraft[inbox.id]?.mode === 'manual' ? 'text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
-                  :style="investDraft[inbox.id]?.mode === 'manual' ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
+                  class="cv-seg-item"
+                  :class="investDraft[inbox.id]?.mode === 'manual' ? 'cv-seg-on' : ''"
                   @click="investDraft[inbox.id].mode = 'manual'"
                 >
                   R$/mês
                 </button>
                 <button
-                  class="px-2 h-6 rounded text-[11px] font-medium transition-colors"
-                  :class="investDraft[inbox.id]?.mode === 'meta_auto' ? 'text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
+                  class="cv-seg-item"
+                  :class="investDraft[inbox.id]?.mode === 'meta_auto' ? 'cv-seg-on' : ''"
                   :style="investDraft[inbox.id]?.mode === 'meta_auto' ? { background: 'linear-gradient(135deg, #1877F2, #42A5F5)' } : {}"
                   title="Puxa o gasto real da conta de anúncios do Meta no período escolhido"
                   @click="investDraft[inbox.id].mode = 'meta_auto'"
@@ -1041,8 +1101,8 @@ const agentView = computed(() => {
                   Meta (automático)
                 </button>
                 <button
-                  class="px-2 h-6 rounded text-[11px] font-medium transition-colors"
-                  :class="investDraft[inbox.id]?.mode === 'google_auto' ? 'text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
+                  class="cv-seg-item"
+                  :class="investDraft[inbox.id]?.mode === 'google_auto' ? 'cv-seg-on' : ''"
                   :style="investDraft[inbox.id]?.mode === 'google_auto' ? { background: 'linear-gradient(135deg, #34A853, #4285F4)' } : {}"
                   title="Puxa o gasto real do Google Ads no período (via GA4 — configure em Integrações → Google Ads)"
                   @click="investDraft[inbox.id].mode = 'google_auto'"
@@ -1057,8 +1117,8 @@ const agentView = computed(() => {
                 min="0"
                 step="50"
                 placeholder="R$/mês"
-                class="h-8 text-xs border rounded-lg px-2 bg-n-solid-1 text-n-slate-12 focus:outline-none"
-                style="width: 110px; margin-bottom: 0; border: 1px solid rgba(212, 160, 23, 0.5)"
+                class="cv-input !h-8 text-xs text-n-slate-12"
+                style="width: 110px; margin-bottom: 0"
               />
               <span v-else class="text-[11px] text-n-slate-10">
                 gasto real {{ investDraft[inbox.id]?.mode === 'google_auto' ? 'do Google Ads (via GA4)' : 'da conta do Meta' }} no período
@@ -1067,7 +1127,7 @@ const agentView = computed(() => {
           </div>
           <!-- Portas de entrada: quais caixas CAPTAM leads (a atribuição
                por caixa segue esta lista; as demais são operacionais) -->
-          <div class="pt-3 mt-1" style="border-top: 1px dashed rgba(212, 160, 23, 0.35)">
+          <div class="pt-3 mt-1" style="border-top: 1px dashed rgb(var(--cv-rgb) / 0.35)">
             <p class="text-xs font-semibold text-n-slate-12 mb-1">🚪 Portas de entrada (caixas de captação)</p>
             <p class="text-[11px] text-n-slate-10 mb-2">
               O lead pertence à primeira porta de entrada por onde falou — caixas operacionais
@@ -1078,8 +1138,8 @@ const agentView = computed(() => {
               <button
                 v-for="inbox in inboxOptions"
                 :key="'cap-' + inbox.id"
-                class="px-2.5 h-7 rounded-lg text-[11px] font-medium transition-colors flex items-center gap-1.5"
-                :class="captureDraft.includes(inbox.id) ? 'text-white' : 'text-n-slate-10 hover:bg-n-alpha-1 border border-n-weak'"
+                class="cv-btn cv-btn-sm"
+                :class="captureDraft.includes(inbox.id) ? '' : 'cv-btn-ghost'"
                 :style="captureDraft.includes(inbox.id) ? { background: inboxGrad(inbox.id) } : {}"
                 @click="toggleCapture(inbox.id)"
               >
@@ -1091,8 +1151,7 @@ const agentView = computed(() => {
 
           <div class="flex items-center gap-2 mt-3">
             <button
-              class="text-xs font-semibold text-white px-3.5 py-2 rounded-xl hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
-              style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+              class="cv-btn"
               :disabled="savingInvest"
               @click="saveInvestments"
             >
@@ -1100,7 +1159,7 @@ const agentView = computed(() => {
               {{ savingInvest ? 'Salvando…' : 'Salvar investimentos' }}
             </button>
             <button
-              class="text-xs text-n-slate-10 hover:text-n-slate-12 px-2 py-2"
+              class="cv-btn cv-btn-ghost"
               :disabled="savingInvest"
               @click="editingInvest = false"
             >
@@ -1118,7 +1177,7 @@ const agentView = computed(() => {
           <div
             v-for="row in inboxRows"
             :key="String(row.inbox_id)"
-            class="rounded-xl bg-n-alpha-1 p-4"
+            class="cv-sub p-4"
             :style="{ borderLeft: `4px solid ${row.inbox_id ? inboxDot(row.inbox_id) : '#64748B'}` }"
           >
             <div class="flex items-center gap-2 mb-3 flex-wrap">
@@ -1130,8 +1189,7 @@ const agentView = computed(() => {
               </span>
               <span
                 v-if="row.inbox_id && !row.is_capture"
-                class="text-[10px] px-2 py-0.5 rounded-full border text-n-slate-10"
-                style="border-color: rgba(148, 163, 184, 0.4)"
+                class="cv-chip cv-slate"
                 title="Caixa operacional: recebe pacientes que já chegaram pelas portas de entrada — só fica com quem nunca passou por porta nenhuma"
               >
                 ⚙️ operacional
@@ -1241,17 +1299,15 @@ const agentView = computed(() => {
       </div>
 
       <!-- Atendimento por agente -->
-      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-10">
+      <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('agentes')">
         <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
           <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-              <span class="i-lucide-headset text-white text-sm" />
-            </span>
+            <span class="cv-icon"><span class="i-lucide-headset text-base" /></span>
             Atendimento por agente
           </h3>
           <select
             v-model="selectedAgentId"
-            class="h-9 text-sm border border-n-weak rounded-xl px-3 bg-n-solid-1 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            class="cv-input text-n-slate-12"
           >
             <option value="all">Todos os agentes</option>
             <option v-for="a in agentRows" :key="a.id" :value="a.id">{{ a.name }}</option>
@@ -1259,17 +1315,17 @@ const agentView = computed(() => {
         </div>
 
         <div v-if="agentView" class="grid grid-cols-1 sm:grid-cols-3 gap-5">
-          <div class="rounded-xl p-4 bg-n-alpha-1" style="border-left: 4px solid #0F5FA6">
+          <div class="cv-sub p-4" style="border-left: 4px solid var(--cv)">
             <p class="text-xs text-n-slate-10 mb-1">Conversas em aberto</p>
             <p class="text-2xl font-bold text-n-slate-12">{{ agentView.open }}</p>
           </div>
-          <div class="rounded-xl p-4 bg-n-alpha-1" style="border-left: 4px solid #D4A017">
+          <div class="cv-sub p-4" style="border-left: 4px solid #D4A017">
             <p class="text-xs text-n-slate-10 mb-1">Sem resposta (paciente aguardando)</p>
             <p class="text-2xl font-bold" :style="{ color: agentView.unanswered > 0 ? '#B8860B' : undefined }">
               {{ agentView.unanswered }}
             </p>
           </div>
-          <div class="rounded-xl p-4 bg-n-alpha-1" style="border-left: 4px solid #7C3AED">
+          <div class="cv-sub p-4" style="border-left: 4px solid var(--cv-deep)">
             <p class="text-xs text-n-slate-10 mb-1">Tempo de 1ª resposta (período)</p>
             <p class="text-2xl font-bold text-n-slate-12">{{ formatSeconds(agentView.avg_first_response_seconds) }}</p>
           </div>
@@ -1281,19 +1337,16 @@ const agentView = computed(() => {
       </div>
 
       <!-- Responsividade das conversas -->
-      <div v-if="resp && resp.total > 0" class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-10">
+      <div v-if="resp && resp.total > 0" class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('responsividade')">
         <div class="flex items-center justify-between flex-wrap gap-2 mb-5">
           <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-              <span class="i-lucide-activity text-white text-sm" />
-            </span>
+            <span class="cv-icon"><span class="i-lucide-activity text-base" /></span>
             Responsividade das conversas
           </h3>
           <div class="flex items-center gap-3 flex-wrap">
             <span class="text-xs text-n-slate-10 hidden lg:inline">leads do período · % = quanto do total chegou até a etapa · a inclinação mostra o vazamento</span>
             <button
-              class="text-xs font-bold px-3.5 py-1.5 rounded-xl text-white hover:opacity-90 shadow flex items-center gap-1.5"
-              style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)"
+              class="cv-btn cv-btn-sm"
               title="Análise por período, estilos de gráfico (até candles) e ações da empresa na linha do tempo"
               @click="proMaxFocus = ''"
             >
@@ -1307,8 +1360,8 @@ const agentView = computed(() => {
           <Line v-if="respCurve" :data="respCurve.data" :options="respCurve.options" />
         </div>
 
-        <div class="mt-5 flex items-center gap-3 rounded-xl p-4 flex-wrap border-2" style="background: rgba(212,160,23,0.08); border-color: rgba(212,160,23,0.35)">
-          <span class="i-lucide-user-x text-xl flex-shrink-0" style="color: #B8860B" />
+        <div class="cv-sub cv-gold mt-5 flex items-center gap-3 p-4 flex-wrap">
+          <span class="i-lucide-user-x text-xl flex-shrink-0" style="color: var(--cv-deep)" />
           <div class="flex-1 min-w-0">
             <p class="text-sm font-bold text-n-slate-12">
               {{ resp.stuck.count }} conversas pouco responsivas ({{ resp.stuck.pct }}%)
@@ -1318,8 +1371,7 @@ const agentView = computed(() => {
             </p>
           </div>
           <button
-            class="text-xs font-bold px-4 py-2 rounded-xl text-white hover:opacity-90 flex-shrink-0 shadow"
-            style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+            class="cv-btn flex-shrink-0"
             @click="$router.push({ name: 'crm_campaigns' })"
           >
             Criar campanha →
@@ -1328,19 +1380,21 @@ const agentView = computed(() => {
       </div>
 
       <!-- Linha do tempo + Caixas de entrada -->
-      <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-10">
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
 
-        <!-- Conversas ao longo do tempo — áreas em camadas sobre navy
-             (mesmo estilo do Faturamento, pedido 03/08) -->
+        <!-- Conversas ao longo do tempo — áreas em camadas sobre o ESCURO
+             da paleta do bloco (rodada 163; antes navy fixo) -->
         <div
-          class="xl:col-span-2 rounded-2xl p-6 shadow-lg"
-          style="background: linear-gradient(160deg, #0A1130, #101A45 55%, #0C1338); border: 1px solid rgba(148, 163, 184, 0.18)"
+          class="cv-block cv-block-deep xl:col-span-2 p-5 sm:p-6 text-white"
+          :style="{ ...blockVars('tempo'), background: blockFamily('tempo')[0] }"
         >
           <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
-            <h3 class="text-sm font-bold text-white">Conversas ao longo do tempo</h3>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <span class="cv-glass w-7 h-7 flex items-center justify-center flex-shrink-0"><span class="i-lucide-chart-area text-sm" /></span>
+              Conversas ao longo do tempo
+            </h3>
             <button
-              class="text-[11px] font-bold px-3 py-1.5 rounded-lg text-white hover:opacity-90 flex items-center gap-1.5"
-              style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)"
+              class="cv-glass-btn"
               title="Abrir no estúdio: conversas por caixa de entrada, estilos de gráfico e ações da empresa"
               @click="proMaxFocus = 'timeline'"
             >
@@ -1348,7 +1402,7 @@ const agentView = computed(() => {
               PRO MAX
             </button>
           </div>
-          <p class="text-[11px] mb-4" style="color: #94A3B8">
+          <p class="text-[11px] mb-4" style="color: rgba(255, 255, 255, 0.78)">
             {{ timelineGranularity }}, pela data em que o lead chegou — e, desses leads, quantos avançaram até agendar ou operar
           </p>
           <div class="h-64">
@@ -1357,15 +1411,18 @@ const agentView = computed(() => {
               :data="timelineChart.data"
               :options="timelineChart.options"
             />
-            <div v-else class="flex items-center justify-center h-full text-sm" style="color: #64748B">
+            <div v-else class="flex items-center justify-center h-full text-sm" style="color: rgba(255, 255, 255, 0.62)">
               Sem dados no período
             </div>
           </div>
         </div>
 
         <!-- Conversas por caixa de entrada -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-1">Conversas por caixa de entrada</h3>
+        <div class="cv-block p-5 sm:p-6" :style="blockVars('tempo')">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-2">
+            <span class="cv-icon"><span class="i-lucide-pie-chart text-base" /></span>
+            Conversas por caixa de entrada
+          </h3>
           <p class="text-[11px] text-n-slate-10 mb-4">
             todas as caixas do período{{ inboxFilterActive ? ' (não muda com o filtro de caixa)' : '' }}
           </p>
@@ -1386,14 +1443,12 @@ const agentView = computed(() => {
       <!-- 💰 Faturamento por caixa de entrada — áreas em camadas com
            gradiente sobre navy (modelo que o Guilherme enviou 03/08) -->
       <div
-        class="rounded-2xl p-6 mb-10 shadow-lg"
-        style="background: linear-gradient(160deg, #0A1130, #101A45 55%, #0C1338); border: 1px solid rgba(148, 163, 184, 0.18)"
+        class="cv-block cv-block-deep p-5 sm:p-6 mb-6 text-white"
+        :style="{ ...blockVars('faturamento'), background: blockFamily('faturamento')[0] }"
       >
         <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
           <h3 class="text-sm font-bold text-white flex items-center gap-2">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-              <span class="i-lucide-trending-up text-white text-sm" />
-            </span>
+            <span class="cv-glass w-7 h-7 flex items-center justify-center flex-shrink-0"><span class="i-lucide-trending-up text-sm" /></span>
             Faturamento por caixa de entrada
           </h3>
           <div class="flex items-center gap-3">
@@ -1401,8 +1456,7 @@ const agentView = computed(() => {
               {{ formatCurrency(revenueTotal) }} no período
             </span>
             <button
-              class="text-[11px] font-bold px-3 py-1.5 rounded-lg text-white hover:opacity-90 flex items-center gap-1.5"
-              style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+              class="cv-glass-btn"
               title="Abrir no estúdio: faturamento por caixa de entrada, candles e ações da empresa"
               @click="proMaxFocus = 'revenue'"
             >
@@ -1411,7 +1465,7 @@ const agentView = computed(() => {
             </button>
           </div>
         </div>
-        <p class="text-[11px] mb-4" style="color: #94A3B8">
+        <p class="text-[11px] mb-4" style="color: rgba(255, 255, 255, 0.78)">
           {{ revenueGranularityLabel }} · receita das cirurgias fechadas, pela data de chegada do lead · cada camada é uma caixa de entrada
         </p>
         <div class="h-72">
@@ -1420,7 +1474,7 @@ const agentView = computed(() => {
             :data="revenueChart.data"
             :options="revenueChart.options"
           />
-          <div v-else class="flex flex-col items-center justify-center h-full text-sm gap-2" style="color: #64748B">
+          <div v-else class="flex flex-col items-center justify-center h-full text-sm gap-2" style="color: rgba(255, 255, 255, 0.62)">
             <span class="i-lucide-trending-up text-2xl" />
             <span>Sem faturamento no período — cards que chegarem à coluna de cirurgia aparecem aqui.</span>
           </div>
@@ -1430,11 +1484,9 @@ const agentView = computed(() => {
       <!-- Etiquetas + Radar de Oportunidades -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <!-- Etiquetas (volume e proporção) -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
+        <div class="cv-block p-5 sm:p-6" :style="blockVars('etiquetas')">
           <div class="flex items-center gap-2 mb-5">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-              <span class="i-lucide-tags text-white text-sm" />
-            </span>
+            <span class="cv-icon"><span class="i-lucide-tags text-base" /></span>
             <h3 class="text-sm font-bold text-n-slate-12">Etiquetas dos leads <span class="font-normal text-n-slate-10">· período escolhido</span></h3>
             <span v-if="data.by_label?.total" class="text-[11px] text-n-slate-9 ml-auto">
               {{ data.by_label.total }} etiquetas aplicadas
@@ -1452,9 +1504,9 @@ const agentView = computed(() => {
               <!-- colunas arredondadas em gradiente (mínimo 33% preenchido) -->
               <div v-for="(item, i) in data.by_label.items" :key="item.label" class="flex items-center gap-2 text-xs">
                 <span class="text-n-slate-12 w-24 truncate flex-shrink-0">{{ item.label }}</span>
-                <div class="flex-1 h-5 rounded-full bg-n-alpha-1 overflow-hidden">
+                <div class="cv-track flex-1 !h-5">
                   <div
-                    class="h-full rounded-full flex items-center justify-end pr-2"
+                    class="cv-fill flex items-center justify-end pr-2"
                     :style="{
                       width: Math.max((item.count / (data.by_label.items[0]?.count || 1)) * 100, 33) + '%',
                       background: `linear-gradient(90deg, ${PALETTE[i % PALETTE.length]}, ${PALETTE[i % PALETTE.length]}99)`,
@@ -1470,23 +1522,21 @@ const agentView = computed(() => {
         </div>
 
         <!-- Radar de Oportunidades × Consultas -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
+        <div class="cv-block p-5 sm:p-6" :style="blockVars('radar')">
           <div class="flex items-center gap-2 mb-5">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #059669, #4ADE80)">
-              <span class="i-lucide-radar text-white text-sm" />
-            </span>
+            <span class="cv-icon"><span class="i-lucide-radar text-base" /></span>
             <h3 class="text-sm font-bold text-n-slate-12">Radar de Oportunidades</h3>
             <span class="text-[11px] text-n-slate-9 ml-auto">no período selecionado</span>
           </div>
           <div class="grid grid-cols-2 gap-4">
-            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #059669, #4ADE80)">
+            <div class="cv-tile relative rounded-2xl p-5 text-white shadow-lg" :style="{ background: blockFamily('radar')[0] }">
               <p class="text-xs font-medium text-white/80 mb-1">Oportunidades detectadas</p>
               <p class="text-3xl font-bold">{{ data.radar?.opportunities ?? 0 }}</p>
               <p class="text-[11px] text-white/70 mt-1">
                 pacientes quentes sem atendimento{{ inboxFilterActive ? ' · todas as caixas' : '' }}
               </p>
             </div>
-            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
+            <div class="cv-tile relative rounded-2xl p-5 text-white shadow-lg" :style="{ background: blockFamily('radar')[2] }">
               <p class="text-xs font-medium text-white/80 mb-1">Consultas agendadas</p>
               <p class="text-3xl font-bold">{{ data.radar?.appointments ?? 0 }}</p>
               <p class="text-[11px] text-white/70 mt-1">criadas na Agenda no período</p>
@@ -1501,11 +1551,9 @@ const agentView = computed(() => {
       </div>
 
       <!-- 🟥 Perdas por motivo (item 103) — ambiente das tags de perda -->
-      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-6">
+      <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('perdas')">
         <div class="flex items-center gap-2 mb-5 flex-wrap">
-          <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B91C1C, #EF4444)">
-            <span class="i-lucide-heart-crack text-white text-sm" />
-          </span>
+          <span class="cv-icon cv-red"><span class="i-lucide-heart-crack text-base" /></span>
           <h3 class="text-sm font-bold text-n-slate-12">🟥 Perdas por motivo <span class="font-normal text-n-slate-10">· período escolhido</span></h3>
           <span v-if="lossTotal" class="text-[11px] text-n-slate-9 ml-auto">
             {{ lossTotal }} etiqueta(s) de perda
@@ -1516,8 +1564,8 @@ const agentView = computed(() => {
         <!-- padrão ainda não criado: um clique e as 6 etiquetas nascem -->
         <div
           v-if="missingLossLabels.length"
-          class="rounded-xl border border-dashed p-4 mb-4"
-          style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.04)"
+          class="cv-sub cv-red p-4 mb-4"
+          style="border-style: dashed"
         >
           <p class="text-xs text-n-slate-11 mb-2.5">
             Padrão CEVICO de motivos de perda ({{ missingLossLabels.length }} faltando) — cada um vira uma
@@ -1527,16 +1575,14 @@ const agentView = computed(() => {
             <span
               v-for="l in missingLossLabels"
               :key="l.title"
-              class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border"
-              style="border-color: rgba(239, 68, 68, 0.45); color: #B91C1C"
+              class="cv-chip cv-red"
             >
               <span class="w-1.5 h-1.5 rounded-full" style="background: #EF4444" />
               {{ l.name }}
             </span>
           </div>
           <button
-            class="text-xs font-semibold text-white px-3.5 py-2 rounded-xl hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
-            style="background: linear-gradient(135deg, #B91C1C, #EF4444)"
+            class="cv-btn cv-red"
             :disabled="creatingLossLabels"
             @click="createLossLabels"
           >
@@ -1565,9 +1611,9 @@ const agentView = computed(() => {
             <span class="text-n-slate-12 w-32 truncate flex-shrink-0 text-left group-hover:underline">{{ r.name }}</span>
             <span v-if="lossTrend(r)" class="w-4 flex-shrink-0 font-bold" :style="{ color: lossTrend(r).color }" :title="lossTrend(r).title">{{ lossTrend(r).arrow }}</span>
             <span v-else class="w-4 flex-shrink-0" />
-            <div class="flex-1 h-5 rounded-full bg-n-alpha-1 overflow-hidden">
+            <div class="cv-track cv-red flex-1 !h-5">
               <div
-                class="h-full rounded-full flex items-center justify-end pr-2 transition-all duration-500"
+                class="cv-fill flex items-center justify-end pr-2"
                 :style="{
                   width: Math.max((r.count / (lossRows[0]?.count || 1)) * 100, r.count ? 33 : 0) + '%',
                   background: 'linear-gradient(90deg, #B91C1C, #EF4444)',
@@ -1576,7 +1622,7 @@ const agentView = computed(() => {
                 <span v-if="r.count" class="text-[10px] font-bold text-white drop-shadow">{{ r.count }}</span>
               </div>
             </div>
-            <span class="text-n-slate-9 w-14 text-right flex-shrink-0" :title="'% sobre os leads do período'">
+            <span class="text-n-slate-9 w-14 text-right flex-shrink-0" title="% sobre os leads do período">
               {{ lossPctOfLeads(r) !== null ? String(lossPctOfLeads(r)).replace('.', ',') + '% dos leads' : (lossTotal ? Math.round((r.count / lossTotal) * 100) + '%' : '0%') }}
             </span>
             <span class="w-20 text-right flex-shrink-0" :class="r.value ? 'text-red-500 font-semibold' : 'text-n-slate-9'" :title="r.value ? `valor dos ${r.valueCount} card(s) perdidos com valor preenchido` : ''">
@@ -1591,11 +1637,9 @@ const agentView = computed(() => {
       </div>
 
       <!-- 🌟 Satisfação (NPS) — pós-operatório -->
-      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-10">
+      <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('nps')">
         <div class="flex items-center gap-2 mb-5 flex-wrap">
-          <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0D9488, #2DD4BF)">
-            <span class="i-lucide-smile text-white text-sm" />
-          </span>
+          <span class="cv-icon"><span class="i-lucide-smile text-base" /></span>
           <h3 class="text-sm font-bold text-n-slate-12">Satisfação dos pacientes (NPS)</h3>
           <span class="text-[11px] text-n-slate-9 ml-auto">
             {{ data.nps?.stage_name ? `pacientes do período que chegaram a "${data.nps.stage_name}"` : 'leads do período' }} · notas lidas pelo agente de NPS
@@ -1606,7 +1650,7 @@ const agentView = computed(() => {
           <span>Sem respostas de NPS ainda — ligue o Agente de NPS numa coluna do pós-operatório (Automações → Agentes de IA).</span>
         </div>
         <div v-else class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
-          <div class="rounded-2xl p-5 text-white shadow-lg text-center" style="background: linear-gradient(135deg, #0D9488, #2DD4BF)">
+          <div class="cv-tile relative rounded-2xl p-5 text-white shadow-lg text-center" :style="{ background: blockFamily('nps')[1] }">
             <p class="text-xs font-medium text-white/80 mb-1">% satisfação (notas 9-10)</p>
             <p class="text-4xl font-bold">{{ data.nps.satisfaction }}%</p>
             <p class="text-[11px] text-white/70 mt-1">NPS {{ data.nps.nps_score }} · {{ data.nps.total }} resposta(s)</p>
@@ -1618,9 +1662,9 @@ const agentView = computed(() => {
               class="flex items-center gap-3"
             >
               <span class="text-xs text-n-slate-12 w-44 flex-shrink-0 truncate">{{ band.label }}</span>
-              <div class="flex-1 h-6 rounded-full bg-n-alpha-1 overflow-hidden">
+              <div class="cv-track flex-1 !h-6">
                 <div
-                  class="h-full rounded-full flex items-center justify-end pr-2"
+                  class="cv-fill flex items-center justify-end pr-2"
                   :style="{
                     width: Math.max((band.count / data.nps.total) * 100, band.count ? 33 : 4) + '%',
                     background: `linear-gradient(90deg, ${NPS_BAND_GRADS[bi][0]}, ${NPS_BAND_GRADS[bi][1]})`,
@@ -1639,12 +1683,11 @@ const agentView = computed(() => {
       <!-- Cirurgias da planilha (Google Sheets) -->
       <div
         v-if="data.sheet_surgeries?.configured"
-        class="bg-n-solid-2 border border-n-weak rounded-2xl p-6 mb-6"
+        class="cv-block p-5 sm:p-6 mb-6"
+        :style="blockVars('cirurgias')"
       >
         <div class="flex items-center gap-2 mb-5">
-          <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F9D58, #34A853)">
-            <span class="i-lucide-sheet text-white text-sm" />
-          </span>
+          <span class="cv-icon"><span class="i-lucide-sheet text-base" /></span>
           <h3 class="text-sm font-bold text-n-slate-12">Cirurgias — planilha (Google Sheets)</h3>
           <span class="text-[11px] text-n-slate-9 ml-auto">
             mesmo período selecionado acima{{ inboxFilterActive ? ' · a planilha não separa por caixa' : '' }}
@@ -1656,15 +1699,15 @@ const agentView = computed(() => {
         </p>
         <template v-else>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
-            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #0F9D58, #34A853)">
+            <div class="cv-tile relative rounded-2xl p-5 text-white shadow-lg" :style="{ background: blockFamily('cirurgias')[0] }">
               <p class="text-xs font-medium text-white/80 mb-1">Cirurgias no período</p>
               <p class="text-3xl font-bold">{{ data.sheet_surgeries.count }}</p>
             </div>
-            <div class="rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #65A30D, #84CC16)">
+            <div class="cv-tile relative rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #65A30D, #84CC16)">
               <p class="text-xs font-medium text-white/80 mb-1">Receita (planilha)</p>
               <p class="text-2xl font-bold leading-tight">{{ formatCurrency(data.sheet_surgeries.revenue) }}</p>
             </div>
-            <div class="col-span-2 bg-n-solid-1 border border-n-weak rounded-2xl p-5">
+            <div class="cv-sub col-span-2 p-5">
               <p class="text-xs font-medium text-n-slate-10 mb-2">Por unidade</p>
               <div v-if="data.sheet_surgeries.by_unit?.length" class="space-y-1.5">
                 <div v-for="u in data.sheet_surgeries.by_unit" :key="u.name" class="flex items-center gap-2 text-sm">
@@ -1681,7 +1724,7 @@ const agentView = computed(() => {
             <p class="text-xs font-medium text-n-slate-10 mb-2">Por procedimento</p>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1.5">
               <div v-for="p in data.sheet_surgeries.by_procedure" :key="p.name" class="flex items-center gap-2 text-sm">
-                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background: #0F9D58" />
+                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background: var(--cv)" />
                 <span class="text-n-slate-12 flex-1 truncate">{{ p.name }}</span>
                 <span class="font-semibold text-n-slate-12">{{ p.count }}</span>
                 <span class="text-xs text-n-slate-10 w-24 text-right">{{ formatCurrency(p.value) }}</span>
@@ -1698,14 +1741,12 @@ const agentView = computed(() => {
            mexer há 15+ dias — do gráfico direto pra fila de trabalho -->
       <div
         v-if="stalledSpot"
-        class="rounded-2xl border-2 overflow-hidden mb-6"
-        style="border-color: rgba(212, 160, 23, 0.5); background: rgba(212, 160, 23, 0.06)"
+        class="cv-block cv-strip mb-6"
+        :style="blockVars('dinheiro_parado')"
       >
-        <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #B8860B, #D4A017)" />
+        <div class="h-1.5 w-full" style="background: var(--cv-grad)" />
         <div class="p-4 sm:p-5 flex items-center gap-3 flex-wrap">
-          <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-            <span class="i-lucide-hourglass text-white text-base" />
-          </span>
+          <span class="cv-icon cv-icon-lg"><span class="i-lucide-hourglass text-base" /></span>
           <div class="flex-1 min-w-[240px]">
             <p class="text-sm font-bold text-n-slate-12">
               {{ formatCurrency(stalledSpot.stalled_value) }} parados em "{{ stalledSpot.stage_name }}"
@@ -1716,8 +1757,7 @@ const agentView = computed(() => {
             </p>
           </div>
           <button
-            class="text-xs font-semibold text-white px-4 py-2.5 rounded-xl hover:opacity-90 shadow flex items-center gap-1.5"
-            style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+            class="cv-btn"
             @click="goToBoardStage(stalledSpot)"
           >
             Ver no board →
@@ -1729,8 +1769,11 @@ const agentView = computed(() => {
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         <!-- Conversas por etapa -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Conversas por etapa <span class="font-normal text-n-slate-10">· leads do período</span></h3>
+        <div class="cv-block p-5 sm:p-6" :style="blockVars('funil')">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5 flex items-center gap-2 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-funnel text-base" /></span>
+            Conversas por etapa <span class="font-normal text-n-slate-10">· leads do período</span>
+          </h3>
           <div class="h-56">
             <Bar
               v-if="funnelChart"
@@ -1744,9 +1787,9 @@ const agentView = computed(() => {
         </div>
 
         <!-- Valor em cada etapa do pipeline -->
-        <div class="rounded-2xl p-6 border-2" style="border-color: rgba(132,204,22,0.35); background: rgba(132,204,22,0.05)">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-5 flex items-center gap-2">
-            <span class="i-lucide-circle-dollar-sign" style="color: #65A30D" />
+        <div class="cv-block p-5 sm:p-6" :style="blockVars('funil')">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5 flex items-center gap-2 flex-wrap">
+            <span class="cv-icon cv-green"><span class="i-lucide-circle-dollar-sign text-base" /></span>
             Valor em cada etapa do pipeline
             <span class="font-normal text-n-slate-10 text-xs">· leads do período</span>
           </h3>
@@ -1764,8 +1807,11 @@ const agentView = computed(() => {
         </div>
 
         <!-- Tempo médio por etapa -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-6">
-          <h3 class="text-sm font-bold text-n-slate-12 mb-5">Tempo médio por etapa <span class="font-normal text-n-slate-10">· leads do período</span></h3>
+        <div class="cv-block p-5 sm:p-6" :style="blockVars('funil')">
+          <h3 class="text-sm font-bold text-n-slate-12 mb-5 flex items-center gap-2 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-clock text-base" /></span>
+            Tempo médio por etapa <span class="font-normal text-n-slate-10">· leads do período</span>
+          </h3>
           <div class="h-56">
             <Bar
               v-if="timeChart"
@@ -1805,7 +1851,7 @@ const agentView = computed(() => {
       v-if="kpiPopup"
       :tile="kpiPopup"
       :period="period"
-      accent="#0F5FA6"
+      :accent="kpiAccent"
       @close="kpiPopup = null"
     />
 
@@ -1813,15 +1859,16 @@ const agentView = computed(() => {
     <Teleport to="body">
       <div
         v-if="lossModal"
-        class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
+        class="cv-page cv-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
+        :style="cvVars"
         @click.self="lossModal = null"
       >
-        <div class="w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1 max-h-[85vh] flex flex-col">
-          <div class="p-5 text-white flex-shrink-0" style="background: linear-gradient(135deg, #B91C1C, #EF4444)">
+        <div class="cv-modal w-full max-w-lg max-h-[85vh] flex flex-col">
+          <div class="cv-modal-head !p-5" style="background: linear-gradient(135deg, #B91C1C, #EF4444)">
             <div class="flex items-center gap-2 text-white/90">
               <span class="i-lucide-heart-crack text-base" />
               <p class="text-sm font-bold flex-1">Perda: {{ lossModal.name }}</p>
-              <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="lossModal = null">
+              <button class="cv-glass-btn cv-iconbtn" aria-label="Fechar" @click="lossModal = null">
                 <span class="i-lucide-x text-sm" />
               </button>
             </div>
@@ -1838,7 +1885,7 @@ const agentView = computed(() => {
               <button
                 v-for="c in lossContacts"
                 :key="c.contact_id"
-                class="w-full flex items-center gap-2.5 rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2 mb-1.5 text-left hover:border-red-400/60 transition-colors"
+                class="cv-sub cv-sub-hover w-full flex items-center gap-2.5 px-3 py-2 mb-1.5 text-left"
                 title="Abrir o Espaço do Paciente"
                 @click="openPatientSpace(c)"
               >
@@ -1869,3 +1916,19 @@ const agentView = computed(() => {
 
   </div>
 </template>
+
+<style scoped>
+/* 🍎 rodada 163: os dois blocos "áreas em camadas" (Conversas ao longo do
+   tempo e Faturamento por caixa) trocaram o navy fixo pelo ESCURO da
+   paleta do bloco (família[0]) — a crista e a luz do .cv-block ficam mais
+   discretas sobre o fundo escuro, como no .cv-modal-head */
+.cv-page .cv-block-deep {
+  border-color: rgba(255, 255, 255, 0.26);
+}
+.cv-page .cv-block-deep::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+}
+.cv-page .cv-block-deep::after {
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0));
+}
+</style>

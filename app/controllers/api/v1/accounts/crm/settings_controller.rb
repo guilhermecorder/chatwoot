@@ -1,6 +1,14 @@
 class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
 
+  # 🍎🍊 paletas do Meu Painel (rodada 162): iMac G3 + frutas da Apple; e os
+  # blocos da tela que aceitam paleta própria — só chaves conhecidas entram
+  PALETTE_KEYS = %w[bondi blueberry strawberry lime tangerine grape graphite
+                    laranja limao melancia uva kiwi coco pessego cereja abacate mirtilo].freeze
+  # escopos de paleta dos Relatórios/Dashboards (rodada 163) — além dos painéis
+  REPORT_PALETTE_SCOPES = %w[report:crm report:campanhas report:funil report:medicos report:agentes
+                             report:agenda report:meta report:google report:whatsapp report:etiquetas].freeze
+
   # integração/config sensível = admin (ou área concedida). Leitura (show) e os
   # atalhos usados pela tela do atendente ficam livres.
   ADMIN_SETTINGS_ACTIONS = %i[
@@ -551,6 +559,47 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
     # tema visual dos ambientes (Santorini, Flor del Mar...) — escolha do admin
     cfg['theme'] = params[:theme].to_s if params.key?(:theme)
+    # 🧑‍🤝‍🧑 PAINÉIS POR PESSOA (rodada 160): variantes de um painel-base com
+    # layout próprio (blocos/cards/cores) — [{id, name, base, user_ids}]. Só
+    # admin. Quem está em user_ids fica atribuído à variante; variante
+    # removida leva junto as atribuições e os layouts dela.
+    if params.key?(:panel_variants) && Current.account_user.administrator?
+      before = Array(cfg['panel_variants'])
+      before_keys = before.map { |v| "variant:#{v['id']}" }
+      valid_users = Current.account.users.pluck(:id)
+      variants = Array(params[:panel_variants]).first(20).filter_map do |raw|
+        v = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+        base = v['base'].to_s
+        name = v['name'].to_s.strip[0, 40]
+        next unless %w[agendamento conducao cirurgia medico gestor].include?(base)
+        next if name.blank?
+
+        {
+          'id' => v['id'].to_s.downcase.gsub(/[^a-z0-9_]/, '')[0, 24].presence || "v#{SecureRandom.hex(4)}",
+          'name' => name,
+          'base' => base,
+          'user_ids' => Array(v['user_ids']).map(&:to_i).select { |u| valid_users.include?(u) }.uniq.first(50)
+        }
+      end
+      cfg['panel_variants'] = variants.uniq { |v| v['id'] }
+      assignments = (cfg['panel_assignments'] || {}).dup
+      removed = before_keys - cfg['panel_variants'].map { |v| "variant:#{v['id']}" }
+      assignments = assignments.reject { |_, k| removed.include?(k.to_s) }
+      cfg['kpi_layout'] = (cfg['kpi_layout'] || {}).except(*removed)
+      cfg['block_layout'] = (cfg['block_layout'] || {}).except(*removed)
+      cfg['panel_palettes'] = (cfg['panel_palettes'] || {}).except(*removed)
+      # a lista de pessoas da variante É a atribuição: entra quem está nela,
+      # sai quem saiu dela (e apontava pra ela)
+      cfg['panel_variants'].each do |v|
+        key = "variant:#{v['id']}"
+        was = before.find { |b| b['id'] == v['id'] }
+        Array(was&.dig('user_ids')).map(&:to_s).each do |uid|
+          assignments.delete(uid) if assignments[uid] == key && v['user_ids'].exclude?(uid.to_i)
+        end
+        v['user_ids'].each { |uid| assignments[uid.to_s] = key }
+      end
+      cfg['panel_assignments'] = assignments
+    end
     # qual versão do Meu Painel cada agente vê ({user_id => panel_key})
     if params.key?(:panel_assignments)
       cfg['panel_assignments'] = params.require(:panel_assignments)
@@ -567,7 +616,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # — {painel => {order: [], hidden: [], colors: {id => grad}}}
     if params.key?(:kpi_layout)
       raw = params.require(:kpi_layout).permit!.to_h
-      cfg['kpi_layout'] = raw.slice('agendamento', 'conducao', 'cirurgia', 'medico', 'gestor').transform_values do |v|
+      cfg['kpi_layout'] = raw.slice(*layout_panel_keys(cfg)).transform_values do |v|
         h = v.to_h
         {
           'order' => Array(h['order']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40),
@@ -581,12 +630,22 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # cruzar entre elas — {painel => {top: [ids], main: [ids]}}
     if params.key?(:block_layout)
       raw = params.require(:block_layout).permit!.to_h
-      cfg['block_layout'] = raw.slice('agendamento', 'conducao', 'cirurgia', 'medico', 'gestor').transform_values do |v|
+      cfg['block_layout'] = raw.slice(*layout_panel_keys(cfg)).transform_values do |v|
         h = v.to_h
         {
           'top' => Array(h['top']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
           'main' => Array(h['main']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20)
         }
+      end
+    end
+    # 🍎🍊 PALETAS do Meu Painel por painel (rodada 162): modo do painel (cor
+    # do dia / paleta fixa / salada de frutas) + paleta por bloco —
+    # {painel => {mode, key, blocks: {bloco => paleta}}}; entrada vazia some
+    if params.key?(:panel_palettes)
+      raw = params.require(:panel_palettes).permit!.to_h
+      cfg['panel_palettes'] = raw.slice(*(layout_panel_keys(cfg) + REPORT_PALETTE_SCOPES)).each_with_object({}) do |(panel, v), acc|
+        pal = sanitize_panel_palette(v)
+        acc[panel] = pal if pal
       end
     end
     # CARDS DE INDICADOR criados pelo admin no "+" do Meu Painel (item 141):
@@ -718,6 +777,13 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       h_end = raw['end'].to_i.clamp(1, 24)
       cfg['followup_hours'] = { 'start' => h_start, 'end' => h_end } if h_start < h_end
     end
+    # 🏷️ ETIQUETAS QUE ENCERRAM O FOLLOW-UP (rodada 158): contato ou conversa
+    # com uma delas não recebe cutucada de NENHUM robô (além das fixas
+    # nao_perturbe / perda_* do job). Ex.: att_encerrado. Só admin.
+    if params.key?(:followup_stop_labels) && Current.account_user.administrator?
+      cfg['followup_stop_labels'] = Array(params[:followup_stop_labels])
+                                    .map { |l| l.to_s.strip.downcase }.reject(&:blank?).uniq.first(30)
+    end
     # 📅 LEMBRETES DO DIA DA CONSULTA (item 156): D-1 véspera c/ confirmação
     # + D-0 no dia (ex.: 07h) — cada régua com hora, caixa e mensagem modelo
     if params.key?(:appointment_reminders) && Current.account_user.administrator?
@@ -741,11 +807,21 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       custom_kpis: cfg['custom_kpis'] || [],
       kpi_layout: cfg['kpi_layout'] || {},
       block_layout: cfg['block_layout'] || {},
+      panel_palettes: cfg['panel_palettes'] || {},
       performance_metrics: cfg['performance_metrics'] || {},
       clinical_access: cfg['clinical_access'] || {},
       followup_hours: cfg['followup_hours'] || { 'start' => 8, 'end' => 20 },
-      appointment_reminders: cfg['appointment_reminders'] || {}
+      followup_stop_labels: cfg['followup_stop_labels'] || [],
+      appointment_reminders: cfg['appointment_reminders'] || {},
+      panel_variants: cfg['panel_variants'] || []
     }
+  end
+
+  # chaves de painel que aceitam layout (fileira/blocos): os 5 fixos + as
+  # variantes por pessoa existentes (rodada 160)
+  def layout_panel_keys(cfg)
+    %w[agendamento conducao cirurgia medico gestor] +
+      Array(cfg['panel_variants']).map { |v| "variant:#{v['id']}" }
   end
 
   # cada régua (d1/d0) do lembrete: liga/desliga, hora cheia, caixa do
@@ -1130,6 +1206,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_theme: (s.agenda_config || {})['theme'],
       # 🕐 janela de envio dos robôs de follow-up (item 147; padrão 08h–20h)
       followup_hours: (s.agenda_config || {})['followup_hours'] || { 'start' => 8, 'end' => 20 },
+      # 🏷️ etiquetas que encerram o follow-up de todos os robôs (rodada 158)
+      followup_stop_labels: (s.agenda_config || {})['followup_stop_labels'] || [],
       # 📅 lembretes do dia da consulta D-1/D-0 (item 156)
       appointment_reminders: (s.agenda_config || {})['appointment_reminders'] || {},
       # tabela de preços vigente (com os padrões quando não há tabela salva)
@@ -1145,10 +1223,13 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       custom_kpis: (s.agenda_config || {})['custom_kpis'] || [],
       kpi_layout: (s.agenda_config || {})['kpi_layout'] || {},
       block_layout: (s.agenda_config || {})['block_layout'] || {},
+      panel_palettes: (s.agenda_config || {})['panel_palettes'] || {},
       performance_metrics: (s.agenda_config || {})['performance_metrics'] || {},
       performance_metric_keys: Crm::AgentPerformance::METRIC_KEYS,
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},
       custom_panels: (s.agenda_config || {})['custom_panels'] || [],
+      # 🧑‍🤝‍🧑 painéis por pessoa (rodada 160)
+      panel_variants: (s.agenda_config || {})['panel_variants'] || [],
       main_panel: (s.agenda_config || {})['main_panel'].presence,
       company_actions: (s.agenda_config || {})['company_actions'] || [],
       clinical_access: (s.agenda_config || {})['clinical_access'] || {},
@@ -1293,6 +1374,33 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # cor escolhida pelo admin por card da fileira (item 143): só strings de
   # cor/gradiente CSS simples — nada de caracteres que escapem do style
+  # {mode, key, blocks} de um painel; modo fixo sem chave válida vira cor do
+  # dia; "cor do dia" sem bloco próprio = nada a guardar (nil)
+  def sanitize_panel_palette(raw)
+    h = (raw || {}).to_h
+    key = PALETTE_KEYS.include?(h['key'].to_s) ? h['key'].to_s : ''
+    mode = palette_mode(h['mode'], key)
+    blocks = sanitize_palette_blocks(h['blocks'])
+    return nil if mode == 'day' && blocks.empty?
+
+    { 'mode' => mode, 'key' => key, 'blocks' => blocks }
+  end
+
+  # modo fixo sem chave válida vira cor do dia
+  def palette_mode(raw_mode, key)
+    mode = %w[day fixed salad].include?(raw_mode.to_s) ? raw_mode.to_s : 'day'
+    mode == 'fixed' && key.blank? ? 'day' : mode
+  end
+
+  # blocos: id curto da seção (cada tela tem os seus) → chave de paleta
+  def sanitize_palette_blocks(raw)
+    (raw || {}).to_h.to_a.first(30).each_with_object({}) do |(bid, pk), acc|
+      next unless bid.to_s.match?(/\A[a-z0-9_-]{1,40}\z/) && PALETTE_KEYS.include?(pk.to_s)
+
+      acc[bid.to_s] = pk.to_s
+    end
+  end
+
   def sanitize_kpi_colors(raw)
     (raw || {}).to_h.to_a.first(40).each_with_object({}) do |(k, v), acc|
       key = k.to_s[0, 40]

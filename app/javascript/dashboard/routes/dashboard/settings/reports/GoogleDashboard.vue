@@ -8,6 +8,8 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { useRoute, useRouter } from 'vue-router';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
@@ -18,6 +20,20 @@ const router = useRouter();
 const isLoading = ref(true);
 const data = ref(null);
 const period = ref({ preset: 'month', from: '', to: '' });
+
+// 🍎 formato novo (rodada 163): kit "iMac G3 + vidro" com a paleta desta
+// página (o admin escolhe pelo chip do banner; cada bloco pode ter a sua)
+const pal = useCevicoPalette({
+  scope: 'report:google',
+  blocks: [
+    { id: 'integracao', label: 'Estado da integração', icon: 'i-lucide-plug-zap' },
+    { id: 'palavras', label: 'Palavras e campanhas', icon: 'i-lucide-search' },
+    { id: 'funil', label: 'Do termo à cirurgia', icon: 'i-lucide-route' },
+    { id: 'conversoes', label: 'Conversões por dia', icon: 'i-lucide-send' },
+    { id: 'colunas', label: 'Colunas plugadas', icon: 'i-lucide-columns-3' },
+  ],
+});
+const { cvVars, blockVars, blockFamily } = pal;
 
 const load = async () => {
   isLoading.value = true;
@@ -76,64 +92,70 @@ const termHintNeeded = computed(
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
+  <div class="cv-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1" :style="cvVars">
     <div class="max-w-5xl mx-auto w-full p-4 sm:p-8">
-      <div class="flex items-center gap-3 flex-wrap mb-5">
-        <span class="w-9 h-9 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, #1E40AF, #34A853)">
-          <span class="i-lucide-chart-column text-white text-lg" />
-        </span>
-        <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Google (Ads + GA4)</h1>
-          <p class="text-xs text-n-slate-10">palavras que trazem paciente, conversões que ensinam o Google — tudo num lugar só</p>
-        </div>
-        <PeriodRuler v-model="period" />
-      </div>
+      <!-- banner de vidro na paleta da página (rodada 163) -->
+      <CevicoHero
+        :pal="pal"
+        title="Google (Ads + GA4)"
+        subtitle="palavras que trazem paciente, conversões que ensinam o Google — tudo num lugar só"
+        icon="i-lucide-chart-column"
+      />
+
+      <!-- Período (régua padrão CEVICO) -->
+      <PeriodRuler v-model="period" glass class="mb-6" />
 
       <div v-if="isLoading" class="flex justify-center py-16">
         <Spinner :size="32" class="text-n-brand" />
       </div>
 
       <template v-else>
-        <!-- estado da integração -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
-          <div class="rounded-xl px-4 py-3 border" :class="data.configured ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-amber-500/40 bg-amber-500/5'">
-            <p class="text-[11px] font-medium text-n-slate-10">GA4 (Measurement Protocol)</p>
-            <p class="text-sm font-bold" :style="{ color: data.configured ? '#047857' : '#B45309' }">
-              {{ data.configured ? `Conectado (${data.measurement_id})` : 'Aguardando conexão' }}
-            </p>
-            <button v-if="!data.configured" class="text-[11px] underline decoration-dotted text-n-slate-10 hover:text-n-brand mt-1" @click="goIntegrations">
-              conectar em Integrações → Google
-            </button>
+        <!-- estado da integração (verde = conectado · âmbar = aguardando) -->
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('integracao')">
+          <div class="flex items-center gap-2 mb-4 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-plug-zap text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Estado da integração</h2>
           </div>
-          <DashKpi
-            compact
-            label="Conversões enviadas (período)"
-            :value="totalSent"
-            from="#1E40AF"
-            to="#3B82F6"
-          />
-          <div class="rounded-xl px-4 py-3 border" :class="data.insights_configured ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-n-weak bg-n-solid-1'">
-            <p class="text-[11px] font-medium text-n-slate-10">Cliques e custo (GA4 → Google Ads)</p>
-            <p class="text-sm font-bold" :style="{ color: data.insights_configured ? '#047857' : '#64748B' }">
-              {{ data.insights_configured ? 'Conta de serviço conectada' : 'Entra com a conta de serviço' }}
-            </p>
-            <button v-if="!data.insights_configured" class="text-[11px] underline decoration-dotted text-n-slate-10 hover:text-n-brand mt-1" @click="goIntegrations">
-              preencher em Integrações → Google (propriedade GA4 + JSON)
-            </button>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="cv-sub px-4 py-3" :class="data.configured ? 'cv-green' : 'cv-amber'">
+              <p class="text-[11px] font-medium text-n-slate-10">GA4 (Measurement Protocol)</p>
+              <p class="text-sm font-bold" :style="{ color: data.configured ? '#047857' : '#B45309' }">
+                {{ data.configured ? `Conectado (${data.measurement_id})` : 'Aguardando conexão' }}
+              </p>
+              <button v-if="!data.configured" class="text-[11px] underline decoration-dotted text-n-slate-10 hover:text-n-brand mt-1" @click="goIntegrations">
+                conectar em Integrações → Google
+              </button>
+            </div>
+            <DashKpi
+              compact
+              glass
+              label="Conversões enviadas (período)"
+              :value="totalSent"
+              :grad="blockFamily('integracao')[1]"
+            />
+            <div class="cv-sub px-4 py-3" :class="data.insights_configured ? 'cv-green' : 'cv-amber'">
+              <p class="text-[11px] font-medium text-n-slate-10">Cliques e custo (GA4 → Google Ads)</p>
+              <p class="text-sm font-bold" :style="{ color: data.insights_configured ? '#047857' : '#B45309' }">
+                {{ data.insights_configured ? 'Conta de serviço conectada' : 'Entra com a conta de serviço' }}
+              </p>
+              <button v-if="!data.insights_configured" class="text-[11px] underline decoration-dotted text-n-slate-10 hover:text-n-brand mt-1" @click="goIntegrations">
+                preencher em Integrações → Google (propriedade GA4 + JSON)
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- ═══ PALAVRAS-CHAVE / TERMOS / CAMPANHAS (GA4) ═══ -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-5">
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('palavras')">
           <div class="flex items-center gap-3 flex-wrap mb-1">
+            <span class="cv-icon"><span class="i-lucide-search text-base" /></span>
             <h2 class="text-sm font-bold text-n-slate-12">O que traz clique (e custo) no Google</h2>
-            <div class="flex items-center gap-1 bg-n-solid-1 border border-n-weak rounded-xl p-0.5">
+            <div class="cv-seg cv-seg-sm">
               <button
                 v-for="tab in GOOGLE_TABS"
                 :key="tab.key"
-                class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
-                :class="googleTab === tab.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-                :style="googleTab === tab.key ? { background: 'linear-gradient(135deg, #1E40AF, #34A853)' } : {}"
+                class="cv-seg-item"
+                :class="googleTab === tab.key ? 'cv-seg-on' : ''"
                 :title="tab.hint"
                 @click="googleTab = tab.key"
               >
@@ -145,16 +167,16 @@ const termHintNeeded = computed(
             {{ GOOGLE_TABS.find(t => t.key === googleTab)?.hint }} — dados do GA4 vinculado ao Google Ads
           </p>
 
-          <div v-if="!googleData || googleData.configured === false" class="text-xs text-amber-700 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
-            <p class="font-semibold mb-1">Falta conectar a leitura do GA4</p>
+          <div v-if="!googleData || googleData.configured === false" class="cv-sub cv-amber text-xs text-n-slate-11 p-4">
+            <p class="font-semibold text-n-slate-12 mb-1">Falta conectar a leitura do GA4</p>
             <p>
               Em <b>Integrações → Google</b>, preencha a <b>propriedade do GA4</b> e o
               <b>JSON da conta de serviço</b> (a mesma usada no investimento automático).
               Com isso esta tela mostra cliques, custo e CPC por palavra-chave — sem precisar do developer token.
             </p>
           </div>
-          <div v-else-if="googleTabError" class="text-xs text-red-600 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-            <p class="font-semibold mb-1">Erro ao consultar o Google</p>
+          <div v-else-if="googleTabError" class="cv-sub cv-red text-xs text-n-slate-11 p-4">
+            <p class="font-semibold text-n-slate-12 mb-1">Erro ao consultar o Google</p>
             <p>{{ googleTabError }}</p>
           </div>
           <div v-else-if="!googleRows.length" class="text-xs text-n-slate-9 py-4">
@@ -173,13 +195,13 @@ const termHintNeeded = computed(
               <div
                 v-for="r in googleRows"
                 :key="r.term"
-                class="relative grid items-center px-3 py-1.5 rounded-lg bg-n-alpha-1 overflow-hidden"
+                class="cv-row relative grid items-center px-3 py-1.5 overflow-hidden"
                 style="grid-template-columns: minmax(0,2.2fr) 1fr 1fr 1fr 1fr 1fr"
               >
                 <!-- barra de participação nos cliques (fundo) -->
                 <div
-                  class="absolute inset-y-0 left-0 rounded-lg"
-                  :style="{ width: `${(r.clicks / maxClicks) * 100}%`, background: 'rgba(30, 64, 175, 0.10)' }"
+                  class="absolute inset-y-0 left-0 rounded-xl"
+                  :style="{ width: `${(r.clicks / maxClicks) * 100}%`, background: 'rgb(var(--cv-rgb) / 0.14)' }"
                 />
                 <span class="relative text-xs text-n-slate-12 truncate pr-2" :title="r.term">{{ r.term }}</span>
                 <span class="relative text-xs text-right font-bold text-n-slate-12">{{ fmtNum(r.clicks) }}</span>
@@ -195,14 +217,17 @@ const termHintNeeded = computed(
         </div>
 
         <!-- ═══ DO TERMO À CIRURGIA (dados do sistema) ═══ -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-5">
-          <h2 class="text-sm font-bold text-n-slate-12 mb-1">Do termo à cirurgia — o que vira paciente de verdade</h2>
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('funil')">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-route text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Do termo à cirurgia — o que vira paciente de verdade</h2>
+          </div>
           <p class="text-[11px] text-n-slate-9 mb-3">
             leads do Google carimbados nas páginas (Protocolo) e a jornada deles no sistema:
             {{ fmtNum(funnel.total_leads) }} lead(s) no período
           </p>
 
-          <div v-if="termHintNeeded" class="text-[11px] text-amber-700 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-3">
+          <div v-if="termHintNeeded" class="cv-sub cv-amber text-[11px] text-n-slate-11 p-3 mb-3">
             <b>Dica:</b> a maioria dos leads chegou sem o termo de pesquisa. No Google Ads, adicione
             <code class="font-mono">utm_term={'{'}keyword{'}'}</code> ao modelo de acompanhamento
             da campanha — daí cada lead chega com a palavra que o trouxe.
@@ -225,12 +250,12 @@ const termHintNeeded = computed(
               <div
                 v-for="r in funnel.rows"
                 :key="r.term"
-                class="relative grid items-center px-3 py-1.5 rounded-lg bg-n-alpha-1 overflow-hidden"
+                class="cv-row relative grid items-center px-3 py-1.5 overflow-hidden"
                 style="grid-template-columns: minmax(0,2.2fr) 1fr 1fr 1fr 1fr 1.2fr"
               >
                 <div
-                  class="absolute inset-y-0 left-0 rounded-lg"
-                  :style="{ width: `${(r.leads / maxFunnelLeads) * 100}%`, background: 'rgba(52, 168, 83, 0.10)' }"
+                  class="absolute inset-y-0 left-0 rounded-xl"
+                  :style="{ width: `${(r.leads / maxFunnelLeads) * 100}%`, background: 'rgb(var(--cv-rgb) / 0.14)' }"
                 />
                 <span class="relative text-xs text-n-slate-12 truncate pr-2" :title="r.term">{{ r.term }}</span>
                 <span class="relative text-xs text-right font-bold text-n-slate-12">{{ fmtNum(r.leads) }}</span>
@@ -248,16 +273,19 @@ const termHintNeeded = computed(
         </div>
 
         <!-- série diária das conversões enviadas -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-5">
-          <h2 class="text-sm font-bold text-n-slate-12 mb-3">Conversões enviadas por dia — no período</h2>
-          <div class="flex items-end gap-[3px] h-24 rounded-lg bg-n-alpha-1 px-2 pt-2">
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('conversoes')">
+          <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-send text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Conversões enviadas por dia — no período</h2>
+          </div>
+          <div class="cv-row flex items-end gap-[3px] h-24 px-2 pt-2">
             <div
               v-for="d in data.series"
               :key="d.date"
               class="flex-1 rounded-t-sm"
               :style="{
                 height: `${Math.max((d.total / maxDay) * 100, d.total ? 8 : 1)}%`,
-                background: d.total ? 'linear-gradient(180deg, #34A853, #1E40AF)' : 'rgba(148,163,184,0.25)',
+                background: d.total ? 'var(--cv-grad-2)' : 'rgba(148,163,184,0.25)',
               }"
               :title="barTitle(d)"
             />
@@ -266,7 +294,7 @@ const termHintNeeded = computed(
             <span
               v-for="(n, event) in data.totals_by_event"
               :key="event"
-              class="text-[11px] px-2 py-0.5 rounded-full border border-n-weak bg-n-solid-1 text-n-slate-11"
+              class="cv-chip"
             >
               {{ event }} · <b>{{ n }}</b>
             </span>
@@ -275,11 +303,14 @@ const termHintNeeded = computed(
         </div>
 
         <!-- onde está plugado -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-6">
-          <h2 class="text-sm font-bold text-n-slate-12 mb-2">Colunas que enviam conversão</h2>
+        <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('colunas')">
+          <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-columns-3 text-base" /></span>
+            <h2 class="text-sm font-bold text-n-slate-12">Colunas que enviam conversão</h2>
+          </div>
           <template v-if="data.automations?.length">
-            <div v-for="(a, ai) in data.automations" :key="ai" class="flex items-center gap-2 text-xs text-n-slate-11 mb-1">
-              <span class="i-lucide-columns-3 text-sm text-n-slate-9" />
+            <div v-for="(a, ai) in data.automations" :key="ai" class="cv-row flex items-center gap-2 text-xs text-n-slate-11 px-3 py-2 mb-1.5">
+              <span class="i-lucide-columns-3 text-sm" style="color: var(--cv)" />
               <b class="text-n-slate-12">{{ a.stage || 'coluna' }}</b>
               <span class="i-lucide-arrow-right text-xs text-n-slate-9" />
               <span>{{ a.event || 'evento' }}</span>

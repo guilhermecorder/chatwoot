@@ -199,6 +199,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { followup_hours: hours });
   }
 
+  // 🏷️ etiquetas que encerram o follow-up de todos os robôs (rodada 158)
+  updateFollowupStopLabels(labels) {
+    return axios.post(`${this.url}/settings/update_agenda`, { followup_stop_labels: labels });
+  }
+
   // 📅 lembretes do dia da consulta D-1/D-0 (Automações → Robôs, item 156)
   updateAppointmentReminders(reminders) {
     return axios.post(`${this.url}/settings/update_agenda`, { appointment_reminders: reminders });
@@ -298,6 +303,11 @@ class CrmAPI extends ApiClient {
   }
 
   // qual versão do Meu Painel cada agente vê — admin
+  // 🧑‍🤝‍🧑 painéis por pessoa (rodada 160): [{id, name, base, user_ids}]
+  updatePanelVariants(panelVariants) {
+    return axios.post(`${this.url}/settings/update_agenda`, { panel_variants: panelVariants });
+  }
+
   updatePanelAssignments(panelAssignments) {
     return axios.post(`${this.url}/settings/update_agenda`, { panel_assignments: panelAssignments });
   }
@@ -610,6 +620,12 @@ class CrmAPI extends ApiClient {
   // ordem dos BLOCOS do Meu Painel por painel (item 143)
   updateBlockLayout(blockLayout) {
     return axios.post(`${this.url}/settings/update_agenda`, { block_layout: blockLayout });
+  }
+
+  // 🍎🍊 paletas do Meu Painel por painel (rodada 162): modo do painel (cor
+  // do dia / fixa / salada) + paleta por bloco — {painel => {mode, key, blocks}}
+  updatePanelPalettes(panelPalettes) {
+    return axios.post(`${this.url}/settings/update_agenda`, { panel_palettes: panelPalettes });
   }
 
   // cards de indicador criados pelo admin no "+" do Meu Painel (item 141)

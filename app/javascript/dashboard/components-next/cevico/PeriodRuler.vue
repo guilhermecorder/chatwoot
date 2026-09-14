@@ -14,6 +14,9 @@ const props = defineProps({
   },
   // esconde pílulas específicas quando uma tela não suporta (evitar!)
   hiddenPresets: { type: Array, default: () => [] },
+  // 🍎 formato novo (rodada 161): a régua veste o segmentado de vidro do
+  // kit .cv-* (cor do dia). Só o Meu Painel liga; os relatórios seguem iguais.
+  glass: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['update:modelValue']);
@@ -119,23 +122,24 @@ const clearCustom = () => {
 
 <template>
   <div
-    class="inline-flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 flex-nowrap overflow-x-auto md:overflow-visible"
+    class="inline-flex items-center gap-0.5 flex-nowrap overflow-x-auto md:overflow-visible"
+    :class="glass ? 'cv-seg' : 'h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5'"
   >
     <span
       class="i-lucide-calendar-clock text-sm ml-2 mr-0.5 flex-shrink-0"
-      style="color: #7c3aed"
+      :style="{ color: glass ? 'var(--cv)' : '#7c3aed' }"
     />
     <button
       v-for="p in presets"
       :key="p.key"
-      class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0"
+      class="text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0"
       :class="
-        activePreset === p.key
-          ? 'text-white'
-          : 'text-n-slate-11 hover:bg-n-alpha-1'
+        glass
+          ? ['cv-seg-item', activePreset === p.key ? 'cv-seg-on' : '']
+          : ['h-7 px-2.5 rounded-lg', activePreset === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1']
       "
       :style="
-        activePreset === p.key
+        !glass && activePreset === p.key
           ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' }
           : {}
       "
@@ -146,14 +150,14 @@ const clearCustom = () => {
 
     <div class="relative flex-shrink-0">
       <button
-        class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+        class="text-xs font-medium transition-colors whitespace-nowrap"
         :class="
-          activePreset === 'custom'
-            ? 'text-white'
-            : 'text-n-slate-11 hover:bg-n-alpha-1'
+          glass
+            ? ['cv-seg-item', activePreset === 'custom' ? 'cv-seg-on' : '']
+            : ['h-7 px-2.5 rounded-lg', activePreset === 'custom' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1']
         "
         :style="
-          activePreset === 'custom'
+          !glass && activePreset === 'custom'
             ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' }
             : {}
         "
@@ -164,13 +168,15 @@ const clearCustom = () => {
       </button>
       <div
         v-if="showCustom"
-        class="absolute top-9 right-0 z-50 bg-white dark:bg-n-solid-2 border border-n-weak rounded-2xl shadow-xl p-3 flex items-center gap-2"
+        class="absolute top-9 right-0 z-50 p-3 flex items-center gap-2"
+        :class="glass ? 'cv-pop' : 'bg-white dark:bg-n-solid-2 border border-n-weak rounded-2xl shadow-xl'"
         @click.stop
       >
         <input
           v-model="customFrom"
           type="date"
-          class="h-8 text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+          class="h-8 text-xs text-n-slate-12"
+          :class="glass ? 'cv-input !h-8 !rounded-full' : 'border border-n-weak rounded-full px-2.5 bg-n-solid-1'"
           style="width: 8.4rem"
           title="De"
           @change="applyCustom"
@@ -179,7 +185,8 @@ const clearCustom = () => {
         <input
           v-model="customTo"
           type="date"
-          class="h-8 text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+          class="h-8 text-xs text-n-slate-12"
+          :class="glass ? 'cv-input !h-8 !rounded-full' : 'border border-n-weak rounded-full px-2.5 bg-n-solid-1'"
           style="width: 8.4rem"
           title="Até (vazio = hoje)"
           @change="applyCustom"

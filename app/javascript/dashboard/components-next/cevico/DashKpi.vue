@@ -25,9 +25,23 @@ const props = defineProps({
   // meta do mês (Painel de Metas): { current, target }
   goal: { type: Object, default: null },
   compact: { type: Boolean, default: false },
+  // 🍎 formato novo (rodada 161): degradê PRONTO (família do dia) vence
+  // from/to; glass = acabamento de vidro (card claro vira .cv-sub, card
+  // colorido ganha borda clara e crista). Só o Meu Painel liga isso.
+  grad: { type: String, default: '' },
+  glass: { type: Boolean, default: false },
 });
 
-const isGradient = computed(() => Boolean(props.from && props.to));
+const isGradient = computed(() => Boolean(props.grad || (props.from && props.to)));
+const kpiStyle = computed(() =>
+  isGradient.value
+    ? { background: props.grad || `linear-gradient(135deg, ${props.from}, ${props.to})` }
+    : {}
+);
+const kpiSkin = computed(() => {
+  if (isGradient.value) return props.glass ? 'text-white shadow-lg cv-tile' : 'text-white shadow-lg';
+  return props.glass ? 'cv-sub' : 'bg-white dark:bg-n-solid-2 border-2 border-n-weak shadow-sm';
+});
 
 // ── contagem animada (só quando value é número) ──
 const displayNum = ref(0);
@@ -100,13 +114,8 @@ const goalBarColor = computed(() => {
     <TileAura v-if="state === 'record'" :intensity="1" gold />
     <div
       class="relative rounded-2xl h-full"
-      :class="[
-        compact ? 'px-4 py-3' : 'p-5',
-        isGradient
-          ? 'text-white shadow-lg'
-          : 'bg-white dark:bg-n-solid-2 border-2 border-n-weak shadow-sm',
-      ]"
-      :style="isGradient ? { background: `linear-gradient(135deg, ${from}, ${to})` } : {}"
+      :class="[compact ? 'px-4 py-3' : 'p-5', kpiSkin]"
+      :style="kpiStyle"
     >
       <p
         class="mb-1.5 font-medium"

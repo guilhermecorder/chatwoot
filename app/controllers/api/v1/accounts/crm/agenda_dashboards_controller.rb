@@ -153,10 +153,13 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
   WEEKDAYS = %w[Domingo Segunda Terça Quarta Quinta Sexta Sábado].freeze
 
   def by_weekday(since, until_at)
+    # EXTRACT devolve NUMERIC (BigDecimal) — a busca por Integer/Float nunca
+    # casava e o gráfico "Volume por dia da semana" vivia zerado (fix 12/09)
     counts = consultas(since, until_at)
              .group("EXTRACT(DOW FROM due_at AT TIME ZONE 'America/Sao_Paulo')").count
+             .transform_keys(&:to_i)
     (1..5).map do |dow| # seg-sex (fim de semana é bloqueado na agenda)
-      { dow: dow, label: WEEKDAYS[dow], count: counts[dow.to_f] || counts[dow] || 0 }
+      { dow: dow, label: WEEKDAYS[dow], count: counts[dow] || 0 }
     end
   end
 
