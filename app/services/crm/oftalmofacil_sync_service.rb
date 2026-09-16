@@ -303,7 +303,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
 
     if moved
       @result.moved += 1
-      backdate!(card, stage, surgery) if surgery.status_kind == 'realizada'
+      backdate!(card, stage, surgery)
       fire_automations(card, stage, previous_stage) if !@silent && recent_event?(surgery)
       return card.previous_changes.key?('id') ? 'created_card' : 'moved'
     end
@@ -322,8 +322,10 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     Rails.logger.warn "[OftalmoFácil sync] automações: #{e.message}"
   end
 
+  # 15/09: vale para TODOS os status — antes só a realizada era retrodatada e
+  # a primeira carga jogou 723 "Entrou em Cirurgia Agendada" no dia da carga
   def backdate!(card, stage, surgery)
-    real = surgery.surgery_date && Time.zone.parse("#{surgery.surgery_date.iso8601} #{surgery.surgery_hour.presence || '12:00'}")
+    real = reference_time(surgery)
     return if real.blank? || real > Time.current
 
     log = Crm::StageLog.where(crm_contact_id: card.id, stage_id: stage.id).order(entered_at: :desc).first
@@ -331,6 +333,14 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     card.update_column(:stage_moved_at, real) # rubocop:disable Rails/SkipsModelValidations
   rescue ArgumentError
     nil
+  end
+
+  # realizada = dia/hora da cirurgia; agendada/aguardando = quando foi
+  # marcada lá no OftalmoFácil (a data da cirurgia pode ser futura)
+  def reference_time(surgery)
+    return surgery.of_created_at unless surgery.status_kind == 'realizada'
+
+    surgery.surgery_date && Time.zone.parse("#{surgery.surgery_date.iso8601} #{surgery.surgery_hour.presence || '12:00'}")
   end
 
   def label_for(surgery)

@@ -5457,3 +5457,128 @@ crm_opportunity_radar_job registrados.
 - Sem migration, sem cron; deploy WEB. ✅ SUBIU 13/09 23h no commit 4761f9aaf
   (junto de 159–162; 158 no cac8ef20b). Deploy na VPS: WEB + SIDEKIQ (o job
   do 158). Meta Leads segue no working tree, fora dos commits.
+
+# RODADA 14/09 — item 164 (busca com atalhos do CRM + funil na linha; filtro Funil nas Conversas)
+
+## 164. ✅ 🔎 BUSCA: 2 BOTÕES DO CRM + FUNIL NA LINHA DO PACIENTE · CONVERSAS: FILTRO "FUNIL" (pedido dele 14/09, logo após a integração OftalmoFácil entrar no ar: "quero adicionar os dois botões do CRM no contato pesquisado; na linha do paciente mostre o funil em que ele está; adicione uma opção no 'conversas' para novo funil")
+- CONTEXTO DO DIA: ligação REAL do OftalmoFácil concluída de manhã (VPS
+  GoDaddy do Henrique, usuário só-leitura, firewalld, 1.349 cirurgias do
+  fornecedor desde 22/08/2023; primeira carga rodada) — detalhes na memória
+  oftalmofacil_conexao.md.
+- BUSCA (linha do contato em /search): os MESMOS 2 atalhos do card do CRM —
+  medalhão "Espaço do Paciente" (→ /patient/:id) e balão da conversa (→ a
+  conversa mais recente; sem conversa = balão tracejado que abre o contato
+  p/ iniciar uma). Abaixo do nome, um chip por funil: "🔻 Funil › ● Coluna"
+  (cor da coluna); contato sem CRM = chip tracejado "Fora do CRM".
+  Backend: _contact.json.jbuilder da busca ganha crm_journeys (pipeline/
+  stage/cor) + last_conversation_id (display_id); SearchService.filter_contacts
+  faz includes(crm_contacts: [:pipeline, :stage]) — sem N+1.
+- CONVERSAS (ChatList): botão "Funil" ANTES de "Colunas CRM", só aparece quando
+  a conta tem MAIS DE UM funil (com 1 funil nada muda na tela). Escolheu o
+  funil → pílula teal, lista mostra só conversas de contatos naquele funil
+  (qualquer coluna) e "Colunas CRM" passa a listar SÓ as colunas daquele
+  funil (coluna de outro funil já escolhida é limpa). Backend:
+  ConversationFinder#filter_by_crm_pipeline (param crm_pipeline_id; ignorado
+  quando crm_stage_id veio junto, pois coluna já implica funil). Payload da
+  conversa ganha crm_stage_ids + crm_pipeline_ids (contato pode estar em mais
+  de um funil; crm_stage_id mantido por compatibilidade) e o filtro
+  client-side (helpers.applyPageFilters) usa as listas — corrige o caso de
+  contato em 2 funis que sumia da lista filtrada por coluna.
+- ARQUIVOS: search/_contact.json.jbuilder · search_service.rb ·
+  conversations/partials/_conversation.json.jbuilder · conversation_finder.rb
+  · api/inbox/conversation.js · store/conversations/helpers.js · ChatList.vue
+  · modules/search/components/SearchResultContactItem.vue +
+  SearchResultContactsList.vue.
+- TESTES: rspec finder + search_service + search_controller 79/79 ✅; visual
+  na conta 3 c/ funil temporário "Funil teste 14/09" (2 colunas; contato 1 em
+  2 funis): busca "guilherme" mostrou 2 chips + 2 botões, balão abriu a
+  conversa mais recente, medalhão abriu o Espaço do Paciente; Conversas: Funil
+  → 3 conversas do Guilherme, Colunas CRM só c/ Entrada/Em avaliação. Funil de
+  teste APAGADO ao final (conta 3 voltou a 1 funil). Rubocop limpo nos .rb;
+  eslint dos arquivos novos limpo (bare strings PT-BR = padrão da casa).
+- Sem migration, sem cron; deploy WEB basta. AGUARDA "pode subir".
+
+# RODADA 14/09 — item 165 (dashboards Google / Meta / Agentes no kit, gráficos próprios, as duas "conversões" explicadas)
+
+## 165. ✅ 📊 DASHBOARDS GOOGLE (ADS + GA4), ANÚNCIOS (META) E AGENTES DE IA — gráficos mais claros e bonitos, sem rolagem lateral, e a diferença entre "Conversões enviadas" e "Conversões" na tela (pedido dele 14/09)
+- 2 PEÇAS NOVAS NO KIT (components-next/cevico): **HBars.vue** = lista de
+  barras horizontais (1 ou 2 séries na mesma escala, calha leve, ponta
+  arredondada, valor em texto ao lado, legenda automática c/ 2 séries, cor
+  por linha p/ identidade, EMPILHA sozinho quando o contêiner < 380px) e
+  **ShareBar.vue** = "pizza deitada" (barra 100% c/ até 6 fatias + Outros,
+  respiro de 2px entre fatias, legenda c/ valor e %). Sem lib. MiniBars (já
+  existia) virou o gráfico diário oficial. Seguem o método da skill dataviz
+  (marcas finas, texto nunca na cor da série, legenda c/ ≥2 séries, sem eixo
+  duplo, sem rosca p/ comparar valores próximos).
+- GOOGLE (GoogleDashboard.vue): faixa "Tem duas conversões nesta tela — e
+  elas não deveriam bater": **Conversões enviadas** = eventos que a CEVICO
+  mandou ao GA4 pelo Measurement Protocol quando o card entrou numa coluna
+  plugada (sent_log em google_ads_config; 1 por card; só HTTP 204; guarda 90
+  dias); **Eventos-chave (GA4)** (antes rotulado "Conversões" na tabela) =
+  metric keyEvents da GA4 Data API por sessionGoogleAdsKeyword = TUDO que o
+  GA4 marca como conversão nas sessões daquele termo (clique WhatsApp,
+  formulário do site, + os nossos), por sessão e no dia do clique → sempre
+  maior. Dica na tela: p/ bater, deixar como evento-chave no GA4 só os
+  eventos que a CEVICO envia. Rótulos dos 3 cards do estado ("a CEVICO
+  ENVIA" / "a CEVICO LÊ"); KPI c/ sub. Bloco Palavras: 4 números-resumo
+  (cliques/custo/CPC médio/eventos-chave), gráfico "Onde o dinheiro foi" (8
+  maiores custos, HBars) + tabela c/ barra fina de participação nos cliques
+  sob o termo (sem fundo lavado), coluna "Ev.-chave" c/ ponto verde. Bloco
+  Funil: "A jornada de quem veio do Google" (4 barras Leads→Agendaram→
+  Compareceram→Cirurgia c/ %) + tabela por termo. Conversões por dia =
+  MiniBars c/ eixo, valores, datas e tooltip + ShareBar por tipo de evento.
+  Faixa "Como cada número é calculado" (7 fórmulas). Lado a lado só em xl.
+- META (AdsReport.vue): chart.js/vue-chartjs REMOVIDOS da tela (HBars p/
+  Investimento × Receita e Leads × Conversões; ShareBar p/ fatia do
+  investimento). KPIs viraram 4 vidros DashKpi (Investimento/Leads/
+  Conversões/Receita) + linha CPL/CAC/ROAS/Campeão; impressões e cliques
+  totais no cabeçalho do bloco. TABELA SEM ROLAGEM LATERAL: sem
+  min-w-[900px]/overflow-x; grid de 8 colunas (Anúncio + 7 números) só em
+  xl (≥1280); impressões/cliques desceram p/ a linha de baixo do anúncio
+  ("56,6 mil impressões · 437 cliques"); abaixo de xl cada anúncio vira um
+  cartão c/ chips rotulados. Mesma lista COLS desenha cabeçalho, linha e
+  cartão.
+- AGENTES (AiAgentsDashboard.vue, aba do AutomationsHub): entrou no kit
+  (useCevicoPalette scope report:agentes + CevicoPalettePicker próprio,
+  botão "Paleta" acima da régua — a aba não tem banner): 4 vidros DashKpi
+  (Mais ativo em tile próprio, nome legível), "Ritmo do time, dia a dia"
+  (MiniBars 14d somando todos os agentes + dia mais cheio), "Fatia do
+  custo" (ShareBar, cor = agente), "Quem mais trabalhou" (HBars c/ medalhas,
+  cor = agente, custo+modelo na sub), cards por agente em cv-sub c/ MiniBars
+  de verdade (56px, 3 datas) no lugar das divs de 5px, chip do modelo,
+  ligados/desligados no cabeçalho.
+- TESTE LOCAL: as 3 telas dependem de API externa (GA4/Meta) → initializer
+  LOCAL fora do git (config/initializers/zz_cevico_local_demo.rb, no
+  .git/info/exclude; liga só com tmp/cevico_demo.on) que devolve dados
+  fictícios dos serviços GoogleKeywordsService/MetaAdsReportService, +
+  sent_log/carimbos meta_ads/page_ads/ai_usages semeados na conta 3 e
+  APAGADOS ao final (config real restaurada). Visual conferido em 1024 e
+  1440px (Meta: 8 colunas sem rolagem em 1440; cartões abaixo). Nada de
+  backend mudou. eslint dos arquivos novos limpo nas regras da casa.
+- Sem migration, sem cron; deploy WEB. AGUARDA "pode subir".
+
+# RODADA 15/09 — item 166 (OftalmoFácil: entrada em "Cirurgia Agendada" retrodatada + conserto da primeira carga)
+
+## 166. ✅ 🏥 OFTALMOFÁCIL — "ENTROU EM CIRURGIA AGENDADA: 723 nos 7 dias" (print dele 15/09, primeira carga real feita: 1.349 cirurgias do fornecedor)
+- CAUSA: o sync só retrodatava o StageLog da cirurgia REALIZADA (data/hora da
+  cirurgia). Os cards que a carga pôs em "Cirurgia Agendada" (agendada +
+  aguardando pagamento — 723 itens, muitos antigos que o Henrique nunca
+  fechou lá) ficaram com entered_at = dia da carga → Gestor/Metas/Meu Painel
+  contaram 723 entradas na semana (▲2792%) e o banner "Tudo bem" ficou
+  inflado.
+- CÓDIGO: OftalmofacilSyncService#backdate! vale para todos os status;
+  reference_time = realizada → dia/hora da cirurgia; agendada/aguardando →
+  of_created_at (quando foi MARCADA lá; a data da cirurgia pode ser futura).
+  Nunca retrodata para o futuro.
+- CONSERTO DOS DADOS JÁ CARREGADOS: rake `cevico:oftalmofacil_backdate_agendadas
+  ACCOUNT_ID=1` (dry-run lista card a card; `DRY=0` aplica) — só toca a
+  entrada criada pela carga (entered_at posterior à marcação), reescreve
+  entered_at (+ stage_moved_at se o card ainda está na coluna). Testado local
+  c/ card temporário: dry → aplica → data volta 12 dias → limpo.
+- PENDÊNCIA DE NEGÓCIO (perguntar a ele): cirurgias com data no PASSADO e
+  status ainda "agendada/ativa" no OftalmoFácil — hoje viram "Cirurgia
+  Agendada" na CEVICO. Opções: (a) Henrique atualiza o status lá (o cron traz
+  em 15 min); (b) regra na CEVICO: data passada + N dias sem status = tratar
+  como realizada. Decisão dele.
+- Sem migration, sem cron; deploy WEB+SIDEKIQ (o job roda no sidekiq) + rodar
+  o rake uma vez. AGUARDA "pode subir".
