@@ -169,9 +169,10 @@ class SearchService
 
     contacts_query = apply_time_filter(contacts_query, 'last_activity_at') if current_account.feature_enabled?('advanced_search')
 
+    # CEVICO: funil/coluna na linha da busca sem N+1
     @contacts = contacts_query.resolved_contacts(
       use_crm_v2: current_account.feature_enabled?('crm_v2')
-    ).order_on_last_activity_at('desc').page(params[:page]).per(15)
+    ).includes(crm_contacts: [:pipeline, :stage]).order_on_last_activity_at('desc').page(params[:page]).per(15)
   end
 
   def filter_articles

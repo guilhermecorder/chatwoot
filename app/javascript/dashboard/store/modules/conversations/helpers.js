@@ -43,12 +43,15 @@ export const applyPageFilters = (conversation, filters) => {
     teamId,
     conversationType,
     crmStageId,
+    crmPipelineId,
   } = filters;
   const {
     status: chatStatus,
     inbox_id: chatInboxId,
     labels: chatLabels = [],
     crm_stage_id: chatCrmStageId,
+    crm_stage_ids: chatCrmStageIds,
+    crm_pipeline_ids: chatCrmPipelineIds,
     meta = {},
     first_reply_created_at: firstReplyOn,
     waiting_since: waitingSince,
@@ -60,10 +63,14 @@ export const applyPageFilters = (conversation, filters) => {
   shouldFilter = filterByInbox(shouldFilter, inboxId, chatInboxId);
   shouldFilter = filterByTeam(shouldFilter, teamId, chatTeamId);
   shouldFilter = filterByLabel(shouldFilter, labels, chatLabels);
-  // filtro da jornada CEVICO (coluna do CRM do contato)
+  // filtro da jornada CEVICO (coluna do CRM do contato) — o contato pode
+  // estar em mais de um funil, então vale qualquer uma das colunas dele
   if (crmStageId) {
-    shouldFilter =
-      shouldFilter && Number(chatCrmStageId) === Number(crmStageId);
+    const stageIds = (chatCrmStageIds || [chatCrmStageId]).map(Number);
+    shouldFilter = shouldFilter && stageIds.includes(Number(crmStageId));
+  } else if (crmPipelineId) {
+    const pipelineIds = (chatCrmPipelineIds || []).map(Number);
+    shouldFilter = shouldFilter && pipelineIds.includes(Number(crmPipelineId));
   }
   shouldFilter = filterByUnattended(
     shouldFilter,

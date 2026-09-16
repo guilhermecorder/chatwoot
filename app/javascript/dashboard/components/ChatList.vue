@@ -215,9 +215,19 @@ const activeAssigneeTab = ref(wootConstants.ASSIGNEE_TYPE.ALL);
 // estágio do CRM (coluna da jornada) + etiqueta, no lugar das abas
 const journeyStageId = ref(null);
 const journeyLabel = ref(null);
+// funil (pipeline) escolhido — pedido 14/09: com mais de um funil, o time
+// escolhe o funil e as "Colunas CRM" passam a ser só as daquele funil
+const journeyPipelineId = ref(null);
 const crmPipelines = computed(() => store.getters['crm/getPipelines'] || []);
+const hasManyPipelines = computed(() => crmPipelines.value.length > 1);
+const selectedJourneyPipeline = computed(
+  () => crmPipelines.value.find(p => p.id === journeyPipelineId.value) || null
+);
 const journeyStages = computed(() =>
-  crmPipelines.value.flatMap(p => p.stages || [])
+  (selectedJourneyPipeline.value
+    ? [selectedJourneyPipeline.value]
+    : crmPipelines.value
+  ).flatMap(p => p.stages || [])
 );
 const journeyLabels = computed(
   () => store.getters['labels/getLabels'] || []
@@ -231,7 +241,7 @@ const selectedJourneyLabel = computed(
 );
 // item 102 (20/07): JANELINHA selecionável no lugar da nuvem de chips —
 // tela limpa; aperta "Colunas CRM" ou "Etiquetas", escolhe, ela se fecha
-const filterPanel = ref(null); // null | 'stage' | 'label'
+const filterPanel = ref(null); // null | 'pipeline' | 'stage' | 'label'
 const journeyFilterWrap = ref(null);
 const toggleFilterPanel = kind => {
   filterPanel.value = filterPanel.value === kind ? null : kind;
@@ -239,6 +249,20 @@ const toggleFilterPanel = kind => {
 const pickJourneyStage = s => {
   journeyStageId.value = s.id;
   filterPanel.value = null;
+};
+const pickJourneyPipeline = p => {
+  journeyPipelineId.value = p.id;
+  // coluna escolhida de OUTRO funil não faz sentido mais
+  if (
+    journeyStageId.value &&
+    !(p.stages || []).some(s => s.id === journeyStageId.value)
+  ) {
+    journeyStageId.value = null;
+  }
+  filterPanel.value = null;
+};
+const clearJourneyPipeline = () => {
+  journeyPipelineId.value = null;
 };
 const pickJourneyLabel = l => {
   journeyLabel.value = l.title;
@@ -438,11 +462,14 @@ const conversationFilters = computed(() => {
     teamId: props.teamId || undefined,
     conversationType: props.conversationType || undefined,
     crmStageId: journeyStageId.value || undefined,
+    crmPipelineId: journeyPipelineId.value || undefined,
   };
 });
 
-// trocar estágio/etiqueta da jornada = recarregar a lista do zero
-watch([journeyStageId, journeyLabel], () => resetAndFetchData());
+// trocar funil/estágio/etiqueta da jornada = recarregar a lista do zero
+watch([journeyStageId, journeyLabel, journeyPipelineId], () =>
+  resetAndFetchData()
+);
 
 const activeTeam = computed(() => {
   if (props.teamId) {
@@ -1211,6 +1238,33 @@ watch(conversationFilters, (newVal, oldVal) => {
       class="mx-3 mt-1.5 mb-0.5 space-y-1 relative"
     >
       <div class="flex items-center gap-1.5 flex-wrap">
+        <!-- Funil: só aparece quando há mais de um funil no CRM (14/09) -->
+        <template v-if="hasManyPipelines">
+          <button
+            v-if="!journeyPipelineId"
+            class="inline-flex items-center gap-1 px-2 h-6 rounded-lg border text-[11px] font-medium transition-colors"
+            :class="filterPanel === 'pipeline'
+              ? 'border-n-brand bg-n-brand/10 text-n-brand'
+              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            @click="toggleFilterPanel('pipeline')"
+          >
+            <span class="i-lucide-funnel text-[11px]" />
+            Funil
+            <span class="i-lucide-chevron-down text-[10px]" />
+          </button>
+          <button
+            v-else
+            class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
+            style="background: linear-gradient(135deg, #0F766E, #14B8A6)"
+            title="Clique para limpar"
+            @click="clearJourneyPipeline"
+          >
+            <span class="i-lucide-funnel text-[10px]" />
+            {{ selectedJourneyPipeline?.name || 'Funil' }}
+            <span class="i-lucide-x text-[10px]" />
+          </button>
+        </template>
+
         <!-- Colunas CRM: gatilho ou pílula do selecionado -->
         <button
           v-if="!journeyStageId"
@@ -1267,6 +1321,15 @@ watch(conversationFilters, (newVal, oldVal) => {
       >
         <div class="flex items-center gap-1 mb-2">
           <button
+            v-if="hasManyPipelines"
+            class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
+            :class="filterPanel === 'pipeline' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="filterPanel === 'pipeline' ? 'background: linear-gradient(135deg, #0F766E, #14B8A6)' : ''"
+            @click="filterPanel = 'pipeline'"
+          >
+            Funil
+          </button>
+          <button
             class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
             :class="filterPanel === 'stage' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
             :style="filterPanel === 'stage' ? 'background: linear-gradient(135deg, #152C61, #3B82F6)' : ''"
@@ -1290,7 +1353,22 @@ watch(conversationFilters, (newVal, oldVal) => {
           </button>
         </div>
         <div class="flex flex-wrap gap-1 max-h-44 overflow-y-auto" style="scrollbar-width: thin;">
-          <template v-if="filterPanel === 'stage'">
+          <template v-if="filterPanel === 'pipeline'">
+            <button
+              v-for="p in crmPipelines"
+              :key="p.id"
+              class="inline-flex items-center gap-1 px-2 h-6 rounded-full border text-[11px] transition-colors whitespace-nowrap"
+              :class="p.id === journeyPipelineId
+                ? 'border-teal-500 bg-teal-500/10 text-teal-700 dark:text-teal-300'
+                : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50'"
+              @click="pickJourneyPipeline(p)"
+            >
+              <span class="i-lucide-funnel text-[10px]" />
+              {{ p.name }}
+              <span class="text-n-slate-9">· {{ (p.stages || []).length }} colunas</span>
+            </button>
+          </template>
+          <template v-else-if="filterPanel === 'stage'">
             <button
               v-for="s in journeyStages"
               :key="s.id"

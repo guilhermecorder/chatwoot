@@ -1,4 +1,4 @@
-class ConversationFinder
+class ConversationFinder # rubocop:disable Metrics/ClassLength
   attr_reader :current_user, :current_account, :params
 
   DEFAULT_STATUS = 'open'.freeze
@@ -85,6 +85,7 @@ class ConversationFinder
     filter_by_team
     filter_by_labels
     filter_by_crm_stage
+    filter_by_crm_pipeline
     filter_by_query
     filter_by_source_id
   end
@@ -184,6 +185,14 @@ class ConversationFinder
 
     @conversations = @conversations.joins(contact: :crm_contacts)
                                    .where(crm_contacts: { stage_id: params[:crm_stage_id] })
+  end
+
+  # filtro da jornada CEVICO: conversas cujo contato está em QUALQUER coluna do funil
+  def filter_by_crm_pipeline
+    return if params[:crm_pipeline_id].blank? || params[:crm_stage_id].present?
+
+    @conversations = @conversations.joins(contact: :crm_contacts)
+                                   .where(crm_contacts: { pipeline_id: params[:crm_pipeline_id] })
   end
 
   def filter_by_source_id

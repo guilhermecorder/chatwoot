@@ -1,6 +1,8 @@
 <script setup>
 import { computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { frontendURL } from 'dashboard/helper/URLHelper';
+import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import countries from 'shared/constants/countries';
 import { dynamicTime } from 'shared/helpers/timeHelper';
 
@@ -41,11 +43,38 @@ const props = defineProps({
     type: Number,
     default: 0,
   },
+  // CEVICO (14/09): funil/coluna do CRM em que o paciente está + atalhos
+  crmJourneys: {
+    type: Array,
+    default: () => [],
+  },
+  lastConversationId: {
+    type: [String, Number],
+    default: null,
+  },
 });
+
+const router = useRouter();
 
 const navigateTo = computed(() => {
   return frontendURL(`accounts/${props.accountId}/contacts/${props.id}`);
 });
+
+// os mesmos 2 atalhos do card do CRM: Espaço do Paciente + conversa
+const openPatient = () => {
+  router.push(frontendURL(`accounts/${props.accountId}/patient/${props.id}`));
+};
+const openChat = () => {
+  const target = props.lastConversationId
+    ? `accounts/${props.accountId}/conversations/${props.lastConversationId}`
+    : `accounts/${props.accountId}/contacts/${props.id}`;
+  router.push(frontendURL(target));
+};
+const chatTitle = computed(() =>
+  props.lastConversationId
+    ? 'Abrir a conversa mais recente'
+    : 'Sem conversa ainda — abrir o contato para iniciar uma'
+);
 
 const countriesMap = computed(() => {
   return countries.reduce((acc, country) => {
@@ -103,12 +132,61 @@ const formattedLocation = computed(() => {
           <h5 class="text-sm font-medium truncate min-w-0 text-n-slate-12 py-1">
             {{ name }}
           </h5>
-          <span
-            v-if="updatedAtTime"
-            class="text-sm font-normal min-w-0 truncate text-n-slate-11"
-          >
-            {{ $t('SEARCH.UPDATED_AT', { time: updatedAtTime }) }}
+          <span class="flex items-center gap-1.5 shrink-0">
+            <span
+              v-if="updatedAtTime"
+              class="text-sm font-normal min-w-0 truncate text-n-slate-11"
+            >
+              {{ $t('SEARCH.UPDATED_AT', { time: updatedAtTime }) }}
+            </span>
+            <button
+              class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
+              title="Espaço do Paciente"
+              @click.prevent.stop="openPatient"
+            >
+              <PatientSpaceIcon :size="24" />
+            </button>
+            <button
+              class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors"
+              :class="
+                lastConversationId
+                  ? 'text-n-brand bg-n-brand/10 hover:bg-n-brand hover:text-white'
+                  : 'text-n-slate-9 border border-dashed border-n-weak hover:text-n-brand hover:border-n-brand'
+              "
+              :title="chatTitle"
+              @click.prevent.stop="openChat"
+            >
+              <span class="i-lucide-message-circle-more text-lg" />
+            </button>
           </span>
+        </div>
+        <!-- funil › coluna em que o paciente está (um chip por funil) -->
+        <div v-if="crmJourneys.length" class="flex flex-wrap gap-1">
+          <span
+            v-for="j in crmJourneys"
+            :key="`${j.pipelineId}-${j.stageId}`"
+            class="inline-flex items-center gap-1 px-2 h-5 rounded-full text-[11px] font-medium border border-n-weak text-n-slate-11 bg-n-alpha-1"
+            :title="`Funil ${j.pipelineName} · coluna ${j.stageName}`"
+          >
+            <span class="i-lucide-funnel text-[10px] text-n-slate-9" />
+            <span class="truncate max-w-[10rem]">{{ j.pipelineName }}</span>
+            <span class="text-n-slate-9">›</span>
+            <span
+              class="w-1.5 h-1.5 rounded-full shrink-0"
+              :style="{ background: j.stageColor || '#94A3B8' }"
+            />
+            <span class="truncate max-w-[12rem] text-n-slate-12">{{
+              j.stageName
+            }}</span>
+          </span>
+        </div>
+        <div
+          v-else
+          class="inline-flex items-center gap-1 px-2 h-5 rounded-full text-[11px] border border-dashed border-n-weak text-n-slate-9"
+          title="Este contato ainda não está em nenhum funil do CRM"
+        >
+          <span class="i-lucide-funnel text-[10px]" />
+          Fora do CRM
         </div>
         <div
           class="grid items-center gap-3 m-0 text-sm overflow-hidden min-w-0 grid-cols-[minmax(0,max-content)_auto_minmax(0,max-content)_auto_minmax(0,max-content)]"
