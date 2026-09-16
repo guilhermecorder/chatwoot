@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import MessageMeta from '../MessageMeta.vue';
+import CaptainGenerationDetails from '../CaptainGenerationDetails.vue';
 
 import { emitter } from 'shared/helpers/mitt';
 import { useMessageContext } from '../provider.js';
@@ -9,15 +10,38 @@ import { useI18n } from 'vue-i18n';
 
 import MessageFormatter from 'shared/helpers/MessageFormatter.js';
 import { BUS_EVENTS } from 'shared/constants/busEvents';
-import { MESSAGE_VARIANTS, ORIENTATION } from '../constants';
+import { MESSAGE_VARIANTS, ORIENTATION, SENDER_TYPES } from '../constants';
 
 const props = defineProps({
   hideMeta: { type: Boolean, default: false },
 });
 
-const { variant, orientation, inReplyTo, shouldGroupWithNext } =
-  useMessageContext();
+const {
+  variant,
+  orientation,
+  inReplyTo,
+  shouldGroupWithNext,
+  id,
+  sender,
+  senderType,
+} = useMessageContext();
 const { t } = useI18n();
+
+const isCaptainMessage = computed(
+  () =>
+    (sender.value?.type ?? senderType.value) === SENDER_TYPES.CAPTAIN_ASSISTANT
+);
+
+// CEVICO: balão do agente é azul com letra branca — meta em branco/80
+const metaColorClass = computed(() => {
+  if (variant.value === MESSAGE_VARIANTS.PRIVATE) return 'text-n-amber-12/50';
+  if (variant.value === MESSAGE_VARIANTS.AGENT) return 'text-white/80';
+  return 'text-n-slate-11';
+});
+
+const emailMetaClass = computed(() =>
+  variant.value === MESSAGE_VARIANTS.EMAIL ? 'px-3 pb-3' : ''
+);
 
 const varaintBaseMap = {
   // CEVICO: balão enviado em azul ROYAL com gradiente (contraste perfeito
@@ -117,18 +141,21 @@ const replyToPreview = computed(() => {
       />
     </div>
     <slot />
-    <MessageMeta
-      v-if="shouldShowMeta"
-      :class="[
-        flexOrientationClass,
-        variant === MESSAGE_VARIANTS.EMAIL ? 'px-3 pb-3' : '',
-        variant === MESSAGE_VARIANTS.PRIVATE
-          ? 'text-n-amber-12/50'
-          : variant === MESSAGE_VARIANTS.AGENT
-            ? 'text-white/80'
-            : 'text-n-slate-11',
-      ]"
-      class="mt-2"
-    />
+    <template v-if="shouldShowMeta">
+      <CaptainGenerationDetails
+        v-if="isCaptainMessage"
+        :message-id="id"
+        class="mt-2"
+      >
+        <template #meta>
+          <MessageMeta :class="[emailMetaClass, metaColorClass]" />
+        </template>
+      </CaptainGenerationDetails>
+      <MessageMeta
+        v-else
+        :class="[flexOrientationClass, emailMetaClass, metaColorClass]"
+        class="mt-2"
+      />
+    </template>
   </div>
 </template>

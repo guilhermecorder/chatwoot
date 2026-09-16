@@ -3,6 +3,7 @@ import { h, ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { provideSidebarContext, useSidebarResize } from './provider';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useConfig } from 'dashboard/composables/useConfig';
 import { useKbd } from 'dashboard/composables/utils/useKbd';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useStore } from 'vuex';
@@ -45,7 +46,14 @@ const emit = defineEmits([
 
 const { accountScopedRoute, isOnChatwootCloud } = useAccount();
 const { isAdmin } = useAdmin();
+const { isEnterprise } = useConfig();
 const store = useStore();
+
+// Calls run on the enterprise-only API (cloud runs enterprise); hide the entry
+// on community so it doesn't lead to a dashboard/CTA the backend can't serve.
+const isCallsAvailable = computed(
+  () => isOnChatwootCloud.value || isEnterprise
+);
 const searchShortcut = useKbd([`$mod`, 'k']);
 const { t } = useI18n();
 
@@ -74,6 +82,23 @@ const hasConversationUnreadCounts = computed(() => {
   return isFeatureEnabledonAccount.value(
     accountId.value,
     FEATURE_FLAGS.CONVERSATION_UNREAD_COUNTS
+  );
+});
+
+const hasFilteredUnreadCounts = computed(() => {
+  return (
+    hasConversationUnreadCounts.value &&
+    isFeatureEnabledonAccount.value(
+      accountId.value,
+      FEATURE_FLAGS.UNREAD_COUNT_FOR_FILTERS
+    )
+  );
+});
+
+const hasDataImport = computed(() => {
+  return isFeatureEnabledonAccount.value(
+    accountId.value,
+    FEATURE_FLAGS.DATA_IMPORT
   );
 });
 
@@ -201,6 +226,18 @@ const getLabelUnreadCount = useMapGetter(
 const getTeamUnreadCount = useMapGetter(
   'conversationUnreadCounts/getTeamUnreadCount'
 );
+const mentionsUnreadCount = useMapGetter(
+  'conversationUnreadCounts/getMentionsUnreadCount'
+);
+const participatingUnreadCount = useMapGetter(
+  'conversationUnreadCounts/getParticipatingUnreadCount'
+);
+const unattendedUnreadCount = useMapGetter(
+  'conversationUnreadCounts/getUnattendedUnreadCount'
+);
+const getFolderUnreadCount = useMapGetter(
+  'conversationUnreadCounts/getFolderUnreadCount'
+);
 const teams = useMapGetter('teams/getMyTeams');
 const contactCustomViews = useMapGetter('customViews/getContactCustomViews');
 const conversationCustomViews = useMapGetter(
@@ -228,14 +265,22 @@ watch([accountId, currentUserId], fetchSidebarSortPreferences, {
   immediate: true,
 });
 
+const hasUnreadCountsForSection = section => {
+  if (section === SIDEBAR_SORT_SECTIONS.FOLDERS) {
+    return hasFilteredUnreadCounts.value;
+  }
+
+  return hasConversationUnreadCounts.value;
+};
+
 const getSortOptionsForSection = section =>
   getSidebarSortOptions(section, {
-    hasUnreadCounts: hasConversationUnreadCounts.value,
+    hasUnreadCounts: hasUnreadCountsForSection(section),
   });
 
 const getSortForSection = section =>
   resolveSidebarSort(section, getSidebarSectionSort.value(section), {
-    hasUnreadCounts: hasConversationUnreadCounts.value,
+    hasUnreadCounts: hasUnreadCountsForSection(section),
   });
 
 const updateSortPreference = (section, sortBy) => {
@@ -255,6 +300,7 @@ const sortedFolders = computed(() =>
   sortSidebarItems(conversationCustomViews.value, {
     sortBy: getSortForSection(SIDEBAR_SORT_SECTIONS.FOLDERS),
     labelKey: view => view.name,
+    unreadCountKey: view => getFolderUnreadCount.value(view.id),
   })
 );
 
@@ -596,11 +642,19 @@ const menuItems = computed(() => {
       activeOn: ['captain_assistants_create_index'],
       children: [
         {
+          name: 'Overview',
+          label: t('SIDEBAR.CAPTAIN_OVERVIEW'),
+          activeOn: ['captain_assistants_overview_index'],
+          to: accountScopedRoute('captain_assistants_index', {
+            navigationPath: 'captain_assistants_overview_index',
+          }),
+        },
+        {
           name: 'FAQs',
           label: t('SIDEBAR.CAPTAIN_RESPONSES'),
           activeOn: [
             'captain_assistants_responses_index',
-            'captain_assistants_responses_pending',
+            'captain_assistants_faq_suggestions',
           ],
           to: accountScopedRoute('captain_assistants_index', {
             navigationPath: 'captain_assistants_responses_index',
@@ -651,6 +705,9 @@ const menuItems = computed(() => {
           label: t('SIDEBAR.CAPTAIN_SETTINGS'),
           activeOn: [
             'captain_assistants_settings_index',
+            'captain_assistants_settings_system_index',
+            'captain_assistants_settings_audience_index',
+            'captain_assistants_settings_schedule_index',
             'captain_assistants_guidelines_index',
             'captain_assistants_guardrails_index',
           ],
@@ -660,6 +717,17 @@ const menuItems = computed(() => {
         },
       ],
     },
+    ...(isCallsAvailable.value
+      ? [
+          {
+            name: 'Calls',
+            label: t('SIDEBAR.CALLS'),
+            icon: 'i-lucide-phone',
+            to: accountScopedRoute('calls_dashboard_index'),
+            activeOn: ['calls_dashboard_index'],
+          },
+        ]
+      : []),
     {
       name: 'Companies',
       label: t('SIDEBAR.COMPANIES'),
@@ -1074,6 +1142,12 @@ const menuItems = computed(() => {
             'settings_inboxes_add_agents',
           ],
           to: accountScopedRoute('settings_inbox_list'),
+        },
+        {
+          name: 'Settings Templates',
+          label: t('SIDEBAR.WHATSAPP_TEMPLATES'),
+          icon: 'i-lucide-layout-template',
+          to: accountScopedRoute('settings_templates'),
         },
         {
           name: 'Settings Labels',

@@ -2,7 +2,7 @@
 import { useStoreGetters, useStore } from 'dashboard/composables/store';
 import { computed, onMounted, ref } from 'vue';
 import { useBranding } from 'shared/composables/useBranding';
-import { picoSearch } from '@scmmishra/pico-search';
+import { picoSearch } from '@chatwoot/pico-search';
 import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
 import IntegrationItem from './IntegrationItem.vue';

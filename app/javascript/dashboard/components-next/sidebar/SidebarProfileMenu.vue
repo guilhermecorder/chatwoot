@@ -45,6 +45,12 @@ const showChatSupport = computed(() => {
   );
 });
 
+const toggleChatSupport = () => {
+  if (window.$chatwoot) {
+    window.$chatwoot.toggle();
+  }
+};
+
 // ── CEVICO: Alterar fontes — seleção em painel, igual ao menu de temas ──
 initCevicoFontCombo(); // aplica a combinação salva ao abrir o sistema
 
@@ -55,9 +61,7 @@ const menuItems = computed(() => {
       showOnCustomBrandedInstance: false,
       label: t('SIDEBAR_ITEMS.CONTACT_SUPPORT'),
       icon: 'i-lucide-life-buoy',
-      click: () => {
-        window.$chatwoot.toggle();
-      },
+      click: toggleChatSupport,
     },
     {
       show: true,
