@@ -5710,3 +5710,48 @@ crm_opportunity_radar_job registrados.
 - PRÉ-REQUISITOS: template `confirmar_cirurgia` aprovado na WABA da caixa que
   vai enviar (hoje o N8N usa inbox 5 — confirmar qual é); OftalmoFácil ligado
   (item 157) e sincronizando; decidir se IOP e CEVICO usam caixas diferentes.
+
+## 169. 🔜 🤖📞 AGENTE DE LIGAÇÃO (IA que ATENDE e FAZ ligações; campanhas por telefone) — pedido dele 17/09 ("postergando já faz um tempo")
+- O QUE ELE QUER: IA com base no script do "agente de agendamento" que atende
+  a ligação do paciente; campanhas em que a IA LIGA para os pacientes; não
+  precisa conduzir a conversa inteira — pode direcionar para o WhatsApp.
+- REALIDADE TÉCNICA: quem "atende" precisa ser um servidor de mídia (não o
+  navegador), fazendo voz→texto→LLM→voz em tempo real. Em Ruby não dá. Caminho
+  limpo: a Meta oferece SIP na Calling API (calling.sip.servers) — a ligação do
+  WhatsApp vai por SIP para uma PLATAFORMA DE AGENTE DE VOZ que fala pt-BR e
+  chama nossos webhooks (ferramentas: buscar paciente, horários livres, marcar,
+  enviar WhatsApp, transferir p/ atendente). Candidatas: ElevenLabs
+  Conversational AI (SIP trunk, vozes pt-BR excelentes, LLM à escolha incl.
+  Claude/Gemini, transferência p/ humano, ~US$0,08–0,10/min) ou OpenAI Realtime
+  (SIP nativo, ~US$0,06/min, voz boa mas menos natural em pt-BR). Saída
+  (campanha): a plataforma faz o INVITE SIP p/ a Meta (business-initiated via
+  SIP) — exige permissão prévia do paciente (7 dias) como qualquer ligação da
+  clínica; quem já ligou p/ a clínica concede automaticamente
+  (callback_permission_status ENABLED).
+- O QUE FICA NO NOSSO SISTEMA (construível já): tela "Agente de Ligação" em
+  Automações (script/persona a partir do agente de agendamento, horário em que
+  a IA atende × toca p/ humano, regra de transferência, mensagem de WhatsApp
+  de encaminhamento); campanhas de ligação (público = mesmo motor da Campanha
+  WhatsApp; fila; janela de horário; permissão checada/pedida antes; resultado
+  por paciente: atendeu/agendou/quer WhatsApp/não atendeu/recusou); webhooks de
+  ferramentas p/ a plataforma (paciente por telefone, agenda_slots,
+  AppointmentRecorder, envio de template, transferir); ingestão do resultado +
+  transcrição na MESMA tabela cevico_calls (handled_by: 'ia', outcome) → card
+  na conversa, Espaço do Paciente e Dashboard de Ligações já mostram.
+- PRÉ-REQUISITOS: (1) número habilitado na Meta (item 167); (2) escolher a
+  plataforma de voz e criar a conta (chave); (3) decidir a voz/persona e o
+  aviso "assistente virtual" no início da ligação (LGPD/boa prática).
+- ORDEM: R1 atender (IA recebe fora do horário/quando ninguém atende, agenda
+  ou encaminha p/ WhatsApp) → R2 campanha de ligação (permissão + fila + IA
+  liga) → R3 transferência quente p/ atendente.
+
+## 170. 🔜 🗺️ MAPA DE FLUXOS DOS AGENTES — visualizar as automações/agentes de IA como fluxograma (pedido dele 17/09: "tanto eu quanto o Henrique entendemos a visualização de fluxo; a interação seria mais precisa")
+- Tela "Fluxos" dentro de Automações: um fluxograma por agente/automação
+  (Radar, Follow-up bots, Colheitadeira, Gestor Autônomo, Auditor, Secretário
+  da Agenda, Lembretes d1/d0, Confirmação de cirurgia (168), Chamadas (167),
+  Agente de Ligação (169)), renderizado no browser (Mermaid via npm) a partir de
+  uma descrição declarativa em código (cada agente declara seus passos:
+  gatilho → condições → ações → saídas), com o estado ao vivo (ligado/desligado,
+  última execução, contadores) nos nós; clique no nó abre a configuração.
+- Regra de trabalho: toda rodada que cria/muda um agente entrega também o
+  fluxograma (no sistema e no resumo da rodada).
