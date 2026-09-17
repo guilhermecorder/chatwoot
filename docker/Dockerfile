@@ -1,3 +1,5 @@
+# 🗺️ CEVICO (item 170): o mermaid deixou o build do Vite mais pesado — sem este
+# limite maior o Node estoura o heap padrão ("JavaScript heap out of memory")
 # pre-build stage
 FROM node:24-alpine as node
 FROM ruby:3.4.4-alpine3.21 AS pre-builder
@@ -82,7 +84,7 @@ RUN mkdir -p /app/log
 
 # generate production assets if production environment
 RUN if [ "$RAILS_ENV" = "production" ]; then \
-  SECRET_KEY_BASE=precompile_placeholder RAILS_LOG_TO_STDOUT=enabled bundle exec rake assets:precompile \
+  NODE_OPTIONS="--max-old-space-size=6144" SECRET_KEY_BASE=precompile_placeholder RAILS_LOG_TO_STDOUT=enabled bundle exec rake assets:precompile \
   && rm -rf spec node_modules tmp/cache; \
   fi
 
