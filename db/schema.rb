@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_17_000001) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_17_173000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -571,6 +571,46 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_17_000001) do
     t.index ["slug", "locale", "portal_id"], name: "index_categories_on_slug_and_locale_and_portal_id", unique: true
   end
 
+  create_table "cevico_call_campaign_contacts", force: :cascade do |t|
+    t.bigint "call_campaign_id", null: false
+    t.bigint "contact_id", null: false
+    t.string "status", default: "queued", null: false
+    t.string "provider_conversation_id"
+    t.bigint "call_id"
+    t.string "outcome"
+    t.text "error"
+    t.integer "attempts", default: 0, null: false
+    t.datetime "called_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["call_campaign_id", "contact_id"], name: "idx_on_call_campaign_id_contact_id_354be64df7", unique: true
+    t.index ["call_campaign_id"], name: "index_cevico_call_campaign_contacts_on_call_campaign_id"
+    t.index ["contact_id"], name: "index_cevico_call_campaign_contacts_on_contact_id"
+    t.index ["provider_conversation_id"], name: "idx_on_provider_conversation_id_eaf197986e"
+  end
+
+  create_table "cevico_call_campaigns", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "name", null: false
+    t.integer "status", default: 0, null: false
+    t.jsonb "audience", default: {}, null: false
+    t.text "objective"
+    t.text "first_message"
+    t.string "apply_label"
+    t.jsonb "hours"
+    t.integer "daily_cap", default: 50, null: false
+    t.integer "concurrency", default: 2, null: false
+    t.datetime "scheduled_at"
+    t.datetime "started_at"
+    t.datetime "finished_at"
+    t.jsonb "stats", default: {}, null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "status"], name: "index_cevico_call_campaigns_on_account_id_and_status"
+    t.index ["account_id"], name: "index_cevico_call_campaigns_on_account_id"
+  end
+
   create_table "cevico_calls", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.bigint "inbox_id", null: false
@@ -603,10 +643,19 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_17_000001) do
     t.boolean "simulated", default: false, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "handled_by", default: "human", null: false
+    t.string "provider"
+    t.string "provider_call_id"
+    t.string "outcome"
+    t.bigint "campaign_id"
+    t.jsonb "analysis", default: {}, null: false
+    t.decimal "cost_usd", precision: 12, scale: 6
     t.index ["account_id", "meta_call_id"], name: "index_cevico_calls_on_account_id_and_meta_call_id", unique: true
+    t.index ["account_id", "provider_call_id"], name: "index_cevico_calls_on_account_id_and_provider_call_id"
     t.index ["account_id", "started_at"], name: "index_cevico_calls_on_account_id_and_started_at"
     t.index ["account_id", "status"], name: "index_cevico_calls_on_account_id_and_status"
     t.index ["account_id"], name: "index_cevico_calls_on_account_id"
+    t.index ["campaign_id"], name: "index_cevico_calls_on_campaign_id"
     t.index ["contact_id"], name: "index_cevico_calls_on_contact_id"
     t.index ["user_id"], name: "index_cevico_calls_on_user_id"
   end
@@ -2186,6 +2235,9 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_17_000001) do
   add_foreign_key "campaign_recipients", "campaigns", on_delete: :cascade
   add_foreign_key "campaign_recipients", "contacts", on_delete: :cascade
   add_foreign_key "campaign_recipients", "inboxes", on_delete: :cascade
+  add_foreign_key "cevico_call_campaign_contacts", "cevico_call_campaigns", column: "call_campaign_id", on_delete: :cascade
+  add_foreign_key "cevico_call_campaign_contacts", "contacts", on_delete: :cascade
+  add_foreign_key "cevico_call_campaigns", "accounts", on_delete: :cascade
   add_foreign_key "cevico_calls", "accounts", on_delete: :cascade
   add_foreign_key "cevico_calls", "contacts", on_delete: :nullify
   add_foreign_key "cevico_calls", "conversations", on_delete: :nullify

@@ -3,12 +3,17 @@
 # a gravação (Active Storage) e a transcrição/resumo do Gemini. O card na
 # conversa é a Message apontada por message_id — ela recebe o mesmo
 # to_payload em content_attributes.cevico_call e é atualizada a cada mudança.
+# Item 169: a assistente virtual (ElevenLabs) usa a MESMA tabela —
+# handled_by 'ai', provider_call_id = conversation_id de lá, outcome em
+# pt-BR, análise crua e custo; campaign_id liga à campanha de ligação.
 # == Schema Information
 #
 # Table name: cevico_calls
 #
 #  id                 :bigint           not null, primary key
+#  analysis           :jsonb            not null
 #  answered_at        :datetime
+#  cost_usd           :decimal(12, 6)
 #  direction          :integer          default("inbound"), not null
 #  display_name       :string
 #  duration           :integer
@@ -17,6 +22,9 @@
 #  error_code         :string
 #  error_message      :text
 #  events             :jsonb            not null
+#  handled_by         :string           default("human"), not null
+#  outcome            :string
+#  provider           :string
 #  recording_duration :integer
 #  recording_mime     :string
 #  sdp_answer         :text
@@ -32,22 +40,26 @@
 #  created_at         :datetime         not null
 #  updated_at         :datetime         not null
 #  account_id         :bigint           not null
+#  campaign_id        :bigint
 #  contact_id         :bigint
 #  conversation_id    :bigint
 #  inbox_id           :bigint           not null
 #  message_id         :bigint
 #  meta_call_id       :string           not null
+#  provider_call_id   :string
 #  user_id            :bigint
 #  wa_id              :string
 #
 # Indexes
 #
-#  index_cevico_calls_on_account_id                   (account_id)
-#  index_cevico_calls_on_account_id_and_meta_call_id  (account_id,meta_call_id) UNIQUE
-#  index_cevico_calls_on_account_id_and_started_at    (account_id,started_at)
-#  index_cevico_calls_on_account_id_and_status        (account_id,status)
-#  index_cevico_calls_on_contact_id                   (contact_id)
-#  index_cevico_calls_on_user_id                      (user_id)
+#  index_cevico_calls_on_account_id                       (account_id)
+#  index_cevico_calls_on_account_id_and_meta_call_id      (account_id,meta_call_id) UNIQUE
+#  index_cevico_calls_on_account_id_and_provider_call_id  (account_id,provider_call_id)
+#  index_cevico_calls_on_account_id_and_started_at        (account_id,started_at)
+#  index_cevico_calls_on_account_id_and_status            (account_id,status)
+#  index_cevico_calls_on_campaign_id                      (campaign_id)
+#  index_cevico_calls_on_contact_id                       (contact_id)
+#  index_cevico_calls_on_user_id                          (user_id)
 #
 # Foreign Keys
 #
@@ -65,6 +77,8 @@ class Crm::Call < ApplicationRecord
   belongs_to :contact, class_name: '::Contact', optional: true
   belongs_to :conversation, optional: true
   belongs_to :user, optional: true
+  # campanha de ligação da assistente virtual (item 169)
+  belongs_to :campaign, class_name: 'Crm::CallCampaign', optional: true
 
   has_one_attached :recording
 
@@ -74,12 +88,28 @@ class Crm::Call < ApplicationRecord
   # depois disso a ligação não muda mais de estado (só ganha gravação/transcrição)
   FINAL_STATUSES = %w[completed missed rejected failed canceled].freeze
   MAX_EVENTS = 60
+  # resultado da ligação da assistente virtual → texto humano (chip do card/dashboard)
+  OUTCOME_LABELS = {
+    'agendou' => 'agendou consulta', 'remarcou' => 'remarcou consulta', 'cancelou' => 'cancelou consulta',
+    'quer_whatsapp' => 'prefere continuar pelo WhatsApp', 'sem_interesse' => 'sem interesse', 'recado' => 'deixou recado',
+    'transferido' => 'transferida para a equipe', 'nao_atendeu' => 'não atendeu', 'outro' => 'outro'
+  }.freeze
 
   validates :meta_call_id, presence: true, uniqueness: { scope: :account_id }
 
   scope :in_period, ->(since, until_at) { where(started_at: since..until_at) }
   scope :answered, -> { where(status: [statuses[:accepted], statuses[:completed]]) }
   scope :recent_first, -> { order(started_at: :desc, id: :desc) }
+  scope :by_ai, -> { where(handled_by: 'ai') }
+  scope :by_human, -> { where(handled_by: 'human') }
+
+  def ai?
+    handled_by == 'ai'
+  end
+
+  def outcome_label
+    OUTCOME_LABELS[outcome.to_s] || outcome.presence
+  end
 
   def final?
     FINAL_STATUSES.include?(status)
@@ -119,25 +149,16 @@ class Crm::Call < ApplicationRecord
       id: id, meta_call_id: meta_call_id, direction: direction, status: status, end_reason: end_reason,
       started_at: started_at&.iso8601, answered_at: answered_at&.iso8601, ended_at: ended_at&.iso8601,
       duration: talk_seconds, wait_seconds: wait_seconds, simulated: simulated
-    }.merge(people_payload, media_payload)
+    }.merge(ai_payload, people_payload, media_payload)
     payload[:sdp_offer] = sdp_offer if include_sdp
     payload
   end
 
   # texto humano do card na conversa
   def card_content
-    return outbound_card_content if outbound?
+    return ai_card_content if ai?
 
-    case status
-    when 'completed', 'accepted'
-      ['📞 Chamada recebida', user && "atendida por #{user.available_name}", talk_label].compact.join(' · ')
-    when 'rejected'
-      end_reason == 'outside_hours' ? '📵 Chamada perdida · fora do horário de atendimento' : '📵 Chamada recusada'
-    when 'failed'
-      '📵 Chamada com falha'
-    else
-      '📵 Chamada perdida'
-    end
+    outbound? ? outbound_card_content : inbound_card_content
   end
 
   # "42 s", "3 min 42 s", "1 h 05 min"
@@ -154,6 +175,28 @@ class Crm::Call < ApplicationRecord
 
   private
 
+  def inbound_card_content
+    case status
+    when 'completed', 'accepted'
+      ['📞 Chamada recebida', user && "atendida por #{user.available_name}", talk_label].compact.join(' · ')
+    when 'rejected'
+      end_reason == 'outside_hours' ? '📵 Chamada perdida · fora do horário de atendimento' : '📵 Chamada recusada'
+    when 'failed'
+      '📵 Chamada com falha'
+    else
+      '📵 Chamada perdida'
+    end
+  end
+
+  # 🤖 ligação da assistente virtual: quem cuidou + duração + resultado
+  def ai_card_content
+    head = inbound? ? '🤖 Ligação atendida pela assistente virtual' : '🤖 A assistente ligou para o paciente'
+    return "#{head} · não atendida" if missed? || failed? || canceled?
+    return "#{head} · recusada" if rejected?
+
+    [head, talk_label, outcome_label].compact.join(' · ')
+  end
+
   def outbound_card_content
     case status
     when 'completed', 'accepted' then ['📞 Ligação para o paciente', talk_label].compact.join(' · ')
@@ -165,6 +208,12 @@ class Crm::Call < ApplicationRecord
 
   def talk_label
     talk_seconds.positive? ? self.class.human_duration(talk_seconds) : nil
+  end
+
+  # item 169: quem cuidou (human | ai), resultado e custo da assistente
+  def ai_payload
+    { handled_by: handled_by, provider: provider, campaign_id: campaign_id,
+      outcome: outcome, outcome_label: outcome_label, cost_usd: cost_usd&.to_f }
   end
 
   def people_payload

@@ -171,3 +171,11 @@ crm_oftalmofacil_sync_job:
   cron: '7,22,37,52 * * * *'
   class: 'Crm::OftalmofacilSyncJob'
   queue: low
+
+# 🤖📞 Discador das campanhas de ligação (item 169): a cada 5 min, só nas
+# contas com a assistente virtual ligada — pede à ElevenLabs as próximas
+# ligações da fila dentro do horário, respeitando simultâneas e teto do dia
+crm_voice_campaign_dialer_job:
+  cron: '*/5 * * * *'
+  class: 'Crm::VoiceAgent::CampaignDialerJob'
+  queue: low

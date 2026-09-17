@@ -5583,7 +5583,7 @@ crm_opportunity_radar_job registrados.
 - Sem migration, sem cron; deploy WEB+SIDEKIQ (o job roda no sidekiq) + rodar
   o rake uma vez. AGUARDA "pode subir".
 
-## 167. ✅ 📞 CHAMADAS DE WHATSAPP PRÓPRIAS (RODADA 1 CONSTRUÍDA 17/09 — branch feat/chamadas-nativas, commit 8d8f9a5; aguarda número habilitado na Meta p/ o teste real) — receber (e depois fazer) ligações de pacientes DENTRO do Sistema Unificado, no nosso código (pedido dele 16/09: "eu prefiro construir tudo próprio"; "vamos neste sentido")
+## 167. ✅ 📞 CHAMADAS DE WHATSAPP PRÓPRIAS (RODADA 1 CONSTRUÍDA 17/09 e MERGEADA no develop 17/09 à tarde — imagem ghcr.io/guilhermecorder/chatwoot:3cfa77f entregue p/ deploy; aguarda o teste real c/ o celular) — receber (e depois fazer) ligações de pacientes DENTRO do Sistema Unificado, no nosso código (pedido dele 16/09: "eu prefiro construir tudo próprio"; "vamos neste sentido")
 - CONTEXTO 16/09: fork atualizado para o Chatwoot v4.17.1 (merge 9cff06e, no ar).
   O Chatwoot traz chamadas de WhatsApp e canal de Voz (Twilio), mas TODO esse
   código vive em `enterprise/` — licença Chatwoot Enterprise: uso em produção
@@ -5651,6 +5651,14 @@ crm_opportunity_radar_job registrados.
   + "Ativar na Meta"; (3) teste real c/ o celular dele; (4) desligar a bandeira
   enterprise `channel_voice` da conta 1; (5) merge no develop + deploy (1
   migration 20260917000001).
+- MERGE + IMAGEM (17/09 ~13h50): o Henrique liberou as chamadas na Meta →
+  `git push --no-verify origin feat/chamadas-nativas:develop` (fast-forward;
+  o hook pre-push não existe no worktree) → Build & Push verde (run
+  35248827099) → imagem `ghcr.io/guilhermecorder/chatwoot:3cfa77f` (traz a
+  migration 20260917000001 + ffmpeg); reversão = `9cff06e`. Entregue p/ ele
+  implantar WEB+SIDEKIQ. Depois do deploy: Integrações → Ligações (WhatsApp)
+  → caixa → salvar → "Ativar ligações na Meta" → ligar do celular → desligar
+  `channel_voice` da conta 1.
 - COMO FACILITAR PRÓXIMAS ATUALIZAÇÕES DO CHATWOOT (proposta 16/09, baratos
   primeiro): rotas CEVICO em config/routes/cevico.rb via draw(:cevico);
   migrations c/ timestamp real (nunca redondo — 20260728000001 colidiu);
@@ -5711,7 +5719,7 @@ crm_opportunity_radar_job registrados.
   vai enviar (hoje o N8N usa inbox 5 — confirmar qual é); OftalmoFácil ligado
   (item 157) e sincronizando; decidir se IOP e CEVICO usam caixas diferentes.
 
-## 169. 🔜 🤖📞 AGENTE DE LIGAÇÃO (IA que ATENDE e FAZ ligações; campanhas por telefone) — pedido dele 17/09 ("postergando já faz um tempo")
+## 169. ✅ 🤖📞 AGENTE DE LIGAÇÃO (IA que ATENDE e FAZ ligações; campanhas por telefone) — RODADA 1 CONSTRUÍDA 17/09 (branch feat/fluxos-agente-ligacao; aguarda a conta ElevenLabs + número importado p/ o teste real em 18/09) — pedido dele 17/09 ("postergando já faz um tempo")
 - O QUE ELE QUER: IA com base no script do "agente de agendamento" que atende
   a ligação do paciente; campanhas em que a IA LIGA para os pacientes; não
   precisa conduzir a conversa inteira — pode direcionar para o WhatsApp.
@@ -5745,7 +5753,79 @@ crm_opportunity_radar_job registrados.
   ou encaminha p/ WhatsApp) → R2 campanha de ligação (permissão + fila + IA
   liga) → R3 transferência quente p/ atendente.
 
-## 170. 🔜 🗺️ MAPA DE FLUXOS DOS AGENTES — visualizar as automações/agentes de IA como fluxograma (pedido dele 17/09: "tanto eu quanto o Henrique entendemos a visualização de fluxo; a interação seria mais precisa")
+- DECISÕES 17/09 (dele): plataforma ELEVENLABS; números existentes ficam c/
+  as chamadas no navegador (167); a IA usa um NÚMERO PRÓPRIO; IA se apresenta
+  como "assistente virtual". DESCOBERTA 17/09 (mudou o desenho): a ElevenLabs
+  tem integração NATIVA c/ WhatsApp Business (painel dela → WhatsApp → Import
+  account → atribui o agente; atende e liga pela API `whatsapp/outbound-call`;
+  "Enable messaging" pode ficar OFF = só ligações) → sem SIP/TLS/codec. O SIP
+  ficou como plano B documentado (docs/AGENTE_LIGACAO.md §9).
+- CONSTRUÍDO 17/09 (contrato docs/AGENTE_LIGACAO.md; API conferida no
+  OpenAPI oficial; assinatura do webhook lida do SDK: `ElevenLabs-Signature:
+  t=…,v0=HMAC_SHA256(segredo, "t.corpo")`, janela 30 min):
+  · config em `ai_config['voice']` (segredos nunca voltam p/ a tela; `tools_token`
+    por conta protege as ferramentas) — `Crm::VoiceAgent::Settings`;
+  · `Crm::VoiceAgent::{Client (HTTParty, simulação CEVICO_VOICE_SIMULATE=1),
+    Script (script de VOZ ~75 linhas: frases curtas, números por extenso,
+    confirmar repetindo, máx. 2 horários, unidades/médicos/tabela de preços,
+    guardrail), ToolDefinitions (6 ferramentas webhook), ToolsService
+    (buscar_paciente, horarios_livres, marcar_consulta c/ trava Redis +
+    AppointmentRecorder, minha_consulta, enviar_whatsapp (texto livre → modelo
+    → erro legível), registrar_resultado; toda ferramenta faz upsert da
+    Crm::Call), AgentBody, SyncService (webhook+segredo → 6 ferramentas →
+    agente → atribui o número WhatsApp c/ mensagens OFF), PostCallService
+    (idempotente: transcrição "Assistente:/Paciente:", resumo, resultado,
+    custo US$, card na conversa, cable, Crm::AiUsage 'voice', fecha contato
+    da campanha; áudio mp3 → gravação)}`;
+  · `Webhooks::CevicoVoiceController` (`/webhooks/cevico/voice/:account_id/
+    {tools/:tool, initiation, post_call}`), concern `Crm::VoiceAgentSettings`
+    (update/test/sync/whatsapp_accounts/voices/state), `Crm::CallCampaign` +
+    `Crm::CallCampaignContact` (tabelas cevico_call_campaigns/_contacts,
+    público = mesmo motor da Campanha WhatsApp), `CallCampaignsController`,
+    `Crm::VoiceAgent::CampaignDialerJob` (cron */5: horário, simultâneas,
+    teto/dia, fecha `calling` > 30 min), colunas novas em cevico_calls
+    (handled_by, provider, provider_call_id, outcome, campaign_id, analysis,
+    cost_usd — migration 20260917173000), DashboardService c/ IA × humanos e
+    resultados, rake `cevico:voice_simulate|voice_tools|voice_sync`;
+  · FRONTEND: Integrações → "Agente de Ligação (IA)" (CevicoVoiceAgent.vue:
+    conexão/URLs, contas WhatsApp da ElevenLabs, persona/voz/LLM/idioma/
+    script c/ restaurar padrão/transferência, WhatsApp da clínica c/ modelo de
+    continuidade e de permissão, limites, Salvar · Sincronizar c/ log · ligar/
+    desligar, painel Estado c/ últimas ligações); Campanha → aba "Ligações"
+    (CallCampaignsTab.vue: composer em 4 passos, prever público, começar/
+    agendar, progresso, tabela de contatos c/ resultado); bolha/card/Espaço
+    do Paciente/Dashboard de Ligações mostram 🤖 assistente virtual + resultado.
+  · TESTES: rubocop 0 nos arquivos novos; rspec 92/0 (167+169+170+fix);
+    ferramentas e webhooks via curl (token certo 200/errado 401; HMAC válido
+    200/inválido ou velho 401); simulação semeada na conta 3 local (ligação
+    #12 recebida "agendou", #17 da campanha "remarcou", campanha #1 pausada).
+- INTEGRAÇÃO E VERIFICAÇÃO NO NAVEGADOR (17/09 fim da tarde, conta 3 local):
+  tela Agente de Ligação (estado, últimas ligações, "Como usar"), Campanha →
+  Ligações (campanha simulada listada c/ progresso), card 🤖 na conversa #342,
+  Dashboard de Ligações (KPIs da IA, Humanos × assistente, resultados), aba
+  Fluxos (25 fluxos, estado ao vivo, diagrama em claro/escuro/celular).
+  Ajustes feitos na integração: índice das campanhas devolve
+  `{ call_campaigns: [...] }` (a tela lia assim); lista de contas WhatsApp
+  devolve `items` (idem); interruptor/prompt do card no Painel dos agentes
+  espelha em `ai_config['voice']` (`mirror_voice_agent!` no update_ai);
+  cabeçalho de assinatura malformado vira 401 (não 500); VARREDOR no
+  discador (`sweep_stale_ai_calls`): ligação da IA tocando/em chamada há
+  mais de 2 h sem pós-chamada → failed `sem_pos_chamada` + card atualizado
+  (rótulos "Sem retorno da ElevenLabs"/"Sem registro" no dashboard);
+  cabeçalho do fluxo empilha no celular. ⚠️ Reiniciar o container `vite`
+  refaz o `pnpm install` do zero (entrypoint) — 8 min c/ rede lenta; evitar.
+- PRÉ-REQUISITOS DELE (18/09): conta ElevenLabs + chave de API; número novo
+  na WABA importado na ElevenLabs (Import account) c/ "Enable messaging" OFF
+  e Call settings ligado no WhatsApp Manager; modelo Meta c/ componente
+  `call_permission_request` (nome + idioma) p/ as campanhas; FRONTEND_URL
+  público. Depois: Integrações → Agente de Ligação → chave → Testar → Buscar
+  contas → escolher número → Salvar → "Sincronizar com a ElevenLabs" → ligar
+  do celular. Ponto a confirmar na 1ª sincronização real: código de idioma
+  (`pt-br`; fallback `pt`) — a tela mostra o erro cru da ElevenLabs.
+- FORA DESTA RODADA: transferência quente c/ contexto (SIP REFER), voz
+  clonada, agente por unidade, mensagens de texto no número da IA, plano B SIP.
+
+## 170. ✅ 🗺️ MAPA DE FLUXOS DOS AGENTES — CONSTRUÍDO 17/09 (branch feat/fluxos-agente-ligacao) — visualizar as automações/agentes de IA como fluxograma (pedido dele 17/09: "tanto eu quanto o Henrique entendemos a visualização de fluxo; a interação seria mais precisa")
 - Tela "Fluxos" dentro de Automações: um fluxograma por agente/automação
   (Radar, Follow-up bots, Colheitadeira, Gestor Autônomo, Auditor, Secretário
   da Agenda, Lembretes d1/d0, Confirmação de cirurgia (168), Chamadas (167),
@@ -5755,3 +5835,22 @@ crm_opportunity_radar_job registrados.
   última execução, contadores) nos nós; clique no nó abre a configuração.
 - Regra de trabalho: toda rodada que cria/muda um agente entrega também o
   fluxograma (no sistema e no resumo da rodada).
+- CONSTRUÍDO 17/09 (contrato docs/MAPA_DE_FLUXOS.md; insumo = passo a passo
+  real dos jobs em docs/MAPEAMENTO_FLUXOS_JOBS.md): DSL `Crm::FlowMap::Flow`
+  (gatilho/nós/arestas/live → `to_mermaid` flowchart TD c/ formas por tipo e
+  `classDef`; desligado = tracejado), `Crm::FlowMap::Registry` (25 fluxos em
+  `app/services/crm/flow_map/flows/*.rb`: scheduler, instagram, comments, nps,
+  conversation, calls, voice, reminders, followup_bots, sales, closing,
+  opportunity, form, column_automations, campaigns, copywriter, pagebuilder,
+  creative, harvest, manager, auditor, mentor, stalled_cards, oftalmofacil,
+  surgery_confirmation [N8N externo]), `GET crm/flows` + `crm/flows/:key`
+  (estado ao vivo: ligado, última execução, contadores), aba **Fluxos** em
+  Automações (FlowsMap.vue: lista agrupada c/ chips, cabeçalho c/ "Abrir
+  configuração", diagrama, rodapé; refresh 60 s; `?flow=` deep link; botão
+  "Ver fluxo" em cada card de agente), `FlowDiagram.vue` (mermaid 11 importado
+  sob demanda, tema claro/escuro, clique nos nós, zoom, Baixar PNG), item
+  "Fluxos" no menu. Spec `registry_spec` (todo agente do AGENT_META e todo job
+  CEVICO do schedule.yml têm fluxo; 50 definições validadas no mermaid.parse).
+- REGRA DE TRABALHO (vale a partir de agora): toda rodada que cria/muda um
+  agente entrega o fluxograma (`flows/<key>.rb` + Mermaid no resumo da rodada).
+

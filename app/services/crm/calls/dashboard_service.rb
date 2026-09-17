@@ -1,6 +1,8 @@
 # Números do Dashboard de Ligações (§5 do contrato): KPIs, por atendente,
 # por dia, por hora (horário de São Paulo), por motivo de fim e as 30 mais
 # recentes. Volume de uma clínica é pequeno — as contas rodam em Ruby.
+# Item 169: + KPIs da assistente virtual (ai_answered / ai_outbound),
+# humanos × assistente (by_handler) e resultados das ligações da IA (by_outcome).
 class Crm::Calls::DashboardService
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   ANSWERED = %w[accepted completed].freeze
@@ -20,6 +22,8 @@ class Crm::Calls::DashboardService
       by_day: by_day,
       by_hour: by_hour,
       by_reason: by_reason,
+      by_handler: by_handler,
+      by_outcome: by_outcome,
       recent: scope.recent_first.with_attached_recording.includes(:contact, :user, :conversation).limit(30).map(&:to_payload)
     }
   end
@@ -46,7 +50,29 @@ class Crm::Calls::DashboardService
       received: received, answered: answered, missed: inbound.missed.count, rejected: inbound.rejected.count,
       outbound: scope.outbound.count, answer_rate: pct(answered, received),
       avg_wait_seconds: avg(wait_list), avg_talk_seconds: avg(talks), total_talk_seconds: talks.sum
-    }
+    }.merge(ai_kpis)
+  end
+
+  # assistente virtual: recebidas atendidas por ela e ligações que ela fez
+  def ai_kpis
+    { ai_answered: inbound.by_ai.answered.count, ai_outbound: scope.outbound.by_ai.count }
+  end
+
+  # humanos × assistente virtual: ligações e tempo falado
+  def by_handler
+    %w[human ai].map do |handler|
+      calls = scope.where(handled_by: handler)
+      talks = calls.answered.select(:id, :duration, :answered_at, :ended_at).map(&:talk_seconds)
+      { handled_by: handler, count: calls.count, answered: talks.size, total_talk_seconds: talks.sum }
+    end
+  end
+
+  # resultados das ligações da assistente já encerradas (rótulos pt-BR; sem resultado = outro)
+  def by_outcome
+    counts = scope.by_ai.where(status: Crm::Call::FINAL_STATUSES).group(:outcome).count
+    counts.each_with_object(Hash.new(0)) { |(outcome, count), acc| acc[Crm::Call::OUTCOME_LABELS.key?(outcome.to_s) ? outcome : 'outro'] += count }
+          .map { |outcome, count| { outcome: outcome, label: Crm::Call::OUTCOME_LABELS[outcome], count: count } }
+          .sort_by { |row| -row[:count] }
   end
 
   # segundos de espera de cada recebida atendida

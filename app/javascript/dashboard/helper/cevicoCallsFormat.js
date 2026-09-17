@@ -95,6 +95,9 @@ export const END_REASON_LABELS = {
   failed: 'Falha na ligação',
   canceled: 'Cancelada',
   hangup: 'Desligada',
+  // 🤖 item 169: ligação da IA que ficou sem o webhook de fim
+  sem_pos_chamada: 'Sem retorno da ElevenLabs',
+  unknown: 'Sem registro',
 };
 
 export const STATUS_LABELS = {

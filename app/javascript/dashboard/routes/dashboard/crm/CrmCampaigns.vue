@@ -6,19 +6,20 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import ChipPicker from './components/ChipPicker.vue';
+import CallCampaignsTab from './components/CallCampaignsTab.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { relativeTime } from './helpers';
 
 const store = useStore();
 const router = useRouter();
 
-// aba inicial pode vir da URL (?tab=automations) — usada pelo hub de Automações
-const initialTab = ['campaigns', 'automations', 'panel'].includes(
+// aba inicial pode vir da URL (?tab=automations | ?tab=calls) — usada pelo hub de Automações
+const initialTab = ['campaigns', 'automations', 'calls', 'panel'].includes(
   new URLSearchParams(window.location.search).get('tab')
 )
   ? new URLSearchParams(window.location.search).get('tab')
   : 'campaigns';
-const activeTab = ref(initialTab); // campaigns | automations | panel
+const activeTab = ref(initialTab); // campaigns | automations | calls | panel
 
 // Tratamento de dados agora mora em Automações → Tratamento (item 70)
 const goToTreatmentHub = () =>
@@ -89,6 +90,15 @@ const panelStats = computed(() => {
 const inboxes = useMapGetter('inboxes/getInboxes');
 const labels = useMapGetter('labels/getLabels');
 const pipelines = useMapGetter('crm/getPipelines');
+
+// 🤖📞 aba Ligações (item 169): a assistente virtual precisa estar ligada e
+// com o modelo de permissão salvo em Integrações → Agente de Ligação
+const crmSettings = useMapGetter('crm/getSettings');
+const voiceConfig = computed(() => crmSettings.value?.voice || {});
+const voiceEnabled = computed(() => Boolean(voiceConfig.value.enabled));
+const permissionTemplateSet = computed(() =>
+  Boolean(voiceConfig.value.permission_template?.name)
+);
 
 const whatsappInboxes = computed(() =>
   inboxes.value.filter(i => i.channel_type === 'Channel::Whatsapp')
@@ -223,6 +233,8 @@ onMounted(async () => {
     store.dispatch('crm/fetchPipelines'),
     store.dispatch('labels/get'),
     store.dispatch('inboxes/get'),
+    // settings.voice: a aba Ligações precisa saber se a assistente está ligada
+    store.dispatch('crm/fetchSettings').catch(() => {}),
   ]);
   isLoading.value = false;
   refreshTimer = setInterval(() => {
@@ -517,6 +529,23 @@ const statsLine = c => {
           :style="activeTab === 'panel' ? 'background: linear-gradient(135deg, #1D4ED8, #60A5FA)' : ''"
           @click="activeTab = 'panel'"
         >Painel</button>
+        <button
+          class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+          :class="
+            activeTab === 'calls'
+              ? 'text-white font-bold shadow-sm'
+              : 'text-n-slate-11 hover:bg-n-alpha-1'
+          "
+          :style="
+            activeTab === 'calls'
+              ? 'background: linear-gradient(135deg, #7C3AED, #DB2777)'
+              : ''
+          "
+          @click="activeTab = 'calls'"
+        >
+          <span class="i-lucide-phone-call" />
+          Ligações
+        </button>
       </div>
 
       <div class="flex-1" />
@@ -691,6 +720,16 @@ const statsLine = c => {
             </div>
           </div>
         </div>
+      </template>
+
+      <!-- ══ ABA LIGAÇÕES: campanhas em que a assistente virtual liga (item 169) ══ -->
+      <template v-else-if="activeTab === 'calls'">
+        <CallCampaignsTab
+          :label-options="labelOptions"
+          :stage-options="stageOptions"
+          :voice-enabled="voiceEnabled"
+          :permission-template-set="permissionTemplateSet"
+        />
       </template>
 
       <!-- ══ ABA PAINEL: saúde dos números + visão geral ══ -->

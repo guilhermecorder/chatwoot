@@ -390,6 +390,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         merged.delete('draft') if merged['draft'].blank?
         merged
       end
+      # 🤖📞 item 169: o interruptor/prompt do card "Agente de Ligação" (Painel
+      # dos agentes) espelha em ai_config['voice'], que é o que a assistente lê
+      mirror_voice_agent!(cfg, permitted['voice']) if permitted.key?('voice')
     end
     crm_settings.update!(ai_config: cfg)
     render json: ai_json(crm_settings)
@@ -1297,6 +1300,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # 📞 ligações nativas (item 167) com os padrões preenchidos
   def calls_json(record)
     Crm::Calls::Settings.new(Current.account, crm_settings: record).to_h
+  end
+
+  # 🤖📞 item 169: mantém ai_config['voice'] (fonte da assistente) em dia com o
+  # que o card do Painel dos agentes salvou (enabled/prompt); o resto da config
+  # (chave, número, voz…) só muda pela tela de Integrações
+  def mirror_voice_agent!(cfg, agent)
+    voice = cfg['voice'] || {}
+    voice['enabled'] = agent['enabled'] == true if agent.key?('enabled')
+    voice['prompt'] = agent['prompt'].presence if agent.key?('prompt')
+    cfg['voice'] = voice
   end
 
   # 🤖📞 agente de ligação (item 169) — sem segredos, com defaults e URLs prontas

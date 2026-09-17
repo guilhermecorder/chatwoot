@@ -4,7 +4,9 @@
 // camelíza as chaves, então lemos nas duas grafias): ícone por direção e
 // status, título humano, "atendida por", duração, player da gravação,
 // transcrição dobrável (Atendente:/Paciente:), resumo e o botão
-// "Transcrever" quando a transcrição falhou/foi pulada.
+// "Transcrever" quando a transcrição falhou/foi pulada. Ligações da
+// assistente virtual (handled_by 'ai', item 169): título próprio, chip do
+// resultado (outcome_label) e o resumo da ElevenLabs no lugar do atendente.
 import { ref, computed } from 'vue';
 import { useMessageContext } from '../provider.js';
 import CevicoCallsAPI from 'dashboard/api/cevicoCalls';
@@ -31,7 +33,7 @@ const call = computed(() => ({
 const callId = computed(() => pick(call.value, 'id'));
 const status = computed(() => pick(call.value, 'status'));
 const direction = computed(() => pick(call.value, 'direction'));
-const title = computed(() => callTitle(call.value));
+const humanTitle = computed(() => callTitle(call.value));
 const icon = computed(() => callIcon(call.value));
 const recordingUrl = computed(() => pick(call.value, 'recording_url'));
 const summary = computed(() => pick(call.value, 'summary'));
@@ -52,6 +54,40 @@ const duration = computed(() => Number(pick(call.value, 'duration') || 0));
 const answered = computed(() =>
   ['accepted', 'completed'].includes(status.value)
 );
+
+// ── ligações da assistente virtual (item 169) ──
+const handledBy = computed(() => pick(call.value, 'handled_by') || 'human');
+const isAi = computed(() => handledBy.value === 'ai');
+const outcomeLabel = computed(
+  () => pick(call.value, 'outcome_label') || pick(call.value, 'outcome') || ''
+);
+// espelho do Crm::Call#card_content p/ IA: "Ligação atendida pela assistente
+// virtual · 2 min 10 s" / "A assistente ligou para o paciente · …"
+const title = computed(() => {
+  if (!isAi.value) return humanTitle.value;
+  const talk = formatTalkTime(duration.value);
+  const st = status.value;
+  if (direction.value === 'outbound') {
+    if (st === 'ringing') return 'A assistente está ligando para o paciente…';
+    if (st === 'accepted') {
+      return 'A assistente ligou para o paciente · em andamento';
+    }
+    if (st === 'completed') {
+      return `A assistente ligou para o paciente · ${talk}`;
+    }
+    if (st === 'failed') return 'A assistente ligou para o paciente · falhou';
+    return 'A assistente ligou para o paciente · não atendida';
+  }
+  if (st === 'ringing') {
+    return 'Chamada recebida · a assistente está atendendo…';
+  }
+  if (answered.value) {
+    return st === 'accepted'
+      ? 'Ligação atendida pela assistente virtual · em andamento'
+      : `Ligação atendida pela assistente virtual · ${talk}`;
+  }
+  return humanTitle.value;
+});
 
 const isTranscribing = computed(() =>
   ['pending', 'processing'].includes(transcriptStatus.value)
@@ -74,11 +110,16 @@ const transcriptLines = computed(() => {
     .map(line => line.trim())
     .filter(Boolean)
     .map(line => {
+      // a IA fala como "Assistente:" (PostCallService) — lado da clínica
       const m = line.match(
-        /^(Atendente|Paciente|Clínica|Cliente)\s*:\s*(.*)$/i
+        /^(Atendente|Assistente|Paciente|Clínica|Cliente)\s*:\s*(.*)$/i
       );
       return m
-        ? { who: m[1], text: m[2], mine: /atendente|cl[ií]nica/i.test(m[1]) }
+        ? {
+            who: m[1],
+            text: m[2],
+            mine: /atendente|assistente|cl[ií]nica/i.test(m[1]),
+          }
         : { who: '', text: line, mine: false };
     });
 });
@@ -125,6 +166,8 @@ const toneBox = computed(() => {
   if (['rejected', 'failed', 'canceled'].includes(status.value)) {
     return 'border-amber-300/60 bg-amber-500/5';
   }
+  // a assistente virtual tem a cor dela (roxo), nas duas direções
+  if (isAi.value) return 'border-purple-300/60 bg-purple-500/5';
   if (direction.value === 'outbound') return 'border-blue-300/60 bg-blue-500/5';
   return 'border-emerald-300/60 bg-emerald-500/5';
 });
@@ -147,11 +190,21 @@ const toneBox = computed(() => {
         <p class="font-semibold leading-snug">{{ title }}</p>
         <p class="text-[11px] text-n-slate-10 mt-0.5 flex flex-wrap gap-x-2">
           <span v-if="startedAt">{{ shortDateTime(startedAt) }}</span>
-          <span v-if="answered && waitSeconds">
+          <span v-if="isAi" class="font-medium text-purple-700">
+            🤖 assistente virtual
+          </span>
+          <span v-if="answered && waitSeconds && !isAi">
             esperou {{ formatTalkTime(waitSeconds) }}
           </span>
           <span v-if="simulated" class="text-n-slate-9">· simulação</span>
         </p>
+        <!-- resultado registrado pela IA (agendou, remarcou, recado…) -->
+        <span
+          v-if="isAi && outcomeLabel"
+          class="inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-700 border border-purple-500/20"
+        >
+          {{ outcomeLabel }}
+        </span>
       </div>
     </div>
 
@@ -169,7 +222,7 @@ const toneBox = computed(() => {
       v-if="summary"
       class="mt-2 text-xs text-n-slate-11 leading-relaxed rounded-lg bg-white/60 dark:bg-white/5 px-2.5 py-1.5"
     >
-      ✨ {{ summary }}
+      {{ isAi ? '🤖' : '✨' }} {{ summary }}
     </p>
 
     <!-- transcrição / transcrever -->

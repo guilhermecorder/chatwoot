@@ -985,6 +985,13 @@ const menuItems = computed(() => {
                       icon: 'i-lucide-bot',
                       to: accountScopedRoute('cevico_automations', {}, { tab: 'robos' }),
                     },
+                    // 🗺️ item 170: fluxograma de cada agente/automação com o estado ao vivo
+                    {
+                      name: 'Automations Flows',
+                      label: 'Fluxos',
+                      icon: 'i-lucide-git-branch',
+                      to: accountScopedRoute('cevico_automations', {}, { tab: 'fluxos' }),
+                    },
                   ]
                 : []),
               ...(isAdmin.value

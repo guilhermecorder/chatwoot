@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
@@ -20,6 +20,9 @@ const router = useRouter();
 const { accountId } = useAccount();
 const { isAdmin } = useAdmin();
 
+// 🗺️ item 170: a aba Fluxos traz o Mermaid (pesado) — carrega só quando abre
+const FlowsMap = defineAsyncComponent(() => import('./FlowsMap.vue'));
+
 const inboxes = useMapGetter('inboxes/getInboxes');
 // caixas de WhatsApp (Colheitadeira envia por uma delas)
 const whatsappInboxes = computed(() =>
@@ -30,7 +33,7 @@ const accountLabels = useMapGetter('labels/getLabels');
 const teamAgents = useMapGetter('agents/getAgents');
 const currentUserId = useMapGetter('getCurrentUserID');
 
-const TABS = ['robos', 'regras', 'agentes', 'painel_ia', 'programacao', 'resultados', 'tratamento'];
+const TABS = ['robos', 'regras', 'agentes', 'painel_ia', 'fluxos', 'programacao', 'resultados', 'tratamento'];
 
 // atendente concedido só vê as abas da área dele: robôs/resultados =
 // Automações; tratamento = Tratamento de dados; o resto é de admin
@@ -42,7 +45,7 @@ const canSee = capability =>
   isAdmin.value || myGrants.value.includes(capability);
 const visibleTabs = computed(() =>
   TABS.filter(tab => {
-    if (['robos', 'resultados'].includes(tab)) return canSee('automations');
+    if (['robos', 'resultados', 'fluxos'].includes(tab)) return canSee('automations');
     if (tab === 'tratamento') return canSee('data_tools');
     return isAdmin.value; // regras, agentes de IA, programação
   })
@@ -89,6 +92,8 @@ const aiAgents = ref({
   manager: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', drop_pct: '' },
   auditor: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', daily_cap: '' },
   creative: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', winners_count: '', variations_count: '' },
+  // 🤖📞 item 169: só o espelho ligado/desligado — a configuração mora em Integrações
+  voice: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
 });
 
 const LOOKBACK_OPTIONS = [
@@ -951,6 +956,36 @@ const publishAgent = async key => {
   }
 };
 
+// ── 🗺️ Mapa de Fluxos (item 170) ──
+// "Ver fluxo" no card → aba Fluxos já no fluxograma daquele agente
+const openFlow = key => {
+  activeTab.value = 'fluxos';
+  router.replace({ query: { tab: 'fluxos', flow: key } });
+};
+// "Abrir configuração" no mapa chega com ?tab=agentes&agent=<chave>:
+// expande o card certo e desce até ele
+const focusAgent = key => {
+  if (!key || !aiAgents.value[key]) return;
+  expandedAgents.value = { ...expandedAgents.value, [key]: true };
+  nextTick(() => {
+    setTimeout(() => {
+      document.getElementById(`cv-agent-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 150);
+  });
+};
+watch(
+  () => route.query.agent,
+  key => {
+    if (activeTab.value === 'agentes') focusAgent(key);
+  }
+);
+// 🤖📞 Agente de Ligação: a tela dele é a de Integrações (rota do item 169;
+// se ainda não existir nesta build, cai na lista de Integrações)
+const openVoiceSettings = () => {
+  const name = router.hasRoute('crm_integrations_voice_agent') ? 'crm_integrations_voice_agent' : 'crm_integrations';
+  router.push({ name, params: { accountId: accountId.value } });
+};
+
 // ── Interruptor DEFINITIVO do agente ──
 // Liga/desliga NA HORA (grava direto no banco, sem depender do botão
 // "Salvar agentes"). Desligado = o agente não roda por nenhum caminho:
@@ -1214,12 +1249,27 @@ const AGENT_META = {
     ],
     suggestion: 'Copy é fino — Sonnet no esforço alto escreve as melhores variações.',
   },
+  // 🤖📞 item 169: roda na ElevenLabs — configuração em Integrações → Agente de Ligação (IA)
+  voice: {
+    title: 'Agente de Ligação',
+    icon: 'i-lucide-phone-call',
+    gradient: 'linear-gradient(135deg, #7C3AED, #DB2777)',
+    color: '#7C3AED',
+    tag: 'Atendimento',
+    description: 'Assistente virtual que atende as ligações no número próprio da clínica e liga para pacientes nas campanhas, pela ElevenLabs. Se apresenta como assistente virtual, consulta a agenda, marca a consulta, manda a confirmação pelo WhatsApp da clínica e transfere para um humano quando precisa.',
+    triggers: [
+      { icon: 'i-lucide-phone-incoming', label: 'Ligação recebida no número da IA' },
+      { icon: 'i-lucide-phone-outgoing', label: 'Campanha de ligação (liga com a permissão do paciente)' },
+      { icon: 'i-lucide-rocket', label: 'Resultado vira card na conversa e no Dashboard de Ligações' },
+    ],
+    suggestion: 'Configure em Integrações → Agente de Ligação (IA).',
+  },
 };
 
 // ── Seções da aba "agentes": os 16 agentes agrupados por área ──
 // (são muitos — o agrupamento dá o mapa; card/sanfona continuam os mesmos)
 const AGENT_GROUPS = [
-  { title: 'Atendimento ao paciente', icon: '🗣️', keys: ['conversation', 'scheduler', 'instagram', 'comments', 'nps'] },
+  { title: 'Atendimento ao paciente', icon: '🗣️', keys: ['conversation', 'scheduler', 'instagram', 'comments', 'nps', 'voice'] },
   { title: 'Vendas e fechamento', icon: '💰', keys: ['sales', 'closing', 'opportunity', 'form'] },
   { title: 'Marketing e aquisição', icon: '📣', keys: ['copywriter', 'pagebuilder', 'creative', 'harvest'] },
   { title: 'Gestão e evolução do time', icon: '📈', keys: ['manager', 'auditor', 'mentor'] },
@@ -1353,6 +1403,7 @@ const loadAgents = async () => {
       response_goal_minutes: (oppDraft?.response_goal_minutes || a.opportunity?.response_goal_minutes) || 15,
     },
     mentor: load('mentor'),
+    voice: load('voice'),
     comments: {
       ...load('comments'),
       page_access_token: '',
@@ -1910,6 +1961,14 @@ onUnmounted(() => {
           :style="activeTab === 'painel_ia' ? { background: 'linear-gradient(135deg, #9D174D, #DB2777)' } : {}"
           @click="activeTab = 'painel_ia'"
         ><span class="i-lucide-activity text-xs" />Painel dos agentes</button>
+        <!-- 🗺️ item 170: fluxograma de cada agente/automação -->
+        <button
+          v-if="visibleTabs.includes('fluxos')"
+          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+          :class="activeTab === 'fluxos' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'fluxos' ? { background: 'linear-gradient(135deg, #1D4ED8, #60A5FA)' } : {}"
+          @click="activeTab = 'fluxos'"
+        ><span class="i-lucide-git-branch text-xs" />Fluxos</button>
         <button
           v-if="visibleTabs.includes('programacao')"
           class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
@@ -2289,6 +2348,7 @@ onUnmounted(() => {
         </p>
         <div
           v-for="(agent, key) in groupAgents(group)"
+          :id="`cv-agent-${key}`"
           :key="key"
           class="rounded-2xl border-2 bg-n-solid-2 overflow-hidden"
           :style="{ borderColor: AGENT_META[key].color + '40' }"
@@ -2324,11 +2384,20 @@ onUnmounted(() => {
                   >
                     📝 Rascunho não publicado
                   </span>
+                  <!-- 🗺️ item 170: abre o fluxograma deste agente na aba Fluxos -->
+                  <button
+                    class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-n-alpha-1 text-n-slate-11 hover:bg-n-alpha-2 flex items-center gap-1"
+                    title="Ver o caminho que este agente percorre (aba Fluxos)"
+                    @click.stop="openFlow(key)"
+                  >
+                    <span class="i-lucide-git-branch text-[10px]" />
+                    Ver fluxo
+                  </button>
                 </div>
                 <p class="text-xs text-n-slate-10 mt-1" :class="expandedAgents[key] ? '' : 'line-clamp-2'">{{ AGENT_META[key].description }}</p>
               </div>
               <!-- INTERRUPTOR definitivo: grava na hora, sem "Salvar" -->
-              <div class="flex flex-col items-end gap-1 flex-shrink-0" @click.stop>
+              <div v-if="key !== 'voice'" class="flex flex-col items-end gap-1 flex-shrink-0" @click.stop>
                 <button
                   class="relative w-14 h-7 rounded-full transition-colors disabled:opacity-50"
                   :class="agent.enabled ? 'bg-green-500' : 'bg-n-alpha-3'"
@@ -2351,14 +2420,58 @@ onUnmounted(() => {
                 </button>
                 <span class="text-[9px] text-n-slate-9">salva na hora</span>
               </div>
+              <!-- 🤖📞 Agente de Ligação (item 169): o interruptor mora em Integrações → Agente de Ligação (IA) -->
+              <div v-else class="flex flex-col items-end gap-1 flex-shrink-0" @click.stop>
+                <button
+                  class="text-[11px] px-3 py-1.5 rounded-lg font-medium text-white shadow-sm"
+                  :style="{ background: AGENT_META[key].gradient }"
+                  title="Liga, desliga e configura em Integrações → Agente de Ligação (IA)"
+                  @click="openVoiceSettings"
+                >
+                  Configurar
+                </button>
+                <span class="text-[9px] text-n-slate-9">liga/desliga lá</span>
+              </div>
               <span
                 class="i-lucide-chevron-down text-n-slate-9 text-lg mt-2 flex-shrink-0 transition-transform duration-200"
                 :class="expandedAgents[key] ? 'rotate-180' : ''"
               />
             </div>
 
+            <!-- 🤖📞 Agente de Ligação: configuração inteira mora em Integrações (ElevenLabs) — o card só aponta -->
+            <div v-if="expandedAgents[key] && key === 'voice'" class="cevico-agent-body">
+              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5">Onde se aplica</p>
+              <div class="flex flex-wrap gap-1.5 mb-4">
+                <span
+                  v-for="(t, i) in AGENT_META[key].triggers"
+                  :key="i"
+                  class="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-n-alpha-1 text-n-slate-11 border border-n-weak"
+                >
+                  <span :class="t.icon" class="text-xs" :style="{ color: AGENT_META[key].color }" />
+                  {{ t.label }}
+                </span>
+              </div>
+              <div class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 text-xs text-n-slate-11 flex items-center gap-2 flex-wrap">
+                <span class="i-lucide-lightbulb text-sm" :style="{ color: AGENT_META[key].color }" />
+                <span class="flex-1 min-w-0">{{ AGENT_META[key].suggestion }}</span>
+                <button
+                  class="text-[11px] px-3 py-1.5 rounded-lg font-medium text-white"
+                  :style="{ background: AGENT_META[key].gradient }"
+                  @click="openVoiceSettings"
+                >
+                  Abrir configuração
+                </button>
+                <button
+                  class="text-[11px] px-3 py-1.5 rounded-lg font-medium bg-n-alpha-1 text-n-slate-11 hover:bg-n-alpha-2"
+                  @click="openFlow(key)"
+                >
+                  Ver fluxo
+                </button>
+              </div>
+            </div>
+
             <!-- corpo completo do agente: desce com animação leve -->
-            <div v-if="expandedAgents[key]" class="cevico-agent-body">
+            <div v-else-if="expandedAgents[key]" class="cevico-agent-body">
 
             <!-- Onde se aplica -->
             <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5">Onde se aplica</p>
@@ -3965,6 +4078,11 @@ onUnmounted(() => {
 
       <!-- ══ PAINEL DOS AGENTES DE IA (item 85, só admin) ══ -->
       <AiAgentsDashboard v-else-if="activeTab === 'painel_ia'" />
+
+      <!-- ══ 🗺️ MAPA DE FLUXOS (item 170) — componente sob demanda ══ -->
+      <div v-else-if="activeTab === 'fluxos'">
+        <FlowsMap />
+      </div>
 
       <!-- ══ TRATAMENTO DE DADOS UNIFICADO (item 70) ══ -->
       <div v-else-if="activeTab === 'tratamento'" class="max-w-3xl">

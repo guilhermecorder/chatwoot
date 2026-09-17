@@ -4,7 +4,9 @@
 // (variant="space", card da fileira). Busca `crm/calls?contact_id=&limit=5`:
 // total, tempo total falado, última chamada, lista curta com player e link
 // pra conversa; botão "Ligar" (se o módulo está ligado) consulta a permissão
-// na Meta → liga, ou oferece "Pedir permissão" e mostra o estado.
+// na Meta → liga, ou oferece "Pedir permissão" e mostra o estado. Ligações da
+// assistente virtual (handled_by 'ai', item 169) mostram "🤖 assistente
+// virtual" no lugar do atendente + o resultado e o resumo.
 import { ref, computed, watch, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
@@ -177,7 +179,10 @@ const openConversation = c => {
 const rowLabel = c => {
   const dir = c.direction === 'outbound' ? 'Ligação' : 'Recebida';
   const st = STATUS_LABELS[c.status] || c.status;
-  const who = c.user?.name ? ` · ${c.user.name.split(' ')[0]}` : '';
+  // ligação da assistente virtual: não tem atendente, é a IA
+  let who = '';
+  if (c.handled_by === 'ai') who = ' · 🤖 assistente virtual';
+  else if (c.user?.name) who = ` · ${c.user.name.split(' ')[0]}`;
   const talk = Number(c.duration) ? ` · ${formatTalkTime(c.duration)}` : '';
   return `${dir} · ${st}${who}${talk}`;
 };
@@ -296,6 +301,21 @@ const rowLabel = c => {
               />
             </button>
           </div>
+          <!-- resultado + resumo das ligações da assistente virtual -->
+          <p
+            v-if="c.handled_by === 'ai' && (c.outcome_label || c.summary)"
+            class="text-[10px] text-n-slate-10 mt-0.5 pl-5 flex items-center gap-1.5 min-w-0"
+          >
+            <span
+              v-if="c.outcome_label"
+              class="px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-700 flex-shrink-0"
+            >
+              {{ c.outcome_label }}
+            </span>
+            <span v-if="c.summary" class="truncate" :title="c.summary">
+              {{ c.summary }}
+            </span>
+          </p>
           <audio
             v-if="playing === c.id && c.recording_url"
             controls

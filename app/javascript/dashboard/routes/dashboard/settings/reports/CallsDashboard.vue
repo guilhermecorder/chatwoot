@@ -39,6 +39,7 @@ const pal = useCevicoPalette({
     { id: 'dias', label: 'Por dia', icon: 'i-lucide-calendar-range' },
     { id: 'horas', label: 'Por hora do dia', icon: 'i-lucide-clock' },
     { id: 'motivos', label: 'Como terminaram', icon: 'i-lucide-pie-chart' },
+    { id: 'ia', label: 'Assistente virtual', icon: 'i-lucide-bot' },
     { id: 'recentes', label: 'Últimas chamadas', icon: 'i-lucide-history' },
   ],
 });
@@ -143,6 +144,30 @@ const reasonItems = computed(() =>
     label: END_REASON_LABELS[r.reason] || r.reason || 'Sem motivo',
     value: Number(r.count || 0),
   }))
+);
+
+// ── humanos × assistente virtual (item 169) — payload antigo não traz
+// by_handler/by_outcome/kpis.ai_*: os blocos só aparecem quando vierem ──
+const HANDLER_LABELS = { human: 'Atendentes', ai: 'Assistente virtual' };
+const hasHandlerData = computed(() => Array.isArray(data.value?.by_handler));
+const handlerRows = computed(() =>
+  (data.value?.by_handler || []).map(h => ({
+    key: h.handled_by,
+    label: HANDLER_LABELS[h.handled_by] || h.handled_by || 'Outros',
+    sub: `${formatTalkTime(h.total_talk_seconds)} em ligação`,
+    values: [Number(h.count || 0)],
+  }))
+);
+const hasOutcomeData = computed(() => Array.isArray(data.value?.by_outcome));
+const outcomeItems = computed(() =>
+  (data.value?.by_outcome || []).map(o => ({
+    label: o.label || o.outcome || 'Sem resultado',
+    value: Number(o.count || 0),
+  }))
+);
+const hasAiKpis = computed(
+  () =>
+    kpis.value.ai_answered !== undefined || kpis.value.ai_outbound !== undefined
 );
 
 // ── últimas chamadas ──
@@ -274,6 +299,25 @@ const contactPhone = c =>
             :value="formatTalkTime(kpis.total_talk_seconds)"
             sub="em ligação no período"
           />
+          <!-- assistente virtual (item 169) — só com o payload novo -->
+          <template v-if="hasAiKpis">
+            <DashKpi
+              compact
+              glass
+              label="Atendidas pela IA"
+              :value="Number(kpis.ai_answered || 0)"
+              sub="a assistente virtual atendeu"
+              :grad="blockFamily('ia')[0]"
+            />
+            <DashKpi
+              compact
+              glass
+              label="Ligações feitas pela IA"
+              :value="Number(kpis.ai_outbound || 0)"
+              sub="campanhas de ligação"
+              :grad="blockFamily('ia')[1]"
+            />
+          </template>
         </div>
 
         <!-- por atendente + motivos -->
@@ -306,6 +350,55 @@ const contactPhone = c =>
               Como terminaram
             </h2>
             <ShareBar :items="reasonItems" :family="blockFamily('motivos')" />
+          </div>
+        </div>
+
+        <!-- humanos × assistente virtual (item 169) -->
+        <div
+          v-if="hasHandlerData || hasOutcomeData"
+          class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6"
+        >
+          <div
+            v-if="hasHandlerData"
+            class="cv-block p-5 sm:p-6"
+            :style="blockVars('ia')"
+          >
+            <h2
+              class="text-sm font-bold text-n-slate-12 mb-4 flex items-center gap-2"
+            >
+              <span class="cv-icon">
+                <span class="i-lucide-bot text-base" />
+              </span>
+              Humanos × assistente virtual
+            </h2>
+            <HBars
+              :rows="handlerRows"
+              :series="[{ label: 'ligações', color: blockFamily('ia')[1] }]"
+              empty-text="Nenhuma ligação no período."
+            />
+          </div>
+
+          <div
+            v-if="hasOutcomeData"
+            class="cv-block p-5 sm:p-6"
+            :style="blockVars('ia')"
+          >
+            <h2
+              class="text-sm font-bold text-n-slate-12 mb-4 flex items-center gap-2"
+            >
+              <span class="cv-icon">
+                <span class="i-lucide-clipboard-check text-base" />
+              </span>
+              Resultados das ligações da IA
+            </h2>
+            <p v-if="!outcomeItems.length" class="text-xs text-n-slate-9 py-3">
+              A assistente ainda não registrou resultados no período.
+            </p>
+            <ShareBar
+              v-else
+              :items="outcomeItems"
+              :family="blockFamily('ia')"
+            />
           </div>
         </div>
 
@@ -416,7 +509,10 @@ const contactPhone = c =>
                   </p>
                   <p class="text-[11px] text-n-slate-10 truncate">
                     {{ shortDateTime(c.started_at) }}
-                    <template v-if="c.user?.name">
+                    <template v-if="c.handled_by === 'ai'">
+                      · 🤖 assistente virtual
+                    </template>
+                    <template v-else-if="c.user?.name">
                       · {{ c.user.name }}
                     </template>
                     <template v-if="Number(c.duration)">
@@ -425,6 +521,13 @@ const contactPhone = c =>
                     <template v-if="c.simulated"> · simulação</template>
                   </p>
                 </div>
+                <span
+                  v-if="c.handled_by === 'ai' && (c.outcome_label || c.outcome)"
+                  class="cv-chip flex-shrink-0"
+                  :title="c.summary || ''"
+                >
+                  {{ c.outcome_label || c.outcome }}
+                </span>
                 <span
                   class="cv-chip flex-shrink-0"
                   :class="statusChip(c.status)"
