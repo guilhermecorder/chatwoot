@@ -5583,6 +5583,81 @@ crm_opportunity_radar_job registrados.
 - Sem migration, sem cron; deploy WEB+SIDEKIQ (o job roda no sidekiq) + rodar
   o rake uma vez. AGUARDA "pode subir".
 
+## 167. ✅ 📞 CHAMADAS DE WHATSAPP PRÓPRIAS (RODADA 1 CONSTRUÍDA 17/09 — branch feat/chamadas-nativas, commit 8d8f9a5; aguarda número habilitado na Meta p/ o teste real) — receber (e depois fazer) ligações de pacientes DENTRO do Sistema Unificado, no nosso código (pedido dele 16/09: "eu prefiro construir tudo próprio"; "vamos neste sentido")
+- CONTEXTO 16/09: fork atualizado para o Chatwoot v4.17.1 (merge 9cff06e, no ar).
+  O Chatwoot traz chamadas de WhatsApp e canal de Voz (Twilio), mas TODO esse
+  código vive em `enterprise/` — licença Chatwoot Enterprise: uso em produção
+  só com assinatura; desenvolvimento e teste são livres. Hoje a bandeira
+  `channel_voice` foi ligada na conta 1 por console (runner) SÓ PARA TESTE
+  com o Henrique; DESLIGAR quando o nosso ficar pronto
+  (`Account.find(1).disable_features!(:channel_voice)`).
+- TENTATIVA 16/09 na aba Chamadas da caixa GOOGLE (+5511991651628): a Meta
+  recusou — "número ainda não está cadastrado na API de Chamadas do WhatsApp
+  Business". É pré-requisito do LADO DA META, vale igual para a solução
+  própria: o Henrique precisa habilitar Calling no número (WhatsApp Manager →
+  número → Chamadas / ou app da Meta) e o token precisa de
+  whatsapp_business_management. O erro real da Graph fica no log do WEB
+  (buscar "calling" / "settings").
+- DESENHO (escrito a partir da documentação oficial da Meta — WhatsApp
+  Business Calling API — sem copiar `enterprise/`; nosso namespace
+  Cevico::Calls): a Meta manda webhook `calls` (connect c/ oferta SDP,
+  terminate, status); o navegador da atendente responde com WebRTC (áudio
+  ponto a ponto Meta↔browser, Opus, SDP completo sem trickle ICE); o servidor
+  só sinaliza (accept/pre_accept/reject/terminate na Graph) e registra.
+- RODADA 1 (MVP = RECEBER): webhook + tabela própria `cevico_calls` + ActionCable
+  → popup "chamada recebida" (nome, conversa do lado, atender/recusar, mudo)
+  → aceitar via Graph + WebRTC no browser → item de chamada na conversa
+  (duração, quem atendeu) → PERDIDA vira aviso no Radar (mesma lógica do
+  follow-up). Toque para os agentes da caixa; horário de funcionamento
+  recusa fora do expediente.
+- RODADA 2 (LIGAR PARA O PACIENTE): a Meta exige permissão prévia do
+  contato — enviar pedido de permissão pelo WhatsApp, guardar o consentimento,
+  botão "Ligar" na tela do contato/conversa quando aprovado.
+- RODADA 3 (EXTRAS): histórico/dashboard de chamadas no kit iMac G3, para
+  quem toca primeiro, transferência, transcrição com a IA já integrada
+  (Gemini), métrica no Dashboard dos Agentes.
+- PRÉ-REQUISITOS DELE: (1) Henrique habilitar Calling no número na Meta;
+  (2) de preferência um SEGUNDO NÚMERO (ou número de teste do app) na mesma
+  conta para construir sem afetar o atendimento — WebRTC c/ Meta só se testa
+  com número real; (3) webhook do app apontando para o sistema c/ o campo
+  `calls` assinado; (4) "pode construir".
+- CONSTRUÍDO 17/09 (rodada 1, contrato em docs/CHAMADAS_NATIVAS.md, commit
+  8d8f9a54ea, 45 arquivos): tabela cevico_calls (Crm::Call), desvio do webhook
+  `calls` (Cevico::WhatsappCallsWebhook via prepend, só quando o módulo está
+  ligado p/ a caixa), Crm::Calls::{MetaClient (Graph v23, modo simulação),
+  WebhookService, ConversationFinder, CardMessageBuilder, Broadcaster (cable
+  account_<id>), PermissionReplyService, OutboundService, DashboardService,
+  TranscriptionService (ffmpeg→ogg + Gemini 2.5 Flash)}, CallsController
+  crm/calls (index/show/accept c/ lock+409/reject/hangup/recording/transcribe/
+  dashboard/initiate/request_permission/permission_status), settings
+  agenda_config['calls'] (+update_calls/enable_calls_at_meta/calls_meta_status),
+  rake cevico:calls_simulate|calls_end, ffmpeg no Dockerfile, 10 specs.
+  Frontend: Pinia stores/cevicoCalls.js, composables/useCevicoCallSession.js
+  (WebRTC puro + gravação MediaRecorder + toque WebAudio), CevicoCallPopup.vue
+  (tocando/em chamada/encerrada/perdida, empilhável), bubble CevicoCall.vue
+  (player + transcrição dobrável + resumo), CevicoCallsCard (painel da conversa +
+  Espaço do Paciente, botão Ligar c/ permissão), CallsDashboard.vue (Relatórios →
+  Dashboard de Ligações, kit iMac G3), Integrações → "Ligações (WhatsApp)"
+  (CevicoCalls.vue c/ erro cru da Meta + dica dos 2.000/dia).
+  TESTADO LOCAL no browser (conta 3, simulação): balão tocando → Atender →
+  timer/mudo/desligar → encerrada; card "📞 Chamada recebida · atendida por
+  Guilherme · 1 min 35 s"; perdida (banner + conversa reaberta + "Chamada
+  perdida" na lista); dashboard; Espaço do Paciente; "Ligar" mostra o erro da
+  Meta e oferece "Pedir permissão"; rubocop 0, eslint 0 erros novos, rspec
+  10/10, sem 5xx. NÃO TESTADO (impossível sem a Meta): WebRTC real, gravação,
+  transcrição e ligação de saída reais.
+- PRÓXIMOS PASSOS: (1) Henrique habilita Calling no número (≥ 2.000 msgs/dia;
+  token c/ whatsapp_business_management); (2) Integrações → Ligações → salvar
+  + "Ativar na Meta"; (3) teste real c/ o celular dele; (4) desligar a bandeira
+  enterprise `channel_voice` da conta 1; (5) merge no develop + deploy (1
+  migration 20260917000001).
+- COMO FACILITAR PRÓXIMAS ATUALIZAÇÕES DO CHATWOOT (proposta 16/09, baratos
+  primeiro): rotas CEVICO em config/routes/cevico.rb via draw(:cevico);
+  migrations c/ timestamp real (nunca redondo — 20260728000001 colidiu);
+  lista viva dos arquivos do upstream que alteramos; bloco "CEVICO" no
+  package.json/Gemfile (chart.js foi removido pelo upstream sem aviso);
+  atualizar a cada minor; smoke specs; skill /atualizar-chatwoot.
+
 ## 168. 🔜 🗺️ MENSAGENS DA JORNADA — motor nativo de mensagens-modelo (substitui o N8N "CONFIRMACAO CIRURGICA - IOP" e vira a porta de entrada p/ "centenas" de mensagens ao longo da jornada do paciente; pedido dele 17/09)
 - O QUE O N8N FAZ HOJE (JSON lido 17/09; roda 10h): lê a planilha Google
   "CONFIRMACOES CIRURGICAS" (aba IOP: Procedimento, Paciente, Data, Telefone,
