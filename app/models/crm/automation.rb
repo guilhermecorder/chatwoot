@@ -28,8 +28,11 @@ class Crm::Automation < ApplicationRecord
   has_many :logs, class_name: 'Crm::AutomationLog', foreign_key: :automation_id, dependent: :destroy
 
   TRIGGER_TYPES = %w[card_entered card_left card_stalled label_added label_removed message_created value_added].freeze
+  # Tem que bater com o `case automation.action_type` do CrmAutomationFireJob —
+  # tipo despachado lá mas ausente aqui faz o create! do AutomationsController
+  # devolver 422 (spec/jobs/crm_automation_fire_job_spec.rb garante a sincronia).
   ACTION_TYPES  = %w[webhook n8n_flow apply_label move_card log_timeline notify_team meta_ads_event google_ads_conversion send_form ai_analyze
-                     schedule_appointment set_value send_template].freeze
+                     schedule_appointment set_value send_template closing_extract nps_score].freeze
 
   validates :name,         presence: true
   validates :trigger_type, inclusion: { in: TRIGGER_TYPES }
