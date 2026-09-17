@@ -5582,3 +5582,56 @@ crm_opportunity_radar_job registrados.
   como realizada. Decisão dele.
 - Sem migration, sem cron; deploy WEB+SIDEKIQ (o job roda no sidekiq) + rodar
   o rake uma vez. AGUARDA "pode subir".
+
+## 168. 🔜 🗺️ MENSAGENS DA JORNADA — motor nativo de mensagens-modelo (substitui o N8N "CONFIRMACAO CIRURGICA - IOP" e vira a porta de entrada p/ "centenas" de mensagens ao longo da jornada do paciente; pedido dele 17/09)
+- O QUE O N8N FAZ HOJE (JSON lido 17/09; roda 10h): lê a planilha Google
+  "CONFIRMACOES CIRURGICAS" (aba IOP: Procedimento, Paciente, Data, Telefone,
+  Hora) → p/ cada linha c/ telefone: busca contato por telefone na API; se não
+  existe cria (inbox 5); acha conversa aberta na inbox 5 ou cria; manda a
+  mensagem c/ template `confirmar_cirurgia` (UTILITY, idioma "en", 3 variáveis:
+  nome, data, hora) e o texto da Gabriela (endereço Alameda Casa Branca 35 cj
+  906, estacionamento, documentos, sem convênio, "Você confirma que irá
+  comparecer?"). Nó de aprovação por Gmail (linhaoftalmo@) está DESCONECTADO.
+  Fragilidades: planilha alimentada à mão (Henrique), telefone sem
+  normalização, só "conversa aberta" (cria conversas repetidas), sem registro
+  de quem confirmou, token da API em texto puro no JSON (⚠️ rotacionar se o
+  arquivo circulou), nada aparece no CRM/Radar.
+- O QUE JÁ EXISTE NATIVO (mapeado 17/09): 1 enviador único
+  `Crm::SendTemplateService` (Liquid + ContactInboxBuilder + reaproveita a
+  última conversa da caixa) e CINCO réguas em cima dele: Campanha WhatsApp
+  (lote por público), Automações de coluna (`send_template` no evento de
+  etapa/etiqueta, cooldown 7d), Régua de mensagens (N dias na etiqueta/etapa),
+  Follow-up bots (cutucadas por silêncio, respeita janela 24h) e LEMBRETES DE
+  CONSULTA d1/d0 (`Crm::AppointmentReminderSendJob`, cron */15 + hora
+  configurada, variáveis {{hora}}/{{unidade}}, marca em
+  contact.additional_attributes.cevico_appt_reminders, confirmação detectada
+  pelo `CrmListener` c/ CONFIRM_WORDS → nota privada). O espelho do
+  OftalmoFácil (`cevico_oftalmofacil_surgeries`: surgery_date, surgery_hour,
+  patient_name, contact_id, procedure_name, status_kind=agendada; sync a cada
+  15 min) É A PLANILHA — só que automática.
+- DESENHO (rodadas):
+  R1 "Confirmação de cirurgia nativa": regra de jornada "cirurgia amanhã às
+  10h" lendo o espelho OftalmoFácil (status agendada, surgery_date = amanhã),
+  template confirmar_cirurgia (nome/data/hora automáticos; unidade/endereço
+  por clínica), caixa configurável, marca de envio por cirurgia (1x), resposta
+  "confirmo/sim" → confirmado (etiqueta + nota + card verde na Agenda/Espaço do
+  Paciente), "não/remarcar" → aviso no Radar p/ a atendente; painel "Fila de
+  hoje" às 09:50 com aprovar/pular (substitui o e-mail do N8N). Desliga o N8N.
+  R2 "Jornada" (tela): linha do tempo da jornada (Lead → Consulta → Orçamento →
+  Cirurgia agendada → Pós-op → Retorno) c/ as mensagens penduradas em cada
+  momento; assistente "Nova mensagem" em 3 passos (QUANDO: data relativa a
+  consulta/cirurgia/pós-op, evento de etapa/etiqueta/formulário/chamada
+  perdida, silêncio; PARA QUEM: filtros de público; O QUÊ: modelo aprovado +
+  variáveis preenchidas automaticamente a partir da fonte + prévia c/ paciente
+  real + "enviar teste p/ meu número"); biblioteca pesquisável; estatísticas
+  por mensagem (enviadas/entregues/respondidas/confirmadas). Tabela nova
+  `cevico_journey_messages` + log `cevico_journey_sends` (1 envio por
+  paciente×evento, idempotente), `Crm::TemplateSource` compartilhado (hoje há 5
+  cópias do Struct), regras de silêncio (nao_perturbe, perda_*, janela 24h só
+  p/ texto livre, horário comercial, teto diário).
+  R3: unificar as cinco réguas atrás da tela Jornada (Campanha, Automações de
+  coluna, Régua, Lembretes d1/d0 viram "mensagens da jornada" com o mesmo
+  motor), modelos com botões/mídia, respostas por botão (Confirmar / Remarcar).
+- PRÉ-REQUISITOS: template `confirmar_cirurgia` aprovado na WABA da caixa que
+  vai enviar (hoje o N8N usa inbox 5 — confirmar qual é); OftalmoFácil ligado
+  (item 157) e sincronizando; decidir se IOP e CEVICO usam caixas diferentes.
