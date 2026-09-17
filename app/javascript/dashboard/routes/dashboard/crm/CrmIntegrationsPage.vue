@@ -2,6 +2,7 @@
 // Aba "Integrações" — central única de conexões. Cards organizados como
 // os aplicativos nativos; "Configurar" abre a janela da integração.
 import { ref, computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useStore, useStoreGetters, useMapGetter } from 'dashboard/composables/store';
 import CrmIntegrationsModal from './components/CrmIntegrationsModal.vue';
 import IntegrationItem from 'dashboard/routes/dashboard/settings/integrations/IntegrationItem.vue';
@@ -9,6 +10,8 @@ import IntegrationItem from 'dashboard/routes/dashboard/settings/integrations/In
 const store = useStore();
 const getters = useStoreGetters();
 const settings = useMapGetter('crm/getSettings');
+const router = useRouter();
+const accountId = useMapGetter('getCurrentAccountId');
 
 const configuring = ref(null); // 'n8n' | 'meta' | 'google' | 'ai' | 'sheets' | null
 
@@ -76,7 +79,35 @@ const cevicoCards = computed(() => [
     description: 'Conexão nativa com o sistema OftalmoFácil — endereço e chave da API guardados no CEVICO S.I.',
     enabled: !!settings.value?.oftalmofacil?.configured,
   },
+  // 📞 item 167 e 🤖📞 item 169: têm tela própria (rota), não janela
+  {
+    key: 'calls',
+    name: 'Ligações (WhatsApp)',
+    icon: 'i-lucide-phone',
+    color: '#25D366',
+    description: 'Receba e faça ligações de voz pelo WhatsApp na tela da conversa, com gravação e transcrição.',
+    enabled: !!settings.value?.calls?.enabled,
+    route: 'crm_integrations_calls',
+  },
+  {
+    key: 'voice',
+    name: 'Agente de Ligação (IA)',
+    icon: 'i-lucide-phone-call',
+    color: '#7C3AED',
+    description: 'Assistente virtual que atende as ligações num número próprio da clínica e liga para pacientes nas campanhas — ElevenLabs.',
+    enabled: !!settings.value?.voice?.enabled,
+    route: 'crm_integrations_voice_agent',
+  },
 ]);
+
+// cards com tela própria navegam; os demais abrem a janela de configuração
+const openCard = card => {
+  if (card.route) {
+    router.push({ name: card.route, params: { accountId: accountId.value } });
+    return;
+  }
+  configuring.value = card.key;
+};
 
 const closeConfig = () => {
   configuring.value = null;
@@ -126,7 +157,7 @@ const closeConfig = () => {
             <p class="text-sm font-semibold text-n-slate-12">{{ card.name }}</p>
             <button
               class="text-xs font-medium text-n-brand hover:underline flex items-center gap-1 flex-shrink-0"
-              @click="configuring = card.key"
+              @click="openCard(card)"
             >
               <span class="i-lucide-settings-2 text-xs" />
               Configurar
