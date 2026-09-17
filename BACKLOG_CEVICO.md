@@ -5814,6 +5814,16 @@ crm_opportunity_radar_job registrados.
   (rótulos "Sem retorno da ElevenLabs"/"Sem registro" no dashboard);
   cabeçalho do fluxo empilha no celular. ⚠️ Reiniciar o container `vite`
   refaz o `pnpm install` do zero (entrypoint) — 8 min c/ rede lenta; evitar.
+- SUBIU TUDO DE UMA VEZ (17/09 ~19h, pedido dele: "vamos subir tudo de uma
+  vez, já tenho a conta do elevenlabs"): fast-forward do branch p/ o develop
+  (179d14e) → build falhou ("JavaScript heap out of memory" no
+  assets:precompile: o mermaid pesou) → Dockerfile: `ARG NODE_OPTIONS` de 4096
+  p/ 6144 (a28ceaf) → Build & Push verde (run 35259001480, 28 min em vez de 4)
+  → **imagem `ghcr.io/guilhermecorder/chatwoot:a28ceaf`** (167 + 169 + 170;
+  migrations 20260917000001 + 20260917173000); reversão = `9cff06e`.
+  ⚠️ Build local de produção do Vite morre por falta de memória no Docker
+  Desktop (7,75 GiB) — validar só no CI. Melhoria futura: servir o bundle
+  pré-compilado do mermaid fora do Vite p/ o build voltar aos 4 min.
 - PRÉ-REQUISITOS DELE (18/09): conta ElevenLabs + chave de API; número novo
   na WABA importado na ElevenLabs (Import account) c/ "Enable messaging" OFF
   e Call settings ligado no WhatsApp Manager; modelo Meta c/ componente
