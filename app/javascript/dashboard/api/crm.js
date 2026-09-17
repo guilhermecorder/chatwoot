@@ -619,6 +619,40 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/settings/calls_meta_status`);
   }
 
+  // ── 🤖📞 Agente de Ligação (ElevenLabs) — item 169 ────────────────
+  updateVoice(data) {
+    return axios.post(`${this.url}/settings/update_voice`, data);
+  }
+
+  testVoice() {
+    return axios.post(`${this.url}/settings/test_voice`);
+  }
+
+  syncVoice() {
+    return axios.post(`${this.url}/settings/sync_voice`);
+  }
+
+  voiceWhatsappAccounts() {
+    return axios.get(`${this.url}/settings/voice_whatsapp_accounts`);
+  }
+
+  voiceVoices(params = {}) {
+    return axios.get(`${this.url}/settings/voice_voices`, { params });
+  }
+
+  voiceState() {
+    return axios.get(`${this.url}/settings/voice_state`);
+  }
+
+  // ── 🗺️ Mapa de Fluxos dos agentes — item 170 ──────────────────────
+  getFlows() {
+    return axios.get(`${this.url}/flows`);
+  }
+
+  getFlow(key) {
+    return axios.get(`${this.url}/flows/${key}`);
+  }
+
   // ── Meu Painel ────────────────────────────────────────────────────
   // cesto de indicadores c/ série + período anterior (item 141)
   getKpiBag(params = {}) {

@@ -1,5 +1,7 @@
 class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  # 🤖📞 item 169: ações do Agente de Ligação (ElevenLabs) vivem no concern
+  include Crm::VoiceAgentSettings
 
   # 🍎🍊 paletas do Meu Painel (rodada 162): iMac G3 + frutas da Apple; e os
   # blocos da tela que aceitam paleta própria — só chaves conhecidas entram
@@ -16,6 +18,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     update_google_ads test_google_ads update_sheets test_sheets update_agenda agenda_backfill
     update_oftalmofacil
     update_calls enable_calls_at_meta calls_meta_status
+    update_voice test_voice sync_voice voice_whatsapp_accounts voice_voices voice_state
     update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
     sales_insights radar_scan run_mentor copywriter_content update_price_table
     update_inbox_investments
@@ -374,6 +377,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 manager: agent_fields + [:drop_pct],
                                 # 🎓 Auditor de Conversas (item 130): teto diário
                                 auditor: agent_fields + [:daily_cap],
+                                # 🤖📞 Agente de Ligação (item 169): só o interruptor/prompt
+                                # espelhados — a config completa mora em ai_config['voice']
+                                voice: agent_fields,
                                 # 🎨 Criativo Perpétuo (item 131)
                                 creative: agent_fields + [:winners_count, :variations_count])
                         .to_h
@@ -1293,6 +1299,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     Crm::Calls::Settings.new(Current.account, crm_settings: record).to_h
   end
 
+  # 🤖📞 agente de ligação (item 169) — sem segredos, com defaults e URLs prontas
+  def voice_json(record)
+    Crm::VoiceAgent::Settings.new(Current.account, crm_settings: record).to_h
+  end
+
   def settings_json(s)
     {
       n8n_base_url: s.n8n_base_url,
@@ -1307,6 +1318,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       sheets: sheets_json(s),
       oftalmofacil: oftalmofacil_json(s),
       calls: calls_json(s),
+      voice: voice_json(s),
       agenda_windows: (s.agenda_config || {})['windows'] || [],
       agenda_blocked: (s.agenda_config || {})['blocked'] || [],
       agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || [],
@@ -1389,7 +1401,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'harvest' => Crm::HarvestService::SYSTEM_PROMPT,
       'manager' => Crm::AutoManagerService::SYSTEM_PROMPT,
       'auditor' => Crm::ConversationAuditorService::SYSTEM_PROMPT,
-      'creative' => Crm::CreativeService::SYSTEM_PROMPT
+      'creative' => Crm::CreativeService::SYSTEM_PROMPT,
+      'voice' => Crm::VoiceAgent::Script::SYSTEM_PROMPT
     }
     {
       api_key_set: cfg['api_key'].present?,

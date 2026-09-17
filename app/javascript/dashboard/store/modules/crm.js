@@ -366,6 +366,45 @@ const actions = {
     return data;
   },
 
+  // 🤖📞 Agente de Ligação (ElevenLabs) — item 169: o backend devolve a
+  // config `voice` sem segredos e com defaults; guardamos em settings.voice
+  async updateVoice({ commit }, params) {
+    const { data } = await CrmAPI.updateVoice(params);
+    commit('setSettings', { voice: data?.voice || data });
+    return data;
+  },
+  async testVoice() {
+    const { data } = await CrmAPI.testVoice();
+    return data;
+  },
+  async syncVoice({ commit }) {
+    const { data } = await CrmAPI.syncVoice();
+    if (data?.voice) commit('setSettings', { voice: data.voice });
+    return data;
+  },
+  async voiceWhatsappAccounts() {
+    const { data } = await CrmAPI.voiceWhatsappAccounts();
+    return data;
+  },
+  async voiceVoices(_, params) {
+    const { data } = await CrmAPI.voiceVoices(params);
+    return data;
+  },
+  async voiceState() {
+    const { data } = await CrmAPI.voiceState();
+    return data;
+  },
+
+  // 🗺️ Mapa de Fluxos — item 170 (sem cache: o estado é ao vivo)
+  async fetchFlows() {
+    const { data } = await CrmAPI.getFlows();
+    return data;
+  },
+  async fetchFlow(_, key) {
+    const { data } = await CrmAPI.getFlow(key);
+    return data;
+  },
+
   // ── Automations ──────────────────────────────────────────────────
   async fetchAutomations(_, { pipelineId, stageId }) {
     const { data } = await CrmAPI.getAutomations(pipelineId, stageId);

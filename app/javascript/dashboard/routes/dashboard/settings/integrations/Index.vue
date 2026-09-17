@@ -50,6 +50,16 @@ const CRM_INTEGRATIONS = [
     route: 'crm_integrations_calls',
     noImage: true,
   },
+  {
+    id: 'voice-agent',
+    name: 'Agente de Ligação (IA)',
+    description:
+      'Assistente virtual que atende as ligações no número da clínica e liga para pacientes nas campanhas — ElevenLabs.',
+    icon: 'i-lucide-phone-call',
+    color: '#7C3AED',
+    route: 'crm_integrations_voice_agent',
+    noImage: true,
+  },
 ];
 
 const goToIntegration = (routeName) => {

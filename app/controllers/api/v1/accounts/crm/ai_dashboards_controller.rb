@@ -44,7 +44,10 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
     'auditor' => { name: 'Auditor de Conversas', icon: 'i-lucide-clipboard-check', color: '#0F766E',
                    what: 'dá nota diária nas conversas contra o script — coaching contínuo por atendente' },
     'creative' => { name: 'Criativo Perpétuo', icon: 'i-lucide-wand-sparkles', color: '#DB2777',
-                    what: 'toda semana escreve variações dos anúncios e termos que mais viram cirurgia' }
+                    what: 'toda semana escreve variações dos anúncios e termos que mais viram cirurgia' },
+    # 🤖📞 item 169: roda na ElevenLabs; cada ligação vira 1 linha em crm_ai_usages (custo em US$)
+    'voice' => { name: 'Agente de Ligação', icon: 'i-lucide-phone-call', color: '#7C3AED',
+                 what: 'assistente virtual que atende as ligações no número da clínica e liga para pacientes nas campanhas' }
   }.freeze
 
   def show # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity

@@ -283,6 +283,14 @@ Rails.application.routes.draw do
               post :update_calls
               post :enable_calls_at_meta
               get :calls_meta_status
+              # 🤖📞 item 169: agente de ligação (ElevenLabs) — config, teste,
+              # sincronizar agente/ferramentas/webhook, contas WhatsApp, vozes, estado
+              post :update_voice
+              post :test_voice
+              post :sync_voice
+              get :voice_whatsapp_accounts
+              get :voice_voices
+              get :voice_state
               post :update_agenda
               post :agenda_backfill
               # Configurações → Domínio (público das páginas/formulários)
@@ -447,6 +455,17 @@ Rails.application.routes.draw do
                 get :permission_status
               end
             end
+            # 🤖📞 item 169: campanhas de ligação (a assistente virtual liga p/ o público)
+            resources :call_campaigns, only: [:index, :show, :create, :update, :destroy], controller: 'call_campaigns' do
+              member do
+                post :start
+                post :pause
+                post :resume
+              end
+              collection { post :preview_audience }
+            end
+            # 🗺️ item 170: mapa de fluxos dos agentes/automações (Mermaid + estado ao vivo)
+            resources :flows, only: [:index, :show], controller: 'flows', param: :key
             resources :pipelines, only: [:index, :show, :create, :update, :destroy] do
               resources :stages, only: [:index, :create, :update, :destroy] do
                 collection { post :reorder }
@@ -1007,6 +1026,11 @@ Rails.application.routes.draw do
   post 'webhooks/instagram', to: 'webhooks/instagram#events'
   post 'webhooks/tiktok', to: 'webhooks/tiktok#events'
   post 'webhooks/shopify', to: 'webhooks/shopify#events'
+  # 🤖📞 CEVICO item 169: agente de ligação (ElevenLabs) — ferramentas chamadas
+  # durante a ligação (token da conta), início da conversa e pós-chamada (HMAC)
+  post 'webhooks/cevico/voice/:account_id/tools/:tool', to: 'webhooks/cevico_voice#tool'
+  post 'webhooks/cevico/voice/:account_id/initiation', to: 'webhooks/cevico_voice#initiation'
+  post 'webhooks/cevico/voice/:account_id/post_call', to: 'webhooks/cevico_voice#post_call'
 
   namespace :twitter do
     resource :callback, only: [:show]
