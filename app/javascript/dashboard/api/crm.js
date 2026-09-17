@@ -606,6 +606,19 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/test_sheets`);
   }
 
+  // ── 📞 Ligações (WhatsApp) — item 167 ─────────────────────────────
+  updateCalls(data) {
+    return axios.post(`${this.url}/settings/update_calls`, data);
+  }
+
+  enableCallsAtMeta() {
+    return axios.post(`${this.url}/settings/enable_calls_at_meta`);
+  }
+
+  callsMetaStatus() {
+    return axios.get(`${this.url}/settings/calls_meta_status`);
+  }
+
   // ── Meu Painel ────────────────────────────────────────────────────
   // cesto de indicadores c/ série + período anterior (item 141)
   getKpiBag(params = {}) {

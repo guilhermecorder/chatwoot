@@ -32,6 +32,7 @@ import AgentsDashboard from './AgentsDashboard.vue';
 import GoogleDashboard from './GoogleDashboard.vue';
 import AgendaDashboard from './AgendaDashboard.vue';
 import AdsReport from './AdsReport.vue';
+import CallsDashboard from './CallsDashboard.vue';
 
 const meta = {
   featureFlag: FEATURE_FLAGS.REPORTS,
@@ -232,6 +233,14 @@ export default {
             permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: AdsReport,
+        },
+        {
+          path: 'calls_dashboard',
+          name: 'calls_dashboard_reports',
+          meta: {
+            permissions: ['administrator', 'agent', 'report_manage'],
+          },
+          component: CallsDashboard,
         },
       ],
     },

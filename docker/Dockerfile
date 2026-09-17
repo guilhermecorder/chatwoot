@@ -128,6 +128,8 @@ RUN apk update && apk add --no-cache \
   imagemagick \
   git \
   vips \
+  # 📞 CEVICO: ffmpeg remuxa as gravações das ligações (webm → ogg) antes de transcrever
+  ffmpeg \
   && gem install bundler -v "$BUNDLER_VERSION"
 
 # Restrict libvips to its trusted image loaders when generating variants

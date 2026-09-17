@@ -5,6 +5,7 @@ import { BUS_EVENTS } from 'shared/constants/busEvents';
 import { emitter } from 'shared/helpers/mitt';
 import { useImpersonation } from 'dashboard/composables/useImpersonation';
 import { useCallsStore } from 'dashboard/stores/calls';
+import { useCevicoCallsStore } from 'dashboard/stores/cevicoCalls';
 import {
   applyOutboundAnswer,
   armOutboundRecorder,
@@ -66,6 +67,14 @@ class ActionCableConnector extends BaseActionCableConnector {
       'voice_call.outbound_connected': this.onVoiceCallOutboundConnected,
       'voice_call.outbound_accepted': this.onVoiceCallOutboundAccepted,
       'voice_call.ended': this.onVoiceCallEnded,
+      // 📞 CEVICO (item 167): chamadas nativas de WhatsApp → store Pinia
+      'cevico_call.ringing': this.onCevicoCallRinging,
+      'cevico_call.taken': this.onCevicoCallTaken,
+      'cevico_call.ended': this.onCevicoCallEnded,
+      'cevico_call.missed': this.onCevicoCallMissed,
+      'cevico_call.outbound_answer': this.onCevicoCallOutboundAnswer,
+      'cevico_call.status': this.onCevicoCallStatus,
+      'cevico_call.permission': this.onCevicoCallPermission,
     };
   }
 
@@ -458,6 +467,30 @@ class ActionCableConnector extends BaseActionCableConnector {
     }
     useCallsStore().removeCall(data.call_id);
   };
+
+  // 📞 CEVICO (item 167): os 7 eventos das chamadas nativas caem na store
+  // Pinia, que filtra ring_user_ids/disponibilidade e conduz a chamada.
+  // eslint-disable-next-line class-methods-use-this
+  onCevicoCallRinging = data => useCevicoCallsStore().onRinging(data);
+
+  // eslint-disable-next-line class-methods-use-this
+  onCevicoCallTaken = data => useCevicoCallsStore().onTaken(data);
+
+  // eslint-disable-next-line class-methods-use-this
+  onCevicoCallEnded = data => useCevicoCallsStore().onEnded(data);
+
+  // eslint-disable-next-line class-methods-use-this
+  onCevicoCallMissed = data => useCevicoCallsStore().onMissed(data);
+
+  // eslint-disable-next-line class-methods-use-this
+  onCevicoCallOutboundAnswer = data =>
+    useCevicoCallsStore().onOutboundAnswer(data);
+
+  // eslint-disable-next-line class-methods-use-this
+  onCevicoCallStatus = data => useCevicoCallsStore().onStatus(data);
+
+  // eslint-disable-next-line class-methods-use-this
+  onCevicoCallPermission = data => useCevicoCallsStore().onPermission(data);
 }
 
 export default {

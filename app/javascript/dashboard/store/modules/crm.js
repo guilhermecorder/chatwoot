@@ -345,6 +345,27 @@ const actions = {
     return data;
   },
 
+  // 📞 Ligações (WhatsApp) — item 167: o backend devolve a config `calls`
+  // já com os defaults preenchidos; guardamos em settings.calls
+  async updateCalls({ commit }, params) {
+    const { data } = await CrmAPI.updateCalls(params);
+    commit('setSettings', { calls: data?.calls || data });
+    return data;
+  },
+  async enableCallsAtMeta({ commit, state: s }) {
+    const { data } = await CrmAPI.enableCallsAtMeta();
+    if (data?.meta) {
+      commit('setSettings', {
+        calls: { ...(s.settings.calls || {}), meta: data.meta },
+      });
+    }
+    return data;
+  },
+  async callsMetaStatus() {
+    const { data } = await CrmAPI.callsMetaStatus();
+    return data;
+  },
+
   // ── Automations ──────────────────────────────────────────────────
   async fetchAutomations(_, { pipelineId, stageId }) {
     const { data } = await CrmAPI.getAutomations(pipelineId, stageId);

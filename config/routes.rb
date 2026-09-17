@@ -279,6 +279,10 @@ Rails.application.routes.draw do
               # 🏥 item 157: testar a conexão só-leitura + sincronizar agora
               post :test_oftalmofacil
               post :sync_oftalmofacil
+              # 📞 item 167: ligações nativas (config + ligar na Meta + estado)
+              post :update_calls
+              post :enable_calls_at_meta
+              get :calls_meta_status
               post :update_agenda
               post :agenda_backfill
               # Configurações → Domínio (público das páginas/formulários)
@@ -426,6 +430,23 @@ Rails.application.routes.draw do
             # Dashboard dos AGENTES DE IA (item 85, só admin)
             resource :ai_dashboard, only: [:show], controller: 'ai_dashboards'
             resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
+            # 📞 Ligações nativas de WhatsApp (item 167): lista/atender/recusar/
+            # desligar/gravação/transcrição, ligar p/ o paciente e o dashboard
+            resources :calls, only: [:index, :show], controller: 'calls' do
+              member do
+                post :accept
+                post :reject
+                post :hangup
+                post :recording
+                post :transcribe
+              end
+              collection do
+                get :dashboard
+                post :initiate
+                post :request_permission
+                get :permission_status
+              end
+            end
             resources :pipelines, only: [:index, :show, :create, :update, :destroy] do
               resources :stages, only: [:index, :create, :update, :destroy] do
                 collection { post :reorder }

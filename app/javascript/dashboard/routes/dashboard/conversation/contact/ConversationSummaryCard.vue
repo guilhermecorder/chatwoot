@@ -8,6 +8,7 @@ import CrmAPI from 'dashboard/api/crm';
 import { useAlert } from 'dashboard/composables';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
+import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsCard.vue';
 
 const props = defineProps({
   conversationId: { type: [Number, String], required: true },
@@ -458,5 +459,13 @@ const analyzedAgo = computed(() => {
     </template>
 
     <div v-else-if="isLoading" class="text-[11px] text-n-slate-9">Carregando resumo…</div>
+
+    <!-- 📞 Ligações nativas de WhatsApp (item 167): histórico + Ligar / Pedir permissão -->
+    <CevicoCallsCard
+      v-if="contact?.id"
+      :contact-id="contact.id"
+      :conversation-id="conversationId"
+      variant="panel"
+    />
   </div>
 </template>

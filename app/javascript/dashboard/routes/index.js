@@ -24,6 +24,7 @@ const CEVICO_GRANTED_ROUTES = {
   doctors_reports: ['reports'],
   agents_dashboard_reports: ['reports'],
   agenda_dashboard_reports: ['reports'],
+  calls_dashboard_reports: ['reports'],
   ads_reports: ['reports'],
   google_dashboard_reports: ['reports'],
   whatsapp_health_reports: ['reports'],

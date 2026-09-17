@@ -12,6 +12,7 @@ import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import PatientSpaceIcon from './PatientSpaceIcon.vue';
+import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsCard.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -1034,6 +1035,13 @@ watch(contactId, () => {
               </p>
             </div>
           </div>
+
+          <!-- 📞 Ligações nativas de WhatsApp (item 167) -->
+          <CevicoCallsCard
+            :contact-id="contactId"
+            :accent="theme.accent"
+            variant="space"
+          />
 
           <!-- 🏥 Cirurgias no OftalmoFácil (item 157) — só admin recebe -->
           <div v-if="isAdmin && surgeries.length" class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">

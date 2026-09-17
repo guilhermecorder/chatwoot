@@ -40,6 +40,16 @@ const CRM_INTEGRATIONS = [
     color: '#4285F4',
     route: 'settings_integrations_google_ads',
   },
+  {
+    id: 'calls',
+    name: 'Ligações (WhatsApp)',
+    description:
+      'Receba e faça ligações de voz pelo WhatsApp na tela da conversa, com gravação e transcrição.',
+    icon: 'i-lucide-phone',
+    color: '#25D366',
+    route: 'crm_integrations_calls',
+    noImage: true,
+  },
 ];
 
 const goToIntegration = (routeName) => {
@@ -120,10 +130,18 @@ onMounted(() => {
               @click="goToIntegration(item.route)"
             >
               <img
+                v-if="!item.noImage"
                 :src="`/dashboard/images/integrations/${item.id}.png`"
                 :alt="item.name"
                 class="w-10 h-10 rounded-xl object-contain flex-shrink-0 border border-n-weak"
               />
+              <span
+                v-else
+                class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border border-n-weak"
+                :style="{ background: `${item.color}1a`, color: item.color }"
+              >
+                <span :class="item.icon" class="text-lg" />
+              </span>
               <div class="min-w-0">
                 <p class="text-sm font-semibold text-n-slate-12 group-hover:text-n-brand transition-colors">{{ item.name }}</p>
                 <p class="text-xs text-n-slate-10 mt-0.5 leading-relaxed">{{ item.description }}</p>

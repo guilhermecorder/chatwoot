@@ -762,6 +762,12 @@ const menuItems = computed(() => {
           { name: 'Doctors Dashboard', key: 'doctors', label: 'Dashboard dos Médicos', route: 'doctors_reports' },
           { name: 'Agents Dashboard', key: 'agents_dashboard', label: 'Dashboard dos Agentes', route: 'agents_dashboard_reports' },
           { name: 'Agenda Dashboard', key: 'agenda_dashboard', label: 'Dashboard da Agenda', route: 'agenda_dashboard_reports' },
+          {
+            name: 'Calls Dashboard',
+            key: 'calls_dashboard',
+            label: 'Dashboard de Ligações',
+            route: 'calls_dashboard_reports',
+          },
           { name: 'Ads Report', key: 'ads', label: 'Anúncios (Meta)', route: 'ads_reports' },
           { name: 'Google Dashboard', key: 'google', label: 'Google (Ads + GA4)', route: 'google_dashboard_reports' },
           { name: 'WhatsApp Health', key: 'whatsapp_health', label: 'Saúde do WhatsApp', route: 'whatsapp_health_reports' },

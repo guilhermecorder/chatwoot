@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_10_000001) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_17_000001) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -569,6 +569,46 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_10_000001) do
     t.index ["locale"], name: "index_categories_on_locale"
     t.index ["parent_category_id"], name: "index_categories_on_parent_category_id"
     t.index ["slug", "locale", "portal_id"], name: "index_categories_on_slug_and_locale_and_portal_id", unique: true
+  end
+
+  create_table "cevico_calls", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "inbox_id", null: false
+    t.bigint "contact_id"
+    t.bigint "conversation_id"
+    t.bigint "user_id"
+    t.bigint "message_id"
+    t.string "meta_call_id", null: false
+    t.integer "direction", default: 0, null: false
+    t.integer "status", default: 0, null: false
+    t.string "wa_id"
+    t.string "display_name"
+    t.datetime "started_at"
+    t.datetime "answered_at"
+    t.datetime "ended_at"
+    t.integer "duration"
+    t.string "end_reason"
+    t.string "error_code"
+    t.text "error_message"
+    t.text "sdp_offer"
+    t.text "sdp_answer"
+    t.jsonb "events", default: [], null: false
+    t.integer "recording_duration"
+    t.string "recording_mime"
+    t.text "transcript"
+    t.string "transcript_status"
+    t.text "transcript_error"
+    t.text "summary"
+    t.datetime "transcribed_at"
+    t.boolean "simulated", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "meta_call_id"], name: "index_cevico_calls_on_account_id_and_meta_call_id", unique: true
+    t.index ["account_id", "started_at"], name: "index_cevico_calls_on_account_id_and_started_at"
+    t.index ["account_id", "status"], name: "index_cevico_calls_on_account_id_and_status"
+    t.index ["account_id"], name: "index_cevico_calls_on_account_id"
+    t.index ["contact_id"], name: "index_cevico_calls_on_contact_id"
+    t.index ["user_id"], name: "index_cevico_calls_on_user_id"
   end
 
   create_table "cevico_content_items", force: :cascade do |t|
@@ -2146,6 +2186,11 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_10_000001) do
   add_foreign_key "campaign_recipients", "campaigns", on_delete: :cascade
   add_foreign_key "campaign_recipients", "contacts", on_delete: :cascade
   add_foreign_key "campaign_recipients", "inboxes", on_delete: :cascade
+  add_foreign_key "cevico_calls", "accounts", on_delete: :cascade
+  add_foreign_key "cevico_calls", "contacts", on_delete: :nullify
+  add_foreign_key "cevico_calls", "conversations", on_delete: :nullify
+  add_foreign_key "cevico_calls", "inboxes", on_delete: :cascade
+  add_foreign_key "cevico_calls", "users", on_delete: :nullify
   add_foreign_key "cevico_content_items", "accounts"
   add_foreign_key "cevico_finance_entries", "accounts"
   add_foreign_key "cevico_goal_plans", "accounts"

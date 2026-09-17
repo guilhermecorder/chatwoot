@@ -42,6 +42,7 @@ import CSATBubble from './bubbles/CSAT.vue';
 import FormBubble from './bubbles/Form.vue';
 import VoiceCallBubble from './bubbles/VoiceCall.vue';
 import WhatsappFlowResponseBubble from './bubbles/WhatsappFlowResponse.vue';
+import CevicoCallBubble from './bubbles/CevicoCall.vue';
 import WhatsappReferral from './bubbles/Text/WhatsappReferral.vue';
 
 import MessageError from './MessageError.vue';
@@ -312,6 +313,14 @@ const componentToRender = computed(() => {
     return FormBubble;
   }
 
+  // CEVICO (item 167): card das chamadas nativas de WhatsApp
+  if (
+    props.contentAttributes?.cevicoCall ||
+    props.contentAttributes?.cevico_call
+  ) {
+    return CevicoCallBubble;
+  }
+
   if (props.contentType === CONTENT_TYPES.VOICE_CALL) {
     return VoiceCallBubble;
   }
@@ -560,7 +569,10 @@ provideMessageContext({
     ]"
   >
     <div v-if="variant === MESSAGE_VARIANTS.ACTIVITY">
-      <ActivityBubble :content="content" />
+      <CevicoCallBubble
+        v-if="contentAttributes?.cevicoCall || contentAttributes?.cevico_call"
+      />
+      <ActivityBubble v-else :content="content" />
     </div>
     <div
       v-else

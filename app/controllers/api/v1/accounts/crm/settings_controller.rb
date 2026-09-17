@@ -15,6 +15,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
     update_google_ads test_google_ads update_sheets test_sheets update_agenda agenda_backfill
     update_oftalmofacil
+    update_calls enable_calls_at_meta calls_meta_status
     update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
     sales_insights radar_scan run_mentor copywriter_content update_price_table
     update_inbox_investments
@@ -510,6 +511,111 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
     Crm::OftalmofacilSyncJob.perform_later(Current.account.id, full: params[:full] == true)
     render json: { ok: true, queued: true }
+  end
+
+  # ── 📞 Ligações nativas de WhatsApp (item 167) ─────────────────────────────
+  # liga/desliga, caixa, quem atende, horário, gravar/transcrever e a
+  # mensagem de permissão — tudo em agenda_config['calls'] (padrões em
+  # Crm::Calls::Settings)
+  def update_calls
+    cfg = crm_settings.agenda_config || {}
+    calls = cfg['calls'] || {}
+    apply_call_flags(calls)
+    apply_call_targets(calls)
+    apply_call_texts(calls)
+    calls['updated_at'] = Time.current.iso8601
+    cfg['calls'] = calls
+    crm_settings.update!(agenda_config: cfg)
+    render json: { calls: calls_json(crm_settings) }
+  end
+
+  # horário (HH:MM–HH:MM) e a mensagem do pedido de permissão
+  def apply_call_texts(calls)
+    calls['hours'] = sanitize_call_hours(params[:hours]) if params.key?(:hours)
+    calls['permission_message'] = params[:permission_message].to_s.strip[0, 1024] if params.key?(:permission_message)
+  end
+
+  # ligado / só no horário / gravar / transcrever
+  def apply_call_flags(calls)
+    %w[enabled business_hours_only record transcribe].each do |flag|
+      calls[flag] = ActiveModel::Type::Boolean.new.cast(params[flag]) == true if params.key?(flag)
+    end
+  end
+
+  # caixa (só da conta) e quem atende (só gente da conta; vazio = todos da caixa)
+  def apply_call_targets(calls)
+    calls['inbox_id'] = Current.account.inboxes.find_by(id: params[:inbox_id])&.id if params.key?(:inbox_id)
+    return unless params.key?(:ring_user_ids)
+
+    calls['ring_user_ids'] = Array(params[:ring_user_ids]).map(&:to_i) & Current.account.users.pluck(:id)
+  end
+
+  # "HH:MM" válidos e início < fim; senão volta ao padrão 08:00–19:00
+  def sanitize_call_hours(raw)
+    h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : (raw || {}).to_h
+    start_at = h['start'].to_s.strip
+    end_at = h['end'].to_s.strip
+    valid = [start_at, end_at].all? { |v| v.match?(/\A([01]\d|2[0-3]):[0-5]\d\z/) } && start_at < end_at
+    valid ? { 'start' => start_at, 'end' => end_at } : Crm::Calls::Settings::DEFAULT_HOURS.dup
+  end
+
+  CALLS_META_TIP = 'A Meta exige limite de 2.000 mensagens/dia ou mais neste número.'.freeze
+
+  # "Ativar ligações": liga o recurso no número (POST /settings) e confirma
+  # com um GET. O erro da Meta volta cru (message/code) para o Henrique, mais
+  # a dica que mais pega: o número precisa do limite de 2.000 msgs/dia.
+  def enable_calls_at_meta
+    inbox = calls_inbox_from(params[:inbox_id])
+    return render json: { ok: false, error: 'Escolha primeiro a caixa do WhatsApp (API oficial) que vai receber as ligações.' } unless inbox
+
+    client = Crm::Calls::MetaClient.new(inbox.channel)
+    client.update_settings(status: 'ENABLED', call_icon_visibility: 'DEFAULT', callback_permission_status: 'ENABLED')
+    render json: { ok: true, meta: store_calls_meta(client.settings['calling'] || {}) }
+  rescue Crm::Calls::MetaError => e
+    render json: { ok: false, error: "A Meta não ligou as chamadas neste número. #{CALLS_META_TIP}",
+                   message: e.message, code: e.code, meta: store_calls_meta({}, error: e.message) }
+  end
+
+  # GET calls_meta_status: estado do recurso na Meta + saúde do número (limite/qualidade)
+  def calls_meta_status
+    inbox = calls_inbox_from(params[:inbox_id])
+    return render json: { ok: false, error: 'Nenhuma caixa configurada para ligações.' } unless inbox
+
+    calling = Crm::Calls::MetaClient.new(inbox.channel).settings['calling'] || {}
+    render json: { ok: true, meta: store_calls_meta(calling), health: calls_health(inbox) }
+  rescue Crm::Calls::MetaError => e
+    render json: { ok: false, error: "A Meta não respondeu: #{e.message}", message: e.message, code: e.code,
+                   meta: store_calls_meta({}, error: e.message), health: calls_health(inbox) }
+  end
+
+  # caixa das ligações: a enviada (se for da conta) ou a configurada; só WhatsApp API oficial
+  def calls_inbox_from(inbox_id)
+    inbox = if inbox_id.present?
+              Current.account.inboxes.find_by(id: inbox_id)
+            else
+              Crm::Calls::Settings.new(Current.account, crm_settings: crm_settings).inbox
+            end
+    return nil unless inbox&.channel.is_a?(Channel::Whatsapp) && inbox.channel.provider == 'whatsapp_cloud'
+
+    inbox
+  end
+
+  # guarda em agenda_config.calls.meta o último estado visto na Meta (erro não apaga o estado anterior)
+  def store_calls_meta(calling, error: nil)
+    cfg = crm_settings.agenda_config || {}
+    calls = cfg['calls'] || {}
+    seen = { 'calling_status' => calling['status'], 'callback_permission_status' => calling['callback_permission_status'],
+             'call_icon_visibility' => calling['call_icon_visibility'] }.compact
+    meta = (calls['meta'] || {}).merge(seen).merge('checked_at' => Time.current.iso8601, 'error' => error)
+    calls['meta'] = meta
+    cfg['calls'] = calls
+    crm_settings.update!(agenda_config: cfg)
+    meta
+  end
+
+  def calls_health(inbox)
+    health = inbox&.channel.try(:phone_number_health) || {}
+    { messaging_limit_tier: health['messaging_limit_tier'], quality_rating: health['quality_rating'] }
   end
 
   def update_sheets
@@ -1182,6 +1288,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     }
   end
 
+  # 📞 ligações nativas (item 167) com os padrões preenchidos
+  def calls_json(record)
+    Crm::Calls::Settings.new(Current.account, crm_settings: record).to_h
+  end
+
   def settings_json(s)
     {
       n8n_base_url: s.n8n_base_url,
@@ -1195,6 +1306,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       ai: ai_json(s),
       sheets: sheets_json(s),
       oftalmofacil: oftalmofacil_json(s),
+      calls: calls_json(s),
       agenda_windows: (s.agenda_config || {})['windows'] || [],
       agenda_blocked: (s.agenda_config || {})['blocked'] || [],
       agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || [],

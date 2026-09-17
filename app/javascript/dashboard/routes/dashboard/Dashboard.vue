@@ -25,6 +25,7 @@ import CopilotContainer from 'dashboard/components/copilot/CopilotContainer.vue'
 
 import MobileSidebarLauncher from 'dashboard/components-next/sidebar/MobileSidebarLauncher.vue';
 import RadarPriorityPopup from 'dashboard/components-next/radar/RadarPriorityPopup.vue';
+import CevicoCallPopup from 'dashboard/components-next/cevico/calls/CevicoCallPopup.vue';
 import BugReportDrawer from 'dashboard/components-next/radar/BugReportDrawer.vue';
 import { useCallsStore } from 'dashboard/stores/calls';
 
@@ -39,6 +40,7 @@ export default {
     FloatingCallWidget,
     MobileSidebarLauncher,
     RadarPriorityPopup,
+    CevicoCallPopup,
     BugReportDrawer,
   },
   setup() {
@@ -158,6 +160,7 @@ export default {
         <router-view />
         <CommandBar :is-paywalled="isAccountPaywalled" />
         <RadarPriorityPopup />
+        <CevicoCallPopup />
         <BugReportDrawer />
         <MobileSidebarLauncher
           :is-mobile-sidebar-open="isMobileSidebarOpen"
