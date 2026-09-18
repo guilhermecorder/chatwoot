@@ -118,7 +118,10 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
   # (alvos pessoais — peso-alvo, sessões/semana — moram no registro
   # kind='profile' de cada usuário, não no config compartilhado)
 
-  # Boxe: biblioteca de sequências (combos numerados) pra praticar
+  # Boxe: biblioteca de sequências (combos numerados) pra praticar +
+  # TREINOS PRÉ-PROGRAMADOS (rodada 20): estrutura em blocos (aquecimento,
+  # técnica, sequências, footwork, saco, condicionamento, alongamento…)
+  # com minutos/rounds/descanso — o front guia a sessão com cronômetro.
   def sanitize_boxing(boxing)
     boxing = {} unless boxing.is_a?(Hash)
     {
@@ -130,6 +133,31 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
           'name' => seq['name'].to_s.strip.first(60),
           'steps' => seq['steps'].to_s.strip.first(120),
           'desc' => seq['desc'].to_s.strip.first(200)
+        }
+      end,
+      'workouts' => Array(boxing['workouts']).first(30).filter_map { |w| sanitize_box_workout(w) }
+    }
+  end
+
+  def sanitize_box_workout(workout)
+    return nil unless workout.is_a?(Hash)
+
+    {
+      'id' => workout['id'].presence || SecureRandom.hex(4),
+      'name' => workout['name'].to_s.strip.first(80),
+      'desc' => workout['desc'].to_s.strip.first(300),
+      'blocks' => Array(workout['blocks']).first(20).filter_map do |b|
+        next nil unless b.is_a?(Hash)
+
+        {
+          'type' => b['type'].to_s.first(20),
+          'title' => b['title'].to_s.strip.first(80),
+          'minutes' => b['minutes'].to_s.tr(',', '.').to_f.clamp(0, 180),
+          'rounds' => b['rounds'].to_i.clamp(0, 30),
+          'round_sec' => b['round_sec'].to_i.clamp(0, 900),
+          'rest_sec' => b['rest_sec'].to_i.clamp(0, 600),
+          'seqs' => Array(b['seqs']).map { |x| x.to_s.first(20) }.reject(&:blank?).first(20),
+          'desc' => b['desc'].to_s.strip.first(300)
         }
       end
     }
@@ -185,6 +213,8 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       # rodada 16: chavinha com N opções (barra | halteres | máquina…) —
       # lista livre; sem lista, o front sugere as opções pelo nome
       'variants' => Array(ex['variants']).map { |v| v.to_s.strip.first(30) }.reject(&:blank?).uniq.first(6),
+      # rodada 21: fator de PESO COMUM por variação (halteres ×2, máquina ×0,85…)
+      'equiv' => (ex['equiv'].is_a?(Hash) ? ex['equiv'] : {}).first(6).to_h { |k, v| [k.to_s.strip.first(30).downcase, v.to_s.tr(',', '.').to_f] }.select { |_, v| v.positive? },
       'method' => ex['method'].to_s.first(20),
       'scheme' => ex['scheme'].to_s.first(60),
       'rest' => ex['rest'].to_s.first(40),

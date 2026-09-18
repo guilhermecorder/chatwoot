@@ -394,3 +394,59 @@ export const EXTRA_METHODS = [
   },
 ];
 export const extraMethod = key => EXTRA_METHODS.find(m => m.key === key) || EXTRA_METHODS[0];
+
+// ═══ PESO COMUM entre variações (rodada 21) ═════════════════════════
+// Pedido 18/09: "se eu fiz 30 kg no halter de cada lado e na máquina 70,
+// encontrar um peso comum, assim como na barra". Cada variação tem um
+// FATOR que leva a carga registrada pro "peso comum" (escala da barra):
+//   halteres ×2 (cada lado → total) · barra/smith/polia ×1 ·
+//   máquina = calibrada pelo histórico (força estimada na máquina vs nas
+//   outras variações) ou fixada na prescrição (equiv: { 'máquina': 0.85 }).
+export const DEFAULT_EQUIV = { halteres: 2, halter: 2, halteres_par: 2 };
+const normEq = t => String(t || '').trim().toLowerCase();
+export const fixedFactor = (presc, tag) => {
+  const t = normEq(tag);
+  const fromPresc = presc?.equiv?.[t];
+  if (Number(fromPresc) > 0) return Number(fromPresc);
+  return DEFAULT_EQUIV[t] ?? null;
+};
+// aprende o fator das variações sem fator fixo comparando a MELHOR força
+// estimada (e-1RM) da execução mais recente de cada variação com a da
+// variação de referência (base). execs = [{ tag, e1, date }] (mais novo
+// primeiro). Devolve { tag: fator }.
+export const learnEquiv = (presc, base, execs) => {
+  const out = {};
+  const tags = [...new Set((execs || []).map(x => normEq(x.tag) || normEq(base)))];
+  const baseTag = normEq(base);
+  const baseF = fixedFactor(presc, baseTag) ?? 1;
+  out[baseTag] = baseF;
+  const latest = tag => (execs || []).find(x => (normEq(x.tag) || baseTag) === tag);
+  const refExec = latest(baseTag);
+  tags.forEach(tag => {
+    if (tag === baseTag) return;
+    const fixed = fixedFactor(presc, tag);
+    if (fixed) {
+      out[tag] = fixed;
+      return;
+    }
+    const mine = latest(tag);
+    // sem referência: assume escala da barra (×1)
+    if (!refExec || !mine || !mine.e1) {
+      out[tag] = 1;
+      return;
+    }
+    out[tag] = Math.round(((refExec.e1 * baseF) / mine.e1) * 1000) / 1000;
+  });
+  return out;
+};
+// fator de uma variação: o aprendido/fixado no mapa; se ela ainda não
+// apareceu no histórico, o fixo da prescrição ou o padrão (halteres ×2)
+export const factorOf = (equiv, tag, base, presc = null) => {
+  const t = normEq(tag) || normEq(base);
+  return equiv?.[t] ?? fixedFactor(presc, t) ?? 1;
+};
+// carga de uma variação → outra (ex.: halteres 30 → máquina ≈ 70)
+export const convertLoad = (load, fromF, toF) => {
+  if (!toF) return load;
+  return Math.round(((load * fromF) / toF) * 2) / 2;
+};

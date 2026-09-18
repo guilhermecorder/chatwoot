@@ -66,10 +66,27 @@ const bottomPad = computed(
   () => (options.value.length - 1 - winEnd.value) * ITEM
 );
 
+// ASSENTAR (rodada 20): quando a roleta nasce fora da tela (exercício
+// extra entrando no fim da sessão, card que acabou de montar), o
+// scroll-snap da página reancora o scrollTop antes do layout terminar e
+// a roleta parava num número errado — que o onScroll gravava no modelo.
+// Agora o posicionamento é reaplicado em 3 tempos e os eventos de scroll
+// são ignorados até assentar.
+let settling = false;
 const centerOn = i => {
   windowCenter.value = i;
   selIdx.value = i;
-  nextTick(() => scrollToIdx(i, false));
+  settling = true;
+  nextTick(() => {
+    scrollToIdx(i, false);
+    requestAnimationFrame(() => {
+      scrollToIdx(i, false);
+      setTimeout(() => {
+        scrollToIdx(i, false);
+        settling = false;
+      }, 80);
+    });
+  });
 };
 
 onMounted(() => centerOn(idxOf(props.modelValue)));
@@ -88,7 +105,7 @@ watch(
 
 let timer = null;
 const onScroll = () => {
-  if (!el.value) return;
+  if (!el.value || settling) return;
   const i = Math.min(
     options.value.length - 1,
     Math.max(0, Math.round(el.value.scrollTop / ITEM))

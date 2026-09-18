@@ -12,6 +12,181 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 23 — 18/09 ✅ ATUAL→ALVO + CM×PESO + ONDE QUERO + FORÇA A/B/C + VIDRO + ANÁLISES REORDENADA (working tree)
+Pedido dele 18/09 (prints do painel e do treino), 7 pontos:
+1. "meus dados atuais e desejados neste primeiro painel" → bloco 🎯 ONDE
+   ESTOU → ONDE QUERO CHEGAR logo após o hero: peso + 8 medidas (braço e
+   coxa = média D/E) com atual → alvo, barra "% do caminho" (1ª medição →
+   alvo), "faltam X", ETA no peso; ✎ alvos abre grade de roletas e salva
+   em profile.targets {key: valor} (weight_goal segue junto). Sem alvo
+   mostra Δ desde o início. Tile Força total no fim da grade (leva ao bloco
+   de força). Os 3 tiles antigos saíram.
+2. Cores padronizadas SÓ azul + laranja em tons (painel e Análises): ▲ =
+   royal, ▼ = laranja vivo, "direção certa" = azul, "contra" = laranja;
+   VERDICT_COLORS local; sem verde/vermelho (import limpo).
+3. Gráfico 📐 CENTÍMETROS TOTAIS × PESO logo no início (bloco laranja):
+   Σ de todas as circunferências (carry-forward) laranja × peso azul,
+   eixo duplo, com os números e Δ no cabeçalho.
+4. Gráfico "onde quero perder × onde quero ganhar" (Δ desde a 1ª medição
+   por grupo, laranja/azul) no bloco Centímetros — substituiu o "direção
+   certa" da rodada 22. Áreas do corpo mantidas.
+5. 📈 FORÇA NOS TREINOS: chavinha Geral | A | B | C → 3 números (força
+   total, relativa, % subindo) + gráfico semanal força × relativa
+   (strengthChartFor de volta, eixo duplo). Tile de força rola até aqui.
+6. Treino: os 3 treinos viraram CARTÕES DE VIDRO clicáveis (letra grande,
+   dia, nº de exercícios, "▶ Fazer este"); o da vez em laranja sólido
+   PULSANDO com selo "🔥 HOJE" (dia da prescrição = hoje) ou "▶ próximo";
+   ✎ fica no cartão (stop). Auto-start por ?start= mantido.
+7. VISUAL DE VIDRO: _hub-glass.scss (novo, importado no app.scss) portado
+   do kit iMac G3 + vidro da CEVICO (develop) com a paleta do HUB —
+   .hub-page (luz do alto), .hub-block (carcaça translúcida c/ crista e
+   luz no canto), .hub-block-solid, .hub-block-hover, .hub-block-today
+   (halo pulsando), .hub-orange, .hub-chip; dark mode. As 3 telas do mundo
+   Saúde vestem .hub-page e os cards viraram .hub-block.
+8. ANÁLISES · Visão geral reordenada: 🟦 Mapa de constância PRIMEIRO,
+   depois 📈 DESDE A SEMANA 1 (novo: força total Σ e-1RM carry-forward ×
+   peso × centímetros totais por semana do programa, indexados em 100 na
+   S1, tooltip com valores reais, 3 mini-cards c/ Δ desde S1), depois
+   Insights, Transformação, Aderência.
+- Sem migration. Alvos de teste semeados no profile local (78 kg / 88 cm
+  / braço 43 / peito 106) — banco local é simulação.
+
+## RODADA 22 — 18/09 ✅ PAINEL MAIS CLARO (4 cortes aprovados por ele) (working tree)
+Ele perguntou "o painel já está claro o suficiente?"; propus 4 cortes e
+ele aprovou ("vamos neste sentido"). Só HealthHome.vue.
+
+1. **Gráfico de cm virou "Centímetros na direção certa"**: uma lógica só,
+   SUBIR É BOM — cintura que caiu e braço que cresceu somam na linha
+   verde; o que foi contra vira a linha vermelha; saldo pontilhado. Eixo
+   começa em zero. (Antes laranja descia = bom e azul subia = bom, e o
+   −12 dos braços assustava.)
+2. **Cards de carga leves**: frente = nome (+🏅/tag), "+3 kg no ciclo
+   (+4%)", carga grande (peso comum) e sparkline. TOQUE no card abre o
+   detalhe: séries e data da última, veredito, Δ vs anterior, força
+   estimada, nº de execuções, linha ⚖ do peso comum e a carga registrada
+   na variação. (openCards Set + toggleCard.) Parágrafo de ajuda encurtado.
+3. **Bloco "Progresso de força" SAIU do painel** (carrossel Geral|A|B|C,
+   4 KPIs e gráfico semanal) — mora em Análises; o tile "Força total" do
+   Resultado fica e agora leva pra Análises. Removidos strengthSlides/
+   forceCarousel/strengthChartFor/consistency/adherence/volume da semana
+   (lint sem sobras).
+4. **Gráfico "cintura × peso × alvo" SAIU** (repetia a área Abdômen e o
+   tile de peso; a área Peso já traz a linha do alvo).
+Painel final: hero → 3 tiles → Centímetros (balanço + chips + 1 gráfico
++ áreas) → Cargas (cards leves, botão Fazer Treino) → Metas dobráveis →
+link Análises.
+
+## RODADA 21 — 18/09 ✅ "FAZER TREINO" NO CARROSSEL + PESO COMUM ENTRE VARIAÇÕES (working tree)
+Pedido dele 18/09 (print do carrossel Treino A): botão "fazer treino" ali;
+e quando marca máquina num exercício que também faz com halteres,
+"chegar num peso comum" (30 kg por halter ≈ 70 kg na máquina, como na
+barra).
+
+- **▶ Fazer Treino X** no topo de cada slide do Progresso das cargas
+  (goStart → sessão aberta com metas; selo "é o da vez").
+- **PESO COMUM (warrior.js)**: cada variação tem um FATOR pra mesma
+  escala — DEFAULT_EQUIV halteres ×2 (cada lado → total), barra/smith/
+  polia ×1, máquina sem fator fixo = CALIBRADA pelo histórico
+  (learnEquiv: e-1RM da execução mais recente da base ÷ e-1RM da mais
+  recente da variação); fator fixo opcional na prescrição `equiv`
+  {tag: fator} (sanitize novo no controller). A escala exibida é a da
+  VARIAÇÃO PRINCIPAL do exercício (supino com halteres continua mostrando
+  o número do halter; barra/máquina entram convertidas).
+- **Painel**: execuções ganham `common`; número grande, Δ ciclo, Δ vs
+  anterior e sparkline usam o peso comum; quando o histórico mistura
+  variações aparece a linha "⚖ peso comum · halteres 30 ≈ máquina 70
+  (×0,43)" e, sob o número, a carga registrada na variação.
+- **Sessão (HealthPage)**: chavinha pra variação SEM histórico → roletas
+  nascem ESTIMADAS pelo peso comum a partir da execução mais recente em
+  outra variação (convertLoad, grade de 0,5 kg) com hint "Primeira vez
+  com máquina — estimado pelo peso comum: halteres 30×8 … ≈ 70×8 …";
+  linha "⚖" sob a chavinha mostra a conversão e os fatores ≠ 1. Editor ✎:
+  "barra | halteres ×2 | máquina ×0,85" (parseVariants extrai o ×n pra
+  `equiv`; ajuda no texto).
+
+## RODADA 20 — 18/09 ✅ NAVEGAÇÃO "APP DA APPLE" + PAINEL ENXUTO + CM POR ÁREA + EXTRA PUXA + BOXE PROGRAMADO (working tree)
+Pedido dele 18/09 (prints do painel e do balanço de cm): (1) acesso e
+navegação fáceis "como um app feito pela Apple", 1–2 cliques pra chegar
+em qualquer lugar; (2) enxugar o Meu Painel — as coisas mais importantes
+no início (cargas, progresso, medidas em cm, relação com a meta); (3)
+gráfico com TODOS os centímetros ganhos/perdidos + gráficos separados por
+ÁREA do corpo; (4) exercício complementar (extra) não puxava as
+informações anteriores; (5) reativar o BOXE com treinos pré-programados
+de ~60 min estruturados (aquecimento, sequências, footwork…).
+
+- **HubTabBar.vue (novo)**: barra de abas fixa no rodapé, só no celular
+  (< 768px; no desktop a sidebar já resolve) — Painel · Treino · Boxe (se
+  ligado) · Corpo · Dieta · Análises; vidro azul-noite, aba ativa laranja
+  com brilho, safe-area do iPhone. Incluída nas 3 telas (HealthHome,
+  HealthPage, HealthDashboard) com pb-28 no conteúdo. O hambúrguer do app
+  (#mobile-sidebar-launcher) sobe acima da barra via classe no body
+  (`hub-tabbar-on`) + style global. "Dashboard" virou "Análises" (sidebar
+  + título da tela).
+- **Atalho de 2 toques**: "▶ Treino X de hoje" no painel navega pra
+  hub_health com `?start=X`; HealthPage no onMounted abre a sessão
+  (startProgramSession) e limpa a query. Botão "▶ Começar Treino X" também
+  dentro das Metas.
+- **Meu Painel reescrito (HealthHome)**: ordem = HERO (ciclo/semana/
+  placar + CTA) → RESULTADO (3 tiles: Peso × alvo c/ barra de progresso
+  "% do caminho"/faltam/ETA/ritmo e alvo editável ali; Cintura umbigo c/
+  Δ início/última/ritmo + sparkline; Força total Σ e-1RM c/ Δ ciclo, força
+  relativa e taxa) → 📐 CENTÍMETROS (balanço 3 cards + chips; GRÁFICO
+  "todos os centímetros, medição a medição" = Σ Δ desde a 1ª medição com
+  carry-forward, laranja = onde quer perder, royal = onde quer ganhar,
+  saldo pontilhado; ÁREAS DO CORPO = chavinha rolável Abdômen · Quadril ·
+  Peito · Braços · Coxas · Ombros · Pescoço · Peso → cards por medida
+  (umbigo+estreita, D+E) c/ Δ início/última em cor semântica + gráfico da
+  área; cintura×peso×alvo mantido) → 🏋️ Cargas (carrossel A|B|C intacto)
+  → 📈 Força (carrossel Geral|A|B|C intacto; slide Geral ganhou linha
+  recordes/progressões/aderência e volume da semana na tonelagem) → 🎯
+  METAS do próximo treino DOBRÁVEL (fechada por padrão, lembra em
+  localStorage hub_painel_metas). SAÍRAM: elogio (virou chip "🏆 semana
+  completa" no hero), fileira de 4 KPIs, caixinhas de consistência (moram
+  em Análises), card de dieta. Tiles Cintura/Força rolam pra seção.
+- **Extra puxa a última execução (HealthPage)**: normName (sem acento/
+  preposição/pontuação) + normLoose (sem equipamento no fim, com ou sem
+  preposição) — "rosca martelo halteres" acha "Rosca martelo com
+  halteres"; lastAnyEntry devolve também a data; PREFILL SEMPRE
+  (buildTodaySets com as séries da última vez mesmo com técnica diferente;
+  veredito/alvos só na mesma técnica, senão hint "Última vez dd/mm em X:
+  … Técnica nova"); nome salvo = o canônico do histórico; PRÉVIA ao vivo
+  no seletor ("↩ Última vez 24/08 · RPT · 41×10 · 37×12 — as caixinhas já
+  vêm assim"); CHIPS "Seus extras recentes" (até 8, 1 toque = entra com
+  a técnica da última vez, pickExtra). Provável causa real no iPhone: o
+  datalist não aparece no Safari e ele digitava diferente do nome salvo.
+- **WheelInput assenta**: roleta nascendo fora da tela (extra no fim da
+  sessão) parava num número errado e o onScroll gravava no modelo (viu
+  28,5 no lugar de 37) — centerOn reaplica o scroll em 3 tempos (nextTick
+  → rAF → +80 ms) e ignora scroll até assentar (`settling`).
+- **BOXE PRÉ-PROGRAMADO**: config.boxing.workouts (sanitize novo
+  sanitize_box_workout: ≤30 treinos × ≤20 blocos; bloco = type/title/
+  minutes/rounds/round_sec/rest_sec/seqs/desc). 3 treinos DE FÁBRICA no
+  front (DEFAULT_BOX_WORKOUTS, aparecem enquanto não salvar os dele):
+  Fundamentos 60 min (corda+mobilidade 10 · sombra 3×3' · sequências 4×3'
+  · footwork 3×3' · saco 4×3' · condicionamento 5×40"/20" · volta à calma
+  3), Sequências e footwork 45, Rápido 30. Cards c/ minutos/blocos/rounds/
+  sequências + "▶ Iniciar" e "✓ Já fiz" (registra sem cronômetro).
+  SESSÃO GUIADA: trilha dos blocos, bloco atual c/ descrição e "Round i
+  de n"/descanso, relógio circular SVG grande (mm:ss, arco laranja no
+  round e azul-claro no descanso), sequências do bloco em cards grandes,
+  ‹ ▶/⏸ › , apitos WebAudio (3-2-1, troca de round, fim), wake lock da
+  tela, data/observações e "✓ Concluir" → registro kind=boxing c/
+  duration_min (tempo real ≥1 min, senão o planejado), planned_min,
+  rounds, sequences (união), workout_id/name, blocks[{type,title,minutes,
+  done}]. EDITOR de treino programado (nome/desc/blocos c/ tipo · título ·
+  min · rounds × seg · descanso · desc · chips das sequências · ↑↓ ✕ ·
+  + bloco · excluir). Registro livre antigo virou dobrável "✍️ Registrar
+  treino livre". saveSeq/deleteSeq preservam `workouts` no config.
+  Histórico mostra o nome do treino programado.
+- **HealthPage enxuta**: fileira de KPIs do topo (7 dias/sequência/peso/
+  variação) saiu; título = aba atual; pílulas só no desktop (no celular a
+  barra faz isso).
+- Boxe LIGADO no banco local pra testar (features.boxing = true — banco
+  local é simulação). Sem migration.
+- TESTADO local (375px): painel completo (tiles, gráfico de cm, áreas,
+  carrosséis), CTA → sessão aberta com metas, extra "rosca martelo" c/
+  prévia + prefill + chip recente + 1 toque (registro 292 apagado).
+
 ## RODADA 19 — 10/09 ✅ PORTA DE ENTRADA = MEU PAINEL DA SAÚDE (working tree)
 Feedback dele com a 11ee29e no ar: (1) ícone do iPhone ainda era o
 olho da CEVICO; (2) abrir o app caía no /inicio (painel de negócios)
@@ -770,6 +945,11 @@ AgendaDashboardCore.vue).
   Docker — recarregar a página após editar componente.
 
 ## Ambiente local (convive com o da CEVICO)
+- ⚠️ 18/09: abrir o HUB local em **http://127.0.0.1:3001**, nunca
+  localhost:3001 — a CEVICO local (localhost:3000) e o HUB dividem o
+  cookie `cw_d_session_info` (cookie é por host, ignora porta): logar
+  num derruba o outro ("sempre precisa logar de novo"). Links SSO do
+  rails runner são de USO ÚNICO (2º clique = credenciais inválidas).
 - `cd ~/hub && docker compose up -d rails sidekiq vite` — projeto
   docker "hub", volumes próprios (banco chatwoot_dev do projeto hub).
 - Portas: rails 3001 · vite 3037 · postgres 5433 · redis 6380 ·

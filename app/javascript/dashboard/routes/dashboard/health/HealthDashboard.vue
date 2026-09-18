@@ -9,6 +9,7 @@ import { useAlert } from 'dashboard/composables';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import HubTabBar from './HubTabBar.vue';
 import {
   Chart as ChartJS,
   Tooltip,
@@ -24,11 +25,11 @@ import { exerciseVerdict } from './warrior';
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler);
 
-// paleta azul royal + laranja (rodada 16) — a mesma do Meu Painel
+// paleta azul royal + laranja (rodada 16) — rodada 23: sem verde/vermelho
 import {
   ROYAL, ROYAL_PROFUNDO, ROYAL_NOITE, ROYAL_CLARO,
   LARANJA, LARANJA_VIVO, LARANJA_CLARO, LARANJA_ESCURO,
-  VERMELHO, VERDE_OK, CINZA, GRAD_ROYAL,
+  CINZA, GRAD_ROYAL,
 } from './palette';
 
 const isLoading = ref(true);
@@ -307,9 +308,9 @@ const totalProgress = computed(() => weeklyVerdicts.value.reduce((s, w) => s + w
 const verdictChart = computed(() => ({
   labels: weekLabels.value,
   datasets: [
-    lineBase('▲ progressões', VERDE_OK, weeklyVerdicts.value.map(w => w.progress), { area: true }),
+    lineBase('▲ progressões', ROYAL, weeklyVerdicts.value.map(w => w.progress), { area: true }),
     lineBase('▬ empates', CINZA, weeklyVerdicts.value.map(w => w.tie)),
-    lineBase('▼ regressões', VERMELHO, weeklyVerdicts.value.map(w => w.regress)),
+    lineBase('▼ regressões', LARANJA_VIVO, weeklyVerdicts.value.map(w => w.regress)),
   ],
 }));
 
@@ -478,6 +479,95 @@ const latestWeight = computed(() => {
 });
 const sinal = v => `${v > 0 ? '+' : '−'}${fmtNum(Math.abs(v))}`;
 
+// ── DESDE A SEMANA 1 (rodada 23): força × peso × centímetros por semana
+// do programa, indexados na 1ª semana com dado (= 100). FORÇA = média,
+// por exercício, de (melhor e-1RM conhecido até a semana ÷ e-1RM da 1ª
+// execução daquele exercício) — assim um ciclo que introduz exercícios
+// novos não "inventa" força (Σ cru saltava de 806 pra 1512). Peso e cm =
+// última medição até o fim da semana; cm = soma das circunferências. O
+// tooltip mostra os valores reais (peso/cm) e o % de força.
+const CM_KEYS_DASH = ['waist_navel', 'waist_narrow', 'hips', 'chest', 'arm_r', 'arm_l', 'thigh_r', 'thigh_l', 'neck', 'shoulders'];
+const sinceWeek1 = computed(() => {
+  const prog = mainProgram.value;
+  const upto = Math.min(currentWeek.value || 0, totalWeeks.value);
+  if (!prog?.start_date || !upto) return null;
+  const start = new Date(`${prog.start_date}T00:00:00`);
+  const weekEnd = w => {
+    const d = new Date(start);
+    d.setDate(d.getDate() + w * 7 - 1);
+    return toISO(d);
+  };
+  const bodiesAsc = [...bodies.value].sort((a, b) => (a.record_date > b.record_date ? 1 : -1));
+  const lastKnown = (key, iso) => {
+    const rec = [...bodiesAsc].reverse().find(b => b.record_date <= iso && Number(b.data?.[key]) > 0);
+    return rec ? Number(rec.data[key]) : null;
+  };
+  const recsAsc = [...mainRecords.value].sort((a, b) => Number(a.data.week) - Number(b.data.week));
+  const firstByEx = {};
+  const lastByEx = {};
+  const rows = [];
+  let cursor = 0;
+  for (let w = 1; w <= upto; w += 1) {
+    while (cursor < recsAsc.length && Number(recsAsc[cursor].data.week) <= w) {
+      (recsAsc[cursor].data.exercises || []).forEach(ex => {
+        if (!ex.sets?.length) return;
+        const e1 = Math.max(...ex.sets.map(st => e1rm(Number(st.load) || 0, Number(st.reps) || 0)));
+        if (!e1) return;
+        if (!firstByEx[ex.name]) firstByEx[ex.name] = e1;
+        lastByEx[ex.name] = e1;
+      });
+      cursor += 1;
+    }
+    const ratios = Object.keys(lastByEx).map(n => lastByEx[n] / firstByEx[n]);
+    // força = média das razões × 100 (100 = como na 1ª execução de cada um)
+    const forca = ratios.length ? Math.round((ratios.reduce((a, b) => a + b, 0) / ratios.length) * 1000) / 10 : null;
+    const end = weekEnd(w);
+    const peso = lastKnown('weight', end);
+    const cmVals = CM_KEYS_DASH.map(k => lastKnown(k, end)).filter(v => v !== null);
+    const cm = cmVals.length >= 3 ? cmVals.reduce((a, b) => a + b, 0) : null;
+    rows.push({ w, forca, peso, cm });
+  }
+  const baseOf = key => rows.find(r => r[key] !== null)?.[key] ?? null;
+  const base = { forca: baseOf('forca'), peso: baseOf('peso'), cm: baseOf('cm') };
+  const idx = (r, key) => (r[key] === null || !base[key] ? null : Math.round((r[key] / base[key]) * 1000) / 10);
+  const abs = { forca: rows.map(r => r.forca), peso: rows.map(r => r.peso), cm: rows.map(r => r.cm) };
+  const last = rows[rows.length - 1];
+  return {
+    rows,
+    base,
+    last,
+    chart: {
+      labels: rows.map(r => `S${r.w}`),
+      datasets: [
+        lineBase('Força (média por exercício)', ROYAL, rows.map(r => idx(r, 'forca')), { area: true }),
+        lineBase('Peso (índice)', LARANJA, rows.map(r => idx(r, 'peso'))),
+        lineBase('Centímetros totais (índice)', LARANJA_CLARO, rows.map(r => idx(r, 'cm')), { dashed: true }),
+      ],
+    },
+    options: chartOptions({
+      spanGaps: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const key = ['forca', 'peso', 'cm'][ctx.datasetIndex];
+              const v = abs[key][ctx.dataIndex];
+              if (key === 'forca') return `${ctx.dataset.label}: ${ctx.formattedValue} (${v === null ? '—' : `${sinal(v - 100)}% por exercício`})`;
+              const unit = key === 'peso' ? 'kg' : 'cm';
+              return `${ctx.dataset.label}: ${ctx.formattedValue}${v === null ? '' : ` (${fmtNum(Math.round(v * 10) / 10)} ${unit})`}`;
+            },
+          },
+        },
+      },
+      scales: {
+        y: { ticks: { font: { size: 10 }, callback: v => `${v}` }, title: { display: true, text: 'semana 1 = 100', font: { size: 10 } } },
+        x: { ticks: { font: { size: 10 } } },
+      },
+    }),
+  };
+});
+
 // ── mapa de constância (heatmap, últimas 24 semanas) ───────────────
 const trainedByDate = computed(() => {
   const map = {};
@@ -576,7 +666,7 @@ const insights = computed(() => {
   if (recentPRs.value.length) {
     list.push({
       icon: '🏅',
-      tone: VERDE_OK,
+      tone: ROYAL,
       text: `Recorde pessoal esta semana: ${recentPRs.value.slice(0, 2).map(r => r.name).join(' e ')}${recentPRs.value.length > 2 ? ` (+${recentPRs.value.length - 2})` : ''}.`,
     });
   }
@@ -596,7 +686,7 @@ const insights = computed(() => {
   // peso: tendência de 30 dias
   if (pesoTrend.value !== null) {
     if (pesoTrend.value < -0.1) {
-      list.push({ icon: '📉', tone: VERDE_OK, text: `Peso caindo ${fmtNum(Math.abs(pesoTrend.value))} kg/mês no ritmo atual — cutting funcionando.` });
+      list.push({ icon: '📉', tone: ROYAL, text: `Peso caindo ${fmtNum(Math.abs(pesoTrend.value))} kg/mês no ritmo atual — cutting funcionando.` });
     } else if (pesoTrend.value > 0.3) {
       list.push({ icon: '⚠️', tone: LARANJA, text: `Peso subindo ${fmtNum(pesoTrend.value)} kg/mês — confira as calorias contra a meta.` });
     }
@@ -621,7 +711,7 @@ const insights = computed(() => {
     if (faltando.length) {
       list.push({ icon: '⏰', tone: LARANJA, text: `Semana ${currentWeek.value}: falta o Treino ${faltando.join(' e o ')} previsto até aqui.` });
     } else if (esperadas.length) {
-      list.push({ icon: '✅', tone: VERDE_OK, text: `Semana ${currentWeek.value} em dia: ${esperadas.length} de 3 sessões previstas até hoje, todas feitas.` });
+      list.push({ icon: '✅', tone: ROYAL, text: `Semana ${currentWeek.value} em dia: ${esperadas.length} de 3 sessões previstas até hoje, todas feitas.` });
     }
   }
   // melhor semana de volume
@@ -629,7 +719,7 @@ const insights = computed(() => {
   if (vols.length >= 2) {
     const ultima = vols[vols.length - 1];
     if (ultima.total === Math.max(...vols.map(w => w.total))) {
-      list.push({ icon: '🔥', tone: VERDE_OK, text: `S${ultima.week} é a sua melhor semana de volume até agora (${fmtVol(ultima.total)}).` });
+      list.push({ icon: '🔥', tone: ROYAL, text: `S${ultima.week} é a sua melhor semana de volume até agora (${fmtVol(ultima.total)}).` });
     }
   }
   if (!list.length) {
@@ -743,8 +833,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
-    <div class="max-w-5xl mx-auto w-full p-4 sm:p-8">
+  <div class="hub-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
+    <div class="max-w-5xl mx-auto w-full p-4 pb-28 sm:p-8 md:pb-8">
       <!-- Header -->
       <div class="flex items-center gap-3 flex-wrap mb-5">
         <span
@@ -754,7 +844,7 @@ onMounted(async () => {
           <span class="i-lucide-area-chart text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Dashboard</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">Análises</h1>
           <p class="text-xs text-n-slate-10">seus resultados — semana a semana e acumulado</p>
         </div>
         <div class="flex gap-2">
@@ -776,61 +866,9 @@ onMounted(async () => {
       <template v-else>
         <!-- ═══ VISÃO GERAL ═══ -->
         <template v-if="dashTab === 'visao'">
-          <!-- Insights automáticos -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-2">🧠 Insights</h2>
-            <div
-              v-for="(ins, i) in insights"
-              :key="i"
-              class="flex items-start gap-2.5 py-1.5 border-b border-n-weak/60 last:border-0"
-            >
-              <span class="text-base leading-none mt-0.5">{{ ins.icon }}</span>
-              <p class="flex-1 text-xs text-n-slate-12">{{ ins.text }}</p>
-            </div>
-          </div>
-
-          <!-- Transformação -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🦋 A Transformação</h2>
-            <p class="text-[11px] text-n-slate-10 mb-3">
-              o objetivo do Warrior num gráfico só: peso caindo (azul) enquanto a força sobe (verde) — calorias na linha pontilhada
-            </p>
-            <div style="height: 260px">
-              <Line :data="transformationChart" :options="transformationOptions" />
-            </div>
-            <!-- Projeções -->
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
-              <div class="rounded-xl border border-n-weak p-2.5">
-                <p class="text-[11px] font-medium text-n-slate-11">⚖️ Peso — ritmo (30d)</p>
-                <p class="text-sm font-bold" :style="{ color: pesoTrend !== null && pesoTrend < 0 ? VERDE_OK : LARANJA }">
-                  {{ pesoTrend === null ? 'registre mais dias' : `${sinal(pesoTrend)} kg/mês` }}
-                </p>
-                <p v-if="pesoTrend !== null && latestWeight !== null" class="text-[11px] text-n-slate-10">
-                  em 30 dias: ~{{ fmtNum(latestWeight + pesoTrend) }} kg
-                </p>
-              </div>
-              <div class="rounded-xl border border-n-weak p-2.5">
-                <p class="text-[11px] font-medium text-n-slate-11">💪 Força e-1RM — ritmo (30d)</p>
-                <p class="text-sm font-bold" :style="{ color: forcaTrend !== null && forcaTrend > 0 ? VERDE_OK : LARANJA }">
-                  {{ forcaTrend === null ? 'registre mais treinos' : `${sinal(forcaTrend)} kg/mês` }}
-                </p>
-                <p class="text-[11px] text-n-slate-10">média dos exercícios do programa</p>
-              </div>
-              <div class="rounded-xl border border-n-weak p-2.5">
-                <p class="text-[11px] font-medium text-n-slate-11">🏅 Recordes na semana</p>
-                <p class="text-sm font-bold" :style="{ color: recentPRs.length ? LARANJA : undefined }">
-                  {{ recentPRs.length || '—' }}
-                </p>
-                <p class="text-[11px] text-n-slate-10 truncate">
-                  {{ recentPRs.slice(0, 2).map(r => r.name).join(' · ') || 'supere um e-1RM pra marcar' }}
-                </p>
-              </div>
-            </div>
-          </div>
-
           <!-- Mapa de constância -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🟩 Mapa de constância</h2>
+          <div class="hub-block p-4 mb-4">
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🟦 Mapa de constância</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               últimas 24 semanas — <span :style="{ color: ROYAL }">■</span> musculação ·
               <span :style="{ color: LARANJA }">■</span> boxe · meio a meio = os dois no dia
@@ -855,8 +893,95 @@ onMounted(async () => {
             </div>
           </div>
 
+          <!-- Desde a semana 1: força × peso × cm -->
+          <div class="hub-block p-4 mb-4">
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1">📈 Desde a semana 1 — força × peso × centímetros</h2>
+            <p class="text-[11px] text-n-slate-10 mb-3">
+              cada linha parte de 100 na 1ª semana: força total subindo (azul) enquanto peso e centímetros caem (laranja) é a transformação acontecendo — passe o mouse pra ver os valores reais
+            </p>
+            <div v-if="sinceWeek1" class="grid grid-cols-3 gap-2 mb-3">
+              <div class="rounded-xl p-2" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
+                <p class="text-[10px] text-n-slate-10">Força (média por exercício)</p>
+                <p class="text-sm font-bold" :style="{ color: ROYAL }">
+                  {{ sinceWeek1.last.forca === null ? '—' : `${sinal(sinceWeek1.last.forca - 100)}%` }}
+                  <span class="text-[10px] font-medium text-n-slate-10">vs 1ª execução de cada um</span>
+                </p>
+              </div>
+              <div class="rounded-xl p-2" :style="{ background: 'rgba(255,138,0,0.10)', border: '1px solid rgba(255,138,0,0.35)' }">
+                <p class="text-[10px] text-n-slate-10">Peso</p>
+                <p class="text-sm font-bold" :style="{ color: LARANJA }">
+                  {{ sinceWeek1.last.peso === null ? '—' : `${fmtNum(sinceWeek1.last.peso)} kg` }}
+                  <span v-if="sinceWeek1.base.peso && sinceWeek1.last.peso" class="text-[10px] font-medium text-n-slate-10">· {{ sinal(sinceWeek1.last.peso - sinceWeek1.base.peso) }} desde S1</span>
+                </p>
+              </div>
+              <div class="rounded-xl p-2" :style="{ background: 'rgba(255,178,94,0.14)', border: '1px solid rgba(255,178,94,0.5)' }">
+                <p class="text-[10px] text-n-slate-10">Centímetros totais</p>
+                <p class="text-sm font-bold" :style="{ color: LARANJA_ESCURO }">
+                  {{ sinceWeek1.last.cm === null ? '—' : `${fmtNum(Math.round(sinceWeek1.last.cm * 10) / 10)} cm` }}
+                  <span v-if="sinceWeek1.base.cm && sinceWeek1.last.cm" class="text-[10px] font-medium text-n-slate-10">· {{ sinal(sinceWeek1.last.cm - sinceWeek1.base.cm) }} desde S1</span>
+                </p>
+              </div>
+            </div>
+            <div v-if="sinceWeek1" style="height: 240px">
+              <Line :data="sinceWeek1.chart" :options="sinceWeek1.options" />
+            </div>
+            <p v-else class="text-xs text-n-slate-10">O programa ainda não começou a contar semanas.</p>
+          </div>
+
+          <!-- Insights automáticos -->
+          <div class="hub-block p-4 mb-4">
+            <h2 class="text-sm font-bold text-n-slate-12 mb-2">🧠 Insights</h2>
+            <div
+              v-for="(ins, i) in insights"
+              :key="i"
+              class="flex items-start gap-2.5 py-1.5 border-b border-n-weak/60 last:border-0"
+            >
+              <span class="text-base leading-none mt-0.5">{{ ins.icon }}</span>
+              <p class="flex-1 text-xs text-n-slate-12">{{ ins.text }}</p>
+            </div>
+          </div>
+
+          <!-- Transformação -->
+          <div class="hub-block p-4 mb-4">
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🦋 A Transformação</h2>
+            <p class="text-[11px] text-n-slate-10 mb-3">
+              o objetivo do Warrior num gráfico só: peso caindo (azul) enquanto a força sobe (laranja) — calorias na linha pontilhada
+            </p>
+            <div style="height: 260px">
+              <Line :data="transformationChart" :options="transformationOptions" />
+            </div>
+            <!-- Projeções -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+              <div class="rounded-xl border border-n-weak p-2.5">
+                <p class="text-[11px] font-medium text-n-slate-11">⚖️ Peso — ritmo (30d)</p>
+                <p class="text-sm font-bold" :style="{ color: pesoTrend !== null && pesoTrend < 0 ? ROYAL : LARANJA }">
+                  {{ pesoTrend === null ? 'registre mais dias' : `${sinal(pesoTrend)} kg/mês` }}
+                </p>
+                <p v-if="pesoTrend !== null && latestWeight !== null" class="text-[11px] text-n-slate-10">
+                  em 30 dias: ~{{ fmtNum(latestWeight + pesoTrend) }} kg
+                </p>
+              </div>
+              <div class="rounded-xl border border-n-weak p-2.5">
+                <p class="text-[11px] font-medium text-n-slate-11">💪 Força e-1RM — ritmo (30d)</p>
+                <p class="text-sm font-bold" :style="{ color: forcaTrend !== null && forcaTrend > 0 ? ROYAL : LARANJA }">
+                  {{ forcaTrend === null ? 'registre mais treinos' : `${sinal(forcaTrend)} kg/mês` }}
+                </p>
+                <p class="text-[11px] text-n-slate-10">média dos exercícios do programa</p>
+              </div>
+              <div class="rounded-xl border border-n-weak p-2.5">
+                <p class="text-[11px] font-medium text-n-slate-11">🏅 Recordes na semana</p>
+                <p class="text-sm font-bold" :style="{ color: recentPRs.length ? LARANJA : undefined }">
+                  {{ recentPRs.length || '—' }}
+                </p>
+                <p class="text-[11px] text-n-slate-10 truncate">
+                  {{ recentPRs.slice(0, 2).map(r => r.name).join(' · ') || 'supere um e-1RM pra marcar' }}
+                </p>
+              </div>
+            </div>
+          </div>
+
           <!-- Aderência ao plano -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4">
+          <div class="hub-block p-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">📅 Aderência ao plano</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">das 3 sessões previstas por semana (seg · qua · sex), quantas saíram</p>
             <div v-if="adherenceChart" style="height: 200px">
@@ -881,7 +1006,7 @@ onMounted(async () => {
             />
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">📊 Volume por semana</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">quanto peso você moveu em cada semana, por treino</p>
             <div style="height: 260px">
@@ -889,7 +1014,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
               <h2 class="text-sm font-bold text-n-slate-12">📈 Evolução por exercício</h2>
               <select
@@ -908,7 +1033,7 @@ onMounted(async () => {
             <p v-else class="text-xs text-n-slate-10">Escolha um exercício com registros pra ver a evolução.</p>
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">📶 Placar de progressão por semana</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               cada treino comparado ao MESMO treino da vez anterior — exercícios que subiram, empataram ou caíram
@@ -918,7 +1043,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🔁 Séries e repetições por semana</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">o trabalho total da semana em séries (linha) e repetições (área)</p>
             <div style="height: 220px">
@@ -926,7 +1051,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🗂 Carga por exercício — histórico completo</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               a carga máxima de cada exercício, sessão a sessão — um gráfico por exercício registrado
@@ -948,7 +1073,7 @@ onMounted(async () => {
           </div>
 
           <!-- Recordes pessoais -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🏅 Recordes pessoais</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               sua melhor marca em cada exercício — carga máxima e e-1RM (força estimada pela fórmula de Epley)
@@ -983,7 +1108,7 @@ onMounted(async () => {
           </div>
 
           <!-- Balanço muscular -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">⚖️ Balanço muscular</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">como o volume se divide entre os grupos — algum ficando pra trás?</p>
             <p v-if="!muscleBalance.length" class="text-xs text-n-slate-10">Registre treinos pra ver a divisão.</p>
@@ -998,7 +1123,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4">
+          <div class="hub-block p-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🏔 Acumulado do programa</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">todo o volume somado, semana após semana — a montanha subindo</p>
             <div style="height: 220px">
@@ -1022,7 +1147,7 @@ onMounted(async () => {
             <DashKpi label="Rounds" :value="boxTotalRounds" sub="no total" :from="ROYAL_PROFUNDO" :to="ROYAL_CLARO" />
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">⏱ Tempo de treino por dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">últimos 30 dias — minutos (área) e rounds (linha)</p>
             <div style="height: 240px">
@@ -1030,7 +1155,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🏔 Horas acumuladas</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">o tempo de luta somando, dia após dia (30 dias)</p>
             <div style="height: 200px">
@@ -1038,7 +1163,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4">
+          <div class="hub-block p-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-3">🌀 Sequências mais praticadas</h2>
             <p v-if="!boxTopSeqs.length" class="text-xs text-n-slate-10">
               Registre treinos de boxe marcando as sequências praticadas — o ranking nasce aqui.
@@ -1066,7 +1191,7 @@ onMounted(async () => {
             <DashKpi label="Dias registrados" :value="diets.length" sub="no total" :from="LARANJA_VIVO" :to="LARANJA_CLARO" />
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🔥 Calorias por dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">últimos {{ dietLabels.length }} dias contra a meta ({{ fmtNum(dietCfg.targets?.kcal || 0) }} kcal)</p>
             <div style="height: 240px">
@@ -1074,7 +1199,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🥩 Proteína por dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">últimos {{ dietLabels.length }} dias contra a meta ({{ fmtNum(dietCfg.targets?.protein || 0) }} g)</p>
             <div style="height: 240px">
@@ -1082,7 +1207,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4">
+          <div class="hub-block p-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🍽 Refeições feitas — dia a dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               ✓ com o horário REAL em que você marcou (horário em cinza = o previsto no plano)
@@ -1129,5 +1254,6 @@ onMounted(async () => {
         </template>
       </template>
     </div>
+    <HubTabBar :boxing-on="config?.features?.boxing === true" />
   </div>
 </template>

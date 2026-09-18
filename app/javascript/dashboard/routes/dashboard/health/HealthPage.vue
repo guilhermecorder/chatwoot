@@ -6,25 +6,26 @@
 // (warrior.js) compara HOJE × ÚLTIMA SESSÃO e calcula a meta de cada
 // exercício. Fichas avulsas (fora de programa) continuam existindo.
 // Feito pra usar NO CELULAR dentro da academia: poucos toques por série.
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
-import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import WheelInput from './WheelInput.vue';
+import HubTabBar from './HubTabBar.vue';
 import {
   METHOD_LABELS, METHOD_HINTS, SET_LABELS,
   activeProgram, weekOf, cycleForWeek, suggestedSessionKey,
   lastSessionRecord, lastExerciseSets, buildTodaySets,
   exerciseVerdict, targetHint, setTargets, sessionSummary, summaryPhrase, fmtSets,
   equipmentOf, nameWithoutEquipment, EXTRA_METHODS, extraMethod,
+  learnEquiv, factorOf, convertLoad, fixedFactor,
 } from './warrior';
 // paleta azul royal + laranja (rodada 16) — a mesma do Meu Painel
 import {
-  ROYAL, ROYAL_PROFUNDO, ROYAL_NOITE, ROYAL_CLARO,
-  LARANJA, LARANJA_VIVO, LARANJA_CLARO, LARANJA_ESCURO,
+  ROYAL, ROYAL_CLARO,
+  LARANJA, LARANJA_VIVO, LARANJA_CLARO,
   VERMELHO, VERDE_OK, CINZA,
   GRAD_ROYAL, GRAD_NOITE, GRAD_LARANJA,
 } from './palette';
@@ -120,39 +121,19 @@ const dietCfg = computed(() => {
   return { targets: d.targets || {}, meals: d.meals || [], notes: d.notes || '' };
 });
 
-// ── KPIs do topo (musculação + boxe contam como treino) ─────────────
-const allTraining = computed(() => [...workouts.value, ...boxings.value]);
-const treinos7 = computed(
-  () => allTraining.value.filter(w => w.record_date >= daysAgo(6)).length
+// (rodada 20: a fileira de KPIs do topo saiu — "enxugar": a tela de
+// treino é pra treinar; os indicadores moram no Meu Painel e em Análises)
+const currentTabLabel = computed(
+  () => TABS_ALL.find(t => t.key === tab.value)?.label || 'Saúde'
 );
-const streak = computed(() => {
-  const dates = new Set(allTraining.value.map(w => w.record_date));
-  let count = 0;
-  const cursor = new Date();
-  // hoje ainda sem treino não quebra a sequência — começa de ontem
-  if (!dates.has(toISO(cursor))) cursor.setDate(cursor.getDate() - 1);
-  while (dates.has(toISO(cursor))) {
-    count += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return count;
-});
-const latestWeight = computed(() => {
-  const rec = bodies.value.find(b => Number(b.data?.weight) > 0);
-  return rec ? Number(rec.data.weight) : null;
-});
-const weightDelta30 = computed(() => {
-  if (latestWeight.value === null) return null;
-  const limit = daysAgo(30);
-  const old = [...bodies.value]
-    .filter(b => Number(b.data?.weight) > 0 && b.record_date <= limit)
-    .sort((a, b) => (a.record_date < b.record_date ? 1 : -1))[0];
-  if (!old) return null;
-  return latestWeight.value - Number(old.data.weight);
-});
 
 // ═══ TREINO — MODO PROGRAMA (Warrior) ═══════════════════════════════
 const program = computed(() => activeProgram(programs.value));
+// rodada 23: o treino DO DIA (dia da semana da prescrição = hoje)
+const WEEKDAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const todayWeekday = WEEKDAYS_PT[new Date().getDay()];
+const isTodaySession = sx =>
+  (sx.weekday || '').toLowerCase().startsWith(todayWeekday.slice(0, 4).toLowerCase());
 const programWeek = computed(() => weekOf(program.value, todayISO));
 const programCycle = computed(() => cycleForWeek(program.value, programWeek.value));
 const totalWeeks = computed(() => {
@@ -200,16 +181,37 @@ const openExerciseEditor = sessionDef => {
     // nome · 1 opção = sem chavinha · 2+ = chavinha com essas opções
     rows: (sessionDef.exercises || []).map(e => ({
       ...e,
-      _variants: equipmentOf(e).options.join(' | '),
+      // "barra | halteres ×2 | máquina ×0,85" — o ×n é o fator do PESO COMUM
+      _variants: equipmentOf(e)
+        .options.map(o => {
+          const f = fixedFactor(e, o);
+          return f && f !== 1 ? `${o} ×${String(f).replace('.', ',')}` : o;
+        })
+        .join(' | '),
       _del: false,
     })),
   };
 };
-const parseVariants = text =>
+// "barra | halteres ×2 | máquina x0,85" → { variants: [...], equiv: { máquina: 0.85 } }
+const parseVariants = text => {
+  const variants = [];
+  const equiv = {};
   String(text || '')
     .split(/[|,;/]+/)
     .map(v => v.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .forEach(v => {
+      const m = v.match(/^(.*?)\s*[×x]\s*([\d.,]+)$/i);
+      const name = (m ? m[1] : v).trim();
+      if (!name) return;
+      variants.push(name);
+      if (m) {
+        const f = Number(m[2].replace(',', '.'));
+        if (f > 0) equiv[name.toLowerCase()] = f;
+      }
+    });
+  return { variants, equiv };
+};
 const addEditorExercise = () =>
   exEditor.value.rows.push({
     name: '',
@@ -244,8 +246,8 @@ const saveExerciseEditor = async () => {
                   : {
                       ...s,
                       exercises: rows.map(({ _del, _variants, ...e }) => {
-                        const variants = parseVariants(_variants);
-                        return { ...e, variants, tag: variants[0] || '', alt_tag: '' };
+                        const { variants, equiv } = parseVariants(_variants);
+                        return { ...e, variants, equiv, tag: variants[0] || '', alt_tag: '' };
                       }),
                     }
               ),
@@ -509,16 +511,73 @@ const fmtPrev = prev => `${String(prev.load ?? '').replace('.', ',')}×${prev.re
 // chavinha re-prefill as roletas com a última execução DAQUELA variação
 // (carga de barra ≠ carga de halter) e recalcula meta/alvos. O registro
 // salva a variação usada (out.tag) pra busca futura.
+// execuções do exercício em QUALQUER variação (tag, e-1RM, data) — base do
+// peso comum: fator de cada variação aprendido pelo histórico
+const e1rmOf = (load, reps) => (reps > 0 ? load * (1 + reps / 30) : load);
+const execsOfName = name => {
+  const alvo = name.trim().toLowerCase();
+  const out = [];
+  workouts.value.forEach(w => {
+    (w.data?.exercises || []).forEach(e => {
+      if (String(e.name || '').trim().toLowerCase() !== alvo || !e.sets?.length) return;
+      out.push({
+        tag: e.tag || '',
+        date: w.record_date,
+        sets: e.sets,
+        e1: Math.max(...e.sets.map(s => e1rmOf(toNum(s.load), toNum(s.reps)))),
+      });
+    });
+  });
+  return out; // mais novo primeiro
+};
+const equivOf = ex => learnEquiv(ex.presc || {}, ex.baseTag, execsOfName(ex.name));
+const fmtF = f => `×${String(Math.round(f * 100) / 100).replace('.', ',')}`;
+// nota do peso comum no card da sessão ("halteres 30 ≈ 60 kg comum · máquina ×0,86")
+const commonNote = ex => {
+  if (!ex.options || ex.options.length < 2) return '';
+  const equiv = equivOf(ex);
+  const baseF = factorOf(equiv, ex.baseTag, ex.baseTag, ex.presc) || 1;
+  const rel = t => factorOf(equiv, t, ex.baseTag, ex.presc) / baseF; // escala da variação principal
+  const f = rel(ex.tag);
+  const top = Math.max(0, ...(ex.sets || []).map(s => toNum(s.load)));
+  const parts = [];
+  if (top && f !== 1) {
+    parts.push(`${ex.tag} ${String(top).replace('.', ',')} ≈ ${String(Math.round(top * f * 10) / 10).replace('.', ',')} kg na escala de ${ex.baseTag}`);
+  }
+  ex.options.forEach(o => {
+    const fo = Math.round(rel(o) * 100) / 100;
+    if (fo !== 1) parts.push(`${o} ${fmtF(fo)}`);
+  });
+  return parts.join(' · ');
+};
 const switchVariation = (ex, tag) => {
   if (normTag(ex.tag) === normTag(tag)) return;
   ex.tag = tag;
   const last = lastSetsForTag(ex.name, tag, ex.baseTag);
   ex.last = last;
-  ex.hint = last
-    ? targetHint(ex.presc || { sets: [] }, last)
-    : `Primeira vez com ${tag} — encontre a carga desta variação.`;
-  ex.targets = setTargets(ex.presc || { sets: [] }, last);
-  ex.sets = buildTodaySets(ex.presc || { sets: [] }, last);
+  const presc = ex.presc || { sets: [] };
+  if (last) {
+    ex.hint = targetHint(presc, last);
+    ex.targets = setTargets(presc, last);
+    ex.sets = buildTodaySets(presc, last);
+    return;
+  }
+  // 1ª vez nesta variação: ESTIMA pelo peso comum a partir da execução
+  // mais recente em outra variação (halteres 30 ×2 → máquina ≈ 60/fator)
+  const other = execsOfName(ex.name)[0];
+  if (!other) {
+    ex.hint = `Primeira vez com ${tag} — encontre a carga desta variação.`;
+    ex.targets = setTargets(presc, null);
+    ex.sets = buildTodaySets(presc, null);
+    return;
+  }
+  const equiv = equivOf(ex);
+  const fFrom = factorOf(equiv, other.tag, ex.baseTag, ex.presc);
+  const fTo = factorOf(equiv, tag, ex.baseTag, ex.presc);
+  const est = other.sets.map(s => ({ load: convertLoad(toNum(s.load), fFrom, fTo), reps: toNum(s.reps) }));
+  ex.hint = `Primeira vez com ${tag} — estimado pelo peso comum: ${other.tag || ex.baseTag} ${fmtSets(other.sets)} ≈ ${fmtSets(est)}. Ajuste e a variação passa a ter o próprio histórico.`;
+  ex.targets = setTargets(presc, null);
+  ex.sets = buildTodaySets(presc, est).map(st => ({ ...st, prev: null, estimated: true }));
 };
 
 // tocar num alvo do cartão de vidro → roletas da série vão pra meta
@@ -569,17 +628,61 @@ const extraSuggestions = computed(() => {
     .filter(n => !inSession.has(n.trim().toLowerCase()))
     .sort((a, b) => a.localeCompare(b));
 });
-// última vez deste exercício em QUALQUER treino registrado (séries + técnica)
-const lastAnyEntry = name => {
-  const alvo = name.trim().toLowerCase();
-  for (const w of workouts.value) {
-    const ex = (w.data?.exercises || []).find(
-      e => String(e.name || '').trim().toLowerCase() === alvo
-    );
-    if (ex?.sets?.length) return ex;
-  }
-  return null;
+// nome "normalizado" (rodada 20): sem acento, minúsculo, sem preposição
+// nem equipamento no fim — "Crucifixo maquina" acha "Crucifixo na máquina"
+// (feedback dele 18/09: o extra não puxava as informações anteriores;
+// no iPhone a lista de sugestões não aparece e ele digita de outro jeito)
+const normName = s =>
+  String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(na|no|nas|nos|em|com|de|do|da|a|o)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+// versão "solta": também sem o equipamento no fim, com ou sem preposição
+// ("rosca martelo halteres" = "Rosca martelo com halteres" = "Rosca martelo")
+const EQUIP_TAIL = /\s+(barra|halter|halteres|maquina|corda|polia|cabo|smith|reta|w)$/;
+const normLoose = s => {
+  let out = normName(nameWithoutEquipment(s));
+  for (let i = 0; i < 2 && EQUIP_TAIL.test(out); i += 1) out = out.replace(EQUIP_TAIL, '');
+  return out;
 };
+// última vez deste exercício em QUALQUER treino registrado (séries +
+// técnica + data): igual primeiro; senão igual sem o equipamento
+const lastAnyEntry = name => {
+  const alvo = normName(name);
+  if (!alvo) return null;
+  const alvoLoose = normLoose(name);
+  let loose = null;
+  for (const w of workouts.value) {
+    for (const e of w.data?.exercises || []) {
+      if (!e.sets?.length) continue;
+      const n = normName(e.name);
+      if (n === alvo) return { ...e, date: w.record_date };
+      if (!loose && normLoose(e.name) === alvoLoose) loose = { ...e, date: w.record_date };
+    }
+  }
+  return loose;
+};
+// prévia ao vivo no seletor: o que foi feito da última vez com esse nome
+const extraPreview = computed(() =>
+  extraName.value.trim() ? lastAnyEntry(extraName.value) : null
+);
+// extras recentes (1 toque adiciona com a técnica da última vez)
+const recentExtras = computed(() => {
+  const seen = new Map();
+  workouts.value.forEach(w =>
+    (w.data?.exercises || []).forEach(e => {
+      if (!e.extra || !e.name || !e.sets?.length) return;
+      const k = normName(e.name);
+      if (!seen.has(k)) seen.set(k, { name: e.name, date: w.record_date, sets: e.sets, method: e.method || 'sets' });
+    })
+  );
+  const inSession = new Set((session.value?.exercises || []).map(e => normName(e.name)));
+  return [...seen.values()].filter(x => !inSession.has(normName(x.name))).slice(0, 8);
+});
 // escolheu um exercício já feito → a técnica da última vez vem selecionada
 watch(extraName, name => {
   const entry = name?.trim() ? lastAnyEntry(name) : null;
@@ -590,42 +693,47 @@ watch(extraName, name => {
 const addExtraExercise = () => {
   const name = extraName.value.trim();
   if (!name || !session.value) return;
-  if (
-    session.value.exercises.some(
-      e => e.name.trim().toLowerCase() === name.toLowerCase()
-    )
-  ) {
+  if (session.value.exercises.some(e => normName(e.name) === normName(name))) {
     useAlert('Esse exercício já está no treino de hoje.');
     return;
   }
   const preset = extraPreset.value;
   const presc = { name, ...JSON.parse(JSON.stringify(preset.presc)) };
   const entry = lastAnyEntry(name);
-  // a comparação HOJE × última só vale na MESMA técnica (rest-pause não
-  // se compara com séries retas) — técnica nova = referência no hint
+  // PUXA a última execução SEMPRE: as caixinhas nascem com as cargas da
+  // última vez (chip cinza por série) mesmo que a técnica tenha mudado.
+  // O veredito HOJE × última só vale na MESMA técnica (rest-pause não se
+  // compara com séries retas) — aí entra como referência no hint.
   const sameMethod = entry && (entry.method || 'sets') === presc.method;
-  const last = sameMethod ? entry.sets : null;
+  const comparable = sameMethod ? entry.sets : null;
   let hint;
-  if (last) hint = targetHint(presc, last);
+  if (comparable) hint = targetHint(presc, comparable);
   else if (entry) {
-    hint = `Nova técnica (${preset.label}) — da última vez, em ${
+    hint = `Última vez ${fmtDay(entry.date)} em ${
       METHOD_LABELS[entry.method || 'sets']
-    }: ${fmtSets(entry.sets)}. Encontre a carga nas faixas.`;
+    }: ${fmtSets(entry.sets)}. Técnica nova (${preset.label}) — ajuste a carga nas faixas.`;
   } else hint = `Extra em ${preset.label} — primeira vez, encontre a carga nas faixas.`;
   session.value.exercises.push({
-    name,
+    name: entry?.name || name,
     extra: true,
     method: presc.method,
     scheme: presc.scheme,
     rest: presc.rest,
     presc,
-    last,
+    last: comparable,
+    lastDate: entry?.date || null,
     hint,
-    targets: setTargets(presc, last),
-    sets: buildTodaySets(presc, last),
+    targets: setTargets(presc, comparable),
+    sets: buildTodaySets(presc, entry?.sets || null),
   });
   extraName.value = '';
   extraOpen.value = false;
+};
+// chip de extra recente: 1 toque = entra no treino com a técnica da última vez
+const pickExtra = x => {
+  extraName.value = x.name;
+  if (EXTRA_METHODS.some(m => m.key === x.method)) extraMethodKey.value = x.method;
+  addExtraExercise();
 };
 const removeExtraExercise = ex => {
   session.value.exercises = session.value.exercises.filter(e => e !== ex);
@@ -769,7 +877,7 @@ const saveSeq = async () => {
   const idx = list.findIndex(s => s.id && s.id === seqForm.value.id);
   if (idx >= 0) list[idx] = { ...seqForm.value };
   else list.push({ ...seqForm.value });
-  const ok = await pushConfig({ ...config.value, boxing: { sequences: list } });
+  const ok = await pushConfig({ ...config.value, boxing: { ...(config.value?.boxing || {}), sequences: list } });
   if (ok) {
     seqForm.value = null;
     useAlert('Sequência salva.');
@@ -777,18 +885,363 @@ const saveSeq = async () => {
 };
 const deleteSeq = async () => {
   const list = boxingSeqs.value.filter(s => s.id !== seqForm.value.id);
-  const ok = await pushConfig({ ...config.value, boxing: { sequences: list } });
+  const ok = await pushConfig({ ...config.value, boxing: { ...(config.value?.boxing || {}), sequences: list } });
   if (ok) {
     seqForm.value = null;
     useAlert('Sequência removida.');
   }
 };
 const seqName = id => boxingSeqs.value.find(s => s.id === id)?.name || id;
+const seqSteps = id => boxingSeqs.value.find(s => s.id === id)?.steps || '';
 const boxMin7 = computed(() =>
   boxings.value
     .filter(b => b.record_date >= daysAgo(6))
     .reduce((s, b) => s + (Number(b.data?.duration_min) || 0), 0)
 );
+
+// ═══ BOXE PRÉ-PROGRAMADO (rodada 20) ════════════════════════════════
+// Pedido dele 18/09: "pré-programar treinos de boxe, 60 minutos por
+// exemplo, estruturados com aquecimento, sequências praticadas,
+// footwork etc." Cada treino = blocos em ordem, cada bloco com minutos
+// (ou rounds × segundos + descanso) e as sequências do repertório que
+// entram nele. A sessão guiada roda um cronômetro bloco a bloco
+// (round/descanso com apito) e, ao concluir, vira 1 registro de boxe.
+const BLOCK_TYPES = {
+  aquecimento: { label: 'Aquecimento', icon: '🔥' },
+  sombra: { label: 'Sombra', icon: '👤' },
+  tecnica: { label: 'Técnica', icon: '🎯' },
+  sequencias: { label: 'Sequências', icon: '🌀' },
+  footwork: { label: 'Footwork', icon: '👟' },
+  defesa: { label: 'Defesa', icon: '🛡' },
+  saco: { label: 'Saco pesado', icon: '🥊' },
+  condicionamento: { label: 'Condicionamento', icon: '⚡' },
+  alongamento: { label: 'Volta à calma', icon: '🧘' },
+};
+const blockMeta = type => BLOCK_TYPES[type] || { label: type || 'Bloco', icon: '▫️' };
+const blk = (type, title, minutes, rounds, roundSec, restSec, seqs, desc) => ({
+  type, title, minutes, rounds, round_sec: roundSec, rest_sec: restSec, seqs, desc,
+});
+// treinos de fábrica (aparecem enquanto ele não salvar os dele; os ids
+// das sequências são os do repertório seedado)
+const DEFAULT_BOX_WORKOUTS = [
+  {
+    id: 'bx60',
+    name: 'Fundamentos — 60 min',
+    desc: 'Treino completo: base na sombra, sequências, footwork, saco e condicionamento.',
+    blocks: [
+      blk('aquecimento', 'Corda + mobilidade', 10, 0, 0, 0, [], '5 min de corda · 5 min de mobilidade (ombros, quadril, tornozelos)'),
+      blk('sombra', 'Sombra técnica', 9, 3, 180, 60, ['b1', 'b2'], 'Base, guarda e jab-direto; atenção na volta da mão'),
+      blk('sequencias', 'Sequências', 12, 4, 180, 60, ['b3', 'b4', 'b6'], 'Cada sequência 10× lenta, 10× rápida — troca a cada round'),
+      blk('footwork', 'Footwork', 9, 3, 180, 60, [], 'Passo lateral · pivô · entra-sai com jab'),
+      blk('saco', 'Saco pesado', 12, 4, 180, 60, ['b3', 'b7', 'b8'], 'Potência nas sequências; último round livre'),
+      blk('condicionamento', 'Condicionamento', 5, 5, 40, 20, [], 'Burpee · corrida no lugar · prancha · agachamento · polichinelo'),
+      blk('alongamento', 'Volta à calma', 3, 0, 0, 0, [], 'Respiração + alongamento de ombros e punhos'),
+    ],
+  },
+  {
+    id: 'bx45',
+    name: 'Sequências e footwork — 45 min',
+    desc: 'Técnica pura: combinações do repertório e deslocamento, sem saco.',
+    blocks: [
+      blk('aquecimento', 'Corda', 8, 0, 0, 0, [], 'Corda com variações (pé alternado, duplo)'),
+      blk('sombra', 'Sombra', 6, 2, 180, 60, ['b1'], 'Jab e direto com deslocamento'),
+      blk('sequencias', 'Sequências', 16, 4, 180, 60, ['b2', 'b3', 'b4', 'b5'], 'Uma sequência por round; últimos 30 s em velocidade'),
+      blk('footwork', 'Footwork + esquiva', 12, 4, 150, 30, ['b5'], 'Esquiva e resposta; pivô pra sair da linha'),
+      blk('alongamento', 'Volta à calma', 3, 0, 0, 0, [], 'Respiração e alongamento'),
+    ],
+  },
+  {
+    id: 'bx30',
+    name: 'Rápido — 30 min',
+    desc: 'Pra dia corrido: aquece, bate no saco e condiciona.',
+    blocks: [
+      blk('aquecimento', 'Corda', 5, 0, 0, 0, [], 'Corda leve'),
+      blk('saco', 'Saco pesado', 15, 5, 150, 30, ['b1', 'b3', 'b7'], 'Rounds de 2:30; sequência diferente a cada round'),
+      blk('condicionamento', 'Condicionamento', 8, 8, 30, 30, [], 'Tabata: burpee · sprint · prancha · polichinelo'),
+      blk('alongamento', 'Volta à calma', 2, 0, 0, 0, [], 'Respiração'),
+    ],
+  },
+];
+const boxWorkouts = computed(() => {
+  const saved = config.value?.boxing?.workouts;
+  return saved?.length ? saved : DEFAULT_BOX_WORKOUTS;
+});
+const blockMinutes = b => {
+  const m = Number(b.minutes) || 0;
+  if (m) return m;
+  const r = Number(b.rounds) || 0;
+  return r ? Math.round(((r * (Number(b.round_sec) || 0) + Math.max(0, r - 1) * (Number(b.rest_sec) || 0)) / 60) * 10) / 10 : 0;
+};
+const workoutMinutes = w => Math.round((w.blocks || []).reduce((s, b) => s + blockMinutes(b), 0));
+const workoutRounds = w => (w.blocks || []).reduce((s, b) => s + (Number(b.rounds) || 0), 0);
+const workoutSeqIds = w => [...new Set((w.blocks || []).flatMap(b => b.seqs || []))];
+const fmtClock = sec => {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${pad2(s % 60)}`;
+};
+
+// apito de round (AudioContext nasce no toque do ▶ — regra do iOS)
+let audioCtx = null;
+const beep = (freq = 880, ms = 160, times = 1) => {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    for (let i = 0; i < times; i += 1) {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.value = 0.25;
+      o.connect(g);
+      g.connect(audioCtx.destination);
+      const t0 = audioCtx.currentTime + i * ((ms + 90) / 1000);
+      o.start(t0);
+      o.stop(t0 + ms / 1000);
+    }
+  } catch {
+    /* sem áudio: segue em silêncio */
+  }
+};
+let wakeLock = null;
+const keepAwake = async () => {
+  try {
+    wakeLock = await navigator.wakeLock?.request('screen');
+  } catch {
+    wakeLock = null;
+  }
+};
+const releaseAwake = () => {
+  try {
+    wakeLock?.release();
+  } catch {
+    /* ignora */
+  }
+  wakeLock = null;
+};
+
+// sessão guiada: { workout, blockIdx, phase (round|rest|free), round,
+// remaining, running, elapsed, done[], date, notes }
+const boxSession = ref(null);
+let boxTimer = null;
+const phaseFor = (block, round) => {
+  const rounds = Number(block.rounds) || 0;
+  if (rounds && Number(block.round_sec)) return { phase: 'round', round, remaining: Number(block.round_sec) };
+  return { phase: 'free', round: 0, remaining: Math.round((Number(block.minutes) || 0) * 60) };
+};
+const enterBlock = idx => {
+  const s = boxSession.value;
+  if (!s) return;
+  const block = s.workout.blocks[idx];
+  if (!block) return;
+  s.blockIdx = idx;
+  Object.assign(s, phaseFor(block, 1));
+};
+const startBoxWorkout = w => {
+  boxSession.value = {
+    workout: JSON.parse(JSON.stringify(w)),
+    blockIdx: 0,
+    phase: 'free',
+    round: 0,
+    remaining: 0,
+    running: false,
+    elapsed: 0,
+    done: (w.blocks || []).map(() => false),
+    date: todayISO,
+    notes: '',
+  };
+  enterBlock(0);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+const boxBlock = computed(() => boxSession.value?.workout.blocks[boxSession.value.blockIdx] || null);
+const boxIsLast = computed(
+  () => !!boxSession.value && boxSession.value.blockIdx >= boxSession.value.workout.blocks.length - 1
+);
+const stopBoxTimer = () => {
+  clearInterval(boxTimer);
+  boxTimer = null;
+  if (boxSession.value) boxSession.value.running = false;
+  releaseAwake();
+};
+const nextBoxBlock = () => {
+  const s = boxSession.value;
+  if (!s) return;
+  s.done[s.blockIdx] = true;
+  if (boxIsLast.value) {
+    stopBoxTimer();
+    beep(660, 220, 3);
+    return;
+  }
+  enterBlock(s.blockIdx + 1);
+  beep(990, 140, 2);
+};
+const prevBoxBlock = () => {
+  const s = boxSession.value;
+  if (!s || s.blockIdx === 0) return;
+  enterBlock(s.blockIdx - 1);
+};
+const tickBox = () => {
+  const s = boxSession.value;
+  if (!s || !s.running) return;
+  s.elapsed += 1;
+  if (s.remaining > 0) {
+    s.remaining -= 1;
+    if (s.remaining === 3 || s.remaining === 2 || s.remaining === 1) beep(720, 90);
+    if (s.remaining > 0) return;
+  }
+  // acabou o tempo desta fase
+  const block = boxBlock.value;
+  const rounds = Number(block?.rounds) || 0;
+  if (s.phase === 'round') {
+    if (s.round >= rounds) {
+      nextBoxBlock();
+      return;
+    }
+    if (Number(block.rest_sec) > 0) {
+      s.phase = 'rest';
+      s.remaining = Number(block.rest_sec);
+      beep(520, 260);
+      return;
+    }
+    s.round += 1;
+    s.remaining = Number(block.round_sec);
+    beep(990, 140, 2);
+    return;
+  }
+  if (s.phase === 'rest') {
+    s.round += 1;
+    s.phase = 'round';
+    s.remaining = Number(block.round_sec);
+    beep(990, 140, 2);
+    return;
+  }
+  nextBoxBlock();
+};
+const toggleBoxTimer = () => {
+  const s = boxSession.value;
+  if (!s) return;
+  if (s.running) {
+    stopBoxTimer();
+    return;
+  }
+  beep(880, 60); // destrava o áudio no gesto
+  s.running = true;
+  keepAwake();
+  boxTimer = setInterval(tickBox, 1000);
+};
+const cancelBoxSession = () => {
+  stopBoxTimer();
+  boxSession.value = null;
+};
+const boxPct = computed(() => {
+  const s = boxSession.value;
+  const b = boxBlock.value;
+  if (!s || !b) return 0;
+  const total = s.phase === 'rest' ? Number(b.rest_sec) : s.phase === 'round' ? Number(b.round_sec) : (Number(b.minutes) || 0) * 60;
+  return total ? Math.round(((total - s.remaining) / total) * 100) : 0;
+});
+// salva o treino guiado (ou "já fiz" direto do card) como registro de boxe
+const saveBoxWorkout = async (w, { elapsedSec = 0, done = null, date = todayISO, notes = '' } = {}) => {
+  const blocks = (w.blocks || []).map((b, i) => ({
+    type: b.type,
+    title: b.title,
+    minutes: blockMinutes(b),
+    done: done ? done[i] !== false : true,
+  }));
+  const doneBlocks = (w.blocks || []).filter((b, i) => blocks[i].done);
+  const planned = workoutMinutes(w);
+  const duration = elapsedSec >= 60 ? Math.round(elapsedSec / 60) : planned;
+  savingBox.value = true;
+  try {
+    const { data: rec } = await CrmAPI.createHealthRecord({
+      kind: 'boxing',
+      record_date: date || todayISO,
+      data: {
+        duration_min: duration,
+        planned_min: planned,
+        rounds: doneBlocks.reduce((s, b) => s + (Number(b.rounds) || 0), 0),
+        sequences: [...new Set(doneBlocks.flatMap(b => b.seqs || []))],
+        workout_id: w.id,
+        workout_name: w.name,
+        blocks,
+        notes: notes?.trim() || '',
+      },
+    });
+    boxings.value = sortRecs([rec, ...boxings.value]);
+    useAlert(`🥊 ${w.name} registrado — ${duration} min.`);
+    return true;
+  } catch {
+    useAlert('Não consegui salvar o treino de boxe.');
+    return false;
+  } finally {
+    savingBox.value = false;
+  }
+};
+const finishBoxSession = async () => {
+  const s = boxSession.value;
+  if (!s) return;
+  stopBoxTimer();
+  const done = s.done.map((d, i) => d || i <= s.blockIdx);
+  const ok = await saveBoxWorkout(s.workout, { elapsedSec: s.elapsed, done, date: s.date, notes: s.notes });
+  if (ok) boxSession.value = null;
+};
+const logBoxWorkoutNow = w => saveBoxWorkout(w);
+onUnmounted(stopBoxTimer);
+
+// editor de treinos programados (blocos)
+const boxWkForm = ref(null);
+const openNewBoxWorkout = () => {
+  boxWkForm.value = {
+    id: '',
+    name: '',
+    desc: '',
+    blocks: [
+      blk('aquecimento', 'Aquecimento', 10, 0, 0, 0, [], ''),
+      blk('sequencias', 'Sequências', 12, 4, 180, 60, [], ''),
+      blk('alongamento', 'Volta à calma', 3, 0, 0, 0, [], ''),
+    ],
+  };
+};
+const openEditBoxWorkout = w => {
+  boxWkForm.value = JSON.parse(JSON.stringify(w));
+};
+const addBoxBlock = () => boxWkForm.value.blocks.push(blk('sequencias', '', 9, 3, 180, 60, [], ''));
+const removeBoxBlock = i => boxWkForm.value.blocks.splice(i, 1);
+const moveBoxBlock = (i, dir) => {
+  const list = boxWkForm.value.blocks;
+  const j = i + dir;
+  if (j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+};
+const toggleBlockSeq = (b, id) => {
+  const i = (b.seqs || []).indexOf(id);
+  if (i >= 0) b.seqs.splice(i, 1);
+  else (b.seqs = b.seqs || []).push(id);
+};
+const saveBoxWorkoutCfg = async () => {
+  const f = boxWkForm.value;
+  if (!f?.name?.trim()) {
+    useAlert('Dê um nome pro treino (ex.: Fundamentos — 60 min).');
+    return;
+  }
+  f.blocks = f.blocks.filter(b => b.title?.trim() || blockMinutes(b) > 0);
+  const list = [...boxWorkouts.value];
+  const idx = list.findIndex(w => w.id && w.id === f.id);
+  if (idx >= 0) list[idx] = f;
+  else list.push({ ...f, id: f.id || `bx${Date.now().toString(36)}` });
+  const ok = await pushConfig({ ...config.value, boxing: { ...(config.value?.boxing || {}), sequences: boxingSeqs.value, workouts: list } });
+  if (ok) {
+    boxWkForm.value = null;
+    useAlert('🥊 Treino programado salvo.');
+  }
+};
+const deleteBoxWorkoutCfg = async () => {
+  const list = boxWorkouts.value.filter(w => w.id !== boxWkForm.value.id);
+  const ok = await pushConfig({ ...config.value, boxing: { ...(config.value?.boxing || {}), sequences: boxingSeqs.value, workouts: list } });
+  if (ok) {
+    boxWkForm.value = null;
+    useAlert('Treino removido.');
+  }
+};
+const showManualBox = ref(false);
 
 // fichas avulsas (fora de programa)
 const planForm = ref(null); // null = fechado; {id?, name, exercises[]}
@@ -1163,6 +1616,14 @@ onMounted(async () => {
     MEASURES.forEach(m => {
       if (latest[m.key]) bodyForm.value[m.key] = latest[m.key];
     });
+    // rodada 20: veio do botão "▶ Treino X de hoje" do painel → a sessão
+    // já abre pronta (2 toques do painel até a 1ª série)
+    const startKey = String(route.query?.start || '');
+    if (startKey && program.value) {
+      const def = (programCycle.value?.sessions || []).find(x => x.key === startKey);
+      if (def) startProgramSession(def);
+      router.replace({ name: route.name, params: route.params });
+    }
   } catch {
     useAlert('Não consegui carregar o painel de saúde.');
   } finally {
@@ -1172,10 +1633,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1" :class="{ 'hub-snap': session }">
-    <div class="max-w-5xl mx-auto w-full p-4 sm:p-8">
-      <!-- Header -->
-      <div class="flex items-center gap-3 flex-wrap mb-5">
+  <div class="hub-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1" :class="{ 'hub-snap': session }">
+    <div class="max-w-5xl mx-auto w-full p-4 pb-28 sm:p-8 md:pb-8">
+      <!-- Header (rodada 20: título = a aba atual; sem fileira de KPIs) -->
+      <div class="flex items-center gap-3 flex-wrap mb-4">
         <span
           class="w-9 h-9 rounded-xl flex items-center justify-center"
           :style="{ background: GRAD_NOITE }"
@@ -1183,42 +1644,16 @@ onMounted(async () => {
           <span class="i-lucide-heart-pulse text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Saúde</h1>
-          <p class="text-xs text-n-slate-10">treino · dieta · corpo — seu painel pessoal</p>
+          <h1 class="text-lg font-bold text-n-slate-12">{{ currentTabLabel }}</h1>
+          <p class="text-xs text-n-slate-10">Saúde · seu painel pessoal</p>
         </div>
       </div>
 
       <div v-if="isLoading" class="flex justify-center py-16"><Spinner /></div>
 
       <template v-else>
-        <!-- KPIs -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          <DashKpi label="Treinos (7 dias)" :value="treinos7" sub="últimos 7 dias" :from="ROYAL_NOITE" :to="ROYAL" />
-          <DashKpi
-            label="Sequência"
-            :value="streak"
-            :sub="streak === 1 ? 'dia seguido' : 'dias seguidos'"
-            :from="LARANJA_ESCURO"
-            :to="LARANJA"
-          />
-          <DashKpi
-            label="Peso atual"
-            :value="latestWeight === null ? '—' : `${fmtNum(latestWeight)} kg`"
-            sub="última medição"
-            :from="ROYAL_PROFUNDO"
-            :to="ROYAL_CLARO"
-          />
-          <DashKpi
-            label="Variação (30d)"
-            :value="weightDelta30 === null ? '—' : `${weightDelta30 > 0 ? '+' : ''}${fmtNum(weightDelta30)} kg`"
-            sub="peso vs 30 dias atrás"
-            :from="LARANJA_VIVO"
-            :to="LARANJA_CLARO"
-          />
-        </div>
-
-        <!-- Pílulas de aba -->
-        <div class="flex gap-2 mb-5 flex-wrap">
+        <!-- Pílulas de aba (no celular a barra de abas do rodapé faz isso) -->
+        <div class="hidden md:flex gap-2 mb-5 flex-wrap">
           <button
             v-for="t in TABS"
             :key="t.key"
@@ -1234,7 +1669,7 @@ onMounted(async () => {
         <!-- ═══ TREINO ═══ -->
         <template v-if="tab === 'treino'">
           <!-- Programa ativo (Warrior) -->
-          <div v-if="program && !session" class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div v-if="program && !session" class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
               <h2 class="text-sm font-bold text-n-slate-12">🏋️ {{ program.name }}</h2>
               <div v-if="programs.length > 1" class="flex gap-1.5">
@@ -1257,36 +1692,62 @@ onMounted(async () => {
               {{ programCycle?.name }} — {{ programCycle?.focus }}
               <template v-if="program.note"> · {{ program.note }}</template>
             </p>
-            <div class="flex gap-2 flex-wrap">
+            <!-- rodada 23: todos os treinos são cartões de vidro; o da vez
+                 (do dia ou o próximo) vem em laranja sólido pulsando -->
+            <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
               <div
                 v-for="s in programCycle?.sessions || []"
                 :key="s.key"
-                class="flex items-center gap-1"
+                class="hub-block hub-block-hover p-3 flex flex-col gap-2"
+                :class="s.key === nextKey ? 'hub-orange hub-block-solid hub-block-today' : ''"
+                role="button"
+                @click="startProgramSession(s)"
               >
+                <div class="flex items-start justify-between gap-2">
+                  <span
+                    class="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-black shrink-0"
+                    :style="s.key === nextKey ? { background: '#fff', color: LARANJA_VIVO } : { background: GRAD_NOITE, color: '#fff' }"
+                  >
+                    {{ s.key }}
+                  </span>
+                  <span
+                    v-if="s.key === nextKey"
+                    class="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                    style="background: rgba(255, 255, 255, 0.24)"
+                  >
+                    {{ isTodaySession(s) ? '🔥 HOJE' : '▶ próximo' }}
+                  </span>
+                  <button
+                    v-else
+                    class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1"
+                    title="Editar exercícios deste treino"
+                    @click.stop="openExerciseEditor(s)"
+                  >
+                    ✎
+                  </button>
+                </div>
+                <div>
+                  <p class="text-sm font-extrabold leading-tight">Treino {{ s.key }}</p>
+                  <p class="text-[11px]" :class="s.key === nextKey ? 'opacity-90' : 'text-n-slate-10'">
+                    {{ s.weekday }} · {{ (s.exercises || []).length }} exercícios
+                  </p>
+                </div>
+                <p class="text-[11px] font-bold" :style="s.key === nextKey ? {} : { color: ROYAL }">
+                  {{ s.key === nextKey ? '▶ Começar agora' : '▶ Fazer este' }}
+                </p>
                 <button
-                  class="h-11 px-4 rounded-xl text-xs font-bold flex items-center gap-2 border"
-                  :class="s.key === nextKey ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                  :style="s.key === nextKey ? { background: GRAD_ROYAL } : {}"
-                  @click="startProgramSession(s)"
+                  v-if="s.key === nextKey"
+                  class="self-start text-[10px] underline opacity-90"
+                  @click.stop="openExerciseEditor(s)"
                 >
-                  <span class="i-lucide-play" />
-                  Treino {{ s.key }}
-                  <span class="font-normal opacity-80">· {{ s.weekday }}</span>
-                  <span v-if="s.key === nextKey" class="text-[10px] font-normal opacity-90">▶ próximo</span>
-                </button>
-                <button
-                  class="h-11 w-8 rounded-xl text-sm text-n-slate-10 border border-n-weak hover:bg-n-alpha-1"
-                  title="Editar exercícios deste treino (adicionar, substituir, variação)"
-                  @click="openExerciseEditor(s)"
-                >
-                  ✎
+                  ✎ editar exercícios
                 </button>
               </div>
             </div>
           </div>
 
           <!-- Editor de exercícios da prescrição -->
-          <div v-if="exEditor" class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div v-if="exEditor" class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
               <span class="text-sm font-bold" :style="{ color: ROYAL }">✎ {{ exEditor.title }}</span>
               <button
@@ -1300,6 +1761,8 @@ onMounted(async () => {
               <b>Chavinha</b> = as opções de equipamento do exercício, separadas por <b>|</b>
               (ex.: <b>barra | halteres | máquina</b>) — a 1ª é a principal e cada uma guarda as
               próprias cargas. Vazio = opções automáticas pelo nome; só 1 opção = sem chavinha.
+              <b>Peso comum</b>: escreva o fator com ×, ex. <b>halteres ×2</b> (cada lado vira total) ou
+              <b>máquina ×0,85</b>; sem fator, a máquina é calibrada sozinha pela sua força.
               <b>Renomear</b> vale como substituição: o exercício novo começa histórico do zero.
             </p>
             <div class="flex flex-col gap-2 mb-3">
@@ -1319,8 +1782,8 @@ onMounted(async () => {
                 <input
                   v-model="row._variants"
                   type="text"
-                  placeholder="chavinha: barra | halteres | máquina"
-                  title="Opções da chavinha separadas por | — vazio = automático pelo nome; 1 opção = sem chavinha"
+                  placeholder="chavinha: barra | halteres ×2 | máquina ×0,85"
+                  title="Opções da chavinha separadas por | — vazio = automático pelo nome; 1 opção = sem chavinha. ×n = fator do peso comum (halteres ×2; sem fator a máquina é calibrada pelo histórico)"
                   class="h-9 rounded-lg border border-dashed border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-11"
                   style="width: 15rem; margin-bottom: 0"
                 />
@@ -1353,7 +1816,7 @@ onMounted(async () => {
           </div>
 
           <!-- Sessão em andamento -->
-          <div v-if="session" class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div v-if="session" class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
               <span class="text-sm font-bold" :style="{ color: ROYAL }">{{ session.plan_name }}</span>
               <button
@@ -1471,6 +1934,9 @@ onMounted(async () => {
                 </span>
                 <span class="text-[11px] text-n-slate-10">{{ ex.scheme }}</span>
               </div>
+              <p v-if="ex.options?.length > 1 && commonNote(ex)" class="text-[10px] mb-2" :style="{ color: ROYAL }" title="Peso comum: todas as variações na mesma escala (halteres ×2 = cada lado vira total)">
+                ⚖ {{ commonNote(ex) }}
+              </p>
               <p v-if="ex.rest || ex.warmup" class="text-[11px] text-n-slate-10 mb-2.5">
                 <template v-if="ex.rest">⏱ descanso {{ ex.rest }}</template>
                 <template v-if="ex.rest && ex.warmup"> · </template>
@@ -1589,12 +2055,28 @@ onMounted(async () => {
                 ➕ Adicionar exercício extra no treino de hoje
               </button>
               <div v-else class="rounded-xl border border-dashed border-n-weak p-3">
-                <div class="flex items-center gap-2 flex-wrap mb-2">
+                <!-- extras recentes: 1 toque adiciona com as cargas e a técnica da última vez -->
+                <div v-if="recentExtras.length" class="mb-2.5">
+                  <p class="text-[11px] font-medium text-n-slate-11 mb-1.5">Seus extras recentes — toque pra adicionar</p>
+                  <div class="flex gap-1.5 flex-wrap">
+                    <button
+                      v-for="x in recentExtras"
+                      :key="x.name"
+                      class="hub-extra-chip"
+                      :title="`Última vez ${fmtDay(x.date)} · ${METHOD_LABELS[x.method]} · ${fmtSets(x.sets)}`"
+                      @click="pickExtra(x)"
+                    >
+                      <b>{{ x.name }}</b>
+                      <span class="opacity-70">{{ fmtSets(x.sets) }}</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap mb-1.5">
                   <input
                     v-model="extraName"
                     type="text"
                     list="hub-extra-exercicios"
-                    placeholder="Ex.: Crucifixo na máquina, Panturrilha em pé…"
+                    placeholder="Ou digite: Crucifixo na máquina, Panturrilha em pé…"
                     class="flex-1 h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
                     style="min-width: 12rem; margin-bottom: 0"
                     @keyup.enter="addExtraExercise"
@@ -1609,6 +2091,14 @@ onMounted(async () => {
                     ✕
                   </button>
                 </div>
+                <!-- prévia: o que foi feito da última vez com esse nome -->
+                <p v-if="extraPreview" class="text-[11px] mb-2" :style="{ color: ROYAL }">
+                  ↩ Última vez {{ fmtDay(extraPreview.date) }} · {{ METHOD_LABELS[extraPreview.method || 'sets'] }} ·
+                  <b>{{ fmtSets(extraPreview.sets) }}</b> — as caixinhas já vêm assim.
+                </p>
+                <p v-else-if="extraName.trim()" class="text-[11px] text-n-slate-10 mb-2">
+                  Primeira vez com esse nome — vai nascer nas faixas da técnica.
+                </p>
                 <!-- técnica (rodada 16): o extra já nasce pré-configurado -->
                 <p class="text-[11px] font-medium text-n-slate-11 mb-1.5">Técnica</p>
                 <div class="flex items-center gap-2 flex-wrap">
@@ -1657,7 +2147,7 @@ onMounted(async () => {
           </div>
 
           <!-- Planilha das semanas: A | B | C | Bônus -->
-          <div v-if="gridTabs.length && !session" class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div v-if="gridTabs.length && !session" class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
               <h2 class="text-sm font-bold text-n-slate-12">📋 Planilha das semanas</h2>
               <div class="flex gap-1.5 flex-wrap">
@@ -1737,7 +2227,7 @@ onMounted(async () => {
           </div>
 
           <!-- Evolução -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
               <h2 class="text-sm font-bold text-n-slate-12">📈 Evolução de carga</h2>
               <select
@@ -1763,7 +2253,7 @@ onMounted(async () => {
           </div>
 
           <!-- Histórico -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-3">🗓 Últimos treinos</h2>
             <p v-if="!workouts.length" class="text-xs text-n-slate-10">Nenhum treino registrado ainda.</p>
             <div
@@ -1806,7 +2296,7 @@ onMounted(async () => {
           </div>
 
           <!-- Fichas avulsas (fora do programa) -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4">
+          <div class="hub-block p-4">
             <div class="flex items-center justify-between">
               <button class="text-sm font-bold text-n-slate-12" @click="showFichas = !showFichas">
                 {{ showFichas ? '▾' : '▸' }} 📝 Fichas avulsas
@@ -1932,10 +2422,302 @@ onMounted(async () => {
 
         <!-- ═══ BOXE ═══ -->
         <template v-if="tab === 'boxe'">
-          <!-- Registrar treino de boxe -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🥊 Registrar treino de boxe</h2>
-            <p class="text-[11px] text-n-slate-10 mb-3">{{ boxMin7 }} min nos últimos 7 dias</p>
+          <!-- SESSÃO GUIADA (rodada 20): cronômetro bloco a bloco -->
+          <div v-if="boxSession" class="rounded-2xl overflow-hidden mb-4 text-white" :style="{ background: GRAD_NOITE }">
+            <div class="p-4 sm:p-5">
+              <div class="flex items-center justify-between gap-2 flex-wrap mb-3">
+                <div class="min-w-0">
+                  <p class="text-[11px] opacity-80">🥊 {{ boxSession.workout.name }}</p>
+                  <p class="text-xs opacity-80">
+                    bloco {{ boxSession.blockIdx + 1 }} de {{ boxSession.workout.blocks.length }} ·
+                    {{ fmtClock(boxSession.elapsed) }} de treino
+                  </p>
+                </div>
+                <button class="h-8 px-3 rounded-lg text-xs border border-white/25 hover:bg-white/10" @click="cancelBoxSession">
+                  Cancelar
+                </button>
+              </div>
+              <!-- trilha dos blocos -->
+              <div class="flex gap-1 mb-4">
+                <button
+                  v-for="(b, i) in boxSession.workout.blocks"
+                  :key="i"
+                  class="h-1.5 flex-1 rounded-full transition-all"
+                  :style="{ background: i < boxSession.blockIdx || boxSession.done[i] ? LARANJA : i === boxSession.blockIdx ? '#fff' : 'rgba(255,255,255,0.22)' }"
+                  :title="`${blockMeta(b.type).icon} ${b.title || blockMeta(b.type).label}`"
+                  @click="enterBlock(i)"
+                />
+              </div>
+              <!-- bloco atual -->
+              <div v-if="boxBlock" class="text-center mb-4">
+                <p class="text-[11px] uppercase tracking-wide opacity-80">
+                  {{ blockMeta(boxBlock.type).icon }} {{ blockMeta(boxBlock.type).label }}
+                </p>
+                <p class="text-xl font-extrabold leading-tight">{{ boxBlock.title || blockMeta(boxBlock.type).label }}</p>
+                <p v-if="boxBlock.desc" class="text-xs opacity-85 mt-1">{{ boxBlock.desc }}</p>
+                <p class="text-[11px] mt-1" :style="{ color: LARANJA_CLARO }">
+                  <template v-if="boxSession.phase === 'round'">Round {{ boxSession.round }} de {{ boxBlock.rounds }}</template>
+                  <template v-else-if="boxSession.phase === 'rest'">Descanso · próximo: round {{ boxSession.round + 1 }} de {{ boxBlock.rounds }}</template>
+                  <template v-else>{{ blockMinutes(boxBlock) }} min corridos</template>
+                </p>
+              </div>
+              <!-- cronômetro grande -->
+              <div class="relative mx-auto mb-4 hub-box-clock" :class="{ 'is-rest': boxSession.phase === 'rest' }">
+                <svg viewBox="0 0 120 120" class="absolute inset-0 w-full h-full -rotate-90">
+                  <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="6" />
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="54"
+                    fill="none"
+                    :stroke="boxSession.phase === 'rest' ? ROYAL_CLARO : LARANJA"
+                    stroke-width="6"
+                    stroke-linecap="round"
+                    :stroke-dasharray="`${(boxPct / 100) * 339.3} 339.3`"
+                    style="transition: stroke-dasharray 0.9s linear"
+                  />
+                </svg>
+                <div class="absolute inset-0 flex flex-col items-center justify-center">
+                  <span class="text-5xl font-black tabular-nums leading-none">{{ fmtClock(boxSession.remaining) }}</span>
+                  <span class="text-[10px] uppercase tracking-wider opacity-75 mt-1">
+                    {{ boxSession.phase === 'rest' ? 'descanso' : boxSession.running ? 'em andamento' : 'pausado' }}
+                  </span>
+                </div>
+              </div>
+              <!-- sequências do bloco, grandes pra ler batendo -->
+              <div v-if="boxBlock?.seqs?.length" class="grid gap-2 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
+                <div v-for="id in boxBlock.seqs" :key="id" class="rounded-xl px-3 py-2 bg-white/10 border border-white/15">
+                  <p class="text-[10px] opacity-80">{{ seqName(id) }}</p>
+                  <p class="text-lg font-black tracking-wide" :style="{ color: LARANJA_CLARO }">{{ seqSteps(id) }}</p>
+                </div>
+              </div>
+              <!-- controles -->
+              <div class="flex items-center justify-center gap-2 flex-wrap">
+                <button class="hub-box-btn" :disabled="boxSession.blockIdx === 0" title="Bloco anterior" @click="prevBoxBlock">‹</button>
+                <button
+                  class="h-14 px-8 rounded-2xl text-base font-extrabold shadow-lg"
+                  :style="{ background: boxSession.running ? 'rgba(255,255,255,0.16)' : GRAD_LARANJA, color: '#fff' }"
+                  @click="toggleBoxTimer"
+                >
+                  {{ boxSession.running ? '⏸ Pausar' : boxSession.elapsed ? '▶ Continuar' : '▶ Começar' }}
+                </button>
+                <button class="hub-box-btn" :title="boxIsLast ? 'Último bloco' : 'Próximo bloco'" @click="nextBoxBlock">›</button>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap mt-4">
+                <input
+                  v-model="boxSession.date"
+                  type="date"
+                  class="h-9 rounded-lg border border-white/25 bg-white/10 px-2 text-xs text-white"
+                  style="width: 9.5rem; margin-bottom: 0"
+                />
+                <input
+                  v-model="boxSession.notes"
+                  type="text"
+                  placeholder="Observações"
+                  class="h-9 flex-1 rounded-lg border border-white/25 bg-white/10 px-2 text-xs text-white placeholder-white/60"
+                  style="min-width: 10rem; margin-bottom: 0"
+                />
+                <button
+                  class="h-11 px-5 rounded-xl text-sm font-bold text-white disabled:opacity-60 w-full sm:w-auto"
+                  :style="{ background: GRAD_LARANJA }"
+                  :disabled="savingBox"
+                  @click="finishBoxSession"
+                >
+                  {{ savingBox ? 'Salvando…' : '✓ Concluir treino' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- TREINOS PRÉ-PROGRAMADOS -->
+          <div v-if="!boxSession" class="hub-block p-4 mb-4">
+            <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
+              <h2 class="text-sm font-bold text-n-slate-12">🥊 Treinos programados</h2>
+              <button
+                class="h-8 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
+                @click="openNewBoxWorkout"
+              >
+                + Novo treino
+              </button>
+            </div>
+            <p class="text-[11px] text-n-slate-10 mb-3">
+              Estruturados em blocos com cronômetro (round · descanso · apito). <b>Iniciar</b> guia o
+              treino; <b>Já fiz</b> só registra. {{ boxMin7 }} min nos últimos 7 dias.
+            </p>
+
+            <!-- editor do treino programado -->
+            <div v-if="boxWkForm" class="rounded-xl border border-n-weak p-3 mb-3">
+              <div class="flex items-center gap-2 flex-wrap mb-2">
+                <input
+                  v-model="boxWkForm.name"
+                  type="text"
+                  placeholder="Nome (ex.: Fundamentos — 60 min)"
+                  class="h-9 flex-1 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
+                  style="min-width: 12rem; margin-bottom: 0"
+                />
+                <span class="text-[11px] font-bold" :style="{ color: ROYAL }">{{ workoutMinutes(boxWkForm) }} min</span>
+              </div>
+              <input
+                v-model="boxWkForm.desc"
+                type="text"
+                placeholder="Descrição curta"
+                class="block w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
+                style="margin-bottom: 10px"
+              />
+              <p class="text-[11px] text-n-slate-10 mb-2">
+                Cada bloco: tipo · nome · <b>minutos</b> (tempo corrido) OU <b>rounds × segundos</b> + descanso
+                (o cronômetro apita a cada round) · sequências que entram nele.
+              </p>
+              <div v-for="(b, i) in boxWkForm.blocks" :key="i" class="rounded-xl border border-n-weak p-2.5 mb-2">
+                <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
+                  <select
+                    v-model="b.type"
+                    class="h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
+                    style="width: 10rem; margin-bottom: 0"
+                  >
+                    <option v-for="(m, k) in BLOCK_TYPES" :key="k" :value="k">{{ m.icon }} {{ m.label }}</option>
+                  </select>
+                  <input
+                    v-model="b.title"
+                    type="text"
+                    placeholder="Nome do bloco"
+                    class="h-9 flex-1 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
+                    style="min-width: 9rem; margin-bottom: 0"
+                  />
+                  <span class="text-[10px] text-n-slate-10 whitespace-nowrap">≈ {{ blockMinutes(b) }} min</span>
+                  <button class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1" title="Subir" @click="moveBoxBlock(i, -1)">↑</button>
+                  <button class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1" title="Descer" @click="moveBoxBlock(i, 1)">↓</button>
+                  <button class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1" title="Remover bloco" @click="removeBoxBlock(i)">✕</button>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap mb-1.5">
+                  <label class="flex items-center gap-1 text-[10px] text-n-slate-10">
+                    min
+                    <input v-model="b.minutes" type="text" inputmode="decimal" class="hub-mini-input" />
+                  </label>
+                  <label class="flex items-center gap-1 text-[10px] text-n-slate-10">
+                    rounds
+                    <input v-model="b.rounds" type="text" inputmode="numeric" class="hub-mini-input" />
+                  </label>
+                  <label class="flex items-center gap-1 text-[10px] text-n-slate-10">
+                    × seg
+                    <input v-model="b.round_sec" type="text" inputmode="numeric" class="hub-mini-input" />
+                  </label>
+                  <label class="flex items-center gap-1 text-[10px] text-n-slate-10">
+                    descanso s
+                    <input v-model="b.rest_sec" type="text" inputmode="numeric" class="hub-mini-input" />
+                  </label>
+                </div>
+                <input
+                  v-model="b.desc"
+                  type="text"
+                  placeholder="O que fazer neste bloco"
+                  class="block w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-12"
+                  style="margin-bottom: 6px"
+                />
+                <div v-if="boxingSeqs.length" class="flex gap-1 flex-wrap">
+                  <button
+                    v-for="sq in boxingSeqs"
+                    :key="sq.id"
+                    class="h-7 px-2 rounded-lg text-[10px] font-bold border"
+                    :class="(b.seqs || []).includes(sq.id) ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
+                    :style="(b.seqs || []).includes(sq.id) ? { background: ROYAL } : {}"
+                    @click="toggleBlockSeq(b, sq.id)"
+                  >
+                    {{ sq.name }} <span class="font-normal opacity-75">{{ sq.steps }}</span>
+                  </button>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap mt-2">
+                <button
+                  class="h-8 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
+                  @click="addBoxBlock"
+                >
+                  + bloco
+                </button>
+                <div class="flex-1" />
+                <button
+                  v-if="boxWkForm.id"
+                  class="h-9 px-3 rounded-lg text-xs font-medium border border-n-weak hover:bg-n-alpha-1"
+                  style="color: #dc2626"
+                  @click="deleteBoxWorkoutCfg"
+                >
+                  Excluir
+                </button>
+                <button
+                  class="h-9 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
+                  @click="boxWkForm = null"
+                >
+                  Cancelar
+                </button>
+                <button
+                  class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
+                  :style="{ background: GRAD_NOITE }"
+                  :disabled="savingConfig"
+                  @click="saveBoxWorkoutCfg"
+                >
+                  {{ savingConfig ? 'Salvando…' : 'Salvar treino' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- cards dos treinos -->
+            <div class="grid gap-2.5" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
+              <div v-for="w in boxWorkouts" :key="w.id" class="rounded-2xl border border-n-weak p-3 flex flex-col gap-2">
+                <div class="flex items-start gap-2">
+                  <span
+                    class="w-11 h-11 rounded-xl flex flex-col items-center justify-center text-white shrink-0 leading-none"
+                    :style="{ background: GRAD_NOITE }"
+                  >
+                    <span class="text-base font-black">{{ workoutMinutes(w) }}</span>
+                    <span class="text-[8px] opacity-80">min</span>
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-bold text-n-slate-12 leading-tight">{{ w.name }}</p>
+                    <p class="text-[11px] text-n-slate-10">
+                      {{ (w.blocks || []).length }} blocos · {{ workoutRounds(w) }} rounds · {{ workoutSeqIds(w).length }} sequências
+                    </p>
+                  </div>
+                  <button class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0" title="Editar" @click="openEditBoxWorkout(w)">✏️</button>
+                </div>
+                <div class="flex gap-1 flex-wrap">
+                  <span
+                    v-for="(b, i) in w.blocks"
+                    :key="i"
+                    class="inline-flex items-center gap-1 h-6 px-1.5 rounded-md text-[10px] border border-n-weak bg-n-solid-2 text-n-slate-11"
+                    :title="b.desc"
+                  >
+                    {{ blockMeta(b.type).icon }} {{ b.title || blockMeta(b.type).label }}
+                    <b class="text-n-slate-10">{{ blockMinutes(b) }}'</b>
+                  </span>
+                </div>
+                <div class="flex gap-2 mt-auto">
+                  <button
+                    class="h-10 flex-1 rounded-xl text-xs font-bold text-white shadow"
+                    :style="{ background: GRAD_LARANJA }"
+                    @click="startBoxWorkout(w)"
+                  >
+                    ▶ Iniciar
+                  </button>
+                  <button
+                    class="h-10 px-3 rounded-xl text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1 disabled:opacity-60"
+                    :disabled="savingBox"
+                    title="Registrar este treino como feito hoje, sem cronômetro"
+                    @click="logBoxWorkoutNow(w)"
+                  >
+                    ✓ Já fiz
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Registrar manualmente (dobrável) -->
+          <div v-if="!boxSession" class="hub-block p-4 mb-4">
+            <button class="w-full text-left text-sm font-bold text-n-slate-12" @click="showManualBox = !showManualBox">
+              {{ showManualBox ? '▾' : '▸' }} ✍️ Registrar treino livre
+            </button>
+            <template v-if="showManualBox">
+            <p class="text-[11px] text-n-slate-10 mt-1 mb-3">Treinou fora dos programados? Anote duração, rounds e sequências.</p>
             <div class="flex items-end gap-2.5 flex-wrap mb-3">
               <label class="block">
                 <span class="text-[11px] font-medium text-n-slate-11">Data</span>
@@ -2000,10 +2782,11 @@ onMounted(async () => {
             >
               {{ savingBox ? 'Salvando…' : '✓ Salvar treino de boxe' }}
             </button>
+            </template>
           </div>
 
           <!-- Repertório de sequências -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div v-if="!boxSession" class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between mb-1">
               <h2 class="text-sm font-bold text-n-slate-12">🌀 Sequências — repertório</h2>
               <button
@@ -2093,7 +2876,7 @@ onMounted(async () => {
           </div>
 
           <!-- Histórico do boxe -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4">
+          <div class="hub-block p-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-3">🗓 Últimos treinos de boxe</h2>
             <p v-if="!boxings.length" class="text-xs text-n-slate-10">Nenhum treino de boxe registrado ainda.</p>
             <div
@@ -2111,6 +2894,7 @@ onMounted(async () => {
                 <p class="text-xs font-bold text-n-slate-12">
                   {{ b.data?.duration_min || 0 }} min
                   <span v-if="b.data?.rounds" class="font-normal text-n-slate-10">· {{ b.data.rounds }} rounds</span>
+                  <span v-if="b.data?.workout_name" class="font-normal" :style="{ color: ROYAL }">· {{ b.data.workout_name }}</span>
                 </p>
                 <p class="text-[11px] text-n-slate-10 truncate">
                   {{ (b.data?.sequences || []).map(seqName).join(' · ') || b.data?.notes || '—' }}
@@ -2130,7 +2914,7 @@ onMounted(async () => {
         <!-- ═══ DIETA ═══ -->
         <template v-if="tab === 'dieta'">
           <!-- Dia de hoje -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
               <span class="flex items-center gap-2">
                 <h2 class="text-sm font-bold text-n-slate-12">
@@ -2245,7 +3029,7 @@ onMounted(async () => {
           </div>
 
           <!-- Editor do plano alimentar -->
-          <div v-if="dietForm" class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div v-if="dietForm" class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">🎯 Metas do dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               É só passar as <b>calorias</b>: proteína (1,8 g/kg do seu peso), carbo e
@@ -2338,7 +3122,7 @@ onMounted(async () => {
           </div>
 
           <!-- Histórico da dieta -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4">
+          <div class="hub-block p-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-3">🗓 Últimos dias</h2>
             <p v-if="!diets.length" class="text-xs text-n-slate-10">Nenhum dia registrado ainda.</p>
             <div
@@ -2361,7 +3145,7 @@ onMounted(async () => {
         <template v-if="tab === 'corpo'">
           <!-- Registrar medidas: data em destaque + GRADE uniforme
                (rodada 15 — cada célula: rótulo · roleta · chip da última) -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 sm:p-5 mb-4">
+          <div class="hub-block p-4 sm:p-5 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-1">📏 Registrar medidas</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               Protocolo: braço RELAXADO · coxa no meio virilha–joelho · cintura após expiração normal, sem encolher · pescoço abaixo do pomo de Adão, sem apertar. Sempre do mesmo jeito.
@@ -2426,7 +3210,7 @@ onMounted(async () => {
           </div>
 
           <!-- Gráfico do peso -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-4">
+          <div class="hub-block p-4 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-3">⚖️ Peso ao longo do tempo</h2>
             <MiniBars
               v-if="weightSeries.values.length > 1"
@@ -2453,7 +3237,7 @@ onMounted(async () => {
           </div>
 
           <!-- Histórico do corpo -->
-          <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4">
+          <div class="hub-block p-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-3">🗓 Últimas medições</h2>
             <p v-if="!bodies.length" class="text-xs text-n-slate-10">Nenhuma medição registrada ainda.</p>
             <div
@@ -2481,6 +3265,7 @@ onMounted(async () => {
         </template>
       </template>
     </div>
+    <HubTabBar :boxing-on="boxingOn" />
   </div>
 </template>
 
@@ -2512,6 +3297,56 @@ onMounted(async () => {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 6px 18px -12px rgba(255, 138, 0, 0.55);
+}
+/* extra recente (rodada 20): chip tocável com o nome e a última execução */
+.hub-extra-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.75rem;
+  font-size: 11px;
+  line-height: 1.2;
+  border: 1px solid rgba(65, 105, 225, 0.3);
+  background: rgba(65, 105, 225, 0.08);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.hub-extra-chip:active {
+  transform: scale(0.96);
+}
+.hub-extra-chip:hover {
+  background: rgba(65, 105, 225, 0.16);
+}
+/* boxe guiado (rodada 20): relógio redondo + botões de bloco */
+.hub-box-clock {
+  width: 13.5rem;
+  height: 13.5rem;
+}
+.hub-box-btn {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+}
+.hub-box-btn:disabled {
+  opacity: 0.3;
+}
+.hub-box-btn:not(:disabled):active {
+  transform: scale(0.92);
+}
+.hub-mini-input {
+  width: 3.4rem;
+  height: 2rem;
+  margin-bottom: 0;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: transparent;
+  text-align: center;
+  font-size: 11px;
 }
 /* modo "digitar" (rodada 16): caixinha grande no lugar da roleta */
 .hub-type-input {

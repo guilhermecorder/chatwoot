@@ -549,7 +549,7 @@ const hubMenuSaude = () => [
     : []),
   { name: 'HealthDieta', label: 'Dieta', icon: 'i-lucide-utensils', to: accountScopedRoute('hub_health_dieta') },
   { name: 'HealthCorpo', label: 'Corpo', icon: 'i-lucide-ruler', to: accountScopedRoute('hub_health_corpo') },
-  { name: 'HealthDash', label: 'Dashboard', icon: 'i-lucide-area-chart', to: accountScopedRoute('hub_health_dash') },
+  { name: 'HealthDash', label: 'Análises', icon: 'i-lucide-area-chart', to: accountScopedRoute('hub_health_dash') },
 ];
 
 const visibleMenuItems = computed(() => {

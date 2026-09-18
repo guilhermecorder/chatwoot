@@ -1,17 +1,19 @@
 <script setup>
-// MEU PAINEL DA SAÚDE — rodada 16: 95% TREINO. Pedido dele 10/09: o painel
-// focado no treino, nas cargas e na visualização do progresso; dieta e
-// calorias só como referência; indicadores de peso e medidas com a
-// CIRCUNFERÊNCIA ABDOMINAL em destaque (o indicador do momento).
-// Mantém da rodada 14: ciclo de 24 semanas, caixinhas de consistência,
-// elogio da semana completa, projeções de peso, paleta royal + laranja.
+// MEU PAINEL DA SAÚDE — rodada 20 (18/09): "as coisas mais importantes
+// no início, e nos ater a elas". Ordem: HERO (treino da vez) → RESULTADO
+// (peso × alvo, cintura, força) → CENTÍMETROS (balanço + gráfico de todos
+// os cm ganhos/perdidos ao longo do tempo + gráficos por ÁREA do corpo)
+// → CARGAS por exercício → FORÇA → METAS do próximo treino (dobrável).
+// Saíram: elogio, fileira de KPIs de vaidade, caixinhas de consistência
+// (moram em Análises) e o card de dieta (1 toque na barra de abas).
+// Mantém: ciclo de 24 semanas, carrosséis A|B|C, paleta royal + laranja.
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
-import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import WheelInput from './WheelInput.vue';
+import HubTabBar from './HubTabBar.vue';
 import {
   Chart as ChartJS,
   Tooltip,
@@ -35,13 +37,17 @@ import {
   nameWithoutEquipment,
   fmtSets,
   METHOD_LABELS,
+  learnEquiv,
+  factorOf,
 } from './warrior';
+// rodada 23: paleta SÓ azul + laranja em tons (pedido dele) — sem verde/
+// vermelho no painel: "na direção certa" = azul, "contra" = laranja vivo
 import {
-  ROYAL, ROYAL_PROFUNDO, ROYAL_NOITE, ROYAL_CLARO,
-  LARANJA, LARANJA_VIVO, LARANJA_CLARO, LARANJA_ESCURO,
-  VERMELHO, VERDE_OK, CINZA, GRAD_NOITE, GRAD_LARANJA, GRAD_ROYAL,
-  VERDICT_COLORS,
+  ROYAL, ROYAL_CLARO,
+  LARANJA, LARANJA_VIVO, LARANJA_CLARO,
+  CINZA, GRAD_NOITE, GRAD_LARANJA,
 } from './palette';
+const VERDICT_COLORS = { progress: ROYAL, tie: CINZA, regress: LARANJA_VIVO };
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler);
 
@@ -51,6 +57,13 @@ const accountScopedRoute = name => ({
   params: { accountId: router.currentRoute.value.params.accountId },
 });
 const go = name => router.push(accountScopedRoute(name));
+// "▶ Treino X de hoje" → a tela de treino já abre com a sessão pronta
+const goStart = key =>
+  router.push({ ...accountScopedRoute('hub_health'), query: { start: key } });
+const scrollToId = id => {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 
 const isLoading = ref(true);
 const config = ref({});
@@ -64,7 +77,6 @@ const todayISO = new Date().toISOString().slice(0, 10);
 const num = v => Number(String(v ?? '').replace(',', '.')) || 0;
 const fmt1 = v => String(Math.round(v * 10) / 10).replace('.', ',');
 const fmtKg = v => `${fmt1(v)} kg`;
-const fmtCm = v => `${fmt1(v)} cm`;
 const fmtDay = iso => `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}`;
 const signed = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmt1(Math.abs(v))}`;
 const shiftISO = (iso, days) => {
@@ -102,7 +114,6 @@ const programWeek = computed(() => weekOf(program.value, todayISO));
 const cycleNumber = computed(() =>
   programWeek.value ? Math.floor((programWeek.value - 1) / CYCLE_LEN) + 1 : 1
 );
-const cyclesDone = computed(() => cycleNumber.value - 1);
 const weekInCycle = computed(() =>
   programWeek.value ? ((programWeek.value - 1) % CYCLE_LEN) + 1 : 1
 );
@@ -118,29 +129,12 @@ const mondayISO = computed(() => {
   return d.toISOString().slice(0, 10);
 });
 const inThisWeek = iso => iso >= mondayISO.value && iso <= todayISO;
-const lastMondayISO = computed(() => shiftISO(mondayISO.value, -7));
-const inLastWeek = iso => iso >= lastMondayISO.value && iso < mondayISO.value;
 
 // ── ALVOS (registro 'profile' da pessoa) ────────────────────────────
-const dietTargets = computed(() => config.value.diet?.targets || {});
 const weeklyGoal = computed(() => Number(profile.value.weekly_sessions) || 3);
-const weightGoal = computed(() => Number(profile.value.weight_goal) || 0);
-const editingGoal = ref(false);
-const goalDraft = ref('');
-const saveGoal = async () => {
-  const v = num(goalDraft.value);
-  try {
-    const { data: rec } = await CrmAPI.createHealthRecord({
-      kind: 'profile',
-      data: { ...profile.value, weight_goal: v },
-    });
-    profile.value = rec.data || {};
-    editingGoal.value = false;
-    useAlert('🎯 Peso-alvo salvo.');
-  } catch {
-    useAlert('Não consegui salvar o alvo.');
-  }
-};
+const weightGoal = computed(
+  () => Number(profile.value.targets?.weight) || Number(profile.value.weight_goal) || 0
+);
 
 // ── HOJE / SEMANA ───────────────────────────────────────────────────
 const WEEKDAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -159,7 +153,6 @@ const upcomingSession = computed(() => {
 });
 
 const weekWorkouts = computed(() => workouts.value.filter(w => inThisWeek(w.record_date)));
-const lastWeekWorkouts = computed(() => workouts.value.filter(w => inLastWeek(w.record_date)));
 const weekBoxings = computed(() => boxings.value.filter(b => inThisWeek(b.record_date)));
 const weekSessions = computed(
   () => weekWorkouts.value.length + (boxingOn.value ? weekBoxings.value.length : 0)
@@ -212,10 +205,6 @@ const volumeOf = list =>
       ),
     0
   );
-const fmtVol = v => (v >= 1000 ? `${fmt1(v / 1000)} t` : `${Math.round(v)} kg`);
-const weekVolume = computed(() => volumeOf(weekWorkouts.value));
-const lastWeekVolume = computed(() => volumeOf(lastWeekWorkouts.value));
-
 const weekScore = computed(() => {
   const acc = { progress: 0, tie: 0, regress: 0 };
   weekWorkouts.value.forEach(w => {
@@ -298,7 +287,24 @@ const loadProgress = computed(() => {
       })
       .map(p => {
         const eq = equipmentOf(p);
-        const execs = executionsOf(p.name);
+        // PESO COMUM (rodada 21): cada execução ganha `common` = carga máx ×
+        // fator da variação (halteres ×2, máquina calibrada pelo histórico)
+        // — o Δ, a curva e o número grande não pulam quando troca o
+        // equipamento
+        const rawExecs = executionsOf(p.name);
+        // escala do peso comum = a da variação PRINCIPAL do exercício (um
+        // supino com halteres continua mostrando o número do halter; a
+        // máquina/barra é que entram convertidas pra essa escala)
+        const equiv = learnEquiv(p, eq.base, rawExecs);
+        const baseF = factorOf(equiv, eq.base, eq.base, p) || 1;
+        const relF = tag => Math.round((factorOf(equiv, tag, eq.base, p) / baseF) * 1000) / 1000;
+        const execs = rawExecs.map(x => ({
+          ...x,
+          factor: relF(x.tag),
+          common: Math.round(x.top * relF(x.tag) * 10) / 10,
+        }));
+        const tagsSeen = [...new Set(execs.map(x => lowerName(x.tag) || lowerName(eq.base)))];
+        const mixed = tagsSeen.length > 1;
         const last = execs[0] || null;
         const prev = execs[1] || null;
         // primeira execução DESTE ciclo (Δ no ciclo); senão a mais antiga
@@ -310,20 +316,27 @@ const loadProgress = computed(() => {
         const spark = execs
           .slice(0, 10)
           .reverse()
-          .map(x => x.top);
+          .map(x => x.common);
+        // última carga de cada variação (pra linha "halteres 30 ≈ máquina 70")
+        const perTag = tagsSeen.map(t => {
+          const x = execs.find(e => (lowerName(e.tag) || lowerName(eq.base)) === t);
+          return { tag: t, top: x.top, factor: x.factor };
+        });
         return {
           name: eq.options.length > 1 ? nameWithoutEquipment(p.name) : p.name,
           tag: last?.tag || '',
           method: p.method,
           last,
+          mixed,
+          perTag,
           count: execs.length,
-          deltaCycle: last && first && last !== first ? last.top - first.top : null,
+          deltaCycle: last && first && last !== first ? Math.round((last.common - first.common) * 10) / 10 : null,
           pctCycle:
-            last && first && last !== first && first.top
-              ? Math.round(((last.top - first.top) / first.top) * 1000) / 10
+            last && first && last !== first && first.common
+              ? Math.round(((last.common - first.common) / first.common) * 1000) / 10
               : null,
           firstE1: first?.e1 ?? null,
-          deltaPrev: last && prev ? last.top - prev.top : null,
+          deltaPrev: last && prev ? Math.round((last.common - prev.common) * 10) / 10 : null,
           verdict,
           pr: Boolean(last && execs.length > 1 && last.e1 > bestBefore + 0.01),
           e1: last ? Math.round(last.e1 * 10) / 10 : null,
@@ -354,13 +367,6 @@ const verdictsFor = exercises => {
   });
   return acc;
 };
-const cycleVerdicts = computed(() =>
-  verdictsFor(loadProgress.value.flatMap(s => s.exercises))
-);
-const cycleProgressions = computed(() => cycleVerdicts.value.progress);
-const cyclePRs = computed(() =>
-  loadProgress.value.reduce((a, s) => a + s.exercises.filter(e => e.pr).length, 0)
-);
 const VERDICT_LABEL = { progress: '▲ progrediu', tie: '▬ empatou', regress: '▼ regrediu', first: '🏁 1ª vez' };
 
 // ── CARROSSEL do progresso (rodada 18): 1 slide por treino A/B/C, desliza
@@ -398,56 +404,14 @@ const SESSION_HINT = {
   C: 'puxar + ombros',
 };
 
-// ── CAIXINHAS DE CONSISTÊNCIA (rodada 14) ───────────────────────────
-const WEEKDAY_OFFSET = {
-  Segunda: 0, Terça: 1, Quarta: 2, Quinta: 3, Sexta: 4, Sábado: 5, Domingo: 6,
-};
-const consistency = computed(() => {
-  const prog = program.value;
-  if (!prog?.start_date) return [];
-  const startWeekAbs = (cycleNumber.value - 1) * CYCLE_LEN + 1;
-  const weeks = [];
-  for (let w = 1; w <= CYCLE_LEN; w += 1) {
-    const absWeek = startWeekAbs + w - 1;
-    const cy = cycleForWeek(prog, w);
-    const cells = (cy?.sessions || []).map(s => {
-      const d = new Date(`${prog.start_date}T00:00:00`);
-      d.setDate(d.getDate() + (absWeek - 1) * 7 + (WEEKDAY_OFFSET[s.weekday] ?? 0));
-      const plannedISO = d.toISOString().slice(0, 10);
-      const rec = workouts.value.find(
-        x =>
-          x.data?.program_id === prog.id &&
-          x.data?.session_key === s.key &&
-          Number(x.data?.week) === absWeek
-      );
-      let state = 'future';
-      if (rec) state = rec.record_date === plannedISO ? 'done' : 'moved';
-      else if (plannedISO < todayISO) state = 'missed';
-      return { key: s.key, state, plannedISO };
-    });
-    weeks.push({ n: w, absWeek, cells, current: absWeek === programWeek.value });
-  }
-  return weeks;
-});
-const consistencyTotals = computed(() => {
-  const t = { done: 0, moved: 0, missed: 0 };
-  consistency.value.forEach(w =>
-    w.cells.forEach(c => {
-      if (t[c.state] !== undefined) t[c.state] += 1;
-    })
-  );
-  return t;
-});
-const adherencePct = computed(() => {
-  const t = consistencyTotals.value;
-  const total = t.done + t.moved + t.missed;
-  return total ? Math.round(((t.done + t.moved) / total) * 100) : null;
-});
-const CELL_COLORS = {
-  done: VERDE_OK,
-  moved: LARANJA,
-  missed: VERMELHO,
-  future: 'rgba(127,127,127,0.18)',
+// cards de carga (rodada 22): frente leve — nome, carga, Δ ciclo, curva;
+// tocar abre séries/data, veredito, e-1RM e peso comum
+const openCards = ref(new Set());
+const toggleCard = name => {
+  const next = new Set(openCards.value);
+  if (next.has(name)) next.delete(name);
+  else next.add(name);
+  openCards.value = next;
 };
 
 // ── CORPO: circunferência abdominal em destaque + peso ──────────────
@@ -457,13 +421,8 @@ const seriesOf = key =>
     .map(b => ({ date: b.record_date, v: Number(b.data[key]) }))
     .sort((a, b) => (a.date > b.date ? 1 : -1));
 const weighins = computed(() => seriesOf('weight'));
-const waists = computed(() => seriesOf('waist_navel'));
 const currentWeight = computed(() => weighins.value.at(-1)?.v || 0);
 const firstWeight = computed(() => weighins.value[0]?.v || 0);
-const waistNow = computed(() => waists.value.at(-1) || null);
-const waistPrev = computed(() => waists.value.at(-2) || null);
-const waistFirst = computed(() => waists.value[0] || null);
-const waistSpark = computed(() => sparkPoints(waists.value.slice(-12).map(p => p.v)));
 
 const slopeOf = (series, days = 30) => {
   const cut = shiftISO(todayISO, -days);
@@ -485,10 +444,6 @@ const slopeOf = (series, days = 30) => {
   return (cov / varx) * days;
 };
 const slope30 = computed(() => slopeOf(weighins.value));
-const waistSlope30 = computed(() => slopeOf(waists.value));
-const projection30 = computed(() =>
-  slope30.value === null ? null : currentWeight.value + slope30.value
-);
 const gapToGoal = computed(() =>
   weightGoal.value > 0 && currentWeight.value > 0 ? currentWeight.value - weightGoal.value : null
 );
@@ -499,9 +454,6 @@ const goalEta = computed(() => {
   if (days > 400) return null;
   return { days, label: fmtDay(shiftISO(todayISO, days)) };
 });
-const weightThisWeek = computed(() =>
-  bodies.value.some(b => inThisWeek(b.record_date) && Number(b.data?.weight) > 0)
-);
 
 const MEASURE_VIEW = [
   { key: 'waist_narrow', label: 'C. estreita', down: true },
@@ -514,16 +466,6 @@ const MEASURE_VIEW = [
   { key: 'neck', label: 'Pescoço', down: true },
   { key: 'shoulders', label: 'Ombros', down: false },
 ];
-const measures = computed(() =>
-  MEASURE_VIEW.map(m => {
-    const withVal = bodies.value.filter(b => Number(b.data?.[m.key]) > 0);
-    if (!withVal.length) return null;
-    const value = Number(withVal[0].data[m.key]);
-    const prev = withVal[1] ? Number(withVal[1].data[m.key]) : null;
-    const delta = prev === null ? null : Math.round((value - prev) * 10) / 10;
-    return { ...m, value, delta };
-  }).filter(Boolean)
-);
 
 // ── PROGRESSO DE FORÇA (rodada 17): jeitos de MEDIR a evolução das cargas
 // além do Δ kg por exercício:
@@ -545,70 +487,6 @@ const cycleStartISO = computed(() => {
   const absWeek = (cycleNumber.value - 1) * CYCLE_LEN + (cy.week_start || 1);
   return shiftISO(prog.start_date, (absWeek - 1) * 7);
 });
-// força total semana a semana (carry-forward: cada exercício vale o
-// último e-1RM conhecido até aquela semana) + força relativa ao peso
-const strengthChartFor = exercises => {
-  const cy = programCycle.value;
-  const prog = program.value;
-  if (!cy || !prog?.start_date) return null;
-  const names = exercises.map(e => e.name);
-  const execsByName = {};
-  exercises.forEach(e => {
-    execsByName[e.name] = e.execs || [];
-  });
-  const wStart = cy.week_start || 1;
-  const wEnd = Math.min(weekInCycle.value, cy.week_end || CYCLE_LEN);
-  const labels = [];
-  const total = [];
-  const rel = [];
-  for (let w = wStart; w <= wEnd; w += 1) {
-    const absWeek = (cycleNumber.value - 1) * CYCLE_LEN + w;
-    let sum = 0;
-    let any = false;
-    names.forEach(name => {
-      const known = (execsByName[name] || []).find(x => x.week && x.week <= absWeek);
-      if (known) {
-        sum += known.e1;
-        any = true;
-      }
-    });
-    if (!any) continue;
-    labels.push(`S${w}`);
-    total.push(Math.round(sum));
-    const peso = weightAt(shiftISO(prog.start_date, absWeek * 7 - 1));
-    rel.push(peso ? Math.round((sum / peso) * 100) / 100 : null);
-  }
-  if (labels.length < 2) return null;
-  return {
-    labels,
-    datasets: [
-      {
-        label: 'Força total (Σ e-1RM, kg)',
-        data: total,
-        borderColor: ROYAL,
-        backgroundColor: 'rgba(65,105,225,0.14)',
-        fill: true,
-        tension: 0.3,
-        pointRadius: 2,
-        borderWidth: 2,
-        yAxisID: 'y',
-      },
-      {
-        label: 'Força relativa (× peso corporal)',
-        data: rel,
-        borderColor: LARANJA,
-        borderDash: [6, 4],
-        fill: false,
-        tension: 0.3,
-        pointRadius: 2,
-        borderWidth: 2,
-        spanGaps: true,
-        yAxisID: 'y1',
-      },
-    ],
-  };
-};
-
 // métricas de um conjunto de exercícios (sessionKey null = GERAL, A+B+C)
 const strengthFor = sessionKey => {
   const groups = sessionKey
@@ -650,36 +528,80 @@ const strengthFor = sessionKey => {
     comparable,
     tonnage,
     tonnagePerWeek: tonnage / weeksElapsed,
-    chart: strengthChartFor(exercises),
     exercises: exercises.length,
   };
 };
 const strength = computed(() => strengthFor(null));
-// slides do carrossel de força: Geral + um por treino
-const strengthSlides = computed(() => [
-  {
-    key: 'geral',
-    letter: 'Σ',
-    title: 'Geral',
-    sub: 'A + B + C · todos os exercícios do ciclo',
-    m: strength.value,
-  },
-  ...loadProgress.value.map(g => ({
-    key: g.key,
-    letter: g.key,
-    title: `Treino ${g.key}`,
-    sub: `${g.weekday} · ${g.exercises.length} exercícios${SESSION_HINT[g.key] ? ` · ${SESSION_HINT[g.key]}` : ''}`,
-    m: strengthFor(g.key),
-  })),
+
+// ── FORÇA GERAL E POR TREINO (rodada 23): força total semana a semana
+// (carry-forward: cada exercício vale o último e-1RM conhecido até a
+// semana) × força relativa ao peso — chavinha Geral | A | B | C
+const strengthChartFor = exercises => {
+  const cy = programCycle.value;
+  const prog = program.value;
+  if (!cy || !prog?.start_date) return null;
+  const wStart = cy.week_start || 1;
+  const wEnd = Math.min(weekInCycle.value, cy.week_end || CYCLE_LEN);
+  const labels = [];
+  const total = [];
+  const rel = [];
+  for (let w = wStart; w <= wEnd; w += 1) {
+    const absWeek = (cycleNumber.value - 1) * CYCLE_LEN + w;
+    let sum = 0;
+    let any = false;
+    exercises.forEach(e => {
+      const known = (e.execs || []).find(x => x.week && x.week <= absWeek);
+      if (known) {
+        sum += known.e1;
+        any = true;
+      }
+    });
+    if (!any) continue;
+    labels.push(`S${w}`);
+    total.push(Math.round(sum));
+    const peso = weightAt(shiftISO(prog.start_date, absWeek * 7 - 1));
+    rel.push(peso ? Math.round((sum / peso) * 100) / 100 : null);
+  }
+  if (labels.length < 2) return null;
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Força total (Σ e-1RM, kg)',
+        data: total,
+        borderColor: ROYAL,
+        backgroundColor: 'rgba(65,105,225,0.14)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 2,
+        borderWidth: 2,
+        yAxisID: 'y',
+      },
+      {
+        label: 'Força relativa (× peso)',
+        data: rel,
+        borderColor: LARANJA,
+        borderDash: [6, 4],
+        fill: false,
+        tension: 0.3,
+        pointRadius: 2,
+        borderWidth: 2,
+        spanGaps: true,
+        yAxisID: 'y1',
+      },
+    ],
+  };
+};
+const forcaKey = ref('geral');
+const forcaOptions = computed(() => [
+  { key: 'geral', label: 'Geral' },
+  ...loadProgress.value.map(g => ({ key: g.key, label: `Treino ${g.key}` })),
 ]);
-
-const {
-  el: forceCarousel,
-  idx: forceIdx,
-  go: goForce,
-  onScroll: onForceScroll,
-} = useCarousel(() => strengthSlides.value.length);
-
+const forcaView = computed(() => {
+  const key = forcaKey.value === 'geral' ? null : forcaKey.value;
+  const groups = key ? loadProgress.value.filter(g => g.key === key) : loadProgress.value;
+  return { m: strengthFor(key), chart: strengthChartFor(groups.flatMap(g => g.exercises)) };
+});
 // ── BALANÇO DE CENTÍMETROS (rodada 17): quanto o corpo mudou, no total ──
 // "perdidos onde importa" = cintura/cintura estreita/quadril/pescoço
 // (queda é vitória) · "ganhos onde importa" = peito/braços/coxas/ombros
@@ -722,43 +644,277 @@ const cmBalance = computed(() => {
   };
 });
 
-// gráfico: cintura (laranja, eixo esq.) × peso (royal, eixo dir.)
-const bodyChart = computed(() => {
-  const dates = [...new Set([...waists.value, ...weighins.value].map(p => p.date))]
-    .sort()
-    .slice(-30);
-  const at = (series, d) => series.find(p => p.date === d)?.v ?? null;
-  const data = {
-    labels: dates.map(fmtDay),
-    datasets: [
-      {
-        label: 'Cintura (cm)',
-        data: dates.map(d => at(waists.value, d)),
-        borderColor: LARANJA,
-        backgroundColor: 'rgba(255,138,0,0.12)',
-        fill: true,
-        tension: 0.35,
-        pointRadius: 2,
-        borderWidth: 2,
-        spanGaps: true,
-        yAxisID: 'y',
-      },
-      {
-        label: 'Peso (kg)',
-        data: dates.map(d => at(weighins.value, d)),
-        borderColor: ROYAL,
-        backgroundColor: 'transparent',
-        fill: false,
-        tension: 0.35,
-        pointRadius: 2,
-        borderWidth: 2,
-        spanGaps: true,
-        yAxisID: 'y1',
-      },
-    ],
+// ── ATUAL → ALVO (rodada 23): "meus dados atuais e desejados" no topo.
+// Alvos por medida moram no registro 'profile' (targets: { key: valor });
+// braço e coxa = média D/E. Barra = quanto do caminho (1ª medição → alvo)
+// já foi percorrido.
+const TARGET_DEFS = [
+  { key: 'weight', label: 'Peso', unit: 'kg', down: true, max: 200 },
+  { key: 'waist_navel', label: 'Cintura (umbigo)', unit: 'cm', down: true, max: 220 },
+  { key: 'waist_narrow', label: 'Cintura estreita', unit: 'cm', down: true, max: 220 },
+  { key: 'hips', label: 'Quadril', unit: 'cm', down: true, max: 220 },
+  { key: 'chest', label: 'Peito', unit: 'cm', down: false, max: 220 },
+  { key: 'arm', label: 'Braço (média)', unit: 'cm', down: false, max: 220, avg: ['arm_r', 'arm_l'] },
+  { key: 'thigh', label: 'Coxa (média)', unit: 'cm', down: false, max: 220, avg: ['thigh_r', 'thigh_l'] },
+  { key: 'shoulders', label: 'Ombros', unit: 'cm', down: false, max: 220 },
+  { key: 'neck', label: 'Pescoço', unit: 'cm', down: true, max: 220 },
+];
+const valueAt = (def, which) => {
+  const vals = (def.avg || [def.key])
+    .map(k => {
+      const sr = seriesOf(k);
+      if (!sr.length) return null;
+      return which === 'last' ? sr.at(-1).v : sr[0].v;
+    })
+    .filter(v => v !== null);
+  if (!vals.length) return null;
+  return round1(vals.reduce((a, b) => a + b, 0) / vals.length);
+};
+const targets = computed(() => ({
+  ...(profile.value.targets || {}),
+  weight: weightGoal.value,
+}));
+const goalRows = computed(() =>
+  TARGET_DEFS.map(d => {
+    const now = valueAt(d, 'last');
+    const first = valueAt(d, 'first');
+    const target = Number(targets.value[d.key]) || 0;
+    if (now === null && !target) return null;
+    const remaining = target && now !== null ? round1(d.down ? now - target : target - now) : null;
+    let pct = null;
+    if (target && now !== null && first !== null) {
+      const total = d.down ? first - target : target - first;
+      const done = d.down ? first - now : now - first;
+      if (total > 0) pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+      else if (remaining <= 0) pct = 100;
+    }
+    return { ...d, now, first, target, remaining, pct, hit: remaining !== null && remaining <= 0 };
+  }).filter(Boolean)
+);
+const editingTargets = ref(false);
+const targetsDraft = ref({});
+const openTargets = () => {
+  targetsDraft.value = Object.fromEntries(
+    TARGET_DEFS.map(d => [d.key, targets.value[d.key] ? String(targets.value[d.key]).replace('.', ',') : ''])
+  );
+  editingTargets.value = true;
+};
+const saveTargets = async () => {
+  const t = {};
+  TARGET_DEFS.forEach(d => {
+    const v = num(targetsDraft.value[d.key]);
+    if (v > 0) t[d.key] = v;
+  });
+  try {
+    const { data: rec } = await CrmAPI.createHealthRecord({
+      kind: 'profile',
+      data: { ...profile.value, targets: t, weight_goal: t.weight || 0 },
+    });
+    profile.value = rec.data || {};
+    editingTargets.value = false;
+    useAlert('🎯 Alvos salvos.');
+  } catch {
+    useAlert('Não consegui salvar os alvos.');
+  }
+};
+
+// eixo duplo (esq. laranja/direita azul) usado nos gráficos de relação
+const dualChartOpts = {
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index', intersect: false },
+  plugins: { legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } } },
+  scales: {
+    x: { ticks: { font: { size: 9 } }, grid: { display: false } },
+    y: { position: 'left', ticks: { font: { size: 9 } }, grid: { color: 'rgba(127,127,127,0.12)' } },
+    y1: { position: 'right', ticks: { font: { size: 9 } }, grid: { drawOnChartArea: false } },
+  },
+};
+
+// ── CENTÍMETROS TOTAIS × PESO (rodada 23): a soma de TODAS as
+// circunferências (cada medida vale o último valor conhecido) contra o
+// peso, medição a medição — o gráfico que ele pediu "logo no início"
+const CM_ALL = [{ key: 'waist_navel', label: 'Cintura (umbigo)', down: true }, ...MEASURE_VIEW];
+const cmTotalChart = computed(() => {
+  const keys = CM_ALL.map(m => m.key).filter(k => seriesOf(k).length);
+  if (keys.length < 3) return null;
+  const series = Object.fromEntries(keys.map(k => [k, seriesOf(k)]));
+  const dates = [...new Set(keys.flatMap(k => series[k].map(pt => pt.date)))].sort();
+  if (dates.length < 2) return null;
+  const totals = dates.map(d =>
+    round1(
+      keys.reduce((a, k) => {
+        const sr = series[k];
+        const at = sr.filter(pt => pt.date <= d).at(-1) || sr[0];
+        return a + at.v;
+      }, 0)
+    )
+  );
+  const pesos = dates.map(d => weighins.value.filter(pt => pt.date <= d).at(-1)?.v ?? null);
+  return {
+    first: totals[0],
+    last: totals.at(-1),
+    pesoFirst: pesos.find(v => v !== null) ?? null,
+    pesoLast: [...pesos].reverse().find(v => v !== null) ?? null,
+    chart: {
+      labels: dates.map(fmtDay),
+      datasets: [
+        {
+          label: 'Centímetros totais (Σ medidas)',
+          data: totals,
+          borderColor: LARANJA,
+          backgroundColor: 'rgba(255,138,0,0.14)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          borderWidth: 2,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Peso (kg)',
+          data: pesos,
+          borderColor: ROYAL,
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.3,
+          pointRadius: 3,
+          borderWidth: 2,
+          spanGaps: true,
+          yAxisID: 'y1',
+        },
+      ],
+    },
   };
-  if (weightGoal.value > 0) {
-    data.datasets.push({
+});
+
+// ── GRÁFICO DE TODOS OS CENTÍMETROS (rodada 20): a cada medição, Σ do Δ
+// desde a 1ª medição — onde quer perder (laranja, cair é vitória), onde
+// quer ganhar (royal, subir é vitória) e o saldo. Cada medida vale o
+// último valor conhecido até a data (carry-forward); entram só as que
+// têm ≥ 2 registros, igual ao balanço.
+const CM_KEYS = [{ key: 'waist_navel', label: 'Cintura (umbigo)', down: true }, ...MEASURE_VIEW];
+const cmTimeline = computed(() => {
+  const series = {};
+  CM_KEYS.forEach(m => {
+    const s = seriesOf(m.key);
+    if (s.length >= 2) series[m.key] = s;
+  });
+  const keys = Object.keys(series);
+  if (!keys.length) return null;
+  const dates = [...new Set(keys.flatMap(k => series[k].map(p => p.date)))].sort();
+  if (dates.length < 2) return null;
+  // rodada 23 (pedido dele): "centímetros onde eu quero e onde eu não
+  // quero" — Δ desde a 1ª medição, somado por grupo: laranja = onde quer
+  // PERDER (cair é vitória), azul = onde quer GANHAR (subir é vitória)
+  const rows = dates.map(d => {
+    let lose = 0;
+    let gain = 0;
+    CM_KEYS.forEach(m => {
+      const sr = series[m.key];
+      if (!sr) return;
+      const at = sr.filter(pt => pt.date <= d).at(-1);
+      if (!at) return;
+      const dlt = at.v - sr[0].v;
+      if (m.down) lose += dlt;
+      else gain += dlt;
+    });
+    return { date: d, lose: round1(lose), gain: round1(gain) };
+  });
+  return {
+    rows,
+    chart: {
+      labels: rows.map(r => fmtDay(r.date)),
+      datasets: [
+        {
+          label: 'Onde quero perder (Δ cm)',
+          data: rows.map(r => r.lose),
+          borderColor: LARANJA,
+          backgroundColor: 'rgba(255,138,0,0.14)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          borderWidth: 2,
+        },
+        {
+          label: 'Onde quero ganhar (Δ cm)',
+          data: rows.map(r => r.gain),
+          borderColor: ROYAL,
+          backgroundColor: 'rgba(65,105,225,0.12)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          borderWidth: 2,
+        },
+      ],
+    },
+  };
+});
+const cmChartOpts = {
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index', intersect: false },
+  plugins: { legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } } },
+  scales: {
+    x: { ticks: { font: { size: 9 } }, grid: { display: false } },
+    y: { ticks: { font: { size: 9 }, callback: v => `${v > 0 ? '+' : ''}${v}` }, grid: { color: 'rgba(127,127,127,0.12)' } },
+  },
+};
+
+// ── ÁREAS DO CORPO (rodada 20): "gráficos separados de áreas do corpo" —
+// uma chavinha escolhe a área e o gráfico mostra a(s) medida(s) dela
+// (braços e coxas = D e E; abdômen = umbigo e estreita) com Δ desde o
+// início e vs última, na cor da direção certa.
+const BODY_AREAS = [
+  { key: 'abdomen', label: 'Abdômen', icon: '📐', down: true, unit: 'cm', keys: [{ key: 'waist_navel', label: 'Umbigo' }, { key: 'waist_narrow', label: 'Estreita' }] },
+  { key: 'quadril', label: 'Quadril', icon: '🍑', down: true, unit: 'cm', keys: [{ key: 'hips', label: 'Quadril' }] },
+  { key: 'peito', label: 'Peito', icon: '🫁', down: false, unit: 'cm', keys: [{ key: 'chest', label: 'Peito' }] },
+  { key: 'bracos', label: 'Braços', icon: '💪', down: false, unit: 'cm', keys: [{ key: 'arm_r', label: 'Direito' }, { key: 'arm_l', label: 'Esquerdo' }] },
+  { key: 'coxas', label: 'Coxas', icon: '🦵', down: false, unit: 'cm', keys: [{ key: 'thigh_r', label: 'Direita' }, { key: 'thigh_l', label: 'Esquerda' }] },
+  { key: 'ombros', label: 'Ombros', icon: '🏔', down: false, unit: 'cm', keys: [{ key: 'shoulders', label: 'Ombros' }] },
+  { key: 'pescoco', label: 'Pescoço', icon: '🧣', down: true, unit: 'cm', keys: [{ key: 'neck', label: 'Pescoço' }] },
+  { key: 'peso', label: 'Peso', icon: '⚖️', down: true, unit: 'kg', keys: [{ key: 'weight', label: 'Peso' }] },
+];
+const areaKey = ref('abdomen');
+const areaView = computed(() => {
+  const a = BODY_AREAS.find(x => x.key === areaKey.value) || BODY_AREAS[0];
+  const lines = a.keys
+    .map(k => ({ ...k, s: seriesOf(k.key) }))
+    .filter(l => l.s.length);
+  if (!lines.length) return { ...a, lines: [], chart: null };
+  const dates = [...new Set(lines.flatMap(l => l.s.map(p => p.date)))].sort().slice(-30);
+  const main = a.down ? LARANJA : ROYAL;
+  const alt = a.down ? LARANJA_CLARO : ROYAL_CLARO;
+  const stats = lines.map(l => {
+    const first = l.s[0].v;
+    const last = l.s.at(-1).v;
+    const prev = l.s.at(-2)?.v ?? null;
+    const dStart = round1(last - first);
+    const dPrev = prev === null ? null : round1(last - prev);
+    return {
+      key: l.key,
+      label: l.label,
+      now: last,
+      dStart,
+      dPrev,
+      good: a.down ? dStart <= 0 : dStart >= 0,
+      firstDate: l.s[0].date,
+      lastDate: l.s.at(-1).date,
+      n: l.s.length,
+    };
+  });
+  const datasets = lines.map((l, i) => ({
+    label: `${l.label} (${a.unit})`,
+    data: dates.map(d => l.s.find(p => p.date === d)?.v ?? null),
+    borderColor: i === 0 ? main : alt,
+    backgroundColor: i === 0 ? (a.down ? 'rgba(255,138,0,0.12)' : 'rgba(65,105,225,0.12)') : 'transparent',
+    fill: i === 0,
+    tension: 0.35,
+    pointRadius: 3,
+    borderWidth: 2,
+    spanGaps: true,
+  }));
+  if (a.key === 'peso' && weightGoal.value > 0) {
+    datasets.push({
       label: 'Peso-alvo',
       data: dates.map(() => weightGoal.value),
       borderColor: ROYAL_CLARO,
@@ -766,61 +922,64 @@ const bodyChart = computed(() => {
       borderWidth: 1.5,
       pointRadius: 0,
       fill: false,
-      yAxisID: 'y1',
     });
   }
-  return data;
+  return { ...a, lines: stats, chart: { labels: dates.map(fmtDay), datasets } };
 });
-const bodyChartOpts = {
+const areaChartOpts = {
   responsive: true,
   maintainAspectRatio: false,
+  interaction: { mode: 'index', intersect: false },
   plugins: { legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } } },
   scales: {
     x: { ticks: { font: { size: 9 } }, grid: { display: false } },
-    y: { position: 'left', ticks: { font: { size: 9 } } },
-    y1: { position: 'right', ticks: { font: { size: 9 } }, grid: { drawOnChartArea: false } },
+    y: { ticks: { font: { size: 9 } }, grid: { color: 'rgba(127,127,127,0.12)' } },
   },
 };
 
-// ── DIETA: só referência ────────────────────────────────────────────
-const dietToday = computed(() => diets.value.find(d => d.record_date === todayISO));
-const mealsTotal = computed(() => (config.value.diet?.meals || []).length);
-const mealsDoneToday = computed(() => (dietToday.value?.data?.meals_done || []).length);
-const kcalOfDay = d => {
-  const meals = config.value.diet?.meals || [];
-  const done = d.data?.meals_done || [];
-  const base = meals.filter(m => done.includes(m.id)).reduce((s, m) => s + (Number(m.kcal) || 0), 0);
-  const extra = (d.data?.extras || []).reduce((s, e) => s + (Number(e.kcal) || 0), 0);
-  return base + extra;
+// ── RESULTADO (rodada 20): os 3 números que definem "deu certo" ─────
+
+// ── METAS do próximo treino: dobrável (rodada 20), lembra no aparelho ──
+const METAS_KEY = 'hub_painel_metas';
+const metasOpen = ref(false);
+try {
+  metasOpen.value = localStorage.getItem(METAS_KEY) === '1';
+} catch {
+  /* fica fechado */
+}
+const toggleMetas = () => {
+  metasOpen.value = !metasOpen.value;
+  try {
+    localStorage.setItem(METAS_KEY, metasOpen.value ? '1' : '0');
+  } catch {
+    /* ignora */
+  }
 };
-const weekKcalAvg = computed(() => {
-  const days = diets.value.filter(d => inThisWeek(d.record_date));
-  if (!days.length) return 0;
-  return Math.round(days.reduce((sum, d) => sum + kcalOfDay(d), 0) / days.length);
-});
-const kcalDelta = computed(() => {
-  const meta = Number(dietTargets.value.kcal) || 0;
-  if (!meta || !weekKcalAvg.value) return null;
-  return weekKcalAvg.value - meta;
-});
+
+// (dieta saiu do painel na rodada 20 — 1 toque na barra de abas)
 </script>
 
 <template>
-  <div class="flex-1 overflow-auto p-4 sm:p-6">
+  <div class="hub-page flex-1 overflow-auto p-4 pb-28 sm:p-6 md:pb-6">
     <div class="max-w-5xl mx-auto">
       <div v-if="isLoading" class="flex justify-center py-16"><Spinner /></div>
       <template v-else>
-        <!-- HERO: ciclo + treino da vez + placar da semana -->
-        <div class="rounded-2xl p-5 mb-4 text-white" :style="{ background: GRAD_NOITE }">
+        <!-- 1. HERO: treino da vez + semana -->
+        <div class="hub-block hub-block-solid p-5 mb-4 text-white">
           <div class="flex items-center justify-between flex-wrap gap-3">
-            <div>
+            <div class="min-w-0">
               <div class="flex items-center gap-2 flex-wrap mb-1">
-                <h1 class="text-lg font-bold text-white" style="color: #fff">Meu Painel · Treino</h1>
-                <span
-                  class="px-2 py-0.5 rounded-full text-[10px] font-bold"
-                  :style="{ background: LARANJA, color: '#1a0e00' }"
-                >
+                <h1 class="text-lg font-bold text-white" style="color: #fff">Meu Painel</h1>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold" :style="{ background: LARANJA, color: '#1a0e00' }">
                   Ciclo {{ cycleNumber }}
+                </span>
+                <span
+                  v-if="weekComplete"
+                  class="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                  :style="{ background: 'rgba(255,255,255,0.14)', color: LARANJA_CLARO }"
+                  :title="praise"
+                >
+                  🏆 semana completa
                 </span>
               </div>
               <p class="text-xs opacity-85">
@@ -830,146 +989,194 @@ const kcalDelta = computed(() => {
                 </template>
                 <template v-else>Suas cargas, seu progresso, sua transformação.</template>
               </p>
-              <p class="text-[11px] mt-1" :style="{ color: ROYAL_CLARO }">
-                <template v-if="cyclesDone === 0">🚀 Primeiro ciclo — é aqui que a base é construída.</template>
-                <template v-else>
-                  🏅 {{ cyclesDone }} {{ cyclesDone === 1 ? 'ciclo completo' : 'ciclos completos' }} de 24 semanas.
-                </template>
-              </p>
-            </div>
-            <div class="flex flex-col items-end gap-2">
-              <button
-                v-if="upcomingSession"
-                class="h-11 px-5 rounded-xl text-sm font-bold text-white shadow-lg"
-                :style="{ background: GRAD_LARANJA }"
-                @click="go('hub_health')"
-              >
-                ▶ Treino {{ upcomingSession.key }}
-                {{ todaysSession && !workoutDoneToday ? 'de hoje' : workoutDoneToday ? '· próximo' : '' }}
-              </button>
-              <p class="text-[11px] opacity-90">
+              <p class="text-[11px] mt-1 opacity-90">
                 Semana: <b>{{ weekSessions }} de {{ weeklyGoal }}</b> sessões ·
-                <span :style="{ color: '#7EE2A8' }">▲{{ weekScore.progress }}</span>
+                <span :style="{ color: ROYAL_CLARO }">▲{{ weekScore.progress }}</span>
                 <span class="opacity-70 mx-1">▬{{ weekScore.tie }}</span>
-                <span :style="{ color: '#FF9C9C' }">▼{{ weekScore.regress }}</span>
+                <span :style="{ color: LARANJA_CLARO }">▼{{ weekScore.regress }}</span>
+              </p>
+            </div>
+            <button
+              v-if="upcomingSession"
+              class="h-12 px-5 rounded-xl text-sm font-bold text-white shadow-lg w-full sm:w-auto"
+              :style="{ background: GRAD_LARANJA }"
+              @click="goStart(upcomingSession.key)"
+            >
+              ▶ Treino {{ upcomingSession.key }}
+              {{ todaysSession && !workoutDoneToday ? 'de hoje' : workoutDoneToday ? '· próximo' : '' }}
+              <span class="block text-[10px] font-normal opacity-85">abre com as metas prontas</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 2. ATUAL → ALVO: onde estou e onde quero chegar -->
+        <div class="hub-block p-4 mb-4">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">🎯 Onde estou → onde quero chegar</h2>
+            <button class="hub-chip" @click="editingTargets ? (editingTargets = false) : openTargets()">
+              {{ editingTargets ? '✕ fechar' : '✎ alvos' }}
+            </button>
+          </div>
+          <div v-if="editingTargets" class="rounded-xl border border-dashed border-n-weak p-3 mb-3">
+            <p class="text-[11px] text-n-slate-10 mb-2">Role até o valor que você quer chegar em cada medida (vazio = sem alvo).</p>
+            <div class="grid gap-3 mb-3" style="grid-template-columns: repeat(auto-fill, minmax(7.2rem, 1fr))">
+              <div v-for="d in TARGET_DEFS" :key="d.key" class="flex flex-col gap-1">
+                <span class="text-[10px] font-semibold text-n-slate-11 text-center leading-tight" style="min-height: 2.2em; display: flex; align-items: flex-end; justify-content: center">
+                  {{ d.label }}&nbsp;<span class="opacity-60">{{ d.unit }}</span>
+                </span>
+                <WheelInput v-model="targetsDraft[d.key]" :step="0.5" :max="d.max" decimal :placeholder="d.unit" style="width: 100%" />
+              </div>
+            </div>
+            <button class="h-10 px-5 rounded-xl text-xs font-bold text-white w-full sm:w-auto" :style="{ background: GRAD_LARANJA }" @click="saveTargets">
+              ✓ Salvar alvos
+            </button>
+          </div>
+          <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))">
+            <div
+              v-for="r in goalRows"
+              :key="r.key"
+              class="rounded-xl px-3 py-2"
+              :style="{
+                background: r.down ? 'rgba(255,138,0,0.08)' : 'rgba(65,105,225,0.08)',
+                border: `1px solid ${r.down ? 'rgba(255,138,0,0.3)' : 'rgba(65,105,225,0.3)'}`,
+              }"
+            >
+              <p class="text-[10px] text-n-slate-10">{{ r.label }}</p>
+              <p class="text-base font-extrabold leading-tight text-n-slate-12">
+                {{ r.now === null ? '—' : fmt1(r.now) }}
+                <span v-if="r.target" class="text-xs font-semibold" :style="{ color: r.down ? LARANJA : ROYAL }">→ {{ fmt1(r.target) }}</span>
+                <span class="text-[9px] font-medium text-n-slate-10">&nbsp;{{ r.unit }}</span>
+              </p>
+              <div v-if="r.pct !== null" class="mt-1 h-1.5 rounded-full overflow-hidden" style="background: rgba(127, 127, 127, 0.18)">
+                <div class="h-full rounded-full" :style="{ width: `${Math.max(r.pct, 3)}%`, background: r.down ? LARANJA : ROYAL }" />
+              </div>
+              <p class="text-[10px] text-n-slate-10 mt-0.5">
+                <template v-if="r.hit">🎉 alvo batido</template>
+                <template v-else-if="r.remaining !== null">
+                  faltam <b>{{ fmt1(r.remaining) }} {{ r.unit }}</b><template v-if="r.pct !== null"> · {{ r.pct }}%</template><template v-if="r.key === 'weight' && goalEta"> · ≈ {{ goalEta.label }}</template>
+                </template>
+                <template v-else-if="r.first !== null && r.now !== null && r.first !== r.now">{{ signed(r.now - r.first) }} {{ r.unit }} desde o início</template>
+                <template v-else>defina o alvo em ✎</template>
+              </p>
+            </div>
+            <button
+              class="rounded-xl px-3 py-2 text-left"
+              :style="{ background: 'rgba(65,105,225,0.08)', border: '1px solid rgba(65,105,225,0.3)' }"
+              title="Ver a força por treino"
+              @click="scrollToId('hub-forca')"
+            >
+              <p class="text-[10px] text-n-slate-10">Força total (Σ e-1RM)</p>
+              <p class="text-base font-extrabold leading-tight" :style="{ color: ROYAL }">
+                {{ strength.n ? `${strength.now} kg` : '—' }}
+                <span v-if="strength.rel !== null" class="text-xs font-medium text-n-slate-10">· {{ String(strength.rel).replace('.', ',') }}× peso</span>
+              </p>
+              <p class="text-[10px] text-n-slate-10 mt-0.5">
+                <template v-if="strength.n && strength.delta">{{ signed(strength.delta) }} kg no ciclo ({{ signed(strength.pct) }}%)</template>
+                <template v-else>registre treinos</template>
+              </p>
+            </button>
+          </div>
+        </div>
+
+        <!-- 3. CENTÍMETROS TOTAIS × PESO -->
+        <div class="hub-block hub-orange p-4 mb-4">
+          <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
+            <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">📐 Centímetros totais × peso</h2>
+            <p v-if="cmTotalChart" class="text-[11px] text-n-slate-10">
+              <b :style="{ color: LARANJA }">{{ fmt1(cmTotalChart.last) }} cm</b> ({{ signed(cmTotalChart.last - cmTotalChart.first) }})
+              <template v-if="cmTotalChart.pesoLast !== null">
+                · <b :style="{ color: ROYAL }">{{ fmtKg(cmTotalChart.pesoLast) }}</b><template v-if="cmTotalChart.pesoFirst !== null"> ({{ signed(cmTotalChart.pesoLast - cmTotalChart.pesoFirst) }})</template>
+              </template>
+            </p>
+          </div>
+          <p class="text-[10px] text-n-slate-10 mb-2">Soma de todas as circunferências (laranja) contra o peso (azul), medição a medição.</p>
+          <div v-if="cmTotalChart" style="height: 190px">
+            <Line :data="cmTotalChart.chart" :options="dualChartOpts" />
+          </div>
+          <p v-else class="text-[11px] text-n-slate-10">Registre as medidas na aba Corpo (2 medições) pra curva aparecer.</p>
+        </div>
+
+        <!-- 4. CENTÍMETROS: onde quero perder × onde quero ganhar + áreas -->
+        <h2 id="hub-corpo" class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2" style="scroll-margin-top: 0.75rem">
+          📏 Centímetros
+          <span v-if="cmBalance.since" class="font-normal normal-case text-n-slate-10">desde {{ fmtDay(cmBalance.since) }}</span>
+        </h2>
+        <div class="hub-block p-4 mb-4">
+          <template v-if="cmBalance.rows.length">
+            <div class="grid gap-2 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
+              <div class="rounded-xl p-2.5" :style="{ background: 'rgba(255,138,0,0.10)', border: '1px solid rgba(255,138,0,0.35)' }">
+                <p class="text-[10px] text-n-slate-10">Onde quero perder</p>
+                <p class="text-lg font-extrabold leading-tight" :style="{ color: LARANJA }">{{ signed(cmBalance.lostStart) }} cm</p>
+                <p class="text-[10px] text-n-slate-10">cintura · quadril · pescoço · {{ signed(cmBalance.lostPrev) }} vs última</p>
+              </div>
+              <div class="rounded-xl p-2.5" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
+                <p class="text-[10px] text-n-slate-10">Onde quero ganhar</p>
+                <p class="text-lg font-extrabold leading-tight" :style="{ color: ROYAL }">{{ signed(cmBalance.gainStart) }} cm</p>
+                <p class="text-[10px] text-n-slate-10">peito · braços · coxas · ombros · {{ signed(cmBalance.gainPrev) }} vs última</p>
+              </div>
+              <div class="rounded-xl p-2.5 border border-n-weak">
+                <p class="text-[10px] text-n-slate-10">Saldo total</p>
+                <p class="text-lg font-extrabold leading-tight text-n-slate-12">{{ signed(cmBalance.netStart) }} cm</p>
+                <p class="text-[10px] text-n-slate-10">{{ fmt1(cmBalance.movedStart) }} cm movidos · {{ signed(cmBalance.netPrev) }} vs última</p>
+              </div>
+            </div>
+            <div class="flex gap-1.5 flex-wrap mb-4">
+              <span
+                v-for="r in cmBalance.rows"
+                :key="r.key"
+                class="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] border border-n-weak bg-n-solid-2"
+                :title="`${r.label}: ${fmt1(r.first)} → ${fmt1(r.last)} cm`"
+              >
+                <span class="text-n-slate-10">{{ r.label }}</span>
+                <b :style="{ color: r.dStart === 0 ? CINZA : r.good ? ROYAL : LARANJA_VIVO }">{{ signed(r.dStart) }}</b>
+              </span>
+            </div>
+            <p class="text-[11px] font-bold text-n-slate-11 mb-0.5">📉 Onde quero perder × onde quero ganhar</p>
+            <p class="text-[10px] text-n-slate-10 mb-2">
+              Quanto cada grupo mudou desde a 1ª medição. Laranja bom é caindo; azul bom é subindo.
+            </p>
+            <div v-if="cmTimeline" style="height: 190px" class="mb-4">
+              <Line :data="cmTimeline.chart" :options="cmChartOpts" />
+            </div>
+            <p v-else class="text-[11px] text-n-slate-10 mb-4">A curva aparece a partir da 2ª medição.</p>
+          </template>
+          <p v-else class="text-[11px] text-n-slate-10 mb-4">
+            Registre as medidas na aba Corpo (2 medições) pro balanço e as curvas aparecerem.
+          </p>
+
+          <p class="text-[11px] font-bold text-n-slate-11 mb-1.5">🧍 Áreas do corpo</p>
+          <div class="hub-scroll-row mb-3">
+            <span class="hub-seg">
+              <button
+                v-for="a in BODY_AREAS"
+                :key="a.key"
+                class="hub-seg-opt"
+                :class="{ 'is-on': areaKey === a.key }"
+                :style="areaKey === a.key ? { background: a.down ? LARANJA : ROYAL } : {}"
+                @click="areaKey = a.key"
+              >
+                {{ a.icon }} {{ a.label }}
+              </button>
+            </span>
+          </div>
+          <div v-if="areaView.lines.length" class="grid gap-2 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
+            <div v-for="l in areaView.lines" :key="l.key" class="rounded-xl border border-n-weak p-2.5">
+              <p class="text-[10px] text-n-slate-10">{{ areaView.label }}<template v-if="areaView.lines.length > 1"> · {{ l.label }}</template></p>
+              <p class="text-lg font-extrabold leading-tight text-n-slate-12">{{ fmt1(l.now) }} <span class="text-[10px] font-medium text-n-slate-10">{{ areaView.unit }}</span></p>
+              <p class="text-[10px]">
+                <b :style="{ color: l.dStart === 0 ? CINZA : l.good ? ROYAL : LARANJA_VIVO }">{{ signed(l.dStart) }} {{ areaView.unit }}</b>
+                <span class="text-n-slate-10"> desde {{ fmtDay(l.firstDate) }}</span>
+                <span v-if="l.dPrev !== null" class="text-n-slate-10"> · {{ signed(l.dPrev) }} vs última</span>
               </p>
             </div>
           </div>
-        </div>
-
-        <!-- ELOGIO: semana completa -->
-        <div v-if="weekComplete" class="hub-praise rounded-2xl px-4 py-3 mb-4 flex items-center gap-3">
-          <span class="text-2xl">🏆</span>
-          <div>
-            <p class="text-sm font-bold" :style="{ color: LARANJA_CLARO }">Semana completa!</p>
-            <p class="text-xs text-n-slate-11">{{ praise }}</p>
+          <div v-if="areaView.chart" style="height: 180px">
+            <Line :data="areaView.chart" :options="areaChartOpts" />
           </div>
+          <p v-else class="text-[11px] text-n-slate-10">Sem medições de {{ areaView.label.toLowerCase() }} ainda.</p>
         </div>
 
-        <!-- KPIs do treino -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          <DashKpi
-            label="Volume da semana"
-            :value="fmtVol(weekVolume)"
-            :sub="lastWeekVolume ? `semana passada ${fmtVol(lastWeekVolume)}` : 'Σ carga × reps'"
-            :from="ROYAL_NOITE"
-            :to="ROYAL"
-          />
-          <DashKpi
-            label="Progressões no ciclo"
-            :value="cycleProgressions"
-            sub="exercícios superados"
-            :from="LARANJA_ESCURO"
-            :to="LARANJA"
-          />
-          <DashKpi
-            label="Recordes"
-            :value="cyclePRs"
-            sub="exercícios no melhor e-1RM"
-            :from="ROYAL_PROFUNDO"
-            :to="ROYAL_CLARO"
-          />
-          <DashKpi
-            label="Aderência do ciclo"
-            :value="adherencePct === null ? '—' : `${adherencePct}%`"
-            :sub="`${consistencyTotals.done + consistencyTotals.moved} treinos feitos`"
-            :from="LARANJA_VIVO"
-            :to="LARANJA_CLARO"
-          />
-        </div>
-
-        <!-- PRÓXIMO TREINO: metas por exercício -->
-        <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
-          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">
-            🎯 Metas do Treino {{ metasSession?.key || '' }}
-            <span v-if="metasSession?.weekday" class="font-normal normal-case text-n-slate-10">· {{ metasSession.weekday }}</span>
-            <span
-              v-if="metasSession && upcomingSession && metasSession.key === upcomingSession.key"
-              class="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold normal-case"
-              :style="{ background: LARANJA, color: '#1a0e00' }"
-            >
-              da vez
-            </span>
-          </h2>
-          <span v-if="cycleSessions.length > 1" class="hub-seg">
-            <button
-              v-for="sx in cycleSessions"
-              :key="sx.key"
-              class="hub-seg-opt"
-              :class="{ 'is-on': metasSession?.key === sx.key }"
-              :style="metasSession?.key === sx.key ? { background: ROYAL } : {}"
-              :title="`Treino ${sx.key} · ${sx.weekday}`"
-              @click="metasKey = sx.key"
-            >
-              Treino {{ sx.key }}
-            </button>
-          </span>
-        </div>
-        <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
-          <p v-if="!upcomingPlan.length" class="text-[11px] text-n-slate-10">
-            Sem programa ativo — configure o Warrior na aba Treino.
-          </p>
-          <div v-for="ex in upcomingPlan" :key="ex.name" class="py-2.5 border-b border-n-weak/60 last:border-0 last:pb-0 first:pt-0">
-            <div class="flex items-center gap-2 flex-wrap mb-1">
-              <p class="text-sm font-bold text-n-slate-12">{{ ex.name }}</p>
-              <span
-                v-if="ex.tag"
-                class="px-1.5 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-n-weak text-n-slate-10"
-              >
-                {{ ex.tag }}
-              </span>
-              <span
-                v-if="ex.method"
-                class="px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
-                :style="{ background: ex.method === 'rest_pause' ? LARANJA_VIVO : ex.method === 'pyramid' ? LARANJA : ROYAL }"
-              >
-                {{ METHOD_LABELS[ex.method] || ex.method }}
-              </span>
-              <span v-if="ex.last" class="text-[11px] text-n-slate-10">
-                última {{ ex.lastDate ? fmtDay(ex.lastDate) : '' }}: {{ fmtSets(ex.last) }}
-              </span>
-            </div>
-            <div class="flex gap-1.5 flex-wrap items-center">
-              <span
-                v-for="(t, ti) in ex.targets"
-                :key="ti"
-                class="hub-target"
-                :class="{ 'is-gold': ex.hint.startsWith('🎯') }"
-              >
-                <span class="opacity-60">{{ t.label }}</span>
-                <b>{{ t.load != null ? fmtTarget(t) : t.reps }}</b>
-              </span>
-              <span
-                class="text-[11px] font-medium"
-                :style="{ color: ex.hint.startsWith('🎯') ? LARANJA : ROYAL }"
-              >
-                {{ ex.hint }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <!-- PROGRESSO DAS CARGAS: todos os exercícios do ciclo -->
+        <!-- 4. PROGRESSO DAS CARGAS: todos os exercícios do ciclo -->
         <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
           <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">🏋️ Progresso das cargas</h2>
           <span v-if="loadProgress.length > 1" class="hub-seg">
@@ -985,16 +1192,12 @@ const kcalDelta = computed(() => {
             </button>
           </span>
         </div>
-        <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
+        <div class="hub-block p-4 mb-4">
           <p class="text-[11px] text-n-slate-10 mb-3">
-            Carga máxima de cada exercício, execução a execução. <b>Δ ciclo</b> = quanto subiu
-            desde a 1ª vez neste ciclo · 🏅 = melhor força estimada (e-1RM) de todos os tempos.
-            <span class="opacity-80">Deslize pro lado pra ver os outros treinos.</span>
+            Carga de cada exercício e quanto subiu neste ciclo. Toque num exercício pra ver o detalhe; deslize pro lado pros outros treinos.
           </p>
-          <!-- carrossel: 1 slide por treino -->
           <div ref="carousel" class="hub-carousel" @scroll.passive="onCarouselScroll">
             <div v-for="(s, i) in loadProgress" :key="s.key" class="hub-slide">
-              <!-- cabeçalho grande do treino -->
               <div class="flex items-center gap-3 rounded-2xl px-4 py-3 mb-3 text-white" :style="{ background: GRAD_NOITE }">
                 <span
                   class="w-11 h-11 rounded-xl flex items-center justify-center text-2xl font-black shrink-0"
@@ -1010,77 +1213,85 @@ const kcalDelta = computed(() => {
                   </p>
                 </div>
                 <div class="flex items-center gap-1 shrink-0">
-                  <button
-                    class="hub-arrow"
-                    :disabled="i === 0"
-                    title="Treino anterior"
-                    @click="goSlide(i - 1)"
-                  >
-                    ‹
-                  </button>
+                  <button class="hub-arrow" :disabled="i === 0" title="Treino anterior" @click="goSlide(i - 1)">‹</button>
                   <span class="text-[10px] opacity-80">{{ i + 1 }}/{{ loadProgress.length }}</span>
-                  <button
-                    class="hub-arrow"
-                    :disabled="i === loadProgress.length - 1"
-                    title="Próximo treino"
-                    @click="goSlide(i + 1)"
-                  >
-                    ›
-                  </button>
+                  <button class="hub-arrow" :disabled="i === loadProgress.length - 1" title="Próximo treino" @click="goSlide(i + 1)">›</button>
                 </div>
               </div>
-              <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
-              <div
-                v-for="e in s.exercises"
-                :key="e.name"
-                class="rounded-xl border border-n-weak p-2.5 flex items-center gap-3"
+              <!-- fazer este treino agora (pedido 18/09) -->
+              <button
+                class="w-full h-11 rounded-xl text-sm font-bold text-white shadow mb-3"
+                :style="{ background: GRAD_LARANJA }"
+                @click="goStart(s.key)"
               >
-                <div class="flex-1 min-w-0">
-                  <p class="text-xs font-bold text-n-slate-12 truncate">
-                    {{ e.name }}
-                    <span v-if="e.tag" class="font-normal text-n-slate-10">· {{ e.tag }}</span>
-                    <span v-if="e.pr" title="Recorde de força estimada (e-1RM)">🏅</span>
-                  </p>
-                  <p v-if="e.last" class="text-[11px] text-n-slate-10 truncate">
-                    {{ fmtSets(e.last.sets) }}
-                    <span class="opacity-70">· {{ fmtDay(e.last.date) }}</span>
-                  </p>
-                  <p v-else class="text-[11px] text-n-slate-10">ainda não feito</p>
-                  <p v-if="e.last" class="text-[11px] flex items-center gap-2 flex-wrap mt-0.5">
-                    <span
-                      v-if="e.deltaCycle !== null"
-                      class="font-bold"
-                      :style="{ color: e.deltaCycle > 0 ? VERDE_OK : e.deltaCycle < 0 ? VERMELHO : CINZA }"
-                    >
-                      Δ ciclo {{ signed(e.deltaCycle) }} kg<template v-if="e.pctCycle !== null"> ({{ signed(e.pctCycle) }}%)</template>
-                    </span>
-                    <span v-if="e.verdict" :style="{ color: VERDICT_COLORS[e.verdict] || LARANJA }">
-                      {{ VERDICT_LABEL[e.verdict] }}
-                    </span>
-                    <span v-if="e.e1" class="text-n-slate-10">e-1RM {{ fmt1(e.e1) }}</span>
-                  </p>
-                </div>
-                <div class="shrink-0 text-right">
-                  <p class="text-lg font-extrabold leading-none" :style="{ color: e.last ? ROYAL : CINZA }">
-                    {{ e.last ? fmt1(e.last.top) : '—' }}<span class="text-[10px] font-medium text-n-slate-10"> kg</span>
-                  </p>
-                  <svg v-if="e.spark" viewBox="0 0 84 26" class="hub-spark mt-1">
-                    <polyline
-                      :points="e.spark"
-                      fill="none"
-                      :stroke="e.sparkUp ? ROYAL : LARANJA"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                  <p v-else class="text-[9px] text-n-slate-10 mt-1">{{ e.count }} {{ e.count === 1 ? 'execução' : 'execuções' }}</p>
-                </div>
+                ▶ Fazer Treino {{ s.key }}
+                <span v-if="upcomingSession && upcomingSession.key === s.key" class="text-[10px] font-normal opacity-90">· é o da vez</span>
+              </button>
+              <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
+                <button
+                  v-for="e in s.exercises"
+                  :key="e.name"
+                  class="rounded-xl border border-n-weak p-2.5 text-left transition-colors hover:bg-n-alpha-1"
+                  :class="{ 'bg-n-alpha-1': openCards.has(e.name) }"
+                  @click="toggleCard(e.name)"
+                >
+                  <div class="flex items-center gap-3">
+                    <div class="flex-1 min-w-0">
+                      <p class="text-xs font-bold text-n-slate-12 truncate">
+                        {{ e.name }}
+                        <span v-if="e.tag" class="font-normal text-n-slate-10">· {{ e.tag }}</span>
+                        <span v-if="e.pr" title="Recorde de força estimada">🏅</span>
+                      </p>
+                      <p v-if="e.last" class="text-[11px] mt-0.5">
+                        <span
+                          v-if="e.deltaCycle !== null"
+                          class="font-bold"
+                          :style="{ color: e.deltaCycle > 0 ? ROYAL : e.deltaCycle < 0 ? LARANJA_VIVO : CINZA }"
+                        >
+                          {{ signed(e.deltaCycle) }} kg no ciclo<template v-if="e.pctCycle !== null"> ({{ signed(e.pctCycle) }}%)</template>
+                        </span>
+                        <span v-else class="text-n-slate-10">1ª execução do ciclo</span>
+                      </p>
+                      <p v-else class="text-[11px] text-n-slate-10">ainda não feito</p>
+                    </div>
+                    <div class="shrink-0 text-right">
+                      <p class="text-lg font-extrabold leading-none" :style="{ color: e.last ? ROYAL : CINZA }">
+                        {{ e.last ? fmt1(e.last.common) : '—' }}<span class="text-[10px] font-medium text-n-slate-10"> kg</span>
+                      </p>
+                      <svg v-if="e.spark" viewBox="0 0 84 26" class="hub-spark mt-1">
+                        <polyline
+                          :points="e.spark"
+                          fill="none"
+                          :stroke="e.sparkUp ? ROYAL : LARANJA"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                      <p v-else class="text-[9px] text-n-slate-10 mt-1">{{ e.count }} {{ e.count === 1 ? 'execução' : 'execuções' }}</p>
+                    </div>
+                  </div>
+                  <!-- detalhe (toque) -->
+                  <div v-if="openCards.has(e.name) && e.last" class="hub-card-detail mt-2 pt-2 border-t border-n-weak/60 text-n-slate-10 flex flex-col gap-0.5">
+                    <p>Última {{ fmtDay(e.last.date) }}: {{ fmtSets(e.last.sets) }}</p>
+                    <p>
+                      <span v-if="e.verdict" :style="{ color: VERDICT_COLORS[e.verdict] || LARANJA }">{{ VERDICT_LABEL[e.verdict] }}</span>
+                      <span v-if="e.deltaPrev !== null"> · {{ signed(e.deltaPrev) }} kg vs anterior</span>
+                      <span v-if="e.e1"> · força estimada {{ fmt1(e.e1) }} kg</span>
+                      <span> · {{ e.count }} {{ e.count === 1 ? 'execução' : 'execuções' }}</span>
+                    </p>
+                    <p v-if="e.mixed" :style="{ color: ROYAL }">
+                      ⚖ peso comum ·
+                      <template v-for="(t, ti) in e.perTag" :key="t.tag">
+                        <template v-if="ti > 0"> ≈ </template>{{ t.tag }} {{ fmt1(t.top) }}<template v-if="t.factor !== 1"> (×{{ String(t.factor).replace('.', ',') }})</template>
+                      </template>
+                    </p>
+                    <p v-if="e.last.common !== e.last.top">registrado em {{ e.last.tag || 'outra variação' }}: {{ fmt1(e.last.top) }} kg</p>
+                  </div>
+                </button>
               </div>
-            </div>
             </div>
           </div>
-          <!-- bolinhas do carrossel -->
           <div v-if="loadProgress.length > 1" class="flex justify-center gap-1.5 mt-3">
             <button
               v-for="(s, i) in loadProgress"
@@ -1093,319 +1304,146 @@ const kcalDelta = computed(() => {
           </div>
         </div>
 
-        <!-- PROGRESSO DE FORÇA: carrossel Geral | A | B | C -->
-        <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
-          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">📈 Progresso de força</h2>
-          <span v-if="strengthSlides.length > 1" class="hub-seg">
+        <!-- 6. FORÇA: geral e por treino -->
+        <div id="hub-forca" class="flex items-center justify-between gap-2 flex-wrap mb-2" style="scroll-margin-top: 0.75rem">
+          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">📈 Força nos treinos</h2>
+          <span v-if="forcaOptions.length > 1" class="hub-seg">
             <button
-              v-for="(sl, i) in strengthSlides"
-              :key="sl.key"
+              v-for="o in forcaOptions"
+              :key="o.key"
               class="hub-seg-opt"
-              :class="{ 'is-on': forceIdx === i }"
-              :style="forceIdx === i ? { background: sl.key === 'geral' ? LARANJA : ROYAL } : {}"
-              @click="goForce(i)"
+              :class="{ 'is-on': forcaKey === o.key }"
+              :style="forcaKey === o.key ? { background: o.key === 'geral' ? LARANJA : ROYAL } : {}"
+              @click="forcaKey = o.key"
             >
-              {{ sl.key === 'geral' ? 'Geral' : `Treino ${sl.key}` }}
+              {{ o.label }}
             </button>
           </span>
         </div>
-        <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
-          <p class="text-[11px] text-n-slate-10 mb-3">
-            <b>Força total</b> = soma da força estimada (e-1RM) dos exercícios, um número só.
-            <b>Força relativa</b> = essa força dividida pelo seu peso: no cutting, é o que prova que
-            você emagreceu ficando mais forte. <span class="opacity-80">Deslize pro lado: geral e cada treino.</span>
-          </p>
-          <div ref="forceCarousel" class="hub-carousel" @scroll.passive="onForceScroll">
-            <div v-for="(sl, i) in strengthSlides" :key="sl.key" class="hub-slide">
-              <div
-                class="flex items-center gap-3 rounded-2xl px-4 py-3 mb-3 text-white"
-                :style="{ background: sl.key === 'geral' ? GRAD_LARANJA : GRAD_NOITE }"
-              >
-                <span
-                  class="w-11 h-11 rounded-xl flex items-center justify-center text-2xl font-black shrink-0"
-                  :style="sl.key === 'geral' ? { background: '#fff', color: LARANJA_VIVO } : { background: LARANJA, color: '#1a0e00' }"
-                >
-                  {{ sl.letter }}
-                </span>
-                <div class="flex-1 min-w-0">
-                  <p class="text-base font-extrabold leading-tight">{{ sl.title }}</p>
-                  <p class="text-[11px] opacity-85">{{ sl.sub }}</p>
-                </div>
-                <div class="flex items-center gap-1 shrink-0">
-                  <button class="hub-arrow" :disabled="i === 0" title="Anterior" @click="goForce(i - 1)">‹</button>
-                  <span class="text-[10px] opacity-80">{{ i + 1 }}/{{ strengthSlides.length }}</span>
-                  <button class="hub-arrow" :disabled="i === strengthSlides.length - 1" title="Próximo" @click="goForce(i + 1)">›</button>
-                </div>
-              </div>
-              <div class="grid gap-3 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
-                <div class="rounded-2xl p-3 text-white" :style="{ background: GRAD_ROYAL }">
-                  <p class="text-[11px] opacity-90">Força total (Σ e-1RM)</p>
-                  <p class="text-xl font-bold">{{ sl.m.n ? `${sl.m.now} kg` : '—' }}</p>
-                  <p class="text-[10px] opacity-90">
-                    <template v-if="sl.m.n && sl.m.delta">
-                      {{ signed(sl.m.delta) }} kg no ciclo<template v-if="sl.m.pct !== null"> ({{ signed(sl.m.pct) }}%)</template>
-                    </template>
-                    <template v-else-if="sl.m.n">partiu de {{ sl.m.start }} kg</template>
-                    <template v-else>registre treinos</template>
-                  </p>
-                </div>
-                <div class="rounded-2xl p-3 text-white" :style="{ background: GRAD_LARANJA }">
-                  <p class="text-[11px] opacity-90">Força relativa</p>
-                  <p class="text-xl font-bold">{{ sl.m.rel !== null ? `${String(sl.m.rel).replace('.', ',')}×` : '—' }}</p>
-                  <p class="text-[10px] opacity-90">
-                    <template v-if="sl.m.relDelta !== null && sl.m.relDelta !== 0">
-                      {{ signed(sl.m.relDelta) }} × peso desde o início do ciclo
-                    </template>
-                    <template v-else>força por kg de peso corporal</template>
-                  </p>
-                </div>
-                <div class="rounded-2xl p-3 border border-n-weak bg-n-solid-1">
-                  <p class="text-[11px] text-n-slate-10">Taxa de progressão</p>
-                  <p class="text-xl font-bold" :style="{ color: sl.m.rate === null ? undefined : sl.m.rate >= 50 ? VERDE_OK : LARANJA }">
-                    {{ sl.m.rate === null ? '—' : `${sl.m.rate}%` }}
-                  </p>
-                  <p class="text-[10px] text-n-slate-10">
-                    <template v-if="sl.m.comparable">
-                      ▲{{ sl.m.verdicts.progress }} ▬{{ sl.m.verdicts.tie }} ▼{{ sl.m.verdicts.regress }} no ciclo
-                    </template>
-                    <template v-else>exercícios superados ÷ comparáveis</template>
-                  </p>
-                </div>
-                <div class="rounded-2xl p-3 border border-n-weak bg-n-solid-1">
-                  <p class="text-[11px] text-n-slate-10">Tonelagem do ciclo</p>
-                  <p class="text-xl font-bold" :style="{ color: ROYAL }">{{ fmtVol(sl.m.tonnage) }}</p>
-                  <p class="text-[10px] text-n-slate-10">≈ {{ fmtVol(sl.m.tonnagePerWeek) }} por semana</p>
-                </div>
-              </div>
-              <div v-if="sl.m.chart" style="height: 170px">
-                <Line :data="sl.m.chart" :options="bodyChartOpts" />
-              </div>
-              <p v-else class="text-[11px] text-n-slate-10">
-                A curva da força aparece a partir da 2ª semana com treinos registrados.
+        <div class="hub-block p-4 mb-4">
+          <div class="grid gap-2 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
+            <div class="rounded-xl p-2.5" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
+              <p class="text-[10px] text-n-slate-10">Força total (Σ e-1RM)</p>
+              <p class="text-lg font-extrabold leading-tight" :style="{ color: ROYAL }">{{ forcaView.m.n ? `${forcaView.m.now} kg` : '—' }}</p>
+              <p class="text-[10px] text-n-slate-10">
+                <template v-if="forcaView.m.n && forcaView.m.delta">{{ signed(forcaView.m.delta) }} kg no ciclo ({{ signed(forcaView.m.pct) }}%)</template>
+                <template v-else-if="forcaView.m.n">partiu de {{ forcaView.m.start }} kg</template>
+                <template v-else>registre treinos</template>
+              </p>
+            </div>
+            <div class="rounded-xl p-2.5" :style="{ background: 'rgba(255,138,0,0.10)', border: '1px solid rgba(255,138,0,0.35)' }">
+              <p class="text-[10px] text-n-slate-10">Força relativa</p>
+              <p class="text-lg font-extrabold leading-tight" :style="{ color: LARANJA }">{{ forcaView.m.rel !== null ? `${String(forcaView.m.rel).replace('.', ',')}×` : '—' }}</p>
+              <p class="text-[10px] text-n-slate-10">
+                <template v-if="forcaView.m.relDelta !== null && forcaView.m.relDelta !== 0">{{ signed(forcaView.m.relDelta) }} × peso no ciclo</template>
+                <template v-else>força por kg de corpo</template>
+              </p>
+            </div>
+            <div class="rounded-xl p-2.5 border border-n-weak">
+              <p class="text-[10px] text-n-slate-10">Exercícios subindo</p>
+              <p class="text-lg font-extrabold leading-tight text-n-slate-12">{{ forcaView.m.rate === null ? '—' : `${forcaView.m.rate}%` }}</p>
+              <p class="text-[10px] text-n-slate-10">
+                <template v-if="forcaView.m.comparable">▲{{ forcaView.m.verdicts.progress }} ▬{{ forcaView.m.verdicts.tie }} ▼{{ forcaView.m.verdicts.regress }} no ciclo</template>
+                <template v-else>superados ÷ comparáveis</template>
               </p>
             </div>
           </div>
-          <div v-if="strengthSlides.length > 1" class="flex justify-center gap-1.5 mt-3">
-            <button
-              v-for="(sl, i) in strengthSlides"
-              :key="sl.key"
-              class="w-2 h-2 rounded-full transition-all"
-              :style="{ background: forceIdx === i ? (sl.key === 'geral' ? LARANJA : ROYAL) : 'rgba(127,127,127,0.3)', transform: forceIdx === i ? 'scale(1.35)' : 'none' }"
-              :title="sl.title"
-              @click="goForce(i)"
-            />
+          <div v-if="forcaView.chart" style="height: 180px">
+            <Line :data="forcaView.chart" :options="dualChartOpts" />
           </div>
+          <p v-else class="text-[11px] text-n-slate-10">A curva da força aparece a partir da 2ª semana com treinos registrados.</p>
         </div>
 
-        <!-- CONSISTÊNCIA: caixinhas do ciclo -->
-        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">📦 Consistência do ciclo</h2>
-        <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
-          <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
-            <p class="text-[11px] text-n-slate-10">Cada coluna é uma semana; cada caixinha, um treino planejado.</p>
-            <p class="text-[11px] font-medium">
-              <span :style="{ color: VERDE_OK }">■ no dia ({{ consistencyTotals.done }})</span>
-              <span class="mx-1.5" :style="{ color: LARANJA }">■ reagendado ({{ consistencyTotals.moved }})</span>
-              <span :style="{ color: VERMELHO }">■ não foi ({{ consistencyTotals.missed }})</span>
-            </p>
-          </div>
-          <div class="overflow-x-auto pb-1">
-            <div class="flex gap-1" style="min-width: max-content">
-              <div v-for="w in consistency" :key="w.n" class="flex flex-col items-center gap-1">
-                <div
-                  v-for="c in w.cells"
-                  :key="c.key"
-                  class="rounded-[4px]"
-                  :style="{
-                    width: '14px',
-                    height: '14px',
-                    background: CELL_COLORS[c.state],
-                    outline: w.current ? `1.5px solid ${ROYAL}` : 'none',
-                  }"
-                  :title="`S${w.n} · Treino ${c.key} · ${fmtDay(c.plannedISO)} — ${
-                    { done: 'feito no dia', moved: 'reagendado (feito noutro dia)', missed: 'não foi', future: 'a fazer' }[c.state]
-                  }`"
-                />
-                <span class="text-[8px]" :class="w.current ? 'font-bold' : 'text-n-slate-10'" :style="w.current ? { color: ROYAL } : {}">
-                  {{ w.n }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- CORPO: circunferência abdominal em destaque + peso -->
-        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">📏 Corpo — indicadores</h2>
-        <div class="rounded-2xl border border-n-weak bg-n-solid-1 p-4 mb-5">
-          <div class="grid gap-3 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr))">
-            <!-- destaque: cintura no umbigo -->
-            <div class="rounded-2xl p-3 text-white sm:col-span-2 flex items-center gap-3" :style="{ background: GRAD_LARANJA }">
-              <div class="flex-1 min-w-0">
-                <p class="text-[11px] opacity-90">Circunferência abdominal (umbigo)</p>
-                <p class="text-2xl font-extrabold leading-tight">
-                  {{ waistNow ? fmtCm(waistNow.v) : '—' }}
-                </p>
-                <p class="text-[11px] opacity-90">
-                  <template v-if="waistPrev">
-                    {{ signed(waistNow.v - waistPrev.v) }} cm vs anterior
-                  </template>
-                  <template v-if="waistFirst && waistFirst !== waistNow">
-                    · {{ signed(waistNow.v - waistFirst.v) }} cm desde o início ({{ fmtDay(waistFirst.date) }})
-                  </template>
-                  <template v-if="waistSlope30 !== null"> · ritmo {{ signed(waistSlope30) }} cm/mês</template>
-                  <template v-if="!waistPrev && !waistNow">registre na aba Corpo — é o indicador do momento</template>
-                </p>
-              </div>
-              <svg v-if="waistSpark" viewBox="0 0 84 26" class="hub-spark shrink-0" style="width: 84px">
-                <polyline :points="waistSpark" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </div>
-            <div class="rounded-2xl p-3 text-white" :style="{ background: GRAD_ROYAL }">
-              <p class="text-[11px] opacity-90">Peso atual</p>
-              <p class="text-xl font-bold">{{ currentWeight ? fmtKg(currentWeight) : '—' }}</p>
-              <p class="text-[10px] opacity-85">
-                <template v-if="weighins.length > 1">{{ signed(currentWeight - firstWeight) }} kg desde o início</template>
-                <template v-else-if="!weightThisWeek">pesagem da semana pendente</template>
-                <template v-else>pesagem da semana ✓</template>
-              </p>
-            </div>
-            <div class="rounded-2xl p-3" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
-              <p class="text-[11px] text-n-slate-10">Peso-alvo</p>
-              <template v-if="!editingGoal">
-                <p class="text-xl font-bold" :style="{ color: ROYAL }">{{ weightGoal > 0 ? fmtKg(weightGoal) : '—' }}</p>
-                <p class="text-[10px] text-n-slate-10">
-                  <template v-if="gapToGoal !== null && gapToGoal <= 0">🎉 alvo batido!</template>
-                  <template v-else-if="gapToGoal !== null">faltam {{ fmtKg(gapToGoal) }}</template>
-                  <button class="underline ml-1" @click="editingGoal = true; goalDraft = weightGoal || ''">
-                    {{ weightGoal > 0 ? 'ajustar' : 'definir' }}
-                  </button>
-                </p>
-              </template>
-              <div v-else class="flex items-center gap-1.5">
-                <WheelInput v-model="goalDraft" :step="0.5" :max="200" decimal placeholder="kg" style="width: 5rem" />
-                <button class="h-8 px-2 rounded-lg text-[11px] font-bold text-white" :style="{ background: ROYAL }" @click="saveGoal">✓</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="grid gap-3 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
-            <DashKpi
-              label="Ritmo (30d)"
-              :value="slope30 === null ? '—' : `${slope30 > 0 ? '+' : '−'}${fmt1(Math.abs(slope30))} kg/mês`"
-              hint="tendência das pesagens"
-            />
-            <DashKpi label="Peso em 30 dias" :value="projection30 === null ? '—' : `~${fmtKg(projection30)}`" hint="se o ritmo continuar" />
-            <DashKpi
-              label="Chegada ao alvo"
-              :value="gapToGoal !== null && gapToGoal <= 0 ? '🎉 batido!' : goalEta ? `≈ ${goalEta.label}` : '—'"
-              :hint="goalEta ? `~${goalEta.days} dias no ritmo atual` : 'precisa de ritmo de queda'"
-              :value-color="LARANJA"
-            />
-          </div>
-
-          <div v-if="measures.length" class="flex gap-1.5 flex-wrap mb-3">
-            <span
-              v-for="m in measures"
-              :key="m.key"
-              class="inline-flex items-center gap-1 h-7 px-2 rounded-full text-[11px] border border-n-weak bg-n-solid-2"
-            >
-              <span class="text-n-slate-10">{{ m.label }}</span>
-              <b class="text-n-slate-12">{{ fmt1(m.value) }}</b>
+        <!-- 6. METAS DO PRÓXIMO TREINO (dobrável) -->
+        <div class="hub-block mb-4">
+          <button class="w-full flex items-center justify-between gap-2 px-4 py-3 text-left" @click="toggleMetas">
+            <span class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">
+              🎯 Metas do Treino {{ metasSession?.key || '' }}
+              <span v-if="metasSession?.weekday" class="font-normal normal-case text-n-slate-10">· {{ metasSession.weekday }} · {{ upcomingPlan.length }} exercícios</span>
               <span
-                v-if="m.delta !== null && m.delta !== 0"
-                class="font-bold"
-                :style="{ color: (m.down ? m.delta < 0 : m.delta > 0) ? VERDE_OK : LARANJA }"
+                v-if="metasSession && upcomingSession && metasSession.key === upcomingSession.key"
+                class="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold normal-case"
+                :style="{ background: LARANJA, color: '#1a0e00' }"
               >
-                {{ m.delta > 0 ? '▲' : '▼' }}{{ fmt1(Math.abs(m.delta)) }}
+                da vez
               </span>
             </span>
-          </div>
-          <!-- balanço de centímetros (rodada 17) -->
-          <div v-if="cmBalance.rows.length" class="rounded-xl border border-n-weak p-3 mb-3">
-            <p class="text-[11px] font-bold text-n-slate-11 mb-2">
-              📐 Balanço de centímetros
-              <span class="font-normal text-n-slate-10">desde {{ cmBalance.since ? fmtDay(cmBalance.since) : 'o início' }}</span>
-            </p>
-            <div class="grid gap-2 mb-2" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
-              <div class="rounded-xl p-2.5" :style="{ background: 'rgba(255,138,0,0.10)', border: '1px solid rgba(255,138,0,0.35)' }">
-                <p class="text-[10px] text-n-slate-10">Onde quer perder</p>
-                <p class="text-lg font-extrabold leading-tight" :style="{ color: cmBalance.lostStart <= 0 ? LARANJA : VERMELHO }">
-                  {{ signed(cmBalance.lostStart) }} cm
-                </p>
-                <p class="text-[10px] text-n-slate-10">cintura · quadril · pescoço · {{ signed(cmBalance.lostPrev) }} vs última</p>
-              </div>
-              <div class="rounded-xl p-2.5" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
-                <p class="text-[10px] text-n-slate-10">Onde quer ganhar</p>
-                <p class="text-lg font-extrabold leading-tight" :style="{ color: cmBalance.gainStart >= 0 ? ROYAL : LARANJA }">
-                  {{ signed(cmBalance.gainStart) }} cm
-                </p>
-                <p class="text-[10px] text-n-slate-10">peito · braços · coxas · ombros · {{ signed(cmBalance.gainPrev) }} vs última</p>
-              </div>
-              <div class="rounded-xl p-2.5 border border-n-weak">
-                <p class="text-[10px] text-n-slate-10">Saldo total</p>
-                <p class="text-lg font-extrabold leading-tight text-n-slate-12">{{ signed(cmBalance.netStart) }} cm</p>
-                <p class="text-[10px] text-n-slate-10">{{ fmt1(cmBalance.movedStart) }} cm movidos no total · {{ signed(cmBalance.netPrev) }} vs última</p>
-              </div>
-            </div>
-            <div class="flex gap-1.5 flex-wrap">
-              <span
-                v-for="r in cmBalance.rows"
-                :key="r.key"
-                class="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] border border-n-weak bg-n-solid-2"
-                :title="`${r.label}: ${fmt1(r.first)} → ${fmt1(r.last)} cm`"
-              >
-                <span class="text-n-slate-10">{{ r.label }}</span>
-                <b :style="{ color: r.dStart === 0 ? CINZA : r.good ? VERDE_OK : LARANJA }">{{ signed(r.dStart) }}</b>
+            <span class="text-n-slate-10 text-sm">{{ metasOpen ? '▾' : '▸' }}</span>
+          </button>
+          <div v-if="metasOpen" class="px-4 pb-4">
+            <div v-if="cycleSessions.length > 1" class="mb-3">
+              <span class="hub-seg">
+                <button
+                  v-for="sx in cycleSessions"
+                  :key="sx.key"
+                  class="hub-seg-opt"
+                  :class="{ 'is-on': metasSession?.key === sx.key }"
+                  :style="metasSession?.key === sx.key ? { background: ROYAL } : {}"
+                  :title="`Treino ${sx.key} · ${sx.weekday}`"
+                  @click="metasKey = sx.key"
+                >
+                  Treino {{ sx.key }}
+                </button>
               </span>
             </div>
+            <p v-if="!upcomingPlan.length" class="text-[11px] text-n-slate-10">
+              Sem programa ativo — configure o Warrior na aba Treino.
+            </p>
+            <div v-for="ex in upcomingPlan" :key="ex.name" class="py-2.5 border-b border-n-weak/60 last:border-0 last:pb-0 first:pt-0">
+              <div class="flex items-center gap-2 flex-wrap mb-1">
+                <p class="text-sm font-bold text-n-slate-12">{{ ex.name }}</p>
+                <span v-if="ex.tag" class="px-1.5 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-n-weak text-n-slate-10">
+                  {{ ex.tag }}
+                </span>
+                <span
+                  v-if="ex.method"
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
+                  :style="{ background: ex.method === 'rest_pause' ? LARANJA_VIVO : ex.method === 'pyramid' ? LARANJA : ROYAL }"
+                >
+                  {{ METHOD_LABELS[ex.method] || ex.method }}
+                </span>
+                <span v-if="ex.last" class="text-[11px] text-n-slate-10">
+                  última {{ ex.lastDate ? fmtDay(ex.lastDate) : '' }}: {{ fmtSets(ex.last) }}
+                </span>
+              </div>
+              <div class="flex gap-1.5 flex-wrap items-center">
+                <span v-for="(t, ti) in ex.targets" :key="ti" class="hub-target" :class="{ 'is-gold': ex.hint.startsWith('🎯') }">
+                  <span class="opacity-60">{{ t.label }}</span>
+                  <b>{{ t.load != null ? fmtTarget(t) : t.reps }}</b>
+                </span>
+                <span class="text-[11px] font-medium" :style="{ color: ex.hint.startsWith('🎯') ? LARANJA : ROYAL }">
+                  {{ ex.hint }}
+                </span>
+              </div>
+            </div>
+            <button
+              v-if="metasSession"
+              class="mt-3 h-10 px-4 rounded-xl text-xs font-bold text-white"
+              :style="{ background: GRAD_LARANJA }"
+              @click="goStart(metasSession.key)"
+            >
+              ▶ Começar Treino {{ metasSession.key }}
+            </button>
           </div>
-          <div v-if="weighins.length > 1 || waists.length > 1" style="height: 170px">
-            <Line :data="bodyChart" :options="bodyChartOpts" />
-          </div>
-          <p v-else class="text-[11px] text-n-slate-10">
-            Registre peso e cintura na aba Corpo pra curva aparecer aqui.
-          </p>
         </div>
-
-        <!-- DIETA: só referência -->
-        <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2">🍽 Dieta (referência)</h2>
-        <button
-          class="w-full rounded-2xl border border-n-weak bg-n-solid-1 p-3 mb-5 text-left hover:bg-n-alpha-1 flex items-center gap-3 flex-wrap"
-          @click="go('hub_health_dieta')"
-        >
-          <span class="text-[11px] text-n-slate-11">
-            Meta <b :style="{ color: LARANJA }">{{ dietTargets.kcal || '—' }} kcal</b>
-            · proteína <b :style="{ color: ROYAL }">{{ dietTargets.protein ? `${dietTargets.protein} g` : '—' }}</b>
-          </span>
-          <span class="text-[11px] text-n-slate-10">
-            hoje {{ mealsDoneToday }} de {{ mealsTotal || '—' }} refeições
-          </span>
-          <span v-if="kcalDelta !== null" class="text-[11px] text-n-slate-10">
-            · média da semana {{ weekKcalAvg }} kcal
-            <b :style="{ color: kcalDelta <= 0 ? VERDE_OK : VERMELHO }">({{ kcalDelta > 0 ? '+' : '' }}{{ kcalDelta }})</b>
-          </span>
-          <span class="ml-auto text-[11px]" :style="{ color: ROYAL_CLARO }">abrir →</span>
-        </button>
 
         <div class="flex justify-end mb-8">
           <button class="text-[11px] underline" :style="{ color: ROYAL_CLARO }" @click="go('hub_health_dash')">
-            ver o Dashboard completo →
+            ver Análises completas →
           </button>
         </div>
       </template>
     </div>
+    <HubTabBar :boxing-on="boxingOn" />
   </div>
 </template>
 
 <style scoped>
-/* elogio da semana completa — vidro quente laranja */
-.hub-praise {
-  background: linear-gradient(135deg, rgba(255, 138, 0, 0.14), rgba(255, 107, 26, 0.05) 55%, rgba(255, 255, 255, 0.03));
-  -webkit-backdrop-filter: blur(12px) saturate(1.4);
-  backdrop-filter: blur(12px) saturate(1.4);
-  border: 1px solid rgba(255, 138, 0, 0.3);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 8px 22px -14px rgba(255, 138, 0, 0.55);
+/* detalhe do card de carga (rodada 22): o <p> global do app impõe 14px */
+.hub-card-detail,
+.hub-card-detail p {
+  font-size: 11px;
+  line-height: 1.35;
 }
 /* alvo por série do próximo treino (mesma cara do vidro da sessão) */
 .hub-target {
@@ -1446,12 +1484,24 @@ const kcalDelta = computed(() => {
   font-weight: 600;
   color: inherit;
   opacity: 0.65;
+  white-space: nowrap;
   transition: all 0.15s ease;
 }
 .hub-seg-opt.is-on {
   color: #fff;
   opacity: 1;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+/* fileira que rola pro lado no celular (áreas do corpo) */
+.hub-scroll-row {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -0.25rem;
+  padding: 0 0.25rem;
+}
+.hub-scroll-row::-webkit-scrollbar {
+  display: none;
 }
 /* carrossel dos treinos: desliza com o dedo, ímã em cada slide */
 .hub-carousel {
