@@ -12,7 +12,13 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
-## RODADA 23 — 18/09 ✅ ATUAL→ALVO + CM×PESO + ONDE QUERO + FORÇA A/B/C + VIDRO + ANÁLISES REORDENADA (working tree)
+## SUBIDA 18/09 — RODADAS 20–23: "subir tudo" → commit 1681fc7998 na
+feat/hub-saude → push → docker-build (run 35406047125) VERDE →
+**etiqueta `1681fc7`** (sem migration). Falta ele colar a etiqueta na
+Imagem do web + sidekiq no EasyPanel e Implantar os dois. Depois: ligar
+o Boxe em Configurações → HUB e definir os alvos em ✎ alvos no painel.
+
+## RODADA 23 — 18/09 ✅ ATUAL→ALVO + CM×PESO + ONDE QUERO + FORÇA A/B/C + VIDRO + ANÁLISES REORDENADA (subida na 1681fc7)
 Pedido dele 18/09 (prints do painel e do treino), 7 pontos:
 1. "meus dados atuais e desejados neste primeiro painel" → bloco 🎯 ONDE
    ESTOU → ONDE QUERO CHEGAR logo após o hero: peso + 8 medidas (braço e
@@ -51,7 +57,7 @@ Pedido dele 18/09 (prints do painel e do treino), 7 pontos:
 - Sem migration. Alvos de teste semeados no profile local (78 kg / 88 cm
   / braço 43 / peito 106) — banco local é simulação.
 
-## RODADA 22 — 18/09 ✅ PAINEL MAIS CLARO (4 cortes aprovados por ele) (working tree)
+## RODADA 22 — 18/09 ✅ PAINEL MAIS CLARO (4 cortes aprovados por ele) (subida na 1681fc7)
 Ele perguntou "o painel já está claro o suficiente?"; propus 4 cortes e
 ele aprovou ("vamos neste sentido"). Só HealthHome.vue.
 
@@ -76,7 +82,7 @@ Painel final: hero → 3 tiles → Centímetros (balanço + chips + 1 gráfico
 + áreas) → Cargas (cards leves, botão Fazer Treino) → Metas dobráveis →
 link Análises.
 
-## RODADA 21 — 18/09 ✅ "FAZER TREINO" NO CARROSSEL + PESO COMUM ENTRE VARIAÇÕES (working tree)
+## RODADA 21 — 18/09 ✅ "FAZER TREINO" NO CARROSSEL + PESO COMUM ENTRE VARIAÇÕES (subida na 1681fc7)
 Pedido dele 18/09 (print do carrossel Treino A): botão "fazer treino" ali;
 e quando marca máquina num exercício que também faz com halteres,
 "chegar num peso comum" (30 kg por halter ≈ 70 kg na máquina, como na
@@ -104,7 +110,7 @@ barra).
   "barra | halteres ×2 | máquina ×0,85" (parseVariants extrai o ×n pra
   `equiv`; ajuda no texto).
 
-## RODADA 20 — 18/09 ✅ NAVEGAÇÃO "APP DA APPLE" + PAINEL ENXUTO + CM POR ÁREA + EXTRA PUXA + BOXE PROGRAMADO (working tree)
+## RODADA 20 — 18/09 ✅ NAVEGAÇÃO "APP DA APPLE" + PAINEL ENXUTO + CM POR ÁREA + EXTRA PUXA + BOXE PROGRAMADO (subida na 1681fc7)
 Pedido dele 18/09 (prints do painel e do balanço de cm): (1) acesso e
 navegação fáceis "como um app feito pela Apple", 1–2 cliques pra chegar
 em qualquer lugar; (2) enxugar o Meu Painel — as coisas mais importantes
