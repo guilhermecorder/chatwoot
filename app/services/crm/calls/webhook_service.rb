@@ -3,7 +3,7 @@
 # conversa, avisa o time pelo cable e fecha a ligação no terminate. A
 # simulação local (rake cevico:calls_simulate) passa por AQUI também, com a
 # ligação marcada simulated — mesmo código do fluxo real, sem Graph/WebRTC.
-class Crm::Calls::WebhookService
+class Crm::Calls::WebhookService # rubocop:disable Metrics/ClassLength
   END_REASONS = { 'completed' => 'completed', 'missed' => 'not_answered', 'rejected' => 'rejected',
                   'failed' => 'failed', 'canceled' => 'canceled' }.freeze
 
@@ -82,12 +82,15 @@ class Crm::Calls::WebhookService
     call.update!(status: :rejected, end_reason: 'outside_hours', ended_at: Time.current, sdp_offer: nil)
     Crm::Calls::CardMessageBuilder.new(call).perform
     reopen_conversation(call)
+    Crm::Calls::RadarAlert.push(call)
     broadcast('cevico_call.missed', call: call.to_payload, reason: 'outside_hours')
   end
 
   def broadcast_ringing(call)
     broadcast('cevico_call.ringing', call: call.to_payload(include_sdp: true),
-                                     ring_user_ids: settings.resolved_ring_user_ids(inbox))
+                                     ring_user_ids: settings.resolved_ring_user_ids(inbox),
+                                     ring_first_user_ids: settings.resolved_ring_first_user_ids(inbox),
+                                     ring_cascade_seconds: settings.ring_cascade_seconds(inbox))
   end
 
   # ── clínica ligou e a Meta devolveu a resposta SDP ────────────────────────
@@ -112,6 +115,7 @@ class Crm::Calls::WebhookService
     Crm::Calls::CardMessageBuilder.new(call).perform
     if call.missed? && call.inbound?
       reopen_conversation(call)
+      Crm::Calls::RadarAlert.push(call)
       broadcast('cevico_call.missed', call: call.to_payload, reason: call.end_reason)
     end
     broadcast('cevico_call.ended', call: call.to_payload)

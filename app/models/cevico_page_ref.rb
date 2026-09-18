@@ -46,7 +46,7 @@ class CevicoPageRef < ApplicationRecord
 
   def self.mint!(page:, source_data:, account: nil)
     3.times do
-      token = Array.new(5) { TOKEN_CHARS.sample }.join
+      token = Array.new(5) { TOKEN_CHARS[SecureRandom.random_number(TOKEN_CHARS.size)] }.join
       return create!(account_id: account&.id || page.account_id, cevico_page: page, token: token,
                      source_data: source_data.compact_blank)
     rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique

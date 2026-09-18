@@ -20,7 +20,7 @@
   <% page_name = page ? page.slug : 'hub' %>
   <% page_category = (page&.category).presence || 'hub' %>
   <% if pixel_id %>
-<script>
+<script nonce="<%= content_security_policy_nonce %>">
 !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
 n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
 n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
@@ -35,14 +35,14 @@ fbq('track', 'ViewContent', { content_name: '<%= j page_name %>', content_catego
   <% end %>
   <% if ga4_id %>
 <script async src="https://www.googletagmanager.com/gtag/js?id=<%= j ga4_id %>"></script>
-<script>
+<script nonce="<%= content_security_policy_nonce %>">
 window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
 gtag('js', new Date());
 gtag('config', '<%= j ga4_id %>', { cevico_page: '<%= j page_name %>', cevico_categoria: '<%= j page_category %>' });
 </script>
   <% end %>
-<script>
+<script nonce="<%= content_security_policy_nonce %>">
 // Lead nas duas plataformas quando o paciente clica pro WhatsApp.
 // O snippet do Protocolo chama com o token quando o tem (vira eventID).
 window.cevicoLead = function (token) {

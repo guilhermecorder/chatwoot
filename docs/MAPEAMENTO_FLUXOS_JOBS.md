@@ -164,7 +164,7 @@ Gatilho: botão "Analisar com IA" ou ação de coluna ai_analyze. 1. Sem chave/p
 - sales (`sales_coach_service.rb`, `objection_map_service.rb`): botão "Ajuda com objeção" (ao vivo) · "Insights" (job; exige fechamentos) · "Mapa de objeções" (job admin) → `ai_config.agents.sales.insights/objection_map`.
 - form (`form_insight_service.rb`): botão no hub de Formulários → sem respostas → erro · até 300 respostas → `form.ai_insight`.
 
-## surgery_confirmation — Confirmação de cirurgia (EXTERNO hoje: N8N "CONFIRMACAO CIRURGICA - IOP", 10h)
+## journey — Mensagens da jornada (item 168; substituiu o N8N "CONFIRMACAO CIRURGICA - IOP") — Crm::JourneyRunJob a cada 15 min (Planner + Dispatcher) + Crm::Journey::ReplyService no CrmListener
 Planilha (Procedimento, Paciente, Data, Telefone, Hora) → p/ cada linha c/ telefone → contato existe? não → cria (caixa 5) → conversa aberta na caixa 5? não → cria → envia modelo `confirmar_cirurgia` (nome, data, hora) → paciente responde "confirmo". Item 168 traz isso p/ dentro (fonte = espelho OftalmoFácil).
 
 ## Transversais

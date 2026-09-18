@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_17_173000) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_18_143000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -704,6 +704,55 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_17_173000) do
     t.string "period_type", default: "month", null: false
     t.index ["account_id", "period_type", "month"], name: "index_cevico_goal_plans_on_account_period_start", unique: true
     t.index ["account_id"], name: "index_cevico_goal_plans_on_account_id"
+  end
+
+  create_table "cevico_journey_messages", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "name", null: false
+    t.boolean "active", default: true, null: false
+    t.string "step", default: "consulta", null: false
+    t.bigint "inbox_id"
+    t.jsonb "trigger", default: {}, null: false
+    t.jsonb "audience", default: {}, null: false
+    t.jsonb "content", default: {}, null: false
+    t.string "approval", default: "auto", null: false
+    t.boolean "expects_reply", default: false, null: false
+    t.string "confirm_label"
+    t.boolean "decline_alert", default: true, null: false
+    t.boolean "respect_quiet", default: true, null: false
+    t.integer "position", default: 0, null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "active"], name: "index_cevico_journey_messages_on_account_id_and_active"
+    t.index ["account_id"], name: "index_cevico_journey_messages_on_account_id"
+  end
+
+  create_table "cevico_journey_sends", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "journey_message_id", null: false
+    t.bigint "contact_id", null: false
+    t.bigint "conversation_id"
+    t.string "source_type"
+    t.bigint "source_id"
+    t.string "event_key", null: false
+    t.datetime "scheduled_for", null: false
+    t.string "status", default: "queued", null: false
+    t.datetime "sent_at"
+    t.string "reply"
+    t.datetime "replied_at"
+    t.text "reply_text"
+    t.text "error"
+    t.text "preview"
+    t.jsonb "variables", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "scheduled_for"], name: "index_cevico_journey_sends_on_account_id_and_scheduled_for"
+    t.index ["account_id", "status"], name: "index_cevico_journey_sends_on_account_id_and_status"
+    t.index ["account_id"], name: "index_cevico_journey_sends_on_account_id"
+    t.index ["contact_id"], name: "index_cevico_journey_sends_on_contact_id"
+    t.index ["journey_message_id", "event_key"], name: "index_cevico_journey_sends_on_journey_message_id_and_event_key", unique: true
+    t.index ["journey_message_id"], name: "index_cevico_journey_sends_on_journey_message_id"
   end
 
   create_table "cevico_oftalmofacil_surgeries", force: :cascade do |t|
@@ -2246,6 +2295,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_17_173000) do
   add_foreign_key "cevico_content_items", "accounts"
   add_foreign_key "cevico_finance_entries", "accounts"
   add_foreign_key "cevico_goal_plans", "accounts"
+  add_foreign_key "cevico_journey_messages", "accounts", on_delete: :cascade
+  add_foreign_key "cevico_journey_sends", "accounts", on_delete: :cascade
+  add_foreign_key "cevico_journey_sends", "cevico_journey_messages", column: "journey_message_id", on_delete: :cascade
+  add_foreign_key "cevico_journey_sends", "contacts", on_delete: :cascade
   add_foreign_key "cevico_oftalmofacil_surgeries", "accounts"
   add_foreign_key "cevico_oftalmofacil_surgeries", "contacts"
   add_foreign_key "cevico_page_refs", "accounts"

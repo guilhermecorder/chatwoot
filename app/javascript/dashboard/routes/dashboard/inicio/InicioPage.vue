@@ -1663,6 +1663,10 @@ const perfTilesFor = col => {
         return { key, display: `${clinic.rate ?? 0}%`, label: `comparecimento (clínica) · ${clinic.attended ?? 0} vieram · ${clinic.missed ?? 0} faltaram`, color: (clinic.rate ?? 0) >= 80 ? '#059669' : (clinic.rate ?? 0) >= 60 ? '#D4A017' : '#DC2626' };
       case 'days_worked':
         return { key, display: r.workday?.days_active ?? 0, label: 'dias trabalhados' };
+      case 'calls_answered':
+        return { key, display: r.calls_answered ?? 0, label: 'ligações atendidas' };
+      case 'calls_talk':
+        return { key, display: `${r.calls_talk_minutes ?? 0} min`, label: 'ao telefone' };
       default:
         return null;
     }

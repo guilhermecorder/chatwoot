@@ -41,10 +41,10 @@ module Cevico::WhatsappCallsWebhook
     cevico_webhook_value(params).dig(:messages, 0, :interactive, :type).to_s == 'call_permission_reply'
   end
 
-  # só desvia se o módulo está ligado para a conta e a caixa é a configurada
+  # só desvia se o módulo está ligado para a conta e a caixa é uma das configuradas
   def cevico_calls_for_channel?(channel)
     settings = Crm::Calls::Settings.new(channel.account)
-    settings.enabled? && channel.inbox&.id == settings.inbox_id
+    settings.enabled? && settings.inbox?(channel.inbox)
   end
 
   def cevico_webhook_value(params)

@@ -254,6 +254,23 @@ class Rack::Attack
     req.ip if req.post? && req.path.start_with?('/p/rascunho/')
   end
 
+  ## Webhooks da assistente de voz (token/assinatura): força-bruta não passa
+  ## de 120 tentativas por minuto por IP (a ElevenLabs legítima fica longe disso)
+  throttle('cevico/voice_webhooks', limit: 120, period: 1.minute) do |req|
+    req.ip if req.post? && req.path.start_with?('/webhooks/cevico/voice/')
+  end
+
+  ## Páginas e formulários públicos (GET grava visita/protocolo): um robô
+  ## não infla contadores nem enche o banco — 300/min por IP é folgado
+  throttle('cevico/public_pages', limit: 300, period: 1.minute) do |req|
+    req.ip if req.get? && (req.path.start_with?('/p/', '/forms/'))
+  end
+
+  ## Relatórios de CSP (só log): 30/min por IP
+  throttle('cevico/csp_report', limit: 30, period: 1.minute) do |req|
+    req.ip if req.post? && req.path == '/webhooks/cevico/csp_report'
+  end
+
   ##-----------------------------------------------##
 
   ###-----------------------------------------------###

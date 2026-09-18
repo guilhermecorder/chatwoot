@@ -6,8 +6,9 @@
 # responde na RAIZ desse domínio (www.cevico.com.br/preoperatorio) e os
 # endereços antigos redirecionam 301 pro oficial — um endereço só aos
 # olhos do Google e da Meta.
-class CevicoPagesController < ActionController::Base # rubocop:disable Rails/ApplicationController
+class CevicoPagesController < ActionController::Base # rubocop:disable Rails/ApplicationController, Metrics/ClassLength
   layout false
+  include Cevico::PublicSecurity # 🔐 CSP só-relatar + sem iframe (rodada 171)
 
   def show # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     @page = CevicoPage.published.find_by(slug: params[:slug])

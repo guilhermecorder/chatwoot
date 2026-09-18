@@ -5583,7 +5583,7 @@ crm_opportunity_radar_job registrados.
 - Sem migration, sem cron; deploy WEB+SIDEKIQ (o job roda no sidekiq) + rodar
   o rake uma vez. AGUARDA "pode subir".
 
-## 167. ✅ 📞 CHAMADAS DE WHATSAPP PRÓPRIAS (RODADA 1 CONSTRUÍDA 17/09 e MERGEADA no develop 17/09 à tarde — imagem ghcr.io/guilhermecorder/chatwoot:3cfa77f entregue p/ deploy; aguarda o teste real c/ o celular) — receber (e depois fazer) ligações de pacientes DENTRO do Sistema Unificado, no nosso código (pedido dele 16/09: "eu prefiro construir tudo próprio"; "vamos neste sentido")
+## 167. ✅ 📞 CHAMADAS DE WHATSAPP PRÓPRIAS (RODADA 1 no develop 17/09 [imagem a28ceaf implantada; 1ac1201 com os cards em Integrações do CEVICO ainda não subiu]; RODADAS 2+3 CONSTRUÍDAS 18/09 na branch feat/rodada-171 — ver item 171) — receber (e depois fazer) ligações de pacientes DENTRO do Sistema Unificado, no nosso código (pedido dele 16/09: "eu prefiro construir tudo próprio"; "vamos neste sentido")
 - CONTEXTO 16/09: fork atualizado para o Chatwoot v4.17.1 (merge 9cff06e, no ar).
   O Chatwoot traz chamadas de WhatsApp e canal de Voz (Twilio), mas TODO esse
   código vive em `enterprise/` — licença Chatwoot Enterprise: uso em produção
@@ -5666,7 +5666,7 @@ crm_opportunity_radar_job registrados.
   package.json/Gemfile (chart.js foi removido pelo upstream sem aviso);
   atualizar a cada minor; smoke specs; skill /atualizar-chatwoot.
 
-## 168. 🔜 🗺️ MENSAGENS DA JORNADA — motor nativo de mensagens-modelo (substitui o N8N "CONFIRMACAO CIRURGICA - IOP" e vira a porta de entrada p/ "centenas" de mensagens ao longo da jornada do paciente; pedido dele 17/09)
+## 168. ✅ 🗺️ MENSAGENS DA JORNADA — CONSTRUÍDO 18/09 (rodadas 1+2 na branch feat/rodada-171, ver item 171; contrato docs/MENSAGENS_JORNADA.md) — motor nativo de mensagens-modelo (substitui o N8N "CONFIRMACAO CIRURGICA - IOP" e vira a porta de entrada p/ "centenas" de mensagens ao longo da jornada do paciente; pedido dele 17/09)
 - O QUE O N8N FAZ HOJE (JSON lido 17/09; roda 10h): lê a planilha Google
   "CONFIRMACOES CIRURGICAS" (aba IOP: Procedimento, Paciente, Data, Telefone,
   Hora) → p/ cada linha c/ telefone: busca contato por telefone na API; se não
@@ -5863,4 +5863,87 @@ crm_opportunity_radar_job registrados.
   CEVICO do schedule.yml têm fluxo; 50 definições validadas no mermaid.parse).
 - REGRA DE TRABALHO (vale a partir de agora): toda rodada que cria/muda um
   agente entrega o fluxograma (`flows/<key>.rb` + Mermaid no resumo da rodada).
+
+## 171. ✅ 🧰 RODADA 18/09 — "vamos construir tudo o que vc lembrou": 167 R2/R3 + 168 (Jornada do paciente) + segurança no código + facilitar atualizações + build mais leve — CONSTRUÍDA e testada local (branch feat/rodada-171, worktree ~/chatwoot-upgrade); AGUARDA "pode subir" (2 migrations: 20260918143000; WEB+SIDEKIQ; backup antes)
+- CONTEXTO: ele confirmou que a última implantada é a `a28ceaf`; a `1ac1201`
+  (cards Ligações/Agente de Ligação na página de Integrações do CEVICO) segue
+  pendente de deploy. Pediu pra construir tudo do meu lado sem esperar.
+- 📞 167 RODADA 2 (ligar pro paciente): botão de telefone do CEVICO no
+  cabeçalho da conversa (`CevicoCallButton.vue` em `ConversationHeader.vue`;
+  o botão Enterprise some quando o módulo está ligado) e no painel do contato
+  (`ContactInfo.vue`): consulta a permissão na Meta → liga na hora, ou abre o
+  balão com "Pedir permissão"; resposta do paciente chega pelo cable.
+- 📞 167 RODADA 3: ⭐ "quem toca primeiro" (Integrações → Ligações: linha de
+  frente + espera 5–60 s; `ring_first_user_ids`/`ring_cascade_seconds` no
+  webhook e na store — os demais só ouvem depois da espera, e só se ainda
+  estiver tocando); ligação perdida vira AVISO NO RADAR (`Crm::Calls::RadarAlert`,
+  some quando alguém respondeu/ligou de volta; aparece mesmo com o Radar de IA
+  desligado); métricas "Ligações atendidas" e "Minutos ao telefone" no Meu
+  desempenho (Painéis → 🎯). Transferência entre atendentes NÃO entrou: a
+  Calling API da Meta não renegocia a chamada do lado do negócio — o caminho é
+  desligar e ligar de novo.
+- 📞 VÁRIAS CAIXAS DE LIGAÇÃO (pedido dele 18/09 à noite: "consigo selecionar
+  apenas uma caixa; é importante acionar mais de uma e selecionar os agentes
+  responsáveis"): Integrações → Ligações virou uma LISTA de caixas
+  (`calls.inboxes[]`), cada uma com seus atendentes, sua ⭐ linha de frente,
+  sua espera e seu "Ativar na Meta"/estado. O webhook desvia a chamada de
+  qualquer caixa configurada e toca só para os atendentes DAQUELA caixa;
+  ligar pro paciente sai pela caixa da conversa aberta (senão a da última
+  conversa dele, senão a primeira). Config antiga (1 caixa) migra sozinha.
+  Spec cobre 2 caixas com equipes diferentes.
+- 🗺️ 168 RODADAS 1+2 — MOTOR + TELA "Jornada do paciente" (`/crm/jornada`,
+  menu ao lado da Campanha; contrato completo em docs/MENSAGENS_JORNADA.md):
+  regras com gatilho (dia da cirurgia no OftalmoFácil / dia da consulta /
+  entrou na coluna / recebeu etiqueta / ligação perdida) + dias antes/depois +
+  hora; público (etiquetas/colunas); modelo aprovado com variáveis ligadas ao
+  paciente ({{primeiro_nome}} {{data}} {{hora}} {{unidade}} {{endereco}}
+  {{procedimento}} {{medico}}…) ou texto livre; aprovação na FILA DE HOJE
+  (aprovar/pular/reenviar/aprovar todos); resposta "confirmo" → etiqueta +
+  nota ✅, "não vou/remarcar" → nota ⚠️ + Radar; prévia com paciente real;
+  teste pro meu número; histórico por mensagem; locais/endereços por unidade
+  e por clínica do OftalmoFácil; janela e teto diário; silêncio
+  (nao_perturbe/perda_*). Job `Crm::JourneyRunJob` a cada 15 min. Fluxograma
+  `journey` substituiu o externo do N8N. `Crm::TemplateSource` compartilhado.
+  R3 (migrar Lembretes D-1/D-0, Régua, Automações de coluna pro motor) fica
+  pra depois — a tela mostra os links delas.
+  PRÉ-REQUISITOS DELE: template `confirmar_cirurgia` aprovado na caixa que vai
+  enviar (o N8N usa a inbox 5); preencher "Locais e horário" (endereço da
+  IOP/Alameda Casa Branca); criar a regra "Confirmação de cirurgia (véspera
+  10h)" com aprovação ligada na primeira semana; desligar o N8N depois de
+  ver a primeira fila sair; ROTACIONAR o token da API que estava no JSON do N8N.
+- 🔐 SEGURANÇA (Fase C do plano de 30/08, só código): links de prévia (30 d)
+  e retoque (7 d) das páginas e do formulário (90 d; links antigos seguem
+  aceitos) com validade e finalidade; cadeado do acesso clínico (só admin muda
+  quem lê o prontuário — antes bastava a área "settings" concedida); Rack::Attack
+  para os webhooks de voz (120/min), GETs públicos de páginas/formulários
+  (300/min) e relatórios de CSP; HSTS forte quando FORCE_SSL=true +
+  Referrer-Policy + Permissions-Policy em toda resposta
+  (`config/initializers/zz_cevico_security.rb`); CSP em modo SÓ RELATAR nas
+  páginas públicas (`Cevico::PublicSecurity` + `Cevico::PublicCsp`, nonce nos
+  10 scripts inline, X-Frame-Options DENY; violações no log via
+  POST /webhooks/cevico/csp_report — ligar pra valer depois de 1–2 semanas sem
+  relatório; o formulário ainda usa onclick= inline); protocolo das páginas
+  com SecureRandom. PENDENTE DELE (infra): fechar a porta 3000 do EasyPanel,
+  senha+2FA, backup automático, SSH por chave, FORCE_SSL=true (conferir
+  X-Forwarded-Proto no proxy antes).
+- 🔧 FACILITAR AS ATUALIZAÇÕES: rotas CEVICO saíram do routes.rb (1168 → 811
+  linhas) para `config/routes/cevico_crm.rb` (draw dentro de accounts) e
+  `config/routes/cevico_public.rb` (formulários/páginas/webhooks) — tabela de
+  rotas conferida IDÊNTICA (1099 rotas); `script/cevico_touchpoints.sh` gera
+  `docs/PONTOS_DE_CONTATO_UPSTREAM.md` (134 arquivos do upstream que
+  alteramos); bloco `"cevico"` no package.json com as dependências que o
+  upstream pode remover; spec `spec/cevico/migration_timestamps_spec.rb` cobra
+  timestamp real nas migrations novas; skill `/atualizar-chatwoot` (na pasta
+  do projeto CEVICO) com o passo a passo da 4.17.1.
+- 🏗️ BUILD: o Mermaid saiu do build da imagem (vem da CDN jsdelivr, versão 11,
+  só quando a aba Fluxos abre — `FlowDiagram.vue`); é o que deixou o build 7×
+  mais lento e estourou a memória. `NODE_OPTIONS` 6144 fica.
+- TESTES: rspec 85/0 (calls, jornada, segurança, fluxos, voz, automações),
+  rubocop limpo nos arquivos novos, eslint/prettier limpos nas telas novas;
+  visual local conta 3 (Jornada claro/escuro/celular, assistente 3 passos,
+  fila de hoje, prévia com paciente real). Dados de demo locais: cirurgia
+  `demo-journey-1` + 2 regras na conta 3 — limpar antes de usar de verdade.
+- DEPLOY: 2 migrations (jornada) → BACKUP antes; WEB+SIDEKIQ juntos; sem cron
+  novo além do `crm_journey_run_job` (schedule.yml — sidekiq recarrega no boot).
+  Reversão = etiqueta anterior (tabelas novas ficam, não atrapalham).
 

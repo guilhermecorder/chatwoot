@@ -261,7 +261,7 @@
     </div>
   </div>
 
-  <script>
+  <script nonce="<%= content_security_policy_nonce %>">
     // STEPS = perguntas + cards de mensagem, na ordem montada no criador
     const STEPS = <%= raw @form.questions.to_json %>;
     // link limpo (sem paciente no token): 1º card pede nome + WhatsApp pra

@@ -123,7 +123,8 @@ class Api::V1::Accounts::Crm::CallsController < Api::V1::Accounts::BaseControlle
   end
 
   def outbound
-    @outbound ||= Crm::Calls::OutboundService.new(account: Current.account, user: Current.user, contact: @contact)
+    @outbound ||= Crm::Calls::OutboundService.new(account: Current.account, user: Current.user, contact: @contact,
+                                                  preferred_inbox_id: params[:inbox_id])
   end
 
   def meta_client(call)

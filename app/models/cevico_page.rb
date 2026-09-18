@@ -109,12 +109,17 @@ class CevicoPage < ApplicationRecord
   # Link secreto do admin: quem tem o link vê a página antes de publicar,
   # em qualquer domínio, sem login. O token é assinado pelo segredo do
   # servidor — não dá pra forjar nem adivinhar.
+  # Segurança (rodada 171): os links têm VALIDADE — prévia 30 dias, retoque
+  # 7 dias — e finalidade própria; um link vazado deixa de valer sozinho.
+  PREVIEW_TTL = 30.days
+  EDIT_TTL = 7.days
+
   def preview_token
-    Rails.application.message_verifier('cevico-page-preview').generate(id)
+    Rails.application.message_verifier('cevico-page-preview').generate(id, purpose: :preview, expires_in: PREVIEW_TTL)
   end
 
   def self.find_by_preview_token(token)
-    id = Rails.application.message_verifier('cevico-page-preview').verify(token.to_s)
+    id = Rails.application.message_verifier('cevico-page-preview').verify(token.to_s, purpose: :preview)
     find_by(id: id)
   rescue ActiveSupport::MessageVerifier::InvalidSignature
     nil
@@ -124,11 +129,11 @@ class CevicoPage < ApplicationRecord
   # link da prévia só OLHA; editar inline exige este token, que apenas o
   # time logado recebe (vem no builder_url do admin)
   def edit_token
-    Rails.application.message_verifier('cevico-page-edit').generate(id)
+    Rails.application.message_verifier('cevico-page-edit').generate(id, purpose: :edit, expires_in: EDIT_TTL)
   end
 
   def valid_edit_token?(token)
-    Rails.application.message_verifier('cevico-page-edit').verify(token.to_s) == id
+    Rails.application.message_verifier('cevico-page-edit').verify(token.to_s, purpose: :edit) == id
   rescue ActiveSupport::MessageVerifier::InvalidSignature
     false
   end

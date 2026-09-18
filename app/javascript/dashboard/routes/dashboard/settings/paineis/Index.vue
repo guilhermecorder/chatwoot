@@ -86,6 +86,8 @@ const METRIC_OPTIONS = [
   { key: 'surgeries_closed', label: 'Cirurgias fechadas + R$', hint: 'cards dela que viraram Cirurgia Realizada no período' },
   { key: 'attendance', label: 'Comparecimento (clínica)', hint: 'presença nas consultas do período — de quem confirma' },
   { key: 'days_worked', label: 'Dias trabalhados', hint: 'dias com pelo menos 1 mensagem enviada' },
+  { key: 'calls_answered', label: 'Ligações atendidas', hint: 'ligações de WhatsApp que ela atendeu ou fez pelo sistema' },
+  { key: 'calls_talk', label: 'Minutos ao telefone', hint: 'tempo total falado nas ligações do período' },
 ];
 const DEFAULT_METRICS = ['touched', 'reply_commercial', 'days_worked', 'resolved', 'appointments', 'surgeries_closed'];
 const metricsCfg = ref({}); // { user_id => [chaves] }

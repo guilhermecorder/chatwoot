@@ -5,12 +5,12 @@ const state = {
   contacts: [],
   contactsMeta: { total: 0, shown: 0, scope: 'recent' },
   settings: {
-    n8n_base_url:             '',
-    n8n_api_key_configured:   false,
-    n8n_workflows:            [],
+    n8n_base_url: '',
+    n8n_api_key_configured: false,
+    n8n_workflows: [],
     n8n_workflows_fetched_at: null,
-    column_presets:           [],
-    agent_permissions:        {},
+    column_presets: [],
+    agent_permissions: {},
   },
   uiFlags: {
     isFetchingPipelines: false,
@@ -20,12 +20,13 @@ const state = {
 };
 
 const getters = {
-  getPipelines:    s => s.pipelines,
-  getContacts:     s => s.contacts,
+  getPipelines: s => s.pipelines,
+  getContacts: s => s.contacts,
   getContactsMeta: s => s.contactsMeta,
-  getContactsByStage: s => stageId => s.contacts.filter(c => c.stage_id === stageId),
-  getUIFlags:      s => s.uiFlags,
-  getSettings:     s => s.settings,
+  getContactsByStage: s => stageId =>
+    s.contacts.filter(c => c.stage_id === stageId),
+  getUIFlags: s => s.uiFlags,
+  getSettings: s => s.settings,
   getN8nWorkflows: s => s.settings.n8n_workflows || [],
   // avisos ativos do Radar de Oportunidades (badge no "Meu Painel")
   getRadarAlertCount: s => s.settings.ai?.opportunity_alerts_count || 0,
@@ -185,7 +186,8 @@ const actions = {
   },
 
   async fetchContacts({ commit }, payload) {
-    const pipelineId = typeof payload === 'object' ? payload.pipelineId : payload;
+    const pipelineId =
+      typeof payload === 'object' ? payload.pipelineId : payload;
     const scope = typeof payload === 'object' ? payload.scope : undefined;
     const days = typeof payload === 'object' ? payload.days : undefined;
     const dateFrom = typeof payload === 'object' ? payload.dateFrom : undefined;
@@ -213,7 +215,10 @@ const actions = {
   },
 
   // Próxima página de UMA coluna (scope=period) — anexa sem substituir o board
-  async fetchMoreStage({ commit }, { pipelineId, stageId, offset, limit, dateFrom, dateTo, dateMode }) {
+  async fetchMoreStage(
+    { commit },
+    { pipelineId, stageId, offset, limit, dateFrom, dateTo, dateMode }
+  ) {
     const params = { scope: 'stage_page', stage_id: stageId, offset, limit };
     if (dateFrom) params.date_from = dateFrom;
     if (dateTo) params.date_to = dateTo;
@@ -230,7 +235,9 @@ const actions = {
   },
 
   async moveContact({ commit }, { pipelineId, id, stageId }) {
-    const { data } = await CrmAPI.updateContact(pipelineId, id, { stage_id: stageId });
+    const { data } = await CrmAPI.updateContact(pipelineId, id, {
+      stage_id: stageId,
+    });
     commit('editContact', data);
     return data;
   },
@@ -352,17 +359,24 @@ const actions = {
     commit('setSettings', { calls: data?.calls || data });
     return data;
   },
-  async enableCallsAtMeta({ commit, state: s }) {
-    const { data } = await CrmAPI.enableCallsAtMeta();
+  async enableCallsAtMeta({ commit, state: s }, inboxId = null) {
+    const { data } = await CrmAPI.enableCallsAtMeta(inboxId);
     if (data?.meta) {
+      // estado da Meta é POR CAIXA (várias caixas, 18/09)
+      const calls = s.settings.calls || {};
+      const inboxes = (calls.inboxes || []).map(c =>
+        Number(c.inbox_id) === Number(data.inbox_id)
+          ? { ...c, meta: data.meta }
+          : c
+      );
       commit('setSettings', {
-        calls: { ...(s.settings.calls || {}), meta: data.meta },
+        calls: { ...calls, inboxes, meta: inboxes[0]?.meta || calls.meta },
       });
     }
     return data;
   },
-  async callsMetaStatus() {
-    const { data } = await CrmAPI.callsMetaStatus();
+  async callsMetaStatus(_, inboxId = null) {
+    const { data } = await CrmAPI.callsMetaStatus(inboxId);
     return data;
   },
 
@@ -412,12 +426,21 @@ const actions = {
   },
 
   async createAutomation(_, { pipelineId, stageId, ...automationData }) {
-    const { data } = await CrmAPI.createAutomation(pipelineId, stageId, automationData);
+    const { data } = await CrmAPI.createAutomation(
+      pipelineId,
+      stageId,
+      automationData
+    );
     return data;
   },
 
   async updateAutomation(_, { pipelineId, stageId, id, ...automationData }) {
-    const { data } = await CrmAPI.updateAutomation(pipelineId, stageId, id, automationData);
+    const { data } = await CrmAPI.updateAutomation(
+      pipelineId,
+      stageId,
+      id,
+      automationData
+    );
     return data;
   },
 
@@ -427,14 +450,22 @@ const actions = {
 };
 
 const mutations = {
-  setUIFlag(s, flags) { s.uiFlags = { ...s.uiFlags, ...flags }; },
-  setPipelines(s, data) { s.pipelines = data; },
-  addPipeline(s, p) { s.pipelines.push(p); },
+  setUIFlag(s, flags) {
+    s.uiFlags = { ...s.uiFlags, ...flags };
+  },
+  setPipelines(s, data) {
+    s.pipelines = data;
+  },
+  addPipeline(s, p) {
+    s.pipelines.push(p);
+  },
   editPipeline(s, p) {
     const idx = s.pipelines.findIndex(x => x.id === p.id);
     if (idx !== -1) s.pipelines.splice(idx, 1, p);
   },
-  removePipeline(s, id) { s.pipelines = s.pipelines.filter(p => p.id !== id); },
+  removePipeline(s, id) {
+    s.pipelines = s.pipelines.filter(p => p.id !== id);
+  },
   addStage(s, { pipelineId, stage }) {
     const p = s.pipelines.find(x => x.id === pipelineId);
     if (p) p.stages.push(stage);
@@ -453,24 +484,39 @@ const mutations = {
     const p = s.pipelines.find(x => x.id === pipelineId);
     if (p) p.stages = stages;
   },
-  setSettings(s, data) { s.settings = { ...s.settings, ...data }; },
-  setN8nWorkflows(s, workflows) { s.settings.n8n_workflows = workflows; },
-  setContacts(s, data) { s.contacts = data; },
-  setContactsMeta(s, meta) { s.contactsMeta = meta; },
+  setSettings(s, data) {
+    s.settings = { ...s.settings, ...data };
+  },
+  setN8nWorkflows(s, workflows) {
+    s.settings.n8n_workflows = workflows;
+  },
+  setContacts(s, data) {
+    s.contacts = data;
+  },
+  setContactsMeta(s, meta) {
+    s.contactsMeta = meta;
+  },
   appendContacts(s, list) {
     const seen = new Set(s.contacts.map(c => c.id));
-    list.forEach(c => { if (!seen.has(c.id)) s.contacts.push(c); });
+    list.forEach(c => {
+      if (!seen.has(c.id)) s.contacts.push(c);
+    });
   },
-  addContact(s, c) { s.contacts.push(c); },
+  addContact(s, c) {
+    s.contacts.push(c);
+  },
   editContact(s, c) {
     const idx = s.contacts.findIndex(x => x.id === c.id);
     if (idx !== -1) s.contacts.splice(idx, 1, c);
   },
-  deleteContact(s, id) { s.contacts = s.contacts.filter(c => c.id !== id); },
+  deleteContact(s, id) {
+    s.contacts = s.contacts.filter(c => c.id !== id);
+  },
   // Atualiza dados da última conversa de um card sem refetch do board
   patchContactConversation(s, { id, data }) {
     const c = s.contacts.find(x => x.id === id);
-    if (c?.last_conversation) c.last_conversation = { ...c.last_conversation, ...data };
+    if (c?.last_conversation)
+      c.last_conversation = { ...c.last_conversation, ...data };
   },
   patchContactValue(s, { id, value }) {
     const c = s.contacts.find(x => x.id === id);

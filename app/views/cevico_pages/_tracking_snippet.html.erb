@@ -9,7 +9,7 @@
     page = nil → modo HUB (raiz do domínio): protocolo sai de /hub/ref. %>
 <% ref_path = page ? "/p/#{page.slug}/ref" : '/hub/ref' %>
 <% default_origin = page ? "a página \"#{page.title}\"" : 'o site da CEVICO' %>
-<script>
+<script nonce="<%= content_security_policy_nonce %>">
 (function () {
   var KEY = 'cevico_trk';
   var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid', 'ref_host'];

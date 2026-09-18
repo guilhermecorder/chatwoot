@@ -10,6 +10,9 @@
 class CevicoFormsController < ActionController::Base # rubocop:disable Rails/ApplicationController
   protect_from_forgery with: :null_session
   layout false
+  # 🔐 CSP só-relatar + sem iframe (rodada 171). O formulário ainda usa
+  # onclick= inline — aparece no log até virar addEventListener.
+  include Cevico::PublicSecurity
 
   before_action :load_form
 

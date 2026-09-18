@@ -441,10 +441,7 @@ class CrmAutomationFireJob < ApplicationJob
   # mensagem) com uma fonte leve montada da action_config. Trava: não
   # reenvia a MESMA automação pro mesmo contato dentro do cooldown — card
   # que entra-e-sai da coluna não vira rajada.
-  TemplateSource = Struct.new(:account, :inbox, :sender, :template_params, :message_preview, :name) do
-    def account_id = account.id
-    def inbox_id = inbox.id
-  end
+  TemplateSource = Crm::TemplateSource
 
   TEMPLATE_RESEND_COOLDOWN = 7.days
 

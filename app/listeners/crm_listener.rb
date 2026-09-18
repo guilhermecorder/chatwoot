@@ -49,6 +49,9 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     # recebeu o lembrete da véspera → marca a consulta como confirmada
     handle_appointment_confirmation(message, contact)
 
+    # 🗺️ resposta a uma mensagem da jornada (item 168): "confirmo" / "não vou"
+    Crm::Journey::ReplyService.handle(message, contact)
+
     # 2 consultas leves por mensagem, indexadas — barato mesmo em produção
     stage_ids = Crm::Contact.where(contact_id: contact.id).pluck(:stage_id).compact
     return if stage_ids.empty?

@@ -65,16 +65,22 @@ class Crm::Form < ApplicationRecord
 
   # link público único por contato: o token assinado identifica
   # formulário + contato sem expor nenhum id
+  # Segurança (rodada 171): o link vale 90 dias. Links enviados ANTES desta
+  # rodada não têm validade gravada — continuam aceitos (fallback) para não
+  # quebrar o WhatsApp de quem já recebeu; trocar por token novo é automático.
+  LINK_TTL = 90.days
+
   def public_link_for(contact)
     token = Rails.application.message_verifier(:cevico_form).generate(
-      { form_id: id, account_id: account_id, contact_id: contact&.id }
+      { form_id: id, account_id: account_id, contact_id: contact&.id }, purpose: :public_link, expires_in: LINK_TTL
     )
     "#{base_url}/forms/#{slug}/#{CGI.escape(token)}"
   end
 
   def self.verify_token(token)
-    Rails.application.message_verifier(:cevico_form).verify(token)
-  rescue ActiveSupport::MessageVerifier::InvalidSignature
+    verifier = Rails.application.message_verifier(:cevico_form)
+    verifier.verified(token, purpose: :public_link) || verifier.verified(token)
+  rescue ActiveSupport::MessageVerifier::InvalidSignature, ArgumentError
     nil
   end
 

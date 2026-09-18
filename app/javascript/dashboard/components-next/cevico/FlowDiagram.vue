@@ -1,8 +1,7 @@
 <script setup>
 // 🗺️ DIAGRAMA DE UM FLUXO (item 170): recebe a definição Mermaid gerada no
 // servidor (Crm::FlowMap::Flow#to_mermaid) e desenha no navegador.
-// O Mermaid é pesado — entra só sob demanda (import dinâmico) e só quando
-// esta aba abre. Clique num nó → emite 'nodeClick' com o id (<chave>_<nó>).
+// O Mermaid é pesado — vem da CDN sob demanda, só quando esta aba abre. Clique num nó → emite 'nodeClick' com o id (<chave>_<nó>).
 // Zoom −/100%/+ e "Baixar PNG" (html-to-image). Erro de sintaxe vira um
 // aviso legível — nunca quebra a tela.
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
@@ -32,9 +31,15 @@ const isDark = () =>
   document.body.classList.contains('dark') ||
   document.documentElement.classList.contains('dark');
 
+// O Mermaid NÃO entra no build (rodada 171): ele sozinho deixava o build da
+// imagem 7× mais lento e estourava a memória do Node. Vem da CDN (ESM) só
+// quando esta aba abre — o painel já é online. Versão travada (11.x).
+const MERMAID_URL =
+  'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
 const loadMermaid = async () => {
   if (!mermaidMod) {
-    const { default: mermaid } = await import('mermaid');
+    const { default: mermaid } = await import(/* @vite-ignore */ MERMAID_URL);
     mermaidMod = mermaid;
   }
   const theme = isDark() ? 'dark' : 'neutral';

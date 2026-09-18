@@ -22,10 +22,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
   DEFAULT_HOURS = { 'd1' => 10, 'd0' => 7 }.freeze
   MAX_MARK_ENTRIES = 60 # marcas antigas são podadas (consultas já passaram)
 
-  TemplateSource = Struct.new(:account, :inbox, :sender, :template_params, :message_preview, :name) do
-    def account_id = account.id
-    def inbox_id = inbox.id
-  end
+  # fonte leve compartilhada (item 168 — antes cada job tinha a sua cópia)
+  TemplateSource = Crm::TemplateSource
 
   # now: só os testes passam (congelar o relógio sem gem de viagem no tempo)
   def perform(now = nil)

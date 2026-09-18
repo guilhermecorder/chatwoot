@@ -17,6 +17,7 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::Calls,
     Crm::FlowMap::Flows::Voice,
     Crm::FlowMap::Flows::Reminders,
+    Crm::FlowMap::Flows::Journey,
     Crm::FlowMap::Flows::FollowupBots,
     # Vendas e fechamento
     Crm::FlowMap::Flows::Sales,
@@ -36,8 +37,7 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::Mentor,
     Crm::FlowMap::Flows::StalledCards,
     # Infraestrutura
-    Crm::FlowMap::Flows::Oftalmofacil,
-    Crm::FlowMap::Flows::SurgeryConfirmation
+    Crm::FlowMap::Flows::Oftalmofacil
   ].freeze
 
   module_function

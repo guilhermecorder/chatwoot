@@ -278,8 +278,8 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
   end
 
   def send_template(inbox, target_contact, preview)
-    source = Crm::AppointmentReminderSendJob::TemplateSource.new(account, inbox, account.administrators.first,
-                                                                 settings.handoff_template_params, preview, 'Assistente virtual')
+    source = Crm::TemplateSource.new(account, inbox, account.administrators.first,
+                                     settings.handoff_template_params, preview, 'Assistente virtual')
     sent = Crm::SendTemplateService.new(source: source, contact: target_contact).perform
     return { ok: false, motivo: 'o modelo não pôde ser enviado' } if sent.nil?
 

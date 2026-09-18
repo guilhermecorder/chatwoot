@@ -22,6 +22,7 @@ RSpec.describe Crm::FlowMap::Registry do
       'Crm::ConversationAuditorJob' => 'auditor',
       'Crm::CreativeJob' => 'creative',
       'Crm::AppointmentReminderSendJob' => 'reminders',
+      'Crm::JourneyRunJob' => 'journey',
       'Crm::OftalmofacilSyncJob' => 'oftalmofacil',
       'Crm::VoiceAgent::CampaignDialerJob' => 'voice'
     }
@@ -54,11 +55,11 @@ RSpec.describe Crm::FlowMap::Registry do
 
   it 'cobre todas as chaves obrigatórias do contrato, na ordem dos grupos' do
     expect(described_class.keys).to include(
-      'scheduler', 'instagram', 'comments', 'nps', 'conversation', 'calls', 'voice', 'reminders', 'followup_bots',
+      'scheduler', 'instagram', 'comments', 'nps', 'conversation', 'calls', 'voice', 'reminders', 'journey', 'followup_bots',
       'sales', 'closing', 'opportunity', 'form', 'column_automations', 'campaigns',
       'copywriter', 'pagebuilder', 'creative', 'harvest',
       'manager', 'auditor', 'mentor', 'stalled_cards',
-      'oftalmofacil', 'surgery_confirmation'
+      'oftalmofacil'
     )
     groups = described_class.flows.map(&:group).uniq
     expect(groups).to eq(Crm::FlowMap::Flow::GROUPS)

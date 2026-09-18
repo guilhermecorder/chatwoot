@@ -16,6 +16,8 @@ import ContactDeleteModal from 'dashboard/modules/contact/ContactDeleteModal.vue
 import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
 import NextButton from 'dashboard/components-next/button/Button.vue';
 import VoiceCallButton from 'dashboard/components-next/Contacts/VoiceCallButton.vue';
+// 📞 CEVICO item 167: ligar pelo nosso módulo (Graph API + WebRTC)
+import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
 import InlineInput from 'dashboard/components-next/inline-input/InlineInput.vue';
 
 export default {
@@ -29,6 +31,7 @@ export default {
     ContactMergeModal,
     ContactDeleteModal,
     VoiceCallButton,
+    CevicoCallButton,
     InlineInput,
   },
   props: {
@@ -317,6 +320,13 @@ export default {
             />
           </template>
         </ComposeConversation>
+        <CevicoCallButton
+          :phone="contact.phone_number"
+          :contact-id="contact.id"
+          :inbox-id="currentChat?.inbox_id"
+          :ghost="false"
+          faded
+        />
         <VoiceCallButton
           :phone="contact.phone_number"
           :contact-id="contact.id"

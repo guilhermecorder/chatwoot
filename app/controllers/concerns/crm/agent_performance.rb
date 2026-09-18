@@ -10,7 +10,7 @@ module Crm
     # — o admin propõe as de cada pessoa em Configurações → Painéis
     METRIC_KEYS = %w[touched assigned messages reply_commercial first_response
                      resolved appointments surgeries_created surgeries_closed
-                     attendance days_worked].freeze
+                     attendance days_worked calls_answered calls_talk].freeze
     DEFAULT_METRICS = %w[touched reply_commercial days_worked resolved
                          appointments surgeries_closed].freeze
     RADAR_SAMPLE = 400 # avisos do histórico avaliados por chamada
@@ -60,6 +60,11 @@ module Crm
       reply_scope = reply_scope.where(user_id: user_ids) if user_ids
       reply_avg = reply_scope.group(:user_id).average(:value)
       reply_count = reply_scope.group(:user_id).count
+      # ligações de WhatsApp atendidas/feitas pela pessoa (item 167)
+      calls = Crm::Call.where(account_id: account.id, handled_by: 'human', answered_at: range).where.not(user_id: nil)
+      calls = calls.where(user_id: user_ids) if user_ids
+      calls_count = calls.group(:user_id).count
+      calls_talk = calls.group(:user_id).sum(:duration)
       workdays = workday_stats(range, user_ids: user_ids)
 
       users_scope = user_ids ? account.users.where(id: user_ids) : account.users
@@ -78,6 +83,8 @@ module Crm
           conversations_resolved: resolved[user.id] || 0,
           appointments_created: consultas[user.id] || 0,
           surgeries_created: cirurgias_criadas[user.id] || 0,
+          calls_answered: calls_count[user.id] || 0,
+          calls_talk_minutes: ((calls_talk[user.id] || 0) / 60.0).round,
           radar_responded: radar[:responded],
           radar_avg_response_min: radar[:responded].positive? ? (radar[:total_minutes] / radar[:responded]).round : nil,
           # jornada de atendimento: 1ª/última mensagem e maiores pausas

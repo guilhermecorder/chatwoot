@@ -59,7 +59,7 @@ Atendimento: `scheduler` (Secretário da Agenda + releitura), `instagram`, `comm
 Vendas: `sales`, `closing`, `opportunity` (Radar), `form`, `column_automations` (gatilhos × ações), `campaigns` (Campanha WhatsApp + réguas).
 Marketing: `copywriter`, `pagebuilder`, `creative`, `harvest` (Colheitadeira c/ aprovação).
 Gestão: `manager`, `auditor`, `mentor`, `stalled_cards`.
-Infraestrutura: `oftalmofacil` (sync), `surgery_confirmation` (N8N externo hoje → item 168; nós `:external`).
+Infraestrutura: `oftalmofacil` (sync). A confirmação de cirurgia virou o fluxo nativo `journey` (Mensagens da jornada, item 168) no grupo Atendimento ao paciente.
 O conteúdo dos passos vem do código real (jobs/services) — não inventar condições: cada nó de decisão
 corresponde a um `if/return` do job.
 

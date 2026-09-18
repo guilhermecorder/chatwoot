@@ -269,6 +269,8 @@ class Crm::OpportunityRadarService
     Array(alerts).select do |a|
       created = Time.zone.parse(a['created_at'].to_s) rescue nil
       next false if created.nil? || created < ALERT_TTL.ago
+      # ligação perdida (167) / "não vou" da jornada (168): valem até alguém retornar
+      next Crm::RadarExtraAlerts.still_open?(@account, a) if Crm::RadarExtraAlerts.extra?(a)
 
       conv = @account.conversations.find_by(display_id: a['conversation_id'])
       conv&.open? && conv.waiting_since.present?

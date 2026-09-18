@@ -19,10 +19,17 @@ const agents = useMapGetter('agents/getAgents');
 const DEFAULT_PERMISSION_MESSAGE =
   'Olá! Podemos te ligar pelo WhatsApp para falar sobre o seu atendimento? Toque em permitir para autorizar.';
 
+// cada caixa: { inbox_id, ring_user_ids, ring_first_user_ids, ring_cascade_seconds, meta }
+const newInboxEntry = (inboxId = null) => ({
+  inbox_id: inboxId,
+  ring_user_ids: [],
+  ring_first_user_ids: [],
+  ring_cascade_seconds: 12,
+  meta: {},
+});
 const form = ref({
   enabled: false,
-  inbox_id: null,
-  ring_user_ids: [],
+  inboxes: [],
   business_hours_only: true,
   hours: { start: '08:00', end: '19:00' },
   record: true,
@@ -41,12 +48,22 @@ const metaStatusError = ref('');
 
 const fillForm = () => {
   const c = callsConfig.value || {};
+  let list = [];
+  if (Array.isArray(c.inboxes) && c.inboxes.length) list = c.inboxes;
+  else if (c.inbox_id) list = [c]; // formato antigo (1 caixa)
   form.value = {
     enabled: Boolean(c.enabled),
-    inbox_id: c.inbox_id || null,
-    ring_user_ids: Array.isArray(c.ring_user_ids)
-      ? c.ring_user_ids.map(Number)
-      : [],
+    inboxes: list.map(e => ({
+      inbox_id: e.inbox_id || null,
+      ring_user_ids: Array.isArray(e.ring_user_ids)
+        ? e.ring_user_ids.map(Number)
+        : [],
+      ring_first_user_ids: Array.isArray(e.ring_first_user_ids)
+        ? e.ring_first_user_ids.map(Number)
+        : [],
+      ring_cascade_seconds: Number(e.ring_cascade_seconds) || 12,
+      meta: e.meta || {},
+    })),
     business_hours_only: c.business_hours_only !== false,
     hours: {
       start: c.hours?.start || '08:00',
@@ -70,33 +87,76 @@ const agentList = computed(() =>
   )
 );
 
-const toggleAgent = id => {
+// ── várias caixas (pedido 18/09): cada uma com seus atendentes ──
+const addInbox = () => {
+  const used = form.value.inboxes.map(e => Number(e.inbox_id));
+  const free = whatsappInboxes.value.find(i => !used.includes(Number(i.id)));
+  form.value.inboxes.push(newInboxEntry(free ? free.id : null));
+};
+const removeInbox = idx => {
+  form.value.inboxes.splice(idx, 1);
+};
+const inboxName = id =>
+  whatsappInboxes.value.find(i => Number(i.id) === Number(id))?.name || 'Caixa';
+const toggleAgent = (entry, id) => {
   const n = Number(id);
-  const list = form.value.ring_user_ids;
-  form.value.ring_user_ids = list.includes(n)
-    ? list.filter(x => x !== n)
-    : [...list, n];
+  entry.ring_user_ids = entry.ring_user_ids.includes(n)
+    ? entry.ring_user_ids.filter(x => x !== n)
+    : [...entry.ring_user_ids, n];
+  // saiu de "quem atende" → sai da linha de frente também
+  entry.ring_first_user_ids = entry.ring_first_user_ids.filter(x =>
+    entry.ring_user_ids.length ? entry.ring_user_ids.includes(x) : true
+  );
 };
 
-const checkMetaStatus = async () => {
-  if (!form.value.inbox_id || isCheckingMeta.value) return;
+// ⭐ quem toca primeiro (rodada 2): a linha de frente ouve na hora; os
+// outros só depois da espera. Sem ninguém marcado = toca para todos juntos.
+const isFirst = (entry, id) => entry.ring_first_user_ids.includes(Number(id));
+const toggleFirst = (entry, id) => {
+  const n = Number(id);
+  entry.ring_first_user_ids = entry.ring_first_user_ids.includes(n)
+    ? entry.ring_first_user_ids.filter(x => x !== n)
+    : [...entry.ring_first_user_ids, n];
+};
+// candidatos à linha de frente: os marcados em "quem atende" (ou todos)
+const firstCandidates = entry =>
+  entry.ring_user_ids.length
+    ? agentList.value.filter(a => entry.ring_user_ids.includes(Number(a.id)))
+    : agentList.value;
+
+// estado da Meta por caixa: { [inbox_id]: { ok, meta, health, error } }
+const metaByInbox = ref({});
+const checkingInbox = ref(null);
+const checkMetaStatus = async (inboxId = null) => {
+  const id = Number(inboxId || form.value.inboxes[0]?.inbox_id);
+  if (!id || checkingInbox.value) return;
+  checkingInbox.value = id;
   isCheckingMeta.value = true;
   metaStatusError.value = '';
   try {
     // { ok, meta: { calling_status, callback_permission_status, checked_at, error }, health: { messaging_limit_tier, quality_rating } }
-    const result = await store.dispatch('crm/callsMetaStatus');
+    const result = await store.dispatch('crm/callsMetaStatus', id);
     if (result?.ok === false) {
-      metaStatus.value = null;
-      metaStatusError.value = result.error || 'A Meta não respondeu.';
+      metaByInbox.value = {
+        ...metaByInbox.value,
+        [id]: { ok: false, error: result.error || 'A Meta não respondeu.' },
+      };
+      if (id === Number(form.value.inboxes[0]?.inbox_id)) {
+        metaStatus.value = null;
+        metaStatusError.value = result.error || 'A Meta não respondeu.';
+      }
       return;
     }
-    metaStatus.value = result;
+    metaByInbox.value = { ...metaByInbox.value, [id]: result };
+    if (id === Number(form.value.inboxes[0]?.inbox_id))
+      metaStatus.value = result;
   } catch (error) {
     metaStatus.value = null;
     metaStatusError.value =
       error?.response?.data?.error || 'Não consegui consultar a Meta agora.';
   } finally {
     isCheckingMeta.value = false;
+    checkingInbox.value = null;
   }
 };
 
@@ -112,7 +172,7 @@ onMounted(async () => {
   }
   fillForm();
   isLoading.value = false;
-  if (form.value.inbox_id) checkMetaStatus();
+  form.value.inboxes.forEach(e => e.inbox_id && checkMetaStatus(e.inbox_id));
 });
 watch(callsConfig, () => {
   if (!isSaving.value && !isEnabling.value) fillForm();
@@ -120,8 +180,17 @@ watch(callsConfig, () => {
 
 const payload = () => ({
   enabled: form.value.enabled,
-  inbox_id: form.value.inbox_id ? Number(form.value.inbox_id) : null,
-  ring_user_ids: form.value.ring_user_ids,
+  inboxes: form.value.inboxes
+    .filter(e => e.inbox_id)
+    .map(e => ({
+      inbox_id: Number(e.inbox_id),
+      ring_user_ids: e.ring_user_ids,
+      ring_first_user_ids: e.ring_first_user_ids,
+      ring_cascade_seconds: Math.min(
+        60,
+        Math.max(5, Number(e.ring_cascade_seconds) || 12)
+      ),
+    })),
   business_hours_only: form.value.business_hours_only,
   hours: { ...form.value.hours },
   record: form.value.record,
@@ -129,9 +198,10 @@ const payload = () => ({
   permission_message: form.value.permission_message.trim(),
 });
 
+const hasInbox = computed(() => form.value.inboxes.some(e => e.inbox_id));
 const save = async () => {
-  if (form.value.enabled && !form.value.inbox_id) {
-    useAlert('Escolha a caixa de WhatsApp que vai receber as ligações.');
+  if (form.value.enabled && !hasInbox.value) {
+    useAlert('Escolha pelo menos uma caixa de WhatsApp para as ligações.');
     return;
   }
   isSaving.value = true;
@@ -148,21 +218,24 @@ const save = async () => {
 };
 
 // liga na Meta (calling ENABLED + callback ENABLED) e mostra a resposta crua
-const enableAtMeta = async () => {
-  if (!form.value.inbox_id) {
+const enablingInbox = ref(null);
+const enableAtMeta = async inboxId => {
+  const id = Number(inboxId || form.value.inboxes[0]?.inbox_id);
+  if (!id) {
     useAlert('Escolha a caixa de WhatsApp antes de ativar na Meta.');
     return;
   }
   isEnabling.value = true;
+  enablingInbox.value = id;
   enableResult.value = null;
   try {
-    // salva antes, para o backend saber a caixa
+    // salva antes, para o backend saber as caixas
     await store.dispatch('crm/updateCalls', payload());
-    const result = await store.dispatch('crm/enableCallsAtMeta');
-    enableResult.value = result;
+    const result = await store.dispatch('crm/enableCallsAtMeta', id);
+    enableResult.value = { ...result, inbox_id: id };
     if (result?.ok) {
-      useAlert('Ligações ativadas na Meta!');
-      checkMetaStatus();
+      useAlert(`Ligações ativadas na Meta em ${inboxName(id)}!`);
+      checkMetaStatus(id);
     }
   } catch (error) {
     enableResult.value = {
@@ -175,6 +248,7 @@ const enableAtMeta = async () => {
     };
   } finally {
     isEnabling.value = false;
+    enablingInbox.value = null;
   }
 };
 
@@ -190,14 +264,14 @@ const pretty = value => {
 
 const META_ON = ['ENABLED', 'enabled', true];
 const metaOn = v => META_ON.includes(v);
-const liveMeta = computed(
-  () => metaStatus.value?.meta || callsConfig.value?.meta || {}
+// estado por caixa (consulta ao vivo > último visto salvo na caixa)
+const metaFor = entry =>
+  metaByInbox.value[Number(entry.inbox_id)]?.meta || entry.meta || {};
+const healthFor = entry => metaByInbox.value[Number(entry.inbox_id)]?.health;
+const metaErrorFor = entry => metaByInbox.value[Number(entry.inbox_id)]?.error;
+const anyMetaOn = computed(() =>
+  form.value.inboxes.some(e => metaOn(metaFor(e).calling_status))
 );
-const metaCalling = computed(() => liveMeta.value.calling_status);
-const metaCallback = computed(() => liveMeta.value.callback_permission_status);
-const metaTier = computed(() => metaStatus.value?.health?.messaging_limit_tier);
-const metaQuality = computed(() => metaStatus.value?.health?.quality_rating);
-const metaCheckedAt = computed(() => liveMeta.value.checked_at);
 const fmtDate = ts =>
   ts
     ? new Date(ts).toLocaleString('pt-BR', {
@@ -232,15 +306,16 @@ const inputClass =
         <div
           class="flex items-center gap-3 px-4 py-3 rounded-xl border"
           :class="
-            callsConfig.enabled && metaOn(metaCalling)
+            callsConfig.enabled && anyMetaOn
               ? 'bg-green-500/8 border-green-500/20 text-green-700'
               : 'bg-n-alpha-1 border-n-weak text-n-slate-10'
           "
         >
           <span class="i-lucide-phone-call text-base flex-shrink-0" />
           <span class="text-sm font-medium">
-            <template v-if="callsConfig.enabled && metaOn(metaCalling)">
+            <template v-if="callsConfig.enabled && anyMetaOn">
               Ligações ativas — a clínica recebe e faz chamadas pelo WhatsApp
+              ({{ form.inboxes.length }} caixa(s))
             </template>
             <template v-else-if="callsConfig.enabled">
               Ligado aqui, mas a Meta ainda não confirmou — use "Ativar ligações
@@ -285,63 +360,218 @@ const inputClass =
             </span>
           </label>
 
-          <!-- Caixa -->
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
-              Caixa de WhatsApp <span class="text-red-500">*</span>
-            </label>
-            <select
-              v-model="form.inbox_id"
-              :class="inputClass"
-              @change="checkMetaStatus"
-            >
-              <option :value="null">Escolha a caixa…</option>
-              <option v-for="i in whatsappInboxes" :key="i.id" :value="i.id">
-                {{ i.name
-                }}<template v-if="i.phone_number">
-                  · {{ i.phone_number }}
-                </template>
-              </option>
-            </select>
-            <p class="text-xs text-n-slate-9 mt-1">
-              Só caixas do WhatsApp Cloud (API oficial da Meta) podem receber
-              ligações.
-              <template v-if="!whatsappInboxes.length">
-                Nenhuma encontrada nesta conta.
-              </template>
-            </p>
-          </div>
-
-          <!-- Quem atende -->
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
-              Quem atende as ligações
-            </label>
-            <div class="flex flex-wrap gap-1.5">
+          <!-- Caixas (várias, cada uma com seus atendentes — 18/09) -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-medium text-n-slate-11">
+                Caixas de WhatsApp que recebem ligações
+                <span class="text-red-500">*</span>
+              </label>
               <button
-                v-for="a in agentList"
-                :key="a.id"
                 type="button"
-                class="text-xs px-2.5 py-1 rounded-full border transition-colors"
-                :class="
-                  form.ring_user_ids.includes(Number(a.id))
-                    ? 'bg-n-brand text-white border-n-brand'
-                    : 'border-n-weak text-n-slate-11 hover:border-n-brand/40'
-                "
-                @click="toggleAgent(a.id)"
+                class="text-xs font-semibold text-n-brand hover:underline disabled:opacity-40"
+                :disabled="form.inboxes.length >= whatsappInboxes.length"
+                @click="addInbox"
               >
-                {{ a.name }}
+                + adicionar caixa
               </button>
             </div>
-            <p class="text-xs text-n-slate-9 mt-1">
-              <template v-if="!form.ring_user_ids.length">
-                Ninguém marcado = toca para todos os membros da caixa.
-              </template>
-              <template v-else>
-                Toca só para {{ form.ring_user_ids.length }} atendente(s)
-                marcado(s). Quem está "offline" não ouve tocar.
-              </template>
+            <p v-if="!form.inboxes.length" class="text-xs text-n-slate-9">
+              Nenhuma caixa ainda. Clique em "adicionar caixa" — cada caixa tem
+              seus próprios atendentes e sua linha de frente.
             </p>
+            <div
+              v-for="(entry, idx) in form.inboxes"
+              :key="idx"
+              class="rounded-xl border border-n-weak bg-n-solid-1 p-4 space-y-3"
+            >
+              <div class="flex items-center gap-2">
+                <span class="i-lucide-inbox text-n-slate-10" />
+                <select
+                  v-model="entry.inbox_id"
+                  :class="inputClass"
+                  class="!mb-0 flex-1"
+                  style="margin-bottom: 0"
+                  @change="checkMetaStatus(entry.inbox_id)"
+                >
+                  <option :value="null">Escolha a caixa…</option>
+                  <option
+                    v-for="i in whatsappInboxes"
+                    :key="i.id"
+                    :value="i.id"
+                    :disabled="
+                      form.inboxes.some(
+                        (e, j) =>
+                          j !== idx && Number(e.inbox_id) === Number(i.id)
+                      )
+                    "
+                  >
+                    {{ i.name }}
+                  </option>
+                </select>
+                <span
+                  v-if="entry.inbox_id"
+                  class="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                  :class="
+                    metaOn(metaFor(entry).calling_status)
+                      ? 'bg-green-500/15 text-green-700'
+                      : 'bg-amber-500/15 text-amber-700'
+                  "
+                >
+                  {{
+                    metaOn(metaFor(entry).calling_status)
+                      ? 'ativa na Meta'
+                      : 'não ativa na Meta'
+                  }}
+                </span>
+                <button
+                  type="button"
+                  class="p-1 rounded text-n-slate-10 hover:text-red-600 hover:bg-red-500/10"
+                  title="Remover esta caixa"
+                  @click="removeInbox(idx)"
+                >
+                  <span class="i-lucide-trash-2 text-sm" />
+                </button>
+              </div>
+
+              <!-- Quem atende nesta caixa -->
+              <div>
+                <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                  Quem atende as ligações desta caixa
+                </p>
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    v-for="a in agentList"
+                    :key="a.id"
+                    type="button"
+                    class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+                    :class="
+                      entry.ring_user_ids.includes(Number(a.id))
+                        ? 'bg-n-brand text-white border-n-brand'
+                        : 'border-n-weak text-n-slate-11 hover:border-n-brand/40'
+                    "
+                    @click="toggleAgent(entry, a.id)"
+                  >
+                    {{ a.name }}
+                  </button>
+                </div>
+                <p class="text-xs text-n-slate-9 mt-1">
+                  <template v-if="!entry.ring_user_ids.length">
+                    Ninguém marcado = toca para todos os membros da caixa.
+                  </template>
+                  <template v-else>
+                    Toca só para {{ entry.ring_user_ids.length }} atendente(s)
+                    marcado(s). Quem está "offline" não ouve tocar.
+                  </template>
+                </p>
+              </div>
+
+              <!-- Quem toca primeiro nesta caixa -->
+              <div>
+                <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                  ⭐ Quem toca primeiro
+                </p>
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    v-for="a in firstCandidates(entry)"
+                    :key="`first-${a.id}`"
+                    type="button"
+                    class="text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1"
+                    :class="
+                      isFirst(entry, a.id)
+                        ? 'bg-amber-400 text-amber-950 border-amber-400'
+                        : 'border-n-weak text-n-slate-11 hover:border-amber-400/60'
+                    "
+                    @click="toggleFirst(entry, a.id)"
+                  >
+                    <span class="i-lucide-star text-[10px]" />
+                    {{ a.name }}
+                  </button>
+                </div>
+                <div
+                  class="flex items-center gap-2 mt-2 text-xs text-n-slate-11 flex-wrap"
+                >
+                  <span>Se ninguém da linha de frente atender em</span>
+                  <input
+                    v-model.number="entry.ring_cascade_seconds"
+                    type="number"
+                    min="5"
+                    max="60"
+                    step="1"
+                    class="w-16 text-center h-7 text-xs border border-n-weak rounded-lg bg-n-solid-1 text-n-slate-12 focus:outline-none focus:border-n-brand"
+                    style="width: 4.5rem; margin-bottom: 0"
+                  />
+                  <span>segundos, toca para todos os demais.</span>
+                </div>
+                <p class="text-xs text-n-slate-9 mt-1">
+                  <template v-if="!entry.ring_first_user_ids.length">
+                    Ninguém marcado = toca para todos ao mesmo tempo.
+                  </template>
+                  <template v-else>
+                    Toca primeiro para {{ entry.ring_first_user_ids.length }}
+                    pessoa(s); as outras entram depois da espera.
+                  </template>
+                </p>
+              </div>
+
+              <!-- Meta nesta caixa -->
+              <div
+                class="flex items-center gap-2 flex-wrap pt-2 border-t border-n-weak"
+              >
+                <button
+                  type="button"
+                  class="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50 flex items-center gap-1.5"
+                  style="background: linear-gradient(135deg, #128c7e, #25d366)"
+                  :disabled="isEnabling || !entry.inbox_id"
+                  title="Liga o recurso de chamadas neste número, lá na Meta"
+                  @click="enableAtMeta(entry.inbox_id)"
+                >
+                  <span
+                    :class="
+                      isEnabling && enablingInbox === Number(entry.inbox_id)
+                        ? 'i-lucide-loader-2 animate-spin'
+                        : 'i-lucide-zap'
+                    "
+                    class="text-xs"
+                  />
+                  Ativar na Meta
+                </button>
+                <button
+                  type="button"
+                  class="text-xs font-medium px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:text-n-brand hover:border-n-brand/40 disabled:opacity-50 flex items-center gap-1"
+                  :disabled="isCheckingMeta || !entry.inbox_id"
+                  @click="checkMetaStatus(entry.inbox_id)"
+                >
+                  <span
+                    :class="
+                      checkingInbox === Number(entry.inbox_id)
+                        ? 'i-lucide-loader-2 animate-spin'
+                        : 'i-lucide-refresh-cw'
+                    "
+                    class="text-xs"
+                  />
+                  Consultar
+                </button>
+                <span class="text-[11px] text-n-slate-9">
+                  calling: <b>{{ pretty(metaFor(entry).calling_status) }}</b>
+                  · callback:
+                  <b>{{ pretty(metaFor(entry).callback_permission_status) }}</b>
+                  <template v-if="healthFor(entry)">
+                    · limite/dia:
+                    <b>{{ pretty(healthFor(entry).messaging_limit_tier) }}</b>
+                  </template>
+                  <template v-if="metaFor(entry).checked_at">
+                    · {{ fmtDate(metaFor(entry).checked_at) }}
+                  </template>
+                </span>
+                <span
+                  v-if="metaErrorFor(entry) || metaFor(entry).error"
+                  class="text-[11px] text-red-600 w-full"
+                >
+                  {{ metaErrorFor(entry) || metaFor(entry).error }}
+                </span>
+              </div>
+            </div>
           </div>
 
           <!-- Horário -->
@@ -437,23 +667,6 @@ const inputClass =
             >
               {{ isSaving ? 'Salvando…' : 'Salvar' }}
             </button>
-            <button
-              class="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 flex items-center gap-1.5"
-              style="background: linear-gradient(135deg, #128c7e, #25d366)"
-              :disabled="isEnabling || !form.inbox_id"
-              title="Liga o recurso de chamadas no número, lá na Meta"
-              @click="enableAtMeta"
-            >
-              <span
-                :class="
-                  isEnabling ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-zap'
-                "
-                class="text-sm"
-              />
-              {{
-                isEnabling ? 'Falando com a Meta…' : 'Ativar ligações na Meta'
-              }}
-            </button>
           </div>
 
           <!-- Resultado da Meta (cru, para o técnico) -->
@@ -497,83 +710,6 @@ const inputClass =
               {{ pretty(enableResult.meta || enableResult.error) }}
             </div>
           </div>
-        </div>
-
-        <!-- Estado na Meta -->
-        <div
-          class="bg-n-solid-2 rounded-2xl border border-n-weak p-6 space-y-3"
-        >
-          <div class="flex items-center gap-2">
-            <h3
-              class="text-sm font-semibold text-n-slate-12 flex items-center gap-2"
-            >
-              <span class="i-lucide-radio text-base text-n-slate-10" />
-              Estado na Meta
-            </h3>
-            <button
-              class="ml-auto text-xs font-medium px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:text-n-brand hover:border-n-brand/40 disabled:opacity-50 flex items-center gap-1"
-              :disabled="isCheckingMeta || !form.inbox_id"
-              @click="checkMetaStatus"
-            >
-              <span
-                :class="
-                  isCheckingMeta
-                    ? 'i-lucide-loader-2 animate-spin'
-                    : 'i-lucide-refresh-cw'
-                "
-                class="text-xs"
-              />
-              Consultar agora
-            </button>
-          </div>
-          <p v-if="!form.inbox_id" class="text-xs text-n-slate-9">
-            Escolha a caixa para consultar.
-          </p>
-          <p v-else-if="metaStatusError" class="text-xs text-red-600">
-            {{ metaStatusError }}
-          </p>
-          <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-            <div class="rounded-lg bg-n-alpha-1 px-3 py-2">
-              <p class="text-n-slate-9">Chamadas (calling)</p>
-              <p
-                class="font-semibold"
-                :class="
-                  metaOn(metaCalling) ? 'text-green-600' : 'text-n-slate-12'
-                "
-              >
-                {{ pretty(metaCalling) }}
-              </p>
-            </div>
-            <div class="rounded-lg bg-n-alpha-1 px-3 py-2">
-              <p class="text-n-slate-9">Permissão de retorno (callback)</p>
-              <p
-                class="font-semibold"
-                :class="
-                  metaOn(metaCallback) ? 'text-green-600' : 'text-n-slate-12'
-                "
-              >
-                {{ pretty(metaCallback) }}
-              </p>
-            </div>
-            <div class="rounded-lg bg-n-alpha-1 px-3 py-2">
-              <p class="text-n-slate-9">Limite de mensagens/dia</p>
-              <p class="font-semibold text-n-slate-12">
-                {{ pretty(metaTier) }}
-              </p>
-            </div>
-            <div class="rounded-lg bg-n-alpha-1 px-3 py-2">
-              <p class="text-n-slate-9">Qualidade do número</p>
-              <p class="font-semibold text-n-slate-12">
-                {{ pretty(metaQuality) }}
-              </p>
-            </div>
-          </div>
-          <p v-if="form.inbox_id" class="text-[11px] text-n-slate-9">
-            Última consulta: {{ fmtDate(metaCheckedAt) }}
-            <template v-if="callsConfig.meta?.error">
-              · último erro: {{ callsConfig.meta.error }}
-            </template>
-          </p>
         </div>
 
         <!-- Como usar -->

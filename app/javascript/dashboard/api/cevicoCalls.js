@@ -44,22 +44,26 @@ class CevicoCallsAPI extends ApiClient {
     return axios.get(`${this.url}/dashboard`, { params });
   }
 
-  initiate(contactId, sdpOffer) {
+  // inboxId (opcional): a caixa da conversa aberta — com várias caixas
+  // configuradas, a ligação sai por ela; sem isso o backend escolhe
+  initiate(contactId, sdpOffer, inboxId = null) {
     return axios.post(`${this.url}/initiate`, {
       contact_id: contactId,
       sdp_offer: sdpOffer,
+      inbox_id: inboxId,
     });
   }
 
-  requestPermission(contactId) {
+  requestPermission(contactId, inboxId = null) {
     return axios.post(`${this.url}/request_permission`, {
       contact_id: contactId,
+      inbox_id: inboxId,
     });
   }
 
-  permissionStatus(contactId) {
+  permissionStatus(contactId, inboxId = null) {
     return axios.get(`${this.url}/permission_status`, {
-      params: { contact_id: contactId },
+      params: { contact_id: contactId, inbox_id: inboxId || undefined },
     });
   }
 }

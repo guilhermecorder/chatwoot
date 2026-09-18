@@ -551,12 +551,54 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
   end
 
-  # caixa (só da conta) e quem atende (só gente da conta; vazio = todos da caixa)
+  # caixas (só da conta) e quem atende em cada uma (só gente da conta;
+  # vazio = todos da caixa). `inboxes` = formato novo (várias caixas);
+  # inbox_id/ring_* soltos = formato antigo (1 caixa), ainda aceito.
   def apply_call_targets(calls)
     calls['inbox_id'] = Current.account.inboxes.find_by(id: params[:inbox_id])&.id if params.key?(:inbox_id)
-    return unless params.key?(:ring_user_ids)
+    apply_call_ring(calls)
+    return unless params.key?(:inboxes)
 
-    calls['ring_user_ids'] = Array(params[:ring_user_ids]).map(&:to_i) & Current.account.users.pluck(:id)
+    calls['inboxes'] = sanitize_call_inboxes(calls)
+    first = calls['inboxes'].first || {}
+    calls.merge!('inbox_id' => first['inbox_id'], 'ring_user_ids' => first['ring_user_ids'] || [],
+                 'ring_first_user_ids' => first['ring_first_user_ids'] || [],
+                 'ring_cascade_seconds' => first['ring_cascade_seconds'])
+  end
+
+  # só caixas WhatsApp (API oficial) da conta, sem repetir; o estado da Meta
+  # já visto em cada caixa é preservado
+  def sanitize_call_inboxes(calls)
+    known = Array(calls['inboxes']).index_by { |c| c['inbox_id'].to_i }
+    entries = Array(params[:inboxes]).filter_map { |raw| sanitize_call_inbox(raw, known) }
+    entries.uniq { |c| c['inbox_id'] }
+  end
+
+  def sanitize_call_inbox(raw, known)
+    h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+    inbox = calls_inbox_from(h['inbox_id'])
+    return nil unless inbox
+
+    Crm::Calls::Settings.normalize_inbox(
+      h.merge('inbox_id' => inbox.id, 'ring_user_ids' => account_user_ids(h['ring_user_ids']),
+              'ring_first_user_ids' => account_user_ids(h['ring_first_user_ids']),
+              'meta' => known.dig(inbox.id, 'meta') || {})
+    )
+  end
+
+  # quem atende, quem toca primeiro (só gente da conta) e a espera da cascata
+  def apply_call_ring(calls)
+    %w[ring_user_ids ring_first_user_ids].each do |key|
+      calls[key] = account_user_ids(params[key]) if params.key?(key)
+    end
+    return unless params.key?(:ring_cascade_seconds)
+
+    range = Crm::Calls::Settings::CASCADE_RANGE
+    calls['ring_cascade_seconds'] = params[:ring_cascade_seconds].to_i.clamp(range.min, range.max)
+  end
+
+  def account_user_ids(raw)
+    Array(raw).map(&:to_i) & Current.account.users.pluck(:id)
   end
 
   # "HH:MM" válidos e início < fim; senão volta ao padrão 08:00–19:00
@@ -579,10 +621,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
     client = Crm::Calls::MetaClient.new(inbox.channel)
     client.update_settings(status: 'ENABLED', call_icon_visibility: 'DEFAULT', callback_permission_status: 'ENABLED')
-    render json: { ok: true, meta: store_calls_meta(client.settings['calling'] || {}) }
+    render json: { ok: true, inbox_id: inbox.id, meta: store_calls_meta(inbox, client.settings['calling'] || {}) }
   rescue Crm::Calls::MetaError => e
-    render json: { ok: false, error: "A Meta não ligou as chamadas neste número. #{CALLS_META_TIP}",
-                   message: e.message, code: e.code, meta: store_calls_meta({}, error: e.message) }
+    render json: { ok: false, inbox_id: inbox.id, error: "A Meta não ligou as chamadas neste número. #{CALLS_META_TIP}",
+                   message: e.message, code: e.code, meta: store_calls_meta(inbox, {}, error: e.message) }
   end
 
   # GET calls_meta_status: estado do recurso na Meta + saúde do número (limite/qualidade)
@@ -591,10 +633,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     return render json: { ok: false, error: 'Nenhuma caixa configurada para ligações.' } unless inbox
 
     calling = Crm::Calls::MetaClient.new(inbox.channel).settings['calling'] || {}
-    render json: { ok: true, meta: store_calls_meta(calling), health: calls_health(inbox) }
+    render json: { ok: true, inbox_id: inbox.id, meta: store_calls_meta(inbox, calling), health: calls_health(inbox) }
   rescue Crm::Calls::MetaError => e
-    render json: { ok: false, error: "A Meta não respondeu: #{e.message}", message: e.message, code: e.code,
-                   meta: store_calls_meta({}, error: e.message), health: calls_health(inbox) }
+    render json: { ok: false, inbox_id: inbox.id, error: "A Meta não respondeu: #{e.message}", message: e.message, code: e.code,
+                   meta: store_calls_meta(inbox, {}, error: e.message), health: calls_health(inbox) }
   end
 
   # caixa das ligações: a enviada (se for da conta) ou a configurada; só WhatsApp API oficial
@@ -609,17 +651,30 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     inbox
   end
 
-  # guarda em agenda_config.calls.meta o último estado visto na Meta (erro não apaga o estado anterior)
-  def store_calls_meta(calling, error: nil)
+  # guarda o último estado visto na Meta NA CAIXA (agenda_config.calls.inboxes[].meta;
+  # erro não apaga o estado anterior). A primeira caixa também espelha em calls.meta.
+  def store_calls_meta(inbox, calling, error: nil)
     cfg = crm_settings.agenda_config || {}
     calls = cfg['calls'] || {}
-    seen = { 'calling_status' => calling['status'], 'callback_permission_status' => calling['callback_permission_status'],
-             'call_icon_visibility' => calling['call_icon_visibility'] }.compact
-    meta = (calls['meta'] || {}).merge(seen).merge('checked_at' => Time.current.iso8601, 'error' => error)
-    calls['meta'] = meta
-    cfg['calls'] = calls
-    crm_settings.update!(agenda_config: cfg)
-    meta
+    entries = calls_entries_with(inbox)
+    entry = entries.find { |c| c['inbox_id'] == inbox.id }
+    entry['meta'] = (entry['meta'] || {}).merge(calls_meta_seen(calling), 'checked_at' => Time.current.iso8601, 'error' => error)
+    calls['inboxes'] = entries
+    calls['meta'] = entries.first['meta']
+    crm_settings.update!(agenda_config: cfg.merge('calls' => calls))
+    entry['meta']
+  end
+
+  # as caixas configuradas, garantindo uma entrada para esta caixa
+  def calls_entries_with(inbox)
+    entries = Crm::Calls::Settings.new(Current.account, crm_settings: crm_settings).inboxes
+    entries << Crm::Calls::Settings.normalize_inbox('inbox_id' => inbox.id) if entries.none? { |c| c['inbox_id'] == inbox.id }
+    entries
+  end
+
+  def calls_meta_seen(calling)
+    { 'calling_status' => calling['status'], 'callback_permission_status' => calling['callback_permission_status'],
+      'call_icon_visibility' => calling['call_icon_visibility'] }.compact
   end
 
   def calls_health(inbox)
@@ -833,6 +888,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # clínicas) e se a equipe pode visualizar as anotações (LGPD: fechado
     # por padrão)
     if params.key?(:clinical_access)
+      # cadeado (rodada 171): quem NÃO é admin não muda quem lê o prontuário —
+      # a área "settings" concedida não basta para se incluir entre os médicos
+      unless Current.account_user.administrator?
+        return render json: { error: 'Só administradores mudam o acesso às anotações clínicas.' }, status: :forbidden
+      end
+
       access = params.require(:clinical_access).permit(:team_view, doctor_user_ids: []).to_h
       cfg['clinical_access'] = {
         'doctor_user_ids' => Array(access['doctor_user_ids']).map(&:to_i),

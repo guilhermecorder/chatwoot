@@ -388,6 +388,7 @@ const DAY_MENU_DEFAULT = ['crm', 'conversation', 'agenda', 'goals', 'canned'];
 const GRANT_BY_ITEM_NAME = {
   Reports: ['reports'],
   'Campanha WhatsApp': ['campaigns'],
+  'Jornada do paciente': ['campaigns'],
   'Automations Hub': ['automations', 'data_tools'],
   'Integrations Hub': ['settings'],
   Finance: ['finance'],
@@ -403,6 +404,7 @@ const FEATURE_BY_ITEM_NAME = {
   Reports: 'reports',
   CRM: 'crm',
   'Campanha WhatsApp': 'crm_campaigns',
+  'Jornada do paciente': 'crm_journey',
   Tasks: 'tasks',
   Agenda: 'agenda',
   Academy: 'academy',
@@ -828,6 +830,13 @@ const menuItems = computed(() => {
       label: 'Campanha WhatsApp',
       icon: 'i-lucide-megaphone',
       to: accountScopedRoute('crm_campaigns'),
+    },
+    // 🗺️ Mensagens da jornada (item 168)
+    {
+      name: 'Jornada do paciente',
+      label: 'Jornada do paciente',
+      icon: 'i-lucide-route',
+      to: accountScopedRoute('crm_journey'),
     },
     // Formulários (pré-operatório etc.) — visão de gestão, só admin
     ...(isAdmin.value

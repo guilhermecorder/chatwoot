@@ -237,7 +237,7 @@
       @keyframes cevicoVira { 0%, 72% { transform: rotate(0) } 88%, 100% { transform: rotate(180deg) } }
       #construcao .ampulheta { animation: cevicoVira 2.4s infinite ease-in-out; }
     </style>
-    <script>
+    <script nonce="<%= content_security_policy_nonce %>">
       // consulta o status até a IA terminar; pronta = recarrega em modo "cascata"
       (function () {
         var tries = 0;
@@ -282,7 +282,7 @@
     <div id="pronta-aviso" style="position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:110;background:linear-gradient(135deg,#065F46,#10B981);color:#fff;padding:10px 20px;border-radius:999px;font-size:14px;font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,.3);white-space:nowrap">
       ✅ Página pronta!<%= ' Clique nos textos para retocar.' if @can_edit %>
     </div>
-    <script>
+    <script nonce="<%= content_security_policy_nonce %>">
       setTimeout(function () { var el = document.getElementById('pronta-aviso'); if (el) el.style.display = 'none'; }, 6000);
     </script>
   <% end %>
@@ -402,7 +402,7 @@
     Conteúdo informativo — não substitui a avaliação médica.
   </footer>
 
-  <script>
+  <script nonce="<%= content_security_policy_nonce %>">
     // efeitos de entrada (foco/movimento) + efeitos guiados pelo scroll
     // (miopia/astigmatismo: a "correção" acontece conforme a seção sobe)
     (function () {
@@ -488,7 +488,7 @@
         <button id="chat-enviar" style="background:linear-gradient(135deg,#d4af37,#f4de8e);color:#072A4C;font-weight:800;font-size:12.5px;border:0;border-radius:10px;padding:9px 12px;cursor:pointer">➤</button>
       </div>
     </div>
-    <script>
+    <script nonce="<%= content_security_policy_nonce %>">
       (function () {
         var els = document.querySelectorAll('[data-edit]');
         els.forEach(function (el) {

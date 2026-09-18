@@ -25,19 +25,27 @@ class CrmAPI extends ApiClient {
 
   // ── Stages ────────────────────────────────────────────────────────
   createStage(pipelineId, data) {
-    return axios.post(`${this.url}/pipelines/${pipelineId}/stages`, { stage: data });
+    return axios.post(`${this.url}/pipelines/${pipelineId}/stages`, {
+      stage: data,
+    });
   }
 
   updateStage(pipelineId, stageId, data) {
-    return axios.put(`${this.url}/pipelines/${pipelineId}/stages/${stageId}`, { stage: data });
+    return axios.put(`${this.url}/pipelines/${pipelineId}/stages/${stageId}`, {
+      stage: data,
+    });
   }
 
   deleteStage(pipelineId, stageId) {
-    return axios.delete(`${this.url}/pipelines/${pipelineId}/stages/${stageId}`);
+    return axios.delete(
+      `${this.url}/pipelines/${pipelineId}/stages/${stageId}`
+    );
   }
 
   reorderStages(pipelineId, stageIds) {
-    return axios.post(`${this.url}/pipelines/${pipelineId}/stages/reorder`, { stage_ids: stageIds });
+    return axios.post(`${this.url}/pipelines/${pipelineId}/stages/reorder`, {
+      stage_ids: stageIds,
+    });
   }
 
   // ── Campanhas (mensagens em massa) ────────────────────────────────
@@ -118,17 +126,25 @@ class CrmAPI extends ApiClient {
   // ── 📈 Estúdio PRO MAX (item 129) ─────────────────────────────────
   // séries diárias do período (o estúdio agrega em semana/mês e faz candles)
   getProSeries(pipelineId, params = {}) {
-    return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard/pro_series`, { params });
+    return axios.get(
+      `${this.url}/pipelines/${pipelineId}/dashboard/pro_series`,
+      { params }
+    );
   }
 
   // 🟥 lista de resgate de UM motivo de perda (item 145)
   getLossContacts(pipelineId, params = {}) {
-    return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard/loss_contacts`, { params });
+    return axios.get(
+      `${this.url}/pipelines/${pipelineId}/dashboard/loss_contacts`,
+      { params }
+    );
   }
 
   // histórico de AÇÕES DA EMPRESA (marcadores da linha do tempo) — admin
   updateCompanyActions(companyActions) {
-    return axios.post(`${this.url}/settings/update_agenda`, { company_actions: companyActions });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      company_actions: companyActions,
+    });
   }
 
   // ── Relatório de anúncios (Meta, atribuição CTWA) ─────────────────
@@ -196,17 +212,23 @@ class CrmAPI extends ApiClient {
 
   // 🕐 horário de envio dos robôs de follow-up (Automações → Robôs, item 147)
   updateFollowupHours(hours) {
-    return axios.post(`${this.url}/settings/update_agenda`, { followup_hours: hours });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      followup_hours: hours,
+    });
   }
 
   // 🏷️ etiquetas que encerram o follow-up de todos os robôs (rodada 158)
   updateFollowupStopLabels(labels) {
-    return axios.post(`${this.url}/settings/update_agenda`, { followup_stop_labels: labels });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      followup_stop_labels: labels,
+    });
   }
 
   // 📅 lembretes do dia da consulta D-1/D-0 (Automações → Robôs, item 156)
   updateAppointmentReminders(reminders) {
-    return axios.post(`${this.url}/settings/update_agenda`, { appointment_reminders: reminders });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      appointment_reminders: reminders,
+    });
   }
 
   // 🏥 OftalmoFácil (item 157): testar a conexão só-leitura + sincronizar agora
@@ -225,32 +247,44 @@ class CrmAPI extends ApiClient {
 
   // responsável por painel do Meu Painel (Configurações → Painéis)
   updatePanelOwners(panelOwners) {
-    return axios.post(`${this.url}/settings/update_agenda`, { panel_owners: panelOwners });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      panel_owners: panelOwners,
+    });
   }
 
   // qual login o Atendimento IA usa (bloco "Meu desempenho")
   updateAiUser(userId) {
-    return axios.post(`${this.url}/settings/update_agenda`, { ai_user_id: userId });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      ai_user_id: userId,
+    });
   }
 
   // tema (família de cores) por painel do Meu Painel (item 140)
   updatePanelThemes(panelThemes) {
-    return axios.post(`${this.url}/settings/update_agenda`, { panel_themes: panelThemes });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      panel_themes: panelThemes,
+    });
   }
 
   // métricas individuais do "Meu desempenho" por pessoa (item 139)
   updatePerformanceMetrics(performanceMetrics) {
-    return axios.post(`${this.url}/settings/update_agenda`, { performance_metrics: performanceMetrics });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      performance_metrics: performanceMetrics,
+    });
   }
 
   // médicos com a agenda fechada (item 76)
   updateClosedDoctors(closedDoctors) {
-    return axios.post(`${this.url}/settings/update_agenda`, { closed_doctors: closedDoctors });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      closed_doctors: closedDoctors,
+    });
   }
 
   // etiquetas + resposta de formulário das consultas do dia (item 76)
   getAgendaDayDetails(taskIds) {
-    return axios.get(`${this.url.replace(/crm$/, 'tasks')}/agenda_details`, { params: { ids: taskIds.join(',') } });
+    return axios.get(`${this.url.replace(/crm$/, 'tasks')}/agenda_details`, {
+      params: { ids: taskIds.join(',') },
+    });
   }
 
   updateAgendaBlocked(blocked) {
@@ -258,17 +292,23 @@ class CrmAPI extends ApiClient {
   }
 
   updateAgendaBlockedDays(blockedDays) {
-    return axios.post(`${this.url}/settings/update_agenda`, { blocked_days: blockedDays });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      blocked_days: blockedDays,
+    });
   }
 
   // locais de cirurgia (clínicas parceiras — IOP etc.) do trilho de cirurgias
   updateSurgeryLocations(surgeryLocations) {
-    return axios.post(`${this.url}/settings/update_agenda`, { surgery_locations: surgeryLocations });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      surgery_locations: surgeryLocations,
+    });
   }
 
   // janelas da sala cirúrgica (clínica + dia + horário + bloco)
   updateSurgeryWindows(surgeryWindows) {
-    return axios.post(`${this.url}/settings/update_agenda`, { surgery_windows: surgeryWindows });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      surgery_windows: surgeryWindows,
+    });
   }
 
   // tema visual dos ambientes (Santorini, Flor del Mar...) — admin
@@ -296,45 +336,56 @@ class CrmAPI extends ApiClient {
   updateInboxInvestments(investments, captureInboxIds) {
     const payload = { investments };
     if (captureInboxIds) payload.capture_inbox_ids = captureInboxIds;
-    return axios.post(
-      `${this.url}/settings/update_inbox_investments`,
-      payload
-    );
+    return axios.post(`${this.url}/settings/update_inbox_investments`, payload);
   }
 
   // qual versão do Meu Painel cada agente vê — admin
   // 🧑‍🤝‍🧑 painéis por pessoa (rodada 160): [{id, name, base, user_ids}]
   updatePanelVariants(panelVariants) {
-    return axios.post(`${this.url}/settings/update_agenda`, { panel_variants: panelVariants });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      panel_variants: panelVariants,
+    });
   }
 
   updatePanelAssignments(panelAssignments) {
-    return axios.post(`${this.url}/settings/update_agenda`, { panel_assignments: panelAssignments });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      panel_assignments: panelAssignments,
+    });
   }
 
   // painéis do Construtor salvos por CONTA (aparecem no Meu Painel) — admin
   updateCustomPanels(customPanels) {
-    return axios.post(`${this.url}/settings/update_agenda`, { custom_panels: customPanels });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      custom_panels: customPanels,
+    });
   }
 
   // painel PRINCIPAL da conta (padrão do Meu Painel; '' volta ao de fábrica) — admin
   updateMainPanel(mainPanel) {
-    return axios.post(`${this.url}/settings/update_agenda`, { main_panel: mainPanel });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      main_panel: mainPanel,
+    });
   }
 
   // metas mensais por painel — os cards mudam de cor contra a meta
   updatePanelGoals(panelGoals) {
-    return axios.post(`${this.url}/settings/update_agenda`, { panel_goals: panelGoals });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      panel_goals: panelGoals,
+    });
   }
 
   // conferência do dia → colunas do CRM (compareceu/faltou/cirurgia indicada)
   updateAttendanceStages(attendanceStages) {
-    return axios.post(`${this.url}/settings/update_agenda`, { attendance_stages: attendanceStages });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      attendance_stages: attendanceStages,
+    });
   }
 
   // responsáveis pela conferência do dia (consultas/cirurgias) + prazo
   updateAttendanceOwners(attendanceOwners) {
-    return axios.post(`${this.url}/settings/update_agenda`, { attendance_owners: attendanceOwners });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      attendance_owners: attendanceOwners,
+    });
   }
 
   // preencher a Agenda com o histórico de confirmações das conversas
@@ -344,12 +395,17 @@ class CrmAPI extends ApiClient {
 
   // colunas onde o Secretário da Agenda atua (sincroniza as automações)
   syncSchedulerStages(stageIds) {
-    return axios.post(`${this.url}/settings/sync_scheduler_stages`, { stage_ids: stageIds });
+    return axios.post(`${this.url}/settings/sync_scheduler_stages`, {
+      stage_ids: stageIds,
+    });
   }
 
   // colunas de atuação de qualquer agente de coluna (conversation/closing/nps)
   syncAgentStages(agent, stageIds) {
-    return axios.post(`${this.url}/settings/sync_agent_stages`, { agent, stage_ids: stageIds });
+    return axios.post(`${this.url}/settings/sync_agent_stages`, {
+      agent,
+      stage_ids: stageIds,
+    });
   }
 
   radarScan(params) {
@@ -456,9 +512,13 @@ class CrmAPI extends ApiClient {
 
   // 📄 planilha de fechamento (item 132): upload .xlsx → prévia por NOME → importar
   previewClosingSheet(formData) {
-    return axios.post(`${this.url}/external_surgeries/preview_sheet`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    return axios.post(
+      `${this.url}/external_surgeries/preview_sheet`,
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }
+    );
   }
 
   applyClosingSheet(data) {
@@ -509,7 +569,9 @@ class CrmAPI extends ApiClient {
   }
 
   getWhatsappTemplates(inboxId) {
-    return axios.get(`${this.url}/campaigns/templates`, { params: { inbox_id: inboxId } });
+    return axios.get(`${this.url}/campaigns/templates`, {
+      params: { inbox_id: inboxId },
+    });
   }
 
   // ── Contacts ──────────────────────────────────────────────────────
@@ -524,7 +586,10 @@ class CrmAPI extends ApiClient {
   }
 
   updateContact(pipelineId, id, data) {
-    return axios.put(`${this.url}/pipelines/${pipelineId}/contacts/${id}`, data);
+    return axios.put(
+      `${this.url}/pipelines/${pipelineId}/contacts/${id}`,
+      data
+    );
   }
 
   removeContact(pipelineId, id) {
@@ -532,7 +597,9 @@ class CrmAPI extends ApiClient {
   }
 
   getContactHistory(pipelineId, contactId) {
-    return axios.get(`${this.url}/pipelines/${pipelineId}/contacts/${contactId}/history`);
+    return axios.get(
+      `${this.url}/pipelines/${pipelineId}/contacts/${contactId}/history`
+    );
   }
 
   triggerLabelChange(pipelineId, contactId, { added, removed }) {
@@ -611,12 +678,16 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_calls`, data);
   }
 
-  enableCallsAtMeta() {
-    return axios.post(`${this.url}/settings/enable_calls_at_meta`);
+  enableCallsAtMeta(inboxId = null) {
+    return axios.post(`${this.url}/settings/enable_calls_at_meta`, {
+      inbox_id: inboxId,
+    });
   }
 
-  callsMetaStatus() {
-    return axios.get(`${this.url}/settings/calls_meta_status`);
+  callsMetaStatus(inboxId = null) {
+    return axios.get(`${this.url}/settings/calls_meta_status`, {
+      params: inboxId ? { inbox_id: inboxId } : {},
+    });
   }
 
   // ── 🤖📞 Agente de Ligação (ElevenLabs) — item 169 ────────────────
@@ -661,23 +732,31 @@ class CrmAPI extends ApiClient {
 
   // ordem + ocultos + cores da fileira de indicadores por painel (itens 142/143)
   updateKpiLayout(kpiLayout) {
-    return axios.post(`${this.url}/settings/update_agenda`, { kpi_layout: kpiLayout });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      kpi_layout: kpiLayout,
+    });
   }
 
   // ordem dos BLOCOS do Meu Painel por painel (item 143)
   updateBlockLayout(blockLayout) {
-    return axios.post(`${this.url}/settings/update_agenda`, { block_layout: blockLayout });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      block_layout: blockLayout,
+    });
   }
 
   // 🍎🍊 paletas do Meu Painel por painel (rodada 162): modo do painel (cor
   // do dia / fixa / salada) + paleta por bloco — {painel => {mode, key, blocks}}
   updatePanelPalettes(panelPalettes) {
-    return axios.post(`${this.url}/settings/update_agenda`, { panel_palettes: panelPalettes });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      panel_palettes: panelPalettes,
+    });
   }
 
   // cards de indicador criados pelo admin no "+" do Meu Painel (item 141)
   updateCustomKpis(customKpis) {
-    return axios.post(`${this.url}/settings/update_agenda`, { custom_kpis: customKpis });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      custom_kpis: customKpis,
+    });
   }
 
   getHome(params = {}) {
@@ -691,7 +770,9 @@ class CrmAPI extends ApiClient {
 
   // ── Dashboard ─────────────────────────────────────────────────────
   getDashboard(pipelineId, params = {}) {
-    return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard`, { params });
+    return axios.get(`${this.url}/pipelines/${pipelineId}/dashboard`, {
+      params,
+    });
   }
 
   // ── Páginas CEVICO ────────────────────────────────────────────────
@@ -777,7 +858,10 @@ class CrmAPI extends ApiClient {
 
   // sexo/nascimento do paciente (muda o tema dopamine da página)
   updatePatientProfile(contactId, profile) {
-    return axios.post(`${this.url}/patients/${contactId}/update_profile`, profile);
+    return axios.post(
+      `${this.url}/patients/${contactId}/update_profile`,
+      profile
+    );
   }
 
   getClinicalNotes(contactId) {
@@ -786,19 +870,29 @@ class CrmAPI extends ApiClient {
 
   // fotos vão junto → FormData (multipart)
   createClinicalNote(contactId, formData) {
-    return axios.post(`${this.url}/patients/${contactId}/clinical_notes`, formData);
+    return axios.post(
+      `${this.url}/patients/${contactId}/clinical_notes`,
+      formData
+    );
   }
 
   updateClinicalNote(contactId, noteId, formData) {
-    return axios.put(`${this.url}/patients/${contactId}/clinical_notes/${noteId}`, formData);
+    return axios.put(
+      `${this.url}/patients/${contactId}/clinical_notes/${noteId}`,
+      formData
+    );
   }
 
   deleteClinicalNote(contactId, noteId) {
-    return axios.delete(`${this.url}/patients/${contactId}/clinical_notes/${noteId}`);
+    return axios.delete(
+      `${this.url}/patients/${contactId}/clinical_notes/${noteId}`
+    );
   }
 
   updateClinicalAccess(clinicalAccess) {
-    return axios.post(`${this.url}/settings/update_agenda`, { clinical_access: clinicalAccess });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      clinical_access: clinicalAccess,
+    });
   }
 
   // Mentor do Time: gera o feedback semanal agora (últimos 7 dias, admin)
@@ -898,7 +992,10 @@ class CrmAPI extends ApiClient {
 
   // 🌪 Montador de Funis (item 60): fontes de captação por funil
   saveFunnelSources(payload) {
-    return axios.post(`${this.url}/pages_dashboard/save_funnel_sources`, payload);
+    return axios.post(
+      `${this.url}/pages_dashboard/save_funnel_sources`,
+      payload
+    );
   }
 
   // item 95: renovar os ambientes (concluídos → coluna oculta)
@@ -915,7 +1012,9 @@ class CrmAPI extends ApiClient {
   }
 
   deletePageComment(pageId, commentId) {
-    return axios.post(`${this.url}/pages/${pageId}/delete_comment`, { comment_id: commentId });
+    return axios.post(`${this.url}/pages/${pageId}/delete_comment`, {
+      comment_id: commentId,
+    });
   }
 
   // ── Planejamento de conteúdos (workflow de marketing) ─────────────
@@ -946,12 +1045,19 @@ class CrmAPI extends ApiClient {
   }
 
   savePersonGoals(userId, goals) {
-    return axios.post(`${this.url}/people/save_goals`, { user_id: userId, goals });
+    return axios.post(`${this.url}/people/save_goals`, {
+      user_id: userId,
+      goals,
+    });
   }
 
   // testes arquivados (disc v2 / 4 temperamentos) + espaço de vida
   saveAssessment(kind, scores, answers = []) {
-    return axios.post(`${this.url}/people/save_assessment`, { kind, scores, answers });
+    return axios.post(`${this.url}/people/save_assessment`, {
+      kind,
+      scores,
+      answers,
+    });
   }
 
   saveLife(payload) {
@@ -968,11 +1074,20 @@ class CrmAPI extends ApiClient {
   }
 
   addGoalNote(month, text, aboutUserId, period) {
-    return axios.post(`${this.url}/goal_plans/add_note`, { month, text, about_user_id: aboutUserId, period });
+    return axios.post(`${this.url}/goal_plans/add_note`, {
+      month,
+      text,
+      about_user_id: aboutUserId,
+      period,
+    });
   }
 
   deleteGoalNote(month, noteId, period) {
-    return axios.post(`${this.url}/goal_plans/delete_note`, { month, note_id: noteId, period });
+    return axios.post(`${this.url}/goal_plans/delete_note`, {
+      month,
+      note_id: noteId,
+      period,
+    });
   }
 
   updateRoutinesTools(payload) {
@@ -1007,15 +1122,22 @@ class CrmAPI extends ApiClient {
   }
 
   updateFinanceEntry(entryId, payload) {
-    return axios.post(`${this.url}/finance/update_entry`, { entry_id: entryId, ...payload });
+    return axios.post(`${this.url}/finance/update_entry`, {
+      entry_id: entryId,
+      ...payload,
+    });
   }
 
   deleteFinanceEntry(entryId) {
-    return axios.post(`${this.url}/finance/delete_entry`, { entry_id: entryId });
+    return axios.post(`${this.url}/finance/delete_entry`, {
+      entry_id: entryId,
+    });
   }
 
   compareFinanceMonths(monthA, monthB) {
-    return axios.get(`${this.url}/finance/compare`, { params: { month_a: monthA, month_b: monthB } });
+    return axios.get(`${this.url}/finance/compare`, {
+      params: { month_a: monthA, month_b: monthB },
+    });
   }
 
   // ── OftalmoFácil (conexão nativa) ───────────────────────────────────
@@ -1057,7 +1179,10 @@ class CrmAPI extends ApiClient {
   }
 
   updateStockItem(itemId, payload) {
-    return axios.post(`${this.url}/stock/update_item`, { item_id: itemId, ...payload });
+    return axios.post(`${this.url}/stock/update_item`, {
+      item_id: itemId,
+      ...payload,
+    });
   }
 
   deleteStockItem(itemId) {
@@ -1073,7 +1198,10 @@ class CrmAPI extends ApiClient {
   }
 
   updateStockOrder(orderId, status) {
-    return axios.post(`${this.url}/stock/update_order`, { order_id: orderId, status });
+    return axios.post(`${this.url}/stock/update_order`, {
+      order_id: orderId,
+      status,
+    });
   }
 
   deleteStockOrder(orderId) {
@@ -1090,19 +1218,30 @@ class CrmAPI extends ApiClient {
   }
 
   updateStrategyPillar(pillarId, data) {
-    return axios.post(`${this.url}/strategy/update_pillar`, { pillar_id: pillarId, ...data });
+    return axios.post(`${this.url}/strategy/update_pillar`, {
+      pillar_id: pillarId,
+      ...data,
+    });
   }
 
   deleteStrategyPillar(pillarId) {
-    return axios.post(`${this.url}/strategy/delete_pillar`, { pillar_id: pillarId });
+    return axios.post(`${this.url}/strategy/delete_pillar`, {
+      pillar_id: pillarId,
+    });
   }
 
   createStrategyItem(pillarId, data) {
-    return axios.post(`${this.url}/strategy/create_item`, { pillar_id: pillarId, ...data });
+    return axios.post(`${this.url}/strategy/create_item`, {
+      pillar_id: pillarId,
+      ...data,
+    });
   }
 
   updateStrategyItem(itemId, data) {
-    return axios.post(`${this.url}/strategy/update_item`, { item_id: itemId, ...data });
+    return axios.post(`${this.url}/strategy/update_item`, {
+      item_id: itemId,
+      ...data,
+    });
   }
 
   deleteStrategyItem(itemId) {
@@ -1121,19 +1260,29 @@ class CrmAPI extends ApiClient {
 
   // ── Automations ───────────────────────────────────────────────────
   getAutomations(pipelineId, stageId) {
-    return axios.get(`${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations`);
+    return axios.get(
+      `${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations`
+    );
   }
 
   createAutomation(pipelineId, stageId, data) {
-    return axios.post(`${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations`, { automation: data });
+    return axios.post(
+      `${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations`,
+      { automation: data }
+    );
   }
 
   updateAutomation(pipelineId, stageId, id, data) {
-    return axios.put(`${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations/${id}`, { automation: data });
+    return axios.put(
+      `${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations/${id}`,
+      { automation: data }
+    );
   }
 
   deleteAutomation(pipelineId, stageId, id) {
-    return axios.delete(`${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations/${id}`);
+    return axios.delete(
+      `${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations/${id}`
+    );
   }
 }
 

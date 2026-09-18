@@ -165,6 +165,14 @@ crm_appointment_reminder_send_job:
   class: 'Crm::AppointmentReminderSendJob'
   queue: low
 
+# 🗺️ Mensagens da jornada (item 168): a cada 15 min planeja os envios do dia
+# (cirurgia amanhã, consulta hoje, entrou na coluna…) e despacha os que já
+# chegaram na hora — só nas contas com mensagem ativa
+crm_journey_run_job:
+  cron: '3,18,33,48 * * * *'
+  class: 'Crm::JourneyRunJob'
+  queue: low
+
 # 🏥 Sincronização com o OftalmoFácil (item 157): a cada 15 min, só nas contas
 # com a conexão ligada — lê o banco dele (usuário só-leitura) e trata os cards
 crm_oftalmofacil_sync_job:

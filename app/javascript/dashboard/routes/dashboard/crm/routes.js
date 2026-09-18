@@ -1,6 +1,7 @@
 import { frontendURL } from '../../../helper/URLHelper';
 import CrmBoard from './CrmBoard.vue';
 import CrmCampaigns from './CrmCampaigns.vue';
+import CrmJourney from './CrmJourney.vue';
 import CrmCampaignsDashboard from './CrmCampaignsDashboard.vue';
 import CrmForms from './CrmForms.vue';
 import CrmIntegrationsPage from './CrmIntegrationsPage.vue';
@@ -12,6 +13,12 @@ export default {
       name: 'crm_board',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmBoard,
+    },
+    {
+      path: frontendURL('accounts/:accountId/crm/jornada'),
+      name: 'crm_journey',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: CrmJourney,
     },
     {
       path: frontendURL('accounts/:accountId/crm/campaigns'),

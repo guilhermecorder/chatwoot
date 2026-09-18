@@ -7,12 +7,14 @@ class Crm::Calls::OutboundService
   NO_INBOX = 'Escolha a caixa do WhatsApp (API oficial) em Configurações → Ligações antes de ligar.'.freeze
   NO_PHONE = 'Este paciente não tem telefone cadastrado.'.freeze
 
-  attr_reader :account, :user, :contact
+  attr_reader :account, :user, :contact, :preferred_inbox_id
 
-  def initialize(account:, user:, contact:)
+  # preferred_inbox_id: a caixa da conversa aberta (se for uma das configuradas)
+  def initialize(account:, user:, contact:, preferred_inbox_id: nil)
     @account = account
     @user = user
     @contact = contact
+    @preferred_inbox_id = preferred_inbox_id
   end
 
   # { status: temporary|permanent|no_permission|unknown, expires_at, can_call, can_request }
@@ -53,7 +55,7 @@ class Crm::Calls::OutboundService
   end
 
   def inbox
-    settings.inbox
+    @inbox ||= settings.outbound_inbox_for(contact: contact, preferred_id: preferred_inbox_id)
   end
 
   def wa_id

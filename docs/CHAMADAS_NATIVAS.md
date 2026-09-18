@@ -50,6 +50,12 @@ humano: "📞 Chamada recebida · atendida por Dani · 3 min 42 s" / "📵 Chama
 "📞 Ligação para o paciente · 2 min 10 s").
 
 ### Configuração — `crm_settings.agenda_config['calls']`
+**Várias caixas (18/09):** `inboxes: [{ inbox_id, ring_user_ids, ring_first_user_ids, ring_cascade_seconds (5–60),
+meta: { calling_status, callback_permission_status, checked_at, error } }]` — cada caixa com seus atendentes, sua
+linha de frente (toca primeiro; os demais após a espera) e seu estado na Meta. `inbox_id`/`ring_*`/`meta` soltos =
+espelho da PRIMEIRA caixa (compatibilidade; a config antiga de 1 caixa migra sozinha em `Crm::Calls::Settings#inboxes`).
+Ligar PARA o paciente: `Settings#outbound_inbox_for(contact:, preferred_id:)` = caixa da conversa aberta (o botão manda
+`inbox_id`) → caixa da última conversa dele entre as configuradas → primeira.
 ```
 { enabled: bool, inbox_id: int, ring_user_ids: [int] (vazio = todos os membros da caixa),
   business_hours_only: bool, hours: { start: "08:00", end: "19:00" } (fallback agenda_config.followup_hours / 8..20),

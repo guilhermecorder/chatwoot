@@ -116,9 +116,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def radar_ping # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     settings = CrmSetting.find_by(account: account)
     cfg = settings&.ai_config || {}
-    return render json: { alert: nil, radar: radar_status(cfg) } unless cfg.dig('agents', 'opportunity', 'enabled') == true
-
     alerts = Array(cfg.dig('opportunity_state', 'alerts')).reverse
+    # Radar desligado: só os avisos extras (ligação perdida 167, "não vou" 168) aparecem
+    alerts = alerts.select { |a| Crm::RadarExtraAlerts.extra?(a) } unless cfg.dig('agents', 'opportunity', 'enabled') == true
     # o popup é da tela do atendente ESPECÍFICO: aviso direcionado a mim,
     # ou aviso geral (sem destino) quando não sou admin
     alerts = alerts.select do |a|
@@ -126,6 +126,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     end
 
     live = alerts.lazy.filter_map do |a|
+      next extra_alert(a) if Crm::RadarExtraAlerts.extra?(a)
+
       conversation = account.conversations.find_by(display_id: a['conversation_id'])
       next unless conversation&.open? && conversation.waiting_since.present?
 
@@ -168,6 +170,14 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   end
 
   private
+
+  # ligação perdida / "não vou": aparece na hora e some quando alguém retornou
+  def extra_alert(alert)
+    return nil unless Crm::RadarExtraAlerts.still_open?(account, alert)
+
+    created = Time.zone.parse(alert['created_at'].to_s)
+    alert.merge('waiting_minutes' => ((Time.current - created) / 60).floor)
+  end
 
   def radar_status(cfg)
     last = Array(cfg.dig('opportunity_state', 'manual_log')).last

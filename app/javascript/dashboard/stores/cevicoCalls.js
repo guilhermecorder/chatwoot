@@ -22,6 +22,8 @@ const finishing = new Set();
 
 const currentUserId = () => Number(vuexStore.getters.getCurrentUserID);
 const availability = () => vuexStore.getters.getCurrentUserAvailability;
+// chamada → timer da cascata "quem toca primeiro" (rodada 2)
+const cascadeTimers = {};
 const callsSettings = () => vuexStore.getters['crm/getSettings']?.calls || {};
 
 export const useCevicoCallsStore = defineStore('cevicoCalls', {
@@ -65,6 +67,8 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
     },
 
     dropRinging(id) {
+      clearTimeout(cascadeTimers[id]);
+      delete cascadeTimers[id];
       this.ringing = this.ringing.filter(x => x !== id);
       if (!this.ringing.length) session.stopRingtone();
     },
@@ -87,10 +91,31 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
       const call = data?.call;
       if (!call?.id) return;
       if (availability() === 'offline') return;
+      const me = currentUserId();
       const ids = (data.ring_user_ids || []).map(Number);
-      if (ids.length && !ids.includes(currentUserId())) return;
+      if (ids.length && !ids.includes(me)) return;
       if (call.status && call.status !== 'ringing') return;
       if (this.active === call.id || this.ringing.includes(call.id)) return;
+      // "quem toca primeiro" (rodada 2): a linha de frente ouve na hora; o
+      // resto só depois da espera, e só se a chamada ainda estiver tocando
+      const firsts = (data.ring_first_user_ids || []).map(Number);
+      if (firsts.length && !firsts.includes(me)) {
+        this.upsert(call);
+        clearTimeout(cascadeTimers[call.id]);
+        const wait = Number(data.ring_cascade_seconds || 12) * 1000;
+        cascadeTimers[call.id] = setTimeout(() => {
+          delete cascadeTimers[call.id];
+          const known = this.calls[call.id];
+          if (!known || known.status !== 'ringing') return;
+          if (this.active === call.id || this.ringing.includes(call.id)) return;
+          this.ringNow(known);
+        }, wait);
+        return;
+      }
+      this.ringNow(call);
+    },
+
+    ringNow(call) {
       this.upsert(call);
       this.ringing = [...this.ringing, call.id];
       // em chamada, a segunda só aparece no card (sem toque por cima da voz)
@@ -289,7 +314,7 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
 
     // ligação da clínica → paciente. Devolve o payload da chamada, ou
     // { error, permission } quando a Meta pede permissão (422), ou null.
-    async startOutbound(contactId) {
+    async startOutbound(contactId, inboxId = null) {
       if (this.active) {
         useAlert('Você já está em uma chamada.');
         return null;
@@ -299,7 +324,7 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
       session.ensureNotificationPermission();
       try {
         const sdp = await session.offer();
-        const { data } = await CevicoCallsAPI.initiate(contactId, sdp);
+        const { data } = await CevicoCallsAPI.initiate(contactId, sdp, inboxId);
         this.upsert({ ...data, sdp_answer: null });
         this.active = data.id;
         this.activeSince = null; // o timer começa no ACCEPTED
