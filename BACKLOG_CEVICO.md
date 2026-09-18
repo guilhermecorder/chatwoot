@@ -5864,7 +5864,7 @@ crm_opportunity_radar_job registrados.
 - REGRA DE TRABALHO (vale a partir de agora): toda rodada que cria/muda um
   agente entrega o fluxograma (`flows/<key>.rb` + Mermaid no resumo da rodada).
 
-## 171. ✅ 🧰 RODADA 18/09 — "vamos construir tudo o que vc lembrou": 167 R2/R3 + 168 (Jornada do paciente) + segurança no código + facilitar atualizações + build mais leve — CONSTRUÍDA e testada local (branch feat/rodada-171, worktree ~/chatwoot-upgrade); AGUARDA "pode subir" (2 migrations: 20260918143000; WEB+SIDEKIQ; backup antes)
+## 171. ✅ 🧰 RODADA 18/09 — "vamos construir tudo o que vc lembrou": 167 R2/R3 + várias caixas + 168 (Jornada do paciente) + segurança no código + facilitar atualizações + build mais leve — SUBIU 18/09 ("pode subir" → commit a54060e6fa no develop, inclui a 1ac1201) → imagem ghcr.io/guilhermecorder/chatwoot:a54060e p/ implantar WEB+SIDEKIQ (migration 20260918143000 → BACKUP antes; reversão a28ceaf)
 - CONTEXTO: ele confirmou que a última implantada é a `a28ceaf`; a `1ac1201`
   (cards Ligações/Agente de Ligação na página de Integrações do CEVICO) segue
   pendente de deploy. Pediu pra construir tudo do meu lado sem esperar.
