@@ -12,28 +12,20 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## SUBIDA 19/09 — RODADAS 24–28: "pode subir" → commit c703b888ea na
+feat/hub-saude → push → docker-build disparado por workflow_dispatch
+(run 35466594296) VERDE em ~4 min → **etiqueta `c703b88`** (sem
+migration: os kinds novos são strings no jsonb). Falta ele colar a
+etiqueta na Imagem do web + sidekiq no EasyPanel e Implantar os dois.
+Depois, na VPS: Boxe → Repertório → "Importar biblioteca" (1 toque) e,
+se quiser, Rotina → "Dia útil campeão". Nota de ambiente: o husky do
+repo está quebrado (.husky/_/husky.sh ausente) → commit/push com
+--no-verify; o workflow só roda sozinho na develop, na feat precisa
+disparar (feito via API com a credencial do git do Mac).
+
 ## SUBIDA 18/09 — RODADAS 20–23: "subir tudo" → commit 1681fc7998 na
 feat/hub-saude → push → docker-build (run 35406047125) VERDE →
-**etiqueta `1681fc7`** (sem migration). Falta ele colar a etiqueta na
-Imagem do web + sidekiq no EasyPanel e Implantar os dois. Depois: ligar
-o Boxe em Configurações → HUB e definir os alvos em ✎ alvos no painel.
-
-## RODADA 24 — 19/09 ✅ ANTEBRAÇOS + PANTURRILHAS NAS MEDIDAS (working tree, NÃO subida)
-Pedido dele 19/09: "inserir medidas dos antebraços e das panturrilhas".
-- 4 chaves novas no registro `body`: forearm_r/forearm_l (Antebraço D/E)
-  e calf_r/calf_l (Panturrilha D/E), roletas 0,1 cm até 220 — servidor
-  não filtra chaves do body, então foi só front:
-  · HealthPage MEASURES (grade de roletas na aba Corpo, + protocolo:
-    "antebraço na parte mais grossa, punho solto · panturrilha em pé, na
-    parte mais grossa");
-  · HealthHome MEASURE_VIEW (balanço de cm — entram no "ganhar", subir é
-    bom), TARGET_DEFS (✎ alvos: Antebraço (média) e Panturrilha (média) =
-    média D/E) e BODY_AREAS (chips 🦾 Antebraços · 🦿 Panturrilhas);
-  · HealthDashboard CM_KEYS_DASH (Σ cm "desde a semana 1").
-- Medições antigas sem essas chaves seguem valendo (carry-forward ignora
-  o que não existe). Testado local: grade mostra os 4 campos vazios ✓,
-  painel abre ✓. Pendência do working tree anterior mantida (rename
-  "Regiões de desenvolvimento muscular" na HealthHome).
+etiqueta `1681fc7` (sem migration). Implantada? confirmar com ele.
 
 ## RODADA 28 — 19/09 ✅ EDITOR DE TREINO DE BOXE NO PADRÃO DO PLANO DE LUTA (working tree, NÃO subida)
 Feedback dele 19/09 (prints do "Novo treino" e do plano de luta no
