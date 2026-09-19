@@ -26,6 +26,7 @@ import {
   Filler,
 } from 'chart.js';
 import { Line } from 'vue-chartjs';
+import { applyChartTheme, watchChartTheme } from './chartTheme';
 import {
   activeProgram,
   weekOf,
@@ -54,6 +55,8 @@ import {
 const VERDICT_COLORS = { progress: ROYAL, tie: CINZA, regress: LARANJA_VIVO };
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler);
+applyChartTheme();
+watchChartTheme();
 
 const router = useRouter();
 const accountScopedRoute = name => ({
@@ -669,6 +672,26 @@ const cmBalance = computed(() => {
   };
 });
 
+// rodada 31b: medidas em GRUPOS por região (pedido dele: "organizar em
+// grupos: cintura umbigo | cintura estreita | quadril / peito | ombros | pescoço")
+const CM_GROUPS = [
+  { key: 'tronco', label: 'Tronco', tone: 't-orange', keys: { waist_navel: 'Cintura umbigo', waist_narrow: 'Cintura estreita', hips: 'Quadril' } },
+  { key: 'superior', label: 'Peito · ombros · pescoço', tone: 't-royal', keys: { chest: 'Peito', shoulders: 'Ombros', neck: 'Pescoço' } },
+  { key: 'bracos', label: 'Braços', tone: 't-sky', keys: { arm_r: 'Braço D', arm_l: 'Braço E', forearm_r: 'Antebraço D', forearm_l: 'Antebraço E' } },
+  { key: 'pernas', label: 'Pernas', tone: 't-amber', keys: { thigh_r: 'Coxa D', thigh_l: 'Coxa E', calf_r: 'Panturrilha D', calf_l: 'Panturrilha E' } },
+];
+const cmGroups = computed(() =>
+  CM_GROUPS.map(g => ({
+    ...g,
+    rows: Object.entries(g.keys)
+      .map(([k, short]) => {
+        const r = cmBalance.value.rows.find(x => x.key === k);
+        return r ? { ...r, short } : null;
+      })
+      .filter(Boolean),
+  })).filter(g => g.rows.length)
+);
+
 // ── ATUAL → ALVO (rodada 23): "meus dados atuais e desejados" no topo.
 // Alvos por medida moram no registro 'profile' (targets: { key: valor });
 // braço, antebraço, coxa e panturrilha = média D/E. Barra = quanto do caminho (1ª medição → alvo)
@@ -718,6 +741,14 @@ const goalRows = computed(() =>
     return { ...d, now, first, target, remaining, pct, hit: remaining !== null && remaining <= 0 };
   }).filter(Boolean)
 );
+// rodada 31b: "muitos indicadores" → só os 3 mais importantes (quem tem alvo
+// primeiro, na ordem peso > cintura > …) + força total, cada um num tom
+const GOAL_TONES = ['t-royal', 't-orange', 't-sky'];
+const keyGoals = computed(() => {
+  const withTarget = goalRows.value.filter(r => r.target && r.now !== null);
+  const rest = goalRows.value.filter(r => !withTarget.includes(r) && r.now !== null);
+  return [...withTarget, ...rest].slice(0, 3).map((r, i) => ({ ...r, tone: GOAL_TONES[i] }));
+});
 const editingTargets = ref(false);
 const targetsDraft = ref({});
 const openTargets = () => {
@@ -748,10 +779,21 @@ const saveTargets = async () => {
 // ═══ RODADA 30: TEIAS DO PROGRESSO no painel (pedido dele 19/09: "deixar
 // mais interessante a visualização de progresso; pode ter mais de uma") ═══
 const shortName = n => {
-  const t = String(n || '').replace(/\s+(com|na|no|em)\s+.*$/i, '').trim();
-  return t.length > 16 ? `${t.slice(0, 15)}…` : t;
+  // sem reticências: o HubRadar quebra em 2 linhas e calcula a folga
+  return String(n || '').replace(/\s+(com|na|no|em)\s+.*$/i, '').trim();
 };
-const radarAxes = list => list.map((x, i) => ({ key: x.key, label: x.label, color: i % 2 ? '#B85C00' : '#27408B' }));
+const radarAxes = list => list.map(x => ({ key: x.key, label: x.label }));
+// rodada 31: no celular as 3 teias deslizam (1 card de tela inteira por vez);
+// as bolinhas acompanham o scroll
+const progressRail = ref(null);
+const progressSlide = ref(0);
+const onProgressScroll = () => {
+  const el = progressRail.value;
+  const first = el?.firstElementChild;
+  if (!el || !first) return;
+  const pitch = first.offsetWidth + 12;
+  progressSlide.value = Math.max(0, Math.min(2, Math.round(el.scrollLeft / pitch)));
+};
 // 1) FORÇA por exercício: início do ciclo × agora (e-1RM), até 8 exercícios
 const strengthRadar = computed(() => {
   const ex = loadProgress.value
@@ -1056,7 +1098,7 @@ const toggleMetas = () => {
       <div v-if="isLoading" class="flex justify-center py-16"><Spinner /></div>
       <template v-else>
         <!-- 1. HERO: treino da vez + semana -->
-        <div class="hub-block hub-block-solid p-5 mb-4 text-white">
+        <div class="hub-block hub-block-solid p-5 mb-8 text-white">
           <div class="flex items-center justify-between flex-wrap gap-3">
             <div class="min-w-0">
               <div class="flex items-center gap-2 flex-wrap mb-1">
@@ -1095,7 +1137,7 @@ const toggleMetas = () => {
                 <span :style="{ color: ROYAL_CLARO }">▲{{ weekScore.progress }}</span>
                 <span class="opacity-70 mx-1">▬{{ weekScore.tie }}</span>
                 <span :style="{ color: LARANJA_CLARO }">▼{{ weekScore.regress }}</span>
-                <span v-if="weekCardioMin" class="opacity-90"> · 🏃 {{ weekCardioMin }} min de cardio</span>
+                <span v-if="weekCardioMin" class="opacity-90"> · {{ weekCardioMin }} min de cardio</span>
               </p>
             </div>
             <button
@@ -1112,9 +1154,9 @@ const toggleMetas = () => {
         </div>
 
         <!-- 2. ATUAL → ALVO: onde estou e onde quero chegar -->
-        <div class="hub-block p-4 mb-4">
+        <div class="hub-block p-5 mb-8">
           <div class="flex items-center justify-between gap-2 mb-3">
-            <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide"><span class="hub-h-ico i-lucide-target" />Onde estou → onde quero chegar</h2>
+            <h2 class="hub-h"><span class="hub-h-ico i-lucide-target" />Onde estou → onde quero chegar</h2>
             <button class="hub-chip" @click="editingTargets ? (editingTargets = false) : openTargets()">
               {{ editingTargets ? '✕ fechar' : '✎ alvos' }}
             </button>
@@ -1133,27 +1175,18 @@ const toggleMetas = () => {
               ✓ Salvar alvos
             </button>
           </div>
-          <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))">
-            <div
-              v-for="r in goalRows"
-              :key="r.key"
-              class="rounded-xl px-3 py-2"
-              :style="{
-                background: r.down ? 'rgba(255,138,0,0.08)' : 'rgba(65,105,225,0.08)',
-                border: `1px solid ${r.down ? 'rgba(255,138,0,0.3)' : 'rgba(65,105,225,0.3)'}`,
-              }"
-            >
-              <p class="text-[10px] text-n-slate-10">{{ r.label }}</p>
-              <p class="text-base font-extrabold leading-tight text-n-slate-12">
+          <!-- rodada 31b: só os 3 alvos mais importantes + força total, cada um num tom -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div v-for="r in keyGoals" :key="r.key" class="hub-goal hub-crystal" :class="r.tone">
+              <p class="hub-goal-l">{{ r.label.replace(/ \(.*\)/, '') }}</p>
+              <p class="hub-goal-v">
                 {{ r.now === null ? '—' : fmt1(r.now) }}
-                <span v-if="r.target" class="text-xs font-semibold" :style="{ color: r.down ? LARANJA : ROYAL }">→ {{ fmt1(r.target) }}</span>
-                <span class="text-[9px] font-medium text-n-slate-10">&nbsp;{{ r.unit }}</span>
+                <span v-if="r.target" class="hub-goal-t">→ {{ fmt1(r.target) }}</span>
+                <span class="hub-goal-u">{{ r.unit }}</span>
               </p>
-              <div v-if="r.pct !== null" class="mt-1 h-1.5 rounded-full overflow-hidden" style="background: rgba(127, 127, 127, 0.18)">
-                <div class="h-full rounded-full" :style="{ width: `${Math.max(r.pct, 3)}%`, background: r.down ? LARANJA : ROYAL }" />
-              </div>
-              <p class="text-[10px] text-n-slate-10 mt-0.5">
-                <template v-if="r.hit">🎉 alvo batido</template>
+              <div v-if="r.pct !== null" class="hub-goal-bar"><i :style="{ width: `${Math.max(r.pct, 3)}%` }" /></div>
+              <p class="hub-goal-s">
+                <template v-if="r.hit">alvo batido</template>
                 <template v-else-if="r.remaining !== null">
                   faltam <b>{{ fmt1(r.remaining) }} {{ r.unit }}</b><template v-if="r.pct !== null"> · {{ r.pct }}%</template><template v-if="r.key === 'weight' && goalEta"> · ≈ {{ goalEta.label }}</template>
                 </template>
@@ -1161,63 +1194,64 @@ const toggleMetas = () => {
                 <template v-else>defina o alvo em ✎</template>
               </p>
             </div>
-            <button
-              class="rounded-xl px-3 py-2 text-left"
-              :style="{ background: 'rgba(65,105,225,0.08)', border: '1px solid rgba(65,105,225,0.3)' }"
-              title="Ver a força por treino"
-              @click="scrollToId('hub-forca')"
-            >
-              <p class="text-[10px] text-n-slate-10">Força total (Σ e-1RM)</p>
-              <p class="text-base font-extrabold leading-tight" :style="{ color: ROYAL }">
-                {{ strength.n ? `${strength.now} kg` : '—' }}
-                <span v-if="strength.rel !== null" class="text-xs font-medium text-n-slate-10">· {{ String(strength.rel).replace('.', ',') }}× peso</span>
+            <button class="hub-goal hub-crystal t-amber text-left" title="Ver a força por treino" @click="scrollToId('hub-forca')">
+              <p class="hub-goal-l">Força total</p>
+              <p class="hub-goal-v">
+                {{ strength.n ? strength.now : '—' }}
+                <span class="hub-goal-u">kg</span>
               </p>
-              <p class="text-[10px] text-n-slate-10 mt-0.5">
-                <template v-if="strength.n && strength.delta">{{ signed(strength.delta) }} kg no ciclo ({{ signed(strength.pct) }}%)</template>
-                <template v-else>registre treinos</template>
+              <p class="hub-goal-s">
+                <template v-if="strength.rel !== null"><b>{{ String(strength.rel).replace('.', ',') }}×</b> peso</template>
+                <template v-if="strength.n && strength.delta"><template v-if="strength.rel !== null"> · </template>{{ signed(strength.delta) }} kg no ciclo ({{ signed(strength.pct) }}%)</template>
+                <template v-else-if="strength.rel === null">registre treinos</template>
               </p>
             </button>
           </div>
         </div>
 
-        <!-- 2b. TEIAS DO PROGRESSO (rodada 30) -->
-        <div class="hub-block p-4 mb-4">
+        <!-- 2b. PROGRESSO — 3 teias (rodada 30; rodada 31: título PROGRESSO,
+             cards de vidro transparente, no celular cada teia é um card de
+             tela inteira que desliza pro lado com bolinhas) -->
+        <div class="hub-block hub-progress p-5 mb-8">
           <div class="hub-sec">
-            <span class="hub-sec-ico"><span class="i-lucide-radar" /></span>
+            <span class="hub-sec-ico"><span class="i-lucide-orbit" /></span>
             <div class="hub-sec-text">
-              <h2 class="hub-sec-title">Teias do progresso</h2>
+              <h2 class="hub-sec-title hub-progress-title">Progresso</h2>
               <p class="hub-sec-sub">força por exercício, medidas rumo ao alvo e a constância da semana — de uma olhada</p>
             </div>
           </div>
-          <div class="hub-grid-3" style="gap: 14px">
-            <div class="hub-radar-card">
+          <div ref="progressRail" class="hub-progress-rail" @scroll.passive="onProgressScroll">
+            <div class="hub-progress-card hub-crystal">
               <p class="hub-label">Força · início × agora</p>
               <template v-if="strengthRadar">
-                <RadarChart :axes="strengthRadar.axes" :datasets="strengthRadar.datasets" :size="250" />
-                <p class="hub-radar-cap"><b :style="{ color: ROYAL }">{{ strengthRadar.up }}</b> de {{ strengthRadar.n }} exercícios acima do início do ciclo</p>
+                <div class="hub-progress-web"><RadarChart :axes="strengthRadar.axes" :datasets="strengthRadar.datasets" :size="300" :label-size="11" :ex-ratio="0.1" :pad-ratio="0.16" /></div>
+                <p class="hub-progress-cap"><b class="hub-num-royal">{{ strengthRadar.up }}</b> de {{ strengthRadar.n }} exercícios acima do início do ciclo</p>
               </template>
-              <p v-else class="text-[11px] text-n-slate-10">Registre 3 exercícios com carga pra teia aparecer.</p>
+              <p v-else class="hub-progress-empty">Registre 3 exercícios com carga pra teia aparecer.</p>
             </div>
-            <div class="hub-radar-card">
+            <div class="hub-progress-card hub-crystal">
               <p class="hub-label">Medidas · rumo ao alvo</p>
               <template v-if="targetRadar">
-                <RadarChart :axes="targetRadar.axes" :datasets="targetRadar.datasets" :size="250" />
-                <p class="hub-radar-cap"><b :style="{ color: ROYAL }">{{ targetRadar.avg }}%</b> do caminho, em média · {{ targetRadar.hit }} alvo{{ targetRadar.hit === 1 ? '' : 's' }} batido{{ targetRadar.hit === 1 ? '' : 's' }}</p>
+                <div class="hub-progress-web"><RadarChart :axes="targetRadar.axes" :datasets="targetRadar.datasets" :size="300" :label-size="11" :ex-ratio="0.1" :pad-ratio="0.16" /></div>
+                <p class="hub-progress-cap"><b class="hub-num-royal">{{ targetRadar.avg }}%</b> do caminho, em média · <b class="hub-num-orange">{{ targetRadar.hit }}</b> alvo{{ targetRadar.hit === 1 ? '' : 's' }} batido{{ targetRadar.hit === 1 ? '' : 's' }}</p>
               </template>
-              <p v-else class="text-[11px] text-n-slate-10">Defina pelo menos 3 alvos em "✎ alvos" pra teia aparecer.</p>
+              <p v-else class="hub-progress-empty">Defina pelo menos 3 alvos em "alvos" pra teia aparecer.</p>
             </div>
-            <div class="hub-radar-card">
+            <div class="hub-progress-card hub-crystal">
               <p class="hub-label">Semana · constância</p>
-              <RadarChart :axes="weekRadar.axes" :datasets="weekRadar.datasets" :size="250" />
-              <p class="hub-radar-cap"><b :style="{ color: LARANJA_VIVO }">{{ weekRadar.score }}%</b> da semana ideal (treinos, cardio, medição, cargas subindo)</p>
+              <div class="hub-progress-web"><RadarChart :axes="weekRadar.axes" :datasets="weekRadar.datasets" :size="300" :label-size="11" :ex-ratio="0.1" :pad-ratio="0.16" /></div>
+              <p class="hub-progress-cap"><b class="hub-num-orange">{{ weekRadar.score }}%</b> da semana ideal (treinos, cardio, medição, cargas subindo)</p>
             </div>
+          </div>
+          <div class="hub-progress-dots" aria-hidden="true">
+            <i v-for="i in 3" :key="i" :class="{ 'is-on': progressSlide === i - 1 }" />
           </div>
         </div>
 
         <!-- 3. CENTÍMETROS TOTAIS × PESO -->
-        <div class="hub-block hub-orange p-4 mb-4">
+        <div class="hub-block hub-orange p-5 mb-8">
           <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
-            <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide"><span class="hub-h-ico i-lucide-ruler" />Centímetros totais × peso</h2>
+            <h2 class="hub-h"><span class="hub-h-ico i-lucide-ruler" />Centímetros totais × peso</h2>
             <p v-if="cmTotalChart" class="text-[11px] text-n-slate-10">
               <b :style="{ color: LARANJA }">{{ fmt1(cmTotalChart.last) }} cm</b> ({{ signed(cmTotalChart.last - cmTotalChart.first) }})
               <template v-if="cmTotalChart.pesoLast !== null">
@@ -1226,48 +1260,49 @@ const toggleMetas = () => {
             </p>
           </div>
           <p class="text-[10px] text-n-slate-10 mb-2">Soma de todas as circunferências (laranja) contra o peso (azul), medição a medição.</p>
-          <div v-if="cmTotalChart" style="height: 190px">
+          <div v-if="cmTotalChart" class="hub-chart" style="height: 190px">
             <Line :data="cmTotalChart.chart" :options="dualChartOpts" />
           </div>
           <p v-else class="text-[11px] text-n-slate-10">Registre as medidas na aba Corpo (2 medições) pra curva aparecer.</p>
         </div>
 
         <!-- 4. CENTÍMETROS: onde quero perder × onde quero ganhar + áreas -->
-        <h2 id="hub-corpo" class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2" style="scroll-margin-top: 0.75rem"><span class="hub-h-ico i-lucide-ruler" />Centímetros
-          <span v-if="cmBalance.since" class="font-normal normal-case text-n-slate-10">desde {{ fmtDay(cmBalance.since) }}</span>
+        <h2 id="hub-corpo" class="hub-h mb-4" style="scroll-margin-top: 0.75rem"><span class="hub-h-ico i-lucide-ruler" />Centímetros
+          <span v-if="cmBalance.since" class="hub-h-sub">desde {{ fmtDay(cmBalance.since) }}</span>
         </h2>
-        <div class="hub-block p-4 mb-4">
+        <div class="hub-block p-5 mb-8">
           <template v-if="cmBalance.rows.length">
-            <div class="grid gap-2 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
-              <div class="rounded-xl p-2.5" :style="{ background: 'rgba(255,138,0,0.10)', border: '1px solid rgba(255,138,0,0.35)' }">
-                <p class="text-[10px] text-n-slate-10">Onde quero perder</p>
-                <p class="text-lg font-extrabold leading-tight" :style="{ color: LARANJA }">{{ signed(cmBalance.lostStart) }} cm</p>
-                <p class="text-[10px] text-n-slate-10">cintura · quadril · pescoço · {{ signed(cmBalance.lostPrev) }} vs última</p>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+              <div class="hub-goal hub-crystal t-orange">
+                <p class="hub-goal-l">Onde quero perder</p>
+                <p class="hub-goal-v">{{ signed(cmBalance.lostStart) }}<span class="hub-goal-u">cm</span></p>
+                <p class="hub-goal-s">cintura · quadril · pescoço · <b>{{ signed(cmBalance.lostPrev) }}</b> vs última</p>
               </div>
-              <div class="rounded-xl p-2.5" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
-                <p class="text-[10px] text-n-slate-10">Regiões de desenvolvimento muscular</p>
-                <p class="text-lg font-extrabold leading-tight" :style="{ color: ROYAL }">{{ signed(cmBalance.gainStart) }} cm</p>
-                <p class="text-[10px] text-n-slate-10">peito · braços · antebraços · coxas · panturrilhas · ombros · {{ signed(cmBalance.gainPrev) }} vs última</p>
+              <div class="hub-goal hub-crystal t-royal">
+                <p class="hub-goal-l">Ganho muscular</p>
+                <p class="hub-goal-v">{{ signed(cmBalance.gainStart) }}<span class="hub-goal-u">cm</span></p>
+                <p class="hub-goal-s">peito · braços · coxas · ombros · <b>{{ signed(cmBalance.gainPrev) }}</b> vs última</p>
               </div>
-              <div class="rounded-xl p-2.5 border border-n-weak">
-                <p class="text-[10px] text-n-slate-10">Saldo total</p>
-                <p class="text-lg font-extrabold leading-tight text-n-slate-12">{{ signed(cmBalance.netStart) }} cm</p>
-                <p class="text-[10px] text-n-slate-10">{{ fmt1(cmBalance.movedStart) }} cm movidos · {{ signed(cmBalance.netPrev) }} vs última</p>
+              <div class="hub-goal hub-crystal t-sky">
+                <p class="hub-goal-l">Saldo total</p>
+                <p class="hub-goal-v">{{ signed(cmBalance.netStart) }}<span class="hub-goal-u">cm</span></p>
+                <p class="hub-goal-s">{{ fmt1(cmBalance.movedStart) }} cm movidos · <b>{{ signed(cmBalance.netPrev) }}</b> vs última</p>
               </div>
             </div>
-            <div class="flex gap-1.5 flex-wrap mb-4">
-              <span
-                v-for="r in cmBalance.rows"
-                :key="r.key"
-                class="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] border border-n-weak bg-n-solid-2"
-                :title="`${r.label}: ${fmt1(r.first)} → ${fmt1(r.last)} cm`"
-              >
-                <span class="text-n-slate-10">{{ r.label }}</span>
-                <b :style="{ color: r.dStart === 0 ? CINZA : r.good ? ROYAL : LARANJA_VIVO }">{{ signed(r.dStart) }}</b>
-              </span>
+            <!-- rodada 31b: medidas agrupadas por região (tronco / peito-ombros-pescoço / braços / pernas) -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+              <div v-for="g in cmGroups" :key="g.key" class="hub-group hub-crystal" :class="g.tone">
+                <p class="hub-group-l">{{ g.label }}</p>
+                <div class="hub-group-row" :class="g.rows.length >= 4 ? 'cols-4' : 'cols-3'">
+                  <div v-for="r in g.rows" :key="r.key" class="hub-cell" :title="`${fmt1(r.first)} → ${fmt1(r.last)} cm`">
+                    <span class="hub-cell-l">{{ r.short }}</span>
+                    <b class="hub-cell-v" :class="r.dStart === 0 ? '' : r.good ? 'hub-num-royal' : 'hub-num-orange'">{{ signed(r.dStart) }}</b>
+                  </div>
+                </div>
+              </div>
             </div>
-            <p class="text-[11px] font-bold text-n-slate-11 mb-0.5">📉 Onde quero perder × regiões de desenvolvimento muscular</p>
-            <p class="text-[10px] text-n-slate-10 mb-2">
+            <p class="hub-sub"><span class="i-lucide-trending-down hub-sub-ico" />Onde quero perder × ganho muscular</p>
+            <p class="text-[11px] text-n-slate-10 mb-3">
               Quanto cada grupo mudou desde a 1ª medição. Laranja bom é caindo (cintura, quadril, pescoço); azul bom é subindo (peito, braços, antebraços, coxas, panturrilhas, ombros).
             </p>
             <div v-if="cmTimeline" style="height: 190px" class="mb-4">
@@ -1279,7 +1314,7 @@ const toggleMetas = () => {
             Registre as medidas na aba Corpo (2 medições) pro balanço e as curvas aparecerem.
           </p>
 
-          <p class="text-[11px] font-bold text-n-slate-11 mb-1.5">🧍 Áreas do corpo</p>
+          <p class="hub-sub mb-3"><span class="i-lucide-person-standing hub-sub-ico" />Áreas do corpo</p>
           <div class="hub-scroll-row mb-3">
             <span class="hub-seg">
               <button
@@ -1294,18 +1329,16 @@ const toggleMetas = () => {
               </button>
             </span>
           </div>
-          <div v-if="areaView.lines.length" class="grid gap-2 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
-            <div v-for="l in areaView.lines" :key="l.key" class="rounded-xl border border-n-weak p-2.5">
-              <p class="text-[10px] text-n-slate-10">{{ areaView.label }}<template v-if="areaView.lines.length > 1"> · {{ l.label }}</template></p>
-              <p class="text-lg font-extrabold leading-tight text-n-slate-12">{{ fmt1(l.now) }} <span class="text-[10px] font-medium text-n-slate-10">{{ areaView.unit }}</span></p>
-              <p class="text-[10px]">
-                <b :style="{ color: l.dStart === 0 ? CINZA : l.good ? ROYAL : LARANJA_VIVO }">{{ signed(l.dStart) }} {{ areaView.unit }}</b>
-                <span class="text-n-slate-10"> desde {{ fmtDay(l.firstDate) }}</span>
-                <span v-if="l.dPrev !== null" class="text-n-slate-10"> · {{ signed(l.dPrev) }} vs última</span>
+          <div v-if="areaView.lines.length" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            <div v-for="(l, li) in areaView.lines" :key="l.key" class="hub-goal hub-crystal" :class="['t-royal', 't-orange', 't-sky', 't-amber'][li % 4]">
+              <p class="hub-goal-l">{{ areaView.lines.length > 1 ? l.label : areaView.label }}</p>
+              <p class="hub-goal-v">{{ fmt1(l.now) }}<span class="hub-goal-u">{{ areaView.unit }}</span></p>
+              <p class="hub-goal-s">
+                <b :class="l.dStart === 0 ? '' : l.good ? 'hub-num-royal' : 'hub-num-orange'">{{ signed(l.dStart) }} {{ areaView.unit }}</b> desde {{ fmtDay(l.firstDate) }}<template v-if="l.dPrev !== null"> · {{ signed(l.dPrev) }} vs última</template>
               </p>
             </div>
           </div>
-          <div v-if="areaView.chart" style="height: 180px">
+          <div v-if="areaView.chart" class="hub-chart" style="height: 180px">
             <Line :data="areaView.chart" :options="areaChartOpts" />
           </div>
           <p v-else class="text-[11px] text-n-slate-10">Sem medições de {{ areaView.label.toLowerCase() }} ainda.</p>
@@ -1313,7 +1346,7 @@ const toggleMetas = () => {
 
         <!-- 4. PROGRESSO DAS CARGAS: todos os exercícios do ciclo -->
         <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
-          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide"><span class="hub-h-ico i-lucide-dumbbell" />Progresso das cargas</h2>
+          <h2 class="hub-h"><span class="hub-h-ico i-lucide-dumbbell" />Progresso das cargas</h2>
           <span v-if="loadProgress.length > 1" class="hub-seg">
             <button
               v-for="(s, i) in loadProgress"
@@ -1327,7 +1360,7 @@ const toggleMetas = () => {
             </button>
           </span>
         </div>
-        <div class="hub-block p-4 mb-4">
+        <div class="hub-block p-5 mb-8">
           <p class="text-[11px] text-n-slate-10 mb-3">
             Carga de cada exercício e quanto subiu neste ciclo. Toque num exercício pra ver o detalhe; deslize pro lado pros outros treinos.
           </p>
@@ -1366,8 +1399,8 @@ const toggleMetas = () => {
                 <button
                   v-for="e in s.exercises"
                   :key="e.name"
-                  class="rounded-xl border border-n-weak p-2.5 text-left transition-colors hover:bg-n-alpha-1"
-                  :class="{ 'bg-n-alpha-1': openCards.has(e.name) }"
+                  class="hub-crystal t-royal rounded-xl p-2.5 text-left transition-colors"
+                  :class="{ 'is-open': openCards.has(e.name) }"
                   @click="toggleCard(e.name)"
                 >
                   <div class="flex items-center gap-3">
@@ -1375,7 +1408,7 @@ const toggleMetas = () => {
                       <p class="text-xs font-bold text-n-slate-12 truncate">
                         {{ e.name }}
                         <span v-if="e.tag" class="font-normal text-n-slate-10">· {{ e.tag }}</span>
-                        <span v-if="e.pr" title="Recorde de força estimada">🏅</span>
+                        <span v-if="e.pr" class="i-lucide-medal hub-ico-inline" title="Recorde de força estimada" />
                       </p>
                       <p v-if="e.last" class="text-[11px] mt-0.5">
                         <span
@@ -1416,7 +1449,7 @@ const toggleMetas = () => {
                       <span> · {{ e.count }} {{ e.count === 1 ? 'execução' : 'execuções' }}</span>
                     </p>
                     <p v-if="e.mixed" :style="{ color: ROYAL }">
-                      ⚖ peso comum ·
+                      peso comum ·
                       <template v-for="(t, ti) in e.perTag" :key="t.tag">
                         <template v-if="ti > 0"> ≈ </template>{{ t.tag }} {{ fmt1(t.top) }}<template v-if="t.factor !== 1"> (×{{ String(t.factor).replace('.', ',') }})</template>
                       </template>
@@ -1441,7 +1474,7 @@ const toggleMetas = () => {
 
         <!-- 6. FORÇA: geral e por treino -->
         <div id="hub-forca" class="flex items-center justify-between gap-2 flex-wrap mb-2" style="scroll-margin-top: 0.75rem">
-          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide"><span class="hub-h-ico i-lucide-trending-up" />Força nos treinos</h2>
+          <h2 class="hub-h"><span class="hub-h-ico i-lucide-trending-up" />Força nos treinos</h2>
           <span v-if="forcaOptions.length > 1" class="hub-seg">
             <button
               v-for="o in forcaOptions"
@@ -1455,46 +1488,46 @@ const toggleMetas = () => {
             </button>
           </span>
         </div>
-        <div class="hub-block p-4 mb-4">
-          <div class="grid gap-2 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
-            <div class="rounded-xl p-2.5" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
-              <p class="text-[10px] text-n-slate-10">Força total (Σ e-1RM)</p>
-              <p class="text-lg font-extrabold leading-tight" :style="{ color: ROYAL }">{{ forcaView.m.n ? `${forcaView.m.now} kg` : '—' }}</p>
-              <p class="text-[10px] text-n-slate-10">
-                <template v-if="forcaView.m.n && forcaView.m.delta">{{ signed(forcaView.m.delta) }} kg no ciclo ({{ signed(forcaView.m.pct) }}%)</template>
+        <div class="hub-block p-5 mb-8">
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+            <div class="hub-goal hub-crystal t-royal">
+              <p class="hub-goal-l">Força total</p>
+              <p class="hub-goal-v">{{ forcaView.m.n ? forcaView.m.now : '—' }}<span class="hub-goal-u">kg</span></p>
+              <p class="hub-goal-s">
+                <template v-if="forcaView.m.n && forcaView.m.delta"><b>{{ signed(forcaView.m.delta) }} kg</b> no ciclo ({{ signed(forcaView.m.pct) }}%)</template>
                 <template v-else-if="forcaView.m.n">partiu de {{ forcaView.m.start }} kg</template>
                 <template v-else>registre treinos</template>
               </p>
             </div>
-            <div class="rounded-xl p-2.5" :style="{ background: 'rgba(255,138,0,0.10)', border: '1px solid rgba(255,138,0,0.35)' }">
-              <p class="text-[10px] text-n-slate-10">Força relativa</p>
-              <p class="text-lg font-extrabold leading-tight" :style="{ color: LARANJA }">{{ forcaView.m.rel !== null ? `${String(forcaView.m.rel).replace('.', ',')}×` : '—' }}</p>
-              <p class="text-[10px] text-n-slate-10">
-                <template v-if="forcaView.m.relDelta !== null && forcaView.m.relDelta !== 0">{{ signed(forcaView.m.relDelta) }} × peso no ciclo</template>
+            <div class="hub-goal hub-crystal t-orange">
+              <p class="hub-goal-l">Força relativa</p>
+              <p class="hub-goal-v">{{ forcaView.m.rel !== null ? `${String(forcaView.m.rel).replace('.', ',')}×` : '—' }}<span class="hub-goal-u">peso</span></p>
+              <p class="hub-goal-s">
+                <template v-if="forcaView.m.relDelta !== null && forcaView.m.relDelta !== 0"><b>{{ signed(forcaView.m.relDelta) }}×</b> peso no ciclo</template>
                 <template v-else>força por kg de corpo</template>
               </p>
             </div>
-            <div class="rounded-xl p-2.5 border border-n-weak">
-              <p class="text-[10px] text-n-slate-10">Exercícios subindo</p>
-              <p class="text-lg font-extrabold leading-tight text-n-slate-12">{{ forcaView.m.rate === null ? '—' : `${forcaView.m.rate}%` }}</p>
-              <p class="text-[10px] text-n-slate-10">
+            <div class="hub-goal hub-crystal t-sky">
+              <p class="hub-goal-l">Exercícios subindo</p>
+              <p class="hub-goal-v">{{ forcaView.m.rate === null ? '—' : forcaView.m.rate }}<span v-if="forcaView.m.rate !== null" class="hub-goal-u">%</span></p>
+              <p class="hub-goal-s">
                 <template v-if="forcaView.m.comparable">▲{{ forcaView.m.verdicts.progress }} ▬{{ forcaView.m.verdicts.tie }} ▼{{ forcaView.m.verdicts.regress }} no ciclo</template>
                 <template v-else>superados ÷ comparáveis</template>
               </p>
             </div>
           </div>
-          <div v-if="forcaView.chart" style="height: 180px">
+          <div v-if="forcaView.chart" class="hub-chart" style="height: 180px">
             <Line :data="forcaView.chart" :options="dualChartOpts" />
           </div>
           <p v-else class="text-[11px] text-n-slate-10">A curva da força aparece a partir da 2ª semana com treinos registrados.</p>
         </div>
 
         <!-- 6. METAS DO PRÓXIMO TREINO (dobrável) -->
-        <div class="hub-block mb-4">
+        <div class="hub-block mb-8">
           <button class="w-full flex items-center justify-between gap-2 px-4 py-3 text-left" @click="toggleMetas">
-            <span class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">
-              🎯 Metas do Treino {{ metasSession?.key || '' }}
-              <span v-if="metasSession?.weekday" class="font-normal normal-case text-n-slate-10">· {{ metasSession.weekday }} · {{ upcomingPlan.length }} exercícios</span>
+            <span class="hub-h">
+              <span class="hub-h-ico i-lucide-target" />Metas do Treino {{ metasSession?.key || '' }}
+              <span v-if="metasSession?.weekday" class="hub-h-sub">· {{ metasSession.weekday }} · {{ upcomingPlan.length }} exercícios</span>
               <span
                 v-if="metasSession && upcomingSession && metasSession.key === upcomingSession.key"
                 class="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold normal-case"
@@ -1574,12 +1607,6 @@ const toggleMetas = () => {
 </template>
 
 <style scoped>
-/* rodada 30: teias do progresso */
-.hub-radar-card { border-radius: 16px; padding: 10px 10px 8px; border: 1px solid rgba(65, 105, 225, 0.18); background: rgba(255, 255, 255, 0.55); }
-:global(.dark) .hub-radar-card { background: rgba(255, 255, 255, 0.04); }
-.hub-radar-card :deep(svg) { max-width: 360px !important; }
-.hub-radar-cap { font-size: 11px; color: #64748b; text-align: center; margin: 4px 0 0; }
-
 /* detalhe do card de carga (rodada 22): o <p> global do app impõe 14px */
 .hub-card-detail,
 .hub-card-detail p {

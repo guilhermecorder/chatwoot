@@ -13,13 +13,43 @@ const props = defineProps({
   floor: { type: Number, default: 6 }, // % mínimo desenhado (só visual)
   legend: { type: Boolean, default: true },
   labelSize: { type: Number, default: 10 },
+  // rodada 31: folga lateral e margem em fração do tamanho — o card de tela
+  // inteira do PROGRESSO usa folgas menores pra teia crescer
+  exRatio: { type: Number, default: 0.22 },
+  padRatio: { type: Number, default: 0.2 },
 });
 
 const uid = `hr${Math.random().toString(36).slice(2, 8)}`;
 // folga horizontal extra no viewBox: rótulos laterais ("Sequências",
 // "Movimento") cabem inteiros sem depender de overflow
-const ex = computed(() => Math.round(props.size * 0.22));
-const pad = computed(() => Math.max(40, Math.round(props.size * 0.2)));
+// rótulo em até 2 linhas (quebra no espaço mais perto do meio) — nada de
+// reticências: "todas as palavras encaixem perfeitamente" (pedido dele 19/09)
+const linesOf = label => {
+  const t = String(label || '').trim();
+  if (t.length <= 12 || !t.includes(' ')) return [t];
+  const mid = t.length / 2;
+  let best = -1;
+  for (let i = 0; i < t.length; i += 1) if (t[i] === ' ' && (best < 0 || Math.abs(i - mid) < Math.abs(best - mid))) best = i;
+  return [t.slice(0, best), t.slice(best + 1)];
+};
+const lineH = computed(() => Math.round(props.labelSize * 1.15));
+const pad = computed(() => Math.max(36, Math.round(props.size * props.padRatio)));
+// folga lateral = o que cada rótulo realmente precisa na SUA posição
+// (≈ 0,58 em por caractere): um rótulo largo no topo não pede folga
+// lateral, um no lado pede a largura inteira — a teia fica a maior possível
+const ex = computed(() => {
+  const n = Math.max(3, props.axes.length);
+  const radius = props.size / 2 - pad.value;
+  let need = 0;
+  props.axes.forEach((ax, i) => {
+    const c = Math.cos((Math.PI * 2 * i) / n - Math.PI / 2);
+    const w = Math.max(...linesOf(ax.label).map(l => l.length)) * props.labelSize * 0.58;
+    const side = Math.abs(c) > 0.35;
+    const reach = Math.abs(c) * (radius + 12) + (side ? w : w / 2);
+    need = Math.max(need, reach - props.size / 2);
+  });
+  return Math.round(Math.max(props.size * props.exRatio, need + 6));
+});
 const cx = computed(() => props.size / 2);
 const cy = computed(() => props.size / 2);
 const radius = computed(() => props.size / 2 - pad.value);
@@ -48,10 +78,23 @@ const labelOf = i => {
   const c = Math.cos(a);
   const s = Math.sin(a);
   const anchor = c > 0.35 ? 'start' : c < -0.35 ? 'end' : 'middle';
-  const dy = s < -0.8 ? -3 : s > 0.8 ? 9 : 4;
-  return { x, y, anchor, dy };
+  const lines = linesOf(props.axes[i]?.label);
+  // topo: sobe o bloco inteiro (2 linhas ficam acima do vértice); base: desce;
+  // lados: centraliza verticalmente as linhas
+  let dy = s < -0.8 ? -3 - (lines.length - 1) * lineH.value : s > 0.8 ? 9 : 4;
+  if (Math.abs(s) <= 0.8 && lines.length > 1) dy -= Math.round(lineH.value / 2);
+  return { x, y, anchor, dy, lines };
 };
-const colorOf = (ax, i) => ax.color || (i % 2 ? '#B85C00' : '#27408B');
+// cor do rótulo: os 2 tons padrão viram classes (o CSS troca pro claro no
+// modo escuro); só uma cor realmente própria entra como estilo inline
+const DEFAULT_TONES = ['#27408B', '#B85C00'];
+const toneOf = (ax, i) => {
+  const c = String(ax.color || '').toUpperCase();
+  if (c === DEFAULT_TONES[1]) return 'tone-b';
+  if (c === DEFAULT_TONES[0]) return 'tone-a';
+  return i % 2 ? 'tone-b' : 'tone-a';
+};
+const ownColor = ax => (ax.color && !DEFAULT_TONES.includes(String(ax.color).toUpperCase()) ? { fill: ax.color } : null);
 </script>
 
 <template>
@@ -89,10 +132,11 @@ const colorOf = (ax, i) => ax.color || (i % 2 ? '#B85C00' : '#27408B');
         :text-anchor="labelOf(i).anchor"
         :font-size="labelSize"
         font-weight="700"
-        :fill="colorOf(ax, i)"
         class="hub-radar-label"
+        :class="toneOf(ax, i)"
+        :style="ownColor(ax)"
       >
-        {{ ax.label }}
+        <tspan v-for="(ln, li) in labelOf(i).lines" :key="li" :x="labelOf(i).x" :dy="li ? lineH : 0">{{ ln }}</tspan>
       </text>
     </svg>
     <div v-if="legend && datasets.length" class="hub-radar-legend">
@@ -114,10 +158,19 @@ const colorOf = (ax, i) => ax.color || (i % 2 ? '#B85C00' : '#27408B');
   from { opacity: 0; transform: scale(0.6); }
   to { opacity: 1; transform: none; }
 }
-.hub-radar-label { letter-spacing: 0.01em; }
-.hub-radar-legend { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 2px; font-size: 11px; color: #64748b; }
+/* fonte limpa, sem contorno/sombra; azul e laranja de alto contraste nos 2 modos */
+.hub-radar-label { letter-spacing: 0; stroke: none; paint-order: fill; text-shadow: none; font-family: inherit; }
+.hub-radar-label.tone-a { fill: #1f3a9c; }
+/* laranja = o mesmo LARANJA da paleta (#ff8a00), como nos números do painel */
+.hub-radar-label.tone-b { fill: #e07800; }
+:global(.dark) .hub-radar-label.tone-a { fill: #c3d0ff; }
+:global(.dark) .hub-radar-label.tone-b { fill: #ff8a00; }
+:global(.dark) .hub-radar-ring { stroke: rgba(195, 208, 255, 0.3); }
+:global(.dark) .hub-radar-ring.is-outer { stroke: rgba(195, 208, 255, 0.6); }
+:global(.dark) .hub-radar-axis { stroke: rgba(195, 208, 255, 0.26); }
+.hub-radar-legend { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 2px; font-size: 11px; font-weight: 600; color: #334155; }
 .hub-radar-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .hub-radar-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-:global(.dark) .hub-radar-legend { color: rgba(255, 255, 255, 0.7); }
+:global(.dark) .hub-radar-legend { color: rgba(255, 255, 255, 0.88); }
 @media (prefers-reduced-motion: reduce) { .hub-radar-set { animation: none; } }
 </style>

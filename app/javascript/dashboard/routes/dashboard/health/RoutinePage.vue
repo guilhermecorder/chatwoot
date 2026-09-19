@@ -14,7 +14,7 @@ import CrmAPI from 'dashboard/api/crm';
 import HubTabBar from './HubTabBar.vue';
 import {
   ROUTINE_CATS, routineCat, LIFE_AREAS, WEEKDAYS,
-  ROUTINE_PRESET_WEEKDAY, ROUTINE_PRESET_WEEKEND,
+  ROUTINE_PRESET_WEEKDAY, ROUTINE_PRESET_WEEKEND, ROUTINE_PRESETS,
   timeToMin, dayMinutesByCat, customToProgram, programWeeks,
 } from './warrior';
 import { ROYAL, LARANJA, LARANJA_VIVO, GRAD_ROYAL, GRAD_NOITE, GRAD_LARANJA } from './palette';
@@ -145,8 +145,11 @@ const removeBlock = b => {
   routine.value.days[selDay.value] = blocksOf(selDay.value).filter(x => x.id !== b.id);
   blockForm.value = null;
 };
+const presetsOpen = ref(false);
 const applyPreset = kind => {
-  const preset = kind === 'fds' ? ROUTINE_PRESET_WEEKEND : ROUTINE_PRESET_WEEKDAY;
+  presetsOpen.value = false;
+  const found = ROUTINE_PRESETS.find(p => p.key === kind);
+  const preset = found ? found.blocks : kind === 'fds' ? ROUTINE_PRESET_WEEKEND : ROUTINE_PRESET_WEEKDAY;
   routine.value.days[selDay.value] = clone(preset).map(b => ({ ...b, id: `${b.id}_${Date.now().toString(36)}` }));
 };
 const copyDayTo = day => {
@@ -244,7 +247,7 @@ const yearDone = computed(() => {
           <span class="i-lucide-calendar-range text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12 leading-tight">Rotina</h1>
+          <h1 class="hub-h1">Rotina</h1>
           <p class="text-[11px] text-n-slate-10">construtor de dias, semanas, meses e anos — rotinas campeãs pros seus objetivos de vida</p>
         </div>
         <span class="text-[10px] text-n-slate-10">{{ saving ? 'salvando…' : savedAt ? `salvo ✓ ${savedAt}` : '' }}</span>
@@ -261,7 +264,7 @@ const yearDone = computed(() => {
 
         <!-- ═══ DIA ═══ -->
         <template v-if="view === 'dia'">
-          <div class="hub-block p-4 mb-4">
+          <div class="hub-block p-5 mb-8">
             <div class="flex items-center gap-1.5 flex-wrap mb-3">
               <button
                 v-for="d in WEEKDAYS"
@@ -276,6 +279,7 @@ const yearDone = computed(() => {
                 <span v-if="d === todayWeekday && selDay !== d" class="absolute -top-1 -right-1 w-2 h-2 rounded-full" :style="{ background: LARANJA }" />
               </button>
               <div class="flex-1" />
+              <button class="h-9 px-3 rounded-xl text-xs font-bold border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" :class="{ 'is-on': presetsOpen }" @click="presetsOpen = !presetsOpen"><span class="i-lucide-layout-template hub-ico" style="width: 14px; height: 14px" /> Modelos</button>
               <button class="h-9 px-3 rounded-xl text-xs font-bold text-white" :style="{ background: GRAD_LARANJA }" @click="openNewBlock">+ bloco</button>
             </div>
 
@@ -317,13 +321,30 @@ const yearDone = computed(() => {
             </div>
 
             <!-- dia vazio: rotina campeã de partida -->
-            <div v-if="!dayBlocks.length && !blockForm" class="rounded-xl border border-dashed border-n-weak p-4 text-center mb-3">
+            <div v-if="(!dayBlocks.length || presetsOpen) && !blockForm" class="hub-crystal rounded-2xl p-5 text-center mb-6">
               <span class="hub-sec-ico mx-auto mb-2"><span class="i-lucide-sunrise" /></span>
-              <p class="text-sm font-bold text-n-slate-12">{{ selDay }} ainda sem rotina</p>
-              <p class="text-[11px] text-n-slate-10 mb-3">Comece por um modelo campeão e ajuste — ou monte bloco a bloco.</p>
-              <div class="flex gap-2 justify-center flex-wrap">
-                <button class="h-9 px-4 rounded-xl text-xs font-bold text-white" :style="{ background: GRAD_NOITE }" @click="applyPreset('util')">Dia útil campeão</button>
-                <button class="h-9 px-4 rounded-xl text-xs font-bold text-white" :style="{ background: GRAD_ROYAL }" @click="applyPreset('fds')">Fim de semana</button>
+              <p class="hub-h2 justify-center">{{ dayBlocks.length ? `Modelos pra ${selDay}` : `${selDay} ainda sem rotina` }}</p>
+              <p class="text-[11px] text-n-slate-10 mb-4">{{ dayBlocks.length ? "Aplicar um modelo substitui os blocos deste dia — depois é só ajustar." : "Comece por um modelo campeão e ajuste — ou monte bloco a bloco." }}</p>
+              <div class="hub-preset-grid">
+                <!-- rodada 32: rotinas pré-definidas por relógio (acorda cedo/tarde × dorme cedo/tarde) + fim de semana -->
+                <button
+                  v-for="p in ROUTINE_PRESETS"
+                  :key="p.key"
+                  class="hub-preset hub-crystal t-royal"
+                  :title="`Aplica em ${selDay}: ${p.sub}`"
+                  @click="applyPreset(p.key)"
+                >
+                  <span class="hub-preset-ico" :class="p.ico" />
+                  <span class="hub-preset-l">{{ p.label }}</span>
+                  <span class="hub-preset-t"><b>{{ p.wake }}</b> acorda · <b>{{ p.sleep }}</b> dorme</span>
+                  <span class="hub-preset-s">{{ p.sub }}</span>
+                </button>
+                <button class="hub-preset hub-crystal t-orange" title="Sábado e domingo" @click="applyPreset('fds')">
+                  <span class="hub-preset-ico i-lucide-tent" />
+                  <span class="hub-preset-l">Fim de semana</span>
+                  <span class="hub-preset-t"><b>07:00</b> acorda · <b>22:00</b> dorme</span>
+                  <span class="hub-preset-s">ar livre, família, projeto pessoal, revisão da semana</span>
+                </button>
               </div>
             </div>
 
@@ -372,8 +393,8 @@ const yearDone = computed(() => {
 
         <!-- ═══ SEMANA ═══ -->
         <template v-if="view === 'semana'">
-          <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-calendar" />A semana inteira</h2>
+          <div class="hub-block p-5 mb-8">
+            <h2 class="hub-h2 mb-1"><span class="hub-h-ico i-lucide-calendar" />A semana inteira</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">Cada coluna é um dia (toque pra editar). Cores = áreas da vida.</p>
             <div class="grid gap-1.5" style="grid-template-columns: repeat(7, minmax(0, 1fr))">
               <div v-for="c in weekColumns" :key="c.day" class="min-w-0 cursor-pointer" @click="goDay(c.day)">
@@ -386,8 +407,8 @@ const yearDone = computed(() => {
               </div>
             </div>
           </div>
-          <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-hourglass" />Onde vai o seu tempo na semana</h2>
+          <div class="hub-block p-5 mb-8">
+            <h2 class="hub-h2 mb-1"><span class="hub-h-ico i-lucide-hourglass" />Onde vai o seu tempo na semana</h2>
             <p v-if="!weekByCat.length" class="text-[11px] text-n-slate-10">Monte pelo menos um dia pra ver a distribuição.</p>
             <div v-for="c in weekByCat" :key="c.key" class="flex items-center gap-2 mb-1.5">
               <span class="w-6 h-6 rounded-md flex items-center justify-center" :style="{ background: c.color, color: textOn(c.color) }"><span :class="c.ico" style="width: 13px; height: 13px" /></span>
@@ -412,7 +433,7 @@ const yearDone = computed(() => {
             <div
               v-for="key in monthKeys"
               :key="key"
-              class="hub-block p-3"
+              class="hub-block p-4"
               :class="key === nowMonthKey ? 'hub-orange hub-block-solid' : ''"
             >
               <div class="flex items-center justify-between mb-1">
@@ -444,7 +465,7 @@ const yearDone = computed(() => {
             <button class="h-8 w-8 rounded-lg border border-n-weak hover:bg-n-alpha-1" @click="year += 1">›</button>
             <span v-if="yearDone !== null" class="text-[11px] font-bold px-2 py-0.5 rounded-md" :style="{ background: 'rgba(65,105,225,0.12)', color: ROYAL }">{{ yearDone }}% das metas</span>
           </div>
-          <div class="hub-block hub-block-solid p-4 mb-4 text-white">
+          <div class="hub-block hub-block-solid p-5 mb-8 text-white">
             <p class="text-sm font-black mb-0.5 flex items-center gap-2"><span class="i-lucide-trophy" style="width: 16px; height: 16px" />Onde quero chegar em {{ year }}</p>
             <p class="text-[11px] opacity-85 mb-3">Uma frase por área da vida. É daqui que nascem as metas do mês e os blocos do dia.</p>
             <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))">
@@ -454,8 +475,8 @@ const yearDone = computed(() => {
               </div>
             </div>
           </div>
-          <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-target" />Metas do ano</h2>
+          <div class="hub-block p-5 mb-8">
+            <h2 class="hub-h2 mb-1"><span class="hub-h-ico i-lucide-target" />Metas do ano</h2>
             <p class="text-[11px] text-n-slate-10 mb-2">Poucas e claras. Marque quando bater.</p>
             <div v-for="(g, i) in yearData.goals" :key="i" class="flex items-center gap-2 text-xs py-1.5 border-b border-n-weak/60 last:border-0">
               <input v-model="g.done" type="checkbox" class="m-0" />
@@ -467,8 +488,8 @@ const yearDone = computed(() => {
               <button class="h-9 px-4 rounded-lg text-xs font-bold text-white" :style="{ background: GRAD_LARANJA }" @click="addGoal({ key: `y${year}`, list: yearData.goals })">Adicionar</button>
             </div>
           </div>
-          <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-2"><span class="hub-h-ico i-lucide-calendar-days" />Linha do ano</h2>
+          <div class="hub-block p-5">
+            <h2 class="hub-h2 mb-2"><span class="hub-h-ico i-lucide-calendar-days" />Linha do ano</h2>
             <div class="grid gap-1" style="grid-template-columns: repeat(12, minmax(0, 1fr))">
               <div v-for="key in monthKeys" :key="key" class="rounded-lg border p-1 min-h-[3.4rem]" :style="key === nowMonthKey ? { borderColor: LARANJA, background: 'rgba(255,138,0,0.08)' } : { borderColor: 'rgba(148,163,184,0.35)' }">
                 <p class="text-[9px] font-bold text-center" :style="{ color: key === nowMonthKey ? LARANJA_VIVO : '#64748b' }">{{ MONTHS_PT[Number(key.slice(5, 7)) - 1] }}</p>

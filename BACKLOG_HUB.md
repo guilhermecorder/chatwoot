@@ -12,6 +12,168 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 32 — 19/09 ✅ PASSE "APPLE" EM TODO O MUNDO SAÚDE + ROTINAS PRÉ-DEFINIDAS (working tree, NÃO subida)
+Pedido dele (print da sessão de treino): "maior separação entre os blocos,
+respiro maior, mais contraste, efeito vidro (iPhone) — ajustar TODO o
+ambiente Treino, Cardio, Boxe, Corpo; Análises e Rotina também; fontes
+maiores quando fizer sentido; melhor agrupamento". E em Rotina: "rotinas
+pré-definidas: quem acorda cedo/tarde, quem dorme cedo/tarde — a rotina
+tem que ser ajustável".
+- **Kit (global, vale pras 7 telas)**: `.hub-h1` 24px (título da tela),
+  `.hub-h2` 17px/800 c/ ícone 20px (título de bloco; substituiu os
+  `text-sm font-bold` do Treino/Análises/Rotina), `.hub-sec-title` 16→18px;
+  contraste dos utilitários do app DENTRO do `.hub-page`: `border-n-weak`
+  22% branco no escuro, `text-n-slate-10/11` mais claros, `text-[9/10/11px]`
+  +1px; `.hub-ex-card` (exercício na sessão) 28–36px entre cards, 28px de
+  padding no notebook.
+- **Blocos**: todos os `.hub-block` do HealthPage (24), HealthDashboard
+  (19) e RoutinePage (7) passaram de p-4/mb-4 pra p-5/mb-8 (28px de
+  padding no notebook, 32px entre blocos). Cards internos (`rounded-2xl/
+  rounded-xl border border-n-weak p-*`: exercício da sessão, treinos de
+  boxe, planos de luta, atletas, medidas, macros, refeições, histórico)
+  → `.hub-crystal` (vidro preto/branco, aro nítido) com padding maior.
+  Abas das Análises sem emoji.
+- **Rotina — modelos**: `ROUTINE_PRESETS` no warrior.js (mesma espinha
+  do dia campeão deslocada pro relógio de cada perfil): Acorda cedo ·
+  dorme cedo (05:00→21:00) · Acorda cedo · dorme tarde (06:00→23:30, aviso
+  do sono) · Acorda tarde · dorme cedo (08:30→22:30) · Acorda tarde ·
+  dorme tarde (09:30→01:00) + Fim de semana. Cards de vidro
+  (`.hub-preset`) com relógio de acordar/dormir e descrição; aparecem no
+  dia vazio e, em qualquer dia, pelo botão "Modelos" (aplicar substitui
+  os blocos do dia — tudo editável depois).
+
+## RODADA 31b — 19/09 ✅ VIDRO CRISTALINO + ONDE ESTOU ENXUTO (working tree, NÃO subida)
+Feedback dele (prints): "prefiro vidro cristalino, não esse gradiente
+branco no modo escuro; quanto mais claro melhor; muitos indicadores no
+ONDE ESTOU → reduzir pros 3 ou 4 mais importantes, variar as cores,
+moldura cristalina também".
+- **Kit `.hub-crystal`** (_hub-glass.scss): fundo translúcido UNIFORME
+  (branco 13,5% no escuro / 50% no claro), aro branco nítido 50%, fio de
+  luz no topo, brilho fino na diagonal (não a névoa vertical), anel
+  externo na cor do tom, backdrop blur 26px + saturate + brightness.
+  Tons `.t-royal/.t-orange/.t-sky/.t-amber` (`--tone`/`--tone-rgb`).
+  Usado nos 3 cards do PROGRESSO, nos tiles do ONDE ESTOU e nos 8 tiles
+  da Transformação (Análises).
+- **ONDE ESTOU → ONDE QUERO CHEGAR**: de 10 tiles pra 4 = `keyGoals` (3
+  medidas: quem tem alvo primeiro, na ordem peso > cintura > …; completa
+  com medidas sem alvo) + Força total. Tons: royal, laranja, azul-claro,
+  âmbar. Rótulo em caixa alta na cor do tom, número 21px, barra com brilho
+  do tom, sem emoji. O editor "✎ alvos" continua com todas as medidas.
+- **Referência dele = LIQUID GLASS do iOS 26** (print da pasta
+  "Produtividade" do iPhone): quase sem tinta (branco 7,5% no escuro),
+  desfoque saturado do fundo (blur 30px · saturate 2,1 · brightness
+  1,18), BORDA GROSSA refratando — faísca no canto superior esquerdo
+  (inset 1,5px branco 62%), reflexo mais fraco no inferior direito,
+  halo interno de 24px, aro 32% — e, como o fundo do app é preto chapado,
+  um `::after` com manchas royal + laranja desfocadas atrás do vidro faz
+  o papel do papel de parede. Raio 30px nos cards do progresso.
+- **3ª volta (final)**: "fica ruim assim; fundo do card PRETO no escuro,
+  BRANCO no claro, sem essas luzes" → `.hub-crystal` = vidro liso: preto
+  78% no escuro / branco 92% no claro, aro fino (branco 20% / ardósia
+  10%), fio de luz de 1px no topo, blur 18px, SEM manchas, SEM faíscas.
+  Os `.hub-block` também ficaram neutros (preto 72% / branco 88%, aro
+  fino, luz difusa do canto só no `.hub-block-solid`) — o tom royal que
+  a correção do rgb() tinha "ressuscitado" saiu de novo. Conferido no
+  celular nos 2 modos.
+- **4ª volta — "aumente o contraste dos cards de indicadores; fundo de
+  vidro em todos; gráficos com todas as palavras cabendo, fonte sem
+  moldura, azul e laranja de alto contraste nos 2 modos"**:
+  · TODOS os tiles do Meu Painel (balanço de cm, área do corpo, cargas
+    por exercício, força) viraram `.hub-goal.hub-crystal` com tom (royal/
+    laranja/azul-claro/âmbar); bloco um fio mais claro que o card (preto
+    82% sobre cinza-noite 74%), aro do card 28%, textos 82–88% brancos;
+    rótulo em até 2 linhas (line-clamp), sem reticências.
+  · HubRadar: rótulo quebra em 2 linhas no espaço mais perto do meio
+    (`linesOf`), a folga lateral é calculada pela posição real de cada
+    rótulo (topo não pede folga; lado pede a largura inteira) → teia
+    maior e nada cortado; fonte sem stroke/sombra; tons #1f3a9c/#9a4a00
+    no claro e #c3d0ff/#ffca8c no escuro; anéis mais claros no escuro.
+    `shortName` do painel não trunca mais. Laranja dos rótulos = o
+    LARANJA da paleta (#ff8a00 no escuro, #e07800 no claro) — pedido dele.
+  · `chartTheme.js` (novo): padrões do Chart.js por tema — texto
+    #1e293b (claro) / branco 88% (escuro), 11px/600, eixo X sem girar
+    (autoSkip), legenda com bolinha; `watchChartTheme` observa a classe
+    .dark e redesenha os gráficos abertos. Chamado no HealthHome e no
+    HealthDashboard.
+  · RESPIRO (pedido dele: "mais espaçamento entre os blocos e dentro
+    dos cards e gráficos; o design é extremamente importante"): blocos
+    do painel p-5/mb-6 (24px de padding no notebook), `.hub-sec` 18px
+    abaixo, tiles 14–16px de padding e 6px entre rótulo/número/legenda,
+    grids gap-3, gráficos com `.hub-chart` (16px acima), card do
+    progresso 20px, trilho 16px. Valor do tile em 1 linha (19px celular /
+    22px notebook), rótulo quebra sem estourar; "Desenvolvimento
+    muscular" → "Ganho muscular".
+  · Conferido no celular nos 2 modos.
+- **5ª volta — "títulos CENTÍMETROS bem maiores; mais respiro entre
+  blocos e dentro dos cards; agrupar indicadores (cintura umbigo |
+  cintura estreita | quadril / peito | ombros | pescoço); alinhar o Meu
+  Painel 100% à ideia Apple (claro, transparente, respiros, vidro)"**:
+  · `.hub-h` = título de seção 20px/800 caixa alta (ícone lucide 22px
+    inline, sub em 13px normal) nos 6 títulos do painel; PROGRESSO idem.
+    Blocos mb-8 (32px entre seções), 28px de padding no notebook; tiles
+    18–22px de padding e 10px entre rótulo/número/legenda.
+  · MEDIDAS EM GRUPOS (`CM_GROUPS`/`cmGroups`): 4 faixas de vidro
+    (Tronco = cintura umbigo | estreita | quadril · Peito·ombros·pescoço ·
+    Braços = braço D/E, antebraço D/E · Pernas = coxa D/E, panturrilha
+    D/E), cada uma num tom, células separadas por fio (3 col; 2×2 no
+    celular pras de 4). Substituem a nuvem de 10 chips.
+  · Emojis restantes do painel → lucide (🎯 metas → target, 🏅 recorde →
+    medal, 🧍 áreas → person-standing, 📉 → trending-down, 🏃/⚖ removidos);
+    subtítulos internos `.hub-sub` 13,5px/700 com ícone.
+  · Conferido no celular (escuro).
+- **BUG DO KIT DESDE A RODADA 23, corrigido aqui**: todas as cores
+  `rgb(var(--hb-rgb) / 0.x)` do `_hub-glass.scss` eram INVÁLIDAS (a
+  variável é "65, 105, 225" com vírgulas → `rgb(65, 105, 225 / 0.2)` não
+  existe; o Chrome descartava a declaração inteira, inclusive
+  `background` e `box-shadow` do `.hub-block`). Trocadas as 43 por
+  `rgba(var(--hb-rgb), 0.x)`. EFEITO: o tom royal/laranja que o kit
+  sempre quis dar aos blocos passou a aparecer — o HUB inteiro ficou
+  mais azulado/quente (é o design original; se ele achar demais, é só
+  baixar os alphas do `.hub-block`).
+- TESTADO local (celular, escuro): 4 tiles (Peso/Cintura/Peito/Força
+  total) e o card do PROGRESSO com aro refratando, faísca no canto e as
+  manchas royal/laranja atravessando o vidro.
+
+## RODADA 31 — 19/09 ✅ PROGRESSO EM VIDRO + BARRA SÓ + TRANSFORMAÇÃO C/ CENTÍMETROS (working tree, NÃO subida)
+Pedido dele 19/09 (prints do painel e da transformação no celular):
+"título PROGRESSO; no celular um card grande ocupando uma tela; esse cinza
+(blur) ficou ruim, precisa de contraste, mais elegante como vidro
+transparente; não-admin sem os 3 pontinhos flutuantes, só a barra
+inferior com mais contraste; centímetros na transformação + indicadores
+relevantes; mudar o ícone".
+- **PROGRESSO (HealthHome)**: título em caixa alta, ícone `orbit`. Kit
+  global `.hub-progress-*` em `_hub-glass.scss`: card de VIDRO
+  transparente (degradê branco 13→3,5%, borda branca 22%, reflexo no topo,
+  backdrop-blur 22px) com variante clara/escura pelo `.dark .hub-page`
+  (o `:global(.dark)` scoped não pegava → era o cinza do print). Celular =
+  trilho `scroll-snap` com 1 card por tela (`min-height: 100svh − 15,5rem`),
+  bolinhas indicando o slide; notebook = 3 colunas. Legenda 14px no celular.
+- **HubRadar**: props `exRatio`/`padRatio` (o card do progresso usa 0,10/
+  0,16 → teia maior); rótulos viram classes `tone-a/tone-b` (royal/laranja
+  escuros no claro, `#a9bdf7`/`#ffc17a` no escuro) — cor própria só se não
+  for um dos 2 tons padrão; anéis/eixos mais claros no escuro.
+- **HubTabBar**: `store.getters.getCurrentRole !== 'administrator'` →
+  classe `hub-tabbar-solo` no body esconde `#mobile-sidebar-launcher`
+  (convidado só-Saúde vive só com a barra). Contraste: fundo
+  rgba(7,12,30,.96), régua branca 16%, rótulos 86% brancos 10,5px/700,
+  ícone 23px, aba ativa com pílula laranja 16% + contorno.
+- **A Transformação (HealthDashboard)**: ícone `rocket`; 4ª série
+  "Centímetros totais (cm)" (azul-claro, linha grossa, eixo y3 oculto;
+  calorias viram cinza pontilhado); tooltip com unidade por série.
+  Soma de circunferências = conjunto FIXO de fitas (as da 1ª medição
+  com 3+ fitas) → comparável no tempo. 8 TILES `.hub-kpi` (ícone lucide,
+  sem emoji; 2 col celular / 4 notebook): Peso·ritmo, Força·ritmo,
+  Medidas·ritmo (só dias de fita, janela 90d — a de 30d dava −90 cm/mês
+  por causa do degrau do "último valor conhecido"), Alvo de peso (~N sem
+  + data no ritmo atual / batido / parado / sem alvo), Peso·total,
+  Medidas·total (desde o início), Recordes·7d, Programa (S24 de 24 ·
+  55 treinos).
+- TESTADO local (navegador embutido, escuro): painel celular = 3 cards
+  de tela inteira deslizando c/ bolinhas; notebook = 3 colunas; Análises
+  tiles legíveis (Medidas·ritmo −8,3 cm/mês, Medidas·total −42,9 cm,
+  alvo ~9 sem · 19/11); convidado@hub.local (agent) → sem hambúrguer,
+  body `hub-tabbar-solo`; admin mantém o hambúrguer.
+
 ## SUBIDA 19/09 (noite) — RODADAS 29–30: "ficou bem legal, pode subir" →
 commit c438ff52d5 na feat/hub-saude → push → docker-build por
 workflow_dispatch (run 35472139381) VERDE → **etiqueta `c438ff5`** (sem

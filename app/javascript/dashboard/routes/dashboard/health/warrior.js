@@ -1071,6 +1071,45 @@ export const ROUTINE_PRESET_WEEKDAY = [
   rb('21:00', '21:45', 'Leitura · planejamento do dia seguinte', 'mente'),
   rb('22:00', '05:30', 'Dormir', 'descanso'),
 ];
+// rodada 32 — ROTINAS PRÉ-DEFINIDAS ajustáveis (pedido dele 19/09): "para
+// quem acorda tarde / cedo, para quem dorme tarde / cedo — a rotina tem
+// que ser ajustável". Mesma espinha (treino cedo, foco de manhã, execução
+// à tarde, cardio/boxe, família, leitura, sono), deslocada pro relógio de
+// cada perfil. Tudo editável depois de aplicar.
+const routineDay = ({ wake, train, coffee, focus, lunch, exec, cardio, dinner, mind, sleep }) => [
+  rb(wake[0], wake[1], 'Acordar · água · luz do sol', 'casa'),
+  rb(train[0], train[1], 'Treino', 'saude', 'programa ativo'),
+  rb(coffee[0], coffee[1], 'Café · banho', 'casa'),
+  rb(focus[0], focus[1], 'Trabalho — foco profundo', 'negocios', 'sem celular'),
+  rb(lunch[0], lunch[1], 'Almoço · caminhada', 'saude'),
+  rb(exec[0], exec[1], 'Trabalho — execução e reuniões', 'negocios'),
+  rb(cardio[0], cardio[1], 'Cardio / boxe', 'saude'),
+  rb(dinner[0], dinner[1], 'Jantar · família', 'familia'),
+  rb(mind[0], mind[1], 'Leitura · planejamento do dia seguinte', 'mente'),
+  rb(sleep[0], sleep[1], 'Dormir', 'descanso'),
+];
+export const ROUTINE_PRESETS = [
+  {
+    key: 'cedo_cedo', label: 'Acorda cedo · dorme cedo', wake: '05:00', sleep: '21:00', ico: 'i-lucide-sunrise',
+    sub: 'madrugador: 8h de sono, treino ao nascer do sol',
+    blocks: routineDay({ wake: ['05:00', '05:30'], train: ['05:30', '06:45'], coffee: ['06:45', '07:30'], focus: ['07:30', '11:30'], lunch: ['11:30', '12:30'], exec: ['12:30', '17:00'], cardio: ['17:30', '18:30'], dinner: ['18:30', '20:00'], mind: ['20:00', '20:45'], sleep: ['21:00', '05:00'] }),
+  },
+  {
+    key: 'cedo_tarde', label: 'Acorda cedo · dorme tarde', wake: '06:00', sleep: '23:30', ico: 'i-lucide-sun',
+    sub: 'dia longo: noite pra projetos — cuide do sono (6h30)',
+    blocks: routineDay({ wake: ['06:00', '06:30'], train: ['06:30', '07:45'], coffee: ['07:45', '08:30'], focus: ['08:30', '12:30'], lunch: ['12:30', '13:30'], exec: ['13:30', '18:30'], cardio: ['19:00', '20:00'], dinner: ['20:00', '21:30'], mind: ['21:30', '23:00'], sleep: ['23:30', '06:00'] }),
+  },
+  {
+    key: 'tarde_cedo', label: 'Acorda tarde · dorme cedo', wake: '08:30', sleep: '22:30', ico: 'i-lucide-cloud-sun',
+    sub: 'dia curto e sono longo: recuperação em 1º lugar',
+    blocks: routineDay({ wake: ['08:30', '09:00'], train: ['09:00', '10:15'], coffee: ['10:15', '11:00'], focus: ['11:00', '13:00'], lunch: ['13:00', '14:00'], exec: ['14:00', '18:30'], cardio: ['18:30', '19:30'], dinner: ['19:30', '21:00'], mind: ['21:00', '21:45'], sleep: ['22:30', '08:30'] }),
+  },
+  {
+    key: 'tarde_tarde', label: 'Acorda tarde · dorme tarde', wake: '09:30', sleep: '01:00', ico: 'i-lucide-moon-star',
+    sub: 'coruja: o mesmo dia campeão, 4h mais tarde',
+    blocks: routineDay({ wake: ['09:30', '10:00'], train: ['10:00', '11:15'], coffee: ['11:15', '12:00'], focus: ['12:00', '15:00'], lunch: ['15:00', '16:00'], exec: ['16:00', '20:00'], cardio: ['20:00', '21:00'], dinner: ['21:00', '22:30'], mind: ['22:30', '00:30'], sleep: ['01:00', '09:30'] }),
+  },
+];
 export const ROUTINE_PRESET_WEEKEND = [
   rb('07:00', '07:30', 'Acordar sem pressa', 'casa'),
   rb('08:00', '09:30', 'Atividade ao ar livre', 'saude'),

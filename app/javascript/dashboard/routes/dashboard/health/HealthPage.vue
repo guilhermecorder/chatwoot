@@ -2291,7 +2291,7 @@ onMounted(async () => {
           <span class="i-lucide-heart-pulse text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">{{ currentTabLabel }}</h1>
+          <h1 class="hub-h1">{{ currentTabLabel }}</h1>
           <p class="text-xs text-n-slate-10">Saúde · seu painel pessoal</p>
         </div>
       </div>
@@ -2367,8 +2367,8 @@ onMounted(async () => {
           />
 
           <!-- histórico dos programas pessoais (pra vida toda) -->
-          <div v-if="historyOpen && !session && !wizard" class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-scroll-text" />Meus programas</h2>
+          <div v-if="historyOpen && !session && !wizard" class="hub-block p-5 mb-8">
+            <h2 class="hub-h2 mb-1"><span class="hub-h-ico i-lucide-scroll-text" />Meus programas</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">Cada bloco que você fez, com o resultado no parâmetro que você escolheu.</p>
             <div class="flex flex-col gap-2">
               <div
@@ -2380,7 +2380,7 @@ onMounted(async () => {
               >
                 <span class="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0" :style="{ background: h.status === 'active' ? GRAD_LARANJA : GRAD_NOITE }">{{ h.goal.icon }}</span>
                 <div class="flex-1 min-w-0">
-                  <p class="text-sm font-bold text-n-slate-12">
+                  <p class="hub-h2">
                     {{ h.name }}
                     <span v-if="h.isActive" class="ml-1 px-2 py-0.5 rounded-full text-[10px] text-white" :style="{ background: LARANJA }">ativo</span>
                     <span v-else-if="h.status === 'finished'" class="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-n-alpha-2 text-n-slate-11">encerrado</span>
@@ -2404,17 +2404,17 @@ onMounted(async () => {
           </div>
 
           <!-- sem programa (modo pessoal sem nenhum ativo) -->
-          <div v-if="!program && !session && !wizard" class="hub-block p-5 mb-4 text-center">
+          <div v-if="!program && !session && !wizard" class="hub-block p-5 mb-8 text-center">
             <p class="text-2xl mb-1">✨</p>
-            <p class="text-sm font-bold text-n-slate-12 mb-1">Nenhum programa ativo</p>
+            <p class="hub-h2 mb-1">Nenhum programa ativo</p>
             <p class="text-[11px] text-n-slate-10 mb-3">Monte o seu (ABC, ABCD…) ou cole um treino pronto — leva 2 minutos.</p>
             <button class="h-10 px-5 rounded-xl text-xs font-bold text-white" :style="{ background: GRAD_LARANJA }" @click="openWizard()">+ Criar / importar treino</button>
           </div>
 
           <!-- Programa ativo (Warrior ou pessoal) -->
-          <div v-if="program && !session && !wizard && treinoView === 'treinar'" class="hub-block p-4 mb-4">
+          <div v-if="program && !session && !wizard && treinoView === 'treinar'" class="hub-block p-5 mb-8">
             <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
-              <h2 class="text-sm font-bold text-n-slate-12"><span class="hub-h-ico i-lucide-dumbbell" />{{ program.name }}</h2>
+              <h2 class="hub-h2"><span class="hub-h-ico i-lucide-dumbbell" />{{ program.name }}</h2>
               <div v-if="programs.length > 1" class="flex gap-1.5">
                 <button
                   v-for="p in programs"
@@ -2457,7 +2457,7 @@ onMounted(async () => {
               <div
                 v-for="s in programCycle?.sessions || []"
                 :key="s.key"
-                class="hub-block hub-block-hover hub-session-card p-3 flex flex-col gap-2"
+                class="hub-block hub-block-hover hub-session-card p-4 flex flex-col gap-2"
                 :class="s.key === nextKey ? 'hub-orange hub-block-solid hub-block-today is-next' : ''"
                 role="button"
                 @click="startProgramSession(s)"
@@ -2506,7 +2506,7 @@ onMounted(async () => {
           </div>
 
           <!-- Editor de exercícios da prescrição -->
-          <div v-if="exEditor" class="hub-block p-4 mb-4">
+          <div v-if="exEditor" class="hub-block p-5 mb-8">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
               <span class="text-sm font-bold" :style="{ color: ROYAL }">✎ {{ exEditor.title }}</span>
               <button
@@ -2528,7 +2528,7 @@ onMounted(async () => {
               <div
                 v-for="(row, i) in exEditor.rows"
                 :key="i"
-                class="flex items-center gap-1.5 flex-wrap rounded-xl border border-n-weak p-2"
+                class="flex items-center gap-1.5 flex-wrap hub-crystal rounded-xl p-3"
                 :class="row._del ? 'opacity-40' : ''"
               >
                 <input
@@ -2575,7 +2575,7 @@ onMounted(async () => {
           </div>
 
           <!-- Sessão em andamento -->
-          <div v-if="session" class="hub-block p-4 mb-4">
+          <div v-if="session" class="hub-block p-5 mb-8">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
               <span class="text-sm font-bold" :style="{ color: ROYAL }">{{ session.plan_name }}</span>
               <button
@@ -2587,7 +2587,7 @@ onMounted(async () => {
             </div>
 
             <!-- Data em destaque: registro retroativo muda a semana junto -->
-            <div class="flex items-center gap-2 flex-wrap mb-3 rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2">
+            <div class="flex items-center gap-2 flex-wrap mb-3 hub-crystal rounded-xl px-4 py-3">
               <span class="text-[11px] font-medium text-n-slate-11">📅 Data do treino</span>
               <input
                 v-model="session.date"
@@ -2640,7 +2640,7 @@ onMounted(async () => {
             <!-- 1 exercício ≈ 1 tela no celular (pedido 30/08): o card
                  ocupa ~80% do viewport e o scroll "trava" nele — a tela
                  fica parada no exercício durante o treino -->
-            <div v-for="ex in session.exercises" :key="ex.name" class="hub-ex-card mb-5 rounded-2xl border border-n-weak p-4 sm:p-5">
+            <div v-for="ex in session.exercises" :key="ex.name" class="hub-ex-card mb-5 hub-crystal rounded-2xl p-5 sm:p-6">
               <div class="flex items-start justify-between gap-2 mb-1">
                 <h3 class="text-lg font-extrabold leading-snug text-n-slate-12">
                   {{ ex.displayName || ex.name }}
@@ -2906,9 +2906,9 @@ onMounted(async () => {
           </div>
 
           <!-- Planilha das semanas: A | B | C | Bônus -->
-          <div v-if="gridTabs.length && !session && !wizard && treinoView === 'planilha'" class="hub-block p-4 mb-4">
+          <div v-if="gridTabs.length && !session && !wizard && treinoView === 'planilha'" class="hub-block p-5 mb-8">
             <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
-              <h2 class="text-sm font-bold text-n-slate-12"><span class="hub-h-ico i-lucide-table" />Planilha das semanas</h2>
+              <h2 class="hub-h2"><span class="hub-h-ico i-lucide-table" />Planilha das semanas</h2>
               <div class="flex gap-1.5 flex-wrap">
                 <button
                   v-for="t in gridTabs"
@@ -2986,9 +2986,9 @@ onMounted(async () => {
           </div>
 
           <!-- Evolução -->
-          <div v-if="!session && !wizard && treinoView === 'historico'" class="hub-block p-4 mb-4">
+          <div v-if="!session && !wizard && treinoView === 'historico'" class="hub-block p-5 mb-8">
             <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h2 class="text-sm font-bold text-n-slate-12"><span class="hub-h-ico i-lucide-trending-up" />Evolução de carga</h2>
+              <h2 class="hub-h2"><span class="hub-h-ico i-lucide-trending-up" />Evolução de carga</h2>
               <select
                 v-model="evoExercise"
                 class="h-9 rounded-lg border border-n-weak px-2 text-xs text-n-slate-12"
@@ -3012,7 +3012,7 @@ onMounted(async () => {
           </div>
 
           <!-- Histórico (rodada 27: seção própria, lista agrupada por mês) -->
-          <div v-if="!session && !wizard && treinoView === 'historico'" class="hub-block p-4 mb-4">
+          <div v-if="!session && !wizard && treinoView === 'historico'" class="hub-block p-5 mb-8">
             <div class="hub-sec">
               <span class="hub-sec-ico"><span class="i-lucide-history" /></span>
               <div class="hub-sec-text">
@@ -3046,9 +3046,9 @@ onMounted(async () => {
           </div>
 
           <!-- Fichas avulsas (fora do programa) -->
-          <div v-if="!session && !wizard && treinoView === 'treinar'" class="hub-block p-4">
+          <div v-if="!session && !wizard && treinoView === 'treinar'" class="hub-block p-5">
             <div class="flex items-center justify-between">
-              <button class="text-sm font-bold text-n-slate-12" @click="showFichas = !showFichas">
+              <button class="hub-h2" @click="showFichas = !showFichas">
                 {{ showFichas ? '▾' : '▸' }} Fichas avulsas
               </button>
               <button
@@ -3086,7 +3086,7 @@ onMounted(async () => {
               </div>
 
               <!-- Editor de ficha avulsa -->
-              <div v-if="planForm" class="mt-3 rounded-xl border border-n-weak p-3">
+              <div v-if="planForm" class="mt-3 hub-crystal rounded-xl p-4">
                 <h3 class="text-xs font-bold text-n-slate-12 mb-2">
                   {{ planForm.id ? '✏️ Editar ficha' : '📝 Nova ficha' }}
                 </h3>
@@ -3179,7 +3179,7 @@ onMounted(async () => {
             </button>
           </div>
 
-          <div v-if="cardioView === 'registrar'" class="hub-block p-4 mb-4">
+          <div v-if="cardioView === 'registrar'" class="hub-block p-5 mb-8">
             <div class="hub-sec">
               <span class="hub-sec-ico"><span class="i-lucide-heart-pulse" /></span>
               <div class="hub-sec-text">
@@ -3257,7 +3257,7 @@ onMounted(async () => {
           </div>
 
           <template v-if="cardioView === 'historico'">
-            <div class="hub-block p-4 mb-4">
+            <div class="hub-block p-5 mb-8">
               <div class="hub-sec">
                 <span class="hub-sec-ico"><span class="i-lucide-history" /></span>
                 <div class="hub-sec-text">
@@ -3428,7 +3428,7 @@ onMounted(async () => {
           </div>
 
           <!-- TREINOS PRÉ-PROGRAMADOS -->
-          <div v-if="!boxSession && boxView === 'treinar'" class="hub-block p-4 mb-4">
+          <div v-if="!boxSession && boxView === 'treinar'" class="hub-block p-5 mb-8">
             <div class="hub-sec">
               <span class="hub-sec-ico"><span class="i-lucide-swords" /></span>
               <div class="hub-sec-text">
@@ -3564,7 +3564,7 @@ onMounted(async () => {
                   <button class="hub-acc-head" @click="wkOpen = wkOpen === i ? -1 : i">
                     <span class="hub-acc-n">{{ i + 1 }}</span>
                     <span class="flex-1 min-w-0">
-                      <span class="flex items-center gap-1.5 text-sm font-bold text-n-slate-12 truncate">
+                      <span class="flex items-center gap-1.5 hub-h2 truncate">
                         <span :class="blockMeta(b.type).ico" style="width: 14px; height: 14px; flex-shrink: 0" />{{ b.title || blockMeta(b.type).label }}
                       </span>
                       <span class="block text-[11px] text-n-slate-10 truncate">
@@ -3656,7 +3656,7 @@ onMounted(async () => {
 
             <!-- cards dos treinos -->
             <div class="grid gap-2.5" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
-              <div v-for="w in boxWorkouts" :key="w.id" class="rounded-2xl border border-n-weak p-3 flex flex-col gap-2">
+              <div v-for="w in boxWorkouts" :key="w.id" class="hub-crystal rounded-2xl p-4 flex flex-col gap-2">
                 <div class="flex items-start gap-2">
                   <span
                     class="w-11 h-11 rounded-xl flex flex-col items-center justify-center text-white shrink-0 leading-none"
@@ -3666,7 +3666,7 @@ onMounted(async () => {
                     <span class="text-[8px] opacity-80">min</span>
                   </span>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-bold text-n-slate-12 leading-tight">{{ w.name }}</p>
+                    <p class="hub-h2 leading-tight">{{ w.name }}</p>
                     <p class="text-[11px] text-n-slate-10">
                       {{ (w.blocks || []).length }} blocos · {{ workoutRounds(w) }} rounds · {{ workoutSeqIds(w).length }} sequências
                     </p>
@@ -3710,7 +3710,7 @@ onMounted(async () => {
           </div>
 
           <!-- rodada 26: PLANO DE LUTA -->
-          <div v-if="!boxSession && boxView === 'planos'" class="hub-block p-4 mb-4">
+          <div v-if="!boxSession && boxView === 'planos'" class="hub-block p-5 mb-8">
             <div class="hub-sec">
               <span class="hub-sec-ico"><span class="i-lucide-medal" /></span>
               <div class="hub-sec-text">
@@ -3808,14 +3808,14 @@ onMounted(async () => {
 
             <p v-if="!fightPlans.length && !fpForm" class="text-xs text-n-slate-10">Nenhum plano ainda — monte o primeiro.</p>
             <div class="grid gap-2.5" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
-              <div v-for="fp in fightPlans" :key="fp.id" class="rounded-2xl border border-n-weak p-3 flex flex-col gap-2">
+              <div v-for="fp in fightPlans" :key="fp.id" class="hub-crystal rounded-2xl p-4 flex flex-col gap-2">
                 <div class="flex items-start gap-2">
                   <span class="w-11 h-11 rounded-xl flex flex-col items-center justify-center text-white shrink-0 leading-none" :style="{ background: GRAD_LARANJA }">
                     <span class="text-base font-black">{{ fp.data?.rounds }}</span>
                     <span class="text-[8px] opacity-90">rounds</span>
                   </span>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-bold text-n-slate-12 leading-tight">{{ fp.data?.name }}</p>
+                    <p class="hub-h2 leading-tight">{{ fp.data?.name }}</p>
                     <p class="text-[11px] text-n-slate-10">{{ fpSummary(fp) }}</p>
                   </div>
                   <button class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0" title="Editar" @click="openEditFightPlan(fp)">✏️</button>
@@ -3835,8 +3835,8 @@ onMounted(async () => {
           </div>
 
           <!-- Registrar manualmente (dobrável) -->
-          <div v-if="!boxSession && boxView === 'treinar'" class="hub-block p-4 mb-4">
-            <button class="w-full text-left text-sm font-bold text-n-slate-12" @click="showManualBox = !showManualBox">
+          <div v-if="!boxSession && boxView === 'treinar'" class="hub-block p-5 mb-8">
+            <button class="w-full text-left hub-h2" @click="showManualBox = !showManualBox">
               {{ showManualBox ? '▾' : '▸' }} Registrar treino livre
             </button>
             <template v-if="showManualBox">
@@ -3910,7 +3910,7 @@ onMounted(async () => {
 
           <!-- rodada 29: MAPEADOR DE ATLETAS -->
           <template v-if="!boxSession && boxView === 'atletas'">
-            <div class="hub-block p-4 mb-4">
+            <div class="hub-block p-5 mb-8">
               <div class="hub-sec">
                 <span class="hub-sec-ico"><span class="i-lucide-users" /></span>
                 <div class="hub-sec-text">
@@ -3981,7 +3981,7 @@ onMounted(async () => {
               </div>
 
               <!-- comparação lado a lado -->
-              <div v-if="compareDatasets.length === 2" class="rounded-2xl border border-n-weak p-3 mb-4" :style="{ background: 'rgba(65,105,225,0.04)' }">
+              <div v-if="compareDatasets.length === 2" class="hub-crystal rounded-2xl p-4 mb-4" :style="{ background: 'rgba(65,105,225,0.04)' }">
                 <div class="hub-sec" style="margin-bottom: 4px">
                   <span class="hub-sec-ico"><span class="i-lucide-git-compare" /></span>
                   <div class="hub-sec-text"><h3 class="hub-sec-title">Comparação</h3><p class="hub-sec-sub">{{ compareDatasets[0].label }} × {{ compareDatasets[1].label }}</p></div>
@@ -4001,7 +4001,7 @@ onMounted(async () => {
                   <div class="flex items-start gap-2">
                     <span class="w-11 h-11 rounded-xl flex items-center justify-center text-white text-sm font-black shrink-0" :style="{ background: athleteRole(a.data?.role).color }">{{ initialsOf(a.data?.name) }}</span>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-bold text-n-slate-12 leading-tight truncate">{{ a.data?.name }}</p>
+                      <p class="hub-h2 leading-tight truncate">{{ a.data?.name }}</p>
                       <p class="text-[11px] text-n-slate-10 truncate">
                         <span class="hub-tag is-soft" style="height: 18px; padding: 0 5px; font-size: 9.5px"><span :class="athleteRole(a.data?.role).ico" />{{ athleteRole(a.data?.role).label }}</span>
                         {{ [ATHLETE_STANCES.find(x => x.key === a.data?.stance)?.label, a.data?.weight, a.data?.team].filter(Boolean).join(' · ') }}
@@ -4031,7 +4031,7 @@ onMounted(async () => {
           </template>
 
           <!-- Repertório de sequências -->
-          <div v-if="!boxSession && boxView === 'repertorio'" class="hub-block p-4 mb-4">
+          <div v-if="!boxSession && boxView === 'repertorio'" class="hub-block p-5 mb-8">
             <div class="hub-sec">
               <span class="hub-sec-ico"><span class="i-lucide-list-ordered" /></span>
               <div class="hub-sec-text">
@@ -4071,7 +4071,7 @@ onMounted(async () => {
             </div>
 
             <!-- Editor -->
-            <div v-if="seqForm" class="rounded-xl border border-n-weak p-3 mb-3">
+            <div v-if="seqForm" class="hub-crystal rounded-xl p-4 mb-3">
               <div class="flex items-center gap-2 flex-wrap mb-2">
                 <input
                   v-model="seqForm.name"
@@ -4140,7 +4140,7 @@ onMounted(async () => {
               <div
                 v-for="s in filteredSeqs"
                 :key="s.id"
-                class="rounded-xl border border-n-weak p-3 flex items-start gap-2"
+                class="hub-crystal rounded-xl p-4 flex items-start gap-2"
               >
                 <div class="flex-1 min-w-0">
                   <p class="text-[11px] font-bold text-n-slate-11 flex items-center gap-1.5 flex-wrap">
@@ -4163,7 +4163,7 @@ onMounted(async () => {
           </div>
 
           <!-- Histórico do boxe (rodada 27: seção própria, lista agrupada por mês) -->
-          <div v-if="!boxSession && boxView === 'historico'" class="hub-block p-4 mb-4">
+          <div v-if="!boxSession && boxView === 'historico'" class="hub-block p-5 mb-8">
             <div class="hub-sec">
               <span class="hub-sec-ico"><span class="i-lucide-history" /></span>
               <div class="hub-sec-text">
@@ -4202,10 +4202,10 @@ onMounted(async () => {
         <!-- ═══ DIETA ═══ -->
         <template v-if="tab === 'dieta'">
           <!-- Dia de hoje -->
-          <div class="hub-block p-4 mb-4">
+          <div class="hub-block p-5 mb-8">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
               <span class="flex items-center gap-2">
-                <h2 class="text-sm font-bold text-n-slate-12"><span class="hub-h-ico i-lucide-utensils-crossed" />{{ dietDate === todayISO ? 'Hoje' : fmtDay(dietDate) }}
+                <h2 class="hub-h2"><span class="hub-h-ico i-lucide-utensils-crossed" />{{ dietDate === todayISO ? 'Hoje' : fmtDay(dietDate) }}
                 </h2>
                 <input
                   v-model="dietDate"
@@ -4229,7 +4229,7 @@ onMounted(async () => {
 
             <!-- barras de macros -->
             <div v-if="dietCfg.meals.length" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              <div v-for="m in MACROS" :key="m.key" class="rounded-xl border border-n-weak p-2.5">
+              <div v-for="m in MACROS" :key="m.key" class="hub-crystal rounded-xl p-4">
                 <div class="flex items-baseline justify-between">
                   <span class="text-[11px] font-medium text-n-slate-11">{{ m.label }}</span>
                   <span class="text-[11px] text-n-slate-10">
@@ -4316,8 +4316,8 @@ onMounted(async () => {
           </div>
 
           <!-- Editor do plano alimentar -->
-          <div v-if="dietForm" class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-target" />Metas do dia</h2>
+          <div v-if="dietForm" class="hub-block p-5 mb-8">
+            <h2 class="hub-h2 mb-1"><span class="hub-h-ico i-lucide-target" />Metas do dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               É só passar as <b>calorias</b>: proteína (1,8 g/kg do seu peso), carbo e
               gordura são calculados na hora e divididos entre as refeições — ajuste
@@ -4344,8 +4344,8 @@ onMounted(async () => {
                 style="margin-bottom: 0"
               />
             </label>
-            <h2 class="text-sm font-bold text-n-slate-12 mb-2"><span class="hub-h-ico i-lucide-utensils" />Refeições do plano</h2>
-            <div v-for="(meal, i) in dietForm.meals" :key="i" class="rounded-xl border border-n-weak p-2.5 mb-2">
+            <h2 class="hub-h2 mb-2"><span class="hub-h-ico i-lucide-utensils" />Refeições do plano</h2>
+            <div v-for="(meal, i) in dietForm.meals" :key="i" class="hub-crystal rounded-xl p-4 mb-2">
               <div class="flex items-center gap-2 flex-wrap mb-1.5">
                 <input
                   v-model="meal.name"
@@ -4409,8 +4409,8 @@ onMounted(async () => {
           </div>
 
           <!-- Histórico da dieta -->
-          <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3"><span class="hub-h-ico i-lucide-calendar-days" />Últimos dias</h2>
+          <div class="hub-block p-5">
+            <h2 class="hub-h2 mb-3"><span class="hub-h-ico i-lucide-calendar-days" />Últimos dias</h2>
             <p v-if="!diets.length" class="text-xs text-n-slate-10">Nenhum dia registrado ainda.</p>
             <div
               v-for="d in diets.slice(0, 7)"
@@ -4432,13 +4432,13 @@ onMounted(async () => {
         <template v-if="tab === 'corpo'">
           <!-- Registrar medidas: data em destaque + GRADE uniforme
                (rodada 15 — cada célula: rótulo · roleta · chip da última) -->
-          <div class="hub-block p-4 sm:p-5 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-ruler" />Registrar medidas</h2>
+          <div class="hub-block p-5 sm:p-6 mb-8">
+            <h2 class="hub-h2 mb-1"><span class="hub-h-ico i-lucide-ruler" />Registrar medidas</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               Protocolo: braço RELAXADO · antebraço na parte mais grossa, punho solto · coxa no meio virilha–joelho · panturrilha em pé, na parte mais grossa · cintura após expiração normal, sem encolher · pescoço abaixo do pomo de Adão, sem apertar. Sempre do mesmo jeito.
             </p>
 
-            <div class="flex items-center gap-2 flex-wrap mb-4 rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2.5">
+            <div class="flex items-center gap-2 flex-wrap mb-4 hub-crystal rounded-xl px-4 py-3">
               <span class="text-[11px] font-medium text-n-slate-11">📅 Data da medição</span>
               <input
                 v-model="bodyForm.date"
@@ -4497,8 +4497,8 @@ onMounted(async () => {
           </div>
 
           <!-- Gráfico do peso -->
-          <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3"><span class="hub-h-ico i-lucide-scale" />Peso ao longo do tempo</h2>
+          <div class="hub-block p-5 mb-8">
+            <h2 class="hub-h2 mb-3"><span class="hub-h-ico i-lucide-scale" />Peso ao longo do tempo</h2>
             <MiniBars
               v-if="weightSeries.values.length > 1"
               :values="weightSeries.values"
@@ -4512,7 +4512,7 @@ onMounted(async () => {
 
           <!-- Medidas atuais -->
           <div class="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-            <div v-for="m in currentMeasures" :key="m.key" class="rounded-xl border border-n-weak bg-n-solid-1 p-3">
+            <div v-for="m in currentMeasures" :key="m.key" class="hub-crystal rounded-xl p-4">
               <p class="text-[11px] font-medium text-n-slate-11">{{ m.label }}</p>
               <p class="text-lg font-bold text-n-slate-12">
                 {{ m.value === null ? '—' : `${fmtNum(m.value)}${m.suffix}` }}
@@ -4524,8 +4524,8 @@ onMounted(async () => {
           </div>
 
           <!-- Histórico do corpo -->
-          <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3"><span class="hub-h-ico i-lucide-calendar-days" />Últimas medições</h2>
+          <div class="hub-block p-5">
+            <h2 class="hub-h2 mb-3"><span class="hub-h-ico i-lucide-calendar-days" />Últimas medições</h2>
             <p v-if="!bodies.length" class="text-xs text-n-slate-10">Nenhuma medição registrada ainda.</p>
             <div
               v-for="b in bodies.slice(0, 10)"

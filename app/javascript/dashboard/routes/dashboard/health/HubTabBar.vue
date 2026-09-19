@@ -6,6 +6,7 @@
 // Saúde com 1 toque. No desktop (≥ 768px) a sidebar já resolve — some.
 import { computed, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useStore } from 'vuex';
 
 const props = defineProps({
   boxingOn: { type: Boolean, default: false },
@@ -13,6 +14,10 @@ const props = defineProps({
 
 const route = useRoute();
 const router = useRouter();
+const store = useStore();
+// rodada 31: quem não é admin (convidado só-Saúde) vive só com esta barra —
+// o hambúrguer flutuante do app some no celular
+const isAdmin = computed(() => store.getters.getCurrentRole === 'administrator');
 
 const items = computed(() => [
   { name: 'hub_health_painel', label: 'Painel', icon: 'i-lucide-gauge' },
@@ -26,8 +31,11 @@ const items = computed(() => [
 
 // o botão-hambúrguer do app (fixo no canto inferior esquerdo) sobe pra
 // não cobrir a 1ª aba — marca no body enquanto a barra existe
-onMounted(() => document.body.classList.add('hub-tabbar-on'));
-onUnmounted(() => document.body.classList.remove('hub-tabbar-on'));
+onMounted(() => {
+  document.body.classList.add('hub-tabbar-on');
+  if (!isAdmin.value) document.body.classList.add('hub-tabbar-solo');
+});
+onUnmounted(() => document.body.classList.remove('hub-tabbar-on', 'hub-tabbar-solo'));
 
 const isOn = name => route.name === name;
 const go = name => {
@@ -58,6 +66,10 @@ const go = name => {
   body.hub-tabbar-on #mobile-sidebar-launcher {
     bottom: calc(4.4rem + env(safe-area-inset-bottom, 0px));
   }
+  /* não-admin: só a barra (rodada 31) */
+  body.hub-tabbar-solo #mobile-sidebar-launcher {
+    display: none !important;
+  }
 }
 </style>
 
@@ -72,12 +84,15 @@ const go = name => {
   display: flex;
   align-items: stretch;
   justify-content: space-around;
-  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
-  background: rgba(17, 28, 63, 0.9);
-  -webkit-backdrop-filter: blur(18px) saturate(1.6);
-  backdrop-filter: blur(18px) saturate(1.6);
-  border-top: 1px solid rgba(143, 169, 245, 0.22);
-  box-shadow: 0 -8px 24px -16px rgba(17, 28, 63, 0.8);
+  padding: 7px 6px calc(7px + env(safe-area-inset-bottom, 0px));
+  /* rodada 31: alto contraste — quase-preto azulado, régua clara em cima */
+  background: rgba(7, 12, 30, 0.96);
+  -webkit-backdrop-filter: blur(22px) saturate(1.6);
+  backdrop-filter: blur(22px) saturate(1.6);
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 -12px 32px -12px rgba(0, 0, 0, 0.9);
 }
 /* desktop (≥ 768px): a sidebar já dá 1 clique — a barra some (a regra
    fica aqui e não em md:hidden porque o estilo scoped venceria o utilitário) */
@@ -94,31 +109,34 @@ const go = name => {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  padding: 4px 2px;
-  border-radius: 12px;
-  color: rgba(255, 255, 255, 0.62);
+  padding: 5px 2px 4px;
+  border-radius: 14px;
+  color: rgba(255, 255, 255, 0.86);
   transition:
     color 0.15s ease,
+    background 0.15s ease,
     transform 0.12s ease;
 }
 .hub-tab:active {
   transform: scale(0.94);
 }
 .hub-tab-icon {
-  font-size: 22px;
+  font-size: 23px;
   line-height: 1;
 }
 .hub-tab-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   white-space: nowrap;
 }
 .hub-tab.is-on {
-  color: #ffb25e;
+  color: #ffc17a;
+  background: rgba(255, 138, 0, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 138, 0, 0.35);
 }
 .hub-tab.is-on .hub-tab-icon {
   color: #ff8a00;
-  filter: drop-shadow(0 0 6px rgba(255, 138, 0, 0.55));
+  filter: drop-shadow(0 0 7px rgba(255, 138, 0, 0.6));
 }
 </style>
