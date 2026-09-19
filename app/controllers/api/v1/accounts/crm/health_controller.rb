@@ -24,6 +24,7 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       # rodada 26: cardio, planos de luta e a rotina (1 registro por pessoa)
       cardios: records('cardio', WORKOUTS_LIMIT),
       fight_plans: records('fight_plan', 30),
+      athletes: records('athlete', 100),
       routine: scope.of_kind('routine').order(:id).first&.data || {}
     }
   end
@@ -42,7 +43,7 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       elsif %w[profile routine].include?(kind)
         # ficha da pessoa e rotina: 1 registro por usuário, independente da data
         scope.of_kind(kind).order(:id).first || scope.new(kind: kind, record_date: date)
-      elsif %w[program fight_plan cardio].include?(kind)
+      elsif %w[program fight_plan cardio athlete].include?(kind)
         # programa pessoal / plano de luta / cardio: cada criação é um registro novo
         scope.new(kind: kind, record_date: date)
       else
@@ -252,6 +253,7 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
     case kind
     when 'program' then sanitize_custom_program(data)
     when 'fight_plan' then sanitize_fight_plan(data)
+    when 'athlete' then sanitize_athlete(data)
     else data
     end
   end
@@ -279,6 +281,31 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
           'notes' => r['notes'].to_s.first(300)
         }
       end
+    }
+  end
+
+  # Mapeador de atletas (rodada 29): alunos, adversários e referências
+  # com perfil técnico em 8 eixos (0–10) pro radar, sequências que usam,
+  # pontos fortes/fracos. Por pessoa.
+  ATHLETE_ROLES = %w[aluno adversario referencia].freeze
+  ATHLETE_STANCES = %w[ortodoxo canhoto ambos].freeze
+  ATHLETE_AXES = %w[ataque defesa esquiva contra movimentacao pressao clinch potencia].freeze
+
+  def sanitize_athlete(data)
+    data = {} unless data.is_a?(Hash)
+    radar = data['radar'].is_a?(Hash) ? data['radar'] : {}
+    {
+      'name' => data['name'].to_s.strip.first(80),
+      'role' => (ATHLETE_ROLES.include?(data['role'].to_s) ? data['role'].to_s : 'aluno'),
+      'stance' => (ATHLETE_STANCES.include?(data['stance'].to_s) ? data['stance'].to_s : 'ortodoxo'),
+      'weight' => data['weight'].to_s.strip.first(40),
+      'team' => data['team'].to_s.strip.first(80),
+      'link' => data['link'].to_s.strip.first(300),
+      'notes' => data['notes'].to_s.first(800),
+      'strengths' => data['strengths'].to_s.first(300),
+      'weaknesses' => data['weaknesses'].to_s.first(300),
+      'seqs' => Array(data['seqs']).map { |x| x.to_s.first(20) }.reject(&:blank?).first(20),
+      'radar' => ATHLETE_AXES.to_h { |k| [k, radar[k].to_i.clamp(0, 10)] }
     }
   end
 

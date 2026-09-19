@@ -1096,3 +1096,145 @@ export const dayMinutesByCat = blocks => {
   });
   return acc;
 };
+
+// ═══ RODADA 29: RADAR (teia) — classificação de treinos e planos + MAPEADOR DE ATLETAS ═══
+// Reusa o RadarChart.vue da área de Pessoas (SVG, valores 0–100 por eixo).
+const RADAR_COLORS = ['#4169E1', '#FF8A00'];
+export const axesFrom = (list, labelOf = x => x.label) =>
+  list.map((x, i) => ({ key: x.key, label: labelOf(x), color: i % 2 ? '#B85C00' : '#27408B' }));
+const normalize = obj => {
+  const max = Math.max(1, ...Object.values(obj));
+  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, Math.round((v / max) * 100)]));
+};
+
+// perfil de um treino de boxe: quanto de cada ETIQUETA (ataque, esquiva…)
+// entra nele — cada sequência pesa os minutos do bloco em que aparece
+export const workoutStyleValues = (workout, seqs) => {
+  const acc = Object.fromEntries(SEQ_CATEGORIES.map(c => [c.key, 0]));
+  let any = false;
+  (workout?.blocks || []).forEach(b => {
+    const rounds = Number(b.rounds) || 0;
+    const min = Number(b.minutes) || (rounds ? (rounds * (Number(b.round_sec) || 0)) / 60 : 0) || 1;
+    (b.seqs || []).forEach(id => {
+      const sq = (seqs || []).find(s => s.id === id);
+      if (sq?.category && acc[sq.category] !== undefined) {
+        acc[sq.category] += min;
+        any = true;
+      }
+    });
+  });
+  return any ? normalize(acc) : null;
+};
+// perfil por TIPO de bloco (minutos): sombra, técnica, saco, condicionamento…
+export const WORKOUT_TYPE_AXES = [
+  { key: 'tecnica', label: 'Técnica' },
+  { key: 'sequencias', label: 'Sequências' },
+  { key: 'footwork', label: 'Movimento' },
+  { key: 'defesa', label: 'Defesa' },
+  { key: 'saco', label: 'Potência' },
+  { key: 'condicionamento', label: 'Condição' },
+];
+// tipo de bloco → eixo (sombra e técnica juntos; round do professor vira
+// sequências quando tem sequência, senão técnica; aquecimento/calma ficam de fora)
+const TYPE_TO_AXIS = { sombra: 'tecnica', tecnica: 'tecnica', sequencias: 'sequencias', footwork: 'footwork', defesa: 'defesa', saco: 'saco', condicionamento: 'condicionamento' };
+export const workoutTypeValues = workout => {
+  const acc = Object.fromEntries(WORKOUT_TYPE_AXES.map(a => [a.key, 0]));
+  let any = false;
+  (workout?.blocks || []).forEach(b => {
+    const axis = b.type === 'round' ? ((b.seqs || []).length ? 'sequencias' : 'tecnica') : TYPE_TO_AXIS[b.type];
+    if (!axis) return;
+    const rounds = Number(b.rounds) || 0;
+    const min = Number(b.minutes) || (rounds ? (rounds * (Number(b.round_sec) || 0)) / 60 : 0);
+    if (min > 0) {
+      acc[axis] += min;
+      any = true;
+    }
+  });
+  return any ? normalize(acc) : null;
+};
+// perfil de um plano de luta: intenções por round (+ etiquetas das sequências)
+export const planIntentValues = plan => {
+  const d = plan?.data || plan || {};
+  const acc = Object.fromEntries(FIGHT_INTENTS.map(i => [i.key, 0]));
+  let any = false;
+  (d.plan || []).forEach(r => {
+    if (r.intent && acc[r.intent] !== undefined) {
+      acc[r.intent] += 1;
+      any = true;
+    }
+  });
+  return any ? normalize(acc) : null;
+};
+export const planStyleValues = (plan, seqs) => {
+  const d = plan?.data || plan || {};
+  const acc = Object.fromEntries(SEQ_CATEGORIES.map(c => [c.key, 0]));
+  let any = false;
+  (d.plan || []).forEach(r =>
+    (r.seqs || []).forEach(id => {
+      const sq = (seqs || []).find(s => s.id === id);
+      if (sq?.category && acc[sq.category] !== undefined) {
+        acc[sq.category] += 1;
+        any = true;
+      }
+    })
+  );
+  return any ? normalize(acc) : null;
+};
+
+// MAPEADOR DE ATLETAS — 8 eixos de 0 a 10
+export const ATHLETE_AXES = [
+  { key: 'ataque', label: 'Ataque', hint: 'iniciativa, volume e variedade de golpes' },
+  { key: 'defesa', label: 'Defesa', hint: 'guarda, bloqueios, absorve bem' },
+  { key: 'esquiva', label: 'Esquiva', hint: 'tira a cabeça da linha, slip/roll' },
+  { key: 'contra', label: 'Contra', hint: 'responde logo depois de defender' },
+  { key: 'movimentacao', label: 'Movimento', hint: 'pés, ângulos, sai da linha' },
+  { key: 'pressao', label: 'Pressão', hint: 'ritmo alto, corta o ringue' },
+  { key: 'clinch', label: 'Clinch', hint: 'curta distância, amarra e trabalha' },
+  { key: 'potencia', label: 'Potência', hint: 'força do golpe, define' },
+];
+export const ATHLETE_ROLES = [
+  { key: 'aluno', label: 'Aluno', ico: 'i-lucide-graduation-cap', color: '#4169E1' },
+  { key: 'adversario', label: 'Adversário', ico: 'i-lucide-swords', color: '#FF6B1A' },
+  { key: 'referencia', label: 'Referência', ico: 'i-lucide-star', color: '#27408B' },
+];
+export const athleteRole = key => ATHLETE_ROLES.find(r => r.key === key) || ATHLETE_ROLES[0];
+export const ATHLETE_STANCES = [
+  { key: 'ortodoxo', label: 'Ortodoxo' },
+  { key: 'canhoto', label: 'Canhoto' },
+  { key: 'ambos', label: 'Ambos' },
+];
+export const blankAthlete = (role = 'aluno') => ({
+  name: '',
+  role,
+  stance: 'ortodoxo',
+  weight: '',
+  team: '',
+  link: '',
+  notes: '',
+  strengths: '',
+  weaknesses: '',
+  seqs: [],
+  radar: Object.fromEntries(ATHLETE_AXES.map(a => [a.key, 5])),
+});
+export const athleteValues = a => {
+  const r = (a?.data || a || {}).radar || {};
+  return Object.fromEntries(ATHLETE_AXES.map(ax => [ax.key, Math.max(0, Math.min(10, Number(r[ax.key]) || 0)) * 10]));
+};
+export const athleteDataset = (a, i = 0) => ({
+  label: (a?.data || a || {}).name || 'Atleta',
+  color: RADAR_COLORS[i % RADAR_COLORS.length],
+  values: athleteValues(a),
+});
+// os 3 eixos mais fortes / mais fracos (pra ler o mapa em 1 olhada)
+export const athleteHighlights = a => {
+  const r = (a?.data || a || {}).radar || {};
+  const sorted = [...ATHLETE_AXES].map(ax => ({ ...ax, v: Number(r[ax.key]) || 0 })).sort((x, y) => y.v - x.v);
+  return { top: sorted.slice(0, 3), low: sorted.slice(-2).reverse() };
+};
+export const initialsOf = name =>
+  String(name || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w[0].toUpperCase())
+    .join('');

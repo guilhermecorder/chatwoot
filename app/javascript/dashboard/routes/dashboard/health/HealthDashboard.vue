@@ -10,6 +10,7 @@ import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import HubTabBar from './HubTabBar.vue';
+import RadarChart from './HubRadar.vue';
 import {
   Chart as ChartJS,
   Tooltip,
@@ -665,6 +666,17 @@ const muscleBalance = computed(() => {
     .sort((a, b) => b.vol - a.vol);
 });
 
+// rodada 29: o balanço muscular também em TEIA (mesmo radar da área de Pessoas)
+const muscleRadar = computed(() => {
+  const groups = muscleBalance.value.filter(g => g.label !== 'Outros');
+  if (groups.length < 3) return null;
+  const max = Math.max(1, ...groups.map(g => g.vol));
+  return {
+    axes: groups.map((g, i) => ({ key: g.label, label: g.label.replace(/ \(.*\)/, ''), color: i % 2 ? '#B85C00' : '#27408B' })),
+    datasets: [{ label: 'volume por grupo', color: ROYAL, values: Object.fromEntries(groups.map(g => [g.label, Math.round((g.vol / max) * 100)])) }],
+  };
+});
+
 // ── insights automáticos (regras sobre o que já foi calculado) ─────
 const insights = computed(() => {
   const list = [];
@@ -1120,6 +1132,9 @@ onMounted(async () => {
             <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-scale" />Balanço muscular</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">como o volume se divide entre os grupos — algum ficando pra trás?</p>
             <p v-if="!muscleBalance.length" class="text-xs text-n-slate-10">Registre treinos pra ver a divisão.</p>
+            <div v-if="muscleRadar" class="mb-3">
+              <RadarChart :axes="muscleRadar.axes" :datasets="muscleRadar.datasets" :size="260" />
+            </div>
             <div v-for="g in muscleBalance" :key="g.label" class="flex items-center gap-3 py-1.5">
               <span class="text-xs font-medium text-n-slate-12" style="width: 9.5rem">{{ g.label }}</span>
               <div class="flex-1 h-2.5 rounded-full bg-n-alpha-1 overflow-hidden">

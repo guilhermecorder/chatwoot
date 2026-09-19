@@ -31,7 +31,8 @@ class HubHealthRecord < ApplicationRecord
   # treino") — 1 registro por programa, com histórico próprio
   # cardio = caminhada/corrida/bike… · fight_plan = plano de luta (rodada 26)
   # routine = construtor de rotina (1 por usuário, como o profile)
-  KINDS = %w[workout boxing diet body profile program cardio fight_plan routine].freeze
+  # athlete = mapeador de atletas (alunos, adversários, referências) — rodada 29
+  KINDS = %w[workout boxing diet body profile program cardio fight_plan routine athlete].freeze
 
   validates :kind, inclusion: { in: KINDS }
   validates :record_date, presence: true

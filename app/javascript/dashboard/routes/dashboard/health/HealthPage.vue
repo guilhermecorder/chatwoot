@@ -17,6 +17,7 @@ import HubTabBar from './HubTabBar.vue';
 import ProgramWizard from './ProgramWizard.vue';
 import HubCelebration from './HubCelebration.vue';
 import SeqPicker from './SeqPicker.vue';
+import RadarChart from './HubRadar.vue';
 import {
   METHOD_LABELS, METHOD_HINTS, SET_LABELS,
   activeProgram, weekOf, cycleForWeek, suggestedSessionKey,
@@ -25,6 +26,8 @@ import {
   CARDIO_TYPES, cardioType, CARDIO_DURATIONS, CARDIO_INTENSITIES,
   SEQ_CATEGORIES, seqCategory, SEQ_LIBRARY,
   FIGHT_INTENTS, fightIntent, blankFightPlan, fightPlanToWorkout,
+  axesFrom, workoutStyleValues, workoutTypeValues, WORKOUT_TYPE_AXES, planIntentValues, planStyleValues,
+  ATHLETE_AXES, ATHLETE_ROLES, athleteRole, ATHLETE_STANCES, blankAthlete, athleteDataset, athleteHighlights, initialsOf,
   lastSessionRecord, lastExerciseSets, buildTodaySets,
   exerciseVerdict, targetHint, setTargets, sessionSummary, summaryPhrase, fmtSets,
   equipmentOf, nameWithoutEquipment, EXTRA_METHODS, extraMethod,
@@ -65,6 +68,7 @@ const workouts = ref([]);
 const boxings = ref([]);
 const cardios = ref([]); // rodada 26
 const fightPlans = ref([]); // rodada 26
+const athletes = ref([]); // rodada 29: mapeador de atletas
 const diets = ref([]);
 const bodies = ref([]);
 
@@ -120,6 +124,7 @@ const CARDIO_VIEWS = [
 const BOX_VIEWS = [
   { key: 'treinar', label: 'Treinar', ico: 'i-lucide-play' },
   { key: 'planos', label: 'Planos', ico: 'i-lucide-medal' },
+  { key: 'atletas', label: 'Atletas', ico: 'i-lucide-users' },
   { key: 'repertorio', label: 'Repertório', ico: 'i-lucide-list-ordered' },
   { key: 'historico', label: 'Histórico', ico: 'i-lucide-history' },
 ];
@@ -1768,6 +1773,101 @@ const cardioWeekMin = computed(() =>
   cardios.value.filter(c => c.record_date >= daysAgo(6)).reduce((a, c) => a + (Number(c.data?.minutes) || 0), 0)
 );
 const cardioWeekCount = computed(() => cardios.value.filter(c => c.record_date >= daysAgo(6)).length);
+// ═══ RODADA 29: RADAR (teia) nos treinos e planos + MAPEADOR DE ATLETAS ═══
+const seqAxes = axesFrom(SEQ_CATEGORIES);
+const typeAxes = axesFrom(WORKOUT_TYPE_AXES);
+const intentAxes = axesFrom(FIGHT_INTENTS);
+const athleteAxes = axesFrom(ATHLETE_AXES);
+// treino: prefere o perfil por ETIQUETA (o que ele treina: ataque, esquiva…);
+// sem sequências etiquetadas, mostra o perfil por tipo de bloco
+const workoutRadar = w => {
+  const style = workoutStyleValues(w, boxingSeqs.value);
+  if (style) return { axes: seqAxes, datasets: [{ label: 'estilo do treino', color: ROYAL, values: style }] };
+  const type = workoutTypeValues(w);
+  return type ? { axes: typeAxes, datasets: [{ label: 'perfil do treino', color: ROYAL, values: type }] } : null;
+};
+const planRadar = fp => {
+  const intents = planIntentValues(fp);
+  const style = planStyleValues(fp, boxingSeqs.value);
+  if (intents) return { axes: intentAxes, datasets: [{ label: 'intenção por round', color: LARANJA, values: intents }] };
+  return style ? { axes: seqAxes, datasets: [{ label: 'sequências', color: LARANJA, values: style }] } : null;
+};
+
+const athForm = ref(null);
+const savingAth = ref(false);
+const athFilter = ref('');
+const athCompare = ref([]); // até 2 ids
+const athletesShown = computed(() =>
+  (athFilter.value ? athletes.value.filter(a => a.data?.role === athFilter.value) : athletes.value).slice().sort((a, b) =>
+    String(a.data?.name || '').localeCompare(String(b.data?.name || ''))
+  )
+);
+const athCount = role => athletes.value.filter(a => a.data?.role === role).length;
+const openNewAthlete = (role = 'aluno') => {
+  athForm.value = { id: null, ...blankAthlete(role) };
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+const openEditAthlete = a => {
+  athForm.value = { id: a.id, ...blankAthlete(), ...JSON.parse(JSON.stringify(a.data || {})) };
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+const athFormDataset = computed(() => (athForm.value ? [athleteDataset(athForm.value)] : []));
+const saveAthlete = async () => {
+  const f = athForm.value;
+  if (!f?.name?.trim()) {
+    useAlert('Dê um nome ao atleta.');
+    return;
+  }
+  savingAth.value = true;
+  try {
+    const { id, ...data } = f;
+    let rec;
+    if (id) {
+      ({ data: rec } = await CrmAPI.updateHealthRecord(id, data));
+      athletes.value = athletes.value.map(x => (x.id === rec.id ? rec : x));
+    } else {
+      ({ data: rec } = await CrmAPI.createHealthRecord({ kind: 'athlete', record_date: todayISO, data }));
+      athletes.value = [rec, ...athletes.value];
+    }
+    athForm.value = null;
+    useAlert(`${rec.data?.name} mapeado.`);
+  } catch {
+    useAlert('Não consegui salvar o atleta.');
+  } finally {
+    savingAth.value = false;
+  }
+};
+const deleteAthlete = async id => {
+  try {
+    await CrmAPI.deleteHealthRecord(id);
+    athletes.value = athletes.value.filter(x => x.id !== id);
+    athCompare.value = athCompare.value.filter(x => x !== id);
+    athForm.value = null;
+    useAlert('Atleta removido.');
+  } catch {
+    useAlert('Não consegui remover.');
+  }
+};
+const toggleCompare = id => {
+  const i = athCompare.value.indexOf(id);
+  if (i >= 0) athCompare.value.splice(i, 1);
+  else athCompare.value = [...athCompare.value.slice(-1), id];
+};
+const compareDatasets = computed(() =>
+  athCompare.value
+    .map(id => athletes.value.find(a => a.id === id))
+    .filter(Boolean)
+    .map((a, i) => athleteDataset(a, i))
+);
+// "plano contra ele / plano pra ele": abre o plano de luta já preenchido
+const planForAthlete = a => {
+  openNewFightPlan();
+  if (a.data?.role === 'aluno') fpForm.value.athlete = a.data.name;
+  else fpForm.value.opponent = a.data.name;
+  fpForm.value.name = a.data?.role === 'aluno' ? `Plano · ${a.data.name}` : `Contra ${a.data.name}`;
+  boxView.value = 'planos';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
 const cardioByType = computed(() => {
   const acc = {};
   cardios.value
@@ -2138,6 +2238,7 @@ const deleteRecord = async record => {
     if (record.kind === 'program') personalPrograms.value = personalPrograms.value.filter(r => r.id !== record.id);
     if (record.kind === 'cardio') cardios.value = cardios.value.filter(c => c.id !== record.id);
     if (record.kind === 'fight_plan') fightPlans.value = fightPlans.value.filter(f => f.id !== record.id);
+    if (record.kind === 'athlete') athletes.value = athletes.value.filter(a => a.id !== record.id);
     useAlert('Registro removido.');
   } catch {
     useAlert('Não consegui remover.');
@@ -2155,6 +2256,7 @@ onMounted(async () => {
     boxings.value = payload.boxings || [];
     cardios.value = payload.cardios || [];
     fightPlans.value = payload.fight_plans || [];
+    athletes.value = payload.athletes || [];
     diets.value = payload.diets || [];
     bodies.value = payload.bodies || [];
     const latest = bodies.value[0]?.data || {};
@@ -3319,9 +3421,9 @@ onMounted(async () => {
           </div>
 
           <!-- rodada 27: visualizações da aba Boxe -->
-          <div v-if="!boxSession" class="hub-seg hub-seg-full mb-4">
+          <div v-if="!boxSession" class="hub-seg hub-seg-full hub-seg-5 mb-4">
             <button v-for="v in BOX_VIEWS" :key="v.key" :class="{ 'is-on': boxView === v.key }" @click="boxView = v.key">
-              <span :class="v.ico" />{{ v.label }}
+              <span :class="v.ico" /><span class="lbl">{{ v.label }}</span>
             </button>
           </div>
 
@@ -3582,6 +3684,10 @@ onMounted(async () => {
                     <b class="text-n-slate-10">{{ blockMinutes(b) }}'</b>
                   </span>
                 </div>
+                <!-- rodada 29: teia do treino (o que ele trabalha) -->
+                <div v-if="workoutRadar(w)" class="hub-radar-sm">
+                  <RadarChart :axes="workoutRadar(w).axes" :datasets="workoutRadar(w).datasets" :size="220" />
+                </div>
                 <div class="flex gap-2 mt-auto">
                   <button
                     class="h-10 flex-1 rounded-xl text-xs font-bold text-white shadow"
@@ -3720,6 +3826,9 @@ onMounted(async () => {
                     <b v-if="(r.seqs || []).length" class="text-n-slate-10">{{ (r.seqs || []).length }}</b>
                   </span>
                 </div>
+                <div v-if="planRadar(fp)" class="hub-radar-sm">
+                  <RadarChart :axes="planRadar(fp).axes" :datasets="planRadar(fp).datasets" :size="220" />
+                </div>
                 <button class="h-10 rounded-xl text-xs font-bold text-white shadow mt-auto" :style="{ background: GRAD_NOITE }" @click="trainFightPlan(fp)">▶ Treinar este plano</button>
               </div>
             </div>
@@ -3798,6 +3907,128 @@ onMounted(async () => {
             </button>
             </template>
           </div>
+
+          <!-- rodada 29: MAPEADOR DE ATLETAS -->
+          <template v-if="!boxSession && boxView === 'atletas'">
+            <div class="hub-block p-4 mb-4">
+              <div class="hub-sec">
+                <span class="hub-sec-ico"><span class="i-lucide-users" /></span>
+                <div class="hub-sec-text">
+                  <h2 class="hub-sec-title">Mapeador de atletas</h2>
+                  <p class="hub-sec-sub">catalogue alunos, adversários e referências — a teia mostra o que cada um usa e faz</p>
+                </div>
+                <div class="hub-sec-actions">
+                  <button v-for="r in ATHLETE_ROLES" :key="r.key" class="hub-tag" :style="{ color: r.color }" @click="openNewAthlete(r.key)"><span class="i-lucide-plus" />{{ r.label }}</button>
+                </div>
+              </div>
+
+              <!-- formulário do atleta -->
+              <div v-if="athForm" class="rounded-2xl border p-3 sm:p-4 mb-4" :style="{ borderColor: athleteRole(athForm.role).color, background: 'rgba(65,105,225,0.04)' }">
+                <div class="hub-sec">
+                  <span class="hub-sec-ico" :style="{ background: athleteRole(athForm.role).color, color: '#fff' }"><span :class="athleteRole(athForm.role).ico" /></span>
+                  <div class="hub-sec-text">
+                    <h3 class="hub-sec-title">{{ athForm.id ? 'Editar atleta' : 'Novo atleta' }}</h3>
+                    <p class="hub-sec-sub">{{ athleteRole(athForm.role).label }} · perfil técnico de 0 a 10 em cada eixo</p>
+                  </div>
+                  <div class="hub-sec-actions">
+                    <button class="h-8 px-3 rounded-lg text-xs text-n-slate-11 border border-n-weak hover:bg-n-alpha-1" @click="athForm = null">Cancelar</button>
+                  </div>
+                </div>
+                <div class="hub-grid-2" style="gap: 16px">
+                  <div class="hub-form">
+                    <div class="hub-form-row"><label>Nome</label><input v-model="athForm.name" type="text" placeholder="nome do atleta" class="hub-field hub-field-w font-bold" /></div>
+                    <div class="hub-form-row">
+                      <label>Papel</label>
+                      <div class="flex gap-1.5 flex-wrap">
+                        <button v-for="r in ATHLETE_ROLES" :key="r.key" class="hub-tag" :class="{ 'is-on': athForm.role === r.key }" @click="athForm.role = r.key"><span :class="r.ico" />{{ r.label }}</button>
+                      </div>
+                    </div>
+                    <div class="hub-form-row">
+                      <label>Guarda</label>
+                      <div class="flex gap-1.5 flex-wrap">
+                        <button v-for="st in ATHLETE_STANCES" :key="st.key" class="hub-tag" :class="{ 'is-on': athForm.stance === st.key }" @click="athForm.stance = st.key">{{ st.label }}</button>
+                      </div>
+                    </div>
+                    <div class="hub-form-row"><label>Categoria</label><input v-model="athForm.weight" type="text" placeholder="ex.: até 75 kg · médio" class="hub-field hub-field-w" /></div>
+                    <div class="hub-form-row"><label>Equipe</label><input v-model="athForm.team" type="text" placeholder="academia / equipe" class="hub-field hub-field-w" /></div>
+                    <div class="hub-form-row"><label>Vídeo</label><input v-model="athForm.link" type="text" placeholder="link de uma luta pra estudar" class="hub-field hub-field-w" /></div>
+                    <div class="hub-form-row"><label>Fortes</label><input v-model="athForm.strengths" type="text" placeholder="o que ele faz muito bem" class="hub-field hub-field-w" /></div>
+                    <div class="hub-form-row"><label>Fracos</label><input v-model="athForm.weaknesses" type="text" placeholder="onde ele sofre" class="hub-field hub-field-w" /></div>
+                    <div class="hub-form-row" style="align-items: start"><label style="padding-top: 8px">Notas</label><textarea v-model="athForm.notes" rows="3" placeholder="como ele luta, padrões, hábitos" class="hub-field hub-field-w" style="height: auto; padding: 8px 10px; resize: vertical" /></div>
+                    <div class="hub-form-row" style="align-items: start"><label style="padding-top: 8px">O que usa</label><SeqPicker v-model="athForm.seqs" :seqs="boxingSeqs" /></div>
+                  </div>
+                  <div>
+                    <p class="hub-label">Perfil técnico</p>
+                    <div class="hub-radar-form">
+                      <RadarChart :axes="athleteAxes" :datasets="athFormDataset" :size="240" />
+                    </div>
+                    <div class="flex flex-col gap-1.5 mt-2">
+                      <div v-for="ax in ATHLETE_AXES" :key="ax.key" class="hub-slider" :title="ax.hint">
+                        <label>{{ ax.label }}</label>
+                        <input v-model.number="athForm.radar[ax.key]" type="range" min="0" max="10" step="1" />
+                        <b>{{ athForm.radar[ax.key] }}</b>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap mt-4">
+                  <button v-if="athForm.id" class="h-9 px-3 rounded-lg text-xs font-medium border border-n-weak hover:bg-n-alpha-1" style="color: #dc2626" @click="deleteAthlete(athForm.id)">Excluir</button>
+                  <div class="flex-1" />
+                  <button class="h-10 px-5 rounded-xl text-xs font-bold text-white disabled:opacity-60" :style="{ background: GRAD_LARANJA }" :disabled="savingAth" @click="saveAthlete">
+                    {{ savingAth ? 'Salvando…' : 'Salvar atleta' }}
+                  </button>
+                </div>
+              </div>
+
+              <!-- comparação lado a lado -->
+              <div v-if="compareDatasets.length === 2" class="rounded-2xl border border-n-weak p-3 mb-4" :style="{ background: 'rgba(65,105,225,0.04)' }">
+                <div class="hub-sec" style="margin-bottom: 4px">
+                  <span class="hub-sec-ico"><span class="i-lucide-git-compare" /></span>
+                  <div class="hub-sec-text"><h3 class="hub-sec-title">Comparação</h3><p class="hub-sec-sub">{{ compareDatasets[0].label }} × {{ compareDatasets[1].label }}</p></div>
+                  <div class="hub-sec-actions"><button class="hub-tag" @click="athCompare = []"><span class="i-lucide-x" />limpar</button></div>
+                </div>
+                <RadarChart :axes="athleteAxes" :datasets="compareDatasets" :size="300" />
+              </div>
+
+              <div class="flex gap-1.5 flex-wrap mb-3">
+                <button class="hub-tag" :class="{ 'is-on': !athFilter }" @click="athFilter = ''">todos <small>{{ athletes.length }}</small></button>
+                <button v-for="r in ATHLETE_ROLES" :key="r.key" class="hub-tag" :class="{ 'is-on': athFilter === r.key }" @click="athFilter = athFilter === r.key ? '' : r.key"><span :class="r.ico" />{{ r.label }}s <small>{{ athCount(r.key) }}</small></button>
+                <span v-if="athCompare.length === 1" class="text-[11px] text-n-slate-10 self-center ml-1">escolha o 2º pra comparar</span>
+              </div>
+              <p v-if="!athletesShown.length && !athForm" class="text-xs text-n-slate-10">Nenhum atleta mapeado ainda — comece pelo botão acima.</p>
+              <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr))">
+                <div v-for="a in athletesShown" :key="a.id" class="rounded-2xl border p-3 flex flex-col gap-2" :class="athCompare.includes(a.id) ? '' : 'border-n-weak'" :style="athCompare.includes(a.id) ? { borderColor: LARANJA, background: 'rgba(255,138,0,0.05)' } : {}">
+                  <div class="flex items-start gap-2">
+                    <span class="w-11 h-11 rounded-xl flex items-center justify-center text-white text-sm font-black shrink-0" :style="{ background: athleteRole(a.data?.role).color }">{{ initialsOf(a.data?.name) }}</span>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-bold text-n-slate-12 leading-tight truncate">{{ a.data?.name }}</p>
+                      <p class="text-[11px] text-n-slate-10 truncate">
+                        <span class="hub-tag is-soft" style="height: 18px; padding: 0 5px; font-size: 9.5px"><span :class="athleteRole(a.data?.role).ico" />{{ athleteRole(a.data?.role).label }}</span>
+                        {{ [ATHLETE_STANCES.find(x => x.key === a.data?.stance)?.label, a.data?.weight, a.data?.team].filter(Boolean).join(' · ') }}
+                      </p>
+                    </div>
+                    <button class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0 flex items-center justify-center" title="Editar" @click="openEditAthlete(a)"><span class="i-lucide-pencil-line" style="width: 14px; height: 14px" /></button>
+                  </div>
+                  <div class="hub-radar-sm"><RadarChart :axes="athleteAxes" :datasets="[athleteDataset(a)]" :size="220" /></div>
+                  <p class="text-[11px] text-n-slate-11">
+                    <b :style="{ color: ROYAL }">Forte:</b> {{ athleteHighlights(a).top.map(x => x.label).join(' · ') }}
+                    <span class="mx-1 text-n-slate-10">·</span>
+                    <b :style="{ color: LARANJA_VIVO }">Fraco:</b> {{ athleteHighlights(a).low.map(x => x.label).join(' · ') }}
+                  </p>
+                  <p v-if="a.data?.strengths || a.data?.weaknesses" class="text-[11px] text-n-slate-10 truncate" :title="`${a.data?.strengths || ''} / ${a.data?.weaknesses || ''}`">{{ [a.data?.strengths, a.data?.weaknesses].filter(Boolean).join(' / ') }}</p>
+                  <div v-if="(a.data?.seqs || []).length" class="flex gap-1 flex-wrap">
+                    <span v-for="id in a.data.seqs.slice(0, 6)" :key="id" class="hub-tag is-soft" :title="seqSteps(id)">{{ seqName(id) }}</span>
+                    <span v-if="a.data.seqs.length > 6" class="hub-tag is-soft">+{{ a.data.seqs.length - 6 }}</span>
+                  </div>
+                  <div class="flex gap-1.5 mt-auto">
+                    <button class="hub-tag" :class="{ 'is-on': athCompare.includes(a.id) }" @click="toggleCompare(a.id)"><span class="i-lucide-git-compare" />comparar</button>
+                    <a v-if="a.data?.link" :href="a.data.link" target="_blank" rel="noopener" class="hub-tag"><span class="i-lucide-play" />vídeo</a>
+                    <button class="hub-tag ml-auto" :style="{ color: athleteRole(a.data?.role).color }" @click="planForAthlete(a)"><span class="i-lucide-medal" />{{ a.data?.role === 'aluno' ? 'plano pra ele' : 'plano contra' }}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
 
           <!-- Repertório de sequências -->
           <div v-if="!boxSession && boxView === 'repertorio'" class="hub-block p-4 mb-4">
@@ -4337,6 +4568,16 @@ onMounted(async () => {
 :global(.dark) .hub-session-card:not(.is-next) {
   border-color: rgba(143, 169, 245, 0.55) !important;
 }
+/* rodada 29: teias pequenas nos cartões + sliders do perfil técnico */
+.hub-radar-sm { margin: 2px 0 0; }
+.hub-radar-sm :deep(svg) { max-width: 320px !important; }
+.hub-radar-form :deep(svg) { max-width: 360px !important; }
+.hub-slider { display: grid; grid-template-columns: 5.6rem 1fr 1.6rem; align-items: center; gap: 8px; font-size: 11px; }
+.hub-slider label { font-weight: 700; color: #334155; }
+.hub-slider b { text-align: right; color: #27408b; font-size: 12px; }
+.hub-slider input[type='range'] { width: 100%; accent-color: #4169e1; margin: 0; height: 22px; }
+:global(.dark) .hub-slider label { color: #fff; }
+:global(.dark) .hub-slider b { color: #fff; }
 /* rodada 27: tipo de cardio (grade fixa), estatísticas, campos escuros, controles do professor */
 .hub-cardio-type {
   height: 64px;

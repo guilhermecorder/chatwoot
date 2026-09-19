@@ -414,3 +414,9 @@
 }
 .dark .hub-page .hub-bump { background: rgba(255, 255, 255, 0.08); color: #fff; }
 .hub-page .hub-tag:disabled { opacity: 0.4; }
+
+/* rodada 29: segmentado com 5 itens — no celular só o ativo mostra o rótulo */
+@media (max-width: 639px) {
+  .hub-page .hub-seg-5 > button:not(.is-on) > .lbl { display: none; }
+  .hub-page .hub-seg-5 > button > span[class^='i-'] { width: 16px; height: 16px; }
+}

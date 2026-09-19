@@ -12,6 +12,80 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 30b — 19/09 ✅ RADAR PRÓPRIO DO HUB (HubRadar.vue) — "precisa ficar legal o gráfico"
+Print dele dos cartões de treino: rótulos cortados ("ondição",
+"Sequênci") e formas espetadas (8 eixos, vários zerados).
+- **HubRadar.vue (novo)**: viewBox com folga (20% do tamanho), rótulos
+  ancorados por lado (start/end/middle + dy no topo/base), svg com
+  overflow visível, preenchimento em degradê radial da cor do conjunto,
+  pontos com borda branca, PISO de 6% (só visual) pra forma não colapsar
+  no centro, anéis/eixos suaves, animação de entrada, legenda opcional.
+  As 3 telas (HealthPage, HealthHome, HealthDashboard) trocaram o
+  RadarChart da área de Pessoas por ele (o de Pessoas fica intacto).
+- **Teia do treino de boxe = 6 eixos** que sempre fazem sentido:
+  Técnica (sombra+técnica), Sequências, Movimento (footwork), Defesa,
+  Potência (saco), Condição — aquecimento/volta à calma fora; round do
+  professor conta como Sequências (se tem sequência) ou Técnica. Legenda
+  "perfil do treino".
+
+## RODADA 30 — 19/09 ✅ TEIAS DO PROGRESSO NO MEU PAINEL (working tree, NÃO subida)
+Pedido dele 19/09: "teia de aranha no Meu Painel também, pra deixar mais
+interessante a visualização de progresso; pode ter mais de uma: força nos
+dias de treino, mudança nas medidas de acordo com o objetivo etc."
+- Bloco novo "Teias do progresso" logo após ONDE ESTOU → ONDE QUERO
+  (hub-grid-3, empilha no celular), RadarChart da área de Pessoas:
+  1. FORÇA · início × agora — eixos = até 8 exercícios de maior e-1RM
+     (nome curto), 2 conjuntos: início do ciclo (cinza) × agora (royal),
+     normalizados pelo maior valor; legenda "N de M exercícios acima do
+     início". Some com menos de 3 exercícios com carga.
+  2. MEDIDAS · rumo ao alvo — eixos = medidas com alvo definido (goalRows
+     com pct), conjunto laranja = alvo (borda 100%) × royal = % do
+     caminho já percorrido; legenda média e nº de alvos batidos. Pede
+     "3 alvos em ✎ alvos" se faltar.
+  3. SEMANA · constância — eixos Treinos (feitos ÷ meta), Cardio (min ÷
+     150), Boxe (se ligado), Medição (houve pesagem/medida na semana),
+     Cargas ▲ (% de progressões); legenda "% da semana ideal".
+- TESTADO local (DOM): 3 teias renderizadas — Força com 5 exercícios
+  (5 de 5 acima do início), Medidas com Peso/Cintura/Braço (51% do
+  caminho), Semana 0% (semana de teste vazia). Nota de ambiente: o HUB
+  local bateu o LIMITE DE SESSÕES ATIVAS (25 tokens) de tanto link SSO;
+  zerei `user.tokens` no local — se ele cair pra tela de login, é só
+  entrar de novo.
+## RODADA 29 — 19/09 ✅ RADAR (TEIA) NOS TREINOS/PLANOS + MAPEADOR DE ATLETAS (working tree, NÃO subida)
+Pedido dele 19/09 (após implantar a c703b88, "ficou legal"): gráfico de
+teia/radar "estilo o da área de Pessoas do sistema de negócios" pra
+classificar os treinos e o plano de luta; e um MAPEADOR DE ATLETAS pra
+catalogar/estudar atletas preferidos, adversários e alunos, com a mesma
+teia ("entender perfeitamente o que eles usam e fazem").
+- **Radar reaproveitado**: RadarChart.vue de dashboard/people (SVG puro,
+  eixos + até 2 conjuntos, valores 0–100) importado nas telas do HUB;
+  eixos alternam royal-profundo/laranja-escuro (axesFrom).
+- **Treinos programados**: teia no cartão = ESTILO (quanto de cada
+  etiqueta — ataque, esquiva, contra… — cada sequência pesa os minutos do
+  bloco); sem sequência etiquetada, cai pro perfil por TIPO de bloco
+  (sombra, técnica, sequências, footwork, defesa, saco, condição, rounds).
+- **Planos de luta**: teia = intenção por round (8 eixos); sem intenção,
+  etiquetas das sequências.
+- **Mapeador de atletas** (visualização "Atletas" no Boxe; kind
+  `athlete` por pessoa, sanitize_athlete): papel Aluno | Adversário |
+  Referência (cores royal/laranja/noite), guarda (ortodoxo/canhoto/
+  ambos), categoria, equipe, link de vídeo, notas, pontos fortes/fracos,
+  "o que usa" (SeqPicker) e PERFIL TÉCNICO em 8 eixos 0–10 (Ataque,
+  Defesa, Esquiva, Contra, Movimento, Pressão, Clinch, Potência) com
+  sliders e teia ao vivo no formulário. Cartões: iniciais no papel, teia,
+  "Forte: … · Fraco: …" (3 maiores / 2 menores), sequências que usa,
+  botões comparar (2 atletas → teia sobreposta royal × laranja), vídeo e
+  "plano contra / plano pra ele" (abre o plano de luta já com o nome).
+  Filtro por papel com contagem.
+- **Análises**: Balanço muscular ganhou a teia (6 grupos) acima das barras.
+- Segmentado do Boxe com 5 itens: no celular só o ativo mostra rótulo.
+- TESTADO local (via DOM, painel do navegador estava fechado): view
+  Atletas abre; formulário com 8 sliders e teia ao vivo; "Teste Atleta"
+  salvou → cartão com teia, "Forte: Ataque · Defesa · Esquiva · Fraco:
+  Pressão · Potência", comparar e "plano pra ele"; cartões de treino
+  mostram a teia "por tipo de bloco" (os treinos de fábrica ainda não
+  têm sequências etiquetadas). Atleta de teste apagado.
+
 ## SUBIDA 19/09 — RODADAS 24–28: "pode subir" → commit c703b888ea na
 feat/hub-saude → push → docker-build disparado por workflow_dispatch
 (run 35466594296) VERDE em ~4 min → **etiqueta `c703b88`** (sem

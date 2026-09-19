@@ -14,6 +14,7 @@ import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import WheelInput from './WheelInput.vue';
 import HubTabBar from './HubTabBar.vue';
+import RadarChart from './HubRadar.vue';
 import {
   Chart as ChartJS,
   Tooltip,
@@ -744,6 +745,68 @@ const saveTargets = async () => {
   }
 };
 
+// ═══ RODADA 30: TEIAS DO PROGRESSO no painel (pedido dele 19/09: "deixar
+// mais interessante a visualização de progresso; pode ter mais de uma") ═══
+const shortName = n => {
+  const t = String(n || '').replace(/\s+(com|na|no|em)\s+.*$/i, '').trim();
+  return t.length > 16 ? `${t.slice(0, 15)}…` : t;
+};
+const radarAxes = list => list.map((x, i) => ({ key: x.key, label: x.label, color: i % 2 ? '#B85C00' : '#27408B' }));
+// 1) FORÇA por exercício: início do ciclo × agora (e-1RM), até 8 exercícios
+const strengthRadar = computed(() => {
+  const ex = loadProgress.value
+    .flatMap(g => g.exercises)
+    .filter(e => e.last && e.e1)
+    .sort((a, b) => b.e1 - a.e1)
+    .slice(0, 8);
+  if (ex.length < 3) return null;
+  const max = Math.max(1, ...ex.map(e => Math.max(e.e1, e.firstE1 || 0)));
+  const axes = radarAxes(ex.map(e => ({ key: e.name, label: shortName(e.name) })));
+  const pc = v => Math.round((v / max) * 100);
+  return {
+    axes,
+    datasets: [
+      { label: 'início do ciclo', color: '#94A3B8', values: Object.fromEntries(ex.map(e => [e.name, pc(e.firstE1 ?? e.e1)])) },
+      { label: 'agora', color: ROYAL, values: Object.fromEntries(ex.map(e => [e.name, pc(e.e1)])) },
+    ],
+    up: ex.filter(e => e.firstE1 !== null && e.e1 > e.firstE1).length,
+    n: ex.length,
+  };
+});
+// 2) MEDIDAS × OBJETIVO: % do caminho até o alvo em cada medida (alvo = borda)
+const targetRadar = computed(() => {
+  const rows = goalRows.value.filter(r => r.pct !== null);
+  if (rows.length < 3) return null;
+  const axes = radarAxes(rows.map(r => ({ key: r.key, label: r.label.replace(/ \(.*\)/, '') })));
+  return {
+    axes,
+    datasets: [
+      { label: 'onde quero (alvo)', color: LARANJA, values: Object.fromEntries(rows.map(r => [r.key, 100])) },
+      { label: 'onde estou', color: ROYAL, values: Object.fromEntries(rows.map(r => [r.key, r.pct])) },
+    ],
+    avg: Math.round(rows.reduce((a, r) => a + r.pct, 0) / rows.length),
+    hit: rows.filter(r => r.hit).length,
+  };
+});
+// 3) SEMANA: constância em cada frente (0–100)
+const weekRadar = computed(() => {
+  const bodyThisWeek = bodies.value.some(b => inThisWeek(b.record_date));
+  const vs = weekScore.value;
+  const comparable = vs.progress + vs.tie + vs.regress;
+  const items = [
+    { key: 'treinos', label: 'Treinos', v: Math.min(100, Math.round((weekWorkouts.value.length / Math.max(1, weeklyGoal.value)) * 100)) },
+    { key: 'cardio', label: 'Cardio', v: Math.min(100, Math.round((weekCardioMin.value / 150) * 100)) },
+    ...(boxingOn.value ? [{ key: 'boxe', label: 'Boxe', v: Math.min(100, weekBoxings.value.length * 50) }] : []),
+    { key: 'medidas', label: 'Medição', v: bodyThisWeek ? 100 : 0 },
+    { key: 'cargas', label: 'Cargas ▲', v: comparable ? Math.round((vs.progress / comparable) * 100) : 0 },
+  ];
+  return {
+    axes: radarAxes(items),
+    datasets: [{ label: 'esta semana', color: LARANJA_VIVO, values: Object.fromEntries(items.map(i => [i.key, i.v])) }],
+    score: Math.round(items.reduce((a, i) => a + i.v, 0) / items.length),
+  };
+});
+
 // eixo duplo (esq. laranja/direita azul) usado nos gráficos de relação
 const dualChartOpts = {
   responsive: true,
@@ -1117,6 +1180,40 @@ const toggleMetas = () => {
           </div>
         </div>
 
+        <!-- 2b. TEIAS DO PROGRESSO (rodada 30) -->
+        <div class="hub-block p-4 mb-4">
+          <div class="hub-sec">
+            <span class="hub-sec-ico"><span class="i-lucide-radar" /></span>
+            <div class="hub-sec-text">
+              <h2 class="hub-sec-title">Teias do progresso</h2>
+              <p class="hub-sec-sub">força por exercício, medidas rumo ao alvo e a constância da semana — de uma olhada</p>
+            </div>
+          </div>
+          <div class="hub-grid-3" style="gap: 14px">
+            <div class="hub-radar-card">
+              <p class="hub-label">Força · início × agora</p>
+              <template v-if="strengthRadar">
+                <RadarChart :axes="strengthRadar.axes" :datasets="strengthRadar.datasets" :size="250" />
+                <p class="hub-radar-cap"><b :style="{ color: ROYAL }">{{ strengthRadar.up }}</b> de {{ strengthRadar.n }} exercícios acima do início do ciclo</p>
+              </template>
+              <p v-else class="text-[11px] text-n-slate-10">Registre 3 exercícios com carga pra teia aparecer.</p>
+            </div>
+            <div class="hub-radar-card">
+              <p class="hub-label">Medidas · rumo ao alvo</p>
+              <template v-if="targetRadar">
+                <RadarChart :axes="targetRadar.axes" :datasets="targetRadar.datasets" :size="250" />
+                <p class="hub-radar-cap"><b :style="{ color: ROYAL }">{{ targetRadar.avg }}%</b> do caminho, em média · {{ targetRadar.hit }} alvo{{ targetRadar.hit === 1 ? '' : 's' }} batido{{ targetRadar.hit === 1 ? '' : 's' }}</p>
+              </template>
+              <p v-else class="text-[11px] text-n-slate-10">Defina pelo menos 3 alvos em "✎ alvos" pra teia aparecer.</p>
+            </div>
+            <div class="hub-radar-card">
+              <p class="hub-label">Semana · constância</p>
+              <RadarChart :axes="weekRadar.axes" :datasets="weekRadar.datasets" :size="250" />
+              <p class="hub-radar-cap"><b :style="{ color: LARANJA_VIVO }">{{ weekRadar.score }}%</b> da semana ideal (treinos, cardio, medição, cargas subindo)</p>
+            </div>
+          </div>
+        </div>
+
         <!-- 3. CENTÍMETROS TOTAIS × PESO -->
         <div class="hub-block hub-orange p-4 mb-4">
           <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
@@ -1477,6 +1574,12 @@ const toggleMetas = () => {
 </template>
 
 <style scoped>
+/* rodada 30: teias do progresso */
+.hub-radar-card { border-radius: 16px; padding: 10px 10px 8px; border: 1px solid rgba(65, 105, 225, 0.18); background: rgba(255, 255, 255, 0.55); }
+:global(.dark) .hub-radar-card { background: rgba(255, 255, 255, 0.04); }
+.hub-radar-card :deep(svg) { max-width: 360px !important; }
+.hub-radar-cap { font-size: 11px; color: #64748b; text-align: center; margin: 4px 0 0; }
+
 /* detalhe do card de carga (rodada 22): o <p> global do app impõe 14px */
 .hub-card-detail,
 .hub-card-detail p {
