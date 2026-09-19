@@ -163,11 +163,13 @@ const startPolling = () => {
         await load();
         assets.value = null;
         history.value = null;
-        useAlert(
-          status.sync && status.sync.last_error
-            ? `A Meta respondeu com erro: ${status.sync.last_error}`
-            : 'Dados dos criativos atualizados.'
-        );
+        const sync = status.sync || {};
+        let msg = 'Dados dos criativos atualizados.';
+        if (sync.last_error)
+          msg = `A Meta respondeu com erro: ${sync.last_error}`;
+        else if (sync.last_warning)
+          msg = `Dados atualizados, mas ${sync.last_warning}`;
+        useAlert(msg);
       }
     } catch {
       stopPolling();

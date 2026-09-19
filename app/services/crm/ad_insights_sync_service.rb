@@ -12,6 +12,8 @@ class Crm::AdInsightsSyncService
     video_p75_watched_actions video_p100_watched_actions video_avg_time_watched_actions
     video_continuous_2_sec_watched_actions
   ].freeze
+  BASIC_FIELDS = %w[ad_id ad_name adset_id adset_name campaign_id campaign_name
+                    spend impressions reach frequency clicks inline_link_clicks actions cost_per_action_type].freeze
   AD_FIELDS = 'id,name,effective_status,adset{id,name},campaign{id,name},' \
               'creative{id,name,title,body,call_to_action_type,thumbnail_url,image_url,video_id,' \
               'instagram_permalink_url,object_story_spec,asset_feed_spec}'.freeze
@@ -38,7 +40,7 @@ class Crm::AdInsightsSyncService
   def call
     return { configured: false } unless @graph.configured?
 
-    write_state('running_since' => Time.current.iso8601, 'last_error' => nil, 'progress' => nil)
+    write_state('running_since' => Time.current.iso8601, 'last_error' => nil, 'last_warning' => nil, 'progress' => nil)
     ads = sync_creatives
     rows = load_windows
     recovered = recover_missing_creatives
@@ -92,8 +94,15 @@ class Crm::AdInsightsSyncService
   end
 
   # ── 1) anúncios + criativos ───────────────────────────────────────────────
+  # com todos os status (apagados/arquivados vêm); se a Meta recusar o filtro,
+  # refaz sem ele — os apagados ainda voltam pela recuperação por id
   def sync_creatives
-    ads = @graph.fetch_all('ads', { fields: AD_FIELDS, limit: 100, effective_status: ALL_STATUSES.to_json }, max_pages: 20)
+    ads = begin
+      @graph.fetch_all('ads', { fields: AD_FIELDS, limit: 100, effective_status: ALL_STATUSES.to_json }, max_pages: 20)
+    rescue Crm::MetaGraph::Error => e
+      Rails.logger.warn "[CEVICO criativos] /ads com filtro de status recusado (#{e.message}); refazendo sem filtro"
+      @graph.fetch_all('ads', { fields: AD_FIELDS, limit: 100 }, max_pages: 20)
+    end
     now = Time.current
     rows = ads.map { |ad| creative_row(ad, now) }
     upsert_creatives(rows)
@@ -119,8 +128,16 @@ class Crm::AdInsightsSyncService
   end
 
   # ── 2) métricas diárias ───────────────────────────────────────────────────
+  # se a Meta recusar algum campo de vídeo, refaz só com o básico (a tela
+  # fica sem gancho/retenção até acertarmos o campo, mas não fica sem dados)
   def sync_insights(w_since = since_date, w_until = @until_date)
-    raw = @graph.fetch_all('insights', insights_query(w_since, w_until), max_pages: 60)
+    raw = begin
+      @graph.fetch_all('insights', insights_query(w_since, w_until), max_pages: 60)
+    rescue Crm::MetaGraph::Error => e
+      Rails.logger.warn "[CEVICO criativos] /insights completo recusado (#{e.message}); refazendo com campos básicos"
+      write_state('last_warning' => "Meta recusou as métricas de vídeo: #{e.message}")
+      @graph.fetch_all('insights', insights_query(w_since, w_until, BASIC_FIELDS), max_pages: 60)
+    end
     now = Time.current
     rows = raw.filter_map { |row| insight_row(row, now) }
     ensure_creatives_for(raw, now)
@@ -130,10 +147,10 @@ class Crm::AdInsightsSyncService
     rows.size
   end
 
-  def insights_query(w_since, w_until)
+  def insights_query(w_since, w_until, fields = INSIGHT_FIELDS)
     {
       level: 'ad', time_increment: 1, limit: 500,
-      fields: INSIGHT_FIELDS.join(','),
+      fields: fields.join(','),
       time_range: { since: w_since.iso8601, until: w_until.iso8601 }.to_json
     }
   end

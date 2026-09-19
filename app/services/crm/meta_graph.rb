@@ -35,7 +35,7 @@ class Crm::MetaGraph
 
     max_pages.times do
       response = HTTParty.get(url, query: params, timeout: 30)
-      raise Error, extract_error(response) unless response.success?
+      raise Error, "#{edge}: #{extract_error(response)}" unless response.success?
 
       parsed = response.parsed_response
       rows.concat(Array(parsed['data']))
@@ -92,8 +92,15 @@ class Crm::MetaGraph
     GlobalConfigService.load('WHATSAPP_API_VERSION', 'v22.0')
   end
 
+  # mensagem + explicação que a Meta manda junto (error_user_msg) + códigos:
+  # "Invalid parameter" sozinho não diz qual parâmetro
   def extract_error(response)
-    response.parsed_response.dig('error', 'message') || "HTTP #{response.code}"
+    err = response.parsed_response['error'] || {}
+    parts = [err['message'], err['error_user_title'], err['error_user_msg']].compact.uniq
+    codes = [err['code'], err['error_subcode']].compact.join('/')
+    text = parts.join(' — ')
+    text = "HTTP #{response.code}" if text.blank?
+    codes.present? ? "#{text} (código #{codes})" : text
   rescue StandardError
     "HTTP #{response.code}"
   end
