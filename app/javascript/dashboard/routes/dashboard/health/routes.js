@@ -2,6 +2,7 @@ import { frontendURL } from '../../../helper/URLHelper';
 import HealthPage from './HealthPage.vue';
 import HealthDashboard from './HealthDashboard.vue';
 import HealthHome from './HealthHome.vue';
+import RoutinePage from './RoutinePage.vue';
 
 export default {
   routes: [
@@ -21,6 +22,13 @@ export default {
       component: HealthPage,
     },
     {
+      // rodada 26: cardio pré-configurado (aba da tela de treino)
+      path: frontendURL('accounts/:accountId/health/cardio'),
+      name: 'hub_health_cardio',
+      meta: { permissions: ['administrator', 'agent'], healthTab: 'cardio' },
+      component: HealthPage,
+    },
+    {
       path: frontendURL('accounts/:accountId/health/boxe'),
       name: 'hub_health_boxe',
       meta: { permissions: ['administrator', 'agent'], healthTab: 'boxe' },
@@ -37,6 +45,13 @@ export default {
       name: 'hub_health_corpo',
       meta: { permissions: ['administrator', 'agent'], healthTab: 'corpo' },
       component: HealthPage,
+    },
+    {
+      // rodada 26: construtor de ROTINA (dias, semanas, meses, anos)
+      path: frontendURL('accounts/:accountId/health/rotina'),
+      name: 'hub_health_rotina',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: RoutinePage,
     },
     {
       // Dashboard da Saúde: resultados em linha/área (treino + dieta)

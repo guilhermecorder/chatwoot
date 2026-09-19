@@ -544,12 +544,15 @@ const hubMenuSaude = () => [
   hubItem(),
   { name: 'HealthPainel', label: 'Meu Painel', icon: 'i-lucide-gauge', to: accountScopedRoute('hub_health_painel') },
   { name: 'HealthTreino', label: 'Treino', icon: 'i-lucide-dumbbell', to: accountScopedRoute('hub_health') },
+  { name: 'HealthCardio', label: 'Cardio', icon: 'i-lucide-heart-pulse', to: accountScopedRoute('hub_health_cardio') },
   ...(boxingOn.value
     ? [{ name: 'HealthBoxe', label: 'Boxe', icon: 'i-lucide-swords', to: accountScopedRoute('hub_health_boxe') }]
     : []),
   { name: 'HealthDieta', label: 'Dieta', icon: 'i-lucide-utensils', to: accountScopedRoute('hub_health_dieta') },
   { name: 'HealthCorpo', label: 'Corpo', icon: 'i-lucide-ruler', to: accountScopedRoute('hub_health_corpo') },
   { name: 'HealthDash', label: 'Análises', icon: 'i-lucide-area-chart', to: accountScopedRoute('hub_health_dash') },
+  // rodada 26: construtor de rotina (dias · semanas · meses · anos)
+  { name: 'HealthRotina', label: 'Rotina', icon: 'i-lucide-calendar-range', to: accountScopedRoute('hub_health_rotina') },
 ];
 
 const visibleMenuItems = computed(() => {

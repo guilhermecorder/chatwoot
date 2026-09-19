@@ -18,6 +18,285 @@ feat/hub-saude → push → docker-build (run 35406047125) VERDE →
 Imagem do web + sidekiq no EasyPanel e Implantar os dois. Depois: ligar
 o Boxe em Configurações → HUB e definir os alvos em ✎ alvos no painel.
 
+## RODADA 24 — 19/09 ✅ ANTEBRAÇOS + PANTURRILHAS NAS MEDIDAS (working tree, NÃO subida)
+Pedido dele 19/09: "inserir medidas dos antebraços e das panturrilhas".
+- 4 chaves novas no registro `body`: forearm_r/forearm_l (Antebraço D/E)
+  e calf_r/calf_l (Panturrilha D/E), roletas 0,1 cm até 220 — servidor
+  não filtra chaves do body, então foi só front:
+  · HealthPage MEASURES (grade de roletas na aba Corpo, + protocolo:
+    "antebraço na parte mais grossa, punho solto · panturrilha em pé, na
+    parte mais grossa");
+  · HealthHome MEASURE_VIEW (balanço de cm — entram no "ganhar", subir é
+    bom), TARGET_DEFS (✎ alvos: Antebraço (média) e Panturrilha (média) =
+    média D/E) e BODY_AREAS (chips 🦾 Antebraços · 🦿 Panturrilhas);
+  · HealthDashboard CM_KEYS_DASH (Σ cm "desde a semana 1").
+- Medições antigas sem essas chaves seguem valendo (carry-forward ignora
+  o que não existe). Testado local: grade mostra os 4 campos vazios ✓,
+  painel abre ✓. Pendência do working tree anterior mantida (rename
+  "Regiões de desenvolvimento muscular" na HealthHome).
+
+## RODADA 28 — 19/09 ✅ EDITOR DE TREINO DE BOXE NO PADRÃO DO PLANO DE LUTA (working tree, NÃO subida)
+Feedback dele 19/09 (prints do "Novo treino" e do plano de luta no
+celular): "melhorar o enquadramento — espaços de preenchimento mais pra
+direita, títulos maiores; opções pré-selecionáveis no montar treino com
+'outro' pra escrever o que quiser; mais parecido com o plano de luta".
+- **Kit**: .hub-form/.hub-form-row = rótulo em caixa alta à ESQUERDA
+  (6,2 rem no celular · 8 rem no notebook) e campo à DIREITA ocupando o
+  resto; .hub-sec-title subiu de 14 → 16 px; .hub-bump (−/+) e
+  .hub-other (campo curto "outro").
+- **Editor "Novo treino / Editar treino"** (boxWkForm) reescrito: cabeçalho
+  .hub-sec com nº de blocos e minutos; Nome/Descrição em linhas de
+  formulário; blocos em ACORDEÃO (1 aberto; fechado mostra ícone + nome ·
+  ≈ min · formato · nº de sequências); dentro: Tipo em tags com ícone
+  (pré-selecionável), Nome, Formato = segmentado "Tempo corrido | Rounds"
+  (setBlockMode zera o outro modo), Minutos em chips 3/5/8/10/12/15 +
+  "outro", Rounds −/+, Round em chips 1:00/1:30/2:00/2:30/3:00 + "outro"
+  (segundos), Descanso em chips 15/30/45/60/90 s + "outro", O que fazer,
+  Sequências (SeqPicker); subir/descer/remover como tags no rodapé do
+  bloco; "+ bloco" abre o novo já expandido; Salvar em laranja.
+- **Plano de luta**: cabeçalho do formulário virou linhas Nome/Atleta/
+  Adversário/Rounds/Round/Descanso (mesmos chips + "outro"), rótulo
+  "Rounds" antes do acordeão, Estratégia como linha; valores digitados em
+  "outro" viram número no salvar.
+## RODADA 27 — 19/09 ✅ "MAIS APPLE": SEM EMOJI, SEÇÕES COM CONTRASTE, BOTÕES DE VISUALIZAÇÃO, ENQUADRAMENTO (working tree, NÃO subida)
+Feedback dele 19/09 (prints do repertório, do construtor por rounds e do
+cardio): "está ficando super interessante; agora mais bonito e organizado
+— pense como a Apple; histórico em lista é desagradável (sanfona ou
+seção própria); o montar por rounds virou salada de frutas; botões de
+visualização pra ter controle e limpeza; emojis assim ficam com cara de
+feito por IA, pouco autêntico — vale pra TUDO; mais contraste entre as
+seções; enquadramento otimizado pra celular e notebook, nada solto".
+
+- **Kit de organização** (_hub-glass.scss, rodada 27): .hub-sec
+  (cabeçalho de seção: quadrado com ÍCONE DE LINHA + título + subtítulo +
+  ações à direita), .hub-label (rótulo em caixa alta com régua), .hub-seg
+  (controle segmentado = botões de visualização; -full ocupa a largura),
+  .hub-list/.hub-row/.hub-row-date/.hub-month (lista agrupada por mês,
+  estilo iOS), .hub-tag (chip com ícone de linha; is-on/is-soft),
+  .hub-grid-2/3/4 (grades FIXAS: 1 coluna no celular, 2/3/4 no notebook),
+  .hub-acc (acordeão), .hub-zone, .hub-field (campo com largura fixa),
+  .hub-h-ico (ícone dentro de título).
+- **ZERO emoji em títulos e chips**: todos os h1/h2/h3 das 4 telas
+  (HealthPage 19, HealthHome 5, HealthDashboard 19, RoutinePage 4)
+  trocaram o emoji por ícone lucide (i-lucide-*); listas de dados
+  (GOALS, MEASURE_DEFS, CARDIO_TYPES, SEQ_CATEGORIES, FIGHT_INTENTS,
+  ROUTINE_CATS, BLOCK_TYPES, itens das celebrações) ganharam `ico`
+  (lucide) — o campo `icon` (emoji) ficou só por compatibilidade. 117
+  nomes de ícone conferidos contra o pacote @iconify-json/lucide.
+  Pílulas do topo da tela de treino, da Rotina (Dia/Semana/Mês/Ano) e
+  do assistente viraram .hub-seg. "🔥 HOJE" → "HOJE"; celebração usa
+  ícones (troféu, régua, party-popper) no medalhão e nos cartões.
+- **Botões de visualização**: Treino = Treinar · Planilha · Histórico
+  (programa + cartões + fichas em Treinar; planilha sozinha; evolução de
+  carga + histórico em Histórico); Cardio = Registrar · Histórico; Boxe =
+  Treinar · Planos de luta · Repertório · Histórico.
+- **Histórico virou seção própria** (treino, cardio, boxe): 3 tiles de
+  estatística (sessões/minutos/rounds ou km) + lista agrupada por MÊS com
+  badge de data (dia/mês), título, detalhe e ✕ — nada de lista corrida
+  embaixo de tudo.
+- **Construtor do professor**: cabeçalho .hub-sec, 4 controles em grade
+  fixa (rounds −/+ · tempo 2:00/2:30/3:00 · descanso · aquecer/calma),
+  rounds em ACORDEÃO (1 aberto por vez; fechado mostra foco · tipo · nº
+  de sequências) e o **SeqPicker.vue (novo)**: só as sequências
+  ESCOLHIDAS aparecem como chips; "+ sequência" abre UM painel com abas
+  por etiqueta (contagem), busca e linhas nome · passos · quando usar;
+  "aplicar este round aos demais". O mesmo seletor entrou no plano de
+  luta (rounds em acordeão, intenções como .hub-tag com ícone) e no
+  editor de blocos (adeus 30 chips repetidos).
+- **Cardio**: tipos em grade FIXA 2×/4× com ícone de linha (cartão
+  .hub-cardio-type), tempo e intensidade em .hub-tag lado a lado (grade
+  2), data/km/observação em grade 3 com campos de largura fixa.
+- **Repertório**: filtros como .hub-tag com ícone e contagem; etiqueta
+  no cartão como chip suave; "Quando usar" em negrito sem emoji.
+- **Celular** (testado a 375px): ações do .hub-sec descem pra 2ª linha
+  (título nunca espreme), .hub-seg-full com 4 itens cabe sem cortar
+  ("Planos de luta" → "Planos"), Rotina/Dia empilha lista + linha do
+  tempo (grade só no notebook). Notebook: grades fixas 2/3/4.
+- TESTADO local: Treino (Treinar/Planilha/Histórico agrupado por mês c/
+  badge de data), Cardio (grade 4 de tipos com ícone, tags de tempo/
+  intensidade, histórico com tiles), Boxe (4 visualizações; professor com
+  acordeão + SeqPicker com abas/busca; plano de luta com intenções em
+  tags e rounds em acordeão; repertório com filtros-tag; histórico 29
+  sessões/863 min/169 rounds agrupado por mês), Painel e Análises com
+  ícones de linha nos títulos, Rotina com pílulas segmentadas.
+- 🐛 corrigidos no caminho: título .hub-sec-title invisível em bloco
+  escuro (color: inherit); pílulas de descanso estourando (flex-wrap).
+- FILA: ainda há emojis em TEXTOS corridos e alerts (useAlert) — ele
+  pediu "em tudo"; próxima passada: alerts, textos de ajuda, HubPage
+  (mundos) e HealthDashboard tiles.
+## RODADA 26 — 19/09 ✅ SITUAÇÃO NO PAINEL + CARDIO + MOLDURAS + BOXE (ETIQUETAS · PROFESSOR · PLANO DE LUTA) + ROTINA (working tree, NÃO subida)
+Pedido dele 19/09 (print do Treino, "está ficando ótimo"), 7 pontos:
+1. "treino atual, semana atual" no painel pra se situar → linha 📍 no
+   hero da HealthHome: nome do programa · Semana X de Y (chip laranja) ·
+   próximo Treino K · dia. Linha "Semana:" ganhou "🏃 N min de cardio".
+2. Ambiente de CARDIO pré-configurado → aba Cardio (rota /health/cardio,
+   item na sidebar, pílula na tela de treino): tipo em cartões
+   (caminhada, corrida, bike, boxe, elíptico, natação, corda, escada,
+   remo, futebol, outro) + tempo em chips (10/15/20/30/45/60 ou digitar)
+   + intensidade (leve/moderado/forte) + data, km e observação opcionais;
+   "3 toques e pronto". kind novo `cardio`; painel "últimos 30 dias por
+   tipo" (barras) + lista dos últimos.
+3. Moldura em TODOS os treinos, o da vez laranja → .hub-session-card
+   (borda royal 1,5px + sombra) nos cartões A/B/C; o próximo segue
+   laranja pulsando.
+4. Boxe · PROFESSOR "cria o treino em rounds" → botão 👨‍🏫 Montar por
+   rounds: nome, nº de rounds (−/+), tempo do round (2:00/2:30/3:00),
+   descanso (30/45/60/90 s), aquecer/calma em min, e por round: tipo
+   (sombra, técnica, sequências, saco…), foco, instrução e sequências →
+   "Gerar treino" cria os blocos (1 por round, `rest_after` = descansa
+   ANTES do próximo bloco, como entre rounds) e abre no editor normal
+   pra revisar/salvar. Cronômetro ganhou a fase `rest_after` (tickBox +
+   boxPct + textos), tipo de bloco "🔔 Round". Sanitize aceita rest_after.
+5. Boxe · SEQUÊNCIAS com etiquetas "quando usar" → categoria (⚔️ ataque,
+   ↩️ contra-ataque, 🌀 esquiva, 🛡 defesa/bloqueio, 👟 movimentação, ➡️
+   aproximação, ⬅️ saída, 🤼 clinch) + campo "quando usar" no editor da
+   sequência; chips de filtro por etiqueta com contagem; cartão mostra a
+   etiqueta e "⏱ Quando usar"; 📚 Importar biblioteca traz 25 sequências
+   prontas (SEQ_LIBRARY no warrior.js) sem repetir nomes. Sanitize:
+   category/when; limite 150 sequências.
+6. Boxe · PLANO DE LUTA → seção 🥇: rounds (−/+ até 15), tempo (2:00/
+   3:00), descanso (60/90), nome/atleta/adversário; por round: INTENÇÃO
+   (🔍 estudar, 🔥 pressionar, ↩️ contra-atacar, 📏 distância, 🎯 corpo,
+   🏁 definir, 🧘 recuperar, ♻️ ritmo) + sequências do repertório (filtro
+   por etiqueta) + observações; estratégia geral. kind novo `fight_plan`
+   POR PESSOA (sanitize_fight_plan). Cartões dos planos c/ resumo dos
+   rounds; ▶ Treinar este plano = fightPlanToWorkout → sessão guiada
+   round a round no cronômetro (descanso entre rounds), registra como boxe.
+7. ROTINA (item novo na sidebar e na barra de abas; /health/rotina;
+   RoutinePage.vue novo; kind `routine` 1 por pessoa, salva sozinha 0,7 s
+   após mexer, "salvo ✓ hh:mm"): pílulas Dia · Semana · Mês · Ano.
+   · DIA: dia da semana (hoje marcado), blocos início–fim + nome + área
+     da vida (💪 saúde, 💼 negócios, 👨‍👩‍👧 família, 🧠 mente, 🕊 espírito,
+     🏠 casa, 😴 descanso) + detalhe; LINHA DO TEMPO 24 h colorida (bloco
+     que passa da meia-noite vira 2 pedaços) + lista + "onde vai o dia"
+     (barra por área) + copiar pra outros dias / Seg–Sex / limpar; dia
+     vazio oferece "⚡ Dia útil campeão" e "🌿 Fim de semana" (presets
+     editáveis em warrior.js).
+   · SEMANA: 7 colunas mini-linha do tempo (toque abre o dia) + "onde vai
+     o seu tempo na semana" (horas e % por área).
+   · MÊS: ano ‹ ›, 12 cartões (o atual laranja sólido) c/ foco do mês,
+     metas com checkbox e %, e chips 🏋️ dos programas de treino que
+     passam pelo mês (Warrior do config + programas pessoais ativos).
+   · ANO: "onde quero chegar" por área da vida (5 caixas) + metas do ano
+     c/ % + linha do ano (12 meses c/ foco e barras dos programas: royal
+     = Warrior, laranja = meu programa).
+- Backend: KINDS += cardio, fight_plan, routine; create_record: routine
+  upserta como o profile; GET /health devolve cardios, fight_plans,
+  routine. HealthDashboard: sem mudança (cardio ainda não entra no mapa
+  de constância — fila).
+- TESTADO local (conta 3): molduras nos cartões B/C ✓ (A laranja);
+  Cardio: caminhada 30 min salvou, resumo 30 dias e lista ✓; Boxe:
+  construtor por rounds gerou 8 blocos (aquec + 6 rounds + calma, 36 min)
+  → editor → salvou como "Treino do professor — 6 rounds" ✓; plano "Luta
+  teste · João" (3 rounds, R1 pressionar) salvou e ▶ Treinar abriu a
+  sessão "Round 1 · Pressionar · ritmo alto, cortar o ringue · 3:00" ✓;
+  📚 Importar biblioteca → 30 sequências, filtro Contra-ataque (4) com
+  "Quando usar" ✓; Painel: linha 📍 "Rotina Bônus — Strength & Fullness ·
+  Semana 1 de 8 · próximo: Treino A · Segunda" + "30 min de cardio" ✓;
+  Rotina: preset dia útil → linha do tempo colorida + lista + onde vai o
+  dia + copiar Seg–Sex (chips c/ 10 blocos) ✓, Mês c/ Set laranja e
+  chips do Warrior ✓, Ano c/ 5 áreas + linha do ano ✓, "salvo ✓ hh:mm".
+- Rastros: cardio, plano de luta e treino do professor apagados do banco
+  local; a BIBLIOTECA de sequências importada e a ROTINA-preset ficaram
+  pra ele ver (é só "limpar"). Na VPS ele precisa tocar "📚 Importar
+  biblioteca" uma vez.
+- Ajustes de tabela: blockMinutes conta o rest_after; inputs estreitos
+  (minutos do cardio, aquecer/calma) com width fixo.
+- FILA: cardio no mapa de constância e nas Análises; "modo luta" com
+  placar por round; rotina → lembretes/notificações; rotina ligada ao
+  treino do dia (bloco "Treino" abrir a sessão).
+
+## RODADA 25 — 19/09 ✅ CRIAR/IMPORTAR MEU TREINO + HISTÓRICO + CELEBRAÇÕES ANIMADAS (working tree, NÃO subida)
+Pedido dele 19/09: painéis "parecidos mas independentes do Warrior" —
+escolher Warrior = configuração atual exata; "importar treino / criar meu
+próprio treino" = assistente (1 divisão ABC + dias da semana · 1.1 por
+quantas semanas · 2 exercícios de cada dia · 3 parâmetro de sucesso/
+fracasso · 4 nome pro histórico), pra outras pessoas usarem o app a vida
+toda "como um jogo agradável". E: toda semana ao fechar o 3º treino e a
+cada medição, ANIMAR os relatórios onde houve progresso — bonito, alegre,
+na nossa paleta, animações leves/tecnológicas/satisfatórias — VALENDO
+PRO WARRIOR TAMBÉM (mensagem dele no meio da rodada).
+
+- **Modelo**: kind novo `program` em hub_health_records (POR PESSOA, 1
+  registro por programa, record_date = início; data = name/goal/status
+  active|finished|archived/weeks/start_date/weekdays/sessions[{key,
+  label, weekday, exercises = MESMA prescrição do Warrior}]/finished_at/
+  result). Servidor: sanitize_custom_program (reusa sanitize_prescription)
+  no create/update; GET /health devolve `programs`. A ficha (profile)
+  ganhou `program_mode` ('warrior' | 'custom') + `active_program_id`.
+  Decisão: Warrior segue COMPARTILHADO no config; programa pessoal é da
+  pessoa (convidados montam o seu sem mexer no dele).
+- **warrior.js**: GOALS (constância/força/emagrecimento/hipertrofia c/
+  descrição do que mede), MEASURE_DEFS (lista única das 15 medidas),
+  customToProgram (registro → formato de programa, 1 ciclo de N semanas),
+  resolvePrograms(config, profile, programs) = o que cada tela usa,
+  mainProgramOf (fim dos ids fixos 'warrior24' nas 3 telas),
+  buildPrescriptionSets/schemeText (séries por método), parseImportText
+  (COLAR lista: "Supino reto 3x8-12", "4 × 6–8", "3 x 10"; cabeçalhos
+  "Treino A / B:" importam ABC de uma vez), goalProgress (quanto o
+  programa entregou no parâmetro escolhido: constância = feitos ÷
+  planejados (ok ≥ 80%); força = Σ e-1RM último × 1º por exercício;
+  emagrecimento = peso (+ cintura) desde o start_date; hipertrofia = Σ cm
+  dos músculos desde o início), workoutCelebration (semana fechada →
+  treinos n/meta, semanas seguidas, exercícios que subiram, força vs
+  última, top 4 ganhos) e bodyCelebration (medidas que andaram na direção
+  certa vs anterior, Σ cm, "desde o início"; 1ª medição = ponto de
+  partida; nada melhorou = "nada regrediu, X se mantiveram").
+- **ProgramWizard.vue (novo)**: 4 passos com trilha (✓/atual laranja):
+  dias da semana (chips) + divisão (−/+ ABC…, rotação A B C A quando há
+  mais dias) + semanas (−/+, 1–104) + data de início · exercícios por
+  letra (abas A/B/C c/ ✓, grupos do dia, linhas nome c/ autocompletar +
+  método Séries/RPT/Rest-Pause/Pirâmide + séries −/+ + reps de/a +
+  descanso; 📋 Importar (colar lista)) · objetivo (4 cartões) · nome +
+  observação + resumo em cartão noite; validação por passo; editar
+  programa existente reusa o assistente.
+- **HealthPage**: barra de escolha 🛡 Warrior | ✨ programas pessoais
+  ativos | + Criar / importar | 📜 Histórico (n); cartão do programa
+  pessoal ganha bloco OBJETIVO (valor, detalhe, barra, ✎ editar, 🏁
+  encerrar = guarda `result` com sucesso/abaixo do esperado e volta pro
+  Warrior); cartões de treino mostram o grupo (A · Peito e tríceps);
+  editor ✎ salva no registro quando o programa é pessoal; planilha vira
+  aba "Semanas 1–N"; histórico lista nome/divisão/semanas/período/
+  treinos feitos/objetivo/resultado c/ ▶ Usar · ✎ · 🏁 · 🗑 (só sem
+  treinos); estado vazio "Nenhum programa ativo".
+- **HubCelebration.vue (novo)**: sobreposição de vidro azul-noite c/ 26
+  partículas caindo (royal/laranja/branco), medalhão laranja pulsando c/
+  2 anéis, brilho varrendo o cartão, cartões entrando em cascata, números
+  CONTANDO até o valor (rAF ease-out), barras enchendo com glow, ▲
+  flutuando; botão "Continuar ✨"; prefers-reduced-motion desliga tudo.
+  Disparo: saveSession (programa Warrior OU pessoal) quando a semana
+  Seg–Dom do treino salvo atinge sessões/semana (profile.weekly_sessions
+  ou nº de treinos do ciclo) e saveBody sempre. Chave por semana/registro
+  guardada no aparelho (hub_celebrated) pra não repetir ao editar.
+- **HealthHome**: usa resolvePrograms; CYCLE_LEN virou cycleLen (24 no
+  Warrior, N semanas no pessoal); hero mostra "Objetivo Força: +x% ·
+  detalhe" no programa pessoal. **HealthDashboard**: mainProgram
+  genérico (registros do programa principal pelo id).
+- TESTADO local (conta 3, banco de simulação): assistente ponta a ponta
+  c/ importação colada de 3 treinos (A ✓ B ✓ C ✓, faixas 3 × 6 a 8
+  corretas), programa "Greek God · teste" criado → ativo (Semana 1 de 12,
+  objetivo Força, cartões A · Peito e tríceps…), barra de escolha c/ chip
+  laranja no pessoal e Warrior intacto ao voltar.
+  CELEBRAÇÕES testadas: medição com peso −0,1 / cintura −0,1 / braço D
+  +0,1 / coxa D +0,1 → "4 indicadores na direção certa!" c/ Σ 0,3 cm,
+  cada medida com "desde o início", partículas e barras ✓; treinos A, B
+  e C do programa de teste no mesmo dia → no C: "Semana 1 fechada!" c/
+  Treinos da semana 3/3 (1ª semana = sem vereditos ainda) ✓. Meu Painel
+  c/ programa pessoal: hero "Semana 1 de 12 · Greek God · teste — 💪
+  Força" + linha do objetivo ✓; Análises abre e o "desde a semana 1"
+  usa o programa pessoal ✓.
+- 🐛 corrigido de tabela: sortRecs empatava registros da MESMA data e o
+  "próximo treino" apontava errado quando havia 2 treinos no dia (o B
+  abriu de novo em vez do C) — desempate por id maior primeiro.
+- Rastros de teste (programa "Greek God · teste", 3 treinos, medição de
+  19/09, modo do profile) apagados do banco local no fim; localStorage
+  hub_celebrated limpo. Banco local segue sendo a simulação.
+- FILA (ideias dele nesta rodada, não feitas): celebração mais rica na
+  semana quando há vereditos (já prevista no código: ▲ exercícios que
+  subiram, força vs última, top ganhos — aparece a partir da 2ª semana);
+  mais tipos de importação (foto/PDF via IA); presets de programas
+  famosos (Greek God etc.) prontos pra copiar.
+
 ## RODADA 23 — 18/09 ✅ ATUAL→ALVO + CM×PESO + ONDE QUERO + FORÇA A/B/C + VIDRO + ANÁLISES REORDENADA (subida na 1681fc7)
 Pedido dele 18/09 (prints do painel e do treino), 7 pontos:
 1. "meus dados atuais e desejados neste primeiro painel" → bloco 🎯 ONDE

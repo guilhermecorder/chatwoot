@@ -9,6 +9,7 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
   WORKOUTS_LIMIT = 200
   DIETS_LIMIT = 200
   BODIES_LIMIT = 200
+  PROGRAMS_LIMIT = 30
 
   def show
     render json: {
@@ -17,7 +18,13 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       workouts: records('workout', WORKOUTS_LIMIT),
       boxings: records('boxing', WORKOUTS_LIMIT),
       diets: records('diet', DIETS_LIMIT),
-      bodies: records('body', BODIES_LIMIT)
+      bodies: records('body', BODIES_LIMIT),
+      # programas PESSOAIS da pessoa (rodada 25) — o Warrior segue no config
+      programs: records('program', PROGRAMS_LIMIT),
+      # rodada 26: cardio, planos de luta e a rotina (1 registro por pessoa)
+      cardios: records('cardio', WORKOUTS_LIMIT),
+      fight_plans: records('fight_plan', 30),
+      routine: scope.of_kind('routine').order(:id).first&.data || {}
     }
   end
 
@@ -32,14 +39,17 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
     record =
       if %w[workout boxing].include?(kind)
         scope.new(kind: kind, record_date: date)
-      elsif kind == 'profile'
-        # ficha da pessoa: 1 registro por usuário, independente da data
-        scope.of_kind('profile').order(:id).first || scope.new(kind: 'profile', record_date: date)
+      elsif %w[profile routine].include?(kind)
+        # ficha da pessoa e rotina: 1 registro por usuário, independente da data
+        scope.of_kind(kind).order(:id).first || scope.new(kind: kind, record_date: date)
+      elsif %w[program fight_plan cardio].include?(kind)
+        # programa pessoal / plano de luta / cardio: cada criação é um registro novo
+        scope.new(kind: kind, record_date: date)
       else
         scope.of_kind(kind).find_or_initialize_by(record_date: date)
       end
     record.user_id = Current.user.id
-    record.data = sanitized_data
+    record.data = sanitize_for(kind, sanitized_data)
     record.save!
     render json: record_json(record)
   end
@@ -47,7 +57,7 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
   # record_date é opcional no update (corrigir a data de um treino já salvo)
   def update_record
     record = scope.find(params[:record_id])
-    attrs = { data: sanitized_data }
+    attrs = { data: sanitize_for(record.kind, sanitized_data) }
     date = parse_date(params[:record_date])
     attrs[:record_date] = date if date
     record.update!(attrs)
@@ -125,14 +135,18 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
   def sanitize_boxing(boxing)
     boxing = {} unless boxing.is_a?(Hash)
     {
-      'sequences' => Array(boxing['sequences']).first(60).filter_map do |seq|
+      'sequences' => Array(boxing['sequences']).first(150).filter_map do |seq|
         next nil unless seq.is_a?(Hash)
 
         {
           'id' => seq['id'].presence || SecureRandom.hex(4),
           'name' => seq['name'].to_s.strip.first(60),
           'steps' => seq['steps'].to_s.strip.first(120),
-          'desc' => seq['desc'].to_s.strip.first(200)
+          'desc' => seq['desc'].to_s.strip.first(200),
+          # rodada 26: etiqueta (ataque, contra-ataque, esquiva, movimentação…)
+          # e "quando usar" — pedido dele 19/09
+          'category' => seq['category'].to_s.strip.first(20),
+          'when' => seq['when'].to_s.strip.first(160)
         }
       end,
       'workouts' => Array(boxing['workouts']).first(30).filter_map { |w| sanitize_box_workout(w) }
@@ -156,6 +170,8 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
           'rounds' => b['rounds'].to_i.clamp(0, 30),
           'round_sec' => b['round_sec'].to_i.clamp(0, 900),
           'rest_sec' => b['rest_sec'].to_i.clamp(0, 600),
+          # rodada 26: bloco = 1 round do professor → descansa ANTES do próximo bloco
+          'rest_after' => b['rest_after'] == true || b['rest_after'] == 'true',
           'seqs' => Array(b['seqs']).map { |x| x.to_s.first(20) }.reject(&:blank?).first(20),
           'desc' => b['desc'].to_s.strip.first(300)
         }
@@ -228,6 +244,72 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
         set = { 'min' => st['min'].to_i, 'max' => st['max'].to_i }
         set['kind'] = st['kind'].to_s.first(12) if st['kind'].present?
         set
+      end
+    }
+  end
+
+  def sanitize_for(kind, data)
+    case kind
+    when 'program' then sanitize_custom_program(data)
+    when 'fight_plan' then sanitize_fight_plan(data)
+    else data
+    end
+  end
+
+  # Plano de luta (rodada 26): rounds × tempo, intenção e sequências por
+  # round; salvo com nome (por atleta ou por luta). Por pessoa.
+  FIGHT_INTENTS = %w[estudar pressionar contra_atacar distancia corpo definir recuperar ritmo].freeze
+
+  def sanitize_fight_plan(data)
+    data = {} unless data.is_a?(Hash)
+    {
+      'name' => data['name'].to_s.strip.first(80),
+      'athlete' => data['athlete'].to_s.strip.first(80),
+      'opponent' => data['opponent'].to_s.strip.first(80),
+      'rounds' => data['rounds'].to_i.clamp(1, 15),
+      'round_sec' => data['round_sec'].to_i.clamp(30, 600),
+      'rest_sec' => data['rest_sec'].to_i.clamp(0, 300),
+      'note' => data['note'].to_s.first(500),
+      'plan' => Array(data['plan']).first(15).filter_map do |r|
+        next nil unless r.is_a?(Hash)
+
+        {
+          'intent' => (FIGHT_INTENTS.include?(r['intent'].to_s) ? r['intent'].to_s : ''),
+          'seqs' => Array(r['seqs']).map { |x| x.to_s.first(20) }.reject(&:blank?).first(8),
+          'notes' => r['notes'].to_s.first(300)
+        }
+      end
+    }
+  end
+
+  # Programa PESSOAL (rodada 25 — "crie seu próprio treino"): divisão
+  # A/B/C… com dia da semana, nº de semanas, objetivo (parâmetro de
+  # sucesso) e nome. Os exercícios usam a MESMA prescrição do Warrior
+  # (sanitize_prescription), então o motor de progressão serve igual.
+  GOALS = %w[constancia forca emagrecimento hipertrofia].freeze
+  STATUSES = %w[active finished archived].freeze
+
+  def sanitize_custom_program(data)
+    data = {} unless data.is_a?(Hash)
+    {
+      'name' => data['name'].to_s.strip.first(80),
+      'goal' => (GOALS.include?(data['goal'].to_s) ? data['goal'].to_s : 'constancia'),
+      'status' => (STATUSES.include?(data['status'].to_s) ? data['status'].to_s : 'active'),
+      'weeks' => data['weeks'].to_i.clamp(1, 104),
+      'start_date' => data['start_date'].to_s.first(10),
+      'finished_at' => data['finished_at'].to_s.first(10),
+      'result' => data['result'].to_s.first(300),
+      'note' => data['note'].to_s.first(500),
+      'weekdays' => Array(data['weekdays']).map { |d| d.to_s.first(20) }.reject(&:blank?).first(7),
+      'sessions' => Array(data['sessions']).first(7).filter_map do |s|
+        next nil unless s.is_a?(Hash)
+
+        {
+          'key' => s['key'].to_s.first(3),
+          'label' => s['label'].to_s.strip.first(60),
+          'weekday' => s['weekday'].to_s.first(20),
+          'exercises' => Array(s['exercises']).first(20).filter_map { |e| sanitize_prescription(e) }
+        }
       end
     }
   end

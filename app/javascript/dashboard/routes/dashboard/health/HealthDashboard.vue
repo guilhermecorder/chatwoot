@@ -21,7 +21,10 @@ import {
   Filler,
 } from 'chart.js';
 import { Line } from 'vue-chartjs';
-import { exerciseVerdict } from './warrior';
+import { exerciseVerdict,
+  resolvePrograms,
+  mainProgramOf,
+} from './warrior';
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler);
 
@@ -34,6 +37,8 @@ import {
 
 const isLoading = ref(true);
 const config = ref({});
+const profile = ref({});
+const programRecords = ref([]); // programas pessoais (rodada 25)
 const workouts = ref([]);
 const boxings = ref([]);
 const diets = ref([]);
@@ -75,8 +80,9 @@ const dayIndex = iso => Math.floor(new Date(`${iso}T00:00:00`).getTime() / 86400
 // volume em kg → "12,4 t" quando passa de 1000
 const fmtVol = v => (v >= 1000 ? `${(v / 1000).toFixed(1).replace('.', ',')} t` : `${Math.round(v)} kg`);
 
-const programs = computed(() => config.value?.programs || []);
-const mainProgram = computed(() => programs.value.find(p => p.id === 'warrior24') || null);
+// Warrior (config) OU o programa pessoal ativo (rodada 25) — mesma forma
+const programs = computed(() => resolvePrograms(config.value, profile.value, programRecords.value));
+const mainProgram = computed(() => mainProgramOf(programs.value));
 const dietCfg = computed(() => {
   const d = config.value?.diet || {};
   return { targets: d.targets || {}, meals: d.meals || [] };
@@ -94,7 +100,7 @@ const progRecords = computed(() =>
   workouts.value.filter(w => w.data?.program_id && recVolume(w) > 0)
 );
 const mainRecords = computed(() =>
-  progRecords.value.filter(w => w.data?.program_id === 'warrior24' && Number(w.data?.week) >= 1)
+  progRecords.value.filter(w => w.data?.program_id === mainProgram.value?.id && Number(w.data?.week) >= 1)
 );
 
 const totalWeeks = computed(() => {
@@ -486,7 +492,7 @@ const sinal = v => `${v > 0 ? '+' : '−'}${fmtNum(Math.abs(v))}`;
 // novos não "inventa" força (Σ cru saltava de 806 pra 1512). Peso e cm =
 // última medição até o fim da semana; cm = soma das circunferências. O
 // tooltip mostra os valores reais (peso/cm) e o % de força.
-const CM_KEYS_DASH = ['waist_navel', 'waist_narrow', 'hips', 'chest', 'arm_r', 'arm_l', 'thigh_r', 'thigh_l', 'neck', 'shoulders'];
+const CM_KEYS_DASH = ['waist_navel', 'waist_narrow', 'hips', 'chest', 'arm_r', 'arm_l', 'thigh_r', 'thigh_l', 'forearm_r', 'forearm_l', 'calf_r', 'calf_l', 'neck', 'shoulders'];
 const sinceWeek1 = computed(() => {
   const prog = mainProgram.value;
   const upto = Math.min(currentWeek.value || 0, totalWeeks.value);
@@ -817,6 +823,8 @@ onMounted(async () => {
   try {
     const { data: payload } = await CrmAPI.getHealth();
     config.value = payload.config || {};
+    profile.value = payload.profile || {};
+    programRecords.value = payload.programs || [];
     workouts.value = payload.workouts || [];
     boxings.value = payload.boxings || [];
     diets.value = payload.diets || [];
@@ -868,7 +876,7 @@ onMounted(async () => {
         <template v-if="dashTab === 'visao'">
           <!-- Mapa de constância -->
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🟦 Mapa de constância</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-layout-grid" />Mapa de constância</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               últimas 24 semanas — <span :style="{ color: ROYAL }">■</span> musculação ·
               <span :style="{ color: LARANJA }">■</span> boxe · meio a meio = os dois no dia
@@ -895,7 +903,7 @@ onMounted(async () => {
 
           <!-- Desde a semana 1: força × peso × cm -->
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">📈 Desde a semana 1 — força × peso × centímetros</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-trending-up" />Desde a semana 1 — força × peso × centímetros</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               cada linha parte de 100 na 1ª semana: força total subindo (azul) enquanto peso e centímetros caem (laranja) é a transformação acontecendo — passe o mouse pra ver os valores reais
             </p>
@@ -930,7 +938,7 @@ onMounted(async () => {
 
           <!-- Insights automáticos -->
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-2">🧠 Insights</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-2"><span class="hub-h-ico i-lucide-brain" />Insights</h2>
             <div
               v-for="(ins, i) in insights"
               :key="i"
@@ -943,7 +951,7 @@ onMounted(async () => {
 
           <!-- Transformação -->
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🦋 A Transformação</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-sparkles" />A Transformação</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               o objetivo do Warrior num gráfico só: peso caindo (azul) enquanto a força sobe (laranja) — calorias na linha pontilhada
             </p>
@@ -982,7 +990,7 @@ onMounted(async () => {
 
           <!-- Aderência ao plano -->
           <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">📅 Aderência ao plano</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-calendar-check" />Aderência ao plano</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">das 3 sessões previstas por semana (seg · qua · sex), quantas saíram</p>
             <div v-if="adherenceChart" style="height: 200px">
               <Line :data="adherenceChart" :options="adherenceOptions" />
@@ -1007,7 +1015,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">📊 Volume por semana</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-bar-chart-3" />Volume por semana</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">quanto peso você moveu em cada semana, por treino</p>
             <div style="height: 260px">
               <Line :data="volumeChart" :options="chartOptions()" />
@@ -1016,7 +1024,7 @@ onMounted(async () => {
 
           <div class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
-              <h2 class="text-sm font-bold text-n-slate-12">📈 Evolução por exercício</h2>
+              <h2 class="text-sm font-bold text-n-slate-12"><span class="hub-h-ico i-lucide-trending-up" />Evolução por exercício</h2>
               <select
                 v-model="exSelected"
                 class="h-9 rounded-lg border border-n-weak px-2 text-xs text-n-slate-12"
@@ -1034,7 +1042,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">📶 Placar de progressão por semana</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-signal" />Placar de progressão por semana</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               cada treino comparado ao MESMO treino da vez anterior — exercícios que subiram, empataram ou caíram
             </p>
@@ -1044,7 +1052,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🔁 Séries e repetições por semana</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-repeat" />Séries e repetições por semana</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">o trabalho total da semana em séries (linha) e repetições (área)</p>
             <div style="height: 220px">
               <Line :data="setsRepsChart" :options="setsRepsOptions" />
@@ -1052,7 +1060,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🗂 Carga por exercício — histórico completo</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-archive" />Carga por exercício — histórico completo</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               a carga máxima de cada exercício, sessão a sessão — um gráfico por exercício registrado
             </p>
@@ -1074,7 +1082,7 @@ onMounted(async () => {
 
           <!-- Recordes pessoais -->
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🏅 Recordes pessoais</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-award" />Recordes pessoais</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               sua melhor marca em cada exercício — carga máxima e e-1RM (força estimada pela fórmula de Epley)
             </p>
@@ -1109,7 +1117,7 @@ onMounted(async () => {
 
           <!-- Balanço muscular -->
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">⚖️ Balanço muscular</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-scale" />Balanço muscular</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">como o volume se divide entre os grupos — algum ficando pra trás?</p>
             <p v-if="!muscleBalance.length" class="text-xs text-n-slate-10">Registre treinos pra ver a divisão.</p>
             <div v-for="g in muscleBalance" :key="g.label" class="flex items-center gap-3 py-1.5">
@@ -1124,7 +1132,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🏔 Acumulado do programa</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-mountain" />Acumulado do programa</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">todo o volume somado, semana após semana — a montanha subindo</p>
             <div style="height: 220px">
               <Line :data="cumulativeChart" :options="chartOptions()" />
@@ -1148,7 +1156,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">⏱ Tempo de treino por dia</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-timer" />Tempo de treino por dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">últimos 30 dias — minutos (área) e rounds (linha)</p>
             <div style="height: 240px">
               <Line :data="boxChart" :options="boxChartOptions" />
@@ -1156,7 +1164,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🏔 Horas acumuladas</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-mountain" />Horas acumuladas</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">o tempo de luta somando, dia após dia (30 dias)</p>
             <div style="height: 200px">
               <Line :data="boxCumChart" :options="chartOptions()" />
@@ -1164,7 +1172,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3">🌀 Sequências mais praticadas</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-3"><span class="hub-h-ico i-lucide-list-ordered" />Sequências mais praticadas</h2>
             <p v-if="!boxTopSeqs.length" class="text-xs text-n-slate-10">
               Registre treinos de boxe marcando as sequências praticadas — o ranking nasce aqui.
             </p>
@@ -1192,7 +1200,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🔥 Calorias por dia</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-flame" />Calorias por dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">últimos {{ dietLabels.length }} dias contra a meta ({{ fmtNum(dietCfg.targets?.kcal || 0) }} kcal)</p>
             <div style="height: 240px">
               <Line :data="kcalChart" :options="chartOptions()" />
@@ -1200,7 +1208,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🥩 Proteína por dia</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-beef" />Proteína por dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">últimos {{ dietLabels.length }} dias contra a meta ({{ fmtNum(dietCfg.targets?.protein || 0) }} g)</p>
             <div style="height: 240px">
               <Line :data="proteinChart" :options="chartOptions()" />
@@ -1208,7 +1216,7 @@ onMounted(async () => {
           </div>
 
           <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🍽 Refeições feitas — dia a dia</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-utensils-crossed" />Refeições feitas — dia a dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               ✓ com o horário REAL em que você marcou (horário em cinza = o previsto no plano)
             </p>

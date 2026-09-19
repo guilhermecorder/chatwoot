@@ -39,6 +39,9 @@ import {
   METHOD_LABELS,
   learnEquiv,
   factorOf,
+  resolvePrograms,
+  programWeeks,
+  goalProgress,
 } from './warrior';
 // rodada 23: paleta SÓ azul + laranja em tons (pedido dele) — sem verde/
 // vermelho no painel: "na direção certa" = azul, "contra" = laranja vivo
@@ -68,6 +71,8 @@ const scrollToId = id => {
 const isLoading = ref(true);
 const config = ref({});
 const profile = ref({});
+const programRecords = ref([]); // programas pessoais (rodada 25)
+const cardios = ref([]); // rodada 26
 const workouts = ref([]);
 const boxings = ref([]);
 const diets = ref([]);
@@ -93,6 +98,8 @@ const fetchAll = async () => {
     const { data } = await CrmAPI.getHealth();
     config.value = data.config || {};
     profile.value = data.profile || {};
+    programRecords.value = data.programs || [];
+    cardios.value = data.cardios || [];
     workouts.value = data.workouts || [];
     boxings.value = data.boxings || [];
     diets.value = data.diets || [];
@@ -107,15 +114,24 @@ onMounted(fetchAll);
 
 const boxingOn = computed(() => config.value.features?.boxing === true);
 
-// ── programa, SEMANA e CICLO de 24 semanas ──────────────────────────
-const CYCLE_LEN = 24;
-const program = computed(() => activeProgram(config.value.programs));
+// ── programa, SEMANA e CICLO ─────────────────────────────────────────
+// Warrior (24 semanas, config) OU o programa pessoal ativo (rodada 25:
+// N semanas do registro kind=program) — mesma forma, mesmo painel
+const programs = computed(() => resolvePrograms(config.value, profile.value, programRecords.value));
+const program = computed(() => activeProgram(programs.value));
+const cycleLen = computed(() => programWeeks(program.value) || 24);
+// objetivo do programa pessoal (parâmetro de sucesso escolhido por ele)
+const goalNow = computed(() =>
+  program.value?.custom
+    ? goalProgress({ program: program.value, workouts: workouts.value, bodies: bodies.value, todayISO })
+    : null
+);
 const programWeek = computed(() => weekOf(program.value, todayISO));
 const cycleNumber = computed(() =>
-  programWeek.value ? Math.floor((programWeek.value - 1) / CYCLE_LEN) + 1 : 1
+  programWeek.value ? Math.floor((programWeek.value - 1) / cycleLen.value) + 1 : 1
 );
 const weekInCycle = computed(() =>
-  programWeek.value ? ((programWeek.value - 1) % CYCLE_LEN) + 1 : 1
+  programWeek.value ? ((programWeek.value - 1) % cycleLen.value) + 1 : 1
 );
 const programCycle = computed(() => cycleForWeek(program.value, weekInCycle.value));
 const nextKey = computed(() =>
@@ -154,6 +170,10 @@ const upcomingSession = computed(() => {
 
 const weekWorkouts = computed(() => workouts.value.filter(w => inThisWeek(w.record_date)));
 const weekBoxings = computed(() => boxings.value.filter(b => inThisWeek(b.record_date)));
+// rodada 26: minutos de cardio na semana (caminhada, corrida, bike…)
+const weekCardioMin = computed(() =>
+  cardios.value.filter(c => inThisWeek(c.record_date)).reduce((a, c) => a + (Number(c.data?.minutes) || 0), 0)
+);
 const weekSessions = computed(
   () => weekWorkouts.value.length + (boxingOn.value ? weekBoxings.value.length : 0)
 );
@@ -463,6 +483,10 @@ const MEASURE_VIEW = [
   { key: 'arm_l', label: 'Braço E', down: false },
   { key: 'thigh_r', label: 'Coxa D', down: false },
   { key: 'thigh_l', label: 'Coxa E', down: false },
+  { key: 'forearm_r', label: 'Antebraço D', down: false },
+  { key: 'forearm_l', label: 'Antebraço E', down: false },
+  { key: 'calf_r', label: 'Panturrilha D', down: false },
+  { key: 'calf_l', label: 'Panturrilha E', down: false },
   { key: 'neck', label: 'Pescoço', down: true },
   { key: 'shoulders', label: 'Ombros', down: false },
 ];
@@ -484,7 +508,7 @@ const cycleStartISO = computed(() => {
   const prog = program.value;
   const cy = programCycle.value;
   if (!prog?.start_date || !cy) return null;
-  const absWeek = (cycleNumber.value - 1) * CYCLE_LEN + (cy.week_start || 1);
+  const absWeek = (cycleNumber.value - 1) * cycleLen.value + (cy.week_start || 1);
   return shiftISO(prog.start_date, (absWeek - 1) * 7);
 });
 // métricas de um conjunto de exercícios (sessionKey null = GERAL, A+B+C)
@@ -541,12 +565,12 @@ const strengthChartFor = exercises => {
   const prog = program.value;
   if (!cy || !prog?.start_date) return null;
   const wStart = cy.week_start || 1;
-  const wEnd = Math.min(weekInCycle.value, cy.week_end || CYCLE_LEN);
+  const wEnd = Math.min(weekInCycle.value, cy.week_end || cycleLen.value);
   const labels = [];
   const total = [];
   const rel = [];
   for (let w = wStart; w <= wEnd; w += 1) {
-    const absWeek = (cycleNumber.value - 1) * CYCLE_LEN + w;
+    const absWeek = (cycleNumber.value - 1) * cycleLen.value + w;
     let sum = 0;
     let any = false;
     exercises.forEach(e => {
@@ -604,7 +628,7 @@ const forcaView = computed(() => {
 });
 // ── BALANÇO DE CENTÍMETROS (rodada 17): quanto o corpo mudou, no total ──
 // "perdidos onde importa" = cintura/cintura estreita/quadril/pescoço
-// (queda é vitória) · "ganhos onde importa" = peito/braços/coxas/ombros
+// (queda é vitória) · "ganhos onde importa" = peito/braços/antebraços/coxas/panturrilhas/ombros
 // (subida é vitória) · saldo = soma de tudo com sinal.
 const round1 = v => Math.round(v * 10) / 10;
 const cmBalance = computed(() => {
@@ -646,7 +670,7 @@ const cmBalance = computed(() => {
 
 // ── ATUAL → ALVO (rodada 23): "meus dados atuais e desejados" no topo.
 // Alvos por medida moram no registro 'profile' (targets: { key: valor });
-// braço e coxa = média D/E. Barra = quanto do caminho (1ª medição → alvo)
+// braço, antebraço, coxa e panturrilha = média D/E. Barra = quanto do caminho (1ª medição → alvo)
 // já foi percorrido.
 const TARGET_DEFS = [
   { key: 'weight', label: 'Peso', unit: 'kg', down: true, max: 200 },
@@ -656,6 +680,8 @@ const TARGET_DEFS = [
   { key: 'chest', label: 'Peito', unit: 'cm', down: false, max: 220 },
   { key: 'arm', label: 'Braço (média)', unit: 'cm', down: false, max: 220, avg: ['arm_r', 'arm_l'] },
   { key: 'thigh', label: 'Coxa (média)', unit: 'cm', down: false, max: 220, avg: ['thigh_r', 'thigh_l'] },
+  { key: 'forearm', label: 'Antebraço (média)', unit: 'cm', down: false, max: 220, avg: ['forearm_r', 'forearm_l'] },
+  { key: 'calf', label: 'Panturrilha (média)', unit: 'cm', down: false, max: 220, avg: ['calf_r', 'calf_l'] },
   { key: 'shoulders', label: 'Ombros', unit: 'cm', down: false, max: 220 },
   { key: 'neck', label: 'Pescoço', unit: 'cm', down: true, max: 220 },
 ];
@@ -836,7 +862,7 @@ const cmTimeline = computed(() => {
           borderWidth: 2,
         },
         {
-          label: 'Onde quero ganhar (Δ cm)',
+          label: 'Regiões de desenvolvimento muscular (Δ cm)',
           data: rows.map(r => r.gain),
           borderColor: ROYAL,
           backgroundColor: 'rgba(65,105,225,0.12)',
@@ -870,6 +896,8 @@ const BODY_AREAS = [
   { key: 'peito', label: 'Peito', icon: '🫁', down: false, unit: 'cm', keys: [{ key: 'chest', label: 'Peito' }] },
   { key: 'bracos', label: 'Braços', icon: '💪', down: false, unit: 'cm', keys: [{ key: 'arm_r', label: 'Direito' }, { key: 'arm_l', label: 'Esquerdo' }] },
   { key: 'coxas', label: 'Coxas', icon: '🦵', down: false, unit: 'cm', keys: [{ key: 'thigh_r', label: 'Direita' }, { key: 'thigh_l', label: 'Esquerda' }] },
+  { key: 'antebracos', label: 'Antebraços', icon: '🦾', down: false, unit: 'cm', keys: [{ key: 'forearm_r', label: 'Direito' }, { key: 'forearm_l', label: 'Esquerdo' }] },
+  { key: 'panturrilhas', label: 'Panturrilhas', icon: '🦿', down: false, unit: 'cm', keys: [{ key: 'calf_r', label: 'Direita' }, { key: 'calf_l', label: 'Esquerda' }] },
   { key: 'ombros', label: 'Ombros', icon: '🏔', down: false, unit: 'cm', keys: [{ key: 'shoulders', label: 'Ombros' }] },
   { key: 'pescoco', label: 'Pescoço', icon: '🧣', down: true, unit: 'cm', keys: [{ key: 'neck', label: 'Pescoço' }] },
   { key: 'peso', label: 'Peso', icon: '⚖️', down: true, unit: 'kg', keys: [{ key: 'weight', label: 'Peso' }] },
@@ -979,21 +1007,32 @@ const toggleMetas = () => {
                   :style="{ background: 'rgba(255,255,255,0.14)', color: LARANJA_CLARO }"
                   :title="praise"
                 >
-                  🏆 semana completa
+                  <span class="i-lucide-trophy hub-ico" /> semana completa
                 </span>
               </div>
+              <!-- rodada 26: "treino atual · semana atual" pra se situar -->
+              <p v-if="program" class="text-[12px] font-bold mb-1 flex items-center gap-1.5 flex-wrap">
+                <span class="px-2 py-0.5 rounded-lg inline-flex items-center gap-1" style="background: rgba(255, 255, 255, 0.16)"><span class="i-lucide-map-pin hub-ico" style="width: 13px; height: 13px" />{{ program.name }}</span>
+                <span class="px-2 py-0.5 rounded-lg" :style="{ background: LARANJA, color: '#1a0e00' }">Semana {{ weekInCycle }} de {{ cycleLen }}</span>
+                <span v-if="upcomingSession" class="opacity-90 font-semibold">próximo: Treino {{ upcomingSession.key }}<template v-if="upcomingSession.weekday"> · {{ upcomingSession.weekday }}</template></span>
+              </p>
               <p class="text-xs opacity-85">
                 <template v-if="program && programWeek">
-                  Semana <b>{{ weekInCycle }} de {{ CYCLE_LEN }}</b> · {{ programCycle?.name }}
+                  Semana <b>{{ weekInCycle }} de {{ cycleLen }}</b> · {{ programCycle?.name }}
                   <template v-if="programCycle?.focus"> — {{ programCycle.focus }}</template>
                 </template>
                 <template v-else>Suas cargas, seu progresso, sua transformação.</template>
+              </p>
+              <p v-if="goalNow" class="text-[11px] mt-1 opacity-95">
+                <span :class="goalNow.ico" class="hub-ico" style="width: 13px; height: 13px" /> Objetivo {{ goalNow.label }}: <b :style="{ color: goalNow.none ? '#fff' : goalNow.ok ? ROYAL_CLARO : LARANJA_CLARO }">{{ goalNow.value }}</b>
+                <span class="opacity-80"> · {{ goalNow.detail }}</span>
               </p>
               <p class="text-[11px] mt-1 opacity-90">
                 Semana: <b>{{ weekSessions }} de {{ weeklyGoal }}</b> sessões ·
                 <span :style="{ color: ROYAL_CLARO }">▲{{ weekScore.progress }}</span>
                 <span class="opacity-70 mx-1">▬{{ weekScore.tie }}</span>
                 <span :style="{ color: LARANJA_CLARO }">▼{{ weekScore.regress }}</span>
+                <span v-if="weekCardioMin" class="opacity-90"> · 🏃 {{ weekCardioMin }} min de cardio</span>
               </p>
             </div>
             <button
@@ -1012,7 +1051,7 @@ const toggleMetas = () => {
         <!-- 2. ATUAL → ALVO: onde estou e onde quero chegar -->
         <div class="hub-block p-4 mb-4">
           <div class="flex items-center justify-between gap-2 mb-3">
-            <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">🎯 Onde estou → onde quero chegar</h2>
+            <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide"><span class="hub-h-ico i-lucide-target" />Onde estou → onde quero chegar</h2>
             <button class="hub-chip" @click="editingTargets ? (editingTargets = false) : openTargets()">
               {{ editingTargets ? '✕ fechar' : '✎ alvos' }}
             </button>
@@ -1081,7 +1120,7 @@ const toggleMetas = () => {
         <!-- 3. CENTÍMETROS TOTAIS × PESO -->
         <div class="hub-block hub-orange p-4 mb-4">
           <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
-            <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">📐 Centímetros totais × peso</h2>
+            <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide"><span class="hub-h-ico i-lucide-ruler" />Centímetros totais × peso</h2>
             <p v-if="cmTotalChart" class="text-[11px] text-n-slate-10">
               <b :style="{ color: LARANJA }">{{ fmt1(cmTotalChart.last) }} cm</b> ({{ signed(cmTotalChart.last - cmTotalChart.first) }})
               <template v-if="cmTotalChart.pesoLast !== null">
@@ -1097,8 +1136,7 @@ const toggleMetas = () => {
         </div>
 
         <!-- 4. CENTÍMETROS: onde quero perder × onde quero ganhar + áreas -->
-        <h2 id="hub-corpo" class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2" style="scroll-margin-top: 0.75rem">
-          📏 Centímetros
+        <h2 id="hub-corpo" class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-2" style="scroll-margin-top: 0.75rem"><span class="hub-h-ico i-lucide-ruler" />Centímetros
           <span v-if="cmBalance.since" class="font-normal normal-case text-n-slate-10">desde {{ fmtDay(cmBalance.since) }}</span>
         </h2>
         <div class="hub-block p-4 mb-4">
@@ -1110,9 +1148,9 @@ const toggleMetas = () => {
                 <p class="text-[10px] text-n-slate-10">cintura · quadril · pescoço · {{ signed(cmBalance.lostPrev) }} vs última</p>
               </div>
               <div class="rounded-xl p-2.5" :style="{ background: 'rgba(65,105,225,0.10)', border: '1px solid rgba(65,105,225,0.35)' }">
-                <p class="text-[10px] text-n-slate-10">Onde quero ganhar</p>
+                <p class="text-[10px] text-n-slate-10">Regiões de desenvolvimento muscular</p>
                 <p class="text-lg font-extrabold leading-tight" :style="{ color: ROYAL }">{{ signed(cmBalance.gainStart) }} cm</p>
-                <p class="text-[10px] text-n-slate-10">peito · braços · coxas · ombros · {{ signed(cmBalance.gainPrev) }} vs última</p>
+                <p class="text-[10px] text-n-slate-10">peito · braços · antebraços · coxas · panturrilhas · ombros · {{ signed(cmBalance.gainPrev) }} vs última</p>
               </div>
               <div class="rounded-xl p-2.5 border border-n-weak">
                 <p class="text-[10px] text-n-slate-10">Saldo total</p>
@@ -1131,9 +1169,9 @@ const toggleMetas = () => {
                 <b :style="{ color: r.dStart === 0 ? CINZA : r.good ? ROYAL : LARANJA_VIVO }">{{ signed(r.dStart) }}</b>
               </span>
             </div>
-            <p class="text-[11px] font-bold text-n-slate-11 mb-0.5">📉 Onde quero perder × onde quero ganhar</p>
+            <p class="text-[11px] font-bold text-n-slate-11 mb-0.5">📉 Onde quero perder × regiões de desenvolvimento muscular</p>
             <p class="text-[10px] text-n-slate-10 mb-2">
-              Quanto cada grupo mudou desde a 1ª medição. Laranja bom é caindo; azul bom é subindo.
+              Quanto cada grupo mudou desde a 1ª medição. Laranja bom é caindo (cintura, quadril, pescoço); azul bom é subindo (peito, braços, antebraços, coxas, panturrilhas, ombros).
             </p>
             <div v-if="cmTimeline" style="height: 190px" class="mb-4">
               <Line :data="cmTimeline.chart" :options="cmChartOpts" />
@@ -1155,7 +1193,7 @@ const toggleMetas = () => {
                 :style="areaKey === a.key ? { background: a.down ? LARANJA : ROYAL } : {}"
                 @click="areaKey = a.key"
               >
-                {{ a.icon }} {{ a.label }}
+                {{ a.label }}
               </button>
             </span>
           </div>
@@ -1178,7 +1216,7 @@ const toggleMetas = () => {
 
         <!-- 4. PROGRESSO DAS CARGAS: todos os exercícios do ciclo -->
         <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
-          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">🏋️ Progresso das cargas</h2>
+          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide"><span class="hub-h-ico i-lucide-dumbbell" />Progresso das cargas</h2>
           <span v-if="loadProgress.length > 1" class="hub-seg">
             <button
               v-for="(s, i) in loadProgress"
@@ -1306,7 +1344,7 @@ const toggleMetas = () => {
 
         <!-- 6. FORÇA: geral e por treino -->
         <div id="hub-forca" class="flex items-center justify-between gap-2 flex-wrap mb-2" style="scroll-margin-top: 0.75rem">
-          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide">📈 Força nos treinos</h2>
+          <h2 class="text-xs font-bold text-n-slate-11 uppercase tracking-wide"><span class="hub-h-ico i-lucide-trending-up" />Força nos treinos</h2>
           <span v-if="forcaOptions.length > 1" class="hub-seg">
             <button
               v-for="o in forcaOptions"
@@ -1387,7 +1425,7 @@ const toggleMetas = () => {
               </span>
             </div>
             <p v-if="!upcomingPlan.length" class="text-[11px] text-n-slate-10">
-              Sem programa ativo — configure o Warrior na aba Treino.
+              Sem programa ativo — escolha o Warrior ou crie o seu na aba Treino.
             </p>
             <div v-for="ex in upcomingPlan" :key="ex.name" class="py-2.5 border-b border-n-weak/60 last:border-0 last:pb-0 first:pt-0">
               <div class="flex items-center gap-2 flex-wrap mb-1">

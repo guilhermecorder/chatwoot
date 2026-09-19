@@ -27,7 +27,11 @@ class HubHealthRecord < ApplicationRecord
   belongs_to :account
 
   # profile = ficha da pessoa (peso-alvo, sessões/semana) — 1 por usuário
-  KINDS = %w[workout boxing diet body profile].freeze
+  # program = programa de treino PESSOAL (rodada 25: "crie seu próprio
+  # treino") — 1 registro por programa, com histórico próprio
+  # cardio = caminhada/corrida/bike… · fight_plan = plano de luta (rodada 26)
+  # routine = construtor de rotina (1 por usuário, como o profile)
+  KINDS = %w[workout boxing diet body profile program cardio fight_plan routine].freeze
 
   validates :kind, inclusion: { in: KINDS }
   validates :record_date, presence: true

@@ -14,9 +14,17 @@ import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import WheelInput from './WheelInput.vue';
 import HubTabBar from './HubTabBar.vue';
+import ProgramWizard from './ProgramWizard.vue';
+import HubCelebration from './HubCelebration.vue';
+import SeqPicker from './SeqPicker.vue';
 import {
   METHOD_LABELS, METHOD_HINTS, SET_LABELS,
   activeProgram, weekOf, cycleForWeek, suggestedSessionKey,
+  resolvePrograms, mainProgramOf, goalOf, goalProgress, programWeeks,
+  workoutCelebration, bodyCelebration, MEASURE_DEFS,
+  CARDIO_TYPES, cardioType, CARDIO_DURATIONS, CARDIO_INTENSITIES,
+  SEQ_CATEGORIES, seqCategory, SEQ_LIBRARY,
+  FIGHT_INTENTS, fightIntent, blankFightPlan, fightPlanToWorkout,
   lastSessionRecord, lastExerciseSets, buildTodaySets,
   exerciseVerdict, targetHint, setTargets, sessionSummary, summaryPhrase, fmtSets,
   equipmentOf, nameWithoutEquipment, EXTRA_METHODS, extraMethod,
@@ -50,8 +58,13 @@ const setInputMode = m => {
 
 const isLoading = ref(true);
 const config = ref({});
+// ficha da pessoa (modo de programa, alvos) + programas PESSOAIS (rodada 25)
+const profile = ref({});
+const personalPrograms = ref([]);
 const workouts = ref([]);
 const boxings = ref([]);
+const cardios = ref([]); // rodada 26
+const fightPlans = ref([]); // rodada 26
 const diets = ref([]);
 const bodies = ref([]);
 
@@ -69,6 +82,7 @@ watch(
 
 const TAB_ROUTES = {
   treino: 'hub_health',
+  cardio: 'hub_health_cardio',
   boxe: 'hub_health_boxe',
   dieta: 'hub_health_dieta',
   corpo: 'hub_health_corpo',
@@ -83,6 +97,7 @@ const goTab = key => {
 const boxingOn = computed(() => config.value?.features?.boxing === true);
 const TABS_ALL = [
   { key: 'treino', label: 'Treino', icon: 'i-lucide-dumbbell' },
+  { key: 'cardio', label: 'Cardio', icon: 'i-lucide-heart-pulse' },
   { key: 'boxe', label: 'Boxe', icon: 'i-lucide-swords' },
   { key: 'dieta', label: 'Dieta', icon: 'i-lucide-utensils' },
   { key: 'corpo', label: 'Corpo', icon: 'i-lucide-ruler' },
@@ -91,8 +106,53 @@ const TABS = computed(() =>
   TABS_ALL.filter(t => t.key !== 'boxe' || boxingOn.value)
 );
 
-// ordena registros do mais novo pro mais velho (entradas retroativas)
-const sortRecs = arr => [...arr].sort((a, b) => (a.record_date < b.record_date ? 1 : -1));
+// ═══ RODADA 27: BOTÕES DE VISUALIZAÇÃO por aba (pedido dele 19/09:
+// "mais controle e mais limpeza" — cada aba mostra UMA coisa por vez)
+const TREINO_VIEWS = [
+  { key: 'treinar', label: 'Treinar', ico: 'i-lucide-play' },
+  { key: 'planilha', label: 'Planilha', ico: 'i-lucide-table' },
+  { key: 'historico', label: 'Histórico', ico: 'i-lucide-history' },
+];
+const CARDIO_VIEWS = [
+  { key: 'registrar', label: 'Registrar', ico: 'i-lucide-plus-circle' },
+  { key: 'historico', label: 'Histórico', ico: 'i-lucide-history' },
+];
+const BOX_VIEWS = [
+  { key: 'treinar', label: 'Treinar', ico: 'i-lucide-play' },
+  { key: 'planos', label: 'Planos', ico: 'i-lucide-medal' },
+  { key: 'repertorio', label: 'Repertório', ico: 'i-lucide-list-ordered' },
+  { key: 'historico', label: 'Histórico', ico: 'i-lucide-history' },
+];
+const treinoView = ref('treinar');
+const cardioView = ref('registrar');
+const boxView = ref('treinar');
+// histórico agrupado por mês (lista estilo iOS)
+const MONTHS_PT = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const MONTHS_ABBR = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const dayOf = iso => String(iso).slice(8, 10);
+const monOf = iso => MONTHS_ABBR[Number(String(iso).slice(5, 7)) - 1] || '';
+const groupByMonth = list => {
+  const out = [];
+  (list || []).forEach(r => {
+    const key = String(r.record_date).slice(0, 7);
+    let g = out.find(x => x.key === key);
+    if (!g) {
+      g = { key, label: `${MONTHS_PT[Number(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`, items: [] };
+      out.push(g);
+    }
+    g.items.push(r);
+  });
+  return out;
+};
+
+// ordena registros do mais novo pro mais velho (entradas retroativas);
+// mesma data → o id maior primeiro (rodada 25: dois treinos no mesmo dia
+// faziam o "próximo" apontar pro treino errado — o comparador empatava)
+const sortRecs = arr =>
+  [...arr].sort((a, b) => {
+    if (a.record_date === b.record_date) return (Number(b.id) || 0) - (Number(a.id) || 0);
+    return a.record_date < b.record_date ? 1 : -1;
+  });
 
 // ── utilidades ──────────────────────────────────────────────────────
 const pad2 = n => String(n).padStart(2, '0');
@@ -115,7 +175,11 @@ const daysAgo = n => {
 const toNum = v => Number(String(v ?? '').replace(',', '.')) || 0;
 
 const plans = computed(() => config.value?.workout_plans || []);
-const programs = computed(() => config.value?.programs || []);
+// Warrior (config, compartilhado) OU o programa pessoal ativo — mesma forma
+const programs = computed(() => resolvePrograms(config.value, profile.value, personalPrograms.value));
+const mainProgram = computed(() => mainProgramOf(programs.value));
+const warriorPrograms = computed(() => config.value?.programs || []);
+const programMode = computed(() => profile.value?.program_mode || 'warrior');
 const dietCfg = computed(() => {
   const d = config.value?.diet || {};
   return { targets: d.targets || {}, meals: d.meals || [], notes: d.notes || '' };
@@ -160,9 +224,183 @@ const pushConfig = async next => {
 };
 
 const setActiveProgram = p => {
-  const list = programs.value.map(x => ({ ...x, active: x.id === p.id }));
+  const list = warriorPrograms.value.map(x => ({ ...x, active: x.id === p.id }));
   pushConfig({ ...config.value, programs: list });
 };
+
+// ═══ PROGRAMAS PESSOAIS (rodada 25): Warrior × "crie seu próprio treino" ═══
+// A ficha (kind=profile) guarda o modo: 'warrior' = prescrição compartilhada
+// exatamente como está; 'custom' = o programa pessoal ativo (kind=program).
+const savingProfile = ref(false);
+const saveProfile = async patch => {
+  savingProfile.value = true;
+  try {
+    const { data: rec } = await CrmAPI.createHealthRecord({
+      kind: 'profile',
+      data: { ...profile.value, ...patch },
+    });
+    profile.value = rec.data || {};
+    return true;
+  } catch {
+    useAlert('Não consegui salvar a escolha do programa.');
+    return false;
+  } finally {
+    savingProfile.value = false;
+  }
+};
+const activePersonal = computed(() =>
+  personalPrograms.value.filter(r => r.data?.status === 'active')
+);
+const finishedPersonal = computed(() =>
+  personalPrograms.value.filter(r => r.data?.status !== 'active')
+);
+const chooseWarrior = () => saveProfile({ program_mode: 'warrior' });
+const choosePersonal = rec => saveProfile({ program_mode: 'custom', active_program_id: rec.id });
+
+const historyOpen = ref(false);
+const wizard = ref(null); // { record: null | registro em edição }
+const savingWizard = ref(false);
+const openWizard = (rec = null) => {
+  wizard.value = { record: rec };
+  historyOpen.value = false;
+};
+const saveWizard = async data => {
+  savingWizard.value = true;
+  try {
+    let rec;
+    if (wizard.value?.record) {
+      const { data: updated } = await CrmAPI.updateHealthRecord(wizard.value.record.id, data, data.start_date);
+      rec = updated;
+      personalPrograms.value = personalPrograms.value.map(r => (r.id === rec.id ? rec : r));
+      useAlert('✏️ Treino atualizado.');
+    } else {
+      const { data: created } = await CrmAPI.createHealthRecord({
+        kind: 'program',
+        record_date: data.start_date,
+        data,
+      });
+      rec = created;
+      personalPrograms.value = [rec, ...personalPrograms.value];
+      useAlert(`🚀 "${rec.data?.name}" começou. Bom jogo!`);
+    }
+    await choosePersonal(rec);
+    wizard.value = null;
+  } catch {
+    useAlert('Não consegui salvar o treino.');
+  } finally {
+    savingWizard.value = false;
+  }
+};
+// objetivo do programa pessoal ativo: quanto já entregou
+const goalNow = computed(() =>
+  program.value?.custom
+    ? goalProgress({ program: program.value, workouts: workouts.value, bodies: bodies.value, todayISO })
+    : null
+);
+const finishProgram = async rec => {
+  const prog = programs.value.find(p => p.record_id === rec.id);
+  const g = prog
+    ? goalProgress({ program: prog, workouts: workouts.value, bodies: bodies.value, todayISO })
+    : null;
+  const result = g && !g.none ? `${g.icon} ${g.label}: ${g.value} — ${g.ok ? 'sucesso' : 'abaixo do esperado'} (${g.detail})` : 'sem dados suficientes pra avaliar';
+  try {
+    const { data: updated } = await CrmAPI.updateHealthRecord(rec.id, {
+      ...rec.data,
+      status: 'finished',
+      finished_at: todayISO,
+      result,
+    });
+    personalPrograms.value = personalPrograms.value.map(r => (r.id === updated.id ? updated : r));
+    if (Number(profile.value.active_program_id) === Number(rec.id)) {
+      const other = activePersonal.value.find(r => r.id !== rec.id);
+      if (other) await choosePersonal(other);
+      else await saveProfile({ program_mode: warriorPrograms.value.length ? 'warrior' : 'custom', active_program_id: null });
+    }
+    useAlert(`🏁 "${rec.data?.name}" encerrado e guardado no histórico.`);
+  } catch {
+    useAlert('Não consegui encerrar o programa.');
+  }
+};
+const deleteProgram = async rec => {
+  try {
+    await CrmAPI.deleteHealthRecord(rec.id);
+    personalPrograms.value = personalPrograms.value.filter(r => r.id !== rec.id);
+    if (Number(profile.value.active_program_id) === Number(rec.id)) {
+      await saveProfile({ program_mode: warriorPrograms.value.length ? 'warrior' : 'custom', active_program_id: null });
+    }
+    useAlert('Programa removido.');
+  } catch {
+    useAlert('Não consegui remover.');
+  }
+};
+// histórico dos programas pessoais: nome, período, treinos feitos, resultado
+const programHistory = computed(() =>
+  personalPrograms.value.map(rec => {
+    const pid = `custom_${rec.id}`;
+    const done = workouts.value.filter(
+      w => w.data?.program_id === pid && (w.data?.exercises || []).some(e => e.sets?.length)
+    ).length;
+    const d = rec.data || {};
+    const goal = goalOf(d.goal);
+    const prog = programs.value.find(p => p.record_id === rec.id);
+    const live = prog && d.status === 'active'
+      ? goalProgress({ program: prog, workouts: workouts.value, bodies: bodies.value, todayISO })
+      : null;
+    return {
+      rec,
+      name: d.name || 'Meu treino',
+      period: `${fmtDay(d.start_date || rec.record_date)}${d.finished_at ? ` → ${fmtDay(d.finished_at)}` : ''}`,
+      weeks: Number(d.weeks) || 0,
+      split: (d.sessions || []).map(x => x.key).join(''),
+      done,
+      goal,
+      status: d.status || 'active',
+      result: d.result || '',
+      live,
+      isActive: Number(profile.value.active_program_id) === Number(rec.id) && programMode.value === 'custom',
+    };
+  })
+);
+// nomes conhecidos pro autocompletar do assistente
+const knownExerciseNames = computed(() => {
+  const names = new Set();
+  [...warriorPrograms.value, ...programs.value].forEach(p =>
+    (p.cycles || []).forEach(c =>
+      (c.sessions || []).forEach(sx => (sx.exercises || []).forEach(e => e.name && names.add(e.name)))
+    )
+  );
+  workouts.value.forEach(w => (w.data?.exercises || []).forEach(e => e.name && names.add(e.name)));
+  return [...names].sort((a, b) => a.localeCompare(b));
+});
+
+// ═══ CELEBRAÇÕES (rodada 25): semana fechada + medição registrada ═══
+// (valem pro Warrior e pro programa pessoal). Cada celebração tem uma
+// chave; guardada no aparelho pra não repetir se editar o mesmo registro.
+const celebration = ref(null);
+const CELE_KEY = 'hub_celebrated';
+const alreadyCelebrated = key => {
+  try {
+    return (JSON.parse(localStorage.getItem(CELE_KEY) || '[]') || []).includes(key);
+  } catch {
+    return false;
+  }
+};
+const markCelebrated = key => {
+  try {
+    const list = JSON.parse(localStorage.getItem(CELE_KEY) || '[]') || [];
+    localStorage.setItem(CELE_KEY, JSON.stringify([...list, key].slice(-60)));
+  } catch {
+    /* ignora */
+  }
+};
+const celebrate = data => {
+  if (!data || alreadyCelebrated(data.key)) return;
+  markCelebrated(data.key);
+  celebration.value = data;
+};
+const sessionsPerWeek = computed(
+  () => Number(profile.value?.weekly_sessions) || (programCycle.value?.sessions || []).length || 3
+);
 
 // ═══ EDITOR DE EXERCÍCIOS DA PRESCRIÇÃO (pedido 26/08) ══════════════
 // Adicionar exercício num treino, substituir (renomear) e marcar a
@@ -231,7 +469,27 @@ const saveExerciseEditor = async () => {
   const ed = exEditor.value;
   if (!ed) return;
   const rows = ed.rows.filter(r => !r._del && r.name?.trim());
-  const progs = programs.value.map(p => {
+  const cleanRows = rows.map(({ _del, _variants, ...e }) => {
+    const { variants, equiv } = parseVariants(_variants);
+    return { ...e, variants, equiv, tag: variants[0] || '', alt_tag: '' };
+  });
+  // programa PESSOAL: a prescrição mora no registro kind=program
+  const personal = program.value?.custom ? personalPrograms.value.find(r => r.id === program.value.record_id) : null;
+  if (personal) {
+    try {
+      const sessions = (personal.data.sessions || []).map(sx =>
+        sx.key === ed.sessionKey ? { ...sx, exercises: cleanRows } : sx
+      );
+      const { data: updated } = await CrmAPI.updateHealthRecord(personal.id, { ...personal.data, sessions });
+      personalPrograms.value = personalPrograms.value.map(r => (r.id === updated.id ? updated : r));
+      exEditor.value = null;
+      useAlert('✏️ Treino atualizado.');
+    } catch {
+      useAlert('Não consegui salvar a edição.');
+    }
+    return;
+  }
+  const progs = warriorPrograms.value.map(p => {
     if (p.id !== ed.programId) return p;
     return {
       ...p,
@@ -341,11 +599,11 @@ const startProgramSession = sessionDef => {
 // modo treino (1 registro por treino/semana — nada duplica).
 const CYCLE_LETTERS = ['A', 'B', 'C'];
 const gridTabs = computed(() => {
-  const main = programs.value.find(p => p.id === 'warrior24');
+  const main = mainProgram.value;
   const bonus = programs.value.find(p => p.id === 'warrior_bonus');
   const tabs = (main?.cycles || []).map((c, i) => ({
     key: c.id,
-    label: CYCLE_LETTERS[i] || c.name,
+    label: main.custom ? 'Semanas' : CYCLE_LETTERS[i] || c.name,
     sub: `sem ${c.week_start}–${c.week_end}`,
     programId: main.id,
     program: main,
@@ -808,10 +1066,20 @@ const saveSession = async () => {
       });
       workouts.value = sortRecs([rec, ...workouts.value]);
     }
+    const savedDate = session.value.date || todayISO;
     session.value = null;
     if (isProgram) {
       const done = exercises.filter(e => !e.skipped).length;
       useAlert(`💪 ${summaryPhrase(data.summary, done)}`);
+      // rodada 25: fechou o último treino planejado da semana → celebra
+      celebrate(
+        workoutCelebration({
+          program: program.value,
+          workouts: workouts.value,
+          dateISO: savedDate,
+          sessionsPerWeek: sessionsPerWeek.value,
+        })
+      );
     } else {
       useAlert('💪 Treino registrado!');
     }
@@ -863,7 +1131,26 @@ const saveBoxing = async () => {
 // editor de sequências (biblioteca de combos)
 const seqForm = ref(null);
 const openNewSeq = () => {
-  seqForm.value = { id: '', name: '', steps: '', desc: '' };
+  seqForm.value = { id: '', name: '', steps: '', desc: '', category: '', when: '' };
+};
+// rodada 26: etiqueta "quando usar" — filtro por categoria + biblioteca pronta
+const seqFilter = ref('');
+const filteredSeqs = computed(() =>
+  seqFilter.value ? boxingSeqs.value.filter(sq => sq.category === seqFilter.value) : boxingSeqs.value
+);
+const seqCatMeta = key => seqCategory(key);
+const seqCount = key => boxingSeqs.value.filter(sq => sq.category === key).length;
+const importSeqLibrary = async () => {
+  const have = new Set(boxingSeqs.value.map(sq => String(sq.name || '').trim().toLowerCase()));
+  const fresh = SEQ_LIBRARY.filter(sq => !have.has(sq.name.toLowerCase()));
+  if (!fresh.length) {
+    useAlert('A biblioteca inteira já está no seu repertório.');
+    return;
+  }
+  const stamp = Date.now().toString(36);
+  const list = [...boxingSeqs.value, ...fresh.map((sq, i) => ({ ...sq, id: `lb${stamp}${i}` }))];
+  const ok = await pushConfig({ ...config.value, boxing: { ...(config.value?.boxing || {}), sequences: list } });
+  if (ok) useAlert(`📚 ${fresh.length} sequências entraram no repertório.`);
 };
 const openEditSeq = s => {
   seqForm.value = { ...s };
@@ -907,17 +1194,24 @@ const boxMin7 = computed(() =>
 // entram nele. A sessão guiada roda um cronômetro bloco a bloco
 // (round/descanso com apito) e, ao concluir, vira 1 registro de boxe.
 const BLOCK_TYPES = {
-  aquecimento: { label: 'Aquecimento', icon: '🔥' },
-  sombra: { label: 'Sombra', icon: '👤' },
-  tecnica: { label: 'Técnica', icon: '🎯' },
-  sequencias: { label: 'Sequências', icon: '🌀' },
-  footwork: { label: 'Footwork', icon: '👟' },
-  defesa: { label: 'Defesa', icon: '🛡' },
-  saco: { label: 'Saco pesado', icon: '🥊' },
-  condicionamento: { label: 'Condicionamento', icon: '⚡' },
-  alongamento: { label: 'Volta à calma', icon: '🧘' },
+  aquecimento: { label: 'Aquecimento', icon: '🔥', ico: 'i-lucide-flame' },
+  sombra: { label: 'Sombra', icon: '👤', ico: 'i-lucide-user' },
+  tecnica: { label: 'Técnica', icon: '🎯', ico: 'i-lucide-crosshair' },
+  sequencias: { label: 'Sequências', icon: '🌀', ico: 'i-lucide-list-ordered' },
+  footwork: { label: 'Footwork', icon: '👟', ico: 'i-lucide-footprints' },
+  defesa: { label: 'Defesa', icon: '🛡', ico: 'i-lucide-shield' },
+  saco: { label: 'Saco pesado', icon: '🥊', ico: 'i-lucide-circle-dot' },
+  condicionamento: { label: 'Condicionamento', icon: '⚡', ico: 'i-lucide-zap' },
+  alongamento: { label: 'Volta à calma', icon: '🧘', ico: 'i-lucide-leaf' },
+  round: { label: 'Round', icon: '🔔', ico: 'i-lucide-bell' },
 };
-const blockMeta = type => BLOCK_TYPES[type] || { label: type || 'Bloco', icon: '▫️' };
+const blockMeta = type => BLOCK_TYPES[type] || { label: type || 'Bloco', icon: '▫️', ico: 'i-lucide-square' };
+// estatísticas do histórico de boxe (rodada 27)
+const boxStats = computed(() => ({
+  n: boxings.value.length,
+  min: boxings.value.reduce((a, b) => a + (Number(b.data?.duration_min) || 0), 0),
+  rounds: boxings.value.reduce((a, b) => a + (Number(b.data?.rounds) || 0), 0),
+}));
 const blk = (type, title, minutes, rounds, roundSec, restSec, seqs, desc) => ({
   type, title, minutes, rounds, round_sec: roundSec, rest_sec: restSec, seqs, desc,
 });
@@ -970,7 +1264,9 @@ const blockMinutes = b => {
   const m = Number(b.minutes) || 0;
   if (m) return m;
   const r = Number(b.rounds) || 0;
-  return r ? Math.round(((r * (Number(b.round_sec) || 0) + Math.max(0, r - 1) * (Number(b.rest_sec) || 0)) / 60) * 10) / 10 : 0;
+  // rest_after (rodada 26): descanso depois do último round também conta
+  const rests = Math.max(0, r - 1) + (b.rest_after ? 1 : 0);
+  return r ? Math.round(((r * (Number(b.round_sec) || 0) + rests * (Number(b.rest_sec) || 0)) / 60) * 10) / 10 : 0;
 };
 const workoutMinutes = w => Math.round((w.blocks || []).reduce((s, b) => s + blockMinutes(b), 0));
 const workoutRounds = w => (w.blocks || []).reduce((s, b) => s + (Number(b.rounds) || 0), 0);
@@ -1092,6 +1388,14 @@ const tickBox = () => {
   const rounds = Number(block?.rounds) || 0;
   if (s.phase === 'round') {
     if (s.round >= rounds) {
+      // rodada 26: bloco = 1 round (professor/plano de luta) → descansa
+      // antes do próximo bloco, como entre rounds de uma luta
+      if (block.rest_after && Number(block.rest_sec) > 0 && !boxIsLast.value) {
+        s.phase = 'rest_after';
+        s.remaining = Number(block.rest_sec);
+        beep(520, 260);
+        return;
+      }
       nextBoxBlock();
       return;
     }
@@ -1104,6 +1408,10 @@ const tickBox = () => {
     s.round += 1;
     s.remaining = Number(block.round_sec);
     beep(990, 140, 2);
+    return;
+  }
+  if (s.phase === 'rest_after') {
+    nextBoxBlock();
     return;
   }
   if (s.phase === 'rest') {
@@ -1135,7 +1443,7 @@ const boxPct = computed(() => {
   const s = boxSession.value;
   const b = boxBlock.value;
   if (!s || !b) return 0;
-  const total = s.phase === 'rest' ? Number(b.rest_sec) : s.phase === 'round' ? Number(b.round_sec) : (Number(b.minutes) || 0) * 60;
+  const total = s.phase.startsWith('rest') ? Number(b.rest_sec) : s.phase === 'round' ? Number(b.round_sec) : (Number(b.minutes) || 0) * 60;
   return total ? Math.round(((total - s.remaining) / total) * 100) : 0;
 });
 // salva o treino guiado (ou "já fiz" direto do card) como registro de boxe
@@ -1189,6 +1497,7 @@ onUnmounted(stopBoxTimer);
 // editor de treinos programados (blocos)
 const boxWkForm = ref(null);
 const openNewBoxWorkout = () => {
+  wkOpen.value = 0;
   boxWkForm.value = {
     id: '',
     name: '',
@@ -1201,9 +1510,13 @@ const openNewBoxWorkout = () => {
   };
 };
 const openEditBoxWorkout = w => {
+  wkOpen.value = 0;
   boxWkForm.value = JSON.parse(JSON.stringify(w));
 };
-const addBoxBlock = () => boxWkForm.value.blocks.push(blk('sequencias', '', 9, 3, 180, 60, [], ''));
+const addBoxBlock = () => {
+  boxWkForm.value.blocks.push(blk('sequencias', '', 0, 3, 180, 60, [], ''));
+  wkOpen.value = boxWkForm.value.blocks.length - 1;
+};
 const removeBoxBlock = i => boxWkForm.value.blocks.splice(i, 1);
 const moveBoxBlock = (i, dir) => {
   const list = boxWkForm.value.blocks;
@@ -1242,6 +1555,235 @@ const deleteBoxWorkoutCfg = async () => {
   }
 };
 const showManualBox = ref(false);
+
+// ═══ RODADA 28: editor de blocos com OPÇÕES PRÉ-SELECIONÁVEIS + "outro",
+// no padrão do plano de luta (acordeão, rótulo à esquerda, campo à direita)
+const MIN_PRESETS = [3, 5, 8, 10, 12, 15];
+const ROUND_SEC_PRESETS = [60, 90, 120, 150, 180];
+const REST_PRESETS = [15, 30, 45, 60, 90];
+const wkOpen = ref(0);
+const blockMode = b => (Number(b.rounds) > 0 ? 'rounds' : 'min');
+const setBlockMode = (b, mode) => {
+  if (mode === 'min') {
+    b.rounds = 0;
+    b.round_sec = 0;
+    b.rest_sec = 0;
+    if (!Number(b.minutes)) b.minutes = 10;
+  } else {
+    b.minutes = 0;
+    if (!Number(b.rounds)) b.rounds = 3;
+    if (!Number(b.round_sec)) b.round_sec = 180;
+    if (!Number(b.rest_sec)) b.rest_sec = 60;
+  }
+};
+const blockDurationText = b =>
+  blockMode(b) === 'min'
+    ? 'tempo corrido'
+    : `${b.rounds} × ${fmtClock(Number(b.round_sec) || 0)} · descanso ${b.rest_sec || 0} s`;
+
+// ═══ RODADA 26 · PROFESSOR: montar o treino POR ROUNDS ═══════════════
+// "deixar o professor ir lá e criar o treino, considerando o tempo em
+// rounds": nº de rounds × segundos + descanso, e o que fazer em cada
+// round (foco + sequências + observação). Gera os blocos (1 por round,
+// descanso antes do próximo) e abre no editor normal pra ajustar.
+const roundsForm = ref(null);
+const roundsOpen = ref(0); // acordeão: 1 round aberto por vez (rodada 27)
+const copyRoundToAll = i => {
+  const src = roundsForm.value.items[i];
+  roundsForm.value.items.forEach((it, j) => {
+    if (j === i) return;
+    it.type = src.type;
+    it.seqs = [...src.seqs];
+    it.desc = src.desc;
+  });
+  useAlert('Aplicado aos outros rounds.');
+};
+const openRoundsBuilder = () => {
+  roundsOpen.value = 0;
+  roundsForm.value = {
+    name: '',
+    rounds: 6,
+    round_sec: 180,
+    rest_sec: 60,
+    warmup: 10,
+    cooldown: 3,
+    items: Array.from({ length: 6 }, (_, i) => ({ type: i === 0 ? 'sombra' : 'sequencias', title: '', seqs: [], desc: '' })),
+  };
+  boxWkForm.value = null;
+};
+const setRoundsCount = n => {
+  const f = roundsForm.value;
+  const count = Math.max(1, Math.min(20, n));
+  while (f.items.length < count) f.items.push({ type: 'sequencias', title: '', seqs: [], desc: '' });
+  f.items.length = count;
+  f.rounds = count;
+};
+const toggleRoundSeq = (item, id) => {
+  const i = item.seqs.indexOf(id);
+  if (i >= 0) item.seqs.splice(i, 1);
+  else item.seqs.push(id);
+};
+const roundsTotalMin = computed(() => {
+  const f = roundsForm.value;
+  if (!f) return 0;
+  const core = (f.rounds * f.round_sec + Math.max(0, f.rounds - 1) * f.rest_sec) / 60;
+  return Math.round(core + (Number(f.warmup) || 0) + (Number(f.cooldown) || 0));
+});
+const generateFromRounds = () => {
+  const f = roundsForm.value;
+  if (!f) return;
+  const blocks = [];
+  if (Number(f.warmup) > 0) blocks.push(blk('aquecimento', 'Aquecimento', Number(f.warmup), 0, 0, 0, [], 'Corda · mobilidade · sombra leve'));
+  f.items.forEach((it, i) => {
+    blocks.push({
+      ...blk(it.type || 'round', it.title || `Round ${i + 1}`, 0, 1, Number(f.round_sec) || 180, Number(f.rest_sec) || 60, [...it.seqs], it.desc || ''),
+      rest_after: i < f.items.length - 1,
+    });
+  });
+  if (Number(f.cooldown) > 0) blocks.push(blk('alongamento', 'Volta à calma', Number(f.cooldown), 0, 0, 0, [], 'Respiração · alongamento'));
+  boxWkForm.value = {
+    id: '',
+    name: f.name.trim() || `Treino do professor — ${f.rounds} rounds`,
+    desc: `${f.rounds} rounds × ${Math.round(f.round_sec / 60)} min · descanso ${f.rest_sec} s`,
+    blocks,
+  };
+  roundsForm.value = null;
+  useAlert('Blocos gerados — revise e salve.');
+};
+
+// ═══ RODADA 26 · PLANO DE LUTA ═══════════════════════════════════════
+// "escolher o volume de rounds e planejar a intenção, sequências etc. em
+// cada um; salvar com nome (por atleta ou por luta)". Registro
+// kind=fight_plan por pessoa; ▶ Treinar vira sessão guiada round a round.
+const fpForm = ref(null);
+const fpOpen = ref(0); // acordeão dos rounds do plano (rodada 27)
+const savingFp = ref(false);
+const openNewFightPlan = () => {
+  fpForm.value = { id: null, ...blankFightPlan(3) };
+  fpOpen.value = 0;
+};
+const openEditFightPlan = rec => {
+  const d = JSON.parse(JSON.stringify(rec.data || {}));
+  fpForm.value = { id: rec.id, ...blankFightPlan(Number(d.rounds) || 3), ...d };
+  setFpRounds(Number(d.rounds) || 3);
+};
+const setFpRounds = n => {
+  const f = fpForm.value;
+  const count = Math.max(1, Math.min(15, n));
+  while (f.plan.length < count) f.plan.push({ intent: '', seqs: [], notes: '' });
+  f.plan.length = count;
+  f.rounds = count;
+};
+const toggleFpSeq = (r, id) => {
+  const i = r.seqs.indexOf(id);
+  if (i >= 0) r.seqs.splice(i, 1);
+  else r.seqs.push(id);
+};
+const saveFightPlan = async () => {
+  const f = fpForm.value;
+  if (!f?.name?.trim()) {
+    useAlert('Dê um nome ao plano (ex.: Luta de outubro · João).');
+    return;
+  }
+  savingFp.value = true;
+  try {
+    const { id, ...raw } = f;
+    const data = { ...raw, round_sec: Number(raw.round_sec) || 180, rest_sec: Number(raw.rest_sec) || 0 };
+    let rec;
+    if (id) {
+      ({ data: rec } = await CrmAPI.updateHealthRecord(id, data));
+      fightPlans.value = fightPlans.value.map(x => (x.id === rec.id ? rec : x));
+    } else {
+      ({ data: rec } = await CrmAPI.createHealthRecord({ kind: 'fight_plan', record_date: todayISO, data }));
+      fightPlans.value = [rec, ...fightPlans.value];
+    }
+    fpForm.value = null;
+    useAlert(`🥇 Plano "${rec.data?.name}" salvo.`);
+  } catch {
+    useAlert('Não consegui salvar o plano de luta.');
+  } finally {
+    savingFp.value = false;
+  }
+};
+const deleteFightPlan = async rec => {
+  try {
+    await CrmAPI.deleteHealthRecord(rec.id);
+    fightPlans.value = fightPlans.value.filter(x => x.id !== rec.id);
+    fpForm.value = null;
+    useAlert('Plano removido.');
+  } catch {
+    useAlert('Não consegui remover.');
+  }
+};
+const trainFightPlan = rec => {
+  startBoxWorkout(fightPlanToWorkout(rec));
+};
+const fpSummary = rec => {
+  const d = rec.data || {};
+  const who = [d.athlete, d.opponent].filter(Boolean).join(' × ');
+  return `${d.rounds} × ${Math.round((Number(d.round_sec) || 0) / 60)} min · descanso ${d.rest_sec} s${who ? ` · ${who}` : ''}`;
+};
+
+// ═══ RODADA 26 · CARDIO ══════════════════════════════════════════════
+// Pré-configurado: tipo (caminhada, corrida, bike, boxe…) + tempo em
+// toques, intensidade e distância opcional. 1 registro por sessão.
+const cardioForm = ref({ date: todayISO, type: 'caminhada', minutes: 30, km: '', intensity: 'moderado', notes: '' });
+const savingCardio = ref(false);
+const saveCardio = async () => {
+  const minutes = Math.round(toNum(cardioForm.value.minutes));
+  if (!minutes) {
+    useAlert('Quanto tempo? Toque num dos tempos ou digite os minutos.');
+    return;
+  }
+  savingCardio.value = true;
+  try {
+    const data = {
+      type: cardioForm.value.type,
+      minutes,
+      intensity: cardioForm.value.intensity,
+      notes: cardioForm.value.notes?.trim() || '',
+    };
+    const km = toNum(cardioForm.value.km);
+    if (km > 0) data.km = km;
+    const { data: rec } = await CrmAPI.createHealthRecord({
+      kind: 'cardio',
+      record_date: cardioForm.value.date || todayISO,
+      data,
+    });
+    cardios.value = sortRecs([rec, ...cardios.value]);
+    cardioForm.value = { ...cardioForm.value, km: '', notes: '' };
+    useAlert(`${cardioType(data.type).icon} ${cardioType(data.type).label} · ${minutes} min registrado!`);
+  } catch {
+    useAlert('Não consegui salvar o cardio.');
+  } finally {
+    savingCardio.value = false;
+  }
+};
+const cardioStats = computed(() => ({
+  n: cardios.value.length,
+  min: cardios.value.reduce((a, c) => a + (Number(c.data?.minutes) || 0), 0),
+  km: Math.round(cardios.value.reduce((a, c) => a + (Number(c.data?.km) || 0), 0) * 10) / 10,
+}));
+const cardioWeekMin = computed(() =>
+  cardios.value.filter(c => c.record_date >= daysAgo(6)).reduce((a, c) => a + (Number(c.data?.minutes) || 0), 0)
+);
+const cardioWeekCount = computed(() => cardios.value.filter(c => c.record_date >= daysAgo(6)).length);
+const cardioByType = computed(() => {
+  const acc = {};
+  cardios.value
+    .filter(c => c.record_date >= daysAgo(29))
+    .forEach(c => {
+      const k = c.data?.type || 'outro';
+      acc[k] = acc[k] || { min: 0, n: 0, km: 0 };
+      acc[k].min += Number(c.data?.minutes) || 0;
+      acc[k].n += 1;
+      acc[k].km += Number(c.data?.km) || 0;
+    });
+  const max = Math.max(1, ...Object.values(acc).map(v => v.min));
+  return Object.entries(acc)
+    .map(([k, v]) => ({ key: k, ...cardioType(k), ...v, pct: Math.round((v.min / max) * 100) }))
+    .sort((a, b) => b.min - a.min);
+});
 
 // fichas avulsas (fora de programa)
 const planForm = ref(null); // null = fechado; {id?, name, exercises[]}
@@ -1508,21 +2050,15 @@ const dietDayPct = d => {
 // Protocolo oficial do Guilherme (26/08): braço RELAXADO, coxa no meio
 // entre virilha e joelho, cintura após expiração normal sem encolher,
 // pescoço abaixo do pomo de Adão sem apertar.
-const MEASURES = [
-  // step/max alimentam a roleta (rodada 12): peso fino de 0,1 em 0,1 kg;
-  // circunferências de 0,5 em 0,5 cm até 220 (teto fixo, sem infinito)
-  { key: 'weight', label: 'Peso', suffix: ' kg', step: 0.1, max: 200 },
-  { key: 'waist_navel', label: 'Cintura (umbigo)', suffix: ' cm', step: 0.1, max: 220 },
-  { key: 'waist_narrow', label: 'Cintura estreita', suffix: ' cm', step: 0.1, max: 220 },
-  { key: 'hips', label: 'Quadril', suffix: ' cm', step: 0.1, max: 220 },
-  { key: 'chest', label: 'Peito/tórax', suffix: ' cm', step: 0.1, max: 220 },
-  { key: 'arm_r', label: 'Braço D', suffix: ' cm', step: 0.1, max: 220 },
-  { key: 'arm_l', label: 'Braço E', suffix: ' cm', step: 0.1, max: 220 },
-  { key: 'thigh_r', label: 'Coxa D', suffix: ' cm', step: 0.1, max: 220 },
-  { key: 'thigh_l', label: 'Coxa E', suffix: ' cm', step: 0.1, max: 220 },
-  { key: 'neck', label: 'Pescoço', suffix: ' cm', step: 0.1, max: 220 },
-  { key: 'shoulders', label: 'Ombros (escapular)', suffix: ' cm', step: 0.1, max: 220 },
-];
+// lista única em warrior.js (rodada 25); step/max alimentam a roleta
+// (rodada 12): peso de 0,1 em 0,1 kg; circunferências até 220 cm
+const MEASURES = MEASURE_DEFS.map(m => ({
+  key: m.key,
+  label: m.label,
+  suffix: ` ${m.unit}`,
+  step: 0.1,
+  max: m.key === 'weight' ? 200 : 220,
+}));
 const bodyForm = ref({
   date: todayISO,
   notes: '',
@@ -1561,6 +2097,8 @@ const saveBody = async () => {
     });
     bodies.value = sortRecs([rec, ...bodies.value.filter(b => b.id !== rec.id)]);
     useAlert('📏 Medidas registradas.');
+    // rodada 25: anima o que andou na direção certa
+    celebrate(bodyCelebration({ bodies: bodies.value, record: rec }));
   } catch {
     useAlert('Não consegui salvar as medidas.');
   } finally {
@@ -1597,6 +2135,9 @@ const deleteRecord = async record => {
     if (record.kind === 'boxing') boxings.value = boxings.value.filter(b => b.id !== record.id);
     if (record.kind === 'diet') diets.value = diets.value.filter(d => d.id !== record.id);
     if (record.kind === 'body') bodies.value = bodies.value.filter(b => b.id !== record.id);
+    if (record.kind === 'program') personalPrograms.value = personalPrograms.value.filter(r => r.id !== record.id);
+    if (record.kind === 'cardio') cardios.value = cardios.value.filter(c => c.id !== record.id);
+    if (record.kind === 'fight_plan') fightPlans.value = fightPlans.value.filter(f => f.id !== record.id);
     useAlert('Registro removido.');
   } catch {
     useAlert('Não consegui remover.');
@@ -1608,8 +2149,12 @@ onMounted(async () => {
   try {
     const { data: payload } = await CrmAPI.getHealth();
     config.value = payload.config || {};
+    profile.value = payload.profile || {};
+    personalPrograms.value = payload.programs || [];
     workouts.value = payload.workouts || [];
     boxings.value = payload.boxings || [];
+    cardios.value = payload.cardios || [];
+    fightPlans.value = payload.fight_plans || [];
     diets.value = payload.diets || [];
     bodies.value = payload.bodies || [];
     const latest = bodies.value[0]?.data || {};
@@ -1653,25 +2198,121 @@ onMounted(async () => {
 
       <template v-else>
         <!-- Pílulas de aba (no celular a barra de abas do rodapé faz isso) -->
-        <div class="hidden md:flex gap-2 mb-5 flex-wrap">
-          <button
-            v-for="t in TABS"
-            :key="t.key"
-            class="h-9 px-4 rounded-full text-xs font-bold flex items-center gap-1.5 border"
-            :class="tab === t.key ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-            :style="tab === t.key ? { background: GRAD_ROYAL } : {}"
-            @click="goTab(t.key)"
-          >
-            <span :class="t.icon" /> {{ t.label }}
-          </button>
+        <div class="hidden md:block mb-5">
+          <div class="hub-seg">
+            <button v-for="t in TABS" :key="t.key" :class="{ 'is-on': tab === t.key }" @click="goTab(t.key)">
+              <span :class="t.icon" />{{ t.label }}
+            </button>
+          </div>
         </div>
 
         <!-- ═══ TREINO ═══ -->
         <template v-if="tab === 'treino'">
-          <!-- Programa ativo (Warrior) -->
-          <div v-if="program && !session" class="hub-block p-4 mb-4">
+          <!-- rodada 25: ESCOLHA DO PROGRAMA — Warrior (como está) ×
+               meu treino (criado/importado, com histórico próprio) -->
+          <div v-if="!session && !wizard" class="flex items-center gap-1.5 flex-wrap mb-3">
+            <button
+              v-if="warriorPrograms.length"
+              class="h-9 px-3 rounded-full text-xs font-bold border transition"
+              :class="programMode === 'warrior' ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
+              :style="programMode === 'warrior' ? { background: GRAD_NOITE } : {}"
+              :disabled="savingProfile"
+              @click="chooseWarrior"
+            >
+              🛡 Warrior
+            </button>
+            <button
+              v-for="rec in activePersonal"
+              :key="rec.id"
+              class="h-9 px-3 rounded-full text-xs font-bold border transition"
+              :class="programMode === 'custom' && Number(profile.active_program_id) === rec.id ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
+              :style="programMode === 'custom' && Number(profile.active_program_id) === rec.id ? { background: GRAD_LARANJA } : {}"
+              :disabled="savingProfile"
+              @click="choosePersonal(rec)"
+            >
+              ✨ {{ rec.data?.name }}
+            </button>
+            <button
+              class="h-9 px-3 rounded-full text-xs font-bold border border-dashed border-n-weak hover:bg-n-alpha-1"
+              :style="{ color: LARANJA_VIVO }"
+              @click="openWizard()"
+            >
+              + Criar / importar treino
+            </button>
+            <button
+              v-if="personalPrograms.length"
+              class="h-9 px-3 rounded-full text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1 ml-auto"
+              @click="historyOpen = !historyOpen"
+            >
+              📜 Histórico ({{ personalPrograms.length }})
+            </button>
+          </div>
+
+          <!-- rodada 27: visualizações da aba Treino -->
+          <div v-if="!session && !wizard && program" class="hub-seg hub-seg-full mb-4">
+            <button v-for="v in TREINO_VIEWS" :key="v.key" :class="{ 'is-on': treinoView === v.key }" @click="treinoView = v.key">
+              <span :class="v.ico" />{{ v.label }}
+            </button>
+          </div>
+
+          <ProgramWizard
+            v-if="wizard"
+            :initial="wizard.record?.data || null"
+            :known-exercises="knownExerciseNames"
+            :saving="savingWizard"
+            @save="saveWizard"
+            @cancel="wizard = null"
+          />
+
+          <!-- histórico dos programas pessoais (pra vida toda) -->
+          <div v-if="historyOpen && !session && !wizard" class="hub-block p-4 mb-4">
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-scroll-text" />Meus programas</h2>
+            <p class="text-[11px] text-n-slate-10 mb-3">Cada bloco que você fez, com o resultado no parâmetro que você escolheu.</p>
+            <div class="flex flex-col gap-2">
+              <div
+                v-for="h in programHistory"
+                :key="h.rec.id"
+                class="rounded-xl border p-3 flex items-start gap-3 flex-wrap"
+                :class="h.isActive ? '' : 'border-n-weak'"
+                :style="h.isActive ? { borderColor: LARANJA, background: 'rgba(255,138,0,0.06)' } : {}"
+              >
+                <span class="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0" :style="{ background: h.status === 'active' ? GRAD_LARANJA : GRAD_NOITE }">{{ h.goal.icon }}</span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-bold text-n-slate-12">
+                    {{ h.name }}
+                    <span v-if="h.isActive" class="ml-1 px-2 py-0.5 rounded-full text-[10px] text-white" :style="{ background: LARANJA }">ativo</span>
+                    <span v-else-if="h.status === 'finished'" class="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-n-alpha-2 text-n-slate-11">encerrado</span>
+                  </p>
+                  <p class="text-[11px] text-n-slate-10">
+                    {{ h.split }} · {{ h.weeks }} semanas · {{ h.period }} · <b>{{ h.done }}</b> treinos feitos · objetivo {{ h.goal.label }}
+                  </p>
+                  <p v-if="h.result" class="text-[11px] mt-1" :style="{ color: ROYAL }">🏁 {{ h.result }}</p>
+                  <p v-else-if="h.live && !h.live.none" class="text-[11px] mt-1" :style="{ color: h.live.ok ? ROYAL : LARANJA_VIVO }">
+                    {{ h.live.icon }} {{ h.live.value }} · {{ h.live.detail }}
+                  </p>
+                </div>
+                <div class="flex gap-1.5 flex-wrap">
+                  <button v-if="h.status === 'active' && !h.isActive" class="h-8 px-2.5 rounded-lg text-[11px] font-bold text-white" :style="{ background: ROYAL }" @click="choosePersonal(h.rec)">▶ Usar</button>
+                  <button v-if="h.status === 'active'" class="h-8 px-2.5 rounded-lg text-[11px] border border-n-weak hover:bg-n-alpha-1" @click="openWizard(h.rec)">✎</button>
+                  <button v-if="h.status === 'active'" class="h-8 px-2.5 rounded-lg text-[11px] border border-n-weak hover:bg-n-alpha-1" title="Encerrar e guardar o resultado" @click="finishProgram(h.rec)">🏁</button>
+                  <button v-if="h.status !== 'active' && !h.done" class="h-8 px-2.5 rounded-lg text-[11px] text-n-slate-10 hover:bg-n-alpha-1" title="Remover (só sem treinos feitos)" @click="deleteProgram(h.rec)">🗑</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- sem programa (modo pessoal sem nenhum ativo) -->
+          <div v-if="!program && !session && !wizard" class="hub-block p-5 mb-4 text-center">
+            <p class="text-2xl mb-1">✨</p>
+            <p class="text-sm font-bold text-n-slate-12 mb-1">Nenhum programa ativo</p>
+            <p class="text-[11px] text-n-slate-10 mb-3">Monte o seu (ABC, ABCD…) ou cole um treino pronto — leva 2 minutos.</p>
+            <button class="h-10 px-5 rounded-xl text-xs font-bold text-white" :style="{ background: GRAD_LARANJA }" @click="openWizard()">+ Criar / importar treino</button>
+          </div>
+
+          <!-- Programa ativo (Warrior ou pessoal) -->
+          <div v-if="program && !session && !wizard && treinoView === 'treinar'" class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
-              <h2 class="text-sm font-bold text-n-slate-12">🏋️ {{ program.name }}</h2>
+              <h2 class="text-sm font-bold text-n-slate-12"><span class="hub-h-ico i-lucide-dumbbell" />{{ program.name }}</h2>
               <div v-if="programs.length > 1" class="flex gap-1.5">
                 <button
                   v-for="p in programs"
@@ -1692,14 +2333,30 @@ onMounted(async () => {
               {{ programCycle?.name }} — {{ programCycle?.focus }}
               <template v-if="program.note"> · {{ program.note }}</template>
             </p>
+            <!-- rodada 25: objetivo do programa pessoal = parâmetro de sucesso -->
+            <div v-if="program.custom && goalNow" class="rounded-xl p-3 mb-3 flex items-center gap-3 flex-wrap" :style="{ background: 'rgba(65,105,225,0.08)', border: '1px solid rgba(65,105,225,0.25)' }">
+              <span class="text-2xl">{{ goalNow.icon }}</span>
+              <div class="flex-1 min-w-0" style="min-width: 10rem">
+                <p class="text-[11px] text-n-slate-10">Objetivo: <b>{{ goalNow.label }}</b> · semana {{ goalNow.week }} de {{ goalNow.weeks }}</p>
+                <p class="text-lg font-extrabold leading-tight" :style="{ color: goalNow.none ? CINZA : goalNow.ok ? ROYAL : LARANJA_VIVO }">{{ goalNow.value }}</p>
+                <p class="text-[10px] text-n-slate-10">{{ goalNow.detail }}</p>
+                <div class="h-1.5 rounded-full bg-n-alpha-2 mt-1.5 overflow-hidden">
+                  <div class="h-full rounded-full" :style="{ width: `${Math.round(goalNow.pct * 100)}%`, background: GRAD_LARANJA }" />
+                </div>
+              </div>
+              <div class="flex gap-1.5">
+                <button class="h-8 px-2.5 rounded-lg text-[11px] border border-n-weak hover:bg-n-alpha-1" @click="openWizard(personalPrograms.find(r => r.id === program.record_id))">✎ editar</button>
+                <button class="h-8 px-2.5 rounded-lg text-[11px] border border-n-weak hover:bg-n-alpha-1" title="Encerrar e guardar no histórico" @click="finishProgram(personalPrograms.find(r => r.id === program.record_id))">🏁 encerrar</button>
+              </div>
+            </div>
             <!-- rodada 23: todos os treinos são cartões de vidro; o da vez
                  (do dia ou o próximo) vem em laranja sólido pulsando -->
             <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
               <div
                 v-for="s in programCycle?.sessions || []"
                 :key="s.key"
-                class="hub-block hub-block-hover p-3 flex flex-col gap-2"
-                :class="s.key === nextKey ? 'hub-orange hub-block-solid hub-block-today' : ''"
+                class="hub-block hub-block-hover hub-session-card p-3 flex flex-col gap-2"
+                :class="s.key === nextKey ? 'hub-orange hub-block-solid hub-block-today is-next' : ''"
                 role="button"
                 @click="startProgramSession(s)"
               >
@@ -1715,7 +2372,7 @@ onMounted(async () => {
                     class="px-2 py-0.5 rounded-full text-[10px] font-bold"
                     style="background: rgba(255, 255, 255, 0.24)"
                   >
-                    {{ isTodaySession(s) ? '🔥 HOJE' : '▶ próximo' }}
+                    {{ isTodaySession(s) ? 'HOJE' : '▶ próximo' }}
                   </span>
                   <button
                     v-else
@@ -1727,7 +2384,7 @@ onMounted(async () => {
                   </button>
                 </div>
                 <div>
-                  <p class="text-sm font-extrabold leading-tight">Treino {{ s.key }}</p>
+                  <p class="text-sm font-extrabold leading-tight">Treino {{ s.key }}<span v-if="s.label" class="font-semibold opacity-80"> · {{ s.label }}</span></p>
                   <p class="text-[11px]" :class="s.key === nextKey ? 'opacity-90' : 'text-n-slate-10'">
                     {{ s.weekday }} · {{ (s.exercises || []).length }} exercícios
                   </p>
@@ -2147,9 +2804,9 @@ onMounted(async () => {
           </div>
 
           <!-- Planilha das semanas: A | B | C | Bônus -->
-          <div v-if="gridTabs.length && !session" class="hub-block p-4 mb-4">
+          <div v-if="gridTabs.length && !session && !wizard && treinoView === 'planilha'" class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
-              <h2 class="text-sm font-bold text-n-slate-12">📋 Planilha das semanas</h2>
+              <h2 class="text-sm font-bold text-n-slate-12"><span class="hub-h-ico i-lucide-table" />Planilha das semanas</h2>
               <div class="flex gap-1.5 flex-wrap">
                 <button
                   v-for="t in gridTabs"
@@ -2181,11 +2838,11 @@ onMounted(async () => {
                       v-for="w in gridWeeks"
                       :key="w"
                       class="text-center text-[11px] font-bold px-1 py-1.5 border-b border-n-weak"
-                      :class="gridTab?.programId === 'warrior24' && w === programWeek ? '' : 'text-n-slate-11'"
-                      :style="gridTab?.programId === 'warrior24' && w === programWeek ? { color: ROYAL } : {}"
+                      :class="gridTab?.programId === mainProgram?.id && w === programWeek ? '' : 'text-n-slate-11'"
+                      :style="gridTab?.programId === mainProgram?.id && w === programWeek ? { color: ROYAL } : {}"
                     >
                       S{{ w }}
-                      <span v-if="gridTab?.programId === 'warrior24' && w === programWeek">•</span>
+                      <span v-if="gridTab?.programId === mainProgram?.id && w === programWeek">•</span>
                     </th>
                   </tr>
                 </thead>
@@ -2227,9 +2884,9 @@ onMounted(async () => {
           </div>
 
           <!-- Evolução -->
-          <div class="hub-block p-4 mb-4">
+          <div v-if="!session && !wizard && treinoView === 'historico'" class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h2 class="text-sm font-bold text-n-slate-12">📈 Evolução de carga</h2>
+              <h2 class="text-sm font-bold text-n-slate-12"><span class="hub-h-ico i-lucide-trending-up" />Evolução de carga</h2>
               <select
                 v-model="evoExercise"
                 class="h-9 rounded-lg border border-n-weak px-2 text-xs text-n-slate-12"
@@ -2252,54 +2909,45 @@ onMounted(async () => {
             </p>
           </div>
 
-          <!-- Histórico -->
-          <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3">🗓 Últimos treinos</h2>
-            <p v-if="!workouts.length" class="text-xs text-n-slate-10">Nenhum treino registrado ainda.</p>
-            <div
-              v-for="w in workouts.slice(0, 8)"
-              :key="w.id"
-              class="flex items-center gap-3 py-2 border-b border-n-weak last:border-0"
-            >
-              <span
-                class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold shrink-0"
-                :style="{ background: GRAD_ROYAL }"
-              >
-                {{ fmtDay(w.record_date) }}
-              </span>
-              <div class="flex-1 min-w-0">
-                <p class="text-xs font-bold text-n-slate-12 truncate">
-                  {{ w.data?.plan_name || 'Treino' }}
-                  <span v-if="w.data?.week" class="font-normal text-n-slate-10">· sem. {{ w.data.week }}</span>
-                </p>
-                <p class="text-[11px] text-n-slate-10 truncate">{{ workoutSummary(w) }}</p>
+          <!-- Histórico (rodada 27: seção própria, lista agrupada por mês) -->
+          <div v-if="!session && !wizard && treinoView === 'historico'" class="hub-block p-4 mb-4">
+            <div class="hub-sec">
+              <span class="hub-sec-ico"><span class="i-lucide-history" /></span>
+              <div class="hub-sec-text">
+                <h2 class="hub-sec-title">Histórico de treinos</h2>
+                <p class="hub-sec-sub">{{ workouts.length }} treinos registrados · toque no ✕ pra remover</p>
               </div>
-              <span v-if="w.data?.summary" class="flex items-center gap-1 shrink-0 text-[11px] font-bold">
-                <span
-                  v-for="(chip, verdictKey) in VERDICT_CHIPS"
-                  :key="verdictKey"
-                  v-show="w.data.summary[verdictKey]"
-                  :style="{ color: chip.color }"
-                  :title="chip.title"
-                >
-                  {{ chip.label }}{{ w.data.summary[verdictKey] }}
-                </span>
-              </span>
-              <button
-                class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0"
-                title="Remover"
-                @click="deleteRecord(w)"
-              >
-                ✕
-              </button>
+            </div>
+            <p v-if="!workouts.length" class="text-xs text-n-slate-10">Nenhum treino registrado ainda.</p>
+            <div v-else class="hub-list">
+              <template v-for="g in groupByMonth(workouts.slice(0, 80))" :key="g.key">
+                <div class="hub-month">{{ g.label }}</div>
+                <div v-for="w in g.items" :key="w.id" class="hub-row">
+                  <span class="hub-row-date"><b>{{ dayOf(w.record_date) }}</b><small>{{ monOf(w.record_date) }}</small></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-bold text-n-slate-12 truncate">
+                      {{ w.data?.plan_name || 'Treino' }}<span v-if="w.data?.week" class="font-normal text-n-slate-10"> · semana {{ w.data.week }}</span>
+                    </p>
+                    <p class="text-[11px] text-n-slate-10 truncate">{{ (w.data?.exercises || []).filter(e => !e.skipped).map(e => e.name).join(' · ') || '—' }}</p>
+                  </div>
+                  <span v-if="w.data?.summary" class="text-[11px] font-bold whitespace-nowrap hidden sm:inline">
+                    <span :style="{ color: ROYAL }">▲{{ w.data.summary.progress || 0 }}</span>
+                    <span class="text-n-slate-10 mx-1">▬{{ w.data.summary.tie || 0 }}</span>
+                    <span :style="{ color: LARANJA_VIVO }">▼{{ w.data.summary.regress || 0 }}</span>
+                  </span>
+                  <button class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0 flex items-center justify-center" title="Remover" @click="deleteRecord(w)">
+                    <span class="i-lucide-x" style="width: 14px; height: 14px" />
+                  </button>
+                </div>
+              </template>
             </div>
           </div>
 
           <!-- Fichas avulsas (fora do programa) -->
-          <div class="hub-block p-4">
+          <div v-if="!session && !wizard && treinoView === 'treinar'" class="hub-block p-4">
             <div class="flex items-center justify-between">
               <button class="text-sm font-bold text-n-slate-12" @click="showFichas = !showFichas">
-                {{ showFichas ? '▾' : '▸' }} 📝 Fichas avulsas
+                {{ showFichas ? '▾' : '▸' }} Fichas avulsas
               </button>
               <button
                 v-if="showFichas"
@@ -2421,13 +3069,153 @@ onMounted(async () => {
         </template>
 
         <!-- ═══ BOXE ═══ -->
+        <!-- ═══ CARDIO (rodada 26 · reorganizado na 27) ═══ -->
+        <template v-if="tab === 'cardio'">
+          <div class="hub-seg hub-seg-full mb-4">
+            <button v-for="v in CARDIO_VIEWS" :key="v.key" :class="{ 'is-on': cardioView === v.key }" @click="cardioView = v.key">
+              <span :class="v.ico" />{{ v.label }}
+            </button>
+          </div>
+
+          <div v-if="cardioView === 'registrar'" class="hub-block p-4 mb-4">
+            <div class="hub-sec">
+              <span class="hub-sec-ico"><span class="i-lucide-heart-pulse" /></span>
+              <div class="hub-sec-text">
+                <h2 class="hub-sec-title">Registrar cardio</h2>
+                <p class="hub-sec-sub">tipo, tempo, intensidade — pronto. {{ cardioWeekMin }} min em {{ cardioWeekCount }} sessões nos últimos 7 dias</p>
+              </div>
+            </div>
+            <p class="hub-label">Tipo</p>
+            <div class="hub-grid-4 mb-4">
+              <button
+                v-for="t in CARDIO_TYPES"
+                :key="t.key"
+                class="hub-cardio-type"
+                :class="{ 'is-on': cardioForm.type === t.key }"
+                @click="cardioForm.type = t.key"
+              >
+                <span :class="t.ico" class="hub-cardio-ico" />
+                <span>{{ t.label }}</span>
+              </button>
+            </div>
+            <div class="hub-grid-2 mb-4">
+              <div>
+                <p class="hub-label">Tempo</p>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    v-for="m in CARDIO_DURATIONS"
+                    :key="m"
+                    class="hub-tag"
+                    :class="{ 'is-on': Number(cardioForm.minutes) === m }"
+                    @click="cardioForm.minutes = m"
+                  >
+                    {{ m }} min
+                  </button>
+                  <input v-model="cardioForm.minutes" type="text" inputmode="numeric" placeholder="outro" class="hub-field" style="width: 5rem" />
+                </div>
+              </div>
+              <div>
+                <p class="hub-label">Intensidade</p>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    v-for="i in CARDIO_INTENSITIES"
+                    :key="i.key"
+                    class="hub-tag"
+                    :class="{ 'is-on': cardioForm.intensity === i.key }"
+                    :title="i.hint"
+                    @click="cardioForm.intensity = i.key"
+                  >
+                    {{ i.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="hub-grid-3 mb-4">
+              <label class="block">
+                <span class="hub-label" style="margin-bottom: 6px">Data</span>
+                <input v-model="cardioForm.date" type="date" class="hub-field hub-field-w" />
+              </label>
+              <label class="block">
+                <span class="hub-label" style="margin-bottom: 6px">Distância (km)</span>
+                <input v-model="cardioForm.km" type="text" inputmode="decimal" placeholder="opcional, ex.: 5,2" class="hub-field hub-field-w" />
+              </label>
+              <label class="block">
+                <span class="hub-label" style="margin-bottom: 6px">Observações</span>
+                <input v-model="cardioForm.notes" type="text" placeholder="ex.: esteira inclinada 8%" class="hub-field hub-field-w" />
+              </label>
+            </div>
+            <button
+              class="h-12 rounded-xl text-sm font-bold text-white disabled:opacity-60 w-full sm:w-auto sm:px-8"
+              :style="{ background: GRAD_LARANJA }"
+              :disabled="savingCardio"
+              @click="saveCardio"
+            >
+              {{ savingCardio ? 'Salvando…' : `Salvar ${cardioType(cardioForm.type).label} · ${cardioForm.minutes || 0} min` }}
+            </button>
+          </div>
+
+          <template v-if="cardioView === 'historico'">
+            <div class="hub-block p-4 mb-4">
+              <div class="hub-sec">
+                <span class="hub-sec-ico"><span class="i-lucide-history" /></span>
+                <div class="hub-sec-text">
+                  <h2 class="hub-sec-title">Histórico de cardio</h2>
+                  <p class="hub-sec-sub">tudo que você registrou, mês a mês</p>
+                </div>
+              </div>
+              <div class="hub-grid-3 mb-4">
+                <div class="hub-stat"><b>{{ cardioStats.n }}</b><span>sessões</span></div>
+                <div class="hub-stat"><b>{{ cardioStats.min }}</b><span>minutos</span></div>
+                <div class="hub-stat"><b>{{ String(cardioStats.km).replace('.', ',') }}</b><span>km</span></div>
+              </div>
+              <template v-if="cardioByType.length">
+                <p class="hub-label">Últimos 30 dias por tipo</p>
+                <div class="flex flex-col gap-2 mb-4">
+                  <div v-for="t in cardioByType" :key="t.key" class="flex items-center gap-3">
+                    <span class="hub-sec-ico" style="width: 30px; height: 30px"><span :class="t.ico" style="width: 15px; height: 15px" /></span>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center justify-between text-[11px]">
+                        <b class="text-n-slate-12">{{ t.label }}</b>
+                        <span class="text-n-slate-10">{{ t.min }} min · {{ t.n }}×<template v-if="t.km"> · {{ String(Math.round(t.km * 10) / 10).replace('.', ',') }} km</template></span>
+                      </div>
+                      <div class="h-1.5 rounded-full bg-n-alpha-2 overflow-hidden mt-1">
+                        <div class="h-full rounded-full" :style="{ width: `${t.pct}%`, background: GRAD_ROYAL }" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <p v-if="!cardios.length" class="text-xs text-n-slate-10">Nenhum cardio registrado ainda.</p>
+              <div v-else class="hub-list">
+                <template v-for="g in groupByMonth(cardios.slice(0, 80))" :key="g.key">
+                  <div class="hub-month">{{ g.label }}</div>
+                  <div v-for="c in g.items" :key="c.id" class="hub-row">
+                    <span class="hub-row-date"><b>{{ dayOf(c.record_date) }}</b><small>{{ monOf(c.record_date) }}</small></span>
+                    <span class="hub-sec-ico" style="width: 30px; height: 30px"><span :class="cardioType(c.data?.type).ico" style="width: 15px; height: 15px" /></span>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-xs font-bold text-n-slate-12 truncate">
+                        {{ cardioType(c.data?.type).label }} · {{ c.data?.minutes || 0 }} min
+                        <span v-if="c.data?.km" class="font-normal text-n-slate-10">· {{ String(c.data.km).replace('.', ',') }} km</span>
+                      </p>
+                      <p class="text-[11px] text-n-slate-10 truncate">{{ [c.data?.intensity, c.data?.notes].filter(Boolean).join(' · ') || '—' }}</p>
+                    </div>
+                    <button class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0 flex items-center justify-center" title="Remover" @click="deleteRecord(c)">
+                      <span class="i-lucide-x" style="width: 14px; height: 14px" />
+                    </button>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </template>
+
         <template v-if="tab === 'boxe'">
           <!-- SESSÃO GUIADA (rodada 20): cronômetro bloco a bloco -->
           <div v-if="boxSession" class="rounded-2xl overflow-hidden mb-4 text-white" :style="{ background: GRAD_NOITE }">
             <div class="p-4 sm:p-5">
               <div class="flex items-center justify-between gap-2 flex-wrap mb-3">
                 <div class="min-w-0">
-                  <p class="text-[11px] opacity-80">🥊 {{ boxSession.workout.name }}</p>
+                  <p class="text-[11px] opacity-80">{{ boxSession.workout.name }}</p>
                   <p class="text-xs opacity-80">
                     bloco {{ boxSession.blockIdx + 1 }} de {{ boxSession.workout.blocks.length }} ·
                     {{ fmtClock(boxSession.elapsed) }} de treino
@@ -2444,25 +3232,26 @@ onMounted(async () => {
                   :key="i"
                   class="h-1.5 flex-1 rounded-full transition-all"
                   :style="{ background: i < boxSession.blockIdx || boxSession.done[i] ? LARANJA : i === boxSession.blockIdx ? '#fff' : 'rgba(255,255,255,0.22)' }"
-                  :title="`${blockMeta(b.type).icon} ${b.title || blockMeta(b.type).label}`"
+                  :title="b.title || blockMeta(b.type).label"
                   @click="enterBlock(i)"
                 />
               </div>
               <!-- bloco atual -->
               <div v-if="boxBlock" class="text-center mb-4">
-                <p class="text-[11px] uppercase tracking-wide opacity-80">
-                  {{ blockMeta(boxBlock.type).icon }} {{ blockMeta(boxBlock.type).label }}
+                <p class="text-[11px] uppercase tracking-wide opacity-80 flex items-center justify-center gap-1.5">
+                  <span :class="blockMeta(boxBlock.type).ico" style="width: 13px; height: 13px" />{{ blockMeta(boxBlock.type).label }}
                 </p>
                 <p class="text-xl font-extrabold leading-tight">{{ boxBlock.title || blockMeta(boxBlock.type).label }}</p>
                 <p v-if="boxBlock.desc" class="text-xs opacity-85 mt-1">{{ boxBlock.desc }}</p>
                 <p class="text-[11px] mt-1" :style="{ color: LARANJA_CLARO }">
                   <template v-if="boxSession.phase === 'round'">Round {{ boxSession.round }} de {{ boxBlock.rounds }}</template>
                   <template v-else-if="boxSession.phase === 'rest'">Descanso · próximo: round {{ boxSession.round + 1 }} de {{ boxBlock.rounds }}</template>
+                  <template v-else-if="boxSession.phase === 'rest_after'">Descanso · próximo: {{ boxSession.workout.blocks[boxSession.blockIdx + 1]?.title || 'próximo bloco' }}</template>
                   <template v-else>{{ blockMinutes(boxBlock) }} min corridos</template>
                 </p>
               </div>
               <!-- cronômetro grande -->
-              <div class="relative mx-auto mb-4 hub-box-clock" :class="{ 'is-rest': boxSession.phase === 'rest' }">
+              <div class="relative mx-auto mb-4 hub-box-clock" :class="{ 'is-rest': boxSession.phase.startsWith('rest') }">
                 <svg viewBox="0 0 120 120" class="absolute inset-0 w-full h-full -rotate-90">
                   <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="6" />
                   <circle
@@ -2470,7 +3259,7 @@ onMounted(async () => {
                     cy="60"
                     r="54"
                     fill="none"
-                    :stroke="boxSession.phase === 'rest' ? ROYAL_CLARO : LARANJA"
+                    :stroke="boxSession.phase.startsWith('rest') ? ROYAL_CLARO : LARANJA"
                     stroke-width="6"
                     stroke-linecap="round"
                     :stroke-dasharray="`${(boxPct / 100) * 339.3} 339.3`"
@@ -2480,7 +3269,7 @@ onMounted(async () => {
                 <div class="absolute inset-0 flex flex-col items-center justify-center">
                   <span class="text-5xl font-black tabular-nums leading-none">{{ fmtClock(boxSession.remaining) }}</span>
                   <span class="text-[10px] uppercase tracking-wider opacity-75 mt-1">
-                    {{ boxSession.phase === 'rest' ? 'descanso' : boxSession.running ? 'em andamento' : 'pausado' }}
+                    {{ boxSession.phase.startsWith('rest') ? 'descanso' : boxSession.running ? 'em andamento' : 'pausado' }}
                   </span>
                 </div>
               </div>
@@ -2529,132 +3318,235 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- TREINOS PRÉ-PROGRAMADOS -->
-          <div v-if="!boxSession" class="hub-block p-4 mb-4">
-            <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
-              <h2 class="text-sm font-bold text-n-slate-12">🥊 Treinos programados</h2>
-              <button
-                class="h-8 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
-                @click="openNewBoxWorkout"
-              >
-                + Novo treino
-              </button>
-            </div>
-            <p class="text-[11px] text-n-slate-10 mb-3">
-              Estruturados em blocos com cronômetro (round · descanso · apito). <b>Iniciar</b> guia o
-              treino; <b>Já fiz</b> só registra. {{ boxMin7 }} min nos últimos 7 dias.
-            </p>
+          <!-- rodada 27: visualizações da aba Boxe -->
+          <div v-if="!boxSession" class="hub-seg hub-seg-full mb-4">
+            <button v-for="v in BOX_VIEWS" :key="v.key" :class="{ 'is-on': boxView === v.key }" @click="boxView = v.key">
+              <span :class="v.ico" />{{ v.label }}
+            </button>
+          </div>
 
-            <!-- editor do treino programado -->
-            <div v-if="boxWkForm" class="rounded-xl border border-n-weak p-3 mb-3">
-              <div class="flex items-center gap-2 flex-wrap mb-2">
-                <input
-                  v-model="boxWkForm.name"
-                  type="text"
-                  placeholder="Nome (ex.: Fundamentos — 60 min)"
-                  class="h-9 flex-1 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-                  style="min-width: 12rem; margin-bottom: 0"
-                />
-                <span class="text-[11px] font-bold" :style="{ color: ROYAL }">{{ workoutMinutes(boxWkForm) }} min</span>
+          <!-- TREINOS PRÉ-PROGRAMADOS -->
+          <div v-if="!boxSession && boxView === 'treinar'" class="hub-block p-4 mb-4">
+            <div class="hub-sec">
+              <span class="hub-sec-ico"><span class="i-lucide-swords" /></span>
+              <div class="hub-sec-text">
+                <h2 class="hub-sec-title">Treinos programados</h2>
+                <p class="hub-sec-sub">blocos com cronômetro · {{ boxMin7 }} min nos últimos 7 dias</p>
               </div>
-              <input
-                v-model="boxWkForm.desc"
-                type="text"
-                placeholder="Descrição curta"
-                class="block w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-                style="margin-bottom: 10px"
-              />
-              <p class="text-[11px] text-n-slate-10 mb-2">
-                Cada bloco: tipo · nome · <b>minutos</b> (tempo corrido) OU <b>rounds × segundos</b> + descanso
-                (o cronômetro apita a cada round) · sequências que entram nele.
-              </p>
-              <div v-for="(b, i) in boxWkForm.blocks" :key="i" class="rounded-xl border border-n-weak p-2.5 mb-2">
-                <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
-                  <select
-                    v-model="b.type"
-                    class="h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-                    style="width: 10rem; margin-bottom: 0"
-                  >
-                    <option v-for="(m, k) in BLOCK_TYPES" :key="k" :value="k">{{ m.icon }} {{ m.label }}</option>
-                  </select>
-                  <input
-                    v-model="b.title"
-                    type="text"
-                    placeholder="Nome do bloco"
-                    class="h-9 flex-1 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-                    style="min-width: 9rem; margin-bottom: 0"
-                  />
-                  <span class="text-[10px] text-n-slate-10 whitespace-nowrap">≈ {{ blockMinutes(b) }} min</span>
-                  <button class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1" title="Subir" @click="moveBoxBlock(i, -1)">↑</button>
-                  <button class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1" title="Descer" @click="moveBoxBlock(i, 1)">↓</button>
-                  <button class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1" title="Remover bloco" @click="removeBoxBlock(i)">✕</button>
-                </div>
-                <div class="flex items-center gap-2 flex-wrap mb-1.5">
-                  <label class="flex items-center gap-1 text-[10px] text-n-slate-10">
-                    min
-                    <input v-model="b.minutes" type="text" inputmode="decimal" class="hub-mini-input" />
-                  </label>
-                  <label class="flex items-center gap-1 text-[10px] text-n-slate-10">
-                    rounds
-                    <input v-model="b.rounds" type="text" inputmode="numeric" class="hub-mini-input" />
-                  </label>
-                  <label class="flex items-center gap-1 text-[10px] text-n-slate-10">
-                    × seg
-                    <input v-model="b.round_sec" type="text" inputmode="numeric" class="hub-mini-input" />
-                  </label>
-                  <label class="flex items-center gap-1 text-[10px] text-n-slate-10">
-                    descanso s
-                    <input v-model="b.rest_sec" type="text" inputmode="numeric" class="hub-mini-input" />
-                  </label>
-                </div>
-                <input
-                  v-model="b.desc"
-                  type="text"
-                  placeholder="O que fazer neste bloco"
-                  class="block w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-12"
-                  style="margin-bottom: 6px"
-                />
-                <div v-if="boxingSeqs.length" class="flex gap-1 flex-wrap">
-                  <button
-                    v-for="sq in boxingSeqs"
-                    :key="sq.id"
-                    class="h-7 px-2 rounded-lg text-[10px] font-bold border"
-                    :class="(b.seqs || []).includes(sq.id) ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                    :style="(b.seqs || []).includes(sq.id) ? { background: ROYAL } : {}"
-                    @click="toggleBlockSeq(b, sq.id)"
-                  >
-                    {{ sq.name }} <span class="font-normal opacity-75">{{ sq.steps }}</span>
-                  </button>
-                </div>
-              </div>
-              <div class="flex items-center gap-2 flex-wrap mt-2">
+              <div class="hub-sec-actions">
+                <button
+                  class="h-8 px-3 rounded-lg text-xs font-bold text-white"
+                  :style="{ background: GRAD_NOITE }"
+                  title="O professor monta o treino em rounds: quantos, quanto tempo, o que fazer em cada um"
+                  @click="openRoundsBuilder"
+                >
+                  <span class="i-lucide-graduation-cap hub-ico" style="width: 14px; height: 14px" /> Montar por rounds
+                </button>
                 <button
                   class="h-8 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
-                  @click="addBoxBlock"
+                  @click="openNewBoxWorkout"
                 >
-                  + bloco
+                  + Novo treino
                 </button>
+              </div>
+            </div>
+
+            <!-- rodada 27: construtor do PROFESSOR por rounds — acordeão + seletor -->
+            <div v-if="roundsForm" class="rounded-2xl p-4 mb-3 text-white" :style="{ background: GRAD_NOITE }">
+              <div class="hub-sec">
+                <span class="hub-sec-ico" style="background: rgba(255, 255, 255, 0.14); color: #fff"><span class="i-lucide-graduation-cap" /></span>
+                <div class="hub-sec-text">
+                  <h3 class="hub-sec-title">Treino do professor</h3>
+                  <p class="hub-sec-sub">monte round a round · total ≈ {{ roundsTotalMin }} min</p>
+                </div>
+                <div class="hub-sec-actions">
+                  <button class="h-8 px-3 rounded-lg text-xs border border-white/25 hover:bg-white/10" @click="roundsForm = null">Cancelar</button>
+                </div>
+              </div>
+              <input
+                v-model="roundsForm.name"
+                type="text"
+                placeholder="Nome do treino (ex.: Sparring técnico — 6 rounds)"
+                class="hub-field hub-field-w hub-field-dark mb-3"
+              />
+              <div class="hub-grid-4 mb-3">
+                <div class="hub-pro-ctl">
+                  <em>Rounds</em>
+                  <div class="flex items-center gap-2">
+                    <button class="hub-pro-bump" @click="setRoundsCount(roundsForm.rounds - 1)">−</button>
+                    <b>{{ roundsForm.rounds }}</b>
+                    <button class="hub-pro-bump" @click="setRoundsCount(roundsForm.rounds + 1)">+</button>
+                  </div>
+                </div>
+                <div class="hub-pro-ctl">
+                  <em>Tempo do round</em>
+                  <div class="flex gap-1">
+                    <button v-for="sec in [120, 150, 180]" :key="sec" class="hub-pro-pill" :class="{ 'is-on': roundsForm.round_sec === sec }" @click="roundsForm.round_sec = sec">{{ fmtClock(sec) }}</button>
+                  </div>
+                </div>
+                <div class="hub-pro-ctl">
+                  <em>Descanso</em>
+                  <div class="flex gap-1">
+                    <button v-for="sec in [30, 45, 60, 90]" :key="sec" class="hub-pro-pill" :class="{ 'is-on': roundsForm.rest_sec === sec }" @click="roundsForm.rest_sec = sec">{{ sec }}s</button>
+                  </div>
+                </div>
+                <div class="hub-pro-ctl">
+                  <em>Aquecer · volta à calma</em>
+                  <div class="flex items-center gap-1">
+                    <input v-model="roundsForm.warmup" type="text" inputmode="numeric" class="hub-rounds-num" />
+                    <span class="text-[10px] opacity-70">min</span>
+                    <input v-model="roundsForm.cooldown" type="text" inputmode="numeric" class="hub-rounds-num ml-1" />
+                    <span class="text-[10px] opacity-70">min</span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex flex-col gap-2">
+                <div v-for="(it, i) in roundsForm.items" :key="i" class="hub-acc hub-acc-dark" :class="{ 'is-open': roundsOpen === i }">
+                  <button class="hub-acc-head" @click="roundsOpen = roundsOpen === i ? -1 : i">
+                    <span class="hub-acc-n" :style="{ background: LARANJA, color: '#1a0e00' }">{{ i + 1 }}</span>
+                    <span class="flex-1 min-w-0">
+                      <span class="block text-xs font-bold truncate">{{ it.title || blockMeta(it.type).label }}</span>
+                      <span class="block text-[10px] opacity-75 truncate">
+                        {{ blockMeta(it.type).label }} · {{ it.seqs.length }} sequência{{ it.seqs.length === 1 ? '' : 's' }}<template v-if="it.desc"> · {{ it.desc }}</template>
+                      </span>
+                    </span>
+                    <span :class="roundsOpen === i ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="hub-ico opacity-70" />
+                  </button>
+                  <div v-if="roundsOpen === i" class="hub-acc-body pt-3">
+                    <div class="hub-grid-2 mb-2">
+                      <select v-model="it.type" class="hub-field hub-field-w hub-field-dark">
+                        <option v-for="(m, k) in BLOCK_TYPES" :key="k" :value="k" style="color: #111">{{ m.label }}</option>
+                      </select>
+                      <input v-model="it.title" type="text" placeholder="Foco do round (ex.: jab e distância)" class="hub-field hub-field-w hub-field-dark" />
+                    </div>
+                    <input v-model="it.desc" type="text" placeholder="Instrução do professor pra este round" class="hub-field hub-field-w hub-field-dark mb-2" />
+                    <SeqPicker v-model="it.seqs" :seqs="boxingSeqs" dark />
+                    <div class="flex justify-end mt-2">
+                      <button class="text-[11px] underline opacity-80 hover:opacity-100" @click="copyRoundToAll(i)">aplicar este round aos demais</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="flex justify-end mt-3">
+                <button class="h-10 px-5 rounded-xl text-xs font-bold" :style="{ background: GRAD_LARANJA, color: '#fff' }" @click="generateFromRounds">
+                  Gerar treino ({{ roundsTotalMin }} min) →
+                </button>
+              </div>
+            </div>
+
+            <!-- editor do treino programado (rodada 28: padrão do plano de luta) -->
+            <div v-if="boxWkForm" class="rounded-2xl border p-3 sm:p-4 mb-3" :style="{ borderColor: ROYAL, background: 'rgba(65,105,225,0.04)' }">
+              <div class="hub-sec">
+                <span class="hub-sec-ico"><span class="i-lucide-pencil-line" /></span>
+                <div class="hub-sec-text">
+                  <h3 class="hub-sec-title">{{ boxWkForm.id ? 'Editar treino' : 'Novo treino' }}</h3>
+                  <p class="hub-sec-sub">{{ boxWkForm.blocks.length }} blocos · ≈ {{ workoutMinutes(boxWkForm) }} min</p>
+                </div>
+                <div class="hub-sec-actions">
+                  <button class="h-8 px-3 rounded-lg text-xs text-n-slate-11 border border-n-weak hover:bg-n-alpha-1" @click="boxWkForm = null">Cancelar</button>
+                </div>
+              </div>
+              <div class="hub-form mb-4">
+                <div class="hub-form-row">
+                  <label>Nome</label>
+                  <input v-model="boxWkForm.name" type="text" placeholder="ex.: Fundamentos — 60 min" class="hub-field hub-field-w font-bold" />
+                </div>
+                <div class="hub-form-row">
+                  <label>Descrição</label>
+                  <input v-model="boxWkForm.desc" type="text" placeholder="uma linha sobre o treino" class="hub-field hub-field-w" />
+                </div>
+              </div>
+              <p class="hub-label">Blocos</p>
+              <div class="flex flex-col gap-2">
+                <div v-for="(b, i) in boxWkForm.blocks" :key="i" class="hub-acc" :class="{ 'is-open': wkOpen === i }">
+                  <button class="hub-acc-head" @click="wkOpen = wkOpen === i ? -1 : i">
+                    <span class="hub-acc-n">{{ i + 1 }}</span>
+                    <span class="flex-1 min-w-0">
+                      <span class="flex items-center gap-1.5 text-sm font-bold text-n-slate-12 truncate">
+                        <span :class="blockMeta(b.type).ico" style="width: 14px; height: 14px; flex-shrink: 0" />{{ b.title || blockMeta(b.type).label }}
+                      </span>
+                      <span class="block text-[11px] text-n-slate-10 truncate">
+                        ≈ {{ blockMinutes(b) }} min · {{ blockDurationText(b) }} · {{ (b.seqs || []).length }} sequência{{ (b.seqs || []).length === 1 ? '' : 's' }}
+                      </span>
+                    </span>
+                    <span :class="wkOpen === i ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="hub-ico text-n-slate-10" />
+                  </button>
+                  <div v-if="wkOpen === i" class="hub-acc-body pt-3">
+                    <div class="hub-form">
+                      <div class="hub-form-row">
+                        <label>Tipo</label>
+                        <div class="flex gap-1.5 flex-wrap">
+                          <button v-for="(m, k) in BLOCK_TYPES" :key="k" class="hub-tag" :class="{ 'is-on': b.type === k }" @click="b.type = k">
+                            <span :class="m.ico" />{{ m.label }}
+                          </button>
+                        </div>
+                      </div>
+                      <div class="hub-form-row">
+                        <label>Nome</label>
+                        <input v-model="b.title" type="text" :placeholder="blockMeta(b.type).label" class="hub-field hub-field-w" />
+                      </div>
+                      <div class="hub-form-row">
+                        <label>Formato</label>
+                        <div class="hub-seg">
+                          <button :class="{ 'is-on': blockMode(b) === 'min' }" @click="setBlockMode(b, 'min')"><span class="i-lucide-timer" />Tempo corrido</button>
+                          <button :class="{ 'is-on': blockMode(b) === 'rounds' }" @click="setBlockMode(b, 'rounds')"><span class="i-lucide-bell" />Rounds</button>
+                        </div>
+                      </div>
+                      <template v-if="blockMode(b) === 'min'">
+                        <div class="hub-form-row">
+                          <label>Minutos</label>
+                          <div class="flex gap-1.5 flex-wrap items-center">
+                            <button v-for="m in MIN_PRESETS" :key="m" class="hub-tag" :class="{ 'is-on': Number(b.minutes) === m }" @click="b.minutes = m">{{ m }} min</button>
+                            <input v-model="b.minutes" type="text" inputmode="decimal" placeholder="outro" class="hub-field hub-other" title="Outro valor" />
+                          </div>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <div class="hub-form-row">
+                          <label>Rounds</label>
+                          <div class="flex items-center gap-2">
+                            <button class="hub-bump" @click="b.rounds = Math.max(1, Number(b.rounds) - 1)">−</button>
+                            <b class="text-base font-black w-7 text-center text-n-slate-12">{{ b.rounds }}</b>
+                            <button class="hub-bump" @click="b.rounds = Math.min(30, Number(b.rounds) + 1)">+</button>
+                          </div>
+                        </div>
+                        <div class="hub-form-row">
+                          <label>Round</label>
+                          <div class="flex gap-1.5 flex-wrap items-center">
+                            <button v-for="sec in ROUND_SEC_PRESETS" :key="sec" class="hub-tag" :class="{ 'is-on': Number(b.round_sec) === sec }" @click="b.round_sec = sec">{{ fmtClock(sec) }}</button>
+                            <input v-model="b.round_sec" type="text" inputmode="numeric" placeholder="seg" class="hub-field hub-other" title="Outro valor, em segundos" />
+                          </div>
+                        </div>
+                        <div class="hub-form-row">
+                          <label>Descanso</label>
+                          <div class="flex gap-1.5 flex-wrap items-center">
+                            <button v-for="sec in REST_PRESETS" :key="sec" class="hub-tag" :class="{ 'is-on': Number(b.rest_sec) === sec }" @click="b.rest_sec = sec">{{ sec }} s</button>
+                            <input v-model="b.rest_sec" type="text" inputmode="numeric" placeholder="seg" class="hub-field hub-other" title="Outro valor, em segundos" />
+                          </div>
+                        </div>
+                      </template>
+                      <div class="hub-form-row">
+                        <label>O que fazer</label>
+                        <input v-model="b.desc" type="text" placeholder="instrução deste bloco" class="hub-field hub-field-w" />
+                      </div>
+                      <div class="hub-form-row" style="align-items: start">
+                        <label style="padding-top: 8px">Sequências</label>
+                        <SeqPicker v-model="b.seqs" :seqs="boxingSeqs" />
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-1.5 justify-end mt-3">
+                      <button class="hub-tag" :disabled="i === 0" @click="moveBoxBlock(i, -1)"><span class="i-lucide-arrow-up" />subir</button>
+                      <button class="hub-tag" :disabled="i === boxWkForm.blocks.length - 1" @click="moveBoxBlock(i, 1)"><span class="i-lucide-arrow-down" />descer</button>
+                      <button class="hub-tag" style="color: #dc2626" @click="removeBoxBlock(i)"><span class="i-lucide-trash-2" />remover</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap mt-3">
+                <button class="hub-tag" @click="addBoxBlock"><span class="i-lucide-plus" />bloco</button>
                 <div class="flex-1" />
-                <button
-                  v-if="boxWkForm.id"
-                  class="h-9 px-3 rounded-lg text-xs font-medium border border-n-weak hover:bg-n-alpha-1"
-                  style="color: #dc2626"
-                  @click="deleteBoxWorkoutCfg"
-                >
-                  Excluir
-                </button>
-                <button
-                  class="h-9 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
-                  @click="boxWkForm = null"
-                >
-                  Cancelar
-                </button>
-                <button
-                  class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
-                  :style="{ background: GRAD_NOITE }"
-                  :disabled="savingConfig"
-                  @click="saveBoxWorkoutCfg"
-                >
+                <button v-if="boxWkForm.id" class="h-9 px-3 rounded-lg text-xs font-medium border border-n-weak hover:bg-n-alpha-1" style="color: #dc2626" @click="deleteBoxWorkoutCfg">Excluir</button>
+                <button class="h-10 px-5 rounded-xl text-xs font-bold text-white disabled:opacity-60" :style="{ background: GRAD_LARANJA }" :disabled="savingConfig" @click="saveBoxWorkoutCfg">
                   {{ savingConfig ? 'Salvando…' : 'Salvar treino' }}
                 </button>
               </div>
@@ -2686,7 +3578,7 @@ onMounted(async () => {
                     class="inline-flex items-center gap-1 h-6 px-1.5 rounded-md text-[10px] border border-n-weak bg-n-solid-2 text-n-slate-11"
                     :title="b.desc"
                   >
-                    {{ blockMeta(b.type).icon }} {{ b.title || blockMeta(b.type).label }}
+                    <span :class="blockMeta(b.type).ico" style="width: 11px; height: 11px" />{{ b.title || blockMeta(b.type).label }}
                     <b class="text-n-slate-10">{{ blockMinutes(b) }}'</b>
                   </span>
                 </div>
@@ -2711,10 +3603,132 @@ onMounted(async () => {
             </div>
           </div>
 
+          <!-- rodada 26: PLANO DE LUTA -->
+          <div v-if="!boxSession && boxView === 'planos'" class="hub-block p-4 mb-4">
+            <div class="hub-sec">
+              <span class="hub-sec-ico"><span class="i-lucide-medal" /></span>
+              <div class="hub-sec-text">
+                <h2 class="hub-sec-title">Planos de luta</h2>
+                <p class="hub-sec-sub">intenção e sequências de cada round · por atleta ou por luta · Treinar roda no cronômetro</p>
+              </div>
+              <div class="hub-sec-actions">
+                <button class="h-8 px-3 rounded-lg text-xs font-bold text-white" :style="{ background: GRAD_LARANJA }" @click="openNewFightPlan">+ Novo plano</button>
+              </div>
+            </div>
+
+            <div v-if="fpForm" class="rounded-2xl border p-3 mb-3" :style="{ borderColor: LARANJA, background: 'rgba(255,138,0,0.05)' }">
+              <div class="hub-form mb-4">
+                <div class="hub-form-row">
+                  <label>Nome</label>
+                  <input v-model="fpForm.name" type="text" placeholder="ex.: Luta de outubro · João" class="hub-field hub-field-w font-bold" />
+                </div>
+                <div class="hub-form-row">
+                  <label>Atleta</label>
+                  <input v-model="fpForm.athlete" type="text" placeholder="quem vai lutar" class="hub-field hub-field-w" />
+                </div>
+                <div class="hub-form-row">
+                  <label>Adversário</label>
+                  <input v-model="fpForm.opponent" type="text" placeholder="adversário ou nome da luta" class="hub-field hub-field-w" />
+                </div>
+                <div class="hub-form-row">
+                  <label>Rounds</label>
+                  <div class="flex items-center gap-2">
+                    <button class="hub-bump" @click="setFpRounds(fpForm.rounds - 1)">−</button>
+                    <b class="text-base font-black w-7 text-center text-n-slate-12">{{ fpForm.rounds }}</b>
+                    <button class="hub-bump" @click="setFpRounds(fpForm.rounds + 1)">+</button>
+                  </div>
+                </div>
+                <div class="hub-form-row">
+                  <label>Round</label>
+                  <div class="flex gap-1.5 flex-wrap items-center">
+                    <button v-for="sec in ROUND_SEC_PRESETS" :key="sec" class="hub-tag" :class="{ 'is-on': Number(fpForm.round_sec) === sec }" @click="fpForm.round_sec = sec">{{ fmtClock(sec) }}</button>
+                    <input v-model="fpForm.round_sec" type="text" inputmode="numeric" placeholder="seg" class="hub-field hub-other" title="Outro valor, em segundos" />
+                  </div>
+                </div>
+                <div class="hub-form-row">
+                  <label>Descanso</label>
+                  <div class="flex gap-1.5 flex-wrap items-center">
+                    <button v-for="sec in REST_PRESETS" :key="sec" class="hub-tag" :class="{ 'is-on': Number(fpForm.rest_sec) === sec }" @click="fpForm.rest_sec = sec">{{ sec }} s</button>
+                    <input v-model="fpForm.rest_sec" type="text" inputmode="numeric" placeholder="seg" class="hub-field hub-other" title="Outro valor, em segundos" />
+                  </div>
+                </div>
+              </div>
+              <p class="hub-label">Rounds</p>
+              <div class="flex flex-col gap-2">
+                <div v-for="(r, i) in fpForm.plan" :key="i" class="hub-acc" :class="{ 'is-open': fpOpen === i }">
+                  <button class="hub-acc-head" @click="fpOpen = fpOpen === i ? -1 : i">
+                    <span class="hub-acc-n">{{ i + 1 }}</span>
+                    <span class="flex-1 min-w-0">
+                      <span class="block text-xs font-bold text-n-slate-12 truncate">Round {{ i + 1 }}<template v-if="fightIntent(r.intent)"> · {{ fightIntent(r.intent).label }}</template></span>
+                      <span class="block text-[10px] text-n-slate-10 truncate">{{ r.seqs.length }} sequência{{ r.seqs.length === 1 ? '' : 's' }}<template v-if="r.notes"> · {{ r.notes }}</template></span>
+                    </span>
+                    <span :class="fpOpen === i ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="hub-ico text-n-slate-10" />
+                  </button>
+                  <div v-if="fpOpen === i" class="hub-acc-body pt-3">
+                    <p class="hub-label">Intenção</p>
+                    <div class="flex gap-1.5 flex-wrap mb-3">
+                      <button
+                        v-for="it in FIGHT_INTENTS"
+                        :key="it.key"
+                        class="hub-tag"
+                        :class="{ 'is-on': r.intent === it.key }"
+                        :title="it.hint"
+                        @click="r.intent = r.intent === it.key ? '' : it.key"
+                      >
+                        <span :class="it.ico" />{{ it.label }}
+                      </button>
+                    </div>
+                    <p class="hub-label">Sequências</p>
+                    <SeqPicker v-model="r.seqs" :seqs="boxingSeqs" class="mb-3" />
+                    <input v-model="r.notes" type="text" placeholder="Observações do round (o que evitar, o que provocar…)" class="hub-field hub-field-w" />
+                  </div>
+                </div>
+              </div>
+              <div class="hub-form mt-3 mb-3">
+                <div class="hub-form-row">
+                  <label>Estratégia</label>
+                  <input v-model="fpForm.note" type="text" placeholder="linha geral da luta (opcional)" class="hub-field hub-field-w" />
+                </div>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex-1" />
+                <button v-if="fpForm.id" class="h-9 px-3 rounded-lg text-xs font-medium border border-n-weak hover:bg-n-alpha-1" style="color: #dc2626" @click="deleteFightPlan({ id: fpForm.id })">Excluir</button>
+                <button class="h-9 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1" @click="fpForm = null">Cancelar</button>
+                <button class="h-10 px-5 rounded-xl text-xs font-bold text-white disabled:opacity-60" :style="{ background: GRAD_LARANJA }" :disabled="savingFp" @click="saveFightPlan">
+                  {{ savingFp ? 'Salvando…' : 'Salvar plano' }}
+                </button>
+              </div>
+            </div>
+
+            <p v-if="!fightPlans.length && !fpForm" class="text-xs text-n-slate-10">Nenhum plano ainda — monte o primeiro.</p>
+            <div class="grid gap-2.5" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
+              <div v-for="fp in fightPlans" :key="fp.id" class="rounded-2xl border border-n-weak p-3 flex flex-col gap-2">
+                <div class="flex items-start gap-2">
+                  <span class="w-11 h-11 rounded-xl flex flex-col items-center justify-center text-white shrink-0 leading-none" :style="{ background: GRAD_LARANJA }">
+                    <span class="text-base font-black">{{ fp.data?.rounds }}</span>
+                    <span class="text-[8px] opacity-90">rounds</span>
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-bold text-n-slate-12 leading-tight">{{ fp.data?.name }}</p>
+                    <p class="text-[11px] text-n-slate-10">{{ fpSummary(fp) }}</p>
+                  </div>
+                  <button class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0" title="Editar" @click="openEditFightPlan(fp)">✏️</button>
+                </div>
+                <div class="flex gap-1 flex-wrap">
+                  <span v-for="(r, i) in fp.data?.plan || []" :key="i" class="inline-flex items-center gap-1 h-6 px-1.5 rounded-md text-[10px] border border-n-weak bg-n-solid-2 text-n-slate-11" :title="(r.seqs || []).map(seqName).join(' · ')">
+                    <span v-if="fightIntent(r.intent)" :class="fightIntent(r.intent).ico" style="width: 11px; height: 11px" />R{{ i + 1 }} {{ fightIntent(r.intent)?.label || 'livre' }}
+                    <b v-if="(r.seqs || []).length" class="text-n-slate-10">{{ (r.seqs || []).length }}</b>
+                  </span>
+                </div>
+                <button class="h-10 rounded-xl text-xs font-bold text-white shadow mt-auto" :style="{ background: GRAD_NOITE }" @click="trainFightPlan(fp)">▶ Treinar este plano</button>
+              </div>
+            </div>
+          </div>
+
           <!-- Registrar manualmente (dobrável) -->
-          <div v-if="!boxSession" class="hub-block p-4 mb-4">
+          <div v-if="!boxSession && boxView === 'treinar'" class="hub-block p-4 mb-4">
             <button class="w-full text-left text-sm font-bold text-n-slate-12" @click="showManualBox = !showManualBox">
-              {{ showManualBox ? '▾' : '▸' }} ✍️ Registrar treino livre
+              {{ showManualBox ? '▾' : '▸' }} Registrar treino livre
             </button>
             <template v-if="showManualBox">
             <p class="text-[11px] text-n-slate-10 mt-1 mb-3">Treinou fora dos programados? Anote duração, rounds e sequências.</p>
@@ -2786,19 +3800,44 @@ onMounted(async () => {
           </div>
 
           <!-- Repertório de sequências -->
-          <div v-if="!boxSession" class="hub-block p-4 mb-4">
-            <div class="flex items-center justify-between mb-1">
-              <h2 class="text-sm font-bold text-n-slate-12">🌀 Sequências — repertório</h2>
+          <div v-if="!boxSession && boxView === 'repertorio'" class="hub-block p-4 mb-4">
+            <div class="hub-sec">
+              <span class="hub-sec-ico"><span class="i-lucide-list-ordered" /></span>
+              <div class="hub-sec-text">
+                <h2 class="hub-sec-title">Repertório de sequências</h2>
+                <p class="hub-sec-sub">1 jab · 2 direto · 3 hook esq · 4 hook dir · 5 upper esq · 6 upper dir · b = no corpo</p>
+              </div>
+              <div class="hub-sec-actions">
+                <button
+                  class="h-8 px-3 rounded-lg text-xs font-medium border border-dashed border-n-weak hover:bg-n-alpha-1"
+                  :style="{ color: LARANJA_VIVO }"
+                  title="Traz 25 sequências prontas com etiqueta e 'quando usar' (não repete as suas)"
+                  @click="importSeqLibrary"
+                >
+                  <span class="i-lucide-library hub-ico" style="width: 14px; height: 14px" /> Importar biblioteca
+                </button>
+                <button
+                  class="h-8 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
+                  @click="openNewSeq"
+                >
+                  + Nova sequência
+                </button>
+              </div>
+            </div>
+            <!-- etiquetas "quando usar" (rodada 26 · tags de linha na 27) -->
+            <div class="flex gap-1.5 flex-wrap mb-3">
+              <button class="hub-tag" :class="{ 'is-on': !seqFilter }" @click="seqFilter = ''">todas <small>{{ boxingSeqs.length }}</small></button>
               <button
-                class="h-8 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
-                @click="openNewSeq"
+                v-for="c in SEQ_CATEGORIES"
+                :key="c.key"
+                class="hub-tag"
+                :class="{ 'is-on': seqFilter === c.key }"
+                :title="c.hint"
+                @click="seqFilter = seqFilter === c.key ? '' : c.key"
               >
-                + Nova sequência
+                <span :class="c.ico" />{{ c.label }} <small>{{ seqCount(c.key) }}</small>
               </button>
             </div>
-            <p class="text-[11px] text-n-slate-10 mb-3">
-              1 jab · 2 direto · 3 hook esq · 4 hook dir · 5 uppercut esq · 6 uppercut dir
-            </p>
 
             <!-- Editor -->
             <div v-if="seqForm" class="rounded-xl border border-n-weak p-3 mb-3">
@@ -2823,8 +3862,21 @@ onMounted(async () => {
                 type="text"
                 placeholder="Descrição (ex.: Jab · direto · hook esquerdo)"
                 class="block w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-                style="margin-bottom: 10px"
+                style="margin-bottom: 8px"
               />
+              <div class="flex items-center gap-2 flex-wrap" style="margin-bottom: 10px">
+                <select v-model="seqForm.category" class="h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12" style="width: 12rem; margin-bottom: 0">
+                  <option value="">Etiqueta (quando usar)…</option>
+                  <option v-for="c in SEQ_CATEGORIES" :key="c.key" :value="c.key">{{ c.label }}</option>
+                </select>
+                <input
+                  v-model="seqForm.when"
+                  type="text"
+                  placeholder="Quando usar (ex.: ele solta o jab: esquiva pra fora e direto)"
+                  class="h-9 flex-1 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
+                  style="min-width: 12rem; margin-bottom: 0"
+                />
+              </div>
               <div class="flex items-center gap-2 flex-wrap">
                 <div class="flex-1" />
                 <button
@@ -2855,14 +3907,18 @@ onMounted(async () => {
             <!-- Cards das sequências (grandes, pra praticar lendo) -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div
-                v-for="s in boxingSeqs"
+                v-for="s in filteredSeqs"
                 :key="s.id"
                 class="rounded-xl border border-n-weak p-3 flex items-start gap-2"
               >
                 <div class="flex-1 min-w-0">
-                  <p class="text-[11px] font-bold text-n-slate-11">{{ s.name }}</p>
+                  <p class="text-[11px] font-bold text-n-slate-11 flex items-center gap-1.5 flex-wrap">
+                    {{ s.name }}
+                    <span v-if="seqCatMeta(s.category)" class="hub-tag is-soft"><span :class="seqCatMeta(s.category).ico" />{{ seqCatMeta(s.category).label }}</span>
+                  </p>
                   <p class="text-xl font-black tracking-wide" :style="{ color: ROYAL }">{{ s.steps }}</p>
                   <p v-if="s.desc" class="text-[11px] text-n-slate-10">{{ s.desc }}</p>
+                  <p v-if="s.when" class="text-[11px] mt-0.5" :style="{ color: LARANJA_VIVO }"><b>Quando usar:</b> {{ s.when }}</p>
                 </div>
                 <button
                   class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0"
@@ -2875,38 +3931,39 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- Histórico do boxe -->
-          <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3">🗓 Últimos treinos de boxe</h2>
-            <p v-if="!boxings.length" class="text-xs text-n-slate-10">Nenhum treino de boxe registrado ainda.</p>
-            <div
-              v-for="b in boxings.slice(0, 8)"
-              :key="b.id"
-              class="flex items-center gap-3 py-2 border-b border-n-weak last:border-0"
-            >
-              <span
-                class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold shrink-0"
-                :style="{ background: GRAD_NOITE }"
-              >
-                {{ fmtDay(b.record_date) }}
-              </span>
-              <div class="flex-1 min-w-0">
-                <p class="text-xs font-bold text-n-slate-12">
-                  {{ b.data?.duration_min || 0 }} min
-                  <span v-if="b.data?.rounds" class="font-normal text-n-slate-10">· {{ b.data.rounds }} rounds</span>
-                  <span v-if="b.data?.workout_name" class="font-normal" :style="{ color: ROYAL }">· {{ b.data.workout_name }}</span>
-                </p>
-                <p class="text-[11px] text-n-slate-10 truncate">
-                  {{ (b.data?.sequences || []).map(seqName).join(' · ') || b.data?.notes || '—' }}
-                </p>
+          <!-- Histórico do boxe (rodada 27: seção própria, lista agrupada por mês) -->
+          <div v-if="!boxSession && boxView === 'historico'" class="hub-block p-4 mb-4">
+            <div class="hub-sec">
+              <span class="hub-sec-ico"><span class="i-lucide-history" /></span>
+              <div class="hub-sec-text">
+                <h2 class="hub-sec-title">Histórico de boxe</h2>
+                <p class="hub-sec-sub">cada sessão registrada, mês a mês</p>
               </div>
-              <button
-                class="w-7 h-7 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0"
-                title="Remover"
-                @click="deleteRecord(b)"
-              >
-                ✕
-              </button>
+            </div>
+            <div class="hub-grid-3 mb-4">
+              <div class="hub-stat"><b>{{ boxStats.n }}</b><span>sessões</span></div>
+              <div class="hub-stat"><b>{{ boxStats.min }}</b><span>minutos</span></div>
+              <div class="hub-stat"><b>{{ boxStats.rounds }}</b><span>rounds</span></div>
+            </div>
+            <p v-if="!boxings.length" class="text-xs text-n-slate-10">Nenhum treino de boxe registrado ainda.</p>
+            <div v-else class="hub-list">
+              <template v-for="g in groupByMonth(boxings.slice(0, 80))" :key="g.key">
+                <div class="hub-month">{{ g.label }}</div>
+                <div v-for="b in g.items" :key="b.id" class="hub-row">
+                  <span class="hub-row-date"><b>{{ dayOf(b.record_date) }}</b><small>{{ monOf(b.record_date) }}</small></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-bold text-n-slate-12 truncate">
+                      {{ b.data?.duration_min || 0 }} min
+                      <span v-if="b.data?.rounds" class="font-normal text-n-slate-10">· {{ b.data.rounds }} rounds</span>
+                      <span v-if="b.data?.workout_name" class="font-normal" :style="{ color: ROYAL }">· {{ b.data.workout_name }}</span>
+                    </p>
+                    <p class="text-[11px] text-n-slate-10 truncate">{{ (b.data?.sequences || []).map(seqName).join(' · ') || b.data?.notes || '—' }}</p>
+                  </div>
+                  <button class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 shrink-0 flex items-center justify-center" title="Remover" @click="deleteRecord(b)">
+                    <span class="i-lucide-x" style="width: 14px; height: 14px" />
+                  </button>
+                </div>
+              </template>
             </div>
           </div>
         </template>
@@ -2917,8 +3974,7 @@ onMounted(async () => {
           <div class="hub-block p-4 mb-4">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
               <span class="flex items-center gap-2">
-                <h2 class="text-sm font-bold text-n-slate-12">
-                  🍽 {{ dietDate === todayISO ? 'Hoje' : fmtDay(dietDate) }}
+                <h2 class="text-sm font-bold text-n-slate-12"><span class="hub-h-ico i-lucide-utensils-crossed" />{{ dietDate === todayISO ? 'Hoje' : fmtDay(dietDate) }}
                 </h2>
                 <input
                   v-model="dietDate"
@@ -3030,7 +4086,7 @@ onMounted(async () => {
 
           <!-- Editor do plano alimentar -->
           <div v-if="dietForm" class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">🎯 Metas do dia</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-target" />Metas do dia</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
               É só passar as <b>calorias</b>: proteína (1,8 g/kg do seu peso), carbo e
               gordura são calculados na hora e divididos entre as refeições — ajuste
@@ -3057,7 +4113,7 @@ onMounted(async () => {
                 style="margin-bottom: 0"
               />
             </label>
-            <h2 class="text-sm font-bold text-n-slate-12 mb-2">🍱 Refeições do plano</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-2"><span class="hub-h-ico i-lucide-utensils" />Refeições do plano</h2>
             <div v-for="(meal, i) in dietForm.meals" :key="i" class="rounded-xl border border-n-weak p-2.5 mb-2">
               <div class="flex items-center gap-2 flex-wrap mb-1.5">
                 <input
@@ -3123,7 +4179,7 @@ onMounted(async () => {
 
           <!-- Histórico da dieta -->
           <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3">🗓 Últimos dias</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-3"><span class="hub-h-ico i-lucide-calendar-days" />Últimos dias</h2>
             <p v-if="!diets.length" class="text-xs text-n-slate-10">Nenhum dia registrado ainda.</p>
             <div
               v-for="d in diets.slice(0, 7)"
@@ -3146,9 +4202,9 @@ onMounted(async () => {
           <!-- Registrar medidas: data em destaque + GRADE uniforme
                (rodada 15 — cada célula: rótulo · roleta · chip da última) -->
           <div class="hub-block p-4 sm:p-5 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-1">📏 Registrar medidas</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-1"><span class="hub-h-ico i-lucide-ruler" />Registrar medidas</h2>
             <p class="text-[11px] text-n-slate-10 mb-3">
-              Protocolo: braço RELAXADO · coxa no meio virilha–joelho · cintura após expiração normal, sem encolher · pescoço abaixo do pomo de Adão, sem apertar. Sempre do mesmo jeito.
+              Protocolo: braço RELAXADO · antebraço na parte mais grossa, punho solto · coxa no meio virilha–joelho · panturrilha em pé, na parte mais grossa · cintura após expiração normal, sem encolher · pescoço abaixo do pomo de Adão, sem apertar. Sempre do mesmo jeito.
             </p>
 
             <div class="flex items-center gap-2 flex-wrap mb-4 rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2.5">
@@ -3211,7 +4267,7 @@ onMounted(async () => {
 
           <!-- Gráfico do peso -->
           <div class="hub-block p-4 mb-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3">⚖️ Peso ao longo do tempo</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-3"><span class="hub-h-ico i-lucide-scale" />Peso ao longo do tempo</h2>
             <MiniBars
               v-if="weightSeries.values.length > 1"
               :values="weightSeries.values"
@@ -3238,7 +4294,7 @@ onMounted(async () => {
 
           <!-- Histórico do corpo -->
           <div class="hub-block p-4">
-            <h2 class="text-sm font-bold text-n-slate-12 mb-3">🗓 Últimas medições</h2>
+            <h2 class="text-sm font-bold text-n-slate-12 mb-3"><span class="hub-h-ico i-lucide-calendar-days" />Últimas medições</h2>
             <p v-if="!bodies.length" class="text-xs text-n-slate-10">Nenhuma medição registrada ainda.</p>
             <div
               v-for="b in bodies.slice(0, 10)"
@@ -3266,10 +4322,119 @@ onMounted(async () => {
       </template>
     </div>
     <HubTabBar :boxing-on="boxingOn" />
+    <HubCelebration :data="celebration" @close="celebration = null" />
   </div>
 </template>
 
 <style scoped>
+/* rodada 26: TODOS os treinos com moldura; o da vez segue laranja */
+.hub-session-card:not(.is-next) {
+  border: 1.5px solid rgba(65, 105, 225, 0.42) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 24px -14px rgba(39, 64, 139, 0.45) !important;
+}
+:global(.dark) .hub-session-card:not(.is-next) {
+  border-color: rgba(143, 169, 245, 0.55) !important;
+}
+/* rodada 27: tipo de cardio (grade fixa), estatísticas, campos escuros, controles do professor */
+.hub-cardio-type {
+  height: 64px;
+  border-radius: 16px;
+  border: 1px solid rgba(65, 105, 225, 0.22);
+  background: rgba(255, 255, 255, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+  transition: all 0.15s ease;
+}
+.hub-cardio-type .hub-cardio-ico { width: 20px; height: 20px; color: #4169e1; }
+.hub-cardio-type.is-on { background: linear-gradient(135deg, #27408b, #4169e1); color: #fff; border-color: transparent; box-shadow: 0 8px 20px rgba(65, 105, 225, 0.35); }
+.hub-cardio-type.is-on .hub-cardio-ico { color: #fff; }
+:global(.dark) .hub-cardio-type { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.hub-stat {
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(65, 105, 225, 0.08);
+  border: 1px solid rgba(65, 105, 225, 0.18);
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.hub-stat b { font-size: 20px; font-weight: 900; color: #27408b; }
+.hub-stat span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-top: 3px; }
+:global(.dark) .hub-stat b { color: #fff; }
+.hub-field-dark { background: rgba(255, 255, 255, 0.1) !important; border-color: rgba(255, 255, 255, 0.25) !important; color: #fff !important; }
+.hub-field-dark::placeholder { color: rgba(255, 255, 255, 0.6); }
+.hub-acc-dark { background: rgba(255, 255, 255, 0.08) !important; border-color: rgba(255, 255, 255, 0.18) !important; }
+.hub-acc-dark.is-open { border-color: rgba(255, 178, 94, 0.6) !important; }
+.hub-acc-dark .hub-acc-body { border-top-color: rgba(255, 255, 255, 0.14); }
+.hub-pro-ctl { border-radius: 12px; padding: 8px 10px; background: rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hub-pro-ctl > div { flex-wrap: wrap; }
+.hub-pro-ctl em { font-style: normal; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.75; }
+.hub-pro-ctl b { min-width: 22px; text-align: center; font-size: 15px; }
+.hub-pro-bump { width: 28px; height: 28px; border-radius: 8px; font-weight: 900; border: 1px solid rgba(255, 255, 255, 0.3); }
+.hub-pro-pill { height: 28px; padding: 0 9px; border-radius: 8px; font-size: 11px; font-weight: 700; border: 1px solid rgba(255, 255, 255, 0.25); }
+.hub-pro-pill.is-on { background: #ff8a00; color: #1a0e00; border-color: transparent; }
+/* controles do construtor por rounds / plano de luta */
+.hub-rounds-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+}
+.hub-rounds-ctl.is-light {
+  background: rgba(65, 105, 225, 0.08);
+}
+.hub-rounds-ctl em {
+  font-style: normal;
+  font-size: 10px;
+  opacity: 0.75;
+  margin-right: 2px;
+}
+.hub-rounds-ctl > button {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-weight: 900;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+}
+.hub-rounds-ctl b {
+  min-width: 20px;
+  text-align: center;
+  font-size: 14px;
+}
+.hub-rounds-pill {
+  width: auto !important;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700 !important;
+}
+.hub-rounds-pill.is-on {
+  background: #ff8a00;
+  color: #1a0e00;
+  border-color: transparent !important;
+}
+.hub-rounds-num {
+  width: 3rem !important;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  text-align: center;
+  font-size: 12px;
+  margin-bottom: 0 !important;
+}
 /* Cartão de vidro da meta (rodada 13): translúcido c/ blur, borda fina
    e brilho interno — royal no dia a dia, LARANJA quando a meta foi batida */
 .hub-glass {

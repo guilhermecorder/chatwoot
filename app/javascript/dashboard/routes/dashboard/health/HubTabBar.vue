@@ -21,6 +21,7 @@ const items = computed(() => [
   { name: 'hub_health_corpo', label: 'Corpo', icon: 'i-lucide-ruler' },
   { name: 'hub_health_dieta', label: 'Dieta', icon: 'i-lucide-utensils' },
   { name: 'hub_health_dash', label: 'Análises', icon: 'i-lucide-area-chart' },
+  { name: 'hub_health_rotina', label: 'Rotina', icon: 'i-lucide-calendar-range' },
 ]);
 
 // o botão-hambúrguer do app (fixo no canto inferior esquerdo) sobe pra
