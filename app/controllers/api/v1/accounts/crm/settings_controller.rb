@@ -219,6 +219,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ── Meta Ads ────────────────────────────────────────────────────────────────
 
+  # parâmetros bom/atenção/ruim da Central de Criativos (item 172)
+  def apply_creative_targets(cfg)
+    cfg['creative_targets'] = Crm::CreativeTargets.sanitize(params[:creative_targets]) if params.key?(:creative_targets)
+  end
+
   def update_meta_ads
     cfg = crm_settings.meta_ads_config || {}
     cfg['pixel_id']          = params[:pixel_id]          if params[:pixel_id].present?
@@ -227,6 +232,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg['test_event_code']   = params[:test_event_code]   # pode ser blank
     # etapas do CRM que contam como conversão no relatório de anúncios
     cfg['conversion_stage_ids'] = Array(params[:conversion_stage_ids]).map(&:to_i) if params.key?(:conversion_stage_ids)
+    apply_creative_targets(cfg)
     crm_settings.update!(meta_ads_config: cfg)
     render json: meta_ads_json(crm_settings)
   end
@@ -333,9 +339,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # ── IA (análise de conversas — Anthropic) ──────────────────────────────────
 
   def update_ai
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores podem configurar a IA.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores podem configurar a IA.' }, status: :forbidden unless Current.account_user.administrator?
 
     cfg = crm_settings.ai_config || {}
     cfg['api_key'] = params[:api_key] if params[:api_key].present?
@@ -482,7 +486,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # Item 157: a conexão de verdade é o BANCO do OftalmoFácil (usuário
   # só-leitura): host/porta/banco/usuário/senha + o nome do fornecedor
   # (CATARATA_SP = CEVICO) + o de-para de médicos (CRM → nome) + liga/desliga.
-  def update_oftalmofacil # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
+  def update_oftalmofacil # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     cfg = crm_settings.agenda_config || {}
     of = cfg['oftalmofacil'] || {}
     of['base_url'] = params[:base_url].to_s.strip if params.key?(:base_url)
@@ -917,9 +921,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
     # painel PRINCIPAL da conta: o padrão do Meu Painel para quem não tem
     # painel atribuído ('' volta ao padrão de fábrica) — só admin
-    if params.key?(:main_panel) && Current.account_user.administrator?
-      cfg['main_panel'] = params[:main_panel].to_s[0, 60].presence
-    end
+    cfg['main_panel'] = params[:main_panel].to_s[0, 60].presence if params.key?(:main_panel) && Current.account_user.administrator?
     # 📌 PRO MAX (item 129): histórico de AÇÕES DA EMPRESA (LP nova no ar,
     # campanha X, deploy…) — marcadores na linha do tempo do estúdio, para
     # entender o que cada ação gerou. Lista inteira substituída a cada save.
@@ -1005,7 +1007,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def sanitize_appointment_reminders(raw)
     %w[d1 d0].index_with do |regua|
       r = raw[regua].is_a?(ActionController::Parameters) ? raw[regua] : ActionController::Parameters.new
-      tp = r[:template_params].is_a?(ActionController::Parameters) ? r[:template_params].permit(:name, :namespace, :language, :category, processed_params: {}).to_h : nil
+      tp = if r[:template_params].is_a?(ActionController::Parameters)
+             r[:template_params].permit(:name, :namespace, :language, :category,
+                                        processed_params: {}).to_h
+           end
       {
         'enabled' => ActiveModel::Type::Boolean.new.cast(r[:enabled]) == true,
         'hour' => r[:hour].to_i.clamp(0, 23),
@@ -1029,9 +1034,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   SCHEDULER_MSG_MARKER = 'Secretário da Agenda (mensagens)'.freeze
 
   def sync_scheduler_stages
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     wanted = Array(params[:stage_ids]).map(&:to_i).reject(&:zero?).uniq
     managed = Crm::Automation.joins(stage: :pipeline)
@@ -1080,9 +1083,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # Insights comerciais do Consultor Comercial: analisa as conversas que
   # geraram fechamento e grava o relatório p/ a gestão (job assíncrono).
   def sales_insights
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     Crm::SalesInsightsJob.perform_later(Current.account.id)
     render json: { success: true, message: 'Análise iniciada! Os insights aparecem aqui em 1-2 minutos.' }
@@ -1103,9 +1104,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   def sync_agent_stages
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     agent = params[:agent].to_s
     action = AGENT_STAGE_ACTIONS[agent]
@@ -1138,9 +1137,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # Preencher a Agenda com o histórico: varre conversas com confirmação de
   # agendamento e registra as consultas (Agente de Agendamento). Admin-only.
   def agenda_backfill
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     Crm::AgendaBackfillJob.perform_later(Current.account.id, {
                                            'since_days' => params[:since_days].to_i,
@@ -1165,9 +1162,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # Mentor do Time pontual (admin): gera o feedback dos últimos 7 dias agora,
   # sem esperar a segunda-feira — bom para testar e para a primeira rodada.
   def run_mentor
-    unless Current.account_user.administrator?
-      return render json: { error: 'Só administradores rodam o Mentor.' }, status: :forbidden
-    end
+    return render json: { error: 'Só administradores rodam o Mentor.' }, status: :forbidden unless Current.account_user.administrator?
 
     Crm::WeeklyMentorJob.perform_later(Current.account.id)
     render json: { success: true, message: 'Mentor do Time iniciado! Os feedbacks aparecem no Meu Painel em alguns minutos.' }
@@ -1328,7 +1323,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   def usage_totals(scope)
-    calls, input, output, cost = scope.pick(Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'))
+    calls, input, output, cost = scope.pick(Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'),
+                                            Arel.sql('SUM(cost_usd)'))
     { calls: calls.to_i, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4) }
   end
 
@@ -1629,7 +1625,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # Extrai o path do webhook do primeiro nó Webhook ativo no workflow
   def extract_webhook_path(workflow)
-    nodes = workflow.dig('nodes') || []
+    nodes = workflow['nodes'] || []
     webhook_node = nodes.find { |n| n['type'] == 'n8n-nodes-base.webhook' }
     webhook_node&.dig('parameters', 'path')
   rescue StandardError

@@ -1,6 +1,6 @@
 # Pontos de contato com o upstream (base: v4.17.1)
 
-Gerado por `script/cevico_touchpoints.sh v4.17.1` em 18/09/2026. Arquivos do Chatwoot
+Gerado por `script/cevico_touchpoints.sh v4.17.1` em 19/09/2026. Arquivos do Chatwoot
 original que o CEVICO modificou — na próxima atualização, são estes que podem conflitar.
 Arquivos novos nossos (app/services/crm, components-next/cevico, …) não aparecem: nunca conflitam.
 
@@ -21,13 +21,14 @@ Arquivos novos nossos (app/services/crm, components-next/cevico, …) não apare
 | `app/javascript/dashboard/assets/scss/app.scss` | +42/−0 |
 | `app/javascript/dashboard/components-next/message/Message.vue` | +13/−1 |
 | `app/javascript/dashboard/components-next/message/bubbles/Base.vue` | +10/−6 |
-| `app/javascript/dashboard/components-next/sidebar/Sidebar.vue` | +665/−290 |
+| `app/javascript/dashboard/components-next/sidebar/Sidebar.vue` | +674/−290 |
 | `app/javascript/dashboard/components-next/sidebar/SidebarGroup.vue` | +10/−1 |
 | `app/javascript/dashboard/components-next/sidebar/SidebarGroupHeader.vue` | +66/−2 |
 | `app/javascript/dashboard/components-next/sidebar/SidebarProfileMenu.vue` | +25/−0 |
 | `app/javascript/dashboard/components-next/sidebar/SidebarSortMenu.vue` | +12/−0 |
 | `app/javascript/dashboard/components/ChatList.vue` | +533/−14 |
 | `app/javascript/dashboard/components/widgets/conversation/ConversationCard.vue` | +104/−0 |
+| `app/javascript/dashboard/components/widgets/conversation/ConversationHeader.vue` | +17/−1 |
 | `app/javascript/dashboard/composables/commands/useAppearanceHotKeys.js` | +54/−2 |
 | `app/javascript/dashboard/composables/useAutomationValues.js` | +12/−1 |
 | `app/javascript/dashboard/constants/localStorage.js` | +1/−0 |
@@ -52,6 +53,7 @@ Arquivos novos nossos (app/services/crm, components-next/cevico, …) não apare
 | `app/javascript/dashboard/routes/dashboard/Dashboard.vue` | +10/−3 |
 | `app/javascript/dashboard/routes/dashboard/conversation/ContactPanel.vue` | +30/−12 |
 | `app/javascript/dashboard/routes/dashboard/conversation/ConversationAction.vue` | +29/−171 |
+| `app/javascript/dashboard/routes/dashboard/conversation/contact/ContactInfo.vue` | +10/−0 |
 | `app/javascript/dashboard/routes/dashboard/conversation/contact/ContactNotes.vue` | +26/−63 |
 | `app/javascript/dashboard/routes/dashboard/dashboard.routes.js` | +26/−0 |
 | `app/javascript/dashboard/routes/dashboard/settings/agents/Index.vue` | +26/−0 |
@@ -61,7 +63,7 @@ Arquivos novos nossos (app/services/crm, components-next/cevico, …) não apare
 | `app/javascript/dashboard/routes/dashboard/settings/labels/Index.vue` | +155/−62 |
 | `app/javascript/dashboard/routes/dashboard/settings/reports/reports.routes.js` | +90/−0 |
 | `app/javascript/dashboard/routes/dashboard/settings/settings.routes.js` | +6/−0 |
-| `app/javascript/dashboard/routes/index.js` | +60/−1 |
+| `app/javascript/dashboard/routes/index.js` | +61/−1 |
 | `app/javascript/dashboard/routes/index.spec.js` | +3/−0 |
 | `app/javascript/dashboard/store/index.js` | +4/−0 |
 | `app/javascript/dashboard/store/modules/conversations/helpers.js` | +21/−1 |
@@ -92,10 +94,10 @@ Arquivos novos nossos (app/services/crm, components-next/cevico, …) não apare
 | `app/views/api/v1/accounts/search/_contact.json.jbuilder` | +12/−0 |
 | `app/views/api/v1/conversations/partials/_conversation.json.jbuilder` | +7/−0 |
 | `app/views/layouts/vueapp.html.erb` | +6/−5 |
-| `config/initializers/rack_attack.rb` | +26/−0 |
+| `config/initializers/rack_attack.rb` | +43/−0 |
 | `config/installation_config.yml` | +5/−5 |
-| `config/routes.rb` | +372/−1 |
-| `config/schedule.yml` | +105/−0 |
+| `config/routes.rb` | +41/−1 |
+| `config/schedule.yml` | +113/−0 |
 | `config/vite.json` | +2/−1 |
 | `db/migrate/20231211010807_add_cached_labels_list.rb` | +1/−1 |
 | `docker-compose.yaml` | +4/−1 |
@@ -109,7 +111,7 @@ Arquivos novos nossos (app/services/crm, components-next/cevico, …) não apare
 | `enterprise/app/models/captain/faq_suggestion.rb` | +7/−0 |
 | `enterprise/app/models/company.rb` | +8/−8 |
 | `enterprise/app/models/enterprise/audit_log.rb` | +6/−5 |
-| `package.json` | +4/−1 |
+| `package.json` | +16/−2 |
 | `public/android-icon-144x144.png` | +-/−- |
 | `public/android-icon-192x192.png` | +-/−- |
 | `public/android-icon-36x36.png` | +-/−- |

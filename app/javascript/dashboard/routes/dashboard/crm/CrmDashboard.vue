@@ -824,7 +824,7 @@ const respCurve = computed(() => {
           label: '% que chegou até a etapa',
           data: rows.map(s => s.reached_pct),
           borderColor: blockHex('responsividade', 2),
-          backgroundColor: `rgba(${hexToRgb(blockHex('responsividade', 2))}, 0.16)`,
+          backgroundColor: `rgb(${hexToRgb(blockHex('responsividade', 2))} / 0.16)`,
           fill: true,
           tension: 0.4,
           borderWidth: 3,

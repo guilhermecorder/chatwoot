@@ -187,3 +187,10 @@ crm_voice_campaign_dialer_job:
   cron: '*/5 * * * *'
   class: 'Crm::VoiceAgent::CampaignDialerJob'
   queue: low
+
+# 🎯 Central de Criativos (item 172): 07:20 UTC (04:20 SP) — anúncios +
+# métricas diárias da Meta (últimos 3 dias; 90 na primeira vez)
+crm_ad_insights_sync_job:
+  cron: '20 7 * * *'
+  class: 'Crm::AdInsightsSyncJob'
+  queue: low

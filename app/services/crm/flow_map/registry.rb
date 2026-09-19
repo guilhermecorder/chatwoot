@@ -31,6 +31,7 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::Pagebuilder,
     Crm::FlowMap::Flows::Creative,
     Crm::FlowMap::Flows::Harvest,
+    Crm::FlowMap::Flows::CreativesCenter,
     # Gestão e evolução do time
     Crm::FlowMap::Flows::Manager,
     Crm::FlowMap::Flows::Auditor,

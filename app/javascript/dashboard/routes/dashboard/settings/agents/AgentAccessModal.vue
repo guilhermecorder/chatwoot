@@ -73,6 +73,7 @@ const REPORT_ITEMS = [
   { key: 'agents_dashboard', label: 'Dashboard dos Agentes' },
   { key: 'agenda_dashboard', label: 'Dashboard da Agenda' },
   { key: 'ads', label: 'Anúncios (Meta)' },
+  { key: 'creatives', label: 'Central de Criativos' },
   { key: 'google', label: 'Google (Ads + GA4)' },
   { key: 'whatsapp_health', label: 'Saúde do WhatsApp' },
 ];

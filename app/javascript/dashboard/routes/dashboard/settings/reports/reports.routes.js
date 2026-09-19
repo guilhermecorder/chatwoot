@@ -32,6 +32,7 @@ import AgentsDashboard from './AgentsDashboard.vue';
 import GoogleDashboard from './GoogleDashboard.vue';
 import AgendaDashboard from './AgendaDashboard.vue';
 import AdsReport from './AdsReport.vue';
+import CreativesCenter from './CreativesCenter.vue';
 import CallsDashboard from './CallsDashboard.vue';
 
 const meta = {
@@ -233,6 +234,15 @@ export default {
             permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: AdsReport,
+        },
+        {
+          // 🎯 Central de Criativos (item 172)
+          path: 'creatives',
+          name: 'creatives_reports',
+          meta: {
+            permissions: ['administrator', 'agent', 'report_manage'],
+          },
+          component: CreativesCenter,
         },
         {
           path: 'calls_dashboard',

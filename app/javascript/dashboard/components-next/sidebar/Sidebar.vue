@@ -771,6 +771,7 @@ const menuItems = computed(() => {
             route: 'calls_dashboard_reports',
           },
           { name: 'Ads Report', key: 'ads', label: 'Anúncios (Meta)', route: 'ads_reports' },
+          { name: 'Creatives Center', key: 'creatives', label: 'Central de Criativos', route: 'creatives_reports' },
           { name: 'Google Dashboard', key: 'google', label: 'Google (Ads + GA4)', route: 'google_dashboard_reports' },
           { name: 'WhatsApp Health', key: 'whatsapp_health', label: 'Saúde do WhatsApp', route: 'whatsapp_health_reports' },
         ]

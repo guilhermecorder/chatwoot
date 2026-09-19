@@ -70,6 +70,11 @@ class Api::V1::Accounts::Crm::JourneyMessagesController < Api::V1::Accounts::Bas
     render json: { created: created, today: today_summary }
   end
 
+  # GET /crm/journey_messages/map — tudo o que age em cada etapa (item 173)
+  def map
+    render json: Crm::Journey::MapService.new(account: Current.account).call
+  end
+
   def settings_show
     render json: { settings: settings.to_h }
   end
@@ -92,13 +97,35 @@ class Api::V1::Accounts::Crm::JourneyMessagesController < Api::V1::Accounts::Bas
     @settings ||= Crm::Journey::Settings.new(Current.account)
   end
 
-  def apply_settings_params(journey)
+  def apply_settings_params(journey) # rubocop:disable Metrics/AbcSize
     journey['places'] = sanitize_places(params[:places]) if params.key?(:places)
     journey['hours'] = sanitize_hours(params[:hours]) if params.key?(:hours)
     journey['daily_cap'] = params[:daily_cap].to_i.clamp(1, 5000) if params.key?(:daily_cap)
     journey['quiet_labels'] = quiet_labels_param if params.key?(:quiet_labels)
+    journey['map'] = sanitize_map(params[:map]) if params.key?(:map)
     journey
   end
+
+  MAP_STEPS = Crm::JourneyMessage::STEPS.keys.freeze
+
+  # customização do mapa da jornada (item 173) — só chaves conhecidas
+  # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def sanitize_map(raw)
+    h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+    step_ok = ->(v) { MAP_STEPS.include?(v.to_s) }
+    {
+      'stage_steps' => h['stage_steps'].to_h.select { |_k, v| step_ok.call(v) }.to_h { |k, v| [k.to_s, v.to_s] }.first(200).to_h,
+      'overrides' => h['overrides'].to_h.select { |_k, v| step_ok.call(v) || v.to_s == 'geral' }
+                                   .to_h { |k, v| [k.to_s[0, 60], v.to_s] }.first(300).to_h,
+      'hidden' => Array(h['hidden']).map { |v| v.to_s[0, 60] }.compact_blank.uniq.first(300),
+      'show' => h['show'].to_h.slice(*Crm::Journey::MapService::KINDS.keys).transform_values { |v| !(v == false || v.to_s == 'false') },
+      'step_order' => Array(h['step_order']).map(&:to_s).select { |k| step_ok.call(k) }.uniq,
+      'step_labels' => h['step_labels'].to_h.slice(*MAP_STEPS).transform_values { |v| v.to_s.strip[0, 40] }.compact_blank,
+      'density' => %w[compact comfortable].include?(h['density'].to_s) ? h['density'].to_s : 'comfortable',
+      'queue' => %w[side top hidden].include?(h['queue'].to_s) ? h['queue'].to_s : 'side'
+    }
+  end
+  # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   def quiet_labels_param
     Array(params[:quiet_labels]).map { |l| l.to_s.strip }.compact_blank.first(20)

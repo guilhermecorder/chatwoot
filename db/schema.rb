@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_18_143000) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_19_143000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -569,6 +569,37 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_18_143000) do
     t.index ["locale"], name: "index_categories_on_locale"
     t.index ["parent_category_id"], name: "index_categories_on_parent_category_id"
     t.index ["slug", "locale", "portal_id"], name: "index_categories_on_slug_and_locale_and_portal_id", unique: true
+  end
+
+  create_table "cevico_ad_creatives", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "ad_id", null: false
+    t.string "ad_name"
+    t.string "adset_id"
+    t.string "adset_name"
+    t.string "campaign_id"
+    t.string "campaign_name"
+    t.string "effective_status"
+    t.string "format", default: "other", null: false
+    t.jsonb "creative", default: {}, null: false
+    t.datetime "synced_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "ad_id"], name: "index_cevico_ad_creatives_on_account_id_and_ad_id", unique: true
+    t.index ["account_id", "campaign_id"], name: "index_cevico_ad_creatives_on_account_id_and_campaign_id"
+    t.index ["account_id"], name: "index_cevico_ad_creatives_on_account_id"
+  end
+
+  create_table "cevico_ad_insights", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "ad_id", null: false
+    t.date "date", null: false
+    t.jsonb "metrics", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "ad_id", "date"], name: "index_cevico_ad_insights_on_account_id_and_ad_id_and_date", unique: true
+    t.index ["account_id", "date"], name: "index_cevico_ad_insights_on_account_id_and_date"
+    t.index ["account_id"], name: "index_cevico_ad_insights_on_account_id"
   end
 
   create_table "cevico_call_campaign_contacts", force: :cascade do |t|
@@ -2284,6 +2315,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_18_143000) do
   add_foreign_key "campaign_recipients", "campaigns", on_delete: :cascade
   add_foreign_key "campaign_recipients", "contacts", on_delete: :cascade
   add_foreign_key "campaign_recipients", "inboxes", on_delete: :cascade
+  add_foreign_key "cevico_ad_creatives", "accounts", on_delete: :cascade
+  add_foreign_key "cevico_ad_insights", "accounts", on_delete: :cascade
   add_foreign_key "cevico_call_campaign_contacts", "cevico_call_campaigns", column: "call_campaign_id", on_delete: :cascade
   add_foreign_key "cevico_call_campaign_contacts", "contacts", on_delete: :cascade
   add_foreign_key "cevico_call_campaigns", "accounts", on_delete: :cascade

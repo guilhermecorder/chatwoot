@@ -19,6 +19,7 @@ const props = defineProps({
   labelOptions: { type: Array, default: () => [] },
   labelTitleOptions: { type: Array, default: () => [] },
   stageOptions: { type: Array, default: () => [] },
+  presetStep: { type: String, default: '' }, // etapa já escolhida no mapa (item 173)
 });
 const emit = defineEmits(['close', 'saved']);
 
@@ -193,6 +194,8 @@ onMounted(() => {
   syncOffsetFromForm();
   if (form.value.inbox_id) loadTemplates(form.value.inbox_id);
 });
+
+if (!props.message && props.presetStep) form.value.step = props.presetStep;
 
 const pickKind = kind => {
   form.value.trigger.kind = kind;

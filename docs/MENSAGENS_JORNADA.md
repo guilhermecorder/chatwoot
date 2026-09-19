@@ -55,3 +55,16 @@ Sidebar "Jornada do paciente" (grant campaigns). Fluxograma `Crm::FlowMap::Flows
 Migrar Lembretes D-1/D-0, Régua de mensagens e Automações de coluna para o motor novo (a tela
 mostra links para elas); modelos com botões/mídia e resposta por botão; estatísticas de entrega
 (delivered/read) por mensagem.
+
+## Mapa da jornada (item 173)
+
+`GET crm/journey_messages/map` (`Crm::Journey::MapService`) devolve, por etapa,
+tudo o que já age no paciente além das mensagens da jornada: lembretes D-1/D-0,
+follow-ups, réguas de mensagens, automações de coluna, campanhas e agentes
+(ligado/desligado, quando, detalhe, link para onde se edita). Coluna do CRM →
+etapa é adivinhada pelo nome e ajustável. Personalização em
+`agenda_config.journey.map` (`stage_steps`, `overrides`, `hidden`, `show`,
+`step_order`, `step_labels`, `density`, `queue`), salva por
+`POST update_settings { map }`. A tela `crm/CrmJourney.vue` mostra tudo numa
+grade que embrulha (sem rolagem lateral), com a Fila de hoje ao lado, em cima
+ou oculta.

@@ -40,6 +40,11 @@ class CevicoJourneyAPI extends ApiClient {
     return axios.post(`${this.url}/${id}/plan_now`);
   }
 
+  // mapa: lembretes, follow-up, réguas, automações, campanhas e agentes por etapa (item 173)
+  map() {
+    return axios.get(`${this.url}/map`);
+  }
+
   settings() {
     return axios.get(`${this.url}/settings`);
   }

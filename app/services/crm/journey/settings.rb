@@ -56,7 +56,7 @@ class Crm::Journey::Settings
   end
 
   def to_h
-    { places: places, hours: hours, daily_cap: daily_cap, quiet_labels: Array(raw['quiet_labels']) }
+    { places: places, hours: hours, daily_cap: daily_cap, quiet_labels: Array(raw['quiet_labels']), map: (raw['map'] || {}).to_h }
   end
 
   private

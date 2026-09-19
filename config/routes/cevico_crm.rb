@@ -28,6 +28,7 @@ namespace :crm do
     collection do
       post :preview
       get :settings, action: :settings_show
+      get :map
       post :update_settings
     end
   end
@@ -48,6 +49,17 @@ namespace :crm do
   resource :traffic_report, only: [:show]
   resource :ads_report, only: [:show], controller: 'ads_reports' do
     post :backfill
+  end
+  # Central de Criativos (item 172): gancho/corpo/CTA × métricas da Meta
+  resources :creatives, only: [:index, :show], param: :ad_id do
+    collection do
+      get :assets
+      get :history
+      post :sync
+      post :load_history
+      get :sync_status
+      get :export
+    end
   end
   resource :conversation_summary, only: [:show], controller: 'conversation_summaries' do
     post :analyze

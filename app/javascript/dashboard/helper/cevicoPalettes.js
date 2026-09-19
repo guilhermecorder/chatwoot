@@ -71,10 +71,13 @@ export const SALAD = {
 
 // ── utilidades de cor do kit .cv-* (InicioPage) ──
 export const hexFromGrad = grad => (String(grad || '').match(/#[0-9a-f]{6}/gi) || [])[0] || null;
+// "r g b" SEPARADO POR ESPAÇO: o kit usa `rgb(var(--cv-rgb) / 0.2)` (sintaxe
+// moderna), e o navegador REJEITA a mistura "r, g, b / a" — com vírgulas,
+// toda borda/fundo/sombra do kit que usa a variável era ignorada em silêncio.
 export const hexToRgb = hex => {
   const m = String(hex || '').replace('#', '');
-  if (m.length !== 6) return '21, 44, 97';
-  return [0, 2, 4].map(i => parseInt(m.slice(i, i + 2), 16)).join(', ');
+  if (m.length !== 6) return '21 44 97';
+  return [0, 2, 4].map(i => parseInt(m.slice(i, i + 2), 16)).join(' ');
 };
 // as variáveis --cv* que o kit lê (na página inteira ou num bloco só)
 export const paletteVars = pal => {

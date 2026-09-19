@@ -25,11 +25,11 @@
   background-image: radial-gradient(1100px 420px at 50% -180px, rgb(var(--cv-rgb) / 0.22), rgb(var(--cv-rgb) / 0) 70%);
 }
 .cv-page.cv-overlay { background-image: none; }
-.cv-page .cv-red   { --cv: #dc2626; --cv-deep: #991b1b; --cv-rgb: 220, 38, 38;  --cv-deep-rgb: 153, 27, 27;  --cv-grad: linear-gradient(135deg, #991b1b, #ef4444); --cv-grad-2: linear-gradient(135deg, #b91c1c, #f87171); --cv-grad-3: linear-gradient(135deg, #dc2626, #f87171); }
-.cv-page .cv-amber { --cv: #d97706; --cv-deep: #92400e; --cv-rgb: 217, 119, 6;  --cv-deep-rgb: 146, 64, 14;  --cv-grad: linear-gradient(135deg, #92400e, #f59e0b); --cv-grad-2: linear-gradient(135deg, #b45309, #fbbf24); --cv-grad-3: linear-gradient(135deg, #d97706, #fbbf24); }
-.cv-page .cv-green { --cv: #059669; --cv-deep: #065f46; --cv-rgb: 5, 150, 105;  --cv-deep-rgb: 6, 95, 70;    --cv-grad: linear-gradient(135deg, #065f46, #10b981); --cv-grad-2: linear-gradient(135deg, #047857, #34d399); --cv-grad-3: linear-gradient(135deg, #059669, #34d399); }
-.cv-page .cv-gold  { --cv: #d4a017; --cv-deep: #92600a; --cv-rgb: 212, 160, 23; --cv-deep-rgb: 146, 96, 10;  --cv-grad: linear-gradient(135deg, #92600a, #d4a017); --cv-grad-2: linear-gradient(135deg, #b8860b, #e5b93a); --cv-grad-3: linear-gradient(135deg, #d4a017, #f1cf5c); }
-.cv-page .cv-slate { --cv: #64748b; --cv-deep: #334155; --cv-rgb: 100, 116, 139; --cv-deep-rgb: 51, 65, 85; --cv-grad: linear-gradient(135deg, #334155, #64748b); --cv-grad-2: linear-gradient(135deg, #475569, #94a3b8); --cv-grad-3: linear-gradient(135deg, #64748b, #94a3b8); }
+.cv-page .cv-red   { --cv: #dc2626; --cv-deep: #991b1b; --cv-rgb: 220 38 38;  --cv-deep-rgb: 153 27 27;  --cv-grad: linear-gradient(135deg, #991b1b, #ef4444); --cv-grad-2: linear-gradient(135deg, #b91c1c, #f87171); --cv-grad-3: linear-gradient(135deg, #dc2626, #f87171); }
+.cv-page .cv-amber { --cv: #d97706; --cv-deep: #92400e; --cv-rgb: 217 119 6;  --cv-deep-rgb: 146 64 14;  --cv-grad: linear-gradient(135deg, #92400e, #f59e0b); --cv-grad-2: linear-gradient(135deg, #b45309, #fbbf24); --cv-grad-3: linear-gradient(135deg, #d97706, #fbbf24); }
+.cv-page .cv-green { --cv: #059669; --cv-deep: #065f46; --cv-rgb: 5 150 105;  --cv-deep-rgb: 6 95 70;    --cv-grad: linear-gradient(135deg, #065f46, #10b981); --cv-grad-2: linear-gradient(135deg, #047857, #34d399); --cv-grad-3: linear-gradient(135deg, #059669, #34d399); }
+.cv-page .cv-gold  { --cv: #d4a017; --cv-deep: #92600a; --cv-rgb: 212 160 23; --cv-deep-rgb: 146 96 10;  --cv-grad: linear-gradient(135deg, #92600a, #d4a017); --cv-grad-2: linear-gradient(135deg, #b8860b, #e5b93a); --cv-grad-3: linear-gradient(135deg, #d4a017, #f1cf5c); }
+.cv-page .cv-slate { --cv: #64748b; --cv-deep: #334155; --cv-rgb: 100 116 139; --cv-deep-rgb: 51 65 85; --cv-grad: linear-gradient(135deg, #334155, #64748b); --cv-grad-2: linear-gradient(135deg, #475569, #94a3b8); --cv-grad-3: linear-gradient(135deg, #64748b, #94a3b8); }
 
 /* ── BLOCO: a carcaça translúcida do iMac — branco leitoso com o tom do
    dia por trás, borda de vidro, crista de luz no topo e uma luz difusa
@@ -694,3 +694,214 @@
   }
 }
 
+
+/* ── 🎞️ Central de Criativos (item 172, rodada 3 → ajustada na rodada 4):
+   moldura de vidro por criativo e destaque de CAMPEÃO sem animação — só a
+   moldura em degradê "dopamina" (todas as cores) e o selo dourado com o
+   troféu. ─────────────────────────────────────────────────────────────── */
+.cv-page .cv-frame {
+  position: relative;
+  border-radius: 30px;
+  padding: 6px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.18)),
+    rgb(var(--cv-rgb) / 0.12);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 0 20px 44px -20px rgb(var(--cv-deep-rgb) / 0.38);
+}
+.dark .cv-page .cv-frame {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02)),
+    rgb(var(--cv-rgb) / 0.16);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+/* campeão: moldura "dopamina" — fio em degradê com TODAS as cores (rosa →
+   laranja → amarelo → verde → ciano → violeta), parada, sobre vidro com um
+   véu leve das mesmas cores. O selo com o troféu continua dourado. */
+.cv-page .cv-frame.cv-champion {
+  --cv-dopamine: linear-gradient(135deg, #ff2e88 0%, #ff7a00 20%, #ffd600 40%, #2ee66b 60%, #00d1ff 80%, #7b5cff 100%);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.4)),
+    linear-gradient(135deg, rgba(255, 46, 136, 0.28) 0%, rgba(255, 122, 0, 0.24) 20%, rgba(255, 214, 0, 0.24) 40%, rgba(46, 230, 107, 0.22) 60%, rgba(0, 209, 255, 0.24) 80%, rgba(123, 92, 255, 0.28) 100%);
+  border-color: rgba(255, 255, 255, 0.75);
+  box-shadow:
+    0 24px 48px -22px rgba(123, 92, 255, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+}
+.dark .cv-page .cv-frame.cv-champion {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    linear-gradient(135deg, rgba(255, 46, 136, 0.3) 0%, rgba(255, 122, 0, 0.24) 20%, rgba(255, 214, 0, 0.2) 40%, rgba(46, 230, 107, 0.2) 60%, rgba(0, 209, 255, 0.24) 80%, rgba(123, 92, 255, 0.32) 100%);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.cv-page .cv-champion::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 33px;
+  padding: 3px;
+  background: var(--cv-dopamine);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+.cv-page .cv-champion-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4a3a00;
+  background: linear-gradient(110deg, #f5e6a8 0%, #d4af37 55%, #f5e6a8 100%);
+  box-shadow: 0 6px 14px -8px rgba(212, 175, 55, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.cv-page .cv-podium-1 { --cv-medal: linear-gradient(135deg, #f7e27a, #d4af37 55%, #b8860b); }
+.cv-page .cv-podium-2 { --cv-medal: linear-gradient(135deg, #f1f1f1, #c0c0c0 55%, #8f8f8f); }
+.cv-page .cv-podium-3 { --cv-medal: linear-gradient(135deg, #f0c9a6, #cd7f32 55%, #8c5a2b); }
+.cv-page .cv-medal {
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 13px;
+  color: #fff;
+  background: var(--cv-medal, var(--cv-grad));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 8px 16px -8px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+
+/* ── ESCOLHA: cartão clicável com contorno visível (campanhas da Central de
+   Criativos). Parece botão: borda firme, levanta ao passar o mouse, marca
+   com o tom do bloco quando escolhido. ─────────────────────────────────── */
+.cv-page .cv-choice {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.74)),
+    rgb(var(--cv-rgb) / 0.05);
+  border: 1.5px solid rgb(var(--cv-rgb) / 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 6px 16px -10px rgb(var(--cv-deep-rgb) / 0.35);
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+.cv-page .cv-choice:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--cv-rgb) / 0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 14px 28px -14px rgb(var(--cv-deep-rgb) / 0.5);
+}
+.cv-page .cv-choice:active { transform: translateY(0); }
+.cv-page .cv-choice:focus-visible { outline: 2px solid var(--cv); outline-offset: 2px; }
+.cv-page .cv-choice-on,
+.cv-page .cv-choice-on:hover {
+  border-color: var(--cv);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.7)),
+    rgb(var(--cv-rgb) / 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 0 4px rgb(var(--cv-rgb) / 0.14),
+    0 14px 28px -14px rgb(var(--cv-deep-rgb) / 0.5);
+}
+.cv-page .cv-choice-mark {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: rgb(var(--cv-rgb) / 0.75);
+  background: rgb(var(--cv-rgb) / 0.1);
+  border: 1px solid rgb(var(--cv-rgb) / 0.3);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.cv-page .cv-choice-on .cv-choice-mark {
+  color: #fff;
+  background: var(--cv-grad);
+  border-color: transparent;
+}
+.dark .cv-page .cv-choice {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgb(var(--cv-rgb) / 0.5);
+  box-shadow: none;
+}
+.dark .cv-page .cv-choice:hover { border-color: rgb(var(--cv-rgb) / 0.8); }
+.dark .cv-page .cv-choice-on,
+.dark .cv-page .cv-choice-on:hover {
+  background: rgb(var(--cv-rgb) / 0.16);
+  border-color: var(--cv);
+  box-shadow: 0 0 0 4px rgb(var(--cv-rgb) / 0.18);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cv-page .cv-choice { transition: none; }
+}
+
+/* ── CHAVINHA: liga/desliga pequeno, no tom do bloco (eixos da teia) ── */
+.cv-page .cv-switch {
+  position: relative;
+  display: inline-block;
+  width: 28px;
+  height: 16px;
+  border-radius: 9999px;
+  background: rgb(var(--cv-rgb) / 0.18);
+  border: 1px solid rgb(var(--cv-rgb) / 0.3);
+  transition: background 0.18s ease, border-color 0.18s ease;
+  flex-shrink: 0;
+}
+.cv-page .cv-switch::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cv-page .cv-switch-on {
+  background: var(--cv-grad);
+  border-color: transparent;
+}
+.cv-page .cv-switch-on::after { transform: translateX(12px); }
+.dark .cv-page .cv-switch { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.18); }
+.dark .cv-page .cv-switch-on { background: var(--cv-grad); border-color: transparent; }
+@media (prefers-reduced-motion: reduce) {
+  .cv-page .cv-switch, .cv-page .cv-switch::after { transition: none; }
+}
+
+/* ── FICHA EM CONTÊINER (Central de Criativos): o interior responde à largura
+   da FICHA — 2 por linha no desktop, 1 no celular — e não à da janela. ── */
+.cv-page .cv-cq { container-type: inline-size; }
+.cv-page .cv-cq-thumb { width: 112px; height: 144px; }
+.cv-page .cv-cq-meters { grid-template-columns: minmax(0, 1fr); }
+.cv-page .cv-cq-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cv-page .cv-cq-radar { width: 100%; display: flex; justify-content: center; }
+@container (min-width: 480px) {
+  .cv-page .cv-cq-radar { width: auto; margin-left: auto; }
+  .cv-page .cv-cq-meters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (min-width: 640px) {
+  .cv-page .cv-cq-thumb { width: 148px; height: 190px; }
+  .cv-page .cv-cq-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}

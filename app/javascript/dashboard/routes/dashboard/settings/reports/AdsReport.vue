@@ -294,7 +294,17 @@ const TABLE_GRID = 'minmax(0, 2.2fr) repeat(7, minmax(0, 1fr))';
       />
 
       <!-- Período (régua padrão CEVICO) -->
-      <PeriodRuler v-model="period" glass class="mb-6" />
+      <PeriodRuler v-model="period" glass class="mb-4" />
+
+      <!-- 🎯 atalho para a Central de Criativos (item 172) -->
+      <router-link
+        :to="{ name: 'creatives_reports' }"
+        class="cv-block cv-strip px-4 py-3 mb-6 flex items-center gap-3 text-sm text-n-slate-11 cv-block-hover"
+      >
+        <span class="cv-icon"><span class="i-lucide-clapperboard text-base" /></span>
+        <span><b class="text-n-slate-12">Central de Criativos:</b> gancho, corpo e CTA de cada anúncio, com taxa de parada, retenção e conversas.</span>
+        <span class="i-lucide-arrow-right ml-auto" />
+      </router-link>
 
       <SkeletonScreen v-if="isLoading" variant="dashboard" />
 

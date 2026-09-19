@@ -5947,3 +5947,230 @@ crm_opportunity_radar_job registrados.
   novo além do `crm_journey_run_job` (schedule.yml — sidekiq recarrega no boot).
   Reversão = etiqueta anterior (tabelas novas ficam, não atrapalham).
 
+
+## 172. 🎯 CENTRAL DE CRIATIVOS — gancho, corpo e CTA de cada anúncio com os números da Meta (pedido 19/09)
+- Pedido: entender a performance INDIVIDUAL de cada criativo relacionando gancho,
+  corpo e CTA, com dados da própria Meta (visualizações, cliques…) e gráficos de
+  desempenho para análise profunda e otimização futura.
+- Leitura: a Meta não sabe o que é gancho/corpo/CTA; o sistema traduz em métricas
+  que ela mede — GANCHO = taxa de parada (plays de 3 s ÷ impressões, só vídeo);
+  CORPO = retenção (ThruPlay ÷ plays de 3 s + curva 25/50/75/100 %); CTA = clique
+  (cliques no link ÷ impressões) e conversa (conversas iniciadas no WhatsApp ÷
+  cliques); daí em diante entra o CRM (leads CTWA → consulta marcada → compareceu
+  → cirurgia, mesma régua do relatório Anúncios (Meta)).
+- Dados: tabelas `cevico_ad_creatives` (anúncio + criativo: title/body/cta_type/
+  miniatura/vídeo/formato; listas do criativo dinâmico) e `cevico_ad_insights`
+  (anúncio × DIA × métricas jsonb). `Crm::AdInsightsSyncService` puxa `/ads` (com
+  `creative{…}`) e `/insights?level=ad&time_increment=1`; `Crm::AdInsightsSyncJob`
+  cron 07:20 UTC (04:20 SP) refaz os últimos 3 dias (a Meta reprocessa); botão
+  "Atualizar dados" refaz 30 dias, primeira carga 90; trava Redis + estado em
+  `meta_ads_config['creatives_sync']` (synced_at/running_since/last_error).
+  Quebras (posicionamento, idade×sexo, ativos title/body/call_to_action) vêm da
+  Meta sob demanda com cache de 6 h (`Crm::AdBreakdownService`); `summary` traz
+  alcance/frequência REAIS do período (a soma dos dias infla o alcance).
+- Leitura por anúncio (`Crm::CreativeAnalyticsService`): taxas contra a média
+  da conta ponderada por impressões (≥115 % forte, ≤80 % fraco), diagnóstico em
+  1 frase (gancho fraco / gancho forte-corpo fraco / segura mas não clica / clica
+  mas não conversa / acima da média / na média), FADIGA = 2ª metade do período
+  com ≥40 % das impressões da 1ª e CTR ≤75 % (período ≥14 d).
+- Tela Relatórios → Central de Criativos (`reports/CreativesCenter.vue`, rota
+  `creatives_reports`, grant `reports`, paleta `report:criativos`): hero + régua
+  de período + filtros em 1 linha (formato/campanha/status/ordem/busca) + KPIs;
+  abas Criativos (cards com miniatura, gancho, corpo, CTA, 4 medidores com a
+  média da conta marcada, números, jornada do CRM, diagnóstico, CTR por dia),
+  Ganchos/corpos/CTAs (ranking por ativo — exige criativo dinâmico; aviso quando
+  não há), Ritmo da conta (investimento/conversas/CTR por dia — um eixo por
+  gráfico) e Como se calcula. "Ver a fundo" = modal com série diária, 1ª × 2ª
+  metade, curva de retenção (SVG próprio), posicionamento, idade × sexo, ativos
+  e links Gerenciador/Instagram. "Comparar" = até 4 lado a lado (melhor de cada
+  linha com troféu + curvas sobrepostas). Componentes em
+  `components-next/cevico/creatives/` (CreativeCard, CreativeDetail,
+  CreativeCompare, RateMeter, RetentionCurve, creativeFormat.js).
+- API `crm/creatives` (index/show/assets/sync/sync_status; capability reports);
+  ⚠️ filtro de formato viaja como `fmt` (params[:format] é o formato da requisição).
+- Simulação local: token `simulate` (ou `CEVICO_META_SIMULATE=1`) → 8 anúncios
+  fictícios com 90 dias (`Crm::MetaSimulator`); conta 3 local está assim.
+- Testes: `spec/services/crm/creatives_center_spec.rb` + controller spec (17/17).
+- Deploy: MIGRATION nova (20260919143000) → BACKUP antes; WEB+SIDEKIQ; depois
+  Relatórios → Central de Criativos → "Buscar agora" (primeira carga de 90 dias).
+- Limites: a Meta só devolve ativos separados em criativo dinâmico/flexível;
+  imagem estática não tem gancho/retenção (só clique/conversa); atalho na tela
+  Anúncios (Meta) leva para a Central.
+- RODADA 2 (feedback 19/09 "visualização apertada, parâmetros claros,
+  palavras inteiras"): PARÂMETROS bom/atenção/ruim em `Crm::CreativeTargets`
+  (padrões dos benchmarks: parada bom ≥ 35 %/ruim < 25 %; retenção ≥ 50 %/< 30 %;
+  CTR ≥ 1,5 %/< 0,7 %; conversa por clique ≥ 45 %/< 25 %; custo por conversa
+  ≤ R$ 10/> R$ 25), editáveis pelo admin na aba "Parâmetros e fórmulas"
+  (`meta_ads_config.creative_targets`, POST settings/update_meta_ads).
+  Diagnóstico passa a citar o parâmetro ("parada 27,5 %, bom é ≥ 35 %") +
+  `focus` (o que trabalhar) + posição vs média da conta. `prev` = o mesmo
+  criativo no período anterior de igual tamanho (setas ▲▼ em tudo);
+  `prev_daily`/`prev_totals` da conta; `averages.retention` (curva média).
+  UI: `BulletMeter` (régua estilo bullet graph: faixas ruim/atenção/bom, traço
+  do parâmetro, triângulo da média, veredito com ícone + palavra, variação);
+  `CreativeCard` = FICHA COMPLETA de largura inteira (mídia | gancho/corpo/CTA/
+  leitura/jornada | réguas + KPIs com variação + CTR por dia com linha da
+  média), 1 por linha; `CreativeTable` = visão tabela ordenável (escolha
+  lembrada); `AssetTable` (peças/posicionamento/idade×sexo em tabela com fatia,
+  CTR, conversas, custo e melhor/pior marcados) usada na aba Ganchos/corpos/
+  CTAs e no Ver a fundo; `CreativeDetail`/`CreativeCompare` no `.cv-modal`
+  SÓLIDO do kit (corrige o modal transparente) com seções lidas de cima para
+  baixo, frases de leitura por gráfico (média, melhor e pior dia), metades,
+  curva de retenção × média da conta; Ritmo da conta com o período anterior
+  sobreposto e frases de leitura; KPIs com variação e contagem verde/atenção/
+  vermelho. Referências: bullet graphs de Stephen Few, benchmarks AdSights/
+  Motion (hook rate, hold rate), curva de retenção completa por variante.
+  Próximo (pedido dele, prioridade menor): IA plugada na leitura (insights).
+- RODADA 3 (pedido 19/09: metas automáticas pelo nosso histórico "nos superar
+  dia a dia, semana a semana, mês a mês"; moldura moderna e campeão animado;
+  escolha de campanha intencional; aba de peças caprichada; resumo histórico):
+  `Crm::CreativeRecords` (recordes por métrica: melhor dia ≥300 impr., melhor
+  semana-calendário ≥1.500 impr. e ≥4 dias, melhor mês ≥3.000 impr. e ≥7 dias,
+  mediana semanal, hoje/semana/mês × anterior; campeões de gancho/corpo/CTA/
+  conversa/custo por mês e de todos os tempos, com texto e miniatura; cache
+  1 h por carga). `Crm::CreativeTargets` ganha `mode` manual|auto e `step`
+  (3 % padrão): no auto, bom = melhor semana + passo, ruim = abaixo da mediana
+  (cai para o manual sem histórico). `GET crm/creatives/history` (recordes +
+  campeões por mês + peças campeãs por mês via breakdowns cacheados).
+  Overview: `champion_of` por criativo (menor custo ≥5 conversas; melhor
+  parada/retenção/CTR/conversa ≥500 impr.) e `campaign_stats` (cartões de
+  campanha com criativos, investimento, conversas, custo, verde/atenção/
+  vermelho, leads, cirurgias). UI: bloco "Campanhas" (cartões, seleção
+  intencional, chip "Analisando: X" no hero); `.cv-frame` (moldura de vidro
+  com blur) e `.cv-champion` (borda cônica girando + pulso ouro + selo com
+  brilho, respeita reduced-motion) no kit SCSS; selos "Campeão de gancho/
+  corpo/CTA/conversa/custo" na ficha e troféus na tabela; aba "Ganchos,
+  corpos e CTAs" com explicação dos parâmetros por parte + `AssetPodium`
+  (1º/2º/3º com medalha, texto inteiro, conversas, custo, CTR, fatia; 1º com
+  moldura campeã; ranking completo dobrável); aba "Recordes e histórico"
+  (cards por métrica com melhor dia/semana/mês, régua "esta semana × recorde",
+  hoje×ontem / semana×anterior / mês×anterior; campeões de todos os tempos
+  com moldura; tabela mês a mês; peças campeãs por mês); aba Parâmetros com
+  Manual × Automático + passo de superação e a base (recorde/mediana) de cada
+  número. Specs 17/17.
+- RODADA 4 (19/09 noite, feedback dele: "está ficando realmente bom"; campanhas
+  com contorno e cara de clicável; retirou o pedido de animação — só moldura em
+  degradê "dopamina" (todas as cores, pedido dele na hora) + selo dourado com troféu; Recordes "ainda mais Apple"; botão para
+  "transcrever" a parte campeã e montar os blocos da copy): `.cv-choice` no kit
+  (cartão-botão com borda firme, levanta no hover, ✓ quando escolhido, chevron
+  quando não) nas campanhas; `.cv-frame.cv-champion` vira moldura DOPAMINA
+  PARADA (véu leve das cores + fio 3 px rosa→laranja→amarelo→verde→ciano→violeta; giro/pulso/brilho apagados, junto
+  com `@property --cv-angle`); aba Recordes: campeões de todos os tempos com
+  número grande, miniatura, fio divisor e rodapé (selo + Transcrever);
+  "Campeões mês a mês" e "Peças campeãs por mês" deixam de ser tabela e viram
+  lista agrupada por mês (cartão por mês com 4/3 células: número, miniatura,
+  nome, citação, Transcrever); botão TRANSCREVER (`useTranscribe.js`: peça
+  sozinha = texto puro; anúncio inteiro = Gancho/Corpo/CTA rotulados; toast
+  com o trecho) no histórico, mês a mês, peças, pódio (`AssetPodium` prop
+  `part`), ranking (`AssetTable` props `copyable`/`part`), ficha
+  (`CreativeCard`) e Ver a fundo (`CreativeDetail`); `CreativeRecords#describe`
+  passa a devolver `hook`/`body`/`cta_label` além do `text` da parte.
+  LAYOUT (pedido dele 19/09 noite, antes de subir): fichas SEMPRE no layout
+  "de celular" (mídia + chips + teia em cima, texto, números embaixo) e 2 por
+  linha no desktop (`lg:grid-cols-2`); o interior responde à largura da FICHA
+  via container queries do kit (`.cv-cq`, `.cv-cq-thumb/-meters/-kpis/-radar`:
+  réguas em 2 colunas a partir de 480 px de ficha, miniatura maior e KPIs em 4
+  a partir de 640 px); seletor de PERÍODO desceu para junto das abas
+  (Criativos, Ganchos…, Recordes…); filtros (formato/status/ordem/busca/
+  Comparar) foram para dentro da aba Criativos; TABELA cabe sempre sem barra
+  (`table-fixed`, sem `nowrap`, gancho/corpo/conversa/investido só a partir
+  de md, leads/cirurgias só em xl, teia só em md+).
+  ⚠️ BUG DO KIT achado nessa rodada (desde a 161, 13/09, EM PRODUÇÃO): o
+  contorno não aparecia porque `--cv-rgb` era definido com VÍRGULAS
+  ("107, 58, 201") e o kit usa a sintaxe moderna `rgb(var(--cv-rgb) / 0.2)`;
+  o navegador rejeita a mistura "r, g, b / a" e descartava, em silêncio, TODA
+  borda/fundo/sombra que usava a variável (104 regras em 14 arquivos: blocos
+  sem a tinta do dia, sub-cartões sem borda, hovers sem sombra). Correção na
+  fonte: `hexToRgb` passa a devolver "r g b" (espaço) e os 5 presets
+  `.cv-red/.cv-amber/.cv-green/.cv-gold/.cv-slate` idem; único uso em
+  vírgula (`rgba(${hexToRgb()}, 0.16)` no CrmDashboard) virou `rgb(… / 0.16)`.
+  EFEITO: todas as telas do kit (Meu Painel, Relatórios, CRM, Jornada,
+  Central) passam a mostrar a tinta e as bordas que já estavam desenhadas.
+
+
+## 174. 🗄️ DADOS PRÓPRIOS E HISTÓRICO COMPLETO DOS CRIATIVOS — independência da Meta (pedido 19/09 noite)
+
+Pedido dele: "essa parte do nosso armazenamento de dados e histórico é
+importante. E também é importante que a gente construa, armazene e gerencie
+o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
+- CONSTRUÍDO 19/09 (feat/rodada-172, sem commit): `MAX_DAYS` 365 → 1125 (37
+  meses = limite da Meta); carga em JANELAS de 90 dias, da mais recente para a
+  mais antiga, com progresso gravado (`creatives_sync.progress`) e mostrado na
+  tela (chip do hero "carregando histórico: janela 3 de 13" + barra no bloco);
+  `POST crm/creatives/load_history` (só admin) + botão "Carregar histórico
+  completo (até 37 meses)"; `/ads` pedido com TODOS os status (apagados e
+  arquivados vêm); anúncio que só aparece nos números é RECUPERADO por id
+  (`MetaGraph#fetch_objects`, `?ids=` 50 por lote, cai para um a um) → nome,
+  texto, miniatura e status ficam nossos; MINIATURA guardada no nosso Active
+  Storage (`Crm::AdCreativeMediaJob`, roda depois de cada carga, 300 por vez,
+  `thumbnail_src` usa a cópia) — a URL da Meta expira em horas; EXPORTAÇÃO CSV
+  (`Crm::CreativesExport`: `;`, BOM, vírgula decimal, criativo ao lado de cada
+  dia) do período ou de tudo; resumo "Nossos dados" (anúncios guardados e
+  quantos já sumiram na Meta, dias com dados, linhas anúncio × dia, miniaturas
+  guardadas) na aba renomeada "Parâmetros e dados"; "Campeões mês a mês" com 12
+  meses à vista e o resto dobrado; peças campeãs buscam 12 meses. Simulador
+  ganhou o anúncio APAGADO `2309` (só dias com 46+ de idade) para exercitar a
+  recuperação. Specs 22/22 (janelas, recuperação, miniatura com Down stubado,
+  CSV, rotas admin-only). Sem migration nova (Active Storage já existe).
+  Depois da carga o serviço PRÉ-AQUECE o cache dos recordes (com 10 mil linhas
+  o cálculo levou 6 s no clique quando o cache estava frio; cache de 1 h por carga)
+  e as peças campeãs de 12 meses; `AdBreakdownService` guarda período fechado por
+  30 dias (`CLOSED_TTL`) — a aba Recordes não refaz 36 chamadas à Meta a cada 6 h.
+- Limites conhecidos: a ligação com o CRM (lead → consulta → cirurgia) só
+  existe para contatos cuja 1ª mensagem trouxe o anúncio (recente); vídeo em si
+  não é baixado (só a miniatura); a Meta não devolve nada antes de 37 meses.
+- PÓS-DEPLOY: abrir Central → Parâmetros e dados → "Carregar histórico
+  completo" (uma vez; alguns minutos em segundo plano); depois "Exportar tudo
+  (CSV)" e guardar uma cópia fora do sistema. Backup da VPS continua sendo o
+  seguro principal (as tabelas cevico_ad_* + storage/ vão no pg_dump/volume).
+
+
+## 175. 🕸️ TEIA (RADAR) DOS CRIATIVOS — força de gancho, corpo, CTA e mais, com eixos por chavinha (pedido 19/09 noite)
+
+Pedido dele: gráfico de teia/radar "estilo o da área de Pessoas" para
+classificar os criativos e a força de gancho/corpo/CTA, com parâmetros
+como retenção, CTR, lead; pequeno, dentro dos cards, em vários ambientes,
+com parâmetros diferentes selecionáveis por chavinhas.
+- CONSTRUÍDO 19/09 (feat/rodada-172, sem commit): `MiniRadar.vue` no kit
+  (mesmo desenho do radar de Pessoas, 46–240 px, 2º polígono tracejado =
+  média da conta, tooltip por ponto); `radarAxes.js` (eixos, força 0–100:
+  com parâmetro 50 = ruim / 100 = bom, custo invertido; sem parâmetro contra o
+  melhor do recorte; frequência 1→100 / 3→0; escolha por ambiente guardada no
+  navegador, mínimo 3); `RadarAxesPicker.vue` (chavinhas `.cv-switch` do kit)
+  e `CreativeRadar.vue`. Onde está: ficha (150 px + média + legenda), tabela
+  (46 px ao lado da miniatura), Ver a fundo (184 px + média, sem eixos
+  relativos), Comparar (uma teia com um polígono por criativo, nas cores das
+  colunas), Recordes (campeões de todos os tempos — backend passou a devolver
+  `rates` em `champions_for`), pódio de peças (eixos de peça: CTA, conversas,
+  custo, fatia, parada). Fórmula explicada na aba Parâmetros e dados.
+
+## 173. 🗺️ JORNADA DO PACIENTE EM UMA TELA SÓ + mapa do que já age em cada etapa (pedido 19/09)
+- Pedido: tudo na mesma tela, sem rolar para o lado; mais customizável; mostrar
+  também as automações, configurações e follow-ups que já existem.
+- Backend `Crm::Journey::MapService` (GET `crm/journey_messages/map`): pendura em
+  cada etapa (lead/consulta/orcamento/cirurgia/pos_op/retorno) os lembretes D-1/D-0
+  (`agenda_config.appointment_reminders`), follow-ups (`crm_followup_bots` por
+  coluna), réguas (`crm_message_automations`), automações de coluna
+  (`crm_automations`), campanhas (rascunho/agendada/rodando) e agentes do
+  FlowMap (NPS→pós-op, Fechamento→orçamento, Colheita/Comercial→lead; Radar,
+  Cards parados, Ligações e Voz = "Vigias gerais"), com ligado/desligado, quando,
+  detalhe e link para onde se edita. Coluna do CRM → etapa: adivinha pelo nome
+  (cirurgia antes de consulta, "Não Fechou" = orçamento) e aceita ajuste.
+- Personalização em `agenda_config.journey.map` (sanitizada em update_settings):
+  stage_steps, overrides (item → etapa/geral), hidden, show (por categoria),
+  step_order, step_labels, density (compact/comfortable), queue (side/top/hidden).
+- Tela `crm/CrmJourney.vue` refeita no kit CEVICO (paleta `crm:jornada`, blocos
+  por etapa + fila + vigias): hero com chips/ações; grid das etapas que EMBRULHA
+  (1/2/3/6 colunas conforme a largura, `minmax(0,1fr)`), nunca rola de lado;
+  cada etapa = mensagens da jornada (compactas, com toggle/ações) + grupos do
+  mapa (bolinha ligado/desligado, quando, detalhe, contadores ao vivo, botão
+  "abrir onde se edita"); "+ mensagem aqui" abre o assistente já na etapa
+  (`preset-step` no JourneyWizard); Fila de hoje ao lado (fixa, rola por dentro),
+  em cima ou oculta; busca filtra mensagens e itens do mapa; "Personalizar" =
+  barra fixa (mostrar categorias, densidade, posição da fila, colunas do CRM →
+  etapas em modal, renomear/ordenar etapas, mover/esconder item, restaurar) que
+  salva sozinha. Modais (assistente, teste, histórico, locais/horário) mantidos.
+- Corrigido de tabela: o link antigo "Automações de coluna" abria a aba errada
+  (regras da caixa); agora aponta para Programação.
+- Testes: `spec/services/crm/journey/map_service_spec.rb` (adivinhação, fontes,
+  personalização ponta a ponta).

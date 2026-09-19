@@ -21,6 +21,7 @@ RSpec.describe Crm::FlowMap::Registry do
       'Crm::AutoManagerJob' => 'manager',
       'Crm::ConversationAuditorJob' => 'auditor',
       'Crm::CreativeJob' => 'creative',
+      'Crm::AdInsightsSyncJob' => 'creatives_center',
       'Crm::AppointmentReminderSendJob' => 'reminders',
       'Crm::JourneyRunJob' => 'journey',
       'Crm::OftalmofacilSyncJob' => 'oftalmofacil',
