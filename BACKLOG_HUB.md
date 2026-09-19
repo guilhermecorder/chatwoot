@@ -12,6 +12,11 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## SUBIDA 19/09 (noite) — RODADAS 29–30: "ficou bem legal, pode subir" →
+commit c438ff52d5 na feat/hub-saude → push → docker-build por
+workflow_dispatch (run 35472139381) VERDE → **etiqueta `c438ff5`** (sem
+migration). Falta ele colar no EasyPanel (web + sidekiq) e Implantar.
+
 ## RODADA 30b — 19/09 ✅ RADAR PRÓPRIO DO HUB (HubRadar.vue) — "precisa ficar legal o gráfico"
 Print dele dos cartões de treino: rótulos cortados ("ondição",
 "Sequênci") e formas espetadas (8 eixos, vários zerados).
