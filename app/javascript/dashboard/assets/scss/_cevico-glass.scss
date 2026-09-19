@@ -703,45 +703,150 @@
   position: relative;
   border-radius: 30px;
   padding: 6px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.18)),
-    rgb(var(--cv-rgb) / 0.12);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  box-shadow: 0 20px 44px -20px rgb(var(--cv-deep-rgb) / 0.38);
+  /* vidro com interior de cor DIFERENTE do fundo da página (pedido dele):
+     BRANCO no claro, PRETO no escuro. Sem tinta da paleta, sem leite lilás;
+     o desfoque atrás dá o corpo de vidro e o brilho fica na borda (::after). */
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 24px 48px -22px rgb(var(--cv-deep-rgb) / 0.4);
+}
+/* refração: fio de luz no topo, sombra de luz embaixo e um halo leve nas
+   bordas internas — sem tocar no miolo */
+.cv-page .cv-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
+    inset 1px 0 0 rgba(255, 255, 255, 0.3),
+    inset -1px 0 0 rgba(255, 255, 255, 0.3),
+    inset 0 0 22px rgba(255, 255, 255, 0.12);
 }
 .dark .cv-page .cv-frame {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02)),
-    rgb(var(--cv-rgb) / 0.16);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(7, 7, 11, 0.84);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 24px 48px -22px rgba(0, 0, 0, 0.6);
 }
-/* campeão: moldura "dopamina" — fio em degradê com TODAS as cores (rosa →
-   laranja → amarelo → verde → ciano → violeta), parada, sobre vidro com um
-   véu leve das mesmas cores. O selo com o troféu continua dourado. */
-.cv-page .cv-frame.cv-champion {
-  --cv-dopamine: linear-gradient(135deg, #ff2e88 0%, #ff7a00 20%, #ffd600 40%, #2ee66b 60%, #00d1ff 80%, #7b5cff 100%);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.4)),
-    linear-gradient(135deg, rgba(255, 46, 136, 0.28) 0%, rgba(255, 122, 0, 0.24) 20%, rgba(255, 214, 0, 0.24) 40%, rgba(46, 230, 107, 0.22) 60%, rgba(0, 209, 255, 0.24) 80%, rgba(123, 92, 255, 0.28) 100%);
-  border-color: rgba(255, 255, 255, 0.75);
+.dark .cv-page .cv-frame::after {
   box-shadow:
-    0 24px 48px -22px rgba(123, 92, 255, 0.5),
-    0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+    inset 1px 0 0 rgba(255, 255, 255, 0.12),
+    inset -1px 0 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 22px rgba(255, 255, 255, 0.05);
+}
+/* bloco de TRÁS das fichas (Criativos / Peças / Recordes): quase nada — só
+   uma borda translúcida — para as molduras pretas/brancas ganharem contraste
+   contra a página. Sem luz do canto nem brilho de topo. */
+.cv-page .cv-block.cv-block-sheer {
+  background: rgba(255, 255, 255, 0.28);
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
+}
+.dark .cv-page .cv-block.cv-block-sheer {
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+.cv-page .cv-block.cv-block-sheer::before,
+.cv-page .cv-block.cv-block-sheer::after {
+  display: none;
+}
+/* página inteira "sheer" (Central de Criativos): TODO .cv-block de fundo
+   vira quase nada + borda translúcida; as faixas de aviso (.cv-strip)
+   continuam coloridas. */
+.cv-page.cv-page-sheer .cv-block:not(.cv-strip) {
+  background: rgba(255, 255, 255, 0.28);
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
+}
+.dark .cv-page.cv-page-sheer .cv-block:not(.cv-strip) {
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+.cv-page.cv-page-sheer .cv-block:not(.cv-strip)::before,
+.cv-page.cv-page-sheer .cv-block:not(.cv-strip)::after {
+  display: none;
+}
+/* cor COMPLEMENTAR da paleta do bloco: `.cv-alt` troca --cv pela alt (cards
+   alternados, chips, ícones) */
+.cv-page .cv-alt {
+  --cv: var(--cv-alt);
+  --cv-rgb: var(--cv-alt-rgb);
+  --cv-grad: var(--cv-alt-grad);
+}
+/* 🌈 nota de novidade "cores de dopamina" (Meu Painel): fio fino com todas
+   as cores, começando pelo azul, e um orbe com brilho suave */
+.cv-page .cv-notice-dopamine {
+  position: relative;
+  border-color: transparent;
+}
+.cv-page .cv-notice-dopamine::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 25px;
+  padding: 2px;
+  background: linear-gradient(180deg, #38bdf8 0%, #7b5cff 22%, #ff2e88 44%, #ff7a00 64%, #ffd600 82%, #2ee66b 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+.cv-page .cv-notice-dopamine-orb {
+  width: 56px;
+  height: 56px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  background: conic-gradient(from 200deg, #38bdf8, #7b5cff, #ff2e88, #ff7a00, #ffd600, #2ee66b, #38bdf8);
+  box-shadow: 0 10px 24px -10px rgba(123, 92, 255, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+/* dentro da moldura o vidro é a PRÓPRIA moldura: o .cv-block interno perde
+   fundo, tinta, borda, luz do canto e brilho — senão vira o "fosco" lilás
+   (era isso que aparecia no escuro). */
+.cv-page .cv-frame > .cv-block,
+.dark .cv-page .cv-frame > .cv-block,
+.cv-page.cv-page-sheer .cv-frame > .cv-block,
+.dark .cv-page.cv-page-sheer .cv-frame > .cv-block {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.cv-page .cv-frame > .cv-block::before,
+.cv-page .cv-frame > .cv-block::after {
+  display: none;
+}
+/* campeão: o vidro é o MESMO cristal; só a moldura ganha um fio fino em
+   degradê, começando pelo azul em cima e descendo por violeta → rosa →
+   laranja → amarelo → verde. */
+.cv-page .cv-frame.cv-champion {
+  --cv-dopamine: linear-gradient(180deg, #38bdf8 0%, #7b5cff 22%, #ff2e88 44%, #ff7a00 64%, #ffd600 82%, #2ee66b 100%);
+  border-color: transparent;
+  box-shadow: 0 24px 48px -22px rgba(56, 189, 248, 0.45);
 }
 .dark .cv-page .cv-frame.cv-champion {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
-    linear-gradient(135deg, rgba(255, 46, 136, 0.3) 0%, rgba(255, 122, 0, 0.24) 20%, rgba(255, 214, 0, 0.2) 40%, rgba(46, 230, 107, 0.2) 60%, rgba(0, 209, 255, 0.24) 80%, rgba(123, 92, 255, 0.32) 100%);
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: transparent;
+  box-shadow: 0 24px 48px -22px rgba(56, 189, 248, 0.35);
 }
 .cv-page .cv-champion::before {
   content: '';
   position: absolute;
-  inset: -3px;
-  border-radius: 33px;
-  padding: 3px;
+  inset: -1px;
+  border-radius: 31px;
+  padding: 2px;
   background: var(--cv-dopamine);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;

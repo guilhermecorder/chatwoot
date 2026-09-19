@@ -115,7 +115,7 @@ const pal = useCevicoPalette({
     { id: 'dados', label: 'Nossos dados', icon: 'i-lucide-database' },
   ],
 });
-const { cvVars, blockVars, blockFamily } = pal;
+const { cvVars, blockVars, blockFamily, blockAltFamily, blockAltInk } = pal;
 const hex = (block, i) => hexFromGrad(blockFamily(block)[i] || '') || '#0F5FA6';
 
 const periodParams = computed(() => ({
@@ -651,7 +651,7 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
 
 <template>
   <div
-    class="cv-page flex flex-col h-full overflow-y-auto bg-n-surface-1"
+    class="cv-page cv-page-sheer flex flex-col h-full overflow-y-auto bg-n-surface-1"
     :style="cvVars"
   >
     <div class="max-w-7xl mx-auto w-full p-4 sm:p-6 pb-24">
@@ -668,14 +668,17 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
           <span class="cevico-hero-chip">{{
             isSyncing ? syncingText : syncedText
           }}</span>
-          <span v-if="data && data.simulated" class="cevico-hero-chip"
+          <span
+v-if="data && data.simulated" class="cevico-hero-chip"
             >simulação</span
           >
-          <span v-if="selectedCampaign" class="cevico-hero-chip"
+          <span
+v-if="selectedCampaign" class="cevico-hero-chip"
             ><span class="i-lucide-megaphone text-xs" />Analisando:
             {{ selectedCampaign.name }}</span
           >
-          <span v-if="targets.mode === 'auto'" class="cevico-hero-chip"
+          <span
+v-if="targets.mode === 'auto'" class="cevico-hero-chip"
             ><span class="i-lucide-trending-up text-xs" />régua automática pelo
             nosso histórico</span
           >
@@ -740,7 +743,7 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
 
         <div
           v-else-if="neverSynced && !hasData"
-          class="cv-block p-8 mb-6 text-center"
+          class="cv-block p-10 mb-10 text-center"
         >
           <span class="cv-icon cv-icon-xl mx-auto mb-3"
             ><span class="i-lucide-download text-2xl"
@@ -760,12 +763,14 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
 
         <template v-else>
           <!-- 📊 números do período -->
-          <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('kpis')">
+          <div class="cv-block p-6 sm:p-9 mb-10" :style="blockVars('kpis')">
             <div class="flex items-center gap-2 mb-4 flex-wrap">
               <span class="cv-icon"
                 ><span class="i-lucide-gauge text-base"
               /></span>
-              <h2 class="text-sm font-bold text-n-slate-12">
+              <h2
+                class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+              >
                 Números do período<span
                   v-if="selectedCampaign"
                   class="font-normal text-n-slate-10"
@@ -782,7 +787,7 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                 ></span
               >
             </div>
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-5">
               <DashKpi
                 compact
                 glass
@@ -803,7 +808,8 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                     'gancho · média dos vídeos'
                   )
                 "
-                :grad="blockFamily('kpis')[1]"
+                :grad="blockAltFamily('kpis')[1]"
+                :ink="blockAltInk('kpis')"
               />
               <DashKpi
                 compact
@@ -817,7 +823,8 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                     'corpo · ThruPlay ÷ 3 s'
                   )
                 "
-                :grad="blockFamily('kpis')[2]"
+                :grad="blockAltFamily('kpis')[2]"
+                :ink="blockAltInk('kpis')"
               />
               <DashKpi
                 compact
@@ -863,7 +870,8 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                     'investimento ÷ conversas'
                   )
                 "
-                :grad="blockFamily('kpis')[2]"
+                :grad="blockAltFamily('kpis')[2]"
+                :ink="blockAltInk('kpis')"
               />
               <DashKpi
                 compact
@@ -871,7 +879,8 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                 label="Leads no CRM"
                 :value="fmtNum(totals.leads)"
                 :sub="`${fmtNum(totals.booked)} marcaram consulta`"
-                :grad="blockFamily('kpis')[0]"
+                :grad="blockAltFamily('kpis')[0]"
+                :ink="blockAltInk('kpis')"
               />
               <DashKpi
                 compact
@@ -926,12 +935,19 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
           </div>
 
           <!-- 📣 campanhas: escolha o que analisar -->
-          <div class="cv-block p-4 sm:p-5 mb-6" :style="blockVars('campanhas')">
+          <div
+            class="cv-block p-6 sm:p-9 mb-10"
+            :style="blockVars('campanhas')"
+          >
             <div class="flex items-center gap-2 mb-3 flex-wrap">
               <span class="cv-icon"
                 ><span class="i-lucide-megaphone text-base"
               /></span>
-              <h2 class="text-sm font-bold text-n-slate-12">Campanhas</h2>
+              <h2
+                class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+              >
+                Campanhas
+              </h2>
               <span class="text-[11px] text-n-slate-9"
                 >clique em uma para analisar só ela; tudo abaixo passa a olhar
                 só para ela</span
@@ -1109,14 +1125,16 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
           <!-- 🎬 criativo por criativo -->
           <div
             v-if="tab === 'criativos'"
-            class="cv-block p-4 sm:p-5 mb-6"
+            class="cv-block cv-block-sheer p-6 sm:p-9 mb-10"
             :style="blockVars('criativos')"
           >
             <div class="flex items-center gap-2 mb-2 flex-wrap">
               <span class="cv-icon"
                 ><span class="i-lucide-clapperboard text-base"
               /></span>
-              <h2 class="text-sm font-bold text-n-slate-12">
+              <h2
+                class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+              >
                 Criativo por criativo
               </h2>
               <span class="cv-seg cv-seg-sm ml-auto">
@@ -1226,14 +1244,16 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
           <!-- 🔀 ganchos, corpos e CTAs -->
           <div
             v-if="tab === 'ativos'"
-            class="cv-block p-4 sm:p-5 mb-6"
+            class="cv-block cv-block-sheer p-6 sm:p-9 mb-10"
             :style="blockVars('ativos')"
           >
             <div class="flex items-center gap-2 mb-1 flex-wrap">
               <span class="cv-icon"
                 ><span class="i-lucide-shuffle text-base"
               /></span>
-              <h2 class="text-sm font-bold text-n-slate-12">
+              <h2
+                class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+              >
                 Ganchos, corpos e CTAs: quem ganha, peça por peça
               </h2>
             </div>
@@ -1333,14 +1353,16 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
           <!-- 🏆 recordes e histórico -->
           <div
             v-if="tab === 'historico'"
-            class="cv-block p-4 sm:p-5 mb-6"
+            class="cv-block cv-block-sheer p-6 sm:p-9 mb-10"
             :style="blockVars('historico')"
           >
             <div class="flex items-center gap-2 mb-1 flex-wrap">
               <span class="cv-icon"
                 ><span class="i-lucide-trophy text-base"
               /></span>
-              <h2 class="text-sm font-bold text-n-slate-12">
+              <h2
+                class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+              >
                 Recordes e histórico: nos superar um pouco a cada dia
               </h2>
               <span
@@ -1544,7 +1566,9 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                 <span class="cv-icon cv-icon-sm"
                   ><span class="i-lucide-crown text-sm"
                 /></span>
-                <h3 class="text-sm font-bold text-n-slate-12">
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight leading-tight"
+                >
                   Campeões de todos os tempos
                 </h3>
                 <span class="text-[11px] text-n-slate-9"
@@ -1656,7 +1680,9 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                 <span class="cv-icon cv-icon-sm"
                   ><span class="i-lucide-calendar-range text-sm"
                 /></span>
-                <h3 class="text-sm font-bold text-n-slate-12">
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight leading-tight"
+                >
                   Campeões mês a mês
                 </h3>
                 <span class="text-[11px] text-n-slate-9"
@@ -1780,7 +1806,9 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                   <span class="cv-icon cv-icon-sm"
                     ><span class="i-lucide-shuffle text-sm"
                   /></span>
-                  <h3 class="text-sm font-bold text-n-slate-12">
+                  <h3
+                    class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight leading-tight"
+                  >
                     Peças campeãs por mês
                   </h3>
                   <span class="text-[11px] text-n-slate-9"
@@ -1854,12 +1882,14 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
 
           <!-- 📈 ritmo da conta + fatia -->
           <template v-if="tab === 'conta'">
-            <div class="cv-block p-4 sm:p-5 mb-6" :style="blockVars('ritmo')">
+            <div class="cv-block p-6 sm:p-9 mb-10" :style="blockVars('ritmo')">
               <div class="flex items-center gap-2 mb-1 flex-wrap">
                 <span class="cv-icon"
                   ><span class="i-lucide-activity text-base"
                 /></span>
-                <h2 class="text-sm font-bold text-n-slate-12">
+                <h2
+                  class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+                >
                   Ritmo da conta, dia a dia
                 </h2>
                 <span class="text-[11px] text-n-slate-9 ml-auto"
@@ -1922,12 +1952,14 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                 </div>
               </div>
             </div>
-            <div class="cv-block p-4 sm:p-5 mb-6" :style="blockVars('fatia')">
+            <div class="cv-block p-6 sm:p-9 mb-10" :style="blockVars('fatia')">
               <div class="flex items-center gap-2 mb-3 flex-wrap">
                 <span class="cv-icon"
                   ><span class="i-lucide-chart-pie text-base"
                 /></span>
-                <h2 class="text-sm font-bold text-n-slate-12">
+                <h2
+                  class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+                >
                   Onde está o investimento
                 </h2>
               </div>
@@ -1962,14 +1994,16 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
           <!-- ⚙️ parâmetros e fórmulas -->
           <div
             v-if="tab === 'formulas'"
-            class="cv-block p-4 sm:p-5 mb-6"
+            class="cv-block p-6 sm:p-9 mb-10"
             :style="blockVars('formulas')"
           >
             <div class="flex items-center gap-2 mb-1">
               <span class="cv-icon"
                 ><span class="i-lucide-sliders-horizontal text-base"
               /></span>
-              <h2 class="text-sm font-bold text-n-slate-12">
+              <h2
+                class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+              >
                 Parâmetros: o que é bom e o que é ruim
               </h2>
             </div>
@@ -2178,7 +2212,11 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
               <span class="cv-icon"
                 ><span class="i-lucide-info text-base"
               /></span>
-              <h2 class="text-sm font-bold text-n-slate-12">Como se calcula</h2>
+              <h2
+                class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+              >
+                Como se calcula
+              </h2>
             </div>
             <ul class="grid md:grid-cols-2 gap-x-6 gap-y-2">
               <li
@@ -2194,14 +2232,16 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
           <!-- 🗄️ nossos dados: guardados aqui, independentes da Meta (item 174) -->
           <div
             v-if="tab === 'formulas'"
-            class="cv-block p-4 sm:p-5 mb-6"
+            class="cv-block p-6 sm:p-9 mb-10"
             :style="blockVars('dados')"
           >
             <div class="flex items-center gap-2 mb-1 flex-wrap">
               <span class="cv-icon"
                 ><span class="i-lucide-database text-base"
               /></span>
-              <h2 class="text-sm font-bold text-n-slate-12">
+              <h2
+                class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+              >
                 Nossos dados: guardados aqui, independentes da Meta
               </h2>
               <span
@@ -2219,7 +2259,7 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
             </p>
             <div
               v-if="storage"
-              class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4"
+              class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-4"
             >
               <div class="cv-sub rounded-2xl p-3">
                 <p

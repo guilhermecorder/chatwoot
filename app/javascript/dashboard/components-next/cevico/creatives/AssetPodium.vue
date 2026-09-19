@@ -49,7 +49,8 @@ const share = r => (total.value ? (r.conversations || 0) / total.value : 0);
       <span v-if="subtitle" class="text-[11px] text-n-slate-9">{{
         subtitle
       }}</span>
-      <span v-if="sorted.length" class="text-[11px] text-n-slate-9 ml-auto"
+      <span
+v-if="sorted.length" class="text-[11px] text-n-slate-9 ml-auto"
         >{{ sorted.length }} peça(s) · {{ fmtNum(total) }} conversas</span
       >
     </div>
@@ -64,10 +65,7 @@ const share = r => (total.value ? (r.conversations || 0) / total.value : 0);
           class="cv-frame"
           :class="[`cv-podium-${i + 1}`, { 'cv-champion': i === 0 }]"
         >
-          <div
-            class="cv-block p-4 h-full flex flex-col gap-3"
-            :class="{ 'md:min-h-[15rem]': true }"
-          >
+          <div class="cv-block p-4 h-full flex flex-col gap-3 md:min-h-[15rem]">
             <div class="flex items-start gap-3">
               <span class="cv-medal flex-shrink-0">{{ i + 1 }}º</span>
               <p
@@ -78,7 +76,8 @@ const share = r => (total.value ? (r.conversations || 0) / total.value : 0);
               </p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
-              <span v-if="i === 0" class="cv-champion-badge"
+              <span
+v-if="i === 0" class="cv-champion-badge"
                 ><span class="i-lucide-trophy" />Campeã do período</span
               >
               <button
@@ -92,6 +91,7 @@ const share = r => (total.value ? (r.conversations || 0) / total.value : 0);
             <CreativeRadar
               :row="r"
               env="pecas"
+              group="asset"
               scope="asset"
               :targets="targets"
               :peers="podium"

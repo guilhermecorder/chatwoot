@@ -114,12 +114,12 @@ const avgCtrPct = computed(() =>
 <template>
   <div class="cv-frame cv-cq" :class="{ 'cv-champion': isChampion }">
     <article
-      class="cv-block p-4 sm:p-5"
+      class="cv-block p-6 sm:p-8"
       :class="{ 'ring-2 ring-[var(--cv)]': selected }"
     >
-      <div class="flex flex-col gap-4">
+      <div class="flex flex-col gap-7">
         <!-- topo: mídia · chips e botões · teia (embrulha na ficha estreita) -->
-        <div class="flex flex-wrap gap-3 items-start">
+        <div class="flex flex-wrap gap-5 items-start">
           <button
             class="cv-cq-thumb rounded-2xl overflow-hidden bg-n-alpha-2 flex-shrink-0 flex items-center justify-center"
             title="Ver a fundo"
@@ -163,7 +163,8 @@ const avgCtrPct = computed(() =>
                 CHAMPION_META[k].label
               }}
             </span>
-            <span v-if="diag.fatigue" class="cv-chip cv-amber self-start"
+            <span
+v-if="diag.fatigue" class="cv-chip cv-amber self-start"
               ><span class="i-lucide-battery-low text-xs" />sinal de
               fadiga</span
             >
@@ -217,25 +218,68 @@ const avgCtrPct = computed(() =>
               >{{ row.days }} dia(s) com dados</span
             >
           </div>
-          <div class="cv-cq-radar">
-            <CreativeRadar
-              :row="row"
-              env="criativos"
-              :targets="targets"
-              :averages="averages"
-              :peers="peers"
-              :size="150"
-              :color="accent"
-              show-average
-              legend
-            />
+          <!-- TEIAS: uma por pergunta (copy × parâmetros; retenção do vídeo) -->
+          <div
+            class="cv-cq-radar flex flex-wrap justify-center gap-x-4 gap-y-2"
+          >
+            <figure class="flex flex-col items-center gap-1 m-0">
+              <CreativeRadar
+                :row="row"
+                env="criativos"
+                group="copy"
+                :targets="targets"
+                :averages="averages"
+                :peers="peers"
+                :size="isVideo ? 132 : 150"
+                :color="accent"
+                show-average
+              />
+              <figcaption
+                class="text-[10px] text-n-slate-10 text-center leading-tight"
+              >
+                <b class="text-n-slate-12">Copy</b> · qual bloco está fraco
+              </figcaption>
+            </figure>
+            <figure v-if="isVideo" class="flex flex-col items-center gap-1 m-0">
+              <CreativeRadar
+                :row="row"
+                env="criativos"
+                group="video"
+                :targets="targets"
+                :averages="averages"
+                :peers="peers"
+                :size="132"
+                :color="accent"
+                show-average
+              />
+              <figcaption
+                class="text-[10px] text-n-slate-10 text-center leading-tight"
+              >
+                <b class="text-n-slate-12">Retenção</b> · onde o vídeo solta
+              </figcaption>
+            </figure>
+            <p
+              class="w-full text-[10px] text-n-slate-9 text-center leading-tight"
+            >
+              <span
+                class="inline-block w-2 h-2 rounded-full align-middle"
+                :style="{ background: accent }"
+              />
+              este criativo ·
+              <span
+                class="inline-block w-2 h-2 rounded-full align-middle border border-dashed border-n-slate-10"
+              />
+              média da conta · 100 = bateu o parâmetro
+            </p>
           </div>
         </div>
 
         <!-- texto -->
-        <div class="min-w-0 flex flex-col gap-3">
+        <div class="min-w-0 flex flex-col gap-5">
           <div>
-            <h3 class="text-base font-bold text-n-slate-12 leading-snug">
+            <h3
+              class="text-xl font-bold text-n-slate-12 leading-snug tracking-tight"
+            >
               {{ row.ad_name || `Anúncio ${row.ad_id}` }}
             </h3>
             <p class="text-xs text-n-slate-9">
@@ -243,7 +287,7 @@ const avgCtrPct = computed(() =>
               }}<span v-if="row.adset_name"> · {{ row.adset_name }}</span>
             </p>
           </div>
-          <div class="rounded-2xl bg-n-alpha-1 p-4 space-y-2">
+          <div class="rounded-2xl bg-n-alpha-1 p-6 space-y-3">
             <p
               class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold"
             >
@@ -275,7 +319,7 @@ const avgCtrPct = computed(() =>
               <span class="cv-chip">{{ row.cta_label }}</span>
             </div>
           </div>
-          <div v-if="row.diagnosis" class="cv-sub rounded-2xl p-4">
+          <div v-if="row.diagnosis" class="cv-sub rounded-2xl p-5">
             <p
               class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold flex items-center gap-1 mb-1"
             >
@@ -317,15 +361,16 @@ const avgCtrPct = computed(() =>
               ><b class="text-n-slate-12">{{ row.funnel.surgeries }}</b>
               cirurgias</span
             >
-            <span v-if="row.funnel.revenue" class="text-n-slate-9"
+            <span
+v-if="row.funnel.revenue" class="text-n-slate-9"
               >· {{ fmtMoney(row.funnel.revenue) }}</span
             >
           </div>
         </div>
 
         <!-- números -->
-        <div class="min-w-0 flex flex-col gap-4">
-          <div class="cv-cq-meters grid gap-4">
+        <div class="min-w-0 flex flex-col gap-6">
+          <div class="cv-cq-meters grid gap-x-8 gap-y-5">
             <BulletMeter
               v-for="(m, i) in meters"
               :key="m.key"
@@ -342,11 +387,11 @@ const avgCtrPct = computed(() =>
               :color="grad(i)"
             />
           </div>
-          <div class="cv-cq-kpis grid gap-2">
+          <div class="cv-cq-kpis grid gap-3">
             <div
               v-for="k in kpis"
               :key="k.label"
-              class="cv-sub rounded-xl px-3 py-2"
+              class="cv-sub rounded-xl px-4 py-3"
             >
               <p class="text-[10px] text-n-slate-9 flex items-center gap-1">
                 {{ k.label }}

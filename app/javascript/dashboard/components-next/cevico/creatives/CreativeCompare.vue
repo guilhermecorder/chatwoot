@@ -6,7 +6,7 @@ import { computed } from 'vue';
 import RetentionCurve from './RetentionCurve.vue';
 import MiniRadar from 'dashboard/components-next/cevico/MiniRadar.vue';
 import RadarAxesPicker from './RadarAxesPicker.vue';
-import { useRadarAxes, datasetFor, DEFAULT_AXES } from './radarAxes';
+import { useRadarAxes, datasetFor } from './radarAxes';
 import {
   fmtMoney,
   fmtCompact,
@@ -15,19 +15,20 @@ import {
   BAND_META,
 } from './creativeFormat';
 
-const COLORS = ['#0F5FA6', '#D4AF37', '#2E8B57', '#C0392B'];
-
 const props = defineProps({
   rows: { type: Array, default: () => [] },
   cvVars: { type: Object, default: () => ({}) },
   targets: { type: Object, default: () => ({}) },
   averages: { type: Object, default: () => ({}) },
 });
+
 const emit = defineEmits(['close']);
 
+const COLORS = ['#0F5FA6', '#D4AF37', '#2E8B57', '#C0392B'];
+
 // teia: um polígono por criativo, na cor da coluna
-const { axesFor } = useRadarAxes('comparar', DEFAULT_AXES.creative);
-const radarAxes = computed(() => axesFor('creative', true));
+const { axesFor } = useRadarAxes('comparar');
+const radarAxes = computed(() => axesFor('copy', 'creative', true));
 const radarDatasets = computed(() =>
   props.rows.map((r, i) =>
     datasetFor(
@@ -196,7 +197,7 @@ const series = computed(() =>
                 100 = atingiu o parâmetro bom · 50 = na linha do ruim · sem
                 parâmetro, contra o melhor dos comparados.
               </p>
-              <RadarAxesPicker env="comparar" />
+              <RadarAxesPicker env="comparar" :only="['copy']" />
             </div>
           </div>
           <div class="overflow-x-auto -mx-2 px-2">

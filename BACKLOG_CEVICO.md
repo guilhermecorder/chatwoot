@@ -6143,6 +6143,33 @@ com parâmetros diferentes selecionáveis por chavinhas.
   colunas), Recordes (campeões de todos os tempos — backend passou a devolver
   `rates` em `champions_for`), pódio de peças (eixos de peça: CTA, conversas,
   custo, fatia, parada). Fórmula explicada na aba Parâmetros e dados.
+- AJUSTE 19/09 noite (pós-deploy da 1bb4084/7fbe5e1, pedido dele): a teia
+  ganhou MODOS por ambiente (`RADAR_GROUPS`): "Retenção do vídeo" (gancho,
+  25 %, 50 %, 75 %, fim ÷ quem parou 3 s, corpo), "Cliques e resultado" (CTR,
+  cliques, CPC, custo por conversa, conversa, leads) e "Completa"; escolher o
+  modo liga os eixos dele e as chavinhas refinam. Objetivo: comparar blocos de
+  copy (gancho/corpo/CTA) para a "disputa de criação" interna. E a moldura
+  `.cv-frame` virou vidro cristalino (fundo quase transparente + blur, brilho só na borda; claro/escuro legíveis) com o degradê só no
+  fio de 2 px do campeão, começando pelo azul em cima (fichas, Recordes, pódio). Depois:
+  interior BRANCO no claro / PRETO no escuro (ele recusou transparente
+  total); TODOS os blocos de fundo da página em `cv-page-sheer` (quase nada +
+  borda translúcida); e cor COMPLEMENTAR por paleta (`alt`/`altFamily` em
+  cevicoPalettes.js + `--cv-alt` + `.cv-alt` no kit) com os cards dos
+  Números do período alternando roxo × ouro (Grape), azul × amarelo, verde ×
+  rosa etc. — `blockAltFamily(blockId)` no composable, reutilizável nas
+  outras telas. E a 2ª revisão da teia: "pouca lógica nos 6 pontos" → cada
+  teia responde UMA pergunta com eixos da mesma régua: "Copy × parâmetros"
+  (gancho/corpo/CTA/conversa/custo contra o parâmetro; ponta curta = bloco a
+  trocar) e "Retenção do vídeo" (3 s + 25/50/75/fim de quem parou), lado a
+  lado na ficha; "Peça × recorte" no pódio; cliques/CPC/leads/frequência
+  saíram das teias. BulletMeter enxuto (parâmetros e "acima da média" no
+  tooltip). Complementar VIVA em 2 tons (âmbar → amarelo de flor, referência
+  de lótus dele) com texto escuro (`ink="dark"` no DashKpi). PALETA: escopo
+  `report:criativos` faltava na lista do backend (por isso não salvava);
+  escolha PESSOAL por usuário em `ui_settings.cevico_palettes` ("Só para
+  mim" no popup; admin também tem "Para todo mundo"); nota "Seu painel, as
+  suas cores" no Meu Painel de todo mundo (dispensável). RESPIRO: blocos
+  p-6/sm:p-9 mb-10, títulos text-xl/2xl, ficha p-6/sm:p-8 gap-7.
 
 ## 173. 🗺️ JORNADA DO PACIENTE EM UMA TELA SÓ + mapa do que já age em cada etapa (pedido 19/09)
 - Pedido: tudo na mesma tela, sem rolar para o lado; mais customizável; mostrar

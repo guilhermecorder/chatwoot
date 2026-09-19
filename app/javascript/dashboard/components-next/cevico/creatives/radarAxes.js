@@ -14,6 +14,25 @@ const rateOf = (row, key) => {
   if (row.rates && row.rates[key] !== undefined) return row.rates[key];
   return row[key];
 };
+// curva de retenção: [parou 3 s, 25 %, 50 %, 75 %, fim] ÷ impressões.
+// Para ler "onde o vídeo solta", cada ponto é dividido por quem PAROU
+// (3 s): 100 = todos que pararam chegaram até ali.
+const retentionShare = (row, i) => {
+  const c = row && row.rates && row.rates.retention;
+  if (!Array.isArray(c) || !(c[0] > 0)) return null;
+  return c[i] / c[0];
+};
+const shareAxis = (key, i, label, metric, short = label) => ({
+  key,
+  label,
+  short,
+  metric,
+  get: r => retentionShare(r, i),
+  fixed: v => clamp(v * 100),
+  fmt: v => fmtPct(v, 0),
+  scopes: ['creative'],
+  video: true,
+});
 
 export const RADAR_AXES = [
   {
@@ -69,40 +88,16 @@ export const RADAR_AXES = [
     fmt: v => fmtMoney(v),
     scopes: ['creative', 'asset'],
   },
-  {
-    key: 'leads',
-    label: 'Leads',
-    short: 'Leads',
-    metric: 'leads no CRM (contra o melhor do recorte)',
-    get: r => (r && r.funnel ? r.funnel.leads : null),
-    relative: true,
-    fmt: v => fmtNum(v),
-    scopes: ['creative'],
-  },
-  {
-    key: 'finish',
-    label: 'Fim do vídeo',
-    short: 'Fim',
-    metric: 'assistiu até o fim ÷ impressões (contra o melhor)',
-    get: r =>
-      r && r.rates && Array.isArray(r.rates.retention)
-        ? r.rates.retention[4]
-        : null,
-    relative: true,
-    video: true,
-    fmt: v => fmtPct(v),
-    scopes: ['creative'],
-  },
-  {
-    key: 'freq',
-    label: 'Frequência',
-    short: 'Freq.',
-    metric: 'vezes que a mesma pessoa viu (1 = ótimo, 3 = saturou)',
-    get: r => rateOf(r, 'frequency'),
-    fixed: v => clamp((100 * (3 - v)) / 2),
-    fmt: v => `${Number(v).toFixed(1).replace('.', ',')}×`,
-    scopes: ['creative'],
-  },
+  shareAxis('p25', 1, '25 %', 'chegou a 25 % do vídeo ÷ parou 3 s'),
+  shareAxis('p50', 2, '50 %', 'chegou à metade ÷ parou 3 s'),
+  shareAxis('p75', 3, '75 %', 'chegou a 75 % ÷ parou 3 s'),
+  shareAxis(
+    'finish',
+    4,
+    'Fim do vídeo',
+    'assistiu até o fim ÷ parou 3 s',
+    'Fim'
+  ),
   {
     key: 'conversations',
     label: 'Conversas',
@@ -125,9 +120,47 @@ export const RADAR_AXES = [
   },
 ];
 
+// ── TEIAS: cada uma responde UMA pergunta e mistura só eixos da MESMA
+//    régua, para a forma do polígono ter lógica ("ponta curta = bloco a
+//    trocar"). Chavinhas parametrizam cada teia (mínimo 3 eixos). ──
+export const RADAR_GROUPS = [
+  {
+    key: 'copy',
+    label: 'Copy × parâmetros',
+    short: 'Copy',
+    question: 'qual bloco está fraco?',
+    icon: 'i-lucide-target',
+    hint: 'Cada ponta é um bloco da copy medido contra o SEU parâmetro: 100 = bateu o bom, 50 = na linha do ruim, 0 = zero (custo invertido). A ponta mais curta é o bloco a trocar na próxima versão.',
+    axes: ['hook', 'hold', 'cta', 'conv', 'cost'],
+    scopes: ['creative'],
+  },
+  {
+    key: 'video',
+    label: 'Retenção do vídeo',
+    short: 'Retenção',
+    question: 'onde o vídeo solta?',
+    icon: 'i-lucide-film',
+    hint: 'Parada nos 3 s contra o parâmetro e, de quem parou, quanto chegou a 25 %, 50 %, 75 % e ao fim (100 = todos). Teia cheia = ninguém solta; a ponta curta mostra em que trecho o vídeo perde.',
+    axes: ['hook', 'p25', 'p50', 'p75', 'finish'],
+    scopes: ['creative'],
+    video: true,
+  },
+  {
+    key: 'asset',
+    label: 'Peça × recorte',
+    short: 'Peça',
+    question: 'qual peça rende mais?',
+    icon: 'i-lucide-puzzle',
+    hint: 'CTA e custo contra o parâmetro; conversas e fatia contra a melhor peça do recorte.',
+    axes: ['cta', 'conversations', 'cost', 'share'],
+    scopes: ['asset'],
+  },
+];
+export const groupOf = key => RADAR_GROUPS.find(g => g.key === key);
+// compatibilidade: eixos padrão por escopo = a 1ª teia do escopo
 export const DEFAULT_AXES = {
-  creative: ['hook', 'hold', 'cta', 'conv', 'cost', 'leads'],
-  asset: ['cta', 'conversations', 'cost', 'share'],
+  creative: RADAR_GROUPS[0].axes,
+  asset: RADAR_GROUPS[2].axes,
 };
 
 const valid = v => v !== null && v !== undefined && Number.isFinite(Number(v));
@@ -159,16 +192,20 @@ const relativeScore = (axis, v, peers) => {
   return best > 0 ? clamp((100 * v) / best) : 0;
 };
 
-export const scoreFor = (axis, row, ctx = {}) => {
-  const raw = axis.get(row);
-  if (!valid(raw)) return { score: null, raw: null };
-  const v = Number(raw);
+const scoreRaw = (axis, v, ctx = {}) => {
   let score = null;
   if (axis.fixed) score = axis.fixed(v);
   else if (axis.target && ctx.targets && ctx.targets[axis.target])
     score = targetScore(v, ctx.targets[axis.target]);
   if (score === null) score = relativeScore(axis, v, ctx.peers);
-  return { score: score === null ? null : Math.round(clamp(score)), raw: v };
+  return score === null ? null : Math.round(clamp(score));
+};
+
+export const scoreFor = (axis, row, ctx = {}) => {
+  const raw = axis.get(row);
+  if (!valid(raw)) return { score: null, raw: null };
+  const v = Number(raw);
+  return { score: scoreRaw(axis, v, ctx), raw: v };
 };
 
 // polígono de UMA linha (criativo, peça, campeão)
@@ -198,40 +235,65 @@ export const datasetFor = (
   };
 };
 
-// polígono tracejado da MÉDIA da conta (taxas médias + média dos pares)
+// polígono tracejado da MÉDIA da conta: taxa média da conta quando o
+// backend manda (averages), senão a média dos pares do recorte
 export const averageDataset = (axes, ctx) => {
-  const avgRow = { rates: { ...(ctx.averages || {}) } };
+  const values = {};
+  const texts = {};
   const peers = ctx.peers || [];
   axes.forEach(axis => {
-    if (axis.target && ctx.averages && valid(ctx.averages[axis.target])) return;
-    const vals = peers.map(axis.get).filter(valid).map(Number);
-    if (!vals.length) return;
-    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-    if (axis.key === 'leads') avgRow.funnel = { leads: mean };
-    else if (axis.key === 'finish') avgRow.rates.retention = [0, 0, 0, 0, mean];
-    else if (axis.key === 'conversations') avgRow.conversations = mean;
-    else if (axis.key === 'share') avgRow.share = mean;
-    else avgRow.rates[axis.target || axis.key] = mean;
+    let mean = null;
+    if (axis.target && ctx.averages && valid(ctx.averages[axis.target])) {
+      mean = Number(ctx.averages[axis.target]);
+    } else {
+      const vals = peers.map(axis.get).filter(valid).map(Number);
+      if (vals.length) mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    }
+    const score = mean === null ? null : scoreRaw(axis, mean, ctx);
+    values[axis.key] = score === null ? 0 : score;
+    texts[axis.key] =
+      score === null
+        ? `${axis.label}: média não se aplica`
+        : `Média da conta — ${axis.label}: ${axis.fmt(mean)} → força ${score}`;
   });
-  return datasetFor(avgRow, axes, ctx, {
+  return {
     key: 'avg',
     label: 'média da conta',
     color: '#64748b',
+    values,
+    texts,
     dashed: true,
-  });
+  };
 };
 
-// eixos que fazem sentido no ambiente
+// eixos que existem no ambiente (escopo + se eixos relativos valem)
 export const availableAxes = (scope = 'creative', relativeOk = true) =>
   RADAR_AXES.filter(
     a => a.scopes.includes(scope) && (relativeOk || !a.relative)
   );
 
-// ── escolha por ambiente (chavinhas), compartilhada entre os cards da tela ──
+// teias que fazem sentido no ambiente (escopo, vídeo, ≥ 3 eixos)
+export const groupsFor = (
+  scope = 'creative',
+  relativeOk = true,
+  video = true
+) => {
+  const avail = availableAxes(scope, relativeOk).map(a => a.key);
+  return RADAR_GROUPS.filter(
+    g =>
+      g.scopes.includes(scope) &&
+      (video || !g.video) &&
+      g.axes.filter(k => avail.includes(k)).length >= 3
+  );
+};
+
+// ── escolha por ambiente: quais eixos de cada teia ficam ligados
+//    (chavinhas), compartilhada entre os cards da tela e guardada no
+//    navegador como { copy: [...], video: [...], asset: [...] } ──
 const stores = {};
 const storageKey = env => `cevico_radar_axes:${env}`;
 
-export const useRadarAxes = (env, defaults = DEFAULT_AXES.creative) => {
+export const useRadarAxes = env => {
   if (!stores[env]) {
     let saved = null;
     try {
@@ -239,30 +301,50 @@ export const useRadarAxes = (env, defaults = DEFAULT_AXES.creative) => {
     } catch {
       saved = null;
     }
-    stores[env] = reactive({
-      selected:
-        Array.isArray(saved) && saved.length >= 3 ? saved : [...defaults],
+    const selected = {};
+    RADAR_GROUPS.forEach(g => {
+      const sel =
+        saved && saved.selected && Array.isArray(saved.selected[g.key])
+          ? saved.selected[g.key].filter(k => g.axes.includes(k))
+          : null;
+      selected[g.key] = sel && sel.length >= 3 ? sel : [...g.axes];
     });
+    stores[env] = reactive({ selected });
   }
   const store = stores[env];
-  const isOn = key => store.selected.includes(key);
-  // mínimo de 3 eixos: sem isso não há teia
-  const toggle = key => {
-    const i = store.selected.indexOf(key);
-    if (i >= 0) {
-      if (store.selected.length <= 3) return false;
-      store.selected.splice(i, 1);
-    } else {
-      store.selected.push(key);
-    }
+  const persist = () => {
     try {
-      localStorage.setItem(storageKey(env), JSON.stringify(store.selected));
+      localStorage.setItem(
+        storageKey(env),
+        JSON.stringify({ selected: store.selected })
+      );
     } catch {
       /* navegador sem armazenamento: só não lembra */
     }
+  };
+  const isOn = (group, key) => (store.selected[group] || []).includes(key);
+  // mínimo de 3 eixos: sem isso não há teia
+  const toggle = (group, key) => {
+    const list = store.selected[group];
+    if (!list) return false;
+    const i = list.indexOf(key);
+    if (i >= 0) {
+      if (list.length <= 3) return false;
+      list.splice(i, 1);
+    } else {
+      list.push(key);
+    }
+    persist();
     return true;
   };
-  const axesFor = (scope = 'creative', relativeOk = true) =>
-    availableAxes(scope, relativeOk).filter(a => isOn(a.key));
-  return { store, isOn, toggle, axesFor };
+  // opções (chavinhas) de uma teia no ambiente, na ordem da teia
+  const optionsFor = (group, scope = 'creative', relativeOk = true) => {
+    const g = groupOf(group);
+    if (!g) return [];
+    const avail = availableAxes(scope, relativeOk);
+    return g.axes.map(k => avail.find(a => a.key === k)).filter(Boolean);
+  };
+  const axesFor = (group, scope = 'creative', relativeOk = true) =>
+    optionsFor(group, scope, relativeOk).filter(a => isOn(group, a.key));
+  return { store, isOn, toggle, optionsFor, axesFor };
 };

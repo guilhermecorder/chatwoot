@@ -9,7 +9,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                     laranja limao melancia uva kiwi coco pessego cereja abacate mirtilo].freeze
   # escopos de paleta dos Relatórios/Dashboards (rodada 163) — além dos painéis
   REPORT_PALETTE_SCOPES = %w[report:crm report:campanhas report:funil report:medicos report:agentes
-                             report:agenda report:meta report:google report:whatsapp report:etiquetas].freeze
+                             report:agenda report:meta report:google report:whatsapp report:etiquetas
+                             report:criativos].freeze
 
   # integração/config sensível = admin (ou área concedida). Leitura (show) e os
   # atalhos usados pela tela do atendente ficam livres.

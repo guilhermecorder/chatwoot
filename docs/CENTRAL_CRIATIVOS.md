@@ -169,6 +169,62 @@ frequência fixa (1 = 100, 3 = 0). `CreativeRadar.vue` = teia de uma linha;
 polígonos), Recordes (`recordes`, campeões de todos os tempos, taxas vindas
 de `CreativeRecords#champions_for` → `rates`), peças (`pecas`, pódio).
 
+**Teias com lógica (19/09 noite, 2ª revisão a pedido dele: "pouca lógica
+por trás dos 6 pontos; divida em mais de um radar"):** cada teia responde
+UMA pergunta e só mistura eixos da MESMA régua (`RADAR_GROUPS` em
+`radarAxes.js`):
+- **Copy × parâmetros** — *qual bloco está fraco?* Gancho, Corpo, CTA,
+  Conversa e Custo, todos contra o SEU parâmetro (100 = bateu o bom, 50 =
+  linha do ruim, 0 = zero; custo invertido). A ponta curta é o bloco a
+  trocar. É a teia de fichas, tabela, Ver a fundo, Comparar e Recordes.
+- **Retenção do vídeo** — *onde o vídeo solta?* Parada 3 s (contra o
+  parâmetro) e, de quem parou, quanto chegou a 25 %, 50 %, 75 % e ao fim
+  (escala fixa, 100 = todos). Só em vídeo; a ficha mostra as duas teias lado
+  a lado.
+- **Peça × recorte** — *qual peça rende mais?* CTA e custo contra o
+  parâmetro; conversas e fatia contra a melhor peça (pódio).
+Eixos relativos ao melhor do recorte (cliques, CPC, leads, frequência)
+SAÍRAM das teias — misturavam réguas e a forma não dizia nada; leads
+continuam na linha de jornada da ficha. `RadarAxesPicker` = uma linha por
+teia (pergunta + chavinhas, mínimo 3; prop `only` limita as teias);
+`CreativeRadar` recebe `group`; guardado em `localStorage` como
+`{ selected: { copy, video, asset } }`.
+
+**Leitura por bloco enxuta (mesma revisão):** `BulletMeter` mostra só o que
+decide — rótulo · métrica, valor, régua (faixas ruim/atenção/bom, traço do
+parâmetro, triângulo da média), situação, "média x" e "▲ n % vs anterior".
+Os parâmetros ("bom ≥ … · ruim < …") e "acima/abaixo da média" foram para o
+tooltip.
+
+**Moldura das fichas (`.cv-frame`, ajuste 19/09 noite):** interior de cor
+DIFERENTE do fundo da página — BRANCO no claro (`rgba(255,255,255,.9)`) e
+PRETO no escuro (`rgba(7,7,11,.84)`), com `backdrop-filter: blur(24px)
+saturate(1.4)` dando corpo de vidro e o brilho só na borda (`::after` com
+sombras internas: fio de luz no topo, halo leve). Sem tinta da paleta e sem
+"fosco" lilás: o `.cv-block` interno fica transparente (sem fundo, borda,
+luz do canto ou brilho). Quem colore é só o fio de 2 px do campeão
+(`.cv-champion::before`, degradê vertical começando pelo azul em cima:
+azul → violeta → rosa → laranja → amarelo → verde). Vale para fichas,
+Recordes (campeões de todos os tempos) e pódio. O bloco de TRÁS das abas
+Criativos / Peças / Recordes usa `.cv-block-sheer` (kit): quase nada de
+fundo, só uma borda translúcida, sem luz do canto — para as molduras
+ganharem contraste contra a página. No seletor de modo da teia, a explicação
+do modo fica em linha própria e as chavinhas na linha seguinte.
+
+**Página inteira "sheer" + cor complementar (19/09 noite, pedido dele):** o
+root da página leva `cv-page-sheer` → TODO `.cv-block` de fundo (hero de
+números, Campanhas, abas, Ritmo, Fatia, Parâmetros) vira quase nada com
+borda translúcida (faixas `.cv-strip` continuam coloridas). E cada paleta
+ganhou uma cor COMPLEMENTAR (`alt` em `cevicoPalettes.js`: Grape → ouro,
+Bondi/Blueberry/Mirtilo → amarelo/âmbar, Lime/Kiwi/Abacate → rosa/vermelho,
+Strawberry/Cereja/Melancia → verde-água/esmeralda, Tangerine/Laranja/Pêssego →
+azul, Limão → roxo, Uva → laranja, Coco → petróleo, Graphite → ouro CEVICO;
+Salada → Uva) com `altFamily` (4 degradês gerados por `shade()`), variáveis
+`--cv-alt/--cv-alt-rgb/--cv-alt-grad` e a classe `.cv-alt` no kit. Nos
+"Números do período" os cards alternam família × complementar em xadrez
+(`blockAltFamily('kpis')` em Taxa de parada, Retenção, Custo por conversa e
+Leads no CRM).
+
 ## Layout da página (ajuste 19/09)
 
 Ordem: hero → Números do período → Campanhas → **abas + período** (o
@@ -180,3 +236,30 @@ no desktop; o interior responde à largura da ficha com container queries do
 kit (`.cv-cq` = `container-type: inline-size`; `.cv-cq-thumb`,
 `.cv-cq-meters`, `.cv-cq-kpis`, `.cv-cq-radar`). A tabela cabe sem barra
 horizontal (`table-fixed`; colunas menos essenciais só em md/xl).
+
+## Paleta pessoal + respiro (19/09 noite, pedido dele)
+
+- **Escopo `report:criativos`** entrou em `REPORT_PALETTE_SCOPES` no
+  `settings_controller` — sem isso o backend descartava a escolha do admin
+  nesta tela (era por isso que "não dava para mudar o tema").
+- **Cada pessoa escolhe as cores do próprio painel** (`useCevicoPalette`):
+  a escolha pessoal fica em `ui_settings.cevico_palettes[escopo]`
+  (`{ mode: 'fixed'|'salad'|'day', key }`) e vence a do admin só para quem
+  escolheu. O popup `CevicoPalettePicker` ganhou "Para quem": *Só para mim*
+  (todo mundo; opção "Padrão da clínica" volta a seguir o admin) × *Para todo
+  mundo* (admin; com blocos). O chip do banner (`CevicoHero`) e o do Meu
+  Painel abrem o popup para qualquer usuário.
+- **Nota no Meu Painel** (`.cv-notice-dopamine`, InicioPage): "Seu painel, as
+  suas cores" com botão para abrir o popup; some ao dispensar
+  (`localStorage cevico_note_dopamine_colors_v1`).
+- **Respiro:** blocos da Central com `p-6 sm:p-9 mb-10`; títulos de bloco
+  `text-xl sm:text-2xl` (seções `text-lg sm:text-xl`); ficha `p-6 sm:p-8`
+  com `gap-7`, caixa da copy `p-6`, réguas `gap-x-8 gap-y-5`, KPIs `gap-5`.
+
+**Complementar: tinta e degradê pela luminância (19/09 noite, Tangerine):**
+`altInk` em cada paleta = `dark` só quando a complementar é clara (amarelo,
+ouro) — o texto usa `--cv-deep`; nas fortes (azul, rosa, verde, roxo) o
+texto é branco e a `altFamily` não sobe até o tom claro (branco sobre
+azul-claro não lê). `blockAltInk(blockId)` no composable, `--cv-alt-ink` nas
+variáveis. Rótulo da teia de retenção: `Fim` (o "Fim do vídeo" vazava do
+SVG para a teia vizinha).

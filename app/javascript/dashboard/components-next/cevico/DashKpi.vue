@@ -30,17 +30,39 @@ const props = defineProps({
   // colorido ganha borda clara e crista). Só o Meu Painel liga isso.
   grad: { type: String, default: '' },
   glass: { type: Boolean, default: false },
+  // tinta do texto sobre o degradê: 'light' (branco) ou 'dark' (o escuro da
+  // paleta, --cv-deep) — para cards em cor clara como o amarelo complementar
+  ink: { type: String, default: 'light' },
 });
+const darkInk = computed(() => props.ink === 'dark');
 
-const isGradient = computed(() => Boolean(props.grad || (props.from && props.to)));
-const kpiStyle = computed(() =>
-  isGradient.value
-    ? { background: props.grad || `linear-gradient(135deg, ${props.from}, ${props.to})` }
-    : {}
+const isGradient = computed(() =>
+  Boolean(props.grad || (props.from && props.to))
+);
+const kpiStyle = computed(() => {
+  if (!isGradient.value) return {};
+  const st = {
+    background:
+      props.grad || `linear-gradient(135deg, ${props.from}, ${props.to})`,
+  };
+  if (darkInk.value) st.color = 'var(--cv-deep, #1f1338)';
+  return st;
+});
+const inkMain = computed(() => (darkInk.value ? '' : 'text-white'));
+const inkSub = computed(() =>
+  darkInk.value ? 'opacity-80' : 'text-white/80'
+);
+const inkDim = computed(() =>
+  darkInk.value ? 'opacity-70' : 'text-white/70'
 );
 const kpiSkin = computed(() => {
-  if (isGradient.value) return props.glass ? 'text-white shadow-lg cv-tile' : 'text-white shadow-lg';
-  return props.glass ? 'cv-sub' : 'bg-white dark:bg-n-solid-2 border-2 border-n-weak shadow-sm';
+  if (isGradient.value)
+    return props.glass
+      ? `${inkMain.value} shadow-lg cv-tile`
+      : `${inkMain.value} shadow-lg`;
+  return props.glass
+    ? 'cv-sub'
+    : 'bg-white dark:bg-n-solid-2 border-2 border-n-weak shadow-sm';
 });
 
 // ── contagem animada (só quando value é número) ──
@@ -119,7 +141,10 @@ const goalBarColor = computed(() => {
     >
       <p
         class="mb-1.5 font-medium"
-        :class="[compact ? 'text-[11px]' : 'text-xs', isGradient ? 'text-white/80' : 'text-n-slate-10']"
+        :class="[
+          compact ? 'text-[11px]' : 'text-xs',
+          isGradient ? inkSub : 'text-n-slate-10',
+        ]"
       >
         {{ label }}
       </p>
@@ -133,7 +158,10 @@ const goalBarColor = computed(() => {
       <p
         v-if="sub"
         class="mt-1"
-        :class="[compact ? 'text-[10px]' : 'text-xs', isGradient ? 'text-white/70' : 'text-n-slate-9']"
+        :class="[
+          compact ? 'text-[10px]' : 'text-xs',
+          isGradient ? inkDim : 'text-n-slate-9',
+        ]"
       >
         {{ sub }}
       </p>
@@ -146,14 +174,18 @@ const goalBarColor = computed(() => {
         >
           <div
             class="h-full rounded-full transition-all duration-700"
-            :style="{ width: `${Math.max(goalPct, 3)}%`, background: goalBarColor }"
+            :style="{
+              width: `${Math.max(goalPct, 3)}%`,
+              background: goalBarColor,
+            }"
           />
         </div>
         <p
           class="text-[10px] mt-0.5"
-          :class="isGradient ? 'text-white/70' : 'text-n-slate-9'"
+          :class="isGradient ? inkDim : 'text-n-slate-9'"
         >
-          meta do mês: {{ Number(goal.current || 0).toLocaleString('pt-BR') }} de
+          meta do mês:
+          {{ Number(goal.current || 0).toLocaleString('pt-BR') }} de
           {{ Number(goal.target).toLocaleString('pt-BR') }} · {{ goalPct }}%
         </p>
       </div>
@@ -181,8 +213,13 @@ const goalBarColor = computed(() => {
   animation: cevico-kpi-hit 2.4s ease-in-out infinite;
 }
 @keyframes cevico-kpi-hit {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
-  50% { box-shadow: 0 0 22px 2px rgba(52, 211, 153, 0.55); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+  }
+  50% {
+    box-shadow: 0 0 22px 2px rgba(52, 211, 153, 0.55);
+  }
 }
 
 /* 🏆 recorde: brilho dourado constante (a aura orbita por cima) */
@@ -195,8 +232,13 @@ const goalBarColor = computed(() => {
   animation: cevico-kpi-critical 1.6s ease-in-out infinite;
 }
 @keyframes cevico-kpi-critical {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.35); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.35);
+  }
 }
 
 .cevico-kpi__chip--record {
@@ -206,11 +248,22 @@ const goalBarColor = computed(() => {
   animation: cevico-chip-shimmer 2.2s linear infinite;
 }
 @keyframes cevico-chip-shimmer {
-  to { background-position: -200% 0; }
+  to {
+    background-position: -200% 0;
+  }
 }
-.cevico-kpi__chip--hit { background: #059669; color: #fff; }
-.cevico-kpi__chip--low { background: #f59e0b; color: #451a03; }
-.cevico-kpi__chip--critical { background: #dc2626; color: #fff; }
+.cevico-kpi__chip--hit {
+  background: #059669;
+  color: #fff;
+}
+.cevico-kpi__chip--low {
+  background: #f59e0b;
+  color: #451a03;
+}
+.cevico-kpi__chip--critical {
+  background: #dc2626;
+  color: #fff;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .cevico-kpi--hit > div,

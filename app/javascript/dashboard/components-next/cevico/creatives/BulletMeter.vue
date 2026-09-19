@@ -76,19 +76,27 @@ const targetText = computed(() => {
     ? `bom ≤ ${fmt(good.value)} · ruim > ${fmt(bad.value)}`
     : `bom ≥ ${fmt(good.value)} · ruim < ${fmt(bad.value)}`;
 });
+// tudo que é detalhe (parâmetros, posição contra a média) vai para o
+// tooltip; na tela fica só o que decide: valor, régua, situação, média, tendência
+const tooltip = computed(() =>
+  [props.hint, targetText.value, props.vsAvg ? VS_META[props.vsAvg] : '']
+    .filter(Boolean)
+    .join(' · ')
+);
 </script>
 
 <template>
-  <div class="min-w-0" :title="hint">
-    <div class="flex items-baseline justify-between gap-2 min-w-0">
-      <span class="text-xs font-semibold text-n-slate-12 min-w-0">
+  <div class="min-w-0" :title="tooltip">
+    <div class="flex items-baseline gap-2 min-w-0">
+      <span class="text-xs font-semibold text-n-slate-12 min-w-0 truncate">
         {{ label }}
-        <span v-if="metric" class="text-n-slate-9 font-normal"
+        <span
+v-if="metric" class="text-n-slate-9 font-normal"
           >· {{ metric }}</span
         >
       </span>
       <span
-        class="font-bold text-n-slate-12 tabular-nums flex-shrink-0"
+        class="ml-auto font-bold text-n-slate-12 tabular-nums flex-shrink-0"
         :class="compact ? 'text-sm' : 'text-lg'"
       >
         {{ fmt(value) }}
@@ -96,7 +104,7 @@ const targetText = computed(() => {
     </div>
     <div
       class="relative mt-1 rounded-full overflow-visible"
-      :class="compact ? 'h-2.5' : 'h-3.5'"
+      :class="compact ? 'h-2' : 'h-2.5'"
     >
       <div
         class="absolute inset-0 rounded-full overflow-hidden flex bg-n-alpha-2"
@@ -111,7 +119,7 @@ const targetText = computed(() => {
       <div
         v-if="value !== null"
         class="absolute left-0 top-1/2 -translate-y-1/2 rounded-full"
-        :class="compact ? 'h-1.5' : 'h-2'"
+        :class="compact ? 'h-1' : 'h-1.5'"
         :style="{ width: `${valuePct}%`, background: color }"
       />
       <span
@@ -122,12 +130,14 @@ const targetText = computed(() => {
       />
       <span
         v-if="avgPct !== null"
-        class="absolute -bottom-1.5 w-0 h-0 -translate-x-1/2 border-l-[5px] border-r-[5px] border-b-[6px] border-l-transparent border-r-transparent border-b-n-slate-11"
+        class="absolute -bottom-1.5 w-0 h-0 -translate-x-1/2 border-l-[4px] border-r-[4px] border-b-[5px] border-l-transparent border-r-transparent border-b-n-slate-11"
         :style="{ left: `${avgPct}%` }"
         :title="`média da conta: ${fmt(avg)}`"
       />
     </div>
-    <div class="flex items-center gap-x-3 gap-y-0.5 mt-2 text-[11px] flex-wrap">
+    <div
+      class="flex items-center gap-x-2.5 gap-y-0.5 mt-1.5 text-[11px] flex-wrap"
+    >
       <span
         v-if="bandMeta"
         class="inline-flex items-center gap-1 font-semibold"
@@ -136,18 +146,12 @@ const targetText = computed(() => {
         <span :class="bandMeta.icon" class="text-sm" />{{ bandMeta.label }}
       </span>
       <span v-else class="text-n-slate-9">sem parâmetro</span>
-      <span v-if="!compact && targetText" class="text-n-slate-10">{{
-        targetText
-      }}</span>
-      <span v-if="avg" class="text-n-slate-10">
-        <span
-          class="inline-block w-0 h-0 border-l-[4px] border-r-[4px] border-b-[5px] border-l-transparent border-r-transparent border-b-n-slate-11 align-middle mr-0.5"
-        />
-        média {{ fmt(avg)
-        }}<span v-if="vsAvg && !compact"> · {{ VS_META[vsAvg] }}</span>
-      </span>
-      <span v-if="d !== null" class="font-semibold" :class="deltaCls(d, lower)"
-        >{{ fmtDelta(d) }} vs período anterior</span
+      <span v-if="avg" class="text-n-slate-10">média {{ fmt(avg) }}</span>
+      <span
+        v-if="d !== null"
+        class="font-semibold ml-auto"
+        :class="deltaCls(d, lower)"
+        >{{ fmtDelta(d) }} vs anterior</span
       >
     </div>
   </div>

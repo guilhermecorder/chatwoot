@@ -4,16 +4,12 @@
 // tracejado da média da conta.
 import { computed } from 'vue';
 import MiniRadar from 'dashboard/components-next/cevico/MiniRadar.vue';
-import {
-  useRadarAxes,
-  datasetFor,
-  averageDataset,
-  DEFAULT_AXES,
-} from './radarAxes';
+import { useRadarAxes, datasetFor, averageDataset } from './radarAxes';
 
 const props = defineProps({
   row: { type: Object, required: true },
   env: { type: String, required: true },
+  group: { type: String, default: 'copy' }, // qual teia (copy | video | asset)
   scope: { type: String, default: 'creative' },
   relativeOk: { type: Boolean, default: true },
   targets: { type: Object, default: () => ({}) },
@@ -27,8 +23,10 @@ const props = defineProps({
   label: { type: String, default: 'este criativo' },
 });
 
-const { axesFor } = useRadarAxes(props.env, DEFAULT_AXES[props.scope]);
-const axes = computed(() => axesFor(props.scope, props.relativeOk));
+const { axesFor } = useRadarAxes(props.env);
+const axes = computed(() =>
+  axesFor(props.group, props.scope, props.relativeOk)
+);
 const ctx = computed(() => ({
   targets: props.targets,
   averages: props.averages,
