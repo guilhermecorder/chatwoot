@@ -46,6 +46,7 @@ class Crm::AdInsightsSyncService
     recovered = recover_missing_creatives
     write_done_state(ads, rows, recovered)
     Crm::AdCreativeMediaJob.perform_later(@account.id)
+    Crm::AdVideoTranscribeJob.enqueue_pending(@account) # 🎬 item 181
     warm_records_cache
     { configured: true, ads: ads, rows: rows, since: since_date, until: @until_date, recovered: recovered, windows: windows.size }
   rescue StandardError => e
@@ -105,8 +106,20 @@ class Crm::AdInsightsSyncService
     end
     now = Time.current
     rows = ads.map { |ad| creative_row(ad, now) }
+    keep_transcripts!(rows)
     upsert_creatives(rows)
     rows.size
+  end
+
+  # a transcrição do vídeo (item 181) mora em creative['transcript'] e NÃO vem
+  # da Meta: a carga preserva o que já foi transcrito
+  def keep_transcripts!(rows)
+    ids = rows.pluck(:ad_id)
+    existing = Crm::AdCreative.where(account_id: @account.id, ad_id: ids).pluck(:ad_id, :creative).to_h
+    rows.each do |row|
+      transcript = existing.dig(row[:ad_id], 'transcript')
+      row[:creative] = row[:creative].merge('transcript' => transcript) if transcript.present?
+    end
   end
 
   def creative_row(ad_row, now)

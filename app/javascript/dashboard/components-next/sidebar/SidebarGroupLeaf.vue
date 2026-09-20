@@ -12,6 +12,8 @@ const props = defineProps({
   active: { type: Boolean, default: false },
   component: { type: Function, default: null },
   badgeCount: { type: [Number, String], default: 0 },
+  // cor do azulejo do ícone (menu estilo iPhone, pedido 20/09)
+  iconColor: { type: String, default: '' },
   hideTreeLine: { type: Boolean, default: false },
   thinTreeLine: { type: Boolean, default: false },
 });
@@ -55,7 +57,11 @@ const TREE_CONNECTOR =
         v-bind="{ label, icon, active, badgeCount }"
       />
       <template v-else>
-        <span v-if="icon" class="size-4 grid place-content-center rounded-full">
+        <span
+          v-if="icon"
+          class="size-4 grid place-content-center rounded-full sb-icon"
+          :style="iconColor ? { color: iconColor } : {}"
+        >
           <Icon :icon="icon" class="size-4 inline-block" />
         </span>
         <div class="flex-1 truncate min-w-0 text-sm">{{ label }}</div>

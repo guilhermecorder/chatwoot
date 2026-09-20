@@ -11,6 +11,7 @@ import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue'
 import { hexFromGrad } from 'dashboard/helper/cevicoPalettes';
 import BulletMeter from './BulletMeter.vue';
 import RetentionCurve from './RetentionCurve.vue';
+import MoneyTiles from './MoneyTiles.vue';
 import AssetTable from './AssetTable.vue';
 import CreativeRadar from './CreativeRadar.vue';
 import RadarAxesPicker from './RadarAxesPicker.vue';
@@ -25,6 +26,7 @@ import {
   METRIC_DEFS,
   FOCUS_META,
   BAND_META,
+  CHAMPION_META,
   delta,
   fmtDelta,
   deltaCls,
@@ -39,11 +41,37 @@ const props = defineProps({
   adAccountId: { type: String, default: '' },
 });
 const emit = defineEmits(['close']);
-
 const data = ref(null);
 const isLoading = ref(false);
 const error = ref('');
 const imgFailed = ref(false);
+
+// 🎬 item 181: transcrição do vídeo
+const showTranscript = ref(false);
+const isTranscribing = ref(false);
+const fromVideo = computed(
+  () => data.value && data.value.text_source === 'video'
+);
+const transcriptStatus = computed(
+  () =>
+    (data.value && data.value.transcript && data.value.transcript.status) || ''
+);
+const transcribeVideo = async () => {
+  if (!data.value) return;
+  isTranscribing.value = true;
+  try {
+    const { data: r } = await CevicoCreativesAPI.transcribeVideo(
+      data.value.ad_id
+    );
+    data.value = { ...data.value, transcript: r.transcript };
+  } catch (e) {
+    error.value =
+      (e.response && e.response.data && e.response.data.error) ||
+      'Não consegui pedir a transcrição.';
+  } finally {
+    isTranscribing.value = false;
+  }
+};
 
 const load = async () => {
   isLoading.value = true;
@@ -206,31 +234,140 @@ const managerUrl = computed(() =>
     : ''
 );
 const bkRows = bk => (bk && bk.rows) || [];
+// 🧭 faixa do topo (pedido 20/09): os indicadores mais relevantes juntos, com nome
+const topTiles = computed(() => {
+  if (!data.value) return [];
+  const d = data.value;
+  const r = d.rates || {};
+  const s = d.summary || {};
+  const tiles = [
+    { label: 'Investido', value: fmtMoney(d.totals.spend) },
+    { label: 'Impressões', value: fmtCompact(d.totals.impressions) },
+    { label: 'Alcance', value: fmtCompact(s.reach || d.totals.reach) },
+    { label: 'Conversas', value: fmtNum(d.totals.conversations), strong: true },
+    {
+      label: 'Custo por conversa',
+      value: r.cost_conversation ? fmtMoney(r.cost_conversation) : '—',
+      band: bands.value.cost,
+    },
+    {
+      label: 'CTR de link',
+      value: fmtPct(r.link_ctr, 2),
+      band: bands.value.cta,
+    },
+    {
+      label: 'Conversa por clique',
+      value: fmtPct(r.conv_rate),
+      band: bands.value.conv,
+    },
+  ];
+  if (isVideo.value) {
+    tiles.push(
+      {
+        label: 'Taxa de parada',
+        value: fmtPct(r.hook_rate),
+        band: bands.value.hook,
+      },
+      { label: 'Retenção', value: fmtPct(r.hold_rate), band: bands.value.hold }
+    );
+  }
+  tiles.push(
+    {
+      label: 'Custo por consulta',
+      value: r.cost_booked ? fmtMoney(r.cost_booked) : '—',
+      money: true,
+    },
+    {
+      label: 'Custo por cirurgia',
+      value: r.cost_surgery ? fmtMoney(r.cost_surgery) : '—',
+      money: true,
+    },
+    {
+      label: 'ROAS',
+      value: r.roas ? `${String(r.roas).replace('.', ',')}×` : '—',
+      money: true,
+    },
+    { label: '% agendamento', value: fmtPct(r.booking_rate, 0), money: true }
+  );
+  return tiles;
+});
+const champions = computed(() =>
+  ((data.value && data.value.champion_of) || []).filter(k => CHAMPION_META[k])
+);
+// tiles de contexto (Meta) em uma linha só — cada um com a variação
+const metaTiles = computed(() => {
+  if (!data.value) return [];
+  const d = data.value;
+  const p = prev.value;
+  const s = d.summary || {};
+  return [
+    {
+      label: 'Investido',
+      value: fmtMoney(d.totals.spend),
+      d: p && delta(d.totals.spend, p.spend),
+      neutral: true,
+    },
+    {
+      label: 'Impressões',
+      value: fmtCompact(d.totals.impressions),
+      d: p && delta(d.totals.impressions, p.impressions),
+      neutral: true,
+    },
+    {
+      label: 'Alcance real',
+      value: fmtCompact(s.reach || d.totals.reach),
+      sub: 'pessoas no período',
+    },
+    {
+      label: 'Frequência',
+      value: s.frequency ? String(s.frequency).replace('.', ',') : '—',
+      sub: 'vezes por pessoa',
+    },
+    {
+      label: 'Conversas',
+      value: fmtNum(d.totals.conversations),
+      d: p && delta(d.totals.conversations, p.conversations),
+    },
+    {
+      label: 'Custo por conversa',
+      value: d.rates.cost_conversation
+        ? fmtMoney(d.rates.cost_conversation)
+        : '—',
+      d: p && delta(d.rates.cost_conversation, p.cost_conversation),
+      lower: true,
+      band: bands.value.cost,
+    },
+  ];
+});
 </script>
 
 <template>
   <Teleport to="body">
     <div
-      class="cv-page fixed inset-0 z-[60] flex items-start sm:items-center justify-center bg-black/60 p-2 sm:p-6"
+      class="cv-page fixed inset-0 z-[60] flex items-start sm:items-center justify-center bg-black/60 p-0 sm:p-6"
       :style="cvVars"
       @click.self="emit('close')"
     >
-      <div class="cv-modal w-full max-w-6xl max-h-[95vh] flex flex-col">
-        <!-- cabeçalho do kit -->
-        <div class="cv-modal-head flex items-center gap-3">
-          <span class="cv-icon cv-icon-lg"
+      <div
+        class="cv-modal w-full max-w-6xl h-full sm:h-auto sm:max-h-[95vh] flex flex-col rounded-none sm:rounded-3xl"
+      >
+        <!-- cabeçalho: nome grande, contexto, ações -->
+        <div class="cv-modal-head flex items-center gap-3 sm:gap-4">
+          <span class="cv-icon cv-icon-lg flex-shrink-0"
             ><span
               :class="FORMAT_ICON[(data && data.format) || 'other']"
               class="text-lg"
           /></span>
           <div class="min-w-0 flex-1">
             <p class="text-[11px] opacity-80">Ver a fundo</p>
-            <h2 class="text-base font-bold leading-snug">
+            <h2
+              class="text-lg sm:text-2xl font-bold leading-tight tracking-tight truncate"
+            >
               {{ data ? data.ad_name : 'Carregando…' }}
             </h2>
           </div>
           <button
-            class="cv-iconbtn cv-iconbtn-lg"
+            class="cv-iconbtn cv-iconbtn-lg flex-shrink-0"
             title="Fechar"
             @click="emit('close')"
           >
@@ -238,7 +375,7 @@ const bkRows = bk => (bk && bk.rows) || [];
           </button>
         </div>
 
-        <div class="overflow-y-auto min-h-0 p-4 sm:p-6 space-y-5">
+        <div class="overflow-y-auto min-h-0 p-4 sm:p-8 space-y-8">
           <SkeletonScreen v-if="isLoading && !data" variant="dashboard" />
           <div
             v-else-if="error"
@@ -247,11 +384,45 @@ const bkRows = bk => (bk && bk.rows) || [];
             <span class="i-lucide-alert-triangle" />{{ error }}
           </div>
           <template v-else-if="data">
-            <!-- 1. ficha -->
-            <section class="grid gap-5 md:grid-cols-[200px_minmax(0,1fr)]">
-              <div class="flex flex-col gap-3 min-w-0">
+            <!-- 0. indicadores nomeados, juntos, logo no topo -->
+            <section
+              class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2.5"
+            >
+              <div
+                v-for="t in topTiles"
+                :key="t.label"
+                class="cv-sub rounded-2xl px-4 py-3 min-w-0"
+                :class="t.money ? 'cv-sub-on' : ''"
+              >
+                <p
+                  class="text-[11px] font-semibold text-n-slate-10 leading-tight flex items-center gap-1 flex-wrap"
+                >
+                  <span class="truncate">{{ t.label }}</span>
+                  <span
+                    v-if="t.band"
+                    class="ml-auto"
+                    :class="[BAND_META[t.band].icon, BAND_META[t.band].cls]"
+                    :title="BAND_META[t.band].label"
+                  />
+                </p>
+                <p
+                  class="text-xl font-extrabold tabular-nums tracking-tight leading-none mt-1"
+                  :class="
+                    t.value === '—' ? 'text-n-slate-8' : 'text-n-slate-12'
+                  "
+                >
+                  {{ t.value }}
+                </p>
+              </div>
+            </section>
+
+            <!-- 1. ficha: mídia + copy + chips -->
+            <section
+              class="grid grid-cols-1 gap-6 md:grid-cols-[180px_minmax(0,1fr)]"
+            >
+              <div class="flex flex-col gap-4 min-w-0">
                 <div
-                  class="w-40 h-52 md:w-full md:h-[250px] rounded-2xl overflow-hidden bg-n-alpha-2 flex items-center justify-center"
+                  class="w-44 h-56 md:w-full md:h-[230px] rounded-3xl overflow-hidden bg-n-alpha-2 flex items-center justify-center"
                 >
                   <img
                     v-if="data.thumbnail_url && !imgFailed"
@@ -266,22 +437,9 @@ const bkRows = bk => (bk && bk.rows) || [];
                     class="text-4xl text-n-slate-9"
                   />
                 </div>
-                <!-- teia deste criativo × média da conta -->
-                <CreativeRadar
-                  :row="data"
-                  env="detalhe"
-                  :relative-ok="false"
-                  :targets="targets"
-                  :averages="averages"
-                  :size="184"
-                  show-average
-                  legend
-                  class="self-center"
-                />
-                <RadarAxesPicker env="detalhe" :relative-ok="false" />
               </div>
-              <div class="min-w-0">
-                <div class="flex items-center gap-1.5 flex-wrap mb-2">
+              <div class="min-w-0 flex flex-col gap-4">
+                <div class="flex items-center gap-1.5 flex-wrap">
                   <span class="cv-chip"
                     ><span
                       :class="FORMAT_ICON[data.format]"
@@ -305,45 +463,71 @@ const bkRows = bk => (bk && bk.rows) || [];
                   <span class="text-[11px] text-n-slate-9"
                     >{{ data.campaign_name }} · {{ data.adset_name }}</span
                   >
-                  <span class="ml-auto flex gap-2 flex-wrap">
-                    <button
-                      class="cv-btn cv-btn-sm cv-btn-ghost"
-                      title="Copiar gancho, corpo e CTA"
-                      @click="transcribe(data)"
-                    >
-                      <span class="i-lucide-copy text-sm" />Transcrever
-                    </button>
-                    <a
-                      v-if="managerUrl"
-                      :href="managerUrl"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="cv-btn cv-btn-sm cv-btn-ghost"
-                      ><span
-                        class="i-lucide-external-link text-sm"
-                      />Gerenciador</a
-                    >
-                    <a
-                      v-if="data.permalink"
-                      :href="data.permalink"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="cv-btn cv-btn-sm cv-btn-ghost"
-                      ><span class="i-lucide-instagram text-sm" />Instagram</a
-                    >
+                </div>
+                <div v-if="champions.length" class="flex flex-wrap gap-1.5">
+                  <span
+                    v-for="k in champions"
+                    :key="k"
+                    class="cv-champion-badge"
+                  >
+                    <span :class="CHAMPION_META[k].icon" />{{
+                      CHAMPION_META[k].label
+                    }}
                   </span>
                 </div>
-                <div class="rounded-2xl bg-n-alpha-1 p-4 space-y-2">
+                <div class="rounded-3xl bg-n-alpha-1 p-6 space-y-3">
                   <p
-                    class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold"
+                    class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold flex items-center gap-2 flex-wrap"
                   >
                     Gancho
+                    <span
+                      v-if="fromVideo"
+                      class="cv-chip cv-green normal-case tracking-normal"
+                      title="Transcrição do vídeo"
+                      ><span class="i-lucide-clapperboard text-xs" />fala do
+                      vídeo</span
+                    >
+                    <span
+                      v-else-if="data.format === 'video'"
+                      class="cv-chip cv-amber normal-case tracking-normal"
+                      ><span class="i-lucide-file-text text-xs" />texto do
+                      anúncio</span
+                    >
+                    <button
+                      v-if="
+                        data.format === 'video' &&
+                        !fromVideo &&
+                        !['queued', 'processing'].includes(transcriptStatus)
+                      "
+                      class="cv-btn cv-btn-sm cv-btn-ghost normal-case tracking-normal"
+                      :disabled="isTranscribing"
+                      @click="transcribeVideo"
+                    >
+                      <span class="i-lucide-sparkles text-xs" />Transcrever
+                      vídeo
+                    </button>
+                    <span
+                      v-else-if="
+                        ['queued', 'processing'].includes(transcriptStatus)
+                      "
+                      class="normal-case tracking-normal text-n-slate-9"
+                      >transcrevendo… (volte em alguns minutos)</span
+                    >
+                    <span
+                      v-else-if="transcriptStatus === 'failed'"
+                      class="normal-case tracking-normal text-red-600"
+                      >{{
+                        data.transcript.error || 'a transcrição falhou'
+                      }}</span
+                    >
                   </p>
-                  <p class="text-lg font-bold text-n-slate-12 leading-snug">
+                  <p
+                    class="text-xl font-bold text-n-slate-12 leading-snug tracking-tight"
+                  >
                     {{ data.hook || '—' }}
                   </p>
                   <p
-                    class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold pt-1"
+                    class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold pt-2"
                   >
                     Corpo
                   </p>
@@ -352,165 +536,324 @@ const bkRows = bk => (bk && bk.rows) || [];
                   >
                     {{ data.body || '—' }}
                   </p>
-                  <div class="flex items-center gap-2 pt-1">
+                  <div class="flex items-center gap-2 pt-2 flex-wrap">
                     <span
                       class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold"
                       >CTA</span
                     ><span class="cv-chip">{{ data.cta_label }}</span>
+                    <span v-if="data.video_cta" class="text-xs text-n-slate-11"
+                      >· no vídeo: “{{ data.video_cta }}”</span
+                    >
+                  </div>
+                  <div v-if="fromVideo" class="pt-2">
+                    <button
+                      class="cv-btn cv-btn-sm cv-btn-ghost"
+                      @click="showTranscript = !showTranscript"
+                    >
+                      <span class="i-lucide-scroll-text text-xs" />{{
+                        showTranscript
+                          ? 'Esconder a transcrição'
+                          : 'Ver a transcrição inteira'
+                      }}
+                    </button>
+                    <p
+                      v-if="showTranscript"
+                      class="mt-3 text-sm text-n-slate-11 whitespace-pre-line leading-relaxed"
+                    >
+                      {{ data.transcript.text }}
+                    </p>
+                    <p
+                      v-if="data.ad_hook || data.ad_body"
+                      class="mt-3 text-[11px] text-n-slate-9"
+                    >
+                      Texto do anúncio na Meta: “{{ data.ad_hook || '—' }}” ·
+                      {{ data.ad_body || '—' }}
+                    </p>
                   </div>
                 </div>
+                <div class="flex gap-2 flex-wrap">
+                  <button
+                    class="cv-btn cv-btn-sm"
+                    title="Copiar gancho, corpo e CTA"
+                    @click="transcribe(data)"
+                  >
+                    <span class="i-lucide-copy text-sm" />Transcrever
+                  </button>
+                  <a
+                    v-if="managerUrl"
+                    :href="managerUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="cv-btn cv-btn-sm cv-btn-ghost"
+                    ><span
+                      class="i-lucide-external-link text-sm"
+                    />Gerenciador</a
+                  >
+                  <a
+                    v-if="data.permalink"
+                    :href="data.permalink"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="cv-btn cv-btn-sm cv-btn-ghost"
+                    ><span class="i-lucide-instagram text-sm" />Instagram</a
+                  >
+                </div>
               </div>
             </section>
 
-            <!-- 2. leitura -->
-            <section class="cv-block p-5" :style="{ '--cv-grad': family[0] }">
-              <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <!-- 2. o que vale dinheiro -->
+            <section
+              class="cv-block p-6 sm:p-8"
+              :style="{ '--cv-grad': family[0] }"
+            >
+              <div class="flex items-center gap-2.5 mb-1 flex-wrap">
                 <span class="cv-icon"
-                  ><span class="i-lucide-sparkles text-base"
+                  ><span class="i-lucide-badge-dollar-sign text-base"
                 /></span>
-                <h3 class="text-sm font-bold text-n-slate-12">Leitura</h3>
-                <span v-if="FOCUS_META[diag.focus]" class="cv-chip">{{
-                  FOCUS_META[diag.focus]
-                }}</span>
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                >
+                  O que vale dinheiro
+                </h3>
               </div>
-              <p class="text-base text-n-slate-12 leading-relaxed mb-5">
-                {{ diag.text }}
+              <p class="text-xs text-n-slate-10 mb-5">
+                jornada do CRM deste anúncio × investido, contra a média da
+                conta no mesmo período
               </p>
-              <div class="grid gap-x-8 gap-y-5 md:grid-cols-2">
-                <BulletMeter
-                  v-for="(m, i) in meters"
-                  :key="m.key"
-                  :label="m.label"
-                  :metric="m.metric"
-                  :hint="m.hint"
-                  :value="data.rates[m.key]"
-                  :avg="averages[m.key]"
-                  :prev="prev ? prev[m.key] : null"
-                  :band="bands[m.band]"
-                  :vs-avg="vsAvg[m.band]"
-                  :target="targets[m.key]"
-                  :digits="m.digits"
-                  :money="!!m.money"
-                  :color="color(i % 4)"
-                />
+              <MoneyTiles
+                :rates="data.rates"
+                :funnel="data.funnel"
+                :averages="averages"
+                :champions="data.champion_of || []"
+              />
+            </section>
+
+            <!-- 3. leitura + réguas + retenção -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <section
+                class="cv-block p-6 sm:p-8"
+                :style="{ '--cv-grad': family[1] }"
+              >
+                <div class="flex items-center gap-2.5 mb-1 flex-wrap">
+                  <span class="cv-icon"
+                    ><span class="i-lucide-sparkles text-base"
+                  /></span>
+                  <h3
+                    class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                  >
+                    Leitura
+                  </h3>
+                  <span v-if="FOCUS_META[diag.focus]" class="cv-chip ml-auto">{{
+                    FOCUS_META[diag.focus]
+                  }}</span>
+                </div>
+                <p class="text-base text-n-slate-12 leading-relaxed mb-6">
+                  {{ diag.text }}
+                </p>
+                <div class="flex flex-col items-center gap-3 mb-6">
+                  <CreativeRadar
+                    :row="data"
+                    env="detalhe"
+                    :relative-ok="false"
+                    :targets="targets"
+                    :averages="averages"
+                    :size="200"
+                    show-average
+                    legend
+                  />
+                  <RadarAxesPicker env="detalhe" :relative-ok="false" />
+                </div>
+                <div class="grid grid-cols-1 gap-x-8 gap-y-6">
+                  <BulletMeter
+                    v-for="(m, i) in meters"
+                    :key="m.key"
+                    :label="m.label"
+                    :metric="m.metric"
+                    :hint="m.hint"
+                    :value="data.rates[m.key]"
+                    :avg="averages[m.key]"
+                    :prev="prev ? prev[m.key] : null"
+                    :band="bands[m.band]"
+                    :vs-avg="vsAvg[m.band]"
+                    :target="targets[m.key]"
+                    :digits="m.digits"
+                    :money="!!m.money"
+                    :color="color(i % 4)"
+                  />
+                </div>
+              </section>
+
+              <div class="flex flex-col gap-6">
+                <section
+                  v-if="retentionSeries.length"
+                  class="cv-block p-6 sm:p-8"
+                  :style="{ '--cv-grad': family[0] }"
+                >
+                  <div class="flex items-center gap-2.5 mb-1">
+                    <span class="cv-icon"
+                      ><span class="i-lucide-film text-base"
+                    /></span>
+                    <h3
+                      class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                    >
+                      Curva de retenção
+                    </h3>
+                  </div>
+                  <p class="text-xs text-n-slate-10 mb-1">
+                    % das impressões que chegou a cada marco · tempo médio
+                    assistido
+                    {{ String(data.rates.avg_watch || 0).replace('.', ',') }} s
+                  </p>
+                  <p class="text-sm text-n-slate-12 mb-3">
+                    {{ retentionReading }}
+                  </p>
+                  <RetentionCurve :series="retentionSeries" :height="200" />
+                </section>
+
+                <section
+                  class="cv-block p-6 sm:p-8"
+                  :style="{ '--cv-grad': family[2] }"
+                >
+                  <div class="flex items-center gap-2.5 mb-1">
+                    <span class="cv-icon"
+                      ><span class="i-lucide-scale text-base"
+                    /></span>
+                    <h3
+                      class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                    >
+                      1ª metade × 2ª metade
+                    </h3>
+                  </div>
+                  <p class="text-xs text-n-slate-10 mb-4">
+                    O período dividido ao meio. Queda de CTR com entrega mantida
+                    é o sinal clássico de fadiga.
+                  </p>
+                  <ul class="divide-y divide-n-weak">
+                    <li
+                      v-for="r in halfRows"
+                      :key="r.label"
+                      class="py-2 flex items-center gap-3 text-sm"
+                    >
+                      <span class="text-n-slate-11 flex-1 min-w-0">{{
+                        r.label
+                      }}</span>
+                      <span
+                        class="tabular-nums text-n-slate-10 w-20 text-right"
+                        >{{ r.a }}</span
+                      >
+                      <span
+                        class="i-lucide-arrow-right text-[10px] text-n-slate-8"
+                      />
+                      <span
+                        class="tabular-nums text-n-slate-12 font-semibold w-20 text-right"
+                        >{{ r.b }}</span
+                      >
+                      <span
+                        class="tabular-nums font-semibold w-16 text-right text-xs"
+                        :class="
+                          r.neutral ? 'text-n-slate-9' : deltaCls(r.d, r.lower)
+                        "
+                        >{{ fmtDelta(r.d) }}</span
+                      >
+                    </li>
+                  </ul>
+                </section>
+              </div>
+            </div>
+
+            <!-- 4. números da Meta -->
+            <section
+              class="cv-block p-6 sm:p-8"
+              :style="{ '--cv-grad': family[3] }"
+            >
+              <div class="flex items-center gap-2.5 mb-5">
+                <span class="cv-icon"
+                  ><span class="i-lucide-gauge text-base"
+                /></span>
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                >
+                  Números da Meta
+                </h3>
               </div>
               <div
-                class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-5"
+                class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5"
               >
-                <div class="cv-sub rounded-xl px-3 py-2">
-                  <p class="text-[10px] text-n-slate-9">Investido</p>
-                  <p class="text-base font-bold text-n-slate-12">
-                    {{ fmtMoney(data.totals.spend) }}
-                  </p>
-                  <p v-if="prev" class="text-[10px] text-n-slate-9">
-                    {{ fmtDelta(delta(data.totals.spend, prev.spend)) }} vs
-                    anterior
-                  </p>
-                </div>
-                <div class="cv-sub rounded-xl px-3 py-2">
-                  <p class="text-[10px] text-n-slate-9">Impressões</p>
-                  <p class="text-base font-bold text-n-slate-12">
-                    {{ fmtCompact(data.totals.impressions) }}
-                  </p>
-                  <p v-if="prev" class="text-[10px] text-n-slate-9">
-                    {{
-                      fmtDelta(delta(data.totals.impressions, prev.impressions))
-                    }}
-                    vs anterior
-                  </p>
-                </div>
-                <div class="cv-sub rounded-xl px-3 py-2">
-                  <p class="text-[10px] text-n-slate-9">Alcance real</p>
-                  <p class="text-base font-bold text-n-slate-12">
-                    {{
-                      fmtCompact(
-                        data.summary ? data.summary.reach : data.totals.reach
-                      )
-                    }}
-                  </p>
-                  <p class="text-[10px] text-n-slate-9">pessoas no período</p>
-                </div>
-                <div class="cv-sub rounded-xl px-3 py-2">
-                  <p class="text-[10px] text-n-slate-9">Frequência</p>
-                  <p class="text-base font-bold text-n-slate-12">
-                    {{
-                      data.summary && data.summary.frequency
-                        ? String(data.summary.frequency).replace('.', ',')
-                        : '—'
-                    }}
-                  </p>
-                  <p class="text-[10px] text-n-slate-9">vezes por pessoa</p>
-                </div>
-                <div class="cv-sub rounded-xl px-3 py-2">
-                  <p class="text-[10px] text-n-slate-9">Conversas</p>
-                  <p class="text-base font-bold text-n-slate-12">
-                    {{ fmtNum(data.totals.conversations) }}
+                <div
+                  v-for="t in metaTiles"
+                  :key="t.label"
+                  class="cv-sub rounded-2xl px-4 py-3.5"
+                >
+                  <p class="text-[10px] text-n-slate-9 flex items-center gap-1">
+                    {{ t.label }}
+                    <span
+                      v-if="t.band"
+                      class="inline-flex items-center gap-0.5 ml-auto font-semibold"
+                      :class="BAND_META[t.band].cls"
+                      ><span :class="BAND_META[t.band].icon" />{{
+                        BAND_META[t.band].label
+                      }}</span
+                    >
                   </p>
                   <p
-                    v-if="prev"
+                    class="text-xl font-extrabold text-n-slate-12 tabular-nums tracking-tight"
+                  >
+                    {{ t.value }}
+                  </p>
+                  <p
+                    v-if="t.d !== null && t.d !== undefined"
                     class="text-[10px] font-semibold"
                     :class="
-                      deltaCls(
-                        delta(data.totals.conversations, prev.conversations)
-                      )
+                      t.neutral ? 'text-n-slate-9' : deltaCls(t.d, t.lower)
                     "
                   >
-                    {{
-                      fmtDelta(
-                        delta(data.totals.conversations, prev.conversations)
-                      )
-                    }}
-                    vs anterior
+                    {{ fmtDelta(t.d) }} vs anterior
                   </p>
-                </div>
-                <div class="cv-sub rounded-xl px-3 py-2">
-                  <p class="text-[10px] text-n-slate-9">Jornada no CRM</p>
-                  <p class="text-xs font-semibold text-n-slate-12 leading-snug">
-                    {{ data.funnel.leads }} leads ·
-                    {{ data.funnel.booked }} consultas ·
-                    {{ data.funnel.surgeries }} cirurgias
-                  </p>
-                  <p
-                    v-if="data.funnel.revenue"
-                    class="text-[10px] text-n-slate-9"
-                  >
-                    {{ fmtMoney(data.funnel.revenue) }}
+                  <p v-else-if="t.sub" class="text-[10px] text-n-slate-9">
+                    {{ t.sub }}
                   </p>
                 </div>
               </div>
             </section>
 
-            <div class="grid lg:grid-cols-2 gap-5">
-              <!-- 3. ritmo -->
-              <section class="cv-block p-5" :style="{ '--cv-grad': family[1] }">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="cv-icon"
-                    ><span class="i-lucide-activity text-base"
-                  /></span>
-                  <h3 class="text-sm font-bold text-n-slate-12">
-                    Ritmo dia a dia
-                  </h3>
+            <!-- 5. ritmo dia a dia -->
+            <section
+              class="cv-block p-6 sm:p-8"
+              :style="{ '--cv-grad': family[1] }"
+            >
+              <div class="flex items-center gap-2.5 mb-1">
+                <span class="cv-icon"
+                  ><span class="i-lucide-activity text-base"
+                /></span>
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                >
+                  Ritmo dia a dia
+                </h3>
+              </div>
+              <p class="text-xs text-n-slate-10 mb-5">
+                Linha tracejada = média da conta · linha pontilhada = parâmetro
+                bom
+              </p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                <div>
+                  <p class="text-sm font-semibold text-n-slate-12">
+                    CTR de link (%)
+                  </p>
+                  <p class="text-[11px] text-n-slate-9 mb-1">
+                    {{ readSeries(ctrSeries, pctFmt) }}
+                  </p>
+                  <MiniBars
+                    :values="ctrSeries"
+                    :labels="labels"
+                    :color="color(1)"
+                    :height="100"
+                    :reference="avgCtrPct"
+                    :format="v => `${String(v).replace('.', ',')}%`"
+                  />
                 </div>
-                <p class="text-[11px] text-n-slate-9 mb-3">
-                  Linha tracejada = média da conta · linha pontilhada =
-                  parâmetro bom
-                </p>
-                <p class="text-xs font-semibold text-n-slate-11">
-                  CTR de link (%)
-                </p>
-                <p class="text-[11px] text-n-slate-9 mb-1">
-                  {{ readSeries(ctrSeries, pctFmt) }}
-                </p>
-                <MiniBars
-                  :values="ctrSeries"
-                  :labels="labels"
-                  :color="color(1)"
-                  :height="100"
-                  :reference="avgCtrPct"
-                  :format="v => `${String(v).replace('.', ',')}%`"
-                />
-                <template v-if="isVideo">
-                  <p class="text-xs font-semibold text-n-slate-11 mt-4">
+                <div v-if="isVideo">
+                  <p class="text-sm font-semibold text-n-slate-12">
                     Taxa de parada (%)
                   </p>
                   <p class="text-[11px] text-n-slate-9 mb-1">
@@ -525,139 +868,61 @@ const bkRows = bk => (bk && bk.rows) || [];
                     :values="hookSeries"
                     :labels="labels"
                     :color="color(0)"
-                    :height="90"
+                    :height="100"
                     :goal="hookGoalPct"
                     :format="v => `${String(v).replace('.', ',')}%`"
                   />
-                </template>
-                <p class="text-xs font-semibold text-n-slate-11 mt-4">
-                  Conversas iniciadas
-                </p>
-                <p class="text-[11px] text-n-slate-9 mb-1">
-                  {{ readSeries(convSeries, v => `${Math.round(v)}`) }}
-                </p>
-                <MiniBars
-                  :values="convSeries"
-                  :labels="labels"
-                  :color="color(3)"
-                  :height="90"
-                  :format="v => `${v} conv.`"
-                />
-                <p class="text-xs font-semibold text-n-slate-11 mt-4">
-                  Investimento (R$)
-                </p>
-                <p class="text-[11px] text-n-slate-9 mb-1">
-                  {{ readSeries(spendSeries, v => fmtMoney(v)) }}
-                </p>
-                <MiniBars
-                  :values="spendSeries"
-                  :labels="labels"
-                  :color="color(2)"
-                  :height="90"
-                  :format="v => fmtMoney(v)"
-                />
-              </section>
-
-              <div class="space-y-5">
-                <!-- 4. metades -->
-                <section
-                  class="cv-block p-5"
-                  :style="{ '--cv-grad': family[2] }"
-                >
-                  <div class="flex items-center gap-2 mb-1">
-                    <span class="cv-icon"
-                      ><span class="i-lucide-scale text-base"
-                    /></span>
-                    <h3 class="text-sm font-bold text-n-slate-12">
-                      Primeira metade × segunda metade
-                    </h3>
-                  </div>
-                  <p class="text-[11px] text-n-slate-9 mb-3">
-                    O período dividido ao meio. Queda de CTR com entrega mantida
-                    é o sinal clássico de fadiga.
+                </div>
+                <div>
+                  <p class="text-sm font-semibold text-n-slate-12">
+                    Conversas iniciadas
                   </p>
-                  <table class="w-full text-xs">
-                    <thead>
-                      <tr
-                        class="text-[10px] uppercase tracking-wide text-n-slate-9"
-                      >
-                        <th class="text-left font-semibold py-1">Métrica</th>
-                        <th class="text-right font-semibold">1ª metade</th>
-                        <th class="text-right font-semibold">2ª metade</th>
-                        <th class="text-right font-semibold">Variação</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr
-                        v-for="r in halfRows"
-                        :key="r.label"
-                        class="border-t border-n-weak"
-                      >
-                        <td class="py-1.5 text-n-slate-11">{{ r.label }}</td>
-                        <td
-                          class="py-1.5 text-right tabular-nums text-n-slate-11"
-                        >
-                          {{ r.a }}
-                        </td>
-                        <td
-                          class="py-1.5 text-right tabular-nums text-n-slate-12 font-semibold"
-                        >
-                          {{ r.b }}
-                        </td>
-                        <td
-                          class="py-1.5 text-right tabular-nums font-semibold"
-                          :class="
-                            r.neutral
-                              ? 'text-n-slate-9'
-                              : deltaCls(r.d, r.lower)
-                          "
-                        >
-                          {{ fmtDelta(r.d) }}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </section>
-
-                <!-- 5. retenção -->
-                <section
-                  v-if="retentionSeries.length"
-                  class="cv-block p-5"
-                  :style="{ '--cv-grad': family[0] }"
-                >
-                  <div class="flex items-center gap-2 mb-1">
-                    <span class="cv-icon"
-                      ><span class="i-lucide-film text-base"
-                    /></span>
-                    <h3 class="text-sm font-bold text-n-slate-12">
-                      Curva de retenção
-                    </h3>
-                  </div>
                   <p class="text-[11px] text-n-slate-9 mb-1">
-                    % das impressões que chegou a cada marco · tempo médio
-                    assistido
-                    {{ String(data.rates.avg_watch || 0).replace('.', ',') }} s
+                    {{ readSeries(convSeries, v => `${Math.round(v)}`) }}
                   </p>
-                  <p class="text-xs text-n-slate-12 mb-2">
-                    {{ retentionReading }}
+                  <MiniBars
+                    :values="convSeries"
+                    :labels="labels"
+                    :color="color(3)"
+                    :height="100"
+                    :format="v => `${v} conv.`"
+                  />
+                </div>
+                <div>
+                  <p class="text-sm font-semibold text-n-slate-12">
+                    Investimento (R$)
                   </p>
-                  <RetentionCurve :series="retentionSeries" :height="190" />
-                </section>
+                  <p class="text-[11px] text-n-slate-9 mb-1">
+                    {{ readSeries(spendSeries, v => fmtMoney(v)) }}
+                  </p>
+                  <MiniBars
+                    :values="spendSeries"
+                    :labels="labels"
+                    :color="color(2)"
+                    :height="100"
+                    :format="v => fmtMoney(v)"
+                  />
+                </div>
               </div>
-            </div>
+            </section>
 
             <!-- 6. onde apareceu / quem viu -->
-            <div class="grid lg:grid-cols-2 gap-5">
-              <section class="cv-block p-5" :style="{ '--cv-grad': family[3] }">
-                <div class="flex items-center gap-2 mb-1">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <section
+                class="cv-block p-6 sm:p-8"
+                :style="{ '--cv-grad': family[3] }"
+              >
+                <div class="flex items-center gap-2.5 mb-1">
                   <span class="cv-icon"
                     ><span class="i-lucide-layout-grid text-base"
                   /></span>
-                  <h3 class="text-sm font-bold text-n-slate-12">
+                  <h3
+                    class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                  >
                     Onde apareceu
                   </h3>
                 </div>
-                <p class="text-[11px] text-n-slate-9 mb-2">
+                <p class="text-xs text-n-slate-10 mb-3">
                   Posicionamento na Meta. O melhor e o pior custo por conversa
                   ficam marcados.
                 </p>
@@ -675,14 +940,21 @@ const bkRows = bk => (bk && bk.rows) || [];
                   empty-text="sem quebra por posicionamento no período"
                 />
               </section>
-              <section class="cv-block p-5" :style="{ '--cv-grad': family[1] }">
-                <div class="flex items-center gap-2 mb-1">
+              <section
+                class="cv-block p-6 sm:p-8"
+                :style="{ '--cv-grad': family[1] }"
+              >
+                <div class="flex items-center gap-2.5 mb-1">
                   <span class="cv-icon"
                     ><span class="i-lucide-users text-base"
                   /></span>
-                  <h3 class="text-sm font-bold text-n-slate-12">Quem viu</h3>
+                  <h3
+                    class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                  >
+                    Quem viu
+                  </h3>
                 </div>
-                <p class="text-[11px] text-n-slate-9 mb-2">
+                <p class="text-xs text-n-slate-10 mb-3">
                   Idade e sexo de quem recebeu o anúncio.
                 </p>
                 <p
@@ -704,24 +976,26 @@ const bkRows = bk => (bk && bk.rows) || [];
             <!-- 7. peças do criativo dinâmico -->
             <section
               v-if="data.assets"
-              class="cv-block p-5"
+              class="cv-block p-6 sm:p-8"
               :style="{ '--cv-grad': family[2] }"
             >
-              <div class="flex items-center gap-2 mb-1">
+              <div class="flex items-center gap-2.5 mb-1">
                 <span class="cv-icon"
                   ><span class="i-lucide-shuffle text-base"
                 /></span>
-                <h3 class="text-sm font-bold text-n-slate-12">
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                >
                   Gancho, corpo e CTA como peças separadas
                 </h3>
               </div>
-              <p class="text-[11px] text-n-slate-9 mb-3">
+              <p class="text-xs text-n-slate-10 mb-4">
                 A Meta testa as combinações sozinha; aqui cada peça aparece com
                 o próprio resultado.
               </p>
-              <div class="grid xl:grid-cols-3 gap-5">
+              <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
                 <div>
-                  <p class="text-xs font-semibold text-n-slate-11 mb-1">
+                  <p class="text-sm font-semibold text-n-slate-12 mb-1">
                     Ganchos
                   </p>
                   <AssetTable
@@ -731,7 +1005,7 @@ const bkRows = bk => (bk && bk.rows) || [];
                   />
                 </div>
                 <div>
-                  <p class="text-xs font-semibold text-n-slate-11 mb-1">
+                  <p class="text-sm font-semibold text-n-slate-12 mb-1">
                     Corpos
                   </p>
                   <AssetTable
@@ -741,7 +1015,7 @@ const bkRows = bk => (bk && bk.rows) || [];
                   />
                 </div>
                 <div>
-                  <p class="text-xs font-semibold text-n-slate-11 mb-1">CTAs</p>
+                  <p class="text-sm font-semibold text-n-slate-12 mb-1">CTAs</p>
                   <AssetTable
                     :rows="bkRows(data.assets.ctas)"
                     :color="color(2)"

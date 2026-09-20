@@ -25,11 +25,14 @@ class Crm::Calls::OutboundService
     permission_info
   end
 
+  # pedido de permissão com os limites da Meta travados localmente
+  # (Crm::Calls::PermissionRequests: 1 por 24 h, 2 por 7 dias)
   def request_permission
-    error = ready_error
+    error = ready_error || Crm::Calls::PermissionRequests.limit_error(contact)
     return { ok: false, error: error } if error
 
     client.send_permission_request(to: wa_id, text: settings.permission_message)
+    Crm::Calls::PermissionRequests.remember!(contact)
     leave_note('📨 Pedido de permissão para ligar enviado ao paciente pelo WhatsApp')
     { ok: true }
   rescue Crm::Calls::MetaError => e
@@ -37,7 +40,7 @@ class Crm::Calls::OutboundService
   end
 
   def initiate(sdp_offer)
-    error = ready_error
+    error = ready_error || hours_error
     return { ok: false, error: error } if error
 
     permission = permission_info
@@ -64,6 +67,13 @@ class Crm::Calls::OutboundService
 
   def client
     @client ||= Crm::Calls::MetaClient.new(inbox.channel)
+  end
+
+  # ligação manual de saída respeita o horário configurado (como a recebida)
+  def hours_error
+    return nil unless settings.business_hours_only? && !settings.within_hours?
+
+    "Fora do horário de ligações (#{settings.hours['start']}–#{settings.hours['end']})."
   end
 
   def ready_error

@@ -13,6 +13,7 @@ import {
   fmtPct,
   fmtNum,
   BAND_META,
+  fmtRoas,
 } from './creativeFormat';
 
 const props = defineProps({
@@ -71,6 +72,35 @@ const METRICS = [
     band: 'conv',
     get: r => r.rates.conv_rate,
     fmt: v => fmtPct(v),
+    best: 'max',
+  },
+  // v2 (item 177): o que vale dinheiro — jornada do CRM × investido
+  {
+    key: 'cost_booked',
+    label: 'Custo por consulta agendada',
+    get: r => r.rates.cost_booked,
+    fmt: v => (v ? fmtMoney(v) : '—'),
+    best: 'min',
+  },
+  {
+    key: 'cost_surgery',
+    label: 'Custo por cirurgia (CAC)',
+    get: r => r.rates.cost_surgery,
+    fmt: v => (v ? fmtMoney(v) : '—'),
+    best: 'min',
+  },
+  {
+    key: 'roas',
+    label: 'ROAS',
+    get: r => r.rates.roas,
+    fmt: v => fmtRoas(v),
+    best: 'max',
+  },
+  {
+    key: 'booking_rate',
+    label: '% de agendamento',
+    get: r => r.rates.booking_rate,
+    fmt: v => fmtPct(v, 0),
     best: 'max',
   },
   {

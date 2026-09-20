@@ -65,10 +65,16 @@ class Crm::MessageAutomation < ApplicationRecord
     contacts = account.contacts.where(id: base_ids).where.not(phone_number: [nil, ''])
     contacts = contacts.tagged_with(Array(required_labels), any: false) if Array(required_labels).any?
 
-    to_exclude = Array(exclude_labels) + [marker_label]
-    excluded_ids = account.contacts.tagged_with(to_exclude.compact, any: true).pluck(:id)
+    excluded_ids = excluded_contact_ids
     contacts = contacts.where.not(id: excluded_ids) if excluded_ids.any?
     contacts.distinct
+  end
+
+  # etiquetas excluídas + marcadora + opt-out fixo (conformidade 20/09:
+  # nao_perturbe / perda_* nunca entram)
+  def excluded_contact_ids
+    to_exclude = Array(exclude_labels) + [marker_label]
+    account.contacts.tagged_with(to_exclude.compact, any: true).pluck(:id) | Crm::OptOut.excluded_contact_ids(account)
   end
 
   private

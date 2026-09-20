@@ -57,7 +57,23 @@ class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseContr
     render json: { enqueued: true, days: Crm::AdInsightsSyncService::MAX_DAYS, sync: sync_state }
   end
 
-  # GET /crm/creatives/sync_status
+  # item 181: todos os vídeos pendentes; :ad_id/transcribe = um só
+  def transcribe_videos
+    count = Crm::AdVideoTranscribeJob.enqueue_pending(Current.account, limit: 100)
+    render json: { enqueued: count }
+  end
+
+  def transcribe
+    creative = Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
+    return render json: { error: 'Só anúncios em vídeo têm transcrição.' }, status: :unprocessable_entity unless creative.video?
+
+    creative.queue_transcript!
+    Crm::AdVideoTranscribeJob.perform_later(creative.id)
+    render json: { enqueued: true, transcript: creative.transcript }
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'anúncio não encontrado' }, status: :not_found
+  end
+
   def sync_status
     render json: { sync: sync_state, configured: graph.configured?, storage: storage_summary }
   end

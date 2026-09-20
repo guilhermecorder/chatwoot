@@ -1010,3 +1010,163 @@
   .cv-page .cv-cq-thumb { width: 148px; height: 190px; }
   .cv-page .cv-cq-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   🔮 CRISTAL + CONTRASTE (pedido 20/09): "a maioria dos ambientes tem fonte
+   cinza num ambiente acinzentado — não fica bom". Regras: (1) todo cartão de
+   número (.cv-sub, .cv-stat, .cv-row, tiles) vira VIDRO CRISTALINO — fundo
+   quase transparente, borda de luz, crista no topo, desfoque do que está
+   atrás; (2) o texto secundário sobe de contraste (nada de cinza-médio sobre
+   cinza-escuro). Vale para todos os painéis, porque todos usam o kit.
+   Declarado por último de propósito: mesma especificidade, vence o de cima.
+   ═══════════════════════════════════════════════════════════════════════ */
+.cv-page .cv-sub,
+.cv-page .cv-stat,
+.cv-page .cv-row {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.5) 60%, rgba(255, 255, 255, 0.62)),
+    rgb(var(--cv-rgb) / 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 -10px 24px rgb(var(--cv-rgb) / 0.05),
+    0 0 0 1px rgb(var(--cv-rgb) / 0.16),
+    0 6px 18px -10px rgb(var(--cv-deep-rgb) / 0.35);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+.dark .cv-page .cv-sub,
+.dark .cv-page .cv-stat,
+.dark .cv-page .cv-row {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035) 55%, rgba(255, 255, 255, 0.07)),
+    rgb(var(--cv-rgb) / 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -12px 28px rgba(255, 255, 255, 0.03),
+    0 0 0 1px rgb(var(--cv-rgb) / 0.22),
+    0 10px 28px -14px rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+}
+/* a crista de luz na borda de cima (o brilho das referências) */
+.cv-page .cv-sub,
+.cv-page .cv-stat { position: relative; }
+.cv-page .cv-sub::before,
+.cv-page .cv-stat::before {
+  content: '';
+  position: absolute;
+  inset: 0 12% auto 12%;
+  height: 1px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+.dark .cv-page .cv-sub::before,
+.dark .cv-page .cv-stat::before {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0));
+}
+.cv-page .cv-sub-on,
+.dark .cv-page .cv-sub-on {
+  border-color: rgb(var(--cv-rgb) / 0.75);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 0 3px rgb(var(--cv-rgb) / 0.22),
+    0 10px 28px -14px rgba(0, 0, 0, 0.5);
+}
+.cv-page .cv-sub-hover:hover,
+.dark .cv-page .cv-sub-hover:hover {
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 0 0 1px rgb(var(--cv-rgb) / 0.35),
+    0 14px 30px -14px rgb(var(--cv-deep-rgb) / 0.6);
+}
+/* texto secundário com contraste de verdade (os tokens n-slate-8…12) */
+.cv-page .text-n-slate-8  { color: #6b7280; }
+.cv-page .text-n-slate-9  { color: #4b5563; }
+.cv-page .text-n-slate-10 { color: #374151; }
+.cv-page .text-n-slate-11 { color: #1f2937; }
+.cv-page .text-n-slate-12 { color: #0b1220; }
+.dark .cv-page .text-n-slate-8  { color: rgba(255, 255, 255, 0.52); }
+.dark .cv-page .text-n-slate-9  { color: rgba(255, 255, 255, 0.68); }
+.dark .cv-page .text-n-slate-10 { color: rgba(255, 255, 255, 0.8); }
+.dark .cv-page .text-n-slate-11 { color: rgba(255, 255, 255, 0.92); }
+.dark .cv-page .text-n-slate-12 { color: #ffffff; }
+.dark .cv-page .fill-n-slate-9,
+.dark .cv-page .fill-n-slate-10 { fill: rgba(255, 255, 255, 0.72); }
+.dark .cv-page .fill-n-slate-12 { fill: #fff; }
+.cv-page .cv-label { opacity: 0.95; }
+.dark .cv-page .cv-label { opacity: 0.85; }
+/* linhas divisórias visíveis, mas finas */
+.dark .cv-page .divide-n-weak > :not([hidden]) ~ :not([hidden]),
+.dark .cv-page .border-n-weak { border-color: rgba(255, 255, 255, 0.12); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   📱 MENU ESTILO IPHONE (pedido 20/09): cada grupo é um cartão arredondado
+   (como os Ajustes do iOS), linhas altas com azulejo colorido do ícone,
+   texto branco no escuro, divisórias finas recuadas e seta à direita.
+   Só na barra aberta (a recolhida segue com os ícones do Chatwoot).
+   ═══════════════════════════════════════════════════════════════════════ */
+.cv-ios-nav { gap: 10px !important; padding: 2px 2px 8px; }
+.cv-ios-nav > li {
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  padding: 3px 6px;
+  gap: 0 !important;
+}
+.dark .cv-ios-nav > li {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow: none;
+}
+/* linha do grupo / item solto */
+.cv-ios-nav > li > [role='button'],
+.cv-ios-nav > li > a[role='button'] {
+  height: 44px;
+  padding: 0 6px 0 4px;
+  gap: 12px;
+  border-radius: 12px;
+  font-size: 15px;
+  color: #0b1220;
+}
+.dark .cv-ios-nav > li > [role='button'],
+.dark .cv-ios-nav > li > a[role='button'] { color: #fff; }
+.cv-ios-nav [role='button'] > div:last-of-type > span:first-child { font-size: 15px; font-weight: 500; }
+/* azulejo do ícone: fundo na cor do item, glifo branco */
+.cv-ios-nav .sb-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  justify-content: center;
+  background: currentColor;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+}
+.cv-ios-nav .sb-icon > * { color: #fff !important; }
+.cv-ios-nav .sb-icon > .size-4 { width: 17px; height: 17px; }
+.cv-ios-nav .sb-chevron { color: rgba(15, 23, 42, 0.35); width: 14px; height: 14px; }
+.dark .cv-ios-nav .sb-chevron { color: rgba(255, 255, 255, 0.4); }
+/* filhos: sem a linha de árvore; linhas de 40 px com divisória recuada */
+.cv-ios-nav > li > ul { padding-bottom: 4px; }
+.cv-ios-nav > li > ul > li { margin-left: 0 !important; padding-left: 0 !important; }
+.cv-ios-nav > li > ul > li::before,
+.cv-ios-nav > li > ul > li::after { display: none !important; }
+.cv-ios-nav > li > ul > li > a,
+.cv-ios-nav > li > ul > li > div[role='button'],
+.cv-ios-nav > li > ul > li > div { height: 40px; padding-left: 8px; gap: 12px; border-radius: 10px; font-size: 14.5px; }
+.cv-ios-nav > li > ul > li + li { border-top: 1px solid rgba(15, 23, 42, 0.06); }
+.dark .cv-ios-nav > li > ul > li + li { border-top-color: rgba(255, 255, 255, 0.07); }
+.cv-ios-nav > li > ul > li .sb-icon { width: 26px; height: 26px; border-radius: 8px; }
+.cv-ios-nav > li > ul > li .sb-icon > .size-4 { width: 15px; height: 15px; }
+.cv-ios-nav > li > ul > li .truncate,
+.cv-ios-nav > li > ul > li .text-sm { color: #0b1220; font-size: 14.5px; }
+.dark .cv-ios-nav > li > ul > li .truncate,
+.dark .cv-ios-nav > li > ul > li .text-sm { color: rgba(255, 255, 255, 0.92); }
+/* subgrupo (Relatórios dentro de Resultados): cabeçalho como linha, filhos recuados */
+.cv-ios-nav > li > ul > li > ul { margin-left: 34px; }
+.cv-ios-nav > li > ul > li > ul > li > a { height: 34px; font-size: 13.5px; }

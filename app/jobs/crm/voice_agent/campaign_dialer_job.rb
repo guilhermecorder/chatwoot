@@ -111,12 +111,23 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
     digits = contact&.phone_number.to_s.gsub(/\D/, '')
     return row.update!(status: 'skipped', error: 'Contato sem telefone') if digits.length < 8
 
+    # a ElevenLabs manda o pedido de permissão da Meta quando falta: os limites
+    # (1/24 h, 2/7 dias) valem aqui também (conformidade 20/09)
+    return if permission_blocked?(row, contact)
+
     conversation_id = request_call(campaign, row, contact, digits, settings)
+    Crm::Calls::PermissionRequests.remember!(contact)
     row.update!(status: 'calling', provider_conversation_id: conversation_id, called_at: Time.current, attempts: row.attempts + 1, error: nil)
     call = build_call(campaign, contact, digits, conversation_id, settings)
     row.update!(call_id: call.id)
   rescue StandardError => e
     row.update!(status: failure_status(e.message), error: e.message.to_s.truncate(500), attempts: row.attempts + 1)
+  end
+
+  def permission_blocked?(row, contact)
+    limit = Crm::Calls::PermissionRequests.limit_error(contact)
+    row.update!(status: 'no_permission', error: limit) if limit
+    limit.present?
   end
 
   # pede a ligação à ElevenLabs → conversation_id (erro dela vira exceção com a mensagem crua)

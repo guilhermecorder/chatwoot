@@ -38,6 +38,15 @@ class CevicoCreativesAPI extends ApiClient {
   }
 
   // CSV do que está guardado aqui (período escolhido ou tudo com all=1)
+  // 🎬 item 181: transcrição dos vídeos (todos os pendentes / um anúncio)
+  transcribeVideos() {
+    return axios.post(`${this.url}/transcribe_videos`);
+  }
+
+  transcribeVideo(adId) {
+    return axios.post(`${this.url}/${adId}/transcribe`);
+  }
+
   exportCsv(params) {
     return axios.get(`${this.url}/export`, { params, responseType: 'blob' });
   }

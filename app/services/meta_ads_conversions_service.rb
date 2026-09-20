@@ -56,7 +56,9 @@ class MetaAdsConversionsService
     payload = {
       data: [event_data],
     }
-    payload[:test_event_code] = test_code if test_code.present?
+    # test_event_code manda os eventos para o balde de TESTE da Meta (não
+    # otimizam nem atribuem): só vale fora de produção ou com CEVICO_META_TEST_EVENTS=1
+    payload[:test_event_code] = test_code if test_code.present? && test_events_allowed?
     payload
   end
 
@@ -104,5 +106,9 @@ class MetaAdsConversionsService
   def hash_value(value)
     return nil unless value.present?
     Digest::SHA256.hexdigest(value.strip.downcase)
+  end
+
+  def test_events_allowed?
+    !Rails.env.production? || ActiveModel::Type::Boolean.new.cast(ENV.fetch('CEVICO_META_TEST_EVENTS', nil))
   end
 end

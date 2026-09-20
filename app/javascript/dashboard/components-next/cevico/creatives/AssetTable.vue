@@ -1,7 +1,8 @@
 <script setup>
-// Tabela de peças (ganchos, corpos, CTAs, posicionamentos, idade × sexo):
-// texto inteiro, fatia das impressões em barra, CTR, conversas e custo por
-// conversa, com o melhor e o pior marcados por ícone + palavra. Item 172 r2.
+// Quebras e peças (ganchos, corpos, CTAs, posicionamentos, idade × sexo)
+// SEM rolagem lateral (v2, item 177): cada linha é um cartão-linha —
+// rótulo inteiro, barra da fatia e os números em pares "rótulo · valor"
+// que embrulham no celular. Melhor e pior custo por conversa marcados.
 import { computed } from 'vue';
 import { fmtCompact, fmtPct, fmtNum, fmtMoney } from './creativeFormat';
 import { useTranscribe } from './useTranscribe';
@@ -48,96 +49,87 @@ const worstKey = computed(() => {
   )[0];
   return w.key === bestKey.value ? null : w.key;
 });
+const stats = r => {
+  const list = [];
+  if (props.video) list.push({ k: 'parada', v: fmtPct(r.hook_rate) });
+  list.push({ k: 'CTR', v: fmtPct(r.link_ctr, 2) });
+  list.push({ k: 'conversas', v: fmtNum(r.conversations), strong: true });
+  list.push({
+    k: 'por conversa',
+    v: r.cost_conversation ? fmtMoney(r.cost_conversation) : '—',
+  });
+  return list;
+};
 </script>
 
 <template>
-  <div class="overflow-x-auto -mx-1 px-1">
+  <div class="w-full min-w-0">
     <p v-if="!sorted.length" class="text-xs text-n-slate-9 py-4 text-center">
       {{ emptyText }}
     </p>
-    <table v-else class="w-full text-xs">
-      <thead>
-        <tr class="text-[10px] uppercase tracking-wide text-n-slate-9">
-          <th class="text-left font-semibold py-1.5 pr-3">{{ labelHeader }}</th>
-          <th class="text-left font-semibold py-1.5 pr-3 w-[26%] min-w-[9rem]">
-            Fatia das impressões
-          </th>
-          <th
-            v-if="video"
-            class="text-right font-semibold py-1.5 pr-3 whitespace-nowrap hidden xl:table-cell"
-          >
-            Parada
-          </th>
-          <th class="text-right font-semibold py-1.5 pr-3">CTR</th>
-          <th class="text-right font-semibold py-1.5 pr-3">Conversas</th>
-          <th class="text-right font-semibold py-1.5 whitespace-nowrap">
-            Custo por conversa
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="r in sorted"
-          :key="r.key"
-          class="border-t border-n-weak align-top"
-        >
-          <td class="py-2 pr-3 text-n-slate-12 max-w-[22rem]">
-            <span class="whitespace-pre-line">{{ r.label }}</span>
+    <ul v-else class="divide-y divide-n-weak" :aria-label="labelHeader">
+      <li
+        v-for="r in sorted"
+        :key="r.key"
+        class="py-3 grid gap-x-5 gap-y-2 items-center md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
+      >
+        <div class="min-w-0">
+          <p class="text-sm text-n-slate-12 leading-snug whitespace-pre-line">
+            {{ r.label }}
+          </p>
+          <p class="flex items-center gap-2 flex-wrap mt-1">
             <span
               v-if="r.key === bestKey"
-              class="ml-1 inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 whitespace-nowrap"
+              class="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400"
               ><span class="i-lucide-trophy" />melhor custo</span
             >
             <span
               v-if="r.key === worstKey"
-              class="ml-1 inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-700 dark:text-red-400 whitespace-nowrap"
+              class="inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-700 dark:text-red-400"
               ><span class="i-lucide-trending-down" />pior custo</span
             >
             <button
               v-if="copyable"
-              class="ml-1 inline-flex items-center gap-0.5 text-[10px] font-semibold text-n-slate-10 hover:text-n-slate-12 whitespace-nowrap align-middle"
+              class="inline-flex items-center gap-0.5 text-[10px] font-semibold text-n-slate-10 hover:text-n-slate-12"
               title="Copiar o texto desta peça"
               @click="transcribe(r, part)"
             >
               <span class="i-lucide-copy" />transcrever
             </button>
-          </td>
-          <td class="py-2 pr-3">
-            <div class="flex items-center gap-2">
-              <div class="cv-track cv-track-sm flex-1">
-                <div
-                  class="cv-fill"
-                  :style="{
-                    width: `${Math.max(2, ((r.share || 0) / maxShare) * 100)}%`,
-                    background: color,
-                  }"
-                />
-              </div>
-              <span class="tabular-nums text-n-slate-11 whitespace-nowrap"
-                >{{ fmtPct(r.share, 0) }} ·
-                {{ fmtCompact(r.impressions) }}</span
-              >
+          </p>
+        </div>
+        <div class="min-w-0 flex flex-col gap-1.5">
+          <div class="flex items-center gap-2">
+            <div class="cv-track cv-track-sm flex-1">
+              <div
+                class="cv-fill"
+                :style="{
+                  width: `${Math.max(2, ((r.share || 0) / maxShare) * 100)}%`,
+                  background: color,
+                }"
+              />
             </div>
-          </td>
-          <td
-            v-if="video"
-            class="py-2 pr-3 text-right tabular-nums text-n-slate-11 hidden xl:table-cell"
-          >
-            {{ fmtPct(r.hook_rate) }}
-          </td>
-          <td class="py-2 pr-3 text-right tabular-nums text-n-slate-11">
-            {{ fmtPct(r.link_ctr, 2) }}
-          </td>
-          <td
-            class="py-2 pr-3 text-right tabular-nums font-semibold text-n-slate-12"
-          >
-            {{ fmtNum(r.conversations) }}
-          </td>
-          <td class="py-2 text-right tabular-nums text-n-slate-11">
-            {{ r.cost_conversation ? fmtMoney(r.cost_conversation) : '—' }}
-          </td>
-        </tr>
-      </tbody>
-    </table>
+            <span
+              class="text-[11px] tabular-nums text-n-slate-10 whitespace-nowrap"
+              >{{ fmtPct(r.share, 0) }} · {{ fmtCompact(r.impressions) }}</span
+            >
+          </div>
+          <div class="flex flex-wrap gap-x-4 gap-y-0.5">
+            <span
+              v-for="s in stats(r)"
+              :key="s.k"
+              class="text-[11px] text-n-slate-10 whitespace-nowrap"
+            >
+              {{ s.k }}
+              <b
+                class="tabular-nums"
+                :class="s.strong ? 'text-n-slate-12' : 'text-n-slate-11'"
+                >{{ s.v }}</b
+              >
+            </span>
+          </div>
+        </div>
+      </li>
+    </ul>
   </div>
 </template>

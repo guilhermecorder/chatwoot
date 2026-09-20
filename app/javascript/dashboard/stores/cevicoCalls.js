@@ -39,6 +39,9 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
     isRecording: false,
     isBusy: false, // aceitando / ligando / desligando
     version: 0, // sobe a cada mudança relevante (cards refazem a lista)
+    // item 176: sobe em TODO evento cevico_call.* (mesmo os que não tocam
+    // para mim) — o ambiente Chamadas usa para atualizar a faixa "Agora"
+    liveTick: 0,
   }),
 
   getters: {
@@ -90,6 +93,10 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
     onRinging(data) {
       const call = data?.call;
       if (!call?.id) return;
+      // todo mundo fica sabendo que está tocando (faixa "Agora"), mesmo
+      // quem não vai ouvir o toque
+      this.upsert({ ...call, sdp_offer: undefined });
+      this.liveTick += 1;
       if (availability() === 'offline') return;
       const me = currentUserId();
       const ids = (data.ring_user_ids || []).map(Number);
@@ -130,6 +137,7 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
 
     onTaken(data) {
       const id = data?.call_id;
+      this.liveTick += 1;
       if (!id || this.active === id) return; // esta aba atendeu
       this.dropRinging(id);
       const known = this.calls[id];
@@ -146,6 +154,7 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
     onEnded(data) {
       const call = data?.call;
       if (!call?.id) return;
+      this.liveTick += 1;
       this.upsert(call);
       this.dropRinging(call.id);
       if (this.active === call.id) this.finishActive(call.id);
@@ -155,6 +164,7 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
     onMissed(data) {
       const call = data?.call;
       if (!call?.id) return;
+      this.liveTick += 1;
       this.upsert(call);
       this.dropRinging(call.id);
       if (availability() === 'offline') return;
@@ -185,6 +195,7 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
     onStatus(data) {
       const id = data?.call_id;
       if (!id || !data.status) return;
+      this.liveTick += 1;
       const status = String(data.status).toLowerCase();
       if (this.calls[id]) this.upsert({ id, status });
       if (this.active === id && status === 'accepted' && !this.activeSince) {

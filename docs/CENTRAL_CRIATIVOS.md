@@ -263,3 +263,70 @@ texto é branco e a `altFamily` não sobe até o tom claro (branco sobre
 azul-claro não lê). `blockAltInk(blockId)` no composable, `--cv-alt-ink` nas
 variáveis. Rótulo da teia de retenção: `Fim` (o "Fim do vídeo" vazava do
 SVG para a teia vizinha).
+
+
+## v2 (item 177, 20/09) — o que vale dinheiro, retenção em todo vídeo, Ver a fundo no formato Apple
+
+- **Jornada por anúncio virou taxa** (`Crm::AdFunnel`, módulo compartilhado):
+  `cost_lead`, `cost_booked` (custo por consulta agendada), `cost_surgery`
+  (custo por cirurgia realizada = CAC), `roas` (receita das cirurgias ÷
+  investido), `booking_rate` (% de agendamento = consultas marcadas ÷ leads),
+  `surgery_rate`. Entram em `rates` de cada linha e nas `averages` da conta
+  (jornada somada ÷ investimento somado). A etapa "cirurgia realizada" é a
+  mesma do relatório Anúncios (Meta): `meta_ads_config.conversion_stage_ids`
+  ou toda etapa com "cirurgia" no nome (sem "indica…").
+- **Campeões novos** (`CHAMPION_KEYS`): `roas` (maior ROAS, ≥ 1 cirurgia),
+  `cac` (menor custo por cirurgia, ≥ 1 cirurgia), `booking` (maior % de
+  agendamento, ≥ 5 leads). `Crm::CreativeRecords` também os calcula por mês
+  e de todos os tempos (jornada do intervalo da lista, cache por intervalo).
+- **Tela:** `MoneyTiles.vue` (4 tiles de alto contraste com veredito contra a
+  média da conta + linha da jornada) nos cards, no Ver a fundo e como linhas
+  na comparação; `RetentionCurve` em TODO card de vídeo (este criativo ×
+  média da conta); campeões de todos os tempos em 8 cartões, 4 por linha no
+  desktop (ROAS, CAC, % agendamento, custo por conversa, gancho, corpo, CTA,
+  conversa); Ver a fundo reorganizado (ficha → o que vale dinheiro → leitura
+  + retenção + metades → números da Meta → ritmo → onde apareceu/quem viu →
+  peças), blocos `p-6 sm:p-8`, títulos `text-xl`, grids com
+  `grid-cols-1` de base (sem rolagem lateral no celular); `AssetTable` virou
+  lista de cartões-linha (rótulo inteiro, barra, números em pares) — sem
+  `overflow-x`.
+- **Demonstração local:** `rails cevico:creatives_demo_funnel ACCOUNT_ID=3`
+  cria leads/consultas/cirurgias fictícios ligados aos anúncios (desfaz com
+  `UNDO=1`). Spec: exemplo "v2" em `creatives_center_spec.rb`.
+
+
+## v2.1 (item 181, 20/09) — gancho, corpo e CTA vêm da FALA DO VÍDEO
+
+Pedido: "não me interesso pelos textos do anúncio; o que importa é o VÍDEO —
+ganchos, corpos e CTAs com base na transcrição dos vídeos".
+
+- `Crm::AdVideoTranscriptionService`: baixa o vídeo pela Graph
+  (`GET /{video_id}?fields=source`, até 18 MB), manda ao Gemini
+  (`gemini-2.5-flash`, vídeo inline, JSON) e guarda em
+  `creative['transcript']` = { status, error, text, hook, body, cta, angle,
+  language, transcribed_at, model }. Gancho = o que é dito nos primeiros 3 s;
+  corpo = desenvolvimento; cta = pedido final; angle = pergunta | dor |
+  curiosidade | prova | oferta | autoridade | historia | outro. Uso de IA
+  registrado em `Crm::AiUsage` (`creatives_video_transcription`). Sem chave
+  do Gemini → `skipped` com motivo. Simulação (token `simulate`) gera fala
+  fictícia a partir do nome do anúncio.
+- `Crm::AdVideoTranscribeJob` (fila low): um vídeo por execução;
+  `enqueue_pending` (25 por vez) roda depois de cada carga da Meta e pelo
+  botão **Transcrever vídeos** (aba Ganchos, corpos e CTAs) ou pelo botão do
+  card/Ver a fundo (`POST crm/creatives/:ad_id/transcribe`).
+- A carga (`AdInsightsSyncService#keep_transcripts!`) PRESERVA a chave
+  `transcript` — o upsert do criativo não apaga o que já foi transcrito.
+- `Crm::AdCreative#hook/#body` devolvem a fala quando há transcrição
+  (`text_source` = video); o texto da Meta fica em `ad_hook/ad_body`. O CTA
+  continua sendo o botão da Meta (é o que o paciente clica); a fala final
+  fica em `video_cta`. Campeões, Transcrever (copiar) e a teia passam a usar
+  a fala automaticamente.
+- Tela: selo "fala do vídeo" (verde) ou "texto do anúncio" (âmbar, com botão
+  Transcrever vídeo) ao lado do gancho no card e no Ver a fundo; transcrição
+  inteira no Ver a fundo; bloco **O que os vídeos falam** na aba Ganchos,
+  corpos e CTAs (`VideoSpeechRanking.vue`): ganchos falados ranqueados pela
+  taxa de parada, corpos pela retenção, CTAs falados pela conversa por
+  clique (`assets_for[:video]`, só vídeos com ≥ 300 impressões no período).
+- Pré-requisito em produção: chave do Gemini em Integrações → IA e token da
+  Meta com `ads_read` na conta dona dos vídeos. Custo: ~US$ 0,01–0,03 por
+  vídeo de 30–60 s.

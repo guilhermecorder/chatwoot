@@ -2,6 +2,7 @@ import { frontendURL } from '../../../helper/URLHelper';
 import CrmBoard from './CrmBoard.vue';
 import CrmCampaigns from './CrmCampaigns.vue';
 import CrmJourney from './CrmJourney.vue';
+import CrmCalls from './CrmCalls.vue';
 import CrmCampaignsDashboard from './CrmCampaignsDashboard.vue';
 import CrmForms from './CrmForms.vue';
 import CrmIntegrationsPage from './CrmIntegrationsPage.vue';
@@ -19,6 +20,13 @@ export default {
       name: 'crm_journey',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmJourney,
+    },
+    // 📞 ambiente Chamadas (item 176): ao vivo + indicadores + histórico
+    {
+      path: frontendURL('accounts/:accountId/crm/chamadas'),
+      name: 'crm_calls',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: CrmCalls,
     },
     {
       path: frontendURL('accounts/:accountId/crm/campaigns'),

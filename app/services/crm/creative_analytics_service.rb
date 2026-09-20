@@ -77,7 +77,11 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
 
   # campeões do recorte: menor custo por conversa, melhor gancho, corpo, CTA e conversa
   CHAMPION_KEYS = { cost: ['cost_conversation', :min], hook: ['hook_rate', :max], hold: ['hold_rate', :max],
-                    cta: ['link_ctr', :max], conv: ['conv_rate', :max] }.freeze
+                    cta: ['link_ctr', :max], conv: ['conv_rate', :max],
+                    # v2 (item 177): o que vale dinheiro — ROAS, CAC (custo por cirurgia) e % de agendamento
+                    roas: ['roas', :max], cac: ['cost_surgery', :min], booking: ['booking_rate', :max] }.freeze
+  # jornada mínima para disputar os campeões de dinheiro (evita campeão com 1 lead)
+  CHAMPION_FUNNEL_MIN = { roas: [:surgeries, 1], cac: [:surgeries, 1], booking: [:leads, 5] }.freeze
 
   def mark_champions(rows) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     rows.each { |r| r[:champion_of] = [] }
@@ -85,6 +89,8 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
     CHAMPION_KEYS.each do |key, (metric, dir)|
       pool = eligible.select { |r| r[:rates][metric] }
       pool = pool.select { |r| r[:totals]['conversations'].to_f >= 5 } if key == :cost
+      rule = CHAMPION_FUNNEL_MIN[key]
+      pool = pool.select { |r| r[:funnel][rule[0]].to_i >= rule[1] } if rule
       next if pool.size < 2
 
       best = dir == :min ? pool.min_by { |r| r[:rates][metric] } : pool.max_by { |r| r[:rates][metric] }
@@ -144,13 +150,45 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
     best&.slice(:label, :conversations, :cost_conversation, :link_ctr, :impressions)
   end
 
+  # 🎬 item 181: o que os VÍDEOS falam, ranqueado pelo que cada parte tem de
+  # provar — gancho pela taxa de parada, corpo pela retenção, CTA falado pela
+  # conversa por clique — no período da tela (só vídeos com transcrição)
+  def video_assets
+    rows = all_rows.select { |r| r[:creative].transcript_done? && r[:totals]['impressions'].to_f >= 300 }
+    {
+      hooks: video_part_rows(rows, :hook, 'hook_rate'),
+      bodies: video_part_rows(rows, :body, 'hold_rate'),
+      ctas: video_part_rows(rows, :video_cta, 'conv_rate'),
+      transcribed: Crm::AdCreative.where(account_id: @account.id, format: 'video')
+                                  .where("creative -> 'transcript' ->> 'status' = 'done'").count,
+      videos: Crm::AdCreative.where(account_id: @account.id, format: 'video').count
+    }
+  end
+
+  def video_part_rows(rows, part, metric)
+    list = rows.filter_map { |r| video_row(r, part, metric) }
+    list.sort_by { |row| -row[:value] }.first(12)
+  end
+
+  def video_row(row, part, metric)
+    creative = row[:creative]
+    text = creative.public_send(part)
+    value = row[:rates][metric]
+    return nil if text.blank? || value.nil?
+
+    { ad_id: creative.ad_id, ad_name: creative.ad_name, text: text, angle: creative.transcript['angle'], value: value,
+      metric: metric, impressions: row[:totals]['impressions'].to_i, conversations: row[:totals]['conversations'].to_i,
+      cost_conversation: row[:rates]['cost_conversation'], thumbnail_url: creative.thumbnail_src }
+  end
+
   # ── Gancho / corpo / CTA como ativos (conta inteira) ──────────────────────
   def assets_for(ad_id = nil)
     {
       titles: breakdown('title_asset', ad_id),
       bodies: breakdown('body_asset', ad_id),
       ctas: breakdown('call_to_action_asset', ad_id),
-      dynamic_ads: Crm::AdCreative.where(account_id: @account.id, format: 'dynamic').count
+      dynamic_ads: Crm::AdCreative.where(account_id: @account.id, format: 'dynamic').count,
+      video: video_assets
     }
   end
 
@@ -224,10 +262,12 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
 
   def row_for(creative, list)
     totals = Crm::AdMetrics.sum(list)
+    funnel = funnel_for(creative.ad_id)
     {
       creative: creative, status: creative.effective_status, totals: totals,
-      rates: Crm::AdMetrics.rates(totals, video: video_like?(creative, totals)),
-      funnel: funnel_for(creative.ad_id), days: list.size
+      rates: Crm::AdMetrics.rates(totals, video: video_like?(creative, totals))
+                           .merge(Crm::AdFunnel.rates(funnel, totals['spend']).stringify_keys),
+      funnel: funnel, days: list.size
     }
   end
 
@@ -246,51 +286,12 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
     funnels[ad_id] || { leads: 0, booked: 0, attended: 0, surgeries: 0, revenue: 0.0 }
   end
 
-  # rubocop:disable Metrics/AbcSize
-  def funnels # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    @funnels ||= begin
-      contacts = @account.contacts
-                         .where("additional_attributes -> 'meta_ads' ->> 'source_id' IS NOT NULL")
-                         .where("(additional_attributes -> 'meta_ads' ->> 'captured_at')::timestamptz >= ?", @since_date.beginning_of_day)
-                         .where("(additional_attributes -> 'meta_ads' ->> 'captured_at')::timestamptz <= ?", @until_date.end_of_day)
-                         .pluck(:id, Arel.sql("additional_attributes -> 'meta_ads' ->> 'source_id'"))
-      ids = contacts.map(&:first)
-      booked = @account.tasks.where(task_type: 'consulta', contact_id: ids).distinct.pluck(:contact_id).to_set
-      attended = @account.tasks.where(task_type: 'consulta', attendance: 'attended', contact_id: ids).distinct.pluck(:contact_id).to_set
-      converted = converted_values(ids)
-      contacts.group_by(&:last).transform_values do |pairs|
-        cids = pairs.map(&:first)
-        { leads: cids.size, booked: cids.count { |id| booked.include?(id) },
-          attended: cids.count { |id| attended.include?(id) },
-          surgeries: cids.count { |id| converted.key?(id) },
-          revenue: cids.sum { |id| converted[id].to_f }.round(2) }
-      end
-    end
-  end
-  # rubocop:enable Metrics/AbcSize
-
-  def conversion_stage_ids # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    @conversion_stage_ids ||= begin
-      cfg = CrmSetting.find_by(account: @account)&.meta_ads_config || {}
-      configured = Array(cfg['conversion_stage_ids']).map(&:to_i).reject(&:zero?)
-      if configured.any?
-        configured
-      else
-        base = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: @account.id })
-                         .where('crm_stages.name ILIKE ?', '%cirurgia%')
-        strict = base.where.not('crm_stages.name ILIKE ?', '%indica%').pluck(:id)
-        strict.any? ? strict : base.pluck(:id)
-      end
-    end
+  def funnels
+    @funnels ||= Crm::AdFunnel.by_ad(@account, @since_date, @until_date, conversion_stage_ids: conversion_stage_ids)
   end
 
-  def converted_values(contact_ids)
-    return {} if contact_ids.empty? || conversion_stage_ids.empty?
-
-    cards = Crm::Contact.joins(:pipeline).where(crm_pipelines: { account_id: @account.id }).where(contact_id: contact_ids)
-    converted_ids = cards.where(stage_id: conversion_stage_ids).pluck(:id) |
-                    Crm::StageLog.where(crm_contact_id: cards.select(:id), stage_id: conversion_stage_ids).pluck(:crm_contact_id)
-    cards.where(id: converted_ids).pluck(:contact_id, :value).to_h
+  def conversion_stage_ids
+    @conversion_stage_ids ||= Crm::AdFunnel.stage_ids(@account)
   end
 
   # ── Médias da conta (ponderadas por impressão) e diagnóstico ─────────────
@@ -299,10 +300,11 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
     video_total = Crm::AdMetrics.sum(rows.select { |r| r[:rates]['hook_rate'] }.pluck(:totals))
     video_rates = Crm::AdMetrics.rates(video_total, video: true)
     all_rates = Crm::AdMetrics.rates(total, video: false)
+    funnel_rates = Crm::AdFunnel.rates(Crm::AdFunnel.sum(rows.pluck(:funnel)), total['spend']).stringify_keys
     { 'hook_rate' => video_rates['hook_rate'], 'hold_rate' => video_rates['hold_rate'],
       'retention' => video_rates['retention'],
       'link_ctr' => all_rates['link_ctr'], 'conv_rate' => all_rates['conv_rate'],
-      'cost_conversation' => all_rates['cost_conversation'], 'cpm' => all_rates['cpm'] }
+      'cost_conversation' => all_rates['cost_conversation'], 'cpm' => all_rates['cpm'] }.merge(funnel_rates)
   end
 
   def vs_avg_for(value, average)
@@ -461,6 +463,9 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
       ad_id: c.ad_id, ad_name: c.ad_name, adset_name: c.adset_name, campaign_id: c.campaign_id,
       campaign_name: c.campaign_name, status: c.effective_status, format: c.format, format_label: c.format_label,
       hook: c.hook, body: c.body, cta: c.cta, cta_label: Crm::AdCreativeParser.cta_label(c.cta),
+      # 🎬 item 181: de onde vem o texto (video | ad) + o que o vídeo fala
+      text_source: c.text_source, video_cta: c.video_cta, ad_hook: c.ad_hook, ad_body: c.ad_body,
+      transcript: c.transcript.slice('status', 'error', 'text', 'angle', 'transcribed_at'),
       description: c.creative['description'], thumbnail_url: c.thumbnail_src, thumbnail_stored: c.thumbnail_stored?,
       permalink: c.creative['permalink'], video_id: c.creative['video_id'],
       titles: c.creative['titles'] || [], bodies: c.creative['bodies'] || [], ctas: c.creative['ctas'] || [],

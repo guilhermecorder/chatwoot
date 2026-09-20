@@ -6125,6 +6125,160 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   seguro principal (as tabelas cevico_ad_* + storage/ vão no pg_dump/volume).
 
 
+## 184. 📱 MENU LATERAL ESTILO IPHONE (pedido 20/09, noite)
+
+Pedido: "algo mais iPhone na barra lateral; importante ter tudo, mas no
+estilo iPhone". FEITO: skin `.cv-ios-nav` (kit scss, fora do .cv-page) sobre
+os grupos do item 182 — cada grupo é um cartão arredondado como os Ajustes
+do iOS, linhas de 44 px, azulejo colorido por item (`TILE_COLORS` no
+Sidebar.vue; `sb-icon` no SidebarGroupHeader/Leaf com a cor no wrapper e o
+glifo branco), texto branco no escuro / quase-preto no claro, divisórias
+finas recuadas, seta à direita que gira ao abrir. A barra recolhida segue
+com os ícones do Chatwoot.
+
+## 183. 🔮 VIDRO CRISTALINO + CONTRASTE EM TODOS OS PAINÉIS (pedido 20/09, noite)
+
+Pedido: "fonte cinza em ambiente acinzentado não fica bom; indicadores com
+contraste ou transparentes com fundo de vidro cristalino (referências de
+glassmorphism); reajuste todos os painéis, principalmente dashboards e Meu
+Painel". FEITO no KIT (`_cevico-glass.scss`, bloco final "CRISTAL +
+CONTRASTE"), então vale para todas as telas de uma vez: `.cv-sub`, `.cv-stat`
+e `.cv-row` viram vidro cristalino (fundo quase transparente com degradê de
+luz, borda clara, crista de luz no topo, desfoque do fundo, halo na cor do
+bloco); tokens `text-n-slate-8…12` ganham contraste dentro do .cv-page
+(escuro: branco 52 %→100 %; claro: cinza-escuro→quase-preto); `.cv-label`
+mais opaco; divisórias visíveis. Ver a fundo v3: faixa de 13 indicadores
+NOMEADOS no topo (Investido, Impressões, Alcance, Conversas, Custo por
+conversa, CTR, Conversa por clique, Parada, Retenção, Custo por consulta,
+Custo por cirurgia, ROAS, % agendamento), mídia menor, teia + seletor de
+eixos (chips compactos, sem interruptores grandes) dentro da Leitura ao lado
+das réguas. Verificado por DOM em claro e escuro, sem rolagem lateral.
+
+## 182. 🗂️ MENU LATERAL EM GRUPOS COM RAMIFICAÇÕES (pedido 20/09)
+
+Print dele: ~20 itens soltos, "Chamadas" duas vezes (o Calls enterprise do
+Chatwoot + o nosso). FEITO: `MENU_GROUPS` no Sidebar.vue — Meu Painel solto;
+grupos Atendimento (Conversas, Chamadas, Caixa de Entrada, Agenda, Tarefas,
+Respostas prontas), Pacientes e funil (CRM, Jornada, Campanha WhatsApp,
+Formulários, Automações), Resultados (Relatórios com os dashboards dentro,
+Metas, Estratégia, Financeiro), Equipe e marca (Pessoas, Academia,
+Conteúdos, Construtor, Captain, Empresas), Configurações (Configurações,
+Integrações). Só um grupo aberto por vez (accordion do kit), o grupo do item
+ativo abre sozinho, itens que já tinham filhos viram subgrupo; Personalizar
+menu (ordem/ocultar) e os acessos por atendente continuam valendo; o Calls
+enterprise sai do menu (o nosso "Chamadas" fica). Nomes dos grupos são
+proposta — fácil de trocar.
+
+## 181. 🎬 CENTRAL DE CRIATIVOS v2.1 — gancho/corpo/CTA pela TRANSCRIÇÃO DO VÍDEO (pedido 20/09)
+
+Pedido: "o que importa é o vídeo; ganchos, corpos e CTAs devem ser com base
+na transcrição dos vídeos". FEITO (docs/CENTRAL_CRIATIVOS.md, seção v2.1):
+serviço + job de transcrição (Gemini, vídeo inline), preservado na carga,
+modelo devolve a fala como gancho/corpo (texto da Meta vira reserva), selo
+"fala do vídeo" nos cards e no Ver a fundo, botão Transcrever vídeo(s),
+bloco "O que os vídeos falam" ranqueando ganchos/corpos/CTAs falados.
+Testado com simulação (5 vídeos da conta 3); spec 20/20. Em produção:
+precisa da chave do Gemini e o token da Meta ler `source` dos vídeos.
+
+## 180. 🛡️ CONFORMIDADE META + GOOGLE — varredura 20/09 e pendências
+
+Varredura completa em docs/CONFORMIDADE_META_GOOGLE.md. FEITO na hora: GA4
+sem dado pessoal; test_event_code só fora de produção; opt-out fixo
+(nao_perturbe/perda_*) em campanha/régua/campanha de ligação + detector de
+"PARE"; travas da Calling API (1 pedido/24 h, 2/7 dias, horário comercial na
+ligação manual); agente de Instagram se identifica como assistente virtual.
+DECISÃO DELE: criptografar segredos do CrmSetting (chaves no EasyPanel +
+backup) e banner de cookies/Consent Mode v2 nas landings. PENDENTES
+menores: categoria do template, teto global por paciente/dia, event_id =
+Protocolo, purga de insights/criativos + janela do ctwa_clid, escopo
+ads_read, token no header, 4 não atendidas → revogação, teto diário dos
+comentários, aviso de gravação no pedido de permissão, aviso de
+privacidade nos formulários.
+
+## 179. 🍎 PADRONIZAR O DESIGN APPLE EM TODO O SISTEMA (pedido 20/09)
+
+Pedido: "design apple para este ambiente também (e todos os outros do
+sistema) — padronizar nosso melhor design por tudo". Regra: kit `.cv-*`
+(vidro, paleta por bloco, CevicoHero, blocos `p-6 sm:p-8`, títulos
+`text-xl/2xl`, muito respiro, alto contraste só no que importa, grids com
+`grid-cols-1` de base, nada de rolagem lateral, texto que embrulha em vez
+de cortar). Já estão no padrão: Meu Painel, Relatórios (10), Central de
+Criativos v2, Chamadas, Jornada (colunas). Plano por rodadas (uma tela por
+vez, sem mudar comportamento): (1) CRM board + ficha do paciente; (2)
+Campanha WhatsApp + Formulários + Integrações; (3) Agenda + Tarefas + Metas;
+(4) Estratégia + Financeiro + Pessoas + Academia; (5) Configurações do CRM.
+Cada rodada entrega print claro/escuro/celular e checagem de overflow.
+
+## 178. 🗺️ JORNADA — colunas legíveis (ajuste 20/09)
+
+Print dele: 6 colunas espremidas em 2000 px com títulos cortados ("Cons…",
+"Lembr…"). FEITO: no máximo 4 colunas por linha (`2xl:grid-cols-4`, as 6
+etapas viram 2 linhas) e os textos dos cartões passam a embrulhar em 2
+linhas (`line-clamp-2`) em vez de `truncate`.
+
+## 177. 🎯 CENTRAL DE CRIATIVOS v2 — o que vale dinheiro, ROAS/CAC/% agendamento como campeões, retenção em todo card, Ver a fundo Apple (pedido 20/09)
+
+Pedido: custo por consulta agendada e por cirurgia realizada nos cards;
+ROAS, CAC e % de agendamento como parâmetros de campeão; gráfico de
+retenção em todos; "Ver a fundo" no design Apple, clean, com respiro e alto
+contraste; sem rolagem lateral; campeões melhores no desktop.
+**FEITO 20/09 (working tree da feat/rodada-172, sem commit; aguarda "pode
+subir" — deploy WEB só, sem migration).** Detalhes: docs/CENTRAL_CRIATIVOS.md
+(seção v2). Testado: rspec 19/19 (Central), campeões novos disputando com
+dados de demonstração, DOM sem overflow em 1024 px e 375 px (card e modal).
+
+## 176. 📞 AMBIENTE "CHAMADAS" — ao vivo para todos, histórico com visualizações e indicadores por período (pedido 19/09 noite, via Henrique)
+
+**20/09 — CONSTRUÍDO (R1 inteira + as ações da R2: retornar, marcar
+retornada, CSV, paleta `crm:chamadas`), no working tree da feat/rodada-172,
+AGUARDA "pode subir" (deploy WEB só — sem migration).** Decisão: "Chamadas"
+é item do MENU DO DIA (`calls`, ligado por padrão para todo mundo, o admin
+desliga por pessoa) e não uma concessão — o pedido era "todo mundo vê".
+Testado local: rspec 8/8 novos (overview, live, busca, retornada, CSV),
+ligação simulada ao vivo (tocou → apareceu na faixa "Agora" em 1 s com
+cronômetro → encerrou → entrou em "Perdidas de hoje sem retorno" → botão
+Retornada limpou a fila), 4 visualizações, modal, claro/escuro/375 px.
+Detalhes técnicos: docs/CHAMADAS_NATIVAS.md §9. Falta (R3): recordes/
+campeões, metas, alerta no Radar, aposentar o relatório antigo.
+
+Pedido: um ambiente de CHAMADAS (desktop e celular) onde as ligações ficam
+registradas; todo mundo vê as chamadas EM ANDAMENTO; opções de visualização
+do histórico; indicadores por dia/semana/mês "do nosso jeito" (kit CEVICO:
+CevicoHero + PeriodRuler + DashKpi + gráficos). Precisa ser muito útil.
+
+O que JÁ existe (item 167/169): tabela `cevico_calls` (direção, status,
+started/answered/ended, duração, motivo do fim, gravação, transcrição,
+resumo, IA), `GET crm/calls` (filtros por tipo/ids/período), `GET
+crm/calls/dashboard` (`Crm::Calls::DashboardService`: KPIs, por dia, por
+hora, por atendente, por desfecho, espera, IA), eventos ao vivo
+`cevico_call.*` no stream `account_<id>` (Broadcaster) e o relatório
+"Dashboard de Ligações" (`reports/CallsDashboard.vue`) com PeriodRuler,
+KPIs, gráficos e "recentes".
+
+PLANO (3 rodadas, sem migration nova):
+- R1 — Página `Chamadas` (rota `crm/calls`, item "Chamadas" no menu CEVICO,
+  grant `calls`), no kit e em 1 tela no celular: (a) faixa **"Agora"** ao
+  vivo para TODO MUNDO: tocando / em atendimento (quem está na linha, com
+  quem, há quanto tempo — cronômetro), fila de perdidas de hoje sem retorno;
+  alimentada pelo `GET crm/calls?live=1` + eventos ActionCable; (b)
+  **indicadores do período** com PeriodRuler (hoje/ontem/7 dias/semana/mês/
+  personalizado, comparado com o anterior): recebidas, feitas, atendidas,
+  perdidas, taxa de atendimento, espera média, conversa média, IA; gráfico
+  por dia + por hora (MiniBars), por atendente (HBars); (c) **histórico**
+  com visualizações: Lista (cards com desfecho, duração, gravação,
+  resumo), Tabela (colunas por breakpoint), Por atendente, Linha do tempo
+  do dia; filtros: direção, desfecho, atendente, caixa, IA, busca por
+  nome/número; detalhe da chamada (linha do tempo, gravação, transcrição,
+  resumo, abrir conversa/contato).
+- R2 — Ações no ambiente: retornar ligação perdida (OutboundService), pedir
+  permissão, marcar "retornada"; alertas (perdida sem retorno há X min →
+  Radar); exportar CSV; paleta por bloco (escopo `crm:chamadas`).
+- R3 — Recordes/campeões (dia com mais atendidas, melhor taxa, atendente
+  do mês), metas de atendimento, e o Dashboard de Ligações passa a ser um
+  atalho para o ambiente.
+- Reusar `DashboardService` (acrescentar `live`, `outbound` e `by_inbox`),
+  `calls_controller#index` (parâmetro `live`), Broadcaster como está.
+
 ## 175. 🕸️ TEIA (RADAR) DOS CRIATIVOS — força de gancho, corpo, CTA e mais, com eixos por chavinha (pedido 19/09 noite)
 
 Pedido dele: gráfico de teia/radar "estilo o da área de Pessoas" para

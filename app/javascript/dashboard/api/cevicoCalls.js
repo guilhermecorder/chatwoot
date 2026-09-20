@@ -44,6 +44,27 @@ class CevicoCallsAPI extends ApiClient {
     return axios.get(`${this.url}/dashboard`, { params });
   }
 
+  // ── item 176: ambiente Chamadas ──
+  // números do período + comparação + ao vivo + perdidas de hoje sem retorno
+  overview(params = {}) {
+    return axios.get(`${this.url}/overview`, { params });
+  }
+
+  // só o que está tocando/em atendimento agora
+  live() {
+    return axios.get(this.url, { params: { live: 1 } });
+  }
+
+  // perdida que alguém já retornou por fora (ligação/mensagem)
+  markReturned(id, note = '') {
+    return axios.post(`${this.url}/${id}/returned`, { note });
+  }
+
+  // CSV do histórico com os mesmos filtros da lista (blob para download)
+  exportCsv(params = {}) {
+    return axios.get(`${this.url}/export`, { params, responseType: 'blob' });
+  }
+
   // inboxId (opcional): a caixa da conversa aberta — com várias caixas
   // configuradas, a ligação sai por ela; sem isso o backend escolhe
   initiate(contactId, sdpOffer, inboxId = null) {

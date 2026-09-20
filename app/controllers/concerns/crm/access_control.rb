@@ -24,8 +24,9 @@ module Crm::AccessControl
   # itens do MENU do dia a dia que o admin liga/desliga por atendente
   # (só visual — os endpoints dessas áreas continuam abertos ao time).
   # Padrão de quem não tem configuração: DAY_MENU_DEFAULT.
-  DAY_MENU_ITEMS = %w[crm conversation agenda goals canned tasks people academy].freeze
-  DAY_MENU_DEFAULT = %w[crm conversation agenda goals canned].freeze
+  # 'calls' (item 176): ambiente Chamadas — todo mundo vê por padrão
+  DAY_MENU_ITEMS = %w[crm conversation calls agenda goals canned tasks people academy].freeze
+  DAY_MENU_DEFAULT = %w[crm conversation calls agenda goals canned].freeze
 
   private
 

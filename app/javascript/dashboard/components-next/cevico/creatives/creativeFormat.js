@@ -181,8 +181,25 @@ export const METRIC_DEFS = [
   },
 ];
 
-// ── campeões (item 172, rodada 3) ──
+// "3,2×" — retorno sobre o investimento (receita ÷ investido)
+export const fmtRoas = v => {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return '—';
+  return `${Number(v)
+    .toFixed(Number(v) >= 10 ? 0 : 1)
+    .replace('.', ',')}×`;
+};
+
+// ── campeões (item 172, rodada 3 · v2 item 177: ROAS, CAC e % agendamento) ──
 export const CHAMPION_META = {
+  roas: { label: 'Campeão de ROAS', icon: 'i-lucide-trending-up' },
+  cac: {
+    label: 'Campeão · menor custo por cirurgia',
+    icon: 'i-lucide-badge-dollar-sign',
+  },
+  booking: {
+    label: 'Campeão de agendamento',
+    icon: 'i-lucide-calendar-check',
+  },
   cost: {
     label: 'Campeão · menor custo por conversa',
     icon: 'i-lucide-trophy',
@@ -192,6 +209,74 @@ export const CHAMPION_META = {
   cta: { label: 'Campeão de CTA', icon: 'i-lucide-mouse-pointer-click' },
   conv: { label: 'Campeão de conversa', icon: 'i-lucide-message-circle' },
 };
+
+// posição de um valor contra a média da conta (±15 % = na média);
+// `lower` inverte a leitura (custo menor é melhor)
+export const vsAverage = (value, avg, lower = false) => {
+  if (
+    value === null ||
+    value === undefined ||
+    avg === null ||
+    avg === undefined ||
+    !Number(avg)
+  )
+    return null;
+  const ratio = Number(value) / Number(avg);
+  if (ratio >= 1.15)
+    return {
+      key: 'acima',
+      text: `${Math.round((ratio - 1) * 100)}% acima da média`,
+      good: !lower,
+    };
+  if (ratio <= 0.85)
+    return {
+      key: 'abaixo',
+      text: `${Math.round((1 - ratio) * 100)}% abaixo da média`,
+      good: lower,
+    };
+  return { key: 'na_media', text: 'na média da conta', good: null };
+};
+
+// ── o que vale dinheiro (v2): jornada do CRM × investimento ──
+// tiles dos cards, do Ver a fundo e da comparação; `lower` = menor é melhor
+export const MONEY_DEFS = [
+  {
+    key: 'cost_booked',
+    label: 'Custo por consulta agendada',
+    short: 'Consulta agendada',
+    hint: 'investido ÷ leads deste anúncio que marcaram consulta',
+    fmt: v => fmtMoney(v),
+    lower: true,
+    icon: 'i-lucide-calendar-plus',
+  },
+  {
+    key: 'cost_surgery',
+    label: 'Custo por cirurgia realizada',
+    short: 'Cirurgia realizada (CAC)',
+    hint: 'investido ÷ cirurgias realizadas — o CAC de verdade',
+    fmt: v => fmtMoney(v),
+    lower: true,
+    icon: 'i-lucide-badge-dollar-sign',
+  },
+  {
+    key: 'roas',
+    label: 'ROAS',
+    short: 'ROAS',
+    hint: 'receita das cirurgias ÷ investido',
+    fmt: v => fmtRoas(v),
+    lower: false,
+    icon: 'i-lucide-trending-up',
+  },
+  {
+    key: 'booking_rate',
+    label: '% de agendamento',
+    short: 'Agendamento',
+    hint: 'leads que marcaram consulta ÷ leads do anúncio',
+    fmt: v => fmtPct(v, 0),
+    lower: false,
+    icon: 'i-lucide-calendar-check',
+  },
+];
 
 export const PART_META = {
   hook: {
@@ -228,6 +313,27 @@ export const PART_META = {
     icon: 'i-lucide-trophy',
     fmt: v => fmtMoney(v),
     key: 'cost_conversation',
+  },
+  roas: {
+    label: 'ROAS',
+    metric: 'receita ÷ investido',
+    icon: 'i-lucide-trending-up',
+    fmt: v => fmtRoas(v),
+    key: 'roas',
+  },
+  cac: {
+    label: 'Custo por cirurgia',
+    metric: 'investido ÷ cirurgias realizadas',
+    icon: 'i-lucide-badge-dollar-sign',
+    fmt: v => fmtMoney(v),
+    key: 'cost_surgery',
+  },
+  booking: {
+    label: '% de agendamento',
+    metric: 'consultas marcadas ÷ leads',
+    icon: 'i-lucide-calendar-check',
+    fmt: v => fmtPct(v, 0),
+    key: 'booking_rate',
   },
 };
 

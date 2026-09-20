@@ -42,13 +42,24 @@ const count = computed(() =>
     }"
     @click.stop="emit('toggle')"
   >
-    <div v-if="icon" class="relative flex items-center gap-2">
+    <div
+      v-if="icon"
+      class="relative flex items-center gap-2 sb-icon"
+      :style="
+        countVariant === 'radar' && dynamicCount
+          ? { color: '#10B981' }
+          : iconColor
+            ? { color: iconColor }
+            : {}
+      "
+    >
       <Icon
         v-if="icon"
         :icon="icon"
         class="size-4"
-        :class="countVariant === 'radar' && dynamicCount ? 'cevico-radar-icon' : ''"
-        :style="countVariant === 'radar' && dynamicCount ? { color: '#10B981' } : (iconColor ? { color: iconColor } : {})"
+        :class="
+          countVariant === 'radar' && dynamicCount ? 'cevico-radar-icon' : ''
+        "
       />
       <span
         v-if="showBadge"
@@ -74,7 +85,8 @@ const count = computed(() =>
           'bg-n-slate-4 text-n-slate-12 dark:bg-n-slate-5': !countVariant,
           'bg-green-500 text-white': countVariant === 'green',
           'cevico-gold-badge text-white font-semibold': countVariant === 'gold',
-          'cevico-radar-badge text-white font-semibold': countVariant === 'radar',
+          'cevico-radar-badge text-white font-semibold':
+            countVariant === 'radar',
         }"
       >
         {{ count }}
@@ -82,8 +94,8 @@ const count = computed(() =>
     </div>
     <span
       v-if="expandable"
-      v-show="isExpanded"
-      class="i-lucide-chevron-up size-3"
+      class="i-lucide-chevron-right size-3 sb-chevron transition-transform"
+      :class="{ 'rotate-90': isExpanded }"
       @click.stop="emit('toggle')"
     />
   </component>
@@ -105,8 +117,15 @@ const count = computed(() =>
   animation: cevico-gold-pulse 2.2s ease-out infinite;
 }
 @keyframes cevico-gold-pulse {
-  0% { transform: scale(0.85); opacity: 0.8; }
-  70%, 100% { transform: scale(1.45); opacity: 0; }
+  0% {
+    transform: scale(0.85);
+    opacity: 0.8;
+  }
+  70%,
+  100% {
+    transform: scale(1.45);
+    opacity: 0;
+  }
 }
 
 /* Radar de Oportunidades: VERDE DOPAMINE pulsando — oportunidade é
@@ -128,11 +147,23 @@ const count = computed(() =>
   animation: cevico-radar-throb 2.2s ease-in-out infinite;
 }
 @keyframes cevico-radar-throb {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 @keyframes cevico-radar-ring {
-  0% { transform: scale(0.85); opacity: 0.8; }
-  70%, 100% { transform: scale(1.5); opacity: 0; }
+  0% {
+    transform: scale(0.85);
+    opacity: 0.8;
+  }
+  70%,
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
 }
 </style>

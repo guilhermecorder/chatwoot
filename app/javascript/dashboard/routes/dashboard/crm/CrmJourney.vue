@@ -567,8 +567,8 @@ const compact = computed(() => mapConfig.value.density === 'compact');
 const queuePos = computed(() => mapConfig.value.queue || 'side');
 const stepGridClass = computed(() =>
   queuePos.value === 'side'
-    ? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6'
-    : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6'
+    ? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'
+    : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4'
 );
 const openNewAt = step => {
   editing.value = null;
@@ -899,7 +899,10 @@ const inputClass =
                   maxlength="40"
                   @change="renameStep(col.key, $event.target.value)"
                 />
-                <h3 v-else class="text-sm font-bold text-n-slate-12 truncate">
+                <h3
+                  v-else
+                  class="text-sm font-bold text-n-slate-12 leading-tight"
+                >
                   {{ col.label }}
                 </h3>
                 <span
@@ -944,12 +947,12 @@ const inputClass =
                     />
                     <div class="min-w-0 flex-1">
                       <p
-                        class="text-xs font-semibold text-n-slate-12 leading-tight truncate"
+                        class="text-xs font-semibold text-n-slate-12 leading-tight line-clamp-2"
                         :title="m.name"
                       >
                         {{ m.name }}
                       </p>
-                      <p class="text-[10px] text-n-slate-10 truncate">
+                      <p class="text-[10px] text-n-slate-10 line-clamp-2">
                         {{ m.when_label
                         }}<span v-if="!compact"> · {{ m.kind_label }}</span>
                       </p>
@@ -1087,10 +1090,12 @@ const inputClass =
                       "
                     />
                     <div class="min-w-0 flex-1">
-                      <p class="text-xs text-n-slate-12 leading-tight truncate">
+                      <p
+                        class="text-xs text-n-slate-12 leading-tight line-clamp-2"
+                      >
                         {{ it.name }}
                       </p>
-                      <p class="text-[10px] text-n-slate-10 truncate">
+                      <p class="text-[10px] text-n-slate-10 line-clamp-2">
                         {{ it.when_label
                         }}<span v-if="!compact && it.detail">
                           · {{ it.detail }}</span
@@ -1102,7 +1107,7 @@ const inputClass =
                           it.live?.counters &&
                           Object.keys(it.live.counters).length
                         "
-                        class="text-[10px] text-n-slate-9 truncate"
+                        class="text-[10px] text-n-slate-9 line-clamp-2"
                       >
                         {{
                           Object.entries(it.live.counters)

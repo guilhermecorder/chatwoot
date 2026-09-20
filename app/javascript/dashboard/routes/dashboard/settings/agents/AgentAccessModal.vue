@@ -13,29 +13,69 @@ const store = useStore();
 
 // ── Menu do dia a dia (só visual — o admin liga/desliga por pessoa) ──
 const DAY_ITEMS = [
-  { key: 'crm',          label: 'CRM (funil de leads)' },
+  { key: 'crm', label: 'CRM (funil de leads)' },
   { key: 'conversation', label: 'Conversas' },
-  { key: 'agenda',       label: 'Agenda' },
-  { key: 'goals',        label: 'Metas (acompanhar o mês)' },
-  { key: 'canned',       label: 'Respostas prontas' },
-  { key: 'tasks',        label: 'Tarefas' },
-  { key: 'people',       label: 'Pessoas (DISC e desenvolvimento)' },
-  { key: 'academy',      label: 'Academia CEVICO' },
+  { key: 'calls', label: 'Chamadas (ligações de WhatsApp)' },
+  { key: 'agenda', label: 'Agenda' },
+  { key: 'goals', label: 'Metas (acompanhar o mês)' },
+  { key: 'canned', label: 'Respostas prontas' },
+  { key: 'tasks', label: 'Tarefas' },
+  { key: 'people', label: 'Pessoas (DISC e desenvolvimento)' },
+  { key: 'academy', label: 'Academia CEVICO' },
 ];
 // padrão combinado 17/07: Meu Painel | CRM | Conversas | Agenda | Metas |
 // Respostas prontas (Meu Painel e Conteúdos aparecem sempre)
-const DAY_DEFAULT = ['crm', 'conversation', 'agenda', 'goals', 'canned'];
+const DAY_DEFAULT = [
+  'crm',
+  'conversation',
+  'calls',
+  'agenda',
+  'goals',
+  'canned',
+];
 
 // ── Áreas administrativas (CONCESSÃO — vale de verdade, na API também) ──
 const GRANT_ITEMS = [
-  { key: 'reports',    label: 'Relatórios',            hint: 'dashboards CEVICO (CRM, Médicos, Agentes, Agenda, Anúncios…)' },
-  { key: 'campaigns',  label: 'Campanha WhatsApp',     hint: 'mensagens em massa e o painel de resultados' },
-  { key: 'automations', label: 'Automações',           hint: 'robôs de follow-up e resultados das automações' },
-  { key: 'data_tools', label: 'Tratamento de dados',   hint: 'etiquetas retroativas, mover em lote, unificar contatos' },
-  { key: 'settings',   label: 'Integrações & config.', hint: 'integrações do CRM e configurações sensíveis' },
-  { key: 'finance',    label: 'Financeiro',            hint: 'livro caixa da clínica — receitas, custos, margem' },
-  { key: 'strategy',   label: 'Estratégia',            hint: 'painel estratégico por pilares' },
-  { key: 'pages',      label: 'Análise de Páginas',    hint: 'análise de funis e testes A/B (rascunhos já são do time)' },
+  {
+    key: 'reports',
+    label: 'Relatórios',
+    hint: 'dashboards CEVICO (CRM, Médicos, Agentes, Agenda, Anúncios…)',
+  },
+  {
+    key: 'campaigns',
+    label: 'Campanha WhatsApp',
+    hint: 'mensagens em massa e o painel de resultados',
+  },
+  {
+    key: 'automations',
+    label: 'Automações',
+    hint: 'robôs de follow-up e resultados das automações',
+  },
+  {
+    key: 'data_tools',
+    label: 'Tratamento de dados',
+    hint: 'etiquetas retroativas, mover em lote, unificar contatos',
+  },
+  {
+    key: 'settings',
+    label: 'Integrações & config.',
+    hint: 'integrações do CRM e configurações sensíveis',
+  },
+  {
+    key: 'finance',
+    label: 'Financeiro',
+    hint: 'livro caixa da clínica — receitas, custos, margem',
+  },
+  {
+    key: 'strategy',
+    label: 'Estratégia',
+    hint: 'painel estratégico por pilares',
+  },
+  {
+    key: 'pages',
+    label: 'Análise de Páginas',
+    hint: 'análise de funis e testes A/B (rascunhos já são do time)',
+  },
 ];
 
 // ── Perfis rápidos (preenchem os checkboxes; dá para ajustar depois) ──
@@ -51,7 +91,7 @@ const PRESETS = [
     key: 'agenda',
     label: 'Agenda & Conferência',
     hint: 'vive na agenda: conferência de consultas e cirurgias',
-    menu: ['agenda', 'conversation', 'goals', 'canned', 'tasks'],
+    menu: ['agenda', 'conversation', 'calls', 'goals', 'canned', 'tasks'],
     grants: [],
   },
   {
@@ -175,8 +215,8 @@ const save = async () => {
         Acessos de {{ agent.name }}
       </h2>
       <p v-if="isTargetAdmin" class="text-sm text-n-slate-10 mt-1">
-        {{ agent.name.split(' ')[0] }} é <strong>administrador(a)</strong> e
-        tem acesso a tudo — não há o que configurar aqui.
+        {{ agent.name.split(' ')[0] }} é <strong>administrador(a)</strong> e tem
+        acesso a tudo — não há o que configurar aqui.
       </p>
       <p v-else class="text-sm text-n-slate-10 mt-1">
         Marque o que {{ agent.name.split(' ')[0] }} <strong>pode</strong> ver e
@@ -187,7 +227,9 @@ const save = async () => {
     <div v-if="!isTargetAdmin" class="px-8 overflow-y-auto space-y-5">
       <!-- perfis rápidos -->
       <div>
-        <p class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10 mb-2">
+        <p
+          class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10 mb-2"
+        >
           Perfis rápidos
         </p>
         <div class="flex flex-wrap gap-1.5">
@@ -211,7 +253,9 @@ const save = async () => {
       <!-- menu do dia a dia -->
       <div class="bg-n-alpha-1 border border-n-weak rounded-2xl p-4">
         <div class="flex items-center justify-between mb-1">
-          <p class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10">
+          <p
+            class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10"
+          >
             Menu do dia a dia
           </p>
           <button
@@ -244,7 +288,9 @@ const save = async () => {
       <!-- áreas administrativas -->
       <div class="bg-n-alpha-1 border border-n-weak rounded-2xl p-4">
         <div class="flex items-center justify-between mb-1">
-          <p class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10">
+          <p
+            class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10"
+          >
             Áreas administrativas
           </p>
           <button
@@ -274,7 +320,8 @@ const save = async () => {
                   <span
                     v-if="grants.includes(item.key)"
                     class="text-[10px] font-medium text-green-600 bg-green-600/10 rounded-full px-2 py-0.5"
-                  >concedido</span>
+                    >concedido</span
+                  >
                 </span>
                 <span class="text-[11px] text-n-slate-9">{{ item.hint }}</span>
               </span>
@@ -286,14 +333,18 @@ const save = async () => {
               class="ml-8 mt-1 mb-2 bg-n-solid-1 border border-n-weak rounded-xl p-3"
             >
               <div class="flex items-center justify-between mb-1.5">
-                <p class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-10">
+                <p
+                  class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-10"
+                >
                   Quais relatórios?
                 </p>
                 <button
                   class="text-[10px] font-medium border rounded-full px-2 py-0.5 transition-colors"
-                  :class="reportKeys.length === 0
-                    ? 'border-green-600/40 text-green-700 bg-green-600/10'
-                    : 'border-n-weak text-n-slate-10 hover:text-n-slate-12'"
+                  :class="
+                    reportKeys.length === 0
+                      ? 'border-green-600/40 text-green-700 bg-green-600/10'
+                      : 'border-n-weak text-n-slate-10 hover:text-n-slate-12'
+                  "
                   @click="selectAllReports"
                 >
                   {{ reportKeys.length === 0 ? 'todos ✓' : 'selecionar todos' }}
@@ -315,7 +366,8 @@ const save = async () => {
                 </label>
               </div>
               <p class="text-[10px] text-n-slate-9 mt-1.5">
-                desmarcados somem do menu dela(e); "todos" acompanha relatórios novos automaticamente
+                desmarcados somem do menu dela(e); "todos" acompanha relatórios
+                novos automaticamente
               </p>
             </div>
           </div>

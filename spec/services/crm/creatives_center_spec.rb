@@ -179,6 +179,59 @@ RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
       expect(row[:funnel][:leads]).to eq(1)
     end
 
+    it 'v2: custo por consulta, custo por cirurgia, ROAS e % de agendamento por anúncio, com campeões de dinheiro' do
+      creator = create(:user, account: account)
+      pipeline = Crm::Pipeline.create!(account: account, name: 'Funil')
+      stage = Crm::Stage.create!(pipeline: pipeline, name: 'Cirurgia Realizada', position: 1, color: '#0F5FA6')
+      leads = Array.new(6) do |i|
+        create(:contact, account: account, phone_number: "+55119999000#{i}",
+                         additional_attributes: { 'meta_ads' => { 'source_id' => '2301', 'captured_at' => 3.days.ago.iso8601 } })
+      end
+      leads.first(3).each { |c| account.tasks.create!(title: 'consulta', task_type: 'consulta', contact_id: c.id, creator: creator, attendance: 'attended') }
+      Crm::Contact.create!(contact_id: leads.first.id, pipeline: pipeline, stage: stage, value: 9000)
+      row = service.overview[:rows].find { |r| r[:ad_id] == '2301' }
+      spend = row[:totals]['spend'].to_f
+      expect(row[:funnel]).to include(leads: 6, booked: 3, surgeries: 1, revenue: 9000.0)
+      expect(row[:rates]['cost_booked']).to eq((spend / 3).round(2))
+      expect(row[:rates]['cost_surgery']).to eq(spend.round(2))
+      expect(row[:rates]['roas']).to eq((9000 / spend).round(2))
+      expect(row[:rates]['booking_rate']).to eq(0.5)
+      # 2301 é o único com jornada suficiente → não há disputa (precisa de 2 no páreo)
+      expect(row[:champion_of]).not_to include('roas')
+      other = create(:contact, account: account, phone_number: '+5511988880000',
+                               additional_attributes: { 'meta_ads' => { 'source_id' => '2302', 'captured_at' => 2.days.ago.iso8601 } })
+      Crm::Contact.create!(contact_id: other.id, pipeline: pipeline, stage: stage, value: 100)
+      fresh = described_class.new(account: account, since_date: Date.current - 29, until_date: Date.current)
+      champions = fresh.overview[:rows].to_h { |r| [r[:ad_id], r[:champion_of]] }
+      expect(champions['2301']).to include('roas')
+      expect(champions.values.flatten).to include('cac')
+      records = Crm::CreativeRecords.new(account: account).call
+      expect(records[:all_time][:roas][:ad_id]).to eq('2301')
+      expect(records[:all_time][:cac][:funnel][:surgeries]).to eq(1)
+    end
+
+    it 'v2.1: transcreve o vídeo (simulação) e o gancho/corpo passam a vir da fala; a carga preserva' do
+      creative = Crm::AdCreative.find_by!(account: account, ad_id: '2304')
+      expect(creative.text_source).to eq('ad')
+      expect(Crm::AdVideoTranscriptionService.new(creative).perform).to be(true)
+      creative.reload
+      expect(creative.text_source).to eq('video')
+      expect(creative.hook).to eq('Cansou das lentes?')
+      expect(creative.video_cta).to include('WhatsApp')
+      expect(creative.transcript['angle']).to eq('pergunta')
+      Crm::AdInsightsSyncService.new(account: account).call
+      expect(creative.reload.transcript_done?).to be(true)
+      row = service.overview[:rows].find { |r| r[:ad_id] == '2304' }
+      expect(row[:text_source]).to eq('video')
+      video = service.assets_for(nil)[:video]
+      expect(video[:hooks].map { |h| h[:ad_id] }).to eq(['2304'])
+      expect(video[:transcribed]).to eq(1)
+      image = Crm::AdCreative.find_by!(account: account, ad_id: '2305')
+      expect(Crm::AdVideoTranscriptionService.new(image).perform).to be(false)
+      expect(image.reload.transcript['status']).to eq('skipped')
+      expect(Crm::AdVideoTranscribeJob.pending_for(account).pluck(:ad_id)).not_to include('2304', '2305')
+    end
+
     it 'respeita parâmetros editados pelo admin' do
       settings.update!(meta_ads_config: settings.meta_ads_config.merge('creative_targets' => { 'hook_rate' => { 'good' => 0.6, 'bad' => 0.5 } }))
       row = service.overview[:rows].find { |r| r[:ad_id] == '2304' }

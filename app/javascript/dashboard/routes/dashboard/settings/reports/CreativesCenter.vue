@@ -23,6 +23,7 @@ import CreativeTable from 'dashboard/components-next/cevico/creatives/CreativeTa
 import CreativeDetail from 'dashboard/components-next/cevico/creatives/CreativeDetail.vue';
 import CreativeCompare from 'dashboard/components-next/cevico/creatives/CreativeCompare.vue';
 import AssetPodium from 'dashboard/components-next/cevico/creatives/AssetPodium.vue';
+import VideoSpeechRanking from 'dashboard/components-next/cevico/creatives/VideoSpeechRanking.vue';
 import BulletMeter from 'dashboard/components-next/cevico/creatives/BulletMeter.vue';
 import RadarAxesPicker from 'dashboard/components-next/cevico/creatives/RadarAxesPicker.vue';
 import CreativeRadar from 'dashboard/components-next/cevico/creatives/CreativeRadar.vue';
@@ -70,6 +71,41 @@ const setView = v => {
   localStorage.setItem(VIEW_KEY, v);
 };
 const assets = ref(null);
+// 🎬 item 181: transcrição dos vídeos (gancho/corpo/CTA passam a ser o que o vídeo FALA)
+const isTranscribing = ref(false);
+const transcribeVideos = async () => {
+  isTranscribing.value = true;
+  try {
+    const { data: res } = await CevicoCreativesAPI.transcribeVideos();
+    useAlert(
+      res.enqueued
+        ? `${res.enqueued} vídeo(s) na fila de transcrição — volte em alguns minutos.`
+        : 'Todos os vídeos já estão transcritos.'
+    );
+  } catch (e) {
+    useAlert(
+      (e.response && e.response.data && e.response.data.error) ||
+        'Não consegui enfileirar as transcrições.'
+    );
+  } finally {
+    isTranscribing.value = false;
+  }
+};
+const videoAssets = computed(
+  () => (assets.value && assets.value.video) || null
+);
+const transcribeOne = async row => {
+  try {
+    const { data: res } = await CevicoCreativesAPI.transcribeVideo(row.ad_id);
+    row.transcript = res.transcript;
+    useAlert('Vídeo na fila de transcrição — volte em alguns minutos.');
+  } catch (e) {
+    useAlert(
+      (e.response && e.response.data && e.response.data.error) ||
+        'Não consegui pedir a transcrição.'
+    );
+  }
+};
 const isAssetsLoading = ref(false);
 const history = ref(null);
 const isHistoryLoading = ref(false);
@@ -569,8 +605,18 @@ const recordBand = (def, rec) => {
   if (v >= rec.best_week.value) return 'bom';
   return rec.median_week && v >= rec.median_week ? 'atencao' : 'ruim';
 };
-const PART_KEYS = ['hook', 'hold', 'cta', 'conv', 'cost'];
-const MONTH_PARTS = ['hook', 'hold', 'cta', 'cost'];
+// v2 (item 177): campeões de dinheiro (ROAS, custo por cirurgia, % agendamento) primeiro
+const PART_KEYS = [
+  'roas',
+  'cac',
+  'booking',
+  'cost',
+  'hook',
+  'hold',
+  'cta',
+  'conv',
+];
+const MONTH_PARTS = ['roas', 'cac', 'hook', 'hold', 'cta', 'cost'];
 const ASSET_KINDS = ['title', 'body', 'call_to_action'];
 const ASSET_META = {
   title: { label: 'Gancho campeão', icon: 'i-lucide-anchor' },
@@ -668,17 +714,14 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
           <span class="cevico-hero-chip">{{
             isSyncing ? syncingText : syncedText
           }}</span>
-          <span
-v-if="data && data.simulated" class="cevico-hero-chip"
+          <span v-if="data && data.simulated" class="cevico-hero-chip"
             >simulação</span
           >
-          <span
-v-if="selectedCampaign" class="cevico-hero-chip"
+          <span v-if="selectedCampaign" class="cevico-hero-chip"
             ><span class="i-lucide-megaphone text-xs" />Analisando:
             {{ selectedCampaign.name }}</span
           >
-          <span
-v-if="targets.mode === 'auto'" class="cevico-hero-chip"
+          <span v-if="targets.mode === 'auto'" class="cevico-hero-chip"
             ><span class="i-lucide-trending-up text-xs" />régua automática pelo
             nosso histórico</span
           >
@@ -1237,6 +1280,7 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
                 :peers="rows"
                 @open="detailAdId = r.ad_id"
                 @toggle="toggleCompare"
+                @transcribe-video="transcribeOne"
               />
             </div>
           </div>
@@ -1301,6 +1345,65 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
               Não consegui buscar as quebras por peça agora.
             </p>
             <template v-else-if="assets">
+              <!-- 🎬 o que os vídeos falam (item 181) -->
+              <div class="cv-sub rounded-3xl p-5 sm:p-7 mb-8">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                  <span class="cv-icon"
+                    ><span class="i-lucide-clapperboard text-base"
+                  /></span>
+                  <h3
+                    class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                  >
+                    O que os vídeos falam
+                  </h3>
+                  <span v-if="videoAssets" class="cv-chip">
+                    {{ videoAssets.transcribed }} de
+                    {{ videoAssets.videos }} vídeo(s) transcrito(s)
+                  </span>
+                  <button
+                    class="cv-btn cv-btn-sm ml-auto"
+                    :disabled="isTranscribing"
+                    title="Transcrever os vídeos que ainda não têm transcrição"
+                    @click="transcribeVideos"
+                  >
+                    <span class="i-lucide-sparkles text-sm" />Transcrever vídeos
+                  </button>
+                </div>
+                <p class="text-xs text-n-slate-10 mb-5">
+                  Gancho, corpo e CTA aqui são a FALA do vídeo (transcrição por
+                  IA), não o texto do anúncio — ranqueados pelo que cada parte
+                  tem de provar.
+                </p>
+                <div v-if="videoAssets" class="space-y-7">
+                  <VideoSpeechRanking
+                    :rows="videoAssets.hooks"
+                    title="Ganchos falados"
+                    subtitle="os primeiros 3 segundos · ranqueados pela taxa de parada"
+                    icon="i-lucide-anchor"
+                    :color="hex('ativos', 0)"
+                    metric-label="taxa de parada"
+                    part="hook"
+                  />
+                  <VideoSpeechRanking
+                    :rows="videoAssets.bodies"
+                    title="Corpos falados"
+                    subtitle="o desenvolvimento · ranqueados pela retenção"
+                    icon="i-lucide-film"
+                    :color="hex('ativos', 1)"
+                    metric-label="retenção"
+                    part="body"
+                  />
+                  <VideoSpeechRanking
+                    :rows="videoAssets.ctas"
+                    title="CTAs falados"
+                    subtitle="o pedido final · ranqueados pela conversa por clique"
+                    icon="i-lucide-mouse-pointer-click"
+                    :color="hex('ativos', 2)"
+                    metric-label="conversa por clique"
+                    part="cta"
+                  />
+                </div>
+              </div>
               <div
                 v-if="!assets.dynamic_ads"
                 class="cv-strip cv-amber px-4 py-3 text-xs text-n-slate-11 mb-4 flex gap-2 items-start"
@@ -1582,14 +1685,16 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
                 :relative-ok="false"
                 class="mb-3"
               />
-              <div class="grid sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-10">
+              <div
+                class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10"
+              >
                 <div
                   v-for="part in PART_KEYS"
                   :key="part"
                   class="cv-frame"
                   :class="{ 'cv-champion': !!allTime(part) }"
                 >
-                  <div class="cv-block p-4 h-full flex flex-col gap-3">
+                  <div class="cv-block p-5 sm:p-6 h-full flex flex-col gap-4">
                     <p
                       class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold flex items-center gap-1.5"
                     >

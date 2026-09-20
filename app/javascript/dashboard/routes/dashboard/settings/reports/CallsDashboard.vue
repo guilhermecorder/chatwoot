@@ -88,6 +88,10 @@ const callsEnabled = computed(
 const settingsRoute = computed(() =>
   frontendURL(`accounts/${accountId.value}/settings/integrations/calls`)
 );
+// item 176: o ambiente Chamadas (ao vivo + histórico) mora no menu do time
+const callsRoute = computed(() =>
+  frontendURL(`accounts/${accountId.value}/crm/chamadas`)
+);
 
 const kpis = computed(() => data.value?.kpis || {});
 const kpiGrad = i => blockFamily('kpis')[i % blockFamily('kpis').length];
@@ -206,7 +210,13 @@ const contactPhone = c =>
         icon="i-lucide-phone-call"
       />
 
-      <PeriodRuler v-model="period" glass class="mb-6" />
+      <div class="flex items-center gap-3 flex-wrap mb-6">
+        <PeriodRuler v-model="period" glass class="flex-1 min-w-0" />
+        <router-link :to="callsRoute" class="cv-btn cv-btn-sm flex-shrink-0">
+          <span class="i-lucide-radio text-xs" />
+          Ambiente Chamadas (ao vivo) →
+        </router-link>
+      </div>
 
       <!-- módulo ainda desligado -->
       <div

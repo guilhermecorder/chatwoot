@@ -237,3 +237,49 @@ Arquivos CEVICO já nossos: settings_controller.rb, ConversationSummaryCard.vue,
 
 ## 8. Fora desta rodada
 Transferência entre atendentes, correio de voz, SIP, canal Twilio, chamadas simultâneas na mesma conversa.
+
+
+## 9. Ambiente CHAMADAS (item 176, 20/09) — ao vivo + indicadores + histórico
+
+Tela `crm/CrmCalls.vue` (rota `crm_calls` = `/app/accounts/:id/crm/chamadas`),
+item **Chamadas** no menu do time (chave do dia a dia `calls`, ligada por
+padrão; o admin liga/desliga por pessoa no acesso do atendente). Kit
+`.cv-*` com paleta por bloco (escopo `crm:chamadas`, blocos agora/kpis/dias/
+horas/atendentes/historico). Uma tela só, funciona em 375 px.
+
+**Backend (aberto ao time — o menu é quem esconde):**
+- `GET crm/calls/overview` (`DashboardService#overview`): tudo do `dashboard`
+  + `previous` (mesmos KPIs no período anterior de mesma duração), `live`
+  (tocando/em atendimento agora, independe do período), `missed_pending`
+  (perdidas/recusadas de HOJE sem retorno — sem evento `returned`, sem
+  ligação da clínica depois e sem nova recebida atendida do mesmo paciente),
+  `by_inbox`; KPIs novos `total`, `outbound_answered`, `outbound_answer_rate`;
+  `by_day` ganhou `outbound`; `by_agent` ganhou `outbound`.
+- `GET crm/calls?live=1` → só o ao vivo. Lista/CSV com filtros novos
+  `handled_by=human|ai`, `inbox_id`, `status=not_answered` (perdida/recusada/
+  falha/cancelada) e `q` (nome do paciente, nome do perfil ou telefone —
+  `Crm::Call.search`) — tudo em `Crm::Calls::ListFilter`.
+- `POST crm/calls/:id/returned` → `Crm::Call#mark_returned!` (evento
+  `returned` em `events`, sem coluna nova; `returned_at` no payload) +
+  card da conversa + `cevico_call.ended` para todo mundo.
+- `GET crm/calls/export` → CSV (`Crm::Calls::CsvExport`, `;`, pt-BR, até
+  5.000 linhas, horário de São Paulo).
+- `to_payload` agora traz `display_name`, `wa_id`, `returned_at`,
+  `inbox_name`; `show` inclui `events` (linha do tempo do detalhe).
+
+**Frontend:** `api/cevicoCalls.js` (overview/live/markReturned/exportCsv);
+store `cevicoCalls` sobe `liveTick` em TODO evento `cevico_call.*` e passa
+a guardar a chamada que está tocando mesmo para quem não ouve o toque (sem
+o SDP). A página: faixa "Agora" (cronômetro, quem está na linha, Atender/
+Recusar quando toca para mim, Mudo/Desligar quando é minha) + fila
+"Perdidas de hoje sem retorno" (Retornar = `startOutbound`, com pedido de
+permissão da Meta quando a API devolve 422; Retornada = marca por fora);
+indicadores com PeriodRuler (padrão Hoje) e comparação "▲/▼ % vs anterior";
+histórico em 4 visualizações (Lista, Tabela, Por atendente, Linha do tempo),
+filtros, busca, "Carregar mais", CSV; modal `CallDetailModal` (linha do
+tempo, gravação, transcrição/resumo, abrir conversa/paciente, ligar,
+marcar retornada, transcrever). `CallLine` é a linha reutilizável.
+O relatório "Dashboard de Ligações" ganhou o atalho "Ambiente Chamadas".
+
+**Fica para a R3:** recordes/campeões, metas de atendimento, alerta no
+Radar de perdida sem retorno há X min, e aposentar o relatório antigo.

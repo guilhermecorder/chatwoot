@@ -40,6 +40,8 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     contact = message.conversation&.contact
     return if contact.blank?
 
+    handle_opt_out(message, contact)
+
     # releitura do Secretário da Agenda (rodada 148): resposta de quem tem
     # tarefa de revisão aberta, ou pedido de remarcar/cancelar de quem tem
     # consulta futura — roda MESMO sem card no funil
@@ -88,6 +90,13 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     'nao vou conseguir', 'nao vou poder', 'nao poderei'
   ].freeze
   RECHECK_THROTTLE = 10.minutes
+
+  # 🛑 "PARE / SAIR / não quero mais": opt-out automático (conformidade 20/09)
+  def handle_opt_out(message, contact)
+    return unless message.incoming? && Crm::OptOut.opt_out_message?(message.content)
+
+    Crm::OptOut.apply!(contact, conversation: message.conversation)
+  end
 
   def handle_scheduler_recheck(message, contact)
     return unless message.message_type == 'incoming'

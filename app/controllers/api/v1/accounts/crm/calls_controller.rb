@@ -7,21 +7,51 @@ class Api::V1::Accounts::Crm::CallsController < Api::V1::Accounts::BaseControlle
   include Crm::ResolvesPeriod
 
   PER_PAGE = 50
+  EXPORT_LIMIT = 5000
+  LIST_INCLUDES = %i[contact user conversation inbox].freeze
 
   before_action -> { require_capability(:reports) }, only: [:dashboard]
-  before_action :set_call, only: [:show, :accept, :reject, :hangup, :recording, :transcribe]
+  before_action :set_call, only: [:show, :accept, :reject, :hangup, :recording, :transcribe, :returned]
   before_action :set_contact, only: [:initiate, :request_permission, :permission_status]
 
+  # live=1 → só o que está tocando/em atendimento agora (ignora os filtros)
   def index
+    return render json: { calls: live_scope.map(&:to_payload), meta: { live: true } } if params[:live].present?
+
     scope = filtered_scope
     total = scope.count
-    calls = scope.recent_first.with_attached_recording.includes(:contact, :user, :conversation)
+    calls = scope.recent_first.with_attached_recording.includes(*LIST_INCLUDES)
                  .offset((page - 1) * per_page).limit(per_page)
     render json: { calls: calls.map(&:to_payload), meta: { total: total, page: page, per_page: per_page } }
   end
 
+  # ambiente Chamadas (item 176): números do período com comparação, ao vivo,
+  # perdidas de hoje sem retorno — aberto ao time (o menu é quem esconde)
+  def overview
+    since, until_at = dashboard_range
+    render json: Crm::Calls::DashboardService.new(account: Current.account, since: since, until_at: until_at,
+                                                  period: params[:preset].presence || 'month').overview
+  end
+
+  # marca uma perdida como retornada (ligou de volta por fora / mandou mensagem)
+  def returned
+    return render json: { error: 'Só ligações já encerradas podem ser marcadas.' }, status: :unprocessable_entity unless @call.final?
+
+    @call.mark_returned!(Current.user, note: params[:note].to_s.first(200))
+    Crm::Calls::CardMessageBuilder.new(@call).perform
+    broadcast('cevico_call.ended', call: @call.to_payload)
+    render json: @call.to_payload
+  end
+
+  # CSV do histórico com os mesmos filtros da lista (até 5.000 linhas)
+  def export
+    calls = filtered_scope.recent_first.includes(*LIST_INCLUDES).limit(EXPORT_LIMIT)
+    send_data Crm::Calls::CsvExport.new(calls).to_csv, type: 'text/csv; charset=utf-8',
+                                                       filename: "chamadas-#{Time.zone.today.iso8601}.csv"
+  end
+
   def show
-    render json: @call.to_payload(include_sdp: @call.ringing?)
+    render json: @call.to_payload(include_sdp: @call.ringing?, include_events: true)
   end
 
   # atender: trava a linha para dois atendentes não pegarem a mesma chamada
@@ -164,46 +194,13 @@ class Api::V1::Accounts::Crm::CallsController < Api::V1::Accounts::BaseControlle
     Crm::Calls::Broadcaster.push(Current.account, event, data)
   end
 
-  # filtros da lista: status, direção, atendente, paciente e período (preset da régua ou since/until)
+  def live_scope
+    Crm::Call.where(account_id: Current.account.id).live.includes(*LIST_INCLUDES)
+  end
+
+  # filtros da lista/CSV (situação, direção, atendente, caixa, busca, período)
   def filtered_scope
-    scope = Crm::Call.where(account_id: Current.account.id)
-    apply_period(apply_id_filters(apply_kind_filters(scope)))
-  end
-
-  def apply_kind_filters(scope)
-    scope = scope.where(status: params[:status]) if Crm::Call.statuses.key?(params[:status].to_s)
-    scope = scope.where(direction: params[:direction]) if Crm::Call.directions.key?(params[:direction].to_s)
-    scope
-  end
-
-  def apply_id_filters(scope)
-    scope = scope.where(user_id: params[:user_id]) if params[:user_id].present?
-    scope = scope.where(contact_id: params[:contact_id]) if params[:contact_id].present?
-    scope
-  end
-
-  def apply_period(scope)
-    range = list_range
-    range ? scope.in_period(*range) : scope
-  end
-
-  def list_range
-    preset_range = standard_period_range
-    return preset_range if preset_range
-
-    since = safe_period_parse(params[:since])
-    until_at = list_until
-    return nil if since.nil? && until_at.nil?
-
-    [since || Time.zone.at(0), until_at || PERIOD_TZ.now.end_of_day]
-  end
-
-  # "até" só com a data (sem hora) = o dia inteiro
-  def list_until
-    until_at = safe_period_parse(params[:until])
-    return until_at if until_at.nil? || params[:until].to_s.length > 10
-
-    until_at.end_of_day
+    Crm::Calls::ListFilter.new(Current.account, params).scope
   end
 
   def dashboard_range

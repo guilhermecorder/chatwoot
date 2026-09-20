@@ -6,12 +6,15 @@
 # gancho / corpo / CTA / custo por mês e de todos os tempos.
 class Crm::CreativeRecords
   METRICS = %w[hook_rate hold_rate link_ctr conv_rate cost_conversation].freeze
-  LOWER_IS_BETTER = %w[cost_conversation].freeze
+  LOWER_IS_BETTER = %w[cost_conversation cost_surgery].freeze
   MIN_DAY = 300
   MIN_WEEK = 1500
   MIN_MONTH = 3000
   MIN_AD = 500
-  PARTS = { hook: 'hook_rate', hold: 'hold_rate', cta: 'link_ctr', conv: 'conv_rate', cost: 'cost_conversation' }.freeze
+  PARTS = { hook: 'hook_rate', hold: 'hold_rate', cta: 'link_ctr', conv: 'conv_rate', cost: 'cost_conversation',
+            # v2 (item 177): campeões de dinheiro — vêm da jornada do CRM (Crm::AdFunnel), não da Meta
+            roas: 'roas', cac: 'cost_surgery', booking: 'booking_rate' }.freeze
+  FUNNEL_PARTS = { roas: [:surgeries, 1], cac: [:surgeries, 1], booking: [:leads, 5] }.freeze
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   MONTHS_PT = %w[jan fev mar abr mai jun jul ago set out nov dez].freeze
 
@@ -134,22 +137,38 @@ class Crm::CreativeRecords
   # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def champions_for(list)
     per_ad = list.group_by(&:first).transform_values { |l| Crm::AdMetrics.sum(l.map(&:last)) }
+    funnels = funnels_for(list)
     PARTS.to_h do |part, metric|
       best = nil
       per_ad.each do |ad_id, total|
         next if total['impressions'].to_f < MIN_AD
         next if part == :cost && total['conversations'].to_f < 5
+        next if FUNNEL_PARTS[part] && funnels.dig(ad_id, FUNNEL_PARTS[part][0]).to_i < FUNNEL_PARTS[part][1]
 
-        value = rate(total, metric)
+        rates = rates_for(total, funnels[ad_id])
+        value = rates[metric]
         next if value.nil?
 
         next unless better?(metric, value, best&.dig(:value))
 
         best = { ad_id: ad_id, value: value.round(4), conversations: total['conversations'].to_i, spend: total['spend'],
-                 rates: Crm::AdMetrics.rates(total, video: total['plays_3s'].to_f.positive?) } # a teia do campeão
+                 funnel: funnels[ad_id] || Crm::AdFunnel::EMPTY, rates: rates } # a teia do campeão
       end
       [part, best&.merge(describe(best[:ad_id], part))]
     end
+  end
+
+  # taxas da Meta + da jornada do CRM, no mesmo hash (chaves em texto)
+  def rates_for(total, funnel)
+    Crm::AdMetrics.rates(total, video: total['plays_3s'].to_f.positive?)
+                  .merge(Crm::AdFunnel.rates(funnel, total['spend']).stringify_keys)
+  end
+
+  # jornada por anúncio no intervalo de datas da lista (cache por intervalo)
+  def funnels_for(list)
+    range = list.pluck(1).minmax
+    @funnel_cache ||= {}
+    @funnel_cache[range] ||= Crm::AdFunnel.by_ad(@account, range[0], range[1])
   end
   # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 

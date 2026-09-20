@@ -75,6 +75,9 @@ class Crm::Campaign < ApplicationRecord
   def resolve_audience
     contacts = included_contacts
     contacts = contacts.where.not(id: excluded_contact_ids) if excluded_contact_ids.any?
+    # opt-out fixo (conformidade 20/09): nao_perturbe / perda_* nunca entram
+    quiet_ids = Crm::OptOut.excluded_contact_ids(account)
+    contacts = contacts.where.not(id: quiet_ids) if quiet_ids.any?
     contacts = apply_period_filter(contacts)
     contacts.where.not(phone_number: [nil, '']).distinct
   end

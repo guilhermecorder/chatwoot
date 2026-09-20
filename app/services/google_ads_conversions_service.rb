@@ -106,11 +106,10 @@ class GoogleAdsConversionsService
     # session_id da visita original: reforça a junção da conversão com a
     # sessão certa dentro do GA4
     p[:session_id] = client_identity[:session_id] if client_identity[:session_id].present?
-    if @contact
-      p[:contact_id]    = @contact.id.to_s
-      p[:contact_name]  = @contact.name if @contact.name.present?
-      p[:contact_phone] = @contact.phone_number if @contact.phone_number.present?
-    end
+    # Só o id interno (pseudônimo): a política do Google Analytics proíbe
+    # enviar dado pessoal identificável (nome, telefone, e-mail) ao GA4.
+    # Varredura de conformidade 20/09.
+    p[:contact_id] = @contact.id.to_s if @contact
     p
   end
 end

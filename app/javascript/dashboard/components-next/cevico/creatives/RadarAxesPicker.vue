@@ -32,35 +32,27 @@ const flip = (g, key) => {
     <div
       v-for="g in groups"
       :key="g.key"
-      class="flex items-center gap-x-3 gap-y-1 flex-wrap"
+      class="flex items-center gap-x-2 gap-y-1 flex-wrap"
       :title="g.hint"
     >
       <span
-        class="inline-flex items-center gap-1.5 text-n-slate-12 font-semibold"
+        class="inline-flex items-center gap-1 text-n-slate-12 font-semibold mr-1"
       >
-        <span :class="g.icon" class="text-sm text-n-slate-10" />{{ g.label }}
-        <span class="text-n-slate-9 font-normal">· {{ g.question }}</span>
+        <span :class="g.icon" class="text-sm" />{{ g.label }}
       </span>
       <button
         v-for="a in options(g)"
         :key="a.key"
         type="button"
-        class="inline-flex items-center gap-1.5"
-        :title="a.metric"
+        class="cv-chip cursor-pointer"
+        :class="isOn(g.key, a.key) ? 'cv-green' : 'opacity-60'"
+        :title="`${a.metric} · ${g.question}`"
         @click="flip(g, a.key)"
       >
         <span
-          class="cv-switch"
-          :class="{ 'cv-switch-on': isOn(g.key, a.key) }"
-        />
-        <span
-          :class="
-            isOn(g.key, a.key)
-              ? 'text-n-slate-12 font-semibold'
-              : 'text-n-slate-10'
-          "
-          >{{ a.label }}</span
-        >
+          :class="isOn(g.key, a.key) ? 'i-lucide-check' : 'i-lucide-plus'"
+          class="text-[10px]"
+        />{{ a.label }}
       </button>
     </div>
   </div>

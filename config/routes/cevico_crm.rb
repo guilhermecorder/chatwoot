@@ -52,11 +52,15 @@ namespace :crm do
   end
   # Central de Criativos (item 172): gancho/corpo/CTA × métricas da Meta
   resources :creatives, only: [:index, :show], param: :ad_id do
+    member do
+      post :transcribe
+    end
     collection do
       get :assets
       get :history
       post :sync
       post :load_history
+      post :transcribe_videos
       get :sync_status
       get :export
     end
@@ -296,9 +300,12 @@ namespace :crm do
       post :hangup
       post :recording
       post :transcribe
+      post :returned
     end
     collection do
       get :dashboard
+      get :overview
+      get :export
       post :initiate
       post :request_permission
       get :permission_status

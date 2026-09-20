@@ -102,6 +102,18 @@ class Crm::Call < ApplicationRecord
   scope :recent_first, -> { order(started_at: :desc, id: :desc) }
   scope :by_ai, -> { where(handled_by: 'ai') }
   scope :by_human, -> { where(handled_by: 'human') }
+  # item 176: o que está acontecendo AGORA (tocando ou em atendimento)
+  scope :live, -> { where(status: [statuses[:ringing], statuses[:accepted]]).order(started_at: :asc) }
+  # busca do histórico por nome do paciente, telefone ou nome de perfil do WhatsApp
+  scope :search, lambda { |term|
+    digits = term.to_s.gsub(/\D/, '')
+    like = "%#{sanitize_sql_like(term.to_s.strip)}%"
+    left_outer_joins(:contact).where(
+      'contacts.name ILIKE :like OR cevico_calls.display_name ILIKE :like' \
+      "#{digits.present? ? ' OR cevico_calls.wa_id LIKE :digits OR contacts.phone_number LIKE :digits' : ''}",
+      like: like, digits: "%#{digits}%"
+    )
+  }
 
   def ai?
     handled_by == 'ai'
@@ -121,6 +133,22 @@ class Crm::Call < ApplicationRecord
     return 0 unless answered_at && ended_at
 
     [(ended_at - answered_at).to_i, 0].max
+  end
+
+  # item 176: ligação perdida que alguém marcou como retornada (fica em events,
+  # sem coluna nova) — nil quando ainda não foi
+  def returned_at
+    entry = Array(events).reverse.find { |e| e['event'] == 'returned' }
+    entry && entry['at']
+  end
+
+  def returned?
+    returned_at.present?
+  end
+
+  def mark_returned!(user, note: nil)
+    add_event('returned', user_id: user&.id, user_name: user&.available_name, note: note.presence)
+    save!
   end
 
   # quanto o paciente esperou até alguém atender (nil se ninguém atendeu)
@@ -143,14 +171,16 @@ class Crm::Call < ApplicationRecord
     Rails.application.routes.url_helpers.rails_blob_path(recording, only_path: true)
   end
 
-  # hash usado no JSON da API, no cable e no card da conversa (§4 do contrato)
-  def to_payload(include_sdp: false)
+  # hash usado no JSON da API, no cable e no card da conversa (§4 do contrato);
+  # include_events (só no detalhe, item 176) traz a linha do tempo crua
+  def to_payload(include_sdp: false, include_events: false)
     payload = {
       id: id, meta_call_id: meta_call_id, direction: direction, status: status, end_reason: end_reason,
       started_at: started_at&.iso8601, answered_at: answered_at&.iso8601, ended_at: ended_at&.iso8601,
       duration: talk_seconds, wait_seconds: wait_seconds, simulated: simulated
-    }.merge(ai_payload, people_payload, media_payload)
+    }.merge(identity_payload, ai_payload, people_payload, media_payload)
     payload[:sdp_offer] = sdp_offer if include_sdp
+    payload[:events] = Array(events) if include_events
     payload
   end
 
@@ -216,8 +246,14 @@ class Crm::Call < ApplicationRecord
       outcome: outcome, outcome_label: outcome_label, cost_usd: cost_usd&.to_f }
   end
 
+  # item 176: nome do perfil do WhatsApp, número cru e se a perdida já foi retornada
+  def identity_payload
+    { display_name: display_name, wa_id: wa_id, returned_at: returned_at }
+  end
+
   def people_payload
-    { contact: contact_payload, conversation_id: conversation&.display_id, inbox_id: inbox_id, user: user_payload }
+    { contact: contact_payload, conversation_id: conversation&.display_id, inbox_id: inbox_id,
+      inbox_name: inbox&.name, user: user_payload }
   end
 
   def media_payload

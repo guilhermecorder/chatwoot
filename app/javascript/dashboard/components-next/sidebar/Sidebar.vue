@@ -373,6 +373,7 @@ const crmSettings = useMapGetter('crm/getSettings');
 const DAY_ITEM_BY_KEY = {
   crm: 'CRM',
   conversation: 'Conversation',
+  calls: 'Cevico Calls',
   agenda: 'Agenda',
   goals: 'Goals',
   canned: 'Canned',
@@ -382,7 +383,14 @@ const DAY_ITEM_BY_KEY = {
 };
 // menu padrão do atendente (pedido do Guilherme 17/07):
 // Meu Painel | CRM | Conversas | Agenda | Metas | Respostas prontas
-const DAY_MENU_DEFAULT = ['crm', 'conversation', 'agenda', 'goals', 'canned'];
+const DAY_MENU_DEFAULT = [
+  'crm',
+  'conversation',
+  'calls',
+  'agenda',
+  'goals',
+  'canned',
+];
 
 // name do item → capabilities que o liberam para atendente (qualquer uma)
 const GRANT_BY_ITEM_NAME = {
@@ -399,6 +407,7 @@ const GRANT_BY_ITEM_NAME = {
 const FEATURE_BY_ITEM_NAME = {
   Inbox: 'inbox',
   Conversation: 'conversation',
+  'Cevico Calls': 'calls',
   Captain: 'captain',
   Companies: 'companies',
   Reports: 'reports',
@@ -458,14 +467,14 @@ const toggleHiddenFeature = key => {
 // ── Ordem dos itens do menu (Personalizar menu, por pessoa/navegador) ──
 // Padrão admin: Relatórios logo abaixo do CRM (pedido 2026-07-15).
 const DEFAULT_MENU_ORDER = [
-  'Inicio', 'CRM', 'Reports', 'Strategy', 'Finance', 'Goals', 'Builder', 'People', 'Inbox', 'Conversation', 'Captain', 'Companies',
+  'Inicio', 'CRM', 'Reports', 'Strategy', 'Finance', 'Goals', 'Builder', 'People', 'Inbox', 'Conversation', 'Cevico Calls', 'Captain', 'Companies',
   'Campanha WhatsApp', 'Forms', 'Tasks', 'Agenda', 'Cevico Pages', 'Academy',
   'Automations Hub', 'Settings',
 ];
 // Padrão do ATENDENTE (pedido 2026-07-17): Meu Painel | CRM | Conversas |
 // Agenda | Metas | Respostas prontas — depois os extras/concedidos.
 const AGENT_MENU_ORDER = [
-  'Inicio', 'CRM', 'Conversation', 'Agenda', 'Goals', 'Builder', 'Canned',
+  'Inicio', 'CRM', 'Conversation', 'Cevico Calls', 'Agenda', 'Goals', 'Builder', 'Canned',
   'Tasks', 'People', 'Reports', 'Campanha WhatsApp', 'Cevico Pages',
   'Strategy', 'Finance', 'Academy', 'Automations Hub',
   'Settings',
@@ -555,6 +564,94 @@ const menuItemsForRole = computed(() => {
       to: accountScopedRoute('profile_settings_index'),
     },
   ];
+});
+
+// ── 🗂️ MENU EM GRUPOS (pedido 20/09): "agrupar melhor, mas abrir as
+// ramificações". Cada grupo é um SidebarGroup com filhos; só um grupo fica
+// aberto por vez (accordion do kit) e o grupo do item ativo abre sozinho.
+// Meu Painel fica solto no topo; Configurações solto embaixo. Itens que
+// já têm filhos (Relatórios, Conversas…) viram subgrupo dentro do grupo.
+// Personalizar menu continua valendo (ordem e ocultar) dentro de cada grupo.
+const MENU_GROUPS = [
+  {
+    name: 'group:atendimento',
+    color: '#34c759',
+    label: 'Atendimento',
+    icon: 'i-lucide-headset',
+    items: ['Conversation', 'Cevico Calls', 'Inbox', 'Agenda', 'Tasks', 'Canned'],
+  },
+  {
+    name: 'group:pacientes',
+    color: '#af52de',
+    label: 'Pacientes e funil',
+    icon: 'i-lucide-users-round',
+    items: ['CRM', 'Jornada do paciente', 'Campanha WhatsApp', 'Forms', 'Automations Hub'],
+  },
+  {
+    name: 'group:resultados',
+    color: '#0a84ff',
+    label: 'Resultados',
+    icon: 'i-lucide-chart-line',
+    items: ['Reports', 'Goals', 'Strategy', 'Finance'],
+  },
+  {
+    name: 'group:equipe',
+    color: '#ff9f0a',
+    label: 'Equipe e marca',
+    icon: 'i-lucide-sparkles',
+    items: ['People', 'Academy', 'Cevico Pages', 'Builder', 'Captain', 'Companies'],
+  },
+  {
+    name: 'group:config',
+    color: '#8e8e93',
+    label: 'Configurações',
+    icon: 'i-lucide-bolt',
+    items: ['Settings', 'Integrations Hub'],
+  },
+];
+const UNGROUPED = ['Inicio'];
+// contadores dos itens que viram folha (folha não lê getterKeys)
+const leafBadge = item => {
+  const key = item.getterKeys && item.getterKeys.count;
+  if (!key) return 0;
+  const value = store.getters[key];
+  return typeof value === 'number' ? value : 0;
+};
+// azulejos coloridos por item (como os ícones dos Ajustes do iPhone)
+const TILE_COLORS = {
+  Conversation: '#34c759', 'Cevico Calls': '#30d158', Inbox: '#007aff', Agenda: '#ff3b30', Tasks: '#ff9500',
+  Canned: '#5ac8fa', CRM: '#af52de', 'Jornada do paciente': '#ff2d55', 'Campanha WhatsApp': '#25d366',
+  Forms: '#ffcc00', 'Automations Hub': '#5856d6', Reports: '#0a84ff', Goals: '#ff9f0a', Strategy: '#64d2ff',
+  Finance: '#30d158', People: '#ff375f', Academy: '#bf5af2', 'Cevico Pages': '#0a84ff', Builder: '#ff9f0a',
+  Captain: '#5e5ce6', Companies: '#8e8e93', Settings: '#8e8e93', 'Integrations Hub': '#64d2ff', Inicio: '#34c759',
+};
+const tileColor = name => TILE_COLORS[name] || '#8e8e93';
+const toChild = item =>
+  item.children
+    ? { ...item, collapsible: true, iconColor: tileColor(item.name) }
+    : {
+        name: item.name,
+        label: item.label,
+        icon: item.icon,
+        iconColor: tileColor(item.name),
+        to: item.to,
+        activeOn: item.activeOn || [],
+        badgeCount: leafBadge(item),
+      };
+const groupedMenuItems = computed(() => {
+  const items = visibleMenuItems.value.filter(i => i.name !== 'Calls'); // o "Calls" do Chatwoot (enterprise) sai: o nosso é "Cevico Calls"
+  const used = new Set();
+  const out = [];
+  items.filter(i => UNGROUPED.includes(i.name)).forEach(i => { out.push({ ...i, iconColor: tileColor(i.name) }); used.add(i.name); });
+  MENU_GROUPS.forEach(g => {
+    const children = items.filter(i => g.items.includes(i.name));
+    if (!children.length) return;
+    children.forEach(i => used.add(i.name));
+    out.push({ name: g.name, label: g.label, icon: g.icon, iconColor: g.color, children: children.map(toChild) });
+  });
+  const rest = items.filter(i => !used.has(i.name));
+  if (rest.length) out.push({ name: 'group:mais', label: 'Mais', icon: 'i-lucide-ellipsis', children: rest.map(toChild) });
+  return out;
 });
 
 const visibleMenuItems = computed(() => {
@@ -825,6 +922,13 @@ const menuItems = computed(() => {
             ]
           : []),
       ],
+    },
+    // 📞 ambiente Chamadas (item 176): ao vivo para todo mundo + histórico
+    {
+      name: 'Cevico Calls',
+      label: 'Chamadas',
+      icon: 'i-lucide-phone-call',
+      to: accountScopedRoute('crm_calls'),
     },
     {
       name: 'Campanha WhatsApp',
@@ -1346,10 +1450,10 @@ const menuItems = computed(() => {
     >
       <ul
         class="flex flex-col gap-1 m-0 list-none min-w-0"
-        :class="{ 'items-center': isEffectivelyCollapsed }"
+        :class="{ 'items-center': isEffectivelyCollapsed, 'cv-ios-nav': !isEffectivelyCollapsed }"
       >
         <SidebarGroup
-          v-for="item in visibleMenuItems"
+          v-for="item in groupedMenuItems"
           :key="item.name"
           v-bind="item"
         />

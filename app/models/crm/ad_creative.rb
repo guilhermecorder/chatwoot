@@ -58,16 +58,50 @@ class Crm::AdCreative < ApplicationRecord
     format == 'dynamic'
   end
 
+  # 🎬 v2.1 (item 181): o gancho/corpo/CTA de um VÍDEO vêm da transcrição
+  # (o que o vídeo fala); o texto do anúncio fica como reserva. `text_source`
+  # diz de onde veio ('video' | 'ad').
+  def transcript
+    (creative['transcript'] || {}).to_h
+  end
+
+  def transcript_done?
+    transcript['status'] == 'done' && transcript['text'].present?
+  end
+
+  def text_source
+    transcript_done? ? 'video' : 'ad'
+  end
+
   def hook
-    creative['title'].presence
+    (transcript_done? && transcript['hook'].presence) || ad_hook
   end
 
   def body
-    creative['body'].presence
+    (transcript_done? && transcript['body'].presence) || ad_body
   end
 
+  # CTA continua sendo o botão da Meta (é o que o paciente clica); o pedido
+  # falado no vídeo fica em `video_cta`
   def cta
     creative['cta_type'].presence
+  end
+
+  def video_cta
+    transcript_done? ? transcript['cta'].presence : nil
+  end
+
+  # marca "na fila" antes de enfileirar o job (a tela mostra o estado)
+  def queue_transcript!
+    update!(creative: creative.merge('transcript' => transcript.merge('status' => 'queued', 'error' => nil)))
+  end
+
+  def ad_hook
+    creative['title'].presence
+  end
+
+  def ad_body
+    creative['body'].presence
   end
 
   def format_label
