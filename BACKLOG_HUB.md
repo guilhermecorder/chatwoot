@@ -14,8 +14,8 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 
 ## SUBIDA 19/09 (noite) — RODADAS 31–32: "pode subir" → commit 140ccbae37 na
 feat/hub-saude → push → docker-build por workflow_dispatch (run
-35477237985) VERDE → **etiqueta `140ccba`** (sem migration). Falta ele
-colar no EasyPanel (web + sidekiq) e Implantar.
+35477237985) VERDE → **etiqueta `140ccba`** (sem migration). IMPLANTADA
+por ele 19/09 — "ficou legal".
 
 ## RODADA 32 — 19/09 ✅ PASSE "APPLE" EM TODO O MUNDO SAÚDE + ROTINAS PRÉ-DEFINIDAS (working tree, NÃO subida)
 Pedido dele (print da sessão de treino): "maior separação entre os blocos,
