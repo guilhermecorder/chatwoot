@@ -32,7 +32,6 @@ import {
   deltaCls,
 } from './creativeFormat';
 
-const { transcribe } = useTranscribe();
 const props = defineProps({
   adId: { type: String, required: true },
   periodParams: { type: Object, default: () => ({}) },
@@ -41,6 +40,7 @@ const props = defineProps({
   adAccountId: { type: String, default: '' },
 });
 const emit = defineEmits(['close']);
+const { transcribe } = useTranscribe();
 const data = ref(null);
 const isLoading = ref(false);
 const error = ref('');
@@ -361,7 +361,7 @@ const metaTiles = computed(() => {
           <div class="min-w-0 flex-1">
             <p class="text-[11px] opacity-80">Ver a fundo</p>
             <h2
-              class="text-lg sm:text-2xl font-bold leading-tight tracking-tight truncate"
+              class="text-lg sm:text-2xl font-bold leading-tight tracking-tight break-words"
             >
               {{ data ? data.ad_name : 'Carregando…' }}
             </h2>
@@ -386,7 +386,7 @@ const metaTiles = computed(() => {
           <template v-else-if="data">
             <!-- 0. indicadores nomeados, juntos, logo no topo -->
             <section
-              class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2.5"
+              class="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2.5"
             >
               <div
                 v-for="t in topTiles"
@@ -397,7 +397,7 @@ const metaTiles = computed(() => {
                 <p
                   class="text-[11px] font-semibold text-n-slate-10 leading-tight flex items-center gap-1 flex-wrap"
                 >
-                  <span class="truncate">{{ t.label }}</span>
+                  <span class="min-w-0">{{ t.label }}</span>
                   <span
                     v-if="t.band"
                     class="ml-auto"
@@ -406,7 +406,7 @@ const metaTiles = computed(() => {
                   />
                 </p>
                 <p
-                  class="text-xl font-extrabold tabular-nums tracking-tight leading-none mt-1"
+                  class="text-lg sm:text-xl font-extrabold tabular-nums tracking-tight leading-none mt-1 whitespace-nowrap"
                   :class="
                     t.value === '—' ? 'text-n-slate-8' : 'text-n-slate-12'
                   "
@@ -453,11 +453,13 @@ const metaTiles = computed(() => {
                       :class="status.cls"
                     />{{ status.label }}</span
                   >
-                  <span v-if="diag.fatigue" class="cv-chip cv-amber"
+                  <span
+v-if="diag.fatigue" class="cv-chip cv-amber"
                     ><span class="i-lucide-battery-low text-xs" />sinal de
                     fadiga</span
                   >
-                  <span v-if="data.simulated" class="cv-chip cv-slate"
+                  <span
+v-if="data.simulated" class="cv-chip cv-slate"
                     >simulação</span
                   >
                   <span class="text-[11px] text-n-slate-9"
@@ -541,7 +543,8 @@ const metaTiles = computed(() => {
                       class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold"
                       >CTA</span
                     ><span class="cv-chip">{{ data.cta_label }}</span>
-                    <span v-if="data.video_cta" class="text-xs text-n-slate-11"
+                    <span
+v-if="data.video_cta" class="text-xs text-n-slate-11"
                       >· no vídeo: “{{ data.video_cta }}”</span
                     >
                   </div>

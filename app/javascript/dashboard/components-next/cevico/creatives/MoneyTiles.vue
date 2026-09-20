@@ -41,22 +41,19 @@ const hasFunnel = computed(() => Number(f.value.leads || 0) > 0);
 
 <template>
   <div class="flex flex-col gap-3">
-    <div
-      class="grid grid-cols-2 gap-2.5"
-      :class="compact ? '' : 'md:grid-cols-4'"
-    >
+    <div class="mt-grid grid gap-3" :class="compact ? 'mt-grid-compact' : ''">
       <div
         v-for="t in tiles"
         :key="t.key"
-        class="cv-sub rounded-2xl px-4 py-3.5 flex flex-col gap-1 min-w-0"
+        class="mt-tile cv-sub rounded-2xl px-4 py-3.5 flex flex-col gap-1 min-w-0"
         :class="t.champion ? 'cv-sub-on' : ''"
         :title="t.hint"
       >
         <p
-          class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 leading-tight"
+          class="text-xs font-semibold text-n-slate-10 flex items-start gap-1.5 leading-tight"
         >
-          <span :class="t.icon" class="text-xs flex-shrink-0" />
-          <span class="truncate">{{ t.short }}</span>
+          <span :class="t.icon" class="text-xs flex-shrink-0 mt-px" />
+          <span class="min-w-0">{{ t.short }}</span>
           <span
             v-if="t.champion"
             class="i-lucide-trophy text-amber-500 text-xs ml-auto flex-shrink-0"
@@ -64,17 +61,14 @@ const hasFunnel = computed(() => Number(f.value.leads || 0) > 0);
           />
         </p>
         <p
-          class="font-extrabold tabular-nums tracking-tight leading-none"
-          :class="[
-            compact ? 'text-xl' : 'text-2xl',
-            t.empty ? 'text-n-slate-8' : 'text-n-slate-12',
-          ]"
+          class="mt-value font-extrabold tabular-nums tracking-tight leading-none whitespace-nowrap"
+          :class="t.empty ? 'text-n-slate-8' : 'text-n-slate-12'"
         >
           {{ t.text }}
         </p>
         <p
           v-if="t.vs"
-          class="text-[10px] font-semibold leading-tight"
+          class="text-[11px] font-semibold leading-tight"
           :class="
             t.vs.good === null
               ? 'text-n-slate-9'
@@ -112,13 +106,33 @@ const hasFunnel = computed(() => Number(f.value.leads || 0) > 0);
         <span
           ><b class="text-n-slate-12">{{ f.surgeries }}</b> cirurgias</span
         >
-        <span v-if="f.revenue" class="text-n-slate-9"
+        <span
+v-if="f.revenue" class="text-n-slate-9"
           >· {{ fmtMoney(f.revenue) }} de receita</span
         >
       </template>
-      <span v-else class="text-n-slate-9"
+      <span
+v-else class="text-n-slate-9"
         >nenhum lead do CRM chegou por este anúncio no período</span
       >
     </p>
   </div>
 </template>
+
+<style scoped>
+/* O texto aparece INTEIRO sempre (pedido 20/09): a grade decide quantos
+   cartões cabem pela largura do CONTÊINER (não da janela) e o número encolhe
+   junto com o cartão — nunca corta o rótulo, nunca quebra o "R$" da cifra. */
+.mt-grid {
+  grid-template-columns: repeat(auto-fit, minmax(9.25rem, 1fr));
+}
+.mt-grid-compact {
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+}
+.mt-tile {
+  container-type: inline-size;
+}
+.mt-value {
+  font-size: clamp(1.05rem, 13cqi, 1.6rem);
+}
+</style>

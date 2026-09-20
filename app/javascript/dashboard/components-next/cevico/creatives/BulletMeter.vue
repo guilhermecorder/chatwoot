@@ -88,7 +88,7 @@ const tooltip = computed(() =>
 <template>
   <div class="min-w-0" :title="tooltip">
     <div class="flex items-baseline gap-2 min-w-0">
-      <span class="text-xs font-semibold text-n-slate-12 min-w-0 truncate">
+      <span class="text-xs font-semibold text-n-slate-12 min-w-0 leading-tight">
         {{ label }}
         <span
 v-if="metric" class="text-n-slate-9 font-normal"

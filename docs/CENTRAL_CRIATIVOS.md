@@ -330,3 +330,15 @@ ganchos, corpos e CTAs com base na transcrição dos vídeos".
 - Pré-requisito em produção: chave do Gemini em Integrações → IA e token da
   Meta com `ads_read` na conta dona dos vídeos. Custo: ~US$ 0,01–0,03 por
   vídeo de 30–60 s.
+
+## Ajuste 20/09 noite 2 (item 185) — texto inteiro sempre
+
+Regra dele: "precisa aparecer todo o texto sempre, em todas as situações".
+`MoneyTiles.vue` deixou de fixar 4 colunas por breakpoint da janela: a grade
+é `repeat(auto-fit, minmax(9.25rem, 1fr))` (mede o contêiner — dentro do
+modal e do card a conta é outra), o rótulo embrulha e o número usa
+`clamp(1.05rem, 13cqi, 1.6rem)` com `container-type: inline-size` no tile,
+então encolhe com o cartão em vez de quebrar "R$" da cifra. A faixa de 13
+indicadores do Ver a fundo segue a mesma regra (`auto-fit minmax(10rem)`),
+e o título do Ver a fundo, o BulletMeter e o ranking de falas embrulham em
+vez de cortar com `truncate`.

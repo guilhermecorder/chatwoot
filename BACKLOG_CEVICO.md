@@ -6125,6 +6125,49 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   seguro principal (as tabelas cevico_ad_* + storage/ vão no pg_dump/volume).
 
 
+## 185. 🧩 TEXTO INTEIRO SEMPRE + MENU NO CELULAR + NOMES/ÍCONES + KIT MAIS TRANSPARENTE (pedido 20/09, noite 2)
+
+Prints dele: (1) cards "O que vale dinheiro" com "Consulta a…", "Cirurgia
+re…", "Agendame…" e o "R$" quebrado em duas linhas — "precisa aparecer todo o
+texto sempre, em todas as situações; isso é erro de design; ao invés de 4
+lado a lado, ajustar o tamanho"; (2) menu iPhone no celular cortando
+"Atendime…", "Pacientes …", "Configura…" — "reduza o tamanho para o mobile";
+(3) azulejos cinza nas linhas de Configurações; (4) Jornada com fundo roxo —
+"eu queria o transparente… aumente a transparência disso tudo".
+FEITO (working tree da feat/rodada-172, base 780d5d7; deploy WEB só, sem
+migration; reversão 780d5d7):
+- `MoneyTiles.vue`: grade `repeat(auto-fit, minmax(9.25rem, 1fr))` — decide
+  pela largura do CONTÊINER, não da janela (o `md:grid-cols-4` errava dentro
+  do modal); rótulo embrulha (sem `truncate`); número em `whitespace-nowrap`
+  com fonte `clamp(1.05rem, 13cqi, 1.6rem)` por container query
+  (`container-type: inline-size` no tile) — encolhe junto com o cartão, nunca
+  quebra. Faixa dos 13 indicadores do Ver a fundo idem (`auto-fit
+  minmax(10rem)`, sem truncate, nowrap). Título do Ver a fundo, BulletMeter e
+  ranking de falas também sem `truncate` (embrulham).
+- Menu (`Sidebar.vue`): "Pacientes e funil" → "CRM e pacientes"; "Caixa de
+  entrada" fora do menu (`OMITTED_FROM_MENU`; a tela segue pela URL e em
+  Configurações → Caixas); "Equipe e marca" = `i-lucide-id-card`;
+  Configurações = engrenagem (`i-lucide-settings`, era um raio); Central de
+  Criativos = 1ª de Relatórios; filhos de subgrupo (Configurações, Automações,
+  Conteúdos…) ganham cor própria (`TILE_COLORS` + `NESTED_CYCLE` em
+  `colorChildren`) — antes herdavam a cor do texto e saíam cinza; Auditoria =
+  `scroll-text`. ESLint --fix reformatou linhas antigas do arquivo (prettier).
+- Celular: barra `w-[min(80vw,320px)]` (era 200 px fixos — cortava os
+  rótulos) e o botão ≡ acompanha (`MobileSidebarLauncher.vue`); skin
+  `.cv-ios-nav` com `@media (max-width: 767px)`: linhas 40/36/32 px, letra
+  14/13,5/13, azulejos 27/24 px.
+- Kit `_cevico-glass.scss` (vale para TODAS as telas): `.cv-block` claro véu
+  branco 0,62→0,46 (era 0,94→0,8), tinta 0,035 (era 0,12), luz do canto 0,14
+  (era 0,32), crista 0,3; escuro véu 0,035→0,012 (era 0,07→0,03), tinta 0,045
+  (era 0,16), borda 0,3. Cristal `.cv-sub/.cv-stat/.cv-row`: claro véu
+  0,5→0,34 e tinta 0,02; escuro véu 0,065→0,018, tinta 0,02, anel 0,12/0,14.
+  `.cv-strip` (faixas de aviso) MANTÉM a tinta antiga por regra própria; cards
+  de KPI com degradê (DashKpi) não mudam.
+- Verificado no navegador local (conta 3, tema escuro, 1280/900/390): menu por
+  DOM (grupos, filhos coloridos, sem Caixa de entrada, Criativos 1º), Jornada
+  sem tinta roxa, tiles sem overflow em card e modal, menu do celular 311 px
+  com todos os rótulos inteiros (linha 40 px, azulejo 27 px, letra 14 px).
+
 ## 184. 📱 MENU LATERAL ESTILO IPHONE (pedido 20/09, noite)
 
 Pedido: "algo mais iPhone na barra lateral; importante ter tudo, mas no
@@ -6222,8 +6265,8 @@ Pedido: custo por consulta agendada e por cirurgia realizada nos cards;
 ROAS, CAC e % de agendamento como parâmetros de campeão; gráfico de
 retenção em todos; "Ver a fundo" no design Apple, clean, com respiro e alto
 contraste; sem rolagem lateral; campeões melhores no desktop.
-**FEITO 20/09 (working tree da feat/rodada-172, sem commit; aguarda "pode
-subir" — deploy WEB só, sem migration).** Detalhes: docs/CENTRAL_CRIATIVOS.md
+**FEITO 20/09 — SUBIU no commit 780d5d7 (develop) e foi IMPLANTADO por ele
+20/09 ~23h ("ficou bacana"); deploy WEB+SIDEKIQ, sem migration.** Detalhes: docs/CENTRAL_CRIATIVOS.md
 (seção v2). Testado: rspec 19/19 (Central), campeões novos disputando com
 dados de demonstração, DOM sem overflow em 1024 px e 375 px (card e modal).
 
@@ -6231,7 +6274,7 @@ dados de demonstração, DOM sem overflow em 1024 px e 375 px (card e modal).
 
 **20/09 — CONSTRUÍDO (R1 inteira + as ações da R2: retornar, marcar
 retornada, CSV, paleta `crm:chamadas`), no working tree da feat/rodada-172,
-AGUARDA "pode subir" (deploy WEB só — sem migration).** Decisão: "Chamadas"
+SUBIU no 780d5d7 e IMPLANTADO 20/09 (WEB+SIDEKIQ, sem migration).** Decisão: "Chamadas"
 é item do MENU DO DIA (`calls`, ligado por padrão para todo mundo, o admin
 desliga por pessoa) e não uma concessão — o pedido era "todo mundo vê".
 Testado local: rspec 8/8 novos (overview, live, busca, retornada, CSV),

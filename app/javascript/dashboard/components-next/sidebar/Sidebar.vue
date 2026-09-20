@@ -461,22 +461,57 @@ const toggleHiddenFeature = key => {
   const idx = hiddenFeatures.value.indexOf(key);
   if (idx === -1) hiddenFeatures.value.push(key);
   else hiddenFeatures.value.splice(idx, 1);
-  localStorage.setItem('cevico_hidden_menu', JSON.stringify(hiddenFeatures.value));
+  localStorage.setItem(
+    'cevico_hidden_menu',
+    JSON.stringify(hiddenFeatures.value)
+  );
 };
 
 // ── Ordem dos itens do menu (Personalizar menu, por pessoa/navegador) ──
 // Padrão admin: Relatórios logo abaixo do CRM (pedido 2026-07-15).
 const DEFAULT_MENU_ORDER = [
-  'Inicio', 'CRM', 'Reports', 'Strategy', 'Finance', 'Goals', 'Builder', 'People', 'Inbox', 'Conversation', 'Cevico Calls', 'Captain', 'Companies',
-  'Campanha WhatsApp', 'Forms', 'Tasks', 'Agenda', 'Cevico Pages', 'Academy',
-  'Automations Hub', 'Settings',
+  'Inicio',
+  'CRM',
+  'Reports',
+  'Strategy',
+  'Finance',
+  'Goals',
+  'Builder',
+  'People',
+  'Inbox',
+  'Conversation',
+  'Cevico Calls',
+  'Captain',
+  'Companies',
+  'Campanha WhatsApp',
+  'Forms',
+  'Tasks',
+  'Agenda',
+  'Cevico Pages',
+  'Academy',
+  'Automations Hub',
+  'Settings',
 ];
 // Padrão do ATENDENTE (pedido 2026-07-17): Meu Painel | CRM | Conversas |
 // Agenda | Metas | Respostas prontas — depois os extras/concedidos.
 const AGENT_MENU_ORDER = [
-  'Inicio', 'CRM', 'Conversation', 'Cevico Calls', 'Agenda', 'Goals', 'Builder', 'Canned',
-  'Tasks', 'People', 'Reports', 'Campanha WhatsApp', 'Cevico Pages',
-  'Strategy', 'Finance', 'Academy', 'Automations Hub',
+  'Inicio',
+  'CRM',
+  'Conversation',
+  'Cevico Calls',
+  'Agenda',
+  'Goals',
+  'Builder',
+  'Canned',
+  'Tasks',
+  'People',
+  'Reports',
+  'Campanha WhatsApp',
+  'Cevico Pages',
+  'Strategy',
+  'Finance',
+  'Academy',
+  'Automations Hub',
   'Settings',
 ];
 const baseMenuOrder = () =>
@@ -560,7 +595,7 @@ const menuItemsForRole = computed(() => {
     {
       name: 'Settings',
       label: 'Configurações',
-      icon: 'i-lucide-bolt',
+      icon: 'i-lucide-settings',
       to: accountScopedRoute('profile_settings_index'),
     },
   ];
@@ -578,14 +613,20 @@ const MENU_GROUPS = [
     color: '#34c759',
     label: 'Atendimento',
     icon: 'i-lucide-headset',
-    items: ['Conversation', 'Cevico Calls', 'Inbox', 'Agenda', 'Tasks', 'Canned'],
+    items: ['Conversation', 'Cevico Calls', 'Agenda', 'Tasks', 'Canned'],
   },
   {
     name: 'group:pacientes',
     color: '#af52de',
-    label: 'Pacientes e funil',
+    label: 'CRM e pacientes',
     icon: 'i-lucide-users-round',
-    items: ['CRM', 'Jornada do paciente', 'Campanha WhatsApp', 'Forms', 'Automations Hub'],
+    items: [
+      'CRM',
+      'Jornada do paciente',
+      'Campanha WhatsApp',
+      'Forms',
+      'Automations Hub',
+    ],
   },
   {
     name: 'group:resultados',
@@ -598,18 +639,29 @@ const MENU_GROUPS = [
     name: 'group:equipe',
     color: '#ff9f0a',
     label: 'Equipe e marca',
-    icon: 'i-lucide-sparkles',
-    items: ['People', 'Academy', 'Cevico Pages', 'Builder', 'Captain', 'Companies'],
+    icon: 'i-lucide-id-card',
+    items: [
+      'People',
+      'Academy',
+      'Cevico Pages',
+      'Builder',
+      'Captain',
+      'Companies',
+    ],
   },
   {
     name: 'group:config',
     color: '#8e8e93',
     label: 'Configurações',
-    icon: 'i-lucide-bolt',
+    icon: 'i-lucide-settings',
     items: ['Settings', 'Integrations Hub'],
   },
 ];
 const UNGROUPED = ['Inicio'];
+// fora do menu: o "Calls" do Chatwoot (enterprise; o nosso é "Cevico Calls") e a
+// "Caixa de entrada" (pedido 20/09 — o atendimento acontece pelas Conversas;
+// a tela segue viva pela URL e em Configurações → Caixas)
+const OMITTED_FROM_MENU = ['Calls', 'Inbox'];
 // contadores dos itens que viram folha (folha não lê getterKeys)
 const leafBadge = item => {
   const key = item.getterKeys && item.getterKeys.count;
@@ -619,16 +671,91 @@ const leafBadge = item => {
 };
 // azulejos coloridos por item (como os ícones dos Ajustes do iPhone)
 const TILE_COLORS = {
-  Conversation: '#34c759', 'Cevico Calls': '#30d158', Inbox: '#007aff', Agenda: '#ff3b30', Tasks: '#ff9500',
-  Canned: '#5ac8fa', CRM: '#af52de', 'Jornada do paciente': '#ff2d55', 'Campanha WhatsApp': '#25d366',
-  Forms: '#ffcc00', 'Automations Hub': '#5856d6', Reports: '#0a84ff', Goals: '#ff9f0a', Strategy: '#64d2ff',
-  Finance: '#30d158', People: '#ff375f', Academy: '#bf5af2', 'Cevico Pages': '#0a84ff', Builder: '#ff9f0a',
-  Captain: '#5e5ce6', Companies: '#8e8e93', Settings: '#8e8e93', 'Integrations Hub': '#64d2ff', Inicio: '#34c759',
+  Conversation: '#34c759',
+  'Cevico Calls': '#30d158',
+  Inbox: '#007aff',
+  Agenda: '#ff3b30',
+  Tasks: '#ff9500',
+  Canned: '#5ac8fa',
+  CRM: '#af52de',
+  'Jornada do paciente': '#ff2d55',
+  'Campanha WhatsApp': '#25d366',
+  Forms: '#ffcc00',
+  'Automations Hub': '#5856d6',
+  Reports: '#0a84ff',
+  Goals: '#ff9f0a',
+  Strategy: '#64d2ff',
+  Finance: '#30d158',
+  People: '#ff375f',
+  Academy: '#bf5af2',
+  'Cevico Pages': '#0a84ff',
+  Builder: '#ff9f0a',
+  Captain: '#5e5ce6',
+  Companies: '#8e8e93',
+  Settings: '#8e8e93',
+  'Integrations Hub': '#64d2ff',
+  Inicio: '#34c759',
+  // Configurações (pedido 20/09: cada linha com a sua cor, nada de azulejo cinza)
+  'Settings Account Settings': '#0a84ff',
+  'Settings Domain': '#30d158',
+  'Settings Panels': '#af52de',
+  'Settings Prices': '#34c759',
+  'Settings Agents': '#ff9f0a',
+  'Settings Teams': '#5856d6',
+  'Settings Agent Assignment': '#ff2d55',
+  'Settings Inboxes': '#007aff',
+  'Settings Templates': '#25d366',
+  'Settings Labels': '#ffcc00',
+  'Settings Custom Attributes': '#64d2ff',
+  'Settings Agent Bots': '#bf5af2',
+  'Settings Macros': '#ff9500',
+  'Settings Canned Responses': '#5ac8fa',
+  'Settings Audit Logs': '#a2845e',
+  'Settings Custom Roles': '#ff3b30',
+  'Settings Sla': '#ff9f0a',
+  'Conversation Workflow': '#5e5ce6',
+  'Settings Security': '#34c759',
+  'Settings Billing': '#30d158',
+  // Automações
+  'Automations Robos': '#5856d6',
+  'Automations Flows': '#0a84ff',
+  'Automations Rules': '#ff9f0a',
+  'Automations AI Agents': '#af52de',
+  'Automations AI Panel': '#30d158',
+  'Automations Programming': '#ff3b30',
+  'Automations Results': '#34c759',
+  'Automations Treatment': '#64d2ff',
 };
 const tileColor = name => TILE_COLORS[name] || '#8e8e93';
+// filhos de subgrupo (Configurações, Automações, Relatórios…): cada um com a
+// sua cor — sem isso o azulejo herdava a cor do texto e saía cinza
+const NESTED_CYCLE = [
+  '#0a84ff',
+  '#34c759',
+  '#ff9f0a',
+  '#af52de',
+  '#ff3b30',
+  '#5ac8fa',
+  '#ff2d55',
+  '#30d158',
+  '#5856d6',
+  '#ffcc00',
+  '#64d2ff',
+  '#bf5af2',
+];
+const colorChildren = children =>
+  (children || []).map((c, i) => ({
+    ...c,
+    iconColor: TILE_COLORS[c.name] || NESTED_CYCLE[i % NESTED_CYCLE.length],
+  }));
 const toChild = item =>
   item.children
-    ? { ...item, collapsible: true, iconColor: tileColor(item.name) }
+    ? {
+        ...item,
+        children: colorChildren(item.children),
+        collapsible: true,
+        iconColor: tileColor(item.name),
+      }
     : {
         name: item.name,
         label: item.label,
@@ -639,18 +766,37 @@ const toChild = item =>
         badgeCount: leafBadge(item),
       };
 const groupedMenuItems = computed(() => {
-  const items = visibleMenuItems.value.filter(i => i.name !== 'Calls'); // o "Calls" do Chatwoot (enterprise) sai: o nosso é "Cevico Calls"
+  const items = visibleMenuItems.value.filter(
+    i => !OMITTED_FROM_MENU.includes(i.name)
+  );
   const used = new Set();
   const out = [];
-  items.filter(i => UNGROUPED.includes(i.name)).forEach(i => { out.push({ ...i, iconColor: tileColor(i.name) }); used.add(i.name); });
+  items
+    .filter(i => UNGROUPED.includes(i.name))
+    .forEach(i => {
+      out.push({ ...i, iconColor: tileColor(i.name) });
+      used.add(i.name);
+    });
   MENU_GROUPS.forEach(g => {
     const children = items.filter(i => g.items.includes(i.name));
     if (!children.length) return;
     children.forEach(i => used.add(i.name));
-    out.push({ name: g.name, label: g.label, icon: g.icon, iconColor: g.color, children: children.map(toChild) });
+    out.push({
+      name: g.name,
+      label: g.label,
+      icon: g.icon,
+      iconColor: g.color,
+      children: children.map(toChild),
+    });
   });
   const rest = items.filter(i => !used.has(i.name));
-  if (rest.length) out.push({ name: 'group:mais', label: 'Mais', icon: 'i-lucide-ellipsis', children: rest.map(toChild) });
+  if (rest.length)
+    out.push({
+      name: 'group:mais',
+      label: 'Mais',
+      icon: 'i-lucide-ellipsis',
+      children: rest.map(toChild),
+    });
   return out;
 });
 
@@ -678,9 +824,12 @@ onMounted(() => {
   // carrega tarefas para o aviso de prazo na sidebar (badge em Tarefas)
   store.dispatch('tasks/fetch').catch(() => {});
   // badge do Radar de Oportunidades no "Meu Painel" — atualiza a cada 5 min
-  radarBadgeTimer = setInterval(() => {
-    store.dispatch('crm/fetchSettings').catch(() => {});
-  }, 5 * 60 * 1000);
+  radarBadgeTimer = setInterval(
+    () => {
+      store.dispatch('crm/fetchSettings').catch(() => {});
+    },
+    5 * 60 * 1000
+  );
 });
 
 let radarBadgeTimer = null;
@@ -853,27 +1002,83 @@ const menuItems = computed(() => {
         // "Relatórios"; item 62: o admin pode conceder relatórios
         // ESPECÍFICOS (report_keys — lista vazia = todos)
         ...[
-          { name: 'CRM Dashboard', key: 'crm_dashboard', label: 'Dashboard CRM', route: 'crm_dashboard_reports' },
+          {
+            name: 'Creatives Center',
+            key: 'creatives',
+            label: 'Central de Criativos',
+            route: 'creatives_reports',
+          }, // 1ª da fila (pedido 20/09)
+          {
+            name: 'CRM Dashboard',
+            key: 'crm_dashboard',
+            label: 'Dashboard CRM',
+            route: 'crm_dashboard_reports',
+          },
           ...(canSee('campaigns')
-            ? [{ name: 'Campaigns Dashboard', key: 'campaigns_dashboard', label: 'Dashboard Campanhas', route: 'crm_campaigns_dashboard' }]
+            ? [
+                {
+                  name: 'Campaigns Dashboard',
+                  key: 'campaigns_dashboard',
+                  label: 'Dashboard Campanhas',
+                  route: 'crm_campaigns_dashboard',
+                },
+              ]
             : []),
-          { name: 'Traffic Funnel', key: 'traffic_funnel', label: 'Funil de Tráfego', route: 'traffic_funnel_reports' },
-          { name: 'Doctors Dashboard', key: 'doctors', label: 'Dashboard dos Médicos', route: 'doctors_reports' },
-          { name: 'Agents Dashboard', key: 'agents_dashboard', label: 'Dashboard dos Agentes', route: 'agents_dashboard_reports' },
-          { name: 'Agenda Dashboard', key: 'agenda_dashboard', label: 'Dashboard da Agenda', route: 'agenda_dashboard_reports' },
+          {
+            name: 'Traffic Funnel',
+            key: 'traffic_funnel',
+            label: 'Funil de Tráfego',
+            route: 'traffic_funnel_reports',
+          },
+          {
+            name: 'Doctors Dashboard',
+            key: 'doctors',
+            label: 'Dashboard dos Médicos',
+            route: 'doctors_reports',
+          },
+          {
+            name: 'Agents Dashboard',
+            key: 'agents_dashboard',
+            label: 'Dashboard dos Agentes',
+            route: 'agents_dashboard_reports',
+          },
+          {
+            name: 'Agenda Dashboard',
+            key: 'agenda_dashboard',
+            label: 'Dashboard da Agenda',
+            route: 'agenda_dashboard_reports',
+          },
           {
             name: 'Calls Dashboard',
             key: 'calls_dashboard',
             label: 'Dashboard de Ligações',
             route: 'calls_dashboard_reports',
           },
-          { name: 'Ads Report', key: 'ads', label: 'Anúncios (Meta)', route: 'ads_reports' },
-          { name: 'Creatives Center', key: 'creatives', label: 'Central de Criativos', route: 'creatives_reports' },
-          { name: 'Google Dashboard', key: 'google', label: 'Google (Ads + GA4)', route: 'google_dashboard_reports' },
-          { name: 'WhatsApp Health', key: 'whatsapp_health', label: 'Saúde do WhatsApp', route: 'whatsapp_health_reports' },
+          {
+            name: 'Ads Report',
+            key: 'ads',
+            label: 'Anúncios (Meta)',
+            route: 'ads_reports',
+          },
+          {
+            name: 'Google Dashboard',
+            key: 'google',
+            label: 'Google (Ads + GA4)',
+            route: 'google_dashboard_reports',
+          },
+          {
+            name: 'WhatsApp Health',
+            key: 'whatsapp_health',
+            label: 'Saúde do WhatsApp',
+            route: 'whatsapp_health_reports',
+          },
         ]
           .filter(r => canSeeReport(r.key))
-          .map(r => ({ name: r.name, label: r.label, to: accountScopedRoute(r.route) })),
+          .map(r => ({
+            name: r.name,
+            label: r.label,
+            to: accountScopedRoute(r.route),
+          })),
         // relatórios do core do Chatwoot — a API deles só aceita admin,
         // então nem aparecem para atendente concedido
         ...(isAdmin.value
@@ -1097,14 +1302,22 @@ const menuItems = computed(() => {
                       name: 'Automations Robos',
                       label: 'Robôs de follow-up',
                       icon: 'i-lucide-bot',
-                      to: accountScopedRoute('cevico_automations', {}, { tab: 'robos' }),
+                      to: accountScopedRoute(
+                        'cevico_automations',
+                        {},
+                        { tab: 'robos' }
+                      ),
                     },
                     // 🗺️ item 170: fluxograma de cada agente/automação com o estado ao vivo
                     {
                       name: 'Automations Flows',
                       label: 'Fluxos',
                       icon: 'i-lucide-git-branch',
-                      to: accountScopedRoute('cevico_automations', {}, { tab: 'fluxos' }),
+                      to: accountScopedRoute(
+                        'cevico_automations',
+                        {},
+                        { tab: 'fluxos' }
+                      ),
                     },
                   ]
                 : []),
@@ -1114,26 +1327,42 @@ const menuItems = computed(() => {
                       name: 'Automations Rules',
                       label: 'Regras da caixa de entrada',
                       icon: 'i-lucide-repeat',
-                      to: accountScopedRoute('cevico_automations', {}, { tab: 'regras' }),
+                      to: accountScopedRoute(
+                        'cevico_automations',
+                        {},
+                        { tab: 'regras' }
+                      ),
                     },
                     {
                       name: 'Automations AI Agents',
                       label: 'Agentes de IA',
                       icon: 'i-lucide-sparkles',
-                      to: accountScopedRoute('cevico_automations', {}, { tab: 'agentes' }),
+                      to: accountScopedRoute(
+                        'cevico_automations',
+                        {},
+                        { tab: 'agentes' }
+                      ),
                     },
                     // item 85: o que cada agente de IA está fazendo + custos
                     {
                       name: 'Automations AI Panel',
                       label: 'Painel dos agentes',
                       icon: 'i-lucide-activity',
-                      to: accountScopedRoute('cevico_automations', {}, { tab: 'painel_ia' }),
+                      to: accountScopedRoute(
+                        'cevico_automations',
+                        {},
+                        { tab: 'painel_ia' }
+                      ),
                     },
                     {
                       name: 'Automations Programming',
                       label: 'Modo Programação',
                       icon: 'i-lucide-zap',
-                      to: accountScopedRoute('cevico_automations', {}, { tab: 'programacao' }),
+                      to: accountScopedRoute(
+                        'cevico_automations',
+                        {},
+                        { tab: 'programacao' }
+                      ),
                     },
                   ]
                 : []),
@@ -1143,7 +1372,11 @@ const menuItems = computed(() => {
                       name: 'Automations Results',
                       label: 'Resultados',
                       icon: 'i-lucide-bar-chart-3',
-                      to: accountScopedRoute('cevico_automations', {}, { tab: 'resultados' }),
+                      to: accountScopedRoute(
+                        'cevico_automations',
+                        {},
+                        { tab: 'resultados' }
+                      ),
                     },
                   ]
                 : []),
@@ -1153,7 +1386,11 @@ const menuItems = computed(() => {
                       name: 'Automations Treatment',
                       label: 'Tratamento de dados',
                       icon: 'i-lucide-database',
-                      to: accountScopedRoute('cevico_automations', {}, { tab: 'tratamento' }),
+                      to: accountScopedRoute(
+                        'cevico_automations',
+                        {},
+                        { tab: 'tratamento' }
+                      ),
                     },
                   ]
                 : []),
@@ -1164,7 +1401,7 @@ const menuItems = computed(() => {
     {
       name: 'Settings',
       label: t('SIDEBAR.SETTINGS'),
-      icon: 'i-lucide-bolt',
+      icon: 'i-lucide-settings',
       children: [
         // Integrações UNIFICADAS dentro de Configurações (item 78):
         // central CEVICO (Meta/Google/Claude/Sheets/n8n) + aplicativos nativos
@@ -1309,7 +1546,7 @@ const menuItems = computed(() => {
         {
           name: 'Settings Audit Logs',
           label: t('SIDEBAR.AUDIT_LOGS'),
-          icon: 'i-lucide-briefcase',
+          icon: 'i-lucide-scroll-text',
           to: accountScopedRoute('auditlogs_list'),
         },
         {
@@ -1360,7 +1597,7 @@ const menuItems = computed(() => {
         ],
       },
     ]"
-    class="bg-n-background flex flex-col text-sm pb-px fixed top-0 ltr:left-0 rtl:right-0 h-full z-40 w-[200px] md:w-auto md:relative md:flex-shrink-0 md:ltr:translate-x-0 md:rtl:translate-x-0 ltr:border-r rtl:border-l border-n-weak"
+    class="bg-n-background flex flex-col text-sm pb-px fixed top-0 ltr:left-0 rtl:right-0 h-full z-40 w-[min(80vw,320px)] md:w-auto md:relative md:flex-shrink-0 md:ltr:translate-x-0 md:rtl:translate-x-0 ltr:border-r rtl:border-l border-n-weak"
     :class="[
       {
         'shadow-lg md:shadow-none': isMobileSidebarOpen,
@@ -1450,7 +1687,10 @@ const menuItems = computed(() => {
     >
       <ul
         class="flex flex-col gap-1 m-0 list-none min-w-0"
-        :class="{ 'items-center': isEffectivelyCollapsed, 'cv-ios-nav': !isEffectivelyCollapsed }"
+        :class="{
+          'items-center': isEffectivelyCollapsed,
+          'cv-ios-nav': !isEffectivelyCollapsed,
+        }"
       >
         <SidebarGroup
           v-for="item in groupedMenuItems"
@@ -1480,9 +1720,13 @@ const menuItems = computed(() => {
         @click.self="showCustomizeMenu = false"
       >
         <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-sm">
-          <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak">
+          <div
+            class="flex items-center justify-between px-5 py-4 border-b border-n-weak"
+          >
             <div>
-              <h2 class="text-base font-semibold text-n-slate-12">Personalizar menu</h2>
+              <h2 class="text-base font-semibold text-n-slate-12">
+                Personalizar menu
+              </h2>
               <p class="text-xs text-n-slate-10 mt-0.5">
                 Oculte seções que você não usa. Dá para reativar quando quiser.
               </p>
@@ -1524,12 +1768,18 @@ const menuItems = computed(() => {
                   @click="moveMenuItem(item.name, 1)"
                 />
               </div>
-              <span v-if="typeof item.icon === 'string'" :class="item.icon" class="text-sm text-n-slate-10 flex-shrink-0" />
-              <span class="text-sm text-n-slate-12 flex-1 truncate">{{ item.label }}</span>
+              <span
+                v-if="typeof item.icon === 'string'"
+                :class="item.icon"
+                class="text-sm text-n-slate-10 flex-shrink-0"
+              />
+              <span class="text-sm text-n-slate-12 flex-1 truncate">{{
+                item.label
+              }}</span>
               <span
                 v-if="item.feature && hiddenFeatures.includes(item.feature)"
                 class="text-[10px] text-n-slate-9"
-              >oculto</span>
+                >oculto</span>
               <input
                 v-if="item.feature"
                 type="checkbox"

@@ -86,7 +86,7 @@ const copyRow = r =>
           <p
             class="text-[11px] text-n-slate-9 mt-1 flex items-center gap-1.5 flex-wrap"
           >
-            <span class="truncate max-w-[16rem]">{{ r.ad_name }}</span>
+            <span class="min-w-0 break-words">{{ r.ad_name }}</span>
             <span v-if="r.angle && ANGLE[r.angle]" class="cv-chip">{{
               ANGLE[r.angle]
             }}</span>
