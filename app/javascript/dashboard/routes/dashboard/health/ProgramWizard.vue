@@ -213,10 +213,10 @@ const submit = () => {
 </script>
 
 <template>
-  <div class="hub-block p-4 mb-4 hub-wiz">
+  <div class="hub-block p-5 mb-8 hub-wiz">
     <div class="flex items-center justify-between gap-2 flex-wrap mb-3">
       <div>
-        <h2 class="text-sm font-bold text-n-slate-12">
+        <h2 class="hub-h2">
           {{ initial ? 'Editar meu treino' : 'Criar / importar meu treino' }}
         </h2>
         <p class="text-[11px] text-n-slate-10">O Warrior continua guardado. Este é o SEU programa, com histórico próprio.</p>
@@ -259,7 +259,7 @@ const submit = () => {
       </div>
 
       <div class="grid gap-3 sm:grid-cols-2 mb-3">
-        <div class="rounded-xl border border-n-weak p-3">
+        <div class="hub-crystal rounded-xl p-4">
           <p class="text-xs font-bold text-n-slate-12 mb-1">Divisão: quantos treinos diferentes?</p>
           <p class="text-[10px] text-n-slate-10 mb-2">ABC = 3 · ABCD = 4. Mais dias que treinos? Eles se repetem (A B C A…).</p>
           <div class="flex items-center gap-2">
@@ -271,7 +271,7 @@ const submit = () => {
             <span v-for="r in rotation" :key="r.day" class="inline-block mr-2">{{ r.day }} → <b>{{ r.key }}</b></span>
           </p>
         </div>
-        <div class="rounded-xl border border-n-weak p-3">
+        <div class="hub-crystal rounded-xl p-4">
           <p class="text-xs font-bold text-n-slate-12 mb-1">Por quantas semanas?</p>
           <p class="text-[10px] text-n-slate-10 mb-2">8–12 semanas é um bom bloco. Dá pra encerrar antes ou renovar depois.</p>
           <div class="flex items-center gap-2">
@@ -334,7 +334,7 @@ const submit = () => {
         </div>
       </div>
 
-      <div class="rounded-xl border border-n-weak p-3">
+      <div class="hub-crystal rounded-xl p-4">
         <div class="flex items-center gap-2 flex-wrap mb-2">
           <span class="w-9 h-9 rounded-xl flex items-center justify-center text-lg font-black text-white" :style="{ background: GRAD_NOITE }">{{ curKey }}</span>
           <input
@@ -389,7 +389,7 @@ const submit = () => {
               class="h-9 w-24 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
               style="margin-bottom: 0"
             />
-            <button class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1" title="Remover" @click="removeRow(i)">🗑</button>
+            <button class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1" title="Remover" @click="removeRow(i)"><span class="i-lucide-trash-2 hub-ico" style="width: 15px; height: 15px" /></button>
           </div>
         </div>
         <button class="mt-2 h-9 px-3 rounded-lg text-xs font-bold border border-dashed border-n-weak" :style="{ color: ROYAL }" @click="addRow">
@@ -474,7 +474,7 @@ const submit = () => {
         :disabled="!!stepError || saving"
         @click="submit"
       >
-        {{ saving ? 'Salvando…' : initial ? '💾 Salvar alterações' : '🚀 Começar este treino' }}
+        {{ saving ? 'Salvando…' : initial ? 'Salvar alterações' : 'Começar este treino' }}
       </button>
     </div>
   </div>

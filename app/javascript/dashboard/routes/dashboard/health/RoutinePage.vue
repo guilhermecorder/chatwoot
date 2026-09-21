@@ -8,19 +8,23 @@
 // por ele) · ANO = onde quero chegar em cada área + metas do ano.
 // Tudo num registro kind=routine por pessoa (salva sozinho ao mexer).
 import { ref, computed, onMounted, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
-import HubTabBar from './HubTabBar.vue';
 import {
   ROUTINE_CATS, routineCat, LIFE_AREAS, WEEKDAYS,
   ROUTINE_PRESET_WEEKDAY, ROUTINE_PRESET_WEEKEND, ROUTINE_PRESETS,
   timeToMin, dayMinutesByCat, customToProgram, programWeeks,
+  resolvePrograms, mainProgramOf, weekOf, cycleForWeek,
 } from './warrior';
 import { ROYAL, LARANJA, LARANJA_VIVO, GRAD_ROYAL, GRAD_NOITE, GRAD_LARANJA } from './palette';
 
+const route = useRoute();
+const router = useRouter();
 const isLoading = ref(true);
 const config = ref({});
+const profile = ref({});
 const programRecords = ref([]);
 const routine = ref({ days: {}, months: {}, years: {} });
 const loaded = ref(false);
@@ -52,6 +56,7 @@ onMounted(async () => {
   try {
     const { data } = await CrmAPI.getHealth();
     config.value = data.config || {};
+    profile.value = data.profile || {};
     programRecords.value = data.programs || [];
     const r = data.routine || {};
     routine.value = { days: r.days || {}, months: r.months || {}, years: r.years || {} };
@@ -146,11 +151,58 @@ const removeBlock = b => {
   blockForm.value = null;
 };
 const presetsOpen = ref(false);
+// rodada 33: ESCOPO do modelo — só este dia, seg–sex, sáb–dom ou a semana
+// toda (seg–sex com o modelo escolhido + sáb–dom com o de fim de semana)
+const PRESET_SCOPES = [
+  { key: 'dia', label: 'só este dia' },
+  { key: 'uteis', label: 'seg–sex' },
+  { key: 'fds', label: 'sáb–dom' },
+  { key: 'semana', label: 'semana toda' },
+];
+const presetScope = ref('dia');
+const stamp = day => `${Date.now().toString(36)}_${day.slice(0, 3)}`;
+const presetBlocks = kind => {
+  const found = ROUTINE_PRESETS.find(p => p.key === kind);
+  return found ? found.blocks : kind === 'fds' ? ROUTINE_PRESET_WEEKEND : ROUTINE_PRESET_WEEKDAY;
+};
 const applyPreset = kind => {
   presetsOpen.value = false;
-  const found = ROUTINE_PRESETS.find(p => p.key === kind);
-  const preset = found ? found.blocks : kind === 'fds' ? ROUTINE_PRESET_WEEKEND : ROUTINE_PRESET_WEEKDAY;
-  routine.value.days[selDay.value] = clone(preset).map(b => ({ ...b, id: `${b.id}_${Date.now().toString(36)}` }));
+  const scope = presetScope.value;
+  const days = scope === 'dia' ? [selDay.value] : scope === 'uteis' ? WEEKDAYS.slice(0, 5) : scope === 'fds' ? WEEKDAYS.slice(5) : WEEKDAYS;
+  days.forEach(day => {
+    const weekend = WEEKDAYS.indexOf(day) >= 5;
+    const src = scope === 'semana' && weekend && kind !== 'fds' ? presetBlocks('fds') : presetBlocks(kind);
+    routine.value.days[day] = clone(src).map(b => ({ ...b, id: `${b.id}_${stamp(day)}` }));
+  });
+  if (days.length > 1) useAlert(`Modelo aplicado em ${days.length} dias.`);
+};
+// rodada 33: DESLOCAR O RELÓGIO do dia inteiro (±30 min) — "a rotina tem
+// que ser ajustável": todos os blocos andam juntos, a meia-noite dá a volta
+const pad2 = n => String(n).padStart(2, '0');
+const minToTime = m => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
+const shiftDay = delta => {
+  const sh = t => minToTime((timeToMin(t) + delta + 1440) % 1440);
+  routine.value.days[selDay.value] = sortBlocks(blocksOf(selDay.value).map(b => ({ ...b, start: sh(b.start), end: sh(b.end) })));
+};
+// rodada 33: o bloco "Treino" mostra o TREINO REAL do dia (programa ativo:
+// sessão daquele dia da semana, semana atual do programa, nº de exercícios)
+const mainProgram = computed(() => mainProgramOf(resolvePrograms(config.value, profile.value, programRecords.value)));
+const curWeek = computed(() => weekOf(mainProgram.value, todayISO));
+const curCycle = computed(() => cycleForWeek(mainProgram.value, curWeek.value));
+const sessionFor = day =>
+  (curCycle.value?.sessions || []).find(s => (s.weekday || '').toLowerCase().startsWith(day.slice(0, 4).toLowerCase())) || null;
+const isTrainingBlock = b => b.cat === 'saude' && /treino/i.test(b.title || '') && !/cardio|boxe/i.test(b.title || '');
+const trainingFor = day => {
+  const p = mainProgram.value;
+  if (!p) return null;
+  const s = sessionFor(day);
+  const weeks = programWeeks(p) || 0;
+  if (!s) return { rest: true, name: p.name, week: curWeek.value, weeks };
+  return { rest: false, key: s.key, label: s.label || '', n: (s.exercises || []).length, name: p.name, week: curWeek.value, weeks };
+};
+const dayTraining = computed(() => trainingFor(selDay.value));
+const goTrain = key => {
+  router.push({ name: 'hub_health', params: { accountId: route.params.accountId }, query: { start: key } });
 };
 const copyDayTo = day => {
   if (day === selDay.value) return;
@@ -240,7 +292,7 @@ const yearDone = computed(() => {
 </script>
 
 <template>
-  <div class="hub-page flex-1 overflow-auto p-4 pb-28 sm:p-6 md:pb-6">
+  <div class="hub-page flex-1 overflow-auto p-4 pb-20 sm:p-6 md:pb-6">
     <div class="max-w-5xl mx-auto">
       <div class="flex items-center gap-3 flex-wrap mb-4">
         <span class="w-9 h-9 rounded-xl flex items-center justify-center" :style="{ background: GRAD_NOITE }">
@@ -279,6 +331,11 @@ const yearDone = computed(() => {
                 <span v-if="d === todayWeekday && selDay !== d" class="absolute -top-1 -right-1 w-2 h-2 rounded-full" :style="{ background: LARANJA }" />
               </button>
               <div class="flex-1" />
+              <span v-if="dayBlocks.length" class="hub-clock" title="Desloca todos os blocos deste dia">
+                <button class="hub-clock-btn" title="Tudo 30 min mais cedo" @click="shiftDay(-30)"><span class="i-lucide-chevron-left" /></button>
+                <span class="hub-clock-l"><span class="i-lucide-clock" />30 min</span>
+                <button class="hub-clock-btn" title="Tudo 30 min mais tarde" @click="shiftDay(30)"><span class="i-lucide-chevron-right" /></button>
+              </span>
               <button class="h-9 px-3 rounded-xl text-xs font-bold border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" :class="{ 'is-on': presetsOpen }" @click="presetsOpen = !presetsOpen"><span class="i-lucide-layout-template hub-ico" style="width: 14px; height: 14px" /> Modelos</button>
               <button class="h-9 px-3 rounded-xl text-xs font-bold text-white" :style="{ background: GRAD_LARANJA }" @click="openNewBlock">+ bloco</button>
             </div>
@@ -325,6 +382,9 @@ const yearDone = computed(() => {
               <span class="hub-sec-ico mx-auto mb-2"><span class="i-lucide-sunrise" /></span>
               <p class="hub-h2 justify-center">{{ dayBlocks.length ? `Modelos pra ${selDay}` : `${selDay} ainda sem rotina` }}</p>
               <p class="text-[11px] text-n-slate-10 mb-4">{{ dayBlocks.length ? "Aplicar um modelo substitui os blocos deste dia — depois é só ajustar." : "Comece por um modelo campeão e ajuste — ou monte bloco a bloco." }}</p>
+              <div class="hub-seg hub-seg-wrap mb-4">
+                <button v-for="sc in PRESET_SCOPES" :key="sc.key" class="hub-seg-opt" :class="{ 'is-on': presetScope === sc.key }" :style="presetScope === sc.key ? { background: ROYAL } : {}" @click="presetScope = sc.key">{{ sc.label }}</button>
+              </div>
               <div class="hub-preset-grid">
                 <!-- rodada 32: rotinas pré-definidas por relógio (acorda cedo/tarde × dorme cedo/tarde) + fim de semana -->
                 <button
@@ -350,7 +410,7 @@ const yearDone = computed(() => {
 
             <div v-else class="hub-rt-day">
               <!-- linha do tempo -->
-              <div class="relative rounded-xl border border-n-weak bg-n-solid-1 overflow-hidden" :style="{ height: `${24 * PX_H + 8}px` }">
+              <div class="relative hub-crystal rounded-2xl overflow-hidden" :style="{ height: `${24 * PX_H + 8}px` }">
                 <div v-for="h in HOURS" :key="h" class="absolute left-0 right-0 border-t border-n-weak/60 text-[9px] text-n-slate-10 pl-1" :style="{ top: `${(h / 1) * PX_H + 4}px` }">{{ String(h).padStart(2, '0') }}h</div>
                 <div
                   v-for="sg in daySegments"
@@ -365,11 +425,22 @@ const yearDone = computed(() => {
               </div>
               <!-- lista + resumo -->
               <div>
-                <div v-for="b in dayBlocks" :key="b.id" class="flex items-center gap-2 py-1.5 border-b border-n-weak/60 last:border-0 cursor-pointer hover:bg-n-alpha-1 rounded-lg px-1" @click="openEditBlock(b)">
-                  <span class="w-1.5 self-stretch rounded-full" :style="{ background: routineCat(b.cat).color }" />
-                  <span class="text-[11px] font-mono text-n-slate-10 w-24">{{ b.start }}–{{ b.end }}</span>
-                  <span class="text-xs font-bold text-n-slate-12 flex-1 min-w-0 truncate">{{ b.title }}</span>
-                  <span v-if="b.note" class="text-[10px] text-n-slate-10 truncate max-w-[10rem]">{{ b.note }}</span>
+                <div v-for="b in dayBlocks" :key="b.id" class="hub-rt-row" @click="openEditBlock(b)">
+                  <span class="hub-rt-bar" :style="{ background: routineCat(b.cat).color }" />
+                  <span class="hub-rt-time">{{ b.start }}–{{ b.end }}</span>
+                  <span class="hub-rt-main">
+                    <span class="hub-rt-title">{{ b.title }}</span>
+                    <!-- rodada 33: o bloco "Treino" puxa o treino real do dia -->
+                    <template v-if="isTrainingBlock(b) && dayTraining">
+                      <span v-if="!dayTraining.rest" class="hub-rt-train" title="Abrir este treino" @click.stop="goTrain(dayTraining.key)">
+                        <span class="i-lucide-dumbbell hub-rt-train-i" />
+                        <span class="hub-rt-train-t"><b>Treino {{ dayTraining.key }}</b><template v-if="dayTraining.label"> · {{ dayTraining.label }}</template> · semana {{ dayTraining.week }} de {{ dayTraining.weeks }} · {{ dayTraining.n }} exercícios</span>
+                        <span class="i-lucide-play hub-rt-go" />
+                      </span>
+                      <span v-else class="hub-rt-train is-rest"><span class="i-lucide-bed hub-rt-train-i" /><span class="hub-rt-train-t">sem treino programado neste dia · {{ dayTraining.name }}</span></span>
+                    </template>
+                    <span v-else-if="b.note" class="hub-rt-note">{{ b.note }}</span>
+                  </span>
                 </div>
                 <div class="mt-3">
                   <p class="text-[10px] font-bold text-n-slate-11 uppercase tracking-wide mb-1">Onde vai o dia</p>
@@ -505,7 +576,6 @@ const yearDone = computed(() => {
         </template>
       </template>
     </div>
-    <HubTabBar :boxing-on="boxingOn" />
   </div>
 </template>
 

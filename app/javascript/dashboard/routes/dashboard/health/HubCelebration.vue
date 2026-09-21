@@ -117,7 +117,7 @@ const shown = (it, i) => {
           </div>
 
           <button class="hub-cele-btn" :style="{ background: GRAD_LARANJA }" @click="emit('close')">
-            Continuar ✨
+            Continuar
           </button>
         </div>
       </div>

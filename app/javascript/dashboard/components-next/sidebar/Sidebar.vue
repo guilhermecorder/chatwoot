@@ -528,6 +528,13 @@ const onHubModeChange = e => {
   hubMode.value = e?.detail || localStorage.getItem('hub_mode') || '';
 };
 
+// rodada 35: no mundo Saúde a sidebar veste o kit Apple/vidro (classe
+// .hub-side no <aside>; estilos em _hub-glass.scss) — pedido dele 20/09:
+// "também quero o design Apple" no painel lateral
+const hubSideOn = computed(
+  () => segmentoId === 'saude' && (hubMode.value === 'saude' || healthOnly.value)
+);
+
 const hubItem = () => ({
   name: 'HubHome',
   label: 'HUB',
@@ -540,20 +547,49 @@ const boxingOn = computed(
   () => crmSettings.value?.health_features?.boxing === true
 );
 
-const hubMenuSaude = () => [
-  hubItem(),
-  { name: 'HealthPainel', label: 'Meu Painel', icon: 'i-lucide-gauge', to: accountScopedRoute('hub_health_painel') },
-  { name: 'HealthTreino', label: 'Treino', icon: 'i-lucide-dumbbell', to: accountScopedRoute('hub_health') },
-  { name: 'HealthCardio', label: 'Cardio', icon: 'i-lucide-heart-pulse', to: accountScopedRoute('hub_health_cardio') },
-  ...(boxingOn.value
-    ? [{ name: 'HealthBoxe', label: 'Boxe', icon: 'i-lucide-swords', to: accountScopedRoute('hub_health_boxe') }]
-    : []),
-  { name: 'HealthDieta', label: 'Dieta', icon: 'i-lucide-utensils', to: accountScopedRoute('hub_health_dieta') },
-  { name: 'HealthCorpo', label: 'Corpo', icon: 'i-lucide-ruler', to: accountScopedRoute('hub_health_corpo') },
-  { name: 'HealthDash', label: 'Análises', icon: 'i-lucide-area-chart', to: accountScopedRoute('hub_health_dash') },
-  // rodada 26: construtor de rotina (dias · semanas · meses · anos)
-  { name: 'HealthRotina', label: 'Rotina', icon: 'i-lucide-calendar-range', to: accountScopedRoute('hub_health_rotina') },
-];
+// rodada 34: MÓDULOS da Saúde liberados pra mim (admin vê tudo; lista
+// vazia = todos) — o admin marca em Configurações → HUB (Acessos) ou no
+// modal de acessos do agente
+const myHealthModules = computed(() => {
+  const perms = crmSettings.value?.agent_permissions ?? {};
+  return perms.health_modules?.[String(currentUserId.value)] ?? [];
+});
+const healthAllowed = key =>
+  isAdmin.value || myHealthModules.value.length === 0 || myHealthModules.value.includes(key);
+
+// rodada 34: menu da Saúde em GRUPOS (pedido dele: "painel lateral
+// organizado apenas", sem barra inferior) — Treinar (Treino · Cardio ·
+// Boxe) e Corpo & Dieta abrem; Meu Painel, Análises e Rotina são diretos
+const hubMenuSaude = () => {
+  const leaf = (name, label, icon, route) => ({ name, label, icon, to: accountScopedRoute(route) });
+  const groups = [
+    hubItem(),
+    leaf('HealthPainel', 'Meu Painel', 'i-lucide-gauge', 'hub_health_painel'),
+    {
+      name: 'HealthTreinar',
+      label: 'Treinar',
+      icon: 'i-lucide-dumbbell',
+      children: [
+        ...(healthAllowed('treino') ? [{ ...leaf('HealthTreino', 'Treino', 'i-lucide-dumbbell', 'hub_health'), exact: true }] : []),
+        ...(healthAllowed('cardio') ? [leaf('HealthCardio', 'Cardio', 'i-lucide-heart-pulse', 'hub_health_cardio')] : []),
+        ...(boxingOn.value && healthAllowed('boxe') ? [leaf('HealthBoxe', 'Boxe', 'i-lucide-swords', 'hub_health_boxe')] : []),
+      ],
+    },
+    {
+      name: 'HealthCorpoDieta',
+      label: 'Corpo & Dieta',
+      icon: 'i-lucide-ruler',
+      children: [
+        ...(healthAllowed('corpo') ? [leaf('HealthCorpo', 'Corpo', 'i-lucide-ruler', 'hub_health_corpo')] : []),
+        ...(healthAllowed('dieta') ? [leaf('HealthDieta', 'Dieta', 'i-lucide-utensils', 'hub_health_dieta')] : []),
+      ],
+    },
+    ...(healthAllowed('dash') ? [leaf('HealthDash', 'Análises', 'i-lucide-area-chart', 'hub_health_dash')] : []),
+    ...(healthAllowed('rotina') ? [leaf('HealthRotina', 'Rotina', 'i-lucide-calendar-range', 'hub_health_rotina')] : []),
+    ...(isAdmin.value ? [leaf('HealthAcessos', 'Acessos & recursos', 'i-lucide-shield-check', 'hub_settings_index')] : []),
+  ];
+  return groups.filter(g => !g.children || g.children.length);
+};
 
 const visibleMenuItems = computed(() => {
   // convidado só-Saúde: menu do mundo Saúde SEMPRE, sem item HUB
@@ -1271,6 +1307,7 @@ const menuItems = computed(() => {
     class="bg-n-background flex flex-col text-sm pb-px fixed top-0 ltr:left-0 rtl:right-0 h-full z-40 w-[200px] md:w-auto md:relative md:flex-shrink-0 md:ltr:translate-x-0 md:rtl:translate-x-0 ltr:border-r rtl:border-l border-n-weak"
     :class="[
       {
+        'hub-side': hubSideOn,
         'shadow-lg md:shadow-none': isMobileSidebarOpen,
         'ltr:-translate-x-full rtl:translate-x-full': !isMobileSidebarOpen,
         'transition-transform duration-200 ease-out md:transition-[width]':
@@ -1334,7 +1371,7 @@ const menuItems = computed(() => {
         >
           <span class="i-lucide-search size-4 text-n-slate-11" />
         </RouterLink>
-        <ComposeConversation align="start">
+        <ComposeConversation v-if="!hubSideOn" align="start">
           <template #trigger="{ isOpen }">
             <Button
               icon="i-lucide-pen-line"

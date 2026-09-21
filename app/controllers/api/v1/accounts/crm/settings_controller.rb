@@ -61,9 +61,18 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       perms['report_keys'] = report_keys
     end
 
+    # HUB (rodada 34): quais MÓDULOS da Saúde a pessoa vê (vazio = todos)
+    if params.key?(:health_modules)
+      mods = Array(params[:health_modules]).map(&:to_s) & Crm::AccessControl::HEALTH_MODULES
+      health_modules = perms['health_modules'] || {}
+      mods.empty? ? health_modules.delete(user_id) : health_modules[user_id] = mods
+      perms['health_modules'] = health_modules
+    end
+
     crm_settings.update!(agent_permissions: perms)
     render json: { grants: perms['grants'] || {}, menu: perms['menu'] || {},
-                   report_keys: perms['report_keys'] || {} }
+                   report_keys: perms['report_keys'] || {},
+                   health_modules: perms['health_modules'] || {} }
   end
 
   def update

@@ -160,10 +160,10 @@ const ownColor = ax => (ax.color && !DEFAULT_TONES.includes(String(ax.color).toU
 }
 /* fonte limpa, sem contorno/sombra; azul e laranja de alto contraste nos 2 modos */
 .hub-radar-label { letter-spacing: 0; stroke: none; paint-order: fill; text-shadow: none; font-family: inherit; }
-.hub-radar-label.tone-a { fill: #1f3a9c; }
+.hub-radar-label.tone-a { fill: #3b5bdb; }
 /* laranja = o mesmo LARANJA da paleta (#ff8a00), como nos números do painel */
 .hub-radar-label.tone-b { fill: #e07800; }
-:global(.dark) .hub-radar-label.tone-a { fill: #c3d0ff; }
+:global(.dark) .hub-radar-label.tone-a { fill: #9db8ff; }
 :global(.dark) .hub-radar-label.tone-b { fill: #ff8a00; }
 :global(.dark) .hub-radar-ring { stroke: rgba(195, 208, 255, 0.3); }
 :global(.dark) .hub-radar-ring.is-outer { stroke: rgba(195, 208, 255, 0.6); }
@@ -171,6 +171,6 @@ const ownColor = ax => (ax.color && !DEFAULT_TONES.includes(String(ax.color).toU
 .hub-radar-legend { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 2px; font-size: 11px; font-weight: 600; color: #334155; }
 .hub-radar-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .hub-radar-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-:global(.dark) .hub-radar-legend { color: rgba(255, 255, 255, 0.88); }
+:global(.dark) .hub-radar-legend { color: #c7d3ff; }
 @media (prefers-reduced-motion: reduce) { .hub-radar-set { animation: none; } }
 </style>

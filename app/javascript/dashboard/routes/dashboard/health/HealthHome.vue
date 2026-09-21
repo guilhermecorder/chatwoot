@@ -12,8 +12,8 @@ import { useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { useHealthAccess } from './useHealthAccess';
 import WheelInput from './WheelInput.vue';
-import HubTabBar from './HubTabBar.vue';
 import RadarChart from './HubRadar.vue';
 import {
   Chart as ChartJS,
@@ -116,7 +116,8 @@ const fetchAll = async () => {
 };
 onMounted(fetchAll);
 
-const boxingOn = computed(() => config.value.features?.boxing === true);
+const { allowed: moduleAllowed } = useHealthAccess();
+const boxingOn = computed(() => config.value.features?.boxing === true && moduleAllowed('boxe'));
 
 // ── programa, SEMANA e CICLO ─────────────────────────────────────────
 // Warrior (24 semanas, config) OU o programa pessoal ativo (rodada 25:
@@ -1093,7 +1094,7 @@ const toggleMetas = () => {
 </script>
 
 <template>
-  <div class="hub-page flex-1 overflow-auto p-4 pb-28 sm:p-6 md:pb-6">
+  <div class="hub-page flex-1 overflow-auto p-4 pb-20 sm:p-6 md:pb-6">
     <div class="max-w-5xl mx-auto">
       <div v-if="isLoading" class="flex justify-center py-16"><Spinner /></div>
       <template v-else>
@@ -1602,7 +1603,6 @@ const toggleMetas = () => {
         </div>
       </template>
     </div>
-    <HubTabBar :boxing-on="boxingOn" />
   </div>
 </template>
 

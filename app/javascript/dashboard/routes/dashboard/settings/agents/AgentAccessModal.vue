@@ -85,6 +85,28 @@ const crmSettings = useMapGetter('crm/getSettings');
 const dayMenu = ref([...DAY_DEFAULT]);
 const grants = ref([]);
 const reportKeys = ref([]); // [] = todos os relatórios
+// HUB (rodada 34): módulos da Saúde por pessoa ([] = todos)
+const HEALTH_MODULE_ITEMS = [
+  { key: 'treino', label: 'Treino' },
+  { key: 'cardio', label: 'Cardio' },
+  { key: 'boxe', label: 'Boxe' },
+  { key: 'corpo', label: 'Corpo' },
+  { key: 'dieta', label: 'Dieta' },
+  { key: 'dash', label: 'Análises' },
+  { key: 'rotina', label: 'Rotina' },
+];
+const healthModules = ref([]);
+const moduleChecked = key => healthModules.value.length === 0 || healthModules.value.includes(key);
+const toggleModule = key => {
+  if (healthModules.value.length === 0) {
+    healthModules.value = HEALTH_MODULE_ITEMS.map(m => m.key).filter(k => k !== key);
+  } else {
+    const idx = healthModules.value.indexOf(key);
+    if (idx === -1) healthModules.value.push(key);
+    else healthModules.value.splice(idx, 1);
+    if (healthModules.value.length === HEALTH_MODULE_ITEMS.length) healthModules.value = [];
+  }
+};
 const isSaving = ref(false);
 
 onMounted(async () => {
@@ -95,6 +117,7 @@ onMounted(async () => {
   const uid = String(props.agent.id);
   grants.value = [...(perms.grants?.[uid] ?? [])];
   reportKeys.value = [...(perms.report_keys?.[uid] ?? [])];
+  healthModules.value = [...(perms.health_modules?.[uid] ?? [])];
   if (perms.menu?.[uid]) {
     dayMenu.value = [...perms.menu[uid]];
   } else {
@@ -157,6 +180,7 @@ const save = async () => {
       grants: grants.value,
       menu: dayMenu.value,
       reportKeys: grants.value.includes('reports') ? reportKeys.value : [],
+      healthModules: grants.value.includes('health') ? healthModules.value : [],
     });
     useAlert('Acessos atualizados!');
     emit('close');
@@ -279,6 +303,31 @@ const save = async () => {
                 <span class="text-[11px] text-n-slate-9">{{ item.hint }}</span>
               </span>
             </label>
+
+            <!-- HUB (rodada 34): Saúde ABRE — quais módulos a pessoa vê -->
+            <div
+              v-if="item.key === 'health' && grants.includes('health')"
+              class="ml-8 mt-1 mb-2 bg-n-solid-1 border border-n-weak rounded-xl p-3"
+            >
+              <div class="flex items-center justify-between mb-1.5">
+                <p class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-10">
+                  Quais módulos da Saúde?
+                </p>
+                <button class="text-[11px] text-n-brand hover:underline" @click="healthModules = []">todos</button>
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="m in HEALTH_MODULE_ITEMS"
+                  :key="m.key"
+                  class="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors"
+                  :class="moduleChecked(m.key) ? 'bg-n-brand text-white border-n-brand' : 'text-n-slate-10 border-n-weak hover:bg-n-alpha-2'"
+                  @click="toggleModule(m.key)"
+                >
+                  {{ m.label }}
+                </button>
+              </div>
+              <p class="text-[11px] text-n-slate-9 mt-1.5">Meu Painel é de todo mundo. Boxe ainda depende do recurso ligado em Configurações → HUB.</p>
+            </div>
 
             <!-- item 62: Relatórios ABRE — escolher quais dashboards -->
             <div

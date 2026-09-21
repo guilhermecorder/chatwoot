@@ -29,6 +29,10 @@ module Crm::AccessControl
   DAY_MENU_ITEMS = %w[crm conversation agenda goals canned tasks people academy].freeze
   DAY_MENU_DEFAULT = %w[crm conversation agenda goals canned].freeze
 
+  # HUB (rodada 34): MÓDULOS do mundo Saúde que o admin libera por pessoa
+  # (lista vazia/ausente = todos). Só faz sentido com a área 'health'.
+  HEALTH_MODULES = %w[treino cardio boxe corpo dieta dash rotina].freeze
+
   private
 
   def require_capability(capability)

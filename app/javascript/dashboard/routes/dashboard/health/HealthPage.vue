@@ -12,8 +12,8 @@ import { useAlert } from 'dashboard/composables';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { useHealthAccess } from './useHealthAccess';
 import WheelInput from './WheelInput.vue';
-import HubTabBar from './HubTabBar.vue';
 import ProgramWizard from './ProgramWizard.vue';
 import HubCelebration from './HubCelebration.vue';
 import SeqPicker from './SeqPicker.vue';
@@ -106,8 +106,10 @@ const TABS_ALL = [
   { key: 'dieta', label: 'Dieta', icon: 'i-lucide-utensils' },
   { key: 'corpo', label: 'Corpo', icon: 'i-lucide-ruler' },
 ];
+// rodada 34: abas = módulos liberados pra mim (boxe também precisa do recurso ligado)
+const { allowed: moduleAllowed } = useHealthAccess();
 const TABS = computed(() =>
-  TABS_ALL.filter(t => t.key !== 'boxe' || boxingOn.value)
+  TABS_ALL.filter(t => moduleAllowed(t.key) && (t.key !== 'boxe' || boxingOn.value))
 );
 
 // ═══ RODADA 27: BOTÕES DE VISUALIZAÇÃO por aba (pedido dele 19/09:
@@ -2281,7 +2283,7 @@ onMounted(async () => {
 
 <template>
   <div class="hub-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1" :class="{ 'hub-snap': session }">
-    <div class="max-w-5xl mx-auto w-full p-4 pb-28 sm:p-8 md:pb-8">
+    <div class="max-w-5xl mx-auto w-full p-4 pb-20 sm:p-8 md:pb-8">
       <!-- Header (rodada 20: título = a aba atual; sem fileira de KPIs) -->
       <div class="flex items-center gap-3 flex-wrap mb-4">
         <span
@@ -4219,7 +4221,7 @@ onMounted(async () => {
                 class="h-8 px-3 rounded-lg text-xs font-medium text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
                 @click="openDietEditor"
               >
-                ✏️ Plano & metas
+                <span class="i-lucide-pencil hub-ico" style="width: 13px; height: 13px" /> Plano & metas
               </button>
             </div>
             <p v-if="dietCfg.notes" class="text-[11px] text-n-slate-10 mb-3">{{ dietCfg.notes }}</p>
@@ -4266,7 +4268,7 @@ onMounted(async () => {
                   </p>
                   <p v-if="meal.desc" class="text-[11px] text-n-slate-10 truncate">{{ meal.desc }}</p>
                   <p v-if="mealEquiv(meal)" class="text-[10px]" :style="{ color: ROYAL }">
-                    🍗 {{ mealEquiv(meal) }}
+                    <span class="i-lucide-drumstick hub-ico-inline" style="color: inherit" />{{ mealEquiv(meal) }}
                   </p>
                 </div>
                 <span class="text-[11px] text-n-slate-10 shrink-0 text-right">
@@ -4552,7 +4554,6 @@ onMounted(async () => {
         </template>
       </template>
     </div>
-    <HubTabBar :boxing-on="boxingOn" />
     <HubCelebration :data="celebration" @close="celebration = null" />
   </div>
 </template>

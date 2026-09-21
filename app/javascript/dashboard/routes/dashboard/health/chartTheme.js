@@ -10,7 +10,8 @@ export const isDarkMode = () =>
 
 export const applyChartTheme = () => {
   const dark = isDarkMode();
-  ChartJS.defaults.color = dark ? 'rgba(255, 255, 255, 0.88)' : '#1e293b';
+  // azul-claro no escuro / royal-profundo no claro (pedido dele 20/09)
+  ChartJS.defaults.color = dark ? '#c7d3ff' : '#27408b';
   ChartJS.defaults.borderColor = dark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.1)';
   ChartJS.defaults.font.size = 11;
   ChartJS.defaults.font.weight = '600';

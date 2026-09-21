@@ -35,19 +35,21 @@
   /* rodada 31b: neutro — branco no claro / preto no escuro, aro fino; a
      luz difusa no canto ficou só no bloco sólido (pedido dele: "sem luzes") */
   background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(var(--hb-rgb), 0.2);
+  border: 1px solid rgba(var(--hb-rgb), 0.3);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    0 12px 32px -14px rgba(var(--hb-deep-rgb), 0.22);
+    0 12px 32px -14px rgba(var(--hb-deep-rgb), 0.28);
 }
+/* rodada 34 — "mais cores, mais alegre": fio azul→laranja no topo de cada bloco */
 .hub-page .hub-block::before {
   content: '';
   position: absolute;
   inset: 0 0 auto 0;
-  height: 44%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0));
+  height: 3px;
+  background: linear-gradient(90deg, #4169e1 0%, #8fa9f5 45%, #ff8a00 100%);
   pointer-events: none;
-  z-index: 0;
+  z-index: 2;
+  opacity: 0.95;
 }
 .hub-page .hub-block::after {
   content: '';
@@ -67,14 +69,15 @@
 }
 .dark .hub-page .hub-block {
   background: rgba(16, 19, 30, 0.74);
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(143, 169, 245, 0.32);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.1),
     0 14px 34px -14px rgba(0, 0, 0, 0.6);
 }
 .dark .hub-page .hub-block::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0));
+  background: linear-gradient(90deg, #4169e1 0%, #8fa9f5 45%, #ff8a00 100%);
 }
+.hub-page .hub-block-solid::before { display: none; }
 .hub-page .hub-block-hover {
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
   cursor: pointer;
@@ -299,6 +302,7 @@
 .hub-page .hub-tag.is-on { background: var(--hb); color: #fff; border-color: transparent; }
 .hub-page .hub-tag.is-soft { background: rgba(var(--hb-rgb), 0.1); color: var(--hb-deep); border-color: transparent; height: 22px; padding: 0 7px; font-size: 10px; }
 .dark .hub-page .hub-tag { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.dark .hub-page .hub-tag.is-on { background: var(--hb); color: #fff; border-color: transparent; }
 
 .hub-page .hub-grid-2 { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 .hub-page .hub-grid-3 { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -511,9 +515,7 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 .hub-page .hub-kpi-l {
-  display: flex;
-  align-items: center;
-  gap: 5px;
+  display: block;
   font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -523,7 +525,7 @@
   line-height: 1.2;
   flex-wrap: wrap;
 }
-.hub-page .hub-kpi-l > span[class^='i-'] { width: 13px; height: 13px; flex-shrink: 0; color: var(--hb); }
+.hub-page .hub-kpi-l > span[class^='i-'] { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; margin-right: 5px; color: var(--hb); }
 .dark .hub-page .hub-kpi-l { color: rgba(255, 255, 255, 0.64); }
 .dark .hub-page .hub-kpi-l > span[class^='i-'] { color: #a9bdf7; }
 .hub-page .hub-kpi-v { font-size: 17px; font-weight: 800; line-height: 1.15; margin: 0; letter-spacing: -0.01em; color: #0f172a; }
@@ -551,17 +553,17 @@
   /* pedido dele 19/09 (3ª volta): "fundo do card PRETO no escuro, BRANCO no
      claro, sem essas luzes" — só o vidro liso com um aro fino */
   background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(15, 23, 42, 0.1);
+  border: 1px solid rgba(var(--tone-rgb), 0.38);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 1),
-    0 14px 30px -22px rgba(15, 23, 42, 0.35);
+    0 14px 30px -22px rgba(var(--tone-rgb), 0.4);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
 }
 .hub-page .hub-crystal > * { position: relative; }
 .dark .hub-page .hub-crystal {
   background: rgba(3, 4, 8, 0.82);
-  border-color: rgba(255, 255, 255, 0.28);
+  border-color: rgba(var(--tone-rgb), 0.5);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.24),
     0 18px 36px -24px rgba(0, 0, 0, 0.95);
@@ -649,7 +651,8 @@
 .dark .hub-page .hub-h { color: #fff; }
 .hub-page .hub-h > .hub-h-ico { display: inline-block; width: 22px; height: 22px; margin-right: 8px; vertical-align: -4px; }
 .hub-page .hub-h-sub { display: inline; margin-left: 6px; font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: #64748b; }
-.dark .hub-page .hub-h-sub { color: rgba(255, 255, 255, 0.62); }
+.dark .hub-page .hub-h-sub { color: #ffb25e; }
+.hub-page .hub-h-sub { color: #b85c00; }
 .hub-page .hub-sub { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
 .dark .hub-page .hub-sub { color: #fff; }
 .hub-page .hub-sub-ico { width: 16px; height: 16px; color: var(--hb); }
@@ -699,6 +702,8 @@
 .dark .hub-page .hub-h1 { color: #fff; }
 .hub-page .hub-h2 { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 800; line-height: 1.2; color: #0f172a; }
 .dark .hub-page .hub-h2 { color: #fff; }
+.hub-page .hub-h2 > .hub-h-ico, .hub-page .hub-h > .hub-h-ico { color: #4169e1; }
+.dark .hub-page .hub-h2 > .hub-h-ico, .dark .hub-page .hub-h > .hub-h-ico { color: #8fa9f5; }
 .hub-page .hub-h2 > .hub-h-ico { width: 20px; height: 20px; flex-shrink: 0; }
 /* contraste dos utilitários fracos do app dentro do HUB */
 .hub-page .border-n-weak { border-color: rgba(15, 23, 42, 0.16); }
@@ -733,3 +738,173 @@
 .dark .hub-page .t-royal .hub-preset-t b { color: #a9bdf7; }
 .hub-page .hub-preset-s { font-size: 11.5px; color: #5b6b80; line-height: 1.35; }
 .dark .hub-page .hub-preset-s { color: rgba(255, 255, 255, 0.62); }
+
+/* rodada 33 — ROTINA ajustável: relógio ±30 min, linhas do dia, treino real */
+.hub-page .hub-clock { display: inline-flex; align-items: center; height: 36px; border-radius: 12px; border: 1px solid rgba(15, 23, 42, 0.16); overflow: hidden; }
+.dark .hub-page .hub-clock { border-color: rgba(255, 255, 255, 0.22); }
+.hub-page .hub-clock-btn { width: 34px; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--hb); }
+.hub-page .hub-clock-btn:hover { background: rgba(var(--hb-rgb), 0.12); }
+.hub-page .hub-clock-btn > span { width: 16px; height: 16px; }
+.hub-page .hub-clock-l { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; font-size: 11px; font-weight: 700; color: #334155; border-left: 1px solid rgba(15, 23, 42, 0.12); border-right: 1px solid rgba(15, 23, 42, 0.12); height: 100%; }
+.dark .hub-page .hub-clock-l { color: rgba(255, 255, 255, 0.86); border-color: rgba(255, 255, 255, 0.16); }
+.hub-page .hub-clock-l > span { width: 13px; height: 13px; }
+.hub-page .hub-rt-row { display: flex; align-items: stretch; gap: 12px; padding: 10px 8px; border-radius: 12px; cursor: pointer; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
+.dark .hub-page .hub-rt-row { border-bottom-color: rgba(255, 255, 255, 0.1); }
+.hub-page .hub-rt-row:last-child { border-bottom: 0; }
+.hub-page .hub-rt-row:hover { background: rgba(var(--hb-rgb), 0.08); }
+.hub-page .hub-rt-bar { width: 4px; border-radius: 9999px; flex-shrink: 0; }
+.hub-page .hub-rt-time { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #5b6b80; width: 6.4rem; flex-shrink: 0; padding-top: 2px; }
+.dark .hub-page .hub-rt-time { color: rgba(255, 255, 255, 0.7); }
+.hub-page .hub-rt-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.hub-page .hub-rt-title { font-size: 14px; font-weight: 700; color: #0f172a; line-height: 1.25; }
+.dark .hub-page .hub-rt-title { color: #fff; }
+.hub-page .hub-rt-note { font-size: 11.5px; color: #5b6b80; }
+.dark .hub-page .hub-rt-note { color: rgba(255, 255, 255, 0.62); }
+.hub-page .hub-rt-train { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; color: #27408b; padding: 6px 10px 6px 8px; border-radius: 12px; background: rgba(65, 105, 225, 0.1); border: 1px solid rgba(65, 105, 225, 0.3); align-self: stretch; }
+.hub-page .hub-rt-train-i { flex-shrink: 0; }
+.hub-page .hub-rt-train-t { flex: 1; min-width: 0; line-height: 1.3; }
+.hub-page .hub-rt-train-t b { font-weight: 800; }
+.hub-page .hub-rt-train .hub-rt-go { flex-shrink: 0; width: 16px !important; height: 16px !important; }
+/* segmentado que quebra linha no celular (escopo do modelo) */
+.hub-page .hub-seg-wrap { display: inline-flex; flex-wrap: wrap; justify-content: center; row-gap: 4px; }
+.dark .hub-page .hub-rt-train { color: #c3d0ff; background: rgba(65, 105, 225, 0.18); border-color: rgba(143, 169, 245, 0.4); }
+.hub-page .hub-rt-train-i { width: 16px; height: 16px; }
+.hub-page .hub-rt-train .hub-rt-go { color: #ff8a00; }
+.hub-page .hub-rt-train.is-rest { color: #5b6b80; background: rgba(15, 23, 42, 0.05); border-color: rgba(15, 23, 42, 0.12); }
+.dark .hub-page .hub-rt-train.is-rest { color: rgba(255, 255, 255, 0.66); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); }
+@media (max-width: 639px) {
+  .hub-page .hub-rt-time { width: 5.6rem; font-size: 11px; }
+}
+
+/* rodada 34 — mais azul/laranja: subtítulos de seção em azul-claro, segmentados
+   com texto azul, números royal mais claros nos gráficos */
+.dark .hub-page .hub-sec-sub { color: #9db8ff; opacity: 1; }
+.hub-page .hub-sec-sub { color: #3b5bdb; opacity: 1; }
+.dark .hub-page .hub-seg-opt:not(.is-on) { color: #c3d0ff; opacity: 0.85; }
+.hub-page .hub-seg-opt:not(.is-on) { color: #27408b; opacity: 0.85; }
+.dark .hub-page .hub-num-royal { color: #9db8ff; }
+.dark .hub-page .hub-goal-v.is-royal, .dark .hub-page .hub-kpi-v.is-royal { color: #9db8ff; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   RODADA 35 — SIDEBAR "APPLE" no mundo Saúde (aside.hub-side)
+   Painel de vidro, grupos como listas agrupadas do iOS, item ativo em
+   pílula royal, ícones em royal/laranja, sem linhas de árvore.
+   ══════════════════════════════════════════════════════════════════════ */
+aside.hub-side {
+  background: rgba(246, 248, 255, 0.94) !important;
+  border-color: rgba(65, 105, 225, 0.18) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+}
+.dark aside.hub-side {
+  background: rgba(8, 10, 18, 0.94) !important;
+  border-color: rgba(143, 169, 245, 0.2) !important;
+}
+/* fio azul→laranja no topo, como nos blocos */
+aside.hub-side::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #4169e1 0%, #8fa9f5 45%, #ff8a00 100%);
+  z-index: 1;
+  pointer-events: none;
+}
+@media (max-width: 767px) {
+  aside.hub-side { width: 276px !important; }
+}
+/* busca em pílula de vidro */
+aside.hub-side a[href$='/search'] {
+  height: 36px !important;
+  border-radius: 12px !important;
+  outline: none !important;
+  background: rgba(65, 105, 225, 0.08) !important;
+  border: 1px solid rgba(65, 105, 225, 0.22);
+  font-size: 13px;
+}
+.dark aside.hub-side a[href$='/search'] {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+/* grupos = listas agrupadas (cada grupo num cartão de vidro) */
+aside.hub-side nav > ul { gap: 8px !important; padding: 2px 0; }
+aside.hub-side nav > ul > li {
+  border-radius: 16px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(65, 105, 225, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1);
+  gap: 2px !important;
+}
+.dark aside.hub-side nav > ul > li {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+/* cabeçalho do grupo / item direto */
+aside.hub-side nav > ul > li > a,
+aside.hub-side nav > ul > li > div[role='button'] {
+  height: 40px !important;
+  padding: 0 10px !important;
+  border-radius: 12px !important;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.dark aside.hub-side nav > ul > li > a,
+.dark aside.hub-side nav > ul > li > div[role='button'] { color: rgba(255, 255, 255, 0.9); }
+aside.hub-side nav > ul > li > a:hover,
+aside.hub-side nav > ul > li > div[role='button']:hover { background: rgba(65, 105, 225, 0.1) !important; }
+aside.hub-side nav > ul > li > a span,
+aside.hub-side nav > ul > li > div[role='button'] span { font-size: 14px !important; }
+/* ícones: 18px em royal (o degradê de cor do Chatwoot sai) */
+aside.hub-side nav li a svg,
+aside.hub-side nav li a [class^='i-'],
+aside.hub-side nav li div[role='button'] svg,
+aside.hub-side nav li div[role='button'] [class^='i-'] {
+  width: 18px !important;
+  height: 18px !important;
+  color: #4169e1 !important;
+}
+.dark aside.hub-side nav li a svg,
+.dark aside.hub-side nav li a [class^='i-'],
+.dark aside.hub-side nav li div[role='button'] svg,
+.dark aside.hub-side nav li div[role='button'] [class^='i-'] { color: #8fa9f5 !important; }
+/* ativo = pílula royal */
+aside.hub-side nav li a.active,
+aside.hub-side nav > ul > li > a.router-link-exact-active {
+  background: linear-gradient(135deg, #27408b, #4169e1) !important;
+  color: #fff !important;
+  box-shadow: 0 8px 18px -10px rgba(39, 64, 139, 0.7);
+}
+aside.hub-side nav li a.active svg, aside.hub-side nav li a.active [class^='i-'],
+aside.hub-side nav > ul > li > a.router-link-exact-active svg,
+aside.hub-side nav > ul > li > a.router-link-exact-active [class^='i-'] { color: #fff !important; }
+/* filhos: sem linha de árvore, recuo leve, 36px */
+aside.hub-side nav li ul { padding: 2px 0 2px 4px; gap: 2px; }
+aside.hub-side nav li ul li { margin: 0 !important; padding: 0 !important; }
+aside.hub-side nav li ul li::before, aside.hub-side nav li ul li::after { display: none !important; }
+aside.hub-side nav li ul li > a {
+  height: 36px !important;
+  padding: 0 10px 0 12px !important;
+  border-radius: 10px !important;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #334155;
+  background-image: none !important;
+}
+.dark aside.hub-side nav li ul li > a { color: rgba(255, 255, 255, 0.8); }
+aside.hub-side nav li ul li > a:hover { background: rgba(65, 105, 225, 0.1) !important; }
+aside.hub-side nav li ul li > a.active { font-weight: 700; }
+/* chevron do grupo em laranja */
+aside.hub-side nav li div[role='button'] > span[class*='chevron'],
+aside.hub-side nav li a > span[class*='chevron'] { color: #ff8a00 !important; width: 14px !important; height: 14px !important; }
+/* rodapé (perfil) em vidro */
+aside.hub-side > section:last-of-type > div:last-child {
+  border-top-color: rgba(65, 105, 225, 0.16) !important;
+  box-shadow: none !important;
+  padding: 8px 6px !important;
+}

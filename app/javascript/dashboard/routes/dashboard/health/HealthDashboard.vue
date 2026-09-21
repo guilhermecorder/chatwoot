@@ -9,7 +9,7 @@ import { useAlert } from 'dashboard/composables';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
-import HubTabBar from './HubTabBar.vue';
+import { useHealthAccess } from './useHealthAccess';
 import RadarChart from './HubRadar.vue';
 import {
   Chart as ChartJS,
@@ -48,6 +48,7 @@ const boxings = ref([]);
 const diets = ref([]);
 const bodies = ref([]);
 const dashTab = ref('visao');
+const { allowed: moduleAllowed } = useHealthAccess();
 
 const pad2 = n => String(n).padStart(2, '0');
 const toISO = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -942,7 +943,7 @@ onMounted(async () => {
 
 <template>
   <div class="hub-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
-    <div class="max-w-5xl mx-auto w-full p-4 pb-28 sm:p-8 md:pb-8">
+    <div class="max-w-5xl mx-auto w-full p-4 pb-20 sm:p-8 md:pb-8">
       <!-- Header -->
       <div class="flex items-center gap-3 flex-wrap mb-5">
         <span
@@ -957,7 +958,7 @@ onMounted(async () => {
         </div>
         <div class="flex gap-2">
           <button
-            v-for="t in [{ key: 'visao', label: 'Visão geral' }, { key: 'treino', label: 'Treino' }, ...(config?.features?.boxing === true ? [{ key: 'boxe', label: 'Boxe' }] : []), { key: 'dieta', label: 'Dieta' }]"
+            v-for="t in [{ key: 'visao', label: 'Visão geral' }, ...(moduleAllowed('treino') ? [{ key: 'treino', label: 'Treino' }] : []), ...(config?.features?.boxing === true && moduleAllowed('boxe') ? [{ key: 'boxe', label: 'Boxe' }] : []), ...(moduleAllowed('dieta') ? [{ key: 'dieta', label: 'Dieta' }] : [])]"
             :key="t.key"
             class="h-9 px-4 rounded-full text-xs font-bold border"
             :class="dashTab === t.key ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
@@ -1398,6 +1399,5 @@ onMounted(async () => {
         </template>
       </template>
     </div>
-    <HubTabBar :boxing-on="config?.features?.boxing === true" />
   </div>
 </template>

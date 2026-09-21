@@ -249,13 +249,14 @@ class CrmAPI extends ApiClient {
 
   // acessos de UM atendente (admin): áreas concedidas + menu do dia a dia.
   // Merge por usuário no servidor — nunca clobbera os demais.
-  updateAgentGrants({ userId, grants, menu, reportKeys }) {
-    return axios.post(`${this.url}/settings/update_agent_grants`, {
-      user_id: userId,
-      grants,
-      menu,
-      report_keys: reportKeys,
-    });
+  updateAgentGrants({ userId, grants, menu, reportKeys, healthModules }) {
+    // só manda as chaves informadas — o servidor mescla por usuário
+    const body = { user_id: userId };
+    if (grants !== undefined) body.grants = grants;
+    if (menu !== undefined) body.menu = menu;
+    if (reportKeys !== undefined) body.report_keys = reportKeys;
+    if (healthModules !== undefined) body.health_modules = healthModules;
+    return axios.post(`${this.url}/settings/update_agent_grants`, body);
   }
 
   // tabela de preços oficial (Espaço do Paciente + prompts da IA) — admin

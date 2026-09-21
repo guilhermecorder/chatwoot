@@ -12,6 +12,78 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 35 — 20/09 🔧 SIDEBAR "APPLE" NO MUNDO SAÚDE (working tree, NÃO subida)
+Ele: "ok, mas também quero o design apple" (no painel lateral).
+- `aside.hub-side` (classe ligada quando segmento saude e mundo Saúde ou
+  convidado só-Saúde) + estilos globais em _hub-glass.scss: painel de
+  vidro (blur, fio azul→laranja no topo), busca em pílula, cada grupo do
+  menu num cartão de vidro (lista agrupada do iOS), cabeçalhos 40 px /
+  filhos 36 px, ícones 18 px em royal (#8fa9f5 no escuro), item ativo em
+  pílula com degradê royal, chevron laranja, sem linhas de árvore, rodapé
+  do perfil em vidro, gaveta do celular com 276 px; botão "nova conversa"
+  some no mundo Saúde. SidebarGroup: filho com `exact: true` (Treino em
+  /health) só acende no caminho exato — antes acendia junto com o Painel.
+- Testado: notebook (escuro) e gaveta no celular.
+
+## RODADA 34 — 20/09 🔧 ACESSOS POR PESSOA + SIDEBAR EM GRUPOS (sem barra inferior) + MAIS COR (working tree, NÃO subida)
+Pedidos dele 20/09: "azul mais claro nas fontes dos gráficos; trazer o
+painel lateral do CEVICO, remover a barra inferior, deixar só o painel
+lateral organizado; o admin precisa controlar quem tem acesso a quê
+(ex.: nem todo mundo precisa do boxe)"; depois: "mais cores, mais alegre,
+use o nosso azul e laranja um pouco mais".
+- **Acessos por pessoa**: em cima das concessões do CEVICO
+  (`agent_permissions`): nova lista `health_modules[user_id]` (treino ·
+  cardio · boxe · corpo · dieta · dash · rotina; vazia = todos). Backend:
+  `HEALTH_MODULES` no Crm::AccessControl, `update_agent_grants` aceita
+  `health_modules` (mescla por usuário). Front: `useHealthAccess.js`
+  (isAdmin/allowed), guard em routes/index.js (`healthRouteAllowed` →
+  volta pro Meu Painel), abas do HealthPage/HealthDashboard filtradas,
+  boxe do painel só com módulo. Modal "Acessos" do agente ganhou "Quais
+  módulos da Saúde?" (chips, "todos"). Configurações → HUB virou
+  "Recursos" + "ACESSOS POR PESSOA": cartão por pessoa (não-admin) com
+  chave Saúde + chips dos 7 módulos, salva a cada toque.
+- **Sidebar**: menu da Saúde em GRUPOS (Meu Painel · Treinar [Treino,
+  Cardio, Boxe] · Corpo & Dieta [Corpo, Dieta] · Análises · Rotina ·
+  Acessos & recursos [admin]) filtrados pelos módulos. HubTabBar.vue
+  APAGADA (barra inferior fora nas 4 telas; hambúrguer volta pra todos;
+  pb-28 → pb-20).
+- **Cor**: fio azul→laranja de 3 px no topo de cada `.hub-block` (não no
+  sólido), bordas dos blocos/cards tingidas (royal / tom do card), ícones
+  dos títulos em royal, subtítulos de seção em azul-claro, `.hub-h-sub`
+  laranja, segmentados com texto azul; gráficos: rótulos da teia
+  #9db8ff (escuro) / #3b5bdb (claro), Chart.js texto #c7d3ff / #27408b.
+
+## RODADA 33 — 20/09 🔧 ROTINA AJUSTÁVEL + AUDITORIA DAS PEÇAS QUE FALTAVAM (working tree, NÃO subida)
+Ele (20/09): "implantei, ficou legal. como podemos melhorar?" → lista de 6
+(1 rotina ajustável · 2 auditoria claro/peças · 3 teias que abrem · 4
+gráfico padrão · 5 dividir HealthPage · 6 convidado). "Vamos iniciar 1 e
+2, mas eu realmente quero fazer todos."
+- **1 · Rotina ajustável** (RoutinePage): ESCOPO do modelo (segmentado:
+  só este dia · seg–sex · sáb–dom · semana toda — na semana toda, sáb–dom
+  recebem o modelo de fim de semana); RELÓGIO ±30 min (`shiftDay`: todos
+  os blocos do dia andam juntos, meia-noite dá a volta) ao lado de
+  "Modelos"; o bloco "Treino" (cat saude, título com "treino", sem
+  cardio/boxe) mostra o TREINO REAL do dia — sessão do programa ativo
+  pra aquele dia da semana (`sessionFor` casa `weekday`), "Treino A ·
+  semana 3 de 8 · 6 exercícios" com ▶ que abre a sessão
+  (`hub_health?start=A`); dia sem sessão → "sem treino programado".
+  Linha do tempo em vidro, linhas do dia maiores (`.hub-rt-*`).
+- **2 · Peças**: ProgramWizard (p-5/mb-8, `.hub-h2`, cards `.hub-crystal`,
+  lixeira e botões sem emoji), HubCelebration ("Continuar" sem ✨), Dieta
+  (lápis e coxa em lucide). AUDITORIA NO MODO CLARO feita (celular):
+  Painel, Treino (sessão), Corpo, Boxe, Análises, Dieta e Rotina — tudo
+  legível; corrigidos no caminho: etiqueta do treino na Rotina (regra de
+  ícone encolhia o texto), rótulo dos tiles das Análises (ícone em linha).
+- TESTADO local (escuro + claro): modelos com escopo (segmentado quebra
+  linha no celular), relógio −30/+30 (05:30→05:00 e 22:00→21:30, revertido
+  em seguida — a rotina dele ficou como estava), etiqueta "Treino A ·
+  semana 24 de 24 · 5 exercícios" com ▶ na segunda-feira.
+- Nota de ambiente 20/09: Docker Desktop estava desligado (`open -a
+  Docker` + `docker compose up -d`); o Vite reinstalou as dependências
+  (~5 min) e a 1ª visita de cada tela demora ~30 s; o painel do
+  navegador novo cai na porta do HUB até escolher o mundo (localStorage
+  `hub_mode`).
+
 ## SUBIDA 19/09 (noite) — RODADAS 31–32: "pode subir" → commit 140ccbae37 na
 feat/hub-saude → push → docker-build por workflow_dispatch (run
 35477237985) VERDE → **etiqueta `140ccba`** (sem migration). IMPLANTADA

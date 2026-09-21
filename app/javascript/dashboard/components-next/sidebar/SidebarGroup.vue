@@ -191,6 +191,9 @@ const activeChild = computed(() => {
   return navigableChildren.value.find(child => {
     if (!child.to) return false;
     const childPath = resolvePath(child.to);
+    // HUB: item com `exact` (ex.: Treino em /health, prefixo de todas as
+    // rotas da Saúde) só acende no caminho exato
+    if (child.exact) return route.path === childPath;
     return route.path === childPath || route.path.startsWith(`${childPath}/`);
   });
 });

@@ -52,6 +52,36 @@ const cevicoRouteAllowed = async (to, isAdminRole) => {
   return needed.some(capability => grants.includes(capability));
 };
 
+// HUB (rodada 34): módulos da Saúde por pessoa — rota de módulo não
+// liberado volta pro Meu Painel da Saúde (lista vazia = todos)
+const HEALTH_ROUTE_MODULE = {
+  hub_health: 'treino',
+  hub_health_cardio: 'cardio',
+  hub_health_boxe: 'boxe',
+  hub_health_corpo: 'corpo',
+  hub_health_dieta: 'dieta',
+  hub_health_dash: 'dash',
+  hub_health_rotina: 'rotina',
+};
+const healthRouteAllowed = async (to, isAdminRole) => {
+  const key = HEALTH_ROUTE_MODULE[to.name];
+  if (!key || isAdminRole) return true;
+  let settings = store.getters['crm/getSettings'];
+  // no 1º carregamento o store nasce com agent_permissions = {} (vazio, mas
+  // truthy) — por isso o teste é pelo conteúdo, não pela presença
+  if (!Object.keys(settings?.agent_permissions ?? {}).length) {
+    try {
+      await store.dispatch('crm/fetchSettings');
+    } catch {
+      return true;
+    }
+    settings = store.getters['crm/getSettings'];
+  }
+  const userId = String(store.getters.getCurrentUserID);
+  const mods = settings?.agent_permissions?.health_modules?.[userId] ?? [];
+  return mods.length === 0 || mods.includes(key);
+};
+
 export const router = createRouter({ history: createWebHistory(), routes });
 
 // CEVICO: a primeira navegação após abrir/logar cai no Meu Painel (inicio),
@@ -100,6 +130,9 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
 
   if (!(await cevicoRouteAllowed(to, isAdmin))) {
     return next(frontendURL(`accounts/${routeAccountId}/dashboard`));
+  }
+  if (!(await healthRouteAllowed(to, isAdmin))) {
+    return next(frontendURL(`accounts/${routeAccountId}/health/painel`));
   }
 
   // tela inicial do sistema = Meu Painel
