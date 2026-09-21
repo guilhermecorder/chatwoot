@@ -89,4 +89,28 @@ RSpec.describe Crm::ResponderAgentService do
                                 contact: contact, creator: admin)
     expect(service.send(:context_block)).to include("(id #{own.id})")
   end
+
+  # 21/09: o 🧪 Testar agente funciona com o interruptor DESLIGADO (é para antes de ligar)
+  describe 'interruptor desligado' do
+    let(:conversation) { create(:conversation, account: account) }
+
+    before do
+      settings = CrmSetting.find_or_create_by!(account: account)
+      cfg = settings.ai_config || {}
+      cfg['api_key'] = 'sk-teste'
+      cfg['agents'] = (cfg['agents'] || {}).merge('atendente_agendamento' => { 'enabled' => false })
+      settings.update!(ai_config: cfg)
+    end
+
+    it 'sem simulation, recusa' do
+      result = described_class.new(conversation: conversation, agent_key: 'atendente_agendamento').call
+      expect(result[:error]).to eq('Agente desligado.')
+    end
+
+    it 'com simulation, passa da trava do interruptor (para antes da IA na conversa vazia)' do
+      service = described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', simulation: true)
+      allow(service).to receive(:build_transcript).and_return(nil)
+      expect(service.call[:error]).to eq('Conversa vazia.')
+    end
+  end
 end

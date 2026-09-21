@@ -6198,6 +6198,12 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   o card em sombra, escolher colunas; testar por voz no painel da ElevenLabs. Ao vivo de verdade depende
   do número na ElevenLabs (Meta/Henrique) + CEVICO_RESPONDERS_LIVE.
 
+## 196. 🧪 TESTAR AGENTE COM O INTERRUPTOR DESLIGADO (feedback 21/09 pós-deploy da 195) — CORRIGIDO, aguarda "pode subir"
+- "Só consigo testar os agentes se estiverem ligados; o ideal é testar com ele desligado." O motor recusava
+  com "Agente desligado." antes do simulador. Agora `Crm::ResponderAgentService` aceita `simulation: true`
+  (só o `Crm::AgentSimulator` passa) e ignora o interruptor nesse caso; o atendimento real continua
+  exigindo o interruptor ligado. Spec em responder_agent_service_spec. Deploy WEB só.
+
 ## 194. 🩹 LEMBRETE DE VÉSPERA JOGAVA O PACIENTE EM "ENVIO DE ORÇAMENTO" (feedback da Vaneide 21/09) — CORRIGIDO, SEM commit, aguarda "pode subir"
 - Sintoma: "todos os pacientes que vêm como uma nova janela de confirmação de consulta estão vindo
   como orçamento enviado". Causa (pelo código; a configuração real das automações não pôde ser

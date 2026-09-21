@@ -44,7 +44,7 @@ class Crm::AgentSimulator
       content: text.to_s.strip, sender: conversation.contact
     )
     # simulador é sempre SOMBRA: as ferramentas (rodada 192) só simulam, nada escreve na Agenda
-    result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: @agent_key, live: false).call
+    result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: @agent_key, live: false, simulation: true).call
     return { error: result[:error] } if result[:error]
 
     Crm::ResponderAgentJob.write_shadow_note!(conversation, @agent_key, result, message.id)

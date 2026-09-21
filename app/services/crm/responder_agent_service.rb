@@ -66,15 +66,18 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   attr_reader :agent_key
 
   # live: false (sombra/simulador) = nenhuma ferramenta escreve na Agenda
-  def initialize(conversation:, agent_key:, live: false)
+  # simulation: true = 🧪 Testar agente (caixa interna, nada sai): roda MESMO com o
+  # interruptor desligado — o teste é justamente para antes de ligar (pedido 21/09)
+  def initialize(conversation:, agent_key:, live: false, simulation: false)
     @conversation = conversation
     @account = conversation.account
     @agent_key = agent_key.to_s
     @live = live == true
+    @simulation = simulation == true
   end
 
   def call # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-    return { error: 'Agente desligado.' } if agent_paused?
+    return { error: 'Agente desligado.' } if agent_paused? && !@simulation
     return { error: 'Configure a chave da API em Integrações → Claude.' } if api_key.blank?
 
     transcript = build_transcript
