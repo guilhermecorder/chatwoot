@@ -1,4 +1,5 @@
 <script setup>
+import { useAlert } from 'dashboard/composables';
 // Meu Painel (tela inicial) — visível para admin E atendentes.
 // Boas-vindas, avisos do Radar, indicadores por período (régua padrão:
 // hoje/ontem/últimos 7/mês/ano/personalizado) e a saúde da agenda —
@@ -2241,6 +2242,39 @@ const waitingLabel = alert => {
   return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')} sem resposta`;
 };
 // atalhos no formato do card do CRM (iniciais + Espaço do Paciente)
+// 🔧 rodada 192: avisos que não vêm do Radar de IA têm rótulo próprio —
+// ligação perdida (167), "não vou" da jornada (168) e as ações do Atendente
+// Pós-agendamento ao vivo (remarcou / cancelou na Agenda)
+const ALERT_KIND_META = {
+  missed_call: {
+    icon: 'i-lucide-phone-missed',
+    label: 'Ligação perdida',
+    color: '#dc2626',
+  },
+  journey_reply: {
+    icon: 'i-lucide-calendar-x',
+    label: 'Respondeu "não vou"',
+    color: '#d97706',
+  },
+  agente_remarcou: {
+    icon: 'i-lucide-calendar-clock',
+    label: 'Agente remarcou a consulta',
+    color: '#0f5fa6',
+  },
+  agente_cancelou: {
+    icon: 'i-lucide-calendar-off',
+    label: 'Agente cancelou a consulta',
+    color: '#b91c1c',
+  },
+};
+const alertKindMeta = alert => ALERT_KIND_META[alert?.kind] || null;
+const isAgentAlert = alert => String(alert?.kind || '').startsWith('agente_');
+const openAgendaFromAlert = alert =>
+  router.push({
+    name: 'agenda_board',
+    params: { accountId: accountId.value },
+    query: alert?.task_id ? { task: alert.task_id } : {},
+  });
 const alertInitials = alert =>
   (alert.contact_name || '?')
     .split(' ')
@@ -3677,9 +3711,26 @@ class="text-xs"/></span>
                             </span>
                           </div>
                           <div
-                            v-if="radarFront.stage_name || radarFront.user_name"
+                            v-if="
+                              alertKindMeta(radarFront) ||
+                              radarFront.stage_name ||
+                              radarFront.user_name
+                            "
                             class="flex flex-wrap gap-1"
                           >
+                            <span
+                              v-if="alertKindMeta(radarFront)"
+                              class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-semibold text-white"
+                              :style="{
+                                background: alertKindMeta(radarFront).color,
+                              }"
+                            >
+                              <span
+                                :class="alertKindMeta(radarFront).icon"
+                                class="text-[11px]"
+                              />
+                              {{ alertKindMeta(radarFront).label }}
+                            </span>
                             <span
                               v-if="radarFront.stage_name"
                               class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded"
@@ -3755,10 +3806,23 @@ class="text-xs"/></span>
                                 pular ↷
                               </button>
                               <button
+                                v-if="isAgentAlert(radarFront)"
+                                class="text-[11px] font-semibold px-2.5 py-1.5 rounded-full border transition-colors hover:bg-slate-50"
+                                style="border-color: #bfdbfe; color: #1d4ed8"
+                                title="Conferir a consulta na Agenda"
+                                @click.stop="openAgendaFromAlert(radarFront)"
+                              >
+                                📅 Agenda
+                              </button>
+                              <button
                                 class="cevico-energy-btn text-xs font-bold text-white px-3.5 py-1.5 rounded-lg"
                                 @click.stop="attendNow(radarFront, $event)"
                               >
-                                Atender agora →
+                                {{
+                                  isAgentAlert(radarFront)
+                                    ? 'Ver conversa →'
+                                    : 'Atender agora →'
+                                }}
                               </button>
                             </div>
                           </div>

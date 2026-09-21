@@ -6125,6 +6125,279 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   seguro principal (as tabelas cevico_ad_* + storage/ vão no pg_dump/volume).
 
 
+## 189. 🍎 AGENTES DE IA NO KIT CEVICO — hub Automações no design Apple + "Passos desta etapa" (pedido 21/09: "atualizar este ambiente dos agentes com o nosso estilo apple atualizado")
+- Hub Automações inteiro dentro do kit `.cv-page` (paleta por escopo
+  `automations`, banner `CevicoHero` com olho/dia/paleta, abas em segmento
+  `cv-seg` que embrulham no celular). O hub passou a rolar inteiro (banner +
+  abas + conteúdo), como os Relatórios.
+- Aba Agentes de IA: Gasto (vidro cristalino, número grande, uma linha
+  `cv-row` por agente), Roteiro CEVICO (bloco dourado `cv-gold`, seções em
+  segmento, textareas `cv-input`, botões do kit), cards de agente = `cv-block`
+  na COR DO PRÓPRIO AGENTE (`agentVars(key)` → variáveis --cv* a partir do
+  AGENT_META), chips `cv-chip` (etiqueta, Ligado/Desligado, Rascunho, Ver
+  fluxo), interruptor `cv-switch cv-switch-lg` (novo no kit). Corpo dos 19
+  agentes convertido por passada mecânica (scripts em tmp da sessão):
+  sub-caixas `cv-sub`, tiles `cv-stat`, avisos coloridos → vidro com texto de
+  contraste, "botões em linha" `cv-chip cv-chip-lg` + `cv-chip-on` (novo no
+  kit), selects/inputs `cv-input`, escolhas da Colheitadeira `cv-choice`,
+  rodapé Editar / Salvar rascunho / Publicar no kit.
+- Campo "Prompt do agente" dos respondedores (Atendente de Agendamento e
+  Pós-agendamento) renomeado para "Passos desta etapa" (12 linhas visíveis):
+  é ali que mora o passo a passo 1→8 (recepção → sondagem → autoridade →
+  orçamento → objeções → agendamento → reagendamento → pós-consulta); o
+  Roteiro CEVICO (5 seções) entra antes, igual para todos. Texto do card do
+  Roteiro explica isso.
+- Kit `_cevico-glass.scss`: `.cv-chip-on`, `.cv-switch-lg`, `.cv-switch:disabled`.
+- 21/09 (3ª passada, feedback dele): rótulo do interruptor = Ligado/Desligado (era "salva na
+  hora"); card que abre ganha anel pulsando na cor dele e a página rola até ele; "análise(s)"
+  virou "resposta(s)" nos agentes que conversam (chamada(s) à IA no total); bloco no card dos
+  atendentes explicando a Sombra em uma frase + "Comandos para desligar a IA" (responder = pausa,
+  👍 = reativa, interruptor = tudo) — conferido por spec (3 exemplos ao vivo em
+  crm_listener_responders_spec). Mentor do Time no Meu Painel fica como está (pedido dele).
+- 21/09 (tarde, 2ª passada, pedido dele com prints): abas do hub ALINHADAS
+  com o conteúdo (o kit fixa max-width em `.cv-seg`, faltava o embrulho
+  max-w-5xl) + agentes em CARDS compactos como a Central (`Cards | Lista`,
+  lembrado no navegador; grade auto-fill 15,5 rem; card fechado = ícone,
+  interruptor, nome, chips, descrição em 3 linhas, "30 d: análises · custo",
+  botão Abrir; clicado = ocupa a linha inteira com o corpo completo, seta
+  recolhe). Lista = o formato anterior. Verificado 1280 e 375.
+- Verificado no navegador (conta 3; 1280 claro e escuro; 375 celular): sem
+  rolagem lateral; cards Atendente de Agendamento, Colheitadeira, Copywriter e
+  Auditor abertos e íntegros; lint rodado no contêiner vite (avisos de
+  tradução/estilo inline são os mesmos de antes nas telas CEVICO).
+- Deploy = WEB só, sem migration; reversão = etiqueta anterior. Sobe JUNTO com
+  o item 188 (mesmo arquivo AutomationsHub.vue).
+- Fora desta rodada: aba Painel dos agentes (AiAgentsDashboard.vue) e as
+  outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
+  só o banner, as abas novas e o contraste de texto do kit).
+
+## 194. 🩹 LEMBRETE DE VÉSPERA JOGAVA O PACIENTE EM "ENVIO DE ORÇAMENTO" (feedback da Vaneide 21/09) — CORRIGIDO, SEM commit, aguarda "pode subir"
+- Sintoma: "todos os pacientes que vêm como uma nova janela de confirmação de consulta estão vindo
+  como orçamento enviado". Causa (pelo código; a configuração real das automações não pôde ser
+  lida daqui — sem chave SSH neste Mac): o lembrete D-1 sai por `Crm::SendTemplateService`; se o
+  paciente ainda não tinha card, `CrmListener#conversation_created` criava o card em "Novos
+  Contatos", e a mensagem ENVIADA do lembrete disparava a automação de coluna "mensagem enviada →
+  mover para Envio de Orçamento" (feita para quando a ATENDENTE manda o orçamento).
+- Correção (2 camadas): (1) toda mensagem que sai pelo SendTemplateService (lembretes, réguas,
+  campanhas, colheita, ferramentas de voz) leva `additional_attributes.cevico_auto`; o gatilho
+  "mensagem criada" das automações de coluna IGNORA mensagens automáticas enviadas (cevico_auto /
+  cevico_journey / cevico_followup_bot_id / cevico_ia_agent) — a menos que a automação tenha
+  `action_config.include_automated = true`. (2) paciente com consulta FUTURA na Agenda que ganha
+  card novo entra na coluna "Ao agendar, mover o card para" do Atendente de Agendamento (se
+  configurada no mesmo funil), não em Novos Contatos.
+- Specs: spec/listeners/crm_listener_automated_messages_spec.rb (6 verdes). Deploy WEB+SIDEKIQ.
+  Conferir com a Vaneide após o deploy; se ainda acontecer, olhar as automações da coluna
+  "Novos Contatos" (Automações → Modo Programação) — pode haver outra regra movendo o card.
+
+## 191. 🎯 OTIMIZAÇÃO DOS ATENDENTES — "eu mesmo jogo orientações" (pedido 21/09) — CONSTRUÍDO 21/09 ("pode construir os 3"), SEM commit, aguarda "pode subir"
+- Pedido: um ambiente onde ele analisa as conversas (reais e as do 🧪 Testar
+  agente), marca uma resposta do agente, escreve a resposta melhor / uma
+  orientação, e isso vira atualização do Roteiro ou dos Passos da etapa,
+  agente por agente. Substitui a proposta 190 (que era só automática).
+- Desenho proposto: (1) em QUALQUER balão do agente (Sombra, Testar agente e
+  conversa real com nota de sombra) um botão "✍️ Orientar": abre um modal com
+  o trecho, a resposta do agente e dois campos: "como deveria responder" e
+  "regra para o futuro" (1 frase) + escolha da seção destino (Roteiro:
+  persona / forma / dados / objeções / humano, ou Passos do agente X);
+  (2) tela "Orientações" na aba Agentes de IA: fila com as orientações
+  (pendente → aplicada), botão "Aplicar no Roteiro" que insere o texto na
+  seção escolhida e grava VERSÃO do Roteiro (histórico + voltar), e "Testar
+  de novo" que reabre o simulador com a mesma conversa; (3) opcional: a IA
+  reescreve a orientação no tom do Roteiro antes de aplicar (você confirma).
+- Dados no NOSSO Postgres: `crm_agent_guidances` (conta, agente, conversa,
+  mensagem, texto do agente, resposta ideal, regra, seção, status, autor) +
+  `crm_script_versions`. Migration → BACKUP antes.
+- Sinais automáticos (👎 da Sombra, chamar_humano, objeção sem resposta)
+  entram na mesma fila como "sugestões" — sem aplicar nada sozinhos.
+
+## 192. 🗓️ ATENDENTE PÓS-AGENDAMENTO DE VERDADE — consulta a Agenda, remarca, avisa (pedido 21/09: "tem potencial, mas no momento é inútil") — CONSTRUÍDO 21/09, SEM commit, aguarda "pode subir"
+- O que falta hoje (visto no teste dele): o motor só injeta a consulta futura
+  do PRÓPRIO contato; se a consulta é de terceiro (mãe Maísa) ou o cadastro
+  não bate, o agente não acha nada e chama humano. Não busca pela Agenda.
+- Construir FERRAMENTAS (tool use da Claude) no motor dos respondedores:
+  `buscar_consulta(nome | telefone | dia)` na Agenda interna (inclusive
+  terceiros: "minha mãe, Maísa, hoje"), `remarcar_consulta(id, dia, hora,
+  unidade)` só para vagas LIVRES, `cancelar_consulta(id, motivo)`,
+  `confirmar_presenca(id)`. Em SOMBRA as ferramentas só leem; ao vivo
+  escrevem na Agenda e movem o card.
+- Depois de remarcar/cancelar: aviso no Meu Painel da pessoa responsável
+  (reaproveitar os avisos do Radar) + nota na conversa + etiqueta.
+- Objetivo dele: "reduzir a necessidade do humano" — as meninas ficam na
+  conferência e no atendimento humano quando precisar.
+
+## 193. 🌙 AGENDAR SEM HUMANO NOS FINS DE SEMANA (pedido 21/09, gráfico de 294 consultas com vales aos sábados/domingos) — CONSTRUÍDO 21/09 (janela ao vivo por dia), SEM commit, aguarda "pode subir"
+- Já existe no card do Atendente de Agendamento o campo "Horário em que
+  atende sozinho" e o modo Ao vivo (trancado até a Rodada 2). Caminho: Rodada
+  2 = ligar AO VIVO primeiro só na janela sem humano (sáb/dom e noite), com o
+  N8N desligado nessa janela; medir consultas agendadas na janela × antes.
+  Precisa: (a) alguns dias de Sombra com 👍 na maioria; (b) destravar
+  LIVE_ENABLED com janela por dia da semana (hoje é só hora início/fim).
+- Rodada 3 = tudo, 24 h, com o agente B (192) cobrindo pré-consulta.
+
+### FEITO 21/09 (191 + 192 + 193, três frentes em paralelo; spec em ~/Desktop/CLAUDE CODE/CEVICO/docs/RODADA_191_193_SPEC.md)
+- **192 backend:** `Crm::ResponderTools` (buscar_consulta / remarcar_consulta / cancelar_consulta /
+  confirmar_presenca; terceiros por nome+dia; em SOMBRA nunca escreve, devolve `simulado: true`; ao vivo
+  = lock Redis + slot_available? + update da task + nota 🔁), laço de tool use em
+  `Crm::ResponderAgentService` (máx 5 voltas, `tools` + json_schema convivem no gem 1.55, uso registrado
+  por volta), campo `acoes` (montado pelo sistema) na nota de sombra / Testar agente / tela Sombra
+  ("🔧 buscou consulta: 2 encontradas (Maísa, hoje 08:30) · remarcaria …"), `Crm::AgentAlert`
+  (kinds agente_remarcou / agente_cancelou na lista do Radar, TTL 24 h, painel do responsável da
+  consulta) + `RadarExtraAlerts`, STAGE_PROMPTS dos dois atendentes com o bloco FERRAMENTAS. Teste real
+  em sombra na conta 3: achou a consulta da mãe, pediu os 4 dígitos p/ desambiguar, ofereceu vagas reais
+  e "remarcaria" (simulado). Caminho AO VIVO só por spec (stub) — primeiro ao vivo real deve ser numa
+  janela curta, com N8N desligado.
+- **193 backend:** `LIVE_ENABLED` = variável de ambiente `CEVICO_RESPONDERS_LIVE=true` (21/09, "ir com
+  calma": sem a variável no EasyPanel, web E sidekiq, nenhum atendente fala com paciente, a tela mostra
+  o cadeado e o backend recusa "Ao vivo" com 422; deploy sem a variável = tudo em sombra); `mode: live` + `live_days` (0..6, vazio = todos) +
+  hours_start/end (vira a noite); fora da janela = sombra; ao vivo exige caixa marcada (422).
+- **191 backend:** migration `20260921120000` (crm_agent_guidances + crm_script_versions → BACKUP
+  ANTES em produção), `Crm::AgentGuidance` (apply! = foto do Roteiro → linha no fim da seção → applied;
+  `from_shadow_note!` no 👎 da Sombra), `Crm::ScriptVersion` (snapshot!/restore!, grava no prompt
+  PUBLICADO do agente), controllers agent_guidances (index/create/update/destroy/apply/ignore/reopen) e
+  script_versions (index/restore), rotas, snapshot automático ao salvar o Roteiro na tela.
+- **Telas:** segmento Sombra | Ao vivo real + chips dos dias + frase por extenso + aviso do N8N + tile
+  Situação (Ao vivo agora / Sombra fora da janela); `GuidancesPanel.vue` abaixo do Roteiro (filtros,
+  Aplicar/Editar/Ignorar/Testar de novo/Reabrir); `GuidanceModal.vue` ("✍️ Orientar" em cada balão do
+  Testar agente e em cada item da Sombra); chips 🔧 das ferramentas; "🕘 Histórico" no Roteiro com
+  "Voltar para esta"; avisos agente_* no Meu Painel (chip, 📅 Agenda, Ver conversa). Verificado claro/
+  escuro/375. Fix de passagem: import de useAlert faltando em InicioPage.vue.
+- Specs: 44 (frente A) + 18 (frente B) + 6 (listener, adapter :test forçado) = verdes. Deploy =
+  WEB + SIDEKIQ, com migration (backup antes); reversão = etiqueta anterior. Pós-deploy: deixar em
+  sombra alguns dias; primeiro ao vivo = janela curta de fim de semana com N8N desligado.
+
+## 190. 🎓 PROPOSTA — AMBIENTE DE APRENDIZADO DOS ATENDENTES DE IA (pergunta 21/09: "é possível ter um ambiente em que o agente aprenda?") — AGUARDA DECISÃO
+- Recomendação: SIM, mas aprendizado SUPERVISIONADO — nunca a IA reescrevendo
+  o próprio Roteiro sozinha (clínica: valor, horário ou orientação errada custa
+  caro). Ciclo: o sistema COLETA sinais → a IA PROPÕE mudanças no Roteiro →
+  o admin APROVA → vira versão nova do Roteiro (com histórico e "voltar").
+  Tudo no NOSSO Postgres; Supabase só existe por causa do N8N e some com ele.
+- Sinais coletados sozinhos: 👎 da tela Sombra (com a nota), conversas em que
+  o humano assumiu (chamar_humano) e o que o humano respondeu, pergunta do
+  paciente sem resposta no Roteiro (objeção nova), agendamento que falhou
+  (vaga inválida), "não" logo depois do orçamento, paciente que repetiu a
+  pergunta.
+- Tela "Aprendizado" na aba Agentes de IA: fila de lições (uma por sinal:
+  trecho da conversa · o que o agente disse · o que o humano/admin diria ·
+  sugestão de texto para a seção certa do Roteiro) com Aprovar / Editar /
+  Ignorar; aprovar = atualiza a seção (objeções, dados oficiais, passos) e
+  grava versão. Painel: lições da semana, objeções novas, % aprovadas.
+- O Mentor do Time (já existe, roda semanal) gera as sugestões em lote a partir
+  dos sinais; o Auditor de Conversas já dá nota — reaproveitar.
+- Migration: tabela `crm_agent_lessons` + `crm_script_versions` → BACKUP antes.
+- Limpeza de banco: NÃO precisa. O motor lê só as últimas 40 mensagens da
+  conversa + Roteiro; nada se acumula (o "Deletar conteúdo" do N8N existia
+  porque lá a memória ficava em tabelas separadas no Supabase).
+
+## 188. 🗣️ ATENDENTE DE AGENDAMENTO INTERNO — Rodada 1 (SOMBRA) + Roteiro CEVICO (pedido 20/09, noite; "pode construir. dê o seu melhor. precisa ser seguro e visualmente controlável")
+- Objetivo: internalizar o agente de agendamento do WhatsApp (hoje fluxo N8N
+  externo, ~15% de conversão, fecha mal no Google Calendar) em agentes DENTRO
+  do sistema, por coluna do CRM, com UMA fonte (o Roteiro). Desenho completo em
+  ~/Desktop/CLAUDE CODE/CEVICO/docs/AGENTE_AGENDAMENTO_DESENHO_2026-09-20.md.
+- 📜 ROTEIRO CEVICO (`Crm::CevicoScript`): fonte única dos respondedores em 5
+  seções (persona · regras de forma · dados oficiais · objeções · passar p/
+  humano), destilado do Supervisor v19 do N8N (26/08, Tatuapé 5 min); valores
+  de cirurgia vêm da Tabela de preços oficial ({{TABELA_DE_PRECOS}}). Editável
+  em Automações → Agentes de IA (card dourado no topo): abas por seção, texto
+  vigente × padrão, "restaurar padrão", salva na hora (`ai_config.script`,
+  seção vazia = padrão). Bloco da ETAPA por agente = campo "prompt" do card
+  (`STAGE_PROMPTS`). Prompt final = Roteiro + etapa + RESPONDER_GUARDRAIL.
+- 🧠 MOTOR (`Crm::ResponderAgentService`): um serviço para todo agente que fala
+  com paciente; contexto vivo injetado (agora, nome/telefone do contato, coluna
+  do card, vagas LIVRES via `Crm::AgendaSlots` 12 dias × 4/janela, consulta
+  futura via `AppointmentRecorder.future_appointment`, últimas 40 msgs com
+  marcadores [áudio]/[imagem]); saída JSON: mensagens (≤3), etapa, agendar +
+  agendamento, pausar, chamar_humano, leitura (1 frase p/ a equipe).
+  `Crm::AiAgentConfig` ganhou `agent_key` (chave dinâmica) + RECOMMENDED
+  (Sonnet 5/médio) + RESPONDER_AGENTS.
+- ⚙️ JOB (`Crm::ResponderAgentJob`, 12 s de espera, anti-picada): modo SOMBRA =
+  nota interna de ATIVIDADE privada "🕶️ Sombra · teria respondido 1) 2) 3) ·
+  agendaria dia/hora/unidade (vaga válida ✓/✗) · chamaria humano · leitura",
+  com `additional_attributes.cevico_ia_shadow`; NADA sai ao paciente, nada é
+  agendado, card não se move, sem pausa. Teto de CONVERSAS/dia na sombra
+  (`shadow_daily_cap`, padrão 30; mesma conversa conta 1). Registro de atividade
+  em `ai_config.atendente_agendamento_state` (events + shadow_days, 7 dias).
+  Modo AO VIVO já escrito na ORDEM SEGURA (trava vaga → confere → grava na
+  Agenda → SÓ ENTÃO 😊 → move card p/ `after_booking_stage_id` → pausa; vaga
+  sumiu = pede outro período; janela de horas; teto 60 msgs/dia; travessão
+  removido antes de enviar) mas TRANCADO por `LIVE_ENABLED = false` (backend
+  recusa mode=live com 422; a tela mostra "Ao vivo · Rodada 2" com cadeado).
+- 🧭 ROTEAMENTO (`CrmListener#handle_responder_agents`): a COLUNA do card decide
+  quem fala — agente com caixa (inbox_ids, só WhatsApp) + stage_ids (+ "sem
+  card" = contato novo). Em sombra, resposta humana/N8N NÃO pausa nem gera nota
+  (só observa); ao vivo, humano pausa / 👍 reativa (estado próprio
+  `cevico_atendente_wa`). O N8N roteia só incoming/outgoing → ignora a nota.
+- 🕶️ TELA SOMBRA (`ShadowReviewModal.vue`, kit): KPIs (notas, agendaria/vaga
+  válida, chamaria humano, 👍/👎), filtros em linha, uma ficha por leitura em 3
+  colunas — Paciente disse | Interno teria respondido (+ agendaria + leitura)
+  | Respondido de verdade (N8N/API, equipe, robô; 30 min seguintes) — 👍/👎 do
+  admin grava em `cevico_ia_shadow.rating` (GET `settings/ai_shadow`, POST
+  `settings/ai_shadow_rate`, só admin). Link abre a conversa.
+- 🎛 CARD DO AGENTE (AutomationsHub, 1º de "Atendimento ao paciente"): painel de
+  situação (Em sombra/Desligado · caixas · colunas · sombra hoje N/teto), faixa
+  explicando a sombra, modo (Sombra ✓ / Ao vivo 🔒), pílulas de caixas de
+  WhatsApp, pílulas de colunas + "Sem card", coluna pós-agendamento, teto da
+  sombra, horário (ao vivo), botões "Abrir tela Sombra" e "Ver o Roteiro",
+  registro de atividade. Rascunho/Publicar iguais aos outros agentes. Fluxo
+  novo na aba Fluxos (`flows/atendente_agendamento.rb`) + AGENT_META no Painel.
+- Testes (docker, verdes): `spec/services/crm/cevico_script_spec.rb` (3),
+  `spec/jobs/crm/responder_agent_job_spec.rb` (6: nota sem outgoing, vaga
+  válida sem agendar, anti-picada, teto, desligado, live trancado),
+  `spec/listeners/crm_listener_responders_spec.rb` (5: sem card, coluna dele,
+  coluna de outro, caixa errada, humano não pausa na sombra),
+  `spec/controllers/api/v1/accounts/crm/settings_responder_spec.rb` (4: recusa
+  live, grava config, Roteiro por seção, tela Sombra + 👍), flow_map (11).
+  Visual local conta 3 (claro/escuro): 4 conversas semeadas na caixa WhatsApp
+  Principal (#345–#348) com IA simulada + resposta "real" p/ a tela Sombra.
+- 🧪 SIMULADOR (`lib/tasks/cevico_wa_agent.rake`, `cevico:wa_agent_simulate`):
+  teste SEGURO com a IA de verdade e sem WhatsApp real — cria um "Paciente
+  Simulado" numa conversa da caixa configurada, manda as mensagens de MSGS
+  (separadas por |) como se fosse ele e imprime o que o agente teria respondido;
+  a conversa entra na tela Sombra. Job ganhou guarda anti-duplicidade (1 nota
+  por mensagem do paciente, mesmo se o job da fila chegar depois do simulador).
+  Local: a chave da Claude vai em CRM → Integrações → Claude da conta 3 (é a
+  mesma chave pré-paga; ~US$ 0,01 por leitura). Conversa simulada
+  (`additional_attributes.cevico_simulado`) alimenta o agente com as próprias
+  notas de sombra como falas da CLÍNICA (senão cada mensagem parecia primeiro
+  contato). TESTADO COM A IA DE VERDADE 21/09 02:33 (conversa #355, conta 3):
+  recepção → sondagem → autoridade → orçamento oficial → objeção convênio →
+  agendamento oferecendo 2 vagas REAIS da Agenda (terça 22/09 08:00/08:15,
+  Dr. Henrique Gemelli). Bug corrigido de tabela: o formato de resposta não
+  aceita minItems/maxItems em array (a Claude devolvia 400) — removido aqui e
+  no Atendente Instagram, que tinha o mesmo erro latente.
+- 🧪 BOTÃO "TESTAR AGENTE" (pedido 21/09 02:40, "melhor coisa"): bate-papo
+  estilo WhatsApp no card (`AgentTestModal.vue`) em que o admin é o paciente e
+  o agente responde com a IA de verdade e o Roteiro atual, em balões azuis,
+  com etapa/agendaria/vaga válida/chamaria humano/leitura em cada resposta;
+  sugestões de frases em chips; "Nova conversa"; atalho "Editar Roteiro".
+  Backend `Crm::AgentSimulator` + `POST settings/ai_simulate` (só admin, só
+  RESPONDER_AGENTS): caixa interna "🧪 Simulador de agentes" (Channel::Api,
+  criada na 1ª vez, SEM canal de envio — nem local nem em produção sai
+  mensagem), contato "Paciente de teste" (+55 11 90000-0000), conversa com
+  `cevico_simulado`; a resposta vira nota de sombra (mesma tela Sombra), zero
+  outgoing. `ResponderAgentJob.write_shadow_note!` compartilhado job/simulador.
+  Ambiente seguro e dedicado para testar TODOS os respondedores futuros.
+  Spec no settings_responder_spec (caixa API, sem outgoing, recusa agente não
+  respondedor). Testado com a IA real 21/09 02:45 (#356).
+- 🛟 AGENTE B "ATENDENTE PÓS-AGENDAMENTO" (`atendente_pos`, pedido 21/09 02:55
+  "antes de acionar, faça o agente de suporte"): mesmo motor/Roteiro/Sombra/
+  Testar agente; bloco da etapa em STAGE_PROMPTS (dúvidas comuns do N8N,
+  "que dia é minha consulta" pela consulta futura do contexto, REMARCAR com 2
+  vagas reais → agendar=true (o Recorder move a consulta), CANCELAR →
+  `cancelar=true` novo no formato de saída, humano p/ caso clínico). Card no
+  hub (cor azul, colunas sugeridas Agendamento de Consulta + Consulta
+  Confirmada + Desmarcou; sem "sem card"/"mover card"), roteamento por
+  coluna no CrmListener (RESPONDER_KEYS), validação "uma coluna tem um dono
+  só" no update_ai (422) e pílula travada na tela, painel/fluxo/AGENT_META.
+  ai_json: `responder_events` e `responder_shadow_today` por agente. Testado
+  com IA real 21/09 03:00 (simulador): respondeu dia/hora/unidade/médico da
+  consulta futura + o que levar; pedido de remarcar → 2 vagas de manhã reais.
+  Ao vivo (remarcar/cancelar de fato) continua trancado até a Rodada 2/3.
+- Sem migration, sem cron. Deploy WEB + SIDEKIQ. Reversão em 1 linha: desligar
+  o interruptor de cada atendente (nada chegou a paciente) ou voltar a
+  etiqueta anterior. PRÓXIMO: Rodada 2 = fatia ao vivo (LIVE_ENABLED, N8N
+  desligado numa janela, áudio/foto), Rodada 3 = tudo + Agente Pós-agendamento
+  + chips 🤖 nas colunas + botão "IA pausada" no painel da conversa.
+
 ## 187. 🧩 RODADA DE TELAS 20/09 — Central em cards compactos + "Análise científica", Páginas, Formulários e Tarefas no kit, Funil de Tráfego por último (pedido 20/09, madrugada)
 
 Pedidos dele: (1) "Tarefas com o design da Apple"; (2) em Análises, o dash de

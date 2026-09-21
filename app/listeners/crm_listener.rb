@@ -10,7 +10,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     pipeline = account.crm_pipelines.order(:position).first
     return if pipeline.blank?
 
-    entry_stage = pipeline.stages.order(:position).first
+    entry_stage = entry_stage_for(account, pipeline, contact)
     return if entry_stage.blank?
 
     Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: pipeline.id) do |card|
@@ -36,6 +36,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     return unless %w[incoming outgoing].include?(message.message_type)
 
     handle_instagram_agent(message) # Atendente IA das caixas configuradas
+    handle_responder_agents(message) # 🗣️ respondedores do WhatsApp por coluna (rodada 188)
 
     contact = message.conversation&.contact
     return if contact.blank?
@@ -60,6 +61,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
 
     Crm::Automation.where(stage_id: stage_ids, active: true, trigger_type: 'message_created').find_each do |automation|
       next unless direction_matches?(automation, message)
+      next if automated_outgoing?(automation, message)
       next unless content_matches?(automation, message)
       next if throttled?(automation, contact)
 
@@ -234,6 +236,72 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     Rails.logger.error "[CrmListener] atendente instagram: #{e.message}"
   end
 
+  # ── RESPONDEDORES DO WHATSAPP POR COLUNA (rodada 188) ──
+  # A COLUNA do card decide quem fala: cada agente respondedor tem suas
+  # colunas (stage_ids) e, o de agendamento, também o "sem card". Mensagem do
+  # paciente numa caixa permitida → acha o agente dono da coluna → job com 12s
+  # de espera. Em SOMBRA nada pausa e nenhuma nota de pausa é escrita (o N8N
+  # e a equipe continuam respondendo; a sombra só observa). AO VIVO, humano
+  # respondendo pausa o agente e 👍 reativa — igual ao Atendente Instagram,
+  # mas com estado próprio (cevico_atendente_wa).
+  RESPONDER_KEYS = %w[atendente_agendamento atendente_pos].freeze
+  RESPONDER_STATE_KEY = Crm::ResponderAgentJob::STATE_KEY
+
+  def handle_responder_agents(message)
+    conversation = message.conversation
+    return if conversation.blank?
+
+    cfg = CrmSetting.find_by(account_id: conversation.account_id)&.ai_config || {}
+    agents = (cfg['agents'] || {}).slice(*RESPONDER_KEYS).select do |_key, a|
+      a['enabled'] == true && Array(a['inbox_ids']).map(&:to_i).include?(conversation.inbox_id)
+    end
+    return if agents.empty?
+
+    if message.message_type == 'incoming'
+      key = responder_owner_for(conversation, agents)
+      return if key.blank?
+
+      if Crm::ResponderAgentJob.live_mode?(agents[key])
+        state = conversation.additional_attributes&.[](RESPONDER_STATE_KEY) || {}
+        return if state['paused']
+      end
+      Crm::ResponderAgentJob.set(wait: 12.seconds).perform_later(conversation.id, message.id, key)
+    else # outgoing: só importa para quem está AO VIVO
+      return unless agents.values.any? { |a| Crm::ResponderAgentJob.live_mode?(a) }
+      return if message.additional_attributes&.[]('cevico_ia_agent').present? # do próprio agente
+      return if message.additional_attributes&.[]('cevico_followup_bot_id').present? # robô de follow-up
+
+      state = conversation.additional_attributes&.[](RESPONDER_STATE_KEY) || {}
+      if message.content.to_s.strip == '👍'
+        set_responder_pause(conversation, false)
+        note_instagram(conversation, '▶️ Atendente IA do WhatsApp reativado nesta conversa (👍 do atendimento).')
+      elsif !state['paused']
+        set_responder_pause(conversation, true, reason: 'humano_assumiu')
+        note_instagram(conversation, '⏸ Atendente IA do WhatsApp pausado — o atendimento humano assumiu esta conversa. Mande 👍 para reativar.')
+      end
+    end
+  rescue StandardError => e
+    Rails.logger.error "[CrmListener] respondedores: #{e.message}"
+  end
+
+  # agente dono da coluna atual do card (ou do "sem card")
+  def responder_owner_for(conversation, agents) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    contact = conversation.contact
+    return nil if contact.blank?
+
+    stage_id = Crm::Contact.where(contact_id: contact.id).order(:updated_at).last&.stage_id
+    agents.each do |key, a|
+      return key if stage_id.present? && Array(a['stage_ids']).map(&:to_i).include?(stage_id)
+      return key if stage_id.nil? && a['no_card'] == true
+    end
+    nil
+  end
+
+  def set_responder_pause(conversation, paused, reason: nil)
+    value = paused ? { 'paused' => true, 'reason' => reason, 'at' => Time.current.iso8601 }.compact : {}
+    Cevico::AttributeMerge.merge!(conversation) { |attrs| attrs.merge(RESPONDER_STATE_KEY => value) }
+  end
+
   def set_instagram_pause(conversation, paused, reason: nil)
     value = paused ? { 'paused' => true, 'reason' => reason, 'at' => Time.current.iso8601 }.compact : {}
     # merge atômico: não atropela o estado do follow-up gravado em paralelo
@@ -245,6 +313,37 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       account_id: conversation.account_id, inbox_id: conversation.inbox_id,
       message_type: :activity, private: true, content: content
     )
+  end
+
+  # Paciente que JÁ TEM consulta futura na Agenda e ainda não tinha card (ex.:
+  # a conversa nasceu do lembrete de véspera) NÃO é "Novo Contato": entra na
+  # coluna "ao agendar" do Atendente de Agendamento. Feedback da Vaneide
+  # (21/09): esses pacientes caíam em Novos Contatos e a automação da coluna
+  # ("mensagem enviada → Envio de Orçamento") os jogava na coluna errada.
+  # Sem coluna configurada (ou de outro funil), vale a primeira coluna.
+  def entry_stage_for(account, pipeline, contact)
+    first = pipeline.stages.order(:position).first
+    return first if first.blank?
+    return first unless Crm::AppointmentRecorder.future_appointment(account, contact.phone_number, nil, contact)
+
+    booked_id = CrmSetting.find_by(account: account)&.ai_config&.dig('agents', 'atendente_agendamento', 'after_booking_stage_id').to_i
+    (booked_id.positive? && pipeline.stages.find_by(id: booked_id)) || first
+  rescue StandardError => e
+    Rails.logger.warn "[CrmListener] coluna de entrada: #{e.message}"
+    first
+  end
+
+  # Mensagem AUTOMÁTICA da clínica (lembrete de véspera, régua da jornada,
+  # campanha, robô de follow-up, agente de IA) não é "atendente respondeu":
+  # não dispara automação de coluna por mensagem ENVIADA — a menos que a
+  # automação peça de propósito (action_config.include_automated = true).
+  AUTOMATED_MARKS = %w[cevico_auto cevico_journey cevico_followup_bot_id cevico_ia_agent].freeze
+  def automated_outgoing?(automation, message)
+    return false unless message.message_type == 'outgoing'
+    return false if automation.action_config&.dig('include_automated') == true
+
+    attrs = message.additional_attributes || {}
+    AUTOMATED_MARKS.any? { |k| attrs[k].present? }
   end
 
   def direction_matches?(automation, message)

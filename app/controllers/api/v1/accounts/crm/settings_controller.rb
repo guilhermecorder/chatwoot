@@ -386,8 +386,30 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 # espelhados — a config completa mora em ai_config['voice']
                                 voice: agent_fields,
                                 # 🎨 Criativo Perpétuo (item 131)
-                                creative: agent_fields + [:winners_count, :variations_count])
+                                creative: agent_fields + [:winners_count, :variations_count],
+                                # 🗣️ Atendente de Agendamento (rodada 188): modo sombra/ao vivo,
+                                # caixas, colunas (+ sem card), coluna pós-agendamento, teto da
+                                # sombra, janela de horas. O "prompt" dele é o bloco da etapa;
+                                # o Roteiro compartilhado chega em params[:script].
+                                # (193) live_days = dias da semana 0..6 em que fica ao vivo; vazio = todos
+                                atendente_agendamento: agent_fields + [:mode, :no_card, :after_booking_stage_id,
+                                                                       :shadow_daily_cap, :hours_start, :hours_end,
+                                                                       { inbox_ids: [], stage_ids: [], live_days: [] }],
+                                # 🗣️ Atendente Pós-agendamento (agente B): suporte a quem já marcou
+                                atendente_pos: agent_fields + [:mode, :shadow_daily_cap, :hours_start, :hours_end,
+                                                               { inbox_ids: [], stage_ids: [], live_days: [] }])
                         .to_h
+      # 🟢 Ao vivo (193): exige pelo menos uma caixa marcada — sem caixa o agente
+      # não escuta ninguém e o admin acha que está atendendo. Dias fora de 0..6 caem.
+      live_error = responder_live_error(cfg['agents'] || {}, permitted)
+      return render json: { error: live_error }, status: :unprocessable_entity if live_error
+
+      # uma coluna pertence a UM agente: quem fala é decidido pela coluna
+      conflict = responder_stage_conflict(cfg['agents'] || {}, permitted)
+      if conflict
+        return render json: { error: "A coluna \"#{conflict}\" já pertence a outro atendente. Cada coluna tem um dono só." },
+                      status: :unprocessable_entity
+      end
       existing = cfg['agents'] || {}
       cfg['agents'] = existing.merge(permitted) do |_key, old_agent, new_agent|
         merged = (old_agent || {}).merge(new_agent || {})
@@ -399,8 +421,76 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       # dos agentes) espelha em ai_config['voice'], que é o que a assistente lê
       mirror_voice_agent!(cfg, permitted['voice']) if permitted.key?('voice')
     end
+    # 📜 Roteiro CEVICO (fonte única dos respondedores): seção em branco = padrão
+    if params[:script].present?
+      keys = Crm::CevicoScript::SECTIONS.pluck('key')
+      incoming = params.require(:script).permit(*keys).to_h
+      # 🕘 rodada 191: foto do Roteiro atual antes de sobrescrever ("Histórico" no card)
+      Crm::ScriptVersion.snapshot!(Current.account, kind: 'script', note: 'antes de editar na tela', by: Current.user)
+      script = (cfg['script'] || {}).merge(incoming.transform_values { |v| v.to_s.strip })
+      script['updated_at'] = Time.current.iso8601
+      cfg['script'] = script
+    end
     crm_settings.update!(ai_config: cfg)
     render json: ai_json(crm_settings)
+  end
+
+  # 🕶️ TELA SOMBRA (rodada 188): o que o Atendente interno TERIA respondido
+  # (nota interna de atividade) lado a lado com o que o N8N/equipe respondeu
+  # de verdade logo depois, na mesma conversa. Só admin.
+  def ai_shadow
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    agent_key = params[:agent].presence || 'atendente_agendamento'
+    limit = params[:limit].to_i.clamp(1, 200)
+    limit = 60 if limit.zero?
+    notes = Current.account.messages
+                   .where(message_type: :activity, private: true)
+                   .where("additional_attributes ? 'cevico_ia_shadow'")
+                   .where("additional_attributes -> 'cevico_ia_shadow' ->> 'agent' = ?", agent_key)
+                   .includes(conversation: :contact)
+                   .reorder(created_at: :desc)
+                   .limit(limit)
+    items = notes.map { |note| shadow_item(note) }
+    render json: { agent: agent_key, items: items, summary: shadow_summary(items) }
+  end
+
+  # 🧪 SIMULADOR (rodada 188): conversa com o agente como paciente, com a IA
+  # de verdade, numa caixa interna sem canal de envio. Sem conversation_id
+  # (ou reset) abre conversa nova; com text, manda a fala e devolve os balões.
+  def ai_simulate
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    agent_key = params[:agent].presence || 'atendente_agendamento'
+    return render json: { error: 'Agente inválido.' }, status: :unprocessable_entity unless Crm::AiAgentConfig::RESPONDER_AGENTS.include?(agent_key)
+
+    sim = Crm::AgentSimulator.new(account: Current.account, agent_key: agent_key)
+    conversation = Current.account.conversations.find_by(id: params[:conversation_id]) if params[:conversation_id].present?
+    conversation = nil if conversation && !Crm::AgentSimulator.simulated?(conversation)
+    conversation ||= sim.start!
+    error = nil
+    if params[:text].present?
+      outcome = sim.say!(conversation, params[:text])
+      error = outcome[:error]
+    end
+    render json: { agent: agent_key, conversation_id: conversation.id, display_id: conversation.display_id,
+                   turns: sim.transcript(conversation), error: error }
+  end
+
+  # 👍/👎 do admin numa nota de sombra (alimenta o ajuste do Roteiro)
+  def ai_shadow_rate # rubocop:disable Metrics/AbcSize
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    note = Current.account.messages.where(message_type: :activity).find(params[:message_id])
+    rating = %w[good bad].include?(params[:rating].to_s) ? params[:rating].to_s : nil
+    attrs = note.additional_attributes || {}
+    shadow = attrs['cevico_ia_shadow'] || {}
+    shadow['rating'] = rating
+    shadow['rating_note'] = params[:note].to_s.strip.first(300) if params.key?(:note)
+    note.update!(additional_attributes: attrs.merge('cevico_ia_shadow' => shadow))
+    # ✍️ rodada 191: 👎 vira orientação pendente (1 por nota) para o admin corrigir o Roteiro
+    Crm::AgentGuidance.from_shadow_note!(note, by: Current.user) if rating == 'bad'
+    render json: shadow_item(note.reload)
   end
 
   # testa a conexão com a Claude de verdade (mini-chamada à API)
@@ -1453,6 +1543,86 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     }
   end
 
+  # colunas (stage_ids) não podem se repetir entre os atendentes do WhatsApp
+  # (193) valida a janela ao vivo dos respondedores e normaliza live_days no
+  # próprio `permitted` (inteiros 0..6, sem repetição). Devolve a mensagem de
+  # erro ou nil. Ao vivo sem caixa marcada (nem agora, nem já gravada) = 422.
+  def responder_live_error(existing, permitted) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    %w[atendente_agendamento atendente_pos].each do |key|
+      agent = permitted[key]
+      next if agent.blank?
+
+      agent['live_days'] = Array(agent['live_days']).map(&:to_i).select { |d| d.between?(0, 6) }.uniq if agent.key?('live_days')
+      next unless agent['mode'] == 'live'
+      return 'O modo Ao vivo está trancado no servidor (variável CEVICO_RESPONDERS_LIVE). Por enquanto os atendentes só trabalham em sombra.' unless Crm::ResponderAgentJob::LIVE_ENABLED
+
+      inboxes = agent.key?('inbox_ids') ? Array(agent['inbox_ids']) : Array(existing.dig(key, 'inbox_ids'))
+      return 'Para ficar Ao vivo, marque pelo menos uma caixa de WhatsApp para o atendente.' if inboxes.compact_blank.empty?
+    end
+    nil
+  end
+
+  def responder_stage_conflict(existing, permitted)
+    keys = %w[atendente_agendamento atendente_pos]
+    merged = keys.index_with { |k| (existing[k] || {}).merge(permitted[k] || {}) }
+    seen = {}
+    keys.each do |k|
+      # rascunho não conta: só o que está (ou vai ficar) publicado
+      Array(merged[k]['stage_ids']).map(&:to_i).each do |sid|
+        return Crm::Stage.find_by(id: sid)&.name || sid if seen[sid] && seen[sid] != k
+
+        seen[sid] = k
+      end
+    end
+    nil
+  end
+
+  # uma nota de sombra + a mensagem do paciente que a disparou + o que foi
+  # respondido DE VERDADE em seguida (N8N ou equipe), para comparar
+  def shadow_item(note) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    shadow = (note.additional_attributes || {})['cevico_ia_shadow'] || {}
+    conversation = note.conversation
+    trigger = conversation.messages.find_by(id: shadow['trigger_message_id'])
+    real = conversation.messages
+                       .where(message_type: :outgoing, private: false)
+                       .where('id > ?', shadow['trigger_message_id'].to_i)
+                       .where('created_at < ?', note.created_at + 30.minutes)
+                       .reorder(:id).limit(3)
+    {
+      id: note.id,
+      at: note.created_at.iso8601,
+      conversation_id: conversation.display_id,
+      contact: conversation.contact&.name.presence || conversation.contact&.phone_number || 'Paciente',
+      patient_said: trigger&.content.to_s.truncate(400),
+      shadow: shadow.slice('etapa', 'mensagens', 'agendar', 'agendamento', 'slot_valid', 'chamar_humano', 'cancelar', 'pausar', 'leitura',
+                           'rating', 'rating_note', 'acoes'), # acoes = ferramentas (rodada 192)
+      real_replies: real.map { |m| { content: m.content.to_s.truncate(400), by: reply_author(m), at: m.created_at.iso8601 } }
+    }
+  end
+
+  def reply_author(message)
+    attrs = message.additional_attributes || {}
+    return 'agente interno' if attrs['cevico_ia_agent'].present?
+    return 'robô de follow-up' if attrs['cevico_followup_bot_id'].present?
+    return 'jornada' if attrs['cevico_journey'].present?
+
+    message.sender.is_a?(User) ? (message.sender.name.presence || 'equipe') : 'N8N / API'
+  end
+
+  def shadow_summary(items) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    total = items.size
+    booked = items.count { |i| i[:shadow]['agendar'] }
+    {
+      total: total,
+      would_book: booked,
+      slot_valid: items.count { |i| i[:shadow]['agendar'] && i[:shadow]['slot_valid'] },
+      human: items.count { |i| i[:shadow]['chamar_humano'] },
+      rated_good: items.count { |i| i[:shadow]['rating'] == 'good' },
+      rated_bad: items.count { |i| i[:shadow]['rating'] == 'bad' },
+      by_stage: items.group_by { |i| i[:shadow]['etapa'].presence || '?' }.transform_values(&:size)
+    }
+  end
+
   def ai_json(s)
     cfg = s.ai_config || {}
     agents = cfg['agents'] || {}
@@ -1473,7 +1643,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'manager' => Crm::AutoManagerService::SYSTEM_PROMPT,
       'auditor' => Crm::ConversationAuditorService::SYSTEM_PROMPT,
       'creative' => Crm::CreativeService::SYSTEM_PROMPT,
-      'voice' => Crm::VoiceAgent::Script::SYSTEM_PROMPT
+      'voice' => Crm::VoiceAgent::Script::SYSTEM_PROMPT,
+      # 🗣️ rodada 188: o prompt do Atendente é o BLOCO DA ETAPA; o Roteiro vai à parte (script)
+      'atendente_agendamento' => Crm::CevicoScript::STAGE_PROMPTS['atendente_agendamento'],
+      'atendente_pos' => Crm::CevicoScript::STAGE_PROMPTS['atendente_pos']
     }
     {
       api_key_set: cfg['api_key'].present?,
@@ -1486,6 +1659,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       opportunity_last_run: cfg.dig('opportunity_state', 'last_run'),
       sales_insights: cfg.dig('agents', 'sales', 'insights'),
       instagram_events: Array(cfg.dig('instagram_state', 'events')).first(30),
+      # 🗣️ rodada 188: Roteiro CEVICO (fonte única) + registro/sombra do Atendente de Agendamento
+      script: Crm::CevicoScript.sections(s.account),
+      script_updated_at: cfg.dig('script', 'updated_at'),
+      responder_events: %w[atendente_agendamento atendente_pos].index_with { |k| Array(cfg.dig("#{k}_state", 'events')).first(30) },
+      responder_shadow_today: %w[atendente_agendamento atendente_pos].index_with do |k|
+        (cfg.dig("#{k}_state", 'shadow_days', Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s) || {}).slice('count', 'conversation_ids')
+      end,
+      live_enabled: Crm::ResponderAgentJob::LIVE_ENABLED,
       comments_events: Array(cfg.dig('comments_state', 'events')).first(30),
       comments_last_run_at: cfg.dig('comments_state', 'last_run_at'),
       # 🌾 resumo da colheita do mês (a lista completa vem por harvest_status)
@@ -1533,6 +1714,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           template_params: agents.dig(key, 'template_params').presence,
           # 📊 Gestor Autônomo (item 128)
           drop_pct: agents.dig(key, 'drop_pct').presence&.to_i,
+          # 🗣️ Atendente de Agendamento (rodada 188)
+          no_card: (agents.dig(key, 'no_card').nil? ? nil : agents.dig(key, 'no_card') == true),
+          after_booking_stage_id: agents.dig(key, 'after_booking_stage_id').presence&.to_i,
+          shadow_daily_cap: agents.dig(key, 'shadow_daily_cap').presence&.to_i,
+          hours_start: agents.dig(key, 'hours_start').presence,
+          hours_end: agents.dig(key, 'hours_end').presence,
+          # (193) janela ao vivo por dia da semana (0=dom … 6=sáb; vazio = todos os dias)
+          live_days: Array(agents.dig(key, 'live_days')).map(&:to_i),
           watchers: Array(agents.dig(key, 'watchers')).map do |w|
             {
               stage_id: w['stage_id'].to_i,

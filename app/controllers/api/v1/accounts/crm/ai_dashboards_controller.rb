@@ -45,6 +45,11 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
                    what: 'dá nota diária nas conversas contra o script — coaching contínuo por atendente' },
     'creative' => { name: 'Criativo Perpétuo', icon: 'i-lucide-wand-sparkles', color: '#DB2777',
                     what: 'toda semana escreve variações dos anúncios e termos que mais viram cirurgia' },
+    # 🗣️ rodada 188: respondedor do WhatsApp (Roteiro CEVICO + agenda viva); sombra primeiro
+    'atendente_agendamento' => { name: 'Atendente de Agendamento', icon: 'i-lucide-message-square-heart', color: '#059669',
+                                 what: 'conversa com o paciente no WhatsApp da recepção até a consulta agendada' },
+    'atendente_pos' => { name: 'Atendente Pós-agendamento', icon: 'i-lucide-life-buoy', color: '#0F5FA6',
+                         what: 'suporte a quem já marcou: dúvidas da consulta, remarcar e cancelar' },
     # 🤖📞 item 169: roda na ElevenLabs; cada ligação vira 1 linha em crm_ai_usages (custo em US$)
     'voice' => { name: 'Agente de Ligação', icon: 'i-lucide-phone-call', color: '#7C3AED',
                  what: 'assistente virtual que atende as ligações no número da clínica e liga para pacientes nas campanhas' }

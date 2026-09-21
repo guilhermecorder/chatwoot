@@ -198,8 +198,67 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_ai`, data);
   }
 
+  // 🕶️ rodada 188: tela Sombra do Atendente de Agendamento (o que a IA teria
+  // respondido × o que foi respondido de verdade) + 👍/👎 do admin
+  getAiShadow(params = {}) {
+    return axios.get(`${this.url}/settings/ai_shadow`, { params });
+  }
+
+  // 🧪 simulador: conversar com o agente como paciente (caixa interna, sem envio)
+  simulateAgent(payload) {
+    return axios.post(`${this.url}/settings/ai_simulate`, payload);
+  }
+
+  rateAiShadow(messageId, rating, note) {
+    return axios.post(`${this.url}/settings/ai_shadow_rate`, {
+      message_id: messageId,
+      rating,
+      note,
+    });
+  }
+
   testAi() {
     return axios.post(`${this.url}/settings/test_ai`);
+  }
+
+  // ✍️ rodada 191: Orientações dos atendentes (o admin ensina o agente a
+  // partir de uma resposta ruim; "Aplicar" escreve a regra no Roteiro ou nos
+  // Passos da etapa, guardando uma versão antes)
+  agentGuidances(params = {}) {
+    return axios.get(`${this.url}/agent_guidances`, { params });
+  }
+
+  createAgentGuidance(payload) {
+    return axios.post(`${this.url}/agent_guidances`, payload);
+  }
+
+  updateAgentGuidance(id, payload) {
+    return axios.put(`${this.url}/agent_guidances/${id}`, payload);
+  }
+
+  applyAgentGuidance(id) {
+    return axios.post(`${this.url}/agent_guidances/${id}/apply`);
+  }
+
+  ignoreAgentGuidance(id) {
+    return axios.post(`${this.url}/agent_guidances/${id}/ignore`);
+  }
+
+  reopenAgentGuidance(id) {
+    return axios.post(`${this.url}/agent_guidances/${id}/reopen`);
+  }
+
+  deleteAgentGuidance(id) {
+    return axios.delete(`${this.url}/agent_guidances/${id}`);
+  }
+
+  // 🕘 versões do Roteiro / dos Passos (rodada 191): histórico e "Voltar para esta"
+  scriptVersions() {
+    return axios.get(`${this.url}/script_versions`);
+  }
+
+  restoreScriptVersion(id) {
+    return axios.post(`${this.url}/script_versions/${id}/restore`);
   }
 
   getAiUsage() {

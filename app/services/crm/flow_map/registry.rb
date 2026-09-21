@@ -11,6 +11,8 @@ module Crm::FlowMap::Registry
     # Atendimento ao paciente
     Crm::FlowMap::Flows::Scheduler,
     Crm::FlowMap::Flows::Instagram,
+    Crm::FlowMap::Flows::AtendenteAgendamento,
+    Crm::FlowMap::Flows::AtendentePos,
     Crm::FlowMap::Flows::Comments,
     Crm::FlowMap::Flows::Nps,
     Crm::FlowMap::Flows::Conversation,

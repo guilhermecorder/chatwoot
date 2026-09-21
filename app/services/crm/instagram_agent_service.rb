@@ -20,8 +20,6 @@ class Crm::InstagramAgentService
     properties: {
       mensagens: {
         type: 'array',
-        minItems: 1,
-        maxItems: 3,
         items: { type: 'string' },
         description: 'Mensagens curtas a enviar ao paciente, em ordem (máx 3, até ~200 caracteres cada)'
       },

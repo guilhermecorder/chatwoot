@@ -1210,3 +1210,17 @@
   .cv-ios-nav > li > ul > li > ul { margin-left: 28px; }
   .cv-ios-nav > li > ul > li > ul > li > a { height: 32px; font-size: 13px; }
 }
+
+/* ── 21/09 (rodada 189, Agentes de IA no kit): chip LIGADO dos "botões em
+   linha" de múltipla escolha e o interruptor GRANDE dos cards de agente ── */
+.cv-page .cv-chip-on,
+.cv-page .cv-chip-on:hover {
+  color: #fff;
+  background: var(--cv-grad);
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 10px -5px rgb(var(--cv-deep-rgb) / 0.7);
+}
+.cv-page .cv-switch-lg { width: 46px; height: 26px; }
+.cv-page .cv-switch-lg::after { width: 20px; height: 20px; top: 2px; left: 2px; }
+.cv-page .cv-switch-lg.cv-switch-on::after { transform: translateX(20px); }
+.cv-page .cv-switch:disabled { opacity: 0.5; cursor: default; }

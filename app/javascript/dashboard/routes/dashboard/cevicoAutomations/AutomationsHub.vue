@@ -1,5 +1,13 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
+import {
+  ref,
+  computed,
+  watch,
+  onMounted,
+  onUnmounted,
+  nextTick,
+  defineAsyncComponent,
+} from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
@@ -11,14 +19,56 @@ import WhatsAppTemplateParser from 'dashboard/components-next/whatsapp/WhatsAppT
 import FollowupBotModal from 'dashboard/routes/dashboard/crm/components/FollowupBotModal.vue';
 import DataTreatmentTools from 'dashboard/routes/dashboard/crm/components/DataTreatmentTools.vue';
 import AiAgentsDashboard from './AiAgentsDashboard.vue';
+import ShadowReviewModal from './ShadowReviewModal.vue';
+import AgentTestModal from './AgentTestModal.vue';
+import GuidancesPanel from './GuidancesPanel.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import CrmAPI from 'dashboard/api/crm';
+import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import { hexToRgb } from 'dashboard/helper/cevicoPalettes';
 
 const store = useStore();
 const route = useRoute();
 const router = useRouter();
 const { accountId } = useAccount();
 const { isAdmin } = useAdmin();
+
+// 🍎 rodada 189: o hub inteiro no kit CEVICO (vidro cristalino + paleta por
+// escopo, como Relatórios e Central). Cada agente mantém a cor de identidade
+// dele (AGENT_META) nas peças do próprio card — agentVars(key) abaixo.
+const pal = useCevicoPalette({
+  scope: 'automations',
+  blocks: [
+    { id: 'gasto', label: 'Gasto com os agentes', icon: 'i-lucide-wallet' },
+    { id: 'roteiro', label: 'Roteiro CEVICO', icon: 'i-lucide-scroll-text' },
+  ],
+});
+const { cvVars, blockVars } = pal;
+// 🃏 rodada 191: agentes em CARDS compactos (como a Central de Criativos) ou
+// em LISTA; o card clicado abre no lugar (ocupa a linha inteira) com o corpo
+// completo. A escolha fica lembrada neste navegador.
+const AGENTS_VIEW_KEY = 'cevico_agents_view';
+const agentsView = ref('cards');
+try {
+  if (localStorage.getItem(AGENTS_VIEW_KEY) === 'list')
+    agentsView.value = 'list';
+} catch (e) {
+  // navegador sem armazenamento: fica no padrão
+}
+watch(agentsView, v => {
+  try {
+    localStorage.setItem(AGENTS_VIEW_KEY, v);
+  } catch (e) {
+    // idem
+  }
+});
+const USAGE_PERIODS = [
+  { key: 'today', label: 'Hoje' },
+  { key: 'last7', label: '7 dias' },
+  { key: 'last30', label: '30 dias' },
+  { key: 'all', label: 'Desde o início' },
+];
 
 // 🗺️ item 170: a aba Fluxos traz o Mermaid (pesado) — carrega só quando abre
 const FlowsMap = defineAsyncComponent(() => import('./FlowsMap.vue'));
@@ -33,7 +83,16 @@ const accountLabels = useMapGetter('labels/getLabels');
 const teamAgents = useMapGetter('agents/getAgents');
 const currentUserId = useMapGetter('getCurrentUserID');
 
-const TABS = ['robos', 'regras', 'agentes', 'painel_ia', 'fluxos', 'programacao', 'resultados', 'tratamento'];
+const TABS = [
+  'robos',
+  'regras',
+  'agentes',
+  'painel_ia',
+  'fluxos',
+  'programacao',
+  'resultados',
+  'tratamento',
+];
 
 // atendente concedido só vê as abas da área dele: robôs/resultados =
 // Automações; tratamento = Tratamento de dados; o resto é de admin
@@ -45,12 +104,15 @@ const canSee = capability =>
   isAdmin.value || myGrants.value.includes(capability);
 const visibleTabs = computed(() =>
   TABS.filter(tab => {
-    if (['robos', 'resultados', 'fluxos'].includes(tab)) return canSee('automations');
+    if (['robos', 'resultados', 'fluxos'].includes(tab))
+      return canSee('automations');
     if (tab === 'tratamento') return canSee('data_tools');
     return isAdmin.value; // regras, agentes de IA, programação
   })
 );
-const activeTab = ref(TABS.includes(route.query.tab) ? route.query.tab : 'robos');
+const activeTab = ref(
+  TABS.includes(route.query.tab) ? route.query.tab : 'robos'
+);
 
 // os itens do menu lateral apontam para a MESMA rota com ?tab= diferente —
 // sem este watch, clicar neles não trocava a aba (a página não remonta)
@@ -76,24 +138,204 @@ watch(
 // O Radar perene é configurado por VIGIAS: cada vigia = coluna + painel do
 // atendente que recebe os avisos (null = todos) + janela de tempo própria.
 const aiAgents = ref({
-  conversation: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
-  form: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
-  scheduler: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
-  opportunity: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', watchers: [], wait_minutes: 10, response_goal_minutes: 15 },
-  mentor: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
-  comments: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', page_access_token: '', fb_page_id: '', ig_user_id: '', page_token_set: false },
-  closing: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
-  nps: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
-  sales: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
-  instagram: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', inbox_ids: [] },
-  copywriter: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', references: '' },
-  pagebuilder: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', references: '', max_tokens: '' },
-  harvest: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', mode: 'organize', monthly_size: '', cold_days: '', daily_cap: '', day_of_month: '', inbox_id: null, require_approval: true, message_preview: '', template_params: null, stage_ids: [] },
-  manager: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', drop_pct: '' },
-  auditor: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', daily_cap: '' },
-  creative: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '', winners_count: '', variations_count: '' },
+  conversation: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+  },
+  form: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+  },
+  scheduler: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+  },
+  opportunity: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    watchers: [],
+    wait_minutes: 10,
+    response_goal_minutes: 15,
+  },
+  mentor: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+  },
+  comments: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    page_access_token: '',
+    fb_page_id: '',
+    ig_user_id: '',
+    page_token_set: false,
+  },
+  closing: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+  },
+  nps: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+  },
+  sales: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+  },
+  instagram: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    inbox_ids: [],
+  },
+  copywriter: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    references: '',
+  },
+  pagebuilder: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    references: '',
+    max_tokens: '',
+  },
+  harvest: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    mode: 'organize',
+    monthly_size: '',
+    cold_days: '',
+    daily_cap: '',
+    day_of_month: '',
+    inbox_id: null,
+    require_approval: true,
+    message_preview: '',
+    template_params: null,
+    stage_ids: [],
+  },
+  manager: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    drop_pct: '',
+  },
+  auditor: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    daily_cap: '',
+  },
+  creative: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    winners_count: '',
+    variations_count: '',
+  },
   // 🤖📞 item 169: só o espelho ligado/desligado — a configuração mora em Integrações
-  voice: { enabled: false, prompt: '', model: '', effort: '', has_draft: false, default_prompt: '' },
+  voice: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+  },
+  // 🗣️ rodada 188: Atendente de Agendamento (WhatsApp) — nasce em SOMBRA; o "prompt" é o bloco da etapa
+  atendente_agendamento: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    mode: 'shadow',
+    inbox_ids: [],
+    stage_ids: [],
+    no_card: true,
+    after_booking_stage_id: '',
+    shadow_daily_cap: 30,
+    hours_start: '',
+    hours_end: '',
+    live_days: [],
+  },
+  // 🗣️ agente B: suporte a quem já marcou (dúvidas, remarcar, cancelar) — mesmas peças, sem "sem card"
+  atendente_pos: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    mode: 'shadow',
+    inbox_ids: [],
+    stage_ids: [],
+    no_card: false,
+    after_booking_stage_id: '',
+    shadow_daily_cap: 30,
+    hours_start: '',
+    hours_end: '',
+    live_days: [],
+  },
 });
 
 const LOOKBACK_OPTIONS = [
@@ -104,7 +346,11 @@ const LOOKBACK_OPTIONS = [
 ];
 
 const addWatcher = () => {
-  aiAgents.value.opportunity.watchers.push({ stage_id: '', user_id: null, lookback_hours: 24 });
+  aiAgents.value.opportunity.watchers.push({
+    stage_id: '',
+    user_id: null,
+    lookback_hours: 24,
+  });
 };
 const removeWatcher = idx => {
   aiAgents.value.opportunity.watchers.splice(idx, 1);
@@ -152,7 +398,9 @@ const saveSchedulerStages = async () => {
   try {
     const { data } = await CrmAPI.syncSchedulerStages(schedulerStageIds.value);
     schedulerStageIds.value = data.scheduler_stage_ids || [];
-    useAlert('Colunas do Secretário salvas — já está valendo (com o agente LIGADO).');
+    useAlert(
+      'Colunas do Secretário salvas — já está valendo (com o agente LIGADO).'
+    );
   } catch {
     useAlert('Erro ao salvar as colunas do Secretário.');
   } finally {
@@ -174,9 +422,14 @@ const toggleAgentStage = (agent, id) => {
 const saveAgentStages = async agent => {
   savingAgentStages.value = agent;
   try {
-    const { data } = await CrmAPI.syncAgentStages(agent, agentStageIds.value[agent]);
+    const { data } = await CrmAPI.syncAgentStages(
+      agent,
+      agentStageIds.value[agent]
+    );
     agentStageIds.value[agent] = data.stage_ids || [];
-    useAlert(`Colunas de ${AGENT_META[agent].title} salvas — valendo com o agente LIGADO.`);
+    useAlert(
+      `Colunas de ${AGENT_META[agent].title} salvas — valendo com o agente LIGADO.`
+    );
   } catch {
     useAlert('Erro ao salvar as colunas.');
   } finally {
@@ -201,9 +454,266 @@ const instagramStats = () => {
   return {
     replied: evs.filter(e => e.type === 'respondeu').length,
     scheduled: evs.filter(e => e.type === 'agendou').length,
-    errors: evs.filter(e => e.type === 'erro' || e.type === 'horario_invalido').length,
+    errors: evs.filter(e => e.type === 'erro' || e.type === 'horario_invalido')
+      .length,
   };
 };
+// 🗣️ rodada 188: atendentes do WhatsApp (A = agendamento, B = pós-agendamento)
+const RESPONDER_WA_KEYS = ['atendente_agendamento', 'atendente_pos'];
+// quem CONVERSA com o paciente não "analisa": cada chamada à IA é uma resposta
+const RESPONDER_NOUN_KEYS = [
+  'atendente_agendamento',
+  'atendente_pos',
+  'instagram',
+  'comments',
+];
+const usageNoun = key =>
+  RESPONDER_NOUN_KEYS.includes(key) ? 'resposta(s)' : 'análise(s)';
+const atendenteEvents = key =>
+  settings.value?.ai?.responder_events?.[key] || [];
+const ATENDENTE_EVENT_LABELS = {
+  sombra: '🕶️ sombra: anotou o que teria respondido',
+  respondeu: '💬 respondeu',
+  agendou: '📅 agendou e pausou',
+  horario_invalido: '⚠️ horário não validou',
+  teto_sombra: '🛑 teto de conversas/dia da sombra',
+  teto_diario: '🛑 teto diário — pausado',
+  erro: '❌ erro',
+};
+const shadowTodayConversations = key =>
+  (settings.value?.ai?.responder_shadow_today?.[key]?.conversation_ids || [])
+    .length;
+const liveEnabled = computed(() => settings.value?.ai?.live_enabled === true);
+// 🟢 rodada 193: JANELA AO VIVO por dia da semana + horas. Fora da janela o
+// agente continua em sombra (aprendendo). live_days vazio = todos os dias.
+const LIVE_DAYS = [
+  { value: 0, short: 'Dom', long: 'domingos' },
+  { value: 1, short: 'Seg', long: 'segundas' },
+  { value: 2, short: 'Ter', long: 'terças' },
+  { value: 3, short: 'Qua', long: 'quartas' },
+  { value: 4, short: 'Qui', long: 'quintas' },
+  { value: 5, short: 'Sex', long: 'sextas' },
+  { value: 6, short: 'Sáb', long: 'sábados' },
+];
+const toggleLiveDay = (key, day) => {
+  const list = (aiAgents.value[key].live_days || []).map(Number);
+  const idx = list.indexOf(day);
+  if (idx === -1) list.push(day);
+  else list.splice(idx, 1);
+  aiAgents.value[key].live_days = list.sort();
+};
+const liveDayOn = (agent, day) =>
+  (agent.live_days || []).map(Number).includes(day);
+// frase por extenso: "Ao vivo aos sábados e domingos, das 08:00 às 18:00"
+const liveWindowSentence = agent => {
+  const days = (agent.live_days || []).map(Number).sort();
+  const names = LIVE_DAYS.filter(d => days.includes(d.value)).map(d => d.long);
+  let when = 'todos os dias';
+  if (names.length === 7) when = 'todos os dias';
+  else if (names.length === 1) when = `aos ${names[0]}`;
+  else if (names.length > 1)
+    when = `aos ${names.slice(0, -1).join(', ')} e ${names[names.length - 1]}`;
+  const start = agent.hours_start || '00:00';
+  const end = agent.hours_end || '23:59';
+  const hours =
+    agent.hours_start || agent.hours_end
+      ? `das ${start} às ${end}${agent.hours_start && agent.hours_end && start > end ? ' (vira a noite)' : ''}`
+      : 'o dia inteiro';
+  return `Ao vivo ${when}, ${hours}; fora disso continua em sombra.`;
+};
+// está dentro da janela AGORA? (mesma regra do backend, pelo relógio do navegador)
+const liveNow = agent => {
+  const now = new Date();
+  const days = (agent.live_days || []).map(Number);
+  if (days.length && !days.includes(now.getDay())) return false;
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const start = agent.hours_start || '';
+  const end = agent.hours_end || '';
+  if (!start && !end) return true;
+  if (start && end && start > end) return hhmm >= start || hhmm <= end; // vira a noite
+  if (start && hhmm < start) return false;
+  if (end && hhmm > end) return false;
+  return true;
+};
+const situationOf = agent => {
+  if (!agent.enabled) return { label: '○ Desligado', tone: '' };
+  if (agent.mode === 'live' && liveEnabled.value)
+    return liveNow(agent)
+      ? { label: '🟢 Ao vivo (agora)', tone: 'live' }
+      : { label: '🕶️ Sombra (fora da janela)', tone: 'shadow' };
+  return { label: '🕶️ Em sombra', tone: 'shadow' };
+};
+const toggleAtendInbox = (key, id) => {
+  const list = aiAgents.value[key].inbox_ids || [];
+  const idx = list.indexOf(id);
+  if (idx === -1) list.push(id);
+  else list.splice(idx, 1);
+  aiAgents.value[key].inbox_ids = [...list];
+};
+const toggleAtendStage = (key, id) => {
+  const list = aiAgents.value[key].stage_ids || [];
+  const idx = list.indexOf(id);
+  if (idx === -1) list.push(id);
+  else list.splice(idx, 1);
+  aiAgents.value[key].stage_ids = [...list];
+};
+// coluna já marcada no OUTRO atendente (uma coluna tem um dono só)
+const stageOwnedByOther = (key, id) =>
+  RESPONDER_WA_KEYS.filter(k => k !== key).find(k =>
+    (aiAgents.value[k]?.stage_ids || []).includes(id)
+  );
+const atendStageNames = agent =>
+  (agent.stage_ids || [])
+    .map(id => allStages.value.find(s => s.id === id)?.name)
+    .filter(Boolean);
+const atendInboxNames = agent =>
+  (agent.inbox_ids || [])
+    .map(id => inboxes.value.find(i => i.id === id)?.name)
+    .filter(Boolean);
+// tela Sombra (lado a lado: o que a IA teria dito × o que foi dito)
+const shadowOpen = ref(false);
+const shadowAgentKey = ref('atendente_agendamento');
+// 🧪 testar agente: bate-papo em caixa interna (sem envio), com a IA de verdade
+const testAgentKey = ref('');
+const openScriptFromTest = () => {
+  testAgentKey.value = '';
+  scriptExpanded.value = true;
+  scriptOpenSection.value = 'persona';
+  document
+    .getElementById('cv-roteiro')
+    ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+// ✍️ rodada 191: painel de Orientações (abaixo do Roteiro) + "Testar de novo"
+// abre o simulador com a fala do paciente já digitada
+const guidancesPanel = ref(null);
+const testPrefill = ref('');
+const openTestAgent = (key, prefill = '') => {
+  testPrefill.value = prefill || '';
+  testAgentKey.value = key;
+};
+const onGuided = () => guidancesPanel.value?.reload?.();
+const onGuidanceApplied = () => store.dispatch('crm/fetchSettings');
+
+// 🕘 rodada 191: histórico de versões do Roteiro / dos Passos (guardado
+// antes de cada edição na tela e de cada orientação aplicada)
+const scriptHistoryOpen = ref(false);
+const scriptVersions = ref([]);
+const loadingVersions = ref(false);
+const versionsError = ref('');
+const restoringVersion = ref(null);
+const loadScriptVersions = async () => {
+  loadingVersions.value = true;
+  versionsError.value = '';
+  try {
+    const { data } = await CrmAPI.scriptVersions();
+    scriptVersions.value = Array.isArray(data)
+      ? data
+      : data?.versions || data?.items || [];
+  } catch {
+    scriptVersions.value = [];
+    versionsError.value =
+      'Não consegui carregar o histórico — o servidor não respondeu.';
+  } finally {
+    loadingVersions.value = false;
+  }
+};
+const toggleScriptHistory = () => {
+  scriptHistoryOpen.value = !scriptHistoryOpen.value;
+  if (scriptHistoryOpen.value) loadScriptVersions();
+};
+const versionLabel = v =>
+  v.kind === 'stage'
+    ? `Passos · ${AGENT_META[v.agent_key]?.title || v.agent_key || 'agente'}`
+    : 'Roteiro CEVICO';
+const fmtVersionDate = iso =>
+  iso
+    ? new Date(iso).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '';
+const restoreScriptVersion = async v => {
+  // eslint-disable-next-line no-alert
+  if (
+    !window.confirm(
+      `Voltar o ${versionLabel(v)} para a versão de ${fmtVersionDate(v.created_at)}? O texto de agora fica guardado no histórico.`
+    )
+  )
+    return;
+  restoringVersion.value = v.id;
+  try {
+    await CrmAPI.restoreScriptVersion(v.id);
+    await store.dispatch('crm/fetchSettings');
+    await loadScriptVersions();
+    useAlert(`🕘 ${versionLabel(v)} voltou para a versão escolhida — já vale.`);
+  } catch (e) {
+    useAlert(
+      e?.response?.data?.error || 'Não consegui voltar para essa versão.'
+    );
+  } finally {
+    restoringVersion.value = null;
+  }
+};
+
+// 📜 ROTEIRO CEVICO — fonte única dos atendentes que falam com paciente.
+// Seção editada vale na hora para todos; seção em branco = padrão do sistema.
+const scriptSections = computed(() => settings.value?.ai?.script || []);
+const scriptUpdatedAt = computed(
+  () => settings.value?.ai?.script_updated_at || null
+);
+const scriptExpanded = ref(false);
+const scriptEditing = ref(false);
+const scriptDraft = ref({});
+const scriptOpenSection = ref('');
+const savingScript = ref(false);
+const startScriptEdit = () => {
+  scriptDraft.value = Object.fromEntries(
+    scriptSections.value.map(sec => [sec.key, sec.text || ''])
+  );
+  scriptEditing.value = true;
+  if (!scriptOpenSection.value)
+    scriptOpenSection.value = scriptSections.value[0]?.key || '';
+};
+const cancelScriptEdit = () => {
+  scriptEditing.value = false;
+  scriptDraft.value = {};
+};
+const restoreScriptSection = key => {
+  scriptDraft.value[key] =
+    scriptSections.value.find(sec => sec.key === key)?.default || '';
+};
+const scriptSectionIsDefault = key => {
+  const sec = scriptSections.value.find(x => x.key === key);
+  return (scriptDraft.value[key] || '').trim() === (sec?.default || '').trim();
+};
+const saveScript = async () => {
+  savingScript.value = true;
+  try {
+    // texto igual ao padrão viaja vazio: a seção continua "padrão" (e acompanha melhorias futuras)
+    const payload = Object.fromEntries(
+      scriptSections.value.map(sec => [
+        sec.key,
+        scriptSectionIsDefault(sec.key)
+          ? ''
+          : (scriptDraft.value[sec.key] || '').trim(),
+      ])
+    );
+    await CrmAPI.updateAi({ script: payload });
+    await store.dispatch('crm/fetchSettings');
+    scriptEditing.value = false;
+    useAlert(
+      '📜 Roteiro CEVICO salvo — já vale para todos os atendentes que falam com paciente.'
+    );
+  } catch {
+    useAlert('Erro ao salvar o Roteiro.');
+  } finally {
+    savingScript.value = false;
+  }
+};
+
 const instagramInboxNames = agent =>
   (agent.inbox_ids || [])
     .map(id => inboxes.value.find(i => i.id === id)?.name)
@@ -216,8 +726,12 @@ const runMentorNow = async () => {
   isRunningMentor.value = true;
   try {
     const { data } = await CrmAPI.runMentor();
-    useAlert(data.message || 'Mentor iniciado! Veja o Meu Painel em alguns minutos.');
-    setTimeout(() => { isRunningMentor.value = false; }, 90000);
+    useAlert(
+      data.message || 'Mentor iniciado! Veja o Meu Painel em alguns minutos.'
+    );
+    setTimeout(() => {
+      isRunningMentor.value = false;
+    }, 90000);
   } catch (error) {
     useAlert(error?.response?.data?.error || 'Erro ao iniciar o Mentor.');
     isRunningMentor.value = false;
@@ -272,14 +786,18 @@ const startHarvestPolling = (baseGeneratedAt, baseError) => {
     await loadHarvestStatus();
     const h = harvest.value;
     const ready =
-      h?.status === 'preview' && h?.generated_at && h.generated_at !== baseGeneratedAt;
+      h?.status === 'preview' &&
+      h?.generated_at &&
+      h.generated_at !== baseGeneratedAt;
     const failed = h?.last_error && h.last_error !== baseError;
     if (ready || failed || harvestPollTicks > 24) {
       harvestGenerating.value = false;
       stopHarvestPolling();
       if (ready) {
         showHarvestTable.value = true;
-        useAlert('🌾 Prévia da colheita pronta — revise a lista e aprove quando quiser.');
+        useAlert(
+          '🌾 Prévia da colheita pronta — revise a lista e aprove quando quiser.'
+        );
       } else if (failed) {
         useAlert(`⚠️ A prévia não saiu: ${h.last_error}`);
       }
@@ -295,10 +813,14 @@ const runHarvestPreview = async () => {
   try {
     await CrmAPI.harvestPreview();
     harvestGenerating.value = true;
-    useAlert('🌾 Gerando a prévia — leva uns 2 minutos, a lista aparece aqui sozinha.');
+    useAlert(
+      '🌾 Gerando a prévia — leva uns 2 minutos, a lista aparece aqui sozinha.'
+    );
     startHarvestPolling(baseGeneratedAt, baseError);
   } catch (error) {
-    useAlert(error?.response?.data?.error || 'Erro ao gerar a prévia da colheita.');
+    useAlert(
+      error?.response?.data?.error || 'Erro ao gerar a prévia da colheita.'
+    );
   } finally {
     harvestActing.value = '';
   }
@@ -340,11 +862,23 @@ const approveHarvest = () =>
       : '✅ Colheita aprovada — a IA etiqueta os leads escolhidos; filtre pela etiqueta no CRM.'
   );
 const pauseHarvest = () =>
-  harvestAction('pause', () => CrmAPI.harvestPause(), '⏸ Colheita pausada — nada sai até você retomar.');
+  harvestAction(
+    'pause',
+    () => CrmAPI.harvestPause(),
+    '⏸ Colheita pausada — nada sai até você retomar.'
+  );
 const resumeHarvest = () =>
-  harvestAction('resume', () => CrmAPI.harvestResume(), '▶️ Colheita retomada — os envios continuam de onde pararam.');
+  harvestAction(
+    'resume',
+    () => CrmAPI.harvestResume(),
+    '▶️ Colheita retomada — os envios continuam de onde pararam.'
+  );
 const harvestSendNow = () =>
-  harvestAction('send_now', () => CrmAPI.harvestSendNow(), '📤 Lote de hoje disparado — os envios saem em alguns minutos.');
+  harvestAction(
+    'send_now',
+    () => CrmAPI.harvestSendNow(),
+    '📤 Lote de hoje disparado — os envios saem em alguns minutos.'
+  );
 
 const skipHarvestLead = async lead => {
   try {
@@ -355,7 +889,9 @@ const skipHarvestLead = async lead => {
       st.skipped = (st.skipped || 0) + 1;
       st.pending = Math.max(0, (st.pending || 0) - 1);
     }
-    useAlert(`${lead.name || 'Lead'} pulado — não recebe a mensagem desta colheita.`);
+    useAlert(
+      `${lead.name || 'Lead'} pulado — não recebe a mensagem desta colheita.`
+    );
   } catch {
     useAlert('Erro ao pular o lead.');
   }
@@ -363,10 +899,22 @@ const skipHarvestLead = async lead => {
 
 // status do mês em linguagem humana
 const HARVEST_STATUS_INFO = {
-  preview: { label: 'Prévia pronta — revise a lista e aprove para começar', class: 'bg-amber-500/15 text-amber-600' },
-  approved: { label: 'Aprovada — enviando aos poucos, dentro do teto diário', class: 'bg-green-500/15 text-green-600' },
-  paused: { label: 'Pausada — nada sai até você retomar', class: 'bg-n-alpha-2 text-n-slate-10' },
-  done: { label: 'Concluída — colheita do mês encerrada 🎉', class: 'bg-sky-500/15 text-sky-600' },
+  preview: {
+    label: 'Prévia pronta — revise a lista e aprove para começar',
+    class: 'bg-amber-500/15 text-amber-600',
+  },
+  approved: {
+    label: 'Aprovada — enviando aos poucos, dentro do teto diário',
+    class: 'bg-green-500/15 text-green-600',
+  },
+  paused: {
+    label: 'Pausada — nada sai até você retomar',
+    class: 'bg-n-alpha-2 text-n-slate-10',
+  },
+  done: {
+    label: 'Concluída — colheita do mês encerrada 🎉',
+    class: 'bg-sky-500/15 text-sky-600',
+  },
 };
 const harvestStatusInfo = () =>
   HARVEST_STATUS_INFO[harvest.value?.status] || {
@@ -376,7 +924,10 @@ const harvestStatusInfo = () =>
 const harvestMonthLabel = () => {
   const mk = harvest.value?.month_key;
   if (!mk) return '';
-  return new Date(`${mk}-01T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  return new Date(`${mk}-01T12:00:00`).toLocaleDateString('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+  });
 };
 // modo organize: quantos leads já ganharam a etiqueta oportunidade_AAAA_MM
 const harvestOrganizedCount = () =>
@@ -423,7 +974,10 @@ const runManagerNow = async () => {
   isRunningManager.value = true;
   try {
     const { data } = await CrmAPI.runManager();
-    useAlert(data.message || '📊 Gestor rodando! O briefing aparece aqui em ~30 segundos.');
+    useAlert(
+      data.message ||
+        '📊 Gestor rodando! O briefing aparece aqui em ~30 segundos.'
+    );
     setTimeout(async () => {
       await store.dispatch('crm/fetchSettings');
       isRunningManager.value = false;
@@ -471,7 +1025,9 @@ const runAuditorNow = async () => {
   const baseRunAt = auditorSummary.value?.last_run_at || null;
   try {
     await CrmAPI.runAuditor();
-    useAlert('🎓 Auditando as conversas de ontem — leva ~2 minutos, o ranking atualiza aqui sozinho.');
+    useAlert(
+      '🎓 Auditando as conversas de ontem — leva ~2 minutos, o ranking atualiza aqui sozinho.'
+    );
     stopAuditorPolling();
     auditorPollTicks = 0;
     auditorPollTimer = setInterval(async () => {
@@ -508,7 +1064,10 @@ const auditorAvgClass = avg => {
   if (Number(avg) >= 6) return 'bg-amber-500/15 text-amber-600';
   return 'bg-red-500/10 text-red-500';
 };
-const fmtAvg = avg => Number(avg || 0).toFixed(1).replace('.', ',');
+const fmtAvg = avg =>
+  Number(avg || 0)
+    .toFixed(1)
+    .replace('.', ',');
 // "Atendente 0" = conversas sem atendente humano (robô/fluxo)
 const auditorRowName = row =>
   row.user_id === 0 || row.name === 'Atendente 0'
@@ -552,7 +1111,9 @@ const runCreativeNow = async () => {
   const baseGeneratedAt = creativeState.value?.generated_at || null;
   try {
     await CrmAPI.runCreative();
-    useAlert('🎨 Gerando os criativos da semana — leva ~2 minutos, eles aparecem aqui sozinhos.');
+    useAlert(
+      '🎨 Gerando os criativos da semana — leva ~2 minutos, eles aparecem aqui sozinhos.'
+    );
     stopCreativePolling();
     creativePollTicks = 0;
     creativePollTimer = setInterval(async () => {
@@ -565,7 +1126,9 @@ const runCreativeNow = async () => {
         stopCreativePolling();
         isRunningCreative.value = false;
         if (done) {
-          useAlert('🎨 Criativos da semana prontos — revise e aprove os que quiser usar.');
+          useAlert(
+            '🎨 Criativos da semana prontos — revise e aprove os que quiser usar.'
+          );
           // atualiza o resumo do topo (creative_last vem do settings)
           store.dispatch('crm/fetchSettings').catch(() => {});
         }
@@ -620,8 +1183,12 @@ const reviewCreativeVariation = async (wi, vi, status) => {
 
 // copiar a variação pronta (gancho + texto + CTA) p/ o Gerenciador/Estúdio
 const copyCreativeVariation = async v => {
-  await navigator.clipboard.writeText([v.gancho, '', v.texto, '', v.cta].filter(Boolean).join('\n'));
-  useAlert('Criativo copiado! 📋 Cole no Gerenciador de Anúncios ou no Estúdio.');
+  await navigator.clipboard.writeText(
+    [v.gancho, '', v.texto, '', v.cta].filter(Boolean).join('\n')
+  );
+  useAlert(
+    'Criativo copiado! 📋 Cole no Gerenciador de Anúncios ou no Estúdio.'
+  );
 };
 
 // semana em dd/mm (week_key vem como data da segunda-feira)
@@ -639,14 +1206,27 @@ const SCHEDULER_OUTCOMES = {
   created: { label: 'criada', class: 'bg-green-500/15 text-green-600' },
   rescheduled: { label: 'reagendada', class: 'bg-amber-500/15 text-amber-600' },
   already: { label: 'já existia', class: 'bg-n-alpha-2 text-n-slate-10' },
-  skipped: { label: 'sem dia/hora (tarefa criada)', class: 'bg-red-500/10 text-red-500' },
+  skipped: {
+    label: 'sem dia/hora (tarefa criada)',
+    class: 'bg-red-500/10 text-red-500',
+  },
   // rodada 148: cancelamento + erros visíveis — é assim que se vê quem escapou
   canceled: { label: 'cancelada', class: 'bg-rose-500/15 text-rose-600' },
-  cancel_no_match: { label: 'pediu cancelar — consulta não achada', class: 'bg-red-500/10 text-red-500' },
+  cancel_no_match: {
+    label: 'pediu cancelar — consulta não achada',
+    class: 'bg-red-500/10 text-red-500',
+  },
   erro: { label: 'erro na leitura', class: 'bg-red-500/10 text-red-500' },
 };
 const fmtLogDate = iso =>
-  iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+  iso
+    ? new Date(iso).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '—';
 
 // ── Preencher a Agenda com o histórico (Agente de Agendamento) ──
 // Varre conversas com confirmação de agendamento e registra as consultas na
@@ -666,7 +1246,9 @@ const runBackfill = async () => {
     useAlert(data.message || 'Preenchimento iniciado!');
     showBackfillModal.value = false;
   } catch (error) {
-    useAlert(error?.response?.data?.error || 'Erro ao iniciar o preenchimento.');
+    useAlert(
+      error?.response?.data?.error || 'Erro ao iniciar o preenchimento.'
+    );
   } finally {
     isBackfilling.value = false;
   }
@@ -690,7 +1272,14 @@ const STUDIO_STRUCTURES = [
   { key: 'perguntas_respostas', label: 'Perguntas e Respostas' },
   { key: 'dialogo', label: 'Diálogo' },
 ];
-const studio = ref({ modality: 'carrossel', structure: 'auto', briefing: '', form_id: '', generating: false, result: null });
+const studio = ref({
+  modality: 'carrossel',
+  structure: 'auto',
+  briefing: '',
+  form_id: '',
+  generating: false,
+  result: null,
+});
 const studioForms = ref([]);
 const loadStudioForms = async () => {
   try {
@@ -724,7 +1313,11 @@ const generateStudio = async () => {
 const copyStudioResult = async () => {
   const r = studio.value.result;
   if (!r) return;
-  const parts = [r.titulo, '', ...(r.blocos || []).map(b => `${b.rotulo}\n${b.texto}`)];
+  const parts = [
+    r.titulo,
+    '',
+    ...(r.blocos || []).map(b => `${b.rotulo}\n${b.texto}`),
+  ];
   if (r.legenda) parts.push('', `LEGENDA:\n${r.legenda}`);
   if (r.hashtags) parts.push('', r.hashtags);
   await navigator.clipboard.writeText(parts.join('\n'));
@@ -734,7 +1327,11 @@ const savingRefs = ref(false);
 const saveCopyReferences = async () => {
   savingRefs.value = true;
   try {
-    await CrmAPI.updateAi({ agents: { copywriter: { references: aiAgents.value.copywriter.references || '' } } });
+    await CrmAPI.updateAi({
+      agents: {
+        copywriter: { references: aiAgents.value.copywriter.references || '' },
+      },
+    });
     useAlert('Referências salvas — o Copywriter segue esse estilo em tudo.');
   } catch {
     useAlert('Erro ao salvar as referências.');
@@ -757,7 +1354,9 @@ const saveBuilderPro = async () => {
         },
       },
     });
-    useAlert('Construtor ajustado — as próximas montagens seguem essas rédeas. 🏗️');
+    useAlert(
+      'Construtor ajustado — as próximas montagens seguem essas rédeas. 🏗️'
+    );
   } catch {
     useAlert('Erro ao salvar os ajustes do Construtor.');
   } finally {
@@ -768,15 +1367,39 @@ const saveBuilderPro = async () => {
 // SANFONA dos agentes: cabeçalho sempre visível, corpo desce ao clicar
 // (são muitos agentes — assim dá para navegar pela página com controle)
 const expandedAgents = ref({});
+// 🃏 card que está abrindo ganha um anel pulsando na cor dele e a página rola
+// até ele (pedido 21/09: "é esse card que está abrindo")
+const openingAgent = ref('');
 const toggleAgentExpand = key => {
   const next = !expandedAgents.value[key];
   expandedAgents.value = { ...expandedAgents.value, [key]: next };
+  if (next) {
+    openingAgent.value = key;
+    nextTick(() => {
+      document
+        .getElementById(`cv-agent-${key}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => {
+        if (openingAgent.value === key) openingAgent.value = '';
+      }, 1200);
+    });
+  }
   // 🎓 Auditor: carrega o resumo de qualidade ao expandir pela 1ª vez (lazy)
-  if (key === 'auditor' && next && !auditorSummary.value && !loadingAuditorSummary.value) {
+  if (
+    key === 'auditor' &&
+    next &&
+    !auditorSummary.value &&
+    !loadingAuditorSummary.value
+  ) {
     loadAuditorSummary();
   }
   // 🎨 Criativo: carrega os criativos da semana ao expandir pela 1ª vez (lazy)
-  if (key === 'creative' && next && !creativeState.value && !loadingCreative.value) {
+  if (
+    key === 'creative' &&
+    next &&
+    !creativeState.value &&
+    !loadingCreative.value
+  ) {
     loadCreativeState();
   }
 };
@@ -796,6 +1419,17 @@ const snapshotAgent = key => {
     snap.response_goal_minutes = a.response_goal_minutes;
   }
   if (key === 'instagram') snap.inbox_ids = [...(a.inbox_ids || [])];
+  if (RESPONDER_WA_KEYS.includes(key)) {
+    snap.inbox_ids = [...(a.inbox_ids || [])];
+    snap.stage_ids = [...(a.stage_ids || [])];
+    snap.no_card = a.no_card;
+    snap.after_booking_stage_id = a.after_booking_stage_id;
+    snap.shadow_daily_cap = a.shadow_daily_cap;
+    snap.hours_start = a.hours_start;
+    snap.hours_end = a.hours_end;
+    snap.mode = a.mode;
+    snap.live_days = [...(a.live_days || [])];
+  }
   if (key === 'comments') {
     snap.fb_page_id = a.fb_page_id;
     snap.ig_user_id = a.ig_user_id;
@@ -809,7 +1443,9 @@ const snapshotAgent = key => {
     snap.inbox_id = a.inbox_id;
     snap.require_approval = a.require_approval;
     snap.message_preview = a.message_preview;
-    snap.template_params = a.template_params ? JSON.parse(JSON.stringify(a.template_params)) : null;
+    snap.template_params = a.template_params
+      ? JSON.parse(JSON.stringify(a.template_params))
+      : null;
     snap.stage_ids = [...(a.stage_ids || [])];
   }
   if (key === 'manager') snap.drop_pct = a.drop_pct;
@@ -839,6 +1475,17 @@ const discardEdit = key => {
       a.response_goal_minutes = snap.response_goal_minutes;
     }
     if (key === 'instagram') a.inbox_ids = [...(snap.inbox_ids || [])];
+    if (RESPONDER_WA_KEYS.includes(key)) {
+      a.inbox_ids = [...(snap.inbox_ids || [])];
+      a.stage_ids = [...(snap.stage_ids || [])];
+      a.no_card = snap.no_card;
+      a.after_booking_stage_id = snap.after_booking_stage_id;
+      a.shadow_daily_cap = snap.shadow_daily_cap;
+      a.hours_start = snap.hours_start;
+      a.hours_end = snap.hours_end;
+      a.mode = snap.mode || 'shadow';
+      a.live_days = [...(snap.live_days || [])];
+    }
     if (key === 'comments') {
       a.fb_page_id = snap.fb_page_id;
       a.ig_user_id = snap.ig_user_id;
@@ -853,7 +1500,9 @@ const discardEdit = key => {
       a.inbox_id = snap.inbox_id;
       a.require_approval = snap.require_approval;
       a.message_preview = snap.message_preview;
-      a.template_params = snap.template_params ? JSON.parse(JSON.stringify(snap.template_params)) : null;
+      a.template_params = snap.template_params
+        ? JSON.parse(JSON.stringify(snap.template_params))
+        : null;
       a.stage_ids = [...(snap.stage_ids || [])];
     }
     if (key === 'manager') a.drop_pct = snap.drop_pct;
@@ -869,7 +1518,11 @@ const discardEdit = key => {
 // monta os campos de config do agente (sem o enabled — esse é do interruptor)
 const packAgentFields = key => {
   const a = aiAgents.value[key];
-  const fields = { prompt: (a.prompt || '').trim(), model: a.model, effort: a.effort };
+  const fields = {
+    prompt: (a.prompt || '').trim(),
+    model: a.model,
+    effort: a.effort,
+  };
   if (key === 'opportunity') {
     fields.watchers = (a.watchers || [])
       .filter(w => w.stage_id)
@@ -884,18 +1537,37 @@ const packAgentFields = key => {
   if (key === 'instagram') {
     fields.inbox_ids = (a.inbox_ids || []).map(Number);
   }
+  if (RESPONDER_WA_KEYS.includes(key)) {
+    fields.inbox_ids = (a.inbox_ids || []).map(Number);
+    fields.stage_ids = (a.stage_ids || []).map(Number);
+    fields.no_card = a.no_card !== false;
+    fields.after_booking_stage_id = a.after_booking_stage_id
+      ? Number(a.after_booking_stage_id)
+      : null;
+    fields.shadow_daily_cap = Number(a.shadow_daily_cap) || 30;
+    fields.hours_start = a.hours_start || '';
+    fields.hours_end = a.hours_end || '';
+    // 🟢 rodada 193: ao vivo só dentro da janela (dias + horas); fora dela
+    // continua em sombra. live_days vazio = todos os dias.
+    fields.mode = a.mode === 'live' ? 'live' : 'shadow';
+    fields.live_days = [...new Set((a.live_days || []).map(Number))].sort();
+  }
   if (key === 'comments') {
     fields.fb_page_id = (a.fb_page_id || '').trim();
     fields.ig_user_id = (a.ig_user_id || '').trim();
     // token só viaja quando digitado (nunca volta preenchido do servidor)
-    if ((a.page_access_token || '').trim()) fields.page_access_token = a.page_access_token.trim();
+    if ((a.page_access_token || '').trim())
+      fields.page_access_token = a.page_access_token.trim();
   }
   if (key === 'harvest') {
     fields.mode = a.mode === 'send' ? 'send' : 'organize';
     fields.monthly_size = Number(a.monthly_size) || 300;
     fields.cold_days = Number(a.cold_days) || 60;
     fields.daily_cap = Number(a.daily_cap) || 50;
-    fields.day_of_month = Math.min(28, Math.max(1, Number(a.day_of_month) || 1));
+    fields.day_of_month = Math.min(
+      28,
+      Math.max(1, Number(a.day_of_month) || 1)
+    );
     fields.inbox_id = a.inbox_id || null;
     fields.require_approval = a.require_approval !== false;
     fields.message_preview = a.message_preview || '';
@@ -929,10 +1601,14 @@ const toggleInstagramInbox = id => {
 const saveAgentDraft = async key => {
   savingAgent.value = key;
   try {
-    await CrmAPI.updateAi({ agents: { [key]: { draft: packAgentFields(key) } } });
+    await CrmAPI.updateAi({
+      agents: { [key]: { draft: packAgentFields(key) } },
+    });
     aiAgents.value[key].has_draft = true;
     editingAgent.value = { ...editingAgent.value, [key]: false };
-    useAlert(`💾 Rascunho de ${AGENT_META[key].title} salvo — ainda NÃO está valendo. Publique quando quiser aplicar.`);
+    useAlert(
+      `💾 Rascunho de ${AGENT_META[key].title} salvo — ainda NÃO está valendo. Publique quando quiser aplicar.`
+    );
   } catch {
     useAlert('Erro ao salvar o rascunho.');
   } finally {
@@ -944,11 +1620,15 @@ const saveAgentDraft = async key => {
 const publishAgent = async key => {
   savingAgent.value = key;
   try {
-    await CrmAPI.updateAi({ agents: { [key]: { ...packAgentFields(key), draft: {} } } });
+    await CrmAPI.updateAi({
+      agents: { [key]: { ...packAgentFields(key), draft: {} } },
+    });
     aiAgents.value[key].has_draft = false;
     editingAgent.value = { ...editingAgent.value, [key]: false };
     loadedValues.value[key] = snapshotAgent(key);
-    useAlert(`🚀 ${AGENT_META[key].title} publicado — vale a partir das próximas análises.`);
+    useAlert(
+      `🚀 ${AGENT_META[key].title} publicado — vale a partir das próximas análises.`
+    );
   } catch {
     useAlert('Erro ao publicar o agente.');
   } finally {
@@ -969,7 +1649,9 @@ const focusAgent = key => {
   expandedAgents.value = { ...expandedAgents.value, [key]: true };
   nextTick(() => {
     setTimeout(() => {
-      document.getElementById(`cv-agent-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document
+        .getElementById(`cv-agent-${key}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 150);
   });
 };
@@ -982,7 +1664,9 @@ watch(
 // 🤖📞 Agente de Ligação: a tela dele é a de Integrações (rota do item 169;
 // se ainda não existir nesta build, cai na lista de Integrações)
 const openVoiceSettings = () => {
-  const name = router.hasRoute('crm_integrations_voice_agent') ? 'crm_integrations_voice_agent' : 'crm_integrations';
+  const name = router.hasRoute('crm_integrations_voice_agent')
+    ? 'crm_integrations_voice_agent'
+    : 'crm_integrations';
   router.push({ name, params: { accountId: accountId.value } });
 };
 
@@ -1016,7 +1700,8 @@ const aiUsage = ref(null);
 const usageByAgent = key =>
   (aiUsage.value?.by_agent || []).find(r => r.key === key) || null;
 const fmtUsd = v => `US$ ${(v || 0).toFixed(2)}`;
-const fmtTokens = v => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v || 0));
+const fmtTokens = v =>
+  v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v || 0);
 
 const AGENT_META = {
   conversation: {
@@ -1025,13 +1710,18 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #0F5FA6, #7C3AED)',
     color: '#0F5FA6',
     tag: 'Atendimento',
-    description: 'Lê a conversa e devolve, numa análise só: indicador de interesse (alto/médio/baixo/perdido), resumo, próximo passo, a ETAPA DO SCRIPT CEVICO em que o paciente está e 2-3 FRASES PRONTAS para a atendente copiar e usar.',
+    description:
+      'Lê a conversa e devolve, numa análise só: indicador de interesse (alto/médio/baixo/perdido), resumo, próximo passo, a ETAPA DO SCRIPT CEVICO em que o paciente está e 2-3 FRASES PRONTAS para a atendente copiar e usar.',
     triggers: [
-      { icon: 'i-lucide-mouse-pointer-click', label: 'Botão "Analisar com IA" no painel da conversa' },
+      {
+        icon: 'i-lucide-mouse-pointer-click',
+        label: 'Botão "Analisar com IA" no painel da conversa',
+      },
       { icon: 'i-lucide-zap', label: 'Ação de coluna "Analisar com IA"' },
       { icon: 'i-lucide-rocket', label: 'Resultado aparece no balão do CRM' },
     ],
-    suggestion: 'Tarefa exigente — Opus ou Sonnet dão a melhor leitura de interesse.',
+    suggestion:
+      'Tarefa exigente — Opus ou Sonnet dão a melhor leitura de interesse.',
   },
   form: {
     title: 'Analista de Formulários',
@@ -1039,9 +1729,13 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #5B21B6, #7C3AED)',
     color: '#7C3AED',
     tag: 'Marketing',
-    description: 'Lê todas as respostas de um formulário e sintetiza dores, desejos, objeções e recomendações práticas de marketing e atendimento.',
+    description:
+      'Lê todas as respostas de um formulário e sintetiza dores, desejos, objeções e recomendações práticas de marketing e atendimento.',
     triggers: [
-      { icon: 'i-lucide-sparkles', label: 'Botão "Gerar insights com IA" na página Formulários' },
+      {
+        icon: 'i-lucide-sparkles',
+        label: 'Botão "Gerar insights com IA" na página Formulários',
+      },
     ],
     suggestion: 'Analisa muitas respostas de uma vez — vale usar esforço alto.',
   },
@@ -1051,13 +1745,24 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #B8860B, #D4A017)',
     color: '#B8860B',
     tag: 'Agenda',
-    description: 'Lê a conversa e ANOTA a consulta na Agenda do sistema: nome, telefone, dia, hora, médico, unidade, valor e observações. Entende reagendamento (atualiza a consulta existente). NUNCA fala com o paciente — quem conversa é o Atendente IA (N8N).',
+    description:
+      'Lê a conversa e ANOTA a consulta na Agenda do sistema: nome, telefone, dia, hora, médico, unidade, valor e observações. Entende reagendamento (atualiza a consulta existente). NUNCA fala com o paciente — quem conversa é o Atendente IA (N8N).',
     triggers: [
-      { icon: 'i-lucide-zap', label: 'Card entra nas colunas escolhidas abaixo' },
-      { icon: 'i-lucide-calendar-days', label: 'Anota/reagenda na Agenda do sistema' },
-      { icon: 'i-lucide-list-checks', label: 'Sem dia/hora → tarefa "⚠️ Confirmar consulta"' },
+      {
+        icon: 'i-lucide-zap',
+        label: 'Card entra nas colunas escolhidas abaixo',
+      },
+      {
+        icon: 'i-lucide-calendar-days',
+        label: 'Anota/reagenda na Agenda do sistema',
+      },
+      {
+        icon: 'i-lucide-list-checks',
+        label: 'Sem dia/hora → tarefa "⚠️ Confirmar consulta"',
+      },
     ],
-    suggestion: 'Extração estruturada — Sonnet no esforço médio resolve bem e custa menos.',
+    suggestion:
+      'Extração estruturada — Sonnet no esforço médio resolve bem e custa menos.',
   },
   opportunity: {
     title: 'Radar de Oportunidades',
@@ -1065,14 +1770,28 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #059669, #4ADE80)',
     color: '#059669',
     tag: 'Não perder venda',
-    description: 'Audita as colunas vigiadas e encontra pacientes QUENTES parados sem atendimento (ex.: quer agendar e ninguém respondeu). Cria o aviso no Meu Painel com nome, motivo e o que a atendente deve fazer.',
+    description:
+      'Audita as colunas vigiadas e encontra pacientes QUENTES parados sem atendimento (ex.: quer agendar e ninguém respondeu). Cria o aviso no Meu Painel com nome, motivo e o que a atendente deve fazer.',
     triggers: [
-      { icon: 'i-lucide-clock', label: 'Auditoria automática a cada 10 minutos' },
-      { icon: 'i-lucide-house', label: 'Aviso vermelho no Meu Painel do atendente escolhido' },
-      { icon: 'i-lucide-columns-3', label: 'Cada coluna vigiada com atendente e janela próprios' },
-      { icon: 'i-lucide-scan-search', label: 'Radar pontual: varredura única que não fica ativa' },
+      {
+        icon: 'i-lucide-clock',
+        label: 'Auditoria automática a cada 10 minutos',
+      },
+      {
+        icon: 'i-lucide-house',
+        label: 'Aviso vermelho no Meu Painel do atendente escolhido',
+      },
+      {
+        icon: 'i-lucide-columns-3',
+        label: 'Cada coluna vigiada com atendente e janela próprios',
+      },
+      {
+        icon: 'i-lucide-scan-search',
+        label: 'Radar pontual: varredura única que não fica ativa',
+      },
     ],
-    suggestion: 'Classificação simples e frequente — Haiku mantém o custo baixinho.',
+    suggestion:
+      'Classificação simples e frequente — Haiku mantém o custo baixinho.',
   },
   closing: {
     title: 'Monitor de Fechamento',
@@ -1080,11 +1799,22 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #065F46, #10B981)',
     color: '#065F46',
     tag: 'Cirurgias',
-    description: 'Lê a conversa quando o card entra na coluna escolhida e registra o FECHAMENTO da cirurgia: valor fechado, forma de pagamento e data combinada. Preenche o valor do card (se vazio) e o 💰 aparece na Agenda de Cirurgias — visível só para admin.',
+    description:
+      'Lê a conversa quando o card entra na coluna escolhida e registra o FECHAMENTO da cirurgia: valor fechado, forma de pagamento e data combinada. Preenche o valor do card (se vazio) e o 💰 aparece na Agenda de Cirurgias — visível só para admin.',
     triggers: [
-      { icon: 'i-lucide-zap', label: 'Ação de coluna "Adicionar agente de IA" → Monitor de Fechamento' },
-      { icon: 'i-lucide-wallet', label: 'Valor + forma de pagamento gravados no contato' },
-      { icon: 'i-lucide-calendar-days', label: 'Valor visível na conferência da Agenda de Cirurgias (admin)' },
+      {
+        icon: 'i-lucide-zap',
+        label:
+          'Ação de coluna "Adicionar agente de IA" → Monitor de Fechamento',
+      },
+      {
+        icon: 'i-lucide-wallet',
+        label: 'Valor + forma de pagamento gravados no contato',
+      },
+      {
+        icon: 'i-lucide-calendar-days',
+        label: 'Valor visível na conferência da Agenda de Cirurgias (admin)',
+      },
     ],
     suggestion: 'Extração estruturada — Sonnet no esforço médio.',
   },
@@ -1094,13 +1824,89 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #065F46, #34D399)',
     color: '#047857',
     tag: 'Fechamento',
-    description: 'Dois papéis: AO VIVO, o botão "💼 Ajuda com objeção" no painel da conversa identifica o que está travando o paciente e sugere respostas prontas no tom CEVICO para a vendedora. Para a GESTÃO, analisa as conversas que geraram fechamento de cirurgia e produz insights comerciais (o que funciona, objeções vencidas, recomendações).',
+    description:
+      'Dois papéis: AO VIVO, o botão "💼 Ajuda com objeção" no painel da conversa identifica o que está travando o paciente e sugere respostas prontas no tom CEVICO para a vendedora. Para a GESTÃO, analisa as conversas que geraram fechamento de cirurgia e produz insights comerciais (o que funciona, objeções vencidas, recomendações).',
     triggers: [
-      { icon: 'i-lucide-handshake', label: 'Botão "💼 Ajuda com objeção" no painel da conversa' },
-      { icon: 'i-lucide-lightbulb', label: 'Botão "Gerar insights comerciais" abaixo (gestão)' },
-      { icon: 'i-lucide-shield', label: 'Nunca fala com o paciente — quem decide e envia é a vendedora' },
+      {
+        icon: 'i-lucide-handshake',
+        label: 'Botão "💼 Ajuda com objeção" no painel da conversa',
+      },
+      {
+        icon: 'i-lucide-lightbulb',
+        label: 'Botão "Gerar insights comerciais" abaixo (gestão)',
+      },
+      {
+        icon: 'i-lucide-shield',
+        label: 'Nunca fala com o paciente — quem decide e envia é a vendedora',
+      },
     ],
     suggestion: 'Leitura fina de vendas — Opus no esforço alto vale o custo.',
+  },
+  atendente_agendamento: {
+    title: 'Atendente de Agendamento',
+    icon: 'i-lucide-message-square-heart',
+    gradient: 'linear-gradient(135deg, #059669, #34D399)',
+    color: '#059669',
+    tag: 'WhatsApp · ao vivo',
+    description:
+      'O agente de agendamento DENTRO do sistema, feito para substituir o fluxo do N8N: conversa com o paciente no WhatsApp da recepção até a consulta agendada, seguindo o Roteiro CEVICO (fonte única, no topo desta aba) e oferecendo só vagas LIVRES da Agenda. Nasce em modo SOMBRA: lê as conversas e anota, numa nota interna, o que TERIA respondido — nada chega ao paciente. A tela Sombra compara com o que o N8N respondeu, para você afinar o Roteiro antes de ligar de verdade.',
+    triggers: [
+      {
+        icon: 'i-lucide-message-square',
+        label:
+          'Mensagem do paciente numa caixa de WhatsApp escolhida (espera ~12s e junta mensagens picadas)',
+      },
+      {
+        icon: 'i-lucide-columns-3',
+        label:
+          'A COLUNA do card decide: só fala nas colunas marcadas abaixo (ou sem card)',
+      },
+      {
+        icon: 'i-lucide-calendar-check',
+        label:
+          'Só oferece vagas livres reais da Agenda; ao vivo, grava a consulta ANTES de confirmar 😊',
+      },
+      {
+        icon: 'i-lucide-eye-off',
+        label:
+          'Sombra = nota interna, nada ao paciente · Ao vivo = só na janela (dias + horas) escolhida, com o N8N desligado',
+      },
+    ],
+    suggestion:
+      'Conversa ao vivo — Sonnet no esforço médio equilibra qualidade e custo. Compare na tela Sombra antes de ligar.',
+  },
+  atendente_pos: {
+    title: 'Atendente Pós-agendamento',
+    icon: 'i-lucide-life-buoy',
+    gradient: 'linear-gradient(135deg, #0F5FA6, #38BDF8)',
+    color: '#0F5FA6',
+    tag: 'WhatsApp · suporte',
+    description:
+      'Cuida de quem JÁ TEM consulta marcada, até o dia da consulta: onde fica, o que levar, quanto demora, acompanhante, jejum, "que dia é minha consulta" (ele lê a consulta futura na Agenda), remarcar com vagas reais e cancelar. Não vende, não convida, não manda lembrete. Mesmo Roteiro CEVICO do Atendente de Agendamento, só muda o bloco da etapa. Nasce em SOMBRA e fala só nas colunas dele.',
+    triggers: [
+      {
+        icon: 'i-lucide-message-square',
+        label:
+          'Mensagem do paciente numa caixa de WhatsApp escolhida (espera ~12s)',
+      },
+      {
+        icon: 'i-lucide-columns-3',
+        label:
+          'Só nas colunas marcadas abaixo (ex.: Agendamento de Consulta, Consulta Confirmada, Desmarcou)',
+      },
+      {
+        icon: 'i-lucide-calendar-clock',
+        label:
+          'Vê a consulta futura do paciente; remarca só com vagas livres; cancela só se o paciente confirmar',
+      },
+      {
+        icon: 'i-lucide-eye-off',
+        label:
+          'Sombra = nota interna, nada ao paciente · Ao vivo = remarca/cancela de verdade na Agenda, só na janela escolhida',
+      },
+    ],
+    suggestion:
+      'Suporte curto e objetivo — Sonnet no esforço médio resolve bem. Teste no simulador com "preciso remarcar".',
   },
   instagram: {
     title: 'Atendente Direct & Messenger',
@@ -1108,14 +1914,30 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #C2185B, #7C3AED)',
     color: '#C2185B',
     tag: 'Atendimento ao vivo',
-    description: 'FALA com o paciente nas caixas escolhidas — Instagram Direct E Facebook Messenger — seguindo o script CEVICO (sondagem → autoridade → orçamento → agendamento). Agenda SOZINHO na Agenda interna oferecendo só horários livres, captura o telefone e avisa que a confirmação oficial vai pelo WhatsApp. PAUSA quando um humano responde na conversa; humano manda 👍 para reativar; a confirmação de agendamento (😊) pausa sozinha.',
+    description:
+      'FALA com o paciente nas caixas escolhidas — Instagram Direct E Facebook Messenger — seguindo o script CEVICO (sondagem → autoridade → orçamento → agendamento). Agenda SOZINHO na Agenda interna oferecendo só horários livres, captura o telefone e avisa que a confirmação oficial vai pelo WhatsApp. PAUSA quando um humano responde na conversa; humano manda 👍 para reativar; a confirmação de agendamento (😊) pausa sozinha.',
     triggers: [
-      { icon: 'i-lucide-instagram', label: 'Mensagem recebida nas caixas escolhidas abaixo (espera ~12s e junta mensagens picadas)' },
-      { icon: 'i-lucide-calendar-check', label: 'Agenda direto na Agenda interna (só horários livres reais)' },
-      { icon: 'i-lucide-message-circle', label: 'Confirmações oficiais e lembretes seguem pelo WhatsApp' },
-      { icon: 'i-lucide-pause', label: 'Humano respondeu = pausa · 👍 = reativa · urgência = chama humano' },
+      {
+        icon: 'i-lucide-instagram',
+        label:
+          'Mensagem recebida nas caixas escolhidas abaixo (espera ~12s e junta mensagens picadas)',
+      },
+      {
+        icon: 'i-lucide-calendar-check',
+        label: 'Agenda direto na Agenda interna (só horários livres reais)',
+      },
+      {
+        icon: 'i-lucide-message-circle',
+        label: 'Confirmações oficiais e lembretes seguem pelo WhatsApp',
+      },
+      {
+        icon: 'i-lucide-pause',
+        label:
+          'Humano respondeu = pausa · 👍 = reativa · urgência = chama humano',
+      },
     ],
-    suggestion: 'Conversa ao vivo — Sonnet no esforço médio equilibra qualidade e custo.',
+    suggestion:
+      'Conversa ao vivo — Sonnet no esforço médio equilibra qualidade e custo.',
   },
   copywriter: {
     title: 'Copywriter',
@@ -1123,14 +1945,29 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #7C3AED, #D4AF37)',
     color: '#7C3AED',
     tag: 'Marketing',
-    description: 'Escreve a copy da casa em VÁRIOS FORMATOS: páginas, carrosséis, roteiros de reels, posts e anúncios — com estruturas validadas (kishōtenketsu, storytelling, jornada do herói, notícia, P&R, diálogo) e as SUAS referências de estilo. Pode usar os INSIGHTS reais dos formulários (dores/desejos/objeções do público).',
+    description:
+      'Escreve a copy da casa em VÁRIOS FORMATOS: páginas, carrosséis, roteiros de reels, posts e anúncios — com estruturas validadas (kishōtenketsu, storytelling, jornada do herói, notícia, P&R, diálogo) e as SUAS referências de estilo. Pode usar os INSIGHTS reais dos formulários (dores/desejos/objeções do público).',
     triggers: [
-      { icon: 'i-lucide-sparkles', label: 'Botão "Gerar página com IA" no editor de Páginas' },
-      { icon: 'i-lucide-pen-line', label: 'Estúdio de conteúdo aqui embaixo (carrossel, reels, post, anúncio)' },
-      { icon: 'i-lucide-clipboard-list', label: 'Opcional: insights de um formulário alimentam a copy' },
-      { icon: 'i-lucide-shield', label: 'Nada vai ao ar sozinho — você revisa e publica' },
+      {
+        icon: 'i-lucide-sparkles',
+        label: 'Botão "Gerar página com IA" no editor de Páginas',
+      },
+      {
+        icon: 'i-lucide-pen-line',
+        label:
+          'Estúdio de conteúdo aqui embaixo (carrossel, reels, post, anúncio)',
+      },
+      {
+        icon: 'i-lucide-clipboard-list',
+        label: 'Opcional: insights de um formulário alimentam a copy',
+      },
+      {
+        icon: 'i-lucide-shield',
+        label: 'Nada vai ao ar sozinho — você revisa e publica',
+      },
     ],
-    suggestion: 'Copy é fino — Opus no esforço alto escreve os melhores textos.',
+    suggestion:
+      'Copy é fino — Opus no esforço alto escreve os melhores textos.',
   },
   pagebuilder: {
     title: 'Construtor de Páginas',
@@ -1138,10 +1975,17 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #0F5FA6, #D4AF37)',
     color: '#0F5FA6',
     tag: 'Marketing',
-    description: 'Recebe uma COPY PRONTA (do Copywriter, sua ou do time) e MONTA a página no editor: distribui o texto em seções, escolhe os efeitos visuais e gera o SEO — sem reescrever o conteúdo. É a dupla do Copywriter: um escreve, o outro constrói.',
+    description:
+      'Recebe uma COPY PRONTA (do Copywriter, sua ou do time) e MONTA a página no editor: distribui o texto em seções, escolhe os efeitos visuais e gera o SEO — sem reescrever o conteúdo. É a dupla do Copywriter: um escreve, o outro constrói.',
     triggers: [
-      { icon: 'i-lucide-layout-template', label: 'Modo "Montar de copy pronta" no editor de Páginas' },
-      { icon: 'i-lucide-shield', label: 'Publicar continua sendo decisão humana (admin)' },
+      {
+        icon: 'i-lucide-layout-template',
+        label: 'Modo "Montar de copy pronta" no editor de Páginas',
+      },
+      {
+        icon: 'i-lucide-shield',
+        label: 'Publicar continua sendo decisão humana (admin)',
+      },
     ],
     suggestion: 'Montagem estruturada — Sonnet no esforço médio resolve bem.',
   },
@@ -1151,11 +1995,22 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #0D9488, #2DD4BF)',
     color: '#0D9488',
     tag: 'Satisfação',
-    description: 'Lê a conversa do pós-operatório e identifica a NOTA (0-10) que o paciente deu. Etiqueta o contato com a faixa (nps-9-10 / nps-7-8 / nps-0-6) — o Dashboard CRM e o painel do Gestor mostram a % de satisfação a partir daí.',
+    description:
+      'Lê a conversa do pós-operatório e identifica a NOTA (0-10) que o paciente deu. Etiqueta o contato com a faixa (nps-9-10 / nps-7-8 / nps-0-6) — o Dashboard CRM e o painel do Gestor mostram a % de satisfação a partir daí.',
     triggers: [
-      { icon: 'i-lucide-zap', label: 'Ação de coluna "Adicionar agente de IA" → Agente de NPS (ex.: coluna Pós-Operatório)' },
-      { icon: 'i-lucide-tags', label: 'Etiquetas nps-9-10 / nps-7-8 / nps-0-6 no contato' },
-      { icon: 'i-lucide-bar-chart-3', label: 'Bloco "Satisfação (NPS)" no Dashboard CRM' },
+      {
+        icon: 'i-lucide-zap',
+        label:
+          'Ação de coluna "Adicionar agente de IA" → Agente de NPS (ex.: coluna Pós-Operatório)',
+      },
+      {
+        icon: 'i-lucide-tags',
+        label: 'Etiquetas nps-9-10 / nps-7-8 / nps-0-6 no contato',
+      },
+      {
+        icon: 'i-lucide-bar-chart-3',
+        label: 'Bloco "Satisfação (NPS)" no Dashboard CRM',
+      },
     ],
     suggestion: 'Ler uma nota é simples — Haiku resolve baratinho.',
   },
@@ -1165,12 +2020,25 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #7C3AED, #DB2777)',
     color: '#7C3AED',
     tag: 'Atendimento ao vivo',
-    description: 'Responde os COMENTÁRIOS públicos dos posts e anúncios do Instagram e Facebook: agradece elogios, tira dúvidas leves e convida pro direct/WhatsApp — sem falar preço nem dado clínico em público. Reclamação séria ou urgência = marca pro humano e fica quieto. Corrige o gargalo de atendimento dos comentários.',
+    description:
+      'Responde os COMENTÁRIOS públicos dos posts e anúncios do Instagram e Facebook: agradece elogios, tira dúvidas leves e convida pro direct/WhatsApp — sem falar preço nem dado clínico em público. Reclamação séria ou urgência = marca pro humano e fica quieto. Corrige o gargalo de atendimento dos comentários.',
     triggers: [
-      { icon: 'i-lucide-clock', label: 'Varre os comentários novos a cada 5 minutos' },
-      { icon: 'i-lucide-message-square-reply', label: 'Responde em público no tom CEVICO (curto e caloroso)' },
-      { icon: 'i-lucide-hand', label: 'Caso delicado → não responde e marca pro humano' },
-      { icon: 'i-lucide-key-round', label: 'Precisa do token da Página da Meta (cole aqui embaixo)' },
+      {
+        icon: 'i-lucide-clock',
+        label: 'Varre os comentários novos a cada 5 minutos',
+      },
+      {
+        icon: 'i-lucide-message-square-reply',
+        label: 'Responde em público no tom CEVICO (curto e caloroso)',
+      },
+      {
+        icon: 'i-lucide-hand',
+        label: 'Caso delicado → não responde e marca pro humano',
+      },
+      {
+        icon: 'i-lucide-key-round',
+        label: 'Precisa do token da Página da Meta (cole aqui embaixo)',
+      },
     ],
     suggestion: 'Comentário público é a vitrine — Sonnet no esforço médio.',
   },
@@ -1180,14 +2048,25 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #C2410C, #FB923C)',
     color: '#C2410C',
     tag: 'Evolução do time',
-    description: 'Capta os dados de uso da semana de CADA pessoa (tempo de resposta, conversas resolvidas, mensagens, tarefas) e entrega um feedback individual no Meu Painel: o ponto forte, O PONTO FRACO exato a corrigir e 2-3 soluções simples que geram grande resultado. Compara com a mediana do time sem expor ninguém.',
+    description:
+      'Capta os dados de uso da semana de CADA pessoa (tempo de resposta, conversas resolvidas, mensagens, tarefas) e entrega um feedback individual no Meu Painel: o ponto forte, O PONTO FRACO exato a corrigir e 2-3 soluções simples que geram grande resultado. Compara com a mediana do time sem expor ninguém.',
     triggers: [
-      { icon: 'i-lucide-calendar-check', label: 'Toda segunda de manhã, analisando a semana que acabou' },
-      { icon: 'i-lucide-house', label: 'Feedback individual no Meu Painel de cada pessoa' },
+      {
+        icon: 'i-lucide-calendar-check',
+        label: 'Toda segunda de manhã, analisando a semana que acabou',
+      },
+      {
+        icon: 'i-lucide-house',
+        label: 'Feedback individual no Meu Painel de cada pessoa',
+      },
       { icon: 'i-lucide-eye', label: 'Admin vê o feedback do time inteiro' },
-      { icon: 'i-lucide-shield', label: 'Nunca fala com paciente — só lê números de uso' },
+      {
+        icon: 'i-lucide-shield',
+        label: 'Nunca fala com paciente — só lê números de uso',
+      },
     ],
-    suggestion: 'Feedback humano e fino, 1x por semana — Sonnet no esforço alto.',
+    suggestion:
+      'Feedback humano e fino, 1x por semana — Sonnet no esforço alto.',
   },
   harvest: {
     title: 'Colheitadeira da Base',
@@ -1195,14 +2074,28 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #CA8A04, #FACC15)',
     color: '#CA8A04',
     tag: 'Reativação',
-    description: 'Pontua a base fria todo mês e reativa os leads mais propensos, um a um, com aprovação sua. A IA escreve um gancho pessoal para cada paciente e os envios saem aos poucos, dentro do teto diário — anti-bloqueio.',
+    description:
+      'Pontua a base fria todo mês e reativa os leads mais propensos, um a um, com aprovação sua. A IA escreve um gancho pessoal para cada paciente e os envios saem aos poucos, dentro do teto diário — anti-bloqueio.',
     triggers: [
-      { icon: 'i-lucide-calendar-clock', label: 'Todo mês, no dia escolhido, gera a prévia da colheita' },
-      { icon: 'i-lucide-list-checks', label: 'Você revisa a lista e aprova antes de qualquer envio' },
-      { icon: 'i-lucide-message-circle', label: 'Envia pelo WhatsApp com gancho pessoal por lead' },
-      { icon: 'i-lucide-shield', label: 'Teto de envios por dia — menos é mais seguro' },
+      {
+        icon: 'i-lucide-calendar-clock',
+        label: 'Todo mês, no dia escolhido, gera a prévia da colheita',
+      },
+      {
+        icon: 'i-lucide-list-checks',
+        label: 'Você revisa a lista e aprova antes de qualquer envio',
+      },
+      {
+        icon: 'i-lucide-message-circle',
+        label: 'Envia pelo WhatsApp com gancho pessoal por lead',
+      },
+      {
+        icon: 'i-lucide-shield',
+        label: 'Teto de envios por dia — menos é mais seguro',
+      },
     ],
-    suggestion: 'Pontuar a base e escrever ganchos — Sonnet no esforço médio equilibra bem.',
+    suggestion:
+      'Pontuar a base e escrever ganchos — Sonnet no esforço médio equilibra bem.',
   },
   manager: {
     title: 'Gestor Autônomo',
@@ -1210,14 +2103,28 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #0F5FA6, #3B82F6)',
     color: '#0F5FA6',
     tag: 'Gestão',
-    description: 'Lê o funil todos os dias contra a média de 12 semanas, abre tarefas nos desvios e escreve o briefing do dia. Você abre o Meu Painel e já sabe onde o processo está vazando — sem planilha.',
+    description:
+      'Lê o funil todos os dias contra a média de 12 semanas, abre tarefas nos desvios e escreve o briefing do dia. Você abre o Meu Painel e já sabe onde o processo está vazando — sem planilha.',
     triggers: [
-      { icon: 'i-lucide-clock', label: 'Roda todos os dias, sozinho, de manhã' },
-      { icon: 'i-lucide-trending-down', label: 'Compara cada indicador com a média de 12 semanas' },
-      { icon: 'i-lucide-list-checks', label: 'Desvio encontrado → abre tarefa para o time agir' },
-      { icon: 'i-lucide-house', label: 'Briefing do dia no Meu Painel (admin)' },
+      {
+        icon: 'i-lucide-clock',
+        label: 'Roda todos os dias, sozinho, de manhã',
+      },
+      {
+        icon: 'i-lucide-trending-down',
+        label: 'Compara cada indicador com a média de 12 semanas',
+      },
+      {
+        icon: 'i-lucide-list-checks',
+        label: 'Desvio encontrado → abre tarefa para o time agir',
+      },
+      {
+        icon: 'i-lucide-house',
+        label: 'Briefing do dia no Meu Painel (admin)',
+      },
     ],
-    suggestion: 'Leitura fina de números todo dia — Sonnet no esforço alto escreve o melhor briefing.',
+    suggestion:
+      'Leitura fina de números todo dia — Sonnet no esforço alto escreve o melhor briefing.',
   },
   auditor: {
     title: 'Auditor de Conversas',
@@ -1225,14 +2132,28 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #0F766E, #2DD4BF)',
     color: '#0F766E',
     tag: 'Evolução do time',
-    description: 'Dá nota 0-10 nas conversas de ontem contra o script — coaching contínuo por atendente. Todo dia audita o atendimento da véspera e monta o ranking do time com as falhas mais comuns.',
+    description:
+      'Dá nota 0-10 nas conversas de ontem contra o script — coaching contínuo por atendente. Todo dia audita o atendimento da véspera e monta o ranking do time com as falhas mais comuns.',
     triggers: [
-      { icon: 'i-lucide-clock', label: 'Roda todo dia, sozinho, auditando as conversas de ontem' },
-      { icon: 'i-lucide-list-checks', label: 'Nota 0-10 por conversa contra o script da clínica' },
-      { icon: 'i-lucide-trophy', label: 'Ranking por atendente + falhas mais comuns do time' },
-      { icon: 'i-lucide-shield', label: 'Nunca fala com o paciente — só lê e avalia' },
+      {
+        icon: 'i-lucide-clock',
+        label: 'Roda todo dia, sozinho, auditando as conversas de ontem',
+      },
+      {
+        icon: 'i-lucide-list-checks',
+        label: 'Nota 0-10 por conversa contra o script da clínica',
+      },
+      {
+        icon: 'i-lucide-trophy',
+        label: 'Ranking por atendente + falhas mais comuns do time',
+      },
+      {
+        icon: 'i-lucide-shield',
+        label: 'Nunca fala com o paciente — só lê e avalia',
+      },
     ],
-    suggestion: 'Avaliar contra o script é leitura fina — Sonnet no esforço médio equilibra qualidade e custo.',
+    suggestion:
+      'Avaliar contra o script é leitura fina — Sonnet no esforço médio equilibra qualidade e custo.',
   },
   creative: {
     title: 'Criativo Perpétuo',
@@ -1240,14 +2161,29 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #9D174D, #DB2777)',
     color: '#DB2777',
     tag: 'Marketing',
-    description: 'Toda semana encontra os termos do Google e os anúncios do Meta que mais viraram cirurgia — na jornada real do banco — e escreve variações de copy prontas para os próximos anúncios. Você só aprova; as aprovadas ficam guardadas para o Estúdio Criativo.',
+    description:
+      'Toda semana encontra os termos do Google e os anúncios do Meta que mais viraram cirurgia — na jornada real do banco — e escreve variações de copy prontas para os próximos anúncios. Você só aprova; as aprovadas ficam guardadas para o Estúdio Criativo.',
     triggers: [
-      { icon: 'i-lucide-calendar-clock', label: 'Toda segunda 08:30 gera as variações da semana' },
-      { icon: 'i-lucide-trophy', label: 'Vencedores reais: o que mais virou consulta e cirurgia (90 dias)' },
-      { icon: 'i-lucide-list-checks', label: 'Você aprova ou recusa cada variação — nada vai ao ar sozinho' },
-      { icon: 'i-lucide-copy', label: 'Aprovou? Copia e cola no Gerenciador de Anúncios / Estúdio' },
+      {
+        icon: 'i-lucide-calendar-clock',
+        label: 'Toda segunda 08:30 gera as variações da semana',
+      },
+      {
+        icon: 'i-lucide-trophy',
+        label:
+          'Vencedores reais: o que mais virou consulta e cirurgia (90 dias)',
+      },
+      {
+        icon: 'i-lucide-list-checks',
+        label: 'Você aprova ou recusa cada variação — nada vai ao ar sozinho',
+      },
+      {
+        icon: 'i-lucide-copy',
+        label: 'Aprovou? Copia e cola no Gerenciador de Anúncios / Estúdio',
+      },
     ],
-    suggestion: 'Copy é fino — Sonnet no esforço alto escreve as melhores variações.',
+    suggestion:
+      'Copy é fino — Sonnet no esforço alto escreve as melhores variações.',
   },
   // 🤖📞 item 169: roda na ElevenLabs — configuração em Integrações → Agente de Ligação (IA)
   voice: {
@@ -1256,11 +2192,21 @@ const AGENT_META = {
     gradient: 'linear-gradient(135deg, #7C3AED, #DB2777)',
     color: '#7C3AED',
     tag: 'Atendimento',
-    description: 'Assistente virtual que atende as ligações no número próprio da clínica e liga para pacientes nas campanhas, pela ElevenLabs. Se apresenta como assistente virtual, consulta a agenda, marca a consulta, manda a confirmação pelo WhatsApp da clínica e transfere para um humano quando precisa.',
+    description:
+      'Assistente virtual que atende as ligações no número próprio da clínica e liga para pacientes nas campanhas, pela ElevenLabs. Se apresenta como assistente virtual, consulta a agenda, marca a consulta, manda a confirmação pelo WhatsApp da clínica e transfere para um humano quando precisa.',
     triggers: [
-      { icon: 'i-lucide-phone-incoming', label: 'Ligação recebida no número da IA' },
-      { icon: 'i-lucide-phone-outgoing', label: 'Campanha de ligação (liga com a permissão do paciente)' },
-      { icon: 'i-lucide-rocket', label: 'Resultado vira card na conversa e no Dashboard de Ligações' },
+      {
+        icon: 'i-lucide-phone-incoming',
+        label: 'Ligação recebida no número da IA',
+      },
+      {
+        icon: 'i-lucide-phone-outgoing',
+        label: 'Campanha de ligação (liga com a permissão do paciente)',
+      },
+      {
+        icon: 'i-lucide-rocket',
+        label: 'Resultado vira card na conversa e no Dashboard de Ligações',
+      },
     ],
     suggestion: 'Configure em Integrações → Agente de Ligação (IA).',
   },
@@ -1268,11 +2214,51 @@ const AGENT_META = {
 
 // ── Seções da aba "agentes": os 16 agentes agrupados por área ──
 // (são muitos — o agrupamento dá o mapa; card/sanfona continuam os mesmos)
+// variáveis --cv* do kit com a cor do agente (ícone, chips, botões e
+// interruptor do card ficam na cor DELE)
+const agentVars = key => {
+  const meta = AGENT_META[key];
+  if (!meta) return {};
+  return {
+    '--cv': meta.color,
+    '--cv-rgb': hexToRgb(meta.color),
+    '--cv-deep': meta.color,
+    '--cv-deep-rgb': hexToRgb(meta.color),
+    '--cv-grad': meta.gradient,
+    '--cv-grad-2': meta.gradient,
+    '--cv-grad-3': meta.gradient,
+  };
+};
 const AGENT_GROUPS = [
-  { title: 'Atendimento ao paciente', icon: '🗣️', keys: ['conversation', 'scheduler', 'instagram', 'comments', 'nps', 'voice'] },
-  { title: 'Vendas e fechamento', icon: '💰', keys: ['sales', 'closing', 'opportunity', 'form'] },
-  { title: 'Marketing e aquisição', icon: '📣', keys: ['copywriter', 'pagebuilder', 'creative', 'harvest'] },
-  { title: 'Gestão e evolução do time', icon: '📈', keys: ['manager', 'auditor', 'mentor'] },
+  {
+    title: 'Atendimento ao paciente',
+    icon: '🗣️',
+    keys: [
+      'atendente_agendamento',
+      'atendente_pos',
+      'conversation',
+      'scheduler',
+      'instagram',
+      'comments',
+      'nps',
+      'voice',
+    ],
+  },
+  {
+    title: 'Vendas e fechamento',
+    icon: '💰',
+    keys: ['sales', 'closing', 'opportunity', 'form'],
+  },
+  {
+    title: 'Marketing e aquisição',
+    icon: '📣',
+    keys: ['copywriter', 'pagebuilder', 'creative', 'harvest'],
+  },
+  {
+    title: 'Gestão e evolução do time',
+    icon: '📈',
+    keys: ['manager', 'auditor', 'mentor'],
+  },
 ];
 // agente novo que ainda não entrou em nenhum grupo cai em "Outros" (à prova
 // de futuro — nada some da tela)
@@ -1283,7 +2269,8 @@ const agentGroups = computed(() => {
     keys: g.keys.filter(k => aiAgents.value[k]),
   }));
   const leftovers = Object.keys(aiAgents.value).filter(k => !known.includes(k));
-  if (leftovers.length) groups.push({ title: 'Outros', icon: '🧩', keys: leftovers });
+  if (leftovers.length)
+    groups.push({ title: 'Outros', icon: '🧩', keys: leftovers });
   return groups.filter(g => g.keys.length);
 });
 // mesmo formato do v-for original — (agent, key) — só que restrito ao grupo
@@ -1308,7 +2295,13 @@ const MODEL_SHORT = {
   'claude-sonnet-5': 'Sonnet 5',
   'claude-haiku-4-5': 'Haiku 4.5',
 };
-const EFFORT_SHORT = { low: 'baixo', medium: 'médio', high: 'alto', xhigh: 'muito alto', max: 'máximo' };
+const EFFORT_SHORT = {
+  low: 'baixo',
+  medium: 'médio',
+  high: 'alto',
+  xhigh: 'muito alto',
+  max: 'máximo',
+};
 
 // recomendação do sistema para cada agente (vem do backend)
 const recommendedFor = key => settings.value?.ai?.agents?.[key] || {};
@@ -1319,23 +2312,35 @@ const recommendedModelLabel = key => {
 };
 const recommendedEffortLabel = key => {
   const rec = recommendedFor(key);
-  if ((rec.recommended_model || '').includes('haiku') && !rec.recommended_effort)
+  if (
+    (rec.recommended_model || '').includes('haiku') &&
+    !rec.recommended_effort
+  )
     return 'Recomendado — não se aplica (Haiku)';
   return `Recomendado — ${EFFORT_SHORT[rec.recommended_effort] || 'alto'}`;
 };
 
 // o que o agente vai usar de verdade (escolha própria > recomendado > global)
 const resolvedModel = (key, agent) => {
-  const m = agent.model || recommendedFor(key).recommended_model ||
-    settings.value?.ai?.model || 'claude-opus-4-8';
+  const m =
+    agent.model ||
+    recommendedFor(key).recommended_model ||
+    settings.value?.ai?.model ||
+    'claude-opus-4-8';
   return MODEL_SHORT[m] || m;
 };
 const resolvedEffort = (key, agent) => {
-  const m = agent.model || recommendedFor(key).recommended_model ||
-    settings.value?.ai?.model || '';
+  const m =
+    agent.model ||
+    recommendedFor(key).recommended_model ||
+    settings.value?.ai?.model ||
+    '';
   if (m.includes('haiku')) return 'não se aplica (Haiku)';
-  const e = agent.effort || recommendedFor(key).recommended_effort ||
-    settings.value?.ai?.effort || 'high';
+  const e =
+    agent.effort ||
+    recommendedFor(key).recommended_effort ||
+    settings.value?.ai?.effort ||
+    'high';
   return EFFORT_SHORT[e] || e;
 };
 
@@ -1377,6 +2382,28 @@ const loadAgents = async () => {
   const managerDraft = a.manager?.draft || null;
   const auditorDraft = a.auditor?.draft || null;
   const creativeDraft = a.creative?.draft || null;
+  // 🗣️ atendentes do WhatsApp (A e B): mesmos campos, rascunho vence o publicado nos campos
+  const loadResponder = key => {
+    const draft = a[key]?.draft || null;
+    const real = a[key] || {};
+    return {
+      ...load(key),
+      mode: (draft?.mode ?? real.mode) || 'shadow',
+      live_days: [...((draft?.live_days ?? real.live_days) || [])].map(Number),
+      inbox_ids: [...((draft?.inbox_ids ?? real.inbox_ids) || [])],
+      stage_ids: [...((draft?.stage_ids ?? real.stage_ids) || [])],
+      no_card:
+        key === 'atendente_agendamento'
+          ? (draft?.no_card ?? real.no_card ?? true)
+          : false,
+      after_booking_stage_id:
+        (draft?.after_booking_stage_id ?? real.after_booking_stage_id) || '',
+      shadow_daily_cap:
+        (draft?.shadow_daily_cap ?? real.shadow_daily_cap) || 30,
+      hours_start: (draft?.hours_start ?? real.hours_start) || '',
+      hours_end: (draft?.hours_end ?? real.hours_end) || '',
+    };
+  };
   aiAgents.value = {
     conversation: load('conversation'),
     form: load('form'),
@@ -1384,7 +2411,10 @@ const loadAgents = async () => {
     closing: load('closing'),
     nps: load('nps'),
     sales: load('sales'),
-    copywriter: { ...load('copywriter'), references: a.copywriter?.references || '' },
+    copywriter: {
+      ...load('copywriter'),
+      references: a.copywriter?.references || '',
+    },
     pagebuilder: {
       ...load('pagebuilder'),
       references: a.pagebuilder?.references || '',
@@ -1394,13 +2424,20 @@ const loadAgents = async () => {
       ...load('instagram'),
       inbox_ids: [...(a.instagram?.inbox_ids || [])],
     },
+    atendente_agendamento: loadResponder('atendente_agendamento'),
+    atendente_pos: loadResponder('atendente_pos'),
     opportunity: {
       ...load('opportunity'),
       watchers: oppDraft?.watchers?.length
         ? oppDraft.watchers
-        : (a.opportunity?.watchers?.length ? a.opportunity.watchers : legacyWatchers),
-      wait_minutes: (oppDraft?.wait_minutes || a.opportunity?.wait_minutes) || 10,
-      response_goal_minutes: (oppDraft?.response_goal_minutes || a.opportunity?.response_goal_minutes) || 15,
+        : a.opportunity?.watchers?.length
+          ? a.opportunity.watchers
+          : legacyWatchers,
+      wait_minutes: oppDraft?.wait_minutes || a.opportunity?.wait_minutes || 10,
+      response_goal_minutes:
+        oppDraft?.response_goal_minutes ||
+        a.opportunity?.response_goal_minutes ||
+        15,
     },
     mentor: load('mentor'),
     voice: load('voice'),
@@ -1415,28 +2452,34 @@ const loadAgents = async () => {
       ...load('harvest'),
       // null/vazio = organize (novo padrão): a IA etiqueta em vez de enviar
       mode: (harvestDraft?.mode ?? a.harvest?.mode) || 'organize',
-      monthly_size: (harvestDraft?.monthly_size ?? a.harvest?.monthly_size) ?? '',
-      cold_days: (harvestDraft?.cold_days ?? a.harvest?.cold_days) ?? '',
-      daily_cap: (harvestDraft?.daily_cap ?? a.harvest?.daily_cap) ?? '',
-      day_of_month: (harvestDraft?.day_of_month ?? a.harvest?.day_of_month) ?? '',
-      inbox_id: (harvestDraft?.inbox_id ?? a.harvest?.inbox_id) ?? null,
-      require_approval: (harvestDraft?.require_approval ?? a.harvest?.require_approval) !== false,
-      message_preview: (harvestDraft?.message_preview ?? a.harvest?.message_preview) || '',
-      template_params: (harvestDraft?.template_params ?? a.harvest?.template_params) || null,
+      monthly_size: harvestDraft?.monthly_size ?? a.harvest?.monthly_size ?? '',
+      cold_days: harvestDraft?.cold_days ?? a.harvest?.cold_days ?? '',
+      daily_cap: harvestDraft?.daily_cap ?? a.harvest?.daily_cap ?? '',
+      day_of_month: harvestDraft?.day_of_month ?? a.harvest?.day_of_month ?? '',
+      inbox_id: harvestDraft?.inbox_id ?? a.harvest?.inbox_id ?? null,
+      require_approval:
+        (harvestDraft?.require_approval ?? a.harvest?.require_approval) !==
+        false,
+      message_preview:
+        (harvestDraft?.message_preview ?? a.harvest?.message_preview) || '',
+      template_params:
+        (harvestDraft?.template_params ?? a.harvest?.template_params) || null,
       stage_ids: [...((harvestDraft?.stage_ids ?? a.harvest?.stage_ids) || [])],
     },
     manager: {
       ...load('manager'),
-      drop_pct: (managerDraft?.drop_pct ?? a.manager?.drop_pct) ?? '',
+      drop_pct: managerDraft?.drop_pct ?? a.manager?.drop_pct ?? '',
     },
     auditor: {
       ...load('auditor'),
-      daily_cap: (auditorDraft?.daily_cap ?? a.auditor?.daily_cap) ?? '',
+      daily_cap: auditorDraft?.daily_cap ?? a.auditor?.daily_cap ?? '',
     },
     creative: {
       ...load('creative'),
-      winners_count: (creativeDraft?.winners_count ?? a.creative?.winners_count) ?? '',
-      variations_count: (creativeDraft?.variations_count ?? a.creative?.variations_count) ?? '',
+      winners_count:
+        creativeDraft?.winners_count ?? a.creative?.winners_count ?? '',
+      variations_count:
+        creativeDraft?.variations_count ?? a.creative?.variations_count ?? '',
     },
   };
   Object.keys(aiAgents.value).forEach(key => {
@@ -1451,7 +2494,9 @@ const loadAgents = async () => {
   loadStages().catch(() => {});
   loadHarvestStatus();
   CrmAPI.getAiUsage()
-    .then(({ data }) => { aiUsage.value = data; })
+    .then(({ data }) => {
+      aiUsage.value = data;
+    })
     .catch(() => {});
 };
 
@@ -1473,7 +2518,9 @@ const loadColumnAutomations = async () => {
         const { data } = await CrmAPI.getAutomations(p.id, s.id);
         (data || [])
           .filter(a => a.action_type) // só automações de coluna (não réguas)
-          .forEach(a => all.push({ ...a, stage_name: s.name, pipeline_name: p.name }));
+          .forEach(a =>
+            all.push({ ...a, stage_name: s.name, pipeline_name: p.name })
+          );
       }
     }
     columnAutomations.value = all;
@@ -1540,7 +2587,8 @@ watch(resultsPeriod, loadResults, { deep: true });
 
 // carrega quando a aba abre pela primeira vez
 watch(activeTab, tab => {
-  if (tab === 'resultados' && !resultsData.value && !loadingResults.value) loadResults();
+  if (tab === 'resultados' && !resultsData.value && !loadingResults.value)
+    loadResults();
 });
 
 const maxTimelineFired = () =>
@@ -1554,7 +2602,10 @@ const fmtDay = iso => {
 const fmtLastFired = iso => {
   if (!iso) return 'nunca no período';
   return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 };
 
@@ -1575,7 +2626,10 @@ const loadReguas = async () => {
 
 const toggleRegua = async a => {
   try {
-    await store.dispatch('crm/updateMessageAutomation', { id: a.id, active: !a.active });
+    await store.dispatch('crm/updateMessageAutomation', {
+      id: a.id,
+      active: !a.active,
+    });
     a.active = !a.active;
   } catch {
     useAlert('Erro ao atualizar');
@@ -1593,7 +2647,10 @@ const deleteRegua = async a => {
 };
 
 const goToCampaign = () => {
-  router.push({ name: 'crm_campaigns', params: { accountId: accountId.value } });
+  router.push({
+    name: 'crm_campaigns',
+    params: { accountId: accountId.value },
+  });
 };
 
 // ── Regras da caixa de entrada (Automation nativa do Chatwoot) ──
@@ -1608,13 +2665,19 @@ const loadNativeRules = async () => {
 };
 const toggleNativeRule = async rule => {
   try {
-    await store.dispatch('automations/update', { ...rule, active: !rule.active });
+    await store.dispatch('automations/update', {
+      ...rule,
+      active: !rule.active,
+    });
   } catch {
     useAlert('Erro ao atualizar a regra');
   }
 };
 const openNativeEditor = () =>
-  router.push({ name: 'automation_list', params: { accountId: accountId.value } });
+  router.push({
+    name: 'automation_list',
+    params: { accountId: accountId.value },
+  });
 const RULE_EVENT_LABELS = {
   conversation_created: 'Conversa criada',
   conversation_updated: 'Conversa atualizada',
@@ -1630,7 +2693,8 @@ const loadBots = async () => {
   loadingBots.value = true;
   try {
     bots.value = await store.dispatch('crm/fetchFollowupBots');
-    if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
+    if (!accountLabels.value.length)
+      store.dispatch('labels/get').catch(() => {});
   } catch {
     useAlert('Erro ao carregar robôs');
   } finally {
@@ -1641,13 +2705,26 @@ const loadBots = async () => {
 const showBotModal = ref(false);
 const editingBot = ref(null);
 
-const openCreateBot = () => { editingBot.value = null; showBotModal.value = true; };
-const openEditBot = bot => { editingBot.value = bot; showBotModal.value = true; };
-const onBotSaved = async () => { showBotModal.value = false; editingBot.value = null; await loadBots(); };
+const openCreateBot = () => {
+  editingBot.value = null;
+  showBotModal.value = true;
+};
+const openEditBot = bot => {
+  editingBot.value = bot;
+  showBotModal.value = true;
+};
+const onBotSaved = async () => {
+  showBotModal.value = false;
+  editingBot.value = null;
+  await loadBots();
+};
 
 const toggleBot = async bot => {
   try {
-    const data = await store.dispatch('crm/updateFollowupBot', { id: bot.id, active: !bot.active });
+    const data = await store.dispatch('crm/updateFollowupBot', {
+      id: bot.id,
+      active: !bot.active,
+    });
     bot.active = data.active;
   } catch {
     useAlert('Erro ao atualizar');
@@ -1670,15 +2747,19 @@ const deleteBot = async bot => {
 const expandedBotLog = ref(null);
 const REASON_LABELS = {
   aguardando_prazo: 'aguardando o prazo da cutucada',
-  aguardando_espacamento: 'aguardando o espaçamento da cadência (não sai empilhada)',
+  aguardando_espacamento:
+    'aguardando o espaçamento da cadência (não sai empilhada)',
   paciente_falou_ultimo: 'paciente falou por último (vez do atendimento)',
   cadencia_completa: 'já recebeu todas as cutucadas',
   etiquetas: 'barrado pelo filtro de etiquetas',
-  etiqueta_de_encerramento: 'etiqueta de encerramento (nao_perturbe / perda_* / lista da conta)',
+  etiqueta_de_encerramento:
+    'etiqueta de encerramento (nao_perturbe / perda_* / lista da conta)',
   protegida_por_etiqueta: 'etapa protegida por etiqueta (não enviada)',
-  janela_whatsapp: 'fora da janela de 24h do WhatsApp — texto simples não entrega (use mensagem modelo)',
+  janela_whatsapp:
+    'fora da janela de 24h do WhatsApp — texto simples não entrega (use mensagem modelo)',
   momento_perdido: 'cutucada vencida há horas — descartada (anti-rajada)',
-  pausado_para_paciente: 'follow-up pausado para o paciente (trava da atendente)',
+  pausado_para_paciente:
+    'follow-up pausado para o paciente (trava da atendente)',
   trava_intervalo_minimo: 'trava: 30 min mínimos entre cutucadas',
   trava_teto_diario: 'trava: teto de 4 cutucadas por dia',
   trava_cadencia_completa: 'trava: cadência já saiu inteira (mensagens reais)',
@@ -1761,7 +2842,8 @@ const savingStopLabels = ref(false);
 watch(
   settings,
   s => {
-    if (Array.isArray(s?.followup_stop_labels)) followupStopLabels.value = [...s.followup_stop_labels];
+    if (Array.isArray(s?.followup_stop_labels))
+      followupStopLabels.value = [...s.followup_stop_labels];
   },
   { immediate: true }
 );
@@ -1784,10 +2866,14 @@ const saveStopLabels = async labels => {
   }
 };
 const toggleStopLabel = title => {
-  const t = String(title || '').trim().toLowerCase();
+  const t = String(title || '')
+    .trim()
+    .toLowerCase();
   if (!t || savingStopLabels.value) return;
   const current = followupStopLabels.value;
-  saveStopLabels(current.includes(t) ? current.filter(l => l !== t) : [...current, t]);
+  saveStopLabels(
+    current.includes(t) ? current.filter(l => l !== t) : [...current, t]
+  );
 };
 
 // 📅 LEMBRETES DO DIA DA CONSULTA (item 156, pacote comparecimento):
@@ -1795,10 +2881,25 @@ const toggleStopLabel = title => {
 // Cada régua: hora, caixa do WhatsApp e mensagem modelo ({{hora}} e
 // {{unidade}} nas variáveis viram o dado da consulta; {{contact.name}} = nome)
 const REMINDER_DEFAULTS = {
-  d1: { enabled: false, hour: 10, inbox_id: null, template_params: null, message_preview: '' },
-  d0: { enabled: false, hour: 7, inbox_id: null, template_params: null, message_preview: '' },
+  d1: {
+    enabled: false,
+    hour: 10,
+    inbox_id: null,
+    template_params: null,
+    message_preview: '',
+  },
+  d0: {
+    enabled: false,
+    hour: 7,
+    inbox_id: null,
+    template_params: null,
+    message_preview: '',
+  },
 };
-const REMINDER_LABELS = { d1: '📨 Véspera (D-1) — pede confirmação', d0: '☀️ No dia (D-0) — o lembrete da manhã' };
+const REMINDER_LABELS = {
+  d1: '📨 Véspera (D-1) — pede confirmação',
+  d0: '☀️ No dia (D-0) — o lembrete da manhã',
+};
 const apptReminders = ref(JSON.parse(JSON.stringify(REMINDER_DEFAULTS)));
 const reminderTemplates = ref({ d1: [], d0: [] });
 const reminderTplName = ref({ d1: '', d0: '' });
@@ -1830,7 +2931,9 @@ watch(
         message_preview: c.message_preview || '',
       };
       reminderTplName.value[k] = c.template_params?.name || '';
-      reminderVars.value[k] = { ...(c.template_params?.processed_params?.body || {}) };
+      reminderVars.value[k] = {
+        ...(c.template_params?.processed_params?.body || {}),
+      };
       if (c.inbox_id) loadReminderTemplates(k, c.inbox_id);
     });
   },
@@ -1844,8 +2947,11 @@ const onReminderInbox = k => {
   reminderVars.value[k] = {};
   loadReminderTemplates(k, apptReminders.value[k].inbox_id);
 };
-const reminderTpl = k => reminderTemplates.value[k].find(t => t.name === reminderTplName.value[k]) || null;
-const reminderBody = k => reminderTpl(k)?.components?.find(c => c.type === 'BODY')?.text || '';
+const reminderTpl = k =>
+  reminderTemplates.value[k].find(t => t.name === reminderTplName.value[k]) ||
+  null;
+const reminderBody = k =>
+  reminderTpl(k)?.components?.find(c => c.type === 'BODY')?.text || '';
 const reminderTokens = k => {
   const s = new Set();
   const re = /\{\{\s*(\d+)\s*\}\}/g;
@@ -1877,8 +2983,13 @@ const saveReminders = async () => {
       payload[k].template_params = r.template_params;
       payload[k].message_preview = r.message_preview;
     }
-    if (payload[k].enabled && (!payload[k].inbox_id || !payload[k].template_params)) {
-      useAlert(`Escolha a caixa e a mensagem modelo do lembrete "${k === 'd1' ? 'véspera' : 'no dia'}" antes de ligar.`);
+    if (
+      payload[k].enabled &&
+      (!payload[k].inbox_id || !payload[k].template_params)
+    ) {
+      useAlert(
+        `Escolha a caixa e a mensagem modelo do lembrete "${k === 'd1' ? 'véspera' : 'no dia'}" antes de ligar.`
+      );
       return;
     }
   }
@@ -1916,2417 +3027,4781 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="bg-n-surface-1 flex flex-col h-full w-full">
-    <!-- Header (item 70: medalhão + abas coloridas, mesma linguagem da
-         Campanha WhatsApp — cada aba tem a sua cor) -->
-    <div class="px-6 py-4 border-b border-n-weak flex-shrink-0">
-      <div class="flex items-center gap-3">
-        <span class="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-sm" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-          <span class="i-lucide-workflow text-white text-lg" />
-        </span>
-        <div>
-          <h1 class="text-lg font-semibold text-n-slate-12">Automações</h1>
-          <p class="text-xs text-n-slate-10 mt-0.5">
-            Tudo que trabalha sozinho no sistema: réguas, robôs, agentes de IA, automações de coluna e tratamento de dados.
-          </p>
-        </div>
+  <div
+    class="cv-page bg-n-surface-1 flex flex-col h-full w-full overflow-y-auto"
+    :style="cvVars"
+  >
+    <!-- Cabeçalho (rodada 189): banner de vidro do kit + abas em segmento,
+         mesma linguagem de Relatórios/Central; cada aba mantém o ícone -->
+    <div class="px-4 sm:px-6 pt-4 sm:pt-6">
+      <div class="max-w-5xl mx-auto w-full">
+        <CevicoHero
+          :pal="pal"
+          title="Automações"
+          subtitle="Tudo que trabalha sozinho no sistema: réguas, robôs, agentes de IA, automações de coluna e tratamento de dados."
+          icon="i-lucide-workflow"
+        />
       </div>
-      <!-- Tabs (atendente concedido só vê as abas da área dele) -->
-      <div class="flex gap-1 mt-3 flex-wrap">
-        <button
-          v-if="visibleTabs.includes('robos')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'robos' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'robos' ? { background: 'linear-gradient(135deg, #0F5FA6, #3B82F6)' } : {}"
-          @click="activeTab = 'robos'"
-        ><span class="i-lucide-bot text-xs" />Robôs de follow-up</button>
-        <button
-          v-if="visibleTabs.includes('regras')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'regras' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'regras' ? { background: 'linear-gradient(135deg, #0E7490, #22D3EE)' } : {}"
-          @click="activeTab = 'regras'"
-        ><span class="i-lucide-repeat text-xs" />Regras da caixa de entrada</button>
-        <button
-          v-if="visibleTabs.includes('agentes')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'agentes' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'agentes' ? { background: 'linear-gradient(135deg, #7C3AED, #5B21B6)' } : {}"
-          @click="activeTab = 'agentes'"
-        ><span class="i-lucide-sparkles text-xs" />Agentes de IA</button>
-        <button
-          v-if="visibleTabs.includes('painel_ia')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'painel_ia' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'painel_ia' ? { background: 'linear-gradient(135deg, #9D174D, #DB2777)' } : {}"
-          @click="activeTab = 'painel_ia'"
-        ><span class="i-lucide-activity text-xs" />Painel dos agentes</button>
-        <!-- 🗺️ item 170: fluxograma de cada agente/automação -->
-        <button
-          v-if="visibleTabs.includes('fluxos')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'fluxos' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'fluxos' ? { background: 'linear-gradient(135deg, #1D4ED8, #60A5FA)' } : {}"
-          @click="activeTab = 'fluxos'"
-        ><span class="i-lucide-git-branch text-xs" />Fluxos</button>
-        <button
-          v-if="visibleTabs.includes('programacao')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'programacao' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'programacao' ? { background: 'linear-gradient(135deg, #D97706, #F59E0B)' } : {}"
-          @click="activeTab = 'programacao'"
-        ><span class="i-lucide-zap text-xs" />Modo Programação</button>
-        <button
-          v-if="visibleTabs.includes('resultados')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'resultados' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'resultados' ? { background: 'linear-gradient(135deg, #65A30D, #84CC16)' } : {}"
-          @click="activeTab = 'resultados'"
-        ><span class="i-lucide-bar-chart-3 text-xs" />Resultados</button>
-        <button
-          v-if="visibleTabs.includes('tratamento')"
-          class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          :class="activeTab === 'tratamento' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="activeTab === 'tratamento' ? { background: 'linear-gradient(135deg, #0F766E, #14B8A6)' } : {}"
-          @click="activeTab = 'tratamento'"
-        ><span class="i-lucide-database text-xs" />Tratamento de dados</button>
+      <!-- Abas (atendente concedido só vê as abas da área dele) -->
+      <div class="max-w-5xl mx-auto w-full">
+        <div class="cv-seg cv-seg-sm !flex flex-wrap">
+          <button
+            v-if="visibleTabs.includes('robos')"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': activeTab === 'robos' }"
+            @click="activeTab = 'robos'"
+          >
+            <span class="i-lucide-bot text-xs" />Robôs de follow-up
+          </button>
+          <button
+            v-if="visibleTabs.includes('regras')"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': activeTab === 'regras' }"
+            @click="activeTab = 'regras'"
+          >
+            <span class="i-lucide-repeat text-xs" />Regras da caixa de entrada
+          </button>
+          <button
+            v-if="visibleTabs.includes('agentes')"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': activeTab === 'agentes' }"
+            @click="activeTab = 'agentes'"
+          >
+            <span class="i-lucide-sparkles text-xs" />Agentes de IA
+          </button>
+          <button
+            v-if="visibleTabs.includes('painel_ia')"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': activeTab === 'painel_ia' }"
+            @click="activeTab = 'painel_ia'"
+          >
+            <span class="i-lucide-activity text-xs" />Painel dos agentes
+          </button>
+          <button
+            v-if="visibleTabs.includes('fluxos')"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': activeTab === 'fluxos' }"
+            @click="activeTab = 'fluxos'"
+          >
+            <span class="i-lucide-git-branch text-xs" />Fluxos
+          </button>
+          <button
+            v-if="visibleTabs.includes('programacao')"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': activeTab === 'programacao' }"
+            @click="activeTab = 'programacao'"
+          >
+            <span class="i-lucide-zap text-xs" />Modo Programação
+          </button>
+          <button
+            v-if="visibleTabs.includes('resultados')"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': activeTab === 'resultados' }"
+            @click="activeTab = 'resultados'"
+          >
+            <span class="i-lucide-bar-chart-3 text-xs" />Resultados
+          </button>
+          <button
+            v-if="visibleTabs.includes('tratamento')"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': activeTab === 'tratamento' }"
+            @click="activeTab = 'tratamento'"
+          >
+            <span class="i-lucide-database text-xs" />Tratamento de dados
+          </button>
+        </div>
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-6">
-      <!-- ══ ROBÔS ══ -->
-      <div v-if="activeTab === 'robos'" class="max-w-3xl">
-        <div class="flex items-center justify-between mb-4">
-          <p class="text-sm text-n-slate-11">
-            Cutucadas simples para reabrir a conversa quando o paciente some. Ex.: 3h "oi, pode falar?",
-            10h "[nome], no seu tempo ok?". Para sozinho se o paciente responder.
-          </p>
-          <button
-            class="text-sm px-3 py-2 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 flex items-center gap-1.5 flex-shrink-0"
-            @click="openCreateBot"
-          >
-            <span class="i-lucide-plus text-sm" />
-            Novo robô
-          </button>
-        </div>
-
-        <!-- 🕐 Horário de envio (item 147): janela em que as cutucadas podem
-             sair — o admin estende até 24h pra não empilhar pro dia seguinte -->
-        <div v-if="isAdmin" class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="i-lucide-clock text-sm" style="color: #0F5FA6" />
-            <p class="text-sm font-semibold text-n-slate-12">Horário de envio das cutucadas</p>
-            <span class="text-xs font-medium text-n-brand">{{ followupHoursLabel }}</span>
-            <Spinner v-if="savingFollowupHours" :size="14" class="text-n-brand" />
-          </div>
-          <div class="mt-2.5 flex items-center gap-2 flex-wrap">
-            <span class="text-xs text-n-slate-11">das</span>
-            <select
-              :value="followupHours.start"
-              class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-1"
-              style="width: 86px; margin-bottom: 0"
-              @change="saveFollowupHours(Number($event.target.value), followupHours.end)"
-            >
-              <option v-for="h in 24" :key="`fh-s-${h}`" :value="h - 1">{{ String(h - 1).padStart(2, '0') }}h</option>
-            </select>
-            <span class="text-xs text-n-slate-11">às</span>
-            <select
-              :value="followupHours.end"
-              class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-1"
-              style="width: 86px; margin-bottom: 0"
-              @change="saveFollowupHours(followupHours.start, Number($event.target.value))"
-            >
-              <option v-for="h in 24" :key="`fh-e-${h}`" :value="h">{{ h === 24 ? '24h' : `${String(h).padStart(2, '0')}h` }}</option>
-            </select>
-            <button
-              class="text-[11px] px-2.5 py-1 rounded-full border transition-colors"
-              :class="followupHours.start === 8 && followupHours.end === 20 ? 'border-n-brand text-n-brand font-semibold' : 'border-n-weak text-n-slate-10 hover:text-n-brand'"
-              @click="saveFollowupHours(8, 20)"
-            >Padrão 08h–20h</button>
-            <button
-              class="text-[11px] px-2.5 py-1 rounded-full border transition-colors"
-              :class="followupHours.start === 0 && followupHours.end === 24 ? 'border-n-brand text-n-brand font-semibold' : 'border-n-weak text-n-slate-10 hover:text-n-brand'"
-              @click="saveFollowupHours(0, 24)"
-            >24 horas</button>
-          </div>
-          <p class="mt-2 text-[11px] text-n-slate-10 leading-relaxed">
-            Vale para todos os robôs. Cutucada que vence fora do horário espera ele reabrir (não é descartada) e,
-            ao reabrir, as etapas <b>não saem empilhadas</b>: entre uma e a seguinte vale a diferença de tempo da cadência, contada da cutucada anterior.
-            💡 Texto simples só chega dentro da janela de 24h do WhatsApp — fora dela a etapa de texto é pulada (fica no registro) e só mensagem modelo entrega.
-          </p>
-
-          <!-- 🏷️ Etiquetas que encerram o follow-up (rodada 158) -->
-          <div class="mt-3 pt-3 border-t border-n-weak">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="i-lucide-octagon-x text-sm" style="color: #b91c1c" />
-              <p class="text-sm font-semibold text-n-slate-12">Etiquetas que encerram o follow-up</p>
-              <Spinner v-if="savingStopLabels" :size="14" class="text-n-brand" />
-            </div>
-            <p class="mt-1 text-[11px] text-n-slate-10 leading-relaxed">
-              Contato ou conversa com uma destas etiquetas não recebe cutucada de <b>nenhum</b> robô — ex.: <code>att_encerrado</code>.
-              Fixas (sempre valem): <code>nao_perturbe</code> e <code>perda_*</code>. Clique numa etiqueta para ligar/desligar.
+    <div class="px-4 sm:px-6 py-5 sm:py-6">
+      <div class="max-w-5xl mx-auto w-full">
+        <!-- ══ ROBÔS ══ -->
+        <div v-if="activeTab === 'robos'" class="max-w-3xl">
+          <div class="flex items-center justify-between mb-4">
+            <p class="text-sm text-n-slate-11">
+              Cutucadas simples para reabrir a conversa quando o paciente some.
+              Ex.: 3h "oi, pode falar?", 10h "[nome], no seu tempo ok?". Para
+              sozinho se o paciente responder.
             </p>
-            <div class="mt-2 flex flex-wrap gap-1.5">
-              <button
-                v-for="l in accountLabels"
-                :key="`stop-${l.id}`"
-                class="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors"
-                :class="followupStopLabels.includes(l.title)
-                  ? 'bg-red-500/15 border-red-500 text-red-600 font-medium'
-                  : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
-                :disabled="savingStopLabels"
-                @click="toggleStopLabel(l.title)"
-              >
-                <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: l.color ?? '#6B7280' }" />
-                {{ l.title }}
-              </button>
-              <span v-if="!accountLabels.length" class="text-[11px] text-n-slate-9">Nenhuma etiqueta cadastrada na conta ainda.</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 📅 Lembretes do dia da consulta (item 156): D-1 véspera com
-             confirmação por resposta + D-0 no dia — pacote comparecimento -->
-        <div v-if="isAdmin" class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="i-lucide-calendar-check text-sm" style="color: #B8860B" />
-            <p class="text-sm font-semibold text-n-slate-12">Lembretes do dia da consulta</p>
-            <Spinner v-if="savingReminders" :size="14" class="text-n-brand" />
-          </div>
-          <p class="mt-1 text-[11px] text-n-slate-10 leading-relaxed">
-            Pela <b>data da consulta</b>: a véspera pede a confirmação ("responde SIM") e a manhã do dia lembra o paciente.
-            Quem responde confirmando ganha o ✅ registrado na conversa. Envio por <b>mensagem modelo</b> — chega mesmo fora da janela de 24h.
-          </p>
-          <div v-for="k in ['d1', 'd0']" :key="`rem-${k}`" class="mt-3 p-3 rounded-lg bg-n-solid-1 border border-n-weak">
-            <div class="flex items-center gap-2 flex-wrap">
-              <button
-                class="w-9 h-5 rounded-full transition-colors relative flex-shrink-0"
-                :class="apptReminders[k].enabled ? 'bg-green-500' : 'bg-n-slate-6'"
-                :title="apptReminders[k].enabled ? 'Ligado — clique para desligar' : 'Desligado — clique para ligar'"
-                @click="apptReminders[k].enabled = !apptReminders[k].enabled"
-              >
-                <span class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" :class="apptReminders[k].enabled ? 'left-[18px]' : 'left-0.5'" />
-              </button>
-              <p class="text-xs font-semibold text-n-slate-12">{{ REMINDER_LABELS[k] }}</p>
-              <span class="text-[11px] text-n-slate-11 ml-auto">enviar às</span>
-              <select v-model.number="apptReminders[k].hour" class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-2" style="width: 84px; margin-bottom: 0">
-                <option v-for="h in 24" :key="`rh-${k}-${h}`" :value="h - 1">{{ String(h - 1).padStart(2, '0') }}h</option>
-              </select>
-            </div>
-            <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <select v-model.number="apptReminders[k].inbox_id" class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2" style="margin-bottom: 0" @change="onReminderInbox(k)">
-                <option :value="null">Caixa do WhatsApp…</option>
-                <option v-for="i in whatsappInboxesRobos" :key="`ri-${k}-${i.id}`" :value="i.id">{{ i.name }}</option>
-              </select>
-              <select v-model="reminderTplName[k]" class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2" style="margin-bottom: 0">
-                <option value="">{{ apptReminders[k].template_params?.name ? `Modelo salva: ${apptReminders[k].template_params.name}` : 'Mensagem modelo…' }}</option>
-                <option v-for="t in reminderTemplates[k]" :key="`rt-${k}-${t.name}-${t.language}`" :value="t.name">{{ t.name }} ({{ t.language }})</option>
-              </select>
-            </div>
-            <template v-if="reminderTpl(k)">
-              <p class="mt-2 text-[11px] text-n-slate-10 whitespace-pre-wrap bg-n-alpha-1 rounded-lg px-2 py-1.5">{{ reminderBody(k) }}</p>
-              <div class="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                <input
-                  v-for="token in reminderTokens(k)"
-                  :key="`rv-${k}-${token}`"
-                  v-model="reminderVars[k][token]"
-                  class="text-xs border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2 font-mono"
-                  style="margin-bottom: 0"
-                  :placeholder="`Variável {{${token}}} — ex.: {{contact.name}}, {{hora}} ou {{unidade}}`"
-                />
-              </div>
-              <p class="mt-1 text-[10px] text-n-slate-9">
-                Nas variáveis: <code>{{ '\{\{contact.name\}\}' }}</code> = nome ·
-                <code>{{ '\{\{hora\}\}' }}</code> = horário da consulta ·
-                <code>{{ '\{\{unidade\}\}' }}</code> = Av. Paulista/Tatuapé
-              </p>
-            </template>
-          </div>
-          <div class="mt-3 flex items-center gap-2">
-            <button class="text-sm px-4 py-2 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 disabled:opacity-60" :disabled="savingReminders" @click="saveReminders">Salvar lembretes</button>
-            <span class="text-[11px] text-n-slate-10">1 envio por consulta em cada régua — reprocessar não duplica.</span>
-          </div>
-        </div>
-
-        <div v-if="loadingBots" class="flex justify-center py-10"><Spinner :size="28" class="text-n-brand" /></div>
-        <div v-else-if="!bots.length" class="text-center py-12 text-n-slate-10">
-          <span class="i-lucide-bot text-4xl mb-2 block mx-auto" />
-          <p class="text-sm">Nenhum robô criado ainda.</p>
-        </div>
-        <div v-else class="space-y-3">
-          <div v-for="bot in bots" :key="bot.id" class="p-4 bg-n-solid-2 border border-n-weak rounded-xl">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="w-2 h-2 rounded-full flex-shrink-0" :class="bot.active ? 'bg-green-500' : 'bg-n-slate-9'" />
-              <p class="text-sm font-semibold text-n-slate-12 flex-1 truncate">{{ bot.name }}</p>
-              <span class="text-xs text-n-slate-10">{{ bot.inbox_name || '🔁 Caixa automática' }}</span>
-              <button
-                class="text-xs px-2 py-1 rounded-lg border border-n-weak ml-1"
-                :class="bot.active ? 'text-yellow-600' : 'text-green-600'"
-                @click="toggleBot(bot)"
-              >{{ bot.active ? 'Pausar' : 'Ativar' }}</button>
-              <button class="text-n-slate-9 hover:text-n-brand i-lucide-pencil text-sm" @click="openEditBot(bot)" />
-              <button
-                v-if="deleteBotConfirmId !== bot.id"
-                class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm"
-                @click="deleteBotConfirmId = bot.id"
-              />
-              <button v-else class="text-xs text-red-500" @click="deleteBot(bot)">Confirmar</button>
-            </div>
-            <div class="flex flex-wrap gap-1.5">
-              <span
-                v-for="(s, i) in bot.steps"
-                :key="i"
-                class="text-[11px] bg-n-alpha-2 text-n-slate-11 rounded-full px-2 py-0.5"
-              >
-                {{ delayLabel(s) }}: {{ s.template_params ? `📋 ${s.template_params.name}` : `"${s.message}"` }}
-              </span>
-            </div>
-
-            <!-- aviso quando a janela parou o robô (causa silenciosa nº 1) -->
-            <div
-              v-if="bot.active && botWarning(bot)"
-              class="mt-2 text-xs rounded-lg px-3 py-2 font-medium"
-              style="background: rgba(217, 119, 6, 0.1); color: #b45309; border: 1px solid rgba(217, 119, 6, 0.35)"
-            >
-              {{ botWarning(bot) }}
-            </div>
-
-            <!-- última rodada + registro de atividade -->
-            <div class="mt-2 flex items-center gap-2 flex-wrap text-[11px] text-n-slate-10">
-              <template v-if="bot.activity?.last_run">
-                <span>
-                  Última rodada {{ fmtLogDate(bot.activity.last_run.at) }} ·
-                  <template v-if="bot.activity.last_run.status === 'fora_da_janela'">fora da janela (não enviou)</template>
-                  <template v-else-if="bot.activity.last_run.status === 'fora_do_expediente'">fora do horário de envio ({{ followupHoursLabel }})</template>
-                  <template v-else>
-                    {{ bot.activity.last_run.candidates }} conversa(s) na mira ·
-                    <b :class="bot.activity.last_run.sent ? 'text-green-600' : ''">{{ bot.activity.last_run.sent }} enviada(s)</b>
-                  </template>
-                </span>
-                <span v-if="reasonLine(bot.activity.last_run)" class="text-n-slate-9">{{ reasonLine(bot.activity.last_run) }}</span>
-              </template>
-              <span v-else>Sem rodadas registradas ainda (o registro começa após esta atualização).</span>
-              <button
-                v-if="bot.activity?.events?.length"
-                class="text-n-brand font-medium hover:underline"
-                @click="expandedBotLog = expandedBotLog === bot.id ? null : bot.id"
-              >
-                📒 Registro de atividade ({{ bot.activity.events.length }})
-              </button>
-            </div>
-            <div v-if="expandedBotLog === bot.id && bot.activity?.events?.length" class="mt-2 rounded-lg bg-n-alpha-1 divide-y divide-n-weak">
-              <div v-for="(ev, i) in bot.activity.events" :key="i" class="px-3 py-1.5 text-[11px] flex items-center gap-2">
-                <span>{{ ev.type === 'sent' ? '✉️' : (ev.type === 'skipped' ? '⏭️' : '⚠️') }}</span>
-                <span class="text-n-slate-9 flex-shrink-0">{{ fmtLogDate(ev.at) }}</span>
-                <span class="text-n-slate-11 truncate">{{ ev.contact || 'Contato' }} · conversa #{{ ev.conversation_id }}</span>
-                <span class="text-n-slate-10 truncate">{{ ev.type === 'error' ? `erro: ${ev.note}` : ev.note }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <!-- ══ AGENTES DE IA ══ -->
-      <!-- ══ REGRAS DA CAIXA DE ENTRADA (Automation nativa) ══ -->
-      <div v-else-if="activeTab === 'regras'" class="max-w-3xl">
-        <div class="flex items-start justify-between gap-3 mb-4 flex-wrap">
-          <p class="text-sm text-n-slate-11 flex-1 min-w-[240px]">
-            Regras que rodam nas conversas da caixa de entrada: quando uma conversa é criada ou uma
-            mensagem chega, aplicam etiqueta, atribuem time/atendente, mudam prioridade... Ligue e
-            desligue por aqui; criar e editar é no editor completo.
-          </p>
-          <button
-            class="px-3 py-1.5 text-sm font-medium rounded-lg bg-n-brand text-white hover:opacity-90 transition-opacity flex items-center gap-1.5"
-            @click="openNativeEditor"
-          >
-            <span class="i-lucide-external-link text-xs" />
-            Abrir editor completo
-          </button>
-        </div>
-
-        <div v-if="loadingNativeRules" class="flex justify-center py-10"><Spinner /></div>
-        <p v-else-if="!nativeRules.length" class="text-sm text-n-slate-10 border border-dashed border-n-weak rounded-xl p-6 text-center">
-          Nenhuma regra criada ainda — use o editor completo para criar a primeira.
-        </p>
-        <div v-else class="space-y-2">
-          <div
-            v-for="rule in nativeRules"
-            :key="rule.id"
-            class="border border-n-weak rounded-xl p-3 flex items-center gap-3 bg-n-solid-2"
-          >
-            <span
-              class="w-2 h-2 rounded-full flex-shrink-0"
-              :class="rule.active ? 'bg-green-500' : 'bg-n-slate-7'"
-            />
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-n-slate-12 truncate">{{ rule.name }}</p>
-              <p class="text-[11px] text-n-slate-10 truncate">
-                {{ RULE_EVENT_LABELS[rule.event_name] || rule.event_name }}
-                <template v-if="rule.description"> · {{ rule.description }}</template>
-              </p>
-            </div>
-            <span
-              class="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-              :class="rule.active ? 'bg-green-500/15 text-green-600 dark:text-green-400' : 'bg-n-alpha-1 text-n-slate-10'"
-            >
-              {{ rule.active ? 'Ativa' : 'Desligada' }}
-            </span>
             <button
-              class="text-xs font-medium px-2.5 py-1 rounded-lg border border-n-weak hover:bg-n-alpha-1 transition-colors flex-shrink-0"
-              @click="toggleNativeRule(rule)"
+              class="text-sm px-3 py-2 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 flex items-center gap-1.5 flex-shrink-0"
+              @click="openCreateBot"
             >
-              {{ rule.active ? 'Desligar' : 'Ligar' }}
+              <span class="i-lucide-plus text-sm" />
+              Novo robô
             </button>
           </div>
-        </div>
-      </div>
 
-      <div v-else-if="activeTab === 'agentes'" class="max-w-3xl space-y-5">
-        <div v-if="!aiConfigured" class="rounded-xl border-2 p-4 text-sm text-n-slate-11" style="border-color: rgba(212,160,23,0.4); background: rgba(212,160,23,0.08)">
-          ⚠️ A Claude ainda não está conectada — configure a chave da API em
-          <button class="text-n-brand font-medium hover:underline" @click="router.push({ name: 'crm_integrations', params: { accountId } })">Integrações → Claude</button>.
-          Os agentes ficam prontos, mas só funcionam com a chave.
-        </div>
+          <!-- 🕐 Horário de envio (item 147): janela em que as cutucadas podem
+             sair — o admin estende até 24h pra não empilhar pro dia seguinte -->
+          <div
+            v-if="isAdmin"
+            class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl"
+          >
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="i-lucide-clock text-sm" style="color: #0f5fa6" />
+              <p class="text-sm font-semibold text-n-slate-12">
+                Horário de envio das cutucadas
+              </p>
+              <span class="text-xs font-medium text-n-brand">{{
+                followupHoursLabel
+              }}</span>
+              <Spinner
+                v-if="savingFollowupHours"
+                :size="14"
+                class="text-n-brand"
+              />
+            </div>
+            <div class="mt-2.5 flex items-center gap-2 flex-wrap">
+              <span class="text-xs text-n-slate-11">das</span>
+              <select
+                :value="followupHours.start"
+                class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-1"
+                style="width: 86px; margin-bottom: 0"
+                @change="
+                  saveFollowupHours(
+                    Number($event.target.value),
+                    followupHours.end
+                  )
+                "
+              >
+                <option v-for="h in 24" :key="`fh-s-${h}`" :value="h - 1">
+                  {{ String(h - 1).padStart(2, '0') }}h
+                </option>
+              </select>
+              <span class="text-xs text-n-slate-11">às</span>
+              <select
+                :value="followupHours.end"
+                class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-1"
+                style="width: 86px; margin-bottom: 0"
+                @change="
+                  saveFollowupHours(
+                    followupHours.start,
+                    Number($event.target.value)
+                  )
+                "
+              >
+                <option v-for="h in 24" :key="`fh-e-${h}`" :value="h">
+                  {{ h === 24 ? '24h' : `${String(h).padStart(2, '0')}h` }}
+                </option>
+              </select>
+              <button
+                class="text-[11px] px-2.5 py-1 rounded-full border transition-colors"
+                :class="
+                  followupHours.start === 8 && followupHours.end === 20
+                    ? 'border-n-brand text-n-brand font-semibold'
+                    : 'border-n-weak text-n-slate-10 hover:text-n-brand'
+                "
+                @click="saveFollowupHours(8, 20)"
+              >
+                Padrão 08h–20h
+              </button>
+              <button
+                class="text-[11px] px-2.5 py-1 rounded-full border transition-colors"
+                :class="
+                  followupHours.start === 0 && followupHours.end === 24
+                    ? 'border-n-brand text-n-brand font-semibold'
+                    : 'border-n-weak text-n-slate-10 hover:text-n-brand'
+                "
+                @click="saveFollowupHours(0, 24)"
+              >
+                24 horas
+              </button>
+            </div>
+            <p class="mt-2 text-[11px] text-n-slate-10 leading-relaxed">
+              Vale para todos os robôs. Cutucada que vence fora do horário
+              espera ele reabrir (não é descartada) e, ao reabrir, as etapas
+              <b>não saem empilhadas</b>: entre uma e a seguinte vale a
+              diferença de tempo da cadência, contada da cutucada anterior. 💡
+              Texto simples só chega dentro da janela de 24h do WhatsApp — fora
+              dela a etapa de texto é pulada (fica no registro) e só mensagem
+              modelo entrega.
+            </p>
 
-        <!-- 💰 Relatório de gastos com os agentes -->
-        <div v-if="aiUsage" class="rounded-2xl border-2 border-n-weak bg-n-solid-2 p-5">
-          <div class="flex items-center gap-2 mb-4">
-            <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #65A30D, #84CC16)">
-              <span class="i-lucide-wallet text-white text-base" />
-            </span>
-            <div>
-              <p class="text-sm font-bold text-n-slate-12">Gasto com os agentes de IA</p>
-              <p class="text-[11px] text-n-slate-10">custo estimado pelas tabelas da Anthropic (US$)</p>
+            <!-- 🏷️ Etiquetas que encerram o follow-up (rodada 158) -->
+            <div class="mt-3 pt-3 border-t border-n-weak">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span
+                  class="i-lucide-octagon-x text-sm"
+                  style="color: #b91c1c"
+                />
+                <p class="text-sm font-semibold text-n-slate-12">
+                  Etiquetas que encerram o follow-up
+                </p>
+                <Spinner
+                  v-if="savingStopLabels"
+                  :size="14"
+                  class="text-n-brand"
+                />
+              </div>
+              <p class="mt-1 text-[11px] text-n-slate-10 leading-relaxed">
+                Contato ou conversa com uma destas etiquetas não recebe cutucada
+                de <b>nenhum</b> robô — ex.: <code>att_encerrado</code>. Fixas
+                (sempre valem): <code>nao_perturbe</code> e
+                <code>perda_*</code>. Clique numa etiqueta para ligar/desligar.
+              </p>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <button
+                  v-for="l in accountLabels"
+                  :key="`stop-${l.id}`"
+                  class="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors"
+                  :class="
+                    followupStopLabels.includes(l.title)
+                      ? 'bg-red-500/15 border-red-500 text-red-600 font-medium'
+                      : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'
+                  "
+                  :disabled="savingStopLabels"
+                  @click="toggleStopLabel(l.title)"
+                >
+                  <span
+                    class="w-1.5 h-1.5 rounded-full"
+                    :style="{ backgroundColor: l.color ?? '#6B7280' }"
+                  />
+                  {{ l.title }}
+                </button>
+                <span
+                  v-if="!accountLabels.length"
+                  class="text-[11px] text-n-slate-9"
+                  >Nenhuma etiqueta cadastrada na conta ainda.</span>
+              </div>
             </div>
           </div>
 
-          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #0F5FA6, #0B4A82)">
-              <p class="text-[11px] font-medium text-white/80">Hoje</p>
-              <p class="text-lg font-bold leading-tight">{{ fmtUsd(aiUsage.periods?.today?.cost_usd) }}</p>
-              <p class="text-[10px] text-white/70">{{ aiUsage.periods?.today?.calls || 0 }} análise(s)</p>
+          <!-- 📅 Lembretes do dia da consulta (item 156): D-1 véspera com
+             confirmação por resposta + D-0 no dia — pacote comparecimento -->
+          <div
+            v-if="isAdmin"
+            class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl"
+          >
+            <div class="flex items-center gap-2 flex-wrap">
+              <span
+                class="i-lucide-calendar-check text-sm"
+                style="color: #b8860b"
+              />
+              <p class="text-sm font-semibold text-n-slate-12">
+                Lembretes do dia da consulta
+              </p>
+              <Spinner v-if="savingReminders" :size="14" class="text-n-brand" />
             </div>
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-              <p class="text-[11px] font-medium text-white/80">7 dias</p>
-              <p class="text-lg font-bold leading-tight">{{ fmtUsd(aiUsage.periods?.last7?.cost_usd) }}</p>
-              <p class="text-[10px] text-white/70">{{ aiUsage.periods?.last7?.calls || 0 }} análise(s)</p>
-            </div>
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-              <p class="text-[11px] font-medium text-white/80">30 dias</p>
-              <p class="text-lg font-bold leading-tight">{{ fmtUsd(aiUsage.periods?.last30?.cost_usd) }}</p>
-              <p class="text-[10px] text-white/70">{{ aiUsage.periods?.last30?.calls || 0 }} análise(s)</p>
-            </div>
-            <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
-              <p class="text-[11px] font-medium text-n-slate-10">Desde o início</p>
-              <p class="text-lg font-bold leading-tight text-n-slate-12">{{ fmtUsd(aiUsage.periods?.all?.cost_usd) }}</p>
-              <p class="text-[10px] text-n-slate-9">{{ aiUsage.periods?.all?.calls || 0 }} análise(s)</p>
-            </div>
-          </div>
-
-          <div v-if="aiUsage.by_agent?.length" class="space-y-1.5">
-            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Por agente (30 dias)</p>
+            <p class="mt-1 text-[11px] text-n-slate-10 leading-relaxed">
+              Pela <b>data da consulta</b>: a véspera pede a confirmação
+              ("responde SIM") e a manhã do dia lembra o paciente. Quem responde
+              confirmando ganha o ✅ registrado na conversa. Envio por
+              <b>mensagem modelo</b> — chega mesmo fora da janela de 24h.
+            </p>
             <div
-              v-for="row in aiUsage.by_agent"
-              :key="row.key"
-              class="flex items-center gap-2 text-xs text-n-slate-11 flex-wrap"
+              v-for="k in ['d1', 'd0']"
+              :key="`rem-${k}`"
+              class="mt-3 p-3 rounded-lg bg-n-solid-1 border border-n-weak"
             >
-              <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ backgroundColor: AGENT_META[row.key]?.color || '#94A3B8' }" />
-              <span class="font-medium text-n-slate-12 w-48 truncate">{{ AGENT_META[row.key]?.title || row.key }}</span>
-              <span>{{ row.calls }} análise(s)</span>
-              <span class="text-n-slate-9">· {{ fmtTokens(row.input_tokens) }} tokens entrada · {{ fmtTokens(row.output_tokens) }} saída</span>
-              <span class="ml-auto font-semibold text-n-slate-12">{{ fmtUsd(row.cost_usd) }}</span>
+              <div class="flex items-center gap-2 flex-wrap">
+                <button
+                  class="w-9 h-5 rounded-full transition-colors relative flex-shrink-0"
+                  :class="
+                    apptReminders[k].enabled ? 'bg-green-500' : 'bg-n-slate-6'
+                  "
+                  :title="
+                    apptReminders[k].enabled
+                      ? 'Ligado — clique para desligar'
+                      : 'Desligado — clique para ligar'
+                  "
+                  @click="apptReminders[k].enabled = !apptReminders[k].enabled"
+                >
+                  <span
+                    class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                    :class="
+                      apptReminders[k].enabled ? 'left-[18px]' : 'left-0.5'
+                    "
+                  />
+                </button>
+                <p class="text-xs font-semibold text-n-slate-12">
+                  {{ REMINDER_LABELS[k] }}
+                </p>
+                <span class="text-[11px] text-n-slate-11 ml-auto">enviar às</span>
+                <select
+                  v-model.number="apptReminders[k].hour"
+                  class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-2"
+                  style="width: 84px; margin-bottom: 0"
+                >
+                  <option v-for="h in 24" :key="`rh-${k}-${h}`" :value="h - 1">
+                    {{ String(h - 1).padStart(2, '0') }}h
+                  </option>
+                </select>
+              </div>
+              <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <select
+                  v-model.number="apptReminders[k].inbox_id"
+                  class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2"
+                  style="margin-bottom: 0"
+                  @change="onReminderInbox(k)"
+                >
+                  <option :value="null">Caixa do WhatsApp…</option>
+                  <option
+                    v-for="i in whatsappInboxesRobos"
+                    :key="`ri-${k}-${i.id}`"
+                    :value="i.id"
+                  >
+                    {{ i.name }}
+                  </option>
+                </select>
+                <select
+                  v-model="reminderTplName[k]"
+                  class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2"
+                  style="margin-bottom: 0"
+                >
+                  <option value="">
+                    {{
+                      apptReminders[k].template_params?.name
+                        ? `Modelo salva: ${apptReminders[k].template_params.name}`
+                        : 'Mensagem modelo…'
+                    }}
+                  </option>
+                  <option
+                    v-for="t in reminderTemplates[k]"
+                    :key="`rt-${k}-${t.name}-${t.language}`"
+                    :value="t.name"
+                  >
+                    {{ t.name }} ({{ t.language }})
+                  </option>
+                </select>
+              </div>
+              <template v-if="reminderTpl(k)">
+                <p
+                  class="mt-2 text-[11px] text-n-slate-10 whitespace-pre-wrap bg-n-alpha-1 rounded-lg px-2 py-1.5"
+                >
+                  {{ reminderBody(k) }}
+                </p>
+                <div class="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  <input
+                    v-for="token in reminderTokens(k)"
+                    :key="`rv-${k}-${token}`"
+                    v-model="reminderVars[k][token]"
+                    class="text-xs border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2 font-mono"
+                    style="margin-bottom: 0"
+                    :placeholder="`Variável {{${token}}} — ex.: {{contact.name}}, {{hora}} ou {{unidade}}`"
+                  />
+                </div>
+                <p class="mt-1 text-[10px] text-n-slate-9">
+                  Nas variáveis: <code>{{ '\{\{contact.name\}\}' }}</code> =
+                  nome · <code>{{ '\{\{hora\}\}' }}</code> = horário da consulta
+                  · <code>{{ '\{\{unidade\}\}' }}</code> = Av. Paulista/Tatuapé
+                </p>
+              </template>
+            </div>
+            <div class="mt-3 flex items-center gap-2">
+              <button
+                class="text-sm px-4 py-2 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 disabled:opacity-60"
+                :disabled="savingReminders"
+                @click="saveReminders"
+              >
+                Salvar lembretes
+              </button>
+              <span class="text-[11px] text-n-slate-10">1 envio por consulta em cada régua — reprocessar não
+                duplica.</span>
             </div>
           </div>
-          <p v-else class="text-xs text-n-slate-10">Nenhuma análise registrada ainda — os custos aparecem aqui conforme os agentes rodarem.</p>
+
+          <div v-if="loadingBots" class="flex justify-center py-10">
+            <Spinner :size="28" class="text-n-brand" />
+          </div>
+          <div
+            v-else-if="!bots.length"
+            class="text-center py-12 text-n-slate-10"
+          >
+            <span class="i-lucide-bot text-4xl mb-2 block mx-auto" />
+            <p class="text-sm">Nenhum robô criado ainda.</p>
+          </div>
+          <div v-else class="space-y-3">
+            <div
+              v-for="bot in bots"
+              :key="bot.id"
+              class="p-4 bg-n-solid-2 border border-n-weak rounded-xl"
+            >
+              <div class="flex items-center gap-2 mb-2">
+                <span
+                  class="w-2 h-2 rounded-full flex-shrink-0"
+                  :class="bot.active ? 'bg-green-500' : 'bg-n-slate-9'"
+                />
+                <p
+                  class="text-sm font-semibold text-n-slate-12 flex-1 truncate"
+                >
+                  {{ bot.name }}
+                </p>
+                <span class="text-xs text-n-slate-10">{{
+                  bot.inbox_name || '🔁 Caixa automática'
+                }}</span>
+                <button
+                  class="text-xs px-2 py-1 rounded-lg border border-n-weak ml-1"
+                  :class="bot.active ? 'text-yellow-600' : 'text-green-600'"
+                  @click="toggleBot(bot)"
+                >
+                  {{ bot.active ? 'Pausar' : 'Ativar' }}
+                </button>
+                <button
+                  class="text-n-slate-9 hover:text-n-brand i-lucide-pencil text-sm"
+                  @click="openEditBot(bot)"
+                />
+                <button
+                  v-if="deleteBotConfirmId !== bot.id"
+                  class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm"
+                  @click="deleteBotConfirmId = bot.id"
+                />
+                <button
+                  v-else
+                  class="text-xs text-red-500"
+                  @click="deleteBot(bot)"
+                >
+                  Confirmar
+                </button>
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <span
+                  v-for="(s, i) in bot.steps"
+                  :key="i"
+                  class="text-[11px] bg-n-alpha-2 text-n-slate-11 rounded-full px-2 py-0.5"
+                >
+                  {{ delayLabel(s) }}:
+                  {{
+                    s.template_params
+                      ? `📋 ${s.template_params.name}`
+                      : `"${s.message}"`
+                  }}
+                </span>
+              </div>
+
+              <!-- aviso quando a janela parou o robô (causa silenciosa nº 1) -->
+              <div
+                v-if="bot.active && botWarning(bot)"
+                class="mt-2 text-xs rounded-lg px-3 py-2 font-medium"
+                style="
+                  background: rgba(217, 119, 6, 0.1);
+                  color: #b45309;
+                  border: 1px solid rgba(217, 119, 6, 0.35);
+                "
+              >
+                {{ botWarning(bot) }}
+              </div>
+
+              <!-- última rodada + registro de atividade -->
+              <div
+                class="mt-2 flex items-center gap-2 flex-wrap text-[11px] text-n-slate-10"
+              >
+                <template v-if="bot.activity?.last_run">
+                  <span>
+                    Última rodada {{ fmtLogDate(bot.activity.last_run.at) }} ·
+                    <template
+                      v-if="bot.activity.last_run.status === 'fora_da_janela'"
+                      >fora da janela (não enviou)</template>
+                    <template
+                      v-else-if="
+                        bot.activity.last_run.status === 'fora_do_expediente'
+                      "
+                      >fora do horário de envio ({{
+                        followupHoursLabel
+                      }})</template>
+                    <template v-else>
+                      {{ bot.activity.last_run.candidates }} conversa(s) na mira
+                      ·
+                      <b
+                        :class="
+                          bot.activity.last_run.sent ? 'text-green-600' : ''
+                        "
+                        >{{ bot.activity.last_run.sent }} enviada(s)</b>
+                    </template>
+                  </span>
+                  <span
+                    v-if="reasonLine(bot.activity.last_run)"
+                    class="text-n-slate-9"
+                    >{{ reasonLine(bot.activity.last_run) }}</span>
+                </template>
+                <span v-else>Sem rodadas registradas ainda (o registro começa após esta
+                  atualização).</span>
+                <button
+                  v-if="bot.activity?.events?.length"
+                  class="text-n-brand font-medium hover:underline"
+                  @click="
+                    expandedBotLog = expandedBotLog === bot.id ? null : bot.id
+                  "
+                >
+                  📒 Registro de atividade ({{ bot.activity.events.length }})
+                </button>
+              </div>
+              <div
+                v-if="expandedBotLog === bot.id && bot.activity?.events?.length"
+                class="mt-2 rounded-lg bg-n-alpha-1 divide-y divide-n-weak"
+              >
+                <div
+                  v-for="(ev, i) in bot.activity.events"
+                  :key="i"
+                  class="px-3 py-1.5 text-[11px] flex items-center gap-2"
+                >
+                  <span>{{
+                    ev.type === 'sent'
+                      ? '✉️'
+                      : ev.type === 'skipped'
+                        ? '⏭️'
+                        : '⚠️'
+                  }}</span>
+                  <span class="text-n-slate-9 flex-shrink-0">{{
+                    fmtLogDate(ev.at)
+                  }}</span>
+                  <span class="text-n-slate-11 truncate">{{ ev.contact || 'Contato' }} · conversa #{{
+                      ev.conversation_id
+                    }}</span>
+                  <span class="text-n-slate-10 truncate">{{
+                    ev.type === 'error' ? `erro: ${ev.note}` : ev.note
+                  }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- ══ AGENTES DE IA ══ -->
+        <!-- ══ REGRAS DA CAIXA DE ENTRADA (Automation nativa) ══ -->
+        <div v-else-if="activeTab === 'regras'" class="max-w-3xl">
+          <div class="flex items-start justify-between gap-3 mb-4 flex-wrap">
+            <p class="text-sm text-n-slate-11 flex-1 min-w-[240px]">
+              Regras que rodam nas conversas da caixa de entrada: quando uma
+              conversa é criada ou uma mensagem chega, aplicam etiqueta,
+              atribuem time/atendente, mudam prioridade... Ligue e desligue por
+              aqui; criar e editar é no editor completo.
+            </p>
+            <button
+              class="px-3 py-1.5 text-sm font-medium rounded-lg bg-n-brand text-white hover:opacity-90 transition-opacity flex items-center gap-1.5"
+              @click="openNativeEditor"
+            >
+              <span class="i-lucide-external-link text-xs" />
+              Abrir editor completo
+            </button>
+          </div>
+
+          <div v-if="loadingNativeRules" class="flex justify-center py-10">
+            <Spinner />
+          </div>
+          <p
+            v-else-if="!nativeRules.length"
+            class="text-sm text-n-slate-10 border border-dashed border-n-weak rounded-xl p-6 text-center"
+          >
+            Nenhuma regra criada ainda — use o editor completo para criar a
+            primeira.
+          </p>
+          <div v-else class="space-y-2">
+            <div
+              v-for="rule in nativeRules"
+              :key="rule.id"
+              class="border border-n-weak rounded-xl p-3 flex items-center gap-3 bg-n-solid-2"
+            >
+              <span
+                class="w-2 h-2 rounded-full flex-shrink-0"
+                :class="rule.active ? 'bg-green-500' : 'bg-n-slate-7'"
+              />
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-n-slate-12 truncate">
+                  {{ rule.name }}
+                </p>
+                <p class="text-[11px] text-n-slate-10 truncate">
+                  {{ RULE_EVENT_LABELS[rule.event_name] || rule.event_name }}
+                  <template v-if="rule.description">
+                    · {{ rule.description }}
+                  </template>
+                </p>
+              </div>
+              <span
+                class="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
+                :class="
+                  rule.active
+                    ? 'bg-green-500/15 text-green-600 dark:text-green-400'
+                    : 'bg-n-alpha-1 text-n-slate-10'
+                "
+              >
+                {{ rule.active ? 'Ativa' : 'Desligada' }}
+              </span>
+              <button
+                class="text-xs font-medium px-2.5 py-1 rounded-lg border border-n-weak hover:bg-n-alpha-1 transition-colors flex-shrink-0"
+                @click="toggleNativeRule(rule)"
+              >
+                {{ rule.active ? 'Desligar' : 'Ligar' }}
+              </button>
+            </div>
+          </div>
         </div>
 
-        <template v-for="group in agentGroups" :key="group.title">
-        <!-- Cabeçalho da seção (mesmo padrão dos cabeçalhos do hub) -->
-        <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5 pt-1">
-          <span class="text-sm">{{ group.icon }}</span>
-          {{ group.title }}
-          <span class="text-n-slate-9 font-normal normal-case">({{ group.keys.length }})</span>
-        </p>
-        <div
-          v-for="(agent, key) in groupAgents(group)"
-          :id="`cv-agent-${key}`"
-          :key="key"
-          class="rounded-2xl border-2 bg-n-solid-2 overflow-hidden"
-          :style="{ borderColor: AGENT_META[key].color + '40' }"
-        >
-          <!-- Faixa superior colorida -->
-          <div class="h-1.5 w-full" :style="{ background: AGENT_META[key].gradient }" />
+        <div v-else-if="activeTab === 'agentes'" class="max-w-4xl space-y-5">
+          <div
+            v-if="!aiConfigured"
+            class="cv-block cv-strip cv-amber px-4 py-3.5 flex items-center gap-3 flex-wrap"
+          >
+            <span class="cv-icon cv-icon-sm"><span class="i-lucide-key-round text-xs"/></span>
+            <p class="text-xs text-n-slate-11 flex-1 min-w-0">
+              A Claude ainda não está conectada. Os agentes ficam prontos, mas
+              só funcionam com a chave da API.
+            </p>
+            <button
+              class="cv-btn cv-btn-sm"
+              @click="
+                router.push({ name: 'crm_integrations', params: { accountId } })
+              "
+            >
+              Integrações → Claude
+            </button>
+          </div>
 
-          <div class="p-5">
-            <!-- Cabeçalho (clique = desce/recolhe o agente completo) -->
-            <div class="flex items-start gap-3 cursor-pointer select-none" :class="expandedAgents[key] ? 'mb-3' : ''" @click="toggleAgentExpand(key)">
-              <span class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 shadow" :style="{ background: AGENT_META[key].gradient }">
-                <span :class="AGENT_META[key].icon" class="text-white text-lg" />
-              </span>
+          <!-- 💰 Gasto com os agentes (rodada 189: vidro cristalino do kit, número grande) -->
+          <div
+            v-if="aiUsage"
+            class="cv-block p-5 sm:p-6"
+            :style="blockVars('gasto')"
+          >
+            <div class="flex items-center gap-3 mb-4">
+              <span class="cv-icon cv-icon-lg"><span class="i-lucide-wallet text-base"/></span>
+              <div class="min-w-0">
+                <p class="text-base font-bold text-n-slate-12 leading-tight">
+                  Gasto com os agentes de IA
+                </p>
+                <p class="text-xs text-n-slate-10 mt-0.5">
+                  custo estimado pelas tabelas da Anthropic (US$)
+                </p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              <div
+                v-for="p in USAGE_PERIODS"
+                :key="p.key"
+                class="cv-stat px-4 py-3"
+              >
+                <p class="cv-label">{{ p.label }}</p>
+                <p
+                  class="text-2xl font-bold text-n-slate-12 leading-tight mt-1 tabular-nums"
+                >
+                  {{ fmtUsd(aiUsage.periods?.[p.key]?.cost_usd) }}
+                </p>
+                <p class="text-[11px] text-n-slate-10 mt-0.5">
+                  {{ aiUsage.periods?.[p.key]?.calls || 0 }} chamada(s) à IA
+                </p>
+              </div>
+            </div>
+
+            <div v-if="aiUsage.by_agent?.length" class="space-y-1.5">
+              <p class="cv-label mb-1">Por agente (30 dias)</p>
+              <div
+                v-for="row in aiUsage.by_agent"
+                :key="row.key"
+                class="cv-row px-3 py-2 flex items-center gap-2 text-xs text-n-slate-11 flex-wrap"
+              >
+                <span
+                  class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  :style="{
+                    background: AGENT_META[row.key]?.gradient || '#94A3B8',
+                  }"
+                />
+                <span class="font-semibold text-n-slate-12 w-48 truncate">{{
+                  AGENT_META[row.key]?.title || row.key
+                }}</span>
+                <span>{{ row.calls }} {{ usageNoun(row.key) }}</span>
+                <span class="text-n-slate-9">· {{ fmtTokens(row.input_tokens) }} tokens entrada ·
+                  {{ fmtTokens(row.output_tokens) }} saída</span>
+                <span class="ml-auto font-bold text-n-slate-12 tabular-nums">{{
+                  fmtUsd(row.cost_usd)
+                }}</span>
+              </div>
+            </div>
+            <p v-else class="text-xs text-n-slate-10">
+              Nenhuma análise registrada ainda — os custos aparecem aqui
+              conforme os agentes rodarem.
+            </p>
+          </div>
+
+          <!-- 📜 ROTEIRO CEVICO (rodada 188): fonte única dos atendentes que falam com paciente -->
+          <div id="cv-roteiro" class="cv-block cv-gold p-5 sm:p-6">
+            <div
+              class="flex items-start gap-3 cursor-pointer select-none"
+              :class="scriptExpanded ? 'mb-4' : ''"
+              @click="scriptExpanded = !scriptExpanded"
+            >
+              <span class="cv-icon cv-icon-xl"><span class="i-lucide-scroll-text text-lg"/></span>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
-                  <p class="text-sm font-bold text-n-slate-12">{{ AGENT_META[key].title }}</p>
-                  <span
-                    class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                    :style="{ backgroundColor: AGENT_META[key].color + '1A', color: AGENT_META[key].color }"
-                  >
-                    {{ AGENT_META[key].tag }}
+                  <p class="text-base font-bold text-n-slate-12 leading-tight">
+                    Roteiro CEVICO
+                  </p>
+                  <span class="cv-chip">fonte única</span>
+                  <span class="cv-chip cv-slate">
+                    {{ scriptSections.filter(sec => sec.custom).length }} de
+                    {{ scriptSections.length }} seções personalizadas
                   </span>
                   <span
-                    class="text-[10px] px-2 py-0.5 rounded-full font-medium"
-                    :class="agent.enabled ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-10'"
+                    v-if="scriptUpdatedAt"
+                    class="text-[11px] text-n-slate-9"
                   >
-                    ● {{ agent.enabled ? 'Ligado' : 'Desligado' }}
+                    editado
+                    {{
+                      new Date(scriptUpdatedAt).toLocaleString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    }}
                   </span>
-                  <span
-                    v-if="agent.has_draft"
-                    class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-600"
-                    title="Existe um rascunho salvo que ainda NÃO está valendo — clique em Publicar para aplicar"
-                  >
-                    📝 Rascunho não publicado
-                  </span>
-                  <!-- 🗺️ item 170: abre o fluxograma deste agente na aba Fluxos -->
-                  <button
-                    class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-n-alpha-1 text-n-slate-11 hover:bg-n-alpha-2 flex items-center gap-1"
-                    title="Ver o caminho que este agente percorre (aba Fluxos)"
-                    @click.stop="openFlow(key)"
-                  >
-                    <span class="i-lucide-git-branch text-[10px]" />
-                    Ver fluxo
-                  </button>
                 </div>
-                <p class="text-xs text-n-slate-10 mt-1" :class="expandedAgents[key] ? '' : 'line-clamp-2'">{{ AGENT_META[key].description }}</p>
-              </div>
-              <!-- INTERRUPTOR definitivo: grava na hora, sem "Salvar" -->
-              <div v-if="key !== 'voice'" class="flex flex-col items-end gap-1 flex-shrink-0" @click.stop>
-                <button
-                  class="relative w-14 h-7 rounded-full transition-colors disabled:opacity-50"
-                  :class="agent.enabled ? 'bg-green-500' : 'bg-n-alpha-3'"
-                  :title="agent.enabled
-                    ? 'Desligar este agente agora (para tudo: botões, automações e cron)'
-                    : 'Ligar este agente agora'"
-                  :disabled="togglingAgent === key"
-                  @click="toggleAgent(key)"
+                <p
+                  class="text-xs text-n-slate-10 mt-1 leading-relaxed"
+                  :class="scriptExpanded ? '' : 'line-clamp-2'"
                 >
-                  <span
-                    class="absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-all flex items-center justify-center"
-                    :class="agent.enabled ? 'left-7' : 'left-0.5'"
-                  >
-                    <span
-                      :class="togglingAgent === key ? 'i-lucide-loader-2 animate-spin' : (agent.enabled ? 'i-lucide-check' : 'i-lucide-power')"
-                      class="text-[11px]"
-                      :style="{ color: agent.enabled ? '#16A34A' : '#94A3B8' }"
-                    />
-                  </span>
-                </button>
-                <span class="text-[9px] text-n-slate-9">salva na hora</span>
-              </div>
-              <!-- 🤖📞 Agente de Ligação (item 169): o interruptor mora em Integrações → Agente de Ligação (IA) -->
-              <div v-else class="flex flex-col items-end gap-1 flex-shrink-0" @click.stop>
-                <button
-                  class="text-[11px] px-3 py-1.5 rounded-lg font-medium text-white shadow-sm"
-                  :style="{ background: AGENT_META[key].gradient }"
-                  title="Liga, desliga e configura em Integrações → Agente de Ligação (IA)"
-                  @click="openVoiceSettings"
-                >
-                  Configurar
-                </button>
-                <span class="text-[9px] text-n-slate-9">liga/desliga lá</span>
+                  Quem ele é, como fala, dados oficiais, objeções e quando
+                  chamar humano — o mesmo texto para TODOS os atendentes que
+                  falam com o paciente (Atendente de Agendamento e
+                  Pós-agendamento hoje; os próximos amanhã). Os PASSOS de cada
+                  etapa ficam no card de cada agente. Mudou aqui, mudou em
+                  todos.
+                </p>
               </div>
               <span
                 class="i-lucide-chevron-down text-n-slate-9 text-lg mt-2 flex-shrink-0 transition-transform duration-200"
-                :class="expandedAgents[key] ? 'rotate-180' : ''"
+                :class="scriptExpanded ? 'rotate-180' : ''"
               />
             </div>
 
-            <!-- 🤖📞 Agente de Ligação: configuração inteira mora em Integrações (ElevenLabs) — o card só aponta -->
-            <div v-if="expandedAgents[key] && key === 'voice'" class="cevico-agent-body">
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5">Onde se aplica</p>
-              <div class="flex flex-wrap gap-1.5 mb-4">
-                <span
-                  v-for="(t, i) in AGENT_META[key].triggers"
-                  :key="i"
-                  class="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-n-alpha-1 text-n-slate-11 border border-n-weak"
-                >
-                  <span :class="t.icon" class="text-xs" :style="{ color: AGENT_META[key].color }" />
-                  {{ t.label }}
-                </span>
-              </div>
-              <div class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 text-xs text-n-slate-11 flex items-center gap-2 flex-wrap">
-                <span class="i-lucide-lightbulb text-sm" :style="{ color: AGENT_META[key].color }" />
-                <span class="flex-1 min-w-0">{{ AGENT_META[key].suggestion }}</span>
-                <button
-                  class="text-[11px] px-3 py-1.5 rounded-lg font-medium text-white"
-                  :style="{ background: AGENT_META[key].gradient }"
-                  @click="openVoiceSettings"
-                >
-                  Abrir configuração
-                </button>
-                <button
-                  class="text-[11px] px-3 py-1.5 rounded-lg font-medium bg-n-alpha-1 text-n-slate-11 hover:bg-n-alpha-2"
-                  @click="openFlow(key)"
-                >
-                  Ver fluxo
-                </button>
-              </div>
-            </div>
-
-            <!-- corpo completo do agente: desce com animação leve -->
-            <div v-else-if="expandedAgents[key]" class="cevico-agent-body">
-
-            <!-- Onde se aplica -->
-            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5">Onde se aplica</p>
-            <div class="flex flex-wrap gap-1.5 mb-4">
-              <span
-                v-for="(t, i) in AGENT_META[key].triggers"
-                :key="i"
-                class="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-n-alpha-1 text-n-slate-11 border border-n-weak"
+            <div v-if="scriptExpanded" class="cevico-agent-body">
+              <div
+                class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed mb-3"
               >
-                <span :class="t.icon" class="text-xs" :style="{ color: AGENT_META[key].color }" />
-                {{ t.label }}
-              </span>
-            </div>
+                📌 Cada atendente lê: <b>Roteiro</b> (este card, igual para
+                todos) + <b>Passos desta etapa</b> (no card do agente: o passo a
+                passo da recepção ao agendamento) + trava fixa do sistema (nunca
+                inventar valor, horário ou diagnóstico). Seção em branco volta
+                ao padrão. Salvar aqui vale <b>na hora</b>.
+              </div>
 
-            <!-- Modelo + Esforço (vazio = recomendado pelo sistema) -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2" :class="!editingAgent[key] ? 'opacity-70' : ''">
-              <div>
-                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Modelo de IA</label>
-                <select
-                  v-model="agent.model"
-                  :disabled="!editingAgent[key]"
-                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12 disabled:cursor-not-allowed"
+              <!-- abas das seções -->
+              <div class="cv-seg cv-seg-sm !flex flex-wrap mb-3">
+                <button
+                  v-for="sec in scriptSections"
+                  :key="sec.key"
+                  class="cv-seg-item"
+                  :class="{
+                    'cv-seg-on':
+                      (scriptOpenSection || scriptSections[0]?.key) === sec.key,
+                  }"
+                  @click="scriptOpenSection = sec.key"
                 >
-                  <option value="">⭐ {{ recommendedModelLabel(key) }}</option>
-                  <option v-for="m in AGENT_MODELS" :key="m.value" :value="m.value">{{ m.label }}</option>
-                </select>
-              </div>
-              <div>
-                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
-                  Esforço <span class="text-n-slate-9 font-normal">(quanto pensa)</span>
-                </label>
-                <select
-                  v-model="agent.effort"
-                  :disabled="!editingAgent[key]"
-                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-1 text-n-slate-12 disabled:cursor-not-allowed"
-                >
-                  <option value="">⭐ {{ recommendedEffortLabel(key) }}</option>
-                  <option v-for="e in AGENT_EFFORTS" :key="e.value" :value="e.value">{{ e.label }}</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Em uso + dica + uso 30d -->
-            <div class="flex items-center gap-2 flex-wrap mb-4">
-              <span class="text-[11px] px-2 py-1 rounded-lg font-medium text-white" :style="{ background: AGENT_META[key].gradient }">
-                Em uso: {{ resolvedModel(key, agent) }} · esforço {{ resolvedEffort(key, agent) }}
-              </span>
-              <span
-                v-if="usageByAgent(key)"
-                class="text-[11px] px-2 py-1 rounded-lg bg-n-alpha-1 border border-n-weak text-n-slate-11"
-              >
-                30 dias: {{ usageByAgent(key).calls }} análise(s) · {{ fmtUsd(usageByAgent(key).cost_usd) }}
-              </span>
-              <span class="text-[11px] text-n-slate-9 flex items-center gap-1">
-                <span class="i-lucide-lightbulb text-xs" />
-                {{ AGENT_META[key].suggestion }}
-              </span>
-            </div>
-
-            <!-- Config específica do Atendente Instagram (respondedor) -->
-            <div v-if="key === 'instagram'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <!-- 🎛 Painel de situação: a configuração dele, num relance -->
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div class="rounded-lg px-3 py-2" :class="agent.enabled ? 'bg-green-500/10' : 'bg-n-alpha-1'">
-                  <p class="text-[10px] text-n-slate-10">Situação</p>
-                  <p class="text-sm font-bold" :class="agent.enabled ? 'text-green-600 dark:text-green-400' : 'text-n-slate-11'">
-                    {{ agent.enabled ? '● Atendendo' : '○ Desligado' }}
-                  </p>
-                </div>
-                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
-                  <p class="text-[10px] text-n-slate-10">Caixas em que atende</p>
-                  <p class="text-sm font-bold text-n-slate-12 truncate" :title="instagramInboxNames(agent).join(', ')">
-                    {{ instagramInboxNames(agent).length ? instagramInboxNames(agent).join(', ') : 'nenhuma' }}
-                  </p>
-                </div>
-                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
-                  <p class="text-[10px] text-n-slate-10">Respostas <span class="text-n-slate-9">(últ. registros)</span></p>
-                  <p class="text-sm font-bold text-n-slate-12">💬 {{ instagramStats().replied }}</p>
-                </div>
-                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
-                  <p class="text-[10px] text-n-slate-10">Agendamentos / avisos</p>
-                  <p class="text-sm font-bold text-n-slate-12">
-                    📅 {{ instagramStats().scheduled }}
-                    <span v-if="instagramStats().errors" class="text-amber-500">· ⚠️ {{ instagramStats().errors }}</span>
-                  </p>
-                </div>
-              </div>
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #C2185B, #7C3AED)">
-                ⚠️ Este agente FALA COM O PACIENTE nas caixas abaixo. Ele agenda só na Agenda interna,
-                nunca inventa valores/horários, e as confirmações oficiais vão pelo WhatsApp.
-                Se um humano responder na conversa, ele PAUSA na hora — 👍 do atendimento reativa.
-              </div>
-              <div>
-                <p class="text-xs font-medium text-n-slate-11 mb-1.5">Caixas de entrada em que ele atende <span class="text-n-slate-9 font-normal">(nenhuma marcada = desligado na prática)</span></p>
-                <div class="flex flex-wrap gap-1.5">
-                  <button
-                    v-for="ib in inboxes"
-                    :key="ib.id"
-                    class="text-xs px-2.5 py-1 rounded-full border transition-colors disabled:opacity-60"
-                    :class="(agent.inbox_ids || []).includes(ib.id)
-                      ? 'text-white border-transparent'
-                      : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                    :style="(agent.inbox_ids || []).includes(ib.id) ? { background: 'linear-gradient(135deg, #C2185B, #7C3AED)' } : {}"
-                    :disabled="!editingAgent[key]"
-                    @click="toggleInstagramInbox(ib.id)"
-                  >
-                    {{ ib.name }}
-                  </button>
-                  <p v-if="!inboxes.length" class="text-[11px] text-n-slate-10">Nenhuma caixa de entrada na conta ainda.</p>
-                </div>
-                <p class="text-[10px] text-n-slate-9 mt-1">Escolha a caixa do Instagram quando ela for conectada (Configurações → Caixas de Entrada). Salve e publique para valer.</p>
-              </div>
-              <!-- 📒 Registro de atividade -->
-              <div v-if="instagramEvents().length">
-                <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">📒 Registro de atividade</p>
-                <div class="max-h-40 overflow-y-auto space-y-1">
-                  <p v-for="(ev, i) in instagramEvents()" :key="i" class="text-[11px] text-n-slate-11">
-                    <span class="text-n-slate-9">{{ new Date(ev.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }}</span>
-                    · #{{ ev.conversation_id }} {{ ev.contact }} — {{ INSTAGRAM_EVENT_LABELS[ev.type] || ev.type }}
-                    <span v-if="ev.note" class="text-n-slate-9">({{ ev.note }})</span>
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <!-- Config específica do Radar de Oportunidades (perene) -->
-            <div v-if="key === 'opportunity'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <!-- O que ele monitora, direto ao ponto -->
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #059669, #4ADE80)">
-                <p>
-                  📡 Monitora só o movimento <b>novo</b> de cada coluna vigiada (espera > {{ agent.wait_minutes }} min)
-                  · avisa no <b>Meu Painel</b> do atendente escolhido · <b>nunca fala com o paciente</b>.
-                </p>
-                <p v-if="radarLastRun()" class="text-white/80 mt-0.5">
-                  Última rodada: {{ radarLastRun().candidates }} no filtro · {{ radarLastRun().analyzed }} analisados ·
-                  {{ radarLastRun().new_alerts }} novos avisos
-                </p>
-              </div>
-
-              <div class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11">
-                Avisar quando o paciente esperar mais de
-                <input
-                  v-model.number="agent.wait_minutes"
-                  type="number"
-                  min="1"
-                  :disabled="!editingAgent[key]"
-                  class="border border-n-weak rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
-                  style="width: 4.5rem"
-                />
-                min sem resposta
-              </div>
-
-              <!-- Meta de tempo de atendimento: vira o relatório pessoal
-                   de cada atendente no Meu Painel -->
-              <div class="rounded-lg border border-n-weak bg-n-solid-2 px-3 py-2.5">
-                <div class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11">
-                  <span class="i-lucide-target text-sm" style="color: #059669" />
-                  <b class="text-n-slate-12">Meta de tempo de atendimento:</b>
-                  responder o paciente em até
-                  <input
-                    v-model.number="agent.response_goal_minutes"
-                    type="number"
-                    min="1"
-                    :disabled="!editingAgent[key]"
-                    class="border border-n-weak rounded-lg px-2 py-1 text-sm bg-n-solid-1 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
-                    style="width: 4.5rem"
+                  <span :class="sec.icon" class="text-xs" />
+                  {{ sec.title }}
+                  <span
+                    v-if="sec.custom"
+                    class="i-lucide-pencil text-[10px]"
+                    title="personalizado"
                   />
-                  minutos
-                </div>
-                <p class="text-[11px] text-n-slate-9 mt-1">
-                  Cada atendente acompanha a própria meta no <b>Meu Painel</b>: tempo médio de resposta,
-                  % das respostas dentro da meta e o selo de meta batida. Admin vê a quebra por atendente.
-                </p>
+                </button>
               </div>
 
-              <!-- Vigias: coluna + painel do atendente + janela de tempo -->
-              <div>
-                <p class="text-xs font-medium text-n-slate-11 mb-1.5">
-                  Colunas vigiadas
-                  <span class="text-n-slate-9 font-normal">(cada coluna com seu atendente e janela — sem vigia o Radar fica desligado)</span>
-                </p>
-                <div v-if="!allStages.length" class="text-xs text-n-slate-9">Carregando colunas…</div>
-                <template v-else>
-                  <div v-if="!agent.watchers.length" class="text-xs text-n-slate-9 mb-2">
-                    Nenhuma coluna vigiada ainda — adicione a primeira abaixo.
-                  </div>
-                  <div v-else class="space-y-2 mb-2">
-                    <div
-                      v-for="(w, wi) in agent.watchers"
-                      :key="wi"
-                      class="flex flex-col sm:flex-row sm:items-end gap-2 rounded-lg border border-n-weak bg-n-solid-2 px-3 py-2.5"
+              <template v-for="sec in scriptSections" :key="`body-${sec.key}`">
+                <div
+                  v-if="
+                    scriptOpenSection === sec.key ||
+                    (!scriptOpenSection && sec === scriptSections[0])
+                  "
+                  class="cv-sub p-4"
+                >
+                  <div class="flex items-center gap-2 flex-wrap mb-2">
+                    <p class="text-sm font-bold text-n-slate-12">
+                      {{ sec.title }}
+                    </p>
+                    <span class="text-[11px] text-n-slate-9">{{
+                      sec.hint
+                    }}</span>
+                    <span
+                      class="ml-auto cv-chip"
+                      :class="sec.custom ? 'cv-amber' : 'cv-slate'"
                     >
-                      <div class="flex-1 min-w-0">
-                        <label class="text-[10px] font-medium text-n-slate-9 block mb-0.5 flex items-center gap-1">
-                          <span class="i-lucide-columns-3 text-[10px]" style="color: #DC2626" /> Coluna vigiada
-                        </label>
-                        <select
-                          v-model="w.stage_id"
-                          :disabled="!editingAgent[key]"
-                          class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
-                        >
-                          <option value="" disabled>Escolha a coluna…</option>
-                          <option v-for="s in allStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
-                        </select>
-                      </div>
-                      <div class="flex-1 min-w-0">
-                        <label class="text-[10px] font-medium text-n-slate-9 block mb-0.5">Avisar no painel de</label>
-                        <select
-                          v-model="w.user_id"
-                          :disabled="!editingAgent[key]"
-                          class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
-                        >
-                          <option :value="null">👥 Todos os atendentes</option>
-                          <option v-for="ag in teamAgents" :key="ag.id" :value="ag.id">{{ ag.available_name || ag.name }}</option>
-                        </select>
-                      </div>
-                      <div class="flex-1 min-w-0">
-                        <label class="text-[10px] font-medium text-n-slate-9 block mb-0.5">Olhando o movimento das</label>
-                        <select
-                          v-model.number="w.lookback_hours"
-                          :disabled="!editingAgent[key]"
-                          class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
-                        >
-                          <option v-for="o in LOOKBACK_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-                        </select>
-                      </div>
-                      <button
-                        v-if="editingAgent[key]"
-                        class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm flex-shrink-0 self-end sm:self-auto sm:mb-2"
-                        title="Remover esta vigia"
-                        @click="removeWatcher(wi)"
-                      />
-                    </div>
+                      {{ sec.custom ? 'personalizado' : 'padrão do sistema' }}
+                    </span>
                   </div>
-                  <button
-                    v-if="editingAgent[key]"
-                    class="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-dashed transition-colors hover:bg-n-alpha-1"
-                    style="border-color: rgba(220,38,38,0.5); color: #DC2626"
-                    @click="addWatcher"
+                  <textarea
+                    v-if="scriptEditing"
+                    v-model="scriptDraft[sec.key]"
+                    rows="14"
+                    class="cv-input w-full text-xs font-mono leading-relaxed"
+                  />
+                  <pre
+                    v-else
+                    class="text-xs text-n-slate-11 whitespace-pre-wrap font-sans leading-relaxed max-h-72 overflow-y-auto"
+                    >{{ sec.text }}</pre>
+                  <div
+                    v-if="scriptEditing"
+                    class="flex items-center gap-2 mt-2 flex-wrap"
                   >
-                    <span class="i-lucide-plus text-xs" />
-                    Vigiar outra coluna
+                    <button
+                      class="cv-btn cv-btn-sm cv-btn-ghost"
+                      :disabled="scriptSectionIsDefault(sec.key)"
+                      @click="restoreScriptSection(sec.key)"
+                    >
+                      ↺ Restaurar padrão desta seção
+                    </button>
+                    <span class="text-[11px] text-n-slate-9">{{
+                        (scriptDraft[sec.key] || '').length
+                      }}
+                      caracteres</span>
+                  </div>
+                </div>
+              </template>
+
+              <div class="flex items-center gap-2 mt-3 flex-wrap">
+                <template v-if="!scriptEditing">
+                  <button class="cv-btn cv-btn-sm" @click="startScriptEdit">
+                    <span class="i-lucide-pencil text-xs" /> Editar Roteiro
+                  </button>
+                  <button
+                    class="cv-btn cv-btn-sm cv-btn-ghost"
+                    :class="scriptHistoryOpen ? 'cv-chip-on' : ''"
+                    title="Versões anteriores do Roteiro e dos Passos — dá para voltar"
+                    @click="toggleScriptHistory"
+                  >
+                    <span class="i-lucide-history text-xs" /> 🕘 Histórico
+                  </button>
+                  <span class="text-[11px] text-n-slate-9">o texto acima é o que os atendentes leem hoje</span>
+                </template>
+                <template v-else>
+                  <button
+                    class="cv-btn cv-btn-sm cv-green"
+                    :disabled="savingScript"
+                    @click="saveScript"
+                  >
+                    <span
+                      :class="
+                        savingScript
+                          ? 'i-lucide-loader-circle animate-spin'
+                          : 'i-lucide-save'
+                      "
+                      class="text-xs"
+                    />
+                    {{
+                      savingScript
+                        ? 'Salvando…'
+                        : 'Salvar Roteiro (vale na hora)'
+                    }}
+                  </button>
+                  <button
+                    class="cv-btn cv-btn-sm cv-btn-ghost"
+                    :disabled="savingScript"
+                    @click="cancelScriptEdit"
+                  >
+                    Descartar
                   </button>
                 </template>
               </div>
 
-              <!-- Radar pontual: roda uma vez, não fica ativo -->
-              <div class="border-t border-n-weak pt-3 flex items-center gap-2 flex-wrap">
-                <button
-                  class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90"
-                  style="background: linear-gradient(135deg, #059669, #4ADE80)"
-                  @click="showSweepModal = true"
-                >
-                  <span class="i-lucide-scan-search text-xs" />
-                  Radar pontual…
-                </button>
-                <span class="text-[11px] text-n-slate-9">
-                  varre AGORA a coluna que você escolher e avisa o atendente escolhido — roda uma vez, não fica ativo
-                </span>
-              </div>
-            </div>
-
-            <!-- Respondedor de Comentários: conexão da Meta + registro -->
-            <div v-if="key === 'comments'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #7C3AED, #DB2777)">
-                <p>
-                  Responde os <b>comentários públicos</b> dos posts e anúncios a cada 5 min ·
-                  sem preço/dado clínico em público · caso sério = <b>marca pro humano</b>.
-                  Precisa do <b>token da Página</b> (app da Meta — o mesmo caminho do canal Instagram).
-                </p>
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <label class="block">
-                  <span class="text-[10px] font-medium text-n-slate-9">ID da Página do Facebook (opcional)</span>
-                  <input
-                    v-model="agent.fb_page_id"
-                    type="text"
-                    :disabled="!editingAgent[key]"
-                    placeholder="ex.: 1234567890"
-                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                  />
-                </label>
-                <label class="block">
-                  <span class="text-[10px] font-medium text-n-slate-9">ID da conta Instagram Business (opcional)</span>
-                  <input
-                    v-model="agent.ig_user_id"
-                    type="text"
-                    :disabled="!editingAgent[key]"
-                    placeholder="ex.: 17841400000000"
-                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                  />
-                </label>
-              </div>
-              <label class="block">
-                <span class="text-[10px] font-medium text-n-slate-9">
-                  Token de acesso da Página {{ agent.page_token_set ? '— já conectado ✓ (cole um novo só pra trocar)' : '' }}
-                </span>
-                <input
-                  v-model="agent.page_access_token"
-                  type="password"
-                  :disabled="!editingAgent[key]"
-                  :placeholder="agent.page_token_set ? '••••••••••••' : 'cole o Page Access Token da Meta'"
-                  class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                />
-              </label>
-              <!-- registro de atividade (aparência nativa) -->
-              <div v-if="(settings?.ai?.comments_events || []).length">
-                <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Últimos comentários tratados</p>
-                <div class="space-y-1 max-h-44 overflow-y-auto">
-                  <div v-for="(ev, ei) in settings.ai.comments_events" :key="ei" class="rounded-lg bg-n-alpha-1 px-2.5 py-1.5 text-[11px]">
-                    <div class="flex items-center gap-1.5 flex-wrap">
-                      <span :class="ev.platform === 'instagram' ? 'i-lucide-instagram' : 'i-lucide-facebook'" class="text-[11px] text-n-slate-9" />
-                      <b class="text-n-slate-12">@{{ ev.author }}</b>
-                      <span
-                        class="text-[9px] font-bold px-1.5 rounded-full uppercase"
-                        :style="ev.status === 'respondido'
-                          ? 'background: rgba(16,185,129,0.15); color: #047857'
-                          : ev.status === 'humano'
-                            ? 'background: rgba(245,158,11,0.15); color: #B45309'
-                            : 'background: rgba(100,116,139,0.15); color: #64748B'"
-                      >
-                        {{ ev.status }}
-                      </span>
-                    </div>
-                    <p class="text-n-slate-10 mt-0.5">“{{ ev.comment }}”</p>
-                    <p v-if="ev.reply && ev.status === 'respondido'" class="text-n-slate-11 mt-0.5">↳ {{ ev.reply }}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Mentor do Time: como funciona + gerar agora -->
-            <div v-if="key === 'mentor'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-2">
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #C2410C, #FB923C)">
-                <p>
-                  Toda <b>segunda de manhã</b> ele lê a semana de cada pessoa e deixa o feedback no
-                  <b>Meu Painel</b> dela: ponto forte, o ponto fraco a corrigir e soluções simples ·
-                  compara com a <b>mediana do time</b> sem expor ninguém · <b>nunca fala com o paciente</b>.
-                </p>
-              </div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <p class="text-xs font-medium text-n-slate-11 flex-1">
-                  Primeira rodada ou teste
-                  <span class="text-n-slate-9 font-normal">(analisa os últimos 7 dias agora, sem esperar segunda)</span>
-                </p>
-                <button
-                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
-                  :style="{ background: AGENT_META.mentor.gradient }"
-                  :disabled="isRunningMentor || !agent.enabled"
-                  :title="agent.enabled ? '' : 'Ligue o Mentor no interruptor acima primeiro'"
-                  @click="runMentorNow"
-                >
-                  {{ isRunningMentor ? 'Gerando… (1-2 min)' : 'Gerar feedback agora' }}
-                </button>
-              </div>
-            </div>
-
-            <!-- Consultor Comercial: insights p/ a gestão -->
-            <div v-if="key === 'sales'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-2">
-              <div class="flex items-center gap-2 flex-wrap">
-                <p class="text-xs font-medium text-n-slate-11 flex-1">
-                  💡 Insights comerciais
-                  <span class="text-n-slate-9 font-normal">(analisa as conversas que FECHARAM cirurgia — alimentadas pelo Monitor de Fechamento)</span>
-                </p>
-                <button
-                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
-                  :style="{ background: AGENT_META.sales.gradient }"
-                  :disabled="isGeneratingInsights"
-                  @click="generateSalesInsights"
-                >
-                  {{ isGeneratingInsights ? 'Analisando… (1-2 min)' : 'Gerar insights comerciais' }}
-                </button>
-              </div>
-              <div v-if="salesInsights()?.text" class="rounded-lg bg-n-alpha-1 p-3 max-h-72 overflow-y-auto">
-                <p class="text-[10px] text-n-slate-9 mb-1.5">
-                  {{ salesInsights().conversations }} conversa(s) analisada(s) · {{ fmtLogDate(salesInsights().generated_at) }}
-                </p>
-                <pre class="text-[11px] text-n-slate-11 whitespace-pre-wrap font-sans leading-relaxed">{{ salesInsights().text }}</pre>
-              </div>
-              <p v-else-if="salesInsights()?.error" class="text-[11px] text-amber-600">⚠️ {{ salesInsights().error }}</p>
-            </div>
-
-            <!-- 🏗️ CONSTRUTOR PRO: referências de estilo + teto de resposta -->
-            <div v-if="key === 'pagebuilder'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
-                <span class="i-lucide-ruler text-xs" style="color: #d4af37" /> Construtor PRO
-                <span class="font-normal text-n-slate-9">— rédeas da montagem: estilo e tamanho da resposta</span>
-              </p>
-              <div>
-                <p class="text-[11px] font-medium text-n-slate-11 mb-1">
-                  Referências de estilo
-                  <span class="text-n-slate-9 font-normal">(cole exemplos de páginas que você admira, diretrizes de marca, o que nunca pode faltar — o Construtor se inspira nelas em TODA montagem)</span>
-                </p>
-                <textarea
-                  v-model="aiAgents.pagebuilder.references"
-                  rows="3"
-                  class="w-full border border-n-weak rounded-lg px-2.5 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
-                  placeholder="Ex: hero curto e emocional · benefícios sempre em cards · fechar com FAQ + CTA dourado · tom calmo, público 55+, letra grande…"
-                />
-              </div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-[11px] text-n-slate-10">Teto de resposta (tokens):</span>
-                <input
-                  v-model="aiAgents.pagebuilder.max_tokens"
-                  type="number"
-                  min="1000"
-                  max="60000"
-                  step="1000"
-                  placeholder="30000"
-                  class="w-24 h-8 border border-n-weak rounded-lg px-2 text-xs bg-n-solid-2 text-n-slate-12"
-                  style="width: 6.5rem"
-                />
-                <span class="text-[10px] text-n-slate-9">vazio = padrão (30.000). Página grande truncada? Aumente. Custo alto? Diminua.</span>
-              </div>
-              <button
-                class="text-[11px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50"
-                style="background: linear-gradient(135deg, #d4af37, #f4de8e); color: #072a4c"
-                :disabled="savingBuilderPro"
-                @click="saveBuilderPro"
-              >
-                {{ savingBuilderPro ? 'Salvando…' : 'Salvar rédeas do Construtor' }}
-              </button>
-            </div>
-
-            <!-- ✍️ ESTÚDIO DO COPYWRITER: referências + conteúdo multi-formato -->
-            <div v-if="key === 'copywriter'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
-                <span class="i-lucide-pen-line text-xs" style="color: #7C3AED" /> Estúdio de conteúdo
-                <span class="font-normal text-n-slate-9">— escolha o formato e a estrutura; o resultado é seu para copiar</span>
-              </p>
-
-              <!-- referências da casa: o agente segue esse estilo em TUDO -->
-              <div>
-                <p class="text-[11px] font-medium text-n-slate-11 mb-1">
-                  Suas estruturas e referências de copywriting
-                  <span class="text-n-slate-9 font-normal">(cole exemplos que você gosta, frases da casa, regras de estilo — vale para páginas e para o Estúdio)</span>
-                </p>
-                <textarea
-                  v-model="aiAgents.copywriter.references"
-                  rows="3"
-                  class="w-full border border-n-weak rounded-lg px-2.5 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
-                  placeholder="Ex: sempre abrir com pergunta que toca a dor · nunca usar 'agende já' · exemplo de copy aprovada: ..."
-                />
-                <button
-                  class="text-[11px] font-semibold text-white px-3 py-1.5 rounded-lg mt-1 disabled:opacity-50"
-                  style="background: linear-gradient(135deg, #7C3AED, #5B21B6)"
-                  :disabled="savingRefs"
-                  @click="saveCopyReferences"
-                >
-                  {{ savingRefs ? 'Salvando…' : 'Salvar referências' }}
-                </button>
-              </div>
-
-              <!-- formato: botões em linha -->
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="text-[11px] text-n-slate-10">Formato:</span>
-                <button
-                  v-for="m in STUDIO_MODALITIES"
-                  :key="m.key"
-                  class="px-2.5 h-7 rounded-full border text-[11px] font-medium transition-colors"
-                  :class="studio.modality === m.key ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  :style="studio.modality === m.key ? { background: AGENT_META.copywriter.gradient } : {}"
-                  @click="studio.modality = m.key"
-                >
-                  {{ m.label }}
-                </button>
-                <span class="text-[10px] text-n-slate-9">· páginas são no editor de Páginas</span>
-              </div>
-
-              <!-- estrutura narrativa: botões em linha -->
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="text-[11px] text-n-slate-10">Estrutura:</span>
-                <button
-                  v-for="st in STUDIO_STRUCTURES"
-                  :key="st.key"
-                  class="px-2.5 h-7 rounded-full border text-[11px] font-medium transition-colors"
-                  :class="studio.structure === st.key ? 'border-n-brand bg-n-brand/10 text-n-brand' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  @click="studio.structure = st.key"
-                >
-                  {{ st.label }}
-                </button>
-              </div>
-
-              <textarea
-                v-model="studio.briefing"
-                rows="3"
-                class="w-full border border-n-weak rounded-lg px-2.5 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
-                placeholder="Briefing: assunto, objetivo e o que não pode faltar. Ex: carrossel sobre os 5 mitos da cirurgia de catarata, tom acolhedor, CTA para avaliação."
-              />
-              <div class="flex items-center gap-2 flex-wrap">
-                <select v-model="studio.form_id" class="h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-12 max-w-[240px]">
-                  <option value="">Sem insights de formulário</option>
-                  <option v-for="f in studioForms" :key="f.id" :value="f.id">Usar insights de: {{ f.name }}</option>
-                </select>
-                <button
-                  class="ml-auto px-3 h-8 rounded-lg text-[11px] font-bold text-white flex items-center gap-1.5 disabled:opacity-60"
-                  :style="{ background: AGENT_META.copywriter.gradient }"
-                  :disabled="studio.generating"
-                  @click="generateStudio"
-                >
-                  <span :class="studio.generating ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-sparkles'" class="text-xs" />
-                  {{ studio.generating ? 'Escrevendo…' : 'Gerar conteúdo' }}
-                </button>
-              </div>
-
-              <!-- resultado -->
-              <div v-if="studio.result" class="rounded-lg bg-n-alpha-1 p-3 space-y-2">
-                <div class="flex items-center gap-2">
-                  <p class="text-xs font-bold text-n-slate-12 flex-1">{{ studio.result.titulo }}</p>
-                  <button class="text-[11px] font-medium text-n-brand hover:underline flex items-center gap-1" @click="copyStudioResult">
-                    <span class="i-lucide-copy text-[10px]" /> Copiar tudo
-                  </button>
-                </div>
-                <div v-for="(b, bi) in studio.result.blocos" :key="bi" class="rounded-md bg-n-solid-2 border border-n-weak px-2.5 py-2">
-                  <p class="text-[10px] font-bold text-n-slate-9 uppercase tracking-wide">{{ b.rotulo }}</p>
-                  <p class="text-[11px] text-n-slate-11 whitespace-pre-wrap leading-relaxed">{{ b.texto }}</p>
-                </div>
-                <p v-if="studio.result.legenda" class="text-[11px] text-n-slate-11 whitespace-pre-wrap"><b>Legenda:</b> {{ studio.result.legenda }}</p>
-                <p v-if="studio.result.hashtags" class="text-[11px] text-n-slate-10">{{ studio.result.hashtags }}</p>
-              </div>
-            </div>
-
-            <!-- Colunas de atuação (Analista / Monitor de Fechamento / NPS) -->
-            <div v-if="STAGE_AGENTS.includes(key)" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-2">
-              <p class="text-xs font-medium text-n-slate-11">
-                Colunas de atuação
-                <span class="text-n-slate-9 font-normal">
-                  (card entrou na coluna → o agente lê a conversa
-                  <template v-if="key === 'closing'">; sugestão: as colunas de "Indicação de Cirurgia"</template>
-                  <template v-else-if="key === 'nps'">; sugestão: a coluna de Pós-Operatório</template>)
-                </span>
-              </p>
-              <div v-if="!allStages.length" class="text-xs text-n-slate-9">Carregando colunas…</div>
-              <div v-else class="flex flex-wrap gap-1.5">
-                <button
-                  v-for="st in allStages"
-                  :key="st.id"
-                  class="text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors"
-                  :class="agentStageIds[key].includes(st.id)
-                    ? 'text-white border-transparent'
-                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  :style="agentStageIds[key].includes(st.id) ? { background: AGENT_META[key].gradient } : {}"
-                  @click="toggleAgentStage(key, st.id)"
-                >
-                  {{ st.name }}
-                </button>
-              </div>
-              <button
-                class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
-                :style="{ background: AGENT_META[key].gradient }"
-                :disabled="savingAgentStages === key"
-                @click="saveAgentStages(key)"
-              >
-                {{ savingAgentStages === key ? 'Salvando…' : 'Salvar colunas de atuação' }}
-              </button>
-            </div>
-
-            <!-- Config do Secretário da Agenda -->
-            <div v-if="key === 'scheduler'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-                📥 Anota consultas na Agenda do sistema lendo as conversas — <b>nunca fala com o
-                paciente</b> (quem conversa é o Atendente IA do N8N). Lê quando o card ENTRA nas
-                colunas escolhidas <b>e relê a cada mensagem do paciente nessas colunas</b> — a
-                confirmação que chega depois não escapa mais. Reagendamentos atualizam a consulta
-                existente; <b>cancelamento sem novo horário tira a consulta da Agenda</b>. Fora das
-                colunas: quem tem tarefa "⚠️ Confirmar consulta" aberta ou fala em
-                remarcar/cancelar também redispara a leitura sozinho.
-              </div>
-
-              <!-- Colunas onde o Secretário atua -->
-              <div>
-                <p class="text-xs font-medium text-n-slate-11 mb-1.5">
-                  Colunas onde o Secretário atua
-                  <span class="text-n-slate-9 font-normal">(card entrou + mensagens do paciente na coluna → lê a conversa e anota na Agenda; nenhuma marcada = só manual)</span>
-                </p>
-                <div v-if="!allStages.length" class="text-xs text-n-slate-9">Carregando colunas…</div>
-                <div v-else class="flex flex-wrap gap-1.5">
-                  <button
-                    v-for="s in allStages"
-                    :key="s.id"
-                    class="text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors"
-                    :class="schedulerStageIds.includes(s.id)
-                      ? 'text-white border-transparent'
-                      : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                    :style="schedulerStageIds.includes(s.id) ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
-                    @click="toggleSchedulerStage(s.id)"
-                  >
-                    {{ s.name }}
-                  </button>
-                </div>
-                <button
-                  class="mt-2 text-xs font-semibold text-white px-3 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-50"
-                  style="background: linear-gradient(135deg, #B8860B, #D4A017)"
-                  :disabled="isSavingSchedulerStages"
-                  @click="saveSchedulerStages"
-                >
-                  {{ isSavingSchedulerStages ? 'Salvando…' : 'Salvar colunas de atuação' }}
-                </button>
-              </div>
-
-              <!-- Preencher com o histórico -->
-              <div class="flex items-center gap-2 flex-wrap border-t border-n-weak pt-3">
-                <button
-                  class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90"
-                  style="background: linear-gradient(135deg, #B8860B, #D4A017)"
-                  @click="showBackfillModal = true"
-                >
-                  <span class="i-lucide-calendar-search text-xs" />
-                  Preencher agenda com o histórico…
-                </button>
-                <span v-if="backfillLastRun()" class="text-[11px] text-n-slate-10">
-                  Última varredura: {{ backfillLastRun().scanned }} conversas ·
-                  {{ backfillLastRun().created || 0 }} criadas · {{ backfillLastRun().rescheduled || 0 }} reagendadas ·
-                  {{ backfillLastRun().already || 0 }} já existiam
-                </span>
-              </div>
-
-              <!-- Registro de atividade: cada leitura vira uma linha -->
-              <div class="border-t border-n-weak pt-3">
-                <button
-                  class="flex items-center gap-1.5 text-xs font-medium text-n-slate-11 hover:text-n-brand"
-                  @click="showSchedulerLog = !showSchedulerLog"
-                >
-                  <span :class="showSchedulerLog ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="text-xs" />
-                  📒 Registro de atividade ({{ schedulerLog().length }} última(s) leitura(s))
-                </button>
-                <div v-if="showSchedulerLog" class="mt-2 space-y-1 max-h-56 overflow-y-auto pr-1">
-                  <p v-if="!schedulerLog().length" class="text-xs text-n-slate-9">
-                    Nenhuma leitura ainda — as linhas aparecem aqui conforme o Secretário trabalhar.
+              <!-- 🕘 rodada 191: histórico de versões (Roteiro + Passos) -->
+              <div v-if="scriptHistoryOpen" class="cv-sub p-4 mt-3">
+                <div class="flex items-center gap-2 flex-wrap mb-2">
+                  <p class="text-sm font-bold text-n-slate-12">
+                    🕘 Histórico de versões
                   </p>
-                  <div
-                    v-for="(entry, i) in schedulerLog()"
-                    :key="i"
-                    class="flex items-center gap-2 text-[11px] text-n-slate-11 rounded-lg bg-n-solid-2 border border-n-weak px-2.5 py-1.5 flex-wrap"
+                  <span class="text-[11px] text-n-slate-9">uma versão é guardada antes de cada edição e de cada
+                    orientação aplicada · últimas 30</span>
+                  <button
+                    class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
+                    :disabled="loadingVersions"
+                    @click="loadScriptVersions"
                   >
-                    <span class="text-n-slate-9">{{ fmtLogDate(entry.at) }}</span>
-                    <span class="font-medium text-n-slate-12 truncate max-w-[160px]">{{ entry.name }}</span>
-                    <span v-if="entry.when" class="text-n-slate-10">→ consulta {{ fmtLogDate(entry.when) }}</span>
                     <span
-                      class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold ml-auto"
-                      :class="(SCHEDULER_OUTCOMES[entry.outcome] || {}).class"
-                    >
-                      {{ (SCHEDULER_OUTCOMES[entry.outcome] || {}).label || entry.outcome }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 🌾 Config da Colheitadeira da Base -->
-            <div v-if="key === 'harvest'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" :style="{ background: AGENT_META.harvest.gradient }">
-                🌾 Todo mês ele pontua a base fria, escolhe os leads mais propensos e manda a
-                mensagem modelo com um <b>gancho pessoal</b> escrito pela IA — um a um, dentro do
-                teto diário. Com a caixinha marcada, <b>nada sai sem a sua aprovação</b>.
-              </div>
-
-              <!-- Modo de trabalho: organizar (etiqueta no CRM) × enviar (mensagem) -->
-              <div>
-                <p class="text-xs font-medium text-n-slate-11 mb-1.5">O que ele faz com os leads aprovados</p>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup">
-                  <button
-                    role="radio"
-                    :aria-checked="agent.mode !== 'send'"
-                    class="text-left rounded-xl border-2 p-3 transition-colors disabled:cursor-not-allowed"
-                    :class="agent.mode !== 'send' ? '' : 'border-n-weak hover:bg-n-alpha-1'"
-                    :style="agent.mode !== 'send' ? { borderColor: AGENT_META.harvest.color, background: AGENT_META.harvest.color + '14' } : {}"
-                    :disabled="!editingAgent[key]"
-                    @click="agent.mode = 'organize'"
-                  >
-                    <p class="text-xs font-bold text-n-slate-12">
-                      🗂️ Organizar oportunidades <span class="font-normal text-n-slate-9">(recomendado)</span>
-                    </p>
-                    <p class="text-[11px] text-n-slate-10 mt-0.5 leading-relaxed">
-                      a IA escolhe e etiqueta os melhores leads frios como oportunidade_AAAA_MM —
-                      nenhuma mensagem sai; o time trabalha a lista no CRM filtrando pela etiqueta
-                    </p>
-                  </button>
-                  <button
-                    role="radio"
-                    :aria-checked="agent.mode === 'send'"
-                    class="text-left rounded-xl border-2 p-3 transition-colors disabled:cursor-not-allowed"
-                    :class="agent.mode === 'send' ? '' : 'border-n-weak hover:bg-n-alpha-1'"
-                    :style="agent.mode === 'send' ? { borderColor: AGENT_META.harvest.color, background: AGENT_META.harvest.color + '14' } : {}"
-                    :disabled="!editingAgent[key]"
-                    @click="agent.mode = 'send'"
-                  >
-                    <p class="text-xs font-bold text-n-slate-12">📤 Enviar mensagem modelo</p>
-                    <p class="text-[11px] text-n-slate-10 mt-0.5 leading-relaxed">
-                      envia a mensagem modelo aprovada com gancho pessoal, respeitando o teto diário
-                    </p>
+                      class="i-lucide-refresh-cw text-xs"
+                      :class="loadingVersions ? 'animate-spin' : ''"
+                    />
+                    Atualizar
                   </button>
                 </div>
-              </div>
-
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <label class="block">
-                  <span class="text-[10px] font-medium text-n-slate-9">Quantos leads por mês</span>
-                  <input
-                    v-model.number="agent.monthly_size"
-                    type="number"
-                    min="1"
-                    placeholder="300"
-                    :disabled="!editingAgent[key]"
-                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                  />
-                </label>
-                <label class="block">
-                  <span class="text-[10px] font-medium text-n-slate-9">Frio há pelo menos (dias)</span>
-                  <input
-                    v-model.number="agent.cold_days"
-                    type="number"
-                    min="1"
-                    placeholder="60"
-                    :disabled="!editingAgent[key]"
-                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                  />
-                </label>
-                <label v-if="agent.mode === 'send'" class="block">
-                  <span class="text-[10px] font-medium text-n-slate-9">Teto de envios por dia</span>
-                  <input
-                    v-model.number="agent.daily_cap"
-                    type="number"
-                    min="1"
-                    placeholder="50"
-                    :disabled="!editingAgent[key]"
-                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                  />
-                  <span class="text-[10px] text-n-slate-9 block mt-0.5">anti-bloqueio: menos é mais seguro</span>
-                </label>
-                <label class="block">
-                  <span class="text-[10px] font-medium text-n-slate-9">Dia do mês que a colheita gera a prévia</span>
-                  <input
-                    v-model.number="agent.day_of_month"
-                    type="number"
-                    min="1"
-                    max="28"
-                    placeholder="1"
-                    :disabled="!editingAgent[key]"
-                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                  />
-                </label>
-              </div>
-
-              <div v-if="agent.mode === 'send'">
-                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Caixa de WhatsApp que envia</label>
-                <select
-                  v-model="agent.inbox_id"
-                  :disabled="!editingAgent[key]"
-                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
+                <p
+                  v-if="versionsError"
+                  class="cv-sub cv-amber px-3 py-2 text-xs text-n-slate-12 mb-2"
                 >
-                  <option :value="null" disabled>Escolha a caixa…</option>
-                  <option v-for="ib in whatsappInboxes" :key="ib.id" :value="ib.id">{{ ib.name }}</option>
-                </select>
-                <p v-if="!whatsappInboxes.length" class="text-[11px] text-n-slate-10 mt-1">
-                  Nenhuma caixa de WhatsApp na conta ainda (Configurações → Caixas de Entrada).
+                  ⚠️ {{ versionsError }}
                 </p>
-              </div>
-
-              <div v-if="agent.mode === 'send'">
-                <p class="text-xs font-medium text-n-slate-11 mb-1.5">
-                  Mensagem modelo <span class="text-n-slate-9 font-normal">(template aprovado pela Meta — sem ele a colheita não envia)</span>
+                <p
+                  v-else-if="!loadingVersions && !scriptVersions.length"
+                  class="text-xs text-n-slate-9"
+                >
+                  Nenhuma versão guardada ainda — a primeira aparece quando você
+                  salvar o Roteiro ou aplicar uma orientação.
                 </p>
-                <div class="flex items-center gap-2">
-                  <div class="flex-1 min-w-0">
-                    <p v-if="agent.template_params" class="text-xs text-n-slate-12 truncate">
-                      📋 {{ agent.template_params.name }}
-                      <span v-if="agent.message_preview" class="text-n-slate-9">— "{{ agent.message_preview.slice(0, 60) }}…"</span>
-                    </p>
-                    <p v-else class="text-xs text-amber-600">Nenhum modelo escolhido ainda.</p>
-                  </div>
-                  <button
-                    class="text-xs px-2.5 py-1.5 rounded-lg border border-n-brand text-n-brand hover:bg-n-brand/10 flex-shrink-0 disabled:opacity-60"
-                    :disabled="!editingAgent[key]"
-                    :title="editingAgent[key] ? '' : 'Clique em Editar lá embaixo para trocar o modelo'"
-                    @click="openHarvestTemplatePicker"
-                  >
-                    {{ agent.template_params ? 'Trocar modelo' : 'Escolher modelo' }}
-                  </button>
-                </div>
-                <p class="text-[10px] text-n-slate-9 mt-1">
-                  💡 Use <code class="bg-n-alpha-2 px-1 rounded">[gancho]</code> numa variável do modelo —
-                  a IA escreve um gancho pessoal para cada paciente;
-                  <code class="bg-n-alpha-2 px-1 rounded">[procedimento]</code> também funciona.
-                </p>
-              </div>
-
-              <label class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer">
-                <input
-                  v-model="agent.require_approval"
-                  type="checkbox"
-                  class="rounded accent-n-brand"
-                  :disabled="!editingAgent[key]"
-                />
-                Exigir minha aprovação antes de enviar
-                <span class="text-n-slate-9">(recomendado — a prévia espera o seu ok)</span>
-              </label>
-            </div>
-
-            <!-- 🌾 OPERAÇÃO DA COLHEITA: o mês em andamento -->
-            <div v-if="key === 'harvest'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">
-                Operação da colheita<template v-if="harvestMonthLabel()"> · {{ harvestMonthLabel() }}</template>
-              </p>
-
-              <!-- status do mês em linguagem humana -->
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full" :class="harvestStatusInfo().class">
-                  {{ harvestStatusInfo().label }}
-                </span>
-                <span v-if="harvest?.approved_at" class="text-[10px] text-n-slate-9">
-                  aprovada<template v-if="harvest.approved_by"> por {{ harvest.approved_by }}</template> · {{ fmtLogDate(harvest.approved_at) }}
-                </span>
-              </div>
-
-              <!-- modo organize: a lista virou etiqueta — ambiente de trabalho no CRM -->
-              <div
-                v-if="harvest?.organized_label"
-                class="rounded-lg bg-green-500/10 border border-green-500/30 px-3 py-2 text-[11px] text-green-700 dark:text-green-400"
-              >
-                ✅ {{ harvestOrganizedCount() }} lead(s) etiquetado(s) como
-                <b>{{ harvest.organized_label }}</b> — filtre por essa etiqueta no CRM para trabalhar a lista.
-              </div>
-
-              <div
-                v-if="harvestGenerating"
-                class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400"
-              >
-                ⏳ Gerando a prévia… leva uns 2 minutos — esta tela atualiza sozinha a cada 15 segundos.
-              </div>
-              <div
-                v-if="harvest?.last_error"
-                class="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-[11px] text-red-600 dark:text-red-400"
-              >
-                ⚠️ {{ harvest.last_error }}
-              </div>
-
-              <!-- números do mês -->
-              <div v-if="harvest?.stats" class="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
-                  <p class="text-[10px] text-n-slate-10">Base fria</p>
-                  <p class="text-sm font-bold text-n-slate-12">{{ harvest.stats.pool ?? 0 }}</p>
-                </div>
-                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
-                  <p class="text-[10px] text-n-slate-10">Planejados</p>
-                  <p class="text-sm font-bold text-n-slate-12">{{ harvest.stats.planned ?? 0 }}</p>
-                </div>
-                <div class="rounded-lg px-3 py-2 bg-green-500/10">
-                  <p class="text-[10px] text-n-slate-10">Enviados</p>
-                  <p class="text-sm font-bold text-green-600 dark:text-green-400">{{ harvest.stats.sent ?? 0 }}</p>
-                </div>
-                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
-                  <p class="text-[10px] text-n-slate-10">Responderam</p>
-                  <p class="text-sm font-bold text-n-slate-12">{{ harvest.stats.replied ?? 0 }}</p>
-                </div>
-                <div class="rounded-lg px-3 py-2 bg-n-alpha-1">
-                  <p class="text-[10px] text-n-slate-10">Pendentes</p>
-                  <p class="text-sm font-bold text-n-slate-12">{{ harvest.stats.pending ?? 0 }}</p>
-                </div>
-              </div>
-              <p v-if="harvest?.stats?.skipped" class="text-[10px] text-n-slate-9">
-                {{ harvest.stats.skipped }} lead(s) pulado(s) por você neste mês.
-              </p>
-
-              <!-- botões conforme o status -->
-              <div class="flex items-center gap-2 flex-wrap">
-                <button
-                  v-if="!harvest?.status || ['preview', 'done'].includes(harvest.status)"
-                  class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
-                  :style="{ background: AGENT_META.harvest.gradient }"
-                  :disabled="harvestGenerating || harvestActing === 'preview'"
-                  @click="runHarvestPreview"
-                >
-                  <span :class="harvestGenerating || harvestActing === 'preview' ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-sparkles'" class="text-xs" />
-                  {{ harvestGenerating ? 'Gerando… (~2 min)' : 'Gerar prévia agora' }}
-                </button>
-                <button
-                  v-if="harvest?.selected?.length"
-                  class="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50"
-                  :disabled="harvestActing === 'refresh'"
-                  @click="refreshHarvestPreview"
-                >
-                  <span :class="harvestActing === 'refresh' ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-eye'" class="text-xs" />
-                  Ver/atualizar prévia
-                </button>
-                <button
-                  v-if="harvest?.status === 'preview'"
-                  class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 shadow"
-                  style="background: linear-gradient(135deg, #059669, #34D399)"
-                  :disabled="!!harvestActing"
-                  @click="approveHarvest"
-                >
-                  <span :class="harvestActing === 'approve' ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-xs" />
-                  {{ agent.mode === 'send' ? 'Aprovar e começar' : 'Aprovar e etiquetar' }}
-                </button>
-                <button
-                  v-if="harvest?.status === 'approved'"
-                  class="text-xs font-medium px-3 py-2 rounded-lg border border-n-weak text-yellow-600 hover:bg-n-alpha-1 disabled:opacity-50"
-                  :disabled="!!harvestActing"
-                  @click="pauseHarvest"
-                >
-                  ⏸ Pausar
-                </button>
-                <button
-                  v-if="harvest?.status === 'paused'"
-                  class="text-xs font-medium px-3 py-2 rounded-lg border border-n-weak text-green-600 hover:bg-n-alpha-1 disabled:opacity-50"
-                  :disabled="!!harvestActing"
-                  @click="resumeHarvest"
-                >
-                  ▶️ Retomar
-                </button>
-                <button
-                  v-if="harvest?.status === 'approved'"
-                  class="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-n-brand text-n-brand hover:bg-n-brand/10 disabled:opacity-50"
-                  :disabled="!!harvestActing"
-                  title="Dispara o lote de hoje agora, respeitando o teto diário"
-                  @click="harvestSendNow"
-                >
-                  <span :class="harvestActing === 'send_now' ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-send'" class="text-xs" />
-                  Enviar lote agora
-                </button>
-              </div>
-
-              <!-- prévia: a lista dos escolhidos do mês -->
-              <div v-if="showHarvestTable && harvest?.selected?.length" class="space-y-1 max-h-80 overflow-y-auto pr-1">
-                <div
-                  v-for="lead in harvest.selected"
-                  :key="lead.contact_id"
-                  class="flex items-center gap-2 flex-wrap text-[11px] rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5"
-                  :class="lead.skipped ? 'opacity-50' : ''"
-                >
-                  <span v-if="lead.sent_at" class="text-green-600 font-bold flex-shrink-0" title="Mensagem já enviada">✓</span>
-                  <span class="font-semibold text-n-slate-12 truncate max-w-[150px]">{{ lead.name }}</span>
-                  <span v-if="lead.stage_name" class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-1 text-n-slate-10 whitespace-nowrap">{{ lead.stage_name }}</span>
-                  <span v-if="lead.procedure" class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-1 text-n-slate-10 whitespace-nowrap">{{ lead.procedure }}</span>
-                  <span v-if="lead.value" class="text-n-slate-11 whitespace-nowrap">{{ fmtBrl(lead.value) }}</span>
-                  <span class="text-n-slate-10 whitespace-nowrap">frio há {{ lead.cold_days }}d</span>
-                  <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" :class="scoreClass(lead.score)">{{ lead.score }}</span>
-                  <span v-if="lead.hook" class="italic text-n-slate-10 basis-full sm:basis-auto sm:flex-1 truncate" :title="lead.hook">“{{ lead.hook }}”</span>
-                  <span v-if="lead.skipped" class="text-[10px] text-n-slate-9 ml-auto">pulado</span>
-                  <button
-                    v-else-if="!lead.sent_at"
-                    class="text-n-slate-9 hover:text-red-500 i-lucide-x text-sm flex-shrink-0 ml-auto"
-                    title="Pular este lead (não recebe a mensagem desta colheita)"
-                    @click="skipHarvestLead(lead)"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <!-- 📊 Config + estado do Gestor Autônomo -->
-            <div v-if="key === 'manager'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" :style="{ background: AGENT_META.manager.gradient }">
-                📊 Todo dia ele compara o funil com a <b>média das últimas 12 semanas</b>. Caiu além
-                da sensibilidade? Ele <b>abre uma tarefa</b> para o time e escreve o <b>briefing do
-                dia</b> no Meu Painel. <b>Nunca fala com o paciente</b> — só lê números.
-              </div>
-
-              <div class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11">
-                Sensibilidade: avisar quando cair mais de
-                <input
-                  v-model.number="agent.drop_pct"
-                  type="number"
-                  min="1"
-                  max="90"
-                  placeholder="25"
-                  :disabled="!editingAgent[key]"
-                  class="border border-n-weak rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-70 disabled:cursor-not-allowed"
-                  style="width: 4.5rem"
-                />
-                % vs a média
-              </div>
-
-              <!-- último briefing + desvios encontrados -->
-              <div v-if="managerState()" class="border-t border-n-weak pt-3 space-y-2">
-                <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">
-                  Última rodada<template v-if="managerState().last_run_at"> · {{ fmtLogDate(managerState().last_run_at) }}</template>
-                </p>
-                <div v-if="managerState().brief" class="rounded-lg bg-n-alpha-1 p-3">
-                  <p class="text-xs text-n-slate-11 leading-relaxed whitespace-pre-wrap">{{ managerState().brief }}</p>
-                </div>
-                <div v-if="(managerState().findings || []).length" class="flex flex-wrap gap-1.5">
-                  <span
-                    v-for="(f, fi) in managerState().findings"
-                    :key="fi"
-                    class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25"
-                    :title="f.window ? `janela: ${f.window}` : ''"
-                  >
-                    {{ managerFindingLabel(f) }}
-                  </span>
-                </div>
-                <p class="text-[11px] text-n-slate-10">abriu {{ managerState().tasks_opened || 0 }} tarefa(s)</p>
-              </div>
-
-              <div class="flex items-center gap-2 flex-wrap border-t border-n-weak pt-3">
-                <button
-                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
-                  :style="{ background: AGENT_META.manager.gradient }"
-                  :disabled="isRunningManager || !agent.enabled"
-                  :title="agent.enabled ? '' : 'Ligue o Gestor no interruptor acima primeiro'"
-                  @click="runManagerNow"
-                >
-                  {{ isRunningManager ? 'Rodando… (~30 s)' : 'Rodar agora' }}
-                </button>
-                <span class="text-[11px] text-n-slate-9">lê o funil agora e atualiza o briefing do dia</span>
-              </div>
-            </div>
-
-            <!-- 🎓 Config do Auditor de Conversas -->
-            <div v-if="key === 'auditor'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" :style="{ background: AGENT_META.auditor.gradient }">
-                🎓 Todo dia ele relê as conversas de <b>ontem</b> e dá <b>nota 0-10</b> contra o
-                script da clínica, apontando o que faltou em cada uma. O ranking por atendente
-                vira <b>coaching contínuo</b> — e ele <b>nunca fala com o paciente</b>.
-              </div>
-
-              <label class="block sm:w-64">
-                <span class="text-[10px] font-medium text-n-slate-9">Teto de conversas auditadas por dia</span>
-                <input
-                  v-model.number="agent.daily_cap"
-                  type="number"
-                  min="1"
-                  placeholder="150"
-                  :disabled="!editingAgent[key]"
-                  class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                />
-                <span class="text-[10px] text-n-slate-9 block mt-0.5">controla o custo da auditoria diária</span>
-              </label>
-            </div>
-
-            <!-- 🎓 QUALIDADE DO TIME: ranking + falhas mais comuns -->
-            <div v-if="key === 'auditor'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Qualidade do time</p>
-
-              <div class="flex items-center gap-2 flex-wrap">
-                <button
-                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
-                  :style="{ background: AGENT_META.auditor.gradient }"
-                  :disabled="isRunningAuditor || !agent.enabled"
-                  :title="agent.enabled ? 'Re-audita as conversas de ontem (~2 min)' : 'Ligue o Auditor no interruptor acima primeiro'"
-                  @click="runAuditorNow"
-                >
-                  {{ isRunningAuditor ? 'Auditando… (~2 min)' : 'Auditar agora' }}
-                </button>
-                <span v-if="auditorLast()?.days_done" class="text-[11px] text-n-slate-10">
-                  último dia auditado: <b class="text-n-slate-12">{{ fmtDay(auditorLast().days_done) }}</b>
-                  <template v-if="auditorLast()?.last_run_at"> · rodou {{ fmtLogDate(auditorLast().last_run_at) }}</template>
-                </span>
-                <span v-else class="text-[11px] text-n-slate-10">nenhuma auditoria ainda — o primeiro ranking sai depois da primeira rodada</span>
-              </div>
-
-              <div
-                v-if="isRunningAuditor"
-                class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400"
-              >
-                ⏳ Auditando… leva ~2 minutos — o ranking abaixo atualiza aqui sozinho a cada 20 segundos.
-              </div>
-
-              <!-- janela de análise: 7 / 14 / 30 dias -->
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="text-[11px] text-n-slate-10">Janela:</span>
-                <button
-                  v-for="d in [7, 14, 30]"
-                  :key="d"
-                  class="text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors"
-                  :class="auditorDays === d ? 'text-white border-transparent shadow-sm' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  :style="auditorDays === d ? { background: AGENT_META.auditor.gradient } : {}"
-                  @click="setAuditorDays(d)"
-                >
-                  {{ d }} dias
-                </button>
-                <span v-if="auditorSummary" class="text-[11px] text-n-slate-9 ml-auto">
-                  {{ auditorSummary.audited_total || 0 }} conversa(s) auditada(s) no período
-                </span>
-              </div>
-
-              <div v-if="loadingAuditorSummary && !auditorSummary" class="flex items-center gap-2 text-xs text-n-slate-10 py-2">
-                <Spinner :size="16" class="text-n-brand" /> Carregando a qualidade do time…
-              </div>
-
-              <template v-else-if="auditorSummary">
-                <!-- ranking por atendente (já vem ordenado pela média) -->
-                <div v-if="(auditorSummary.ranking || []).length" class="space-y-1.5">
-                  <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Ranking por atendente</p>
+                <div v-else class="space-y-1.5">
                   <div
-                    v-for="row in auditorSummary.ranking"
-                    :key="row.user_id"
-                    class="rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5"
+                    v-for="v in scriptVersions"
+                    :key="v.id"
+                    class="cv-row px-3 py-2 flex items-center gap-x-2 gap-y-1 flex-wrap"
                   >
-                    <div class="flex items-center gap-2 flex-wrap text-xs">
-                      <span class="font-semibold text-n-slate-12 truncate max-w-[180px]">{{ auditorRowName(row) }}</span>
-                      <span class="text-n-slate-10 whitespace-nowrap">{{ row.audited }} auditada(s)</span>
-                      <span
-                        class="text-[11px] font-bold px-2 py-0.5 rounded-full ml-auto flex-shrink-0"
-                        :class="auditorAvgClass(row.avg)"
-                        title="média das notas 0-10 no período"
-                      >
-                        {{ fmtAvg(row.avg) }}
-                      </span>
-                    </div>
-                    <div v-if="(row.top_gaps || []).length" class="flex flex-wrap gap-1 mt-1">
-                      <span
-                        v-for="(gap, gi) in row.top_gaps"
-                        :key="gi"
-                        class="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/25"
-                      >
-                        {{ gap }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <p v-else class="text-xs text-n-slate-10">
-                  Nenhuma conversa auditada no período ainda — o ranking aparece depois da primeira auditoria.
-                </p>
-
-                <!-- falhas mais comuns do time -->
-                <div v-if="(auditorSummary.team_gaps || []).length" class="space-y-1 border-t border-n-weak pt-2">
-                  <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Falhas mais comuns do time</p>
-                  <p v-for="(g, gi) in auditorSummary.team_gaps" :key="gi" class="text-xs text-n-slate-11">
-                    <span class="font-medium text-amber-700 dark:text-amber-400">{{ g.gap }}</span>
-                    <span class="text-n-slate-9"> · {{ g.count }}×</span>
-                  </p>
-                </div>
-              </template>
-            </div>
-
-            <!-- 🎨 Config do Criativo Perpétuo -->
-            <div v-if="key === 'creative'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <div class="rounded-lg px-3 py-2 text-[11px] text-white" :style="{ background: AGENT_META.creative.gradient }">
-                🎨 Toda <b>segunda 08:30</b> ele encontra os <b>vencedores da semana</b> — os termos
-                do Google e os anúncios do Meta que mais viraram <b>consulta e cirurgia</b> na
-                jornada real do banco (últimos 90 dias) — e escreve variações de copy prontas.
-                <b>Nada vai ao ar sozinho</b>: você aprova, copia e cola no Gerenciador de Anúncios.
-              </div>
-
-              <div class="grid grid-cols-2 gap-2 sm:w-96">
-                <label class="block">
-                  <span class="text-[10px] font-medium text-n-slate-9">Vencedores por semana</span>
-                  <input
-                    v-model.number="agent.winners_count"
-                    type="number"
-                    min="1"
-                    placeholder="3"
-                    :disabled="!editingAgent[key]"
-                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                  />
-                </label>
-                <label class="block">
-                  <span class="text-[10px] font-medium text-n-slate-9">Variações por vencedor</span>
-                  <input
-                    v-model.number="agent.variations_count"
-                    type="number"
-                    min="1"
-                    placeholder="3"
-                    :disabled="!editingAgent[key]"
-                    class="mt-0.5 w-full h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12 disabled:opacity-60"
-                  />
-                </label>
-              </div>
-            </div>
-
-            <!-- 🎨 CRIATIVOS DA SEMANA: vencedores + variações p/ aprovar -->
-            <div v-if="key === 'creative'" class="rounded-xl border border-n-weak bg-n-solid-1 p-3.5 mb-4 space-y-3">
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">
-                Criativos da semana<template v-if="creativeState?.week_key"> · semana de {{ fmtWeekKey(creativeState.week_key) }}</template>
-              </p>
-
-              <div class="flex items-center gap-2 flex-wrap">
-                <button
-                  class="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
-                  :style="{ background: AGENT_META.creative.gradient }"
-                  :disabled="isRunningCreative || !agent.enabled"
-                  :title="agent.enabled ? 'Gera os vencedores + variações da semana agora (~2 min)' : 'Ligue o Criativo no interruptor acima primeiro'"
-                  @click="runCreativeNow"
-                >
-                  {{ isRunningCreative ? 'Gerando… (~2 min)' : 'Gerar agora' }}
-                </button>
-                <span v-if="creativeState?.generated_at" class="text-[11px] text-n-slate-10">
-                  gerado {{ fmtLogDate(creativeState.generated_at) }}
-                </span>
-                <span v-else-if="creativeLast()?.generated_at" class="text-[11px] text-n-slate-10">
-                  última geração {{ fmtLogDate(creativeLast().generated_at) }}
-                </span>
-                <span
-                  class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 ml-auto cursor-help"
-                  title="aprovadas ficam guardadas para o Estúdio Criativo"
-                >
-                  📦 {{ (creativeState?.approved_log || []).length }} aprovada(s) na despensa
-                </span>
-              </div>
-
-              <div
-                v-if="isRunningCreative"
-                class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400"
-              >
-                ⏳ Gerando as variações… leva ~2 minutos — esta tela atualiza sozinha a cada 20 segundos.
-              </div>
-
-              <div v-if="loadingCreative && !creativeState" class="flex items-center gap-2 text-xs text-n-slate-10 py-2">
-                <Spinner :size="16" class="text-n-brand" /> Carregando os criativos da semana…
-              </div>
-
-              <template v-else-if="(creativeState?.winners || []).length">
-                <div
-                  v-for="(w, wi) in creativeState.winners"
-                  :key="wi"
-                  class="rounded-lg border border-n-weak bg-n-solid-2 p-3 space-y-2"
-                >
-                  <!-- cabeçalho do vencedor -->
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-sm flex-shrink-0">🥇</span>
-                    <p class="text-xs font-bold text-n-slate-12 truncate max-w-[240px]" :title="w.name">{{ w.name }}</p>
                     <span
-                      class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0"
-                      :style="{ backgroundColor: AGENT_META.creative.color + '1A', color: AGENT_META.creative.color }"
+                      class="cv-chip"
+                      :class="v.kind === 'stage' ? 'cv-slate' : 'cv-gold'"
                     >
-                      {{ w.kind_label }}
+                      {{ versionLabel(v) }}
                     </span>
-                  </div>
-
-                  <!-- jornada real em pílulas -->
-                  <div class="flex items-center gap-1 flex-wrap text-[10px] font-medium">
-                    <span class="px-1.5 py-0.5 rounded-full bg-n-alpha-2 text-n-slate-11">{{ w.stats?.leads ?? 0 }} leads</span>
-                    <span class="text-n-slate-9">→</span>
-                    <span class="px-1.5 py-0.5 rounded-full bg-n-alpha-2 text-n-slate-11">{{ w.stats?.booked ?? 0 }} consultas</span>
-                    <span class="text-n-slate-9">→</span>
-                    <span class="px-1.5 py-0.5 rounded-full bg-n-alpha-2 text-n-slate-11">{{ w.stats?.attended ?? 0 }} compareceram</span>
-                    <span class="text-n-slate-9">→</span>
-                    <span class="px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-600">{{ w.stats?.surgeries ?? 0 }} cirurgias</span>
-                    <span v-if="w.stats?.revenue" class="text-n-slate-10">· {{ fmtBrl(w.stats.revenue) }}</span>
-                  </div>
-
-                  <!-- variações: cartõezinhos p/ aprovar/recusar/copiar -->
-                  <div class="space-y-2">
-                    <div
-                      v-for="(v, vi) in w.variations"
-                      :key="vi"
-                      class="rounded-lg border border-n-weak bg-n-solid-1 px-3 py-2.5 space-y-1.5"
-                      :class="v.status === 'rejected' ? 'opacity-50' : ''"
+                    <span class="text-xs text-n-slate-12 font-medium">{{
+                      fmtVersionDate(v.created_at)
+                    }}</span>
+                    <!-- no celular a nota ocupa a linha inteira (senão vira uma coluna de 1 palavra) -->
+                    <span
+                      class="text-[11px] text-n-slate-10 min-w-0 basis-full sm:basis-auto sm:flex-1 leading-snug"
                     >
-                      <div class="flex items-center gap-1.5 flex-wrap">
-                        <span
-                          v-if="v.angulo"
-                          class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-n-alpha-2 text-n-slate-11"
-                        >
-                          {{ v.angulo }}
-                        </span>
-                        <span
-                          v-if="v.status === 'approved'"
-                          class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-green-500/15 text-green-600"
-                          :title="v.reviewed_by ? `aprovada por ${v.reviewed_by}` : ''"
-                        >
-                          ✓ aprovada
-                        </span>
-                        <span
-                          v-else-if="v.status === 'rejected'"
-                          class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-n-alpha-2 text-n-slate-10"
-                        >
-                          ✗ recusada
-                        </span>
-                        <button
-                          class="text-[11px] font-medium text-n-brand hover:underline flex items-center gap-1 ml-auto flex-shrink-0"
-                          title="Copia gancho + texto + CTA — cole no Gerenciador de Anúncios ou no Estúdio"
-                          @click="copyCreativeVariation(v)"
-                        >
-                          <span class="i-lucide-copy text-[10px]" /> 📋 Copiar
-                        </button>
-                      </div>
-                      <p class="text-xs font-bold text-n-slate-12">{{ v.gancho }}</p>
-                      <p class="text-[11px] text-n-slate-11 leading-relaxed" style="white-space: pre-line">{{ v.texto }}</p>
-                      <p v-if="v.cta" class="text-[11px] text-n-slate-10"><b>CTA:</b> {{ v.cta }}</p>
-                      <div v-if="v.status === 'pending'" class="flex items-center gap-2 pt-1">
-                        <button
-                          class="text-[11px] font-semibold text-white px-2.5 py-1 rounded-lg hover:opacity-90 disabled:opacity-50"
-                          style="background: linear-gradient(135deg, #059669, #34D399)"
-                          :disabled="reviewingCreative === `${wi}-${vi}`"
-                          @click="reviewCreativeVariation(wi, vi, 'approved')"
-                        >
-                          ✓ Aprovar
-                        </button>
-                        <button
-                          class="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-n-weak text-n-slate-10 hover:bg-n-alpha-1 disabled:opacity-50"
-                          :disabled="reviewingCreative === `${wi}-${vi}`"
-                          @click="reviewCreativeVariation(wi, vi, 'rejected')"
-                        >
-                          ✗ Recusar
-                        </button>
-                      </div>
-                    </div>
+                      {{ v.note || 'sem nota' }}
+                      <template v-if="v.author?.name">
+                        · {{ v.author.name }}</template>
+                      <template v-if="v.size">· {{ v.size }} caracteres</template>
+                    </span>
+                    <button
+                      class="cv-btn cv-btn-sm cv-btn-ghost"
+                      :disabled="restoringVersion === v.id"
+                      title="Volta o texto para esta versão (a de agora fica guardada)"
+                      @click="restoreScriptVersion(v)"
+                    >
+                      <span
+                        :class="
+                          restoringVersion === v.id
+                            ? 'i-lucide-loader-circle animate-spin'
+                            : 'i-lucide-undo-2'
+                        "
+                        class="text-xs"
+                      />
+                      Voltar para esta
+                    </button>
                   </div>
                 </div>
-              </template>
-              <p v-else-if="!loadingCreative && !isRunningCreative" class="text-xs text-n-slate-10">
-                Nenhum criativo nesta semana ainda — toda segunda 08:30 ele gera sozinho, ou clique em "Gerar agora".
-              </p>
-            </div>
-
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
-              Prompt do agente <span class="text-n-slate-9 font-normal">(vazio = usa o prompt padrão abaixo)</span>
-            </label>
-            <textarea
-              v-model="agent.prompt"
-              rows="4"
-              :disabled="!editingAgent[key]"
-              class="w-full border border-n-weak rounded-xl px-3 py-2.5 text-xs bg-n-solid-1 text-n-slate-12 font-mono leading-relaxed disabled:opacity-70 disabled:cursor-not-allowed"
-              :placeholder="agent.default_prompt"
-            />
-
-            <!-- EDITAR | SALVAR (rascunho) | PUBLICAR -->
-            <div class="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-n-weak">
-              <button
-                v-if="!editingAgent[key]"
-                class="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 hover:text-n-brand transition-colors"
-                @click="startEdit(key)"
-              >
-                <span class="i-lucide-pencil text-xs" />
-                Editar
-              </button>
-              <template v-else>
-                <button
-                  class="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-amber-500/50 text-amber-600 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
-                  :disabled="savingAgent === key"
-                  title="Guarda as mudanças SEM aplicar — o agente continua como está até você publicar"
-                  @click="saveAgentDraft(key)"
-                >
-                  <span :class="savingAgent === key ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-save'" class="text-xs" />
-                  Salvar rascunho
-                </button>
-                <button
-                  class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 shadow"
-                  :style="{ background: AGENT_META[key].gradient }"
-                  :disabled="savingAgent === key"
-                  title="Aplica de verdade — vale nas próximas análises"
-                  @click="publishAgent(key)"
-                >
-                  <span :class="savingAgent === key ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-rocket'" class="text-xs" />
-                  Publicar
-                </button>
-                <button
-                  class="text-xs text-n-slate-9 hover:text-n-slate-11 px-2 py-2"
-                  :disabled="savingAgent === key"
-                  @click="discardEdit(key)"
-                >
-                  Descartar mudanças
-                </button>
-              </template>
-              <button
-                v-if="!editingAgent[key] && agent.has_draft"
-                class="flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 shadow"
-                :style="{ background: AGENT_META[key].gradient }"
-                :disabled="savingAgent === key"
-                title="Publica o rascunho salvo — vale nas próximas análises"
-                @click="publishAgent(key)"
-              >
-                <span :class="savingAgent === key ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-rocket'" class="text-xs" />
-                Publicar rascunho
-              </button>
-              <span class="text-[10px] text-n-slate-9 ml-auto">
-                Salvar = guarda sem aplicar · Publicar = passa a valer · interruptor liga/desliga na hora
-              </span>
-            </div>
-            </div>
-          </div>
-        </div>
-        </template>
-      </div>
-
-      <!-- ══ MODO PROGRAMAÇÃO — painel panorâmico de automações ══ -->
-      <div v-else-if="activeTab === 'programacao'" class="max-w-3xl space-y-6">
-        <div class="flex items-center justify-between flex-wrap gap-2">
-          <p class="text-sm text-n-slate-11">
-            Painel panorâmico: <b>tudo</b> que trabalha sozinho no sistema, num lugar só — agentes de IA,
-            robôs, réguas e automações de coluna, com a situação de cada um.
-          </p>
-          <button
-            class="text-sm px-3 py-2 rounded-lg bg-yellow-500 text-white hover:bg-yellow-600 flex items-center gap-1.5 flex-shrink-0 font-medium"
-            @click="openProgrammingMode"
-          >
-            ⚡ Abrir Modo Programação no CRM
-          </button>
-        </div>
-
-        <!-- ✨ Agentes de IA -->
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5">
-              <span class="i-lucide-sparkles text-sm" style="color: #7C3AED" />
-              Agentes de IA <span class="text-n-slate-9 font-normal normal-case">({{ Object.keys(aiAgents).length }})</span>
-            </p>
-            <button class="text-xs font-medium text-n-brand hover:underline" @click="activeTab = 'agentes'">configurar →</button>
-          </div>
-          <div class="grid sm:grid-cols-2 gap-2">
-            <button
-              v-for="(agent, key) in aiAgents"
-              :key="key"
-              class="text-left flex items-start gap-2.5 p-3 bg-n-solid-2 border border-n-weak rounded-xl hover:border-n-brand/50 transition-colors"
-              @click="activeTab = 'agentes'"
-            >
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ background: AGENT_META[key].gradient }">
-                <span :class="AGENT_META[key].icon" class="text-white text-sm" />
-              </span>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <p class="text-sm font-semibold text-n-slate-12 truncate">{{ AGENT_META[key].title }}</p>
-                  <span
-                    class="text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0"
-                    :class="agent.enabled ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-10'"
-                  >● {{ agent.enabled ? 'Ligado' : 'Desligado' }}</span>
-                </div>
-                <p class="text-[11px] text-n-slate-10 truncate">
-                  {{ resolvedModel(key, agent) }}<template v-if="key === 'opportunity'"> · {{ agent.watchers.length }} coluna(s) vigiada(s)</template>
-                </p>
-              </div>
-            </button>
-          </div>
-        </div>
-
-        <!-- 🤖 Robôs de follow-up -->
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5">
-              <span class="i-lucide-bot text-sm" style="color: #0F5FA6" />
-              Robôs de follow-up <span class="text-n-slate-9 font-normal normal-case">({{ bots.length }})</span>
-            </p>
-            <button class="text-xs font-medium text-n-brand hover:underline" @click="activeTab = 'robos'">gerenciar →</button>
-          </div>
-          <p v-if="!bots.length" class="text-xs text-n-slate-9 pl-1">Nenhum robô criado.</p>
-          <div v-else class="space-y-1.5">
-            <button
-              v-for="bot in bots"
-              :key="bot.id"
-              class="w-full text-left flex items-center gap-3 px-3 py-2 bg-n-solid-2 border border-n-weak rounded-xl hover:border-n-brand/50 transition-colors"
-              @click="activeTab = 'robos'"
-            >
-              <span class="w-2 h-2 rounded-full flex-shrink-0" :class="bot.active ? 'bg-green-500' : 'bg-n-slate-9'" />
-              <p class="text-sm font-medium text-n-slate-12 flex-1 truncate">{{ bot.name }}</p>
-              <span class="text-[11px] text-n-slate-10 flex-shrink-0">{{ (bot.steps || []).length }} cutucada(s)</span>
-              <span
-                class="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
-                :class="bot.active ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
-              >{{ bot.active ? 'Ativo' : 'Pausado' }}</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- 📣 Réguas de mensagem -->
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5">
-              <span class="i-lucide-megaphone text-sm" style="color: #B8860B" />
-              Réguas de mensagem <span class="text-n-slate-9 font-normal normal-case">({{ automations.length }})</span>
-            </p>
-            <button class="text-xs font-medium text-n-brand hover:underline" @click="goToCampaign">abrir Campanha WhatsApp →</button>
-          </div>
-          <div v-if="loadingReguas" class="flex justify-center py-4"><Spinner :size="20" class="text-n-brand" /></div>
-          <p v-else-if="!automations.length" class="text-xs text-n-slate-9 pl-1">Nenhuma régua criada.</p>
-          <div v-else class="space-y-1.5">
-            <button
-              v-for="a in automations"
-              :key="a.id"
-              class="w-full text-left flex items-center gap-3 px-3 py-2 bg-n-solid-2 border border-n-weak rounded-xl hover:border-n-brand/50 transition-colors"
-              @click="goToCampaign"
-            >
-              <span class="w-2 h-2 rounded-full flex-shrink-0" :class="a.active ? 'bg-green-500' : 'bg-n-slate-9'" />
-              <p class="text-sm font-medium text-n-slate-12 flex-1 truncate">{{ a.name }}</p>
-              <span v-if="a.trigger_label" class="text-[11px] text-n-slate-10 flex-shrink-0 truncate max-w-32">🏷 {{ a.trigger_label }}</span>
-              <span
-                class="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
-                :class="a.active ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
-              >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- ⚡ Automações de coluna -->
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5">
-              <span class="i-lucide-zap text-sm" style="color: #EAB308" />
-              Automações de coluna <span class="text-n-slate-9 font-normal normal-case">({{ columnAutomations.length }})</span>
-            </p>
-            <button class="text-xs font-medium text-n-brand hover:underline" @click="openProgrammingMode">criar/editar no CRM →</button>
-          </div>
-          <div v-if="loadingColumnAutomations" class="flex justify-center py-6"><Spinner :size="24" class="text-n-brand" /></div>
-          <p v-else-if="!columnAutomations.length" class="text-xs text-n-slate-9 pl-1">Nenhuma automação de coluna ainda.</p>
-          <div v-else class="space-y-1.5">
-            <div
-              v-for="a in columnAutomations"
-              :key="a.id"
-              class="flex items-center gap-3 px-3 py-2 bg-n-solid-2 border border-n-weak rounded-xl"
-            >
-              <span class="w-2 h-2 rounded-full flex-shrink-0" :class="a.active ? 'bg-green-500' : 'bg-n-slate-9'" />
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium text-n-slate-12 truncate">{{ a.name }}</p>
-                <p class="text-xs text-n-slate-10 truncate">
-                  Coluna "{{ a.stage_name }}" · {{ ACTION_LABELS[a.action_type] || a.action_type }}
-                </p>
-              </div>
-              <span
-                class="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
-                :class="a.active ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-9'"
-              >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ══ TRATAMENTO DE DADOS ══ -->
-      <!-- ══ RESULTADOS — dashboard das automações de coluna ══ -->
-      <div v-else-if="activeTab === 'resultados'" class="max-w-3xl space-y-5">
-        <p class="text-sm text-n-slate-11">
-          Quantas vezes cada automação de coluna trabalhou no período — disparos, falhas e
-          pacientes alcançados. Réguas de mensagem têm resultados na Campanha WhatsApp.
-        </p>
-
-        <!-- Régua de período padrão CEVICO -->
-        <PeriodRuler v-model="resultsPeriod" />
-
-        <div v-if="loadingResults" class="flex items-center gap-2 text-sm text-n-slate-10 py-8">
-          <Spinner class="w-4 h-4" /> Carregando resultados…
-        </div>
-
-        <template v-else-if="resultsData">
-          <!-- KPIs -->
-          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #0F5FA6, #0B4A82)">
-              <p class="text-[11px] font-medium text-white/80">Disparos</p>
-              <p class="text-xl font-bold leading-tight">{{ resultsData.totals.fired }}</p>
-            </div>
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-              <p class="text-[11px] font-medium text-white/80">Pacientes alcançados</p>
-              <p class="text-xl font-bold leading-tight">{{ resultsData.totals.contacts }}</p>
-            </div>
-            <div class="rounded-xl px-4 py-3 text-white shadow" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-              <p class="text-[11px] font-medium text-white/80">Automações ativas</p>
-              <p class="text-xl font-bold leading-tight">{{ resultsData.totals.active_automations }}</p>
-            </div>
-            <div
-              class="rounded-xl px-4 py-3 shadow"
-              :class="resultsData.totals.failed ? 'text-white' : 'bg-n-solid-1 border border-n-weak'"
-              :style="resultsData.totals.failed ? { background: 'linear-gradient(135deg, #DC2626, #F59E0B)' } : {}"
-            >
-              <p class="text-[11px] font-medium" :class="resultsData.totals.failed ? 'text-white/80' : 'text-n-slate-10'">Falhas</p>
-              <p class="text-xl font-bold leading-tight" :class="resultsData.totals.failed ? '' : 'text-n-slate-12'">{{ resultsData.totals.failed }}</p>
-            </div>
-          </div>
-
-          <!-- Disparos por dia -->
-          <div v-if="resultsData.timeline.length > 1" class="rounded-2xl border-2 border-n-weak bg-n-solid-2 p-4">
-            <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-3">Disparos por dia</p>
-            <div class="flex items-end gap-1 h-24 overflow-x-auto">
-              <div
-                v-for="d in resultsData.timeline"
-                :key="d.date"
-                class="flex flex-col items-center gap-1 flex-1 min-w-[22px]"
-                :title="`${fmtDay(d.date)}: ${d.fired} disparo(s)`"
-              >
-                <span class="text-[9px] text-n-slate-10 leading-none">{{ d.fired || '' }}</span>
-                <div
-                  class="w-full rounded-t-md"
-                  :style="{
-                    height: `${Math.max(d.fired ? 8 : 2, (d.fired / maxTimelineFired()) * 64)}px`,
-                    background: d.fired ? 'linear-gradient(180deg, #7C3AED, #0F5FA6)' : 'rgba(148,163,184,0.25)',
-                  }"
-                />
-                <span class="text-[8px] text-n-slate-9 leading-none whitespace-nowrap">{{ fmtDay(d.date) }}</span>
               </div>
             </div>
           </div>
 
-          <!-- Ranking por automação -->
-          <div class="rounded-2xl border-2 border-n-weak bg-n-solid-2 p-4">
-            <p class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-3">Automação por automação</p>
-            <div v-if="!resultsData.automations.length" class="text-sm text-n-slate-10 py-4">
-              Nenhuma automação com movimento no período.
-            </div>
-            <div v-else class="space-y-2">
-              <div
-                v-for="a in resultsData.automations"
-                :key="a.id"
-                class="rounded-xl border border-n-weak bg-n-solid-1 px-3.5 py-2.5"
-              >
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ backgroundColor: a.stage_color || '#94A3B8' }" />
-                  <p class="text-sm font-semibold text-n-slate-12 truncate">{{ a.name }}</p>
-                  <span
-                    class="text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0"
-                    :class="a.active ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-10'"
-                  >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
-                  <span class="ml-auto text-sm font-bold text-n-slate-12 flex-shrink-0">{{ a.fired }}×</span>
-                </div>
-                <div class="flex items-center gap-2 flex-wrap text-[11px] text-n-slate-10 mt-1">
-                  <span>{{ a.stage_name }}</span>
-                  <span>· {{ TRIGGER_LABELS[a.trigger_type] || a.trigger_type }} → {{ ACTION_LABELS[a.action_type] || a.action_type }}</span>
-                  <span>· {{ a.contacts }} paciente(s)</span>
-                  <span v-if="a.failed" class="text-red-500 font-medium">· {{ a.failed }} falha(s)</span>
-                  <span class="ml-auto">último: {{ fmtLastFired(a.last_fired_at) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </template>
-      </div>
-
-      <!-- ══ PAINEL DOS AGENTES DE IA (item 85, só admin) ══ -->
-      <AiAgentsDashboard v-else-if="activeTab === 'painel_ia'" />
-
-      <!-- ══ 🗺️ MAPA DE FLUXOS (item 170) — componente sob demanda ══ -->
-      <div v-else-if="activeTab === 'fluxos'">
-        <FlowsMap />
-      </div>
-
-      <!-- ══ TRATAMENTO DE DADOS UNIFICADO (item 70) ══ -->
-      <div v-else-if="activeTab === 'tratamento'" class="max-w-3xl">
-        <p class="text-sm text-n-slate-11 mb-4">
-          A casa de TODAS as ferramentas para tratar a base: identificação
-          tradicional (filtros, etiquetas, unificação — sempre com prévia
-          antes de aplicar) e identificação com inteligência.
-        </p>
-        <DataTreatmentTools />
-
-        <!-- extras com IA que já moram no hub (só admin: mexem no Radar e na Agenda) -->
-        <div v-if="isAdmin" class="grid sm:grid-cols-2 gap-4 mt-2 mb-6">
-          <button
-            class="text-left rounded-2xl border border-n-weak bg-n-solid-2 p-4 hover:border-n-brand transition-colors flex items-start gap-3"
-            @click="showSweepModal = true"
-          >
-            <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #DC2626, #F59E0B)">
-              <span class="i-lucide-scan-search text-white text-base" />
-            </span>
-            <span>
-              <p class="text-sm font-bold text-n-slate-12 mb-1">Radar pontual</p>
-              <p class="text-xs text-n-slate-10 leading-relaxed">
-                Varredura ÚNICA por leads aguardando resposta (coluna + etiqueta +
-                período) → avisos no Meu Painel. Não fica ativa.
-              </p>
-            </span>
-          </button>
-          <button
-            class="text-left rounded-2xl border border-n-weak bg-n-solid-2 p-4 hover:border-n-brand transition-colors flex items-start gap-3"
-            @click="showBackfillModal = true"
-          >
-            <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-              <span class="i-lucide-calendar-search text-white text-base" />
-            </span>
-            <span>
-              <p class="text-sm font-bold text-n-slate-12 mb-1">Preencher a Agenda com o histórico</p>
-              <p class="text-xs text-n-slate-10 leading-relaxed">
-                O Agente de Agendamento lê as confirmações antigas e registra as
-                consultas na Agenda — sem duplicar, nada vai ao paciente.
-              </p>
-            </span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal robô (componente compartilhado) -->
-    <FollowupBotModal
-      v-if="showBotModal"
-      :bot="editingBot"
-      @close="showBotModal = false"
-      @saved="onBotSaved"
-    />
-    <!-- Janela isolada: Radar PONTUAL (roda uma vez, não fica ativo) -->
-    <div
-      v-if="showSweepModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      @click.self="showSweepModal = false"
-    >
-      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden">
-        <div class="h-1.5 w-full flex-shrink-0" style="background: linear-gradient(135deg, #059669, #4ADE80)" />
-        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak">
-          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-scan-search" style="color: #059669" />
-            Radar pontual
-            <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-n-alpha-2 text-n-slate-11">roda uma vez</span>
-          </h2>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showSweepModal = false" />
-        </div>
-        <div class="p-5 space-y-4">
-          <p class="text-xs text-n-slate-10">
-            Varre AGORA os leads aguardando resposta no recorte escolhido e cria
-            os avisos no <b>Meu Painel</b> do atendente escolhido, em alguns
-            minutos. Diferente do Radar perene, <b>não fica ativo</b> — é uma
-            auditoria única. Nada é enviado ao paciente.
-          </p>
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Coluna</label>
-            <select v-model="sweep.stage_id" class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12">
-              <option value="">Colunas vigiadas (padrão)</option>
-              <option v-for="s in allStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
-            </select>
-          </div>
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Enviar os avisos para o painel de</label>
-            <select v-model="sweep.user_id" class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12">
-              <option :value="null">👥 Todos os atendentes</option>
-              <option v-for="ag in teamAgents" :key="ag.id" :value="ag.id">{{ ag.available_name || ag.name }}</option>
-            </select>
-          </div>
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Etiqueta <span class="text-n-slate-9 font-normal">(opcional)</span></label>
-            <select v-model="sweep.label" class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12">
-              <option value="">Qualquer etiqueta</option>
-              <option v-for="l in accountLabels" :key="l.id" :value="l.title">{{ l.title }}</option>
-            </select>
-          </div>
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Período (mensagens aguardando das…)</label>
-            <select v-model.number="sweep.since_hours" class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12">
-              <option :value="6">últimas 6 horas</option>
-              <option :value="24">últimas 24 horas</option>
-              <option :value="72">últimos 3 dias</option>
-              <option :value="168">últimos 7 dias</option>
-            </select>
-          </div>
-        </div>
-        <div class="px-5 py-4 border-t border-n-weak flex gap-2">
-          <button
-            class="flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold text-white py-2 rounded-lg disabled:opacity-50"
-            style="background: linear-gradient(135deg, #DC2626, #F59E0B)"
-            :disabled="isSweeping"
-            @click="runSweep"
-          >
-            <span :class="isSweeping ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-scan-search'" class="text-sm" />
-            {{ isSweeping ? 'Iniciando…' : 'Varrer agora' }}
-          </button>
-          <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showSweepModal = false">
-            Fechar
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Janela: escolher a mensagem modelo da Colheitadeira -->
-    <div
-      v-if="showHarvestTemplatePicker"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      @click.self="closeHarvestTemplatePicker"
-    >
-      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden">
-        <div class="h-1.5 w-full flex-shrink-0" :style="{ background: AGENT_META.harvest.gradient }" />
-        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
-          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-wheat" style="color: #CA8A04" />
-            {{ harvestPickerTemplate ? 'Preencher variáveis do modelo' : 'Escolher mensagem modelo' }}
-          </h2>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="closeHarvestTemplatePicker" />
-        </div>
-        <div class="flex-1 overflow-y-auto p-5 space-y-3">
-          <p class="text-[11px] text-n-slate-10">
-            💡 Escreva <code class="bg-n-alpha-2 px-1 rounded">[gancho]</code> numa variável do corpo —
-            a IA troca por um gancho pessoal para cada paciente;
-            <code class="bg-n-alpha-2 px-1 rounded">[procedimento]</code> também funciona.
-            O <code class="bg-n-alpha-2 px-1 rounded">{{ '\{\{contact.first_name\}\}' }}</code> vira o nome do paciente.
-          </p>
-          <WhatsAppTemplateParser
-            v-if="harvestPickerTemplate"
-            :template="harvestPickerTemplate"
-            @send-message="useHarvestTemplate"
-            @reset-template="harvestPickerTemplate = null"
-          >
-            <template #actions="{ sendMessage, resetTemplate, disabled }">
-              <footer class="flex gap-2 justify-end">
-                <button class="px-3 py-1.5 text-sm border border-n-weak rounded-lg text-n-slate-11" @click="resetTemplate">
-                  Trocar modelo
-                </button>
-                <button
-                  class="px-4 py-1.5 text-sm bg-n-brand text-white rounded-lg disabled:opacity-50"
-                  :disabled="disabled"
-                  @click="sendMessage"
-                >
-                  Usar este modelo
-                </button>
-              </footer>
-            </template>
-          </WhatsAppTemplateParser>
-          <TemplatesPicker
-            v-else
-            :inbox-id="harvestPickerInboxId"
-            @on-select="harvestPickerTemplate = $event"
+          <!-- ✍️ ORIENTAÇÕES (rodada 191): fila de "como deveria ter respondido" -->
+          <GuidancesPanel
+            ref="guidancesPanel"
+            @test="openTestAgent"
+            @applied="onGuidanceApplied"
           />
-        </div>
-      </div>
-    </div>
 
-    <!-- Modal: preencher a Agenda com o histórico -->
-    <div
-      v-if="showBackfillModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      @click.self="showBackfillModal = false"
-    >
-      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div class="h-1.5 w-full" style="background: linear-gradient(135deg, #B8860B, #D4A017)" />
-        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak">
-          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-calendar-search" style="color: #B8860B" />
-            Preencher agenda com o histórico
-          </h2>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showBackfillModal = false" />
+          <ShadowReviewModal
+            v-if="shadowOpen"
+            :agent-key="shadowAgentKey"
+            :agent-name="AGENT_META[shadowAgentKey]?.title"
+            @close="shadowOpen = false"
+            @guided="onGuided"
+          />
+          <AgentTestModal
+            v-if="testAgentKey"
+            :agent-key="testAgentKey"
+            :agent-name="AGENT_META[testAgentKey]?.title || testAgentKey"
+            :prefill="testPrefill"
+            @close="
+              testAgentKey = '';
+              testPrefill = '';
+            "
+            @edit-script="openScriptFromTest"
+            @guided="onGuided"
+          />
+
+          <!-- 🃏 Cards × Lista -->
+          <div class="flex items-center justify-between gap-2 flex-wrap pt-1">
+            <p class="text-sm font-bold text-n-slate-12">
+              Agentes
+              <span class="text-n-slate-9 font-normal text-xs">· clique num card para abrir e configurar</span>
+            </p>
+            <div class="cv-seg cv-seg-sm">
+              <button
+                class="cv-seg-item"
+                :class="{ 'cv-seg-on': agentsView === 'cards' }"
+                @click="agentsView = 'cards'"
+              >
+                <span class="i-lucide-layout-grid text-xs" /> Cards
+              </button>
+              <button
+                class="cv-seg-item"
+                :class="{ 'cv-seg-on': agentsView === 'list' }"
+                @click="agentsView = 'list'"
+              >
+                <span class="i-lucide-rows-3 text-xs" /> Lista
+              </button>
+            </div>
+          </div>
+
+          <template v-for="group in agentGroups" :key="group.title">
+            <!-- Cabeçalho da seção (rodada 189: rótulo do kit) -->
+            <div class="flex items-center gap-2 pt-2">
+              <span class="text-base">{{ group.icon }}</span>
+              <p class="cv-label !text-[11px]">{{ group.title }}</p>
+              <span class="cv-chip cv-slate">{{ group.keys.length }}</span>
+            </div>
+            <div
+              :class="agentsView === 'cards' ? 'cv-agents-grid' : 'space-y-5'"
+            >
+              <div
+                v-for="(agent, key) in groupAgents(group)"
+                :id="`cv-agent-${key}`"
+                :key="key"
+                class="cv-block flex flex-col"
+                :class="[
+                  agentsView === 'cards' && expandedAgents[key]
+                    ? 'cv-agent-open'
+                    : '',
+                  openingAgent === key ? 'cv-agent-opening' : '',
+                ]"
+                :style="agentVars(key)"
+              >
+                <!-- Fio superior na cor do agente -->
+                <div
+                  class="h-1 w-full flex-shrink-0"
+                  :style="{ background: AGENT_META[key].gradient }"
+                />
+
+                <div
+                  :class="
+                    agentsView === 'cards' && !expandedAgents[key]
+                      ? 'p-4 flex-1 flex flex-col'
+                      : 'p-5 sm:p-6'
+                  "
+                >
+                  <!-- 🃏 Card compacto (modo Cards, fechado): clique = abre no lugar -->
+                  <div
+                    v-if="agentsView === 'cards' && !expandedAgents[key]"
+                    class="flex-1 flex flex-col gap-2.5 cursor-pointer select-none"
+                    @click="toggleAgentExpand(key)"
+                  >
+                    <div class="flex items-start justify-between gap-2">
+                      <span class="cv-icon cv-icon-xl">
+                        <span :class="AGENT_META[key].icon" class="text-lg" />
+                      </span>
+                      <div
+                        v-if="key !== 'voice'"
+                        class="flex flex-col items-end gap-1"
+                        @click.stop
+                      >
+                        <button
+                          class="cv-switch cv-switch-lg"
+                          :class="agent.enabled ? 'cv-switch-on' : ''"
+                          :title="
+                            agent.enabled
+                              ? 'Desligar este agente agora'
+                              : 'Ligar este agente agora'
+                          "
+                          :disabled="togglingAgent === key"
+                          :aria-pressed="agent.enabled"
+                          @click="toggleAgent(key)"
+                        />
+                        <span class="text-[10px] text-n-slate-9">{{
+                          togglingAgent === key
+                            ? 'salvando…'
+                            : agent.enabled
+                              ? 'Ligado'
+                              : 'Desligado'
+                        }}</span>
+                      </div>
+                      <button
+                        v-else
+                        class="cv-btn cv-btn-sm"
+                        @click.stop="openVoiceSettings"
+                      >
+                        Configurar
+                      </button>
+                    </div>
+                    <div>
+                      <p
+                        class="text-base font-bold text-n-slate-12 leading-tight"
+                      >
+                        {{ AGENT_META[key].title }}
+                      </p>
+                      <div class="flex items-center gap-1.5 flex-wrap mt-1.5">
+                        <span class="cv-chip">{{ AGENT_META[key].tag }}</span>
+                        <span
+                          class="cv-chip"
+                          :class="agent.enabled ? 'cv-green' : 'cv-slate'"
+                        >
+                          ● {{ agent.enabled ? 'Ligado' : 'Desligado' }}
+                        </span>
+                        <span
+                          v-if="agent.has_draft"
+                          class="cv-chip cv-amber"
+                          title="Rascunho salvo que ainda não vale"
+                          >📝 Rascunho</span>
+                      </div>
+                    </div>
+                    <p
+                      class="text-xs text-n-slate-10 leading-relaxed line-clamp-3"
+                    >
+                      {{ AGENT_META[key].description }}
+                    </p>
+                    <div class="mt-auto flex items-center gap-2 flex-wrap pt-1">
+                      <span
+                        v-if="usageByAgent(key)"
+                        class="cv-chip cv-slate"
+                        title="análises e custo nos últimos 30 dias"
+                      >
+                        30 d: {{ usageByAgent(key).calls }}
+                        {{ usageNoun(key) }} ·
+                        {{ fmtUsd(usageByAgent(key).cost_usd) }}
+                      </span>
+                      <button
+                        class="cv-btn cv-btn-sm ml-auto"
+                        @click.stop="toggleAgentExpand(key)"
+                      >
+                        <span class="i-lucide-maximize-2 text-xs" /> Abrir
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Cabeçalho completo (Lista, ou card aberto): clique = desce/recolhe o agente completo -->
+                  <div
+                    v-else
+                    class="flex items-start gap-3 cursor-pointer select-none"
+                    :class="expandedAgents[key] ? 'mb-3' : ''"
+                    @click="toggleAgentExpand(key)"
+                  >
+                    <span class="cv-icon cv-icon-xl">
+                      <span :class="AGENT_META[key].icon" class="text-lg" />
+                    </span>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <p
+                          class="text-base font-bold text-n-slate-12 leading-tight"
+                        >
+                          {{ AGENT_META[key].title }}
+                        </p>
+                        <span class="cv-chip">{{ AGENT_META[key].tag }}</span>
+                        <span
+                          class="cv-chip"
+                          :class="agent.enabled ? 'cv-green' : 'cv-slate'"
+                        >
+                          ● {{ agent.enabled ? 'Ligado' : 'Desligado' }}
+                        </span>
+                        <span
+                          v-if="agent.has_draft"
+                          class="cv-chip cv-amber"
+                          title="Existe um rascunho salvo que ainda NÃO está valendo — clique em Publicar para aplicar"
+                        >
+                          📝 Rascunho não publicado
+                        </span>
+                        <!-- 🗺️ item 170: abre o fluxograma deste agente na aba Fluxos -->
+                        <button
+                          class="cv-chip cv-slate"
+                          title="Ver o caminho que este agente percorre (aba Fluxos)"
+                          @click.stop="openFlow(key)"
+                        >
+                          <span class="i-lucide-git-branch text-[10px]" />
+                          Ver fluxo
+                        </button>
+                      </div>
+                      <p
+                        class="text-xs text-n-slate-10 mt-1 leading-relaxed"
+                        :class="expandedAgents[key] ? '' : 'line-clamp-2'"
+                      >
+                        {{ AGENT_META[key].description }}
+                      </p>
+                    </div>
+                    <!-- INTERRUPTOR definitivo: grava na hora, sem "Salvar" -->
+                    <div
+                      v-if="key !== 'voice'"
+                      class="flex flex-col items-end gap-1 flex-shrink-0"
+                      @click.stop
+                    >
+                      <button
+                        class="cv-switch cv-switch-lg"
+                        :class="agent.enabled ? 'cv-switch-on' : ''"
+                        :title="
+                          agent.enabled
+                            ? 'Desligar este agente agora (para tudo: botões, automações e cron)'
+                            : 'Ligar este agente agora'
+                        "
+                        :disabled="togglingAgent === key"
+                        :aria-pressed="agent.enabled"
+                        @click="toggleAgent(key)"
+                      />
+                      <span class="text-[10px] text-n-slate-9">{{
+                        togglingAgent === key
+                          ? 'salvando…'
+                          : agent.enabled
+                            ? 'Ligado'
+                            : 'Desligado'
+                      }}</span>
+                    </div>
+                    <!-- 🤖📞 Agente de Ligação (item 169): o interruptor mora em Integrações → Agente de Ligação (IA) -->
+                    <div
+                      v-else
+                      class="flex flex-col items-end gap-1 flex-shrink-0"
+                      @click.stop
+                    >
+                      <button
+                        class="cv-btn cv-btn-sm"
+                        title="Liga, desliga e configura em Integrações → Agente de Ligação (IA)"
+                        @click="openVoiceSettings"
+                      >
+                        Configurar
+                      </button>
+                      <span class="text-[10px] text-n-slate-9">liga/desliga lá</span>
+                    </div>
+                    <span
+                      class="i-lucide-chevron-down text-n-slate-9 text-lg mt-2 flex-shrink-0 transition-transform duration-200"
+                      :class="expandedAgents[key] ? 'rotate-180' : ''"
+                    />
+                  </div>
+
+                  <!-- 🤖📞 Agente de Ligação: configuração inteira mora em Integrações (ElevenLabs) — o card só aponta -->
+                  <div
+                    v-if="expandedAgents[key] && key === 'voice'"
+                    class="cevico-agent-body"
+                  >
+                    <p class="cv-label mb-1.5">Onde se aplica</p>
+                    <div class="flex flex-wrap gap-1.5 mb-4">
+                      <span
+                        v-for="(t, i) in AGENT_META[key].triggers"
+                        :key="i"
+                        class="cv-chip cv-chip-lg cv-chip-wrap"
+                      >
+                        <span
+                          :class="t.icon"
+                          class="text-xs"
+                          :style="{ color: AGENT_META[key].color }"
+                        />
+                        {{ t.label }}
+                      </span>
+                    </div>
+                    <div
+                      class="cv-sub p-4 text-xs text-n-slate-11 flex items-center gap-2 flex-wrap"
+                    >
+                      <span
+                        class="i-lucide-lightbulb text-sm"
+                        :style="{ color: AGENT_META[key].color }"
+                      />
+                      <span class="flex-1 min-w-0">{{
+                        AGENT_META[key].suggestion
+                      }}</span>
+                      <button
+                        class="cv-btn cv-btn-sm"
+                        :style="{ background: AGENT_META[key].gradient }"
+                        @click="openVoiceSettings"
+                      >
+                        Abrir configuração
+                      </button>
+                      <button
+                        class="cv-btn cv-btn-sm cv-btn-ghost"
+                        @click="openFlow(key)"
+                      >
+                        Ver fluxo
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- corpo completo do agente: desce com animação leve -->
+                  <div
+                    v-else-if="expandedAgents[key]"
+                    class="cevico-agent-body"
+                  >
+                    <!-- Onde se aplica -->
+                    <p class="cv-label mb-1.5">Onde se aplica</p>
+                    <div class="flex flex-wrap gap-1.5 mb-4">
+                      <span
+                        v-for="(t, i) in AGENT_META[key].triggers"
+                        :key="i"
+                        class="cv-chip cv-chip-lg cv-chip-wrap"
+                      >
+                        <span
+                          :class="t.icon"
+                          class="text-xs"
+                          :style="{ color: AGENT_META[key].color }"
+                        />
+                        {{ t.label }}
+                      </span>
+                    </div>
+
+                    <!-- Modelo + Esforço (vazio = recomendado pelo sistema) -->
+                    <div
+                      class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2"
+                      :class="!editingAgent[key] ? 'opacity-70' : ''"
+                    >
+                      <div>
+                        <label
+                          class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                          >Modelo de IA</label>
+                        <select
+                          v-model="agent.model"
+                          :disabled="!editingAgent[key]"
+                          class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                        >
+                          <option value="">
+                            ⭐ {{ recommendedModelLabel(key) }}
+                          </option>
+                          <option
+                            v-for="m in AGENT_MODELS"
+                            :key="m.value"
+                            :value="m.value"
+                          >
+                            {{ m.label }}
+                          </option>
+                        </select>
+                      </div>
+                      <div>
+                        <label
+                          class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                        >
+                          Esforço
+                          <span class="text-n-slate-9 font-normal">(quanto pensa)</span>
+                        </label>
+                        <select
+                          v-model="agent.effort"
+                          :disabled="!editingAgent[key]"
+                          class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                        >
+                          <option value="">
+                            ⭐ {{ recommendedEffortLabel(key) }}
+                          </option>
+                          <option
+                            v-for="e in AGENT_EFFORTS"
+                            :key="e.value"
+                            :value="e.value"
+                          >
+                            {{ e.label }}
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <!-- Em uso + dica + uso 30d -->
+                    <div class="flex items-center gap-2 flex-wrap mb-4">
+                      <span
+                        class="cv-chip cv-chip-lg cv-chip-on"
+                        :style="{ background: AGENT_META[key].gradient }"
+                      >
+                        Em uso: {{ resolvedModel(key, agent) }} · esforço
+                        {{ resolvedEffort(key, agent) }}
+                      </span>
+                      <span v-if="usageByAgent(key)" class="cv-chip cv-chip-lg">
+                        30 dias: {{ usageByAgent(key).calls }}
+                        {{ usageNoun(key) }} ·
+                        {{ fmtUsd(usageByAgent(key).cost_usd) }}
+                      </span>
+                      <span
+                        class="text-[11px] text-n-slate-9 flex items-center gap-1"
+                      >
+                        <span class="i-lucide-lightbulb text-xs" />
+                        {{ AGENT_META[key].suggestion }}
+                      </span>
+                    </div>
+
+                    <!-- 🗣️ Config específica do Atendente de Agendamento (rodada 188): sombra × ao vivo, caixas, colunas -->
+                    <div
+                      v-if="RESPONDER_WA_KEYS.includes(key)"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <!-- 🎛 Painel de situação -->
+                      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div
+                          class="cv-stat px-3 py-2"
+                          :class="
+                            situationOf(agent).tone === 'live'
+                              ? 'cv-green'
+                              : situationOf(agent).tone === 'shadow'
+                                ? 'cv-slate'
+                                : ''
+                          "
+                        >
+                          <p class="text-[10px] text-n-slate-10">Situação</p>
+                          <p
+                            class="text-sm font-bold"
+                            :class="
+                              situationOf(agent).tone === 'live'
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-n-slate-12'
+                            "
+                          >
+                            {{ situationOf(agent).label }}
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">
+                            Caixas em que lê
+                          </p>
+                          <p
+                            class="text-sm font-bold text-n-slate-12"
+                            :title="atendInboxNames(agent).join(', ')"
+                          >
+                            {{
+                              atendInboxNames(agent).length
+                                ? atendInboxNames(agent).join(', ')
+                                : 'nenhuma'
+                            }}
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">
+                            Colunas dele
+                          </p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            {{
+                              atendStageNames(agent).length +
+                              (key === 'atendente_agendamento' &&
+                              agent.no_card !== false
+                                ? 1
+                                : 0)
+                            }}
+                            <span
+                              class="text-[10px] font-normal text-n-slate-9"
+                              >{{
+                                key === 'atendente_agendamento' &&
+                                agent.no_card !== false
+                                  ? '(inclui sem card)'
+                                  : ''
+                              }}</span>
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">Sombra hoje</p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            {{ shadowTodayConversations(key) }}
+                            <span class="text-[10px] font-normal text-n-slate-9">/
+                              {{ agent.shadow_daily_cap || 30 }} conversas</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <!-- 🕶️ o que é a Sombra, em linguagem simples + comandos para desligar a IA (pedido 21/09) -->
+                      <div
+                        class="cv-sub p-3.5 text-[11px] text-n-slate-11 leading-relaxed space-y-1.5"
+                      >
+                        <p>
+                          <b>🕶️ Sombra, em uma frase:</b> o agente lê cada
+                          mensagem do paciente e escreve numa
+                          <b>nota interna</b> o que responderia{{
+                            key === 'atendente_agendamento'
+                              ? ' (e se agendaria, com vaga real)'
+                              : ' (e se remarcaria ou cancelaria)'
+                          }}. <b>O paciente não recebe nada.</b> É um estágio de
+                          treino: você confere na tela Sombra, orienta, e só
+                          depois liga de verdade.
+                        </p>
+                        <p>
+                          <b>🟢 Ao vivo:</b> responde o paciente de verdade, só
+                          na janela de dias e horas escolhida abaixo. Fora da
+                          janela volta para a sombra sozinho. Ele só responde,
+                          nunca puxa conversa.
+                        </p>
+                        <p class="cv-label !text-[10px] pt-1">
+                          Comandos para desligar a IA
+                        </p>
+                        <ul class="list-disc pl-4 space-y-0.5">
+                          <li>
+                            <b>Numa conversa:</b> responda o paciente você
+                            mesmo. Qualquer mensagem sua pausa o agente só nessa
+                            conversa (ele deixa a nota ⏸).
+                          </li>
+                          <li>
+                            <b>Reativar na conversa:</b> mande 👍 (só o polegar)
+                            como mensagem. Ele deixa a nota ▶️ e volta a
+                            responder.
+                          </li>
+                          <li>
+                            <b>Parar tudo agora:</b> o interruptor no topo deste
+                            card desliga na hora, em todas as conversas.
+                          </li>
+                          <li>
+                            Em sombra nada disso é preciso: ele nunca fala com o
+                            paciente.
+                          </li>
+                        </ul>
+                      </div>
+
+                      <!-- modo -->
+                      <div>
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          Modo de trabalho
+                        </p>
+                        <div class="cv-seg cv-seg-sm cv-green">
+                          <button
+                            class="cv-seg-item"
+                            :class="agent.mode !== 'live' ? 'cv-seg-on' : ''"
+                            :disabled="!editingAgent[key]"
+                            title="Só anota o que teria respondido (nota interna). Nada chega ao paciente."
+                            @click="agent.mode = 'shadow'"
+                          >
+                            🕶️ Sombra
+                          </button>
+                          <button
+                            class="cv-seg-item"
+                            :class="[
+                              agent.mode === 'live' ? 'cv-seg-on' : '',
+                              liveEnabled
+                                ? ''
+                                : 'opacity-60 cursor-not-allowed',
+                            ]"
+                            :disabled="!editingAgent[key] || !liveEnabled"
+                            :title="
+                              liveEnabled
+                                ? 'Responde de verdade ao paciente na janela escolhida abaixo'
+                                : 'Trancado no servidor: só abre com a variável CEVICO_RESPONDERS_LIVE=true no EasyPanel (web e sidekiq). Até lá, tudo em sombra.'
+                            "
+                            @click="agent.mode = 'live'"
+                          >
+                            <span
+                              v-if="!liveEnabled"
+                              class="i-lucide-lock text-[10px]"
+                            />
+                            🟢 Ao vivo
+                          </button>
+                        </div>
+                        <p
+                          v-if="!editingAgent[key]"
+                          class="text-[10px] text-n-slate-9 mt-1"
+                        >
+                          Clique em Editar (no fim do card) para trocar o modo e
+                          a janela.
+                        </p>
+                      </div>
+
+                      <!-- 🟢 rodada 193: JANELA AO VIVO (dias + horas) -->
+                      <div
+                        v-if="agent.mode === 'live'"
+                        class="cv-sub cv-green p-3.5 space-y-2.5"
+                      >
+                        <p class="text-xs font-bold text-n-slate-12">
+                          🟢 Janela ao vivo
+                          <span class="text-n-slate-9 font-normal">(nenhum dia marcado = todos os dias; as horas ficam
+                            no campo "Horário em que atende sozinho"
+                            abaixo)</span>
+                        </p>
+                        <div class="flex flex-wrap gap-1.5">
+                          <button
+                            v-for="d in LIVE_DAYS"
+                            :key="d.value"
+                            class="cv-chip cv-chip-lg"
+                            :class="
+                              liveDayOn(agent, d.value) ? 'cv-chip-on' : ''
+                            "
+                            :style="
+                              liveDayOn(agent, d.value)
+                                ? {
+                                    background:
+                                      'linear-gradient(135deg, #059669, #34D399)',
+                                  }
+                                : {}
+                            "
+                            :disabled="!editingAgent[key]"
+                            @click="toggleLiveDay(key, d.value)"
+                          >
+                            {{ d.short }}
+                          </button>
+                        </div>
+                        <p class="text-xs font-semibold text-n-slate-12">
+                          {{ liveWindowSentence(agent) }}
+                        </p>
+                        <div
+                          class="cv-sub cv-amber px-3 py-2 text-[11px] text-n-slate-12 leading-relaxed"
+                        >
+                          ⚠️ <b>Nessa janela o N8N tem que estar DESLIGADO</b>
+                          para essas caixas — nunca os dois ao vivo ao mesmo
+                          tempo, senão o paciente recebe duas respostas.
+                        </div>
+                        <p
+                          v-if="!(agent.inbox_ids || []).length"
+                          class="text-[11px] text-red-600 dark:text-red-400 font-medium"
+                        >
+                          Marque pelo menos uma caixa de WhatsApp: ao vivo sem
+                          caixa não publica.
+                        </p>
+                      </div>
+
+                      <!-- caixas -->
+                      <div>
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          Caixas de WhatsApp em que ele lê
+                          <span class="text-n-slate-9 font-normal">(nenhuma marcada = desligado na prática)</span>
+                        </p>
+                        <div class="flex flex-wrap gap-1.5">
+                          <button
+                            v-for="ib in whatsappInboxes"
+                            :key="ib.id"
+                            class="cv-chip cv-chip-lg"
+                            :class="
+                              (agent.inbox_ids || []).includes(ib.id)
+                                ? 'cv-chip-on'
+                                : ''
+                            "
+                            :style="
+                              (agent.inbox_ids || []).includes(ib.id)
+                                ? {
+                                    background:
+                                      'linear-gradient(135deg, #059669, #34D399)',
+                                  }
+                                : {}
+                            "
+                            :disabled="!editingAgent[key]"
+                            @click="toggleAtendInbox(key, ib.id)"
+                          >
+                            {{ ib.name }}
+                          </button>
+                          <p
+                            v-if="!whatsappInboxes.length"
+                            class="text-[11px] text-n-slate-10"
+                          >
+                            Nenhuma caixa de WhatsApp na conta ainda.
+                          </p>
+                        </div>
+                      </div>
+
+                      <!-- colunas: quem fala é decidido pela coluna do card -->
+                      <div>
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          Colunas do CRM em que ELE fala
+                          <span class="text-n-slate-9 font-normal">(o card do paciente nessas colunas = este agente;
+                            nas outras, ninguém)</span>
+                        </p>
+                        <div
+                          v-if="!allStages.length"
+                          class="text-xs text-n-slate-9"
+                        >
+                          Carregando colunas…
+                        </div>
+                        <div v-else class="flex flex-wrap gap-1.5">
+                          <button
+                            v-if="key === 'atendente_agendamento'"
+                            class="cv-chip cv-chip-lg"
+                            :class="agent.no_card !== false ? 'cv-chip-on' : ''"
+                            :style="
+                              agent.no_card !== false
+                                ? {
+                                    background:
+                                      'linear-gradient(135deg, #152C61, #0F5FA6)',
+                                  }
+                                : {}
+                            "
+                            :disabled="!editingAgent[key]"
+                            title="Contato que ainda não tem card no CRM (primeira mensagem)"
+                            @click="agent.no_card = agent.no_card === false"
+                          >
+                            <span class="i-lucide-user-plus text-[10px]" /> Sem
+                            card (contato novo)
+                          </button>
+                          <button
+                            v-for="st in allStages"
+                            :key="st.id"
+                            class="cv-chip cv-chip-lg"
+                            :class="
+                              (agent.stage_ids || []).includes(st.id)
+                                ? 'cv-chip-on'
+                                : ''
+                            "
+                            :style="
+                              (agent.stage_ids || []).includes(st.id)
+                                ? {
+                                    background:
+                                      'linear-gradient(135deg, #059669, #34D399)',
+                                  }
+                                : {}
+                            "
+                            :disabled="
+                              !editingAgent[key] ||
+                              !!stageOwnedByOther(key, st.id)
+                            "
+                            :title="
+                              stageOwnedByOther(key, st.id)
+                                ? `já é do ${AGENT_META[stageOwnedByOther(key, st.id)].title}`
+                                : st.pipeline
+                            "
+                            @click="toggleAtendStage(key, st.id)"
+                          >
+                            {{ st.name }}
+                          </button>
+                        </div>
+                        <p class="text-[10px] text-n-slate-9 mt-1">
+                          {{
+                            key === 'atendente_agendamento'
+                              ? 'Sugestão inicial: Sem card + Novos Contatos + Envio de Orçamento.'
+                              : 'Sugestão inicial: Agendamento de Consulta + Consulta Confirmada + Desmarcou a Consulta.'
+                          }}
+                          Card mudou de coluna = muda quem fala, na hora. Uma
+                          coluna tem um dono só.
+                        </p>
+                      </div>
+
+                      <!-- ao agendar → coluna / teto da sombra / horário -->
+                      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div v-if="key === 'atendente_agendamento'">
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Ao agendar (ao vivo), mover o card para</label>
+                          <select
+                            v-model="agent.after_booking_stage_id"
+                            :disabled="!editingAgent[key]"
+                            class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                          >
+                            <option value="">— não mover —</option>
+                            <option
+                              v-for="st in allStages"
+                              :key="st.id"
+                              :value="st.id"
+                            >
+                              {{ st.name }} ({{ st.pipeline }})
+                            </option>
+                          </select>
+                        </div>
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Teto da sombra
+                            <span class="text-n-slate-9 font-normal">(conversas por dia)</span></label>
+                          <input
+                            v-model.number="agent.shadow_daily_cap"
+                            type="number"
+                            min="1"
+                            max="500"
+                            :disabled="!editingAgent[key]"
+                            class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                          />
+                        </div>
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Horário em que atende sozinho
+                            <span class="text-n-slate-9 font-normal">(janela ao vivo; vazio = o dia inteiro)</span></label>
+                          <div class="flex items-center gap-1.5">
+                            <input
+                              v-model="agent.hours_start"
+                              type="time"
+                              :disabled="!editingAgent[key]"
+                              class="cv-input flex-1 min-w-0 text-sm disabled:cursor-not-allowed"
+                            />
+                            <span class="text-[11px] text-n-slate-9">até</span>
+                            <input
+                              v-model="agent.hours_end"
+                              type="time"
+                              :disabled="!editingAgent[key]"
+                              class="cv-input flex-1 min-w-0 text-sm disabled:cursor-not-allowed"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <button
+                          class="cv-btn cv-btn-sm cv-green"
+                          title="Converse com o agente como se fosse o paciente — IA de verdade, caixa interna sem envio"
+                          @click="openTestAgent(key)"
+                        >
+                          <span class="i-lucide-flask-conical text-xs" /> 🧪
+                          Testar agente
+                        </button>
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          @click="
+                            shadowAgentKey = key;
+                            shadowOpen = true;
+                          "
+                        >
+                          <span class="i-lucide-columns-2 text-xs" /> 🕶️ Abrir
+                          tela Sombra (interno × N8N)
+                        </button>
+                        <button
+                          class="cv-btn cv-btn-sm cv-btn-ghost"
+                          @click="
+                            scriptExpanded = true;
+                            scriptOpenSection = 'persona';
+                            document
+                              .getElementById('cv-roteiro')
+                              ?.scrollIntoView({
+                                behavior: 'smooth',
+                                block: 'start',
+                              });
+                          "
+                        >
+                          <span class="i-lucide-scroll-text text-xs" /> Ver o
+                          Roteiro CEVICO
+                        </button>
+                        <span class="text-[10px] text-n-slate-9">O campo <b>Passos desta etapa</b> abaixo é só o passo
+                          a passo deste agente{{
+                            key === 'atendente_agendamento'
+                              ? ' (recepção → agendamento)'
+                              : ' (suporte a quem já marcou)'
+                          }}.</span>
+                      </div>
+
+                      <!-- 📒 Registro de atividade -->
+                      <div v-if="atendenteEvents(key).length">
+                        <p class="cv-label mb-1">📒 Registro de atividade</p>
+                        <div class="max-h-40 overflow-y-auto space-y-1">
+                          <p
+                            v-for="(ev, i) in atendenteEvents(key)"
+                            :key="i"
+                            class="text-[11px] text-n-slate-11"
+                          >
+                            <span class="text-n-slate-9">{{
+                              new Date(ev.at).toLocaleString('pt-BR', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            }}</span>
+                            · #{{ ev.conversation_id }} {{ ev.contact }} —
+                            {{ ATENDENTE_EVENT_LABELS[ev.type] || ev.type }}
+                            <span v-if="ev.note"
+class="text-n-slate-9"
+                              >({{ ev.note }})</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Config específica do Atendente Instagram (respondedor) -->
+                    <div
+                      v-if="key === 'instagram'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <!-- 🎛 Painel de situação: a configuração dele, num relance -->
+                      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div
+                          class="cv-stat px-3 py-2"
+                          :class="agent.enabled ? 'cv-green' : ''"
+                        >
+                          <p class="text-[10px] text-n-slate-10">Situação</p>
+                          <p
+                            class="text-sm font-bold"
+                            :class="
+                              agent.enabled
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-n-slate-11'
+                            "
+                          >
+                            {{ agent.enabled ? '● Atendendo' : '○ Desligado' }}
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">
+                            Caixas em que atende
+                          </p>
+                          <p
+                            class="text-sm font-bold text-n-slate-12 truncate"
+                            :title="instagramInboxNames(agent).join(', ')"
+                          >
+                            {{
+                              instagramInboxNames(agent).length
+                                ? instagramInboxNames(agent).join(', ')
+                                : 'nenhuma'
+                            }}
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">
+                            Respostas
+                            <span class="text-n-slate-9">(últ. registros)</span>
+                          </p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            💬 {{ instagramStats().replied }}
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">
+                            Agendamentos / avisos
+                          </p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            📅 {{ instagramStats().scheduled }}
+                            <span
+                              v-if="instagramStats().errors"
+                              class="text-amber-500"
+                              >· ⚠️ {{ instagramStats().errors }}</span>
+                          </p>
+                        </div>
+                      </div>
+                      <div
+                        class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed"
+                      >
+                        ⚠️ Este agente FALA COM O PACIENTE nas caixas abaixo.
+                        Ele agenda só na Agenda interna, nunca inventa
+                        valores/horários, e as confirmações oficiais vão pelo
+                        WhatsApp. Se um humano responder na conversa, ele PAUSA
+                        na hora — 👍 do atendimento reativa.
+                      </div>
+                      <div>
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          Caixas de entrada em que ele atende
+                          <span class="text-n-slate-9 font-normal">(nenhuma marcada = desligado na prática)</span>
+                        </p>
+                        <div class="flex flex-wrap gap-1.5">
+                          <button
+                            v-for="ib in inboxes"
+                            :key="ib.id"
+                            class="cv-chip cv-chip-lg"
+                            :class="
+                              (agent.inbox_ids || []).includes(ib.id)
+                                ? 'cv-chip-on'
+                                : ''
+                            "
+                            :style="
+                              (agent.inbox_ids || []).includes(ib.id)
+                                ? {
+                                    background:
+                                      'linear-gradient(135deg, #C2185B, #7C3AED)',
+                                  }
+                                : {}
+                            "
+                            :disabled="!editingAgent[key]"
+                            @click="toggleInstagramInbox(ib.id)"
+                          >
+                            {{ ib.name }}
+                          </button>
+                          <p
+                            v-if="!inboxes.length"
+                            class="text-[11px] text-n-slate-10"
+                          >
+                            Nenhuma caixa de entrada na conta ainda.
+                          </p>
+                        </div>
+                        <p class="text-[10px] text-n-slate-9 mt-1">
+                          Escolha a caixa do Instagram quando ela for conectada
+                          (Configurações → Caixas de Entrada). Salve e publique
+                          para valer.
+                        </p>
+                      </div>
+                      <!-- 📒 Registro de atividade -->
+                      <div v-if="instagramEvents().length">
+                        <p class="cv-label mb-1">📒 Registro de atividade</p>
+                        <div class="max-h-40 overflow-y-auto space-y-1">
+                          <p
+                            v-for="(ev, i) in instagramEvents()"
+                            :key="i"
+                            class="text-[11px] text-n-slate-11"
+                          >
+                            <span class="text-n-slate-9">{{
+                              new Date(ev.at).toLocaleString('pt-BR', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            }}</span>
+                            · #{{ ev.conversation_id }} {{ ev.contact }} —
+                            {{ INSTAGRAM_EVENT_LABELS[ev.type] || ev.type }}
+                            <span v-if="ev.note"
+class="text-n-slate-9"
+                              >({{ ev.note }})</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Config específica do Radar de Oportunidades (perene) -->
+                    <div
+                      v-if="key === 'opportunity'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <!-- O que ele monitora, direto ao ponto -->
+                      <div
+                        class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed"
+                      >
+                        <p>
+                          📡 Monitora só o movimento <b>novo</b> de cada coluna
+                          vigiada (espera > {{ agent.wait_minutes }} min) ·
+                          avisa no <b>Meu Painel</b> do atendente escolhido ·
+                          <b>nunca fala com o paciente</b>.
+                        </p>
+                        <p v-if="radarLastRun()" class="text-n-slate-10 mt-0.5">
+                          Última rodada: {{ radarLastRun().candidates }} no
+                          filtro · {{ radarLastRun().analyzed }} analisados ·
+                          {{ radarLastRun().new_alerts }} novos avisos
+                        </p>
+                      </div>
+
+                      <div
+                        class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11"
+                      >
+                        Avisar quando o paciente esperar mais de
+                        <input
+                          v-model.number="agent.wait_minutes"
+                          type="number"
+                          min="1"
+                          :disabled="!editingAgent[key]"
+                          class="cv-input !h-8 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+                          style="width: 4.5rem"
+                        />
+                        min sem resposta
+                      </div>
+
+                      <!-- Meta de tempo de atendimento: vira o relatório pessoal
+                   de cada atendente no Meu Painel -->
+                      <div class="cv-sub px-3 py-2.5">
+                        <div
+                          class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11"
+                        >
+                          <span
+                            class="i-lucide-target text-sm"
+                            style="color: #059669"
+                          />
+                          <b class="text-n-slate-12">Meta de tempo de atendimento:</b>
+                          responder o paciente em até
+                          <input
+                            v-model.number="agent.response_goal_minutes"
+                            type="number"
+                            min="1"
+                            :disabled="!editingAgent[key]"
+                            class="cv-input !h-8 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+                            style="width: 4.5rem"
+                          />
+                          minutos
+                        </div>
+                        <p class="text-[11px] text-n-slate-9 mt-1">
+                          Cada atendente acompanha a própria meta no
+                          <b>Meu Painel</b>: tempo médio de resposta, % das
+                          respostas dentro da meta e o selo de meta batida.
+                          Admin vê a quebra por atendente.
+                        </p>
+                      </div>
+
+                      <!-- Vigias: coluna + painel do atendente + janela de tempo -->
+                      <div>
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          Colunas vigiadas
+                          <span class="text-n-slate-9 font-normal">(cada coluna com seu atendente e janela — sem vigia
+                            o Radar fica desligado)</span>
+                        </p>
+                        <div
+                          v-if="!allStages.length"
+                          class="text-xs text-n-slate-9"
+                        >
+                          Carregando colunas…
+                        </div>
+                        <template v-else>
+                          <div
+                            v-if="!agent.watchers.length"
+                            class="text-xs text-n-slate-9 mb-2"
+                          >
+                            Nenhuma coluna vigiada ainda — adicione a primeira
+                            abaixo.
+                          </div>
+                          <div v-else class="space-y-2 mb-2">
+                            <div
+                              v-for="(w, wi) in agent.watchers"
+                              :key="wi"
+                              class="flex flex-col sm:flex-row sm:items-end gap-2 cv-sub px-3 py-2.5"
+                            >
+                              <div class="flex-1 min-w-0">
+                                <label
+                                  class="text-[10px] font-medium text-n-slate-9 block mb-0.5 flex items-center gap-1"
+                                >
+                                  <span
+                                    class="i-lucide-columns-3 text-[10px]"
+                                    style="color: #dc2626"
+                                  />
+                                  Coluna vigiada
+                                </label>
+                                <select
+                                  v-model="w.stage_id"
+                                  :disabled="!editingAgent[key]"
+                                  class="cv-input !h-8 w-full text-xs disabled:opacity-70 disabled:cursor-not-allowed"
+                                >
+                                  <option value="" disabled>
+                                    Escolha a coluna…
+                                  </option>
+                                  <option
+                                    v-for="s in allStages"
+                                    :key="s.id"
+                                    :value="s.id"
+                                  >
+                                    {{ s.name }} ({{ s.pipeline }})
+                                  </option>
+                                </select>
+                              </div>
+                              <div class="flex-1 min-w-0">
+                                <label
+                                  class="text-[10px] font-medium text-n-slate-9 block mb-0.5"
+                                  >Avisar no painel de</label>
+                                <select
+                                  v-model="w.user_id"
+                                  :disabled="!editingAgent[key]"
+                                  class="cv-input !h-8 w-full text-xs disabled:opacity-70 disabled:cursor-not-allowed"
+                                >
+                                  <option :value="null">
+                                    👥 Todos os atendentes
+                                  </option>
+                                  <option
+                                    v-for="ag in teamAgents"
+                                    :key="ag.id"
+                                    :value="ag.id"
+                                  >
+                                    {{ ag.available_name || ag.name }}
+                                  </option>
+                                </select>
+                              </div>
+                              <div class="flex-1 min-w-0">
+                                <label
+                                  class="text-[10px] font-medium text-n-slate-9 block mb-0.5"
+                                  >Olhando o movimento das</label>
+                                <select
+                                  v-model.number="w.lookback_hours"
+                                  :disabled="!editingAgent[key]"
+                                  class="cv-input !h-8 w-full text-xs disabled:opacity-70 disabled:cursor-not-allowed"
+                                >
+                                  <option
+                                    v-for="o in LOOKBACK_OPTIONS"
+                                    :key="o.value"
+                                    :value="o.value"
+                                  >
+                                    {{ o.label }}
+                                  </option>
+                                </select>
+                              </div>
+                              <button
+                                v-if="editingAgent[key]"
+                                class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm flex-shrink-0 self-end sm:self-auto sm:mb-2"
+                                title="Remover esta vigia"
+                                @click="removeWatcher(wi)"
+                              />
+                            </div>
+                          </div>
+                          <button
+                            v-if="editingAgent[key]"
+                            class="cv-btn cv-btn-sm cv-btn-ghost border-dashed"
+                            style="
+                              border-color: rgba(220, 38, 38, 0.5);
+                              color: #dc2626;
+                            "
+                            @click="addWatcher"
+                          >
+                            <span class="i-lucide-plus text-xs" />
+                            Vigiar outra coluna
+                          </button>
+                        </template>
+                      </div>
+
+                      <!-- Radar pontual: roda uma vez, não fica ativo -->
+                      <div
+                        class="border-t border-n-weak pt-3 flex items-center gap-2 flex-wrap"
+                      >
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          style="
+                            background: linear-gradient(
+                              135deg,
+                              #059669,
+                              #4ade80
+                            );
+                          "
+                          @click="showSweepModal = true"
+                        >
+                          <span class="i-lucide-scan-search text-xs" />
+                          Radar pontual…
+                        </button>
+                        <span class="text-[11px] text-n-slate-9">
+                          varre AGORA a coluna que você escolher e avisa o
+                          atendente escolhido — roda uma vez, não fica ativo
+                        </span>
+                      </div>
+                    </div>
+
+                    <!-- Respondedor de Comentários: conexão da Meta + registro -->
+                    <div
+                      v-if="key === 'comments'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <div
+                        class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed"
+                      >
+                        <p>
+                          Responde os <b>comentários públicos</b> dos posts e
+                          anúncios a cada 5 min · sem preço/dado clínico em
+                          público · caso sério = <b>marca pro humano</b>.
+                          Precisa do <b>token da Página</b> (app da Meta — o
+                          mesmo caminho do canal Instagram).
+                        </p>
+                      </div>
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <label class="block">
+                          <span class="text-[10px] font-medium text-n-slate-9">ID da Página do Facebook (opcional)</span>
+                          <input
+                            v-model="agent.fb_page_id"
+                            type="text"
+                            :disabled="!editingAgent[key]"
+                            placeholder="ex.: 1234567890"
+                            class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                          />
+                        </label>
+                        <label class="block">
+                          <span class="text-[10px] font-medium text-n-slate-9">ID da conta Instagram Business (opcional)</span>
+                          <input
+                            v-model="agent.ig_user_id"
+                            type="text"
+                            :disabled="!editingAgent[key]"
+                            placeholder="ex.: 17841400000000"
+                            class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                          />
+                        </label>
+                      </div>
+                      <label class="block">
+                        <span class="text-[10px] font-medium text-n-slate-9">
+                          Token de acesso da Página
+                          {{
+                            agent.page_token_set
+                              ? '— já conectado ✓ (cole um novo só pra trocar)'
+                              : ''
+                          }}
+                        </span>
+                        <input
+                          v-model="agent.page_access_token"
+                          type="password"
+                          :disabled="!editingAgent[key]"
+                          :placeholder="
+                            agent.page_token_set
+                              ? '••••••••••••'
+                              : 'cole o Page Access Token da Meta'
+                          "
+                          class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                        />
+                      </label>
+                      <!-- registro de atividade (aparência nativa) -->
+                      <div v-if="(settings?.ai?.comments_events || []).length">
+                        <p class="cv-label mb-1">
+                          Últimos comentários tratados
+                        </p>
+                        <div class="space-y-1 max-h-44 overflow-y-auto">
+                          <div
+                            v-for="(ev, ei) in settings.ai.comments_events"
+                            :key="ei"
+                            class="cv-row px-2.5 py-1.5 text-[11px]"
+                          >
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                :class="
+                                  ev.platform === 'instagram'
+                                    ? 'i-lucide-instagram'
+                                    : 'i-lucide-facebook'
+                                "
+                                class="text-[11px] text-n-slate-9"
+                              />
+                              <b class="text-n-slate-12">@{{ ev.author }}</b>
+                              <span
+                                class="text-[9px] font-bold px-1.5 rounded-full uppercase"
+                                :style="
+                                  ev.status === 'respondido'
+                                    ? 'background: rgba(16,185,129,0.15); color: #047857'
+                                    : ev.status === 'humano'
+                                      ? 'background: rgba(245,158,11,0.15); color: #B45309'
+                                      : 'background: rgba(100,116,139,0.15); color: #64748B'
+                                "
+                              >
+                                {{ ev.status }}
+                              </span>
+                            </div>
+                            <p class="text-n-slate-10 mt-0.5">
+                              “{{ ev.comment }}”
+                            </p>
+                            <p
+                              v-if="ev.reply && ev.status === 'respondido'"
+                              class="text-n-slate-11 mt-0.5"
+                            >
+                              ↳ {{ ev.reply }}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Mentor do Time: como funciona + gerar agora -->
+                    <div
+                      v-if="key === 'mentor'"
+                      class="cv-sub p-4 mb-4 space-y-2"
+                    >
+                      <div
+                        class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed"
+                      >
+                        <p>
+                          Toda <b>segunda de manhã</b> ele lê a semana de cada
+                          pessoa e deixa o feedback no <b>Meu Painel</b> dela:
+                          ponto forte, o ponto fraco a corrigir e soluções
+                          simples · compara com a <b>mediana do time</b> sem
+                          expor ninguém · <b>nunca fala com o paciente</b>.
+                        </p>
+                      </div>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <p class="text-xs font-medium text-n-slate-11 flex-1">
+                          Primeira rodada ou teste
+                          <span class="text-n-slate-9 font-normal">(analisa os últimos 7 dias agora, sem esperar
+                            segunda)</span>
+                        </p>
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          :style="{ background: AGENT_META.mentor.gradient }"
+                          :disabled="isRunningMentor || !agent.enabled"
+                          :title="
+                            agent.enabled
+                              ? ''
+                              : 'Ligue o Mentor no interruptor acima primeiro'
+                          "
+                          @click="runMentorNow"
+                        >
+                          {{
+                            isRunningMentor
+                              ? 'Gerando… (1-2 min)'
+                              : 'Gerar feedback agora'
+                          }}
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Consultor Comercial: insights p/ a gestão -->
+                    <div
+                      v-if="key === 'sales'"
+                      class="cv-sub p-4 mb-4 space-y-2"
+                    >
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <p class="text-xs font-medium text-n-slate-11 flex-1">
+                          💡 Insights comerciais
+                          <span class="text-n-slate-9 font-normal">(analisa as conversas que FECHARAM cirurgia —
+                            alimentadas pelo Monitor de Fechamento)</span>
+                        </p>
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          :style="{ background: AGENT_META.sales.gradient }"
+                          :disabled="isGeneratingInsights"
+                          @click="generateSalesInsights"
+                        >
+                          {{
+                            isGeneratingInsights
+                              ? 'Analisando… (1-2 min)'
+                              : 'Gerar insights comerciais'
+                          }}
+                        </button>
+                      </div>
+                      <div
+                        v-if="salesInsights()?.text"
+                        class="cv-row p-3 max-h-72 overflow-y-auto"
+                      >
+                        <p class="text-[10px] text-n-slate-9 mb-1.5">
+                          {{ salesInsights().conversations }} conversa(s)
+                          analisada(s) ·
+                          {{ fmtLogDate(salesInsights().generated_at) }}
+                        </p>
+                        <pre
+                          class="text-[11px] text-n-slate-11 whitespace-pre-wrap font-sans leading-relaxed"
+                          >{{ salesInsights().text }}</pre>
+                      </div>
+                      <p
+                        v-else-if="salesInsights()?.error"
+                        class="text-[11px] text-amber-600"
+                      >
+                        ⚠️ {{ salesInsights().error }}
+                      </p>
+                    </div>
+
+                    <!-- 🏗️ CONSTRUTOR PRO: referências de estilo + teto de resposta -->
+                    <div
+                      v-if="key === 'pagebuilder'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <p
+                        class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5"
+                      >
+                        <span
+                          class="i-lucide-ruler text-xs"
+                          style="color: #d4af37"
+                        />
+                        Construtor PRO
+                        <span class="font-normal text-n-slate-9">— rédeas da montagem: estilo e tamanho da
+                          resposta</span>
+                      </p>
+                      <div>
+                        <p class="text-[11px] font-medium text-n-slate-11 mb-1">
+                          Referências de estilo
+                          <span class="text-n-slate-9 font-normal">(cole exemplos de páginas que você admira,
+                            diretrizes de marca, o que nunca pode faltar — o
+                            Construtor se inspira nelas em TODA montagem)</span>
+                        </p>
+                        <textarea
+                          v-model="aiAgents.pagebuilder.references"
+                          rows="3"
+                          class="cv-input !h-8 w-full text-xs"
+                          placeholder="Ex: hero curto e emocional · benefícios sempre em cards · fechar com FAQ + CTA dourado · tom calmo, público 55+, letra grande…"
+                        />
+                      </div>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span class="text-[11px] text-n-slate-10">Teto de resposta (tokens):</span>
+                        <input
+                          v-model="aiAgents.pagebuilder.max_tokens"
+                          type="number"
+                          min="1000"
+                          max="60000"
+                          step="1000"
+                          placeholder="30000"
+                          class="cv-input !h-8 text-xs"
+                          style="width: 6.5rem"
+                        />
+                        <span class="text-[10px] text-n-slate-9">vazio = padrão (30.000). Página grande truncada?
+                          Aumente. Custo alto? Diminua.</span>
+                      </div>
+                      <button
+                        class="cv-btn cv-btn-sm"
+                        style="
+                          background: linear-gradient(135deg, #d4af37, #f4de8e);
+                          color: #072a4c;
+                        "
+                        :disabled="savingBuilderPro"
+                        @click="saveBuilderPro"
+                      >
+                        {{
+                          savingBuilderPro
+                            ? 'Salvando…'
+                            : 'Salvar rédeas do Construtor'
+                        }}
+                      </button>
+                    </div>
+
+                    <!-- ✍️ ESTÚDIO DO COPYWRITER: referências + conteúdo multi-formato -->
+                    <div
+                      v-if="key === 'copywriter'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <p
+                        class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5"
+                      >
+                        <span
+                          class="i-lucide-pen-line text-xs"
+                          style="color: #7c3aed"
+                        />
+                        Estúdio de conteúdo
+                        <span class="font-normal text-n-slate-9">— escolha o formato e a estrutura; o resultado é seu
+                          para copiar</span>
+                      </p>
+
+                      <!-- referências da casa: o agente segue esse estilo em TUDO -->
+                      <div>
+                        <p class="text-[11px] font-medium text-n-slate-11 mb-1">
+                          Suas estruturas e referências de copywriting
+                          <span class="text-n-slate-9 font-normal">(cole exemplos que você gosta, frases da casa,
+                            regras de estilo — vale para páginas e para o
+                            Estúdio)</span>
+                        </p>
+                        <textarea
+                          v-model="aiAgents.copywriter.references"
+                          rows="3"
+                          class="cv-input !h-8 w-full text-xs"
+                          placeholder="Ex: sempre abrir com pergunta que toca a dor · nunca usar 'agende já' · exemplo de copy aprovada: ..."
+                        />
+                        <button
+                          class="cv-btn cv-btn-sm mt-1"
+                          style="
+                            background: linear-gradient(
+                              135deg,
+                              #7c3aed,
+                              #5b21b6
+                            );
+                          "
+                          :disabled="savingRefs"
+                          @click="saveCopyReferences"
+                        >
+                          {{ savingRefs ? 'Salvando…' : 'Salvar referências' }}
+                        </button>
+                      </div>
+
+                      <!-- formato: botões em linha -->
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="text-[11px] text-n-slate-10">Formato:</span>
+                        <button
+                          v-for="m in STUDIO_MODALITIES"
+                          :key="m.key"
+                          class="cv-chip cv-chip-lg"
+                          :class="studio.modality === m.key ? 'cv-chip-on' : ''"
+                          :style="
+                            studio.modality === m.key
+                              ? { background: AGENT_META.copywriter.gradient }
+                              : {}
+                          "
+                          @click="studio.modality = m.key"
+                        >
+                          {{ m.label }}
+                        </button>
+                        <span class="text-[10px] text-n-slate-9">· páginas são no editor de Páginas</span>
+                      </div>
+
+                      <!-- estrutura narrativa: botões em linha -->
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="text-[11px] text-n-slate-10">Estrutura:</span>
+                        <button
+                          v-for="st in STUDIO_STRUCTURES"
+                          :key="st.key"
+                          class="cv-chip cv-chip-lg"
+                          :class="
+                            studio.structure === st.key ? 'cv-chip-on' : ''
+                          "
+                          @click="studio.structure = st.key"
+                        >
+                          {{ st.label }}
+                        </button>
+                      </div>
+
+                      <textarea
+                        v-model="studio.briefing"
+                        rows="3"
+                        class="cv-input !h-8 w-full text-xs"
+                        placeholder="Briefing: assunto, objetivo e o que não pode faltar. Ex: carrossel sobre os 5 mitos da cirurgia de catarata, tom acolhedor, CTA para avaliação."
+                      />
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <select
+                          v-model="studio.form_id"
+                          class="h-8 cv-sub px-2 text-[11px] text-n-slate-12 max-w-[240px]"
+                        >
+                          <option value="">Sem insights de formulário</option>
+                          <option
+                            v-for="f in studioForms"
+                            :key="f.id"
+                            :value="f.id"
+                          >
+                            Usar insights de: {{ f.name }}
+                          </option>
+                        </select>
+                        <button
+                          class="cv-btn cv-btn-sm ml-auto"
+                          :style="{
+                            background: AGENT_META.copywriter.gradient,
+                          }"
+                          :disabled="studio.generating"
+                          @click="generateStudio"
+                        >
+                          <span
+                            :class="
+                              studio.generating
+                                ? 'i-lucide-loader-circle animate-spin'
+                                : 'i-lucide-sparkles'
+                            "
+                            class="text-xs"
+                          />
+                          {{
+                            studio.generating ? 'Escrevendo…' : 'Gerar conteúdo'
+                          }}
+                        </button>
+                      </div>
+
+                      <!-- resultado -->
+                      <div v-if="studio.result" class="cv-row p-3 space-y-2">
+                        <div class="flex items-center gap-2">
+                          <p class="text-xs font-bold text-n-slate-12 flex-1">
+                            {{ studio.result.titulo }}
+                          </p>
+                          <button
+                            class="text-[11px] font-medium text-n-brand hover:underline flex items-center gap-1"
+                            @click="copyStudioResult"
+                          >
+                            <span class="i-lucide-copy text-[10px]" /> Copiar
+                            tudo
+                          </button>
+                        </div>
+                        <div
+                          v-for="(b, bi) in studio.result.blocos"
+                          :key="bi"
+                          class="cv-input"
+                        >
+                          <p
+                            class="text-[10px] font-bold text-n-slate-9 uppercase tracking-wide"
+                          >
+                            {{ b.rotulo }}
+                          </p>
+                          <p
+                            class="text-[11px] text-n-slate-11 whitespace-pre-wrap leading-relaxed"
+                          >
+                            {{ b.texto }}
+                          </p>
+                        </div>
+                        <p
+                          v-if="studio.result.legenda"
+                          class="text-[11px] text-n-slate-11 whitespace-pre-wrap"
+                        >
+                          <b>Legenda:</b> {{ studio.result.legenda }}
+                        </p>
+                        <p
+                          v-if="studio.result.hashtags"
+                          class="text-[11px] text-n-slate-10"
+                        >
+                          {{ studio.result.hashtags }}
+                        </p>
+                      </div>
+                    </div>
+
+                    <!-- Colunas de atuação (Analista / Monitor de Fechamento / NPS) -->
+                    <div
+                      v-if="STAGE_AGENTS.includes(key)"
+                      class="cv-sub p-4 mb-4 space-y-2"
+                    >
+                      <p class="text-xs font-medium text-n-slate-11">
+                        Colunas de atuação
+                        <span class="text-n-slate-9 font-normal">
+                          (card entrou na coluna → o agente lê a conversa
+                          <template v-if="key === 'closing'">; sugestão: as colunas de "Indicação de
+                            Cirurgia"</template>
+                          <template v-else-if="key === 'nps'">; sugestão: a coluna de Pós-Operatório</template>)
+                        </span>
+                      </p>
+                      <div
+                        v-if="!allStages.length"
+                        class="text-xs text-n-slate-9"
+                      >
+                        Carregando colunas…
+                      </div>
+                      <div v-else class="flex flex-wrap gap-1.5">
+                        <button
+                          v-for="st in allStages"
+                          :key="st.id"
+                          class="cv-chip cv-chip-lg"
+                          :class="
+                            agentStageIds[key].includes(st.id)
+                              ? 'cv-chip-on'
+                              : ''
+                          "
+                          :style="
+                            agentStageIds[key].includes(st.id)
+                              ? { background: AGENT_META[key].gradient }
+                              : {}
+                          "
+                          @click="toggleAgentStage(key, st.id)"
+                        >
+                          {{ st.name }}
+                        </button>
+                      </div>
+                      <button
+                        class="cv-btn cv-btn-sm"
+                        :style="{ background: AGENT_META[key].gradient }"
+                        :disabled="savingAgentStages === key"
+                        @click="saveAgentStages(key)"
+                      >
+                        {{
+                          savingAgentStages === key
+                            ? 'Salvando…'
+                            : 'Salvar colunas de atuação'
+                        }}
+                      </button>
+                    </div>
+
+                    <!-- Config do Secretário da Agenda -->
+                    <div
+                      v-if="key === 'scheduler'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <div
+                        class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed"
+                      >
+                        📥 Anota consultas na Agenda do sistema lendo as
+                        conversas — <b>nunca fala com o paciente</b> (quem
+                        conversa é o Atendente IA do N8N). Lê quando o card
+                        ENTRA nas colunas escolhidas
+                        <b>e relê a cada mensagem do paciente nessas colunas</b>
+                        — a confirmação que chega depois não escapa mais.
+                        Reagendamentos atualizam a consulta existente;
+                        <b>cancelamento sem novo horário tira a consulta da
+                          Agenda</b>. Fora das colunas: quem tem tarefa "⚠️ Confirmar
+                        consulta" aberta ou fala em remarcar/cancelar também
+                        redispara a leitura sozinho.
+                      </div>
+
+                      <!-- Colunas onde o Secretário atua -->
+                      <div>
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          Colunas onde o Secretário atua
+                          <span class="text-n-slate-9 font-normal">(card entrou + mensagens do paciente na coluna → lê
+                            a conversa e anota na Agenda; nenhuma marcada = só
+                            manual)</span>
+                        </p>
+                        <div
+                          v-if="!allStages.length"
+                          class="text-xs text-n-slate-9"
+                        >
+                          Carregando colunas…
+                        </div>
+                        <div v-else class="flex flex-wrap gap-1.5">
+                          <button
+                            v-for="s in allStages"
+                            :key="s.id"
+                            class="cv-chip cv-chip-lg"
+                            :class="
+                              schedulerStageIds.includes(s.id)
+                                ? 'cv-chip-on'
+                                : ''
+                            "
+                            :style="
+                              schedulerStageIds.includes(s.id)
+                                ? {
+                                    background:
+                                      'linear-gradient(135deg, #B8860B, #D4A017)',
+                                  }
+                                : {}
+                            "
+                            @click="toggleSchedulerStage(s.id)"
+                          >
+                            {{ s.name }}
+                          </button>
+                        </div>
+                        <button
+                          class="cv-btn cv-btn-sm mt-2"
+                          style="
+                            background: linear-gradient(
+                              135deg,
+                              #b8860b,
+                              #d4a017
+                            );
+                          "
+                          :disabled="isSavingSchedulerStages"
+                          @click="saveSchedulerStages"
+                        >
+                          {{
+                            isSavingSchedulerStages
+                              ? 'Salvando…'
+                              : 'Salvar colunas de atuação'
+                          }}
+                        </button>
+                      </div>
+
+                      <!-- Preencher com o histórico -->
+                      <div
+                        class="flex items-center gap-2 flex-wrap border-t border-n-weak pt-3"
+                      >
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          style="
+                            background: linear-gradient(
+                              135deg,
+                              #b8860b,
+                              #d4a017
+                            );
+                          "
+                          @click="showBackfillModal = true"
+                        >
+                          <span class="i-lucide-calendar-search text-xs" />
+                          Preencher agenda com o histórico…
+                        </button>
+                        <span
+                          v-if="backfillLastRun()"
+                          class="text-[11px] text-n-slate-10"
+                        >
+                          Última varredura:
+                          {{ backfillLastRun().scanned }} conversas ·
+                          {{ backfillLastRun().created || 0 }} criadas ·
+                          {{ backfillLastRun().rescheduled || 0 }} reagendadas ·
+                          {{ backfillLastRun().already || 0 }} já existiam
+                        </span>
+                      </div>
+
+                      <!-- Registro de atividade: cada leitura vira uma linha -->
+                      <div class="border-t border-n-weak pt-3">
+                        <button
+                          class="flex items-center gap-1.5 text-xs font-medium text-n-slate-11 hover:text-n-brand"
+                          @click="showSchedulerLog = !showSchedulerLog"
+                        >
+                          <span
+                            :class="
+                              showSchedulerLog
+                                ? 'i-lucide-chevron-up'
+                                : 'i-lucide-chevron-down'
+                            "
+                            class="text-xs"
+                          />
+                          📒 Registro de atividade ({{ schedulerLog().length }}
+                          última(s) leitura(s))
+                        </button>
+                        <div
+                          v-if="showSchedulerLog"
+                          class="mt-2 space-y-1 max-h-56 overflow-y-auto pr-1"
+                        >
+                          <p
+                            v-if="!schedulerLog().length"
+                            class="text-xs text-n-slate-9"
+                          >
+                            Nenhuma leitura ainda — as linhas aparecem aqui
+                            conforme o Secretário trabalhar.
+                          </p>
+                          <div
+                            v-for="(entry, i) in schedulerLog()"
+                            :key="i"
+                            class="cv-input !h-8"
+                          >
+                            <span class="text-n-slate-9">{{
+                              fmtLogDate(entry.at)
+                            }}</span>
+                            <span
+                              class="font-medium text-n-slate-12 truncate max-w-[160px]"
+                              >{{ entry.name }}</span>
+                            <span v-if="entry.when"
+class="text-n-slate-10"
+                              >→ consulta {{ fmtLogDate(entry.when) }}</span>
+                            <span
+                              class="cv-chip ml-auto"
+                              :class="
+                                (SCHEDULER_OUTCOMES[entry.outcome] || {}).class
+                              "
+                            >
+                              {{
+                                (SCHEDULER_OUTCOMES[entry.outcome] || {})
+                                  .label || entry.outcome
+                              }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 🌾 Config da Colheitadeira da Base -->
+                    <div
+                      v-if="key === 'harvest'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <div
+                        class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed"
+                      >
+                        🌾 Todo mês ele pontua a base fria, escolhe os leads
+                        mais propensos e manda a mensagem modelo com um
+                        <b>gancho pessoal</b> escrito pela IA — um a um, dentro
+                        do teto diário. Com a caixinha marcada,
+                        <b>nada sai sem a sua aprovação</b>.
+                      </div>
+
+                      <!-- Modo de trabalho: organizar (etiqueta no CRM) × enviar (mensagem) -->
+                      <div>
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          O que ele faz com os leads aprovados
+                        </p>
+                        <div
+                          class="grid grid-cols-1 sm:grid-cols-2 gap-2"
+                          role="radiogroup"
+                        >
+                          <button
+                            role="radio"
+                            :aria-checked="agent.mode !== 'send'"
+                            class="cv-choice p-3 disabled:cursor-not-allowed"
+                            :class="agent.mode !== 'send' ? 'cv-choice-on' : ''"
+                            :style="
+                              agent.mode !== 'send'
+                                ? {
+                                    borderColor: AGENT_META.harvest.color,
+                                    background: AGENT_META.harvest.color + '14',
+                                  }
+                                : {}
+                            "
+                            :disabled="!editingAgent[key]"
+                            @click="agent.mode = 'organize'"
+                          >
+                            <p class="text-xs font-bold text-n-slate-12">
+                              🗂️ Organizar oportunidades
+                              <span class="font-normal text-n-slate-9">(recomendado)</span>
+                            </p>
+                            <p
+                              class="text-[11px] text-n-slate-10 mt-0.5 leading-relaxed"
+                            >
+                              a IA escolhe e etiqueta os melhores leads frios
+                              como oportunidade_AAAA_MM — nenhuma mensagem sai;
+                              o time trabalha a lista no CRM filtrando pela
+                              etiqueta
+                            </p>
+                          </button>
+                          <button
+                            role="radio"
+                            :aria-checked="agent.mode === 'send'"
+                            class="cv-choice p-3 disabled:cursor-not-allowed"
+                            :class="agent.mode === 'send' ? 'cv-choice-on' : ''"
+                            :style="
+                              agent.mode === 'send'
+                                ? {
+                                    borderColor: AGENT_META.harvest.color,
+                                    background: AGENT_META.harvest.color + '14',
+                                  }
+                                : {}
+                            "
+                            :disabled="!editingAgent[key]"
+                            @click="agent.mode = 'send'"
+                          >
+                            <p class="text-xs font-bold text-n-slate-12">
+                              📤 Enviar mensagem modelo
+                            </p>
+                            <p
+                              class="text-[11px] text-n-slate-10 mt-0.5 leading-relaxed"
+                            >
+                              envia a mensagem modelo aprovada com gancho
+                              pessoal, respeitando o teto diário
+                            </p>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <label class="block">
+                          <span class="text-[10px] font-medium text-n-slate-9">Quantos leads por mês</span>
+                          <input
+                            v-model.number="agent.monthly_size"
+                            type="number"
+                            min="1"
+                            placeholder="300"
+                            :disabled="!editingAgent[key]"
+                            class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                          />
+                        </label>
+                        <label class="block">
+                          <span class="text-[10px] font-medium text-n-slate-9">Frio há pelo menos (dias)</span>
+                          <input
+                            v-model.number="agent.cold_days"
+                            type="number"
+                            min="1"
+                            placeholder="60"
+                            :disabled="!editingAgent[key]"
+                            class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                          />
+                        </label>
+                        <label v-if="agent.mode === 'send'" class="block">
+                          <span class="text-[10px] font-medium text-n-slate-9">Teto de envios por dia</span>
+                          <input
+                            v-model.number="agent.daily_cap"
+                            type="number"
+                            min="1"
+                            placeholder="50"
+                            :disabled="!editingAgent[key]"
+                            class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                          />
+                          <span class="text-[10px] text-n-slate-9 block mt-0.5">anti-bloqueio: menos é mais seguro</span>
+                        </label>
+                        <label class="block">
+                          <span class="text-[10px] font-medium text-n-slate-9">Dia do mês que a colheita gera a prévia</span>
+                          <input
+                            v-model.number="agent.day_of_month"
+                            type="number"
+                            min="1"
+                            max="28"
+                            placeholder="1"
+                            :disabled="!editingAgent[key]"
+                            class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                          />
+                        </label>
+                      </div>
+
+                      <div v-if="agent.mode === 'send'">
+                        <label
+                          class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                          >Caixa de WhatsApp que envia</label>
+                        <select
+                          v-model="agent.inbox_id"
+                          :disabled="!editingAgent[key]"
+                          class="cv-input w-full text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+                        >
+                          <option :value="null" disabled>
+                            Escolha a caixa…
+                          </option>
+                          <option
+                            v-for="ib in whatsappInboxes"
+                            :key="ib.id"
+                            :value="ib.id"
+                          >
+                            {{ ib.name }}
+                          </option>
+                        </select>
+                        <p
+                          v-if="!whatsappInboxes.length"
+                          class="text-[11px] text-n-slate-10 mt-1"
+                        >
+                          Nenhuma caixa de WhatsApp na conta ainda
+                          (Configurações → Caixas de Entrada).
+                        </p>
+                      </div>
+
+                      <div v-if="agent.mode === 'send'">
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          Mensagem modelo
+                          <span class="text-n-slate-9 font-normal">(template aprovado pela Meta — sem ele a colheita
+                            não envia)</span>
+                        </p>
+                        <div class="flex items-center gap-2">
+                          <div class="flex-1 min-w-0">
+                            <p
+                              v-if="agent.template_params"
+                              class="text-xs text-n-slate-12 truncate"
+                            >
+                              📋 {{ agent.template_params.name }}
+                              <span
+                                v-if="agent.message_preview"
+                                class="text-n-slate-9"
+                                >— "{{
+                                  agent.message_preview.slice(0, 60)
+                                }}…"</span>
+                            </p>
+                            <p v-else class="text-xs text-amber-600">
+                              Nenhum modelo escolhido ainda.
+                            </p>
+                          </div>
+                          <button
+                            class="cv-btn cv-btn-sm cv-btn-ghost flex-shrink-0"
+                            :disabled="!editingAgent[key]"
+                            :title="
+                              editingAgent[key]
+                                ? ''
+                                : 'Clique em Editar lá embaixo para trocar o modelo'
+                            "
+                            @click="openHarvestTemplatePicker"
+                          >
+                            {{
+                              agent.template_params
+                                ? 'Trocar modelo'
+                                : 'Escolher modelo'
+                            }}
+                          </button>
+                        </div>
+                        <p class="text-[10px] text-n-slate-9 mt-1">
+                          💡 Use
+                          <code class="bg-n-alpha-2 px-1 rounded">[gancho]</code>
+                          numa variável do modelo — a IA escreve um gancho
+                          pessoal para cada paciente;
+                          <code class="bg-n-alpha-2 px-1 rounded">[procedimento]</code>
+                          também funciona.
+                        </p>
+                      </div>
+
+                      <label
+                        class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer"
+                      >
+                        <input
+                          v-model="agent.require_approval"
+                          type="checkbox"
+                          class="rounded accent-n-brand"
+                          :disabled="!editingAgent[key]"
+                        />
+                        Exigir minha aprovação antes de enviar
+                        <span class="text-n-slate-9">(recomendado — a prévia espera o seu ok)</span>
+                      </label>
+                    </div>
+
+                    <!-- 🌾 OPERAÇÃO DA COLHEITA: o mês em andamento -->
+                    <div
+                      v-if="key === 'harvest'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <p class="cv-label">
+                        Operação da colheita<template
+                          v-if="harvestMonthLabel()"
+                        >
+                          · {{ harvestMonthLabel() }}
+                        </template>
+                      </p>
+
+                      <!-- status do mês em linguagem humana -->
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span
+                          class="cv-chip cv-chip-lg"
+                          :class="harvestStatusInfo().class"
+                        >
+                          {{ harvestStatusInfo().label }}
+                        </span>
+                        <span
+                          v-if="harvest?.approved_at"
+                          class="text-[10px] text-n-slate-9"
+                        >
+                          aprovada<template v-if="harvest.approved_by">
+                            por {{ harvest.approved_by }}</template>
+                          · {{ fmtLogDate(harvest.approved_at) }}
+                        </span>
+                      </div>
+
+                      <!-- modo organize: a lista virou etiqueta — ambiente de trabalho no CRM -->
+                      <div
+                        v-if="harvest?.organized_label"
+                        class="cv-sub cv-green px-3.5 py-2.5 text-[11px] text-green-700 dark:text-green-400"
+                      >
+                        ✅ {{ harvestOrganizedCount() }} lead(s) etiquetado(s)
+                        como <b>{{ harvest.organized_label }}</b> — filtre por
+                        essa etiqueta no CRM para trabalhar a lista.
+                      </div>
+
+                      <div
+                        v-if="harvestGenerating"
+                        class="cv-sub cv-amber px-3.5 py-2.5 text-[11px] text-amber-700 dark:text-amber-400"
+                      >
+                        ⏳ Gerando a prévia… leva uns 2 minutos — esta tela
+                        atualiza sozinha a cada 15 segundos.
+                      </div>
+                      <div
+                        v-if="harvest?.last_error"
+                        class="cv-sub cv-red px-3.5 py-2.5 text-[11px] text-red-600 dark:text-red-400"
+                      >
+                        ⚠️ {{ harvest.last_error }}
+                      </div>
+
+                      <!-- números do mês -->
+                      <div
+                        v-if="harvest?.stats"
+                        class="grid grid-cols-3 sm:grid-cols-5 gap-2"
+                      >
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">Base fria</p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            {{ harvest.stats.pool ?? 0 }}
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">Planejados</p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            {{ harvest.stats.planned ?? 0 }}
+                          </p>
+                        </div>
+                        <div class="cv-stat cv-green px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">Enviados</p>
+                          <p
+                            class="text-sm font-bold text-green-600 dark:text-green-400"
+                          >
+                            {{ harvest.stats.sent ?? 0 }}
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">Responderam</p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            {{ harvest.stats.replied ?? 0 }}
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">Pendentes</p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            {{ harvest.stats.pending ?? 0 }}
+                          </p>
+                        </div>
+                      </div>
+                      <p
+                        v-if="harvest?.stats?.skipped"
+                        class="text-[10px] text-n-slate-9"
+                      >
+                        {{ harvest.stats.skipped }} lead(s) pulado(s) por você
+                        neste mês.
+                      </p>
+
+                      <!-- botões conforme o status -->
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <button
+                          v-if="
+                            !harvest?.status ||
+                            ['preview', 'done'].includes(harvest.status)
+                          "
+                          class="cv-btn cv-btn-sm disabled:opacity-50"
+                          :style="{ background: AGENT_META.harvest.gradient }"
+                          :disabled="
+                            harvestGenerating || harvestActing === 'preview'
+                          "
+                          @click="runHarvestPreview"
+                        >
+                          <span
+                            :class="
+                              harvestGenerating || harvestActing === 'preview'
+                                ? 'i-lucide-loader-circle animate-spin'
+                                : 'i-lucide-sparkles'
+                            "
+                            class="text-xs"
+                          />
+                          {{
+                            harvestGenerating
+                              ? 'Gerando… (~2 min)'
+                              : 'Gerar prévia agora'
+                          }}
+                        </button>
+                        <button
+                          v-if="harvest?.selected?.length"
+                          class="cv-btn cv-btn-sm cv-btn-ghost"
+                          :disabled="harvestActing === 'refresh'"
+                          @click="refreshHarvestPreview"
+                        >
+                          <span
+                            :class="
+                              harvestActing === 'refresh'
+                                ? 'i-lucide-loader-circle animate-spin'
+                                : 'i-lucide-eye'
+                            "
+                            class="text-xs"
+                          />
+                          Ver/atualizar prévia
+                        </button>
+                        <button
+                          v-if="harvest?.status === 'preview'"
+                          class="cv-btn cv-btn-sm"
+                          style="
+                            background: linear-gradient(
+                              135deg,
+                              #059669,
+                              #34d399
+                            );
+                          "
+                          :disabled="!!harvestActing"
+                          @click="approveHarvest"
+                        >
+                          <span
+                            :class="
+                              harvestActing === 'approve'
+                                ? 'i-lucide-loader-circle animate-spin'
+                                : 'i-lucide-check'
+                            "
+                            class="text-xs"
+                          />
+                          {{
+                            agent.mode === 'send'
+                              ? 'Aprovar e começar'
+                              : 'Aprovar e etiquetar'
+                          }}
+                        </button>
+                        <button
+                          v-if="harvest?.status === 'approved'"
+                          class="cv-btn cv-btn-sm cv-btn-ghost cv-amber"
+                          :disabled="!!harvestActing"
+                          @click="pauseHarvest"
+                        >
+                          ⏸ Pausar
+                        </button>
+                        <button
+                          v-if="harvest?.status === 'paused'"
+                          class="cv-btn cv-btn-sm cv-btn-ghost cv-green"
+                          :disabled="!!harvestActing"
+                          @click="resumeHarvest"
+                        >
+                          ▶️ Retomar
+                        </button>
+                        <button
+                          v-if="harvest?.status === 'approved'"
+                          class="cv-btn cv-btn-sm cv-btn-ghost"
+                          :disabled="!!harvestActing"
+                          title="Dispara o lote de hoje agora, respeitando o teto diário"
+                          @click="harvestSendNow"
+                        >
+                          <span
+                            :class="
+                              harvestActing === 'send_now'
+                                ? 'i-lucide-loader-circle animate-spin'
+                                : 'i-lucide-send'
+                            "
+                            class="text-xs"
+                          />
+                          Enviar lote agora
+                        </button>
+                      </div>
+
+                      <!-- prévia: a lista dos escolhidos do mês -->
+                      <div
+                        v-if="showHarvestTable && harvest?.selected?.length"
+                        class="space-y-1 max-h-80 overflow-y-auto pr-1"
+                      >
+                        <div
+                          v-for="lead in harvest.selected"
+                          :key="lead.contact_id"
+                          class="flex items-center gap-2 flex-wrap text-[11px] cv-sub px-2.5 py-1.5"
+                          :class="lead.skipped ? 'opacity-50' : ''"
+                        >
+                          <span
+                            v-if="lead.sent_at"
+                            class="text-green-600 font-bold flex-shrink-0"
+                            title="Mensagem já enviada"
+                            >✓</span>
+                          <span
+                            class="font-semibold text-n-slate-12 truncate max-w-[150px]"
+                            >{{ lead.name }}</span>
+                          <span
+                            v-if="lead.stage_name"
+                            class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-1 text-n-slate-10 whitespace-nowrap"
+                            >{{ lead.stage_name }}</span>
+                          <span
+                            v-if="lead.procedure"
+                            class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-1 text-n-slate-10 whitespace-nowrap"
+                            >{{ lead.procedure }}</span>
+                          <span
+                            v-if="lead.value"
+                            class="text-n-slate-11 whitespace-nowrap"
+                            >{{ fmtBrl(lead.value) }}</span>
+                          <span class="text-n-slate-10 whitespace-nowrap">frio há {{ lead.cold_days }}d</span>
+                          <span
+                            class="cv-chip flex-shrink-0"
+                            :class="scoreClass(lead.score)"
+                            >{{ lead.score }}</span>
+                          <span
+                            v-if="lead.hook"
+                            class="italic text-n-slate-10 basis-full sm:basis-auto sm:flex-1 truncate"
+                            :title="lead.hook"
+                            >“{{ lead.hook }}”</span>
+                          <span
+                            v-if="lead.skipped"
+                            class="text-[10px] text-n-slate-9 ml-auto"
+                            >pulado</span>
+                          <button
+                            v-else-if="!lead.sent_at"
+                            class="text-n-slate-9 hover:text-red-500 i-lucide-x text-sm flex-shrink-0 ml-auto"
+                            title="Pular este lead (não recebe a mensagem desta colheita)"
+                            @click="skipHarvestLead(lead)"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 📊 Config + estado do Gestor Autônomo -->
+                    <div
+                      v-if="key === 'manager'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <div
+                        class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed"
+                      >
+                        📊 Todo dia ele compara o funil com a
+                        <b>média das últimas 12 semanas</b>. Caiu além da
+                        sensibilidade? Ele <b>abre uma tarefa</b> para o time e
+                        escreve o <b>briefing do dia</b> no Meu Painel.
+                        <b>Nunca fala com o paciente</b> — só lê números.
+                      </div>
+
+                      <div
+                        class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11"
+                      >
+                        Sensibilidade: avisar quando cair mais de
+                        <input
+                          v-model.number="agent.drop_pct"
+                          type="number"
+                          min="1"
+                          max="90"
+                          placeholder="25"
+                          :disabled="!editingAgent[key]"
+                          class="cv-input !h-8 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+                          style="width: 4.5rem"
+                        />
+                        % vs a média
+                      </div>
+
+                      <!-- último briefing + desvios encontrados -->
+                      <div
+                        v-if="managerState()"
+                        class="border-t border-n-weak pt-3 space-y-2"
+                      >
+                        <p class="cv-label">
+                          Última rodada<template
+                            v-if="managerState().last_run_at"
+                          >
+                            ·
+                            {{ fmtLogDate(managerState().last_run_at) }}
+                          </template>
+                        </p>
+                        <div v-if="managerState().brief" class="cv-row p-3">
+                          <p
+                            class="text-xs text-n-slate-11 leading-relaxed whitespace-pre-wrap"
+                          >
+                            {{ managerState().brief }}
+                          </p>
+                        </div>
+                        <div
+                          v-if="(managerState().findings || []).length"
+                          class="flex flex-wrap gap-1.5"
+                        >
+                          <span
+                            v-for="(f, fi) in managerState().findings"
+                            :key="fi"
+                            class="cv-chip cv-red"
+                            :title="f.window ? `janela: ${f.window}` : ''"
+                          >
+                            {{ managerFindingLabel(f) }}
+                          </span>
+                        </div>
+                        <p class="text-[11px] text-n-slate-10">
+                          abriu {{ managerState().tasks_opened || 0 }} tarefa(s)
+                        </p>
+                      </div>
+
+                      <div
+                        class="flex items-center gap-2 flex-wrap border-t border-n-weak pt-3"
+                      >
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          :style="{ background: AGENT_META.manager.gradient }"
+                          :disabled="isRunningManager || !agent.enabled"
+                          :title="
+                            agent.enabled
+                              ? ''
+                              : 'Ligue o Gestor no interruptor acima primeiro'
+                          "
+                          @click="runManagerNow"
+                        >
+                          {{
+                            isRunningManager
+                              ? 'Rodando… (~30 s)'
+                              : 'Rodar agora'
+                          }}
+                        </button>
+                        <span class="text-[11px] text-n-slate-9">lê o funil agora e atualiza o briefing do dia</span>
+                      </div>
+                    </div>
+
+                    <!-- 🎓 Config do Auditor de Conversas -->
+                    <div
+                      v-if="key === 'auditor'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <div
+                        class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed"
+                      >
+                        🎓 Todo dia ele relê as conversas de <b>ontem</b> e dá
+                        <b>nota 0-10</b> contra o script da clínica, apontando o
+                        que faltou em cada uma. O ranking por atendente vira
+                        <b>coaching contínuo</b> — e ele
+                        <b>nunca fala com o paciente</b>.
+                      </div>
+
+                      <label class="block sm:w-64">
+                        <span class="text-[10px] font-medium text-n-slate-9">Teto de conversas auditadas por dia</span>
+                        <input
+                          v-model.number="agent.daily_cap"
+                          type="number"
+                          min="1"
+                          placeholder="150"
+                          :disabled="!editingAgent[key]"
+                          class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                        />
+                        <span class="text-[10px] text-n-slate-9 block mt-0.5">controla o custo da auditoria diária</span>
+                      </label>
+                    </div>
+
+                    <!-- 🎓 QUALIDADE DO TIME: ranking + falhas mais comuns -->
+                    <div
+                      v-if="key === 'auditor'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <p class="cv-label">Qualidade do time</p>
+
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          :style="{ background: AGENT_META.auditor.gradient }"
+                          :disabled="isRunningAuditor || !agent.enabled"
+                          :title="
+                            agent.enabled
+                              ? 'Re-audita as conversas de ontem (~2 min)'
+                              : 'Ligue o Auditor no interruptor acima primeiro'
+                          "
+                          @click="runAuditorNow"
+                        >
+                          {{
+                            isRunningAuditor
+                              ? 'Auditando… (~2 min)'
+                              : 'Auditar agora'
+                          }}
+                        </button>
+                        <span
+                          v-if="auditorLast()?.days_done"
+                          class="text-[11px] text-n-slate-10"
+                        >
+                          último dia auditado:
+                          <b class="text-n-slate-12">{{
+                            fmtDay(auditorLast().days_done)
+                          }}</b>
+                          <template v-if="auditorLast()?.last_run_at">
+                            · rodou
+                            {{
+                              fmtLogDate(auditorLast().last_run_at)
+                            }}</template>
+                        </span>
+                        <span v-else
+class="text-[11px] text-n-slate-10"
+                          >nenhuma auditoria ainda — o primeiro ranking sai
+                          depois da primeira rodada</span>
+                      </div>
+
+                      <div
+                        v-if="isRunningAuditor"
+                        class="cv-sub cv-amber px-3.5 py-2.5 text-[11px] text-amber-700 dark:text-amber-400"
+                      >
+                        ⏳ Auditando… leva ~2 minutos — o ranking abaixo
+                        atualiza aqui sozinho a cada 20 segundos.
+                      </div>
+
+                      <!-- janela de análise: 7 / 14 / 30 dias -->
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="text-[11px] text-n-slate-10">Janela:</span>
+                        <button
+                          v-for="d in [7, 14, 30]"
+                          :key="d"
+                          class="cv-chip cv-chip-lg"
+                          :class="
+                            auditorDays === d
+                              ? 'text-white border-transparent shadow-sm'
+                              : ''
+                          "
+                          :style="
+                            auditorDays === d
+                              ? { background: AGENT_META.auditor.gradient }
+                              : {}
+                          "
+                          @click="setAuditorDays(d)"
+                        >
+                          {{ d }} dias
+                        </button>
+                        <span
+                          v-if="auditorSummary"
+                          class="text-[11px] text-n-slate-9 ml-auto"
+                        >
+                          {{ auditorSummary.audited_total || 0 }} conversa(s)
+                          auditada(s) no período
+                        </span>
+                      </div>
+
+                      <div
+                        v-if="loadingAuditorSummary && !auditorSummary"
+                        class="flex items-center gap-2 text-xs text-n-slate-10 py-2"
+                      >
+                        <Spinner :size="16" class="text-n-brand" /> Carregando a
+                        qualidade do time…
+                      </div>
+
+                      <template v-else-if="auditorSummary">
+                        <!-- ranking por atendente (já vem ordenado pela média) -->
+                        <div
+                          v-if="(auditorSummary.ranking || []).length"
+                          class="space-y-1.5"
+                        >
+                          <p class="cv-label">Ranking por atendente</p>
+                          <div
+                            v-for="row in auditorSummary.ranking"
+                            :key="row.user_id"
+                            class="cv-sub px-2.5 py-1.5"
+                          >
+                            <div
+                              class="flex items-center gap-2 flex-wrap text-xs"
+                            >
+                              <span
+                                class="font-semibold text-n-slate-12 truncate max-w-[180px]"
+                                >{{ auditorRowName(row) }}</span>
+                              <span class="text-n-slate-10 whitespace-nowrap">{{ row.audited }} auditada(s)</span>
+                              <span
+                                class="cv-chip ml-auto flex-shrink-0"
+                                :class="auditorAvgClass(row.avg)"
+                                title="média das notas 0-10 no período"
+                              >
+                                {{ fmtAvg(row.avg) }}
+                              </span>
+                            </div>
+                            <div
+                              v-if="(row.top_gaps || []).length"
+                              class="flex flex-wrap gap-1 mt-1"
+                            >
+                              <span
+                                v-for="(gap, gi) in row.top_gaps"
+                                :key="gi"
+                                class="cv-chip cv-amber"
+                              >
+                                {{ gap }}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <p v-else class="text-xs text-n-slate-10">
+                          Nenhuma conversa auditada no período ainda — o ranking
+                          aparece depois da primeira auditoria.
+                        </p>
+
+                        <!-- falhas mais comuns do time -->
+                        <div
+                          v-if="(auditorSummary.team_gaps || []).length"
+                          class="space-y-1 border-t border-n-weak pt-2"
+                        >
+                          <p class="cv-label">Falhas mais comuns do time</p>
+                          <p
+                            v-for="(g, gi) in auditorSummary.team_gaps"
+                            :key="gi"
+                            class="text-xs text-n-slate-11"
+                          >
+                            <span
+                              class="font-medium text-amber-700 dark:text-amber-400"
+                              >{{ g.gap }}</span>
+                            <span class="text-n-slate-9">
+                              · {{ g.count }}×</span>
+                          </p>
+                        </div>
+                      </template>
+                    </div>
+
+                    <!-- 🎨 Config do Criativo Perpétuo -->
+                    <div
+                      v-if="key === 'creative'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <div
+                        class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed"
+                      >
+                        🎨 Toda <b>segunda 08:30</b> ele encontra os
+                        <b>vencedores da semana</b> — os termos do Google e os
+                        anúncios do Meta que mais viraram
+                        <b>consulta e cirurgia</b> na jornada real do banco
+                        (últimos 90 dias) — e escreve variações de copy prontas.
+                        <b>Nada vai ao ar sozinho</b>: você aprova, copia e cola
+                        no Gerenciador de Anúncios.
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-2 sm:w-96">
+                        <label class="block">
+                          <span class="text-[10px] font-medium text-n-slate-9">Vencedores por semana</span>
+                          <input
+                            v-model.number="agent.winners_count"
+                            type="number"
+                            min="1"
+                            placeholder="3"
+                            :disabled="!editingAgent[key]"
+                            class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                          />
+                        </label>
+                        <label class="block">
+                          <span class="text-[10px] font-medium text-n-slate-9">Variações por vencedor</span>
+                          <input
+                            v-model.number="agent.variations_count"
+                            type="number"
+                            min="1"
+                            placeholder="3"
+                            :disabled="!editingAgent[key]"
+                            class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <!-- 🎨 CRIATIVOS DA SEMANA: vencedores + variações p/ aprovar -->
+                    <div
+                      v-if="key === 'creative'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <p class="cv-label">
+                        Criativos da semana<template
+                          v-if="creativeState?.week_key"
+                        >
+                          · semana de
+                          {{ fmtWeekKey(creativeState.week_key) }}
+                        </template>
+                      </p>
+
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          :style="{ background: AGENT_META.creative.gradient }"
+                          :disabled="isRunningCreative || !agent.enabled"
+                          :title="
+                            agent.enabled
+                              ? 'Gera os vencedores + variações da semana agora (~2 min)'
+                              : 'Ligue o Criativo no interruptor acima primeiro'
+                          "
+                          @click="runCreativeNow"
+                        >
+                          {{
+                            isRunningCreative
+                              ? 'Gerando… (~2 min)'
+                              : 'Gerar agora'
+                          }}
+                        </button>
+                        <span
+                          v-if="creativeState?.generated_at"
+                          class="text-[11px] text-n-slate-10"
+                        >
+                          gerado {{ fmtLogDate(creativeState.generated_at) }}
+                        </span>
+                        <span
+                          v-else-if="creativeLast()?.generated_at"
+                          class="text-[11px] text-n-slate-10"
+                        >
+                          última geração
+                          {{ fmtLogDate(creativeLast().generated_at) }}
+                        </span>
+                        <span
+                          class="cv-chip cv-green ml-auto cursor-help"
+                          title="aprovadas ficam guardadas para o Estúdio Criativo"
+                        >
+                          📦
+                          {{ (creativeState?.approved_log || []).length }}
+                          aprovada(s) na despensa
+                        </span>
+                      </div>
+
+                      <div
+                        v-if="isRunningCreative"
+                        class="cv-sub cv-amber px-3.5 py-2.5 text-[11px] text-amber-700 dark:text-amber-400"
+                      >
+                        ⏳ Gerando as variações… leva ~2 minutos — esta tela
+                        atualiza sozinha a cada 20 segundos.
+                      </div>
+
+                      <div
+                        v-if="loadingCreative && !creativeState"
+                        class="flex items-center gap-2 text-xs text-n-slate-10 py-2"
+                      >
+                        <Spinner :size="16" class="text-n-brand" /> Carregando
+                        os criativos da semana…
+                      </div>
+
+                      <template
+                        v-else-if="(creativeState?.winners || []).length"
+                      >
+                        <div
+                          v-for="(w, wi) in creativeState.winners"
+                          :key="wi"
+                          class="cv-sub p-3 space-y-2"
+                        >
+                          <!-- cabeçalho do vencedor -->
+                          <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm flex-shrink-0">🥇</span>
+                            <p
+                              class="text-xs font-bold text-n-slate-12 truncate max-w-[240px]"
+                              :title="w.name"
+                            >
+                              {{ w.name }}
+                            </p>
+                            <span
+                              class="cv-chip flex-shrink-0"
+                              :style="{
+                                backgroundColor:
+                                  AGENT_META.creative.color + '1A',
+                                color: AGENT_META.creative.color,
+                              }"
+                            >
+                              {{ w.kind_label }}
+                            </span>
+                          </div>
+
+                          <!-- jornada real em pílulas -->
+                          <div
+                            class="flex items-center gap-1 flex-wrap text-[10px] font-medium"
+                          >
+                            <span class="cv-chip">{{ w.stats?.leads ?? 0 }} leads</span>
+                            <span class="text-n-slate-9">→</span>
+                            <span class="cv-chip">{{ w.stats?.booked ?? 0 }} consultas</span>
+                            <span class="text-n-slate-9">→</span>
+                            <span class="cv-chip">{{ w.stats?.attended ?? 0 }} compareceram</span>
+                            <span class="text-n-slate-9">→</span>
+                            <span class="cv-chip cv-green">{{ w.stats?.surgeries ?? 0 }} cirurgias</span>
+                            <span
+                              v-if="w.stats?.revenue"
+                              class="text-n-slate-10"
+                              >· {{ fmtBrl(w.stats.revenue) }}</span>
+                          </div>
+
+                          <!-- variações: cartõezinhos p/ aprovar/recusar/copiar -->
+                          <div class="space-y-2">
+                            <div
+                              v-for="(v, vi) in w.variations"
+                              :key="vi"
+                              class="cv-sub px-3 py-2.5 space-y-1.5"
+                              :class="
+                                v.status === 'rejected' ? 'opacity-50' : ''
+                              "
+                            >
+                              <div class="flex items-center gap-1.5 flex-wrap">
+                                <span v-if="v.angulo" class="cv-chip cv-slate">
+                                  {{ v.angulo }}
+                                </span>
+                                <span
+                                  v-if="v.status === 'approved'"
+                                  class="cv-chip cv-green"
+                                  :title="
+                                    v.reviewed_by
+                                      ? `aprovada por ${v.reviewed_by}`
+                                      : ''
+                                  "
+                                >
+                                  ✓ aprovada
+                                </span>
+                                <span
+                                  v-else-if="v.status === 'rejected'"
+                                  class="cv-chip cv-slate"
+                                >
+                                  ✗ recusada
+                                </span>
+                                <button
+                                  class="text-[11px] font-medium text-n-brand hover:underline flex items-center gap-1 ml-auto flex-shrink-0"
+                                  title="Copia gancho + texto + CTA — cole no Gerenciador de Anúncios ou no Estúdio"
+                                  @click="copyCreativeVariation(v)"
+                                >
+                                  <span class="i-lucide-copy text-[10px]" /> 📋
+                                  Copiar
+                                </button>
+                              </div>
+                              <p class="text-xs font-bold text-n-slate-12">
+                                {{ v.gancho }}
+                              </p>
+                              <p
+                                class="text-[11px] text-n-slate-11 leading-relaxed"
+                                style="white-space: pre-line"
+                              >
+                                {{ v.texto }}
+                              </p>
+                              <p
+                                v-if="v.cta"
+                                class="text-[11px] text-n-slate-10"
+                              >
+                                <b>CTA:</b> {{ v.cta }}
+                              </p>
+                              <div
+                                v-if="v.status === 'pending'"
+                                class="flex items-center gap-2 pt-1"
+                              >
+                                <button
+                                  class="cv-btn cv-btn-sm"
+                                  style="
+                                    background: linear-gradient(
+                                      135deg,
+                                      #059669,
+                                      #34d399
+                                    );
+                                  "
+                                  :disabled="
+                                    reviewingCreative === `${wi}-${vi}`
+                                  "
+                                  @click="
+                                    reviewCreativeVariation(wi, vi, 'approved')
+                                  "
+                                >
+                                  ✓ Aprovar
+                                </button>
+                                <button
+                                  class="cv-btn cv-btn-sm cv-btn-ghost"
+                                  :disabled="
+                                    reviewingCreative === `${wi}-${vi}`
+                                  "
+                                  @click="
+                                    reviewCreativeVariation(wi, vi, 'rejected')
+                                  "
+                                >
+                                  ✗ Recusar
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </template>
+                      <p
+                        v-else-if="!loadingCreative && !isRunningCreative"
+                        class="text-xs text-n-slate-10"
+                      >
+                        Nenhum criativo nesta semana ainda — toda segunda 08:30
+                        ele gera sozinho, ou clique em "Gerar agora".
+                      </p>
+                    </div>
+
+                    <label
+                      class="text-xs font-semibold text-n-slate-12 block mb-1.5"
+                    >
+                      {{
+                        RESPONDER_WA_KEYS.includes(key)
+                          ? 'Passos desta etapa'
+                          : 'Prompt do agente'
+                      }}
+                      <span class="text-n-slate-9 font-normal">
+                        {{
+                          RESPONDER_WA_KEYS.includes(key)
+                            ? '(o passo a passo que só este agente segue; o Roteiro CEVICO entra antes, para todos · vazio = passos padrão abaixo)'
+                            : '(vazio = usa o prompt padrão abaixo)'
+                        }}
+                      </span>
+                    </label>
+                    <textarea
+                      v-model="agent.prompt"
+                      :rows="RESPONDER_WA_KEYS.includes(key) ? 12 : 4"
+                      :disabled="!editingAgent[key]"
+                      class="cv-input w-full text-xs font-mono leading-relaxed disabled:opacity-70 disabled:cursor-not-allowed"
+                      :placeholder="agent.default_prompt"
+                    />
+
+                    <!-- EDITAR | SALVAR (rascunho) | PUBLICAR -->
+                    <div
+                      class="flex items-center gap-2 flex-wrap mt-4 pt-4 border-t"
+                      style="border-color: rgb(var(--cv-rgb) / 0.18)"
+                    >
+                      <button
+                        v-if="!editingAgent[key]"
+                        class="cv-btn cv-btn-sm cv-btn-ghost"
+                        @click="startEdit(key)"
+                      >
+                        <span class="i-lucide-pencil text-xs" />
+                        Editar
+                      </button>
+                      <template v-else>
+                        <button
+                          class="cv-btn cv-btn-sm cv-btn-ghost cv-amber"
+                          :disabled="savingAgent === key"
+                          title="Guarda as mudanças SEM aplicar — o agente continua como está até você publicar"
+                          @click="saveAgentDraft(key)"
+                        >
+                          <span
+                            :class="
+                              savingAgent === key
+                                ? 'i-lucide-loader-circle animate-spin'
+                                : 'i-lucide-save'
+                            "
+                            class="text-xs"
+                          />
+                          Salvar rascunho
+                        </button>
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          :disabled="savingAgent === key"
+                          title="Aplica de verdade — vale nas próximas análises"
+                          @click="publishAgent(key)"
+                        >
+                          <span
+                            :class="
+                              savingAgent === key
+                                ? 'i-lucide-loader-circle animate-spin'
+                                : 'i-lucide-rocket'
+                            "
+                            class="text-xs"
+                          />
+                          Publicar
+                        </button>
+                        <button
+                          class="text-xs text-n-slate-9 hover:text-n-slate-11 px-2 py-2"
+                          :disabled="savingAgent === key"
+                          @click="discardEdit(key)"
+                        >
+                          Descartar mudanças
+                        </button>
+                      </template>
+                      <button
+                        v-if="!editingAgent[key] && agent.has_draft"
+                        class="cv-btn cv-btn-sm cv-btn-pulse"
+                        :disabled="savingAgent === key"
+                        title="Publica o rascunho salvo — vale nas próximas análises"
+                        @click="publishAgent(key)"
+                      >
+                        <span
+                          :class="
+                            savingAgent === key
+                              ? 'i-lucide-loader-circle animate-spin'
+                              : 'i-lucide-rocket'
+                          "
+                          class="text-xs"
+                        />
+                        Publicar rascunho
+                      </button>
+                      <span class="text-[10px] text-n-slate-9 ml-auto">
+                        Salvar = guarda sem aplicar · Publicar = passa a valer ·
+                        interruptor liga/desliga na hora
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
-        <div class="p-5 space-y-4">
-          <p class="text-xs text-n-slate-11 leading-relaxed">
-            O Agente de Agendamento vai ler as conversas com <b>confirmação de agendamento</b>
-            (ex.: "Consulta confirmada" do bot) e registrar cada consulta na Agenda do sistema —
-            criando as novas e <b>reagendando</b> as que mudaram de horário. Nada é enviado ao paciente.
+
+        <!-- ══ MODO PROGRAMAÇÃO — painel panorâmico de automações ══ -->
+        <div
+          v-else-if="activeTab === 'programacao'"
+          class="max-w-3xl space-y-6"
+        >
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <p class="text-sm text-n-slate-11">
+              Painel panorâmico: <b>tudo</b> que trabalha sozinho no sistema,
+              num lugar só — agentes de IA, robôs, réguas e automações de
+              coluna, com a situação de cada um.
+            </p>
+            <button
+              class="text-sm px-3 py-2 rounded-lg bg-yellow-500 text-white hover:bg-yellow-600 flex items-center gap-1.5 flex-shrink-0 font-medium"
+              @click="openProgrammingMode"
+            >
+              ⚡ Abrir Modo Programação no CRM
+            </button>
+          </div>
+
+          <!-- ✨ Agentes de IA -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <p
+                class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5"
+              >
+                <span
+                  class="i-lucide-sparkles text-sm"
+                  style="color: #7c3aed"
+                />
+                Agentes de IA
+                <span class="text-n-slate-9 font-normal normal-case">({{ Object.keys(aiAgents).length }})</span>
+              </p>
+              <button
+                class="text-xs font-medium text-n-brand hover:underline"
+                @click="activeTab = 'agentes'"
+              >
+                configurar →
+              </button>
+            </div>
+            <div class="grid sm:grid-cols-2 gap-2">
+              <button
+                v-for="(agent, key) in aiAgents"
+                :key="key"
+                class="text-left flex items-start gap-2.5 p-3 bg-n-solid-2 border border-n-weak rounded-xl hover:border-n-brand/50 transition-colors"
+                @click="activeTab = 'agentes'"
+              >
+                <span
+                  class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                  :style="{ background: AGENT_META[key].gradient }"
+                >
+                  <span
+                    :class="AGENT_META[key].icon"
+                    class="text-white text-sm"
+                  />
+                </span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <p class="text-sm font-semibold text-n-slate-12 truncate">
+                      {{ AGENT_META[key].title }}
+                    </p>
+                    <span
+                      class="text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0"
+                      :class="
+                        agent.enabled
+                          ? 'bg-green-500/15 text-green-600'
+                          : 'bg-n-alpha-2 text-n-slate-10'
+                      "
+                      >● {{ agent.enabled ? 'Ligado' : 'Desligado' }}</span>
+                  </div>
+                  <p class="text-[11px] text-n-slate-10 truncate">
+                    {{ resolvedModel(key, agent)
+                    }}<template v-if="key === 'opportunity'">
+                      · {{ agent.watchers.length }} coluna(s) vigiada(s)
+                    </template>
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- 🤖 Robôs de follow-up -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <p
+                class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5"
+              >
+                <span class="i-lucide-bot text-sm" style="color: #0f5fa6" />
+                Robôs de follow-up
+                <span class="text-n-slate-9 font-normal normal-case">({{ bots.length }})</span>
+              </p>
+              <button
+                class="text-xs font-medium text-n-brand hover:underline"
+                @click="activeTab = 'robos'"
+              >
+                gerenciar →
+              </button>
+            </div>
+            <p v-if="!bots.length" class="text-xs text-n-slate-9 pl-1">
+              Nenhum robô criado.
+            </p>
+            <div v-else class="space-y-1.5">
+              <button
+                v-for="bot in bots"
+                :key="bot.id"
+                class="w-full text-left flex items-center gap-3 px-3 py-2 bg-n-solid-2 border border-n-weak rounded-xl hover:border-n-brand/50 transition-colors"
+                @click="activeTab = 'robos'"
+              >
+                <span
+                  class="w-2 h-2 rounded-full flex-shrink-0"
+                  :class="bot.active ? 'bg-green-500' : 'bg-n-slate-9'"
+                />
+                <p class="text-sm font-medium text-n-slate-12 flex-1 truncate">
+                  {{ bot.name }}
+                </p>
+                <span class="text-[11px] text-n-slate-10 flex-shrink-0">{{ (bot.steps || []).length }} cutucada(s)</span>
+                <span
+                  class="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
+                  :class="
+                    bot.active
+                      ? 'bg-green-500/15 text-green-600'
+                      : 'bg-n-alpha-2 text-n-slate-9'
+                  "
+                  >{{ bot.active ? 'Ativo' : 'Pausado' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 📣 Réguas de mensagem -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <p
+                class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5"
+              >
+                <span
+                  class="i-lucide-megaphone text-sm"
+                  style="color: #b8860b"
+                />
+                Réguas de mensagem
+                <span class="text-n-slate-9 font-normal normal-case">({{ automations.length }})</span>
+              </p>
+              <button
+                class="text-xs font-medium text-n-brand hover:underline"
+                @click="goToCampaign"
+              >
+                abrir Campanha WhatsApp →
+              </button>
+            </div>
+            <div v-if="loadingReguas" class="flex justify-center py-4">
+              <Spinner :size="20" class="text-n-brand" />
+            </div>
+            <p
+              v-else-if="!automations.length"
+              class="text-xs text-n-slate-9 pl-1"
+            >
+              Nenhuma régua criada.
+            </p>
+            <div v-else class="space-y-1.5">
+              <button
+                v-for="a in automations"
+                :key="a.id"
+                class="w-full text-left flex items-center gap-3 px-3 py-2 bg-n-solid-2 border border-n-weak rounded-xl hover:border-n-brand/50 transition-colors"
+                @click="goToCampaign"
+              >
+                <span
+                  class="w-2 h-2 rounded-full flex-shrink-0"
+                  :class="a.active ? 'bg-green-500' : 'bg-n-slate-9'"
+                />
+                <p class="text-sm font-medium text-n-slate-12 flex-1 truncate">
+                  {{ a.name }}
+                </p>
+                <span
+                  v-if="a.trigger_label"
+                  class="text-[11px] text-n-slate-10 flex-shrink-0 truncate max-w-32"
+                  >🏷 {{ a.trigger_label }}</span>
+                <span
+                  class="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
+                  :class="
+                    a.active
+                      ? 'bg-green-500/15 text-green-600'
+                      : 'bg-n-alpha-2 text-n-slate-9'
+                  "
+                  >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ⚡ Automações de coluna -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <p
+                class="text-xs font-bold text-n-slate-11 uppercase tracking-wide flex items-center gap-1.5"
+              >
+                <span class="i-lucide-zap text-sm" style="color: #eab308" />
+                Automações de coluna
+                <span class="text-n-slate-9 font-normal normal-case">({{ columnAutomations.length }})</span>
+              </p>
+              <button
+                class="text-xs font-medium text-n-brand hover:underline"
+                @click="openProgrammingMode"
+              >
+                criar/editar no CRM →
+              </button>
+            </div>
+            <div
+              v-if="loadingColumnAutomations"
+              class="flex justify-center py-6"
+            >
+              <Spinner :size="24" class="text-n-brand" />
+            </div>
+            <p
+              v-else-if="!columnAutomations.length"
+              class="text-xs text-n-slate-9 pl-1"
+            >
+              Nenhuma automação de coluna ainda.
+            </p>
+            <div v-else class="space-y-1.5">
+              <div
+                v-for="a in columnAutomations"
+                :key="a.id"
+                class="flex items-center gap-3 px-3 py-2 bg-n-solid-2 border border-n-weak rounded-xl"
+              >
+                <span
+                  class="w-2 h-2 rounded-full flex-shrink-0"
+                  :class="a.active ? 'bg-green-500' : 'bg-n-slate-9'"
+                />
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-n-slate-12 truncate">
+                    {{ a.name }}
+                  </p>
+                  <p class="text-xs text-n-slate-10 truncate">
+                    Coluna "{{ a.stage_name }}" ·
+                    {{ ACTION_LABELS[a.action_type] || a.action_type }}
+                  </p>
+                </div>
+                <span
+                  class="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
+                  :class="
+                    a.active
+                      ? 'bg-green-500/15 text-green-600'
+                      : 'bg-n-alpha-2 text-n-slate-9'
+                  "
+                  >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ TRATAMENTO DE DADOS ══ -->
+        <!-- ══ RESULTADOS — dashboard das automações de coluna ══ -->
+        <div v-else-if="activeTab === 'resultados'" class="max-w-3xl space-y-5">
+          <p class="text-sm text-n-slate-11">
+            Quantas vezes cada automação de coluna trabalhou no período —
+            disparos, falhas e pacientes alcançados. Réguas de mensagem têm
+            resultados na Campanha WhatsApp.
           </p>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Olhar as conversas dos últimos</label>
-              <select v-model.number="backfill.since_days" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12">
-                <option :value="7">7 dias</option>
-                <option :value="30">30 dias</option>
-                <option :value="90">90 dias</option>
-                <option :value="180">180 dias</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Teto de conversas</label>
-              <select v-model.number="backfill.limit" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12">
-                <option :value="50">50</option>
-                <option :value="100">100</option>
-                <option :value="200">200</option>
-                <option :value="300">300 (máximo)</option>
-              </select>
-            </div>
+
+          <!-- Régua de período padrão CEVICO -->
+          <PeriodRuler v-model="resultsPeriod" />
+
+          <div
+            v-if="loadingResults"
+            class="flex items-center gap-2 text-sm text-n-slate-10 py-8"
+          >
+            <Spinner class="w-4 h-4" /> Carregando resultados…
           </div>
-          <div class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
-            ⚠️ Cada conversa = 1 análise de IA (Sonnet ≈ US$ 0,01–0,02 cada). O Agente de Agendamento
-            precisa estar <b>LIGADO</b> e com a chave configurada. Rodar de novo não duplica consultas.
+
+          <template v-else-if="resultsData">
+            <!-- KPIs -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div
+                class="rounded-xl px-4 py-3 text-white shadow"
+                style="background: linear-gradient(135deg, #0f5fa6, #0b4a82)"
+              >
+                <p class="text-[11px] font-medium text-white/80">Disparos</p>
+                <p class="text-xl font-bold leading-tight">
+                  {{ resultsData.totals.fired }}
+                </p>
+              </div>
+              <div
+                class="rounded-xl px-4 py-3 text-white shadow"
+                style="background: linear-gradient(135deg, #5b21b6, #7c3aed)"
+              >
+                <p class="text-[11px] font-medium text-white/80">
+                  Pacientes alcançados
+                </p>
+                <p class="text-xl font-bold leading-tight">
+                  {{ resultsData.totals.contacts }}
+                </p>
+              </div>
+              <div
+                class="rounded-xl px-4 py-3 text-white shadow"
+                style="background: linear-gradient(135deg, #b8860b, #d4a017)"
+              >
+                <p class="text-[11px] font-medium text-white/80">
+                  Automações ativas
+                </p>
+                <p class="text-xl font-bold leading-tight">
+                  {{ resultsData.totals.active_automations }}
+                </p>
+              </div>
+              <div
+                class="rounded-xl px-4 py-3 shadow"
+                :class="
+                  resultsData.totals.failed
+                    ? 'text-white'
+                    : 'bg-n-solid-1 border border-n-weak'
+                "
+                :style="
+                  resultsData.totals.failed
+                    ? {
+                        background: 'linear-gradient(135deg, #DC2626, #F59E0B)',
+                      }
+                    : {}
+                "
+              >
+                <p
+                  class="text-[11px] font-medium"
+                  :class="
+                    resultsData.totals.failed
+                      ? 'text-white/80'
+                      : 'text-n-slate-10'
+                  "
+                >
+                  Falhas
+                </p>
+                <p
+                  class="text-xl font-bold leading-tight"
+                  :class="resultsData.totals.failed ? '' : 'text-n-slate-12'"
+                >
+                  {{ resultsData.totals.failed }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Disparos por dia -->
+            <div
+              v-if="resultsData.timeline.length > 1"
+              class="rounded-2xl border-2 border-n-weak bg-n-solid-2 p-4"
+            >
+              <p
+                class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-3"
+              >
+                Disparos por dia
+              </p>
+              <div class="flex items-end gap-1 h-24 overflow-x-auto">
+                <div
+                  v-for="d in resultsData.timeline"
+                  :key="d.date"
+                  class="flex flex-col items-center gap-1 flex-1 min-w-[22px]"
+                  :title="`${fmtDay(d.date)}: ${d.fired} disparo(s)`"
+                >
+                  <span class="text-[9px] text-n-slate-10 leading-none">{{
+                    d.fired || ''
+                  }}</span>
+                  <div
+                    class="w-full rounded-t-md"
+                    :style="{
+                      height: `${Math.max(d.fired ? 8 : 2, (d.fired / maxTimelineFired()) * 64)}px`,
+                      background: d.fired
+                        ? 'linear-gradient(180deg, #7C3AED, #0F5FA6)'
+                        : 'rgba(148,163,184,0.25)',
+                    }"
+                  />
+                  <span
+                    class="text-[8px] text-n-slate-9 leading-none whitespace-nowrap"
+                    >{{ fmtDay(d.date) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ranking por automação -->
+            <div class="rounded-2xl border-2 border-n-weak bg-n-solid-2 p-4">
+              <p
+                class="text-xs font-bold text-n-slate-11 uppercase tracking-wide mb-3"
+              >
+                Automação por automação
+              </p>
+              <div
+                v-if="!resultsData.automations.length"
+                class="text-sm text-n-slate-10 py-4"
+              >
+                Nenhuma automação com movimento no período.
+              </div>
+              <div v-else class="space-y-2">
+                <div
+                  v-for="a in resultsData.automations"
+                  :key="a.id"
+                  class="rounded-xl border border-n-weak bg-n-solid-1 px-3.5 py-2.5"
+                >
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span
+                      class="w-2 h-2 rounded-full flex-shrink-0"
+                      :style="{ backgroundColor: a.stage_color || '#94A3B8' }"
+                    />
+                    <p class="text-sm font-semibold text-n-slate-12 truncate">
+                      {{ a.name }}
+                    </p>
+                    <span
+                      class="text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0"
+                      :class="
+                        a.active
+                          ? 'bg-green-500/15 text-green-600'
+                          : 'bg-n-alpha-2 text-n-slate-10'
+                      "
+                      >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
+                    <span
+                      class="ml-auto text-sm font-bold text-n-slate-12 flex-shrink-0"
+                      >{{ a.fired }}×</span>
+                  </div>
+                  <div
+                    class="flex items-center gap-2 flex-wrap text-[11px] text-n-slate-10 mt-1"
+                  >
+                    <span>{{ a.stage_name }}</span>
+                    <span>·
+                      {{ TRIGGER_LABELS[a.trigger_type] || a.trigger_type }} →
+                      {{ ACTION_LABELS[a.action_type] || a.action_type }}</span>
+                    <span>· {{ a.contacts }} paciente(s)</span>
+                    <span v-if="a.failed"
+class="text-red-500 font-medium"
+                      >· {{ a.failed }} falha(s)</span>
+                    <span class="ml-auto">último: {{ fmtLastFired(a.last_fired_at) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- ══ PAINEL DOS AGENTES DE IA (item 85, só admin) ══ -->
+        <AiAgentsDashboard v-else-if="activeTab === 'painel_ia'" />
+
+        <!-- ══ 🗺️ MAPA DE FLUXOS (item 170) — componente sob demanda ══ -->
+        <div v-else-if="activeTab === 'fluxos'">
+          <FlowsMap />
+        </div>
+
+        <!-- ══ TRATAMENTO DE DADOS UNIFICADO (item 70) ══ -->
+        <div v-else-if="activeTab === 'tratamento'" class="max-w-3xl">
+          <p class="text-sm text-n-slate-11 mb-4">
+            A casa de TODAS as ferramentas para tratar a base: identificação
+            tradicional (filtros, etiquetas, unificação — sempre com prévia
+            antes de aplicar) e identificação com inteligência.
+          </p>
+          <DataTreatmentTools />
+
+          <!-- extras com IA que já moram no hub (só admin: mexem no Radar e na Agenda) -->
+          <div v-if="isAdmin" class="grid sm:grid-cols-2 gap-4 mt-2 mb-6">
+            <button
+              class="text-left rounded-2xl border border-n-weak bg-n-solid-2 p-4 hover:border-n-brand transition-colors flex items-start gap-3"
+              @click="showSweepModal = true"
+            >
+              <span
+                class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style="background: linear-gradient(135deg, #dc2626, #f59e0b)"
+              >
+                <span class="i-lucide-scan-search text-white text-base" />
+              </span>
+              <span>
+                <p class="text-sm font-bold text-n-slate-12 mb-1">
+                  Radar pontual
+                </p>
+                <p class="text-xs text-n-slate-10 leading-relaxed">
+                  Varredura ÚNICA por leads aguardando resposta (coluna +
+                  etiqueta + período) → avisos no Meu Painel. Não fica ativa.
+                </p>
+              </span>
+            </button>
+            <button
+              class="text-left rounded-2xl border border-n-weak bg-n-solid-2 p-4 hover:border-n-brand transition-colors flex items-start gap-3"
+              @click="showBackfillModal = true"
+            >
+              <span
+                class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style="background: linear-gradient(135deg, #b8860b, #d4a017)"
+              >
+                <span class="i-lucide-calendar-search text-white text-base" />
+              </span>
+              <span>
+                <p class="text-sm font-bold text-n-slate-12 mb-1">
+                  Preencher a Agenda com o histórico
+                </p>
+                <p class="text-xs text-n-slate-10 leading-relaxed">
+                  O Agente de Agendamento lê as confirmações antigas e registra
+                  as consultas na Agenda — sem duplicar, nada vai ao paciente.
+                </p>
+              </span>
+            </button>
           </div>
         </div>
-        <div class="flex gap-2 px-5 pb-5">
-          <button
-            class="flex-1 flex items-center justify-center gap-1.5 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50"
-            style="background: linear-gradient(135deg, #B8860B, #D4A017)"
-            :disabled="isBackfilling"
-            @click="runBackfill"
+      </div>
+
+      <!-- Modal robô (componente compartilhado) -->
+      <FollowupBotModal
+        v-if="showBotModal"
+        :bot="editingBot"
+        @close="showBotModal = false"
+        @saved="onBotSaved"
+      />
+      <!-- Janela isolada: Radar PONTUAL (roda uma vez, não fica ativo) -->
+      <div
+        v-if="showSweepModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        @click.self="showSweepModal = false"
+      >
+        <div
+          class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden"
+        >
+          <div
+            class="h-1.5 w-full flex-shrink-0"
+            style="background: linear-gradient(135deg, #059669, #4ade80)"
+          />
+          <div
+            class="flex items-center justify-between px-5 py-4 border-b border-n-weak"
           >
-            <span :class="isBackfilling ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-play'" class="text-sm" />
-            {{ isBackfilling ? 'Iniciando…' : 'Começar a preencher' }}
-          </button>
-          <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showBackfillModal = false">
-            Fechar
-          </button>
+            <h2
+              class="text-base font-semibold text-n-slate-12 flex items-center gap-2"
+            >
+              <span class="i-lucide-scan-search" style="color: #059669" />
+              Radar pontual
+              <span
+                class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-n-alpha-2 text-n-slate-11"
+                >roda uma vez</span>
+            </h2>
+            <button
+              class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl"
+              @click="showSweepModal = false"
+            />
+          </div>
+          <div class="p-5 space-y-4">
+            <p class="text-xs text-n-slate-10">
+              Varre AGORA os leads aguardando resposta no recorte escolhido e
+              cria os avisos no <b>Meu Painel</b> do atendente escolhido, em
+              alguns minutos. Diferente do Radar perene, <b>não fica ativo</b> —
+              é uma auditoria única. Nada é enviado ao paciente.
+            </p>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Coluna</label>
+              <select
+                v-model="sweep.stage_id"
+                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option value="">Colunas vigiadas (padrão)</option>
+                <option v-for="s in allStages" :key="s.id" :value="s.id">
+                  {{ s.name }} ({{ s.pipeline }})
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Enviar os avisos para o painel de</label>
+              <select
+                v-model="sweep.user_id"
+                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option :value="null">👥 Todos os atendentes</option>
+                <option v-for="ag in teamAgents" :key="ag.id" :value="ag.id">
+                  {{ ag.available_name || ag.name }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Etiqueta
+                <span class="text-n-slate-9 font-normal">(opcional)</span></label>
+              <select
+                v-model="sweep.label"
+                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option value="">Qualquer etiqueta</option>
+                <option v-for="l in accountLabels" :key="l.id" :value="l.title">
+                  {{ l.title }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Período (mensagens aguardando das…)</label>
+              <select
+                v-model.number="sweep.since_hours"
+                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option :value="6">últimas 6 horas</option>
+                <option :value="24">últimas 24 horas</option>
+                <option :value="72">últimos 3 dias</option>
+                <option :value="168">últimos 7 dias</option>
+              </select>
+            </div>
+          </div>
+          <div class="px-5 py-4 border-t border-n-weak flex gap-2">
+            <button
+              class="flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold text-white py-2 rounded-lg disabled:opacity-50"
+              style="background: linear-gradient(135deg, #dc2626, #f59e0b)"
+              :disabled="isSweeping"
+              @click="runSweep"
+            >
+              <span
+                :class="
+                  isSweeping
+                    ? 'i-lucide-loader-2 animate-spin'
+                    : 'i-lucide-scan-search'
+                "
+                class="text-sm"
+              />
+              {{ isSweeping ? 'Iniciando…' : 'Varrer agora' }}
+            </button>
+            <button
+              class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11"
+              @click="showSweepModal = false"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Janela: escolher a mensagem modelo da Colheitadeira -->
+      <div
+        v-if="showHarvestTemplatePicker"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        @click.self="closeHarvestTemplatePicker"
+      >
+        <div
+          class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden"
+        >
+          <div
+            class="h-1.5 w-full flex-shrink-0"
+            :style="{ background: AGENT_META.harvest.gradient }"
+          />
+          <div
+            class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0"
+          >
+            <h2
+              class="text-base font-semibold text-n-slate-12 flex items-center gap-2"
+            >
+              <span class="i-lucide-wheat" style="color: #ca8a04" />
+              {{
+                harvestPickerTemplate
+                  ? 'Preencher variáveis do modelo'
+                  : 'Escolher mensagem modelo'
+              }}
+            </h2>
+            <button
+              class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl"
+              @click="closeHarvestTemplatePicker"
+            />
+          </div>
+          <div class="flex-1 overflow-y-auto p-5 space-y-3">
+            <p class="text-[11px] text-n-slate-10">
+              💡 Escreva
+              <code class="bg-n-alpha-2 px-1 rounded">[gancho]</code> numa
+              variável do corpo — a IA troca por um gancho pessoal para cada
+              paciente;
+              <code class="bg-n-alpha-2 px-1 rounded">[procedimento]</code>
+              também funciona. O
+              <code class="bg-n-alpha-2 px-1 rounded">{{
+                '\{\{contact.first_name\}\}'
+              }}</code>
+              vira o nome do paciente.
+            </p>
+            <WhatsAppTemplateParser
+              v-if="harvestPickerTemplate"
+              :template="harvestPickerTemplate"
+              @send-message="useHarvestTemplate"
+              @reset-template="harvestPickerTemplate = null"
+            >
+              <template #actions="{ sendMessage, resetTemplate, disabled }">
+                <footer class="flex gap-2 justify-end">
+                  <button
+                    class="px-3 py-1.5 text-sm border border-n-weak rounded-lg text-n-slate-11"
+                    @click="resetTemplate"
+                  >
+                    Trocar modelo
+                  </button>
+                  <button
+                    class="px-4 py-1.5 text-sm bg-n-brand text-white rounded-lg disabled:opacity-50"
+                    :disabled="disabled"
+                    @click="sendMessage"
+                  >
+                    Usar este modelo
+                  </button>
+                </footer>
+              </template>
+            </WhatsAppTemplateParser>
+            <TemplatesPicker
+              v-else
+              :inbox-id="harvestPickerInboxId"
+              @on-select="harvestPickerTemplate = $event"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: preencher a Agenda com o histórico -->
+      <div
+        v-if="showBackfillModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        @click.self="showBackfillModal = false"
+      >
+        <div
+          class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        >
+          <div
+            class="h-1.5 w-full"
+            style="background: linear-gradient(135deg, #b8860b, #d4a017)"
+          />
+          <div
+            class="flex items-center justify-between px-5 py-4 border-b border-n-weak"
+          >
+            <h2
+              class="text-base font-semibold text-n-slate-12 flex items-center gap-2"
+            >
+              <span class="i-lucide-calendar-search" style="color: #b8860b" />
+              Preencher agenda com o histórico
+            </h2>
+            <button
+              class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl"
+              @click="showBackfillModal = false"
+            />
+          </div>
+          <div class="p-5 space-y-4">
+            <p class="text-xs text-n-slate-11 leading-relaxed">
+              O Agente de Agendamento vai ler as conversas com
+              <b>confirmação de agendamento</b> (ex.: "Consulta confirmada" do
+              bot) e registrar cada consulta na Agenda do sistema — criando as
+              novas e <b>reagendando</b> as que mudaram de horário. Nada é
+              enviado ao paciente.
+            </p>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Olhar as conversas dos últimos</label>
+                <select
+                  v-model.number="backfill.since_days"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                >
+                  <option :value="7">7 dias</option>
+                  <option :value="30">30 dias</option>
+                  <option :value="90">90 dias</option>
+                  <option :value="180">180 dias</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Teto de conversas</label>
+                <select
+                  v-model.number="backfill.limit"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                >
+                  <option :value="50">50</option>
+                  <option :value="100">100</option>
+                  <option :value="200">200</option>
+                  <option :value="300">300 (máximo)</option>
+                </select>
+              </div>
+            </div>
+            <div
+              class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400"
+            >
+              ⚠️ Cada conversa = 1 análise de IA (Sonnet ≈ US$ 0,01–0,02 cada).
+              O Agente de Agendamento precisa estar <b>LIGADO</b> e com a chave
+              configurada. Rodar de novo não duplica consultas.
+            </div>
+          </div>
+          <div class="flex gap-2 px-5 pb-5">
+            <button
+              class="flex-1 flex items-center justify-center gap-1.5 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50"
+              style="background: linear-gradient(135deg, #b8860b, #d4a017)"
+              :disabled="isBackfilling"
+              @click="runBackfill"
+            >
+              <span
+                :class="
+                  isBackfilling
+                    ? 'i-lucide-loader-2 animate-spin'
+                    : 'i-lucide-play'
+                "
+                class="text-sm"
+              />
+              {{ isBackfilling ? 'Iniciando…' : 'Começar a preencher' }}
+            </button>
+            <button
+              class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11"
+              @click="showBackfillModal = false"
+            >
+              Fechar
+            </button>
+          </div>
         </div>
       </div>
     </div>
-
   </div>
 </template>
 
 <style scoped>
+/* 🃏 rodada 191: grade de cards compactos dos agentes (auto-fill, como a Central) */
+.cv-agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
+  gap: 1rem;
+  align-items: stretch;
+}
+.cv-agents-grid > .cv-agent-open {
+  grid-column: 1 / -1;
+}
+/* o card que acabou de abrir: anel pulsando na cor do agente */
+.cv-agent-opening {
+  animation: cvAgentOpening 1.1s ease-out;
+}
+@keyframes cvAgentOpening {
+  0% {
+    box-shadow: 0 0 0 0 rgb(var(--cv-rgb) / 0.6);
+    transform: scale(0.988);
+  }
+  35% {
+    box-shadow: 0 0 0 12px rgb(var(--cv-rgb) / 0.16);
+    transform: scale(1.004);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--cv-rgb) / 0);
+    transform: none;
+  }
+}
 /* sanfona dos agentes: aparição suave e leve */
-.cevico-agent-body { animation: agentReveal 0.28s ease; }
-@keyframes agentReveal { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+.cevico-agent-body {
+  animation: agentReveal 0.28s ease;
+}
+@keyframes agentReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 </style>

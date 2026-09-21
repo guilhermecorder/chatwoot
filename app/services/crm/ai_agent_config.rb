@@ -34,12 +34,16 @@ module Crm::AiAgentConfig
     'manager'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # briefing diário curto (a matemática é do Ruby)
     'auditor'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # nota diária em volume — barato por desenho
     'creative'     => { 'model' => 'claude-sonnet-5', 'effort' => 'high' }    # copy que vai pro anúncio — qualidade importa
-  }.freeze
+  }.merge(
+    # 🗣️ rodada 188: respondedores do WhatsApp (Roteiro CEVICO + bloco da etapa)
+    'atendente_agendamento' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # conversa com paciente até agendar
+    'atendente_pos' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' } # suporte a quem já agendou (dúvidas, remarcar)
+  ).freeze
 
   # Agentes RESPONDEDORES: os únicos autorizados a falar com o paciente
   # (hoje só o Atendente Instagram, restrito às caixas escolhidas na config).
   # Todos os demais seguem a trava operacional de leitura.
-  RESPONDER_AGENTS = %w[instagram comments].freeze
+  RESPONDER_AGENTS = %w[instagram comments atendente_agendamento atendente_pos].freeze
 
   # preço US$ por milhão de tokens (entrada / saída)
   PRICING = {
@@ -85,6 +89,12 @@ module Crm::AiAgentConfig
 
   private
 
+  # chave do agente: constante da classe por padrão; o motor dos respondedores
+  # (Crm::ResponderAgentService) sobrescreve com a chave recebida no construtor
+  def agent_key
+    self.class::AGENT_KEY
+  end
+
   def client
     # 300s: Copywriter/Construtor geram páginas inteiras (minutos) — 60s estourava no meio (bug 17/07)
     @client ||= Anthropic::Client.new(api_key: api_key, timeout: 300)
@@ -99,7 +109,7 @@ module Crm::AiAgentConfig
   end
 
   def agent_config
-    (ai_config['agents'] || {})[self.class::AGENT_KEY] || {}
+    (ai_config['agents'] || {})[agent_key] || {}
   end
 
   # INTERRUPTOR DEFINITIVO: agente só roda com enabled == true gravado.
@@ -118,12 +128,12 @@ module Crm::AiAgentConfig
     if base.include?('{{TABELA_DE_PRECOS}}')
       base = base.gsub('{{TABELA_DE_PRECOS}}', Cevico::PriceList.prompt_block(@account))
     end
-    guard = RESPONDER_AGENTS.include?(self.class::AGENT_KEY) ? RESPONDER_GUARDRAIL : OPERATIONAL_GUARDRAIL
+    guard = RESPONDER_AGENTS.include?(agent_key) ? RESPONDER_GUARDRAIL : OPERATIONAL_GUARDRAIL
     base + guard
   end
 
   def recommended
-    RECOMMENDED[self.class::AGENT_KEY] || {}
+    RECOMMENDED[agent_key] || {}
   end
 
   # modelo: escolha do agente > recomendado para o agente > global > padrão
@@ -188,7 +198,7 @@ module Crm::AiAgentConfig
 
     Crm::AiUsage.create!(
       account: @account,
-      agent_key: self.class::AGENT_KEY,
+      agent_key: agent_key,
       model: model,
       input_tokens: input,
       output_tokens: output,

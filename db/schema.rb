@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_19_143000) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_21_120000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1340,6 +1340,28 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_19_143000) do
     t.index ["user_id"], name: "index_copilot_threads_on_user_id"
   end
 
+  create_table "crm_agent_guidances", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "agent_key", null: false
+    t.integer "conversation_id"
+    t.bigint "message_id"
+    t.string "source", default: "manual", null: false
+    t.text "patient_excerpt"
+    t.text "agent_text"
+    t.text "ideal_reply"
+    t.text "rule"
+    t.string "target_section"
+    t.string "status", default: "pending", null: false
+    t.datetime "applied_at"
+    t.bigint "created_by_id"
+    t.bigint "applied_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "message_id"], name: "index_crm_agent_guidances_on_account_id_and_message_id"
+    t.index ["account_id", "status"], name: "index_crm_agent_guidances_on_account_id_and_status"
+    t.index ["account_id"], name: "index_crm_agent_guidances_on_account_id"
+  end
+
   create_table "crm_ai_usages", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.string "agent_key", null: false
@@ -1563,6 +1585,20 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_19_143000) do
     t.datetime "updated_at", null: false
     t.index ["account_id", "position"], name: "index_crm_pipelines_on_account_id_and_position"
     t.index ["account_id"], name: "index_crm_pipelines_on_account_id"
+  end
+
+  create_table "crm_script_versions", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "kind", default: "script", null: false
+    t.string "agent_key"
+    t.jsonb "content", default: {}, null: false
+    t.string "note"
+    t.bigint "created_by_id"
+    t.bigint "guidance_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "created_at"], name: "index_crm_script_versions_on_account_id_and_created_at"
+    t.index ["account_id"], name: "index_crm_script_versions_on_account_id"
   end
 
   create_table "crm_settings", force: :cascade do |t|
@@ -2350,6 +2386,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_19_143000) do
   add_foreign_key "cevico_strategies", "accounts"
   add_foreign_key "cevico_strategies", "cevico_pillars", column: "pillar_id"
   add_foreign_key "cevico_tools", "accounts"
+  add_foreign_key "crm_agent_guidances", "accounts", on_delete: :cascade
   add_foreign_key "crm_ai_usages", "accounts"
   add_foreign_key "crm_automation_logs", "crm_automations", column: "automation_id"
   add_foreign_key "crm_automations", "crm_stages", column: "stage_id"
@@ -2381,6 +2418,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_19_143000) do
   add_foreign_key "crm_message_automations", "inboxes"
   add_foreign_key "crm_message_automations", "users", column: "sender_id"
   add_foreign_key "crm_pipelines", "accounts"
+  add_foreign_key "crm_script_versions", "accounts", on_delete: :cascade
   add_foreign_key "crm_settings", "accounts"
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "crm_weekly_feedbacks", "accounts"

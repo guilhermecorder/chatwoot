@@ -120,6 +120,10 @@ namespace :crm do
     post :test_meta_ads
     post :update_ai
     post :test_ai
+    # 🕶️ rodada 188: tela Sombra dos respondedores (o que a IA teria dito × o que foi dito)
+    get :ai_shadow
+    post :ai_shadow_rate
+    post :ai_simulate
     post :test_gemini
     # Estúdio do Copywriter: conteúdo multi-formato (carrossel, reels...)
     post :copywriter_content
@@ -180,6 +184,17 @@ namespace :crm do
     post :update_price_table
     # investimento mensal por caixa (ROI/CAC do Dashboard CRM)
     post :update_inbox_investments
+  end
+  # ✍️ rodada 191: orientações dos atendentes de IA + histórico do Roteiro (só admin)
+  resources :agent_guidances, only: %i[index create update destroy], controller: 'agent_guidances' do
+    member do
+      post :apply
+      post :ignore
+      post :reopen
+    end
+  end
+  resources :script_versions, only: [:index], controller: 'script_versions' do
+    member { post :restore }
   end
   # Feedback de bugs do time (vira card 🐞 no board do admin)
   resources :bug_reports, only: [:create], controller: 'bug_reports'

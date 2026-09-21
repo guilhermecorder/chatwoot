@@ -25,13 +25,20 @@ class Crm::SendTemplateService
       message_type: :outgoing,
       content: render_content(processed),
       sender: source.sender,
-      additional_attributes: { template_params: processed }
+      # 'cevico_auto' (21/09, feedback da Vaneide): esta mensagem saiu de um
+      # robô (lembrete, régua, campanha…), não de um atendente — as automações
+      # de coluna "mensagem enviada" ignoram mensagens automáticas
+      additional_attributes: { template_params: processed, 'cevico_auto' => auto_label }
     )
 
     conversation
   end
 
   private
+
+  def auto_label
+    source.respond_to?(:auto_label) ? source.auto_label.to_s : source.class.name.demodulize
+  end
 
   def find_or_create_conversation(contact_inbox)
     existing = source.account.conversations

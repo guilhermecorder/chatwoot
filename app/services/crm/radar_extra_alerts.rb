@@ -1,10 +1,11 @@
 # Avisos que entram no Radar sem vir da auditoria de IA (ligação perdida,
-# resposta "não vou" da jornada). Cada tipo sabe dizer se ainda vale.
+# resposta "não vou" da jornada, atendente de IA remarcou/cancelou — rodada
+# 192). Cada tipo sabe dizer se ainda vale.
 module Crm::RadarExtraAlerts
   HANDLERS = {
     Crm::Calls::RadarAlert::KIND => Crm::Calls::RadarAlert,
     Crm::Journey::RadarAlert::KIND => Crm::Journey::RadarAlert
-  }.freeze
+  }.merge(Crm::AgentAlert::KINDS.index_with { Crm::AgentAlert }).freeze
 
   module_function
 
