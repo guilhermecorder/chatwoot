@@ -4,7 +4,7 @@
 // palavra, nada truncado (o nome quebra linha). Cabe SEMPRE na largura, sem
 // barra: tabela fixa; no celular só Criativo, Conversas e Custo; o resto a
 // partir de md (leads/cirurgias em xl).
-// Clique = Ver a fundo.
+// Clique = Análise científica.
 import { computed, ref } from 'vue';
 import {
   fmtMoney,

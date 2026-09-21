@@ -1,4 +1,8 @@
 <script setup>
+// ✅ TAREFAS (kit CEVICO, 20/09): o quadro da equipe no formato "iMac G3 +
+// vidro" — hero, colunas em .cv-block que embrulham (sem rolar de lado),
+// cartões .cv-sub, chips e modal do kit. A mecânica (arrastar entre colunas,
+// filtros, anexos, comentários, celebração) é a mesma de antes.
 import { ref, computed, reactive, onMounted, watch } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
@@ -6,15 +10,12 @@ import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import draggable from 'vuedraggable';
-import {
-  Chart as ChartJS,
-  Title, Tooltip, Legend, ArcElement,
-} from 'chart.js';
+import { Chart as ChartJS, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 import { Doughnut } from 'vue-chartjs';
 import TasksAPI from 'dashboard/api/tasks';
 import CrmAPI from 'dashboard/api/crm';
-import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
-import { resolveTheme } from 'dashboard/helper/cevicoThemes';
+import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 
 ChartJS.register(Title, Tooltip, Legend, ArcElement);
 
@@ -34,40 +35,45 @@ const lists = reactive({ todo: [], doing: [], done: [] });
 
 const STATUSES = ['todo', 'doing', 'done'];
 
+// prioridade → cor do chip do kit (média fica na cor da coluna)
 const PRIORITY_STYLES = {
-  low:    'bg-n-alpha-2 text-n-slate-10',
-  medium: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
-  high:   'bg-amber-500/15 text-amber-700 dark:text-amber-400',
-  urgent: 'bg-red-500/15 text-red-600 dark:text-red-400',
+  low: 'cv-slate',
+  medium: '',
+  high: 'cv-amber',
+  urgent: 'cv-red',
 };
 
-const COLUMN_STYLES = {
-  todo:  { icon: 'i-lucide-circle',        color: 'text-n-slate-10' },
-  doing: { icon: 'i-lucide-loader',        color: 'text-blue-500' },
-  done:  { icon: 'i-lucide-check-circle-2', color: 'text-green-500' },
-};
+// 🍎 paleta do kit: um bloco por coluna + o resumo (admin escolhe a cor de
+// cada um no chip da paleta do hero; escopo 'crm:tarefas')
+const BLOCKS = [
+  { id: 'todo', label: 'A fazer', icon: 'i-lucide-circle' },
+  { id: 'doing', label: 'Fazendo', icon: 'i-lucide-loader' },
+  { id: 'done', label: 'Feito', icon: 'i-lucide-check-circle-2' },
+  { id: 'resumo', label: 'Resumo', icon: 'i-lucide-pie-chart' },
+];
+const BLOCK_ICON = Object.fromEntries(BLOCKS.map(b => [b.id, b.icon]));
+const pal = useCevicoPalette({ scope: 'crm:tarefas', blocks: BLOCKS });
+const { cvVars, blockVars } = pal;
 
-// topo das colunas em GRADIENTE — segue o TEMA escolhido pelo admin
-// (Santorini, Flor del Mar... — Agenda → botão 🎨). No tema padrão fica
-// o visual original azul→roxo / dourado / verde.
-const crmSettings = useMapGetter('crm/getSettings');
-const theme = computed(() => resolveTheme(crmSettings.value));
-// board 100% FEITO = a tela inteira assume o DOURADO do anel
-const GOLD_GRAD = 'linear-gradient(135deg, #B8860B, #D4A017)';
-const COLUMN_GRADIENTS = computed(() =>
-  allDone.value
-    ? { todo: GOLD_GRAD, doing: GOLD_GRAD, done: GOLD_GRAD }
-    : { todo: theme.value.primary, doing: theme.value.accent, done: theme.value.action }
-);
-const uiGrad = computed(() => ({
-  primary: allDone.value ? GOLD_GRAD : theme.value.primary,
-  action: allDone.value ? GOLD_GRAD : theme.value.action,
-  accent: allDone.value ? GOLD_GRAD : theme.value.accent,
-}));
+const plural = (n, one, many) => (n === 1 ? one : many);
 
 // ── Celebração: EXPLOSÃO DE EMOJIS (sempre diferente) perto do painel ──
 // Nada de troféu: emojis aleatórios do set oficial voam do centro pra fora.
-const CELEBRATION_EMOJIS = ['❤️', '😧', '🥳', '👏', '⭐️', '🔥', '🥇', '🚀', '❤️‍🔥', '💖', '✅', '🔝', '💎'];
+const CELEBRATION_EMOJIS = [
+  '❤️',
+  '😧',
+  '🥳',
+  '👏',
+  '⭐️',
+  '🔥',
+  '🥇',
+  '🚀',
+  '❤️‍🔥',
+  '💖',
+  '✅',
+  '🔝',
+  '💎',
+];
 const showCelebration = ref(false);
 const burstPieces = ref([]);
 const burstOrigin = ref('float'); // 'ring' = do centro do anel · 'float' = perto do painel
@@ -75,7 +81,8 @@ const burstOrigin = ref('float'); // 'ring' = do centro do anel · 'float' = per
 // o sorteado também fica no CENTRO do donut durante a fase dourada
 const centerEmoji = ref('');
 const makeBurst = count => {
-  const emoji = CELEBRATION_EMOJIS[Math.floor(Math.random() * CELEBRATION_EMOJIS.length)];
+  const emoji =
+    CELEBRATION_EMOJIS[Math.floor(Math.random() * CELEBRATION_EMOJIS.length)];
   centerEmoji.value = emoji;
   return Array.from({ length: count }, (_, i) => {
     const angle = Math.random() * Math.PI * 2;
@@ -96,9 +103,13 @@ const explodeEmojis = (count, origin = 'float') => {
   burstOrigin.value = origin;
   burstPieces.value = makeBurst(count);
   showCelebration.value = false; // reinicia a animação se já estava rodando
-  requestAnimationFrame(() => { showCelebration.value = true; });
+  requestAnimationFrame(() => {
+    showCelebration.value = true;
+  });
   clearTimeout(celebrationTimer);
-  celebrationTimer = setTimeout(() => { showCelebration.value = false; }, 2800);
+  celebrationTimer = setTimeout(() => {
+    showCelebration.value = false;
+  }, 2800);
 };
 const celebrateIfEarly = task => {
   if (!task.due_at || new Date() >= new Date(task.due_at)) return;
@@ -128,16 +139,34 @@ const sendComment = async () => {
 };
 
 const fmtCommentAt = iso =>
-  new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
 const visibleTasks = computed(() => {
   if (filterAssignee.value === 'me') {
     return tasks.value.filter(x => x.assignee?.id === currentUser.value.id);
   }
   if (filterAssignee.value) {
-    return tasks.value.filter(x => x.assignee?.id === Number(filterAssignee.value));
+    return tasks.value.filter(
+      x => x.assignee?.id === Number(filterAssignee.value)
+    );
   }
   return tasks.value;
+});
+
+// admin: seletor "por pessoa" — limpar volta para "Minhas tarefas"
+const agentFilter = computed({
+  get: () =>
+    filterAssignee.value === 'me' || filterAssignee.value === ''
+      ? ''
+      : String(filterAssignee.value),
+  set: v => {
+    filterAssignee.value = v || 'me';
+  },
 });
 
 const rebuildLists = () => {
@@ -168,11 +197,22 @@ const stats = computed(() => ({
   dueSoon: visibleTasks.value.filter(isDueSoon).length,
 }));
 
+// faixa de aviso acima do quadro ("2 atrasadas e 1 perto do prazo")
+const deadlineNote = computed(() => {
+  const parts = [];
+  const { overdue, dueSoon } = stats.value;
+  if (overdue)
+    parts.push(`${overdue} ${plural(overdue, 'atrasada', 'atrasadas')}`);
+  if (dueSoon) parts.push(`${dueSoon} perto do prazo`);
+  return parts.join(' e ');
+});
+
 // board zerado (tudo FEITO): o anel TREME (tremor que antecede a explosão),
 // os emojis explodem do centro e o anel fica pulsando VERDE.
 // (declarado DEPOIS de stats: o watch avalia o computed já na montagem)
 const allDone = computed(
-  () => stats.value.todo === 0 && stats.value.doing === 0 && stats.value.done > 0
+  () =>
+    stats.value.todo === 0 && stats.value.doing === 0 && stats.value.done > 0
 );
 
 // 🏆 BANCO DE ELOGIOS: um elogio aleatório a cada 100% (bem-humorado,
@@ -195,7 +235,8 @@ const PRAISE_BANK = [
   'O dia acabou cedo pra essa lista.',
   'Talento é pouco: isso é hábito de campeão.',
 ];
-const pickPraise = () => PRAISE_BANK[Math.floor(Math.random() * PRAISE_BANK.length)];
+const pickPraise = () =>
+  PRAISE_BANK[Math.floor(Math.random() * PRAISE_BANK.length)];
 const praise = ref(pickPraise());
 watch(allDone, now => {
   if (now) praise.value = pickPraise();
@@ -230,7 +271,9 @@ watch(allDone, now => {
     return;
   }
   renewCountdown.value = RENEW_AFTER_MS / 1000;
-  renewTicker = setInterval(() => { renewCountdown.value = Math.max(0, renewCountdown.value - 1); }, 1000);
+  renewTicker = setInterval(() => {
+    renewCountdown.value = Math.max(0, renewCountdown.value - 1);
+  }, 1000);
   renewTimer = setTimeout(renewNow, RENEW_AFTER_MS);
 });
 const renewLabel = computed(() => {
@@ -270,7 +313,10 @@ watch(
     } else if (now) {
       ringPhase.value = 'gold'; // já abriu completo: sem explosão de novo
       if (!centerEmoji.value)
-        centerEmoji.value = CELEBRATION_EMOJIS[Math.floor(Math.random() * CELEBRATION_EMOJIS.length)];
+        centerEmoji.value =
+          CELEBRATION_EMOJIS[
+            Math.floor(Math.random() * CELEBRATION_EMOJIS.length)
+          ];
     } else {
       ringPhase.value = '';
     }
@@ -293,8 +339,12 @@ const donutLegend = computed(() => {
 // tarefas em aberto (não feitas) por status, para o donut
 const donutChart = computed(() => {
   const phase = ringPhase.value; // repinta o donut quando vira DOURADO
-  const openTodo = visibleTasks.value.filter(x => x.status === 'todo' && !isOverdue(x)).length;
-  const openDoing = visibleTasks.value.filter(x => x.status === 'doing' && !isOverdue(x)).length;
+  const openTodo = visibleTasks.value.filter(
+    x => x.status === 'todo' && !isOverdue(x)
+  ).length;
+  const openDoing = visibleTasks.value.filter(
+    x => x.status === 'doing' && !isOverdue(x)
+  ).length;
   const overdue = stats.value.overdue;
   const done = stats.value.done;
   const total = openTodo + openDoing + overdue + done;
@@ -308,31 +358,38 @@ const donutChart = computed(() => {
         t('TASKS.STATS.OVERDUE'),
         t('TASKS.COLUMNS.DONE'),
       ],
-      datasets: [{
-        data: [openTodo, openDoing, overdue, done],
-        // gradiente por fatia = aspecto brilhante/vítreo; quando o board
-        // completa, a fatia "Feito" (o anel inteiro) vira DOURADA
-        backgroundColor: ctx => {
-          const gold = phase === 'gold';
-          const pairs = [
-            ['#94A3B8', '#D8E0EA'],
-            ['#3B82F6', '#93E3FD'],
-            ['#EF4444', '#FCA5A5'],
-            gold ? ['#B8860B', '#FFD700'] : ['#10B981', '#86EFC9'],
-          ];
-          const { chartArea, ctx: c } = ctx.chart;
-          const pair = pairs[ctx.dataIndex % pairs.length];
-          if (!chartArea) return pair[0];
-          const g = c.createLinearGradient(chartArea.left, chartArea.top, chartArea.left, chartArea.bottom);
-          g.addColorStop(0, pair[1]);
-          g.addColorStop(1, pair[0]);
-          return g;
+      datasets: [
+        {
+          data: [openTodo, openDoing, overdue, done],
+          // gradiente por fatia = aspecto brilhante/vítreo; quando o board
+          // completa, a fatia "Feito" (o anel inteiro) vira DOURADA
+          backgroundColor: ctx => {
+            const gold = phase === 'gold';
+            const pairs = [
+              ['#94A3B8', '#D8E0EA'],
+              ['#3B82F6', '#93E3FD'],
+              ['#EF4444', '#FCA5A5'],
+              gold ? ['#B8860B', '#FFD700'] : ['#10B981', '#86EFC9'],
+            ];
+            const { chartArea, ctx: c } = ctx.chart;
+            const pair = pairs[ctx.dataIndex % pairs.length];
+            if (!chartArea) return pair[0];
+            const g = c.createLinearGradient(
+              chartArea.left,
+              chartArea.top,
+              chartArea.left,
+              chartArea.bottom
+            );
+            g.addColorStop(0, pair[1]);
+            g.addColorStop(1, pair[0]);
+            return g;
+          },
+          borderWidth: 0,
+          borderRadius: 14, // pontas arredondadas até na parte "reta" das fatias
+          spacing: 3,
+          hoverOffset: 6,
         },
-        borderWidth: 0,
-        borderRadius: 14, // pontas arredondadas até na parte "reta" das fatias
-        spacing: 3,
-        hoverOffset: 6,
-      }],
+      ],
     },
     options: {
       responsive: true,
@@ -363,7 +420,7 @@ const fetchTasks = async () => {
 
 onMounted(() => {
   if (!agents.value.length) store.dispatch('agents/get');
-  store.dispatch('crm/fetchSettings').catch(() => {}); // tema do ambiente
+  store.dispatch('crm/fetchSettings').catch(() => {}); // paletas do kit
   fetchTasks();
 });
 
@@ -492,7 +549,10 @@ const uploadPending = async taskId => {
 const removeAttachment = async att => {
   if (!editingTask.value) return;
   try {
-    const { data } = await TasksAPI.deleteAttachment(editingTask.value.id, att.id);
+    const { data } = await TasksAPI.deleteAttachment(
+      editingTask.value.id,
+      att.id
+    );
     syncTask(data);
     editingTask.value = data;
   } catch {
@@ -514,7 +574,9 @@ const save = async () => {
     const payload = {
       ...form.value,
       title: form.value.title.trim(),
-      due_at: form.value.due_at ? new Date(form.value.due_at).toISOString() : null,
+      due_at: form.value.due_at
+        ? new Date(form.value.due_at).toISOString()
+        : null,
     };
     if (editingTask.value) {
       const wasDone = editingTask.value.status === 'done';
@@ -553,195 +615,275 @@ const removeTask = async () => {
 const formatDue = iso => {
   if (!iso) return null;
   return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 };
 </script>
 
 <template>
-  <div class="bg-n-surface-1 flex flex-col h-full w-full">
-    <!-- Top bar -->
-    <div class="flex items-center gap-3 px-8 py-5 border-b border-n-weak flex-shrink-0 flex-wrap">
-      <div class="flex flex-col gap-2">
-        <h1 class="text-lg font-bold text-n-slate-12 flex items-center gap-2">
-          <span class="w-8 h-8 rounded-lg flex items-center justify-center transition-all" :style="{ background: uiGrad.primary }">
-            <span class="i-lucide-list-checks text-white text-base" />
+  <div
+    class="cv-page flex flex-col h-full overflow-y-auto bg-n-surface-1"
+    :style="cvVars"
+  >
+    <div class="max-w-[1600px] mx-auto w-full p-4 sm:p-6">
+      <!-- hero do kit: título, efeito prático, contagens e o botão de criar -->
+      <CevicoHero
+        :pal="pal"
+        :title="$t('TASKS.TITLE')"
+        subtitle="O que a equipe precisa fazer, em três colunas: arraste cada cartão conforme avança e nada fica esquecido."
+        icon="i-lucide-list-checks"
+      >
+        <template #chips>
+          <span class="cevico-hero-chip">
+            {{ stats.todo + stats.doing }}
+            {{ plural(stats.todo + stats.doing, 'aberta', 'abertas') }}
           </span>
-          {{ $t('TASKS.TITLE') }}
-        </h1>
-        <button
-          class="flex items-center justify-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-white hover:opacity-90 transition-opacity shadow w-fit"
-          :style="{ background: uiGrad.action }"
-          @click="openCreate"
-        >
-          <span class="i-lucide-plus text-sm" />
-          {{ $t('TASKS.NEW') }}
-        </button>
-      </div>
+          <span class="cevico-hero-chip">
+            <span class="i-lucide-check text-xs" />
+            {{ stats.done }} {{ plural(stats.done, 'feita', 'feitas') }}
+          </span>
+          <span v-if="stats.overdue > 0" class="cevico-hero-chip">
+            <span class="i-lucide-alert-triangle text-xs" />
+            {{ stats.overdue }}
+            {{ plural(stats.overdue, 'atrasada', 'atrasadas') }}
+          </span>
+          <span v-if="stats.dueSoon > 0" class="cevico-hero-chip">
+            <span class="i-lucide-clock text-xs" />
+            {{ stats.dueSoon }} perto do prazo
+          </span>
+        </template>
+        <template #actions>
+          <button class="cevico-hero-btn" @click="openCreate">
+            <span class="i-lucide-plus text-sm" />{{ $t('TASKS.NEW') }}
+          </button>
+        </template>
+      </CevicoHero>
 
-      <!-- Mini dashboard -->
-      <div class="flex items-center gap-2 ml-2 flex-wrap">
-        <span class="text-xs bg-n-alpha-2 text-n-slate-11 rounded-full px-2.5 py-1">
-          {{ $t('TASKS.COLUMNS.TODO') }}: <strong>{{ stats.todo }}</strong>
+      <!-- filtros: de quem são as tarefas -->
+      <div class="flex items-center gap-2 flex-wrap mb-4">
+        <span class="cv-seg cv-seg-sm">
+          <button
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': filterAssignee === 'me' }"
+            @click="filterAssignee = 'me'"
+          >
+            <span class="i-lucide-user text-xs" />{{ $t('TASKS.FILTER.MINE') }}
+          </button>
+          <button
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': filterAssignee === '' }"
+            @click="filterAssignee = ''"
+          >
+            <span class="i-lucide-users text-xs" />{{ $t('TASKS.FILTER.ALL') }}
+          </button>
         </span>
-        <span class="text-xs bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-full px-2.5 py-1">
-          {{ $t('TASKS.COLUMNS.DOING') }}: <strong>{{ stats.doing }}</strong>
-        </span>
-        <span class="text-xs bg-green-500/10 text-green-600 rounded-full px-2.5 py-1">
-          {{ $t('TASKS.COLUMNS.DONE') }}: <strong>{{ stats.done }}</strong>
-        </span>
-        <span
-          v-if="stats.overdue > 0"
-          class="text-xs bg-red-500/10 text-red-600 rounded-full px-2.5 py-1 font-medium"
-        >
-          ⚠ {{ $t('TASKS.STATS.OVERDUE') }}: <strong>{{ stats.overdue }}</strong>
-        </span>
-        <span
-          v-if="stats.dueSoon > 0"
-          class="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded-full px-2.5 py-1 font-medium"
-        >
-          ⏰ {{ $t('TASKS.STATS.DUE_SOON') }}: <strong>{{ stats.dueSoon }}</strong>
-        </span>
-      </div>
-
-      <div class="flex items-center gap-2 ml-auto">
-        <!-- Filtro por pessoa -->
         <select
-          v-model="filterAssignee"
-          class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+          v-if="isAdmin"
+          v-model="agentFilter"
+          class="cv-input !h-[30px] text-xs text-n-slate-12 max-w-full"
         >
-          <option value="me">{{ $t('TASKS.FILTER.MINE') }}</option>
-          <option value="">{{ $t('TASKS.FILTER.ALL') }}</option>
-          <template v-if="isAdmin">
-            <option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option>
-          </template>
+          <option value="">Por pessoa…</option>
+          <option
+            v-for="agent in agents"
+            :key="agent.id"
+            :value="String(agent.id)"
+          >
+            {{ agent.name }}
+          </option>
         </select>
+        <span class="cv-chip ml-auto">
+          {{ visibleTasks.length }}
+          {{ plural(visibleTasks.length, 'tarefa', 'tarefas') }}
+        </span>
       </div>
-    </div>
 
-    <!-- Loading -->
-    <SkeletonScreen v-if="isLoading" variant="board" />
+      <!-- aviso de prazo: faixa colorida do kit (vermelha se há atrasadas) -->
+      <div
+        v-if="!isLoading && deadlineNote"
+        class="cv-block cv-strip px-4 py-3 mb-4 flex items-center gap-3 flex-wrap"
+        :class="stats.overdue > 0 ? 'cv-red' : 'cv-amber'"
+      >
+        <span class="cv-icon cv-icon-sm">
+          <span
+            :class="
+              stats.overdue > 0 ? 'i-lucide-alert-triangle' : 'i-lucide-clock'
+            "
+            class="text-sm"
+          />
+        </span>
+        <p class="text-sm text-n-slate-11 min-w-0 flex-1 break-words">
+          <strong class="text-n-slate-12">{{ deadlineNote }}</strong> — abra o
+          cartão para ajustar o prazo ou arraste para Feito.
+        </p>
+      </div>
 
-    <!-- Kanban + dashboard -->
-    <div v-else class="flex-1 min-h-0 overflow-x-auto p-8">
-      <div class="flex gap-4 h-full min-w-max">
-        <!-- Colunas de largura fixa (padrão, igual CRM) -->
-        <div
+      <!-- Loading -->
+      <SkeletonScreen v-if="isLoading" variant="board" />
+
+      <!-- quadro: colunas que EMBRULHAM em linhas (nunca rola de lado) + resumo -->
+      <div
+        v-else
+        class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      >
+        <!-- board 100% feito: as colunas vestem o DOURADO (cv-gold) no lugar da paleta -->
+        <section
           v-for="statusKey in STATUSES"
           :key="statusKey"
-          class="flex flex-col bg-n-alpha-1 rounded-2xl w-[86vw] min-w-[86vw] snap-center md:w-72 md:min-w-72 flex-shrink-0 h-full min-h-0 overflow-hidden border border-n-weak"
+          class="cv-block p-4 min-w-0 flex flex-col"
+          :class="allDone ? 'cv-gold' : ''"
+          :style="allDone ? undefined : blockVars(statusKey)"
         >
-          <!-- Topo da coluna em gradiente -->
-          <div
-            class="flex items-center gap-2 px-3.5 py-2.5 flex-shrink-0 text-white"
-            :style="{ background: COLUMN_GRADIENTS[statusKey] }"
-            :class="theme.glass ? 'cevico-glass' : ''"
-          >
-            <span :class="COLUMN_STYLES[statusKey].icon" class="text-sm" />
-            <span class="text-sm font-bold">{{ $t(`TASKS.COLUMNS.${statusKey.toUpperCase()}`) }}</span>
-            <span class="text-xs bg-white/25 rounded-full px-2 py-0.5 font-semibold ml-auto">{{ lists[statusKey].length }}</span>
-          </div>
-
-          <!-- Cards -->
-          <div class="flex-1 overflow-y-auto p-2 min-h-0" style="scrollbar-width:thin;">
-            <draggable
-              v-model="lists[statusKey]"
-              group="tasks"
-              item-key="id"
-              :animation="150"
-              ghost-class="opacity-40"
-              class="min-h-16 h-full"
-              @change="onColumnChange(statusKey, $event)"
-            >
-              <template #item="{ element: task }">
-                <div
-                  class="bg-n-solid-2 border rounded-xl p-4 mb-2 cursor-pointer hover:border-n-brand hover:shadow-sm transition-all select-none"
-                  :class="isOverdue(task) ? 'border-red-400/60' : (isDueSoon(task) ? 'border-amber-400/60' : 'border-n-weak')"
-                  @click="openEdit(task)"
-                >
-                  <p
-                    class="text-sm font-medium text-n-slate-12 leading-snug"
-                    :class="task.status === 'done' ? 'line-through opacity-60' : ''"
-                  >
-                    {{ task.title }}
-                  </p>
-
-                  <div class="flex items-center gap-1.5 mt-2 flex-wrap">
-                    <span
-                      class="text-[10px] font-medium rounded-full px-2 py-0.5"
-                      :class="PRIORITY_STYLES[task.priority]"
-                    >
-                      {{ $t(`TASKS.PRIORITY.${task.priority.toUpperCase()}`) }}
-                    </span>
-                    <span
-                      v-if="task.task_type"
-                      class="text-[10px] bg-n-alpha-2 text-n-slate-10 rounded-full px-2 py-0.5"
-                    >
-                      {{ task.task_type }}
-                    </span>
-                    <span
-                      v-if="task.attachments?.length"
-                      class="text-[10px] bg-n-alpha-2 text-n-slate-10 rounded-full px-2 py-0.5 inline-flex items-center gap-0.5"
-                      :title="$t('TASKS.ATTACH.TITLE')"
-                    >
-                      <span class="i-lucide-paperclip text-[9px]" />
-                      {{ task.attachments.length }}
-                    </span>
-                  </div>
-
-                  <div v-if="task.due_at" class="mt-2">
-                    <span
-                      class="inline-flex items-center gap-1 text-[11px]"
-                      :class="isOverdue(task) ? 'text-red-500 font-medium' : (isDueSoon(task) ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-n-slate-9')"
-                    >
-                      <span class="i-lucide-calendar-clock text-[11px]" />
-                      {{ formatDue(task.due_at) }}
-                      <span v-if="isDueSoon(task)" class="ml-0.5">· {{ $t('TASKS.STATS.DUE_SOON') }}</span>
-                    </span>
-                  </div>
-
-                  <div class="flex items-center justify-between mt-2 gap-1">
-                    <span v-if="task.assignee" class="flex items-center gap-1 text-[11px] text-n-slate-10 min-w-0">
-                      <span class="i-lucide-user text-[10px] flex-shrink-0" />
-                      <span class="truncate">{{ task.assignee.name }}</span>
-                    </span>
-                    <span
-                      v-if="task.creator && task.creator.id !== task.assignee?.id"
-                      class="text-[10px] text-n-slate-9 ml-auto flex-shrink-0"
-                      :title="$t('TASKS.CREATED_BY', { name: task.creator.name })"
-                    >
-                      {{ $t('TASKS.BY') }} {{ task.creator.name.split(' ')[0] }}
-                    </span>
-                  </div>
-                </div>
-              </template>
-            </draggable>
-          </div>
-        </div>
-
-        <!-- Painel de resumo (donut) — só desktop -->
-        <div
-          class="hidden lg:flex flex-col w-72 min-w-72 flex-shrink-0 rounded-2xl p-4 h-full min-h-0 overflow-y-auto cevico-no-scrollbar border-2 transition-all"
-          :class="allDone ? 'cevico-all-done-ring bg-amber-500/5' : 'bg-n-alpha-1 border-n-weak'"
-        >
-          <p class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-1.5">
-            <span class="w-6 h-6 rounded-lg flex items-center justify-center transition-all" :style="{ background: uiGrad.primary }">
-              <span class="i-lucide-pie-chart text-white text-xs" />
+          <header class="flex items-center gap-2.5 mb-3">
+            <span class="cv-icon cv-icon-sm">
+              <span :class="BLOCK_ICON[statusKey]" class="text-sm" />
             </span>
-            {{ $t('TASKS.DASHBOARD.TITLE') }}
+            <h2
+              class="text-base sm:text-lg font-bold tracking-tight text-n-slate-12 leading-tight min-w-0 break-words"
+            >
+              {{ $t(`TASKS.COLUMNS.${statusKey.toUpperCase()}`) }}
+            </h2>
+            <span class="cv-chip ml-auto">{{ lists[statusKey].length }}</span>
+          </header>
+
+          <p
+            v-if="!lists[statusKey].length"
+            class="text-xs text-n-slate-9 text-center py-3 px-2 break-words"
+          >
+            Nenhuma tarefa aqui — arraste um cartão ou crie uma nova.
           </p>
-          <p class="text-xs text-n-slate-10 mb-4">{{ $t('TASKS.DASHBOARD.SUBTITLE') }}</p>
+
+          <!-- o draggable continua sendo o pai direto dos cartões -->
+          <draggable
+            v-model="lists[statusKey]"
+            group="tasks"
+            item-key="id"
+            :animation="150"
+            ghost-class="opacity-40"
+            class="flex flex-col gap-2.5 flex-1 min-h-16"
+            @change="onColumnChange(statusKey, $event)"
+          >
+            <template #item="{ element: task }">
+              <div
+                class="cv-sub cv-sub-hover rounded-2xl p-4 flex flex-col gap-2 min-w-0 cursor-pointer select-none"
+                @click="openEdit(task)"
+              >
+                <!-- título inteiro, sempre visível -->
+                <p
+                  class="text-sm font-semibold text-n-slate-12 leading-snug break-words min-w-0"
+                  :class="
+                    task.status === 'done' ? 'line-through opacity-60' : ''
+                  "
+                >
+                  {{ task.title }}
+                </p>
+
+                <!-- linha de contexto: responsável · prazo · quem criou -->
+                <div
+                  v-if="task.assignee || task.due_at || task.creator"
+                  class="flex items-center gap-x-3 gap-y-1 flex-wrap text-xs text-n-slate-10 min-w-0"
+                >
+                  <span
+                    v-if="task.assignee"
+                    class="inline-flex items-center gap-1 min-w-0 break-words"
+                  >
+                    <span class="i-lucide-user text-[11px] flex-shrink-0" />
+                    {{ task.assignee.name }}
+                  </span>
+                  <span
+                    v-if="task.due_at"
+                    class="inline-flex items-center gap-1"
+                    :class="
+                      isOverdue(task)
+                        ? 'text-red-600 dark:text-red-400 font-semibold'
+                        : isDueSoon(task)
+                          ? 'text-amber-700 dark:text-amber-400 font-semibold'
+                          : ''
+                    "
+                  >
+                    <span
+                      class="i-lucide-calendar-clock text-[11px] flex-shrink-0"
+                    />
+                    {{ formatDue(task.due_at) }}
+                  </span>
+                  <span
+                    v-if="task.creator && task.creator.id !== task.assignee?.id"
+                    class="text-n-slate-9"
+                    :title="$t('TASKS.CREATED_BY', { name: task.creator.name })"
+                  >
+                    {{ $t('TASKS.BY') }} {{ task.creator.name.split(' ')[0] }}
+                  </span>
+                </div>
+
+                <!-- chips: prioridade, situação do prazo, tipo, anexos -->
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="cv-chip" :class="PRIORITY_STYLES[task.priority]">
+                    {{ $t(`TASKS.PRIORITY.${task.priority.toUpperCase()}`) }}
+                  </span>
+                  <span v-if="task.status === 'done'" class="cv-chip cv-green">
+                    <span class="i-lucide-check text-[11px]" />Concluída
+                  </span>
+                  <span v-else-if="isOverdue(task)" class="cv-chip cv-red">
+                    <span class="i-lucide-alert-triangle text-[11px]" />Atrasada
+                  </span>
+                  <span v-else-if="isDueSoon(task)" class="cv-chip cv-amber">
+                    <span class="i-lucide-clock text-[11px]" />{{
+                      $t('TASKS.STATS.DUE_SOON')
+                    }}
+                  </span>
+                  <span v-if="task.task_type" class="cv-chip cv-slate">
+                    {{ task.task_type }}
+                  </span>
+                  <span
+                    v-if="task.attachments?.length"
+                    class="cv-chip cv-slate"
+                    :title="$t('TASKS.ATTACH.TITLE')"
+                  >
+                    <span class="i-lucide-paperclip text-[11px]" />{{
+                      task.attachments.length
+                    }}
+                  </span>
+                </div>
+              </div>
+            </template>
+          </draggable>
+        </section>
+
+        <!-- Painel de resumo (donut) — só desktop, como antes -->
+        <section
+          class="cv-block p-4 min-w-0 hidden lg:flex flex-col"
+          :class="allDone ? 'cv-gold cevico-all-done-ring' : ''"
+          :style="allDone ? undefined : blockVars('resumo')"
+        >
+          <header class="flex items-center gap-2.5 mb-1">
+            <span class="cv-icon cv-icon-sm">
+              <span class="i-lucide-pie-chart text-sm" />
+            </span>
+            <h2
+              class="text-base sm:text-lg font-bold tracking-tight text-n-slate-12 leading-tight"
+            >
+              {{ $t('TASKS.DASHBOARD.TITLE') }}
+            </h2>
+          </header>
+          <p class="text-xs text-n-slate-10 mb-4">
+            {{ $t('TASKS.DASHBOARD.SUBTITLE') }}
+          </p>
 
           <!-- O DONUT é o anel: fecha verde → TREME → explosão do centro →
                fica DOURADO pulsando (como os ícones da sidebar) -->
           <div
             v-if="donutChart"
             class="h-48 relative"
-            :class="{ 'cevico-ring-tremor': ringPhase === 'tremor', 'cevico-donut-gold': ringPhase === 'gold' }"
+            :class="{
+              'cevico-ring-tremor': ringPhase === 'tremor',
+              'cevico-donut-gold': ringPhase === 'gold',
+            }"
           >
             <!-- névoa de partículas douradas circulando com o donut -->
             <span
-              v-for="p in (ringPhase === 'gold' ? mistParticles : [])"
+              v-for="p in ringPhase === 'gold' ? mistParticles : []"
               :key="'mist' + p.id"
               class="cevico-donut-mist"
               :style="{
@@ -754,17 +896,24 @@ const formatDue = iso => {
               }"
             />
             <!-- só o anel gira (sentido horário); os emojis ficam parados -->
-            <div class="h-full" :class="ringPhase === 'gold' ? 'cevico-donut-spin' : ''">
+            <div
+              class="h-full"
+              :class="ringPhase === 'gold' ? 'cevico-donut-spin' : ''"
+            >
               <Doughnut :data="donutChart.data" :options="donutChart.options" />
             </div>
             <!-- o emoji da explosão mora no CENTRO do donut -->
             <span
               v-if="ringPhase === 'gold' && centerEmoji"
               class="absolute inset-0 flex items-center justify-center text-4xl pointer-events-none"
-            >{{ centerEmoji }}</span>
+            >
+              {{ centerEmoji }}
+            </span>
             <!-- explosão a partir do CENTRO do anel -->
             <span
-              v-for="c in (showCelebration && burstOrigin === 'ring' ? burstPieces : [])"
+              v-for="c in showCelebration && burstOrigin === 'ring'
+                ? burstPieces
+                : []"
               :key="'ring' + c.id"
               class="cevico-burst-emoji"
               :style="{
@@ -774,40 +923,59 @@ const formatDue = iso => {
                 fontSize: c.size + 'px',
                 animationDelay: c.delay + 's',
               }"
-            >{{ c.emoji }}</span>
+            >
+              {{ c.emoji }}
+            </span>
           </div>
           <!-- legenda própria: 2 de cada lado, dourada junto com a explosão -->
-          <div v-if="donutChart" class="grid grid-cols-2 gap-x-5 gap-y-1.5 w-fit mx-auto mt-3">
+          <div
+            v-if="donutChart"
+            class="grid grid-cols-2 gap-x-5 gap-y-1.5 w-fit mx-auto mt-3"
+          >
             <span
               v-for="item in donutLegend"
               :key="item.label"
               class="flex items-center gap-1.5 text-[11px] transition-colors"
-              :style="{ color: ringPhase === 'gold' ? '#D4A017' : 'var(--n-slate-11, #94A3B8)' }"
+              :class="ringPhase === 'gold' ? '' : 'text-n-slate-10'"
+              :style="ringPhase === 'gold' ? { color: '#D4A017' } : {}"
             >
-              <span class="w-2.5 h-2.5 rounded-full transition-colors" :style="{ backgroundColor: item.color }" />
+              <span
+                class="w-2.5 h-2.5 rounded-full transition-colors"
+                :style="{ backgroundColor: item.color }"
+              />
               {{ item.label }}
             </span>
           </div>
-          <div v-if="!donutChart" class="h-56 flex flex-col items-center justify-center text-n-slate-10 gap-2">
+          <div
+            v-if="!donutChart"
+            class="h-56 flex flex-col items-center justify-center text-n-slate-10 gap-2"
+          >
             <span class="i-lucide-pie-chart text-3xl" />
             <span class="text-xs">{{ $t('TASKS.DASHBOARD.EMPTY') }}</span>
           </div>
-          <div v-if="allDone" class="text-center mt-3 space-y-0.5 flex-shrink-0">
-            <p class="text-xs font-semibold leading-snug" style="color: #D4A017">
+          <div v-if="allDone" class="text-center mt-3 space-y-1 flex-shrink-0">
+            <p class="text-xs font-semibold leading-snug cevico-gold-text">
               Parabéns, 100% das tarefas concluídas.
             </p>
             <!-- elogio ALEATÓRIO do banco de elogios, com destaque -->
-            <p class="text-lg font-black tracking-wide leading-snug" style="color: #B8860B">
-              {{ praise }} ✨
+            <p
+              class="text-lg font-black tracking-wide leading-snug flex items-center justify-center gap-1.5 flex-wrap cevico-gold-deep"
+            >
+              <span class="i-lucide-sparkles text-base flex-shrink-0" />{{
+                praise
+              }}
             </p>
             <!-- item 95: renovação automática do ambiente -->
-            <div v-if="renewCountdown > 0" class="flex items-center justify-center gap-1.5 pt-1">
-              <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" style="background: rgba(184, 134, 11, 0.14); color: #92600A">
-                🧹 tela nova em {{ renewLabel }}
+            <div
+              v-if="renewCountdown > 0"
+              class="flex items-center justify-center gap-1.5 pt-1 flex-wrap"
+            >
+              <span class="cv-chip cv-gold">
+                <span class="i-lucide-timer text-[11px]" />tela nova em
+                {{ renewLabel }}
               </span>
               <button
-                class="text-[10px] font-bold px-2 py-0.5 rounded-full text-white hover:opacity-90"
-                style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+                class="cv-btn cv-btn-sm cv-gold"
                 title="Mover as concluídas pra coluna oculta agora"
                 @click="renewNow"
               >
@@ -816,55 +984,70 @@ const formatDue = iso => {
             </div>
           </div>
 
-          <!-- Números-chave: no modo 100%, só o FEITO fica dourado (pulsando);
-               as caixinhas zeradas ficam escuras -->
+          <!-- Números-chave em vidro (cor só no fio): FEITO verde (dourado
+               pulsando no 100%), ATRASADAS vermelho quando há alguma -->
           <div class="grid grid-cols-2 gap-2.5 mt-4 flex-shrink-0">
             <div
-              class="rounded-xl p-2.5 text-center text-white shadow transition-all"
-              :class="allDone ? 'cevico-tile-gold-pulse' : ''"
-              :style="{ background: uiGrad.action }"
+              class="cv-sub rounded-2xl p-3 text-center"
+              :class="allDone ? 'cv-gold cevico-tile-gold-pulse' : 'cv-green'"
             >
-              <p class="text-lg font-bold leading-tight">{{ stats.done }}</p>
-              <p class="text-[11px] text-white/85">{{ $t('TASKS.COLUMNS.DONE') }}</p>
+              <p class="text-xl font-bold text-n-slate-12 leading-tight">
+                {{ stats.done }}
+              </p>
+              <p class="text-[11px] text-n-slate-10 mt-0.5">
+                {{ $t('TASKS.COLUMNS.DONE') }}
+              </p>
+            </div>
+            <div class="cv-sub rounded-2xl p-3 text-center">
+              <p class="text-xl font-bold text-n-slate-12 leading-tight">
+                {{ stats.doing }}
+              </p>
+              <p class="text-[11px] text-n-slate-10 mt-0.5">
+                {{ $t('TASKS.COLUMNS.DOING') }}
+              </p>
+            </div>
+            <div class="cv-sub rounded-2xl p-3 text-center">
+              <p class="text-xl font-bold text-n-slate-12 leading-tight">
+                {{ stats.todo }}
+              </p>
+              <p class="text-[11px] text-n-slate-10 mt-0.5">
+                {{ $t('TASKS.COLUMNS.TODO') }}
+              </p>
             </div>
             <div
-              class="rounded-xl p-2.5 text-center shadow transition-all"
-              :class="allDone && stats.doing === 0 ? 'bg-n-solid-2' : 'text-white'"
-              :style="allDone && stats.doing === 0 ? {} : { background: uiGrad.accent }"
+              class="cv-sub rounded-2xl p-3 text-center"
+              :class="stats.overdue > 0 ? 'cv-red' : 'cv-slate'"
             >
-              <p class="text-lg font-bold leading-tight" :class="allDone && stats.doing === 0 ? 'text-n-slate-12' : ''">{{ stats.doing }}</p>
-              <p class="text-[11px]" :class="allDone && stats.doing === 0 ? 'text-n-slate-10' : 'text-white/85'">{{ $t('TASKS.COLUMNS.DOING') }}</p>
-            </div>
-            <div
-              class="rounded-xl p-2.5 text-center shadow transition-all"
-              :class="allDone && stats.todo === 0 ? 'bg-n-solid-2' : 'text-white'"
-              :style="allDone && stats.todo === 0 ? {} : { background: uiGrad.primary }"
-            >
-              <p class="text-lg font-bold leading-tight" :class="allDone && stats.todo === 0 ? 'text-n-slate-12' : ''">{{ stats.todo }}</p>
-              <p class="text-[11px]" :class="allDone && stats.todo === 0 ? 'text-n-slate-10' : 'text-white/85'">{{ $t('TASKS.COLUMNS.TODO') }}</p>
-            </div>
-            <div
-              class="rounded-xl p-2.5 text-center shadow"
-              :class="stats.overdue > 0 ? 'text-white' : 'bg-n-solid-2'"
-              :style="stats.overdue > 0 ? { background: 'linear-gradient(135deg, #DC2626, #F59E0B)' } : {}"
-            >
-              <p class="text-lg font-bold leading-tight" :class="stats.overdue > 0 ? '' : 'text-n-slate-12'">{{ stats.overdue }}</p>
-              <p class="text-[11px]" :class="stats.overdue > 0 ? 'text-white/85' : 'text-n-slate-10'">{{ $t('TASKS.STATS.OVERDUE') }}</p>
+              <p class="text-xl font-bold text-n-slate-12 leading-tight">
+                {{ stats.overdue }}
+              </p>
+              <p class="text-[11px] text-n-slate-10 mt-0.5">
+                {{ $t('TASKS.STATS.OVERDUE') }}
+              </p>
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
 
-    <!-- 🔍 anexo de imagem em tela cheia -->
+    <!-- anexo de imagem em tela cheia -->
     <div
       v-if="previewImage"
-      class="fixed inset-0 z-[70] flex items-center justify-center p-6 cursor-zoom-out"
-      style="background: rgba(0, 0, 0, 0.82)"
+      class="fixed inset-0 z-[70] flex items-center justify-center p-6 cursor-zoom-out bg-black/80"
       @click="previewImage = null"
     >
-      <img :src="previewImage" class="max-w-full max-h-full rounded-xl shadow-2xl" />
-      <button class="absolute top-4 right-4 text-white text-2xl i-lucide-x" @click="previewImage = null" />
+      <img
+        :src="previewImage"
+        alt=""
+        class="max-w-full max-h-full rounded-2xl shadow-2xl"
+      />
+      <button
+        class="cv-glass-btn cv-iconbtn absolute top-4 right-4"
+        aria-label="Fechar"
+        @click="previewImage = null"
+      >
+        <span class="i-lucide-x text-base" />
+      </button>
     </div>
 
     <!-- 🎉 Celebração: EXPLOSÃO DE EMOJIS localizada perto do painel -->
@@ -883,48 +1066,73 @@ const formatDue = iso => {
           fontSize: c.size + 'px',
           animationDelay: c.delay + 's',
         }"
-      >{{ c.emoji }}</span>
+      >
+        {{ c.emoji }}
+      </span>
     </div>
 
-    <!-- Modal criar/editar -->
+    <!-- Modal criar/editar: concha sólida do kit (cv-modal) -->
     <div
       v-if="showModal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       @click.self="showModal = false"
     >
-      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
-          <h2 class="text-base font-semibold text-n-slate-12">
-            {{ editingTask ? $t('TASKS.EDIT') : $t('TASKS.NEW') }}
-          </h2>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showModal = false" />
+      <div class="cv-modal w-full max-w-md max-h-[90vh] flex flex-col">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span
+            class="cv-glass w-10 h-10 flex items-center justify-center flex-shrink-0"
+          >
+            <span
+              :class="editingTask ? 'i-lucide-pencil' : 'i-lucide-list-checks'"
+              class="text-base"
+            />
+          </span>
+          <div class="flex-1 min-w-0">
+            <p class="text-[11px] opacity-85">{{ $t('TASKS.TITLE') }}</p>
+            <h2 class="text-base font-bold leading-tight break-words">
+              {{ editingTask ? $t('TASKS.EDIT') : $t('TASKS.NEW') }}
+            </h2>
+          </div>
+          <button
+            class="cv-glass-btn cv-iconbtn flex-shrink-0"
+            aria-label="Fechar"
+            @click="showModal = false"
+          >
+            <span class="i-lucide-x text-base" />
+          </button>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-5 space-y-3.5">
+        <div class="flex-1 overflow-y-auto p-5 space-y-4">
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ $t('TASKS.FORM.TITLE') }} *</label>
+            <label class="cv-label block mb-1">
+              {{ $t('TASKS.FORM.TITLE') }} *
+            </label>
             <input
               v-model="form.title"
-              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+              class="cv-input w-full text-n-slate-12"
               :placeholder="$t('TASKS.FORM.TITLE_PLACEHOLDER')"
             />
           </div>
 
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ $t('TASKS.FORM.DESCRIPTION') }}</label>
+            <label class="cv-label block mb-1">{{
+              $t('TASKS.FORM.DESCRIPTION')
+            }}</label>
             <textarea
               v-model="form.description"
               rows="3"
-              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 resize-none focus:outline-none focus:border-n-brand"
+              class="cv-input w-full text-n-slate-12 resize-none"
             />
           </div>
 
-          <div class="grid grid-cols-2 gap-5">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ $t('TASKS.FORM.TYPE') }}</label>
+              <label class="cv-label block mb-1">{{
+                $t('TASKS.FORM.TYPE')
+              }}</label>
               <select
                 v-model="form.task_type"
-                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                class="cv-input w-full text-n-slate-12"
               >
                 <option value="">—</option>
                 <option value="Atendimento">Atendimento</option>
@@ -936,43 +1144,61 @@ const formatDue = iso => {
             </div>
 
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ $t('TASKS.FORM.PRIORITY') }}</label>
+              <label class="cv-label block mb-1">{{
+                $t('TASKS.FORM.PRIORITY')
+              }}</label>
               <select
                 v-model="form.priority"
-                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                class="cv-input w-full text-n-slate-12"
               >
                 <option value="low">{{ $t('TASKS.PRIORITY.LOW') }}</option>
-                <option value="medium">{{ $t('TASKS.PRIORITY.MEDIUM') }}</option>
+                <option value="medium">
+                  {{ $t('TASKS.PRIORITY.MEDIUM') }}
+                </option>
                 <option value="high">{{ $t('TASKS.PRIORITY.HIGH') }}</option>
-                <option value="urgent">{{ $t('TASKS.PRIORITY.URGENT') }}</option>
+                <option value="urgent">
+                  {{ $t('TASKS.PRIORITY.URGENT') }}
+                </option>
               </select>
             </div>
 
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ $t('TASKS.FORM.ASSIGNEE') }}</label>
+              <label class="cv-label block mb-1">{{
+                $t('TASKS.FORM.ASSIGNEE')
+              }}</label>
               <select
                 v-model="form.assignee_id"
-                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                class="cv-input w-full text-n-slate-12"
               >
-                <option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option>
+                <option
+                  v-for="agent in agents"
+                  :key="agent.id"
+                  :value="agent.id"
+                >
+                  {{ agent.name }}
+                </option>
               </select>
             </div>
 
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ $t('TASKS.FORM.DUE_AT') }}</label>
+              <label class="cv-label block mb-1">{{
+                $t('TASKS.FORM.DUE_AT')
+              }}</label>
               <input
                 v-model="form.due_at"
                 type="datetime-local"
-                class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+                class="cv-input w-full text-n-slate-12"
               />
             </div>
           </div>
 
           <div v-if="editingTask">
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">{{ $t('TASKS.FORM.STATUS') }}</label>
+            <label class="cv-label block mb-1">{{
+              $t('TASKS.FORM.STATUS')
+            }}</label>
             <select
               v-model="form.status"
-              class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              class="cv-input w-full text-n-slate-12"
             >
               <option value="todo">{{ $t('TASKS.COLUMNS.TODO') }}</option>
               <option value="doing">{{ $t('TASKS.COLUMNS.DOING') }}</option>
@@ -980,126 +1206,200 @@ const formatDue = iso => {
             </select>
           </div>
 
-          <!-- 📎 Anexos: imagem/PDF/documento (criador ↔ responsável) -->
-          <div class="border-t border-n-weak pt-3">
-            <p class="text-xs font-semibold text-n-slate-11 mb-2 flex items-center gap-1.5">
-              <span class="i-lucide-paperclip text-sm" style="color: #B8860B" />
-              {{ $t('TASKS.ATTACH.TITLE') }}
-              <span class="text-n-slate-9 font-normal">{{ $t('TASKS.ATTACH.HINT') }}</span>
-            </p>
-            <div v-if="(editingTask?.attachments?.length || 0) + pendingFiles.length" class="flex flex-wrap gap-2 mb-2">
+          <!-- Anexos: imagem/PDF/documento (criador ↔ responsável) -->
+          <div class="border-t border-n-weak pt-4">
+            <div class="flex items-center gap-2 mb-2 flex-wrap">
+              <span class="cv-icon cv-icon-sm">
+                <span class="i-lucide-paperclip text-xs" />
+              </span>
+              <p class="text-sm font-bold text-n-slate-12">
+                {{ $t('TASKS.ATTACH.TITLE') }}
+              </p>
+              <span class="text-[11px] text-n-slate-9 break-words">{{
+                $t('TASKS.ATTACH.HINT')
+              }}</span>
+            </div>
+            <div
+              v-if="
+                (editingTask?.attachments?.length || 0) + pendingFiles.length
+              "
+              class="flex flex-wrap gap-2 mb-2"
+            >
               <!-- já salvos na tarefa -->
-              <div v-for="att in editingTask?.attachments || []" :key="`att-${att.id}`" class="relative group">
+              <div
+                v-for="att in editingTask?.attachments || []"
+                :key="`att-${att.id}`"
+                class="relative group max-w-full"
+              >
                 <img
                   v-if="att.is_image"
                   :src="att.url"
                   :title="att.filename"
-                  class="w-16 h-16 rounded-lg object-cover border border-n-weak cursor-zoom-in"
+                  alt=""
+                  class="w-16 h-16 rounded-xl object-cover border border-n-weak cursor-zoom-in"
                   @click="previewImage = att.url"
                 />
                 <a
                   v-else
                   :href="att.url"
                   target="_blank"
+                  rel="noopener noreferrer"
                   :title="att.filename"
-                  class="w-16 h-16 rounded-lg border border-n-weak bg-n-alpha-1 flex flex-col items-center justify-center gap-0.5 px-1"
+                  class="cv-sub rounded-xl px-3 py-2 flex items-center gap-1.5 text-xs text-n-slate-11 min-w-0"
                 >
-                  <span class="i-lucide-file-text text-lg text-n-slate-10" />
-                  <span class="text-[8px] text-n-slate-10 truncate w-full text-center">{{ att.filename }}</span>
+                  <span
+                    class="i-lucide-file-text text-base text-n-slate-10 flex-shrink-0"
+                  />
+                  <span class="break-all min-w-0">{{ att.filename }}</span>
                 </a>
                 <button
-                  class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-n-slate-12 text-white text-[9px] leading-none hidden group-hover:flex items-center justify-center"
+                  class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white shadow hidden group-hover:flex items-center justify-center"
                   :title="$t('TASKS.ATTACH.REMOVE')"
                   @click.stop="removeAttachment(att)"
                 >
-                  ✕
+                  <span class="i-lucide-x text-[10px]" />
                 </button>
               </div>
               <!-- escolhidos agora (sobem ao salvar) -->
-              <div v-for="(p, i) in pendingFiles" :key="`pend-${i}`" class="relative group">
-                <img v-if="p.url" :src="p.url" :title="p.file.name" class="w-16 h-16 rounded-lg object-cover border border-dashed border-n-strong" />
-                <div v-else :title="p.file.name" class="w-16 h-16 rounded-lg border border-dashed border-n-strong bg-n-alpha-1 flex flex-col items-center justify-center gap-0.5 px-1">
-                  <span class="i-lucide-file-text text-lg text-n-slate-10" />
-                  <span class="text-[8px] text-n-slate-10 truncate w-full text-center">{{ p.file.name }}</span>
+              <div
+                v-for="(p, i) in pendingFiles"
+                :key="`pend-${i}`"
+                class="relative group max-w-full"
+              >
+                <img
+                  v-if="p.url"
+                  :src="p.url"
+                  :title="p.file.name"
+                  alt=""
+                  class="w-16 h-16 rounded-xl object-cover border border-dashed border-n-strong"
+                />
+                <div
+                  v-else
+                  :title="p.file.name"
+                  class="cv-sub rounded-xl px-3 py-2 flex items-center gap-1.5 text-xs text-n-slate-11 min-w-0 !border-dashed"
+                >
+                  <span
+                    class="i-lucide-file-text text-base text-n-slate-10 flex-shrink-0"
+                  />
+                  <span class="break-all min-w-0">{{ p.file.name }}</span>
                 </div>
                 <button
-                  class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-n-slate-12 text-white text-[9px] leading-none hidden group-hover:flex items-center justify-center"
+                  class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white shadow hidden group-hover:flex items-center justify-center"
                   :title="$t('TASKS.ATTACH.REMOVE')"
                   @click.stop="removePending(i)"
                 >
-                  ✕
+                  <span class="i-lucide-x text-[10px]" />
                 </button>
               </div>
             </div>
             <button
-              class="text-xs font-medium px-3 py-1.5 rounded-lg border border-n-weak hover:border-n-brand text-n-slate-11 flex items-center gap-1.5 disabled:opacity-50"
+              class="cv-btn cv-btn-sm cv-btn-ghost"
               :disabled="isUploadingFiles"
               @click="pickFiles"
             >
               <span class="i-lucide-plus text-xs" />
-              {{ isUploadingFiles ? $t('TASKS.ATTACH.SENDING') : $t('TASKS.ATTACH.ADD') }}
+              {{
+                isUploadingFiles
+                  ? $t('TASKS.ATTACH.SENDING')
+                  : $t('TASKS.ATTACH.ADD')
+              }}
             </button>
-            <input ref="fileInputEl" type="file" class="hidden" multiple :accept="ACCEPT_FILES" @change="onFilesPicked" />
-            <p v-if="pendingFiles.length" class="text-[10px] text-n-slate-9 mt-1">{{ $t('TASKS.ATTACH.ON_SAVE') }}</p>
+            <input
+              ref="fileInputEl"
+              type="file"
+              class="hidden"
+              multiple
+              :accept="ACCEPT_FILES"
+              @change="onFilesPicked"
+            />
+            <p
+              v-if="pendingFiles.length"
+              class="text-[11px] text-n-slate-9 mt-1.5"
+            >
+              {{ $t('TASKS.ATTACH.ON_SAVE') }}
+            </p>
           </div>
 
           <!-- Solicitações / ajuda: conversa entre quem criou e quem executa -->
-          <div v-if="editingTask" class="border-t border-n-weak pt-3">
-            <p class="text-xs font-semibold text-n-slate-11 mb-1.5 flex items-center gap-1.5">
-              <span class="i-lucide-messages-square text-sm" style="color: #B8860B" />
-              Solicitações e ajuda
-              <span class="text-n-slate-9 font-normal">(entre {{ editingTask.creator?.name?.split(' ')[0] }} e {{ editingTask.assignee?.name?.split(' ')[0] || 'o responsável' }})</span>
-            </p>
-            <div v-if="editingTask.comments?.length" class="space-y-1.5 max-h-40 overflow-y-auto mb-2 pr-1">
+          <div v-if="editingTask" class="border-t border-n-weak pt-4">
+            <div class="flex items-center gap-2 mb-2 flex-wrap">
+              <span class="cv-icon cv-icon-sm">
+                <span class="i-lucide-messages-square text-xs" />
+              </span>
+              <p class="text-sm font-bold text-n-slate-12">
+                Solicitações e ajuda
+              </p>
+              <span class="text-[11px] text-n-slate-9 break-words">
+                entre {{ editingTask.creator?.name?.split(' ')[0] }} e
+                {{
+                  editingTask.assignee?.name?.split(' ')[0] || 'o responsável'
+                }}
+              </span>
+            </div>
+            <div
+              v-if="editingTask.comments?.length"
+              class="space-y-1.5 max-h-40 overflow-y-auto mb-2 pr-1"
+            >
               <div
                 v-for="(c, i) in editingTask.comments"
                 :key="i"
-                class="rounded-lg px-2.5 py-1.5 text-xs border"
-                :class="c.user_id === currentUser.id
-                  ? 'bg-n-brand/5 border-n-brand/20'
-                  : 'bg-n-solid-2 border-n-weak'"
+                class="cv-sub rounded-xl px-3 py-2 text-xs"
+                :class="c.user_id === currentUser.id ? 'cv-sub-on' : ''"
               >
                 <p class="flex items-center gap-2 mb-0.5">
-                  <span class="font-semibold text-n-slate-12">{{ c.name?.split(' ')[0] }}</span>
-                  <span class="text-[10px] text-n-slate-9 ml-auto">{{ fmtCommentAt(c.at) }}</span>
+                  <span class="font-semibold text-n-slate-12">{{
+                    c.name?.split(' ')[0]
+                  }}</span>
+                  <span class="text-[10px] text-n-slate-9 ml-auto">{{
+                    fmtCommentAt(c.at)
+                  }}</span>
                 </p>
-                <p class="text-n-slate-11 leading-snug">{{ c.text }}</p>
+                <p class="text-n-slate-11 leading-snug break-words">
+                  {{ c.text }}
+                </p>
               </div>
             </div>
-            <p v-else class="text-[11px] text-n-slate-9 mb-2">
-              Precisa de esclarecimento ou quer avisar algo? Escreva aqui — fica registrado na tarefa.
+            <p v-else class="text-xs text-n-slate-9 mb-2">
+              Precisa de esclarecimento ou quer avisar algo? Escreva aqui — fica
+              registrado na tarefa.
             </p>
-            <div class="flex gap-1.5">
+            <div class="flex gap-2">
               <input
                 v-model="commentText"
-                class="flex-1 border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+                class="cv-input flex-1 min-w-0 text-n-slate-12"
                 placeholder="Ex: consigo os telefones atualizados?"
                 @keyup.enter="sendComment"
               />
               <button
-                class="px-3 rounded-lg text-white text-sm font-medium disabled:opacity-50"
-                style="background: linear-gradient(135deg, #B8860B, #D4A017)"
+                class="cv-btn !h-9 !px-3 flex-shrink-0"
+                aria-label="Enviar"
                 :disabled="!commentText.trim() || isSendingComment"
                 @click="sendComment"
               >
-                <span :class="isSendingComment ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-send'" class="text-sm" />
+                <span
+                  :class="
+                    isSendingComment
+                      ? 'i-lucide-loader-2 animate-spin'
+                      : 'i-lucide-send'
+                  "
+                  class="text-sm"
+                />
               </button>
             </div>
           </div>
         </div>
 
-        <div class="px-5 py-4 border-t border-n-weak flex-shrink-0 space-y-2">
+        <div class="cv-modal-foot flex flex-col gap-2">
           <div class="flex gap-2">
             <button
-              class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
-              :style="{ background: theme.primary }"
+              class="cv-btn cv-btn-lg flex-1"
               :disabled="!form.title.trim() || isSaving"
               @click="save"
             >
               {{ isSaving ? $t('TASKS.SAVING') : $t('TASKS.SAVE') }}
             </button>
             <button
-              class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11"
+              class="cv-btn cv-btn-ghost cv-btn-lg"
               @click="showModal = false"
             >
               {{ $t('TASKS.CANCEL') }}
@@ -1110,17 +1410,25 @@ const formatDue = iso => {
           <div v-if="editingTask">
             <button
               v-if="!showDeleteConfirm"
-              class="w-full py-1.5 text-xs text-red-500 hover:text-red-600"
+              class="cv-btn cv-btn-sm cv-btn-ghost cv-btn-danger w-full"
               @click="showDeleteConfirm = true"
             >
-              {{ $t('TASKS.DELETE') }}
+              <span class="i-lucide-trash-2 text-xs" />{{ $t('TASKS.DELETE') }}
             </button>
-            <div v-else class="flex items-center gap-2">
-              <span class="text-xs text-n-slate-11 flex-1">{{ $t('TASKS.DELETE_CONFIRM') }}</span>
-              <button class="bg-red-500 text-white px-3 py-1 rounded-lg text-xs" @click="removeTask">
+            <div v-else class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs text-n-slate-11 flex-1 min-w-0">{{
+                $t('TASKS.DELETE_CONFIRM')
+              }}</span>
+              <button
+                class="cv-btn cv-btn-sm cv-btn-danger-on"
+                @click="removeTask"
+              >
                 {{ $t('TASKS.DELETE') }}
               </button>
-              <button class="border border-n-weak px-3 py-1 rounded-lg text-xs text-n-slate-11" @click="showDeleteConfirm = false">
+              <button
+                class="cv-btn cv-btn-sm cv-btn-ghost"
+                @click="showDeleteConfirm = false"
+              >
                 {{ $t('TASKS.CANCEL') }}
               </button>
             </div>
@@ -1143,18 +1451,25 @@ const formatDue = iso => {
   animation: cevico-burst-fly 1.4s cubic-bezier(0.16, 0.84, 0.44, 1) forwards;
 }
 @keyframes cevico-burst-fly {
-  0% { transform: translate(0, 0) rotate(0deg) scale(0.4); opacity: 1; }
-  70% { opacity: 1; }
-  100% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.1); opacity: 0; }
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(0.4);
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1.1);
+    opacity: 0;
+  }
 }
 
-/* painel de resumo rola por dentro SEM mostrar a barra */
-.cevico-no-scrollbar {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+/* textos da festa do 100%: dourado do anel (claro) e o tom fundo */
+.cevico-gold-text {
+  color: #d4a017;
 }
-.cevico-no-scrollbar::-webkit-scrollbar {
-  display: none;
+.cevico-gold-deep {
+  color: #b8860b;
 }
 
 /* caixinha FEITO pulsando dourada no modo 100% */
@@ -1162,18 +1477,28 @@ const formatDue = iso => {
   animation: cevico-tile-gold 2.2s ease-in-out infinite;
 }
 @keyframes cevico-tile-gold {
-  0%, 100% { box-shadow: 0 0 6px rgba(212, 160, 23, 0.35); }
-  50% { box-shadow: 0 0 18px rgba(255, 200, 40, 0.7); }
+  0%,
+  100% {
+    box-shadow: 0 0 6px rgba(212, 160, 23, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(255, 200, 40, 0.7);
+  }
 }
 
-/* board 100% feito: a CAIXA pulsa DOURADA (cor do anel) */
+/* board 100% feito: a CAIXA do resumo pulsa DOURADA (cor do anel) */
 .cevico-all-done-ring {
   border-color: #d4a017 !important;
   animation: cevico-ring-pulse 2.2s ease-in-out infinite;
 }
 @keyframes cevico-ring-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(212, 160, 23, 0.35); }
-  50% { box-shadow: 0 0 22px rgba(255, 200, 40, 0.75); }
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(212, 160, 23, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(255, 200, 40, 0.75);
+  }
 }
 
 /* TREMOR que antecede a explosão (o donut sacode rapidinho) */
@@ -1181,10 +1506,19 @@ const formatDue = iso => {
   animation: cevico-ring-tremor 0.12s linear infinite;
 }
 @keyframes cevico-ring-tremor {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  25% { transform: translate(-2px, 1px) rotate(-1.5deg); }
-  50% { transform: translate(2px, -1px) rotate(1.5deg); }
-  75% { transform: translate(-1px, -2px) rotate(-1deg); }
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate(-2px, 1px) rotate(-1.5deg);
+  }
+  50% {
+    transform: translate(2px, -1px) rotate(1.5deg);
+  }
+  75% {
+    transform: translate(-1px, -2px) rotate(-1deg);
+  }
 }
 
 /* depois da explosão: o donut dourado GIRA em sentido horário e pulsa
@@ -1201,25 +1535,31 @@ const formatDue = iso => {
     cevico-donut-spin 8s linear 3.2s infinite;
 }
 @keyframes cevico-donut-spin-burst {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(720deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(720deg);
+  }
 }
 @keyframes cevico-donut-spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 /* sem glow no donut (pedido 18/07) — só a respiração sutil de opacidade;
    quem brilha é a névoa de partículas ao redor */
 @keyframes cevico-donut-gold-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.9; }
-}
-
-/* efeito "vidro" leve dos temas (Santorini etc.) */
-.cevico-glass {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    inset 0 -1px 0 rgba(15, 23, 42, 0.15);
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.9;
+  }
 }
 
 /* névoa de partículas douradas orbitando o donut (no lugar do glow) */

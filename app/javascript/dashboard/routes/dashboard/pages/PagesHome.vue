@@ -9,6 +9,8 @@ import { useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 
 const currentRole = useMapGetter('getCurrentRole');
 const isAdmin = computed(() => currentRole.value === 'administrator');
@@ -18,16 +20,77 @@ const isLoading = ref(true);
 const pages = ref([]);
 const categories = ref({});
 
-const CATEGORY_ORDER = ['captacao', 'pre_consulta', 'pre_cirurgia', 'pos_operatorio'];
+const CATEGORY_ORDER = [
+  'captacao',
+  'pre_consulta',
+  'pre_cirurgia',
+  'pos_operatorio',
+];
 const CATEGORY_META = {
-  captacao: { icon: 'i-lucide-megaphone', grad: 'linear-gradient(135deg, #0F5FA6, #1E7FBF)' },
-  pre_consulta: { icon: 'i-lucide-stethoscope', grad: 'linear-gradient(135deg, #0284C7, #38BDF8)' },
-  pre_cirurgia: { icon: 'i-lucide-heart-pulse', grad: 'linear-gradient(135deg, #B8860B, #D4AF37)' },
-  pos_operatorio: { icon: 'i-lucide-shield-check', grad: 'linear-gradient(135deg, #047857, #10B981)' },
+  captacao: {
+    icon: 'i-lucide-megaphone',
+    grad: 'linear-gradient(135deg, #0F5FA6, #1E7FBF)',
+  },
+  pre_consulta: {
+    icon: 'i-lucide-stethoscope',
+    grad: 'linear-gradient(135deg, #0284C7, #38BDF8)',
+  },
+  pre_cirurgia: {
+    icon: 'i-lucide-heart-pulse',
+    grad: 'linear-gradient(135deg, #B8860B, #D4AF37)',
+  },
+  pos_operatorio: {
+    icon: 'i-lucide-shield-check',
+    grad: 'linear-gradient(135deg, #047857, #10B981)',
+  },
 };
 
+// 🍎 kit CEVICO (20/09): a tela veste o formato novo — hero de vidro, blocos
+// translúcidos e paleta por etapa da jornada (escopo crm:paginas)
+const STAGE_LABELS = {
+  captacao: 'Captação',
+  pre_consulta: 'Pacientes pré consulta',
+  pre_cirurgia: 'Pacientes pré cirurgia',
+  pos_operatorio: 'Pacientes pós operatório',
+};
+// uma frase por etapa: pra quem é a página e o que ela precisa fazer
+const STAGE_HINTS = {
+  captacao:
+    'Para quem ainda não conhece a CEVICO: anúncios, Google e campanhas.',
+  pre_consulta:
+    'Para quem já marcou: o que esperar da consulta, preparo e dúvidas comuns.',
+  pre_cirurgia:
+    'Para quem vai operar: lentes, preparo e o dia da cirurgia, explicado com calma.',
+  pos_operatorio:
+    'Para quem já operou: cuidados, recuperação dia a dia e sinais de alerta.',
+};
+// nome curto da etapa (o servidor manda "Procedimentos — Captação")
+const stageName = cat =>
+  (categories.value[cat] || STAGE_LABELS[cat] || cat).replace(
+    'Procedimentos — ',
+    ''
+  );
+const stageBlocks = computed(() =>
+  CATEGORY_ORDER.map(c => ({
+    id: c,
+    label: stageName(c),
+    icon: CATEGORY_META[c].icon,
+  }))
+);
+const pal = useCevicoPalette({ scope: 'crm:paginas', blocks: stageBlocks });
+const { cvVars, blockVars } = pal;
+
 // cores dos cards (paleta da marca + dopamine)
-const CARD_COLORS = ['#0F5FA6', '#D4AF37', '#0284C7', '#047857', '#7C3AED', '#DB2777', '#EA580C', '#0D9488'];
+const CARD_COLORS = [
+  '#0F5FA6',
+  '#D4AF37',
+  '#0284C7',
+  '#047857',
+  '#7C3AED',
+  '#DB2777',
+  '#EA580C',
+  '#0D9488',
+];
 
 // ── Construtor v2: seções + efeitos ──
 const SECTION_TYPES = [
@@ -50,9 +113,19 @@ const SECTION_EFFECTS = [
   { key: 'brilho', label: 'Brilho dourado' },
 ];
 const ITEM_TYPES = ['beneficios', 'passos', 'faq'];
-const typeMeta = key => SECTION_TYPES.find(t => t.key === key) || SECTION_TYPES[0];
+const typeMeta = key =>
+  SECTION_TYPES.find(t => t.key === key) || SECTION_TYPES[0];
 // retoques (23/07): cores de fundo suave por seção
-const SECTION_COLORS = ['#0F5FA6', '#D4AF37', '#10B981', '#7C3AED', '#EC4899', '#F59E0B', '#0EA5E9', '#64748B'];
+const SECTION_COLORS = [
+  '#0F5FA6',
+  '#D4AF37',
+  '#10B981',
+  '#7C3AED',
+  '#EC4899',
+  '#F59E0B',
+  '#0EA5E9',
+  '#64748B',
+];
 
 const blankSection = type => ({
   type,
@@ -92,7 +165,13 @@ const moveSection = (i, dir) => {
 // ── IA no editor, em DOIS modos:
 // 'briefing' → Copywriter escreve a página do zero
 // 'copy'     → Construtor de Páginas monta a página com uma copy pronta
-const ai = ref({ mode: 'briefing', briefing: '', copy: '', form_id: '', generating: false });
+const ai = ref({
+  mode: 'briefing',
+  briefing: '',
+  copy: '',
+  form_id: '',
+  generating: false,
+});
 const insightForms = ref([]);
 const loadInsightForms = async () => {
   try {
@@ -135,7 +214,10 @@ const generateWithAI = async () => {
       category: form.value.category,
       ...(isCopyMode
         ? { copy: ai.value.copy }
-        : { briefing: ai.value.briefing, form_id: ai.value.form_id || undefined }),
+        : {
+            briefing: ai.value.briefing,
+            form_id: ai.value.form_id || undefined,
+          }),
     });
     const url = `${page.builder_url}&construir=1`;
     if (buildTab) buildTab.location.href = url;
@@ -145,7 +227,9 @@ const generateWithAI = async () => {
     fetchPages();
   } catch (error) {
     if (buildTab) buildTab.close();
-    useAlert(error?.response?.data?.error || 'Não consegui começar a montagem.');
+    useAlert(
+      error?.response?.data?.error || 'Não consegui começar a montagem.'
+    );
   } finally {
     ai.value.generating = false;
   }
@@ -168,7 +252,9 @@ const pagesByCategory = computed(() => {
   const map = {};
   CATEGORY_ORDER.forEach(c => {
     map[c] = pages.value.filter(
-      p => p.category === c && (!statusFilter.value || p.status === statusFilter.value)
+      p =>
+        p.category === c &&
+        (!statusFilter.value || p.status === statusFilter.value)
     );
   });
   return map;
@@ -199,13 +285,34 @@ const blankPage = () => ({
 });
 
 // ── gestão de projetos: ideia → em produção → publicada (17/07) ──
+// `label`/`tab`/`icon`/`cv` vestem a lista no kit (pílula verde = no ar,
+// âmbar = em produção, sem cor = ideia); `chip` continua no editor
 const STATUS_META = {
-  idea: { label: '💡 IDEIA', chip: '💡 Ideias', badge: 'bg-violet-500/90 text-white' },
-  draft: { label: '🛠 EM PRODUÇÃO', chip: '🛠 Em produção', badge: 'bg-black/40 text-white/90' },
-  published: { label: 'NO AR', chip: '🟢 Publicadas', badge: 'bg-white/90 text-green-700' },
+  idea: {
+    label: 'IDEIA',
+    tab: 'Ideias',
+    icon: 'i-lucide-lightbulb',
+    cv: '',
+    chip: '💡 Ideias',
+  },
+  draft: {
+    label: 'EM PRODUÇÃO',
+    tab: 'Em produção',
+    icon: 'i-lucide-hammer',
+    cv: 'cv-amber',
+    chip: '🛠 Em produção',
+  },
+  published: {
+    label: 'NO AR',
+    tab: 'Publicadas',
+    icon: 'i-lucide-radio',
+    cv: 'cv-green',
+    chip: '🟢 Publicadas',
+  },
 };
 const statusFilter = ref(''); // '' = todas
-const statusCount = status => pages.value.filter(p => p.status === status).length;
+const statusCount = status =>
+  pages.value.filter(p => p.status === status).length;
 
 // ── funil: próxima página + números de conversão ──
 const funnelCandidates = computed(() =>
@@ -224,7 +331,11 @@ const pageConversion = page => {
 
 const openNew = category => {
   editing.value = null;
-  form.value = { ...blankPage(), category: category || 'captacao', ab_variants: [] };
+  form.value = {
+    ...blankPage(),
+    category: category || 'captacao',
+    ab_variants: [],
+  };
   comments.value = [];
   attachedHtmlName.value = '';
   showEditor.value = true;
@@ -236,7 +347,11 @@ const openEdit = page => {
   form.value = {
     ...page,
     ab_variants: (page.ab_variants || []).map(v => ({ ...v })),
-    sections: (page.sections || []).map(s => ({ ...blankSection(s.type), ...s, items: s.items || [] })),
+    sections: (page.sections || []).map(s => ({
+      ...blankSection(s.type),
+      ...s,
+      items: s.items || [],
+    })),
   };
   comments.value = page.team_comments || [];
   showEditor.value = true;
@@ -249,7 +364,12 @@ const addVariant = () => {
   const key = ['b', 'c', 'd'].find(k => !used.includes(k));
   if (!key) return;
   form.value.ab_variants.push({
-    key, name: `Variação ${key.toUpperCase()}`, title: '', subtitle: '', cta_label: '', active: false,
+    key,
+    name: `Variação ${key.toUpperCase()}`,
+    title: '',
+    subtitle: '',
+    cta_label: '',
+    active: false,
   });
 };
 const removeVariant = i => form.value.ab_variants.splice(i, 1);
@@ -270,7 +390,10 @@ const sendComment = async () => {
   if (!commentText.value.trim() || !editing.value) return;
   sendingComment.value = true;
   try {
-    const { data } = await CrmAPI.addPageComment(editing.value.id, commentText.value.trim());
+    const { data } = await CrmAPI.addPageComment(
+      editing.value.id,
+      commentText.value.trim()
+    );
     comments.value = data.team_comments || [];
     commentText.value = '';
   } catch {
@@ -281,22 +404,30 @@ const sendComment = async () => {
 };
 const removeComment = async comment => {
   try {
-    const { data } = await CrmAPI.deletePageComment(editing.value.id, comment.id);
+    const { data } = await CrmAPI.deletePageComment(
+      editing.value.id,
+      comment.id
+    );
     comments.value = data.team_comments || [];
   } catch {
     useAlert('Só o autor ou um admin apagam o comentário.');
   }
 };
 const fmtCommentAt = iso =>
-  new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  new Date(iso).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
 // ── 📎 página HTML ANEXADA (feita fora do Construtor — ex.: com IA no
 // computador): o arquivo vai ao ar como veio, com o rastreio injetado.
 // Só admin anexa/remove (o HTML roda script na página pública).
 const htmlFileInput = ref(null);
 const attachedHtmlName = ref('');
-const hasAttachedHtml = computed(
-  () => form.value.custom_html === undefined
+const hasAttachedHtml = computed(() =>
+  form.value.custom_html === undefined
     ? !!editing.value?.has_custom_html
     : !!form.value.custom_html
 );
@@ -347,7 +478,12 @@ const savePage = async (publish = null) => {
 
 const deletePage = async page => {
   // eslint-disable-next-line no-alert
-  if (!window.confirm(`Excluir a página "${page.title}"? O link público para de funcionar.`)) return;
+  if (
+    !window.confirm(
+      `Excluir a página "${page.title}"? O link público para de funcionar.`
+    )
+  )
+    return;
   try {
     await CrmAPI.deletePage(page.id);
     useAlert('Página excluída.');
@@ -389,143 +525,237 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
-    <div class="max-w-5xl mx-auto w-full p-4 sm:p-8">
-      <!-- Header da marca -->
-      <div
-        class="rounded-2xl p-5 mb-6 text-white shadow-lg relative overflow-hidden"
-        style="background: linear-gradient(160deg, #072a4c 0%, #0b3b66 55%, #0f5fa6 100%)"
+  <div
+    class="cv-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1"
+    :style="cvVars"
+  >
+    <div class="max-w-[1600px] mx-auto w-full p-4 sm:p-6">
+      <!-- 🍎 hero do kit: o que a tela faz na prática, os números e o botão
+           principal de criar — em destaque, é o convite da tela -->
+      <CevicoHero
+        :pal="pal"
+        title="Páginas"
+        subtitle="Os sites da clínica para cada etapa da jornada: anunciar procedimentos, tirar dúvidas e acompanhar o paciente — cada página nasce pronta para o Google."
+        icon="i-lucide-panels-top-left"
       >
-        <div class="absolute left-0 right-0 bottom-0 h-1" style="background: linear-gradient(90deg, #d4af37, #f4de8e, #d4af37)" />
-        <div class="flex items-center gap-3 flex-wrap">
-          <span class="w-10 h-10 rounded-xl flex items-center justify-center border-2" style="border-color: #d4af37; color: #f4de8e">
-            <span class="i-lucide-panels-top-left text-lg" />
+        <template #chips>
+          <span class="cevico-hero-chip">{{ pages.length }} página(s)</span>
+          <span class="cevico-hero-chip">
+            <span class="i-lucide-radio text-xs" />
+            {{ statusCount('published') }} no ar
           </span>
-          <div class="flex-1 min-w-0">
-            <h1 class="text-lg font-bold">Páginas</h1>
-            <p class="text-xs text-white/75">
-              sites da CEVICO para cada estágio da jornada — anunciar, tirar dúvidas e nutrir pacientes · prontos para o Google (SEO)
-            </p>
-          </div>
+          <span class="cevico-hero-chip">
+            <span class="i-lucide-hammer text-xs" />
+            {{ statusCount('draft') }} em produção
+          </span>
+          <span v-if="statusCount('idea')" class="cevico-hero-chip">
+            <span class="i-lucide-lightbulb text-xs" />
+            {{ statusCount('idea') }} ideia(s)
+          </span>
+        </template>
+        <template #actions>
           <button
-            class="px-4 h-9 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md text-[#072A4C]"
-            style="background: linear-gradient(135deg, #d4af37, #f4de8e)"
+            class="cevico-hero-btn cevico-hero-btn-on !h-9 !px-4 !text-xs font-bold"
+            title="Criar uma página nova (a etapa você escolhe no editor)"
             @click="openNew()"
           >
-            <span class="i-lucide-plus text-sm" /> Nova página
+            <span class="i-lucide-plus text-sm" />
+            Nova página
           </button>
-        </div>
-      </div>
+        </template>
+      </CevicoHero>
 
       <SkeletonScreen v-if="isLoading" variant="list" />
 
       <template v-else>
-        <!-- gestão de projetos: filtro por etapa (ideia/produção/publicada) -->
-        <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 mb-5 w-fit max-w-full overflow-x-auto">
+        <!-- gestão de projetos: seletor por etapa (ideia / produção / publicada) -->
+        <div class="cv-seg mb-6 flex-wrap">
           <button
-            class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
-            :class="statusFilter === '' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="statusFilter === '' ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': statusFilter === '' }"
             @click="statusFilter = ''"
           >
-            Todas ({{ pages.length }})
+            <span class="i-lucide-layout-grid cv-seg-icon" />
+            Todas
+            <span class="opacity-70 tabular-nums">{{ pages.length }}</span>
           </button>
           <button
             v-for="(meta, st) in STATUS_META"
             :key="st"
-            class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
-            :class="statusFilter === st ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="statusFilter === st ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': statusFilter === st }"
             @click="statusFilter = statusFilter === st ? '' : st"
           >
-            {{ meta.chip }} ({{ statusCount(st) }})
+            <span :class="meta.icon" class="cv-seg-icon" />
+            {{ meta.tab }}
+            <span class="opacity-70 tabular-nums">{{ statusCount(st) }}</span>
           </button>
         </div>
-        <div v-for="cat in CATEGORY_ORDER" :key="cat" class="mb-7">
-          <div class="flex items-center gap-2 mb-3">
-            <span class="w-7 h-7 rounded-lg flex items-center justify-center text-white" :style="{ background: CATEGORY_META[cat].grad }">
-              <span :class="CATEGORY_META[cat].icon" class="text-sm" />
+
+        <!-- um bloco por etapa da jornada; o PRIMEIRO azulejo é sempre o
+             convite para criar — etapa vazia mostra só ele -->
+        <section
+          v-for="cat in CATEGORY_ORDER"
+          :key="cat"
+          class="cv-block p-6 sm:p-9 mb-10"
+          :style="blockVars(cat)"
+        >
+          <div class="flex items-start gap-3 mb-6 flex-wrap">
+            <span class="cv-icon cv-icon-lg">
+              <span :class="CATEGORY_META[cat].icon" class="text-lg" />
             </span>
-            <h2 class="text-sm font-bold text-n-slate-12">{{ categories[cat] || cat }}</h2>
-            <span class="text-[11px] text-n-slate-9">{{ pagesByCategory[cat].length }} página(s)</span>
+            <div class="min-w-0 flex-1">
+              <h2
+                class="text-xl sm:text-2xl tracking-tight font-bold text-n-slate-12 leading-tight break-words"
+              >
+                {{ stageName(cat) }}
+              </h2>
+              <p class="text-sm text-n-slate-10 mt-1 leading-relaxed">
+                {{ STAGE_HINTS[cat] }}
+              </p>
+            </div>
+            <span class="cv-chip">
+              {{ pagesByCategory[cat].length }} página(s)
+            </span>
+          </div>
+
+          <!-- auto-fill (e não auto-fit): os cards ficam do tamanho de card
+               mesmo quando a etapa tem uma página só; 1 coluna no celular -->
+          <div
+            class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-5"
+          >
+            <!-- azulejo de criar: mesmo tamanho de um card, tracejado -->
             <button
-              class="ml-auto text-[11px] font-medium text-n-slate-10 hover:text-n-brand flex items-center gap-1"
+              class="cv-tile-add rounded-2xl p-5 min-h-[220px] flex flex-col items-center justify-center gap-2.5 text-center"
+              :title="`Criar uma página nova em ${stageName(cat)}`"
               @click="openNew(cat)"
             >
-              <span class="i-lucide-plus text-xs" /> criar aqui
+              <span class="cv-icon cv-icon-xl">
+                <span class="i-lucide-plus text-2xl" />
+              </span>
+              <span class="text-sm font-bold">Criar página aqui</span>
+              <span class="text-xs text-n-slate-10 break-words">
+                Nova página para {{ stageName(cat) }}
+              </span>
             </button>
-          </div>
 
-          <div v-if="!pagesByCategory[cat].length" class="rounded-xl border border-dashed border-n-weak px-4 py-5 text-center text-[12px] text-n-slate-9">
-            Nenhuma página nesta etapa ainda.
-          </div>
-
-          <!-- botões médios: cor/emoji do assunto + título -->
-          <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <div
+            <!-- card: miniatura na cor/emoji do assunto (menor), pílula de
+                 status, título e endereço inteiros, números do funil, ações -->
+            <article
               v-for="page in pagesByCategory[cat]"
               :key="page.id"
-              class="rounded-xl border border-n-weak bg-n-solid-2 overflow-hidden hover:shadow-md hover:border-n-brand/50 transition-all cursor-pointer group"
+              class="cv-sub cv-sub-hover rounded-2xl p-5 flex flex-col gap-3 min-w-0 cursor-pointer"
+              role="button"
+              tabindex="0"
               @click="openEdit(page)"
+              @keydown.enter.self="openEdit(page)"
             >
-              <div class="h-16 flex items-center justify-center text-3xl relative" :style="{ background: `linear-gradient(135deg, ${page.color || '#0F5FA6'}, ${page.color || '#0F5FA6'}CC)` }">
-                <span>{{ page.emoji || '👁️' }}</span>
-                <span
-                  class="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold"
-                  :class="STATUS_META[page.status]?.badge || 'bg-black/30 text-white/90'"
-                >
+              <div
+                class="h-24 rounded-xl flex items-center justify-center text-3xl text-white"
+                :style="{
+                  background: `linear-gradient(135deg, ${page.color || '#0F5FA6'}, ${page.color || '#0F5FA6'}CC)`,
+                }"
+              >
+                <span v-if="page.emoji">{{ page.emoji }}</span>
+                <span v-else class="i-lucide-eye" />
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="cv-chip" :class="STATUS_META[page.status]?.cv">
+                  <span
+                    :class="STATUS_META[page.status]?.icon"
+                    class="text-[11px]"
+                  />
                   {{ STATUS_META[page.status]?.label || page.status }}
                 </span>
               </div>
-              <div class="p-3">
-                <p class="text-[13px] font-bold text-n-slate-12 leading-snug line-clamp-2">{{ page.title }}</p>
-                <p class="text-[10px] text-n-slate-9 mt-1 truncate" :title="publicPath(page)">{{ publicPath(page) }}</p>
-                <!-- números do funil: visitas · seguiram o funil · WhatsApp · conversão -->
-                <p
-                  v-if="page.status === 'published'"
-                  class="text-[10px] text-n-slate-10 mt-0.5 whitespace-nowrap"
-                  :title="pageStatsTitle(page)"
+              <div class="min-w-0">
+                <h3
+                  class="text-[15px] font-bold text-n-slate-12 leading-snug break-words"
                 >
-                  👁 {{ page.views_count }}
-                  <template v-if="page.next_page_id"> · ➡ {{ page.next_clicks_count }}</template>
-                  · 💬 {{ page.cta_clicks_count }}
-                  <span v-if="pageConversion(page) !== null" class="font-semibold text-emerald-600">
-                    · {{ pageConversion(page) }}% clicam
-                  </span>
+                  {{ page.title }}
+                </h3>
+                <p
+                  class="text-xs text-n-slate-10 mt-1 leading-relaxed break-all"
+                >
+                  {{ publicPath(page) }}
                 </p>
-                <div class="flex items-center gap-1 mt-2" @click.stop>
-                  <button class="px-2 h-6 rounded-md text-[10px] font-medium text-n-slate-11 hover:bg-n-alpha-1 border border-n-weak" @click="copyLink(page)">
-                    copiar link
-                  </button>
-                  <!-- publicada = abre o endereço oficial; rascunho = prévia
-                       com link secreto (a página como o paciente veria) -->
-                  <button
-                    v-if="page.status === 'published'"
-                    class="px-2 h-6 rounded-md text-[10px] font-medium text-n-slate-11 hover:bg-n-alpha-1 border border-n-weak"
-                    @click="openPublic(page)"
-                  >
-                    abrir ↗
-                  </button>
-                  <button
-                    v-else
-                    class="px-2 h-6 rounded-md text-[10px] font-medium text-amber-600 hover:bg-amber-500/10 border border-amber-500/40"
-                    title="Ver a página como o paciente veria, antes de publicar — o link é secreto e não conta visitas"
-                    @click="openPreview(page)"
-                  >
-                    👁 rascunho
-                  </button>
-                  <button
-                    v-if="isAdmin"
-                    class="ml-auto w-6 h-6 rounded-md flex items-center justify-center text-red-500 hover:bg-red-500/10"
-                    @click="deletePage(page)"
-                  >
-                    <span class="i-lucide-trash-2 text-xs" />
-                  </button>
-                </div>
               </div>
-            </div>
+              <!-- números do funil: visitas · seguiram o funil · WhatsApp · conversão -->
+              <div
+                v-if="page.status === 'published'"
+                class="flex items-center gap-x-3 gap-y-1.5 flex-wrap text-xs text-n-slate-10"
+                :title="pageStatsTitle(page)"
+              >
+                <span
+                  class="inline-flex items-center gap-1 whitespace-nowrap tabular-nums"
+                >
+                  <span class="i-lucide-eye text-[13px]" />
+                  {{ page.views_count }} visitas
+                </span>
+                <span
+                  v-if="page.next_page_id"
+                  class="inline-flex items-center gap-1 whitespace-nowrap tabular-nums"
+                >
+                  <span class="i-lucide-arrow-right text-[13px]" />
+                  {{ page.next_clicks_count }} seguiram
+                </span>
+                <span
+                  class="inline-flex items-center gap-1 whitespace-nowrap tabular-nums"
+                >
+                  <span class="i-lucide-message-circle text-[13px]" />
+                  {{ page.cta_clicks_count }} WhatsApp
+                </span>
+                <span
+                  v-if="pageConversion(page) !== null"
+                  class="cv-chip cv-green"
+                >
+                  {{ pageConversion(page) }}% clicam
+                </span>
+              </div>
+              <div
+                class="flex items-center gap-2 flex-wrap mt-auto pt-1"
+                @click.stop
+              >
+                <button
+                  class="cv-btn cv-btn-sm cv-btn-ghost"
+                  title="Copiar o link da página"
+                  @click="copyLink(page)"
+                >
+                  <span class="i-lucide-link text-sm" />
+                  Copiar link
+                </button>
+                <!-- publicada = abre o endereço oficial; rascunho = prévia
+                     com link secreto (a página como o paciente veria) -->
+                <button
+                  v-if="page.status === 'published'"
+                  class="cv-btn cv-btn-sm cv-btn-ghost"
+                  title="Abrir a página publicada em outra aba"
+                  @click="openPublic(page)"
+                >
+                  <span class="i-lucide-external-link text-sm" />
+                  Abrir
+                </button>
+                <button
+                  v-else
+                  class="cv-btn cv-btn-sm cv-btn-ghost cv-amber"
+                  title="Ver a página como o paciente veria, antes de publicar — o link é secreto e não conta visitas"
+                  @click="openPreview(page)"
+                >
+                  <span class="i-lucide-eye text-sm" />
+                  Ver rascunho
+                </button>
+                <button
+                  v-if="isAdmin"
+                  class="cv-btn cv-btn-ghost cv-iconbtn cv-btn-danger ml-auto flex-shrink-0"
+                  title="Excluir página"
+                  @click="deletePage(page)"
+                >
+                  <span class="i-lucide-trash-2 text-sm" />
+                </button>
+              </div>
+            </article>
           </div>
-        </div>
+        </section>
       </template>
     </div>
 
@@ -535,15 +765,28 @@ onMounted(() => {
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       @click.self="showEditor = false"
     >
-      <div class="bg-n-solid-1 rounded-2xl shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto">
-        <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #0b3b66, #d4af37)" />
+      <div
+        class="bg-n-solid-1 rounded-2xl shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto"
+      >
+        <div
+          class="h-1.5 w-full"
+          style="background: linear-gradient(90deg, #0b3b66, #d4af37)"
+        />
         <div class="p-5">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
-              <span class="i-lucide-panels-top-left text-base" style="color: #d4af37" />
+            <h3
+              class="text-sm font-bold text-n-slate-12 flex items-center gap-2"
+            >
+              <span
+                class="i-lucide-panels-top-left text-base"
+                style="color: #d4af37"
+              />
               {{ editing ? 'Editar página' : 'Nova página' }}
             </h3>
-            <button class="w-7 h-7 rounded-lg hover:bg-n-alpha-1 flex items-center justify-center text-n-slate-10" @click="showEditor = false">
+            <button
+              class="w-7 h-7 rounded-lg hover:bg-n-alpha-1 flex items-center justify-center text-n-slate-10"
+              @click="showEditor = false"
+            >
               <span class="i-lucide-x text-sm" />
             </button>
           </div>
@@ -566,8 +809,16 @@ onMounted(() => {
                 v-for="cat in CATEGORY_ORDER"
                 :key="cat"
                 class="px-2.5 h-7 rounded-lg text-[11px] font-medium border transition-all"
-                :class="form.category === cat ? 'text-white border-transparent shadow-sm' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                :style="form.category === cat ? { background: CATEGORY_META[cat].grad } : {}"
+                :class="
+                  form.category === cat
+                    ? 'text-white border-transparent shadow-sm'
+                    : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'
+                "
+                :style="
+                  form.category === cat
+                    ? { background: CATEGORY_META[cat].grad }
+                    : {}
+                "
                 @click="form.category = cat"
               >
                 {{ (categories[cat] || cat).replace('Procedimentos — ', '') }}
@@ -578,7 +829,12 @@ onMounted(() => {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <label class="block">
               <span class="text-[11px] font-medium text-n-slate-11">Emoji do assunto</span>
-              <input v-model="form.emoji" type="text" placeholder="👁️" class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
+              <input
+                v-model="form.emoji"
+                type="text"
+                placeholder="👁️"
+                class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
+              />
             </label>
             <div>
               <span class="text-[11px] font-medium text-n-slate-11">Cor do card</span>
@@ -587,7 +843,11 @@ onMounted(() => {
                   v-for="c in CARD_COLORS"
                   :key="c"
                   class="w-7 h-7 rounded-lg border-2 transition-transform hover:scale-110"
-                  :class="form.color === c ? 'border-n-slate-12' : 'border-transparent'"
+                  :class="
+                    form.color === c
+                      ? 'border-n-slate-12'
+                      : 'border-transparent'
+                  "
                   :style="{ background: c }"
                   @click="form.color = c"
                 />
@@ -597,26 +857,60 @@ onMounted(() => {
 
           <label class="block mb-3">
             <span class="text-[11px] font-medium text-n-slate-11">Subtítulo (aparece no topo da página)</span>
-            <input v-model="form.subtitle" type="text" placeholder="Tudo o que você precisa saber antes de decidir, explicado com calma." class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
+            <input
+              v-model="form.subtitle"
+              type="text"
+              placeholder="Tudo o que você precisa saber antes de decidir, explicado com calma."
+              class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
+            />
           </label>
 
           <!-- 🪄 IA no editor: Copywriter escreve OU Construtor monta a copy pronta -->
-          <div class="rounded-xl p-3 mb-3 border border-purple-500/30" style="background: linear-gradient(135deg, rgba(124,58,237,.08), rgba(212,175,55,.08))">
+          <div
+            class="rounded-xl p-3 mb-3 border border-purple-500/30"
+            style="
+              background: linear-gradient(
+                135deg,
+                rgba(124, 58, 237, 0.08),
+                rgba(212, 175, 55, 0.08)
+              );
+            "
+          >
             <div class="flex items-center gap-1.5 mb-2 flex-wrap">
-              <span class="i-lucide-sparkles text-xs" style="color: #7C3AED" />
+              <span class="i-lucide-sparkles text-xs" style="color: #7c3aed" />
               <span class="text-[11px] font-semibold text-n-slate-12 mr-1">Criar com IA:</span>
               <button
                 class="px-2.5 h-7 rounded-full border text-[11px] font-medium transition-colors"
-                :class="ai.mode === 'briefing' ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                :style="ai.mode === 'briefing' ? { background: 'linear-gradient(135deg, #7C3AED, #5B21B6)' } : {}"
+                :class="
+                  ai.mode === 'briefing'
+                    ? 'text-white border-transparent'
+                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
+                "
+                :style="
+                  ai.mode === 'briefing'
+                    ? {
+                        background: 'linear-gradient(135deg, #7C3AED, #5B21B6)',
+                      }
+                    : {}
+                "
                 @click="ai.mode = 'briefing'"
               >
                 ✍️ Escrever do zero (Copywriter)
               </button>
               <button
                 class="px-2.5 h-7 rounded-full border text-[11px] font-medium transition-colors"
-                :class="ai.mode === 'copy' ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                :style="ai.mode === 'copy' ? { background: 'linear-gradient(135deg, #0F5FA6, #B8860B)' } : {}"
+                :class="
+                  ai.mode === 'copy'
+                    ? 'text-white border-transparent'
+                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
+                "
+                :style="
+                  ai.mode === 'copy'
+                    ? {
+                        background: 'linear-gradient(135deg, #0F5FA6, #B8860B)',
+                      }
+                    : {}
+                "
                 @click="ai.mode = 'copy'"
               >
                 🧱 Montar de copy pronta (Construtor)
@@ -637,51 +931,114 @@ onMounted(() => {
               class="w-full rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-2 text-[12px] text-n-slate-12"
             />
             <div class="flex items-center gap-2 mt-2 flex-wrap">
-              <select v-if="ai.mode === 'briefing'" v-model="ai.form_id" class="h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-12 max-w-[260px]">
+              <select
+                v-if="ai.mode === 'briefing'"
+                v-model="ai.form_id"
+                class="h-8 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[11px] text-n-slate-12 max-w-[260px]"
+              >
                 <option value="">Sem insights de formulário</option>
-                <option v-for="f in insightForms" :key="f.id" :value="f.id">Usar insights de: {{ f.name }}</option>
+                <option v-for="f in insightForms" :key="f.id" :value="f.id">
+                  Usar insights de: {{ f.name }}
+                </option>
               </select>
               <button
                 class="ml-auto px-3 h-8 rounded-lg text-[11px] font-bold text-white flex items-center gap-1.5 disabled:opacity-60"
-                style="background: linear-gradient(135deg, #7C3AED, #5B21B6)"
+                style="background: linear-gradient(135deg, #7c3aed, #5b21b6)"
                 :disabled="ai.generating"
                 @click="generateWithAI"
               >
-                <span :class="ai.generating ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-sparkles'" class="text-xs" />
-                {{ ai.generating ? (ai.mode === 'copy' ? 'Montando…' : 'Escrevendo…') : (ai.mode === 'copy' ? 'Montar página com IA' : 'Gerar página com IA') }}
+                <span
+                  :class="
+                    ai.generating
+                      ? 'i-lucide-loader-2 animate-spin'
+                      : 'i-lucide-sparkles'
+                  "
+                  class="text-xs"
+                />
+                {{
+                  ai.generating
+                    ? ai.mode === 'copy'
+                      ? 'Montando…'
+                      : 'Escrevendo…'
+                    : ai.mode === 'copy'
+                      ? 'Montar página com IA'
+                      : 'Gerar página com IA'
+                }}
               </button>
             </div>
             <p class="text-[10px] text-n-slate-9 mt-1.5">
-              A IA preenche as seções abaixo — a montagem roda em segundo plano e pode levar 1–2 min (deixe a janela aberta). Qualquer pessoa do time revisa e salva o rascunho; publicar é com o admin. Requer o agente ligado (Automações → Agentes de IA).
+              A IA preenche as seções abaixo — a montagem roda em segundo plano
+              e pode levar 1–2 min (deixe a janela aberta). Qualquer pessoa do
+              time revisa e salva o rascunho; publicar é com o admin. Requer o
+              agente ligado (Automações → Agentes de IA).
             </p>
           </div>
 
           <!-- 📎 página HTML ANEXADA: arquivo pronto feito fora do Construtor -->
-          <div v-if="isAdmin" class="rounded-xl p-3 mb-3 border border-n-weak" style="background: linear-gradient(135deg, rgba(15,95,166,.06), rgba(212,175,55,.06))">
+          <div
+            v-if="isAdmin"
+            class="rounded-xl p-3 mb-3 border border-n-weak"
+            style="
+              background: linear-gradient(
+                135deg,
+                rgba(15, 95, 166, 0.06),
+                rgba(212, 175, 55, 0.06)
+              );
+            "
+          >
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="i-lucide-file-code text-xs" style="color: #0F5FA6" />
+              <span class="i-lucide-file-code text-xs" style="color: #0f5fa6" />
               <span class="text-[11px] font-semibold text-n-slate-12">Página HTML anexada</span>
-              <span v-if="hasAttachedHtml" class="px-2 h-6 inline-flex items-center rounded-full text-[10px] font-bold text-white" style="background: linear-gradient(135deg, #0F5FA6, #1E7FBF)">
+              <span
+                v-if="hasAttachedHtml"
+                class="px-2 h-6 inline-flex items-center rounded-full text-[10px] font-bold text-white"
+                style="background: linear-gradient(135deg, #0f5fa6, #1e7fbf)"
+              >
                 📎 {{ attachedHtmlName || 'arquivo anexado' }}
               </span>
               <div class="flex-1" />
-              <input ref="htmlFileInput" type="file" accept=".html,.htm,text/html" class="hidden" @change="onHtmlFile" />
-              <button class="px-2.5 h-7 rounded-full border border-n-weak text-[11px] font-medium text-n-slate-11 hover:bg-n-alpha-1" @click="pickHtmlFile">
-                {{ hasAttachedHtml ? 'Substituir arquivo' : '📎 Anexar arquivo .html' }}
+              <input
+                ref="htmlFileInput"
+                type="file"
+                accept=".html,.htm,text/html"
+                class="hidden"
+                @change="onHtmlFile"
+              />
+              <button
+                class="px-2.5 h-7 rounded-full border border-n-weak text-[11px] font-medium text-n-slate-11 hover:bg-n-alpha-1"
+                @click="pickHtmlFile"
+              >
+                {{
+                  hasAttachedHtml
+                    ? 'Substituir arquivo'
+                    : '📎 Anexar arquivo .html'
+                }}
               </button>
-              <button v-if="hasAttachedHtml" class="px-2.5 h-7 rounded-full border border-red-500/40 text-[11px] font-medium text-red-500 hover:bg-red-500/10" @click="removeAttachedHtml">
+              <button
+                v-if="hasAttachedHtml"
+                class="px-2.5 h-7 rounded-full border border-red-500/40 text-[11px] font-medium text-red-500 hover:bg-red-500/10"
+                @click="removeAttachedHtml"
+              >
                 Remover
               </button>
             </div>
             <p class="text-[10px] text-n-slate-9 mt-1.5">
-              Pra páginas prontas feitas fora do Construtor (ex.: com IA no computador). O arquivo vai ao ar EXATAMENTE como veio, no endereço desta página, com o rastreamento de origem (Google Ads, SEO, Meta) e o Protocolo do WhatsApp injetados automaticamente. Com arquivo anexado, as seções abaixo ficam de lado — remova o anexo pra voltar ao Construtor.
+              Pra páginas prontas feitas fora do Construtor (ex.: com IA no
+              computador). O arquivo vai ao ar EXATAMENTE como veio, no endereço
+              desta página, com o rastreamento de origem (Google Ads, SEO, Meta)
+              e o Protocolo do WhatsApp injetados automaticamente. Com arquivo
+              anexado, as seções abaixo ficam de lado — remova o anexo pra
+              voltar ao Construtor.
             </p>
           </div>
 
           <!-- ══ Construtor por SEÇÕES ══ -->
           <div v-if="!hasAttachedHtml" class="mb-3">
-            <p class="text-[11px] font-semibold text-n-slate-12 mb-1.5 flex items-center gap-1.5">
-              <span class="i-lucide-layers text-xs" style="color: #d4af37" /> Seções da página
+            <p
+              class="text-[11px] font-semibold text-n-slate-12 mb-1.5 flex items-center gap-1.5"
+            >
+              <span class="i-lucide-layers text-xs" style="color: #d4af37" />
+              Seções da página
               <span class="font-normal text-n-slate-9">— empilhe, escolha o efeito de cada uma</span>
             </p>
 
@@ -691,29 +1048,59 @@ onMounted(() => {
               class="rounded-xl border border-n-weak p-3 mb-2 bg-n-solid-2"
             >
               <div class="flex items-center gap-2 mb-2">
-                <span :class="typeMeta(sec.type).icon" class="text-sm" style="color: #d4af37" />
-                <span class="text-[12px] font-bold text-n-slate-12">{{ typeMeta(sec.type).label }}</span>
+                <span
+                  :class="typeMeta(sec.type).icon"
+                  class="text-sm"
+                  style="color: #d4af37"
+                />
+                <span class="text-[12px] font-bold text-n-slate-12">{{
+                  typeMeta(sec.type).label
+                }}</span>
                 <div class="flex-1" />
-                <button class="i-lucide-chevron-up text-n-slate-10 hover:text-n-slate-12" title="Subir" @click="moveSection(si, -1)" />
-                <button class="i-lucide-chevron-down text-n-slate-10 hover:text-n-slate-12" title="Descer" @click="moveSection(si, 1)" />
-                <button class="i-lucide-trash-2 text-n-slate-10 hover:text-red-500" title="Remover" @click="removeSection(si)" />
+                <button
+                  class="i-lucide-chevron-up text-n-slate-10 hover:text-n-slate-12"
+                  title="Subir"
+                  @click="moveSection(si, -1)"
+                />
+                <button
+                  class="i-lucide-chevron-down text-n-slate-10 hover:text-n-slate-12"
+                  title="Descer"
+                  @click="moveSection(si, 1)"
+                />
+                <button
+                  class="i-lucide-trash-2 text-n-slate-10 hover:text-red-500"
+                  title="Remover"
+                  @click="removeSection(si)"
+                />
               </div>
 
               <input
                 v-model="sec.title"
                 class="w-full h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[12px] text-n-slate-12 mb-2"
-                :placeholder="sec.type === 'depoimento' ? 'Quem disse (ex: Maria S., operada de catarata)' : 'Título da seção (opcional)'"
+                :placeholder="
+                  sec.type === 'depoimento'
+                    ? 'Quem disse (ex: Maria S., operada de catarata)'
+                    : 'Título da seção (opcional)'
+                "
               />
               <textarea
                 v-model="sec.text"
                 :rows="sec.type === 'texto' ? 4 : 2"
                 class="w-full rounded-lg border border-n-weak bg-n-solid-1 px-2 py-1.5 text-[12px] text-n-slate-12"
-                :placeholder="sec.type === 'depoimento' ? 'O depoimento (use só depoimentos reais)' : 'Texto da seção (parágrafos separados por linha em branco)'"
+                :placeholder="
+                  sec.type === 'depoimento'
+                    ? 'O depoimento (use só depoimentos reais)'
+                    : 'Texto da seção (parágrafos separados por linha em branco)'
+                "
               />
 
               <!-- itens (benefícios / passos / FAQ) -->
               <template v-if="ITEM_TYPES.includes(sec.type)">
-                <div v-for="(item, ii) in sec.items" :key="ii" class="flex items-start gap-1.5 mt-1.5">
+                <div
+                  v-for="(item, ii) in sec.items"
+                  :key="ii"
+                  class="flex items-start gap-1.5 mt-1.5"
+                >
                   <input
                     v-model="item.title"
                     class="w-2/5 h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12"
@@ -722,11 +1109,19 @@ onMounted(() => {
                   <input
                     v-model="item.text"
                     class="flex-1 h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12"
-                    :placeholder="sec.type === 'faq' ? 'Resposta' : 'Explicação curta'"
+                    :placeholder="
+                      sec.type === 'faq' ? 'Resposta' : 'Explicação curta'
+                    "
                   />
-                  <button class="i-lucide-x text-n-slate-10 hover:text-red-500 mt-2" @click="sec.items.splice(ii, 1)" />
+                  <button
+                    class="i-lucide-x text-n-slate-10 hover:text-red-500 mt-2"
+                    @click="sec.items.splice(ii, 1)"
+                  />
                 </div>
-                <button class="text-[10px] text-n-slate-10 hover:text-n-brand mt-1.5" @click="sec.items.push({ title: '', text: '' })">
+                <button
+                  class="text-[10px] text-n-slate-10 hover:text-n-brand mt-1.5"
+                  @click="sec.items.push({ title: '', text: '' })"
+                >
                   + adicionar item
                 </button>
               </template>
@@ -738,9 +1133,11 @@ onMounted(() => {
                   v-for="fx in SECTION_EFFECTS"
                   :key="fx.key"
                   class="px-2 h-6 rounded-full border text-[10px] font-medium transition-colors"
-                  :class="sec.effect === fx.key
-                    ? 'border-n-brand bg-n-brand/10 text-n-brand'
-                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                  :class="
+                    sec.effect === fx.key
+                      ? 'border-n-brand bg-n-brand/10 text-n-brand'
+                      : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
+                  "
                   @click="sec.effect = fx.key"
                 >
                   {{ fx.label }}
@@ -752,9 +1149,11 @@ onMounted(() => {
                 <span class="text-[10px] text-n-slate-10 mr-1">Cor:</span>
                 <button
                   class="px-2 h-6 rounded-full border text-[10px] font-medium"
-                  :class="!sec.color
-                    ? 'border-n-brand bg-n-brand/10 text-n-brand'
-                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+                  :class="
+                    !sec.color
+                      ? 'border-n-brand bg-n-brand/10 text-n-brand'
+                      : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
+                  "
                   @click="sec.color = ''"
                 >
                   nenhuma
@@ -763,7 +1162,11 @@ onMounted(() => {
                   v-for="c in SECTION_COLORS"
                   :key="c"
                   class="w-6 h-6 rounded-full border-2 transition-transform"
-                  :class="sec.color === c ? 'scale-110 border-white shadow-md' : 'border-transparent hover:scale-105'"
+                  :class="
+                    sec.color === c
+                      ? 'scale-110 border-white shadow-md'
+                      : 'border-transparent hover:scale-105'
+                  "
                   :style="{ background: c }"
                   :title="'Fundo suave ' + c"
                   @click="sec.color = c"
@@ -774,8 +1177,14 @@ onMounted(() => {
               <div class="flex items-center gap-2 mt-2">
                 <span class="text-[10px] text-n-slate-10">Imagem:</span>
                 <template v-if="sec.image_url">
-                  <img :src="sec.image_url" class="h-10 w-16 object-cover rounded-md border border-n-weak" />
-                  <button class="text-[10px] text-red-500 hover:underline" @click="sec.image_url = ''">
+                  <img
+                    :src="sec.image_url"
+                    class="h-10 w-16 object-cover rounded-md border border-n-weak"
+                  />
+                  <button
+                    class="text-[10px] text-red-500 hover:underline"
+                    @click="sec.image_url = ''"
+                  >
                     remover
                   </button>
                 </template>
@@ -785,7 +1194,12 @@ onMounted(() => {
                 >
                   <span class="i-lucide-image text-xs" />
                   {{ uploadingImage === si ? 'Enviando…' : 'adicionar imagem' }}
-                  <input type="file" accept="image/*" class="hidden" @change="e => uploadSectionImage(e, si)" />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    class="hidden"
+                    @change="e => uploadSectionImage(e, si)"
+                  />
                 </label>
               </div>
             </div>
@@ -805,8 +1219,14 @@ onMounted(() => {
 
           <!-- texto corrido (modo antigo) — ignorado quando há seções -->
           <details class="mb-3" :open="!form.sections.length">
-            <summary class="text-[11px] font-medium text-n-slate-11 cursor-pointer">
-              Conteúdo em texto corrido (modo antigo{{ form.sections.length ? ' — ignorado quando a página tem seções' : '' }})
+            <summary
+              class="text-[11px] font-medium text-n-slate-11 cursor-pointer"
+            >
+              Conteúdo em texto corrido (modo antigo{{
+                form.sections.length
+                  ? ' — ignorado quando a página tem seções'
+                  : ''
+              }})
             </summary>
             <textarea
               v-model="form.body"
@@ -814,24 +1234,38 @@ onMounted(() => {
               placeholder="## O que é a cirurgia de catarata?&#10;&#10;Texto do parágrafo...&#10;&#10;- item de lista&#10;- outro item&#10;&#10;> destaque em dourado (citação)"
               class="mt-1 w-full rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-2 text-[13px] text-n-slate-12 font-mono"
             />
-            <span class="text-[10px] text-n-slate-9">## título · **negrito** · - lista · &gt; destaque dourado — formatação simples (markdown)</span>
+            <span class="text-[10px] text-n-slate-9">## título · **negrito** · - lista · &gt; destaque dourado —
+              formatação simples (markdown)</span>
           </details>
 
           <!-- SEO -->
           <div class="bg-n-alpha-1 rounded-xl p-3 mb-3">
-            <p class="text-[11px] font-semibold text-n-slate-12 mb-2 flex items-center gap-1.5">
-              <span class="i-lucide-search text-xs" style="color: #d4af37" /> Google (SEO)
+            <p
+              class="text-[11px] font-semibold text-n-slate-12 mb-2 flex items-center gap-1.5"
+            >
+              <span class="i-lucide-search text-xs" style="color: #d4af37" />
+              Google (SEO)
             </p>
             <label class="block mb-2">
               <span class="text-[11px] font-medium text-n-slate-11">Título no Google (vazio = usa o título da página)</span>
-              <input v-model="form.meta_title" type="text" placeholder="Cirurgia de Catarata em São Paulo | CEVICO" class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
+              <input
+                v-model="form.meta_title"
+                type="text"
+                placeholder="Cirurgia de Catarata em São Paulo | CEVICO"
+                class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
+              />
             </label>
             <label class="block mb-2">
               <span class="text-[11px] font-medium text-n-slate-11">Descrição no Google (1-2 frases que convidam ao clique)</span>
-              <textarea v-model="form.meta_description" rows="2" class="mt-1 w-full rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 text-[13px] text-n-slate-12" />
+              <textarea
+                v-model="form.meta_description"
+                rows="2"
+                class="mt-1 w-full rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 text-[13px] text-n-slate-12"
+              />
             </label>
             <label class="block">
-              <span class="text-[11px] font-medium text-n-slate-11">Palavras-chave (separadas por vírgula — viram filtro na Análise)</span>
+              <span class="text-[11px] font-medium text-n-slate-11">Palavras-chave (separadas por vírgula — viram filtro na
+                Análise)</span>
               <input
                 v-model="form.seo_keywords"
                 type="text"
@@ -843,32 +1277,61 @@ onMounted(() => {
 
           <!-- Próximo passo do botão: WhatsApp OU outra página (funil) -->
           <div class="bg-n-alpha-1 rounded-xl p-3 mb-3">
-            <p class="text-[11px] font-semibold text-n-slate-12 mb-2 flex items-center gap-1.5">
-              <span class="i-lucide-milestone text-xs" style="color: #d4af37" /> Próximo passo do botão
+            <p
+              class="text-[11px] font-semibold text-n-slate-12 mb-2 flex items-center gap-1.5"
+            >
+              <span class="i-lucide-milestone text-xs" style="color: #d4af37" />
+              Próximo passo do botão
               <span class="text-[10px] font-normal text-n-slate-9">— todo clique é contado (mede a conversão)</span>
             </p>
-            <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 w-fit mb-2">
+            <div
+              class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 w-fit mb-2"
+            >
               <button
                 class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-                :class="!form.next_page_id ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-                :style="!form.next_page_id ? { background: 'linear-gradient(135deg, #059669, #4ADE80)' } : {}"
+                :class="
+                  !form.next_page_id
+                    ? 'text-white'
+                    : 'text-n-slate-11 hover:bg-n-alpha-1'
+                "
+                :style="
+                  !form.next_page_id
+                    ? {
+                        background: 'linear-gradient(135deg, #059669, #4ADE80)',
+                      }
+                    : {}
+                "
                 @click="form.next_page_id = null"
               >
                 💬 Convite pro WhatsApp
               </button>
               <button
                 class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-                :class="form.next_page_id ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-                :style="form.next_page_id ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+                :class="
+                  form.next_page_id
+                    ? 'text-white'
+                    : 'text-n-slate-11 hover:bg-n-alpha-1'
+                "
+                :style="
+                  form.next_page_id
+                    ? {
+                        background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)',
+                      }
+                    : {}
+                "
                 :disabled="!funnelCandidates.length"
-                @click="form.next_page_id = form.next_page_id || funnelCandidates[0]?.id"
+                @click="
+                  form.next_page_id =
+                    form.next_page_id || funnelCandidates[0]?.id
+                "
               >
                 ➡️ Outra página CEVICO (funil)
               </button>
             </div>
 
             <div v-if="form.next_page_id" class="mb-2">
-              <span class="text-[11px] font-medium text-n-slate-11">Página de destino (o visitante chega marcado com a origem)</span>
+              <span class="text-[11px] font-medium text-n-slate-11">Página de destino (o visitante chega marcado com a
+                origem)</span>
               <select
                 v-model="form.next_page_id"
                 class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
@@ -877,58 +1340,129 @@ onMounted(() => {
                   {{ STATUS_META[p.status]?.chip || p.status }} — {{ p.title }}
                 </option>
               </select>
-              <p class="text-[10px] text-amber-600 mt-1" v-if="pages.find(p => p.id === form.next_page_id)?.status !== 'published'">
-                ⚠ A página de destino ainda não está publicada — enquanto isso, o botão usa o WhatsApp.
+              <p
+                v-if="
+                  pages.find(p => p.id === form.next_page_id)?.status !==
+                  'published'
+                "
+                class="text-[10px] text-amber-600 mt-1"
+              >
+                ⚠ A página de destino ainda não está publicada — enquanto isso,
+                o botão usa o WhatsApp.
               </p>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label class="block">
                 <span class="text-[11px] font-medium text-n-slate-11">Texto do botão (vazio = automático)</span>
-                <input v-model="form.cta_label" type="text" class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
+                <input
+                  v-model="form.cta_label"
+                  type="text"
+                  class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
+                />
               </label>
               <label class="block">
                 <span class="text-[11px] font-medium text-n-slate-11">Link do WhatsApp da clínica</span>
-                <input v-model="form.cta_url" type="text" placeholder="https://wa.me/5511..." class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12" />
+                <input
+                  v-model="form.cta_url"
+                  type="text"
+                  placeholder="https://wa.me/5511..."
+                  class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
+                />
               </label>
             </div>
           </div>
 
           <!-- 🧪 Teste A/B: variações servidas no mesmo endereço -->
           <div v-if="editing" class="bg-n-alpha-1 rounded-xl p-3 mb-3">
-            <p class="text-[11px] font-semibold text-n-slate-12 mb-1 flex items-center gap-1.5">
-              <span class="i-lucide-flask-conical text-xs" style="color: #d4af37" /> Teste A/B
-              <span class="text-[10px] font-normal text-n-slate-9">— variações do título/subtítulo/botão servidas no MESMO endereço; visitas e cliques contam por variação</span>
+            <p
+              class="text-[11px] font-semibold text-n-slate-12 mb-1 flex items-center gap-1.5"
+            >
+              <span
+                class="i-lucide-flask-conical text-xs"
+                style="color: #d4af37"
+              />
+              Teste A/B
+              <span class="text-[10px] font-normal text-n-slate-9">— variações do título/subtítulo/botão servidas no MESMO
+                endereço; visitas e cliques contam por variação</span>
             </p>
 
             <!-- original (A) -->
-            <div class="flex items-center gap-2 flex-wrap rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5 mb-1.5 text-[11px]">
+            <div
+              class="flex items-center gap-2 flex-wrap rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5 mb-1.5 text-[11px]"
+            >
               <span class="font-bold text-n-slate-12">A — original</span>
-              <span class="text-n-slate-10 truncate flex-1 min-w-[120px]">{{ form.title }}</span>
+              <span class="text-n-slate-10 truncate flex-1 min-w-[120px]">{{
+                form.title
+              }}</span>
               <span v-if="abLine('a')" class="text-n-slate-10">
-                {{ abLine('a').views }} visitas · {{ abLine('a').clicks }} cliques
-                <b v-if="abLine('a').rate !== null" class="text-emerald-600">· {{ abLine('a').rate }}%</b>
+                {{ abLine('a').views }} visitas ·
+                {{ abLine('a').clicks }} cliques
+                <b v-if="abLine('a').rate !== null"
+class="text-emerald-600"
+                  >· {{ abLine('a').rate }}%</b>
               </span>
             </div>
 
-            <div v-for="(v, vi) in form.ab_variants || []" :key="v.key" class="rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-2 mb-1.5">
+            <div
+              v-for="(v, vi) in form.ab_variants || []"
+              :key="v.key"
+              class="rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-2 mb-1.5"
+            >
               <div class="flex items-center gap-2 flex-wrap mb-1.5">
-                <span class="text-[11px] font-bold text-n-slate-12 uppercase">{{ v.key }}</span>
-                <input v-model="v.name" type="text" class="h-7 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12" style="width: 9rem" />
+                <span class="text-[11px] font-bold text-n-slate-12 uppercase">{{
+                  v.key
+                }}</span>
+                <input
+                  v-model="v.name"
+                  type="text"
+                  class="h-7 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12"
+                  style="width: 9rem"
+                />
                 <span v-if="abLine(v.key)" class="text-[11px] text-n-slate-10">
-                  {{ abLine(v.key).views }} visitas · {{ abLine(v.key).clicks }} cliques
-                  <b v-if="abLine(v.key).rate !== null" class="text-emerald-600">· {{ abLine(v.key).rate }}%</b>
+                  {{ abLine(v.key).views }} visitas ·
+                  {{ abLine(v.key).clicks }} cliques
+                  <b v-if="abLine(v.key).rate !== null"
+class="text-emerald-600"
+                    >· {{ abLine(v.key).rate }}%</b>
                 </span>
-                <label class="ml-auto flex items-center gap-1.5 text-[11px] font-medium cursor-pointer" :class="v.active ? 'text-emerald-600' : 'text-n-slate-10'">
-                  <input v-model="v.active" type="checkbox" class="accent-emerald-600" style="width: 14px; height: 14px" />
+                <label
+                  class="ml-auto flex items-center gap-1.5 text-[11px] font-medium cursor-pointer"
+                  :class="v.active ? 'text-emerald-600' : 'text-n-slate-10'"
+                >
+                  <input
+                    v-model="v.active"
+                    type="checkbox"
+                    class="accent-emerald-600"
+                    style="width: 14px; height: 14px"
+                  />
                   {{ v.active ? 'no ar (sorteada)' : 'pausada' }}
                 </label>
-                <button class="i-lucide-trash-2 text-n-slate-10 hover:text-red-500 text-sm" title="Excluir variação" @click="removeVariant(vi)" />
+                <button
+                  class="i-lucide-trash-2 text-n-slate-10 hover:text-red-500 text-sm"
+                  title="Excluir variação"
+                  @click="removeVariant(vi)"
+                />
               </div>
-              <input v-model="v.title" type="text" placeholder="Título desta variação (vazio = usa o original)" class="w-full h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12 mb-1.5" />
+              <input
+                v-model="v.title"
+                type="text"
+                placeholder="Título desta variação (vazio = usa o original)"
+                class="w-full h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12 mb-1.5"
+              />
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                <input v-model="v.subtitle" type="text" placeholder="Subtítulo (vazio = original)" class="h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12" />
-                <input v-model="v.cta_label" type="text" placeholder="Texto do botão (vazio = original)" class="h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12" />
+                <input
+                  v-model="v.subtitle"
+                  type="text"
+                  placeholder="Subtítulo (vazio = original)"
+                  class="h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12"
+                />
+                <input
+                  v-model="v.cta_label"
+                  type="text"
+                  placeholder="Texto do botão (vazio = original)"
+                  class="h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-[11px] text-n-slate-12"
+                />
               </div>
             </div>
 
@@ -940,21 +1474,40 @@ onMounted(() => {
               <span class="i-lucide-plus text-xs" /> Criar variação
             </button>
             <p class="text-[10px] text-n-slate-9 mt-1.5">
-              Ative a variação e salve: cada visitante é sorteado entre a original e as ativas. Os resultados aparecem aqui e na Análise de Páginas.
+              Ative a variação e salve: cada visitante é sorteado entre a
+              original e as ativas. Os resultados aparecem aqui e na Análise de
+              Páginas.
             </p>
           </div>
 
           <!-- 💬 Comentários do time (estúdio de copy) -->
           <div v-if="editing" class="bg-n-alpha-1 rounded-xl p-3 mb-3">
-            <p class="text-[11px] font-semibold text-n-slate-12 mb-2 flex items-center gap-1.5">
-              <span class="i-lucide-messages-square text-xs" style="color: #d4af37" /> Comentários do time
+            <p
+              class="text-[11px] font-semibold text-n-slate-12 mb-2 flex items-center gap-1.5"
+            >
+              <span
+                class="i-lucide-messages-square text-xs"
+                style="color: #d4af37"
+              />
+              Comentários do time
               <span class="text-[10px] font-normal text-n-slate-9">— sugestões de copy, ajustes, aprovações</span>
             </p>
-            <div v-if="comments.length" class="space-y-1.5 mb-2 max-h-44 overflow-y-auto">
-              <div v-for="c in comments" :key="c.id" class="rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5">
+            <div
+              v-if="comments.length"
+              class="space-y-1.5 mb-2 max-h-44 overflow-y-auto"
+            >
+              <div
+                v-for="c in comments"
+                :key="c.id"
+                class="rounded-lg border border-n-weak bg-n-solid-2 px-2.5 py-1.5"
+              >
                 <div class="flex items-center gap-2">
-                  <span class="text-[11px] font-bold text-n-slate-12">{{ c.name }}</span>
-                  <span class="text-[10px] text-n-slate-9">{{ fmtCommentAt(c.at) }}</span>
+                  <span class="text-[11px] font-bold text-n-slate-12">{{
+                    c.name
+                  }}</span>
+                  <span class="text-[10px] text-n-slate-9">{{
+                    fmtCommentAt(c.at)
+                  }}</span>
                   <button
                     v-if="isAdmin || c.user_id === currentUserId"
                     class="ml-auto i-lucide-x text-n-slate-10 hover:text-red-500 text-xs"
@@ -962,7 +1515,11 @@ onMounted(() => {
                     @click="removeComment(c)"
                   />
                 </div>
-                <p class="text-[11px] text-n-slate-11 mt-0.5 whitespace-pre-line">{{ c.text }}</p>
+                <p
+                  class="text-[11px] text-n-slate-11 mt-0.5 whitespace-pre-line"
+                >
+                  {{ c.text }}
+                </p>
               </div>
             </div>
             <div class="flex items-center gap-1.5">
@@ -975,7 +1532,7 @@ onMounted(() => {
               />
               <button
                 class="px-2.5 h-8 rounded-lg text-[11px] font-semibold text-white disabled:opacity-50"
-                style="background: linear-gradient(135deg, #0F5FA6, #1E7FBF)"
+                style="background: linear-gradient(135deg, #0f5fa6, #1e7fbf)"
                 :disabled="sendingComment || !commentText.trim()"
                 @click="sendComment"
               >
@@ -985,20 +1542,37 @@ onMounted(() => {
           </div>
 
           <label v-if="editing && isAdmin" class="block mb-3">
-            <span class="text-[11px] font-medium text-n-slate-11">Endereço da página (a parte final do link) — mudar quebra links já divulgados</span>
-            <input v-model="form.slug" type="text" class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12 font-mono" />
+            <span class="text-[11px] font-medium text-n-slate-11">Endereço da página (a parte final do link) — mudar quebra links
+              já divulgados</span>
+            <input
+              v-model="form.slug"
+              type="text"
+              class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12 font-mono"
+            />
           </label>
 
           <!-- etapa do projeto (gestão: ideia → produção → publicada) -->
           <div v-if="isAdmin" class="flex items-center gap-2 mb-4 flex-wrap">
             <span class="text-[11px] font-medium text-n-slate-11">Etapa do projeto:</span>
-            <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5">
+            <div
+              class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5"
+            >
               <button
                 v-for="(meta, st) in STATUS_META"
                 :key="st"
                 class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-                :class="form.status === st ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-                :style="form.status === st ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+                :class="
+                  form.status === st
+                    ? 'text-white'
+                    : 'text-n-slate-11 hover:bg-n-alpha-1'
+                "
+                :style="
+                  form.status === st
+                    ? {
+                        background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)',
+                      }
+                    : {}
+                "
                 @click="form.status = st"
               >
                 {{ meta.chip }}
@@ -1016,7 +1590,10 @@ onMounted(() => {
             >
               👁 Ver rascunho
             </button>
-            <button class="px-3 h-9 rounded-lg text-[12px] font-medium text-n-slate-11 hover:bg-n-alpha-1" @click="showEditor = false">
+            <button
+              class="px-3 h-9 rounded-lg text-[12px] font-medium text-n-slate-11 hover:bg-n-alpha-1"
+              @click="showEditor = false"
+            >
               Cancelar
             </button>
             <button
@@ -1035,7 +1612,9 @@ onMounted(() => {
             >
               {{ saving ? 'Salvando…' : 'Publicar 🚀' }}
             </button>
-            <span v-else class="text-[10px] text-n-slate-9">rascunho salvo vai para o admin publicar</span>
+            <span v-else
+class="text-[10px] text-n-slate-9"
+              >rascunho salvo vai para o admin publicar</span>
           </div>
         </div>
       </div>

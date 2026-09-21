@@ -342,3 +342,16 @@ então encolhe com o cartão em vez de quebrar "R$" da cifra. A faixa de 13
 indicadores do Ver a fundo segue a mesma regra (`auto-fit minmax(10rem)`),
 e o título do Ver a fundo, o BulletMeter e o ranking de falas embrulham em
 vez de cortar com `truncate`.
+
+## Cards compactos + "Análise científica" (item 187, 20/09)
+
+Pedido dele: "cards menores que representem o criativo, com a teia principal,
+a imagem, o título, alguns selos, o ROAS e as cirurgias fechadas através dele
+— mais quadradinhos, e expandir para uma análise completa; o Ver a fundo vira
+Análise científica, com TUDO sobre o anúncio, inclusive transcrição".
+`CreativeCard.vue` foi reescrito como card compacto (grade
+`auto-fit minmax(15rem)` na Central — quantos couberem), clicável inteiro; a
+ficha completa antiga deixou de existir como visualização: tudo o que ela
+tinha está no `CreativeDetail` (agora "Análise científica"). O seletor da
+Central ficou "Cards | Tabela" (a chave interna `fichas` foi mantida para não
+perder a preferência salva).

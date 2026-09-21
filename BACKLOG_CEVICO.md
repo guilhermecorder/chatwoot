@@ -6125,6 +6125,99 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   seguro principal (as tabelas cevico_ad_* + storage/ vão no pg_dump/volume).
 
 
+## 187. 🧩 RODADA DE TELAS 20/09 — Central em cards compactos + "Análise científica", Páginas, Formulários e Tarefas no kit, Funil de Tráfego por último (pedido 20/09, madrugada)
+
+Pedidos dele: (1) "Tarefas com o design da Apple"; (2) em Análises, o dash de
+tráfego por último; (3) Central de Criativos: "cards menores com a teia
+principal, imagem, título, selos, ROAS e cirurgias fechadas — mais
+quadradinhos, bem enquadrados; expandir para análise completa; Ver a fundo
+vira Análise científica com TUDO, inclusive transcrição"; (4) Páginas com a
+nova cara, mais convidativo para criar; (5) Formulários idem + bem enquadrado.
+FEITO (feat/rodada-172; deploy WEB só, sem migration):
+- Menu: 'Reports > Traffic Funnel' passou para o fim de Análises.
+- Central: `CreativeCard.vue` reescrito (compacto: mídia 64×80, título inteiro,
+  selos formato/situação/pior parâmetro/fadiga/fala do vídeo, campeões, teia
+  Copy 150 px com média, tiles ROAS × média e Cirurgias fechadas + leads/
+  consultas, ações Análise científica / copiar / transcrever / Instagram /
+  comparar; card inteiro clicável); grade `auto-fit minmax(15rem)`; seletor
+  "Cards | Tabela"; `CreativeDetail` renomeado "Análise científica"; texto de
+  ajuda do bloco atualizado. Docs: CENTRAL_CRIATIVOS.md.
+- Páginas (`PagesHome.vue`): hero com "Nova página" em destaque + chips de
+  contagem; seletor Todas/Ideias/Em produção/Publicadas em `cv-seg`; um
+  `cv-block` por etapa da jornada (medalhão, dica de 1 linha, contagem) com
+  grade `auto-fill minmax(16rem)` cujo 1º tile é sempre o tracejado "Criar
+  página aqui" (abre o criar já na etapa; etapa vazia mostra só ele); cartões
+  `cv-sub` com miniatura menor, pílula de situação (verde no ar / âmbar em
+  produção), título e URL inteiros, números com ícone, ações `cv-btn`.
+  Paleta `crm:paginas` (captacao/pre_consulta/pre_cirurgia/pos_operatorio).
+- Formulários (`CrmForms.vue`): container na largura toda (acabou a coluna
+  estreita); hero com "Novo formulário"; bloco "Seus formulários" em grade
+  auto-fit com o tile "Criar formulário" primeiro e cartões com 3 mini-tiles
+  (envios/respostas/conversão) na técnica do MoneyTiles + barra de conclusão
+  `cv-track/cv-fill`; ações do selecionado em `cv-btn`; bloco "Respostas"
+  (tiles + Insights sem roxo sólido + retenção card a card + resultado da IA
+  em 4 grupos com ícones); bloco "Pergunta a pergunta" em 2 colunas alinhadas.
+  Paleta `crm:formularios`. Bug herdado corrigido: `i-lucide-loader-2` não
+  existe (spinner do Gerar com IA) → `loader-circle`.
+- Tarefas (`TasksBoard.vue`): hero (abertas · feitas · atrasadas · perto do
+  prazo) com "Nova tarefa"; filtro Minhas/Todas em `cv-seg` + "Por pessoa"
+  para admin; alerta de prazo em `cv-strip`; colunas `cv-block` que embrulham
+  (1/2/3/4 colunas), cartões `cv-sub` com título inteiro, meta e chips de
+  prioridade/situação; painel Resumo com tiles; modo "100 % feito" dourado
+  preservado via preset `cv-gold`; modal no `cv-modal`. Arrastar intacto
+  (draggable segue pai direto dos cartões). Paleta `crm:tarefas`.
+- Backend: `REPORT_PALETTE_SCOPES` ganhou `crm:jornada` (faltava — a paleta
+  da Jornada não salvava), `crm:paginas`, `crm:formularios`, `crm:tarefas`.
+- Verificado no navegador local (conta 3, escuro, 1280 e 390): as 4 telas
+  montam, nenhum texto cortado, sem rolagem lateral; Central com 3 colunas de
+  cards em 1280 (4 em telas largas, 1 no celular).
+
+## 186. 🗄️ MENU EM GAVETAS "PERSONAL ORGANIZER" — ordem pela filosofia do funil + gaveta Marketing para parceiros (pedido 20/09, madrugada)
+
+Pedido: "Atendimento = conversas, chamadas e agenda; CRM solo; um ambiente
+ANÁLISES com os relatórios; Configurações com tudo de config; dúvida onde
+pôr automações, conteúdo, páginas… quero que fique fácil fazer o que era
+difícil (páginas, SEO, conteúdo, carrosséis, vídeo com IA) — para mim e para
+os parceiros; organizar como uma personal organizer: nada se perde, tudo em
+um lugar que faz sentido e é rápido de achar". Depois: "Tarefas solo (chega
+por notificação); Central de Criativos em Marketing (vocabulário certo);
+ordem dentro de cada gaveta também pela filosofia — otimizar o funil etapa a
+etapa".
+FEITO (feat/rodada-172 sobre a0776c8; deploy WEB só, sem migration):
+- `Sidebar.vue`: `MENU_GROUPS/UNGROUPED` → `MENU_LAYOUT` (ordem única do
+  menu) com gramática de entradas: `'Nome'`, `'Pai > Filho'` (puxa um filho
+  como folha), `'Pai > *'` (o que sobrou do pai) e `{ rest: 'Pai' }` (o que
+  sobrou como subgrupo fechável); resolvedor em `groupedMenuItems` com rede
+  de segurança "Mais" (item sem gaveta ou filho que sobrou nunca desaparece).
+  Gavetas: Meu Painel · Atendimento (Conversas, Chamadas, Agenda, Respostas
+  prontas) · CRM · Tarefas · Automações (Jornada, Robôs, Campanha WhatsApp,
+  Agentes de IA, Painel dos agentes, Fluxos, Regras, Programação, Resultados,
+  Tratamento) · Marketing (Central de Criativos, Páginas, Formulários,
+  Montador de Funis, Testes A/B, Planejamento de conteúdos, Análise de funis,
+  Resultados de tráfego) · Análises (Funil de Tráfego, Anúncios Meta, Google,
+  Dashboard CRM, Campanhas, Agenda, Médicos, Agentes, Ligações, Saúde do
+  WhatsApp + subgrupo "Outros relatórios" — os do core) · Gestão (Estratégia, Metas,
+  Financeiro, Pessoas, Academia) · Configurações num nível só (Integrações,
+  Conta, Domínio, Painéis, Construtor, Tabela de preços, Agentes, Times,
+  Cargos, Caixas, Modelos, Etiquetas, Atributos, Respostas, Macros, Robôs,
+  Fluxo de Conversa, SLA, resto, Capitão, Empresas). Rótulos longos encurtados
+  para caber inteiros na barra (Planejamento, Regras da caixa, Outros relatórios);
+  Cobrança (só nuvem Chatwoot) deixa de vazar no self-hosted.
+- Central de Criativos virou item de 1º nível (`Creatives Center`, ícone
+  clapperboard); dashboards ganharam ícone+cor (azulejo); atendente vê
+  "Meu perfil" (era "Configurações" solto). Personalizar menu: só
+  mostrar/ocultar — as setas de ordem saíram (a ordem é das gavetas).
+- Concessão "Marketing" = a capability `pages` (renomeada no
+  AgentAccessModal; grants salvos continuam valendo) passa a liberar a gaveta
+  inteira: `Forms` (menu + forms_controller `check_admin` → `crm_can?(:pages)`),
+  `Creatives Center` (menu + creatives_controller `require_any_capability(
+  :reports, :pages)` — helper novo em `Crm::AccessControl`).
+- Testes: rspec creatives_controller 4/4; rubocop sem ofensa nova (5 antigas
+  em aggregate_questions); eslint só o que já existia (i18n/unused do core).
+- Lição: contêineres chatwoot-* (rails/vite/sidekiq) caíram com o restart do
+  Docker; `docker start` nos mesmos contêineres recupera, mas o vite refaz
+  `pnpm install` (~10 min) e o 1º carregamento demora (otimização de deps).
+
 ## 185. 🧩 TEXTO INTEIRO SEMPRE + MENU NO CELULAR + NOMES/ÍCONES + KIT MAIS TRANSPARENTE (pedido 20/09, noite 2)
 
 Prints dele: (1) cards "O que vale dinheiro" com "Consulta a…", "Cirurgia
@@ -6134,8 +6227,8 @@ lado a lado, ajustar o tamanho"; (2) menu iPhone no celular cortando
 "Atendime…", "Pacientes …", "Configura…" — "reduza o tamanho para o mobile";
 (3) azulejos cinza nas linhas de Configurações; (4) Jornada com fundo roxo —
 "eu queria o transparente… aumente a transparência disso tudo".
-FEITO (working tree da feat/rodada-172, base 780d5d7; deploy WEB só, sem
-migration; reversão 780d5d7):
+FEITO — SUBIU no a0776c8 (develop) e IMPLANTADO por ele 20/09 ("ficou legal");
+deploy WEB, sem migration; reversão 780d5d7:
 - `MoneyTiles.vue`: grade `repeat(auto-fit, minmax(9.25rem, 1fr))` — decide
   pela largura do CONTÊINER, não da janela (o `md:grid-cols-4` errava dentro
   do modal); rótulo embrulha (sem `truncate`); número em `whitespace-nowrap`

@@ -36,6 +36,13 @@ module Crm::AccessControl
     render json: { error: 'Você não tem acesso a esta área. Peça a um administrador.' }, status: :forbidden
   end
 
+  # qualquer UMA das concessões libera (ex.: Central de Criativos = Relatórios OU Marketing)
+  def require_any_capability(*capabilities)
+    return if capabilities.any? { |capability| crm_can?(capability) }
+
+    render json: { error: 'Você não tem acesso a esta área. Peça a um administrador.' }, status: :forbidden
+  end
+
   # admin estrito (não delegável) — para ações como conceder acessos
   def require_administrator!
     return if Current.account_user.administrator?

@@ -1,6 +1,7 @@
 # Formulários CEVICO: montagem (admin), agregação das respostas para o
 # dashboard e geração de insights de marketing com IA.
 class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
   before_action :check_admin
   before_action :form, only: [:update, :destroy, :summary, :generate_insights, :preview_link]
 
@@ -56,10 +57,11 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
 
   private
 
+  # admin ou concessão Marketing ('pages') — gaveta Marketing (20/09)
   def check_admin
-    return if Current.account_user.administrator?
+    return if crm_can?(:pages)
 
-    render json: { error: 'Apenas administradores podem gerenciar formulários.' }, status: :forbidden
+    render json: { error: 'Você não tem acesso aos formulários. Peça a concessão Marketing a um administrador.' }, status: :forbidden
   end
 
   def form

@@ -1,5 +1,5 @@
 <script setup>
-// "Ver a fundo" (item 172, rodada 2): modal SÓLIDO do kit (cv-modal) com
+// "Análise científica" (era "Ver a fundo"; item 172, rodada 2): modal SÓLIDO do kit (cv-modal) com
 // seções que se leem de cima para baixo — ficha, leitura com as quatro
 // réguas, ritmo dia a dia (um eixo por gráfico, linha da média e do
 // parâmetro), 1ª × 2ª metade, curva de retenção contra a média da conta,
@@ -359,7 +359,7 @@ const metaTiles = computed(() => {
               class="text-lg"
           /></span>
           <div class="min-w-0 flex-1">
-            <p class="text-[11px] opacity-80">Ver a fundo</p>
+            <p class="text-[11px] opacity-80">Análise científica</p>
             <h2
               class="text-lg sm:text-2xl font-bold leading-tight tracking-tight break-words"
             >

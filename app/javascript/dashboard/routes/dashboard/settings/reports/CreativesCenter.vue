@@ -714,14 +714,17 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
           <span class="cevico-hero-chip">{{
             isSyncing ? syncingText : syncedText
           }}</span>
-          <span v-if="data && data.simulated" class="cevico-hero-chip"
+          <span
+v-if="data && data.simulated" class="cevico-hero-chip"
             >simulação</span
           >
-          <span v-if="selectedCampaign" class="cevico-hero-chip"
+          <span
+v-if="selectedCampaign" class="cevico-hero-chip"
             ><span class="i-lucide-megaphone text-xs" />Analisando:
             {{ selectedCampaign.name }}</span
           >
-          <span v-if="targets.mode === 'auto'" class="cevico-hero-chip"
+          <span
+v-if="targets.mode === 'auto'" class="cevico-hero-chip"
             ><span class="i-lucide-trending-up text-xs" />régua automática pelo
             nosso histórico</span
           >
@@ -1186,7 +1189,7 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                   :class="{ 'cv-seg-on': view === 'fichas' }"
                   @click="setView('fichas')"
                 >
-                  <span class="i-lucide-id-card cv-seg-icon" />Fichas completas
+                  <span class="i-lucide-layout-grid cv-seg-icon" />Cards
                 </button>
                 <button
                   class="cv-seg-item"
@@ -1240,11 +1243,11 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
               </button>
             </div>
             <p class="text-[11px] text-n-slate-9 mb-4">
-              Nas réguas: faixa vermelha = ruim, âmbar = atenção, verde = bom ·
-              traço preto = parâmetro bom · triângulo = média da conta no
-              período. Moldura dourada = campeão do recorte; Transcrever copia
-              gancho, corpo e CTA. Teia = força de cada parte: 100 = atingiu o
-              parâmetro bom, 50 = na linha do ruim.
+              Cada card mostra a teia (100 = atingiu o parâmetro bom, 50 = na
+              linha do ruim), o ROAS e as cirurgias fechadas por aquele anúncio.
+              Moldura dourada = campeão do recorte. Clique no card para a
+              Análise científica: réguas, retenção, fala do vídeo, números da
+              Meta e transcrição.
             </p>
             <RadarAxesPicker env="criativos" class="mb-4" />
             <p v-if="!hasData" class="text-sm text-n-slate-10 py-6 text-center">
@@ -1263,9 +1266,11 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
               @open="r => (detailAdId = r.ad_id)"
               @toggle="toggleCompare"
             />
+            <!-- cards compactos (pedido 20/09): quantos couberem na largura;
+                 cada um abre a Análise científica -->
             <div
               v-else
-              class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start"
+              class="grid gap-5 items-stretch grid-cols-[repeat(auto-fit,minmax(15rem,1fr))]"
             >
               <CreativeCard
                 v-for="r in rows"
@@ -1273,7 +1278,6 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
                 :row="r"
                 :averages="averages"
                 :targets="targets"
-                :family="blockFamily('criativos')"
                 :accent="hex('criativos', 1)"
                 :compare-mode="compareMode"
                 :selected="selectedIds.includes(r.ad_id)"

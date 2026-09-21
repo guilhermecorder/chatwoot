@@ -73,8 +73,8 @@ const GRANT_ITEMS = [
   },
   {
     key: 'pages',
-    label: 'Análise de Páginas',
-    hint: 'análise de funis e testes A/B (rascunhos já são do time)',
+    label: 'Marketing',
+    hint: 'a gaveta inteira: Central de Criativos, páginas, formulários, funis, testes A/B e resultados de tráfego',
   },
 ];
 
