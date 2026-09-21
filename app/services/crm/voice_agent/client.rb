@@ -31,7 +31,42 @@ class Crm::VoiceAgent::Client
     return [{ 'voice_id' => 'sim_voice', 'name' => 'Voz simulada', 'labels' => { 'language' => 'pt' } }] if simulated?
 
     query = { page_size: 30, language: 'pt', search: search.to_s.strip.presence }.compact
-    Array(get('/v2/voices', query)['voices']).map { |v| v.slice('voice_id', 'name', 'labels', 'preview_url') }
+    own = Array(get('/v2/voices', query)['voices']).map { |v| v.slice('voice_id', 'name', 'labels', 'preview_url') }
+    return own if own.any?
+
+    # conta nova (plano free) só tem as vozes padrão em inglês: cai na BIBLIOTECA
+    # pública, em português (21/09 — "Buscar vozes não funcionou")
+    library_voices(search: search)
+  end
+
+  # Biblioteca de vozes (Voice Library) em português: "feminina/masculina/jovem"
+  # viram os filtros da API; o resto do texto vira busca por nome
+  GENDER_WORDS = { 'feminina' => 'female', 'feminino' => 'female', 'mulher' => 'female', 'female' => 'female',
+                   'masculina' => 'male', 'masculino' => 'male', 'homem' => 'male', 'male' => 'male' }.freeze
+  AGE_WORDS = { 'jovem' => 'young', 'young' => 'young', 'adulta' => 'middle_aged', 'adulto' => 'middle_aged',
+                'madura' => 'middle_aged', 'idosa' => 'old', 'idoso' => 'old' }.freeze
+  def library_voices(search: nil) # rubocop:disable Metrics/AbcSize
+    words = search.to_s.downcase.split
+    gender = words.filter_map { |w| GENDER_WORDS[w] }.first
+    age = words.filter_map { |w| AGE_WORDS[w] }.first
+    rest = words.reject { |w| GENDER_WORDS.key?(w) || AGE_WORDS.key?(w) }.join(' ').presence
+    query = { page_size: 30, language: 'pt', gender: gender, age: age, search: rest }.compact
+    Array(get('/v1/shared-voices', query)['voices']).map do |v|
+      { 'voice_id' => v['voice_id'], 'name' => v['name'], 'preview_url' => v['preview_url'],
+        'public_owner_id' => v['public_owner_id'], 'library' => true,
+        'labels' => { 'gender' => v['gender'], 'age' => v['age'], 'accent' => v['accent'], 'language' => v['language'],
+                      'descricao' => v['descriptive'] }.compact }
+    end
+  end
+
+  # traz uma voz da biblioteca para a conta (o agente só usa voz da própria conta)
+  def add_library_voice(public_owner_id, voice_id, name)
+    post("/v1/voices/add/#{public_owner_id}/#{voice_id}", { new_name: name.to_s.presence || 'Voz CEVICO' })
+  end
+
+  # a voz já está na conta?
+  def own_voice?(voice_id)
+    Array(get('/v2/voices', { page_size: 100 })['voices']).any? { |v| v['voice_id'] == voice_id }
   end
 
   # contas WhatsApp importadas na ElevenLabs → items[]

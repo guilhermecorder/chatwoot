@@ -6198,6 +6198,11 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   o card em sombra, escolher colunas; testar por voz no painel da ElevenLabs. Ao vivo de verdade depende
   do número na ElevenLabs (Meta/Henrique) + CEVICO_RESPONDERS_LIVE.
 
+## 197. 🎙️ BUSCAR VOZES na conta free da ElevenLabs (21/09) — CORRIGIDO, aguarda "pode subir"
+- A busca só olhava as vozes da conta (padrão, em inglês) e devolvia "nenhuma voz". Agora cai na Voice
+  Library em português (feminina/masculina/jovem = filtros), marca "biblioteca", dá "▶ ouvir", e o
+  Sincronizar adiciona a voz à conta antes do agente (`voice_public_owner_id`). Deploy WEB só.
+
 ## 196. 🧪 TESTAR AGENTE COM O INTERRUPTOR DESLIGADO (feedback 21/09 pós-deploy da 195) — CORRIGIDO, aguarda "pode subir"
 - "Só consigo testar os agentes se estiverem ligados; o ideal é testar com ele desligado." O motor recusava
   com "Agente desligado." antes do simulador. Agora `Crm::ResponderAgentService` aceita `simulation: true`

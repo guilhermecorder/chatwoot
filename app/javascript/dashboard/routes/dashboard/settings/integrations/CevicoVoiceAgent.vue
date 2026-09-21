@@ -64,6 +64,7 @@ const blankForm = () => ({
   whatsapp_phone_number_id: '',
   whatsapp_number: '',
   voice_id: '',
+  voice_public_owner_id: '',
   voice_name: '',
   llm: DEFAULT_LLM,
   language: 'pt-br',
@@ -123,6 +124,7 @@ const fillForm = () => {
     whatsapp_number: v.whatsapp_number || '',
     voice_id: v.voice_id || '',
     voice_name: v.voice_name || '',
+    voice_public_owner_id: v.voice_public_owner_id || '',
     llm: v.llm || DEFAULT_LLM,
     language: v.language || 'pt-br',
     tts_model: v.tts_model || DEFAULT_TTS_MODEL,
@@ -308,6 +310,8 @@ const fetchVoices = async () => {
 const pickVoice = v => {
   form.value.voice_id = v.voice_id;
   form.value.voice_name = v.name || '';
+  // voz da biblioteca: o Sincronizar adiciona à conta antes de criar o agente
+  form.value.voice_public_owner_id = v.library ? v.public_owner_id || '' : '';
 };
 const voiceLabels = v => {
   const labels = v.labels && typeof v.labels === 'object' ? v.labels : {};
@@ -382,6 +386,7 @@ const payload = () => {
     connection: 'whatsapp',
     voice_id: f.voice_id.trim(),
     voice_name: f.voice_name.trim(),
+    voice_public_owner_id: String(f.voice_public_owner_id || '').trim(),
     llm: f.llm,
     language: f.language,
     tts_model: f.tts_model || DEFAULT_TTS_MODEL,
@@ -1095,7 +1100,8 @@ const chipOff = 'bg-n-alpha-1 border-n-weak text-n-slate-10';
               v-else-if="voicesFetched && !voices.length"
               class="text-xs text-n-slate-9 mt-1"
             >
-              Nenhuma voz encontrada com esse termo.
+              Nenhuma voz encontrada. Tente "feminina", "masculina" ou "jovem"
+              (a busca olha as suas vozes e a biblioteca em português).
             </p>
             <div
               v-if="voices.length"
@@ -1129,10 +1135,23 @@ const chipOff = 'bg-n-alpha-1 border-n-weak text-n-slate-10';
                   </span>
                 </span>
                 <span
-                  class="text-[10px] font-mono text-n-slate-9 flex-shrink-0"
+                  v-if="v.library"
+                  class="text-[10px] px-1.5 py-0.5 rounded-full bg-n-alpha-2 text-n-slate-10 flex-shrink-0"
+                  title="Voz da biblioteca pública: o Sincronizar adiciona à sua conta"
                 >
-                  {{ v.voice_id }}
+                  biblioteca
                 </span>
+                <a
+                  v-if="v.preview_url"
+                  :href="v.preview_url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-[11px] text-n-brand hover:underline flex-shrink-0"
+                  title="Ouvir uma amostra"
+                  @click.stop
+                >
+                  ▶ ouvir
+                </a>
               </button>
             </div>
           </div>

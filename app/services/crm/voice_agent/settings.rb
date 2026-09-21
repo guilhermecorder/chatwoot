@@ -62,6 +62,8 @@ class Crm::VoiceAgent::Settings
   # ── persona e voz ────────────────────────────────────────────────────────
   def voice_id = raw['voice_id'].presence
   def voice_name = raw['voice_name'].presence
+  # voz escolhida na biblioteca pública (o Sincronizar a adiciona à conta)
+  def voice_public_owner_id = raw['voice_public_owner_id'].presence
   def llm = LLM_OPTIONS.include?(raw['llm']) ? raw['llm'] : DEFAULTS['llm']
   def language = LANGUAGE_OPTIONS.include?(raw['language']) ? raw['language'] : DEFAULTS['language']
   def tts_model = raw['tts_model'].presence || DEFAULTS['tts_model']
@@ -158,7 +160,7 @@ class Crm::VoiceAgent::Settings
       api_key_set: api_key.present?, webhook_secret_set: webhook_secret.present?, tools_token_set: tools_token.present?,
       webhook_id: webhook_id, agent_id: agent_id, agent_name: agent_name, tool_ids: tool_ids,
       whatsapp_phone_number_id: whatsapp_phone_number_id, whatsapp_number: whatsapp_number, connection: connection,
-      voice_id: voice_id, voice_name: voice_name, llm: llm, language: language, tts_model: tts_model,
+      voice_id: voice_id, voice_name: voice_name, voice_public_owner_id: voice_public_owner_id, llm: llm, language: language, tts_model: tts_model,
       # rodada 195: prompt = bloco da etapa (mesmo do card do hub); full_prompt = o que a assistente lê de fato
       first_message: first_message, prompt: prompt, default_prompt: Crm::CevicoScript::STAGE_PROMPTS['voice'],
       full_prompt: Crm::VoiceAgent::Script.build(account, self),

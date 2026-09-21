@@ -90,9 +90,23 @@ class Crm::VoiceAgent::SyncService
   end
 
   def sync_agent
+    ensure_library_voice
     body = Crm::VoiceAgent::AgentBody.build(account, settings, tool_ids: settings.tool_ids.values)
     settings.agent_id.present? ? update_agent(body) : create_agent(body)
     log << '⚠️ Sem voz escolhida: a ElevenLabs usa a voz padrão. Escolha uma em Persona e voz.' if settings.voice_id.blank?
+  end
+
+  # voz escolhida na BIBLIOTECA (conta free sem vozes em português): o agente
+  # só aceita voz da própria conta, então ela é adicionada aqui, uma vez
+  def ensure_library_voice # rubocop:disable Metrics/AbcSize
+    owner = settings.voice_public_owner_id
+    return if owner.blank? || settings.voice_id.blank?
+    return if client.own_voice?(settings.voice_id)
+
+    client.add_library_voice(owner, settings.voice_id, settings.voice_name)
+    log << "✅ Voz \"#{settings.voice_name || settings.voice_id}\" adicionada à conta (biblioteca)"
+  rescue StandardError => e
+    log << "⚠️ Não deu para adicionar a voz da biblioteca: #{e.message.to_s.truncate(160)} — o agente sai com a voz padrão"
   end
 
   def update_agent(body)

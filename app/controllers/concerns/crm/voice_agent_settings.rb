@@ -7,7 +7,7 @@
 module Crm::VoiceAgentSettings
   extend ActiveSupport::Concern
 
-  VOICE_TEXT_FIELDS = %w[agent_name agent_id webhook_id whatsapp_phone_number_id whatsapp_number voice_id voice_name
+  VOICE_TEXT_FIELDS = %w[agent_name agent_id webhook_id whatsapp_phone_number_id whatsapp_number voice_id voice_name voice_public_owner_id
                          tts_model first_message prompt transfer_condition].freeze
 
   def update_voice
