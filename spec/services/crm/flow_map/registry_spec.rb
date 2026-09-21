@@ -25,7 +25,8 @@ RSpec.describe Crm::FlowMap::Registry do
       'Crm::AppointmentReminderSendJob' => 'reminders',
       'Crm::JourneyRunJob' => 'journey',
       'Crm::OftalmofacilSyncJob' => 'oftalmofacil',
-      'Crm::VoiceAgent::CampaignDialerJob' => 'voice'
+      'Crm::VoiceAgent::CampaignDialerJob' => 'voice',
+      'Crm::VoiceAgent::UnresponsiveLeadsJob' => 'voice' # 📞 rodada 195
     }
   end
 

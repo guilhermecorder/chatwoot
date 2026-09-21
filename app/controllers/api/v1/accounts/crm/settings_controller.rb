@@ -382,9 +382,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 manager: agent_fields + [:drop_pct],
                                 # 🎓 Auditor de Conversas (item 130): teto diário
                                 auditor: agent_fields + [:daily_cap],
-                                # 🤖📞 Agente de Ligação (item 169): só o interruptor/prompt
-                                # espelhados — a config completa mora em ai_config['voice']
-                                voice: agent_fields,
+                                # 🤖📞 Agente de Ligação (item 169 → 195): interruptor, bloco da
+                                # etapa (prompt), modo sombra/ao vivo + janela, colunas vigiadas,
+                                # horas sem resposta / dias olhados / tentativas / teto diário e a
+                                # caixa do WhatsApp p/ continuar por escrito. Chave/voz/número
+                                # continuam em ai_config['voice'] (tela de Integrações).
+                                voice: agent_fields + [:mode, :silence_hours, :lookback_days, :max_attempts, :daily_cap,
+                                                       :hours_start, :hours_end, :handoff_inbox_id,
+                                                       { stage_ids: [], live_days: [] }],
                                 # 🎨 Criativo Perpétuo (item 131)
                                 creative: agent_fields + [:winners_count, :variations_count],
                                 # 🗣️ Atendente de Agendamento (rodada 188): modo sombra/ao vivo,
@@ -404,6 +409,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       live_error = responder_live_error(cfg['agents'] || {}, permitted)
       return render json: { error: live_error }, status: :unprocessable_entity if live_error
 
+      # 🎙️ (195) Agente de Ligação ao vivo: exige colunas vigiadas + ElevenLabs configurada
+      voice_error = voice_live_error(cfg, permitted)
+      return render json: { error: voice_error }, status: :unprocessable_entity if voice_error
+
       # uma coluna pertence a UM agente: quem fala é decidido pela coluna
       conflict = responder_stage_conflict(cfg['agents'] || {}, permitted)
       if conflict
@@ -417,8 +426,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         merged.delete('draft') if merged['draft'].blank?
         merged
       end
-      # 🤖📞 item 169: o interruptor/prompt do card "Agente de Ligação" (Painel
-      # dos agentes) espelha em ai_config['voice'], que é o que a assistente lê
+      # 🤖📞 item 169: o interruptor do card "Agente de Ligação" (e a caixa do
+      # WhatsApp, 195) espelha em ai_config['voice'], que é o que a assistente lê
       mirror_voice_agent!(cfg, permitted['voice']) if permitted.key?('voice')
     end
     # 📜 Roteiro CEVICO (fonte única dos respondedores): seção em branco = padrão
@@ -432,7 +441,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['script'] = script
     end
     crm_settings.update!(ai_config: cfg)
-    render json: ai_json(crm_settings)
+    # 🎙️ (195) publicou o Agente de Ligação com a ElevenLabs configurada? o prompt
+    # novo (Roteiro + regras de voz + etapa) sobe para lá; falha vira aviso, não erro
+    sync = voice_sync_after_publish(params[:agents])
+    render json: ai_json(crm_settings).merge(sync ? { voice_sync: sync } : {})
   end
 
   # 🕶️ TELA SOMBRA (rodada 188): o que o Atendente interno TERIA respondido
@@ -464,10 +476,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     agent_key = params[:agent].presence || 'atendente_agendamento'
     return render json: { error: 'Agente inválido.' }, status: :unprocessable_entity unless Crm::AiAgentConfig::RESPONDER_AGENTS.include?(agent_key)
 
-    sim = Crm::AgentSimulator.new(account: Current.account, agent_key: agent_key)
+    # 🎙️ (195) objective = "Motivo da ligação" do Agente de Ligação (opcional; só ele usa)
+    sim = Crm::AgentSimulator.new(account: Current.account, agent_key: agent_key, objective: params[:objective])
     conversation = Current.account.conversations.find_by(id: params[:conversation_id]) if params[:conversation_id].present?
     conversation = nil if conversation && !Crm::AgentSimulator.simulated?(conversation)
     conversation ||= sim.start!
+    sim.objective!(conversation) if params[:objective].present?
     error = nil
     if params[:text].present?
       outcome = sim.say!(conversation, params[:text])
@@ -475,6 +489,20 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
     render json: { agent: agent_key, conversation_id: conversation.id, display_id: conversation.display_id,
                    turns: sim.transcript(conversation), error: error }
+  end
+
+  # 📋 (195) "Ver quem ligaria hoje": roda a seleção de leads não responsivos
+  # AGORA, em sombra (nada é discado), grava a lista em voice_state.shadow e a
+  # devolve para a tela. Só admin.
+  def voice_shadow_run
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    cfg = (crm_settings.ai_config || {}).dig('agents', 'voice') || {}
+    settings = Crm::VoiceAgent::Settings.new(Current.account, crm_settings: crm_settings)
+    items = Crm::VoiceAgent::UnresponsiveLeadsJob.shadow!(Current.account, cfg, log: false)
+    render json: { date: Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s, at: Time.current.iso8601, count: items.size,
+                   items: items, ready: settings.configured?,
+                   live_now: Crm::VoiceAgent::UnresponsiveLeadsJob.live_now?(Current.account, cfg, settings: settings) }
   end
 
   # 👍/👎 do admin numa nota de sombra (alimenta o ajuste do Roteiro)
@@ -1451,13 +1479,75 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   # 🤖📞 item 169: mantém ai_config['voice'] (fonte da assistente) em dia com o
-  # que o card do Painel dos agentes salvou (enabled/prompt); o resto da config
-  # (chave, número, voz…) só muda pela tela de Integrações
+  # que o card do Painel dos agentes salvou: interruptor e, desde a 195, a caixa
+  # do WhatsApp p/ continuar por escrito. O "prompt" NÃO é mais espelhado — ele
+  # é o bloco da etapa e vive só em agents.voice.prompt (o script inteiro é
+  # montado por Crm::VoiceAgent::Script.build). Chave/número/voz: Integrações.
   def mirror_voice_agent!(cfg, agent)
     voice = cfg['voice'] || {}
     voice['enabled'] = agent['enabled'] == true if agent.key?('enabled')
-    voice['prompt'] = agent['prompt'].presence if agent.key?('prompt')
+    voice['handoff_inbox_id'] = Current.account.inboxes.find_by(id: agent['handoff_inbox_id'])&.id if agent.key?('handoff_inbox_id')
+    voice.delete('prompt') # resquício do script inteiro custom (antes da 195)
     cfg['voice'] = voice
+  end
+
+  # 🎙️ (195) valida/normaliza a config do Agente de Ligação no próprio
+  # `permitted`: live_days 0..6 sem repetição, números dentro dos limites
+  # (Crm::VoiceAgent::UnresponsiveLeads::LIMITS), stage_ids só desta conta.
+  # Ao vivo exige a trava do servidor, colunas vigiadas e ElevenLabs configurada.
+  VOICE_LIVE_LOCKED = 'O modo Ao vivo está trancado no servidor (variável CEVICO_RESPONDERS_LIVE). ' \
+                      'Por enquanto o Agente de Ligação só monta a lista em sombra.'.freeze
+  VOICE_LIVE_NO_STAGES = 'Para ficar Ao vivo, escolha pelo menos uma coluna para o Agente de Ligação vigiar.'.freeze
+  VOICE_LIVE_NOT_READY = 'Para ficar Ao vivo, configure e sincronize a ElevenLabs em Integrações → Agente de Ligação ' \
+                         '(chave da API + agente).'.freeze
+
+  def voice_live_error(cfg, permitted)
+    agent = permitted['voice']
+    return nil if agent.blank?
+
+    normalize_voice_agent!(agent)
+    return nil unless agent['mode'] == 'live'
+    return VOICE_LIVE_LOCKED unless Crm::ResponderAgentJob::LIVE_ENABLED
+
+    stages = agent.key?('stage_ids') ? agent['stage_ids'] : Array(cfg.dig('agents', 'voice', 'stage_ids'))
+    return VOICE_LIVE_NO_STAGES if stages.compact_blank.empty?
+    return VOICE_LIVE_NOT_READY unless Crm::VoiceAgent::Settings.new(Current.account, crm_settings: crm_settings).configured?
+
+    nil
+  end
+
+  def normalize_voice_agent!(agent) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    agent['live_days'] = Array(agent['live_days']).map(&:to_i).select { |d| d.between?(0, 6) }.uniq if agent.key?('live_days')
+    if agent.key?('stage_ids')
+      ids = Array(agent['stage_ids']).map(&:to_i).select(&:positive?).uniq
+      agent['stage_ids'] = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: Current.account.id }, id: ids).pluck(:id)
+    end
+    Crm::VoiceAgent::UnresponsiveLeads::LIMITS.each_key do |key|
+      agent[key] = Crm::VoiceAgent::UnresponsiveLeads.setting(agent, key) if agent.key?(key)
+    end
+    agent['mode'] = %w[shadow live].include?(agent['mode']) ? agent['mode'] : 'shadow' if agent.key?('mode')
+  end
+
+  # 🎙️ (195) depois de PUBLICAR o card do Agente de Ligação (não o simples
+  # interruptor), sobe o prompt novo para a ElevenLabs. Devolve { ok, error }
+  # ou nil quando não havia o que sincronizar. Nunca derruba o publish.
+  def voice_sync_after_publish(agents_param)
+    keys = voice_publish_keys(agents_param)
+    return nil if (keys - %w[enabled]).empty? || Crm::VoiceAgent::Settings.simulate_env? # só o interruptor: nada a subir
+    return nil unless Crm::VoiceAgent::Settings.new(Current.account, crm_settings: crm_settings.reload).configured?
+
+    result = Crm::VoiceAgent::SyncService.new(Current.account).perform
+    { ok: result[:ok] == true, error: result[:error] }
+  rescue StandardError => e
+    { ok: false, error: e.message.to_s.truncate(200) }
+  end
+
+  # chaves enviadas em params[:agents][:voice] (vazio quando o card não veio)
+  def voice_publish_keys(agents_param)
+    return [] unless agents_param.respond_to?(:key?) && agents_param.key?(:voice)
+
+    voice_param = agents_param[:voice]
+    voice_param.respond_to?(:keys) ? voice_param.keys.map(&:to_s) : []
   end
 
   # 🤖📞 agente de ligação (item 169) — sem segredos, com defaults e URLs prontas
@@ -1643,7 +1733,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'manager' => Crm::AutoManagerService::SYSTEM_PROMPT,
       'auditor' => Crm::ConversationAuditorService::SYSTEM_PROMPT,
       'creative' => Crm::CreativeService::SYSTEM_PROMPT,
-      'voice' => Crm::VoiceAgent::Script::SYSTEM_PROMPT,
+      # 🎙️ rodada 195: o prompt do Agente de Ligação também é o BLOCO DA ETAPA (Roteiro + regras de voz vão à parte)
+      'voice' => Crm::CevicoScript::STAGE_PROMPTS['voice'],
       # 🗣️ rodada 188: o prompt do Atendente é o BLOCO DA ETAPA; o Roteiro vai à parte (script)
       'atendente_agendamento' => Crm::CevicoScript::STAGE_PROMPTS['atendente_agendamento'],
       'atendente_pos' => Crm::CevicoScript::STAGE_PROMPTS['atendente_pos']
@@ -1667,6 +1758,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         (cfg.dig("#{k}_state", 'shadow_days', Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s) || {}).slice('count', 'conversation_ids')
       end,
       live_enabled: Crm::ResponderAgentJob::LIVE_ENABLED,
+      # 🎙️ rodada 195: Agente de Ligação — registro, lista "ligaria hoje" (sombra) ou
+      # "ligações hoje" (ao vivo), ElevenLabs pronta e se está ao vivo AGORA
+      voice_events: Array(cfg.dig('voice_state', 'events')).first(30),
+      voice_shadow: voice_shadow_json(cfg),
+      voice_ready: voice_settings_of(s).configured?,
+      voice_live_now: Crm::VoiceAgent::UnresponsiveLeadsJob.live_now?(s.account, agents['voice'] || {}, settings: voice_settings_of(s)),
       comments_events: Array(cfg.dig('comments_state', 'events')).first(30),
       comments_last_run_at: cfg.dig('comments_state', 'last_run_at'),
       # 🌾 resumo da colheita do mês (a lista completa vem por harvest_status)
@@ -1706,6 +1803,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           monthly_size: agents.dig(key, 'monthly_size').presence&.to_i,
           cold_days: agents.dig(key, 'cold_days').presence&.to_i,
           daily_cap: agents.dig(key, 'daily_cap').presence&.to_i,
+          # 🎙️ Agente de Ligação (195): horas sem resposta, dias olhados, tentativas por lead,
+          # caixa do WhatsApp p/ continuar por escrito (a de Integrações vale quando o card não tem)
+          silence_hours: agents.dig(key, 'silence_hours').presence&.to_i,
+          lookback_days: agents.dig(key, 'lookback_days').presence&.to_i,
+          max_attempts: agents.dig(key, 'max_attempts').presence&.to_i,
+          handoff_inbox_id: voice_handoff_inbox_id(cfg, agents, key),
           day_of_month: agents.dig(key, 'day_of_month').presence&.to_i,
           inbox_id: agents.dig(key, 'inbox_id').presence&.to_i,
           require_approval: agents.dig(key, 'require_approval') != false,
@@ -1734,6 +1837,28 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         }]
       end
     }
+  end
+
+  def voice_settings_of(record)
+    @voice_settings_of ||= {}
+    @voice_settings_of[record.id] ||= Crm::VoiceAgent::Settings.new(record.account, crm_settings: record)
+  end
+
+  # caixa do WhatsApp p/ continuar por escrito: a do card; senão a da Integração (só o voice)
+  def voice_handoff_inbox_id(cfg, agents, key)
+    value = agents.dig(key, 'handoff_inbox_id').presence
+    value ||= cfg.dig('voice', 'handoff_inbox_id') if key == 'voice'
+    value.presence&.to_i
+  end
+
+  # 🎙️ (195) lista do dia do Agente de Ligação: só vale se for de HOJE (a de
+  # ontem some sozinha); mode 'shadow' = ligaria, 'live' = está na campanha
+  def voice_shadow_json(cfg)
+    shadow = cfg.dig('voice_state', 'shadow') || {}
+    today = Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s
+    return { 'date' => today, 'at' => nil, 'mode' => 'shadow', 'items' => [] } unless shadow['date'] == today
+
+    shadow.slice('date', 'at', 'mode', 'campaign_id', 'items')
   end
 
   # badge do Radar na sidebar: admin vê tudo; atendente só vê os avisos

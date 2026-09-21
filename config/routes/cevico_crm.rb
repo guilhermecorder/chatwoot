@@ -124,6 +124,8 @@ namespace :crm do
     get :ai_shadow
     post :ai_shadow_rate
     post :ai_simulate
+    # 📋 rodada 195: Agente de Ligação — "Ver quem ligaria hoje" (seleção em sombra, nada é discado)
+    post :voice_shadow_run
     post :test_gemini
     # Estúdio do Copywriter: conteúdo multi-formato (carrossel, reels...)
     post :copywriter_content

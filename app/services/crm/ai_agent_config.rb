@@ -37,13 +37,16 @@ module Crm::AiAgentConfig
   }.merge(
     # 🗣️ rodada 188: respondedores do WhatsApp (Roteiro CEVICO + bloco da etapa)
     'atendente_agendamento' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # conversa com paciente até agendar
-    'atendente_pos' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' } # suporte a quem já agendou (dúvidas, remarcar)
+    'atendente_pos' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # suporte a quem já agendou (dúvidas, remarcar)
+    # 🎙️ rodada 195: simulador POR TEXTO do Agente de Ligação (a voz real roda na ElevenLabs)
+    'voice' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }
   ).freeze
 
   # Agentes RESPONDEDORES: os únicos autorizados a falar com o paciente
-  # (hoje só o Atendente Instagram, restrito às caixas escolhidas na config).
+  # (Instagram/comentários nas caixas escolhidas; atendentes do WhatsApp; e o
+  # Agente de Ligação, cujo simulador por texto usa o mesmo motor — 195).
   # Todos os demais seguem a trava operacional de leitura.
-  RESPONDER_AGENTS = %w[instagram comments atendente_agendamento atendente_pos].freeze
+  RESPONDER_AGENTS = %w[instagram comments atendente_agendamento atendente_pos voice].freeze
 
   # preço US$ por milhão de tokens (entrada / saída)
   PRICING = {

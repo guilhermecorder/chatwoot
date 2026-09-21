@@ -19,6 +19,14 @@ const props = defineProps({
 });
 const emit = defineEmits(['close', 'edit-script', 'guided']);
 
+// 🎙️ rodada 195: o Agente de Ligação também se testa POR TEXTO — cada
+// resposta dele é o que seria DITO ao telefone. O "motivo da ligação" vai
+// como `objective` no início (de onde a conversa parou: "orçamento enviado,
+// sem resposta há 2 dias"); vazio = o padrão do servidor.
+const isVoice = computed(() => props.agentKey === 'voice');
+const objective = ref('');
+const OBJECTIVE_PLACEHOLDER = 'orçamento enviado, sem resposta há 2 dias';
+
 const pal = useCevicoPalette({
   scope: 'report:agentes',
   blocks: [
@@ -61,6 +69,20 @@ const SUGGESTIONS = [
   'você é um robô?',
   'fiz a cirurgia ontem e meu olho tá doendo muito',
 ];
+// falas típicas de quem ATENDE uma ligação da clínica
+const VOICE_SUGGESTIONS = [
+  'alô? quem fala?',
+  'não posso falar agora',
+  'ah, vi o orçamento sim, achei caro',
+  'tenho convênio, cobre?',
+  'pode ser terça de manhã?',
+  'manda por WhatsApp que eu vejo depois',
+  'você é um robô?',
+  'não tenho interesse, obrigado',
+];
+const suggestions = computed(() =>
+  isVoice.value ? VOICE_SUGGESTIONS : SUGGESTIONS
+);
 
 const scrollToEnd = async () => {
   await nextTick();
@@ -71,13 +93,24 @@ const start = async () => {
   isStarting.value = true;
   errorText.value = '';
   try {
-    const { data } = await CrmAPI.simulateAgent({ agent: props.agentKey });
+    const payload = { agent: props.agentKey };
+    // 🎙️ voz: o motivo só viaja quando preenchido (o servidor tem o padrão)
+    if (isVoice.value && objective.value.trim())
+      payload.objective = objective.value.trim();
+    const { data } = await CrmAPI.simulateAgent(payload);
     conversationId.value = data.conversation_id;
     displayId.value = data.display_id;
     turns.value = data.turns || [];
     if (props.prefill && !draft.value) draft.value = props.prefill;
-  } catch {
-    useAlert('Não consegui abrir a conversa de teste.');
+  } catch (e) {
+    // o servidor pode ainda não aceitar este agente no simulador (frente A
+    // da rodada 195): avisar com a frase dele, sem quebrar a tela
+    const msg = e?.response?.data?.error || e?.response?.data?.message;
+    useAlert(
+      msg
+        ? `Não consegui abrir a conversa de teste: ${msg}`
+        : 'Não consegui abrir a conversa de teste.'
+    );
   } finally {
     isStarting.value = false;
     await scrollToEnd();
@@ -177,12 +210,26 @@ const guide = turn => {
     >
       <div class="cv-modal w-full max-w-3xl max-h-[92vh] flex flex-col">
         <div class="cv-modal-head flex items-center gap-3">
-          <span class="cv-icon cv-icon-lg"><span class="i-lucide-flask-conical text-lg"/></span>
+          <span class="cv-icon cv-icon-lg"><span
+              :class="
+                isVoice ? 'i-lucide-phone-call' : 'i-lucide-flask-conical'
+              "
+              class="text-lg"
+          /></span>
           <div class="min-w-0 flex-1">
             <p class="text-base sm:text-lg font-bold leading-tight">
-              🧪 Testar agente · {{ agentName }}
+              {{
+                isVoice
+                  ? '🎙️ Testar Agente de Ligação (por texto)'
+                  : `🧪 Testar agente · ${agentName}`
+              }}
             </p>
-            <p class="text-[11px] opacity-80">
+            <p v-if="isVoice" class="text-[11px] opacity-80">
+              Você é o lead que atendeu o telefone. As falas abaixo seriam DITAS
+              ao telefone; a voz de verdade você ouve no painel da ElevenLabs.
+              Caixa interna, sem ligação: ninguém recebe nada.
+            </p>
+            <p v-else class="text-[11px] opacity-80">
               Você é o paciente. O agente responde com a IA de verdade e o
               Roteiro de agora. Caixa interna, sem canal de envio: nada vai para
               telefone nenhum.
@@ -201,13 +248,45 @@ const guide = turn => {
           </button>
         </div>
 
+        <!-- 🎙️ motivo da ligação (só no Agente de Ligação): de onde a conversa parou -->
+        <div
+          v-if="isVoice"
+          class="px-4 sm:px-6 pt-3 pb-2 flex flex-col sm:flex-row sm:items-end gap-2 border-b"
+          style="border-color: rgb(var(--cv-rgb) / 0.15)"
+        >
+          <label class="flex-1 min-w-0">
+            <span class="cv-label block mb-1">Motivo da ligação
+              <span class="font-normal normal-case text-n-slate-9">(opcional · de onde a conversa parou)</span></span>
+            <input
+              v-model="objective"
+              type="text"
+              class="cv-input w-full text-sm"
+              :placeholder="OBJECTIVE_PLACEHOLDER"
+              :disabled="isStarting || isSending"
+              @keydown.enter.prevent="start"
+            />
+          </label>
+          <button
+            class="cv-btn cv-btn-sm flex-shrink-0"
+            :disabled="isStarting || isSending"
+            title="Recomeça a ligação de teste já com este motivo"
+            @click="start"
+          >
+            <span class="i-lucide-phone-outgoing text-xs" /> Ligar de novo com
+            este motivo
+          </button>
+        </div>
+
         <!-- corpo do bate-papo -->
         <div
           ref="bodyEl"
           class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4 space-y-3 cv-chat-bg"
         >
           <p v-if="displayId" class="text-center text-[10px] text-n-slate-9">
-            conversa de teste #{{ displayId }} · paciente de teste ·
+            {{ isVoice ? 'ligação de teste' : 'conversa de teste' }} #{{
+              displayId
+            }}
+            · {{ isVoice ? 'lead de teste' : 'paciente de teste' }} ·
             {{ new Date().toLocaleDateString('pt-BR') }}
           </p>
 
@@ -216,7 +295,10 @@ const guide = turn => {
             <div v-if="t.role === 'patient'" class="flex justify-end">
               <div class="cv-bubble cv-bubble-me">
                 <p class="whitespace-pre-wrap">{{ t.text }}</p>
-                <span class="cv-bubble-time">{{ fmtTime(t.at) }} · você (paciente)</span>
+                <span class="cv-bubble-time">{{ fmtTime(t.at) }} ·
+                  {{
+                    isVoice ? 'você (lead, ao telefone)' : 'você (paciente)'
+                  }}</span>
               </div>
             </div>
             <!-- agente à esquerda: um balão por mensagem -->
@@ -227,7 +309,8 @@ const guide = turn => {
                 class="cv-bubble cv-bubble-agent"
               >
                 <p class="whitespace-pre-wrap">{{ m }}</p>
-                <span class="cv-bubble-time">{{ fmtTime(t.at) }} · {{ agentName }}</span>
+                <span class="cv-bubble-time">{{ fmtTime(t.at) }} · {{ agentName
+                  }}{{ isVoice ? ' (falado)' : '' }}</span>
               </div>
               <div class="flex flex-wrap items-center gap-1.5 pl-1">
                 <span class="cv-chip">{{
@@ -288,15 +371,22 @@ class="cv-chip cv-slate"
           <div v-if="isSending" class="flex items-start">
             <div class="cv-bubble cv-bubble-agent">
               <span class="i-lucide-loader-2 animate-spin text-sm" />
-              <span class="text-[11px]">o agente está lendo o Roteiro e a conversa…</span>
+              <span class="text-[11px]">{{
+                isVoice
+                  ? 'o agente está pensando no que dizer…'
+                  : 'o agente está lendo o Roteiro e a conversa…'
+              }}</span>
             </div>
           </div>
           <p v-if="errorText" class="cv-strip text-[11px]">
             ⚠️ {{ errorText }}
           </p>
           <p v-if="ended" class="text-center text-[11px] text-n-slate-10">
-            ⏸ O agente encerrou a função nesta conversa. Comece uma nova para
-            testar outro caso.
+            {{
+              isVoice
+                ? '📴 O agente encerrou a ligação. Comece uma nova para testar outro caso.'
+                : '⏸ O agente encerrou a função nesta conversa. Comece uma nova para testar outro caso.'
+            }}
           </p>
         </div>
 
@@ -304,7 +394,7 @@ class="cv-chip cv-slate"
         <div class="cv-modal-foot flex flex-col gap-2">
           <div class="flex gap-1.5 overflow-x-auto pb-1">
             <button
-              v-for="s in SUGGESTIONS"
+              v-for="s in suggestions"
               :key="s"
               class="cv-chip whitespace-nowrap hover:opacity-80"
               :disabled="isSending"
@@ -319,7 +409,11 @@ class="cv-chip cv-slate"
               v-model="draft"
               rows="2"
               class="cv-input flex-1 min-w-0 resize-none"
-              placeholder="Escreva como o paciente… (Enter envia, Shift+Enter quebra linha)"
+              :placeholder="
+                isVoice
+                  ? 'Escreva o que o lead diria ao telefone… (Enter envia, Shift+Enter quebra linha)'
+                  : 'Escreva como o paciente… (Enter envia, Shift+Enter quebra linha)'
+              "
               :disabled="isSending || isStarting"
               @keydown.enter.exact.prevent="send()"
             />
@@ -334,9 +428,11 @@ class="cv-chip cv-slate"
           <div
             class="flex items-center gap-2 flex-wrap text-[10px] text-n-slate-9"
           >
-            <span class="flex-1 min-w-0">Cada resposta custa centavos de dólar e aparece também na tela
-              Sombra. Ajuste o Roteiro e teste de novo até ficar do seu
-              jeito.</span>
+            <span class="flex-1 min-w-0">{{
+              isVoice
+                ? 'Cada fala custa centavos de dólar. Ajuste os Passos desta ligação ou o Roteiro e teste de novo até ficar do seu jeito.'
+                : 'Cada resposta custa centavos de dólar e aparece também na tela Sombra. Ajuste o Roteiro e teste de novo até ficar do seu jeito.'
+            }}</span>
             <button
               class="cv-btn cv-btn-ghost cv-btn-sm"
               @click="emit('edit-script')"

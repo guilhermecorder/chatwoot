@@ -56,17 +56,10 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
   # janela ao vivo (193): live_days = dias 0..6 (vazio = todos); horas
   # hours_start/hours_end (vazias = o dia inteiro; start > end = vira a noite,
-  # ex.: 20:00 → 06:00)
-  def self.within_window?(cfg, now = TZ.now) # rubocop:disable Metrics/CyclomaticComplexity
-    days = Array(cfg['live_days']).map(&:to_i)
-    return false if days.any? && days.exclude?(now.wday)
-
-    start_at = cfg['hours_start'].to_s.presence
-    end_at = cfg['hours_end'].to_s.presence
-    return true if start_at.blank? || end_at.blank?
-
-    hm = now.strftime('%H:%M')
-    start_at <= end_at ? hm.between?(start_at, end_at) : (hm >= start_at || hm <= end_at)
+  # ex.: 20:00 → 06:00). Regra compartilhada em Crm::AgentWindow (195: o
+  # Agente de Ligação usa a mesma).
+  def self.within_window?(cfg, now = TZ.now)
+    Crm::AgentWindow.within?(cfg, now)
   end
 
   # NOTA DE SOMBRA (usada pelo job e pelo Simulador): o que o agente teria
@@ -344,7 +337,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   end
 
   def agent_name(agent_key)
-    { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento' }[agent_key] || agent_key
+    Crm::ResponderTools::AGENT_NAMES[agent_key] || agent_key
   end
 
   def state_for(account, agent_key)

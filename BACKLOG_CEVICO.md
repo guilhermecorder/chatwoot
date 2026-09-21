@@ -6171,6 +6171,33 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 195. 🎙️ AGENTE DE LIGAÇÃO no molde dos atendentes — liga para leads NÃO RESPONSIVOS (pedido 21/09) — CONSTRUÍDO 21/09, SEM commit, aguarda "pode subir"
+- Objetivo dele: "ligar para leads não responsivos e conduzir ao agendamento (melhor) ou à conversa no
+  WhatsApp; responder dúvidas". Spec: ~/Desktop/CLAUDE CODE/CEVICO/docs/RODADA_195_SPEC.md.
+- **Prompt:** `STAGE_PROMPTS['voice']` (bloco "SUA ETAPA: LIGAÇÃO PARA LEAD NÃO RESPONSIVO", 7 passos
+  falados: abertura com nome + motivo, "não posso falar" → WhatsApp, retomar de onde parou, dúvidas/objeções
+  do Roteiro por extenso, convite → 2 horários reais → confirmar → marcar → WhatsApp de confirmação, porta
+  aberta sem insistir > 2x, registrar resultado + despedida; caixa postal, urgência, pessoa). Script de voz =
+  Roteiro CEVICO + regras de voz + ferramentas + etapa + trava (`Crm::VoiceAgent::Script.build`; R$ → "reais");
+  `agents.voice.prompt` = só o bloco da etapa ("Passos desta ligação"); campo antigo `voice.prompt` ignorado.
+- **Seleção:** `Crm::VoiceAgent::UnresponsiveLeads` (colunas vigiadas; última mensagem é da clínica há ≥
+  silence_hours e ≤ lookback_days, sem resposta; com telefone; sem consulta futura; fora do opt-out; sem
+  ligação da IA em 48 h e < max_attempts em 14 dias; não está em campanha aberta) com `motivo` e `objective`.
+- **Job de hora em hora** `Crm::VoiceAgent::UnresponsiveLeadsJob` (schedule.yml, 12 * * * *): SOMBRA =
+  lista "ligaria hoje" em `voice_state.shadow` + evento; AO VIVO (mode live + CEVICO_RESPONDERS_LIVE +
+  janela dias/horas + ElevenLabs configurada + colunas) = campanha do dia "🤖 Leads não responsivos —
+  dd/mm" enfileirada para o discador existente ({{campanha_objetivo}} por contato).
+- Simulador por texto com `agent: 'voice'` + `objective` ("Motivo da ligação") — testado com IA real:
+  abriu com o motivo, respondeu objeção de valor/medo, ofereceu 2 vagas reais por extenso.
+- Card `voice` no hub completo (interruptor, tiles Situação/Colunas/Ligaria hoje/ElevenLabs, explicador +
+  comandos, Sombra | Ao vivo + janela, colunas vigiadas, horas de silêncio, dias, teto, tentativas, caixa
+  do WhatsApp p/ continuar, 🧪 Testar, 📋 Ver quem ligaria hoje (`POST settings/voice_shadow_run`), 🎙️ Voz
+  e número, registro). Publicar com ElevenLabs configurada sincroniza o prompt lá (aviso se falhar).
+- Refatorações de apoio: `Crm::AgentWindow`, `Crm::AgentState`. Specs: 97 verdes (rodada inteira).
+  Deploy = WEB + SIDEKIQ, SEM migration. Pós-deploy: Integrações → chave ElevenLabs → Sincronizar; ligar
+  o card em sombra, escolher colunas; testar por voz no painel da ElevenLabs. Ao vivo de verdade depende
+  do número na ElevenLabs (Meta/Henrique) + CEVICO_RESPONDERS_LIVE.
+
 ## 194. 🩹 LEMBRETE DE VÉSPERA JOGAVA O PACIENTE EM "ENVIO DE ORÇAMENTO" (feedback da Vaneide 21/09) — CORRIGIDO, SEM commit, aguarda "pode subir"
 - Sintoma: "todos os pacientes que vêm como uma nova janela de confirmação de consulta estão vindo
   como orçamento enviado". Causa (pelo código; a configuração real das automações não pôde ser

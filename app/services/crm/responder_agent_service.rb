@@ -8,7 +8,7 @@
 # futura do paciente e as últimas 40 mensagens reais da conversa.
 # Este serviço NÃO envia nada: devolve o JSON (mensagens + decisões) e quem
 # decide o que fazer com ele é o Crm::ResponderAgentJob (sombra × ao vivo).
-class Crm::ResponderAgentService
+class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   include Crm::AiAgentConfig
 
   MAX_MESSAGES = 40
@@ -57,7 +57,8 @@ class Crm::ResponderAgentService
 
   # 🔧 rodada 192: só estes respondedores recebem ferramentas (buscar/remarcar/
   # cancelar/confirmar presença — Crm::ResponderTools); os demais seguem iguais.
-  RESPONDER_TOOLS_KEYS = %w[atendente_agendamento atendente_pos].freeze
+  # 🎙️ 195: o simulador por texto do Agente de Ligação também (é sempre sombra).
+  RESPONDER_TOOLS_KEYS = %w[atendente_agendamento atendente_pos voice].freeze
   # voltas de tool use por resposta: a IA pede → o sistema executa → a IA lê.
   # Passou do teto, a última chamada vai com tool_choice none (tem que responder).
   MAX_TOOL_ROUNDS = 5
@@ -117,10 +118,31 @@ class Crm::ResponderAgentService
 
   # o prompt completo, visível na tela do agente ("o que ele lê")
   def system_prompt
+    return voice_system_prompt if voice?
+
     "#{Crm::CevicoScript.text(@account)}\n\n== SUA ETAPA ==\n#{Crm::CevicoScript.stage_prompt(@account, @agent_key)}#{RESPONDER_GUARDRAIL}"
   end
 
   private
+
+  # 🎙️ rodada 195: simulador POR TEXTO do Agente de Ligação — mesmo Roteiro,
+  # regras de voz e etapa da ligação real, com as ferramentas mapeadas para as
+  # deste motor (Crm::VoiceAgent::Script::SIMULATOR_TOOLS). As "mensagens" da
+  # saída são as FALAS da assistente.
+  def voice?
+    @agent_key == 'voice'
+  end
+
+  def voice_system_prompt
+    next_appointment = future_appointment_text
+    Crm::VoiceAgent::Script.simulator_prompt(@account, contact: @conversation.contact, objective: call_objective,
+                                                       next_appointment: next_appointment == 'nenhuma' ? '' : next_appointment)
+  end
+
+  # motivo da ligação simulada: o que a tela mandou (guardado na conversa) ou o padrão
+  def call_objective
+    @conversation.additional_attributes&.[]('cevico_simulado_objective').presence || Crm::VoiceAgent::Script::DEFAULT_OBJECTIVE
+  end
 
   def tools
     return nil unless RESPONDER_TOOLS_KEYS.include?(@agent_key)
@@ -156,11 +178,11 @@ class Crm::ResponderAgentService
       - Paciente (cadastro): #{contact&.name.presence || 'sem nome'} · telefone deste WhatsApp: #{phone || 'desconhecido (peça o número antes de agendar)'}
       - Coluna do paciente no CRM: #{card_stage_name || 'sem card (contato novo)'}
       - Consulta futura já marcada: #{future_appointment_text}
-
+      #{"- Motivo da ligação: #{call_objective}\n" if voice?}
       HORÁRIOS DISPONÍVEIS (vagas LIVRES reais dos próximos dias; ofereça no máximo 2 por vez, só destes):
       #{Crm::AgendaSlots.free_slots_text(@account, days: 12, per_window: 4)}
 
-      CONVERSA ATÉ AGORA (PACIENTE = quem você atende; CLÍNICA = você/equipe):
+      #{voice? ? 'LIGAÇÃO ATÉ AGORA (PACIENTE = quem está na linha; CLÍNICA = você, falando)' : 'CONVERSA ATÉ AGORA (PACIENTE = quem você atende; CLÍNICA = você/equipe)'}:
 
     CTX
   end

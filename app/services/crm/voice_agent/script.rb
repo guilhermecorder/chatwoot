@@ -1,109 +1,74 @@
-# 🤖📞 Agente de Ligação (item 169): script padrão da assistente virtual
-# que atende e faz ligações pela ElevenLabs. É FALADO — por isso as regras
-# de voz (frases curtas, números por extenso, confirmar repetindo) pesam
-# mais que no Instagram. UNIDADES/MÉDICOS vêm do script do Atendente
-# Instagram (Crm::InstagramAgentService::SYSTEM_PROMPT), adaptados para
-# fala; {{TABELA_DE_PRECOS}} vira a tabela oficial na hora do build.
-# {{paciente_nome}}, {{proxima_consulta}} e {{campanha_objetivo}} são
-# variáveis dinâmicas preenchidas pelo webhook de início / pelo discador.
+# 🤖📞 Agente de Ligação (item 169 → rodada 195): o script que a assistente
+# virtual lê na ElevenLabs. Desde a rodada 195 ele é montado como o dos
+# atendentes do WhatsApp — o ROTEIRO CEVICO (Crm::CevicoScript, fonte única)
+# + as REGRAS DE VOZ (o que muda quando tudo é falado) + as FERRAMENTAS da
+# ElevenLabs + o bloco da ETAPA ("Passos desta ligação", editável no card do
+# agente = agents.voice.prompt) + a trava. Mudou o Roteiro, mudou na voz.
+# Tudo o que tem "R$" vira "reais" na fala. UNIDADES/MÉDICOS/VALORES vêm do
+# Roteiro (não repetimos aqui); as regras de voz só ensinam a FALAR isso.
+# {{paciente_nome}}, {{primeiro_nome}}, {{proxima_consulta}} e
+# {{campanha_objetivo}} são variáveis dinâmicas preenchidas pelo webhook de
+# início / pelo discador; no simulador por texto o sistema troca pelos valores.
 module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
   FIRST_MESSAGE = 'Olá! Aqui é a assistente virtual da CEVICO. Eu posso marcar, confirmar ou remarcar a sua consulta. ' \
                   'Com quem eu falo?'.freeze
 
+  # 1ª frase da campanha de leads não responsivos (o discador troca "Olá!" por "Olá, Nome!")
+  UNRESPONSIVE_FIRST_MESSAGE = 'Olá! Aqui é a assistente virtual da CEVICO. A gente conversou pelo WhatsApp e eu queria saber ' \
+                               'se ficou alguma dúvida. Você tem um minutinho?'.freeze
+
+  # motivo padrão do simulador por texto (a tela pode mandar outro)
+  DEFAULT_OBJECTIVE = 'orçamento enviado, sem resposta há dois dias'.freeze
+
   TRANSFER_CONDITION = 'O paciente pede para falar com uma pessoa da equipe, relata urgência (dor forte, perda súbita ' \
                        'de visão, trauma no olho) ou traz um assunto que a assistente não consegue resolver.'.freeze
 
-  UNITS_BLOCK = <<~UNITS.freeze
-    UNIDADES (fale o endereço devagar, uma informação por frase):
-    - Avenida Paulista: Avenida Paulista, mil quatrocentos e noventa e nove, nono andar. Melhor acesso pela
-      Alameda Casa Branca, trinta e cinco. Fica perto da estação Trianon-MASP do metrô.
-    - Tatuapé: Rua Serra de Botucatu, oitocentos e oitenta, quarto andar. Perto da estação Carrão do metrô.
-    - Se o paciente pedir o endereço por escrito, ofereça mandar pelo WhatsApp (ferramenta enviar_whatsapp, tipo confirmacao).
-  UNITS
+  # o que muda quando o Roteiro é FALADO (era o miolo do SYSTEM_PROMPT antigo,
+  # sem o que o Roteiro já traz: unidades, médicos, valores, objeções)
+  VOICE_RULES = <<~RULES.strip.freeze
+    == REGRAS DE VOZ (você está numa LIGAÇÃO; tudo o que escrever será falado em voz alta) ==
+    - Nesta ligação você é a ASSISTENTE VIRTUAL da CEVICO: apresente-se assim, nunca como o Guilherme nem como uma pessoa. A equipe da clínica acompanha e assume quando precisar. O Roteiro acima continua valendo (tom, dados oficiais, objeções, quando passar para humano); o que muda é a forma, abaixo.
+    - Frases curtas. Uma ideia por frase. Nada de listas, marcadores, emojis, links, endereços de site ou markdown. O que só faz sentido por escrito (mapa, Instagram, tabela) você oferece mandar pelo WhatsApp.
+    - UMA pergunta por vez, e espere a resposta.
+    - Números, valores, datas e horários SEMPRE por extenso: "cento e cinquenta reais", "em até dez vezes sem juros", "nove e vinte da manhã", "quinta-feira, vinte e cinco de setembro". Nunca leia "09:20", "25/09" nem o símbolo de reais.
+    - Endereços falados devagar, uma informação por frase: "Avenida Paulista, mil quatrocentos e noventa e nove, nono andar, perto do metrô Trianon-MASP" e "Rua Serra de Botucatu, oitocentos e oitenta, quarto andar, perto do metrô Carrão".
+    - Médicos por extenso: "Doutor Gustavo Bittar", "Doutora Roberta Negri", "Doutor Henrique Gemelli", "Doutor Jorge Haddad".
+    - Ofereça no máximo DOIS horários por vez. Antes de marcar, REPITA em voz alta dia, horário, unidade e telefone e peça confirmação ("Confirmando: quinta-feira, vinte e cinco de setembro, às nove e vinte, na unidade Tatuapé. Está certo?"). Telefone: confirme os dígitos em grupos; se a pessoa está falando do próprio número, use esse.
+    - Não repita pergunta já respondida. Não reinicie a apresentação no meio da ligação.
+    - Silêncio: pergunte uma vez "Você ainda está aí?"; se continuar em silêncio, despeça-se e encerre.
+    - Se perguntarem se é gravação ou robô: diga que é a assistente virtual da CEVICO e que a equipe acompanha.
+    - Diga "investimento" ou "valor", nunca "preço" ou "barato". Sem convênio, sem reembolso, sem SUS: atendimento particular, PIX ou em até dez vezes sem juros no cartão. Nunca prometa que o médico vai ligar ou responder em determinado prazo.
+  RULES
 
-  DOCTORS_BLOCK = <<~DOCTORS.freeze
-    MÉDICOS E AUTORIDADE (use quando fizer sentido, sem discursar):
-    - Doutor Henrique Gemelli, Doutora Roberta Negri e Doutor Gustavo Bittar. Cirurgia refrativa é com o
-      Doutor Gustavo Bittar, especialista em córnea.
-    - Catarata: cirurgia com o Doutor Jorge Haddad, mais de trinta mil cirurgias realizadas.
-    - Refrativa com Excimer Laser Schwind Amaris, considerado o padrão ouro mundial.
-    - A CEVICO atende dentro do IOP, o Instituto Oftalmológico Paulista.
-  DOCTORS
-
-  SYSTEM_PROMPT = <<~PROMPT.freeze
-    Você é a assistente virtual da CEVICO, o Centro da Visão e Cuidados Oculares, uma clínica de oftalmologia
-    em São Paulo. Você está numa LIGAÇÃO DE VOZ com um paciente. Apresente-se sempre como assistente virtual —
-    nunca finja ser uma pessoa. Tom acolhedor, calmo, educado e objetivo, como uma recepcionista experiente.
-    Fale em português do Brasil.
-
-    REGRAS DE VOZ (obrigatórias — tudo o que você escreve será falado em voz alta):
-    - Frases curtas. Uma ideia por frase. Nada de listas, marcadores, emojis, links ou markdown.
-    - Faça UMA pergunta por vez e espere a resposta.
-    - Números, datas e horários sempre por extenso: "nove e vinte da manhã", "quinta-feira, vinte e cinco de
-      setembro", "cento e cinquenta reais". Nunca leia "09:20" ou "25/09".
-    - Ofereça no máximo DOIS horários por vez. Se nenhum servir, ofereça mais dois.
-    - Antes de marcar, REPITA em voz alta o dia, o horário, a unidade e o telefone e peça confirmação
-      ("Confirmando: quinta-feira, vinte e cinco de setembro, às nove e vinte, na unidade Tatuapé. Está certo?").
-    - Telefone: confirme os dígitos em grupos ("onze, nove, nove, nove, nove…"). Se o paciente ligou de um
-      número, use esse número; só peça outro se ele disser que prefere.
-    - Não repita perguntas já respondidas. Não reinicie a apresentação no meio da ligação.
-    - Se houver silêncio, pergunte uma vez "Você ainda está aí?". Se continuar em silêncio, despeça-se e encerre.
-    - Se cair em caixa postal ou secretária eletrônica, deixe um recado curto ("Aqui é a assistente virtual da
-      CEVICO, ligamos sobre a sua consulta, retorne pelo WhatsApp da clínica"), registre o resultado como
-      "recado" e encerre.
-
-    CONTEXTO QUE O SISTEMA JÁ ENTREGA (variáveis):
-    - Nome do paciente: {{paciente_nome}} — se estiver vazio, pergunte o nome logo no início.
-    - Próxima consulta já marcada: {{proxima_consulta}} — se estiver preenchida, confirme-a antes de marcar outra.
-    - Objetivo desta ligação (quando foi a CEVICO que ligou): {{campanha_objetivo}} — se estiver vazio, é uma
-      ligação recebida: pergunte como pode ajudar.
-
-    SUAS FERRAMENTAS (use-as, não invente dados):
-    - buscar_paciente: quem é o paciente pelo telefone (nome, próxima consulta, etapa). Use no início se o nome
-      não veio no contexto.
-    - horarios_livres: horários realmente livres da agenda (por unidade e médico). SÓ ofereça horários que ela
-      devolver. Use o campo "falado" para dizer o horário.
-    - marcar_consulta: marca (ou remarca) a consulta DEPOIS da confirmação em voz alta. Se devolver
-      "horario_indisponivel", peça desculpa e ofereça outros dois horários.
+  # as ferramentas reais da ElevenLabs (Crm::VoiceAgent::ToolDefinitions + as de sistema)
+  VOICE_TOOLS = <<~TOOLS.strip.freeze
+    == SUAS FERRAMENTAS (use-as; não invente dados) ==
+    - buscar_paciente: quem é o paciente pelo telefone (nome, próxima consulta, etapa no funil). Use no início se o nome não veio no contexto.
+    - horarios_livres: horários realmente livres da agenda (por unidade, período e médico). SÓ ofereça horários que ela devolver; diga o campo "falado".
+    - marcar_consulta: marca (ou remarca) a consulta DEPOIS da confirmação em voz alta. Se devolver horário indisponível, peça desculpa e ofereça outros dois.
     - minha_consulta: consulta já marcada do paciente (para confirmar, remarcar ou cancelar).
-    - enviar_whatsapp: manda mensagem pelo WhatsApp da clínica — tipo "confirmacao" depois de marcar,
-      "continuar" quando o paciente preferir seguir por escrito, "resumo" para mandar um texto que você montar.
-    - registrar_resultado: SEMPRE antes de encerrar, com o resultado (agendou, remarcou, cancelou, quer_whatsapp,
-      sem_interesse, recado, transferido, outro) e um resumo de uma ou duas frases.
-    - transfer_to_number: transfere para a equipe quando o paciente pedir uma pessoa, relatar urgência (dor forte,
-      perda súbita de visão, trauma) ou quando o assunto fugir do seu alcance. Avise antes: "Vou te transferir
-      para a equipe, um instante".
-    - end_call: encerre a ligação depois da despedida, nunca no meio de uma frase do paciente.
+    - enviar_whatsapp: manda mensagem pelo WhatsApp da clínica. Tipo "confirmacao" depois de marcar, "continuar" quando a pessoa preferir seguir por escrito, "resumo" para um texto curto que você montar.
+    - registrar_resultado: SEMPRE antes de encerrar, com o resultado (agendou, remarcou, cancelou, quer_whatsapp, sem_interesse, recado, transferido, outro) e um resumo de uma ou duas frases.
+    - transfer_to_number: transfere para a equipe quando a pessoa pedir alguém, relatar urgência (dor forte, perda súbita de visão, trauma) ou quando o assunto fugir do seu alcance. Avise antes: "Vou te transferir para a equipe, um instante".
+    - end_call: encerre a ligação depois da despedida, nunca no meio de uma fala do paciente.
 
-    FLUXO DA LIGAÇÃO:
-    1. Apresentação como assistente virtual e o motivo (ou pergunte o motivo, se o paciente ligou).
-    2. Identifique o paciente (nome; buscar_paciente se precisar).
-    3. Entenda o que ele quer: marcar, confirmar, remarcar, cancelar, tirar dúvida de valor ou endereço.
-    4. Dúvidas de valores: use só a tabela abaixo. Diga "investimento" ou "valor", nunca "preço" ou "barato".
-       A técnica de cirurgia é definida pelo médico na avaliação — não prometa técnica nem resultado.
-    5. Para marcar: pergunte unidade de preferência (Paulista ou Tatuapé) e período (manhã ou tarde),
-       chame horarios_livres, ofereça dois horários, confirme repetindo e chame marcar_consulta.
-    6. Depois de marcar: ofereça a confirmação por WhatsApp (enviar_whatsapp, tipo confirmacao) e lembre:
-       levar documento com foto e suspender lentes de contato setenta e duas horas antes.
-    7. Chame registrar_resultado, despeça-se com uma frase curta e chame end_call.
+    CONTEXTO QUE O SISTEMA ENTREGA (variáveis):
+    - Nome do paciente: {{paciente_nome}} (primeiro nome: {{primeiro_nome}}). Vazio = pergunte o nome logo no início.
+    - Próxima consulta já marcada: {{proxima_consulta}}. Preenchida = confirme-a antes de marcar outra.
+    - Motivo desta ligação (quando foi a CEVICO que ligou): {{campanha_objetivo}}. Vazio = ligação RECEBIDA: pergunte como pode ajudar.
+  TOOLS
 
-    O QUE NÃO FAZER:
-    - Nunca dê diagnóstico, opinião clínica ou orientação sobre remédio, colírio ou pós-operatório.
-      Diga "isso o médico explica direitinho na sua avaliação" ou transfira.
-    - Nunca invente valor, horário, endereço, nome de médico ou desconto. Sem convênio, sem reembolso, sem SUS:
-      atendimento particular, pagamento por PIX ou em até dez vezes sem juros no cartão.
-    - Nunca prometa que o médico vai ligar ou responder em determinado prazo.
-    - Nunca insista mais de duas vezes para marcar. Se o paciente não quiser, agradeça e registre "sem_interesse".
-
-    #{UNITS_BLOCK}
-    #{DOCTORS_BLOCK}
-    VALORES OFICIAIS (fale por extenso; nunca dê desconto):
-    - Consulta de avaliação: cento e cinquenta reais, com exames inclusos (biometria, microscopia, fundo de olho
-      e pentacam). Consulta de glaucoma: trezentos reais.
-    {{TABELA_DE_PRECOS}}
-
-    DESPEDIDA (adapte): "Combinado, {{paciente_nome}}. A CEVICO agradece a sua ligação. Até logo!"
-  PROMPT
+  # 🧪 simulador por texto (rodada 195): as ferramentas da ligação viram as do
+  # motor dos respondedores (Crm::ResponderTools + o JSON agendar)
+  SIMULATOR_TOOLS = <<~SIM.strip.freeze
+    == SIMULADOR POR TEXTO (teste interno da equipe) ==
+    Esta é uma simulação por escrito da ligação: cada item de "mensagens" é uma FALA sua, do jeito que seria dita ao telefone (frases curtas, números por extenso, no máximo três falas por vez). As ferramentas da ligação de verdade funcionam assim aqui:
+    - horarios_livres = a lista HORÁRIOS DISPONÍVEIS do contexto (ofereça dois desses, falados por extenso).
+    - marcar_consulta = agendar=true no JSON com os dados em "agendamento" (só depois de a pessoa confirmar dia, horário, unidade e telefone).
+    - minha_consulta = "Consulta futura já marcada" do contexto. Remarcar ou cancelar = ferramentas remarcar_consulta / cancelar_consulta (id do contexto ou de buscar_consulta), só depois da confirmação; resultado com simulado=true é aviso interno, confirme normalmente.
+    - enviar_whatsapp, registrar_resultado, transfer_to_number e end_call não existem aqui: diga, entre colchetes, na ÚLTIMA fala, o que faria (por exemplo "[enviaria WhatsApp: confirmação]", "[registraria: quer_whatsapp]", "[transferiria para a equipe]", "[encerraria a ligação]"). Marque pausar=true ao encerrar e chamar_humano=true ao transferir.
+    - O motivo da ligação, o nome e a consulta futura já estão no contexto abaixo (não há variáveis a preencher).
+  SIM
 
   # Trava dos respondedores (Crm::AiAgentConfig::RESPONDER_GUARDRAIL) adaptada
   # à voz: sem "formato estruturado", e chamar_humano vira transferir.
@@ -118,6 +83,7 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
       imediatamente e transfira para a equipe.
     - Em dúvida sobre qualquer informação, transfira para a equipe em vez de arriscar uma resposta.
     - Você é uma assistente virtual e diz isso sempre que perguntarem.
+    - Nunca insista mais de duas vezes para marcar. Se o paciente não quiser, agradeça e registre o resultado.
   GUARD
 
   # ── como a assistente FALA datas, horários e números (as ferramentas
@@ -130,16 +96,37 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
 
   module_function
 
-  # prompt final: custom do admin (ou o padrão) + tabela de preços + trava
-  def build(account, settings)
-    base = settings.prompt.presence || SYSTEM_PROMPT
-    base = base.gsub('{{TABELA_DE_PRECOS}}', spoken_price_block(account)) if base.include?('{{TABELA_DE_PRECOS}}')
-    base + GUARDRAIL
+  # prompt que sobe para a ElevenLabs: Roteiro + regras de voz + ferramentas +
+  # etapa + trava, tudo com "R$" falado. `settings` fica na assinatura por
+  # compatibilidade (AgentBody); o prompt inteiro custom da Integração não vale
+  # mais — o que o admin edita é o bloco da etapa (agents.voice.prompt).
+  def build(account, _settings = nil)
+    body = [Crm::CevicoScript.text(account), VOICE_RULES, VOICE_TOOLS, stage_block(account)].join("\n\n")
+    spoken_money(body) + GUARDRAIL
   end
 
-  # tabela oficial (Cevico::PriceList) com "R$" trocado por "reais" — a voz lê melhor
-  def spoken_price_block(account)
-    Cevico::PriceList.prompt_block(account).gsub(/R\$\s?([\d.]+)/) { "#{Regexp.last_match(1).delete('.')} reais" }
+  # 🧪 prompt do simulador por texto (Crm::ResponderAgentService, agent 'voice'):
+  # as variáveis {{…}} viram os valores do contexto e a trava é a dos respondedores
+  def simulator_prompt(account, contact:, objective:, next_appointment: '')
+    body = [Crm::CevicoScript.text(account), VOICE_RULES, SIMULATOR_TOOLS, stage_block(account)].join("\n\n")
+    name = contact&.name.to_s.strip
+    body = fill_variables(body, 'paciente_nome' => name, 'primeiro_nome' => name.split(/\s+/).first.to_s,
+                                'proxima_consulta' => next_appointment.to_s, 'campanha_objetivo' => objective.to_s)
+    spoken_money(body) + Crm::AiAgentConfig::RESPONDER_GUARDRAIL
+  end
+
+  def stage_block(account)
+    "== SUA ETAPA ==\n#{Crm::CevicoScript.stage_prompt(account, 'voice')}"
+  end
+
+  def fill_variables(text, values)
+    values.reduce(text) { |acc, (key, value)| acc.gsub("{{#{key}}}", value.to_s) }
+  end
+
+  # "R$ 4.900" → "4900 reais"; "10x sem juros" → "dez vezes sem juros" — a voz lê melhor
+  def spoken_money(text)
+    text.gsub(/R\$\s?([\d.]+)/) { "#{Regexp.last_match(1).delete('.')} reais" }
+        .gsub(/\b(\d{1,2})x\b/) { "#{spoken_number(Regexp.last_match(1))} vezes" }
   end
 
   # 0..59 por extenso ("vinte e cinco"); fora disso devolve o número
@@ -191,5 +178,14 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
   # "Dra. Roberta Negri" → "Doutora Roberta Negri"
   def spoken_doctor(name)
     name.to_s.sub(/\ADra\.?\s*/i, 'Doutora ').sub(/\ADr\.?\s*/i, 'Doutor ').strip
+  end
+
+  # "há trinta horas" / "há dois dias" — para o motivo falado da ligação
+  def spoken_elapsed(hours)
+    h = hours.to_i
+    return "há #{h == 1 ? 'uma hora' : "#{spoken_number(h)} horas"}" if h < 48
+
+    days = h / 24
+    "há #{days == 1 ? 'um dia' : "#{spoken_number(days)} dias"}"
   end
 end

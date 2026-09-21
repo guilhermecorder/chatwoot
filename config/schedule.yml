@@ -188,6 +188,15 @@ crm_voice_campaign_dialer_job:
   class: 'Crm::VoiceAgent::CampaignDialerJob'
   queue: low
 
+# 📞 Agente de Ligação — leads não responsivos (rodada 195): de hora em hora,
+# nas contas com o card ligado — em sombra monta a lista "ligaria hoje"; ao
+# vivo (janela + trava + ElevenLabs) enfileira na campanha do dia e o discador
+# acima liga. Minuto 12 para não coincidir com o discador (*/5).
+crm_voice_unresponsive_leads_job:
+  cron: '12 * * * *'
+  class: 'Crm::VoiceAgent::UnresponsiveLeadsJob'
+  queue: low
+
 # 🎯 Central de Criativos (item 172): 07:20 UTC (04:20 SP) — anúncios +
 # métricas diárias da Meta (últimos 3 dias; 90 na primeira vez)
 crm_ad_insights_sync_job:

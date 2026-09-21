@@ -1,29 +1,38 @@
-# 🤖📞 Agente de Ligação (item 169) — fluxo ponta a ponta de docs/AGENTE_LIGACAO.md
-# §6 (recebida) e §7 (campanha): roda na ElevenLabs, o sistema entra pelas
-# ferramentas (webhooks) e pelo pós-chamada assinado (item 170).
+# 🤖📞 Agente de Ligação (item 169 → rodada 195) — fluxo ponta a ponta de
+# docs/AGENTE_LIGACAO.md §6 (recebida) e §7 (campanha) + a seleção de LEADS
+# NÃO RESPONSIVOS de hora em hora (Crm::VoiceAgent::UnresponsiveLeadsJob:
+# sombra = lista "ligaria hoje"; ao vivo = campanha do dia que o discador
+# liga). A conversa roda na ElevenLabs com o Roteiro CEVICO + regras de voz +
+# etapa; o sistema entra pelas ferramentas (webhooks) e pelo pós-chamada.
 class Crm::FlowMap::Flows::Voice
   FLOW = Crm::FlowMap::Flow.define(:voice) do # rubocop:disable Metrics/BlockLength
     name 'Agente de Ligação'
     group 'Atendimento ao paciente'
     icon 'i-lucide-phone-call'
     color '#7C3AED'
-    what 'assistente virtual que atende as ligações no número da clínica e liga para pacientes nas campanhas'
-    config route: 'crm_integrations_voice_agent'
-    trigger :webhook, 'Ligação no número da IA ou campanha (a cada 5 min)'
-    jobs 'Crm::VoiceAgent::CampaignDialerJob', 'Crm::VoiceAgent::PostCallJob'
+    what 'liga para leads parados nas colunas escolhidas (sem resposta há N horas) e conduz ao agendamento ou ao WhatsApp; ' \
+         'atende as ligações no número da clínica'
+    config tab: 'agentes', anchor: 'voice'
+    trigger :cron, 'Hora em hora (leads parados) · recebida · campanha 5 min'
+    jobs 'Crm::VoiceAgent::UnresponsiveLeadsJob', 'Crm::VoiceAgent::CampaignDialerJob', 'Crm::VoiceAgent::PostCallJob'
 
-    node :ligado, 'Agente ligado e sincronizado?', kind: :decision
-    node :tipo, 'Ligação recebida ou campanha?', kind: :decision
+    node :ligado, 'Card do agente ligado?', kind: :decision
+    node :tipo, 'Leads parados, ligação recebida ou campanha?', kind: :decision
+    # ── leads não responsivos (195) ──
+    node :selecao, 'Seleciona leads parados nas colunas vigiadas (≥ N h)'
+    node :modo, 'Ao vivo agora? (modo + trava + janela + ElevenLabs)', kind: :decision
+    node :sombra, 'Sombra: grava "ligaria hoje para N" (nada é discado)', kind: :output
+    node :campanha_dia, 'Enfileira na campanha do dia 🤖 Leads não responsivos'
     # ── recebida ──
     node :atende, 'ElevenLabs atende no número da IA', kind: :external
-    node :inicio, 'Webhook de início: nome e próxima consulta'
-    node :conversa, 'IA conversa como assistente virtual', kind: :ai
+    node :inicio, 'Webhook de início: nome, próxima consulta, motivo'
+    node :conversa, 'IA fala: Roteiro + regras de voz + etapa', kind: :ai
     node :ferramentas, 'Ferramentas: paciente, horários, marcar, WhatsApp', kind: :loop
-    node :transferir, 'Pediu humano ou assunto fora do escopo?', kind: :decision
+    node :transferir, 'Pediu humano, urgência ou fora do escopo?', kind: :decision
     node :transfere, 'Transfere para o número humano', kind: :external
     node :poscall, 'Pós-chamada assinado (transcrição + áudio)', kind: :external
     node :fecha, 'Fecha a ligação: resumo, resultado, custo'
-    node :saida, 'Card na conversa + Dashboard de Ligações', kind: :output
+    node :saida, 'Card na conversa + Agenda + Dashboard de Ligações', kind: :output
     # ── campanha ──
     node :campanha, 'Campanha em andamento (público escolhido)'
     node :horario, 'Dentro do horário e do teto diário?', kind: :decision
@@ -40,6 +49,12 @@ class Crm::FlowMap::Flows::Voice
     edge :trigger, :ligado
     edge :ligado, :fim, 'não'
     edge :ligado, :tipo, 'sim'
+    edge :tipo, :selecao, 'leads parados'
+    edge :selecao, :modo
+    edge :modo, :sombra, 'não'
+    edge :sombra, :fim
+    edge :modo, :campanha_dia, 'sim'
+    edge :campanha_dia, :campanha
     edge :tipo, :atende, 'recebida'
     edge :atende, :inicio
     edge :inicio, :conversa
@@ -68,16 +83,22 @@ class Crm::FlowMap::Flows::Voice
 
     live do |account|
       v = ai(account)['voice'] || {}
+      cfg = ai(account).dig('agents', 'voice') || {}
+      shadow = ai(account).dig('voice_state', 'shadow') || {}
+      events = Array(ai(account).dig('voice_state', 'events'))
       counters = { 'custo 7 dias (US$)' => Crm::AiUsage.where(account_id: account.id, agent_key: 'voice',
                                                               created_at: 7.days.ago..).sum(:cost_usd).to_f.round(2) }
+      counters['modo'] = Crm::VoiceAgent::UnresponsiveLeadsJob.live_now?(account, cfg) ? 'ao vivo' : 'sombra'
+      counters['colunas vigiadas'] = Array(cfg['stage_ids']).size
+      counters[shadow['mode'] == 'live' ? 'ligações hoje' : 'ligaria hoje'] = Array(shadow['items']).size
       if Crm::Call.column_names.include?('handled_by')
         counters['ligações da IA hoje'] = Crm::Call.where(account_id: account.id, handled_by: 'ai', started_at: today_range).count
       end
       # a tabela de campanhas de ligação chega com o item 169 — só conta se já existir
       counters['campanhas em andamento'] = Crm::CallCampaign.where(account_id: account.id, status: :processing).count if defined?(Crm::CallCampaign)
       {
-        enabled: v['enabled'] == true,
-        last_run_at: v.dig('state', 'last_call_at') || usage_last(account, 'voice'),
+        enabled: cfg['enabled'] == true || v['enabled'] == true,
+        last_run_at: last_at(events) || v.dig('state', 'last_call_at') || usage_last(account, 'voice'),
         counters: counters,
         note: v['agent_id'].present? ? 'roda na ElevenLabs' : 'ainda não sincronizado com a ElevenLabs'
       }

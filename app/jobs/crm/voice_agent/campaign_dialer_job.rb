@@ -154,12 +154,19 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
       conversation_initiation_client_data: {
         dynamic_variables: {
           paciente_nome: contact.name.to_s, primeiro_nome: first_name, telefone: digits,
-          campanha_objetivo: campaign.objective.to_s, campanha_id: campaign.id.to_s, contato_id: row.contact_id.to_s,
+          campanha_objetivo: contact_objective(campaign, row), campanha_id: campaign.id.to_s, contato_id: row.contact_id.to_s,
           proxima_consulta: next_appointment_text(contact, digits)
         },
         conversation_config_override: { agent: { first_message: first_message(campaign, settings, first_name) } }
       }
     }
+  end
+
+  # 📞 rodada 195: a campanha de leads não responsivos guarda o motivo de CADA
+  # pessoa em audience.objectives ("orçamento enviado, sem resposta há dois
+  # dias"); as campanhas normais seguem com o objetivo único
+  def contact_objective(campaign, row)
+    (campaign.audience || {}).dig('objectives', row.contact_id.to_s).presence || campaign.objective.to_s
   end
 
   def next_appointment_text(contact, digits)

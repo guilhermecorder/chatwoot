@@ -9,9 +9,12 @@ class Crm::AgentSimulator
   INBOX_NAME = '🧪 Simulador de agentes'.freeze
   FAKE_PHONE = '+5511900000000'.freeze
 
-  def initialize(account:, agent_key:)
+  # objective (🎙️ rodada 195, só o Agente de Ligação): "Motivo da ligação" que a
+  # tela manda — vira {{campanha_objetivo}} no prompt do simulador por texto
+  def initialize(account:, agent_key:, objective: nil)
     @account = account
     @agent_key = agent_key.to_s
+    @objective = objective.to_s.strip.first(300).presence
   end
 
   # conversa nova de teste (um "paciente de teste" fixo, sem telefone real)
@@ -21,8 +24,17 @@ class Crm::AgentSimulator
     contact_inbox = ContactInbox.find_or_create_by!(contact: contact, inbox: inbox) { |ci| ci.source_id = "simulador-#{contact.id}" }
     Conversation.create!(
       account: @account, inbox: inbox, contact: contact, contact_inbox: contact_inbox,
-      additional_attributes: { 'cevico_simulado' => true, 'cevico_simulado_agent' => @agent_key }
+      additional_attributes: { 'cevico_simulado' => true, 'cevico_simulado_agent' => @agent_key,
+                               'cevico_simulado_objective' => @objective }.compact
     )
+  end
+
+  # troca o motivo numa conversa já aberta (a tela pode ajustar entre as falas)
+  def objective!(conversation)
+    attrs = conversation.additional_attributes || {}
+    return if @objective.blank? || attrs['cevico_simulado_objective'] == @objective
+
+    conversation.update!(additional_attributes: attrs.merge('cevico_simulado_objective' => @objective))
   end
 
   # uma fala do "paciente" → resposta do agente (IA de verdade) como nota de sombra

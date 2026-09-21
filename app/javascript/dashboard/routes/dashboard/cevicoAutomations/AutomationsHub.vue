@@ -291,7 +291,9 @@ const aiAgents = ref({
     winners_count: '',
     variations_count: '',
   },
-  // 🤖📞 item 169: só o espelho ligado/desligado — a configuração mora em Integrações
+  // 🎙️ rodada 195: Agente de Ligação no molde dos atendentes — nasce em
+  // SOMBRA (monta a lista de quem ligaria; nada é discado). Voz, número e
+  // chave continuam em Integrações; aqui mora o "quando" e "para quem".
   voice: {
     enabled: false,
     prompt: '',
@@ -299,6 +301,16 @@ const aiAgents = ref({
     effort: '',
     has_draft: false,
     default_prompt: '',
+    mode: 'shadow',
+    stage_ids: [],
+    silence_hours: 24,
+    lookback_days: 7,
+    max_attempts: 2,
+    daily_cap: 20,
+    live_days: [],
+    hours_start: '',
+    hours_end: '',
+    handoff_inbox_id: '',
   },
   // 🗣️ rodada 188: Atendente de Agendamento (WhatsApp) — nasce em SOMBRA; o "prompt" é o bloco da etapa
   atendente_agendamento: {
@@ -466,6 +478,7 @@ const RESPONDER_NOUN_KEYS = [
   'atendente_pos',
   'instagram',
   'comments',
+  'voice',
 ];
 const usageNoun = key =>
   RESPONDER_NOUN_KEYS.includes(key) ? 'resposta(s)' : 'análise(s)';
@@ -570,6 +583,96 @@ const atendInboxNames = agent =>
   (agent.inbox_ids || [])
     .map(id => inboxes.value.find(i => i.id === id)?.name)
     .filter(Boolean);
+
+// ── 🎙️ rodada 195: Agente de Ligação (leads não responsivos) ──
+// O servidor devolve, no payload de IA: voice_events (registro), voice_shadow
+// ({date, items}) = quem ele ligaria hoje, voice_ready (ElevenLabs
+// configurada) e voice_live_now. Enquanto a frente A não responder, tudo cai
+// em listas vazias / no `settings.voice.configured` que já existe.
+const voiceAi = () => settings.value?.ai || {};
+const voiceEvents = () =>
+  voiceAi().voice_events || voiceAi().agents?.voice?.voice_events || [];
+const VOICE_EVENT_LABELS = {
+  ligaria: '🕶️ ligaria (sombra: nada discado)',
+  enfileirou: '📞 entrou na fila de ligação de hoje',
+  ligou: '📞 ligou',
+  atendeu: '🙋 atendeu',
+  agendou: '📅 agendou',
+  quer_whatsapp: '💬 pediu para seguir pelo WhatsApp',
+  sem_permissao: '🔒 sem permissão da Meta para ligar',
+  caixa_postal: '📼 caiu na caixa postal',
+  teto_diario: '🛑 teto de ligações do dia',
+  fora_da_janela: '🕶️ fora da janela: ficou em sombra',
+  erro: '❌ erro',
+};
+// lista do dia (sombra gravada pelo job de hora em hora)
+const voiceShadowStored = () => {
+  const s = voiceAi().voice_shadow || voiceAi().agents?.voice?.voice_shadow;
+  if (Array.isArray(s)) return s;
+  return s?.items || [];
+};
+// resultado do botão "Ver quem ligaria hoje" (vence a lista gravada)
+const voiceShadowList = ref(null);
+const voiceShadowRunning = ref(false);
+const voiceShadowItems = () => voiceShadowList.value ?? voiceShadowStored();
+const runVoiceShadow = async () => {
+  if (voiceShadowRunning.value) return;
+  voiceShadowRunning.value = true;
+  try {
+    const { data } = await CrmAPI.voiceShadowRun();
+    const items = Array.isArray(data)
+      ? data
+      : data?.items || data?.shadow?.items || [];
+    voiceShadowList.value = items;
+    useAlert(
+      items.length
+        ? `📋 Hoje ele ligaria para ${items.length} pessoa(s). Nada foi discado.`
+        : '📋 Ninguém se encaixa hoje: nenhum lead parado nas colunas vigiadas.'
+    );
+  } catch (e) {
+    const status = e?.response?.status;
+    const msg = e?.response?.data?.error || e?.response?.data?.message;
+    useAlert(
+      status === 404
+        ? 'O servidor ainda não tem a seleção de leads (frente A da rodada 195).'
+        : msg || 'Não consegui montar a lista de hoje.'
+    );
+  } finally {
+    voiceShadowRunning.value = false;
+  }
+};
+// ElevenLabs pronta? (chave + agente + número) — o servidor manda voice_ready;
+// senão vale o `configured` da tela de Integrações
+const voiceReady = computed(() => {
+  const ai = voiceAi();
+  if (typeof ai.voice_ready === 'boolean') return ai.voice_ready;
+  return settings.value?.voice?.configured === true;
+});
+// ligações de hoje (ao vivo): eventos de hoje que viraram ligação
+const voiceCallsToday = () => {
+  const today = new Date().toDateString();
+  return voiceEvents().filter(
+    ev =>
+      ['enfileirou', 'ligou', 'atendeu', 'agendou'].includes(ev.type) &&
+      ev.at &&
+      new Date(ev.at).toDateString() === today
+  ).length;
+};
+const voiceStageNames = agent => atendStageNames(agent);
+// situação do card: igual aos atendentes, mas ao vivo ainda exige a
+// ElevenLabs pronta (sem ela, o servidor deixa em sombra)
+const voiceSituation = agent => {
+  const base = situationOf(agent);
+  if (!agent.enabled) return base;
+  const ai = voiceAi();
+  if (typeof ai.voice_live_now === 'boolean' && agent.mode === 'live')
+    return ai.voice_live_now
+      ? { label: '🟢 Ao vivo (agora)', tone: 'live' }
+      : { label: '🕶️ Sombra (fora da janela)', tone: 'shadow' };
+  if (agent.mode === 'live' && liveEnabled.value && !voiceReady.value)
+    return { label: '🕶️ Sombra (falta a ElevenLabs)', tone: 'shadow' };
+  return base;
+};
 // tela Sombra (lado a lado: o que a IA teria dito × o que foi dito)
 const shadowOpen = ref(false);
 const shadowAgentKey = ref('atendente_agendamento');
@@ -1430,6 +1533,19 @@ const snapshotAgent = key => {
     snap.mode = a.mode;
     snap.live_days = [...(a.live_days || [])];
   }
+  // 🎙️ rodada 195
+  if (key === 'voice') {
+    snap.mode = a.mode;
+    snap.stage_ids = [...(a.stage_ids || [])];
+    snap.silence_hours = a.silence_hours;
+    snap.lookback_days = a.lookback_days;
+    snap.max_attempts = a.max_attempts;
+    snap.daily_cap = a.daily_cap;
+    snap.live_days = [...(a.live_days || [])];
+    snap.hours_start = a.hours_start;
+    snap.hours_end = a.hours_end;
+    snap.handoff_inbox_id = a.handoff_inbox_id;
+  }
   if (key === 'comments') {
     snap.fb_page_id = a.fb_page_id;
     snap.ig_user_id = a.ig_user_id;
@@ -1485,6 +1601,19 @@ const discardEdit = key => {
       a.hours_end = snap.hours_end;
       a.mode = snap.mode || 'shadow';
       a.live_days = [...(snap.live_days || [])];
+    }
+    // 🎙️ rodada 195
+    if (key === 'voice') {
+      a.mode = snap.mode || 'shadow';
+      a.stage_ids = [...(snap.stage_ids || [])];
+      a.silence_hours = snap.silence_hours;
+      a.lookback_days = snap.lookback_days;
+      a.max_attempts = snap.max_attempts;
+      a.daily_cap = snap.daily_cap;
+      a.live_days = [...(snap.live_days || [])];
+      a.hours_start = snap.hours_start;
+      a.hours_end = snap.hours_end;
+      a.handoff_inbox_id = snap.handoff_inbox_id;
     }
     if (key === 'comments') {
       a.fb_page_id = snap.fb_page_id;
@@ -1551,6 +1680,22 @@ const packAgentFields = key => {
     // continua em sombra. live_days vazio = todos os dias.
     fields.mode = a.mode === 'live' ? 'live' : 'shadow';
     fields.live_days = [...new Set((a.live_days || []).map(Number))].sort();
+  }
+  // 🎙️ rodada 195: Agente de Ligação — mesmos padrões do servidor (24 h,
+  // 7 dias, 2 tentativas, 20 ligações/dia); ao vivo só dentro da janela
+  if (key === 'voice') {
+    fields.mode = a.mode === 'live' ? 'live' : 'shadow';
+    fields.stage_ids = (a.stage_ids || []).map(Number);
+    fields.silence_hours = Number(a.silence_hours) || 24;
+    fields.lookback_days = Number(a.lookback_days) || 7;
+    fields.max_attempts = Number(a.max_attempts) || 2;
+    fields.daily_cap = Number(a.daily_cap) || 20;
+    fields.live_days = [...new Set((a.live_days || []).map(Number))].sort();
+    fields.hours_start = a.hours_start || '';
+    fields.hours_end = a.hours_end || '';
+    fields.handoff_inbox_id = a.handoff_inbox_id
+      ? Number(a.handoff_inbox_id)
+      : null;
   }
   if (key === 'comments') {
     fields.fb_page_id = (a.fb_page_id || '').trim();
@@ -1620,17 +1765,28 @@ const saveAgentDraft = async key => {
 const publishAgent = async key => {
   savingAgent.value = key;
   try {
-    await CrmAPI.updateAi({
+    const { data } = await CrmAPI.updateAi({
       agents: { [key]: { ...packAgentFields(key), draft: {} } },
     });
     aiAgents.value[key].has_draft = false;
     editingAgent.value = { ...editingAgent.value, [key]: false };
     loadedValues.value[key] = snapshotAgent(key);
+    // 🎙️ rodada 195: o servidor pode devolver um aviso (ex.: o prompt novo não
+    // subiu para a ElevenLabs) sem quebrar a publicação
+    const sync = data?.voice_sync;
+    let warning = data?.warning || data?.aviso;
+    if (sync && sync.ok === false)
+      warning = `A ElevenLabs não recebeu o prompt novo${sync.error ? `: ${sync.error}` : ''}. Tente "Sincronizar" em Integrações.`;
     useAlert(
-      `🚀 ${AGENT_META[key].title} publicado — vale a partir das próximas análises.`
+      warning
+        ? `🚀 ${AGENT_META[key].title} publicado. ⚠️ ${warning}`
+        : `🚀 ${AGENT_META[key].title} publicado — vale a partir das próximas análises.`
     );
-  } catch {
-    useAlert('Erro ao publicar o agente.');
+    if (key === 'voice') store.dispatch('crm/fetchSettings');
+  } catch (e) {
+    // 422 com frase clara (ex.: "ao vivo exige coluna vigiada / ElevenLabs configurada")
+    const msg = e?.response?.data?.error || e?.response?.data?.message;
+    useAlert(msg ? `Não publicou: ${msg}` : 'Erro ao publicar o agente.');
   } finally {
     savingAgent.value = '';
   }
@@ -2185,7 +2341,8 @@ const AGENT_META = {
     suggestion:
       'Copy é fino — Sonnet no esforço alto escreve as melhores variações.',
   },
-  // 🤖📞 item 169: roda na ElevenLabs — configuração em Integrações → Agente de Ligação (IA)
+  // 🎙️ rodada 195: liga para leads NÃO RESPONSIVOS (fala pela ElevenLabs;
+  // voz/número em Integrações). Por texto ele se testa aqui mesmo.
   voice: {
     title: 'Agente de Ligação',
     icon: 'i-lucide-phone-call',
@@ -2193,22 +2350,27 @@ const AGENT_META = {
     color: '#7C3AED',
     tag: 'Atendimento',
     description:
-      'Assistente virtual que atende as ligações no número próprio da clínica e liga para pacientes nas campanhas, pela ElevenLabs. Se apresenta como assistente virtual, consulta a agenda, marca a consulta, manda a confirmação pelo WhatsApp da clínica e transfere para um humano quando precisa.',
+      'Liga para leads parados nas colunas escolhidas depois de N horas sem resposta; conduz ao agendamento (melhor resultado) ou ao WhatsApp; responde dúvidas com o Roteiro CEVICO. Fala pela ElevenLabs, se apresenta como assistente virtual, consulta a agenda e manda a confirmação pelo WhatsApp da clínica.',
     triggers: [
       {
-        icon: 'i-lucide-phone-incoming',
-        label: 'Ligação recebida no número da IA',
+        icon: 'i-lucide-clock',
+        label: 'Lead numa coluna vigiada sem responder há N horas',
       },
       {
         icon: 'i-lucide-phone-outgoing',
-        label: 'Campanha de ligação (liga com a permissão do paciente)',
+        label: 'Liga só na janela (dias + horas), no máximo N por dia',
       },
       {
-        icon: 'i-lucide-rocket',
-        label: 'Resultado vira card na conversa e no Dashboard de Ligações',
+        icon: 'i-lucide-calendar-check',
+        label: 'Atendeu e marcou → entra na Agenda + confirmação no WhatsApp',
+      },
+      {
+        icon: 'i-lucide-message-circle',
+        label: 'Não pode falar → segue por escrito na caixa do WhatsApp',
       },
     ],
-    suggestion: 'Configure em Integrações → Agente de Ligação (IA).',
+    suggestion:
+      'Comece em Sombra: veja "quem ligaria hoje" e teste por texto antes de ligar de verdade.',
   },
 };
 
@@ -2440,7 +2602,29 @@ const loadAgents = async () => {
         15,
     },
     mentor: load('mentor'),
-    voice: load('voice'),
+    // 🎙️ rodada 195: campos do Agente de Ligação (rascunho vence o publicado
+    // nos campos); a caixa do WhatsApp também mora em settings.voice
+    voice: (() => {
+      const draft = a.voice?.draft || null;
+      const real = a.voice || {};
+      const pick = (k, fallback) => draft?.[k] ?? real[k] ?? fallback;
+      return {
+        ...load('voice'),
+        mode: pick('mode', '') || 'shadow',
+        stage_ids: [...(pick('stage_ids', []) || [])].map(Number),
+        silence_hours: pick('silence_hours', '') || 24,
+        lookback_days: pick('lookback_days', '') || 7,
+        max_attempts: pick('max_attempts', '') || 2,
+        daily_cap: pick('daily_cap', '') || 20,
+        live_days: [...(pick('live_days', []) || [])].map(Number),
+        hours_start: pick('hours_start', '') || '',
+        hours_end: pick('hours_end', '') || '',
+        handoff_inbox_id:
+          pick('handoff_inbox_id', '') ||
+          settings.value?.voice?.handoff_inbox_id ||
+          '',
+      };
+    })(),
     comments: {
       ...load('comments'),
       page_access_token: '',
@@ -4068,11 +4252,8 @@ onUnmounted(() => {
                       <span class="cv-icon cv-icon-xl">
                         <span :class="AGENT_META[key].icon" class="text-lg" />
                       </span>
-                      <div
-                        v-if="key !== 'voice'"
-                        class="flex flex-col items-end gap-1"
-                        @click.stop
-                      >
+                      <!-- interruptor em TODOS os cards (rodada 195: o Agente de Ligação também) -->
+                      <div class="flex flex-col items-end gap-1" @click.stop>
                         <button
                           class="cv-switch cv-switch-lg"
                           :class="agent.enabled ? 'cv-switch-on' : ''"
@@ -4093,13 +4274,6 @@ onUnmounted(() => {
                               : 'Desligado'
                         }}</span>
                       </div>
-                      <button
-                        v-else
-                        class="cv-btn cv-btn-sm"
-                        @click.stop="openVoiceSettings"
-                      >
-                        Configurar
-                      </button>
                     </div>
                     <div>
                       <p
@@ -4194,9 +4368,8 @@ onUnmounted(() => {
                         {{ AGENT_META[key].description }}
                       </p>
                     </div>
-                    <!-- INTERRUPTOR definitivo: grava na hora, sem "Salvar" -->
+                    <!-- INTERRUPTOR definitivo: grava na hora, sem "Salvar" (rodada 195: vale para o Agente de Ligação também) -->
                     <div
-                      v-if="key !== 'voice'"
                       class="flex flex-col items-end gap-1 flex-shrink-0"
                       @click.stop
                     >
@@ -4220,78 +4393,14 @@ onUnmounted(() => {
                             : 'Desligado'
                       }}</span>
                     </div>
-                    <!-- 🤖📞 Agente de Ligação (item 169): o interruptor mora em Integrações → Agente de Ligação (IA) -->
-                    <div
-                      v-else
-                      class="flex flex-col items-end gap-1 flex-shrink-0"
-                      @click.stop
-                    >
-                      <button
-                        class="cv-btn cv-btn-sm"
-                        title="Liga, desliga e configura em Integrações → Agente de Ligação (IA)"
-                        @click="openVoiceSettings"
-                      >
-                        Configurar
-                      </button>
-                      <span class="text-[10px] text-n-slate-9">liga/desliga lá</span>
-                    </div>
                     <span
                       class="i-lucide-chevron-down text-n-slate-9 text-lg mt-2 flex-shrink-0 transition-transform duration-200"
                       :class="expandedAgents[key] ? 'rotate-180' : ''"
                     />
                   </div>
 
-                  <!-- 🤖📞 Agente de Ligação: configuração inteira mora em Integrações (ElevenLabs) — o card só aponta -->
-                  <div
-                    v-if="expandedAgents[key] && key === 'voice'"
-                    class="cevico-agent-body"
-                  >
-                    <p class="cv-label mb-1.5">Onde se aplica</p>
-                    <div class="flex flex-wrap gap-1.5 mb-4">
-                      <span
-                        v-for="(t, i) in AGENT_META[key].triggers"
-                        :key="i"
-                        class="cv-chip cv-chip-lg cv-chip-wrap"
-                      >
-                        <span
-                          :class="t.icon"
-                          class="text-xs"
-                          :style="{ color: AGENT_META[key].color }"
-                        />
-                        {{ t.label }}
-                      </span>
-                    </div>
-                    <div
-                      class="cv-sub p-4 text-xs text-n-slate-11 flex items-center gap-2 flex-wrap"
-                    >
-                      <span
-                        class="i-lucide-lightbulb text-sm"
-                        :style="{ color: AGENT_META[key].color }"
-                      />
-                      <span class="flex-1 min-w-0">{{
-                        AGENT_META[key].suggestion
-                      }}</span>
-                      <button
-                        class="cv-btn cv-btn-sm"
-                        :style="{ background: AGENT_META[key].gradient }"
-                        @click="openVoiceSettings"
-                      >
-                        Abrir configuração
-                      </button>
-                      <button
-                        class="cv-btn cv-btn-sm cv-btn-ghost"
-                        @click="openFlow(key)"
-                      >
-                        Ver fluxo
-                      </button>
-                    </div>
-                  </div>
-
-                  <!-- corpo completo do agente: desce com animação leve -->
-                  <div
-                    v-else-if="expandedAgents[key]"
-                    class="cevico-agent-body"
-                  >
+                  <!-- corpo completo do agente: desce com animação leve (rodada 195: o Agente de Ligação usa o mesmo corpo) -->
+                  <div v-if="expandedAgents[key]" class="cevico-agent-body">
                     <!-- Onde se aplica -->
                     <p class="cv-label mb-1.5">Onde se aplica</p>
                     <div class="flex flex-wrap gap-1.5 mb-4">
@@ -4837,6 +4946,535 @@ onUnmounted(() => {
                             }}</span>
                             · #{{ ev.conversation_id }} {{ ev.contact }} —
                             {{ ATENDENTE_EVENT_LABELS[ev.type] || ev.type }}
+                            <span v-if="ev.note"
+class="text-n-slate-9"
+                              >({{ ev.note }})</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 🎙️ rodada 195: Agente de Ligação — leads não responsivos (sombra × ao vivo, colunas, ritmo, janela, caixa) -->
+                    <div
+                      v-if="key === 'voice'"
+                      class="cv-sub p-4 mb-4 space-y-3"
+                    >
+                      <!-- 🎛 Painel de situação -->
+                      <div
+                        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2"
+                      >
+                        <div
+                          class="cv-stat px-3 py-2"
+                          :class="
+                            voiceSituation(agent).tone === 'live'
+                              ? 'cv-green'
+                              : voiceSituation(agent).tone === 'shadow'
+                                ? 'cv-slate'
+                                : ''
+                          "
+                        >
+                          <p class="text-[10px] text-n-slate-10">Situação</p>
+                          <p
+                            class="text-sm font-bold"
+                            :class="
+                              voiceSituation(agent).tone === 'live'
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-n-slate-12'
+                            "
+                          >
+                            {{ voiceSituation(agent).label }}
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">
+                            Colunas vigiadas
+                          </p>
+                          <p
+                            class="text-sm font-bold text-n-slate-12"
+                            :title="voiceStageNames(agent).join(', ')"
+                          >
+                            {{ voiceStageNames(agent).length || 'nenhuma' }}
+                            <span
+                              v-if="voiceStageNames(agent).length"
+                              class="text-[10px] font-normal text-n-slate-9 block"
+                              >{{ voiceStageNames(agent).join(' · ') }}</span>
+                          </p>
+                        </div>
+                        <div class="cv-stat px-3 py-2">
+                          <p class="text-[10px] text-n-slate-10">
+                            {{
+                              voiceSituation(agent).tone === 'live'
+                                ? 'Ligações hoje'
+                                : 'Ligaria hoje'
+                            }}
+                          </p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            {{
+                              voiceSituation(agent).tone === 'live'
+                                ? voiceCallsToday()
+                                : voiceShadowItems().length
+                            }}
+                            <span class="text-[10px] font-normal text-n-slate-9">/ {{ agent.daily_cap || 20 }} por dia</span>
+                          </p>
+                        </div>
+                        <div
+                          class="cv-stat px-3 py-2"
+                          :class="voiceReady ? 'cv-green' : 'cv-amber'"
+                        >
+                          <p class="text-[10px] text-n-slate-10">ElevenLabs</p>
+                          <p class="text-sm font-bold text-n-slate-12">
+                            {{
+                              voiceReady
+                                ? '✅ conectada'
+                                : '⚠️ falta configurar'
+                            }}
+                          </p>
+                          <button
+                            class="text-[10px] underline text-n-slate-10 hover:text-n-slate-12"
+                            @click="openVoiceSettings"
+                          >
+                            {{
+                              voiceReady
+                                ? 'voz e número'
+                                : 'configurar em Integrações'
+                            }}
+                          </button>
+                        </div>
+                      </div>
+
+                      <!-- 🕶️ o que é a Sombra aqui + comandos para desligar -->
+                      <div
+                        class="cv-sub p-3.5 text-[11px] text-n-slate-11 leading-relaxed space-y-1.5"
+                      >
+                        <p>
+                          <b>🕶️ Sombra, em uma frase:</b> de hora em hora ele
+                          monta a lista de quem ligaria hoje (leads parados nas
+                          colunas vigiadas) e você testa a conversa por texto.
+                          <b>Nada é discado.</b>
+                        </p>
+                        <p>
+                          <b>🟢 Ao vivo:</b> liga de verdade pela ElevenLabs, só
+                          na janela de dias e horas escolhida abaixo. Quem
+                          atende e marca entra na Agenda e recebe a confirmação
+                          no WhatsApp; quem não pode falar segue por escrito.
+                        </p>
+                        <p class="cv-label !text-[10px] pt-1">
+                          Comandos para desligar a IA
+                        </p>
+                        <ul class="list-disc pl-4 space-y-0.5">
+                          <li>
+                            <b>Parar tudo agora:</b> o interruptor no topo deste
+                            card desliga na hora.
+                          </li>
+                          <li>
+                            Ele <b>nunca liga duas vezes no mesmo dia</b> para a
+                            mesma pessoa, e espera 48 h entre tentativas.
+                          </li>
+                          <li>
+                            <b>Tirar alguém da lista:</b> mova o card para outra
+                            coluna ou marque a etiqueta
+                            <code>nao_perturbe</code>.
+                          </li>
+                        </ul>
+                      </div>
+
+                      <!-- modo -->
+                      <div>
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          Modo de trabalho
+                        </p>
+                        <div class="cv-seg cv-seg-sm cv-green">
+                          <button
+                            class="cv-seg-item"
+                            :class="agent.mode !== 'live' ? 'cv-seg-on' : ''"
+                            :disabled="!editingAgent[key]"
+                            title="Só monta a lista de quem ligaria e permite testar por texto. Nada é discado."
+                            @click="agent.mode = 'shadow'"
+                          >
+                            🕶️ Sombra
+                          </button>
+                          <button
+                            class="cv-seg-item"
+                            :class="[
+                              agent.mode === 'live' ? 'cv-seg-on' : '',
+                              liveEnabled
+                                ? ''
+                                : 'opacity-60 cursor-not-allowed',
+                            ]"
+                            :disabled="!editingAgent[key] || !liveEnabled"
+                            :title="
+                              liveEnabled
+                                ? 'Liga de verdade pela ElevenLabs na janela escolhida abaixo'
+                                : 'Trancado no servidor: só abre com a variável CEVICO_RESPONDERS_LIVE=true no EasyPanel (web e sidekiq). Até lá, tudo em sombra.'
+                            "
+                            @click="agent.mode = 'live'"
+                          >
+                            <span
+                              v-if="!liveEnabled"
+                              class="i-lucide-lock text-[10px]"
+                            />
+                            🟢 Ao vivo
+                          </button>
+                        </div>
+                        <p
+                          v-if="!editingAgent[key]"
+                          class="text-[10px] text-n-slate-9 mt-1"
+                        >
+                          Clique em Editar (no fim do card) para trocar o modo,
+                          as colunas e a janela.
+                        </p>
+                      </div>
+
+                      <!-- 🟢 janela ao vivo (dias + horas) -->
+                      <div
+                        v-if="agent.mode === 'live'"
+                        class="cv-sub cv-green p-3.5 space-y-2.5"
+                      >
+                        <p class="text-xs font-bold text-n-slate-12">
+                          🟢 Janela ao vivo
+                          <span class="text-n-slate-9 font-normal">(nenhum dia marcado = todos os dias; as horas ficam
+                            no campo "Horário em que liga" abaixo)</span>
+                        </p>
+                        <div class="flex flex-wrap gap-1.5">
+                          <button
+                            v-for="d in LIVE_DAYS"
+                            :key="d.value"
+                            class="cv-chip cv-chip-lg"
+                            :class="
+                              liveDayOn(agent, d.value) ? 'cv-chip-on' : ''
+                            "
+                            :style="
+                              liveDayOn(agent, d.value)
+                                ? {
+                                    background:
+                                      'linear-gradient(135deg, #059669, #34D399)',
+                                  }
+                                : {}
+                            "
+                            :disabled="!editingAgent[key]"
+                            @click="toggleLiveDay(key, d.value)"
+                          >
+                            {{ d.short }}
+                          </button>
+                        </div>
+                        <p class="text-xs font-semibold text-n-slate-12">
+                          {{ liveWindowSentence(agent) }}
+                        </p>
+                        <p
+                          v-if="!(agent.stage_ids || []).length"
+                          class="text-[11px] text-red-600 dark:text-red-400 font-medium"
+                        >
+                          Marque pelo menos uma coluna para vigiar: ao vivo sem
+                          coluna não publica.
+                        </p>
+                        <p
+                          v-if="!voiceReady"
+                          class="text-[11px] text-red-600 dark:text-red-400 font-medium"
+                        >
+                          A ElevenLabs ainda não está configurada (chave, voz e
+                          número em Integrações): ao vivo não publica sem ela.
+                        </p>
+                      </div>
+
+                      <!-- colunas vigiadas -->
+                      <div>
+                        <p class="text-xs font-medium text-n-slate-11 mb-1.5">
+                          Colunas que ele vigia
+                          <span class="text-n-slate-9 font-normal">(lead parado nessas colunas, sem responder =
+                            candidato à ligação)</span>
+                        </p>
+                        <div
+                          v-if="!allStages.length"
+                          class="text-xs text-n-slate-9"
+                        >
+                          Carregando colunas…
+                        </div>
+                        <div v-else class="flex flex-wrap gap-1.5">
+                          <button
+                            v-for="st in allStages"
+                            :key="st.id"
+                            class="cv-chip cv-chip-lg"
+                            :class="
+                              (agent.stage_ids || []).includes(st.id)
+                                ? 'cv-chip-on'
+                                : ''
+                            "
+                            :style="
+                              (agent.stage_ids || []).includes(st.id)
+                                ? { background: AGENT_META[key].gradient }
+                                : {}
+                            "
+                            :disabled="!editingAgent[key]"
+                            :title="st.pipeline"
+                            @click="toggleAtendStage(key, st.id)"
+                          >
+                            {{ st.name }}
+                          </button>
+                        </div>
+                        <p class="text-[10px] text-n-slate-9 mt-1">
+                          Sugestão inicial: Envio de Orçamento + Novos Contatos.
+                          Card mudou de coluna = sai da lista na hora.
+                        </p>
+                      </div>
+
+                      <!-- ritmo: horas de silêncio, dias olhados, teto, tentativas -->
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Liga depois de
+                            <span class="text-n-slate-9 font-normal">(horas sem resposta do lead)</span></label>
+                          <div class="flex items-center gap-2">
+                            <input
+                              v-model.number="agent.silence_hours"
+                              type="number"
+                              min="1"
+                              max="720"
+                              :disabled="!editingAgent[key]"
+                              class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                            />
+                            <span class="text-xs text-n-slate-10 flex-shrink-0">horas</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Olha leads dos últimos
+                            <span class="text-n-slate-9 font-normal">(mais antigo que isso, deixa quieto)</span></label>
+                          <div class="flex items-center gap-2">
+                            <input
+                              v-model.number="agent.lookback_days"
+                              type="number"
+                              min="1"
+                              max="90"
+                              :disabled="!editingAgent[key]"
+                              class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                            />
+                            <span class="text-xs text-n-slate-10 flex-shrink-0">dias</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >No máximo
+                            <span class="text-n-slate-9 font-normal">(ligações por dia)</span></label>
+                          <div class="flex items-center gap-2">
+                            <input
+                              v-model.number="agent.daily_cap"
+                              type="number"
+                              min="1"
+                              max="500"
+                              :disabled="!editingAgent[key]"
+                              class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                            />
+                            <span class="text-xs text-n-slate-10 flex-shrink-0">ligações por dia</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Tentativas por lead
+                            <span class="text-n-slate-9 font-normal">(em 14 dias, com 48 h entre elas)</span></label>
+                          <div class="flex items-center gap-2">
+                            <input
+                              v-model.number="agent.max_attempts"
+                              type="number"
+                              min="1"
+                              max="10"
+                              :disabled="!editingAgent[key]"
+                              class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                            />
+                            <span class="text-xs text-n-slate-10 flex-shrink-0">tentativas</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- horário + caixa do WhatsApp -->
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Horário em que liga
+                            <span class="text-n-slate-9 font-normal">(janela ao vivo; vazio = o dia inteiro)</span></label>
+                          <div class="flex items-center gap-1.5">
+                            <input
+                              v-model="agent.hours_start"
+                              type="time"
+                              :disabled="!editingAgent[key]"
+                              class="cv-input flex-1 min-w-0 text-sm disabled:cursor-not-allowed"
+                            />
+                            <span class="text-[11px] text-n-slate-9">até</span>
+                            <input
+                              v-model="agent.hours_end"
+                              type="time"
+                              :disabled="!editingAgent[key]"
+                              class="cv-input flex-1 min-w-0 text-sm disabled:cursor-not-allowed"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Caixa do WhatsApp para continuar por escrito
+                            <span class="text-n-slate-9 font-normal">(quem não pode falar recebe por aqui)</span></label>
+                          <select
+                            v-model="agent.handoff_inbox_id"
+                            :disabled="!editingAgent[key]"
+                            class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                          >
+                            <option value="">— escolher a caixa —</option>
+                            <option
+                              v-for="ib in whatsappInboxes"
+                              :key="ib.id"
+                              :value="ib.id"
+                            >
+                              {{ ib.name }}
+                            </option>
+                          </select>
+                          <p
+                            v-if="!whatsappInboxes.length"
+                            class="text-[10px] text-n-slate-9 mt-1"
+                          >
+                            Nenhuma caixa de WhatsApp na conta ainda.
+                          </p>
+                          <p
+                            v-else-if="!agent.handoff_inbox_id"
+                            class="text-[10px] text-amber-600 dark:text-amber-400 mt-1"
+                          >
+                            Sem caixa, ele não consegue mandar a confirmação nem
+                            seguir por escrito.
+                          </p>
+                        </div>
+                      </div>
+
+                      <!-- botões -->
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <button
+                          class="cv-btn cv-btn-sm cv-green"
+                          title="Converse por texto como se fosse o lead que atendeu o telefone — IA de verdade, nada é discado"
+                          @click="openTestAgent(key)"
+                        >
+                          <span class="i-lucide-flask-conical text-xs" /> 🧪
+                          Testar agente
+                        </button>
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          :disabled="voiceShadowRunning"
+                          title="Roda a seleção agora, em sombra, e mostra a lista (nada é discado)"
+                          @click="runVoiceShadow"
+                        >
+                          <span
+                            :class="
+                              voiceShadowRunning
+                                ? 'i-lucide-loader-circle animate-spin'
+                                : 'i-lucide-clipboard-list'
+                            "
+                            class="text-xs"
+                          />
+                          📋 Ver quem ligaria hoje
+                        </button>
+                        <button
+                          class="cv-btn cv-btn-sm cv-btn-ghost"
+                          title="Chave, voz, número e sincronização com a ElevenLabs (Integrações)"
+                          @click="openVoiceSettings"
+                        >
+                          <span class="i-lucide-mic text-xs" /> 🎙️ Voz e número
+                        </button>
+                        <button
+                          class="cv-btn cv-btn-sm cv-btn-ghost"
+                          @click="
+                            scriptExpanded = true;
+                            scriptOpenSection = 'persona';
+                            document
+                              .getElementById('cv-roteiro')
+                              ?.scrollIntoView({
+                                behavior: 'smooth',
+                                block: 'start',
+                              });
+                          "
+                        >
+                          <span class="i-lucide-scroll-text text-xs" /> Ver o
+                          Roteiro CEVICO
+                        </button>
+                        <span class="text-[10px] text-n-slate-9">O campo <b>Passos desta ligação</b> abaixo é só o
+                          passo a passo dele ao telefone.</span>
+                      </div>
+
+                      <!-- 📋 quem ele ligaria hoje -->
+                      <div
+                        v-if="voiceShadowItems().length"
+                        class="cv-sub p-3.5 space-y-1.5"
+                      >
+                        <p class="cv-label mb-1">
+                          📋
+                          {{
+                            voiceSituation(agent).tone === 'live'
+                              ? 'Fila de hoje'
+                              : 'Ligaria hoje'
+                          }}
+                          para {{ voiceShadowItems().length }} pessoa(s)
+                          <span class="font-normal normal-case text-n-slate-9">· nada é discado em sombra</span>
+                        </p>
+                        <div class="max-h-56 overflow-y-auto space-y-1.5">
+                          <div
+                            v-for="(it, i) in voiceShadowItems()"
+                            :key="it.contact_id || i"
+                            class="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-3 text-[11px] text-n-slate-11 border-b last:border-b-0 pb-1.5"
+                            style="border-color: rgb(var(--cv-rgb) / 0.12)"
+                          >
+                            <span
+                              class="font-semibold text-n-slate-12 sm:w-40 flex-shrink-0"
+                            >
+                              {{ it.name || 'sem nome' }}
+                              <span
+                                v-if="it.phone_final"
+                                class="font-normal text-n-slate-9"
+                                >· …{{ it.phone_final }}</span>
+                            </span>
+                            <span
+                              v-if="it.stage"
+                              class="cv-chip cv-slate flex-shrink-0 self-start"
+                              >{{ it.stage }}</span>
+                            <span class="flex-1 min-w-0 leading-relaxed">{{
+                              it.motivo || it.objective || ''
+                            }}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <p
+                        v-else-if="voiceShadowList !== null"
+                        class="text-[11px] text-n-slate-10"
+                      >
+                        Ninguém se encaixa agora: nenhum lead parado nas colunas
+                        vigiadas dentro do prazo.
+                      </p>
+
+                      <!-- 📒 Registro de atividade -->
+                      <div v-if="voiceEvents().length">
+                        <p class="cv-label mb-1">📒 Registro de atividade</p>
+                        <div class="max-h-40 overflow-y-auto space-y-1">
+                          <p
+                            v-for="(ev, i) in voiceEvents()"
+                            :key="i"
+                            class="text-[11px] text-n-slate-11"
+                          >
+                            <span class="text-n-slate-9">{{
+                              ev.at
+                                ? new Date(ev.at).toLocaleString('pt-BR', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })
+                                : ''
+                            }}</span>
+                            <span v-if="ev.contact || ev.name">
+                              · {{ ev.contact || ev.name }}</span>
+                            —
+                            {{ VOICE_EVENT_LABELS[ev.type] || ev.type }}
+                            <span v-if="ev.count"
+class="text-n-slate-9"
+                              >({{ ev.count }})</span>
                             <span v-if="ev.note"
 class="text-n-slate-9"
                               >({{ ev.note }})</span>
@@ -6870,21 +7508,29 @@ class="text-[11px] text-n-slate-10"
                       class="text-xs font-semibold text-n-slate-12 block mb-1.5"
                     >
                       {{
-                        RESPONDER_WA_KEYS.includes(key)
-                          ? 'Passos desta etapa'
-                          : 'Prompt do agente'
+                        key === 'voice'
+                          ? 'Passos desta ligação'
+                          : RESPONDER_WA_KEYS.includes(key)
+                            ? 'Passos desta etapa'
+                            : 'Prompt do agente'
                       }}
                       <span class="text-n-slate-9 font-normal">
                         {{
-                          RESPONDER_WA_KEYS.includes(key)
-                            ? '(o passo a passo que só este agente segue; o Roteiro CEVICO entra antes, para todos · vazio = passos padrão abaixo)'
-                            : '(vazio = usa o prompt padrão abaixo)'
+                          key === 'voice'
+                            ? '(o passo a passo que ele segue AO TELEFONE; o Roteiro CEVICO e as regras de voz entram antes · vazio = passos padrão abaixo)'
+                            : RESPONDER_WA_KEYS.includes(key)
+                              ? '(o passo a passo que só este agente segue; o Roteiro CEVICO entra antes, para todos · vazio = passos padrão abaixo)'
+                              : '(vazio = usa o prompt padrão abaixo)'
                         }}
                       </span>
                     </label>
                     <textarea
                       v-model="agent.prompt"
-                      :rows="RESPONDER_WA_KEYS.includes(key) ? 12 : 4"
+                      :rows="
+                        RESPONDER_WA_KEYS.includes(key) || key === 'voice'
+                          ? 12
+                          : 4
+                      "
                       :disabled="!editingAgent[key]"
                       class="cv-input w-full text-xs font-mono leading-relaxed disabled:opacity-70 disabled:cursor-not-allowed"
                       :placeholder="agent.default_prompt"

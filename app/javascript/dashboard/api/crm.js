@@ -209,6 +209,13 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/ai_simulate`, payload);
   }
 
+  // 🎙️ rodada 195: Agente de Ligação — roda a seleção de leads não
+  // responsivos AGORA, em sombra (nada é discado) e devolve a lista de quem
+  // ele ligaria hoje (botão "Ver quem ligaria hoje" no card)
+  voiceShadowRun() {
+    return axios.post(`${this.url}/settings/voice_shadow_run`);
+  }
+
   rateAiShadow(messageId, rating, note) {
     return axios.post(`${this.url}/settings/ai_shadow_rate`, {
       message_id: messageId,

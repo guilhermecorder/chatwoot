@@ -16,7 +16,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   MAX_RESULTS = 5
   LOCK_TTL = 30.seconds
   NAMES = %w[buscar_consulta remarcar_consulta cancelar_consulta confirmar_presenca].freeze
-  AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento' }.freeze
+  AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
+                  'voice' => 'Agente de Ligação' }.freeze
   WEEKDAYS_SHORT = %w[dom seg ter qua qui sex sáb].freeze
 
   attr_reader :acoes

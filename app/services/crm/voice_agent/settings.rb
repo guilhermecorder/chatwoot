@@ -30,6 +30,12 @@ class Crm::VoiceAgent::Settings
     @raw ||= (crm_settings&.ai_config || {})['voice'] || {}
   end
 
+  # o card do agente no hub (ai_config.agents.voice): modo, colunas vigiadas,
+  # janela, tetos e o bloco da etapa — rodada 195
+  def agent_raw
+    @agent_raw ||= (crm_settings&.ai_config || {}).dig('agents', 'voice') || {}
+  end
+
   def enabled?
     raw['enabled'] == true
   end
@@ -60,7 +66,10 @@ class Crm::VoiceAgent::Settings
   def language = LANGUAGE_OPTIONS.include?(raw['language']) ? raw['language'] : DEFAULTS['language']
   def tts_model = raw['tts_model'].presence || DEFAULTS['tts_model']
   def first_message = raw['first_message'].presence || Crm::VoiceAgent::Script::FIRST_MESSAGE
-  def prompt = raw['prompt'].presence
+  # 🎙️ rodada 195: "prompt" é o bloco da ETAPA (Passos desta ligação), o mesmo
+  # que o card do agente edita (agents.voice.prompt); o script inteiro é montado
+  # por Crm::VoiceAgent::Script.build (Roteiro + regras de voz + etapa)
+  def prompt = agent_raw['prompt'].presence
   def transfer_number = raw['transfer_number'].presence
   def transfer_condition = raw['transfer_condition'].presence || Crm::VoiceAgent::Script::TRANSFER_CONDITION
 
@@ -111,19 +120,30 @@ class Crm::VoiceAgent::Settings
   def initiation_url = "#{tools_base_url}/initiation"
 
   # grava mudanças em ai_config['voice'] (merge raso) e espelha o interruptor
-  # no Painel dos agentes (ai_config['agents']['voice']['enabled'])
+  # no Painel dos agentes (ai_config['agents']['voice']['enabled']). Desde a
+  # rodada 195 "prompt" NÃO mora mais em voice: vai para agents.voice.prompt
+  # (bloco da etapa), a mesma chave que o card do hub edita.
   def persist!(changes)
     record = crm_settings || CrmSetting.find_or_create_by!(account: account)
     record.reload if record.persisted?
     cfg = (record.ai_config || {}).deep_dup
-    voice = (cfg['voice'] || {}).merge(changes.deep_stringify_keys)
+    changes = changes.deep_stringify_keys
+    voice = (cfg['voice'] || {}).merge(changes.except('prompt'))
+    voice.delete('prompt') # resquício do script inteiro custom (antes da 195)
     cfg['voice'] = voice
-    agents = cfg['agents'] || {}
-    cfg['agents'] = agents.merge('voice' => (agents['voice'] || {}).merge('enabled' => voice['enabled'] == true))
+    cfg['agents'] = mirror_agent(cfg['agents'] || {}, voice, changes)
     record.update!(ai_config: cfg)
     @crm_settings = record
     @raw = nil
+    @agent_raw = nil
     voice
+  end
+
+  # agents.voice recebe o interruptor e (quando veio) o bloco da etapa
+  def mirror_agent(agents, voice, changes)
+    agent = (agents['voice'] || {}).merge('enabled' => voice['enabled'] == true)
+    agent['prompt'] = changes['prompt'].presence if changes.key?('prompt')
+    agents.merge('voice' => agent)
   end
 
   # só o bloco state (synced_at, last_error, last_sync_log, last_call_at…)
@@ -139,7 +159,9 @@ class Crm::VoiceAgent::Settings
       webhook_id: webhook_id, agent_id: agent_id, agent_name: agent_name, tool_ids: tool_ids,
       whatsapp_phone_number_id: whatsapp_phone_number_id, whatsapp_number: whatsapp_number, connection: connection,
       voice_id: voice_id, voice_name: voice_name, llm: llm, language: language, tts_model: tts_model,
-      first_message: first_message, prompt: prompt, default_prompt: Crm::VoiceAgent::Script::SYSTEM_PROMPT,
+      # rodada 195: prompt = bloco da etapa (mesmo do card do hub); full_prompt = o que a assistente lê de fato
+      first_message: first_message, prompt: prompt, default_prompt: Crm::CevicoScript::STAGE_PROMPTS['voice'],
+      full_prompt: Crm::VoiceAgent::Script.build(account, self),
       transfer_number: transfer_number, transfer_condition: transfer_condition,
       handoff_inbox_id: handoff_inbox_id, handoff_template_params: handoff_template_params, permission_template: permission_template,
       max_duration_seconds: max_duration_seconds, daily_limit: daily_limit, hours: hours,
