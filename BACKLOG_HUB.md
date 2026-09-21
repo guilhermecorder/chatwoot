@@ -12,6 +12,13 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## SUBIDA 20/09 (noite) — RODADAS 33–35: "subir" → commit e046151f7a na
+feat/hub-saude → push → docker-build por workflow_dispatch (run
+35552093706) VERDE → **etiqueta `e046151`** (sem migration: health_modules
+mora no jsonb agent_permissions). Falta ele colar no EasyPanel (web +
+sidekiq) e Implantar. Depois, na VPS: Configurações → HUB → Acessos por
+pessoa pra marcar quem vê o quê.
+
 ## RODADA 35 — 20/09 🔧 SIDEBAR "APPLE" NO MUNDO SAÚDE (working tree, NÃO subida)
 Ele: "ok, mas também quero o design apple" (no painel lateral).
 - `aside.hub-side` (classe ligada quando segmento saude e mundo Saúde ou
