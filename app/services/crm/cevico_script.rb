@@ -178,44 +178,93 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
     TXT
   }.freeze
 
+  # 🧪 22/09: VERSÕES do Roteiro. 'v1' = o oficial (o que os atendentes leem em
+  # sombra/ao vivo). 'v2' = o PARALELO, que só existe para o 🧪 Testar agente
+  # comparar (Roteiro: atual | v2); padrão em Crm::CevicoScriptV2, personalização
+  # em ai_config['script_v2'] e agents[key]['prompt_v2']. Nada fora do teste lê v2.
+  VERSIONS = %w[v1 v2].freeze
+  # os PASSOS dos dois atendentes aparecem no v2 como seções extras do card,
+  # para editar tudo do paralelo num lugar só
+  STAGE_SECTIONS = [
+    { 'key' => 'stage_atendente_agendamento', 'agent' => 'atendente_agendamento', 'title' => 'Passos · Atendente de Agendamento',
+      'icon' => 'i-lucide-calendar-check', 'hint' => 'da recepção ao agendamento (só no v2; no atual fica no card do agente)' },
+    { 'key' => 'stage_atendente_pos', 'agent' => 'atendente_pos', 'title' => 'Passos · Atendente Pós-agendamento',
+      'icon' => 'i-lucide-calendar-clock', 'hint' => 'dúvidas, remarcar, cancelar (só no v2)' }
+  ].freeze
+
   module_function
 
-  def config(account)
-    CrmSetting.find_by(account: account)&.ai_config&.dig('script') || {}
+  def normalize_version(version)
+    VERSIONS.include?(version.to_s) ? version.to_s : 'v1'
+  end
+
+  def v2?(version)
+    normalize_version(version) == 'v2'
+  end
+
+  def config_key(version)
+    v2?(version) ? 'script_v2' : 'script'
+  end
+
+  def config(account, version = 'v1')
+    CrmSetting.find_by(account: account)&.ai_config&.dig(config_key(version)) || {}
+  end
+
+  # texto padrão de uma seção na versão (v2 cai no v1 se não tiver a seção)
+  def default_text(key, version = 'v1')
+    (v2?(version) ? Crm::CevicoScriptV2::DEFAULT[key] : nil) || DEFAULT[key]
+  end
+
+  def default_stage_prompt(agent_key, version = 'v1')
+    (v2?(version) ? Crm::CevicoScriptV2::STAGE_PROMPTS[agent_key] : nil) || STAGE_PROMPTS[agent_key].to_s
   end
 
   # texto vigente de uma seção: o do admin ou o padrão
-  def section_text(account, key)
-    config(account)[key].to_s.strip.presence || DEFAULT[key]
+  def section_text(account, key, version = 'v1')
+    config(account, version)[key].to_s.strip.presence || default_text(key, version)
   end
 
-  # para a tela: cada seção com o texto vigente, o padrão e se foi personalizada
-  def sections(account)
-    cfg = config(account)
-    SECTIONS.map do |section|
+  # para a tela: cada seção com o texto vigente, o padrão e se foi personalizada.
+  # No v2 entram também os PASSOS dos dois atendentes (seções extras).
+  def sections(account, version = 'v1')
+    cfg = config(account, version)
+    list = SECTIONS.map do |section|
       key = section['key']
       custom = cfg[key].to_s.strip
-      section.merge('text' => custom.presence || DEFAULT[key], 'default' => DEFAULT[key], 'custom' => custom.present?)
+      section.merge('text' => custom.presence || default_text(key, version), 'default' => default_text(key, version),
+                    'custom' => custom.present?)
+    end
+    return list unless v2?(version)
+
+    list + STAGE_SECTIONS.map do |section|
+      custom = custom_stage_prompt(account, section['agent'], version)
+      default = default_stage_prompt(section['agent'], version)
+      section.merge('text' => custom.presence || default, 'default' => default, 'custom' => custom.present?)
     end
   end
 
-  def updated_at(account)
-    config(account)['updated_at']
+  def updated_at(account, version = 'v1')
+    config(account, version)['updated_at']
   end
 
   # o Roteiro inteiro, pronto para entrar no prompt (tabela de preços oficial
   # da clínica no lugar de {{TABELA_DE_PRECOS}})
-  def text(account)
+  def text(account, version = 'v1')
     body = SECTIONS.map do |section|
-      "== #{section['title'].upcase} ==\n#{section_text(account, section['key'])}"
+      "== #{section['title'].upcase} ==\n#{section_text(account, section['key'], version)}"
     end.join("\n\n")
     body = body.gsub('{{TABELA_DE_PRECOS}}', Cevico::PriceList.prompt_block(account)) if body.include?('{{TABELA_DE_PRECOS}}')
-    "ROTEIRO CEVICO (fonte única dos atendentes)\n\n#{body}"
+    title = v2?(version) ? 'ROTEIRO CEVICO v2 (paralelo, em teste)' : 'ROTEIRO CEVICO (fonte única dos atendentes)'
+    "#{title}\n\n#{body}"
+  end
+
+  def custom_stage_prompt(account, agent_key, version = 'v1')
+    field = v2?(version) ? 'prompt_v2' : 'prompt'
+    CrmSetting.find_by(account: account)&.ai_config&.dig('agents', agent_key, field).to_s.strip
   end
 
   # bloco da etapa do agente: personalizado no card (campo prompt) ou padrão
-  def stage_prompt(account, agent_key)
-    custom = CrmSetting.find_by(account: account)&.ai_config&.dig('agents', agent_key, 'prompt').to_s.strip
-    custom.presence || STAGE_PROMPTS[agent_key].to_s
+  def stage_prompt(account, agent_key, version = 'v1')
+    custom_stage_prompt(account, agent_key, version).presence || default_stage_prompt(agent_key, version)
   end
 end

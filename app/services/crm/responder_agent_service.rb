@@ -63,17 +63,22 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # Passou do teto, a última chamada vai com tool_choice none (tem que responder).
   MAX_TOOL_ROUNDS = 5
 
-  attr_reader :agent_key
+  attr_reader :agent_key, :script_version
 
   # live: false (sombra/simulador) = nenhuma ferramenta escreve na Agenda
   # simulation: true = 🧪 Testar agente (caixa interna, nada sai): roda MESMO com o
   # interruptor desligado — o teste é justamente para antes de ligar (pedido 21/09)
-  def initialize(conversation:, agent_key:, live: false, simulation: false)
+  # script_version (22/09): 'v1' (oficial) ou 'v2' (Roteiro paralelo). Sem
+  # informar, vale o que a conversa de teste guardou ao nascer; conversa real = v1.
+  def initialize(conversation:, agent_key:, live: false, simulation: false, script_version: nil)
     @conversation = conversation
     @account = conversation.account
     @agent_key = agent_key.to_s
     @live = live == true
     @simulation = simulation == true
+    @script_version = Crm::CevicoScript.normalize_version(
+      script_version.presence || conversation.additional_attributes&.[]('cevico_simulado_script')
+    )
   end
 
   def call # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
@@ -123,7 +128,8 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   def system_prompt
     return voice_system_prompt if voice?
 
-    "#{Crm::CevicoScript.text(@account)}\n\n== SUA ETAPA ==\n#{Crm::CevicoScript.stage_prompt(@account, @agent_key)}#{RESPONDER_GUARDRAIL}"
+    "#{Crm::CevicoScript.text(@account, @script_version)}\n\n== SUA ETAPA ==\n" \
+      "#{Crm::CevicoScript.stage_prompt(@account, @agent_key, @script_version)}#{RESPONDER_GUARDRAIL}"
   end
 
   private

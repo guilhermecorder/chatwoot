@@ -113,4 +113,22 @@ RSpec.describe Crm::ResponderAgentService do
       expect(service.call[:error]).to eq('Conversa vazia.')
     end
   end
+
+  # 🧪 22/09: o prompt segue a versão do Roteiro presa à conversa de teste
+  describe 'versão do Roteiro' do
+    it 'conversa de teste nascida no v2 monta o prompt com o Roteiro v2; conversa real fica no v1', :aggregate_failures do
+      conversation.update!(additional_attributes: (conversation.additional_attributes || {}).merge('cevico_simulado' => true,
+                                                                                                   'cevico_simulado_script' => 'v2'))
+      svc = described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', simulation: true)
+      expect(svc.script_version).to eq('v2')
+      expect(svc.system_prompt).to include('ROTEIRO CEVICO v2').and include('REGRAS INEGOCIÁVEIS')
+
+      conversation.update!(additional_attributes: {})
+      svc = described_class.new(conversation: conversation, agent_key: 'atendente_agendamento')
+      expect(svc.script_version).to eq('v1')
+      expect(svc.system_prompt).to include('fonte única dos atendentes')
+      expect(described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', script_version: 'v2').system_prompt)
+        .to include('ROTEIRO CEVICO v2')
+    end
+  end
 end

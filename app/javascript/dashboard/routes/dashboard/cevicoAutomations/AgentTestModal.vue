@@ -16,6 +16,9 @@ const props = defineProps({
   // ✍️ rodada 191: "Testar de novo" no painel de Orientações abre o teste
   // com a fala do paciente já digitada no campo
   prefill: { type: String, default: '' },
+  // 🧪 22/09: versão do Roteiro com que a conversa de teste nasce
+  // ('v1' = atual, o que os atendentes leem; 'v2' = paralelo, só aqui)
+  scriptVersion: { type: String, default: 'v1' },
 });
 const emit = defineEmits(['close', 'edit-script', 'guided']);
 
@@ -25,6 +28,14 @@ const emit = defineEmits(['close', 'edit-script', 'guided']);
 // sem resposta há 2 dias"); vazio = o padrão do servidor.
 const isVoice = computed(() => props.agentKey === 'voice');
 const objective = ref('');
+// 🧪 22/09: Roteiro atual × v2 paralelo — trocar recomeça a conversa, porque
+// a conversa de teste fica presa à versão em que nasceu (não mistura)
+const scriptVersion = ref(props.scriptVersion === 'v2' ? 'v2' : 'v1');
+const isV2 = computed(() => scriptVersion.value === 'v2');
+const SCRIPT_VERSIONS = [
+  { key: 'v1', label: 'Roteiro atual', hint: 'o que os atendentes leem hoje' },
+  { key: 'v2', label: 'v2 paralelo', hint: 'só existe aqui no teste' },
+];
 const OBJECTIVE_PLACEHOLDER = 'orçamento enviado, sem resposta há 2 dias';
 
 const pal = useCevicoPalette({
@@ -93,13 +104,14 @@ const start = async () => {
   isStarting.value = true;
   errorText.value = '';
   try {
-    const payload = { agent: props.agentKey };
+    const payload = { agent: props.agentKey, script_version: scriptVersion.value };
     // 🎙️ voz: o motivo só viaja quando preenchido (o servidor tem o padrão)
     if (isVoice.value && objective.value.trim())
       payload.objective = objective.value.trim();
     const { data } = await CrmAPI.simulateAgent(payload);
     conversationId.value = data.conversation_id;
     displayId.value = data.display_id;
+    if (data.script_version) scriptVersion.value = data.script_version;
     turns.value = data.turns || [];
     if (props.prefill && !draft.value) draft.value = props.prefill;
   } catch (e) {
@@ -118,6 +130,12 @@ const start = async () => {
   }
 };
 onMounted(start);
+const pickVersion = async key => {
+  if (key === scriptVersion.value || isStarting.value || isSending.value)
+    return;
+  scriptVersion.value = key;
+  await start();
+};
 
 const send = async text => {
   const content = (text ?? draft.value).trim();
@@ -137,6 +155,7 @@ const send = async text => {
     const { data } = await CrmAPI.simulateAgent({
       agent: props.agentKey,
       conversation_id: conversationId.value,
+      script_version: scriptVersion.value,
       text: content,
     });
     conversationId.value = data.conversation_id;
@@ -231,9 +250,27 @@ const guide = turn => {
             </p>
             <p v-else class="text-[11px] opacity-80">
               Você é o paciente. O agente responde com a IA de verdade e o
-              Roteiro de agora. Caixa interna, sem canal de envio: nada vai para
-              telefone nenhum.
+              {{ isV2 ? 'Roteiro v2 paralelo (só existe neste teste)' : 'Roteiro de agora' }}.
+              Caixa interna, sem canal de envio: nada vai para telefone nenhum.
             </p>
+          </div>
+          <!-- 🧪 22/09: Roteiro atual × v2 paralelo (trocar recomeça a conversa) -->
+          <div
+            v-if="!isVoice"
+            class="cv-seg cv-seg-sm flex-shrink-0"
+            title="Cada conversa de teste fica presa a uma versão do Roteiro. Trocar começa uma conversa nova."
+          >
+            <button
+              v-for="v in SCRIPT_VERSIONS"
+              :key="v.key"
+              class="cv-seg-item"
+              :class="{ 'cv-seg-on': scriptVersion === v.key }"
+              :disabled="isStarting || isSending"
+              :title="v.hint"
+              @click="pickVersion(v.key)"
+            >
+              {{ v.label }}
+            </button>
           </div>
           <button
             class="cv-btn cv-btn-ghost cv-btn-sm"
@@ -287,7 +324,8 @@ const guide = turn => {
               displayId
             }}
             · {{ isVoice ? 'lead de teste' : 'paciente de teste' }} ·
-            {{ new Date().toLocaleDateString('pt-BR') }}
+            {{ new Date().toLocaleDateString('pt-BR') }}<template v-if="!isVoice">
+              · {{ isV2 ? '🧪 Roteiro v2 paralelo' : 'Roteiro atual' }}</template>
           </p>
 
           <template v-for="t in turns" :key="t.id">
@@ -310,7 +348,7 @@ const guide = turn => {
               >
                 <p class="whitespace-pre-wrap">{{ m }}</p>
                 <span class="cv-bubble-time">{{ fmtTime(t.at) }} · {{ agentName
-                  }}{{ isVoice ? ' (falado)' : '' }}</span>
+                  }}{{ isVoice ? ' (falado)' : isV2 ? ' · v2' : '' }}</span>
               </div>
               <div class="flex flex-wrap items-center gap-1.5 pl-1">
                 <span class="cv-chip">{{

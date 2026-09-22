@@ -11,10 +11,14 @@ class Crm::AgentSimulator
 
   # objective (🎙️ rodada 195, só o Agente de Ligação): "Motivo da ligação" que a
   # tela manda — vira {{campanha_objetivo}} no prompt do simulador por texto
-  def initialize(account:, agent_key:, objective: nil)
+  # script_version (22/09): 'v1' = Roteiro oficial, 'v2' = Roteiro paralelo em
+  # teste. A conversa de teste nasce presa a uma versão (guardada nos atributos)
+  # para dar para testar um, depois o outro, sem misturar.
+  def initialize(account:, agent_key:, objective: nil, script_version: nil)
     @account = account
     @agent_key = agent_key.to_s
     @objective = objective.to_s.strip.first(300).presence
+    @script_version = Crm::CevicoScript.normalize_version(script_version)
   end
 
   # conversa nova de teste (um "paciente de teste" fixo, sem telefone real)
@@ -25,7 +29,8 @@ class Crm::AgentSimulator
     Conversation.create!(
       account: @account, inbox: inbox, contact: contact, contact_inbox: contact_inbox,
       additional_attributes: { 'cevico_simulado' => true, 'cevico_simulado_agent' => @agent_key,
-                               'cevico_simulado_objective' => @objective }.compact
+                               'cevico_simulado_objective' => @objective,
+                               'cevico_simulado_script' => @script_version }.compact
     )
   end
 
@@ -44,7 +49,8 @@ class Crm::AgentSimulator
       content: text.to_s.strip, sender: conversation.contact
     )
     # simulador é sempre SOMBRA: as ferramentas (rodada 192) só simulam, nada escreve na Agenda
-    result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: @agent_key, live: false, simulation: true).call
+    result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: @agent_key, live: false, simulation: true,
+                                            script_version: self.class.script_version(conversation)).call
     return { error: result[:error] } if result[:error]
 
     Crm::ResponderAgentJob.write_shadow_note!(conversation, @agent_key, result, message.id)
@@ -65,6 +71,11 @@ class Crm::AgentSimulator
 
   def self.simulated?(conversation)
     conversation.additional_attributes&.[]('cevico_simulado') == true
+  end
+
+  # versão do Roteiro presa à conversa de teste ('v1' quando nasceu antes disso existir)
+  def self.script_version(conversation)
+    Crm::CevicoScript.normalize_version(conversation.additional_attributes&.[]('cevico_simulado_script'))
   end
 
   private

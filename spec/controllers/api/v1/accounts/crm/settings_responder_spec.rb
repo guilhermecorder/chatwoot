@@ -117,4 +117,31 @@ RSpec.describe 'CRM settings — Atendente de Agendamento', type: :request do
     get "#{base}/ai_shadow", headers: agent_user.create_new_auth_token, as: :json
     expect(response).to have_http_status(:forbidden)
   end
+
+  # 🧪 22/09: Roteiro v2 paralelo — salvar num card só e testar um, depois o outro
+  it 'salva o v2 paralelo (seções + passos) sem encostar no Roteiro atual', :aggregate_failures do
+    post "#{base}/update_ai", params: { script_v2: { persona: 'Persona v2.', stage_atendente_pos: 'Passos v2 do pós.' } },
+                              headers: admin.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:ok)
+    cfg = CrmSetting.find_by(account: account).ai_config
+    expect(cfg.dig('script_v2', 'persona')).to eq('Persona v2.')
+    expect(cfg.dig('script_v2', 'updated_at')).to be_present
+    expect(cfg.dig('agents', 'atendente_pos', 'prompt_v2')).to eq('Passos v2 do pós.')
+    expect(cfg['script']).to be_nil
+    v2 = response.parsed_body.dig('ai', 'script_v2') || response.parsed_body['script_v2']
+    expect(v2.find { |x| x['key'] == 'persona' }['custom']).to be(true)
+    expect(v2.find { |x| x['key'] == 'stage_atendente_pos' }['text']).to eq('Passos v2 do pós.')
+    expect(v2.find { |x| x['key'] == 'stage_atendente_agendamento' }['custom']).to be(false)
+  end
+
+  it 'simulador: a conversa de teste nasce presa à versão do Roteiro pedida', :aggregate_failures do
+    post "#{base}/ai_simulate", params: { agent: 'atendente_agendamento', script_version: 'v2' }, headers: admin.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body['script_version']).to eq('v2')
+    conv = Conversation.find(response.parsed_body['conversation_id'])
+    expect(conv.additional_attributes['cevico_simulado_script']).to eq('v2')
+
+    post "#{base}/ai_simulate", params: { agent: 'atendente_agendamento', script_version: 'v9' }, headers: admin.create_new_auth_token, as: :json
+    expect(response.parsed_body['script_version']).to eq('v1')
+  end
 end

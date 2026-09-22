@@ -440,6 +440,20 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       script['updated_at'] = Time.current.iso8601
       cfg['script'] = script
     end
+    # 🧪 (22/09) Roteiro v2 PARALELO: as 5 seções + os Passos dos dois atendentes
+    # (chaves stage_*), tudo num card só; em branco = padrão do v2. Só o 🧪 Testar
+    # agente lê isto — nada de sombra ou ao vivo muda ao salvar aqui.
+    if params[:script_v2].present?
+      keys = Crm::CevicoScript::SECTIONS.pluck('key') + Crm::CevicoScript::STAGE_SECTIONS.pluck('key')
+      incoming = params.require(:script_v2).permit(*keys).to_h.transform_values { |v| v.to_s.strip }
+      Crm::CevicoScript::STAGE_SECTIONS.each do |sec|
+        next unless incoming.key?(sec['key'])
+
+        cfg['agents'] ||= {}
+        cfg['agents'][sec['agent']] = (cfg['agents'][sec['agent']] || {}).merge('prompt_v2' => incoming.delete(sec['key']))
+      end
+      cfg['script_v2'] = (cfg['script_v2'] || {}).merge(incoming).merge('updated_at' => Time.current.iso8601)
+    end
     crm_settings.update!(ai_config: cfg)
     # 🎙️ (195) publicou o Agente de Ligação com a ElevenLabs configurada? o prompt
     # novo (Roteiro + regras de voz + etapa) sobe para lá; falha vira aviso, não erro
@@ -470,14 +484,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # 🧪 SIMULADOR (rodada 188): conversa com o agente como paciente, com a IA
   # de verdade, numa caixa interna sem canal de envio. Sem conversation_id
   # (ou reset) abre conversa nova; com text, manda a fala e devolve os balões.
-  def ai_simulate
+  def ai_simulate # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     agent_key = params[:agent].presence || 'atendente_agendamento'
     return render json: { error: 'Agente inválido.' }, status: :unprocessable_entity unless Crm::AiAgentConfig::RESPONDER_AGENTS.include?(agent_key)
 
     # 🎙️ (195) objective = "Motivo da ligação" do Agente de Ligação (opcional; só ele usa)
-    sim = Crm::AgentSimulator.new(account: Current.account, agent_key: agent_key, objective: params[:objective])
+    # 🧪 (22/09) script_version = 'v1' (Roteiro atual) ou 'v2' (paralelo) — só vale
+    # ao abrir a conversa; depois a conversa segue presa à versão em que nasceu
+    sim = Crm::AgentSimulator.new(account: Current.account, agent_key: agent_key, objective: params[:objective],
+                                  script_version: params[:script_version])
     conversation = Current.account.conversations.find_by(id: params[:conversation_id]) if params[:conversation_id].present?
     conversation = nil if conversation && !Crm::AgentSimulator.simulated?(conversation)
     conversation ||= sim.start!
@@ -488,6 +505,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       error = outcome[:error]
     end
     render json: { agent: agent_key, conversation_id: conversation.id, display_id: conversation.display_id,
+                   script_version: Crm::AgentSimulator.script_version(conversation),
                    turns: sim.transcript(conversation), error: error }
   end
 
@@ -1753,6 +1771,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       # 🗣️ rodada 188: Roteiro CEVICO (fonte única) + registro/sombra do Atendente de Agendamento
       script: Crm::CevicoScript.sections(s.account),
       script_updated_at: cfg.dig('script', 'updated_at'),
+      # 🧪 (22/09) Roteiro v2 paralelo (5 seções + passos dos 2 atendentes), só para o teste
+      script_v2: Crm::CevicoScript.sections(s.account, 'v2'),
+      script_v2_updated_at: cfg.dig('script_v2', 'updated_at'),
       responder_events: %w[atendente_agendamento atendente_pos].index_with { |k| Array(cfg.dig("#{k}_state", 'events')).first(30) },
       responder_shadow_today: %w[atendente_agendamento atendente_pos].index_with do |k|
         (cfg.dig("#{k}_state", 'shadow_days', Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s) || {}).slice('count', 'conversation_ids')

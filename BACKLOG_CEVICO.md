@@ -6171,6 +6171,112 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 199. 💬 NOVA CONVERSA EM 3 PASSOS + topo de Conversas no kit Apple (pedido 22/09) — CONSTRUÍDO, SEM commit, aguarda "pode subir"
+- Pedido: "iniciar uma conversa com um contato que temos no nosso banco de dados, através de uma nova
+  caixa de entrada — pra fazer isso é difícil; precisa ser fácil. Já vamos aproveitar a atualizar o layout."
+  Antes o único caminho era o lápis minúsculo ao lado de "Pesquisar..." (janelinha com Para → Via →
+  modelo, 3 passos escondidos; a busca por telefone só achava se digitasse +55 igualzinho).
+- **Modal "Nova conversa"** (`components-next/cevico/conversas/NovaConversaModal.vue`, montado uma vez no
+  Dashboard; abre por `openNovaConversa({ contactId?, inboxId? })` de `helper/cevicoNovaConversa.js`):
+  1) **Quem** — busca no cadastro inteiro (nome, telefone do jeito que digita, e-mail); linha com foto,
+     nome e contatos; ninguém → **Cadastro rápido** (nome + telefone/e-mail; telefone sem +55 vira +55).
+  2) **Por onde** — TODAS as caixas em cartões coloridos (cor oficial de cada caixa), cada um dizendo
+     "Já conversou por aqui · N conversas, última há X" ou "Caixa nova para esta pessoa"; caixa que não
+     serve fica apagada com o motivo ("precisa de telefone no cadastro", "só responde quem chamou
+     primeiro" etc.). Caixa aberta em Conversas já vem escolhida.
+  3) **Mensagem** — WhatsApp: faixa explicando a regra da Meta (1ª mensagem = modelo aprovado), lista de
+     modelos com o texto INTEIRO e busca, variáveis pelo `WhatsAppTemplateParser`; outros canais: texto
+     livre (+ assunto no e-mail). "Enviar e abrir a conversa" → cria e navega pra conversa.
+- **Entradas**: botão dourado "＋ Nova conversa" logo abaixo do cabeçalho da lista de Conversas
+  (com a frase "com qualquer pessoa do cadastro, por qualquer caixa"); o lápis do menu virou o mesmo
+  modal (ícone message-square-plus); o vazio da direita ("selecione uma conversa") ganhou o botão.
+  A ficha do contato continua com o compose nativo (ContactsDetailsLayout) — trocar depois se ele pedir.
+- **Topo de Conversas no kit** (`cv-page cv-overlay > cv-gold`): gatilhos Funil/Colunas CRM/Etiquetas
+  em `cv-chip` (aceso = `cv-chip-on`), janelinha em `cv-pop`, "Não lidas no topo" com chavinha
+  `cv-switch`, ordem em segmentado `cv-seg cv-seg-sm`, caixa das pílulas com cantos 2xl. Cards da lista
+  NÃO mudaram (uso pesado em produção — mudança pequena).
+- **Backend** (`contacts_controller#search`): além do ILIKE de sempre, casa o telefone SÓ PELOS DÍGITOS
+  (`regexp_replace(phone_number, '\D', '')`) quando a busca tem ≥ 4 dígitos — "11 99999-9999",
+  "99999 9999" e "5511…" acham o +5511999999999. Vale para toda busca de contatos.
+- Sem migration. Deploy WEB só. Reversão: reimplantar a imagem anterior.
+- TESTADO 22/09 no docker local (conta 3, viewport 1280 claro/escuro + 375): busca "19 99418" achou
+  +5519994180121; passo 2 com "Já conversou por aqui · 1 conversa, última há 2 meses" × "Caixa nova";
+  WhatsApp → modelo (3 variáveis) → conversa #380 criada com o texto renderizado (falha de envio esperada
+  sem Meta local); cadastro rápido "(19) 98888-7777" → +5519988887777 → canal API com texto → conversa
+  #381 (card do CRM em Novos Contatos). Dados de teste apagados. Modelos de teste ficaram na caixa 3 local
+  (boas_vindas_cevico, retomada_orcamento, pendente_meta = PENDING, não aparece).
+- Lint: eslint 0 erros nos arquivos tocados (host; sobram só prettier de template no baseline);
+  rubocop OK; rspec contacts search 9/0 (spec nova: telefone por dígitos).
+- Docker Desktop travou na abertura (backend sem socket, log parado em "shutting down vital services"):
+  `kill -9` no com.docker.backend + `open -a Docker` resolveu em 10 s.
+- **PARTE 2 (mesmo dia, tarde) — AMBIENTE DE CONVERSAS "APPLE × WHATSAPP" + RECADO DAS CORES:**
+  pedido: "vamos fazer uma reformulação e deixar esse ambiente de conversas bem amigável… aproximar do
+  WhatsApp, mas estilo Apple: super clean, limpo, elegante, divisões claras, contrastes, cores,
+  arredondado; organizar melhor o painel lateral direito do paciente (organização, visualização,
+  contraste)". Feito, SEM commit, aguarda "pode subir" (deploy WEB só):
+  · `assets/scss/_cevico-conversas.scss` (novo, importado no app.scss) = a PELE inteira sob `.cv-chat`
+    (classe na raiz do ConversationView) — tirar a classe = visual antigo. Variáveis `--ch-*` claro/escuro.
+  · LISTA (ConversationCard.vue, template reescrito): formato WhatsApp — foto redonda 44, nome na cor da
+    caixa + hora, linha da caixa/responsável, prévia + bolinha VERDE de não lidas, chip da coluna +
+    etiquetas; cartões arredondados com separador embutido; a conversa aberta = cartão dourado leve
+    com fio de ouro à esquerda.
+  · CENTRO: papel de parede cinza-Apple com pontinhos quase invisíveis, cabeçalho em vidro, avisos em
+    pílula, balões 18 px com rabinho curto (recebido BRANCO — Base.vue; enviado continua azul iMessage),
+    composer flutuante 22 px com sombra.
+  · PAINEL DO PACIENTE (ContactPanel/ContactInfo/ConversationSummaryCard/AdOriginCard reescritos):
+    título "Paciente"; cartões brancos sobre cinza Apple: 1) Identidade (foto 72 centralizada, nome,
+    "no cadastro há X", perfil completo, ações redondas com rótulo Conversa/Ligar/Editar/Mesclar/Excluir
+    — Conversa abre o modal novo com a pessoa já escolhida; telefone/e-mail em caixa; empresa/local só
+    se existir); 2) Veio de anúncio; 3) Jornada (coluna + Mover, funil, etiquetas, 3 mini-indicadores,
+    trava e previsão do follow-up); 4) Inteligência (análise + Ajuda com objeção); 5) Ligações;
+    6) gavetas Conversa / Notas / Anexos / Conversas anteriores com squircle colorido e chevron
+    (AccordionItem ganhou props `lucide`/`tone`, classe `accordion-item` e chevron no lugar do +/−).
+  · RECADO "Seu painel, as suas cores": (a) moldura arco-íris parava no meio no desktop — o
+    `.cv-block::before` tem height 44% e o `::before` do recado herdava; agora `height:auto`;
+    (b) "só uma vez": a dispensa foi para `ui_settings.cevico_notes_dismissed.dopamine_colors_v1`
+    (por PESSOA, em qualquer aparelho); localStorage ficou só de reforço.
+  · Testado no docker local: 1440/1280/1000 claro e escuro + 375 (lista, conversa com balões dos dois
+    lados e nota privada, painel do paciente inteiro); recado some após "Entendi" e não volta no reload
+    (ui_settings confirmado no banco). Vue SFC compila (checagem no host); eslint sem erros novos.
+  · FEEDBACK "gostei; prefiro azul royal bem alegre ao invés do dourado" → kit ganhou o modificador
+    `.cv-blue` (#2563eb, degradê #1d4ed8→#3b82f6); botão "Nova conversa", chips/chavinha/segmentado do
+    topo, cabeçalho do modal e o cartão da conversa aberta (fio azul) usam ele. A pílula "Todas" das
+    caixas continua dourada (decisão de 16/07: dourado reservado para "Todas") — trocar se ele pedir.
+  · FOTO DO WHATSAPP: ele perguntou se dá para ter a foto do perfil. NÃO pela API oficial da Meta
+    (Cloud API manda só número + nome do perfil; sem endpoint de foto; nenhuma liberação muda isso).
+    Instagram/Facebook já mandam foto e o sistema baixa. Espelho de WhatsApp Web (Evolution/Baileys)
+    desaconselhado (termos, risco de bloqueio, número oficial não espelha). Decisão dele: "boa ideia" →
+    **degradê alegre por pessoa** nas iniciais: `helper/cevicoPersonGradient.js` (8 pares dopamina,
+    hash do nome inteiro, cor FIXA por pessoa) + prop `gradient` no Avatar.vue (só sem foto; a foto real
+    sempre fica por cima) nos três tamanhos: cartão da lista (44), cabeçalho da conversa (32) e ficha do
+    painel (72). Testado claro/escuro.
+  · Fora: cabeçalho da conversa e composer continuam com os componentes nativos (só pele CSS);
+    ConversationChatModal do CRM e Espaço do Paciente não usam a pele.
+
+
+## 198. 📊 APRENDIZADO COM O BANCO DE PRODUÇÃO + ROTEIRO v2 PARALELO (22/09) — ANÁLISE FEITA; v2 DISPONÍVEL NO 🧪 TESTAR AGENTE (construído 22/09, SEM commit); sombra dupla AGUARDA "pode construir"
+
+**Pedido dele (22/09, nova sessão):** analisar o backup do banco (backup_cevico_antes_rodada188_20260921_1741, 65 MB gz / 300 MB) e aprender com as conversas; criar um PROMPT PARALELO para testar contra o atual.
+
+**Feito 22/09 (sem tocar em código):**
+- Dump carregado num SQLite no scratchpad da sessão (663 mil mensagens, 16 mil conversas; caixas GOOGLE=1 e INSTAGRAM=2 = 14.399 conversas de leads). Robô do N8N = usuário 1 "Guilherme, da CEVICO" (387 mil msgs); humanas = Vaneide (14,3 mil), Elizangela, Natalia, Dalila.
+- Relatório: `~/Desktop/CLAUDE CODE/CEVICO/docs/ANALISE_CONVERSAS_2026-09-22.md`. Números-chave: robô sozinho fechava 17–23% (jan–mar/26); desde julho a Vaneide entra em 3 de 4 conversas e o total ficou em 12–16% (não subiu). Maior vazamento: 703 disseram "sim" ao orçamento e só 179 agendaram; "Qual unidade e dia?" fecha 26% × "Tenho X ou Y" fecha 56–65%. Fins de semana = 24% das conversas e zero humanas; 37% dos fechamentos do robô acontecem fora do horário humano. Loops robô×robô (Claro: 2.956 msgs; anota.ai: 84). Conhecimento das humanas que o roteiro não tinha: crianças/oftalmopediatra, estrabismo, idade/21 anos, glaucoma (Dra. Roberta), esclerais, exames isolados (biometria só no Tatuapé — CONFLITA com o roteiro), pedido médico, endereço pela Al. Casa Branca 35, "me avisa se não puder vir".
+- Roteiro v2 paralelo (5 seções + passos dos atendentes A e B, pronto para colar na tela): `~/Desktop/CLAUDE CODE/CEVICO/docs/ROTEIRO_V2_PARALELO_2026-09-22.md`, com tabela "mudança → evidência" e 6 itens [CONFIRMAR].
+
+**CONSTRUÍDO 22/09 (feat/rodada-172, SEM commit, pedido "gostaria que ele estivesse disponível no ambiente de teste, testar um depois o outro; a conversa fica no ambiente de teste"):**
+- `Crm::CevicoScriptV2` (novo arquivo): padrão do v2 = 5 seções + passos dos 2 atendentes, gerado do doc ROTEIRO_V2_PARALELO (notas [CONFIRMAR] fora do prompt). `Crm::CevicoScript` ganhou versão ('v1' oficial | 'v2' paralelo): `text/sections/stage_prompt(account, version)`, `STAGE_SECTIONS` (os Passos aparecem como seções extras do v2), personalização em `ai_config['script_v2']` e `agents[key]['prompt_v2']`. Nada fora do teste lê v2.
+- Motor: `Crm::ResponderAgentService.new(..., script_version:)`; a conversa de teste nasce presa à versão (`cevico_simulado_script`) e o `AgentSimulator` passa adiante. Controller: `ai_simulate` aceita `script_version` e devolve; `update_ai` aceita `script_v2` (seções + stage_*); `ai_json` devolve `script_v2` e `script_v2_updated_at`.
+- Telas: card Roteiro CEVICO com abas **Atual | 🧪 v2 paralelo** (chip "só no teste", 7 seções no v2, salvar = "Salvar v2 paralelo (só no teste)", botão "Testar com o v2"); 🧪 Testar agente com seletor **Roteiro atual | v2 paralelo** (trocar recomeça a conversa; rodapé e balões marcam "v2"). Interruptor: erro do servidor agora aparece na tela (era "Erro ao mudar o interruptor" genérico).
+- Specs: 22 verdes (cevico_script 3 novos, responder_agent_service 1, settings_responder 2). Testado no navegador local (conta 3): v2 respondeu à abertura do anúncio com promessa do valor + 1 pergunta.
+- Deploy: WEB só (sem migration). Reversão: reimplantar etiqueta anterior. Ajuste do v2 depois do teste: "SEM emoji" na recepção e "buscar_consulta nunca no primeiro contato".
+- **Interruptor "não ativa" (relato dele 22/09):** localmente o liga/desliga responde 200 e o card muda. Em produção (2d7b2b4) o que está TRANCADO por desenho é o modo **Ao vivo** (variável CEVICO_RESPONDERS_LIVE) e o 🧪 Testar agente recusa com "Agente desligado." (corrigido no 196, ainda não implantado). Com esta versão a tela mostra o motivo exato.
+
+**Proposta para testar em produção sem risco (aguarda "pode construir"):** "Roteiro paralelo" no sistema: segunda cópia das 5 seções + passos guardada em `ai_config['script_v2']` (sem migration), com (a) seletor "Roteiro: atual | paralelo" no 🧪 Testar agente e (b) SOMBRA DUPLA: quando o atendente estiver em sombra, o job roda os dois prompts na mesma mensagem real e a tela Sombra mostra "interno v1 | interno v2 | de verdade (N8N)", com 👍/👎 por versão; contador por versão no card do agente. Ao vivo continua usando só o Roteiro oficial; "Promover v2 → oficial" com snapshot no Histórico do Roteiro (191). Custo: 2× chamadas de IA nas conversas em sombra (Sonnet 5). Reversão: apagar script_v2.
+
+**Também para o motor (fora do prompt):** trava de loop (3 mensagens iguais seguidas ou padrão de robô → pausar + aviso no Meu Painel); etiqueta "não é paciente"; Rodada 2 ao vivo começar pelo fim de semana (dados do relatório).
+
+**Disco do Mac (22/09):** Docker Desktop não sobe ("no space left on device"); Docker.raw ocupa 37 GB reais, Downloads 12 GB, Caches 8,8 GB. Sem Docker não roda o simulador local.
+
 ## 195. 🎙️ AGENTE DE LIGAÇÃO no molde dos atendentes — liga para leads NÃO RESPONSIVOS (pedido 21/09) — CONSTRUÍDO 21/09, SEM commit, aguarda "pode subir"
 - Objetivo dele: "ligar para leads não responsivos e conduzir ao agendamento (melhor) ou à conversa no
   WhatsApp; responder dúvidas". Spec: ~/Desktop/CLAUDE CODE/CEVICO/docs/RODADA_195_SPEC.md.

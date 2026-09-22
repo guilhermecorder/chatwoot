@@ -38,4 +38,35 @@ RSpec.describe Crm::CevicoScript do
       expect(prompt).to include('ok=true').and include('simulado=true')
     end
   end
+
+  # 🧪 22/09: Roteiro v2 paralelo (só para o Testar agente)
+  describe 'versão v2 (paralela)' do
+    it 'tem padrão próprio nas 5 seções, título próprio e os passos dos 2 atendentes como seções extras', :aggregate_failures do
+      text = described_class.text(account, 'v2')
+      expect(text).to include('ROTEIRO CEVICO v2')
+      expect(text).to include('Postura de quem resolve') # persona v2
+      expect(text).not_to include('{{TABELA_DE_PRECOS}}')
+      sections = described_class.sections(account, 'v2')
+      expect(sections.map { |x| x['key'] }).to eq(described_class::SECTIONS.pluck('key') + described_class::STAGE_SECTIONS.pluck('key'))
+      expect(sections.last['text']).to include('SEU PAPEL NESTA ETAPA')
+      expect(described_class.stage_prompt(account, 'atendente_agendamento', 'v2')).to include('DOIS HORÁRIOS CONCRETOS')
+    end
+
+    it 'personalização do v2 vive em script_v2 / prompt_v2 e não encosta no v1', :aggregate_failures do
+      CrmSetting.create!(account: account, ai_config: { 'script_v2' => { 'persona' => 'Persona só do v2.' },
+                                                        'agents' => { 'atendente_pos' => { 'prompt' => 'Passos v1.',
+                                                                                           'prompt_v2' => 'Passos v2.' } } })
+      expect(described_class.text(account, 'v2')).to include('Persona só do v2.')
+      expect(described_class.text(account)).to include('Guilherme, atendente da CEVICO')
+      expect(described_class.text(account)).not_to include('Persona só do v2.')
+      expect(described_class.stage_prompt(account, 'atendente_pos', 'v2')).to eq('Passos v2.')
+      expect(described_class.stage_prompt(account, 'atendente_pos')).to eq('Passos v1.')
+      expect(described_class.sections(account, 'v2').find { |x| x['key'] == 'stage_atendente_pos' }['custom']).to be(true)
+    end
+
+    it 'versão desconhecida cai no v1' do
+      expect(described_class.normalize_version('v9')).to eq('v1')
+      expect(described_class.text(account, nil)).to include('fonte única dos atendentes')
+    end
+  end
 end

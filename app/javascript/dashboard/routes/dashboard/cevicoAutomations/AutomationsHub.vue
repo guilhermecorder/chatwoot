@@ -763,9 +763,25 @@ const restoreScriptVersion = async v => {
 
 // 📜 ROTEIRO CEVICO — fonte única dos atendentes que falam com paciente.
 // Seção editada vale na hora para todos; seção em branco = padrão do sistema.
-const scriptSections = computed(() => settings.value?.ai?.script || []);
-const scriptUpdatedAt = computed(
-  () => settings.value?.ai?.script_updated_at || null
+// 🧪 22/09: duas versões no mesmo card. 'v1' = o Roteiro ATUAL (o que os
+// atendentes leem em sombra/ao vivo). 'v2' = o PARALELO, que só o 🧪 Testar
+// agente lê (Roteiro: atual | v2) — para testar um, depois o outro, sem risco.
+// No v2 os Passos dos dois atendentes aparecem como seções extras.
+const scriptVersion = ref('v1');
+const scriptIsV2 = computed(() => scriptVersion.value === 'v2');
+const SCRIPT_VERSION_TABS = [
+  { key: 'v1', label: 'Atual', hint: 'o que os atendentes leem hoje' },
+  { key: 'v2', label: '🧪 v2 paralelo', hint: 'só o Testar agente lê' },
+];
+const scriptSections = computed(() =>
+  scriptIsV2.value
+    ? settings.value?.ai?.script_v2 || []
+    : settings.value?.ai?.script || []
+);
+const scriptUpdatedAt = computed(() =>
+  scriptIsV2.value
+    ? settings.value?.ai?.script_v2_updated_at || null
+    : settings.value?.ai?.script_updated_at || null
 );
 const scriptExpanded = ref(false);
 const scriptEditing = ref(false);
@@ -783,6 +799,18 @@ const startScriptEdit = () => {
 const cancelScriptEdit = () => {
   scriptEditing.value = false;
   scriptDraft.value = {};
+};
+const pickScriptVersion = key => {
+  if (key === scriptVersion.value) return;
+  cancelScriptEdit();
+  scriptVersion.value = key;
+  scriptOpenSection.value = scriptSections.value[0]?.key || '';
+};
+// 🧪 abre o Testar agente já na versão que está aberta no card
+const testScriptVersion = ref('v1');
+const openTestWithVersion = key => {
+  testScriptVersion.value = scriptVersion.value;
+  openTestAgent(key);
 };
 const restoreScriptSection = key => {
   scriptDraft.value[key] =
@@ -804,11 +832,15 @@ const saveScript = async () => {
           : (scriptDraft.value[sec.key] || '').trim(),
       ])
     );
-    await CrmAPI.updateAi({ script: payload });
+    await CrmAPI.updateAi(
+      scriptIsV2.value ? { script_v2: payload } : { script: payload }
+    );
     await store.dispatch('crm/fetchSettings');
     scriptEditing.value = false;
     useAlert(
-      '📜 Roteiro CEVICO salvo — já vale para todos os atendentes que falam com paciente.'
+      scriptIsV2.value
+        ? '🧪 Roteiro v2 paralelo salvo — vale só no Testar agente; os atendentes continuam no Roteiro atual.'
+        : '📜 Roteiro CEVICO salvo — já vale para todos os atendentes que falam com paciente.'
     );
   } catch {
     useAlert('Erro ao salvar o Roteiro.');
@@ -1844,8 +1876,15 @@ const toggleAgent = async key => {
         ? `✅ ${AGENT_META[key].title} LIGADO — já está valendo.`
         : `⏹ ${AGENT_META[key].title} DESLIGADO — parou em todos os caminhos.`
     );
-  } catch {
-    useAlert('Erro ao mudar o interruptor do agente.');
+  } catch (e) {
+    // 22/09: mostrar o MOTIVO do servidor (403 sem ser admin, 422 de coluna
+    // repetida ou trava do ao vivo) em vez de um erro genérico
+    const msg = e?.response?.data?.error || e?.response?.data?.message;
+    useAlert(
+      msg
+        ? `Não consegui mudar o interruptor: ${msg}`
+        : 'Erro ao mudar o interruptor do agente.'
+    );
   } finally {
     togglingAgent.value = '';
   }
@@ -3909,7 +3948,9 @@ onUnmounted(() => {
                   <p class="text-base font-bold text-n-slate-12 leading-tight">
                     Roteiro CEVICO
                   </p>
-                  <span class="cv-chip">fonte única</span>
+                  <span class="cv-chip" :class="scriptIsV2 ? 'cv-amber' : ''">{{
+                    scriptIsV2 ? '🧪 v2 paralelo · só no teste' : 'fonte única'
+                  }}</span>
                   <span class="cv-chip cv-slate">
                     {{ scriptSections.filter(sec => sec.custom).length }} de
                     {{ scriptSections.length }} seções personalizadas
@@ -3948,7 +3989,42 @@ onUnmounted(() => {
             </div>
 
             <div v-if="scriptExpanded" class="cevico-agent-body">
+              <!-- 🧪 22/09: Atual × v2 paralelo -->
+              <div class="flex items-center gap-2 flex-wrap mb-3">
+                <div class="cv-seg cv-seg-sm">
+                  <button
+                    v-for="v in SCRIPT_VERSION_TABS"
+                    :key="v.key"
+                    class="cv-seg-item"
+                    :class="{ 'cv-seg-on': scriptVersion === v.key }"
+                    :title="v.hint"
+                    @click="pickScriptVersion(v.key)"
+                  >
+                    {{ v.label }}
+                  </button>
+                </div>
+                <button
+                  class="cv-btn cv-btn-sm cv-btn-ghost"
+                  title="Abre o Testar agente já com esta versão do Roteiro"
+                  @click="openTestWithVersion('atendente_agendamento')"
+                >
+                  <span class="i-lucide-flask-conical text-xs" /> Testar com
+                  {{ scriptIsV2 ? 'o v2' : 'o atual' }}
+                </button>
+              </div>
               <div
+                v-if="scriptIsV2"
+                class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed mb-3"
+              >
+                🧪 <b>Roteiro v2 paralelo</b> (análise de 22/09): mesmo processo
+                de vendas, com flexibilidade e o conhecimento da equipe. Só o
+                <b>Testar agente</b> lê esta versão (escolha "v2 paralelo" lá).
+                Nenhum atendente em sombra ou ao vivo usa o v2. Aqui também
+                ficam os <b>Passos</b> dos dois atendentes do v2. Seção em
+                branco volta ao padrão do v2.
+              </div>
+              <div
+                v-else
                 class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed mb-3"
               >
                 📌 Cada atendente lê: <b>Roteiro</b> (este card, igual para
@@ -4044,7 +4120,11 @@ onUnmounted(() => {
                   >
                     <span class="i-lucide-history text-xs" /> 🕘 Histórico
                   </button>
-                  <span class="text-[11px] text-n-slate-9">o texto acima é o que os atendentes leem hoje</span>
+                  <span class="text-[11px] text-n-slate-9">{{
+                    scriptIsV2
+                      ? 'o texto acima só entra no Testar agente (v2 paralelo)'
+                      : 'o texto acima é o que os atendentes leem hoje'
+                  }}</span>
                 </template>
                 <template v-else>
                   <button
@@ -4063,7 +4143,9 @@ onUnmounted(() => {
                     {{
                       savingScript
                         ? 'Salvando…'
-                        : 'Salvar Roteiro (vale na hora)'
+                        : scriptIsV2
+                          ? 'Salvar v2 paralelo (só no teste)'
+                          : 'Salvar Roteiro (vale na hora)'
                     }}
                   </button>
                   <button
@@ -4174,9 +4256,11 @@ onUnmounted(() => {
             :agent-key="testAgentKey"
             :agent-name="AGENT_META[testAgentKey]?.title || testAgentKey"
             :prefill="testPrefill"
+            :script-version="testScriptVersion"
             @close="
               testAgentKey = '';
               testPrefill = '';
+              testScriptVersion = 'v1';
             "
             @edit-script="openScriptFromTest"
             @guided="onGuided"
