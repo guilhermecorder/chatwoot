@@ -11,6 +11,7 @@ import SLACardLabel from './components/SLACardLabel.vue';
 import ConversationCallButton from './ConversationCallButton.vue';
 // 📞 CEVICO item 167: botão de ligar pelo NOSSO módulo (substitui o Enterprise)
 import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
+import BubbleThemePicker from 'dashboard/components-next/cevico/BubbleThemePicker.vue';
 import wootConstants from 'dashboard/constants/globals';
 import { conversationListPageURL } from 'dashboard/helper/URLHelper';
 import { snoozedReopenTime } from 'dashboard/helper/snoozeHelpers';
@@ -181,6 +182,8 @@ const copyConversationId = async () => {
         :parent-width="width"
         class="hidden md:flex"
       />
+      <!-- 🎨 item 209: tema dos balões (por pessoa) -->
+      <BubbleThemePicker />
       <CevicoCallButton
         :contact-id="currentContact?.id"
         :inbox-id="currentChat.inbox_id"

@@ -1,6 +1,13 @@
 <script>
 import { mapGetters } from 'vuex';
 import { useUISettings } from 'dashboard/composables/useUISettings';
+import {
+  BG_THEME_KEY,
+  BUBBLE_THEME_KEY,
+  DEFAULT_THEME,
+  themeVars,
+  themeClasses,
+} from 'dashboard/helper/cevicoBubbleThemes';
 import { useAccount } from 'dashboard/composables/useAccount';
 import ChatList from '../../../components/ChatList.vue';
 import ConversationBox from '../../../components/widgets/conversation/ConversationBox.vue';
@@ -69,6 +76,19 @@ export default {
     };
   },
   computed: {
+    // 🎨 item 209: a cor da pessoa nas Conversas (fundo + balões, ui_settings)
+    bgThemeKey() {
+      return this.uiSettings?.[BG_THEME_KEY] || DEFAULT_THEME;
+    },
+    bubbleThemeKey() {
+      return this.uiSettings?.[BUBBLE_THEME_KEY] || DEFAULT_THEME;
+    },
+    bubbleThemeClass() {
+      return themeClasses(this.bgThemeKey, this.bubbleThemeKey);
+    },
+    bubbleThemeStyle() {
+      return themeVars(this.bgThemeKey, this.bubbleThemeKey);
+    },
     ...mapGetters({
       chatList: 'getAllConversations',
       currentChat: 'getSelectedChat',
@@ -196,7 +216,11 @@ export default {
 
 <template>
   <!-- CEVICO 199: .cv-chat = pele "Apple × WhatsApp" do ambiente de Conversas -->
-  <section class="cv-chat flex w-full h-full min-w-0">
+  <section
+    class="cv-chat flex w-full h-full min-w-0"
+    :class="bubbleThemeClass"
+    :style="bubbleThemeStyle"
+  >
     <ChatList
       :show-conversation-list="showConversationList"
       :conversation-inbox="inboxId"

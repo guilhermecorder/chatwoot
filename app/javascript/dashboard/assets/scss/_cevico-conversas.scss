@@ -150,6 +150,37 @@
   border-radius: 18px 18px 6px 18px;
   box-shadow: 0 6px 16px -10px rgba(29, 78, 216, 0.6);
 }
+/* 🎨 item 209: TEMA DOS BALÕES por pessoa (variáveis vêm do ConversationView;
+   sem tema = nada muda). Recebido e enviado ganham o tom escolhido e a letra
+   que contrasta — inclusive links e o texto do editor dentro do balão. */
+/* leitoso (item 209b): no CLARO o fundo da conversa e da lista ganham a cor
+   da pessoa; no ESCURO só os balões mudam (fundo escuro continua) */
+.cv-chat.cv-theme-milky { --ch-bg: var(--ch-t-bg-l); }
+.cv-chat.cv-theme-milky .conversations-list-wrap { background: var(--ch-t-list-l); }
+.dark .cv-chat.cv-theme-milky { --ch-bg: #0b0d10; }
+.dark .cv-chat.cv-theme-milky .conversations-list-wrap { background: var(--ch-panel); }
+/* preto (alto contraste): as variáveis vêm inline; aqui só o que é classe
+   utilitária do Tailwind e ficaria escuro no escuro */
+.cv-chat.cv-theme-dark { color-scheme: dark; }
+.cv-chat.cv-theme-dark :is(.text-n-slate-12, .text-n-slate-11, .text-n-slate-10) { color: var(--ch-text) !important; }
+.cv-chat.cv-theme-dark :is(.text-n-slate-10, .text-n-slate-9) { color: var(--ch-muted) !important; }
+.cv-chat.cv-theme-dark :is(.bg-n-surface-1, .bg-n-solid-1, .bg-n-solid-2, .bg-white, .bg-n-background) { background-color: var(--ch-panel) !important; }
+.cv-chat.cv-theme-dark .border-n-weak { border-color: var(--ch-line) !important; }
+.cv-chat.cv-theme-dark .cv-page, .cv-chat.cv-theme-dark .cv-blue { background: var(--ch-soft); color: var(--ch-text); }
+.cv-chat.cv-theme-on { --ch-t-in: var(--ch-t-in-l); --ch-t-in-text: var(--ch-t-in-text-l); --ch-t-out: var(--ch-t-out-l); --ch-t-out-text: var(--ch-t-out-text-l); }
+.dark .cv-chat.cv-theme-on { --ch-t-in: var(--ch-t-in-d); --ch-t-in-text: var(--ch-t-in-text-d); --ch-t-out: var(--ch-t-out-d); --ch-t-out-text: var(--ch-t-out-text-d); }
+.cv-chat.cv-theme-on .message-bubble-container .left-bubble.bg-white {
+  background: var(--ch-t-in) !important;
+  color: var(--ch-t-in-text) !important;
+}
+.cv-chat.cv-theme-on .message-bubble-container .right-bubble.bg-gradient-to-br {
+  background: var(--ch-t-out) !important;
+  color: var(--ch-t-out-text) !important;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05), 0 1px 0 var(--ch-line);
+}
+.cv-chat.cv-theme-on .message-bubble-container .right-bubble.bg-gradient-to-br :is(p, span, a, li, time, strong, em, b, i, code, .prose-bubble, .text-white) {
+  color: var(--ch-t-out-text) !important;
+}
 .cv-chat .group-with-next + .message-bubble-container .left-bubble { border-top-left-radius: 6px; }
 .cv-chat .group-with-next + .message-bubble-container .right-bubble { border-top-right-radius: 6px; }
 .cv-chat .message-bubble-container { margin-bottom: 6px; }
@@ -167,7 +198,10 @@
   border-color: var(--ch-line-strong);
   background: var(--ch-panel);
   box-shadow: var(--ch-shadow);
-  overflow: hidden;
+  /* 23/09: sem overflow hidden — o seletor de emojis e as janelinhas do
+     composer são absolutos e saem por cima da caixa; com hidden viravam
+     uma tira de 1 emoji de largura (bug reportado em produção) */
+  overflow: visible;
 }
 .cv-chat .conversation-details-wrap .reply-box.is-private {
   background: #fff8e1;

@@ -184,6 +184,14 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 🤖 item 207: liga/desliga o Atendente IA do WhatsApp para ESTA conversa
+  toggleResponder(conversationId, paused) {
+    return axios.post(`${this.url}/conversation_summary/toggle_responder`, {
+      conversation_id: conversationId,
+      paused,
+    });
+  }
+
   // chave de emergência: pausa/religa o robô inteiro (aberta às atendentes)
   toggleFollowupBot(botId) {
     return axios.post(`${this.url}/followup_bots/${botId}/toggle`);

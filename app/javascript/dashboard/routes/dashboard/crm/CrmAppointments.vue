@@ -82,10 +82,23 @@ const kindBarStyle = row => ({ background: kindMeta(row).color });
 
 // ── período + filtros ──
 const period = ref({ preset: 'last7', from: '', to: '' });
-const MODES = [
+// 🔪 item 208: chavinha Consultas | Cirurgias (como na Agenda): mesmo painel,
+// outro trilho da Agenda; todas as meninas podem acompanhar as cirurgias aqui
+const track = ref('consultas'); // 'consultas' | 'cirurgias'
+const TRACK_PILL = {
+  consultas: { background: 'linear-gradient(135deg, #152C61, #3B82F6)' },
+  cirurgias: { background: 'linear-gradient(135deg, #0369A1, #38BDF8)' },
+};
+const isSurgery = computed(() => track.value === 'cirurgias');
+const noun = computed(() => (isSurgery.value ? 'cirurgia' : 'consulta'));
+const nounPlural = computed(() => (isSurgery.value ? 'cirurgias' : 'consultas'));
+const MODES = computed(() => [
   { key: 'registradas', label: 'Registradas no período' },
-  { key: 'consultas', label: 'Consultas do período' },
-];
+  {
+    key: 'consultas',
+    label: isSurgery.value ? 'Cirurgias do período' : 'Consultas do período',
+  },
+]);
 const mode = ref('registradas');
 const KINDS = [
   { key: '', label: 'Todas', tone: 'cv-blue', countKey: 'total' },
@@ -142,7 +155,7 @@ const clearFilters = () => {
 // inteiro e assim as contagens dos chips continuam certas com o filtro ligado
 const feedParams = () => {
   const p = period.value || {};
-  const params = { preset: p.preset, mode: mode.value };
+  const params = { preset: p.preset, mode: mode.value, track: track.value };
   if (p.preset === 'custom') Object.assign(params, { from: p.from, to: p.to });
   if (unit.value) params.unit = unit.value;
   if (inboxId.value) params.inbox_id = inboxId.value;
@@ -274,7 +287,7 @@ const rowClock = row => {
   return timeOf(ts) || '--:--';
 };
 const rowClockCaption = row =>
-  mode.value === 'consultas' ? 'consulta' : kindMeta(row).verb;
+  mode.value === 'consultas' ? noun.value : kindMeta(row).verb;
 
 // ── lista: filtro local + ordem + grupos por dia ──
 const groupField = computed(() =>
@@ -382,7 +395,7 @@ const saveBooking = async () => {
 //    atualização silenciosa a cada 60 s ──
 let searchTimer = null;
 let refreshTimer = null;
-watch([mode, unit, inboxId], () => fetchFeed());
+watch([mode, unit, inboxId, track], () => fetchFeed());
 watch(period, () => fetchFeed(), { deep: true });
 watch(q, () => {
   clearTimeout(searchTimer);
@@ -459,15 +472,15 @@ onBeforeUnmount(() => {
           <p class="text-xs text-n-slate-10 mb-6">
             {{
               mode === 'consultas'
-                ? 'consultas cuja data cai no período escolhido'
-                : 'o que aconteceu no período: marcações, remarcações e cancelamentos'
+                ? `${nounPlural} cuja data cai no período escolhido`
+                : `o que aconteceu no período com as ${nounPlural}: marcações, remarcações e cancelamentos`
             }}
           </p>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <DashKpi
               label="Marcadas"
               :value="Number(counts.agendada || 0)"
-              sub="consultas novas"
+              :sub="`${nounPlural} novas`"
               :from="KIND_META.agendada.color"
               :to="KIND_META.agendada.light"
               glass
@@ -650,6 +663,42 @@ onBeforeUnmount(() => {
 
           <!-- filtros -->
           <div class="flex items-center gap-2 flex-wrap mb-3">
+            <!-- 🔪 item 208: trilho Consultas | Cirurgias (mesma chavinha da Agenda) -->
+            <div
+              class="flex items-center rounded-xl p-0.5 gap-0.5 border-2 transition-colors flex-shrink-0"
+              :class="
+                isSurgery
+                  ? 'bg-sky-400/10 border-sky-400/60'
+                  : 'bg-n-solid-2 border-n-weak'
+              "
+            >
+              <button
+                class="flex items-center gap-1.5 px-3 h-7 rounded-lg text-xs font-medium transition-colors"
+                :class="
+                  !isSurgery
+                    ? 'text-white'
+                    : 'text-n-slate-11 hover:bg-n-alpha-1'
+                "
+                :style="!isSurgery ? TRACK_PILL.consultas : {}"
+                @click="track = 'consultas'"
+              >
+                <span class="i-lucide-stethoscope text-sm" />
+                Consultas
+              </button>
+              <button
+                class="flex items-center gap-1.5 px-3 h-7 rounded-lg text-xs font-semibold transition-colors"
+                :class="
+                  isSurgery
+                    ? 'text-white'
+                    : 'text-n-slate-11 hover:bg-n-alpha-1'
+                "
+                :style="isSurgery ? TRACK_PILL.cirurgias : {}"
+                @click="track = 'cirurgias'"
+              >
+                <span class="i-lucide-slice text-sm" />
+                Cirurgias
+              </button>
+            </div>
             <div
               class="cv-seg cv-seg-sm inline-flex items-center gap-0.5 max-w-full overflow-x-auto"
             >

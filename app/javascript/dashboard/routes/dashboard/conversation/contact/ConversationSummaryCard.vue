@@ -127,6 +127,48 @@ const moveToStage = async stageId => {
   }
 };
 
+// 🤖 item 207: liga/desliga o Atendente IA do WhatsApp para ESTA conversa
+// (o 👍 continua valendo, mas ia como mensagem para o paciente)
+const isTogglingResponder = ref(false);
+const toggleResponder = async () => {
+  const rs = summary.value?.responder;
+  if (isTogglingResponder.value || !rs) return;
+  isTogglingResponder.value = true;
+  try {
+    const { data } = await CrmAPI.toggleResponder(
+      props.conversationId,
+      !rs.paused
+    );
+    summary.value.responder = data.responder;
+    useAlert(
+      data.responder.paused
+        ? 'Atendente IA desligado nesta conversa.'
+        : 'Atendente IA ligado nesta conversa.'
+    );
+  } catch {
+    useAlert('Erro ao alterar o Atendente IA.');
+  } finally {
+    isTogglingResponder.value = false;
+  }
+};
+const responderLabel = computed(() => {
+  const rs = summary.value?.responder;
+  if (!rs) return '';
+  if (rs.paused) return 'Atendente IA desligado nesta conversa';
+  return rs.live
+    ? 'Atendente IA respondendo nesta conversa'
+    : 'Atendente IA em sombra nesta conversa';
+});
+const responderHint = computed(() => {
+  const rs = summary.value?.responder;
+  if (!rs) return '';
+  if (rs.paused)
+    return `${rs.reason_text || 'pausado'}${rs.by ? ` (${rs.by})` : ''} · qualquer mensagem sua também pausa; ligue aqui quando terminar`;
+  return rs.live
+    ? 'Responde ao paciente sozinho. Sua mensagem pausa; ligue aqui de novo quando terminar.'
+    : 'Só anota o que teria respondido (modo sombra).';
+});
+
 // TRAVA do follow-up: a atendente pausa as cutucadas para ESTE paciente
 // sem sair da conversa (o robô inteiro se desliga no balão do CRM/Automações)
 const isTogglingFollowup = ref(false);
@@ -364,6 +406,33 @@ const analyzedAgo = computed(() => {
             <span>última do paciente</span>
           </div>
         </div>
+
+        <!-- 🤖 item 207: ligar/desligar o Atendente IA nesta conversa -->
+        <button
+          v-if="summary.responder?.available"
+          class="w-full flex items-center justify-between gap-2 text-[11px] px-3 py-2 rounded-xl border transition-colors disabled:opacity-50 mb-2"
+          :class="
+            summary.responder.paused
+              ? 'border-amber-400/60 bg-amber-400/10 text-amber-700 dark:text-amber-400 font-semibold'
+              : 'border-emerald-400/60 bg-emerald-400/10 text-emerald-700 dark:text-emerald-400 font-semibold'
+          "
+          :disabled="isTogglingResponder"
+          :title="responderHint"
+          @click="toggleResponder"
+        >
+          <span class="flex items-center gap-1.5 min-w-0">
+            <span
+              :class="
+                summary.responder.paused ? 'i-lucide-bot-off' : 'i-lucide-bot'
+              "
+              class="text-xs flex-shrink-0"
+            />
+            <span class="truncate">{{ responderLabel }}</span>
+          </span>
+          <span class="font-bold flex-shrink-0">{{
+            summary.responder.paused ? 'Ligar' : 'Desligar'
+          }}</span>
+        </button>
 
         <!-- trava do follow-up -->
         <button
