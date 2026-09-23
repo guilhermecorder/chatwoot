@@ -6191,7 +6191,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
 - PERGUNTAS para ele: C cobre "Sem Indicação Cirúrgica"? pré-agendar = mover card com etiqueta "a
   confirmar" ou só Tarefa + aviso? quem recebe o aviso? quem aprova os textos pré/pós-operatórios?
 
-## 215. 🍎🚀 CRM NO DESIGN APPLE — quadro, colunas, cartões e ficha do paciente no kit (pedido 23/09 noite: "repaginar o nosso CRM com esse layout e design da Apple") — CONSTRUÍDO 23/09, SEM commit, aguarda "pode subir" (WEB só, sem migration)
+## 215. 🍎🚀 CRM NO DESIGN APPLE — quadro, colunas, cartões e ficha do paciente no kit (pedido 23/09 noite: "repaginar o nosso CRM com esse layout e design da Apple") — SUBIU 23/09 (commit 9ee80b1 no develop → imagem ghcr :9ee80b1, WEB só, sem migration; reversão :e4686d2)
 - PEDIDO: depois de implantar a e4686d2 ("deu certo"), "vale a pena a gente repaginar o nosso CRM
   com esse layout e design da Apple. vamos otimizá-lo". Rodada 1 do item 179 (CRM board + ficha).
 - FEITO (só visual — nenhum comportamento mudou; drag, filtros, presets, modos e modais iguais):
