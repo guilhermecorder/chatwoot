@@ -6171,6 +6171,20 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 205. 🗣️ ROTEIRO APÓS O 1º TESTE REAL DO AGENTE PRÓPRIO (pedido 22/09 23h45, prints da conversa #16309) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+- O que ele viu no teste: balões de autoridade terminando no ponto final (diálogo morre); "qual valor da consulta?" respondido só com R$ 150; e o agente disse que a CONSULTA parcela em 10x (ERRO DE FATO: consulta é só à vista); mensagens de confirmação (PS1/PS2…) num bloco corrido.
+- Mudanças nos DOIS Roteiros (v1 oficial e v2 do teste), texto PADRÃO das seções (se alguma seção estiver personalizada em produção, o padrão novo não entra nela até ela ser apagada/editada):
+  · Regras de forma: toda resposta termina com UMA pergunta que puxa o próximo passo (exceto pós-confirmação e encerramento); balão de informação nunca fica no ponto final ("…perto do Trianon-MASP. Você sabe onde fica?"); com delicadeza: uma pergunta leve, nunca duas, nunca repetida, nunca cobrando.
+  · Dados oficiais: pagamento em 10x é SÓ da cirurgia; CONSULTAS E EXAMES SEMPRE À VISTA; ao passar valores, SEMPRE O CONJUNTO cirurgia (10x sem juros) + R$ 150 da avaliação (à vista); "qual o valor da consulta?" → R$ 150 e, no mesmo balão, o investimento da cirurgia do paciente + pergunta.
+  · Objeção "Vocês parcelam?": a cirurgia sim; a consulta é à vista.
+  · Etapa do Atendente de Agendamento: autoridade com pergunta em cada balão ("Você sabe onde fica?", "Quer que eu te conte sobre o laser?"); orçamento sempre como conjunto e fechando com "Esse investimento está dentro das suas possibilidades?". v2: volta o "Você sabe onde fica?" e marca a avaliação à vista.
+  · Confirmação (Mensagem 1 e 2): CADA FRASE EM UMA LINHA (quebra real após cada ponto final, linha em branco entre blocos). Âncora "Consulta confirmada:" continua na 1ª linha (BookingSideEffects intacto).
+- 2º feedback (23/09 00h, print #16309, remarcação): o agente REMARCOU para 15:00 e só depois avisou, quando o paciente tinha PERGUNTADO "Tem as 16h?? Ou final de dia?". Regra dele: chegar ao horário JUNTO com o paciente → ele confirma → aí remarca → mensagem oficial → encerra. Feito em duas camadas:
+  · TRAVA NA FERRAMENTA (Crm::ResponderTools#remarcar): se a última fala do paciente tem "?", recusa com motivo ("o paciente fez uma pergunta, não confirmou; pergunte 'Fica bom pra você [dia] às [hora]?' e espere o sim") — vale ao vivo e em sombra, texto ou áudio transcrito. Spec nova em responder_tools_spec.
+  · ROTEIRO (etapa do Pós-agendamento, v1 e v2): passo 3 "chegue ao horário junto com o paciente" (pergunta/contraproposta ≠ confirmação; só remarca depois do sim explícito; nunca remarca e avisa depois); passo 4 mensagem OFICIAL de remarcação, cada frase em uma linha, sem pergunta no fim (encerra; começa com "Prontinho, remarquei!" para manter a âncora); passo 5 obedece o motivo da ferramenta.
+  · DESMARCOU / NÃO FOI (pedido dele: "neste mesmo agente, follow-ups de quem desmarcou ou não foi"): seção nova na etapa do Pós-agendamento — quando o paciente responde à cutucada do robô, o agente ajuda a remarcar com cordialidade, sem cobrar motivo, afunilando e confirmando; como não há consulta futura para mover, usa agendar=true (o sistema cria a consulta nova + confirmação oficial + etiqueta + card). Card: ResponderAgentJob#book! usa a coluna "Ao agendar, mover para" do próprio card ou, vazia, a do Atendente de Agendamento. PRÉ-REQUISITO NA TELA: as colunas "Desmarcou a Consulta" e "Não Foi a Consulta" precisam estar nas colunas do card Pós-agendamento (ele configura), e os robôs de follow-up dessas colunas seguem mandando a cutucada.
+- Testes: cevico_script_spec + responder_agent_service_spec + responder_tools_spec + responder_agent_job_spec verdes. Reversão: imagem anterior.
+
 ## 204. 👂🖼️ ÁUDIO E IMAGEM DO PACIENTE LIDOS PELO AGENTE PRÓPRIO (pedido 22/09, 22h40, "muitíssimo importante, quero deixar pronto pra amanhã") — CONSTRUÍDO 22/09 noite na feat/rodada-172, SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, sem migration, sem variável nova)
 - Contexto: a migração do N8N para o agente próprio foi FEITA e testada por ele em 22/09 à noite (CEVICO_RESPONDERS_LIVE=true,
   imagem 3617e2b, N8N + webhook desligados). Lacuna que sobrou: o N8N transcrevia áudio (OpenAI) e descrevia foto; o agente
@@ -6200,7 +6214,8 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   ordem frágil de um exemplo do job (order(:id)).
 - Reversão: imagem anterior (3617e2b). Sem migration.
 
-## 203. 🙈 BOTÃO "RECOLHER" NO TOPO DE CONVERSAS (pedido 22/09, 21h40, print do FECHAMENTO) — AGUARDA "pode construir" (SESSÃO NOVA)
+## 203. 🙈 BOTÃO "RECOLHER" NO TOPO DE CONVERSAS (pedido 22/09, 21h40, print do FECHAMENTO) — CONSTRUÍDO 23/09 00h30 ("não está subido" = vai junto com 204/205), SEM commit, aguarda "pode subir" (WEB só)
+- Feito em ChatList.vue: chevron (↑) no canto direito da linha "Nova conversa" recolhe o topo inteiro (Nova conversa, pílulas das caixas, chips Funil/Colunas CRM/Etiquetas, chavinha Não lidas, ordem) numa linha só: botão azul royal (↓) + resumo do que está valendo ("Todas as caixas · Agendamento de Consulta · não lidas no topo") + atalho "+" da Nova conversa. Lembra a escolha no navegador da pessoa (localStorage cevico_conversas_topo_recolhido, mesmo padrão da largura da lista). Os filtros continuam valendo recolhidos (só somem da vista). Visto no navegador local.
 - Pedido: "quero um botão 'recolher', para deixar mais clean a visualização de CONVERSAS". O topo (botão Nova
   conversa + frase, pílulas das caixas, chips Funil/Colunas CRM/Etiquetas, chavinha Não lidas, segmentado de ordem)
   ocupa quase metade da coluna da lista.

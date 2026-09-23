@@ -280,7 +280,8 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       # item 200: etiqueta + card na coluna (a do card do agente ou a da tela Agendamentos)
       effects = Crm::BookingSideEffects.apply(account: account, contact: conversation.contact, conversation: conversation,
                                               outcome: outcome == :rescheduled ? :rescheduled : :created,
-                                              stage_id: cfg['after_booking_stage_id'])
+                                              stage_id: cfg['after_booking_stage_id'].presence ||
+                                                        agent_cfg(account, 'atendente_agendamento')['after_booking_stage_id'])
       effects_text = Crm::BookingSideEffects.summary(effects)
       conversation.messages.create!(
         account_id: account.id, inbox_id: conversation.inbox_id, message_type: :activity, private: true,

@@ -89,7 +89,20 @@ RSpec.describe Crm::ResponderTools do
   describe 'remarcar_consulta' do
     let!(:task) { consulta('Consulta: Maísa Teste', today_14 + 1.day, phone: '+5511988887777', description: 'Valor da consulta: R$ 150') }
     let(:slot) { Crm::AgendaSlots.free_slots(account, days: 10, per_window: 1).first }
+
+    # 23/09 (teste real #16309): pergunta do paciente ("Tem as 16h?? Ou final de dia?") nunca é confirmação
     let(:input) { { id: task.id, dia: slot[:date].to_s, hora: slot[:time], unidade: slot[:unit] } }
+
+    it 'recusa quando a última fala do paciente é uma pergunta (ainda não confirmou o horário)', :aggregate_failures do
+      before_due = task.due_at
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: 'Tem as 16h?? Ou final de dia?')
+      tools_obj = tools(live: true)
+      result = tools_obj.call('remarcar_consulta', input)
+      expect(result[:ok]).to be(false)
+      expect(result[:motivo]).to include('não confirmou').and include('Fica bom pra você')
+      expect(task.reload.due_at).to eq(before_due)
+      expect(tools_obj.acoes.last).to include('ferramenta' => 'remarcar_consulta', 'ok' => false)
+    end
 
     it 'em SOMBRA só valida a vaga e não escreve nada', :aggregate_failures do
       tools_obj = tools(live: false)

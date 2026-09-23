@@ -51,9 +51,10 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
       },
       {
         name: 'remarcar_consulta',
-        description: 'Move uma consulta existente para outro dia/hora/unidade. Use SÓ depois de o paciente confirmar dia, hora ' \
-                     'e unidade de um horário presente em HORÁRIOS DISPONÍVEIS. Devolve ok=true quando remarcou; ok=false com ' \
-                     'motivo quando a vaga não está livre (ofereça outra).',
+        description: 'Move uma consulta existente para outro dia/hora/unidade. Use SÓ depois de o paciente dizer SIM a um horário ' \
+                     'específico que você propôs ("Fica bom pra você [dia] às [hora]?"). Pergunta ou contraproposta dele ("tem 16h?", ' \
+                     '"final do dia?") NÃO é confirmação: responda e pergunte de novo. Devolve ok=true quando remarcou; ok=false com ' \
+                     'motivo quando a vaga não está livre (ofereça outra) ou quando o paciente ainda não confirmou.',
         input_schema: {
           type: 'object',
           properties: {
@@ -206,6 +207,15 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   # ── remarcar ────────────────────────────────────────────────────────────
+  # última fala do paciente termina em pergunta? (texto; áudio transcrito também conta)
+  def patient_asked_question?
+    last = @conversation.messages.where(message_type: :incoming).reorder(created_at: :desc).first
+    return false if last.blank?
+
+    text = [last.content.to_s, *last.attachments.map { |a| a.meta&.[]('transcribed_text').to_s }].join(' ').strip
+    text.include?('?')
+  end
+
   def remarcar(args) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     task = find_task(args['id'])
     return not_found('remarcar_consulta') unless task
@@ -218,6 +228,14 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     end
 
     label = "#{WEEKDAYS_SHORT[date.wday]} #{date.strftime('%d/%m')} #{time} · #{unit_label(unit)}"
+    # 23/09 (teste real #16309): o agente remarcou para 15:00 quando o paciente
+    # perguntou "Tem as 16h?? Ou final de dia?". Pergunta nunca é confirmação:
+    # a última fala do paciente com "?" trava a ferramenta até ele dizer sim.
+    if patient_asked_question?
+      return refuse('remarcar_consulta', 'O paciente fez uma PERGUNTA, não confirmou este horário. Responda o que ele perguntou ' \
+                                         "e pergunte \"Fica bom pra você #{label}?\". Só remarque depois do sim dele.")
+    end
+
     unless @live
       free = Crm::AgendaSlots.slot_available?(@account, date: date, time: time, unit: unit)
       log_acao('remarcar_consulta', free, "remarcaria #{patient_name(task)} p/ #{label} (simulado#{free ? '' : ', vaga ocupada'})")
