@@ -6171,6 +6171,49 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 209. 🎨 A COR DE CADA UMA NAS CONVERSAS — fundo leitoso + balões, escolhas independentes (pedidos 23/09 10h15–10h40; sugestões das meninas: Vaneide Bondi blue bebê, Elizangela roxo bebê, Dalila soft pink, Natalia amarelo soft) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só)
+- Botão de paleta no cabeçalho da conversa (ao lado do telefone) abre "A sua cor nas Conversas" com DUAS escolhas que se
+  combinam à vontade: FUNDO (bolinhas: Padrão · Bondi blue bebê · Azul bebê · Roxo bebê · Soft pink · Amarelo soft ·
+  Verde bebê · Laranja soft · Cinza leve · Preto alto contraste) e BALÕES (pares recebido/enviado nos mesmos tons + Padrão
+  azul royal + Preto com letra branca). Cada clique salva na hora. Escolha É DA PESSOA (ui_settings cevico_bg_theme e
+  cevico_bubble_theme), não da clínica: segue no PC e no celular.
+- Como pinta: ConversationView põe as variáveis na raiz .cv-chat e classes cv-theme-milky / cv-theme-dark / cv-theme-on;
+  _cevico-conversas.scss: fundo leitoso pinta a conversa (--ch-bg) e a lista (mais claro) só no modo claro (no escuro o
+  fundo segue escuro e só os balões mudam); Preto força o ambiente inteiro escuro com letra branca (variáveis inline +
+  ajuste das classes utilitárias de texto/fundo dentro do .cv-chat); balões trocam fundo e letra do recebido
+  (.left-bubble.bg-white) e do enviado (.right-bubble.bg-gradient-to-br), links inclusos. Tons com contraste de leitura.
+- Conferido no navegador local (cores computadas). Peças: helper/cevicoBubbleThemes.js, components-next/cevico/
+  BubbleThemePicker.vue, ConversationHeader.vue, ConversationView.vue, _cevico-conversas.scss.
+
+## 208. 🔪 CHAVINHA CONSULTAS | CIRURGIAS NO PAINEL AGENDAMENTOS (pedido 23/09 10h, "assim todas as meninas podem usar este ambiente") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só)
+- A mesma chavinha da Agenda (estetoscópio | bisturi, azul-claro no trilho de cirurgias), no bloco de filtros do painel
+  Agendamentos. Backend: `GET crm/appointments/feed?track=consultas|cirurgias` (task_type 'consulta' | 'cirurgia'; mesmos
+  modos "Registradas no período" / "do período", mesmos chips marcadas/remarcadas/canceladas). Sem valores de cirurgia no
+  feed: aberto ao time inteiro. Textos do painel seguem o trilho ("cirurgias do período", "cirurgias novas"). Spec no
+  appointments_controller_spec.
+
+## 207. 🤖 BOTÃO "LIGAR/DESLIGAR IA PARA ESTA PESSOA" DENTRO DA CONVERSA (pedido 23/09 09h55, "religar a IA sem precisar do emoji") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só)
+- No card Resumo do painel do paciente (ConversationSummaryCard), acima da trava do follow-up: botão verde "Atendente IA
+  respondendo nesta conversa · Desligar" / âmbar "Atendente IA desligado nesta conversa · Ligar" (em sombra: "em sombra").
+  Tooltip explica o motivo (pausou sozinho quando o humano respondeu / o agente pediu humano / desligado pelo botão, por quem).
+  Só aparece em caixa atendida por um Atendente ligado. Backend: `POST crm/conversation_summary/toggle_responder
+  {conversation_id, paused}` grava o MESMO estado do 👍/mensagem humana (cevico_atendente_wa) + nota interna com o nome;
+  `GET conversation_summary` traz `responder {available, live, paused, reason, reason_text, by, at}`. O 👍 continua valendo,
+  mas ia como mensagem para o paciente. Notas do ⏸ (listener e job) agora dizem "ligue de novo pelo botão do painel (ou 👍)".
+  Lembrete de uso: qualquer mensagem humana pausa de novo; ligar é o último passo depois de conversar. Spec própria.
+
+## 206. 😀 BUG DOS EMOJIS EM CONVERSAS + PÓS-AGENDAMENTO CONCLUI A REMARCAÇÃO (pedidos 23/09 09h45, prints) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+- EMOJIS: o seletor saía como uma tira de 1 emoji de largura em cima da caixa de resposta. Causa: a pele `.cv-chat` do
+  item 199 pôs `overflow: hidden` no `.reply-box` (cantos de 22 px), e o seletor é `absolute w-[22rem]` acima da caixa →
+  cortado. Fix: `overflow: visible` (_cevico-conversas.scss). Visto no navegador local: seletor inteiro de novo.
+- REMARCAÇÃO (conversa #14649): paciente disse "Ók" ao horário proposto e o agente respondeu "vou verificar com a
+  equipe" + chamar_humano, em vez de remarcar. Pedido dele: "quero que ele conclua os reagendamentos, se houver horário
+  na agenda". Fix em 2 lugares: (a) RESPONDER_GUARDRAIL: fora da lista, quem tem horarios_do_dia consulta a ferramenta
+  (só sem ferramenta é que "verifica com a equipe"); (b) Roteiros v1/v2, etapa do Pós-agendamento, passo 0 do REMARCAR:
+  "quem conclui a remarcação é você; havendo vaga, remarca na hora; nunca 'vou verificar com a equipe' nem humano por
+  horário; chamar_humano só se a ferramenta falhar de verdade ou por caso clínico/urgência".
+- Testes: cevico_script_spec + responder_agent_service_spec + responder_tools_spec verdes (31). Reversão: imagem anterior.
+
 ## 205. 🗣️ ROTEIRO APÓS O 1º TESTE REAL DO AGENTE PRÓPRIO (pedido 22/09 23h45, prints da conversa #16309) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
 - O que ele viu no teste: balões de autoridade terminando no ponto final (diálogo morre); "qual valor da consulta?" respondido só com R$ 150; e o agente disse que a CONSULTA parcela em 10x (ERRO DE FATO: consulta é só à vista); mensagens de confirmação (PS1/PS2…) num bloco corrido.
 - Mudanças nos DOIS Roteiros (v1 oficial e v2 do teste), texto PADRÃO das seções (se alguma seção estiver personalizada em produção, o padrão novo não entra nela até ela ser apagada/editada):

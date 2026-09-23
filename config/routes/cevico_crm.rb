@@ -70,6 +70,7 @@ namespace :crm do
     post :sales_help
     post :move_stage
     post :toggle_followup
+    post :toggle_responder
   end
   # Radar de Oportunidades: "Atender agora" tira o aviso da fila
   # (se o paciente seguir sem resposta, a próxima auditoria recoloca)

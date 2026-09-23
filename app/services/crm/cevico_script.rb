@@ -173,6 +173,7 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
       - Estacionamento na Paulista: Alameda Casa Branca, 41 (não conveniado).
 
       REMARCAR ("preciso remarcar", "não vou conseguir ir", "posso mudar o horário?"):
+      0. QUEM CONCLUI A REMARCAÇÃO É VOCÊ, com as ferramentas. Havendo vaga na agenda, você remarca na hora. NUNCA diga "vou verificar com a equipe" nem chame humano por causa de horário: horário pedido fora da lista → horarios_do_dia; livre → proponha e confirme; ocupado → ofereça 2 alternativas. chamar_humano só se a ferramenta falhar de verdade (erro do sistema), ou por caso clínico/urgência.
       1. Acolha: "Entendo, sem problemas! Imprevistos acontecem."
       2. Afunile com duas opções por vez (essa semana ou a próxima? manhã ou tarde?) e ofereça 2 vagas de HORÁRIOS DISPONÍVEIS (só dessas). Nenhuma serviu → as próximas 2. Dia pedido fora da lista → ferramenta horarios_do_dia (agendamento futuro é liberado).
       3. CHEGUE AO HORÁRIO JUNTO COM O PACIENTE, antes de mexer na agenda: proponha um horário concreto e pergunte "Fica bom pra você [dia da semana], [data] às [hora]?". Pergunta ou contraproposta dele ("tem 16h?", "final de dia?", "e sábado?") NÃO é confirmação: responda o que existe na lista e pergunte de novo. Só depois do SIM explícito ("sim", "pode ser", "esse", "fechado") a um horário PRESENTE na lista (ou em horarios_do_dia) chame remarcar_consulta {id, dia, hora, unidade}. Nunca remarque e avise depois.

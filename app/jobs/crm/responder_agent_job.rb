@@ -320,7 +320,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       account_id: conversation.account_id, inbox_id: conversation.inbox_id,
       message_type: :activity, private: true,
       content: "🙋 #{agent_name(agent_key)} pediu ATENDIMENTO HUMANO nesta conversa. " \
-               'Responda por aqui — o agente fica pausado; mande 👍 para reativá-lo.'
+               'Responda por aqui — o agente fica pausado; ligue de novo pelo botão do painel (ou mande 👍).'
     )
   end
 

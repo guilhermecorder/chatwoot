@@ -21,6 +21,9 @@ RSpec.describe 'CEVICO Appointments feed', type: :request do
     account.tasks.create!(title: 'Consulta: Carla Dias', task_type: 'consulta', unit: 'paulista', creator: admin,
                           due_at: tz.now + 6.days, canceled_at: Time.current)
     account.tasks.create!(title: 'Ligar para fornecedor', task_type: 'ligacao', creator: admin)
+    # 🔪 item 208: cirurgia fica no trilho de cirurgias (track=cirurgias), fora do de consultas
+    account.tasks.create!(title: 'Cirurgia: Eva Prado', task_type: 'cirurgia', unit: 'iop', creator: admin,
+                          contact: contact, due_at: tz.now + 8.days, description: 'catarata OD')
     # tarefa de revisão do Secretário (sem data) fica fora do painel
     account.tasks.create!(title: '⚠️ Confirmar consulta: Dora', task_type: 'consulta', creator: admin, contact: contact)
   end
@@ -73,5 +76,22 @@ RSpec.describe 'CEVICO Appointments feed', type: :request do
     expect(cfg['stage_id']).to eq(stage.id)
     expect(cfg['cancel_stage_id']).to be_nil
     expect(cfg['labels']['created']).to eq('consultamarcada')
+  end
+
+  # 🔪 item 208 (23/09): chavinha Consultas | Cirurgias no painel
+  it 'track=cirurgias lista só as cirurgias (e o padrão só as consultas)', :aggregate_failures do
+    get base, params: { preset: 'custom', from: tz.today.to_s, to: (tz.today + 12).to_s, mode: 'consultas' }, headers: agent.create_new_auth_token, as: :json
+    names = response.parsed_body['rows'].pluck('name')
+    expect(names).to include('Ana Souza')
+    expect(names).not_to include('Eva Prado')
+    expect(response.parsed_body['track']).to eq('consultas')
+
+    get base, params: { preset: 'custom', from: tz.today.to_s, to: (tz.today + 12).to_s, mode: 'consultas', track: 'cirurgias' },
+              headers: agent.create_new_auth_token, as: :json
+    rows = response.parsed_body['rows']
+    expect(rows.pluck('name')).to eq(['Eva Prado'])
+    expect(rows.first).to include('kind' => 'agendada', 'unit' => 'iop')
+    expect(rows.first.keys).not_to include('price', 'valor')
+    expect(response.parsed_body['track']).to eq('cirurgias')
   end
 end

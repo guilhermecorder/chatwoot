@@ -81,6 +81,25 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
     render json: { followup: followup_json }
   end
 
+  # POST /crm/conversation_summary/toggle_responder — 🤖 item 207 (23/09):
+  # botão "ligar/desligar a IA para esta pessoa" dentro da conversa. Mesmo
+  # estado que o 👍/mensagem humana usam (cevico_atendente_wa), com nota
+  # interna dizendo quem foi. Assim a equipe conversa com o paciente e religa
+  # o Atendente sem mandar emoji para ele.
+  def toggle_responder
+    paused = ActiveModel::Type::Boolean.new.cast(params[:paused])
+    value = paused ? { 'paused' => true, 'reason' => 'botao', 'by' => Current.user.name, 'at' => Time.current.iso8601 } : {}
+    Cevico::AttributeMerge.merge!(@conversation) { |attrs| attrs.merge(Crm::ResponderAgentJob::STATE_KEY => value) }
+    note = if paused
+             "⏸ Atendente IA do WhatsApp DESLIGADO nesta conversa por #{Current.user.name} (botão do painel)."
+           else
+             "▶️ Atendente IA do WhatsApp LIGADO nesta conversa por #{Current.user.name} (botão do painel)."
+           end
+    @conversation.messages.create!(account_id: @conversation.account_id, inbox_id: @conversation.inbox_id,
+                                   message_type: :activity, private: true, content: note)
+    render json: { responder: responder_json }
+  end
+
   private
 
   def conversation
@@ -94,12 +113,37 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
       metrics: metrics_json,
       ai: @conversation.additional_attributes&.[]('ai_insight'),
       ai_configured: ai_configured?,
-      followup: followup_json
+      followup: followup_json,
+      responder: responder_json
     }
   end
 
   # estado do follow-up para ESTA conversa: pausado para o paciente? e quais
   # robôs alcançam esta conversa (por coluna do card ou por caixa)
+  # 🤖 estado do Atendente IA do WhatsApp NESTA conversa (item 207)
+  REASON_TEXT = {
+    'humano_assumiu' => 'pausou sozinho quando o atendimento humano respondeu',
+    'chamar_humano' => 'o agente pediu atendimento humano',
+    'botao' => 'desligado pelo botão'
+  }.freeze
+
+  def responder_json # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    cfg = CrmSetting.find_by(account: Current.account)&.ai_config || {}
+    agents = (cfg['agents'] || {}).slice(*CrmListener::RESPONDER_KEYS).select do |_k, a|
+      a['enabled'] == true && Array(a['inbox_ids']).map(&:to_i).include?(@conversation.inbox_id)
+    end
+    state = @conversation.additional_attributes&.[](Crm::ResponderAgentJob::STATE_KEY) || {}
+    {
+      available: agents.any?,
+      live: agents.values.any? { |a| Crm::ResponderAgentJob.live_mode?(a) },
+      paused: state['paused'] == true,
+      reason: state['reason'],
+      reason_text: REASON_TEXT[state['reason'].to_s] || state['reason'],
+      by: state['by'],
+      at: state['at']
+    }
+  end
+
   def followup_json
     paused = @conversation.contact&.additional_attributes&.[]('cevico_followup_paused')
     {

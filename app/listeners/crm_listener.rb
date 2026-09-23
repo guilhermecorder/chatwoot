@@ -336,7 +336,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
         note_instagram(conversation, '▶️ Atendente IA do WhatsApp reativado nesta conversa (👍 do atendimento).')
       elsif !state['paused']
         set_responder_pause(conversation, true, reason: 'humano_assumiu')
-        note_instagram(conversation, '⏸ Atendente IA do WhatsApp pausado — o atendimento humano assumiu esta conversa. Mande 👍 para reativar.')
+        note_instagram(conversation, '⏸ Atendente IA do WhatsApp pausado — o atendimento humano assumiu esta conversa. Ligue de novo pelo botão do painel (ou mande 👍).')
       end
     end
   rescue StandardError => e

@@ -18,7 +18,10 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   def feed # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     since, until_at = standard_period_range || custom_period_range
     mode = params[:mode] == 'consultas' ? 'consultas' : 'registradas'
-    tasks = base_scope(since, until_at, mode).includes(:contact, :assignee, :creator).limit(LIMIT).to_a
+    # 🔪 item 208 (23/09): chavinha Consultas | Cirurgias, como na Agenda —
+    # mesmo painel, outro trilho (task_type 'cirurgia'); sem valores, aberto ao time
+    track = params[:track] == 'cirurgias' ? 'cirurgia' : 'consulta'
+    tasks = base_scope(since, until_at, mode, track).includes(:contact, :assignee, :creator).limit(LIMIT).to_a
     rows = build_rows(tasks)
     rows = rows.select { |r| r[:kind] == params[:kind] } if KINDS.include?(params[:kind].to_s)
     rows = rows.select { |r| r[:unit] == params[:unit] } if params[:unit].present?
@@ -26,7 +29,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     rows = filter_query(rows, params[:q])
 
     render json: {
-      mode: mode, since: since, until: until_at, rows: rows, counts: counts(rows),
+      mode: mode, track: track == 'cirurgia' ? 'cirurgias' : 'consultas', since: since, until: until_at, rows: rows, counts: counts(rows),
       booking: booking_json
     }
   end
@@ -35,10 +38,10 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
 
   # registradas = ACONTECEU no período (marcou/remarcou/cancelou);
   # consultas = a consulta É no período (o dia dela)
-  def base_scope(since, until_at, mode)
+  def base_scope(since, until_at, mode, track = 'consulta')
     # tarefas de REVISÃO do Secretário ("⚠️ Confirmar consulta…", sem data) não
     # são consultas marcadas: ficam em Tarefas, fora deste painel
-    scope = Current.account.tasks.where(task_type: 'consulta', archived_at: nil).where.not(due_at: nil)
+    scope = Current.account.tasks.where(task_type: track, archived_at: nil).where.not(due_at: nil)
                    .where("title NOT LIKE '⚠️%'")
     return scope.where(due_at: since..until_at).order(:due_at) if mode == 'consultas'
 
@@ -62,7 +65,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
         unit_label: Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit,
         doctor: t.doctor,
         procedure: t.procedure,
-        name: t.title.to_s.sub(/\AConsulta:\s*/i, '').strip.presence || contact&.name || 'Paciente',
+        name: t.title.to_s.sub(/\A(Consulta|Cirurgia):\s*/i, '').strip.presence || contact&.name || 'Paciente',
         phone: t.phone.presence || contact&.phone_number,
         source: t.description.to_s.match?(IA_MARKS) ? 'ia' : 'equipe',
         rescheduled_count: t.rescheduled_count,
