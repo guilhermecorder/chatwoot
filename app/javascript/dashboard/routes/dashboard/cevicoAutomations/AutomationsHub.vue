@@ -492,6 +492,7 @@ const ATENDENTE_EVENT_LABELS = {
   agendou: '📅 agendou e pausou',
   horario_invalido: '⚠️ horário não validou',
   teto_sombra: '🛑 teto de conversas/dia da sombra',
+  midia: '👂 leu áudio/imagem do paciente',
   teto_diario: '🛑 teto diário — pausado',
   erro: '❌ erro',
 };
@@ -499,6 +500,10 @@ const shadowTodayConversations = key =>
   (settings.value?.ai?.responder_shadow_today?.[key]?.conversation_ids || [])
     .length;
 const liveEnabled = computed(() => settings.value?.ai?.live_enabled === true);
+// 👂🖼️ item 204: áudio/imagem do paciente lidos pelo Gemini (chave em Integrações → IA)
+const geminiKeySet = computed(
+  () => settings.value?.ai?.gemini_key_set === true
+);
 // 🟢 rodada 193: JANELA AO VIVO por dia da semana + horas. Fora da janela o
 // agente continua em sombra (aprendendo). live_days vazio = todos os dias.
 const LIVE_DAYS = [
@@ -1905,6 +1910,11 @@ const toggleAgent = async key => {
 const aiUsage = ref(null);
 const usageByAgent = key =>
   (aiUsage.value?.by_agent || []).find(r => r.key === key) || null;
+// gastos que não são de um card de agente (Gemini): nome legível na lista
+const EXTRA_USAGE_TITLES = {
+  media_reading: 'Leitura de áudio e imagem (Gemini)',
+  creatives_video_transcription: 'Transcrição de vídeo dos criativos (Gemini)',
+};
 const fmtUsd = v => `US$ ${(v || 0).toFixed(2)}`;
 const fmtTokens = v =>
   v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v || 0);
@@ -3932,7 +3942,9 @@ onUnmounted(() => {
                   }"
                 />
                 <span class="font-semibold text-n-slate-12 w-48 truncate">{{
-                  AGENT_META[row.key]?.title || row.key
+                  AGENT_META[row.key]?.title ||
+                  EXTRA_USAGE_TITLES[row.key] ||
+                  row.key
                 }}</span>
                 <span>{{ row.calls }} {{ usageNoun(row.key) }}</span>
                 <span class="text-n-slate-9">· {{ fmtTokens(row.input_tokens) }} tokens entrada ·
@@ -4979,6 +4991,34 @@ onUnmounted(() => {
                             Entre 5 e 10 s parece humano e junta mensagens
                             picadas.
                           </p>
+                        </div>
+                        <div
+                          class="sm:col-span-3 flex items-start gap-2 text-[11px] leading-snug rounded-lg px-3 py-2"
+                          :class="
+                            geminiKeySet
+                              ? 'bg-n-alpha-1 text-n-slate-11'
+                              : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                          "
+                        >
+                          <span
+                            :class="
+                              geminiKeySet
+                                ? 'i-lucide-ear'
+                                : 'i-lucide-triangle-alert'
+                            "
+                            class="text-sm shrink-0 mt-px"
+                          />
+                          <span v-if="geminiKeySet">
+                            <b>Áudio e imagem:</b> o sistema transcreve os
+                            áudios e lê as imagens que o paciente manda (Gemini)
+                            antes de o agente responder. A equipe vê o texto
+                            embaixo do anexo, na conversa.
+                          </span>
+                          <span v-else>
+                            <b>Áudio e imagem:</b> configure a chave do Gemini
+                            em Integrações → IA para o agente ouvir áudios e ler
+                            imagens. Sem ela, ele pede para o paciente escrever.
+                          </span>
                         </div>
                         <div>
                           <label
