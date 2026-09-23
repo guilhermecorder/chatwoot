@@ -171,6 +171,22 @@ onMounted(() => {
 // direita; arrastou, a escolha vale só neste navegador (localStorage);
 // duplo clique volta ao automático. Assim cada atendente encaixa as
 // caixas/filtros do jeito que preferir.
+// CEVICO 203 (23/09): botão RECOLHER — o topo (Nova conversa, caixas,
+// filtros, ordem) vira uma linha só; a escolha fica no navegador da pessoa
+const HEADER_COLLAPSED_KEY = 'cevico_conversas_topo_recolhido';
+const ROYAL_BLUE = { background: 'linear-gradient(135deg, #152C61, #3B82F6)' };
+const headerCollapsed = ref(localStorage.getItem(HEADER_COLLAPSED_KEY) === '1');
+const toggleHeaderCollapsed = () => {
+  headerCollapsed.value = !headerCollapsed.value;
+  try {
+    localStorage.setItem(
+      HEADER_COLLAPSED_KEY,
+      headerCollapsed.value ? '1' : '0'
+    );
+  } catch {
+    // navegador sem armazenamento: só não lembra
+  }
+};
 const LIST_WIDTH_KEY = 'cevico_conversas_largura';
 const listWrapEl = ref(null);
 const listWidth = ref(Number(localStorage.getItem(LIST_WIDTH_KEY)) || 0);
@@ -878,6 +894,22 @@ const journeyOrder = computed({
     onBasicFilterChange(value, 'sort');
   },
 });
+// CEVICO 203: o que está valendo com o topo recolhido, em uma linha: caixas + filtros ativos
+const collapsedSummary = computed(() => {
+  const ids = activeInboxSet.value;
+  const names = pillInboxes.value
+    .filter(ib => ids.has(ib.id))
+    .map(ib => ib.name);
+  const caixas = names.length ? names.join(', ') : 'Todas as caixas';
+  const filtros = [
+    selectedJourneyPipeline.value?.name,
+    selectedJourneyStage.value?.name,
+    journeyLabel.value,
+    isUnreadFirst.value ? 'não lidas no topo' : null,
+  ].filter(Boolean);
+  return filtros.length ? `${caixas} · ${filtros.join(' · ')}` : caixas;
+});
+
 function toggleUnreadFirst() {
   const next = isUnreadFirst.value
     ? wootConstants.SORT_BY_TYPE.LAST_ACTIVITY_AT_DESC
@@ -1183,7 +1215,37 @@ watch(conversationFilters, (newVal, oldVal) => {
     <!-- CEVICO 199 (22/09): NOVA CONVERSA à mão — com qualquer pessoa do
          cadastro, por qualquer caixa. Abre o modal em 3 passos; a caixa
          aberta em Conversas já vem escolhida no passo 2 -->
-    <div class="cv-page cv-overlay mx-3 mb-2 flex-shrink-0">
+    <!-- CEVICO 203 (23/09): topo RECOLHIDO — uma linha com o que está valendo -->
+    <div
+      v-if="headerCollapsed"
+      class="cv-page cv-overlay mx-3 mb-2 flex-shrink-0"
+    >
+      <div class="cv-blue flex items-center gap-2">
+        <button
+          class="w-7 h-7 rounded-lg flex items-center justify-center text-white flex-shrink-0"
+          :style="ROYAL_BLUE"
+          title="Abrir o topo (Nova conversa, caixas, filtros e ordem)"
+          @click="toggleHeaderCollapsed"
+        >
+          <span class="i-lucide-chevron-down text-sm" />
+        </button>
+        <span
+          class="text-[11px] text-n-slate-11 leading-snug truncate min-w-0 flex-1"
+          :title="collapsedSummary"
+        >
+          {{ collapsedSummary }}
+        </span>
+        <button
+          class="w-7 h-7 rounded-lg flex items-center justify-center text-n-slate-11 hover:bg-n-alpha-1 flex-shrink-0"
+          title="Nova conversa"
+          @click="openNovaConversa({ inboxId: routeInboxId || null })"
+        >
+          <span class="i-lucide-message-square-plus text-sm" />
+        </button>
+      </div>
+    </div>
+
+    <div v-else class="cv-page cv-overlay mx-3 mb-2 flex-shrink-0">
       <div class="cv-blue flex items-center gap-2.5">
         <button
           class="cv-btn flex-shrink-0"
@@ -1193,9 +1255,17 @@ watch(conversationFilters, (newVal, oldVal) => {
           <span class="i-lucide-message-square-plus text-sm" />
           Nova conversa
         </button>
-        <span class="text-[11px] text-n-slate-10 leading-snug min-w-0">
+        <span class="text-[11px] text-n-slate-10 leading-snug min-w-0 flex-1">
           com qualquer pessoa do cadastro, por qualquer caixa
         </span>
+        <!-- CEVICO 203: recolher o topo inteiro numa linha -->
+        <button
+          class="w-7 h-7 rounded-lg flex items-center justify-center text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 flex-shrink-0"
+          title="Recolher o topo (deixa a lista mais limpa)"
+          @click="toggleHeaderCollapsed"
+        >
+          <span class="i-lucide-chevron-up text-sm" />
+        </button>
       </div>
     </div>
 
@@ -1203,7 +1273,7 @@ watch(conversationFilters, (newVal, oldVal) => {
          Pedido 22/07: TODAS as caixas à primeira vista — as pílulas se
          amontoam em quantas linhas precisarem (sem rolagem escondida) -->
     <div
-      v-if="showInboxPills && pillInboxes.length"
+      v-if="!headerCollapsed && showInboxPills && pillInboxes.length"
       class="flex flex-wrap items-center bg-n-solid-2 border border-n-weak rounded-2xl p-1 gap-0.5 mx-3 mb-1.5 flex-shrink-0"
     >
       <button
@@ -1257,7 +1327,7 @@ watch(conversationFilters, (newVal, oldVal) => {
          limpa. Dois botões (Colunas CRM | Etiquetas); apertou, abre a
          janelinha com as opções; escolheu, fecha e sobra a pílula colorida -->
     <div
-      v-if="!hasAppliedFiltersOrActiveFolders"
+      v-if="!headerCollapsed && !hasAppliedFiltersOrActiveFolders"
       ref="journeyFilterWrap"
       class="cv-page cv-overlay mx-3 mt-1.5 mb-0.5 relative"
     >
