@@ -117,7 +117,7 @@ class Crm::SalesCoachService
     message = client.messages.create(
       model: model,
       max_tokens: 1024,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: COACH_SCHEMA }),
       messages: [{ role: 'user', content: "Identifique a objeção e sugira respostas para a vendedora:\n\n#{transcript}" }]
     )
@@ -156,7 +156,7 @@ class Crm::SalesCoachService
     message = client.messages.create(
       model: model,
       max_tokens: 3000,
-      system_: custom_prompt.presence || INSIGHTS_PROMPT,
+      system_: cached_system(custom_prompt.presence || INSIGHTS_PROMPT),
       messages: [{ role: 'user', content: "Analise estas #{convs.size} conversas que geraram fechamento de cirurgia:\n\n#{corpus.truncate(120_000)}" }]
     )
     record_usage(message)

@@ -54,6 +54,14 @@ module Crm::AiAgentConfig
     'claude-sonnet-5'  => [3.0, 15.0],
     'claude-haiku-4-5' => [1.0, 5.0]
   }.freeze
+  # 💸 CACHE DO PROMPT (item 213, 23/09): o roteiro/prompt do agente (e as
+  # ferramentas, que vêm antes dele na chamada) ficam guardados na Anthropic
+  # por 1 h. Gravar custa 2x a entrada, LER custa 10% — e o Atendente lê o
+  # mesmo roteiro de ~10 mil tokens centenas de vezes por dia. O que muda a
+  # cada chamada (contexto, conversa) vai na mensagem do usuário, fora do cache.
+  CACHE_TTL = '1h'.freeze
+  CACHE_WRITE_FACTOR = 2.0   # ttl 1h (5 min seria 1.25)
+  CACHE_READ_FACTOR = 0.1
 
   # Trava de segurança aplicada a TODOS os agentes, mesmo com prompt
   # personalizado: agente interno nunca fala com paciente. (Tecnicamente
@@ -137,6 +145,13 @@ module Crm::AiAgentConfig
     base + guard
   end
 
+  # o prompt do agente como bloco marcado para cache (item 213) — passar em
+  # `system_:` no lugar da string. Prompts curtos (abaixo do mínimo do modelo)
+  # a Anthropic simplesmente não guarda; nada quebra.
+  def cached_system(text = system_prompt)
+    [{ type: 'text', text: text, cache_control: { type: 'ephemeral', ttl: CACHE_TTL } }]
+  end
+
   def recommended
     RECOMMENDED[agent_key] || {}
   end
@@ -194,12 +209,16 @@ module Crm::AiAgentConfig
   # grava tokens + custo estimado da chamada (alimenta o relatório de gastos)
   def record_usage(message)
     usage = message.usage
-    input = usage.input_tokens.to_i +
-            usage.cache_creation_input_tokens.to_i +
-            usage.cache_read_input_tokens.to_i
+    fresh = usage.input_tokens.to_i
+    written = usage.cache_creation_input_tokens.to_i
+    read = usage.cache_read_input_tokens.to_i
+    input = fresh + written + read
     output = usage.output_tokens.to_i
     price_in, price_out = PRICING[model] || PRICING[DEFAULT_MODEL]
-    cost = ((input * price_in) + (output * price_out)) / 1_000_000.0
+    # item 213: entrada lida do cache custa 10%; gravação no cache custa 2x (ttl 1h)
+    cost = ((fresh * price_in) + (written * price_in * CACHE_WRITE_FACTOR) +
+            (read * price_in * CACHE_READ_FACTOR) + (output * price_out)) / 1_000_000.0
+    Rails.logger.info("[Crm::AiUsage] #{agent_key} #{model} entrada=#{fresh} cache_gravado=#{written} cache_lido=#{read} saida=#{output} US$#{cost.round(4)}")
 
     Crm::AiUsage.create!(
       account: @account,

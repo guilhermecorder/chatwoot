@@ -141,7 +141,7 @@ class Crm::CommentsAgentService
     message = client.messages.create(
       model: model,
       max_tokens: 512,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: "Post: #{comment[:post]}\nComentário de @#{comment[:author]} (#{comment[:platform]}): #{comment[:text]}" }]
     )

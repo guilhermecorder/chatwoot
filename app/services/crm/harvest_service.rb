@@ -349,7 +349,7 @@ class Crm::HarvestService
       end
 
       message = client.messages.create(
-        model: model, max_tokens: 4096, system_: system_prompt,
+        model: model, max_tokens: 4096, system_: cached_system,
         output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
         messages: [{ role: 'user', content: "Avalie estes #{batch.size} leads frios:\n\n#{lines.join("\n")}" }]
       )

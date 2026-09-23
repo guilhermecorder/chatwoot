@@ -203,7 +203,7 @@ class Crm::AutoManagerService
     desvios = findings.any? ? findings.map { |f| "#{f['label']} #{f['deviation_pct']}%" }.join(', ') : 'nenhum'
 
     message = client.messages.create(
-      model: model, max_tokens: 512, system_: system_prompt,
+      model: model, max_tokens: 512, system_: cached_system,
       messages: [{ role: 'user', content: "Números:\n#{summary}\n\nDesvios detectados: #{desvios}.\nEscreva o briefing de hoje." }]
     )
     record_usage(message)

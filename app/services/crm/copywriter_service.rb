@@ -101,7 +101,7 @@ class Crm::CopywriterService
       # esforço de raciocínio + página longa dividem o mesmo teto — 8192
       # truncava o JSON de páginas grandes (mesma lição do Construtor)
       max_tokens: @modality == 'pagina' ? 30_000 : 8192,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: schema }),
       messages: [{ role: 'user', content: build_briefing }]
     )

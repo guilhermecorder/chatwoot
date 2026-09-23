@@ -6171,7 +6171,30 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 212. 🎨 COR DE CADA PESSOA na lista de Conversas · chavinha do Atendente IA no topo da conversa · robô de follow-up é SISTEMA · etiquetas no design Apple (pedidos 23/09 tarde, 5 prints) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+## 213. 💸 CACHE DO ROTEIRO — gasto dos agentes de IA (pedido 23/09: "está muito bom, mas inviável financeiramente como está") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, sem migration)
+- DIAGNÓSTICO (print do painel de gasto, 23/09): Atendente de Agendamento US$ 20,68 em 30 dias (US$ 24,63 só no 1º
+  dia solto), 457 respostas, 6,26 M tokens de ENTRADA (13,7 mil por resposta) × 127 k de saída. Causa: o Roteiro
+  CEVICO (~38 KB ≈ 10 mil tokens) vai inteiro em TODA chamada e em toda volta de ferramenta, sempre a preço cheio
+  (Sonnet 5, US$ 3/M). 91% do custo era entrada repetida.
+- SOLUÇÃO (Crm::AiAgentConfig): `cached_system(text = system_prompt)` = o prompt como bloco `cache_control:
+  {type: ephemeral, ttl: 1h}`; as ferramentas (que vêm antes do system na chamada) entram no mesmo cache. Aplicado
+  nos 20 serviços que passam `system_:` (respondedores, Secretário, Radar, Coach, Mentor, Copywriter, Construtor…).
+  Gravar custa 2x a entrada (uma vez por hora por variante de prompt), ler custa 10%. O que muda a cada chamada
+  (contexto vivo + conversa) continua na mensagem do usuário, fora do cache. Prompts curtos demais (abaixo do mínimo
+  do modelo) a Anthropic só não guarda — nada quebra.
+- PAINEL DE GASTO: `record_usage` agora precifica certo (entrada nova ×1, gravação ×2, leitura ×0,1) e loga
+  `[Crm::AiUsage] agente modelo entrada= cache_gravado= cache_lido= saida= US$`. `input_tokens` continua sendo o
+  total (nova + gravada + lida). Sem migration.
+- ESTIMATIVA: Atendente de US$ ~20 → ~US$ 5–6/mês no mesmo volume; vale para todos os agentes. Conferir no painel
+  "Gasto com os agentes de IA" após 1 dia.
+- SECRETÁRIO DA AGENDA: ele decidiu DESLIGAR (Atendente agenda e Pós-agendamento remarca direto na Agenda) —
+  interruptor em Automações → Agentes de IA, feito por ele em produção. O que para: consulta marcada pela equipe só
+  pelo chat não entra sozinha na Agenda.
+- Spec: spec/services/crm/ai_agent_config_cache_spec.rb (3 verdes). Teste real local: 2 chamadas seguidas do
+  Atendente em simulação (ver log cache_gravado/cache_lido).
+- REVERSÃO: imagem :1af4f6f.
+
+## 212. 🎨 COR DE CADA PESSOA na lista de Conversas · chavinha do Atendente IA no topo da conversa · robô de follow-up é SISTEMA · etiquetas no design Apple (pedidos 23/09 tarde, 5 prints) — SUBIU 23/09 (commit 1af4f6f no develop → imagem ghcr :1af4f6f, WEB só, sem migration; reversão :db5df13)
 - PEDIDO (depois de implantar o db5df13: "ficou legal"): (1) a chavinha do Atendente IA deve ficar NA CONVERSA, não na
   aba do paciente, menorzinha, liga/desliga; (2) o "robô de follow-up" saía na cor humana e PAUSAVA a IA → tem que
   ser reconhecido como sistema e não interferir; (3) balões/fundo coloridos aprovados, mas equilibrar o layout

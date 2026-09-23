@@ -156,7 +156,7 @@ class Crm::ConversationAuditorService
   def audit_batch(batch, day)
     corpus = batch.map { |conv| transcript_for(conv) }.join("\n\n---\n\n")
     message = client.messages.create(
-      model: model, max_tokens: 2048, system_: system_prompt,
+      model: model, max_tokens: 2048, system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: "Audite estas #{batch.size} conversas:\n\n#{corpus}" }]
     )

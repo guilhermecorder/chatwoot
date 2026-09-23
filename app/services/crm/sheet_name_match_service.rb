@@ -138,7 +138,7 @@ class Crm::SheetNameMatchService
     message = client.messages.create(
       model: model,
       max_tokens: 4096,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: lines.join("\n") }]
     )

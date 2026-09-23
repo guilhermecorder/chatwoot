@@ -107,7 +107,7 @@ class Crm::ObjectionMapService
     message = client.messages.create(
       model: model,
       max_tokens: 2048,
-      system_: SYSTEM_PROMPT,
+      system_: cached_system(SYSTEM_PROMPT),
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user',
                    content: "Estágio: #{stage[:label]}. Extraia o mapa de objeções destas #{convs.size} conversas:\n\n#{corpus.truncate(90_000)}" }]

@@ -91,7 +91,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     # tools + output_config (json_schema) convivem na mesma chamada (conferido
     # no gem anthropic 1.55, 21/09): o JSON vale para a resposta final em texto
     params = {
-      model: model, max_tokens: 2048, system_: system_prompt,
+      model: model, max_tokens: 2048, system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: context_block + transcript }]
     }

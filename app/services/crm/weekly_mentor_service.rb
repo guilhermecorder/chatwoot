@@ -159,7 +159,7 @@ class Crm::WeeklyMentorService
     message = client.messages.create(
       model: model,
       max_tokens: 2048,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: JSON.pretty_generate(payload) }]
     )
