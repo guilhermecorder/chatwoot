@@ -188,8 +188,8 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       - Coluna do paciente no CRM: #{card_stage_name || 'sem card (contato novo)'}
       - Consulta futura já marcada: #{future_appointment_text}
       #{"- Motivo da ligação: #{call_objective}\n" if voice?}
-      HORÁRIOS DISPONÍVEIS (vagas LIVRES reais dos próximos dias; ofereça no máximo 2 por vez, só destes):
-      #{Crm::AgendaSlots.free_slots_text(@account, days: 12, per_window: 4)}
+      HORÁRIOS DISPONÍVEIS (vagas LIVRES reais das próximas 4 semanas; ofereça no máximo 2 por vez, só destes; para um dia específico fora desta lista use a ferramenta horarios_do_dia — agendamento futuro é liberado):
+      #{Crm::AgendaSlots.free_slots_text(@account, days: 28, per_window: 3)}
 
       #{voice? ? 'LIGAÇÃO ATÉ AGORA (PACIENTE = quem está na linha; CLÍNICA = você, falando)' : 'CONVERSA ATÉ AGORA (PACIENTE = quem você atende; CLÍNICA = você/equipe)'}:
 

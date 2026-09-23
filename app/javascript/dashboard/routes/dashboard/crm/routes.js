@@ -3,6 +3,7 @@ import CrmBoard from './CrmBoard.vue';
 import CrmCampaigns from './CrmCampaigns.vue';
 import CrmJourney from './CrmJourney.vue';
 import CrmCalls from './CrmCalls.vue';
+import CrmAppointments from './CrmAppointments.vue';
 import CrmCampaignsDashboard from './CrmCampaignsDashboard.vue';
 import CrmForms from './CrmForms.vue';
 import CrmIntegrationsPage from './CrmIntegrationsPage.vue';
@@ -27,6 +28,14 @@ export default {
       name: 'crm_calls',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmCalls,
+    },
+    // 📅 ambiente Agendamentos (item 200): monitorar cada consulta marcada,
+    // remarcada ou cancelada no período, com caixa, etiquetas e atalhos
+    {
+      path: frontendURL('accounts/:accountId/crm/agendamentos'),
+      name: 'crm_appointments',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: CrmAppointments,
     },
     {
       path: frontendURL('accounts/:accountId/crm/campaigns'),

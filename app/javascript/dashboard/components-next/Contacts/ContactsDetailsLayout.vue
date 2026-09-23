@@ -6,8 +6,11 @@ import { vOnClickOutside } from '@vueuse/components';
 
 import Button from 'dashboard/components-next/button/Button.vue';
 import Breadcrumb from 'dashboard/components-next/breadcrumb/Breadcrumb.vue';
-import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
 import VoiceCallButton from 'dashboard/components-next/Contacts/VoiceCallButton.vue';
+// CEVICO (pedido 22/09): "chamar" o contato daqui mesmo — ligar pelo nosso
+// módulo e começar conversa pelo modal "Nova conversa" em 3 passos
+import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
+import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
 
 const props = defineProps({
   selectedContact: {
@@ -100,20 +103,25 @@ const closeMobileSidebar = () => {
                 :disabled="isUpdating"
                 @click="toggleBlock"
               />
+              <CevicoCallButton
+                :contact-id="contactId"
+                :phone="selectedContact?.phoneNumber"
+                size="sm"
+                :ghost="false"
+                faded
+              />
               <VoiceCallButton
                 :phone="selectedContact?.phoneNumber"
                 :contact-id="contactId"
                 :label="$t('CONTACT_PANEL.CALL')"
                 size="sm"
               />
-              <ComposeConversation :contact-id="contactId">
-                <template #trigger>
-                  <Button
-                    :label="$t('CONTACTS_LAYOUT.HEADER.SEND_MESSAGE')"
-                    size="sm"
-                  />
-                </template>
-              </ComposeConversation>
+              <Button
+                label="Nova conversa"
+                icon="i-lucide-message-square-plus"
+                size="sm"
+                @click="openNovaConversa({ contactId: Number(contactId) })"
+              />
             </div>
           </div>
         </div>

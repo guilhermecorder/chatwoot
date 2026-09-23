@@ -22,7 +22,7 @@ import ChannelLeaf from './ChannelLeaf.vue';
 import ChannelIcon from 'next/icon/ChannelIcon.vue';
 import SidebarAccountSwitcher from './SidebarAccountSwitcher.vue';
 import Logo from 'next/icon/Logo.vue';
-import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
+import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
 import {
   SIDEBAR_SORT_SECTIONS,
   getSidebarSortOptions,
@@ -419,6 +419,7 @@ const FEATURE_BY_ITEM_NAME = {
   'Jornada do paciente': 'crm_journey',
   Tasks: 'tasks',
   Agenda: 'agenda',
+  'Cevico Appointments': 'appointments',
   Academy: 'academy',
   Settings: 'settings',
   Goals: 'goals',
@@ -490,6 +491,7 @@ const DEFAULT_MENU_ORDER = [
   'Forms',
   'Tasks',
   'Agenda',
+  'Cevico Appointments',
   'Cevico Pages',
   'Academy',
   'Automations Hub',
@@ -503,6 +505,7 @@ const AGENT_MENU_ORDER = [
   'Conversation',
   'Cevico Calls',
   'Agenda',
+  'Cevico Appointments',
   'Goals',
   'Builder',
   'Canned',
@@ -572,7 +575,15 @@ const menuItemsForRole = computed(() => {
   const dayNames = myDayMenu.value
     .map(key => DAY_ITEM_BY_KEY[key])
     .filter(Boolean);
-  const allow = ['Inicio', ...dayNames, 'Cevico Pages', 'Builder'];
+  // 📅 Agendamentos (item 200): monitoramento do time inteiro, aparece para
+  // todo atendente como Conteúdos (dá para esconder no Personalizar menu)
+  const allow = [
+    'Inicio',
+    ...dayNames,
+    'Cevico Appointments',
+    'Cevico Pages',
+    'Builder',
+  ];
   const granted = Object.entries(GRANT_BY_ITEM_NAME)
     .filter(([, capabilities]) =>
       capabilities.some(capability => myGrants.value.includes(capability))
@@ -608,7 +619,13 @@ const MENU_LAYOUT = [
     color: '#34c759',
     label: 'Atendimento',
     icon: 'i-lucide-headset',
-    items: ['Conversation', 'Cevico Calls', 'Agenda', 'Canned'],
+    items: [
+      'Conversation',
+      'Cevico Calls',
+      'Agenda',
+      'Cevico Appointments',
+      'Canned',
+    ],
   },
   { solo: 'CRM' }, // em que ponto está cada paciente?
   { solo: 'Tasks' }, // avisa por notificação — fica à mão
@@ -728,6 +745,7 @@ const TILE_COLORS = {
   'Cevico Calls': '#30d158',
   Inbox: '#007aff',
   Agenda: '#ff3b30',
+  'Cevico Appointments': '#0a84ff',
   Tasks: '#ff9500',
   Canned: '#5ac8fa',
   CRM: '#af52de',
@@ -1356,6 +1374,13 @@ const menuItems = computed(() => {
       icon: 'i-lucide-calendar-days',
       to: accountScopedRoute('agenda_board'),
     },
+    // 📅 ambiente Agendamentos (item 200): monitorar marcadas/remarcadas/canceladas
+    {
+      name: 'Cevico Appointments',
+      label: 'Agendamentos',
+      icon: 'i-lucide-calendar-check',
+      to: accountScopedRoute('crm_appointments'),
+    },
     {
       name: 'Cevico Pages',
       label: 'Conteúdos',
@@ -1812,22 +1837,20 @@ const menuItems = computed(() => {
         >
           <span class="i-lucide-search size-4 text-n-slate-11" />
         </RouterLink>
-        <ComposeConversation align="start">
-          <template #trigger="{ isOpen }">
-            <Button
-              icon="i-lucide-pen-line"
-              color="slate"
-              size="sm"
-              class="dark:hover:!bg-n-slate-9/30"
-              :class="[
-                isEffectivelyCollapsed
-                  ? '!size-8 !outline-n-weak !text-n-slate-11'
-                  : '!h-7 !outline-n-weak !text-n-slate-11',
-                { '!bg-n-alpha-2 dark:!bg-n-slate-9/30': isOpen },
-              ]"
-            />
-          </template>
-        </ComposeConversation>
+        <!-- CEVICO 199: o lápis abre a "Nova conversa" em 3 passos -->
+        <Button
+          icon="i-lucide-message-square-plus"
+          color="slate"
+          size="sm"
+          title="Nova conversa"
+          class="dark:hover:!bg-n-slate-9/30"
+          :class="
+            isEffectivelyCollapsed
+              ? '!size-8 !outline-n-weak !text-n-slate-11'
+              : '!h-7 !outline-n-weak !text-n-slate-11'
+          "
+          @click="openNovaConversa()"
+        />
       </div>
     </section>
     <nav

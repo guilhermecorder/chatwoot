@@ -100,7 +100,8 @@ class Crm::ConversationInsightService
       atendemos convênio nem reembolso
     - Médicos: Dr. Henrique Gemelli, Dra. Roberta Negri e Dr. Gustavo Bittar
       (refrativa: Dr. Gustavo Bittar, especialista em córnea); a cirurgia de
-      catarata é do Dr. Jorge Haddad (mais de 30.000 cirurgias)
+      catarata é realizada pela equipe cirúrgica especializada da clínica, com
+      estrutura de alta tecnologia (não existe cirurgião nomeado)
     - Equipamento de refrativa: Schwind Amaris 1050RS, considerado o padrão
       ouro mundial
     - Unidades: Av. Paulista, 1499, 9º andar (metrô Trianon-MASP) e Tatuapé,

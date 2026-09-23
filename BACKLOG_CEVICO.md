@@ -6171,6 +6171,120 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 200. 🤖🔓 AGENTE "RODANDO SOLTO" + PAINEL DE AGENDAMENTOS + AFUNILAMENTO E PORTA ABERTA (pedido 22/09 noite, para os NÚMEROS NOVOS de 23/09) — CONSTRUÍDO, SEM commit, aguarda "pode subir"
+
+**Pedido dele (22/09, 19h40, com prints do teste no FECHAMENTO #10912 e do 🧪 Testar agente):**
+"vamos precisar atualizar o nosso prompt N8N em alguns pontos": (1) timing das mensagens entre 5 e 10 s da
+mensagem da pessoa; mensagens curtas e espaçadas; (2) o robô "usa a carinha que PAUSA o agente" e agora a
+gente quer que ele "rode solto" → tirar o emoji; (3) ao chegar no agendamento, ir "etiquetando o paciente e
+movendo o card pelas colunas do CRM automaticamente"; (4) agente sempre ativo, sem tantas amarras, educado,
+desprendido, nunca insistente; (5) "liberar agendamento futuro" (o robô disse "nesse dia 07/10 ainda não tenho
+abertura"); (6) um AMBIENTE onde os agendamentos são registrados, "porque o trabalho das meninas em grande
+parte será de monitoramento": painel de agendamentos e reagendamentos, cada um com uma cor, mostrando caixa
+de entrada, etiquetas, nome e telefone, botão para abrir a conversa e/ou o Espaço do Paciente; (7) no Espaço
+do Paciente e em Contatos precisa ser possível chamar o paciente. "Amanhã já quero pôr os números novos."
+**Complemento (20h05):** (8) no encerramento deixar a janela aberta para o follow-up consensual: "vamos fazer o
+seguinte, te chamo daqui a duas semanas, combinado?"; (9) a lógica de "oferecer as possibilidades e ir
+afunilando", que ele tinha tirado do N8N, volta: valor ok → "maravilha, o próximo passo é agendar a sua
+consulta de avaliação… Vamos em frente?" → não: motivo, acolher, à disposição; sim → "essa semana ou na
+próxima? manhã ou tarde? início do dia ou perto do meio-dia? às 10 ou 10:30?" — "estimula o diálogo e coleta
+pequenos comprometimentos"; perguntas de micro-compromisso ("isso é interessante pra você? é isso que você
+procura?") que ele acredita influenciarem o comparecimento.
+
+**N8N (entrega em ~/Desktop/CLAUDE CODE/CEVICO/docs/n8n-v20-rodando-solto/):**
+- `SUPERVISOR systemMessage (v20 rodando solto).txt` — gerado a partir do v19 (Tatuapé 5 min) por substituições
+  cirúrgicas: sem emoji em nenhuma mensagem ("Deu certo! Consulta confirmada: …"); depois da confirmação
+  CONTINUA disponível (regra de ouro 5 e bloco "DEPOIS DO RESUMO"); balões ≤ 2 por resposta, ~160 caracteres;
+  agendamento futuro liberado (regra 9: dia pedido → consulta esse dia; proibido "ainda não tenho abertura");
+  ETAPA 6 reescrita como AFUNILAMENTO (próximo passo → semana → período/unidade → consultar → afunilar hora →
+  2 horários → nome → confirmar o telefone do WhatsApp, que agora entra no topo do prompt por expressão
+  `$('Info2').item.json.telefone`); micro-compromissos na personalidade; FLUXO DE CANCELAMENTO novo
+  (calendar_agent cancelar + "Consulta cancelada…"); PORTA ABERTA ("te chamo daqui a duas semanas,
+  combinado?"); reagendamento confirma com "Prontinho, remarquei:". Processo de vendas intacto.
+- `LEIA-ME.txt` — 3 ajustes no N8N (colar o prompt em modo EXPRESSION; "Intervalo entre Mensagens" 10 → 4 s;
+  "Wait1" 10 → 3 s) + CONFERIR o node "If" (só passa inbox 1, 2 e 3 — cada número novo precisa da caixa nova
+  na condição) + regras do Chatwoot que procuram 😊 (podem sair; o sistema faz sozinho). O 😊 continua sendo
+  o botão de pausa da EQUIPE (switch "Pausar IA1"); 👍 reativa. Node de split por IA pode virar Code (opcional).
+- `AGENTE DE AGENDAMENTO (v20 rodando solto).json` — o export de 26/08 com os 3 ajustes aplicados (Import from
+  File substitui o canvas; mesmo webhook e credenciais).
+
+**Sistema (feat/rodada-172, ~/chatwoot-upgrade, SEM commit; sem migration; deploy WEB+SIDEKIQ):**
+- `Crm::BookingSideEffects` (novo): consulta CRIADA/REAGENDADA/CANCELADA → etiqueta no paciente e na conversa
+  (consulta_agendada · consulta_reagendada · consulta_cancelada; a contrária sai; a etiqueta é criada no
+  cadastro se não existir) + MOVE O CARD (cria o card se não existir) para a coluna de agendamento
+  (`agenda_config['booking']['stage_id']`, senão a "Ao agendar, mover para" do Atendente de Agendamento) ou de
+  cancelamento (`cancel_stage_id`), disparando card_entered/card_left. Nunca levanta exceção.
+- `CrmListener#handle_booking_anchor`: mensagem ENVIADA (robô do N8N ou equipe) com "Consulta confirmada",
+  "remarquei", "consulta cancelada"… → `SchedulerRecheckJob` em 15 s → `AppointmentApplier` lê a conversa,
+  grava/remarca/cancela na Agenda e chama os efeitos; nota interna ganha "🏷️ etiqueta · card → coluna". Freio
+  de 90 s por paciente; mensagens do Atendente interno, jornada e follow-up ficam de fora.
+- Atendente interno "roda solto" (`ResponderAgentJob`): agendar e encerrar NÃO pausam (só chamar_humano; 👍
+  reativa); balões com 3 s entre eles (BALLOON_GAP) e o 😊 é tirado do texto por garantia; `book!` chama os
+  efeitos (etiqueta + card); `ResponderTools` remarcar/cancelar ao vivo também.
+- Delay de resposta configurável: `reply_delay_seconds` (3–30, padrão 6) nos dois atendentes — campo "Responde
+  em" no card (AutomationsHub) + whitelist no settings_controller; CrmListener usa `responder_delay(cfg)`.
+- Agendamento futuro: `Crm::AgendaSlots.free_slots_on(date)` (até 120 dias; `slot_available?` usa ela), lista
+  do prompt passou de 12 para 28 dias, ferramenta nova `horarios_do_dia {dia, unidade?}` nos dois atendentes.
+- Roteiro v1 e v2 (`cevico_script.rb`/`_v2.rb`): sem emoji; 2 balões ≤ 160 caracteres; micro-compromissos;
+  PORTA ABERTA nas regras de forma; passo 6/5 do Atendente de Agendamento = AFUNILAMENTO (A próximo passo → B
+  semana → C período/unidade → D hora + 2 horários, com horarios_do_dia para dia fora da lista → E nome/telefone
+  → F confirmação "Deu certo! Consulta confirmada:" → G continua disponível); passo 7 remarcar afunilando com
+  "Prontinho, remarquei:"; Pós-agendamento sem pausar=true ao confirmar presença/cancelar. ⚠️ Em produção, seção
+  personalizada na tela (custom) NÃO recebe o texto novo: apagar o texto da seção = volta ao padrão novo.
+- `Api::V1::Accounts::Crm::AppointmentsController#feed` (rota crm/appointments/feed): consultas MARCADAS /
+  REMARCADAS / CANCELADAS no período (modo registradas = aconteceu no período; consultas = a consulta é no
+  período), com tipo, origem (robô × equipe pelo rastro na descrição), conversa de origem ("Conversa #N" ou a
+  mais recente do paciente) com caixa e etiquetas, etiquetas do paciente, card (coluna/cor), contagens e a
+  config dos efeitos; `update_agenda` aceita `booking` (só admin).
+- TELA "Agendamentos" (`routes/dashboard/crm/CrmAppointments.vue`, rota crm/agendamentos, menu Atendimento
+  logo após Agenda, visível a todo atendente): hero + PeriodRuler (padrão 7 dias); 4 KPIs (Marcadas verde,
+  Remarcadas âmbar, Canceladas vermelho, Robô × Equipe); filtros (modo, tipo com contagem, origem, unidade,
+  caixa, busca); lista por dia com fio/chip na cor do tipo, avatar com degradê, nome e telefone sem truncar,
+  quando/unidade/médico, chip da CAIXA na cor oficial, coluna do CRM, etiquetas, origem; ações Conversa ·
+  Paciente · Ligar (CevicoCallButton) · Agenda; atualização silenciosa a cada 60 s; "Ajustes" (admin) = etiquetas
+  + colunas dos efeitos. `api/crm.js`: appointmentsFeed / updateAgendaBooking.
+- Chamar o paciente: Espaço do Paciente ganhou pílulas "Conversa" (modal Nova conversa), "Ligar"
+  (CevicoCallButton) e "Abrir conversa" (última conversa, já no payload) no cabeçalho colorido; ficha de
+  Contatos (ContactsDetailsLayout) ganhou Ligar + "Nova conversa" (modal novo no lugar do compose nativo);
+  linha da lista de Contatos (ContactsCard) ganhou os atalhos Nova conversa + Ligar.
+- Specs novos (todos verdes no docker, 60 exemplos com os vizinhos): booking_side_effects (8), listener
+  âncoras (6), listener delay (2), agenda_slots futuro (4), job "rodando solto" (3), feed do painel (3).
+  Rubocop: sem ofensa nova nos arquivos tocados (as que restam são do baseline).
+- Reversão: reimplantar a imagem anterior; no N8N, colar o prompt v19 de volta.
+- TESTADO 22/09 no docker local (conta 3, 1280 claro/escuro + 375): tela Agendamentos com 57 registros dos 7 dias
+  (KPIs, filtros, grupos por dia, chips de caixa/coluna/etiquetas, ações), Ajustes salvos (coluna Agendamento de
+  Consulta / cancelamento Não Foi a Consulta); PONTA A PONTA na conversa #363 (Paciente de teste, caixa WhatsApp
+  teste): mensagem enviada "Deu certo! Consulta confirmada: quarta-feira, 30/09 às 13:00…" → em 27 s a consulta
+  #448 nasceu na Agenda (30/09 13:00, Paulista, Dr. Henrique), etiqueta consulta_agendada no paciente e na conversa,
+  card Novos Contatos → Agendamento de Consulta, nota "📅 … 🏷️ consulta_agendada · card → …"; depois "Prontinho,
+  remarquei: quinta-feira, 01/10 às 08:30…" → #448 foi para 01/10 08:30 (rescheduled_count 1), etiqueta virou
+  consulta_reagendada. Espaço do Paciente com pílulas Conversa/Ligar/Abrir conversa; Contatos (lista e ficha) com
+  Ligar + Nova conversa; hub com o campo "Responde em". A etiqueta nova já aparece em "Etiquetas que encerram o
+  follow-up" (Robôs) para o admin ligar se quiser parar as cutucadas de quem agendou. Dados de teste ficaram na
+  conta 3 local (consulta #448 do Paciente de teste).
+- **SEM JORGE HADDAD (pedido dele 22/09, 20h45: "eliminar o Jorge Haddad do nosso prompt; exaltar a nossa equipe
+  especializada e estrutura altamente tecnológica")**: saiu do N8N v20 (autoridade da catarata, "achei caro", "tenho
+  medo" + regra nova nas proibições), do Roteiro v1 e v2 (dados oficiais + objeções), do Atendente Instagram, do
+  script de voz (lista de médicos por extenso) e do Analista de Conversas. Texto novo: "a cirurgia é realizada pela
+  nossa equipe cirúrgica especializada em catarata, dentro do IOP, com estrutura de alta tecnologia, equipamentos de
+  última geração e lentes importadas Rayner"; nunca inventar números de cirurgias. Ele confirmou que a atualização
+  é dos 2 agentes (Atendente de Agendamento + Atendente Pós-agendamento). ⚠️ Em produção, a seção "Dados oficiais"
+  do Roteiro, se personalizada na tela, precisa ser apagada (volta ao padrão) ou editada à mão.
+- **NOMENCLATURA dos Roteiros (pedido dele 22/09, 20h50: "melhorar a nomenclatura do prompt, porque assim poderemos
+  testar")**: as versões ganharam nome e descrição nas abas do card Roteiro e no seletor do 🧪 Testar agente:
+  "Roteiro 1 · Fiel ao N8N" (estrutura do robô do N8N + regras de 22/09; é o que os atendentes leem) e "Roteiro 2 ·
+  Otimizado pela análise" (análise do banco de 22/09 + regras de 22/09; só o teste lê). Título dentro do prompt
+  acompanha. Os dois têm as regras novas (sem emoji, rodando solto, afunilamento, porta aberta, sem Haddad); o que
+  os diferencia é a estrutura (1 = fiel ao N8N; 2 = enxuto, promessa quando pedem valor cedo, objeções da análise).
+- ⚠️ Freios a saber: âncora = 1 leitura por paciente a cada 90 s; o Secretário ignora leituras a menos de 2 min da
+  anterior (MIN_GAP) — uma remarcação enviada a menos de 2 min da confirmação só entra na próxima mensagem do
+  paciente que fale em remarcar (releitura de sempre).
+
+**Ficou de fora / próximos:** Atendente Instagram (Direct) continua com a regra antiga do 😊 (Meta dev
+pendente); node Code no lugar do split por IA (opcional); admin ligar/desligar "Agendamentos" por pessoa
+(1 linha em DAY_MENU_ITEMS + AgentAccessModal, se ele pedir).
+
+
 ## 199. 💬 NOVA CONVERSA EM 3 PASSOS + topo de Conversas no kit Apple (pedido 22/09) — CONSTRUÍDO, SEM commit, aguarda "pode subir"
 - Pedido: "iniciar uma conversa com um contato que temos no nosso banco de dados, através de uma nova
   caixa de entrada — pra fazer isso é difícil; precisa ser fácil. Já vamos aproveitar a atualizar o layout."
@@ -6254,7 +6368,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
     ConversationChatModal do CRM e Espaço do Paciente não usam a pele.
 
 
-## 198. 📊 APRENDIZADO COM O BANCO DE PRODUÇÃO + ROTEIRO v2 PARALELO (22/09) — ANÁLISE FEITA; v2 DISPONÍVEL NO 🧪 TESTAR AGENTE (construído 22/09, SEM commit); sombra dupla AGUARDA "pode construir"
+## 198. 📊 APRENDIZADO COM O BANCO DE PRODUÇÃO + ROTEIRO v2 PARALELO (22/09) — ANÁLISE FEITA; v2 DISPONÍVEL NO 🧪 TESTAR AGENTE — SUBIU 22/09 ("pode subir" → commit 87c9564 no develop → imagem ghcr.io/guilhermecorder/chatwoot:87c9564, deploy WEB só, reversão 2d7b2b4); sombra dupla AGUARDA "pode construir"
 
 **Pedido dele (22/09, nova sessão):** analisar o backup do banco (backup_cevico_antes_rodada188_20260921_1741, 65 MB gz / 300 MB) e aprender com as conversas; criar um PROMPT PARALELO para testar contra o atual.
 

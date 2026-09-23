@@ -15,7 +15,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   TZ = Crm::AgendaSlots::TZ
   MAX_RESULTS = 5
   LOCK_TTL = 30.seconds
-  NAMES = %w[buscar_consulta remarcar_consulta cancelar_consulta confirmar_presenca].freeze
+  NAMES = %w[buscar_consulta remarcar_consulta cancelar_consulta confirmar_presenca horarios_do_dia].freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
                   'voice' => 'Agente de Ligação' }.freeze
   WEEKDAYS_SHORT = %w[dom seg ter qua qui sex sáb].freeze
@@ -88,6 +88,23 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
           required: %w[id],
           additionalProperties: false
         }
+      },
+      {
+        # item 200: agendamento futuro liberado — qualquer dia até 4 meses
+        name: 'horarios_do_dia',
+        description: 'Vagas LIVRES reais de UM dia específico (qualquer data futura até 4 meses), para quando o paciente ' \
+                     'pede um dia que não aparece em HORÁRIOS DISPONÍVEIS ("dia 07/10", "daqui a um mês"). Devolve os ' \
+                     'horários livres por unidade e médico. Lista vazia = não há consulta nesse dia (dia sem atendimento) ' \
+                     'ou está lotado: ofereça o dia de atendimento mais próximo.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            dia: { type: 'string', description: 'Dia pedido, YYYY-MM-DD' },
+            unidade: { type: 'string', enum: %w[tatuape paulista], description: 'Só desta unidade (opcional)' }
+          },
+          required: %w[dia],
+          additionalProperties: false
+        }
       }
     ]
   end
@@ -100,6 +117,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     when 'remarcar_consulta' then remarcar(args)
     when 'cancelar_consulta' then cancelar(args)
     when 'confirmar_presenca' then confirmar(args)
+    when 'horarios_do_dia' then horarios_do_dia(args)
     else
       { ok: false, motivo: "Ferramenta desconhecida: #{name}" }
     end
@@ -219,7 +237,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
         description: append_note(task.description, "Remarcada pelo #{agent_name} via WhatsApp (conversa ##{@conversation.display_id}) em #{stamp}")
       )
       Crm::AgentAlert.push(account: @account, kind: 'agente_remarcou', task: task, conversation: @conversation, agent_key: @agent_key)
-      activity_note!("🔁 #{agent_name} remarcou: #{patient_name(task)} — #{label}. #{agenda_link(starts_at)}")
+      effects = side_effects(task, :rescheduled)
+      activity_note!("🔁 #{agent_name} remarcou: #{patient_name(task)} — #{label}. #{agenda_link(starts_at)} #{effects}".strip)
       log_acao('remarcar_consulta', true, "remarcou #{patient_name(task)} p/ #{label}")
       { ok: true, consulta: serialize(task.reload) }
     end
@@ -240,7 +259,9 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     note += " — motivo: #{motivo}" if motivo.present?
     task.update!(canceled_at: Time.current, description: append_note(task.description, note))
     Crm::AgentAlert.push(account: @account, kind: 'agente_cancelou', task: task, conversation: @conversation, agent_key: @agent_key)
-    activity_note!("🚫 #{agent_name} cancelou a consulta de #{patient_name(task)} (#{when_label(task)})#{" — motivo: #{motivo}" if motivo.present?}")
+    effects = side_effects(task, :canceled)
+    activity_note!("🚫 #{agent_name} cancelou a consulta de #{patient_name(task)} (#{when_label(task)})" \
+                   "#{" — motivo: #{motivo}" if motivo.present?} #{effects}".strip)
     log_acao('cancelar_consulta', true, "cancelou a consulta de #{patient_name(task)}")
     { ok: true, consulta: serialize(task) }
   end
@@ -258,6 +279,37 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     task.update!(description: append_note(task.description, "Presença confirmada pelo paciente (WhatsApp, #{agent_name}) em #{stamp}"))
     log_acao('confirmar_presenca', true, "presença confirmada: #{patient_name(task)} (#{when_label(task)})")
     { ok: true, consulta: serialize(task) }
+  end
+
+  # ── vagas de um dia específico (item 200: agendamento futuro liberado) ──
+  # Só lê a Agenda: vale igual em sombra e ao vivo.
+  def horarios_do_dia(args)
+    date = parse_date(args['dia'])
+    return refuse('horarios_do_dia', 'Informe o dia no formato YYYY-MM-DD.') if date.nil?
+
+    slots = Crm::AgendaSlots.free_slots_on(@account, date, unit: args['unidade'].to_s.strip.presence, per_window: 8)
+    log_acao('horarios_do_dia', true, "vagas de #{WEEKDAYS_SHORT[date.wday]} #{date.strftime('%d/%m')}: #{slots_count_text(slots)}")
+    result = { dia: date.to_s, dia_semana: Crm::AgendaSlots::WEEKDAYS[date.wday], vagas: group_slots(slots) }
+    result[:aviso] = 'Nenhuma vaga nesse dia (sem atendimento, fechado ou lotado). Ofereça o dia de atendimento mais próximo.' if slots.empty?
+    result
+  end
+
+  def group_slots(slots)
+    slots.group_by { |s| [s[:unit], s[:doctor]] }.map do |(unit, doctor), list|
+      { unidade: unit_label(unit), unidade_chave: unit, medico: doctor, horarios: list.map { |s| s[:time] } }
+    end
+  end
+
+  def slots_count_text(slots)
+    return 'nenhuma' if slots.empty?
+
+    "#{slots.size} livre#{'s' if slots.size > 1}"
+  end
+
+  # etiqueta + card (item 200); devolve o texto curto para a nota
+  def side_effects(task, outcome)
+    effects = Crm::BookingSideEffects.apply(account: @account, contact: task.contact || @contact, conversation: @conversation, outcome: outcome)
+    Crm::BookingSideEffects.summary(effects)
   end
 
   # ── apoio ───────────────────────────────────────────────────────────────

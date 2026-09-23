@@ -9,7 +9,9 @@
 #   compara os dois lado a lado. Nunca gerar mensagem `outgoing` aqui: o N8N
 #   roteia por incoming/outgoing e uma nota de atividade passa batida.
 # - AO VIVO (rodada 193): responde de verdade, na ORDEM segura — trava a vaga →
-#   confere → grava na Agenda → SÓ ENTÃO manda o "Deu certo 😊" → move o card.
+#   confere → grava na Agenda → SÓ ENTÃO manda o "Deu certo" → etiqueta e
+#   move o card (Crm::BookingSideEffects). Item 200 (22/09): o agente RODA
+#   SOLTO — agendar não pausa mais; só chamar_humano pausa (👍 reativa).
 #   Só dentro da JANELA da config (dias da semana em live_days + horas
 #   hours_start/hours_end); fora dela o agente continua em SOMBRA, aprendendo.
 #   Nessa janela o N8N tem que estar desligado — nunca os dois ao vivo.
@@ -205,7 +207,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     tool_done = Array(result[:acoes]).any? { |a| a['ferramenta'] == 'remarcar_consulta' && a['ok'] }
     wants_booking = result[:agendar] && !tool_done
     # ORDEM SEGURA: agendar (trava + confere + grava) ANTES de confirmar ao paciente
-    booked = wants_booking ? book!(account, conversation, result, agent_key) : nil
+    booked = wants_booking ? book!(account, conversation, result, agent_key, cfg) : nil
     if wants_booking && !booked
       # vaga não validou: não confirma; pede outra escolha em vez de sumir
       send_replies(conversation, [SLOT_TAKEN_TEXT], trigger_message_id, agent_key)
@@ -215,7 +217,6 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     end
 
     send_replies(conversation, Array(result[:mensagens]), trigger_message_id, agent_key)
-    move_card_after_booking(account, conversation, cfg) if booked
     handoff_note(conversation, agent_key) if result[:chamar_humano]
     pause_reason = pause_reason_for(result, booked)
     pause!(conversation, pause_reason, agent_key) if pause_reason
@@ -226,15 +227,15 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
   SLOT_TAKEN_TEXT = 'Poxa, esse horário acabou de ser preenchido. Me diz outro período que você prefere, que eu vejo o mais próximo pra você?'.freeze
 
-  def pause_reason_for(result, booked)
-    return 'agendou' if booked
-    return 'chamou_humano' if result[:chamar_humano]
-
-    'encerrou' if result[:pausar]
+  # item 200 ("rodando solto"): agendar e encerrar NÃO pausam mais — o
+  # paciente que volta dias depois ("quero remarcar") é atendido na hora.
+  # Só a passagem para humano pausa (a equipe manda 👍 para reativar).
+  def pause_reason_for(result, _booked)
+    'chamou_humano' if result[:chamar_humano]
   end
 
   # trava por conta+dia+hora+unidade → confere de novo → grava na Agenda
-  def book!(account, conversation, result, agent_key) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+  def book!(account, conversation, result, agent_key, cfg = {}) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     ag = (result[:agendamento] || {}).symbolize_keys
     date = begin
       Date.parse(ag[:dia].to_s)
@@ -253,18 +254,24 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
       starts_at = Crm::AgendaSlots::TZ.parse("#{date} #{time}")
       doctor = Crm::AgendaSlots.windows(account).find { |w| w['dow'] == date.wday && w['unit'] == ag[:unidade] }&.[]('doctor')
-      Crm::AppointmentRecorder.record(
+      outcome = Crm::AppointmentRecorder.record(
         account: account,
         result: { found: true, starts_at: starts_at, name: ag[:nome], phone: ag[:telefone].presence || conversation.contact&.phone_number,
                   unit: ag[:unidade], procedure: ag[:procedimento], doctor: doctor, price: 'R$ 150',
                   notes: "Agendado pelo #{agent_name(agent_key)} (WhatsApp)" },
         contact: conversation.contact, conversation: conversation
       )
+      # item 200: etiqueta + card na coluna (a do card do agente ou a da tela Agendamentos)
+      effects = Crm::BookingSideEffects.apply(account: account, contact: conversation.contact, conversation: conversation,
+                                              outcome: outcome == :rescheduled ? :rescheduled : :created,
+                                              stage_id: cfg['after_booking_stage_id'])
+      effects_text = Crm::BookingSideEffects.summary(effects)
       conversation.messages.create!(
         account_id: account.id, inbox_id: conversation.inbox_id, message_type: :activity, private: true,
         content: "📅 #{agent_name(agent_key)} agendou: #{ag[:nome]} — #{starts_at.strftime('%d/%m/%Y às %H:%M')} " \
                  "(#{Crm::AgendaSlots::UNIT_LABELS[ag[:unidade]] || ag[:unidade]}). " \
-                 "[📆 Ver na agenda](/app/accounts/#{account.id}/agenda?date=#{starts_at.strftime('%Y-%m-%d')})"
+                 "[📆 Ver na agenda](/app/accounts/#{account.id}/agenda?date=#{starts_at.strftime('%Y-%m-%d')})" \
+                 "#{" #{effects_text}" if effects_text.present?}"
       )
       true
     ensure
@@ -272,12 +279,15 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     end
   end
 
+  # item 200: balões curtos e ESPAÇADOS — 3 s entre um e outro (como quem digita)
+  BALLOON_GAP = 3
+
   def send_replies(conversation, texts, trigger_message_id, agent_key)
     texts.first(3).each_with_index do |text, index|
-      clean = text.to_s.tr('—', ',').strip # a regra de forma proíbe travessão; o sistema garante
+      clean = text.to_s.tr('—', ',').gsub(/\s?😊/, '').strip # sem travessão nem a carinha que pausa (o sistema garante)
       next if clean.blank?
 
-      sleep 1.5 if index.positive?
+      sleep BALLOON_GAP if index.positive?
       break if last_incoming_id(conversation) != trigger_message_id
 
       conversation.messages.create!(
@@ -286,22 +296,6 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
         additional_attributes: { 'cevico_ia_agent' => agent_key }
       )
     end
-  end
-
-  def move_card_after_booking(account, conversation, cfg)
-    stage_id = cfg['after_booking_stage_id'].to_i
-    contact = conversation.contact
-    return if stage_id.zero? || contact.blank?
-
-    stage = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: account.id }).find_by(id: stage_id)
-    return if stage.blank?
-
-    card = Crm::Contact.find_by(contact_id: contact.id, pipeline_id: stage.pipeline_id)
-    return if card.blank? || card.stage_id == stage.id
-
-    card.update!(stage_id: stage.id)
-  rescue StandardError => e
-    Rails.logger.warn "[Crm::ResponderAgentJob] mover card: #{e.message}"
   end
 
   def handoff_note(conversation, agent_key)

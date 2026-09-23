@@ -326,6 +326,7 @@ const aiAgents = ref({
     no_card: true,
     after_booking_stage_id: '',
     shadow_daily_cap: 30,
+    reply_delay_seconds: 6,
     hours_start: '',
     hours_end: '',
     live_days: [],
@@ -344,6 +345,7 @@ const aiAgents = ref({
     no_card: false,
     after_booking_stage_id: '',
     shadow_daily_cap: 30,
+    reply_delay_seconds: 6,
     hours_start: '',
     hours_end: '',
     live_days: [],
@@ -770,8 +772,9 @@ const restoreScriptVersion = async v => {
 const scriptVersion = ref('v1');
 const scriptIsV2 = computed(() => scriptVersion.value === 'v2');
 const SCRIPT_VERSION_TABS = [
-  { key: 'v1', label: 'Atual', hint: 'o que os atendentes leem hoje' },
-  { key: 'v2', label: '🧪 v2 paralelo', hint: 'só o Testar agente lê' },
+  // nomes claros (pedido 22/09: "melhorar a nomenclatura para poder testar")
+  { key: 'v1', label: 'Roteiro 1 · Fiel ao N8N', hint: 'estrutura do robô do N8N + regras de 22/09; é o que os atendentes leem' },
+  { key: 'v2', label: '🧪 Roteiro 2 · Otimizado pela análise', hint: 'análise do banco de 22/09 + regras de 22/09; só o Testar agente lê' },
 ];
 const scriptSections = computed(() =>
   scriptIsV2.value
@@ -839,7 +842,7 @@ const saveScript = async () => {
     scriptEditing.value = false;
     useAlert(
       scriptIsV2.value
-        ? '🧪 Roteiro v2 paralelo salvo — vale só no Testar agente; os atendentes continuam no Roteiro atual.'
+        ? '🧪 Roteiro 2 · Otimizado salvo — vale só no Testar agente; os atendentes continuam no Roteiro 1 · Fiel ao N8N.'
         : '📜 Roteiro CEVICO salvo — já vale para todos os atendentes que falam com paciente.'
     );
   } catch {
@@ -1560,6 +1563,7 @@ const snapshotAgent = key => {
     snap.no_card = a.no_card;
     snap.after_booking_stage_id = a.after_booking_stage_id;
     snap.shadow_daily_cap = a.shadow_daily_cap;
+    snap.reply_delay_seconds = a.reply_delay_seconds;
     snap.hours_start = a.hours_start;
     snap.hours_end = a.hours_end;
     snap.mode = a.mode;
@@ -1629,6 +1633,7 @@ const discardEdit = key => {
       a.no_card = snap.no_card;
       a.after_booking_stage_id = snap.after_booking_stage_id;
       a.shadow_daily_cap = snap.shadow_daily_cap;
+      a.reply_delay_seconds = snap.reply_delay_seconds;
       a.hours_start = snap.hours_start;
       a.hours_end = snap.hours_end;
       a.mode = snap.mode || 'shadow';
@@ -1706,6 +1711,12 @@ const packAgentFields = key => {
       ? Number(a.after_booking_stage_id)
       : null;
     fields.shadow_daily_cap = Number(a.shadow_daily_cap) || 30;
+    // ⏱️ "Responde em": segundos que ele espera depois da mensagem (junta as
+    // picadas); o servidor prende entre 3 e 30, padrão 6
+    fields.reply_delay_seconds = Math.min(
+      30,
+      Math.max(3, Number(a.reply_delay_seconds) || 6)
+    );
     fields.hours_start = a.hours_start || '';
     fields.hours_end = a.hours_end || '';
     // 🟢 rodada 193: ao vivo só dentro da janela (dias + horas); fora dela
@@ -2049,7 +2060,7 @@ const AGENT_META = {
       {
         icon: 'i-lucide-message-square',
         label:
-          'Mensagem do paciente numa caixa de WhatsApp escolhida (espera ~12s e junta mensagens picadas)',
+          'Mensagem do paciente numa caixa de WhatsApp escolhida (espera os segundos de "Responde em" e junta mensagens picadas)',
       },
       {
         icon: 'i-lucide-columns-3',
@@ -2059,7 +2070,7 @@ const AGENT_META = {
       {
         icon: 'i-lucide-calendar-check',
         label:
-          'Só oferece vagas livres reais da Agenda; ao vivo, grava a consulta ANTES de confirmar 😊',
+          'Só oferece vagas livres reais da Agenda; ao vivo, grava a consulta ANTES de confirmar ao paciente e segue na conversa (agendar não pausa)',
       },
       {
         icon: 'i-lucide-eye-off',
@@ -2082,7 +2093,7 @@ const AGENT_META = {
       {
         icon: 'i-lucide-message-square',
         label:
-          'Mensagem do paciente numa caixa de WhatsApp escolhida (espera ~12s)',
+          'Mensagem do paciente numa caixa de WhatsApp escolhida (espera os segundos de "Responde em" e junta mensagens picadas)',
       },
       {
         icon: 'i-lucide-columns-3',
@@ -2110,7 +2121,7 @@ const AGENT_META = {
     color: '#C2185B',
     tag: 'Atendimento ao vivo',
     description:
-      'FALA com o paciente nas caixas escolhidas — Instagram Direct E Facebook Messenger — seguindo o script CEVICO (sondagem → autoridade → orçamento → agendamento). Agenda SOZINHO na Agenda interna oferecendo só horários livres, captura o telefone e avisa que a confirmação oficial vai pelo WhatsApp. PAUSA quando um humano responde na conversa; humano manda 👍 para reativar; a confirmação de agendamento (😊) pausa sozinha.',
+      'FALA com o paciente nas caixas escolhidas — Instagram Direct E Facebook Messenger — seguindo o script CEVICO (sondagem → autoridade → orçamento → agendamento). Agenda SOZINHO na Agenda interna oferecendo só horários livres, captura o telefone e avisa que a confirmação oficial vai pelo WhatsApp. Roda solto: agendar não pausa. Só PAUSA quando um humano responde na conversa; humano manda 👍 para reativar.',
     triggers: [
       {
         icon: 'i-lucide-instagram',
@@ -2601,6 +2612,8 @@ const loadAgents = async () => {
         (draft?.after_booking_stage_id ?? real.after_booking_stage_id) || '',
       shadow_daily_cap:
         (draft?.shadow_daily_cap ?? real.shadow_daily_cap) || 30,
+      reply_delay_seconds:
+        (draft?.reply_delay_seconds ?? real.reply_delay_seconds) || 6,
       hours_start: (draft?.hours_start ?? real.hours_start) || '',
       hours_end: (draft?.hours_end ?? real.hours_end) || '',
     };
@@ -3949,7 +3962,7 @@ onUnmounted(() => {
                     Roteiro CEVICO
                   </p>
                   <span class="cv-chip" :class="scriptIsV2 ? 'cv-amber' : ''">{{
-                    scriptIsV2 ? '🧪 v2 paralelo · só no teste' : 'fonte única'
+                    scriptIsV2 ? '🧪 Roteiro 2 · só no teste' : 'Roteiro 1 · fonte única dos atendentes'
                   }}</span>
                   <span class="cv-chip cv-slate">
                     {{ scriptSections.filter(sec => sec.custom).length }} de
@@ -4016,9 +4029,9 @@ onUnmounted(() => {
                 v-if="scriptIsV2"
                 class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed mb-3"
               >
-                🧪 <b>Roteiro v2 paralelo</b> (análise de 22/09): mesmo processo
+                🧪 <b>Roteiro 2 · Otimizado pela análise</b> (22/09): mesmo processo
                 de vendas, com flexibilidade e o conhecimento da equipe. Só o
-                <b>Testar agente</b> lê esta versão (escolha "v2 paralelo" lá).
+                <b>Testar agente</b> lê esta versão (escolha "Roteiro 2" lá).
                 Nenhum atendente em sombra ou ao vivo usa o v2. Aqui também
                 ficam os <b>Passos</b> dos dois atendentes do v2. Seção em
                 branco volta ao padrão do v2.
@@ -4122,7 +4135,7 @@ onUnmounted(() => {
                   </button>
                   <span class="text-[11px] text-n-slate-9">{{
                     scriptIsV2
-                      ? 'o texto acima só entra no Testar agente (v2 paralelo)'
+                      ? 'o texto acima só entra no Testar agente (Roteiro 2)'
                       : 'o texto acima é o que os atendentes leem hoje'
                   }}</span>
                 </template>
@@ -4144,7 +4157,7 @@ onUnmounted(() => {
                       savingScript
                         ? 'Salvando…'
                         : scriptIsV2
-                          ? 'Salvar v2 paralelo (só no teste)'
+                          ? 'Salvar Roteiro 2 (só no teste)'
                           : 'Salvar Roteiro (vale na hora)'
                     }}
                   </button>
@@ -4910,7 +4923,7 @@ onUnmounted(() => {
                         </p>
                       </div>
 
-                      <!-- ao agendar → coluna / teto da sombra / horário -->
+                      <!-- ao agendar → coluna / teto da sombra / responde em / horário -->
                       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div v-if="key === 'atendente_agendamento'">
                           <label
@@ -4944,6 +4957,28 @@ onUnmounted(() => {
                             :disabled="!editingAgent[key]"
                             class="cv-input w-full text-sm disabled:cursor-not-allowed"
                           />
+                        </div>
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                          >
+                            Responde em
+                            <span class="text-n-slate-9 font-normal">
+                              (segundos após a mensagem)
+                            </span>
+                          </label>
+                          <input
+                            v-model.number="agent.reply_delay_seconds"
+                            type="number"
+                            min="3"
+                            max="30"
+                            :disabled="!editingAgent[key]"
+                            class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                          />
+                          <p class="text-[10px] text-n-slate-9 mt-1">
+                            Entre 5 e 10 s parece humano e junta mensagens
+                            picadas.
+                          </p>
                         </div>
                         <div>
                           <label

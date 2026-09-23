@@ -51,9 +51,13 @@ class Crm::AppointmentApplier
       when_str = local_time.strftime('%d/%m/%Y às %H:%M')
       verb = outcome == :rescheduled ? 'REAGENDADA' : 'agendada'
       agenda_url = "/app/accounts/#{account.id}/agenda?date=#{local_time.strftime('%Y-%m-%d')}"
+      # item 200: etiqueta + card na coluna certa, sozinho (o robô "roda solto")
+      effects = Crm::BookingSideEffects.apply(account: account, contact: contact, conversation: conversation, outcome: outcome)
       note = "📅 Consulta #{verb} pela IA: #{name} — #{when_str}" \
              "#{unit ? " (#{unit == 'tatuape' ? 'Tatuapé' : 'Av. Paulista'})" : ''}. " \
              "Registrada na Agenda. [📆 Ver na agenda](#{agenda_url})"
+      effects_text = Crm::BookingSideEffects.summary(effects)
+      note += " #{effects_text}" if effects_text.present?
       private_note(account, conversation, note)
       outcome
     end
@@ -63,9 +67,7 @@ class Crm::AppointmentApplier
         account: account, result: result, contact: contact, conversation: conversation
       )
       if outcome == :canceled
-        private_note(account, conversation,
-                     "📅 Consulta de #{name} CANCELADA a pedido do paciente (Secretário da Agenda). " \
-                     'Saiu da agenda — vale um contato para reagendar.')
+        private_note(account, conversation, cancel_note(account, contact, conversation, name))
       else
         # pediu cancelar/remarcar mas não achei consulta futura no sistema →
         # tarefa para a equipe conferir (pode estar só no Google Calendar)
@@ -79,6 +81,14 @@ class Crm::AppointmentApplier
         Crm::AppointmentRecorder.log_activity(account, result, contact, conversation, :cancel_no_match)
       end
       outcome
+    end
+
+    # nota do cancelamento + efeitos (etiqueta/card — item 200)
+    def cancel_note(account, contact, conversation, name)
+      effects = Crm::BookingSideEffects.apply(account: account, contact: contact, conversation: conversation, outcome: :canceled)
+      effects_text = Crm::BookingSideEffects.summary(effects)
+      note = "📅 Consulta de #{name} CANCELADA a pedido do paciente (Secretário da Agenda). Saiu da agenda, vale um contato para reagendar."
+      effects_text.present? ? "#{note} #{effects_text}" : note
     end
 
     def apply_revision(account, result, contact, conversation, name)

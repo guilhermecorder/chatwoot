@@ -397,11 +397,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 # sombra, janela de horas. O "prompt" dele é o bloco da etapa;
                                 # o Roteiro compartilhado chega em params[:script].
                                 # (193) live_days = dias da semana 0..6 em que fica ao vivo; vazio = todos
+                                # (200) reply_delay_seconds = segundos entre a mensagem do paciente e a resposta (3–30; padrão 6)
                                 atendente_agendamento: agent_fields + [:mode, :no_card, :after_booking_stage_id,
-                                                                       :shadow_daily_cap, :hours_start, :hours_end,
+                                                                       :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
                                                                        { inbox_ids: [], stage_ids: [], live_days: [] }],
                                 # 🗣️ Atendente Pós-agendamento (agente B): suporte a quem já marcou
-                                atendente_pos: agent_fields + [:mode, :shadow_daily_cap, :hours_start, :hours_end,
+                                atendente_pos: agent_fields + [:mode, :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
                                                                { inbox_ids: [], stage_ids: [], live_days: [] }])
                         .to_h
       # 🟢 Ao vivo (193): exige pelo menos uma caixa marcada — sem caixa o agente
@@ -867,6 +868,19 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['surgery_windows'] = Array(params[:surgery_windows]).map do |w|
         w.permit(:dow, :location, :start, :end, :block).to_h
       end
+    end
+    # 🏷️ item 200: o que acontece quando uma consulta é marcada/remarcada/
+    # cancelada (etiquetas + coluna do card) — tela Agendamentos → Ajustes, só admin
+    if params.key?(:booking) && Current.account_user.administrator?
+      raw = params[:booking].respond_to?(:permit) ? params[:booking] : ActionController::Parameters.new(params[:booking].to_h)
+      booking = raw.permit(:stage_id, :cancel_stage_id, :labels_enabled, labels: %i[created rescheduled canceled]).to_h
+      valid_stage_ids = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: Current.account.id }).pluck(:id)
+      cfg['booking'] = {
+        'labels_enabled' => ActiveModel::Type::Boolean.new.cast(booking['labels_enabled']) != false,
+        'labels' => (booking['labels'] || {}).to_h.transform_values { |v| v.to_s.strip.downcase.gsub(/[^\p{L}\p{N}_-]/, '')[0, 40] }.compact_blank,
+        'stage_id' => (valid_stage_ids.include?(booking['stage_id'].to_i) ? booking['stage_id'].to_i : nil),
+        'cancel_stage_id' => (valid_stage_ids.include?(booking['cancel_stage_id'].to_i) ? booking['cancel_stage_id'].to_i : nil)
+      }
     end
     # tema visual dos ambientes (Santorini, Flor del Mar...) — escolha do admin
     cfg['theme'] = params[:theme].to_s if params.key?(:theme)

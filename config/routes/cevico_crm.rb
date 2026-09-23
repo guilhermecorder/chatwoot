@@ -308,6 +308,8 @@ namespace :crm do
   # Dashboard dos AGENTES DE IA (item 85, só admin)
   resource :ai_dashboard, only: [:show], controller: 'ai_dashboards'
   resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
+  # 📅 Painel de Agendamentos (item 200): marcadas/remarcadas/canceladas no período
+  get 'appointments/feed', to: 'appointments#feed'
   # 📞 Ligações nativas de WhatsApp (item 167): lista/atender/recusar/
   # desligar/gravação/transcrição, ligar p/ o paciente e o dashboard
   resources :calls, only: [:index, :show], controller: 'calls' do

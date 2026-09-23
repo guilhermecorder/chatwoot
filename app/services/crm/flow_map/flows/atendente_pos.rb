@@ -22,7 +22,7 @@ class Crm::FlowMap::Flows::AtendentePos
     node :agendar, 'IA pediu para agendar?', kind: :decision
     node :vaga, 'Trava a vaga + confere + grava na Agenda', kind: :decision
     node :outra, 'Diz que a vaga foi preenchida e pede outra', kind: :output
-    node :envia, 'Envia até 3 msgs (😊 só depois de gravar)', kind: :output
+    node :envia, 'Envia até 3 balões espaçados (confirma só depois de gravar)', kind: :output
     node :move, 'Remarca ou cancela a consulta na Agenda'
     node :humano, 'IA chamou humano?', kind: :decision
     node :pausa, 'Pausa o agente nesta conversa'

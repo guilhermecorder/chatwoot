@@ -13,6 +13,8 @@ import CrmAPI from 'dashboard/api/crm';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import PatientSpaceIcon from './PatientSpaceIcon.vue';
 import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsCard.vue';
+import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
+import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
 
 const route = useRoute();
 const router = useRouter();
@@ -253,6 +255,20 @@ const toggleForm = key => {
 const openConversation = id => {
   router.push(frontendURL(`accounts/${accountId.value}/conversations/${id}`));
 };
+
+// 💬📞 "Chamar o paciente" daqui mesmo (pedido 22/09): pílulas no cabeçalho.
+// "Abrir conversa" leva à conversa mais recente (última atividade); o payload
+// já traz cada conversa na linha do tempo, com display_id e last_activity_at.
+// (a pílula "Ligar" só aparece com as ligações ligadas: cevicoCallsOn, abaixo)
+const lastConversationId = computed(() => {
+  const convs = timeline.value.filter(
+    e => e.type === 'conversa' && e.conversation_id
+  );
+  if (!convs.length) return null;
+  const when = e => new Date(e.last_activity_at || e.at || 0).getTime() || 0;
+  return convs.reduce((best, e) => (when(e) > when(best) ? e : best))
+    .conversation_id;
+});
 
 // ── JORNADA EMPILHADA: estágios do funil, do primeiro ao atual ─────
 // Cada bloco = um estágio; à esquerda a data de entrada e o salto de dias;
@@ -769,6 +785,10 @@ const doctorUserIds = ref([]);
 const teamView = ref(false);
 const agents = useMapGetter('agents/getAgents');
 const crmSettings = useMapGetter('crm/getSettings');
+// 📞 ligações do CEVICO ligadas na conta? (gate da pílula "Ligar" do cabeçalho)
+const cevicoCallsOn = computed(
+  () => crmSettings.value?.calls?.enabled === true
+);
 
 const loadAccessConfig = () => {
   const access = crmSettings.value?.clinical_access || {};
@@ -826,13 +846,13 @@ watch(contactId, () => {
       <template v-else>
         <!-- ══ Cabeçalho dopamine (a cor segue o paciente) ══ -->
         <div
-          class="relative rounded-2xl p-5 mb-5 text-white shadow-lg overflow-hidden"
+          class="relative rounded-2xl p-5 mb-5 text-white shadow-lg"
           :class="isLightTheme ? 'cevico-ink-dark' : ''"
           :style="{ background: theme.grad }"
         >
           <div
             v-if="theme.stars"
-            class="absolute inset-0 pointer-events-none"
+            class="absolute inset-0 rounded-2xl pointer-events-none"
             :style="{ backgroundImage: STAR_FIELD }"
           />
           <div class="relative flex items-start gap-4 flex-wrap">
@@ -897,6 +917,39 @@ watch(contactId, () => {
                   <span class="i-lucide-clock text-xs" />
                   paciente desde {{ fmtDate(identity.created_at) }}
                 </span>
+              </div>
+              <!-- 💬📞 chamar o paciente daqui mesmo: conversa nova, ligar, abrir a última conversa -->
+              <div class="flex items-center gap-1.5 flex-wrap mt-2">
+                <button
+                  class="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[12px] font-semibold inline-flex items-center gap-1.5 transition-all"
+                  title="Começar uma conversa com este paciente por qualquer caixa"
+                  @click="openNovaConversa({ contactId: Number(contactId) })"
+                >
+                  <span class="i-lucide-message-square-plus text-[13px]" />
+                  Conversa
+                </button>
+                <span
+                  v-if="identity.phone_number && cevicoCallsOn"
+                  class="cevico-call-pill pl-1 pr-2.5 py-0.5 rounded-full bg-white/15 hover:bg-white/25 text-[12px] font-semibold inline-flex items-center gap-1 transition-all"
+                  title="Ligar para o paciente pelo WhatsApp"
+                >
+                  <CevicoCallButton
+                    :contact-id="Number(contactId)"
+                    :phone="identity.phone_number"
+                    :ghost="false"
+                    faded
+                  />
+                  Ligar
+                </span>
+                <button
+                  v-if="lastConversationId"
+                  class="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[12px] font-semibold inline-flex items-center gap-1.5 transition-all"
+                  :title="`Abrir a conversa mais recente (#${lastConversationId})`"
+                  @click="openConversation(lastConversationId)"
+                >
+                  <span class="i-lucide-messages-square text-[13px]" />
+                  Abrir conversa
+                </button>
               </div>
               <div
                 v-if="(identity.labels || []).length"
@@ -2409,4 +2462,23 @@ class="opacity-70"
 .cevico-ink-dark { color: #0b2239 !important; }
 .cevico-ink-dark [class*='text-white'] { color: rgba(11,34,57,.85) !important; }
 .cevico-ink-dark [class*='bg-white/'] { background: rgba(11,34,57,.10) !important; }
+/* pílula "Ligar" do cabeçalho: o botão do módulo de ligações herda a tinta
+   do cabeçalho (branca ou escura), some o fundo próprio e fica do tamanho
+   das outras pílulas; o balão da permissão abre alinhado à esquerda e
+   mantém as próprias cores */
+.cevico-call-pill :deep(.relative > button) {
+  color: inherit;
+  background: transparent;
+  width: 22px;
+  height: 22px;
+  min-width: 0;
+  padding: 0;
+}
+.cevico-call-pill :deep(.absolute) {
+  left: 0;
+  right: auto;
+}
+.cevico-call-pill :deep(.absolute [class*='text-white']) {
+  color: #fff !important;
+}
 </style>

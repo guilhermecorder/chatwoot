@@ -297,6 +297,18 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 📅 ambiente Agendamentos (item 200): cada consulta marcada, remarcada ou
+  // cancelada no período (preset/from/to, mode, kind, unit, inbox_id, q)
+  appointmentsFeed(params) {
+    return axios.get(`${this.url}/appointments/feed`, { params });
+  }
+
+  // ajustes do que acontece ao confirmar uma consulta (etiquetas + coluna
+  // do CRM ao marcar/remarcar/cancelar) — só admin
+  updateAgendaBooking(booking) {
+    return axios.post(`${this.url}/settings/update_agenda`, { booking });
+  }
+
   // 🏥 OftalmoFácil (item 157): testar a conexão só-leitura + sincronizar agora
   testOftalmofacil() {
     return axios.post(`${this.url}/settings/test_oftalmofacil`);

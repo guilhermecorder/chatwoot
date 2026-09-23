@@ -33,8 +33,9 @@ const objective = ref('');
 const scriptVersion = ref(props.scriptVersion === 'v2' ? 'v2' : 'v1');
 const isV2 = computed(() => scriptVersion.value === 'v2');
 const SCRIPT_VERSIONS = [
-  { key: 'v1', label: 'Roteiro atual', hint: 'o que os atendentes leem hoje' },
-  { key: 'v2', label: 'v2 paralelo', hint: 'só existe aqui no teste' },
+  // nomes claros (pedido 22/09: "melhorar a nomenclatura para poder testar")
+  { key: 'v1', label: 'Roteiro 1 · Fiel ao N8N', hint: 'estrutura do robô do N8N + regras de 22/09; é o que os atendentes leem' },
+  { key: 'v2', label: 'Roteiro 2 · Otimizado pela análise', hint: 'análise do banco de 22/09 + regras de 22/09; só existe aqui no teste' },
 ];
 const OBJECTIVE_PLACEHOLDER = 'orçamento enviado, sem resposta há 2 dias';
 
@@ -250,7 +251,7 @@ const guide = turn => {
             </p>
             <p v-else class="text-[11px] opacity-80">
               Você é o paciente. O agente responde com a IA de verdade e o
-              {{ isV2 ? 'Roteiro v2 paralelo (só existe neste teste)' : 'Roteiro de agora' }}.
+              {{ isV2 ? 'Roteiro 2 · Otimizado pela análise (só existe neste teste)' : 'Roteiro 1 · Fiel ao N8N (o que os atendentes leem)' }}.
               Caixa interna, sem canal de envio: nada vai para telefone nenhum.
             </p>
           </div>
@@ -325,7 +326,7 @@ const guide = turn => {
             }}
             · {{ isVoice ? 'lead de teste' : 'paciente de teste' }} ·
             {{ new Date().toLocaleDateString('pt-BR') }}<template v-if="!isVoice">
-              · {{ isV2 ? '🧪 Roteiro v2 paralelo' : 'Roteiro atual' }}</template>
+              · {{ isV2 ? 'Roteiro 2 · Otimizado' : 'Roteiro 1 · Fiel ao N8N' }}</template>
           </p>
 
           <template v-for="t in turns" :key="t.id">

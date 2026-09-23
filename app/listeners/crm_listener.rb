@@ -48,6 +48,11 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     # consulta futura — roda MESMO sem card no funil
     handle_scheduler_recheck(message, contact)
 
+    # 📅 item 200: "Consulta confirmada: …" / "remarquei: …" / "consulta
+    # cancelada" enviados pelo robô do N8N ou pela equipe → o Secretário lê a
+    # conversa e registra na Agenda (etiqueta + card vêm de brinde)
+    handle_booking_anchor(message, contact)
+
     # ✅ confirmação do lembrete D-1 (item 156): "sim/confirmo" de quem
     # recebeu o lembrete da véspera → marca a consulta como confirmada
     handle_appointment_confirmation(message, contact)
@@ -98,6 +103,53 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     return unless message.incoming? && Crm::OptOut.opt_out_message?(message.content)
 
     Crm::OptOut.apply!(contact, conversation: message.conversation)
+  end
+
+  # ── ÂNCORAS DE AGENDAMENTO (item 200, 22/09) ──
+  # Antes, o "Deu certo 😊" do robô era o único sinal de que a consulta tinha
+  # sido marcada — e a carinha PAUSAVA o robô. Agora o robô roda solto e o
+  # sinal é o TEXTO da confirmação: qualquer mensagem ENVIADA (robô do N8N ou
+  # equipe) com "Consulta confirmada", "remarquei", "consulta cancelada"…
+  # dispara o Secretário da Agenda em 15 s. Ele lê a conversa, grava/remarca/
+  # cancela na Agenda e o Crm::BookingSideEffects etiqueta o paciente e move o
+  # card. Mensagens do Atendente interno (que grava sozinho, na ordem segura),
+  # da jornada e dos robôs de follow-up ficam de fora. Freio: 1 leitura por
+  # paciente a cada 90 s (a confirmação chega picada em 2–3 balões).
+  BOOKING_ANCHORS = Regexp.union(
+    /consulta\s+(confirmada|agendada|marcada|remarcada|reagendada|cancelada|desmarcada)/i,
+    /\b(remarquei|reagendei|cancelei|desmarquei)\b/i
+  ).freeze
+  ANCHOR_THROTTLE = 90.seconds
+
+  def handle_booking_anchor(message, contact)
+    return unless booking_anchor?(message)
+    return if automated_message?(message) || anchor_recently?(contact)
+
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      attrs.merge('cevico_anchor_read_at' => Time.current.iso8601)
+    end
+    Crm::SchedulerRecheckJob.set(wait: 15.seconds).perform_later(message.conversation_id)
+  rescue StandardError => e
+    Rails.logger.error "[CrmListener] âncora de agendamento: #{e.message}"
+  end
+
+  def booking_anchor?(message)
+    message.message_type == 'outgoing' && message.content.to_s.match?(BOOKING_ANCHORS)
+  end
+
+  # mensagem de robô/jornada/agente interno (marcas em additional_attributes)
+  def automated_message?(message)
+    attrs = message.additional_attributes || {}
+    AUTOMATED_MARKS.any? { |mark| attrs[mark].present? }
+  end
+
+  def anchor_recently?(contact)
+    last = contact.additional_attributes&.dig('cevico_anchor_read_at')
+    return false if last.blank?
+
+    Time.zone.parse(last.to_s) > ANCHOR_THROTTLE.ago
+  rescue ArgumentError, TypeError
+    false
   end
 
   def handle_scheduler_recheck(message, contact)
@@ -265,7 +317,9 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
         state = conversation.additional_attributes&.[](RESPONDER_STATE_KEY) || {}
         return if state['paused']
       end
-      Crm::ResponderAgentJob.set(wait: 12.seconds).perform_later(conversation.id, message.id, key)
+      # item 200: responde entre 5 e 10 s da mensagem do paciente (config
+      # reply_delay_seconds do agente; padrão 6 s; junta mensagens picadas)
+      Crm::ResponderAgentJob.set(wait: responder_delay(agents[key])).perform_later(conversation.id, message.id, key)
     else # outgoing: só importa para quem está AO VIVO
       return unless agents.values.any? { |a| Crm::ResponderAgentJob.live_mode?(a) }
       return if message.additional_attributes&.[]('cevico_ia_agent').present? # do próprio agente
@@ -282,6 +336,14 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     end
   rescue StandardError => e
     Rails.logger.error "[CrmListener] respondedores: #{e.message}"
+  end
+
+  DEFAULT_REPLY_DELAY = 6
+
+  def responder_delay(cfg)
+    secs = cfg['reply_delay_seconds'].to_i
+    secs = DEFAULT_REPLY_DELAY unless secs.positive?
+    secs.clamp(3, 30).seconds
   end
 
   # agente dono da coluna atual do card (ou do "sem card")
