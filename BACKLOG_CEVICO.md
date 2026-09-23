@@ -6171,7 +6171,19 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 213. 💸 CACHE DO ROTEIRO — gasto dos agentes de IA (pedido 23/09: "está muito bom, mas inviável financeiramente como está") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, sem migration)
+## 214. 💸🧹 GASTO fase 2 (saída curta + esforço low + Haiku no Pós) e LISTA DE CONVERSAS LIMPA para atendentes (pedidos 23/09 noite) — SUBIU 23/09 (commit no develop, WEB+SIDEKIQ, sem migration; reversão :1ae7f51)
+- PEDIDO: "1 e 3 fazem sentido juntos" (das opções de baratear) + "quero poder selecionar se agentes terão a
+  conversa clean ou não — as meninas não querem a coluna e as etiquetas, mas os admin querem".
+- GASTO: (a) campo `leitura` da resposta do Atendente (só a equipe lê) passou a pedir UMA frase de até 12
+  palavras — a saída (US$ 15/M) era 43% do custo depois do cache; (b) esforço LOW no agendamento foi construído e
+  ELE RECUSOU ("não vou querer o esforço low") → segue medium; (c) atendente_pos no HAIKU 4.5 (era Sonnet 5; 3x mais barato; JSON estruturado já roda
+  em Haiku no Radar). Escolha explícita do admin por agente (Integrações → IA) continua valendo por cima.
+- LISTA LIMPA: `agenda_config.list_clean_for_agents` (update_agenda; sai em crm/getSettings); chavinha em
+  Configurações → Painéis ("Lista de Conversas limpa para atendentes"); ConversationCard esconde a 4ª linha
+  (coluna do CRM + etiquetas + SLA) quando ligado E a pessoa não é admin (useAdmin). Cor/crachá/quem cuida ficam.
+- REVERSÃO: imagem :1ae7f51.
+
+## 213. 💸 CACHE DO ROTEIRO — gasto dos agentes de IA (pedido 23/09: "está muito bom, mas inviável financeiramente como está") — SUBIU 23/09 (commit 1ae7f51 no develop → imagem ghcr :1ae7f51, WEB+SIDEKIQ, sem migration; reversão :1af4f6f)
 - DIAGNÓSTICO (print do painel de gasto, 23/09): Atendente de Agendamento US$ 20,68 em 30 dias (US$ 24,63 só no 1º
   dia solto), 457 respostas, 6,26 M tokens de ENTRADA (13,7 mil por resposta) × 127 k de saída. Causa: o Roteiro
   CEVICO (~38 KB ≈ 10 mil tokens) vai inteiro em TODA chamada e em toda volta de ferramenta, sempre a preço cheio

@@ -1018,6 +1018,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['panel_owners'] = raw.slice('agendamento', 'conducao', 'cirurgia')
                                .transform_values { |v| v.presence&.to_i }.compact
     end
+    # 🧹 LISTA LIMPA (item 214): atendentes veem os cartões de Conversas sem a
+    # coluna do CRM e sem etiquetas (elas não querem); admins veem tudo.
+    cfg['list_clean_for_agents'] = ActiveModel::Type::Boolean.new.cast(params[:list_clean_for_agents]) == true if params.key?(:list_clean_for_agents)
     # 🎨 COR DE CADA PESSOA (item 212): {user_id => '#hex'} escolhida pelo
     # admin em Configurações → Painéis; vale na lista de Conversas (crachá +
     # pílula), no painel da conversa e no filtro "quem cuida". Sem entrada =
@@ -1148,6 +1151,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       block_layout: cfg['block_layout'] || {},
       panel_palettes: cfg['panel_palettes'] || {},
       person_colors: cfg['person_colors'] || {},
+      list_clean_for_agents: cfg['list_clean_for_agents'] == true,
       performance_metrics: cfg['performance_metrics'] || {},
       clinical_access: cfg['clinical_access'] || {},
       followup_hours: cfg['followup_hours'] || { 'start' => 8, 'end' => 20 },
@@ -1643,6 +1647,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       block_layout: (s.agenda_config || {})['block_layout'] || {},
       panel_palettes: (s.agenda_config || {})['panel_palettes'] || {},
       person_colors: (s.agenda_config || {})['person_colors'] || {},
+      list_clean_for_agents: (s.agenda_config || {})['list_clean_for_agents'] == true,
       performance_metrics: (s.agenda_config || {})['performance_metrics'] || {},
       performance_metric_keys: Crm::AgentPerformance::METRIC_KEYS,
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},

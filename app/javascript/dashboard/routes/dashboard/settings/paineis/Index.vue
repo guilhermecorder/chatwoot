@@ -78,6 +78,29 @@ const owners = ref({}); // { painel => user_id }
 const aiUserId = ref(null); // login que o Atendimento IA usa
 const savingKey = ref('');
 
+// 🧹 item 214: lista de Conversas limpa para atendentes (admins veem tudo)
+const listClean = ref(false);
+const toggleListClean = async () => {
+  const previous = listClean.value;
+  listClean.value = !previous;
+  savingKey.value = 'listclean';
+  try {
+    await CrmAPI.updateListClean(listClean.value);
+    await store.dispatch('crm/fetchSettings');
+    useAlert(
+      listClean.value
+        ? 'Atendentes passam a ver a lista limpa.'
+        : 'Atendentes voltam a ver coluna e etiquetas.'
+    );
+  } catch {
+    listClean.value = previous;
+    useAlert('Não consegui salvar — tenta de novo.');
+  } finally {
+    savingKey.value = '';
+  }
+};
+
+
 // 🎯 métricas do "Meu desempenho" por pessoa (item 139) — o admin propõe
 // o painel individual de cada função; vazio = padrão do sistema
 const METRIC_OPTIONS = [
@@ -152,6 +175,7 @@ const loadFromSettings = () => {
   metricsCfg.value = { ...(crmSettings.value?.performance_metrics || {}) };
   panelThemes.value = { ...(crmSettings.value?.panel_themes || {}) };
   personColors.value = { ...(crmSettings.value?.person_colors || {}) };
+  listClean.value = crmSettings.value?.list_clean_for_agents === true;
   if (!selPersonId.value && sortedAgents.value.length) selPersonId.value = sortedAgents.value[0].id;
 };
 
@@ -441,6 +465,34 @@ onMounted(async () => {
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- 🧹 Lista limpa para atendentes (item 214) -->
+      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mt-4">
+        <div class="flex items-center gap-3 flex-wrap">
+          <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #0F766E, #2DD4BF)">
+            <span class="i-lucide-brush-cleaning text-white text-base" />
+          </span>
+          <div class="flex-1 min-w-[180px]">
+            <p class="text-sm font-bold text-n-slate-12">Lista de Conversas limpa para atendentes</p>
+            <p class="text-[11px] text-n-slate-10">
+              ligado: as atendentes veem os cartões só com nome, caixa, quem cuida e a última
+              mensagem — sem a coluna do CRM e sem etiquetas. Administradores veem tudo sempre.
+            </p>
+          </div>
+          <span v-if="savingKey === 'listclean'" class="i-lucide-loader-circle animate-spin text-sm text-n-brand" />
+          <button
+            class="relative w-11 h-6 rounded-full transition-colors flex-shrink-0"
+            :class="listClean ? 'bg-teal-600' : 'bg-n-slate-6'"
+            :title="listClean ? 'Desligar: atendentes voltam a ver coluna e etiquetas' : 'Ligar: atendentes veem a lista limpa'"
+            @click="toggleListClean"
+          >
+            <span
+              class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"
+              :class="listClean ? 'translate-x-5' : ''"
+            />
+          </button>
         </div>
       </div>
 

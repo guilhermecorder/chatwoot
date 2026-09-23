@@ -48,7 +48,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       chamar_humano: { type: 'boolean', description: 'true quando a equipe humana precisa assumir (urgência, caso clínico, insatisfação, falha)' },
       leitura: {
         type: 'string',
-        description: 'Para a EQUIPE (não vai ao paciente): em 1 frase, o que você entendeu da situação e por que respondeu assim'
+        description: 'Para a EQUIPE (não vai ao paciente): UMA frase curta, até 12 palavras, com o que entendeu e por que respondeu assim'
       }
     },
     required: %w[mensagens etapa agendar agendamento cancelar pausar chamar_humano leitura],

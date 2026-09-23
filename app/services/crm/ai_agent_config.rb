@@ -36,8 +36,11 @@ module Crm::AiAgentConfig
     'creative'     => { 'model' => 'claude-sonnet-5', 'effort' => 'high' }    # copy que vai pro anúncio — qualidade importa
   }.merge(
     # 🗣️ rodada 188: respondedores do WhatsApp (Roteiro CEVICO + bloco da etapa)
+    # 💸 item 214 (23/09): HAIKU no pós-agendamento (conversa simples, 3x mais
+    # barato). No agendamento ele NÃO quis esforço low — segue medium.
+    # O admin ainda pode escolher outro modelo/esforço por agente.
     'atendente_agendamento' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # conversa com paciente até agendar
-    'atendente_pos' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # suporte a quem já agendou (dúvidas, remarcar)
+    'atendente_pos' => { 'model' => 'claude-haiku-4-5', 'effort' => nil }, # suporte a quem já agendou (dúvidas, remarcar)
     # 🎙️ rodada 195: simulador POR TEXTO do Agente de Ligação (a voz real roda na ElevenLabs)
     'voice' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }
   ).freeze

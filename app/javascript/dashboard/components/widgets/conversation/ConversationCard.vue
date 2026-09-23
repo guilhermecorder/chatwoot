@@ -14,6 +14,7 @@ import { useMapGetter } from 'dashboard/composables/store';
 import { inboxSolidFor } from 'dashboard/helper/cevicoInboxColors';
 import { firstNameOf, initialOf } from 'dashboard/helper/cevicoPersonColors';
 import { useCevicoPersonColors } from 'dashboard/composables/useCevicoPersonColors';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import CrmAPI from 'dashboard/api/crm';
 
 const props = defineProps({
@@ -184,13 +185,21 @@ const hiddenLabels = computed(() =>
 const toggleLabels = () => {
   labelsExpanded.value = !labelsExpanded.value;
 };
+// 🧹 item 214: "lista limpa" — o admin liga em Configurações → Painéis e as
+// atendentes deixam de ver a coluna do CRM e as etiquetas; admin vê sempre
+const { isAdmin } = useAdmin();
+const crmSettings = useMapGetter('crm/getSettings');
+const cleanList = computed(
+  () => !isAdmin.value && crmSettings.value?.list_clean_for_agents === true
+);
 // a 4ª linha existe sempre que há jornada configurada (coluna ou "sem
 // coluna"), etiqueta ou SLA — assim os cartões ficam alinhados entre si
 const showJourneyRow = computed(
   () =>
-    journeyStages.value.length > 0 ||
-    activeLabels.value.length > 0 ||
-    hasSlaPolicyId.value
+    !cleanList.value &&
+    (journeyStages.value.length > 0 ||
+      activeLabels.value.length > 0 ||
+      hasSlaPolicyId.value)
 );
 </script>
 

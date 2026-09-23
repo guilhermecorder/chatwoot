@@ -339,6 +339,13 @@ class CrmAPI extends ApiClient {
   }
 
   // responsável por painel do Meu Painel (Configurações → Painéis)
+  // 🧹 item 214: lista de Conversas limpa (sem coluna/etiquetas) para atendentes
+  updateListClean(enabled) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      list_clean_for_agents: enabled,
+    });
+  }
+
   // 🎨 item 212: cor de cada pessoa ({user_id: '#hex'}; sem entrada = automática)
   updatePersonColors(personColors) {
     return axios.post(`${this.url}/settings/update_agenda`, {
