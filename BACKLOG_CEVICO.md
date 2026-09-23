@@ -6171,6 +6171,41 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 203. 🙈 BOTÃO "RECOLHER" NO TOPO DE CONVERSAS (pedido 22/09, 21h40, print do FECHAMENTO) — AGUARDA "pode construir" (SESSÃO NOVA)
+- Pedido: "quero um botão 'recolher', para deixar mais clean a visualização de CONVERSAS". O topo (botão Nova
+  conversa + frase, pílulas das caixas, chips Funil/Colunas CRM/Etiquetas, chavinha Não lidas, segmentado de ordem)
+  ocupa quase metade da coluna da lista.
+- Proposta: um botão pequeno (chevron) no cabeçalho da lista que recolhe o bloco inteiro numa linha só (nome da
+  caixa ativa + contadores), lembrando a escolha por pessoa (ui_settings, como o recado das cores), com atalho
+  para abrir de novo. Peças: ChatList.vue (topo do item 199), kit cv-*, azul royal para o estado ativo.
+
+## 202. 🧠 MODELO POR PROVEDOR EM CADA AGENTE — Google, OpenAI ou Anthropic (pedido 22/09, 21h35) — AGUARDA "pode construir" (SESSÃO NOVA)
+- Pedido: "quero ter, ali em cada agente, o modelo que eu vou usar, seja do google, openai, ou anthropic".
+- Hoje: os 20 agentes chamam a API da Anthropic direto (Crm::AiAgentConfig: MODELS = opus-4-8 / sonnet-5 /
+  haiku-4-5, `client.messages.create` com JSON estruturado e, nos atendentes, ferramentas); chave única em
+  Integrações → Claude; custo em Crm::AiUsage.
+- Plano: camada única de conversa com os provedores (JSON estruturado + ferramentas + esforço traduzidos para cada
+  um); chaves por provedor em Integrações (Claude, OpenAI, Google); no card de cada agente o modelo vira
+  "provedor + modelo" (pré-configurado como hoje = Claude, ele troca na tela); tabela de preço por modelo para o
+  gasto continuar certo; registrar o modelo usado em cada resposta (para o 201 comparar conversão por modelo);
+  testar cada provedor no 🧪 Testar agente antes de ligar. Precisa das chaves reais dele para o teste (só via
+  Integrações, nunca no git).
+
+## 201. 📈 EFETIVIDADE DAS AUTOMAÇÕES — conversão em agendamento por automação/robô/agente (pedido 22/09, 21h30) — AGUARDA "pode construir" (SESSÃO NOVA)
+- Pedido: "quero entender qual é a conversão de agendamentos, das automações... a efetividade delas".
+- Hoje só há ATIVIDADE: Automações → Resultados (disparos por automação de coluna, crm_automation_logs), Dashboard
+  dos Agentes (equipe humana), cards dos agentes de IA (respostas/tokens/custo), envios e respostas da Jornada.
+  Nada diz "quem foi tocado e agendou depois".
+- Rastros que já existem: log da automação (contato + fired_at); cutucada do robô de follow-up marcada na mensagem
+  (cevico_followup_bot_id + etapa); envios da Jornada (crm_journey_sends); resposta do atendente de IA
+  (cevico_ia_agent); robô do N8N = usuário 1; campanhas (crm_campaign_contacts); consulta = task 'consulta' com
+  contato, created_at e origem robô × equipe (item 200).
+- Proposta: tela "Efetividade das automações" (hub Automações ou Análises): por automação, robô de follow-up (e por
+  ETAPA de cutucada), mensagem da Jornada, agente de IA (N8N × interno) e campanha → leads tocados no período,
+  quantos agendaram em 7/14/30 dias, conversão %, tempo mediano até agendar; duas atribuições lado a lado (último
+  toque antes de agendar × qualquer toque na janela); linha de base = leads sem toque automático que agendaram;
+  depois o funil completo (agendou → compareceu → indicou cirurgia → operou, a Agenda já guarda). Sem migration.
+
 ## 200. 🤖🔓 AGENTE "RODANDO SOLTO" + PAINEL DE AGENDAMENTOS + AFUNILAMENTO E PORTA ABERTA (pedido 22/09 noite, para os NÚMEROS NOVOS de 23/09) — SUBIU 22/09 21h ("vamos subir" → commits 47e03db [199] + 0a07510 [200] na feat/rodada-172, push para origin/develop = 0a07510 → imagem ghcr.io/guilhermecorder/chatwoot:0a07510, deploy WEB+SIDEKIQ sem migration; reversão = imagem em produção antes: 87c9564 ou 2d7b2b4)
 
 **Pedido dele (22/09, 19h40, com prints do teste no FECHAMENTO #10912 e do 🧪 Testar agente):**
@@ -6276,6 +6311,19 @@ procura?") que ele acredita influenciarem o comparecimento.
   Otimizado pela análise" (análise do banco de 22/09 + regras de 22/09; só o teste lê). Título dentro do prompt
   acompanha. Os dois têm as regras novas (sem emoji, rodando solto, afunilamento, porta aberta, sem Haddad); o que
   os diferencia é a estrutura (1 = fiel ao N8N; 2 = enxuto, promessa quando pedem valor cedo, objeções da análise).
+- **Correção dele 22/09 21h20 ("a estrutura de alta tecnologia não é do IOP, é da CEVICO; nós enaltecemos a CEVICO")**:
+  + ele colou o prompt EM PRODUÇÃO (21h50), que já difere do arquivo de 26/08: Dr Ricardo e Dr Renato na catarata
+  (30.000 cirurgias cada), Tatuapé de 10 em 10 min (não 5), lente escleral R$ 2.500, esclerais + especialista R$ 700.
+  Texto pré-configurado virou "a cirurgia é realizada pelo Dr. Ricardo ou pelo Dr. Renato, cirurgiões de catarata com
+  mais de 30.000 cirurgias cada um, com a estrutura de alta tecnologia da CEVICO: equipamentos de última geração e
+  lentes importadas Rayner" (Roteiro 1 e 2, Instagram, voz, análise; N8N v20 regenerado A PARTIR DO PROMPT DE
+  PRODUÇÃO, base salva em docs/n8n-v20-rodando-solto/SUPERVISOR v19 (base atual de producao, colado 22-09).txt).
+  O IOP fica só como o instituto onde a clínica atua. Tabela de preços do sistema: conferir Lente Escleral 2.500. Ele pode ajustar internamente
+  em Automações → Agentes de IA → Roteiro → seções "Dados oficiais" e "Objeções" (seção editada = personalizada;
+  apagar o texto volta ao padrão). ⚠️ ESTA CORREÇÃO ESTÁ NO WORKING TREE SEM COMMIT (8 arquivos: cevico_script.rb,
+  cevico_script_v2.rb, conversation_insight_service.rb, instagram_agent_service.rb, voice_agent/script.rb, 2 specs
+  com o título novo dos Roteiros, BACKLOG) — specs verdes; aguarda "pode subir" na sessão nova (gera etiqueta nova
+  depois da 0a07510). Também há 1 commit local não enviado (5659a67, só BACKLOG).
 - ⚠️ Freios a saber: âncora = 1 leitura por paciente a cada 90 s; o Secretário ignora leituras a menos de 2 min da
   anterior (MIN_GAP) — uma remarcação enviada a menos de 2 min da confirmação só entra na próxima mensagem do
   paciente que fale em remarcar (releitura de sempre).

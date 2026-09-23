@@ -81,7 +81,7 @@ class Crm::InstagramAgentService
     AUTORIDADE (usar quando fizer sentido, resumido):
     - Médicos: Dr. Henrique Gemelli, Dra. Roberta Negri e Dr. Gustavo Bittar
       (refrativa: Dr. Gustavo Bittar, especialista em córnea).
-    - Catarata: cirurgia realizada pela nossa equipe cirúrgica especializada, dentro do IOP, com estrutura de alta tecnologia e lentes importadas Rayner (nunca cite nome de cirurgião nem números de cirurgias).
+    - Catarata: cirurgia com o Dr. Ricardo ou o Dr. Renato (mais de 30.000 cirurgias cada), com a estrutura de alta tecnologia da CEVICO: equipamentos de última geração e lentes importadas Rayner (cite só os médicos deste prompt; nunca invente números).
     - Refrativa: Excimer Laser Schwind Amaris 1050RS, considerado o padrão
       ouro mundial (1050 pulsos/segundo, ~1,3s por dioptria).
     - A CEVICO atua dentro do IOP – Instituto Oftalmológico Paulista.

@@ -43,7 +43,7 @@ RSpec.describe Crm::CevicoScript do
   describe 'versão v2 (paralela)' do
     it 'tem padrão próprio nas 5 seções, título próprio e os passos dos 2 atendentes como seções extras', :aggregate_failures do
       text = described_class.text(account, 'v2')
-      expect(text).to include('ROTEIRO CEVICO v2')
+      expect(text).to include('ROTEIRO CEVICO 2')
       expect(text).to include('Postura de quem resolve') # persona v2
       expect(text).not_to include('{{TABELA_DE_PRECOS}}')
       sections = described_class.sections(account, 'v2')

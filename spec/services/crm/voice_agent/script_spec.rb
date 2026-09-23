@@ -11,7 +11,7 @@ RSpec.describe Crm::VoiceAgent::Script do
     expect(text).to include('== REGRAS DE VOZ').and include('== SUAS FERRAMENTAS').and include('== SUA ETAPA ==')
     expect(text).to include('LIGAÇÃO PARA LEAD NÃO RESPONSIVO').and include('{{campanha_objetivo}}').and include('registrar_resultado')
     expect(text).not_to include('Haddad') # 22/09: sem cirurgião nomeado; a autoridade é a equipe + estrutura
-    expect(text).to include('equipe cirúrgica especializada')
+    expect(text).to include('Doutor Ricardo')
     expect(text).not_to include('R$')
     expect(text).to include('150 reais').and include('4900 reais').and include('dez vezes sem juros')
     expect(text).to end_with(described_class::GUARDRAIL)

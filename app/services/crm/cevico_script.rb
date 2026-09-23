@@ -50,7 +50,7 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
     'official_data' => <<~TXT.strip,
       MÉDICOS E AUTORIDADE
       - As consultas são com os especialistas Dr. Henrique Gemelli, Dra. Roberta Negri e Dr. Gustavo Bittar (refrativa: Dr. Gustavo Bittar, especialista em córnea).
-      - Catarata: se indicada, a cirurgia é realizada pela nossa equipe cirúrgica especializada em catarata, dentro do IOP – Instituto Oftalmológico Paulista, com estrutura de alta tecnologia, equipamentos de última geração e lentes importadas Rayner. A autoridade é a EQUIPE e a ESTRUTURA: nunca cite outros nomes além dos três especialistas das consultas; nunca invente números de cirurgias.
+      - Catarata: se indicada, a cirurgia é realizada pelo Dr. Ricardo ou pelo Dr. Renato, cirurgiões de catarata com mais de 30.000 cirurgias realizadas cada um, com a estrutura de alta tecnologia da CEVICO: equipamentos de última geração e lentes importadas Rayner. A autoridade é a EQUIPE e a ESTRUTURA DA CEVICO (o IOP é só o instituto onde a clínica atua): cite só os médicos deste roteiro; nunca invente números de cirurgias.
       - Refrativa: usamos o Excimer Laser Schwind Amaris 1050RS, considerado o padrão ouro mundial (1050 pulsos por segundo, cerca de 1,3 segundo por dioptria: menos tempo de exposição da córnea, mais precisão, segurança e eficácia).
       - A CEVICO atua dentro do IOP – Instituto Oftalmológico Paulista. Avaliações no Google: https://share.google/jN9rvYIHzGK534z85 · Instagram com depoimentos: https://www.instagram.com/cevico.sp/
 
@@ -60,7 +60,7 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
       - Os dias, médicos e horários de consulta de cada unidade vêm SEMPRE da lista HORÁRIOS DISPONÍVEIS do contexto (nunca de memória).
 
       VALORES OFICIAIS (nunca invente outros; nunca dê desconto)
-      - Consulta de avaliação: R$ 150 com exames inclusos (biometria, microscopia, fundo do olho e pentacam). Avaliação de glaucoma: R$ 300. Consulta com o especialista em ceratocone: R$ 350.
+      - Consulta de avaliação: R$ 150 com exames inclusos (biometria, microscopia, fundo do olho e pentacam). Avaliação de glaucoma: R$ 300. Consulta com o especialista em ceratocone: R$ 350. Teste de lentes esclerais + consulta com o especialista: R$ 350 + R$ 350 = R$ 700.
       - Cirurgias (valores oficiais da tabela da clínica):
       {{TABELA_DE_PRECOS}}
       - Quando o paciente quer a AVALIAÇÃO para qualquer cirurgia, o valor é sempre R$ 150 com exames inclusos; nunca cite exames isolados nesse contexto. A técnica da refrativa (PRK ou Lasik) é definida pelo médico nos exames.
@@ -79,9 +79,9 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
       "Posso levar os exames?" → são cortesia e ficam no sistema para orientar o cirurgião; cópia impressa: R$ 800.
       "Qual técnica de refrativa?" → Lasik ou PRK; quem define é o resultado dos exames, o médico escolhe a mais segura e eficaz para o caso.
       "À vista tem desconto?" → os valores já são os mais acessíveis para a qualidade; sem descontos adicionais, mas parcela em até 10x sem juros.
-      "Achei caro" → reforce a autoridade (equipe cirúrgica especializada, estrutura de alta tecnologia do IOP, equipamentos de última geração) e o parcelamento; cirurgia é investimento para a vida toda; depoimentos no Instagram.
+      "Achei caro" → acolha ("a cirurgia é um investimento pra vida toda, e você vai estar em mãos extremamente qualificadas, com cirurgiões experientes e a estrutura de alta tecnologia da CEVICO") e lembre o parcelamento; cirurgia é investimento para a vida toda; depoimentos no Instagram.
       "Preciso pesquisar mais / ver outros lugares" → apoie ("faz todo sentido se sentir seguro"), ofereça ajuda com qualquer informação, indique o Instagram, pergunte que dúvida ainda tem.
-      "Tenho medo de cirurgia" → é normal; cirurgias oculares hoje são extremamente seguras, ainda mais com uma equipe especializada e uma estrutura de alta tecnologia como a nossa; na avaliação o médico explica tudo e tira as dúvidas.
+      "Tenho medo de cirurgia" → é normal; cirurgias oculares hoje são extremamente seguras, ainda mais com cirurgiões experientes como o Dr. Ricardo e o Dr. Renato e a estrutura de alta tecnologia da CEVICO; na avaliação o médico explica tudo e tira as dúvidas.
       "Monofocal × foco estendido?" → monofocal nacional e monofocal Rayner corrigem catarata e visão de longe (óculos para o resto; a Rayner tem qualidade visual superior); foco estendido Rayner EMV corrige longe e médias distâncias (cerca de 1 metro: TV, rosto das pessoas), menos dependência de óculos.
       "Quero multifocal" → hoje usamos as TRIFOCAIS Rayner, nova geração das multifocais.
       Convênio / plano / SUS → "Entendo que você tem convênio, mas trabalhamos apenas com atendimento particular. A boa notícia é que nossos valores são acessíveis e você pode parcelar em até 10x sem juros. Gostaria de conhecer os valores?"
