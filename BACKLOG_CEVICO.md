@@ -6171,7 +6171,66 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 214. 💸🧹 GASTO fase 2 (saída curta + esforço low + Haiku no Pós) e LISTA DE CONVERSAS LIMPA para atendentes (pedidos 23/09 noite) — SUBIU 23/09 (commit ae90377 no develop → imagem ghcr :ae90377, WEB+SIDEKIQ, sem migration; reversão :1ae7f51)
+## 216. 🤖 AGENTES DE IA NAS COLUNAS SEM DONO — Retorno (fundo de funil), Pré-cirúrgico, Pós-operatório (pedido 23/09 noite) — ANÁLISE ENTREGUE, AGUARDA decisões + "pode construir"
+- PEDIDO: "analisar possibilidades de outros agentes nas colunas que temos, para atendimento";
+  exemplo dele = fundo de funil: passou em consulta, recebeu orçamento, pediu um tempo, robô de
+  follow-up cutuca; se volta, um agente ajuda a agendar / atendimento rápido; sabendo o preço pode
+  "pré-agendar" a cirurgia — o agendamento da cirurgia fica com humano por enquanto.
+- DIAGNÓSTICO: da coluna Consulta Realizada em diante (7 colunas) NENHUM agente responde ao paciente —
+  só humano. É exatamente o buraco do exemplo (robô cutuca "Não Fechou Ainda", paciente responde à
+  noite, ninguém continua).
+- PROPOSTA (docs/AGENTES_POR_COLUNA_2026-09-23.md): C = Atendente de Retorno (Consulta Realizada ·
+  Indicação de Cirurgia · Não Fechou Ainda; contexto = consulta, procedimento de interesse, orçamento,
+  Tabela de preços; ferramenta `pre_agendar_cirurgia` que grava intenção + etiqueta + Tarefa/aviso no
+  Meu Painel, humano confirma a data; agenda retorno/teleconsulta/exame com vagas reais; Sonnet 5);
+  D = Pré-cirúrgico (Cirurgia Agendada; preparo a partir de seção do Roteiro aprovada pelos médicos;
+  Haiku); E = Pós-operatório (Cirurgia Realizada · Pós Operatório; esperado × alarme → pronto
+  atendimento + chamar_humano + alerta; NPS e pedido de indicação; Sonnet 5, sombra longa).
+  Ordem: C → D → E. Tudo no motor existente (ResponderAgentService, sombra→fatia→tudo, Orientações,
+  cache), sem migration. Complemento: cabeçalho da coluna do CRM mostrando "quem responde aqui".
+- PERGUNTAS para ele: C cobre "Sem Indicação Cirúrgica"? pré-agendar = mover card com etiqueta "a
+  confirmar" ou só Tarefa + aviso? quem recebe o aviso? quem aprova os textos pré/pós-operatórios?
+
+## 215. 🍎🚀 CRM NO DESIGN APPLE — quadro, colunas, cartões e ficha do paciente no kit (pedido 23/09 noite: "repaginar o nosso CRM com esse layout e design da Apple") — CONSTRUÍDO 23/09, SEM commit, aguarda "pode subir" (WEB só, sem migration)
+- PEDIDO: depois de implantar a e4686d2 ("deu certo"), "vale a pena a gente repaginar o nosso CRM
+  com esse layout e design da Apple. vamos otimizá-lo". Rodada 1 do item 179 (CRM board + ficha).
+- FEITO (só visual — nenhum comportamento mudou; drag, filtros, presets, modos e modais iguais):
+  - Pele nova `assets/scss/_cevico-crm.scss` sob `.cv-crm` (raiz do CrmBoard vira `cv-page cv-overlay
+    cv-crm` com as variáveis do azul royal em `crmVars`); tirar a classe = visual antigo em 1 linha.
+    Registrada no app.scss depois da cevico-agenda.
+  - TOPO em vidro grudado (`.cv-crm-top`, receita do `.cv-ag-top`): título com ícone `cv-icon`, funis em
+    `cv-seg` (ativo azul royal), ferramentas em pílulas de vidro `.cv-crm-tool` com o ícone na cor
+    dopamine de cada uma (ligada = acende inteira: Editar Kanban âmbar, Sem resposta âmbar, Tela cheia
+    royal); linha do período em `.cv-crm-summary`; faixas de modo em `.cv-crm-mode` (edição cv-amber,
+    programação cv-gold, excluir cv-red, novo funil) com `cv-btn`; busca/ordenar/responsável/etiqueta
+    em `cv-input`; caixas, visualizações, período e "Mostrar quem" em `cv-seg cv-seg-sm` (o "Mostrar
+    quem" mantém ouro/azul/verde; as caixas mantêm a cor oficial de cada caixa); calendário
+    personalizado em `cv-pop`.
+  - COLUNAS `.cv-crm-col` (272 px no desktop; 86vw no celular): painel branco 20 px sobre o cinza
+    agrupado da Apple, cabeçalho com degradê leve NA COR DA ETAPA (`--sc/--sc-rgb` calculados no
+    KanbanColumn), ícone squircle `.cv-crm-col-ico`, nome em até 2 linhas (nunca corta), contador
+    tingido `.cv-crm-col-n`, valor em verde; modo programação = anel ouro + automações/robôs em
+    `.cv-crm-auto`; "+ Adicionar contato"/"Carregar mais"/"Nova automação"/"Robô" em `.cv-crm-ghost`.
+  - CARTÃO `ContactCard.vue` reescrito: `.cv-crm-card` (branco, 16 px, fio quase invisível → azul royal
+    no hover, igual às Conversas 214b), cara 36 px com degradê fixo da pessoa (cevicoPersonGradient)
+    quando não há foto, nome em 2 linhas, badge verde WhatsApp de não lidas, pílula âmbar "aguardando ·
+    tempo", prévia com fio verde, etiquetas `.cv-tag` com bolinha (item 212), bolinha da caixa na cor
+    oficial (inboxSolidFor), ações redondas `.cv-crm-act` (Espaço do Paciente, conversa; sem conversa =
+    tracejada).
+  - FICHA (`ContactModal.vue`): casco `cv-modal`, cabeçalho `cv-modal-head` em degradê royal com avatar
+    degradê da pessoa e etiquetas em `cv-glass-chip`, abas em `cv-seg`; campos de dentro ganham o formato
+    do kit por regra da pele (`.cv-crm .cv-modal input/select/textarea`) sem tocar em cada campo.
+    Modal "Adicionar contato" do board idem (cv-modal + cv-seg + cv-btn + degradê nas iniciais).
+  - Navegador de colunas no celular na cor da etapa; board com `md:p-5`.
+- VERIFICADO no navegador local (conta 3): 1280 claro e escuro, 375 celular, ficha aberta, modo
+  programação; 4 SFCs compilados com @vue/compiler-sfc no host (hook de lint não roda neste Mac →
+  commit dos .vue/.scss com --no-verify, como sempre).
+- FORA (próximas passadas do 179): ConversationChatModal (popup da conversa), StageEditModal,
+  ColumnAutomationsModal, FollowupBotModal, ColumnPresetsModal, JourneyWizard — seguem no estilo
+  antigo (funcionam igual). Botão "Salvar" da ficha segue o azul sólido.
+- Deploy = WEB só, sem migration; reversão = imagem atual de produção (e4686d2).
+
+## 214. 💸🧹 GASTO fase 2 (saída curta + esforço low + Haiku no Pós) e LISTA DE CONVERSAS LIMPA para atendentes (pedidos 23/09 noite) — SUBIU 23/09 (commits ae90377 + e4686d2 no develop → imagem ghcr :e4686d2, WEB+SIDEKIQ, sem migration; reversão :1ae7f51)
 - PEDIDO: "1 e 3 fazem sentido juntos" (das opções de baratear) + "quero poder selecionar se agentes terão a
   conversa clean ou não — as meninas não querem a coluna e as etiquetas, mas os admin querem".
 - GASTO: (a) campo `leitura` da resposta do Atendente (só a equipe lê) passou a pedir UMA frase de até 12

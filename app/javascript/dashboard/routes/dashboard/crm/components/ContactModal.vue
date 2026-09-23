@@ -7,6 +7,7 @@ import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
 import { relativeTime } from '../helpers';
+import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
 import ContactAPI from 'dashboard/api/contacts';
 import AccountActionsAPI from 'dashboard/api/accountActions';
 
@@ -357,14 +358,14 @@ const doMerge = async () => {
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
     @click.self="emit('close')"
   >
-    <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col">
+    <div class="cv-modal w-full max-w-2xl max-h-[88vh] flex flex-col">
 
-      <!-- Header -->
-      <div class="flex items-start justify-between px-6 pt-5 pb-4 border-b border-n-weak flex-shrink-0">
+      <!-- Header: faixa em degradê (kit) com a cara da pessoa -->
+      <div class="cv-modal-head flex items-start justify-between">
         <div class="flex items-center gap-4 min-w-0">
           <!-- Avatar -->
-          <div class="w-12 h-12 rounded-full bg-n-brand flex items-center justify-center text-white text-lg font-semibold flex-shrink-0 overflow-hidden">
-            <img v-if="contact.avatar_url" :src="contact.avatar_url" class="w-12 h-12 object-cover" />
+          <div class="cv-crm-modal-avatar" :style="{ '--pg': personGradient(contact.name) }">
+            <img v-if="contact.avatar_url" :src="contact.avatar_url" class="w-full h-full object-cover" />
             <span v-else>{{ contact.name?.[0]?.toUpperCase() ?? '?' }}</span>
           </div>
           <!-- Info -->
@@ -372,43 +373,43 @@ const doMerge = async () => {
             <div v-if="isEditingName" class="flex items-center gap-1.5">
               <input
                 v-model="nameEdit"
-                class="border border-n-brand rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12 w-52"
+                class="rounded-lg px-2 py-1 text-sm text-n-slate-12 w-52"
                 @keyup.enter="saveName"
                 @keyup.escape="isEditingName = false"
               />
               <button
-                class="text-n-brand i-lucide-check text-lg disabled:opacity-50"
+                class="text-white i-lucide-check text-lg disabled:opacity-50"
                 :disabled="isSavingName || !nameEdit.trim()"
                 :title="$t('CRM.MODAL.SAVE')"
                 @click="saveName"
               />
               <button
-                class="text-n-slate-10 i-lucide-x text-lg"
+                class="text-white/80 i-lucide-x text-lg"
                 @click="isEditingName = false"
               />
             </div>
             <div v-else class="flex items-center gap-1.5 min-w-0">
-              <h2 class="text-base font-semibold text-n-slate-12 truncate">{{ contact.name }}</h2>
+              <h2 class="text-lg font-bold tracking-tight text-white">{{ contact.name }}</h2>
               <button
-                class="text-n-slate-9 hover:text-n-brand i-lucide-pencil text-sm flex-shrink-0"
+                class="text-white/70 hover:text-white i-lucide-pencil text-sm flex-shrink-0"
                 title="Editar nome do contato"
                 @click="startEditName"
               />
             </div>
             <div class="flex items-center gap-3 mt-0.5 flex-wrap">
-              <span v-if="contact.phone_number" class="text-sm text-n-slate-10 flex items-center gap-1">
+              <span v-if="contact.phone_number" class="text-sm text-white/85 flex items-center gap-1">
                 <span class="i-lucide-phone text-xs" />{{ contact.phone_number }}
               </span>
-              <span v-if="contact.email" class="text-sm text-n-slate-10 flex items-center gap-1">
+              <span v-if="contact.email" class="text-sm text-white/85 flex items-center gap-1">
                 <span class="i-lucide-mail text-xs" />{{ contact.email }}
               </span>
             </div>
-            <!-- Labels -->
-            <div v-if="contact.labels?.length" class="flex flex-wrap gap-1 mt-1.5">
+            <!-- Labels: chips de vidro sobre o degradê -->
+            <div v-if="contact.labels?.length" class="flex flex-wrap gap-1 mt-2">
               <span
                 v-for="label in contact.labels"
                 :key="label"
-                class="text-xs bg-n-alpha-2 text-n-slate-11 px-2 py-0.5 rounded-full"
+                class="cv-glass-chip !h-[22px] text-[10.5px]"
               >
                 {{ label }}
               </span>
@@ -416,24 +417,24 @@ const doMerge = async () => {
           </div>
         </div>
         <button
-          class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl flex-shrink-0 ml-4"
+          class="text-white/80 hover:text-white i-lucide-x text-xl flex-shrink-0 ml-4"
           @click="emit('close')"
         />
       </div>
 
-      <!-- Tabs -->
-      <div class="flex border-b border-n-weak flex-shrink-0 px-6">
-        <button
-          v-for="tab in tabs"
-          :key="tab.key"
-          class="py-3 px-1 mr-6 text-sm font-medium border-b-2 transition-colors"
-          :class="activeTab === tab.key
-            ? 'border-n-brand text-n-brand'
-            : 'border-transparent text-n-slate-10 hover:text-n-slate-12'"
-          @click="activeTab = tab.key"
-        >
-          {{ tab.label }}
-        </button>
+      <!-- Tabs: segmento de vidro (kit) -->
+      <div class="cv-modal-tabs flex-shrink-0">
+        <div class="cv-seg cv-seg-sm flex-wrap">
+          <button
+            v-for="tab in tabs"
+            :key="tab.key"
+            class="cv-seg-item"
+            :class="activeTab === tab.key ? 'cv-seg-on' : ''"
+            @click="activeTab = tab.key"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
       </div>
 
       <!-- Scrollable content -->

@@ -1,10 +1,18 @@
 <script setup>
+// 🍎 item 215 (23/09): o cartão do paciente no design Apple — o mesmo cartão
+// das Conversas (branco, 16 px, fio quase invisível que fica azul royal no
+// hover), "cara" com o degradê fixo da pessoa quando não há foto, etiquetas
+// .cv-tag (item 212), pílula âmbar de "aguardando", bolinha da caixa na cor
+// oficial e ações redondas (Espaço do Paciente, conversa). Comportamento
+// idêntico ao cartão antigo: clique abre a ficha, botões emitem os eventos.
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
+import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
+import { inboxSolidFor } from 'dashboard/helper/cevicoInboxColors.js';
 import { relativeTime } from '../helpers';
 
 const props = defineProps({
@@ -22,6 +30,7 @@ const openPatient = () => {
 
 const { isAdmin } = useAdmin();
 const accountLabels = useMapGetter('labels/getLabels');
+const accountInboxes = useMapGetter('inboxes/getInboxes');
 
 const unreadCount = computed(() => props.contact.last_conversation?.unread_count ?? 0);
 const isAwaitingReply = computed(() => props.contact.last_conversation?.awaiting_reply ?? false);
@@ -34,6 +43,7 @@ const initials = computed(() => {
   if (!props.contact.name) return '?';
   return props.contact.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 });
+const faceStyle = computed(() => ({ background: personGradient(props.contact.name) }));
 
 const labelColorMap = computed(() => {
   const map = {};
@@ -52,6 +62,10 @@ const entryDate = computed(() => {
 });
 
 const lastActivity = computed(() => relativeTime(props.contact.last_activity_at));
+const inboxName = computed(() => props.contact.last_conversation?.inbox_name || '');
+const inboxDot = computed(() =>
+  inboxName.value ? inboxSolidFor(accountInboxes.value || [], inboxName.value) : '#94a3b8'
+);
 
 const channelIcon = (channelType) => {
   const map = {
@@ -71,24 +85,27 @@ const channelIcon = (channelType) => {
 
 <template>
   <div
-    class="bg-n-solid-2 border rounded-xl p-3 mb-2 cursor-pointer hover:border-n-brand hover:shadow-sm transition-all select-none"
-    :class="unreadCount > 0 ? 'border-n-brand/60' : 'border-n-weak'"
+    class="cv-crm-card cursor-pointer select-none"
+    :class="unreadCount > 0 ? 'cv-crm-card-unread' : ''"
     @click="emit('click', contact)"
   >
-    <!-- Identity row -->
-    <div class="flex items-center gap-2">
-      <div class="w-7 h-7 rounded-full bg-n-brand flex items-center justify-center text-white text-[10px] font-semibold flex-shrink-0 overflow-hidden">
-        <img v-if="contact.avatar_url" :src="contact.avatar_url" class="w-7 h-7 rounded-full object-cover" />
+    <!-- Identidade: cara (foto ou degradê da pessoa), nome inteiro, telefone -->
+    <div class="flex items-center gap-2.5">
+      <div
+        class="w-9 h-9 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 overflow-hidden"
+        :style="faceStyle"
+      >
+        <img v-if="contact.avatar_url" :src="contact.avatar_url" class="w-9 h-9 rounded-full object-cover" />
         <span v-else>{{ initials }}</span>
       </div>
       <div class="flex-1 min-w-0">
-        <p class="text-sm font-semibold text-n-slate-12 truncate leading-tight">{{ contact.name }}</p>
-        <p v-if="contact.phone_number" class="text-xs text-n-slate-10 truncate">{{ contact.phone_number }}</p>
+        <p class="cv-crm-card-name">{{ contact.name }}</p>
+        <p v-if="contact.phone_number" class="cv-crm-card-sub truncate">{{ contact.phone_number }}</p>
       </div>
-      <!-- Não lidas -->
+      <!-- Não lidas: a bolinha verde do WhatsApp -->
       <span
         v-if="unreadCount > 0"
-        class="flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-green-500 text-white text-[10px] font-bold flex-shrink-0"
+        class="cv-crm-badge flex-shrink-0"
         :title="$t('CRM.CARD.UNREAD', { count: unreadCount })"
       >
         {{ unreadCount > 9 ? '9+' : unreadCount }}
@@ -97,79 +114,74 @@ const channelIcon = (channelType) => {
 
     <!-- Aguardando resposta -->
     <div v-if="isAwaitingReply" class="mt-2">
-      <span class="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-full px-2 py-0.5">
+      <span class="cv-crm-wait">
         <span class="i-lucide-clock text-[11px]" />
         {{ $t('CRM.CARD.AWAITING_REPLY') }}<template v-if="waitingTime"> · {{ waitingTime }}</template>
       </span>
     </div>
 
     <!-- Prévia da última mensagem do paciente (quando há não lidas) -->
-    <div
-      v-if="unreadPreview"
-      class="mt-2 bg-n-alpha-1 border-l-2 border-green-500 rounded-r-lg px-2 py-1.5"
-    >
-      <p class="text-xs text-n-slate-11 line-clamp-2 leading-snug">{{ unreadPreview }}</p>
+    <div v-if="unreadPreview" class="cv-crm-preview">
+      <p class="line-clamp-2">{{ unreadPreview }}</p>
     </div>
 
-    <!-- Labels with colored dots -->
-    <div class="flex flex-wrap gap-1 mt-2">
+    <!-- Etiquetas no design Apple (tinta da própria cor) -->
+    <div v-if="visibleLabels.length" class="flex flex-wrap gap-1 mt-2">
       <span
         v-for="label in visibleLabels"
         :key="label"
-        class="inline-flex items-center gap-1 text-xs bg-n-alpha-2 text-n-slate-11 px-1.5 py-0.5 rounded"
+        class="cv-tag"
+        :style="{ '--lb': labelColorMap[label] ?? '#6B7280' }"
       >
-        <span
-          class="w-1.5 h-1.5 rounded-full flex-shrink-0"
-          :style="{ backgroundColor: labelColorMap[label] ?? '#6B7280' }"
-        />
-        {{ label }}
+        <span class="cv-tag-dot" />
+        <span class="truncate">{{ label }}</span>
       </span>
-      <span v-if="extraLabels > 0" class="text-xs text-n-slate-9 px-1 py-0.5">+{{ extraLabels }}</span>
+      <span v-if="extraLabels > 0" class="cv-tag cv-tag-more">+{{ extraLabels }}</span>
     </div>
 
-    <!-- Value (só admin vê valores) -->
+    <!-- Valor (só admin vê valores) -->
     <div v-if="isAdmin && contact.value" class="mt-1.5">
-      <span class="text-xs font-semibold text-green-600">
+      <span class="cv-crm-value">
         R$&nbsp;{{ Number(contact.value).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}
       </span>
     </div>
 
-    <!-- Inbox + assignee -->
+    <!-- Caixa (bolinha na cor oficial) + responsável -->
     <div class="flex items-center justify-between mt-2 gap-1">
       <div
-        v-if="contact.last_conversation?.inbox_name"
-        class="flex items-center gap-1 text-xs text-n-slate-9 truncate min-w-0"
+        v-if="inboxName"
+        class="cv-crm-meta flex items-center gap-1.5 min-w-0"
+        :title="`Última conversa pela caixa ${inboxName}`"
       >
-        <span :class="channelIcon(contact.last_conversation.channel_type)" class="text-xs flex-shrink-0" />
-        <span class="truncate">{{ contact.last_conversation.inbox_name }}</span>
+        <span class="cv-crm-inbox-dot" :style="{ background: inboxDot }" />
+        <span :class="channelIcon(contact.last_conversation.channel_type)" class="text-[11px] flex-shrink-0" />
+        <span class="truncate">{{ inboxName }}</span>
       </div>
-      <span v-if="contact.assignee" class="flex items-center gap-1 text-xs text-n-slate-10 flex-shrink-0 ml-auto">
+      <span v-if="contact.assignee" class="cv-crm-meta flex items-center gap-1 flex-shrink-0 ml-auto">
         <span class="i-lucide-user text-[10px]" />
         <span>{{ contact.assignee.name }}</span>
       </span>
     </div>
 
-    <!-- Entry date (left) + last activity + chat (right) -->
-    <div class="flex items-center justify-between mt-1 gap-1">
-      <span v-if="entryDate" class="text-xs text-n-slate-9">{{ entryDate }}</span>
+    <!-- Data de entrada (esquerda) + última atividade + ações (direita) -->
+    <div class="flex items-center justify-between mt-1.5 gap-1">
+      <span v-if="entryDate" class="cv-crm-meta" title="Entrou no funil">{{ entryDate }}</span>
       <span class="flex items-center gap-1.5 ml-auto">
-        <span v-if="lastActivity" class="text-xs text-n-slate-9">{{ lastActivity }}</span>
+        <span v-if="lastActivity" class="cv-crm-meta">{{ lastActivity }}</span>
         <button
-          class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
+          class="cv-crm-act cv-crm-act-plain"
           title="Espaço do Paciente"
           @click.stop="openPatient"
         >
-          <PatientSpaceIcon :size="24" />
+          <PatientSpaceIcon :size="22" />
         </button>
         <button
-          class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors"
-          :class="contact.last_conversation_id
-            ? 'text-n-brand bg-n-brand/10 hover:bg-n-brand hover:text-white'
-            : 'text-n-slate-9 border border-dashed border-n-weak hover:text-n-brand hover:border-n-brand'"
+          class="cv-crm-act"
+          :class="contact.last_conversation_id ? '' : 'cv-crm-act-off'"
           :title="contact.last_conversation_id ? $t('CRM.CHAT.OPEN') : $t('CRM.CHAT.START_TITLE')"
           @click.stop="emit('openChat', contact)"
         >
-          <span class="i-lucide-message-circle-more text-lg" />
+          <span class="i-lucide-message-circle-more text-base" />
         </button>
       </span>
     </div>

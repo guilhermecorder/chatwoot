@@ -41,6 +41,16 @@ const { isAdmin } = useAdmin();
 const { width: windowWidth } = useWindowSize();
 const isMobile = computed(() => windowWidth.value < 768);
 
+// 🍎 item 215: a cor da etapa vira --sc / --sc-rgb ("r g b", regra do kit)
+// para o ícone, o contador e o degradê do cabeçalho da coluna
+const stageVars = computed(() => {
+  const hex = String(props.stage.color || '#94a3b8').replace('#', '');
+  const rgb = hex.length === 6
+    ? [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16)).join(' ')
+    : '148 163 184';
+  return { '--sc': props.stage.color || '#94a3b8', '--sc-rgb': rgb };
+});
+
 // ── Agentes de IA nas automações: card destacado + edição rápida dali ──
 const AI_AGENT_ACTIONS = {
   ai_analyze: { key: 'conversation', title: 'Analista de Conversas', grad: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' },
@@ -374,15 +384,16 @@ const delayLabel = (minutes) => {
        colunas quebra com multi-root) — os modais vivem DENTRO desta div. -->
   <div
     v-show="!hidden"
-    class="flex flex-col bg-n-alpha-1 rounded-xl w-[86vw] min-w-[86vw] snap-center md:w-64 md:min-w-64 md:snap-align-none flex-shrink-0 h-full transition-all"
-    :class="programmingMode ? 'ring-2 ring-yellow-400/50' : ''"
+    class="cv-crm-col flex flex-col w-[86vw] min-w-[86vw] snap-center md:w-[272px] md:min-w-[272px] md:snap-align-none flex-shrink-0 h-full transition-all"
+    :class="programmingMode ? 'cv-crm-col-prog' : ''"
+    :style="stageVars"
   >
 
     <!-- ── Header (no modo edição, o header inteiro arrasta a coluna) ── -->
     <div
-      class="px-3 py-2.5 border-b border-n-weak flex-shrink-0"
+      class="cv-crm-col-head flex-shrink-0"
       :class="[
-        programmingMode ? 'bg-yellow-500/5' : '',
+        programmingMode ? 'cv-crm-col-head-prog' : '',
         editMode ? 'column-drag-handle cursor-grab active:cursor-grabbing' : '',
       ]"
     >
@@ -395,18 +406,18 @@ const delayLabel = (minutes) => {
           </p>
           <select
             v-model="moveToStageId"
-            class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2 text-n-slate-12"
+            class="cv-input w-full !h-8 text-xs"
           >
             <option v-for="s in otherStages" :key="s.id" :value="s.id">{{ s.name }}</option>
           </select>
           <div class="flex gap-2">
             <button
-              class="flex-1 bg-red-500 text-white rounded-lg py-1.5 text-xs disabled:opacity-50"
+              class="cv-btn cv-btn-sm cv-btn-danger-on flex-1"
               :disabled="isDeleting || !moveToStageId"
               @click="deleteStage"
             >{{ isDeleting ? '...' : $t('CRM.DELETE_MOVE_AND_DELETE') }}</button>
             <button
-              class="flex-1 border border-n-weak rounded-lg py-1.5 text-xs text-n-slate-11"
+              class="cv-btn cv-btn-ghost cv-btn-sm flex-1"
               @click="cancelDelete"
             >{{ $t('CRM.CANCEL') }}</button>
           </div>
@@ -415,12 +426,12 @@ const delayLabel = (minutes) => {
           <p class="text-xs text-n-slate-11">{{ $t('CRM.DELETE_STAGE_CONFIRM') }}</p>
           <div class="flex gap-2">
             <button
-              class="flex-1 bg-red-500 text-white rounded-lg py-1.5 text-xs disabled:opacity-50"
+              class="cv-btn cv-btn-sm cv-btn-danger-on flex-1"
               :disabled="isDeleting"
               @click="deleteStage"
             >{{ isDeleting ? '...' : $t('CRM.DELETE_STAGE') }}</button>
             <button
-              class="flex-1 border border-n-weak rounded-lg py-1.5 text-xs text-n-slate-11"
+              class="cv-btn cv-btn-ghost cv-btn-sm flex-1"
               @click="cancelDelete"
             >{{ $t('CRM.CANCEL') }}</button>
           </div>
@@ -429,19 +440,14 @@ const delayLabel = (minutes) => {
 
       <!-- Normal header -->
       <div v-else>
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2 min-w-0">
-            <span
-              class="w-2.5 h-2.5 rounded-full flex-shrink-0"
-              :style="{ backgroundColor: stage.color }"
-            />
-            <span class="text-sm font-semibold text-n-slate-12 truncate">{{ stage.name }}</span>
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="cv-crm-col-ico" />
+            <span class="cv-crm-col-name" :title="stage.name">{{ stage.name }}</span>
             <!-- No modo programação: mostra nº de automações em vez de cards -->
             <span
-              class="text-xs rounded px-1.5 py-0.5 flex-shrink-0"
-              :class="programmingMode
-                ? 'text-yellow-600 bg-yellow-500/15'
-                : 'text-n-slate-10 bg-n-alpha-2'"
+              class="cv-crm-col-n"
+              :class="programmingMode ? 'cv-crm-col-n-prog' : ''"
             >
               {{ programmingMode ? automations.length : headerCount.toLocaleString('pt-BR') }}
             </span>
@@ -469,11 +475,11 @@ const delayLabel = (minutes) => {
         </div>
 
         <!-- Subtítulo no modo programação -->
-        <p v-if="programmingMode" class="text-[11px] text-yellow-600/80 mt-1">
+        <p v-if="programmingMode" class="text-[11px] font-semibold mt-1.5" style="color: #92600a">
           ⚡ Automações da coluna
         </p>
         <!-- Valor total no modo normal (só admin vê valores) -->
-        <p v-else-if="isAdmin && totalValue > 0" class="text-sm font-semibold text-green-600 text-center mt-1.5">
+        <p v-else-if="isAdmin && totalValue > 0" class="cv-crm-col-value">
           R$ {{ totalValue.toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}
         </p>
       </div>
@@ -507,10 +513,8 @@ const delayLabel = (minutes) => {
         <div
           v-for="auto in automations"
           :key="auto.id"
-          class="rounded-lg border bg-n-solid-1 transition-all"
-          :class="auto.active
-            ? 'border-yellow-400/30 hover:border-yellow-400/60'
-            : 'border-n-weak opacity-50 hover:opacity-70'"
+          class="cv-crm-auto"
+          :class="auto.active ? '' : 'cv-crm-auto-off'"
         >
           <!-- Delete confirm inline -->
           <div v-if="deleteConfirmAutoId === auto.id" class="p-2.5 space-y-2">
@@ -631,8 +635,8 @@ const delayLabel = (minutes) => {
         <div
           v-for="bot in followupBots"
           :key="bot.id"
-          class="rounded-lg border bg-n-solid-1 mb-2"
-          :class="bot.active ? 'border-yellow-400/30' : 'border-n-weak opacity-50'"
+          class="cv-crm-auto mb-2"
+          :class="bot.active ? '' : 'cv-crm-auto-off'"
         >
           <div v-if="deleteBotConfirmId === bot.id" class="p-2.5 space-y-2">
             <p class="text-xs text-n-slate-11">Excluir <strong>{{ bot.name }}</strong>?</p>
@@ -677,7 +681,7 @@ const delayLabel = (minutes) => {
           </template>
         </div>
         <button
-          class="w-full flex items-center justify-center gap-1.5 text-[11px] text-yellow-600 hover:text-yellow-700 py-1.5 rounded-lg hover:bg-yellow-500/10 border border-dashed border-yellow-400/40"
+          class="cv-crm-ghost cv-crm-ghost-gold !h-8 text-[11px]"
           @click="openCreateBot"
         >
           <span class="i-lucide-plus text-xs" /> Robô de follow-up
@@ -715,7 +719,7 @@ const delayLabel = (minutes) => {
            os cards entram em lotes para o board não pesar -->
       <button
         v-if="hasMoreCards && !editMode"
-        class="w-full flex items-center justify-center gap-1.5 text-xs text-n-brand hover:text-n-brand/80 py-2 mt-1 rounded-lg border border-dashed border-n-brand/40 hover:bg-n-brand/5 transition-colors"
+        class="cv-crm-ghost mt-1"
         :disabled="loadingMore"
         @click="emit('loadMore')"
       >
@@ -728,11 +732,11 @@ const delayLabel = (minutes) => {
     </div>
 
     <!-- ── Footer ─────────────────────────────────────────────── -->
-    <div class="px-2 pb-2 flex-shrink-0">
+    <div class="cv-crm-col-foot flex-shrink-0">
       <!-- Modo programação: botão nova automação -->
       <button
         v-if="programmingMode"
-        class="w-full flex items-center justify-center gap-1.5 text-xs text-yellow-600 hover:text-yellow-700 py-2 rounded-lg hover:bg-yellow-500/10 border border-dashed border-yellow-400/50 hover:border-yellow-500 transition-colors"
+        class="cv-crm-ghost cv-crm-ghost-gold"
         @click="openCreateAutomation"
       >
         <span class="i-lucide-plus text-sm" />
@@ -742,7 +746,7 @@ const delayLabel = (minutes) => {
       <!-- Modo normal: botão adicionar contato -->
       <button
         v-else
-        class="w-full flex items-center justify-center gap-1 text-xs text-n-slate-10 hover:text-n-brand py-1.5 rounded-lg hover:bg-n-alpha-1 transition-colors"
+        class="cv-crm-ghost"
         @click="emit('addContact', stage.id)"
       >
         <span class="i-lucide-plus text-sm" />

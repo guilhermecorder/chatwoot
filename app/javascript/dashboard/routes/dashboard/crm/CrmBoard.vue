@@ -18,10 +18,29 @@ import {
   inboxSolidFor,
   ALL_INBOXES_GRADIENT,
 } from 'dashboard/helper/cevicoInboxColors.js';
+import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
 
 const store = useStore();
 const { isAdmin } = useAdmin();
 const { t } = useI18n();
+
+// 🍎 item 215 (23/09): o CRM veste o kit (.cv-page + pele .cv-crm) na cor
+// azul royal alegre — a cor de destaque de ação dele (22/09). Cada coluna
+// pinta o próprio ícone/contador com a sua cor (--sc no KanbanColumn).
+const crmVars = {
+  display: 'flex',
+  flexDirection: 'column',
+  height: '100%',
+  width: '100%',
+  '--cv': '#2563eb',
+  '--cv-deep': '#1e40af',
+  '--cv-rgb': '37 99 235',
+  '--cv-deep-rgb': '30 64 175',
+  '--cv-grad': 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
+  '--cv-grad-2': 'linear-gradient(135deg, #2563eb, #60a5fa)',
+  '--cv-grad-3': 'linear-gradient(135deg, #3b82f6, #93c5fd)',
+  '--cv-hero': 'linear-gradient(135deg, #1e40af, #2563eb 55%, #38bdf8)',
+};
 
 const pipelines = useMapGetter('crm/getPipelines');
 const allContacts = useMapGetter('crm/getContacts');
@@ -1017,28 +1036,28 @@ const createAndAddContact = async () => {
 
 <template>
   <div
-    class="bg-n-surface-1"
+    class="cv-page cv-overlay cv-crm bg-n-surface-1"
     :class="isFocusMode ? 'fixed inset-0 z-[100]' : ''"
-    style="display:flex;flex-direction:column;height:100%;width:100%;"
+    :style="crmVars"
     @click="showLabelsDropdown = false; showStagesDropdown = false"
   >
     <!-- Top bar (some no modo tela cheia) -->
-    <div v-show="!isFocusMode" class="flex items-center gap-3 px-3 py-2.5 md:px-6 md:py-4 border-b border-n-weak flex-shrink-0 flex-wrap">
-      <h1 class="text-lg font-bold text-n-slate-12 flex items-center gap-2">
-        <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-          <span class="i-lucide-rocket text-white text-base" />
+    <div v-show="!isFocusMode" class="cv-crm-top flex items-center gap-3 px-3 py-2.5 md:px-6 md:py-3 flex-shrink-0 flex-wrap" style="border-bottom: 0">
+      <h1 class="cv-crm-title flex items-center gap-2.5">
+        <span class="cv-icon">
+          <span class="i-lucide-rocket text-base" />
         </span>
         {{ $t('CRM.TITLE') }}
       </h1>
 
-      <!-- Pipeline tabs -->
-      <div class="flex items-center gap-2 ml-2 flex-wrap">
+      <!-- Funis: segmento de vidro (o ativo acende em azul royal) -->
+      <div class="cv-seg cv-seg-sm ml-1 flex-wrap">
         <template v-for="p in pipelines" :key="p.id">
           <!-- Rename input (only for selected) -->
           <div v-if="isRenamingPipeline && selectedPipelineId === p.id" class="flex items-center gap-1">
             <input
               v-model="renamePipelineValue"
-              class="border border-n-brand rounded-lg px-2 py-1 text-sm bg-n-solid-2 text-n-slate-12 w-36"
+              class="cv-input !h-7 text-xs w-36"
               @keyup.enter="saveRenamePipeline"
               @keyup.escape="isRenamingPipeline = false"
             />
@@ -1049,11 +1068,8 @@ const createAndAddContact = async () => {
           <!-- Normal tab -->
           <button
             v-else
-            class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
-            :class="selectedPipelineId === p.id
-              ? 'text-white shadow'
-              : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="selectedPipelineId === p.id ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            class="cv-seg-item"
+            :class="selectedPipelineId === p.id ? 'cv-seg-on' : ''"
             @click="selectPipeline(p.id)"
           >
             {{ p.name }}
@@ -1065,44 +1081,36 @@ const createAndAddContact = async () => {
            (no celular vira trilho deslizável em vez de empilhar) -->
       <div class="flex items-center gap-2 ml-auto justify-end flex-nowrap overflow-x-auto max-w-full md:flex-wrap md:overflow-visible">
         <!-- Renomear funil (excluir foi ocultado a pedido do Guilherme) -->
-        <div
+        <button
           v-if="isAdmin && selectedPipeline && !isRenamingPipeline"
-          class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5"
+          class="cv-crm-tool cv-iconbtn"
+          :title="$t('CRM.RENAME_PIPELINE')"
+          @click="startRenamePipeline"
         >
-          <button
-            class="h-7 w-7 flex items-center justify-center rounded-lg text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
-            :title="$t('CRM.RENAME_PIPELINE')"
-            @click="startRenamePipeline"
-          >
-            <span class="i-lucide-pencil text-sm" />
-          </button>
-        </div>
+          <span class="i-lucide-pencil text-sm" />
+        </button>
 
-        <!-- Ferramentas — grupo único de pílulas (só admin) -->
-        <div
-          v-if="isAdmin"
-          class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 flex-nowrap md:flex-wrap"
-        >
-          <!-- cada ferramenta com a sua cor da paleta dopamine (19/07) -->
+        <!-- Ferramentas — pílulas de vidro, cada uma com o ícone na sua cor
+             dopamine (19/07); a ligada acende inteira (só admin) -->
+        <template v-if="isAdmin">
           <button
             v-if="selectedPipeline && !isProgrammingMode"
-            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg transition-colors whitespace-nowrap"
-            :class="isEditMode
-              ? 'bg-amber-500 text-white hover:bg-amber-600'
-              : 'text-n-slate-11 hover:bg-blue-500/10'"
+            class="cv-crm-tool"
+            :class="isEditMode ? 'cv-crm-tool-on' : ''"
+            style="--tool-grad: linear-gradient(135deg, #b45309, #f59e0b)"
             @click="isEditMode = !isEditMode"
           >
             <span
               :class="isEditMode ? 'i-lucide-x' : 'i-lucide-layout-template'"
               class="text-sm"
-              :style="isEditMode ? {} : { color: '#0F5FA6' }"
+              :style="isEditMode ? {} : { color: '#2563eb' }"
             />
             {{ isEditMode ? $t('CRM.EXIT_EDIT_MODE') : $t('CRM.EDIT_MODE') }}
           </button>
 
           <button
             v-if="selectedPipeline && !isProgrammingMode && !isEditMode"
-            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-amber-500/10 transition-colors whitespace-nowrap"
+            class="cv-crm-tool"
             @click="isProgrammingMode = true"
           >
             <span class="i-lucide-zap text-sm" style="color: #d4a017" />
@@ -1110,7 +1118,7 @@ const createAndAddContact = async () => {
           </button>
 
           <button
-            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-violet-500/10 transition-colors whitespace-nowrap"
+            class="cv-crm-tool"
             title="Integrações (n8n, Meta, Google, Claude)"
             @click="$router.push({ name: 'crm_integrations' })"
           >
@@ -1119,7 +1127,7 @@ const createAndAddContact = async () => {
           </button>
 
           <button
-            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-pink-500/10 transition-colors whitespace-nowrap"
+            class="cv-crm-tool"
             title="Central de mensagens em massa (templates WhatsApp)"
             @click="$router.push({ name: 'crm_campaigns' })"
           >
@@ -1128,13 +1136,13 @@ const createAndAddContact = async () => {
           </button>
 
           <button
-            class="h-7 flex items-center gap-1.5 text-xs font-medium px-3 rounded-lg text-n-slate-11 hover:bg-emerald-500/10 transition-colors whitespace-nowrap"
+            class="cv-crm-tool"
             @click="showNewPipelineForm = !showNewPipelineForm; showDeletePipelineConfirm = false"
           >
             <span class="i-lucide-plus text-sm" style="color: #059669" />
             {{ $t('CRM.NEW_PIPELINE') }}
           </button>
-        </div>
+        </template>
       </div>
     </div>
 
@@ -1143,9 +1151,9 @@ const createAndAddContact = async () => {
          ("Carregar mais" em cada coluna) para o board ficar leve. -->
     <div
       v-if="!isFocusMode && contactsMeta.scope === 'period' && periodMatching !== null"
-      class="flex items-center gap-2 px-3 md:px-6 py-1.5 text-xs text-n-slate-10 border-b border-n-weak flex-shrink-0 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible"
+      class="cv-crm-summary flex items-center gap-2 px-3 md:px-6 py-1.5 flex-shrink-0 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible"
     >
-      <span class="i-lucide-zap text-n-gold flex-shrink-0" />
+      <span class="i-lucide-zap flex-shrink-0" style="color: #d4a017" />
       <span class="whitespace-nowrap flex-shrink-0">
         <b>{{ periodMatching.toLocaleString('pt-BR') }}</b>
         {{ contactsMeta.date_mode === 'created' ? 'leads que chegaram' : contactsMeta.date_mode === 'moved' ? 'leads que entraram na coluna' : 'leads que conversaram ou se moveram' }}
@@ -1160,103 +1168,87 @@ const createAndAddContact = async () => {
     </div>
 
     <!-- Edit mode banner -->
-    <div
-      v-if="isEditMode"
-      class="flex items-center gap-3 px-6 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-700 flex-shrink-0"
-    >
-      <span class="i-lucide-pencil-ruler text-amber-600 dark:text-amber-400 text-sm" />
-      <span class="text-sm font-medium text-amber-700 dark:text-amber-300 flex-1">
+    <div v-if="isEditMode" class="cv-crm-mode cv-amber flex-shrink-0">
+      <span class="i-lucide-pencil-ruler text-sm" />
+      <span class="flex-1">
         {{ $t('CRM.EDIT_MODE_ACTIVE') }}
       </span>
-      <button
-        class="flex items-center gap-1.5 text-sm px-3 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors"
-        @click="isEditMode = false"
-      >
+      <button class="cv-btn cv-btn-sm" @click="isEditMode = false">
         <span class="i-lucide-x text-sm" />
         {{ $t('CRM.EXIT_EDIT_MODE') }}
       </button>
     </div>
 
     <!-- Programming mode banner -->
-    <div
-      v-if="isProgrammingMode"
-      class="flex items-center gap-3 px-6 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-700 flex-shrink-0"
-    >
-      <span class="i-lucide-zap text-yellow-600 dark:text-yellow-400 text-sm" />
-      <span class="text-sm font-medium text-yellow-700 dark:text-yellow-300 flex-1">
+    <div v-if="isProgrammingMode" class="cv-crm-mode cv-gold flex-shrink-0">
+      <span class="i-lucide-zap text-sm" />
+      <span class="flex-1">
         {{ $t('CRM.PROGRAMMING_MODE_ACTIVE') }}
       </span>
-      <button
-        class="flex items-center gap-1.5 text-sm px-3 py-1 rounded-lg bg-yellow-600 text-white hover:bg-yellow-700 transition-colors"
-        @click="isProgrammingMode = false"
-      >
+      <button class="cv-btn cv-btn-sm" @click="isProgrammingMode = false">
         <span class="i-lucide-x text-sm" />
         {{ $t('CRM.EXIT_PROGRAMMING_MODE') }}
       </button>
     </div>
 
     <!-- Delete pipeline confirm bar -->
-    <div
-      v-if="showDeletePipelineConfirm"
-      class="flex items-center gap-3 px-6 py-2.5 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800"
-    >
-      <span class="text-sm text-red-700 dark:text-red-300 flex-1">{{ $t('CRM.DELETE_PIPELINE_CONFIRM') }}</span>
-      <button class="bg-red-500 text-white px-3 py-1 rounded-lg text-xs" @click="deletePipeline">
+    <div v-if="showDeletePipelineConfirm" class="cv-crm-mode cv-red flex-shrink-0">
+      <span class="flex-1">{{ $t('CRM.DELETE_PIPELINE_CONFIRM') }}</span>
+      <button class="cv-btn cv-btn-sm" @click="deletePipeline">
         {{ $t('CRM.DELETE_PIPELINE') }}
       </button>
-      <button class="text-n-slate-10 px-3 py-1 text-xs" @click="showDeletePipelineConfirm = false">
+      <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="showDeletePipelineConfirm = false">
         {{ $t('CRM.CANCEL') }}
       </button>
     </div>
 
     <!-- New pipeline form bar -->
-    <div v-if="showNewPipelineForm" class="flex items-center gap-2 px-6 py-3 bg-n-alpha-1 border-b border-n-weak">
+    <div v-if="showNewPipelineForm" class="cv-crm-mode flex-shrink-0">
       <input
         v-model="newPipelineName"
-        class="border border-n-weak rounded-lg px-3 py-1.5 text-sm bg-n-solid-2 text-n-slate-12 w-56"
+        class="cv-input !h-8 text-xs w-56"
         :placeholder="$t('CRM.PIPELINE_NAME')"
         @keyup.enter="createPipeline"
       />
-      <button class="bg-n-brand text-white px-3 py-1.5 rounded-lg text-sm" @click="createPipeline">
+      <button class="cv-btn cv-btn-sm" @click="createPipeline">
         {{ $t('CRM.CREATE') }}
       </button>
-      <button class="text-n-slate-10 px-3 py-1.5 text-sm" @click="showNewPipelineForm = false">
+      <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="showNewPipelineForm = false">
         {{ $t('CRM.CANCEL') }}
       </button>
     </div>
 
     <!-- Filter bar (only when a pipeline is selected) -->
-    <div v-if="selectedPipeline && !uiFlags.isFetchingPipelines && !uiFlags.isFetchingContacts" class="flex-shrink-0">
+    <div v-if="selectedPipeline && !uiFlags.isFetchingPipelines && !uiFlags.isFetchingContacts" class="cv-crm-top flex-shrink-0">
       <!-- Toolbar em 2 LINHAS intencionais (pedido 17/07: alinhado e
            distribuído). Linha 1 = "o que eu PROCURO" (busca, sem resposta,
            ordenação, caixa, filtros). Linha 2 = "o que eu VEJO" (colunas,
            período do lead, limpar). Altura padrão de TODOS os controles:
            34px. No celular cada linha vira trilho deslizável. -->
-      <div class="flex items-center gap-2 px-3 md:px-4 pt-2 pb-1.5 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible">
+      <div class="flex items-center gap-2 px-3 md:px-4 pt-2.5 pb-1.5 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible">
         <!-- Search input -->
         <div class="relative flex-none w-48 md:w-72">
           <span class="absolute left-3 top-1/2 -translate-y-1/2 i-lucide-search text-n-slate-9 text-base pointer-events-none" />
           <input
             v-model="filters.search"
-            class="w-full h-[34px] pl-9 pr-3 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12 placeholder-n-slate-9 focus:outline-none focus:border-n-brand"
+            class="cv-input cv-crm-search w-full"
             :placeholder="$t('CRM.FILTER.SEARCH_PLACEHOLDER')"
           />
         </div>
 
         <!-- Sem resposta (paciente aguardando) -->
         <button
-          class="flex items-center gap-1.5 h-[34px] px-3 text-sm rounded-lg border transition-colors whitespace-nowrap flex-shrink-0"
-          :class="filters.awaitingOnly
-            ? 'bg-amber-500/15 border-amber-500 text-amber-700 dark:text-amber-400 font-medium'
-            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+          class="cv-crm-tool flex-shrink-0"
+          :class="filters.awaitingOnly ? 'cv-crm-tool-on' : ''"
+          style="--tool-grad: linear-gradient(135deg, #b45309, #f59e0b)"
           @click="filters.awaitingOnly = !filters.awaitingOnly"
         >
-          <span class="i-lucide-clock text-sm" />
+          <span class="i-lucide-clock text-sm" :style="filters.awaitingOnly ? {} : { color: '#d97706' }" />
           {{ $t('CRM.FILTER.AWAITING_REPLY') }}
           <span
             v-if="awaitingCount > 0"
             class="inline-flex items-center justify-center min-w-[16px] h-4 px-1 text-[10px] font-bold rounded-full"
-            :class="filters.awaitingOnly ? 'bg-amber-500 text-white' : 'bg-n-alpha-2 text-n-slate-10'"
+            :class="filters.awaitingOnly ? 'bg-white/25 text-white' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'"
           >
             {{ awaitingCount }}
           </span>
@@ -1265,7 +1257,7 @@ const createAndAddContact = async () => {
         <!-- Ordenação (compacto — a busca é quem manda no espaço) -->
         <select
           v-model="sortOrder"
-          class="h-[34px] text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand w-auto max-w-[210px] flex-shrink-0"
+          class="cv-input !w-auto max-w-[210px] flex-shrink-0"
           :title="$t('CRM.FILTER.SORT')"
         >
           <option value="lastMessage">{{ $t('CRM.FILTER.SORT_LAST_MESSAGE') }}</option>
@@ -1280,13 +1272,13 @@ const createAndAddContact = async () => {
              máxima de 440px escondia caixas — pedido 17/07). -->
         <div
           v-if="availableInboxes.length"
-          class="flex items-center min-h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 py-0.5 gap-0.5 flex-nowrap md:flex-wrap flex-shrink-0"
+          class="cv-seg cv-seg-sm flex-nowrap md:flex-wrap flex-shrink-0"
           :title="$t('CRM.MODAL.INBOX')"
         >
           <span class="i-lucide-inbox text-sm ml-2 mr-0.5 text-n-slate-10 flex-shrink-0" />
           <button
-            class="h-7 px-2.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
-            :class="filters.inboxName === '' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            class="cv-seg-item"
+            :class="filters.inboxName === '' ? 'cv-seg-on' : ''"
             :style="filters.inboxName === '' ? { background: ALL_INBOXES_GRADIENT } : {}"
             @click="filters.inboxName = ''"
           >
@@ -1295,8 +1287,8 @@ const createAndAddContact = async () => {
           <button
             v-for="inbox in availableInboxes"
             :key="inbox"
-            class="h-7 px-2.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0 flex items-center gap-1.5"
-            :class="filters.inboxName === inbox ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            class="cv-seg-item"
+            :class="filters.inboxName === inbox ? 'cv-seg-on' : ''"
             :style="filters.inboxName === inbox ? { background: crmInboxGradient(inbox) } : {}"
             :title="`Só cards cuja última conversa é da caixa ${inbox}`"
             @click="filters.inboxName = filters.inboxName === inbox ? '' : inbox"
@@ -1314,10 +1306,10 @@ const createAndAddContact = async () => {
              o painel "Filtros" foi aposentado; o importante fica à mão) -->
         <select
           v-model="filters.assigneeId"
-          class="h-[34px] text-xs font-medium border rounded-full px-2.5 flex-shrink-0 cursor-pointer transition-colors"
+          class="cv-input flex-shrink-0 cursor-pointer"
           :class="filters.assigneeId !== ''
-            ? 'bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400'
-            : 'border-n-weak bg-n-solid-2 text-n-slate-11'"
+            ? '!border-emerald-500 !bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+            : ''"
           style="width: auto; max-width: 13rem"
           title="Filtrar pelo responsável do card"
         >
@@ -1329,10 +1321,10 @@ const createAndAddContact = async () => {
         </select>
         <select
           v-model="labelPillValue"
-          class="h-[34px] text-xs font-medium border rounded-full px-2.5 flex-shrink-0 cursor-pointer transition-colors"
+          class="cv-input flex-shrink-0 cursor-pointer"
           :class="labelPillValue
-            ? 'bg-amber-500/10 border-amber-500 text-amber-700 dark:text-amber-400'
-            : 'border-n-weak bg-n-solid-2 text-n-slate-11'"
+            ? '!border-amber-500 !bg-amber-500/10 text-amber-700 dark:text-amber-400'
+            : ''"
           style="width: auto; max-width: 12rem"
           title="Filtrar por etiqueta do contato"
         >
@@ -1342,7 +1334,7 @@ const createAndAddContact = async () => {
 
         <!-- Contador (fim da linha 1): "no período" é a contagem VERDADEIRA
              do servidor; com filtro local em jogo mostra também o refinado -->
-        <span class="text-xs text-n-slate-9 whitespace-nowrap ml-auto hidden md:inline">
+        <span class="cv-crm-meta whitespace-nowrap ml-auto hidden md:inline">
           <template v-if="periodMatching !== null">
             <b>{{ periodMatching.toLocaleString('pt-BR') }}</b> no período
             <template v-if="clientRefineActive"> · {{ filteredCount.toLocaleString('pt-BR') }} após filtros</template>
@@ -1358,13 +1350,12 @@ const createAndAddContact = async () => {
       </div>
 
       <!-- Linha 2: visualizações de colunas + período do lead -->
-      <div class="flex items-center gap-2 px-3 md:px-4 pt-0 pb-2 border-b border-n-weak flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible">
+      <div class="flex items-center gap-2 px-3 md:px-4 pt-0.5 pb-2.5 flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible">
         <!-- Visualizações pré-configuradas (colunas) -->
-        <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 flex-nowrap md:flex-wrap flex-shrink-0">
+        <div class="cv-seg cv-seg-sm flex-nowrap md:flex-wrap flex-shrink-0">
           <button
-            class="h-7 flex items-center gap-1.5 px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
-            :class="activePresetNames.length === 0 ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="activePresetNames.length === 0 ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            class="cv-seg-item"
+            :class="activePresetNames.length === 0 ? 'cv-seg-on' : ''"
             @click="clearPresets"
           >
             <span class="i-lucide-columns-3 text-sm" />
@@ -1373,9 +1364,8 @@ const createAndAddContact = async () => {
           <button
             v-for="p in columnPresets"
             :key="p.name"
-            class="h-7 px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap max-w-[160px] truncate"
-            :class="activePresetNames.includes(p.name) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="activePresetNames.includes(p.name) ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            class="cv-seg-item"
+            :class="activePresetNames.includes(p.name) ? 'cv-seg-on' : ''"
             :title="`Mostrar só as colunas de ${p.name} (dá para combinar mais de uma)`"
             @click="togglePreset(p.name)"
           >
@@ -1383,7 +1373,7 @@ const createAndAddContact = async () => {
           </button>
           <button
             v-if="isAdmin"
-            class="h-7 w-7 flex items-center justify-center rounded-lg text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1 transition-colors"
+            class="cv-seg-item cv-seg-icon"
             :title="$t('CRM.PRESETS.MANAGE')"
             @click="showPresetsModal = true"
           >
@@ -1391,19 +1381,18 @@ const createAndAddContact = async () => {
           </button>
         </div>
 
-        <!-- Período (régua padrão — azul/roxo). O servidor filtra e conta. -->
-        <div class="flex items-center h-[34px] bg-n-solid-2 rounded-xl px-0.5 gap-0.5 flex-nowrap md:flex-wrap border border-n-weak flex-shrink-0">
+        <!-- Período (régua padrão — azul royal). O servidor filtra e conta. -->
+        <div class="cv-seg cv-seg-sm flex-nowrap md:flex-wrap flex-shrink-0">
           <span
             class="i-lucide-calendar-clock text-sm ml-2 mr-0.5"
-            style="color: #7C3AED"
+            style="color: #2563eb"
             :title="dateMode === 'created' ? 'O período filtra por quando o lead CHEGOU' : dateMode === 'moved' ? 'O período filtra por quando o lead ENTROU na coluna' : 'O período filtra pelo MOVIMENTO do lead (conversa ou mudança)'"
           />
           <button
             v-for="p in DATE_PRESETS"
             :key="p.key"
-            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
-            :class="activeDatePreset === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="activeDatePreset === p.key ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            class="cv-seg-item"
+            :class="activeDatePreset === p.key ? 'cv-seg-on' : ''"
             :title="dateMode === 'created'
               ? `Quem CHEGOU ${p.label.toLowerCase()}`
               : dateMode === 'moved'
@@ -1417,9 +1406,8 @@ const createAndAddContact = async () => {
           <!-- Personalizado (item 80): calendário arredondado no balãozinho -->
           <div class="relative">
             <button
-              class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
-              :class="customDateActive ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-              :style="customDateActive ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+              class="cv-seg-item"
+              :class="customDateActive ? 'cv-seg-on' : ''"
               title="Escolher um intervalo de datas de chegada do lead"
               @click="showCustomDate = !showCustomDate"
             >
@@ -1427,13 +1415,13 @@ const createAndAddContact = async () => {
             </button>
             <div
               v-if="showCustomDate"
-              class="absolute top-9 right-0 z-50 bg-white dark:bg-n-solid-2 border border-n-weak rounded-2xl shadow-xl p-3 flex items-center gap-2"
+              class="cv-pop absolute top-9 right-0 z-50 p-3 flex items-center gap-2"
               @click.stop
             >
               <input
                 v-model="filters.dateFrom"
                 type="date"
-                class="h-8 text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+                class="cv-input !h-8 text-xs"
                 style="width: 8.4rem"
                 title="De"
                 @change="onCustomDate"
@@ -1442,13 +1430,13 @@ const createAndAddContact = async () => {
               <input
                 v-model="filters.dateTo"
                 type="date"
-                class="h-8 text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+                class="cv-input !h-8 text-xs"
                 style="width: 8.4rem"
                 title="Até (vazio = hoje)"
                 @change="onCustomDate"
               />
               <button
-                class="w-7 h-7 rounded-full flex items-center justify-center text-n-slate-10 hover:bg-n-alpha-1"
+                class="cv-btn cv-btn-ghost cv-iconbtn"
                 title="Limpar intervalo"
                 @click="clearCustomDate"
               >
@@ -1460,11 +1448,11 @@ const createAndAddContact = async () => {
 
         <!-- Modo do período, lê como frase — Mostrar quem: CHEGOU (entrada
              do lead) × ENTROU AQUI (na coluna) × CONVERSOU (atividade) -->
-        <div class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 flex-shrink-0">
+        <div class="cv-seg cv-seg-sm flex-shrink-0">
           <span class="text-[11px] text-n-slate-10 pl-2 pr-0.5 whitespace-nowrap hidden md:inline">Mostrar quem:</span>
           <button
-            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
-            :class="dateMode === 'created' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            class="cv-seg-item"
+            :class="dateMode === 'created' ? 'cv-seg-on' : ''"
             :style="dateMode === 'created' ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
             title="Quem CHEGOU no período (data real de entrada do lead)"
             @click="setDateMode('created')"
@@ -1472,8 +1460,8 @@ const createAndAddContact = async () => {
             Chegou
           </button>
           <button
-            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
-            :class="dateMode === 'moved' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            class="cv-seg-item"
+            :class="dateMode === 'moved' ? 'cv-seg-on' : ''"
             :style="dateMode === 'moved' ? { background: 'linear-gradient(135deg, #0F5FA6, #3B82F6)' } : {}"
             title="Quem ENTROU na coluna no período — ex.: Consulta Confirmada em julho = confirmou EM julho"
             @click="setDateMode('moved')"
@@ -1481,8 +1469,8 @@ const createAndAddContact = async () => {
             Entrou aqui
           </button>
           <button
-            class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
-            :class="dateMode === 'activity' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+            class="cv-seg-item"
+            :class="dateMode === 'activity' ? 'cv-seg-on' : ''"
             :style="dateMode === 'activity' ? { background: 'linear-gradient(135deg, #059669, #10B981)' } : {}"
             title="Quem teve movimento no período (mensagem, chegada ou mudança de etapa) — mostra a base ativa"
             @click="setDateMode('activity')"
@@ -1493,10 +1481,8 @@ const createAndAddContact = async () => {
 
         <!-- Tela cheia (item 82): o board toma a janela toda -->
         <button
-          class="flex items-center gap-1.5 h-[34px] px-3 text-sm rounded-lg border transition-colors whitespace-nowrap flex-shrink-0 ml-auto"
-          :class="isFocusMode
-            ? 'bg-n-brand/10 border-n-brand text-n-brand font-medium'
-            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+          class="cv-crm-tool flex-shrink-0 ml-auto"
+          :class="isFocusMode ? 'cv-crm-tool-on' : ''"
           :title="isFocusMode ? 'Voltar ao layout normal' : 'Só filtros e colunas, na janela inteira'"
           @click="toggleFocusMode"
         >
@@ -1507,7 +1493,7 @@ const createAndAddContact = async () => {
         <!-- Clear filters button -->
         <button
           v-if="hasActiveFilters"
-          class="flex items-center gap-1 h-[34px] px-2 text-xs text-red-500 hover:text-red-600 flex-shrink-0"
+          class="cv-crm-tool !text-red-600 flex-shrink-0"
           @click="clearFilters"
         >
           <span class="i-lucide-x text-sm" />
@@ -1710,17 +1696,17 @@ const createAndAddContact = async () => {
       <!-- Navegador de colunas — SÓ CELULAR: mostra onde está e pula direto -->
       <div
         v-if="visibleStages.length"
-        class="md:hidden flex items-center gap-1.5 px-3 py-2 border-b border-n-weak overflow-x-auto flex-shrink-0"
+        class="cv-crm-mobile-nav md:hidden flex items-center gap-1.5 px-3 py-2 overflow-x-auto flex-shrink-0"
       >
         <button
           v-for="(s, i) in visibleStages"
           :key="s.id"
           :ref="el => (mobileChipRefs[i] = el)"
-          class="h-7 px-2.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 flex items-center gap-1.5 border transition-colors"
+          class="h-7 px-2.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 flex items-center gap-1.5 border transition-colors"
           :class="i === mobileStageIdx
             ? 'text-white border-transparent shadow'
-            : 'text-n-slate-11 border-n-weak bg-n-solid-2'"
-          :style="i === mobileStageIdx ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' } : {}"
+            : 'text-n-slate-11 border-n-weak bg-white/70 dark:bg-white/5'"
+          :style="i === mobileStageIdx ? { background: s.color || '#2563eb' } : {}"
           @click="scrollToStage(i)"
         >
           <span
@@ -1739,7 +1725,7 @@ const createAndAddContact = async () => {
 
       <div
         ref="boardScrollRef"
-        class="kanban-board-scroll snap-x snap-mandatory md:snap-none p-3 md:p-6"
+        class="kanban-board-scroll snap-x snap-mandatory md:snap-none p-3 md:p-5"
         style="flex:1;min-height:0;overflow-x:scroll;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,0.45) transparent;"
         @scroll.passive="onBoardScroll"
       >
@@ -1802,29 +1788,29 @@ const createAndAddContact = async () => {
           <div v-if="isEditMode" class="flex-shrink-0 w-64">
             <div v-if="!showNewStageForm">
               <button
-                class="w-full border-2 border-dashed border-n-weak rounded-xl py-3 text-sm text-n-slate-10 hover:border-n-brand hover:text-n-brand transition-colors flex items-center justify-center gap-1"
+                class="cv-crm-ghost !h-auto py-3 !rounded-2xl"
                 @click="showNewStageForm = true"
               >
                 <span class="i-lucide-plus" />
                 {{ $t('CRM.NEW_STAGE') }}
               </button>
             </div>
-            <div v-else class="bg-n-alpha-1 rounded-xl p-3 space-y-2">
+            <div v-else class="cv-crm-col p-3 space-y-2">
               <input
                 v-model="newStageName"
-                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                class="cv-input w-full"
                 :placeholder="$t('CRM.STAGE_NAME')"
                 @keyup.enter="createStage"
               />
               <div class="flex items-center gap-2">
-                <label class="text-xs text-n-slate-10">{{ $t('CRM.STAGE_COLOR') }}</label>
-                <input v-model="newStageColor" type="color" class="w-8 h-8 rounded cursor-pointer border-0" />
+                <label class="cv-label">{{ $t('CRM.STAGE_COLOR') }}</label>
+                <input v-model="newStageColor" type="color" class="w-8 h-8 rounded-lg cursor-pointer border-0" />
               </div>
               <div class="flex gap-2">
-                <button class="flex-1 bg-n-brand text-white rounded-lg py-1.5 text-xs" @click="createStage">
+                <button class="cv-btn cv-btn-sm flex-1" @click="createStage">
                   {{ $t('CRM.CREATE') }}
                 </button>
-                <button class="flex-1 border border-n-weak rounded-lg py-1.5 text-xs text-n-slate-11" @click="showNewStageForm = false">
+                <button class="cv-btn cv-btn-ghost cv-btn-sm flex-1" @click="showNewStageForm = false">
                   {{ $t('CRM.CANCEL') }}
                 </button>
               </div>
@@ -1879,29 +1865,34 @@ const createAndAddContact = async () => {
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       @click.self="closeAddContact"
     >
-      <div class="bg-n-solid-1 rounded-2xl shadow-xl w-full max-w-md mx-4">
-        <div class="flex items-center justify-between p-4 border-b border-n-weak">
-          <h2 class="text-base font-semibold text-n-slate-12">{{ $t('CRM.ADD_CONTACT') }}</h2>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="closeAddContact" />
+      <div class="cv-modal w-full max-w-md mx-4">
+        <div class="cv-modal-head flex items-center justify-between">
+          <h2 class="text-base font-bold flex items-center gap-2">
+            <span class="i-lucide-user-plus text-lg" />
+            {{ $t('CRM.ADD_CONTACT') }}
+          </h2>
+          <button class="text-white/80 hover:text-white i-lucide-x text-xl" @click="closeAddContact" />
         </div>
 
         <!-- Tabs -->
-        <div class="flex items-center gap-1 px-4 pt-3">
-          <button
-            class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
-            :class="addContactTab === 'search' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            @click="addContactTab = 'search'"
-          >Buscar existente</button>
-          <button
-            class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
-            :class="addContactTab === 'create' ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            @click="addContactTab = 'create'"
-          >Criar novo contato</button>
+        <div class="px-4 pt-3">
+          <div class="cv-seg cv-seg-sm">
+            <button
+              class="cv-seg-item"
+              :class="addContactTab === 'search' ? 'cv-seg-on' : ''"
+              @click="addContactTab = 'search'"
+            >Buscar existente</button>
+            <button
+              class="cv-seg-item"
+              :class="addContactTab === 'create' ? 'cv-seg-on' : ''"
+              @click="addContactTab = 'create'"
+            >Criar novo contato</button>
+          </div>
         </div>
 
         <div v-if="addContactTab === 'create'" class="p-4 space-y-3">
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">Nome</label>
+            <label class="cv-label block mb-1">Nome</label>
             <input
               v-model="newContact.name"
               class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -1909,7 +1900,7 @@ const createAndAddContact = async () => {
             />
           </div>
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">Telefone</label>
+            <label class="cv-label block mb-1">Telefone</label>
             <input
               v-model="newContact.phone_number"
               class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -1917,8 +1908,8 @@ const createAndAddContact = async () => {
             />
           </div>
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">
-              Email <span class="text-n-slate-9">(opcional se tiver telefone)</span>
+            <label class="cv-label block mb-1">
+              Email <span class="opacity-70 normal-case tracking-normal">(opcional se tiver telefone)</span>
             </label>
             <input
               v-model="newContact.email"
@@ -1927,7 +1918,7 @@ const createAndAddContact = async () => {
             />
           </div>
           <button
-            class="w-full bg-n-brand text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+            class="cv-btn w-full"
             :disabled="!canCreateContact || isCreatingContact"
             @click="createAndAddContact"
           >{{ isCreatingContact ? 'Criando…' : 'Criar e adicionar ao funil' }}</button>
@@ -1966,7 +1957,7 @@ const createAndAddContact = async () => {
                 class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-n-alpha-1 transition-colors text-left"
                 @click="addContactToStage(c)"
               >
-                <div class="w-8 h-8 rounded-full bg-n-brand flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold flex-shrink-0 overflow-hidden" :style="{ background: personGradient(c.name) }">
                   <img v-if="c.avatar_url" :src="c.avatar_url" class="w-8 h-8 rounded-full object-cover" />
                   <span v-else>{{ c.name?.[0]?.toUpperCase() ?? '?' }}</span>
                 </div>
