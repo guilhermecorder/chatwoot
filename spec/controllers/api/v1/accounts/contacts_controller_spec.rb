@@ -348,6 +348,21 @@ RSpec.describe 'Contacts API', type: :request do
         expect(response.body).not_to include(contact1.email)
       end
 
+      # CEVICO (item 199): telefone só pelos dígitos, do jeito que a pessoa digita
+      it 'matches the phone number by digits, ignoring spaces, dashes and the +55' do
+        contact_phone = create(:contact, name: 'Maria Telefone', account: account, phone_number: '+5519994180121')
+        create(:contact, name: 'Outra Pessoa', account: account, phone_number: '+5511988887777')
+
+        get "/api/v1/accounts/#{account.id}/contacts/search",
+            params: { q: '(19) 99418-0121' },
+            headers: admin.create_new_auth_token,
+            as: :json
+
+        expect(response).to have_http_status(:success)
+        expect(response.body).to include(contact_phone.name)
+        expect(response.body).not_to include('Outra Pessoa')
+      end
+
       it 'matches the contact ignoring the case in name' do
         get "/api/v1/accounts/#{account.id}/contacts/search",
             params: { q: 'TestContact' },

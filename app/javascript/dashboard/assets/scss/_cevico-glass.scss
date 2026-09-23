@@ -29,6 +29,8 @@
 .cv-page .cv-amber { --cv: #d97706; --cv-deep: #92400e; --cv-rgb: 217 119 6;  --cv-deep-rgb: 146 64 14;  --cv-grad: linear-gradient(135deg, #92400e, #f59e0b); --cv-grad-2: linear-gradient(135deg, #b45309, #fbbf24); --cv-grad-3: linear-gradient(135deg, #d97706, #fbbf24); }
 .cv-page .cv-green { --cv: #059669; --cv-deep: #065f46; --cv-rgb: 5 150 105;  --cv-deep-rgb: 6 95 70;    --cv-grad: linear-gradient(135deg, #065f46, #10b981); --cv-grad-2: linear-gradient(135deg, #047857, #34d399); --cv-grad-3: linear-gradient(135deg, #059669, #34d399); }
 .cv-page .cv-gold  { --cv: #d4a017; --cv-deep: #92600a; --cv-rgb: 212 160 23; --cv-deep-rgb: 146 96 10;  --cv-grad: linear-gradient(135deg, #92600a, #d4a017); --cv-grad-2: linear-gradient(135deg, #b8860b, #e5b93a); --cv-grad-3: linear-gradient(135deg, #d4a017, #f1cf5c); }
+/* azul ROYAL alegre (22/09, pedido dele: "prefiro azul royal ao invés do dourado") */
+.cv-page .cv-blue  { --cv: #2563eb; --cv-deep: #1e40af; --cv-rgb: 37 99 235;  --cv-deep-rgb: 30 64 175;  --cv-grad: linear-gradient(135deg, #1d4ed8, #3b82f6); --cv-grad-2: linear-gradient(135deg, #2563eb, #60a5fa); --cv-grad-3: linear-gradient(135deg, #3b82f6, #93c5fd); }
 .cv-page .cv-slate { --cv: #64748b; --cv-deep: #334155; --cv-rgb: 100 116 139; --cv-deep-rgb: 51 65 85; --cv-grad: linear-gradient(135deg, #334155, #64748b); --cv-grad-2: linear-gradient(135deg, #475569, #94a3b8); --cv-grad-3: linear-gradient(135deg, #64748b, #94a3b8); }
 
 /* ── BLOCO: a carcaça translúcida do iMac — branco leitoso com o tom do
@@ -810,6 +812,10 @@
   content: '';
   position: absolute;
   inset: -1px;
+  /* 22/09: o .cv-block::before (crista de luz) tem height 44% — sem este
+     height:auto a moldura arco-íris parava no meio da caixa no desktop */
+  height: auto;
+  width: auto;
   border-radius: 25px;
   padding: 2px;
   background: linear-gradient(180deg, #38bdf8 0%, #7b5cff 22%, #ff2e88 44%, #ff7a00 64%, #ffd600 82%, #2ee66b 100%);

@@ -19,7 +19,11 @@ const route = useRoute();
 const router = useRouter();
 // Espaço do Paciente: página única com toda a jornada
 const openPatientSpace = () => {
-  router.push(frontendURL(`accounts/${route.params.accountId}/patient/${props.contact.id}`));
+  router.push(
+    frontendURL(
+      `accounts/${route.params.accountId}/patient/${props.contact.id}`
+    )
+  );
 };
 
 const summary = ref(null);
@@ -109,7 +113,10 @@ const moveToStage = async stageId => {
   if (isMovingStage.value || stageId === summary.value?.stage?.stage_id) return;
   isMovingStage.value = true;
   try {
-    const { data } = await CrmAPI.moveConversationStage(props.conversationId, stageId);
+    const { data } = await CrmAPI.moveConversationStage(
+      props.conversationId,
+      stageId
+    );
     if (summary.value) summary.value.stage = data.stage;
     showStagePicker.value = false;
     useAlert(`Card movido para "${data.stage?.stage_name}"!`);
@@ -128,11 +135,16 @@ const togglePatientPause = async () => {
   if (isTogglingFollowup.value || !fu) return;
   isTogglingFollowup.value = true;
   try {
-    const { data } = await CrmAPI.toggleFollowupPause(props.conversationId, !fu.paused);
+    const { data } = await CrmAPI.toggleFollowupPause(
+      props.conversationId,
+      !fu.paused
+    );
     summary.value.followup = data.followup;
-    useAlert(data.followup.paused
-      ? 'Follow-up pausado para este paciente.'
-      : 'Follow-up reativado para este paciente.');
+    useAlert(
+      data.followup.paused
+        ? 'Follow-up pausado para este paciente.'
+        : 'Follow-up reativado para este paciente.'
+    );
   } catch {
     useAlert('Erro ao alterar o follow-up.');
   } finally {
@@ -141,7 +153,13 @@ const togglePatientPause = async () => {
 };
 
 // ⏱ previsão do follow-up (rodada 158): cor por situação + ícone por etapa
-const TIMELINE_ICON = { enviada: '✅', pulada: '⏭️', proxima: '🔜', aguardando: '⏳', pendente: '·' };
+const TIMELINE_ICON = {
+  enviada: '✅',
+  pulada: '⏭️',
+  proxima: '🔜',
+  aguardando: '⏳',
+  pendente: '·',
+};
 const forecastTone = status =>
   ({
     proxima: 'text-n-brand',
@@ -151,10 +169,26 @@ const forecastTone = status =>
   })[status] || 'text-n-slate-11';
 
 const INTEREST = {
-  alto: { label: 'Interesse ALTO', class: 'bg-green-500/15 text-green-600', dot: 'bg-green-500' },
-  medio: { label: 'Interesse MÉDIO', class: 'bg-amber-500/15 text-amber-600', dot: 'bg-amber-500' },
-  baixo: { label: 'Interesse BAIXO', class: 'bg-orange-500/15 text-orange-600', dot: 'bg-orange-500' },
-  perdido: { label: 'PERDIDO', class: 'bg-red-500/15 text-red-600', dot: 'bg-red-500' },
+  alto: {
+    label: 'Interesse ALTO',
+    class: 'bg-green-500/15 text-green-600',
+    dot: 'bg-green-500',
+  },
+  medio: {
+    label: 'Interesse MÉDIO',
+    class: 'bg-amber-500/15 text-amber-600',
+    dot: 'bg-amber-500',
+  },
+  baixo: {
+    label: 'Interesse BAIXO',
+    class: 'bg-orange-500/15 text-orange-600',
+    dot: 'bg-orange-500',
+  },
+  perdido: {
+    label: 'PERDIDO',
+    class: 'bg-red-500/15 text-red-600',
+    dot: 'bg-red-500',
+  },
 };
 
 const interest = computed(() => INTEREST[summary.value?.ai?.level] || null);
@@ -205,267 +239,375 @@ const analyzedAgo = computed(() => {
 </script>
 
 <template>
-  <div class="mx-4 mb-2 rounded-xl border border-n-weak bg-n-solid-1 p-3">
-    <!-- Nome e telefone copiáveis em 1 clique -->
-    <div class="flex flex-col gap-1 mb-2">
-      <button
-        v-if="contact?.name"
-        class="flex items-center gap-1.5 text-sm font-semibold text-n-slate-12 hover:text-n-brand text-left"
-        title="Copiar nome"
-        @click="copy(contact.name, 'Nome')"
-      >
-        <span class="truncate">{{ contact.name }}</span>
-        <span class="i-lucide-copy text-[11px] text-n-slate-9 flex-shrink-0" />
-      </button>
-      <button
-        v-if="contact?.phone_number"
-        class="flex items-center gap-1.5 text-xs text-n-slate-11 hover:text-n-brand text-left"
-        title="Copiar telefone"
-        @click="copy(contact.phone_number, 'Telefone')"
-      >
-        {{ contact.phone_number }}
-        <span class="i-lucide-copy text-[11px] text-n-slate-9 flex-shrink-0" />
-      </button>
-      <button
-        v-if="contact?.id"
-        class="flex items-center gap-1.5 text-xs font-semibold text-n-slate-12 hover:text-n-brand text-left mt-0.5"
-        title="Abrir o Espaço do Paciente"
-        @click="openPatientSpace"
-      >
-        <PatientSpaceIcon :size="18" />
-        Espaço do Paciente
-      </button>
+  <!-- CEVICO 199 (22/09): o resumo virou TRÊS cartões com divisões claras —
+       Jornada (coluna do CRM, etiquetas, indicadores, follow-up),
+       Inteligência (análise + ajuda com objeção) e Ligações. -->
+  <div class="flex flex-col gap-3">
+    <!-- ══ JORNADA NO CRM ══ -->
+    <div class="cv-side-card p-4">
+      <div class="flex items-center gap-2 mb-3">
+        <p class="cv-side-title flex-1 min-w-0">
+          <span class="cv-side-icon cv-side-icon-violet"><span class="i-lucide-kanban"/></span>
+          Jornada
+        </p>
+        <button
+          v-if="contact?.id"
+          class="cv-side-btn"
+          title="Abrir o Espaço do Paciente (toda a jornada numa página)"
+          @click="openPatientSpace"
+        >
+          <PatientSpaceIcon :size="14" />
+          Espaço do Paciente
+        </button>
+      </div>
+
+      <template v-if="summary">
+        <!-- coluna atual + mover -->
+        <div v-if="summary.stage" class="mb-3">
+          <div class="flex items-center gap-2 min-w-0 flex-wrap">
+            <span
+              class="text-[12px] font-bold px-3 h-7 inline-flex items-center rounded-full text-white min-w-0"
+              :style="{
+                backgroundColor: summary.stage.stage_color || '#6B7280',
+              }"
+              :title="summary.stage.stage_name"
+            >
+              {{ summary.stage.stage_name }}
+            </span>
+            <button
+              v-if="summary.stage.stages?.length"
+              class="cv-side-btn"
+              @click="showStagePicker = !showStagePicker"
+            >
+              <span
+                :class="
+                  showStagePicker
+                    ? 'i-lucide-chevron-up'
+                    : 'i-lucide-arrow-right-left'
+                "
+                class="text-[11px]"
+              />
+              Mover
+            </button>
+          </div>
+          <p class="text-[11px] text-n-slate-10 mt-1 m-0">
+            Funil {{ summary.stage.pipeline_name }}
+          </p>
+          <div v-if="showStagePicker" class="flex flex-wrap gap-1 mt-2">
+            <button
+              v-for="s in summary.stage.stages"
+              :key="s.id"
+              class="text-[11px] font-medium px-2.5 h-7 rounded-full border transition-colors disabled:opacity-50 max-w-full truncate"
+              :class="
+                s.id === summary.stage.stage_id
+                  ? 'text-white border-transparent cursor-default'
+                  : 'text-n-slate-11 border-n-weak hover:text-white hover:border-transparent'
+              "
+              :style="
+                s.id === summary.stage.stage_id
+                  ? { backgroundColor: s.color || '#6B7280' }
+                  : {}
+              "
+              :disabled="isMovingStage"
+              :title="
+                s.id === summary.stage.stage_id
+                  ? 'Coluna atual'
+                  : `Mover para ${s.name}`
+              "
+              @click="moveToStage(s.id)"
+              @mouseenter="
+                $event.target.style.backgroundColor = s.color || '#6B7280'
+              "
+              @mouseleave="
+                s.id !== summary.stage.stage_id &&
+                  ($event.target.style.backgroundColor = '')
+              "
+            >
+              {{ s.name }}
+            </button>
+          </div>
+        </div>
+
+        <!-- etiquetas -->
+        <div v-if="summary.labels?.length" class="flex flex-wrap gap-1 mb-3">
+          <span
+            v-for="label in summary.labels"
+            :key="label"
+            class="text-[10px] font-medium px-2 h-5 inline-flex items-center rounded-full bg-n-alpha-2 text-n-slate-11"
+          >
+            {{ label }}
+          </span>
+        </div>
+
+        <!-- indicadores lado a lado -->
+        <div class="cv-side-stats mb-3">
+          <div
+            class="cv-side-stat"
+            title="Respostas do paciente ÷ mensagens da clínica"
+          >
+            <b>{{ summary.metrics?.responsiveness ?? '—'
+              }}<template
+                v-if="
+                  summary.metrics?.responsiveness !== null &&
+                  summary.metrics?.responsiveness !== undefined
+                "
+                >%</template></b>
+            <span>responsivo</span>
+          </div>
+          <div class="cv-side-stat" title="Mensagens do paciente / da clínica">
+            <b>{{ summary.metrics?.patient_messages ?? 0
+              }}<span class="inline text-n-slate-10 font-normal">/</span>{{ summary.metrics?.clinic_messages ?? 0 }}</b>
+            <span>paciente / clínica</span>
+          </div>
+          <div class="cv-side-stat" title="Última mensagem do paciente">
+            <b>{{ lastPatientAgo || '—' }}</b>
+            <span>última do paciente</span>
+          </div>
+        </div>
+
+        <!-- trava do follow-up -->
+        <button
+          v-if="
+            summary.followup &&
+            (summary.followup.bots?.length || summary.followup.paused)
+          "
+          class="w-full flex items-center justify-between gap-2 text-[11px] px-3 py-2 rounded-xl border transition-colors disabled:opacity-50 mb-2"
+          :class="
+            summary.followup.paused
+              ? 'border-amber-400/60 bg-amber-400/10 text-amber-700 dark:text-amber-400 font-semibold'
+              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
+          "
+          :disabled="isTogglingFollowup"
+          :title="
+            summary.followup.paused
+              ? `Pausado por ${summary.followup.paused_by || '—'}`
+              : 'O robô de follow-up para de cutucar este paciente'
+          "
+          @click="togglePatientPause"
+        >
+          <span class="flex items-center gap-1.5 min-w-0">
+            <span
+              :class="
+                summary.followup.paused ? 'i-lucide-bell-off' : 'i-lucide-bell'
+              "
+              class="text-xs flex-shrink-0"
+            />
+            <span class="truncate">{{
+              summary.followup.paused
+                ? 'Follow-up pausado para este paciente'
+                : 'Pausar follow-up para este paciente'
+            }}</span>
+          </span>
+          <span class="font-bold flex-shrink-0">{{
+            summary.followup.paused ? 'Reativar' : 'Pausar'
+          }}</span>
+        </button>
+
+        <!-- previsão do follow-up, por robô -->
+        <div v-if="summary.followup?.bots?.length" class="space-y-1.5">
+          <div
+            v-for="b in summary.followup.bots"
+            :key="`fu-${b.id}`"
+            class="rounded-xl bg-n-alpha-1 px-3 py-2 text-[11px]"
+          >
+            <div class="flex items-center gap-1.5 min-w-0">
+              <span
+                class="i-lucide-bot text-xs flex-shrink-0"
+                :class="forecastTone(b.forecast?.status)"
+              />
+              <span class="font-semibold text-n-slate-12 truncate">{{
+                b.name
+              }}</span>
+              <span v-if="!b.active"
+class="text-n-slate-9 flex-shrink-0"
+                >desligado</span>
+            </div>
+            <p
+              v-if="b.forecast?.text"
+              class="mt-0.5 leading-snug m-0"
+              :class="forecastTone(b.forecast.status)"
+            >
+              {{ b.forecast.text }}
+            </p>
+            <div
+              v-if="b.forecast?.timeline?.length"
+              class="mt-1 flex flex-wrap gap-1"
+            >
+              <span
+                v-for="(t, i) in b.forecast.timeline"
+                :key="`fu-${b.id}-${i}`"
+                class="rounded-full px-1.5 py-0.5 bg-n-alpha-2 text-n-slate-11"
+                :title="t.note || ''"
+                >{{ TIMELINE_ICON[t.status] || '·' }} {{ t.label
+                }}<template v-if="t.when"> · {{ t.when }}</template></span>
+            </div>
+          </div>
+        </div>
+      </template>
+      <p v-else-if="isLoading" class="text-[11px] text-n-slate-9 m-0">
+        Carregando a jornada…
+      </p>
+      <p v-else class="text-[11px] text-n-slate-9 m-0">
+        Esta conversa ainda não tem card no CRM.
+      </p>
     </div>
 
-    <template v-if="summary">
-      <!-- Estágio do CRM: pílula atual + mover de coluna sem sair da conversa -->
-      <div v-if="summary.stage" class="mb-2">
-        <div class="flex items-center gap-1.5 min-w-0">
-          <span class="i-lucide-kanban text-xs text-n-slate-10 flex-shrink-0" />
-          <span
-            class="text-[11px] font-medium px-2 py-0.5 rounded-full text-white whitespace-nowrap truncate min-w-0"
-            :style="{ backgroundColor: summary.stage.stage_color || '#6B7280' }"
-            :title="summary.stage.stage_name"
-          >
-            {{ summary.stage.stage_name }}
-          </span>
-          <button
-            v-if="summary.stage.stages?.length"
-            class="flex items-center gap-0.5 text-[10px] font-medium text-n-slate-10 hover:text-n-brand px-1.5 py-0.5 rounded border border-n-weak hover:border-n-brand/40 flex-shrink-0 transition-colors"
-            @click="showStagePicker = !showStagePicker"
-          >
-            <span :class="showStagePicker ? 'i-lucide-chevron-up' : 'i-lucide-arrow-right-left'" class="text-[10px]" />
-            Mover
-          </button>
-        </div>
-        <p class="text-[10px] text-n-slate-9 truncate mt-0.5 pl-[18px]">{{ summary.stage.pipeline_name }}</p>
-
-        <!-- Botões das colunas (mobile-friendly: quebram linha, alvo grande) -->
-        <div v-if="showStagePicker" class="flex flex-wrap gap-1 mt-1.5 pl-[18px]">
-          <button
-            v-for="s in summary.stage.stages"
-            :key="s.id"
-            class="text-[10px] font-medium px-2 py-1 rounded-lg border transition-colors disabled:opacity-50 max-w-full truncate"
-            :class="s.id === summary.stage.stage_id
-              ? 'text-white border-transparent cursor-default'
-              : 'text-n-slate-11 border-n-weak hover:text-white hover:border-transparent'"
-            :style="s.id === summary.stage.stage_id ? { backgroundColor: s.color || '#6B7280' } : {}"
-            :disabled="isMovingStage"
-            :title="s.id === summary.stage.stage_id ? 'Coluna atual' : `Mover para ${s.name}`"
-            @click="moveToStage(s.id)"
-            @mouseenter="$event.target.style.backgroundColor = s.color || '#6B7280'"
-            @mouseleave="s.id !== summary.stage.stage_id && ($event.target.style.backgroundColor = '')"
-          >
-            {{ s.name }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Etiquetas -->
-      <div v-if="summary.labels?.length" class="flex flex-wrap gap-1 mb-2">
-        <span
-          v-for="label in summary.labels"
-          :key="label"
-          class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-2 text-n-slate-11"
-        >
-          {{ label }}
-        </span>
-      </div>
-
-      <!-- Métricas -->
-      <div class="flex items-center gap-3 text-[11px] text-n-slate-10 mb-2">
-        <span v-if="summary.metrics?.responsiveness !== null" title="Respostas do paciente ÷ mensagens da clínica">
-          <span class="i-lucide-activity text-[10px]" />
-          {{ summary.metrics.responsiveness }}% responsivo
-        </span>
-        <span title="Mensagens do paciente / da clínica">
-          💬 {{ summary.metrics?.patient_messages ?? 0 }}/{{ summary.metrics?.clinic_messages ?? 0 }}
-        </span>
-        <span v-if="lastPatientAgo" title="Última mensagem do paciente">
-          <span class="i-lucide-clock text-[10px]" />
-          {{ lastPatientAgo }}
-        </span>
-      </div>
-
-      <!-- 🤖 Trava do follow-up (pausa por paciente) -->
-      <button
-        v-if="summary.followup && (summary.followup.bots?.length || summary.followup.paused)"
-        class="w-full flex items-center justify-between gap-2 text-[11px] px-2 py-1.5 rounded-lg border transition-colors disabled:opacity-50 mb-2"
-        :class="summary.followup.paused
-          ? 'border-amber-400/60 bg-amber-400/10 text-amber-600 dark:text-amber-400 font-medium'
-          : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-        :disabled="isTogglingFollowup"
-        :title="summary.followup.paused ? `Pausado por ${summary.followup.paused_by || '—'}` : 'O robô de follow-up para de cutucar este paciente'"
-        @click="togglePatientPause"
-      >
-        <span class="flex items-center gap-1.5">
-          <span :class="summary.followup.paused ? 'i-lucide-bell-off' : 'i-lucide-bell'" class="text-xs" />
-          {{ summary.followup.paused ? 'Follow-up pausado p/ este paciente' : 'Pausar follow-up p/ este paciente' }}
-        </span>
-        <span class="font-semibold flex-shrink-0">{{ summary.followup.paused ? 'Reativar' : 'Pausar' }}</span>
-      </button>
-
-      <!-- ⏱ Previsão do follow-up (rodada 158): por robô, o que já saiu,
-           quando sai a próxima cutucada e por quê — o cronômetro visível -->
-      <div v-if="summary.followup?.bots?.length" class="mb-2 space-y-1.5">
-        <div
-          v-for="b in summary.followup.bots"
-          :key="`fu-${b.id}`"
-          class="rounded-lg border border-n-weak px-2 py-1.5 text-[11px]"
-        >
-          <div class="flex items-center gap-1.5 min-w-0">
-            <span class="i-lucide-bot text-xs flex-shrink-0" :class="forecastTone(b.forecast?.status)" />
-            <span class="font-medium text-n-slate-12 truncate">{{ b.name }}</span>
-            <span v-if="!b.active" class="text-n-slate-9 flex-shrink-0">desligado</span>
-          </div>
-          <p v-if="b.forecast?.text" class="mt-0.5 leading-snug" :class="forecastTone(b.forecast.status)">
-            {{ b.forecast.text }}
-          </p>
-          <div v-if="b.forecast?.timeline?.length" class="mt-1 flex flex-wrap gap-1">
-            <span
-              v-for="(t, i) in b.forecast.timeline"
-              :key="`fu-${b.id}-${i}`"
-              class="rounded-full px-1.5 py-0.5 bg-n-alpha-2 text-n-slate-11"
-              :title="t.note || ''"
-            >{{ TIMELINE_ICON[t.status] || '·' }} {{ t.label }}<template v-if="t.when"> · {{ t.when }}</template></span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Análise de IA -->
-      <div class="border-t border-n-weak pt-2">
-        <template v-if="summary.ai && !summary.ai.error">
-          <div class="flex items-center gap-2 mb-1.5">
-            <span
-              v-if="interest"
-              class="flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full"
-              :class="interest.class"
-            >
-              <span class="w-1.5 h-1.5 rounded-full" :class="interest.dot" />
-              {{ interest.label }}
-            </span>
-            <button
-              class="ml-auto text-[10px] text-n-slate-9 hover:text-n-brand flex items-center gap-1"
-              :disabled="isAnalyzing"
-              title="Reanalisar com IA"
-              @click="analyze"
-            >
-              <span :class="isAnalyzing ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-refresh-cw'" class="text-[10px]" />
-              {{ analyzedAgo }}
-            </button>
-          </div>
-          <p class="text-xs text-n-slate-11 leading-relaxed mb-1">
-            {{ summary.ai.summary }}
-          </p>
-          <p v-if="summary.ai.next_step" class="text-[11px] text-n-slate-12 font-medium">
-            👉 {{ summary.ai.next_step }}
-          </p>
-
-          <!-- Etapa do script + frases sugeridas (item 28) -->
-          <div v-if="scriptStage" class="flex items-center gap-1.5 mt-2">
-            <span class="i-lucide-map-pin text-[10px] text-n-slate-10" />
-            <span class="text-[10px] text-n-slate-10">Etapa do script:</span>
-            <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-n-alpha-2 text-n-slate-12">
-              {{ scriptStage }}
-            </span>
-          </div>
-          <div v-if="suggestedPhrases.length" class="mt-1.5">
-            <p class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-10 mb-1">
-              <span class="i-lucide-message-square-quote text-[10px]" />
-              Frases sugeridas
-            </p>
-            <button
-              v-for="(phrase, index) in suggestedPhrases"
-              :key="index"
-              class="w-full flex items-start gap-1.5 text-left text-[11px] text-n-slate-11 leading-relaxed rounded-lg border border-n-weak px-2 py-1.5 mb-1 hover:bg-n-alpha-1 hover:text-n-slate-12 hover:border-n-brand/40 transition-colors group"
-              title="Copiar frase"
-              @click="copy(phrase, 'Frase')"
-            >
-              <span class="flex-1">{{ phrase }}</span>
-              <span class="i-lucide-copy text-[11px] text-n-slate-8 group-hover:text-n-brand flex-shrink-0 mt-0.5" />
-            </button>
-            <p class="text-[9px] text-n-slate-8 leading-snug">
-              Sugestões da IA no tom do script. Revise antes de enviar — quem decide é você.
-            </p>
-          </div>
-        </template>
-
+    <!-- ══ INTELIGÊNCIA (IA) ══ -->
+    <div v-if="summary" class="cv-side-card p-4">
+      <div class="flex items-center gap-2 mb-3">
+        <p class="cv-side-title flex-1 min-w-0">
+          <span class="cv-side-icon cv-side-icon-green"><span class="i-lucide-sparkles"/></span>
+          Inteligência
+        </p>
         <button
-          v-else-if="summary.ai_configured"
-          class="w-full flex items-center justify-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 hover:text-n-brand transition-colors disabled:opacity-50"
+          v-if="summary.ai && !summary.ai.error"
+          class="text-[10px] text-n-slate-10 hover:text-n-slate-12 flex items-center gap-1"
           :disabled="isAnalyzing"
+          title="Reanalisar com IA"
           @click="analyze"
         >
-          <span :class="isAnalyzing ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-sparkles'" class="text-sm" />
-          {{ isAnalyzing ? 'Analisando conversa…' : 'Analisar com IA' }}
+          <span
+            :class="
+              isAnalyzing
+                ? 'i-lucide-loader-2 animate-spin'
+                : 'i-lucide-refresh-cw'
+            "
+            class="text-[10px]"
+          />
+          {{ analyzedAgo }}
         </button>
+      </div>
 
-        <p v-else class="text-[10px] text-n-slate-9">
-          <span class="i-lucide-sparkles text-[10px]" />
-          Análise de IA disponível — configure em CRM → Integrações → IA
+      <template v-if="summary.ai && !summary.ai.error">
+        <div class="flex items-center gap-2 mb-2 flex-wrap">
+          <span
+            v-if="interest"
+            class="flex items-center gap-1.5 text-[11px] font-bold px-2.5 h-6 rounded-full"
+            :class="interest.class"
+          >
+            <span class="w-1.5 h-1.5 rounded-full" :class="interest.dot" />
+            {{ interest.label }}
+          </span>
+          <span
+            v-if="scriptStage"
+            class="text-[10px] font-semibold px-2 h-6 inline-flex items-center gap-1 rounded-full bg-n-alpha-2 text-n-slate-12"
+            title="Etapa do script onde a IA entende que a conversa está"
+          >
+            <span class="i-lucide-map-pin text-[10px] text-n-slate-10" />
+            {{ scriptStage }}
+          </span>
+        </div>
+        <p class="text-xs text-n-slate-11 leading-relaxed mb-1.5">
+          {{ summary.ai.summary }}
+        </p>
+        <p
+          v-if="summary.ai.next_step"
+          class="text-[12px] text-n-slate-12 font-semibold rounded-xl bg-n-alpha-1 px-3 py-2 m-0"
+        >
+          👉 {{ summary.ai.next_step }}
         </p>
 
-        <!-- 💼 Consultor Comercial: ajuda com a OBJEÇÃO durante o atendimento -->
-        <button
-          v-if="summary.ai_configured"
-          class="w-full flex items-center justify-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg text-white hover:opacity-90 transition-opacity disabled:opacity-50 mt-1.5"
-          style="background: linear-gradient(135deg, #065F46, #10B981)"
-          :disabled="isCoaching"
-          @click="askSalesHelp"
-        >
-          <span :class="isCoaching ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-handshake'" class="text-sm" />
-          {{ isCoaching ? 'Lendo a conversa…' : '💼 Ajuda com objeção (IA)' }}
-        </button>
-        <div v-if="salesHelp" class="mt-2 rounded-xl border p-2.5 space-y-1.5" style="border-color: rgba(16,185,129,0.4); background: rgba(16,185,129,0.06)">
-          <p class="text-[11px] font-bold text-n-slate-12">
-            {{ OBJECTION_LABELS[salesHelp.objection] || salesHelp.objection }}
+        <div v-if="suggestedPhrases.length" class="mt-3">
+          <p
+            class="text-[10px] font-bold uppercase tracking-wide text-n-slate-10 mb-1.5"
+          >
+            <span class="i-lucide-message-square-quote text-[10px]" />
+            Frases sugeridas
           </p>
-          <p class="text-[11px] text-n-slate-11 leading-snug">{{ salesHelp.reading }}</p>
-          <div class="space-y-1">
-            <button
-              v-for="(reply, i) in salesHelp.replies"
-              :key="i"
-              class="w-full text-left text-[11px] rounded-lg border border-n-weak bg-n-solid-1 px-2 py-1.5 hover:border-green-500/60 transition-colors"
-              title="Clique para copiar — revise antes de enviar, quem decide é você"
-              @click="copySalesReply(reply)"
-            >
-              📋 {{ reply }}
-            </button>
-          </div>
-          <p class="text-[10px] text-n-slate-10"><b>Próximo passo:</b> {{ salesHelp.next_step }}</p>
-          <p class="text-[9px] text-n-slate-9">Revise antes de enviar — quem decide é você.</p>
+          <button
+            v-for="(phrase, index) in suggestedPhrases"
+            :key="index"
+            class="w-full flex items-start gap-1.5 text-left text-[11px] text-n-slate-11 leading-relaxed rounded-xl border border-n-weak px-3 py-2 mb-1 hover:bg-n-alpha-1 hover:text-n-slate-12 transition-colors group"
+            title="Copiar frase"
+            @click="copy(phrase, 'Frase')"
+          >
+            <span class="flex-1">{{ phrase }}</span>
+            <span
+              class="i-lucide-copy text-[11px] text-n-slate-8 group-hover:text-n-slate-12 flex-shrink-0 mt-0.5"
+            />
+          </button>
+          <p class="text-[10px] text-n-slate-9 leading-snug m-0">
+            Sugestões da IA no tom do script. Revise antes de enviar — quem
+            decide é você.
+          </p>
         </div>
+      </template>
+
+      <button
+        v-else-if="summary.ai_configured"
+        class="cv-side-btn w-full"
+        :disabled="isAnalyzing"
+        @click="analyze"
+      >
+        <span
+          :class="
+            isAnalyzing ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-sparkles'
+          "
+          class="text-sm"
+        />
+        {{ isAnalyzing ? 'Analisando conversa…' : 'Analisar com IA' }}
+      </button>
+
+      <p v-else class="text-[11px] text-n-slate-9 m-0">
+        Análise de IA disponível — configure em CRM → Integrações → IA
+      </p>
+
+      <!-- 💼 ajuda com a OBJEÇÃO durante o atendimento -->
+      <button
+        v-if="summary.ai_configured"
+        class="cv-side-btn cv-side-btn-green w-full mt-2"
+        :disabled="isCoaching"
+        @click="askSalesHelp"
+      >
+        <span
+          :class="
+            isCoaching ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-handshake'
+          "
+          class="text-sm"
+        />
+        {{ isCoaching ? 'Lendo a conversa…' : 'Ajuda com objeção (IA)' }}
+      </button>
+      <div
+        v-if="salesHelp"
+        class="mt-2 rounded-xl border p-3 space-y-1.5"
+        style="
+          border-color: rgba(16, 185, 129, 0.4);
+          background: rgba(16, 185, 129, 0.06);
+        "
+      >
+        <p class="text-[12px] font-bold text-n-slate-12 m-0">
+          {{ OBJECTION_LABELS[salesHelp.objection] || salesHelp.objection }}
+        </p>
+        <p class="text-[11px] text-n-slate-11 leading-snug m-0">
+          {{ salesHelp.reading }}
+        </p>
+        <div class="space-y-1">
+          <button
+            v-for="(reply, i) in salesHelp.replies"
+            :key="i"
+            class="w-full text-left text-[11px] rounded-xl border border-n-weak bg-n-solid-1 px-3 py-2 hover:border-green-500/60 transition-colors"
+            title="Clique para copiar — revise antes de enviar, quem decide é você"
+            @click="copySalesReply(reply)"
+          >
+            📋 {{ reply }}
+          </button>
+        </div>
+        <p class="text-[10px] text-n-slate-10 m-0">
+          <b>Próximo passo:</b> {{ salesHelp.next_step }}
+        </p>
+        <p class="text-[10px] text-n-slate-9 m-0">
+          Revise antes de enviar — quem decide é você.
+        </p>
       </div>
-    </template>
+    </div>
 
-    <div v-else-if="isLoading" class="text-[11px] text-n-slate-9">Carregando resumo…</div>
-
-    <!-- 📞 Ligações nativas de WhatsApp (item 167): histórico + Ligar / Pedir permissão -->
-    <CevicoCallsCard
-      v-if="contact?.id"
-      :contact-id="contact.id"
-      :conversation-id="conversationId"
-      variant="panel"
-    />
+    <!-- ══ LIGAÇÕES (item 167) ══ -->
+    <div v-if="contact?.id" class="cv-side-card cv-side-calls p-4">
+      <CevicoCallsCard
+        :contact-id="contact.id"
+        :conversation-id="conversationId"
+        variant="panel"
+      />
+    </div>
   </div>
 </template>

@@ -1,0 +1,379 @@
+// ══════════════════════════════════════════════════════════════════════
+// 💬 AMBIENTE DE CONVERSAS "Apple × WhatsApp" (item 199, 22/09).
+// Pedido dele: "super clean, limpo e elegante, mas com divisões claras,
+// contrastes, cores, arredondado" — o WhatsApp como referência de uso, o
+// acabamento Apple. Tudo vive sob .cv-chat (raiz do ConversationView):
+// tirar a classe = volta ao visual antigo em 1 linha.
+//   esquerda  = lista (cartões cv-card, badge verde, nome na cor da caixa)
+//   centro    = papel de parede discreto, balões 18px, composer flutuante
+//   direita   = painel do paciente em cartões brancos sobre cinza Apple
+// ══════════════════════════════════════════════════════════════════════
+.cv-chat {
+  --ch-bg: #f2f2f7;            /* cinza agrupado da Apple */
+  --ch-panel: #ffffff;
+  --ch-line: rgba(0, 0, 0, 0.07);
+  --ch-line-strong: rgba(0, 0, 0, 0.12);
+  --ch-text: #1d1d1f;
+  --ch-muted: #6e6e73;
+  --ch-soft: #f5f5f7;
+  --ch-hover: rgba(0, 0, 0, 0.035);
+  --ch-active: rgba(37, 99, 235, 0.09);
+  --ch-green: #25d366;         /* verde do WhatsApp */
+  --ch-green-deep: #128c7e;
+  --ch-blue: #0a84ff;          /* azul iMessage */
+  --ch-royal: #2563eb;         /* azul royal alegre (a cor de destaque dele) */
+  --ch-in: #ffffff;            /* balão recebido */
+  --ch-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -22px rgba(0, 0, 0, 0.35);
+  --ch-dots: rgba(0, 0, 0, 0.045);
+}
+.dark .cv-chat {
+  --ch-bg: #0b0d10;
+  --ch-panel: #16191d;
+  --ch-line: rgba(255, 255, 255, 0.08);
+  --ch-line-strong: rgba(255, 255, 255, 0.14);
+  --ch-text: #f5f5f7;
+  --ch-muted: #98989f;
+  --ch-soft: #1c2026;
+  --ch-hover: rgba(255, 255, 255, 0.05);
+  --ch-active: rgba(59, 130, 246, 0.16);
+  --ch-in: #202c33;            /* balão recebido do WhatsApp escuro */
+  --ch-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px -22px rgba(0, 0, 0, 0.8);
+  --ch-dots: rgba(255, 255, 255, 0.04);
+}
+
+/* ── ESQUERDA: a lista ─────────────────────────────────────────────── */
+.cv-chat .conversations-list-wrap {
+  background: var(--ch-panel);
+  border-right: 1px solid var(--ch-line);
+}
+.cv-chat .cv-card {
+  margin: 1px 8px;
+  padding: 10px 10px 10px 10px;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+/* separador embutido (estilo Mensagens da Apple): começa depois da foto */
+.cv-chat .cv-card + .cv-card::before {
+  content: '';
+  position: absolute;
+  left: 66px;
+  right: 12px;
+  top: -1px;
+  height: 1px;
+  background: var(--ch-line);
+  pointer-events: none;
+}
+.cv-chat .cv-card:hover { background: var(--ch-hover); }
+.cv-chat .cv-card:hover::before,
+.cv-chat .cv-card:hover + .cv-card::before,
+.cv-chat .cv-card-on::before,
+.cv-chat .cv-card-on + .cv-card::before,
+.cv-chat .cv-card-sel::before,
+.cv-chat .cv-card-sel + .cv-card::before { opacity: 0; }
+/* a conversa aberta: cartão cheio, azul royal bem leve, fio azul na esquerda */
+.cv-chat .cv-card-on,
+.cv-chat .cv-card-on:hover {
+  background: var(--ch-active);
+  border-color: rgba(37, 99, 235, 0.3);
+  box-shadow: inset 3px 0 0 var(--ch-royal);
+}
+.cv-chat .cv-card-sel { background: var(--ch-hover); }
+.cv-chat .cv-card-time { color: var(--ch-muted); }
+.cv-chat .cv-card-time-on { color: var(--ch-green-deep); font-weight: 700; }
+.dark .cv-chat .cv-card-time-on { color: var(--ch-green); }
+.cv-chat .cv-card-preview {
+  color: var(--ch-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-chat .cv-card-preview-on { color: var(--ch-text); font-weight: 500; }
+.cv-chat .cv-card-assignee { color: var(--ch-muted); }
+/* badge de não lidas: a bolinha verde do WhatsApp */
+.cv-chat .cv-card-unread {
+  background: var(--ch-green);
+  color: #063;
+  height: 20px;
+  min-width: 20px;
+  max-width: none;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  box-shadow: 0 2px 6px -2px rgba(18, 140, 126, 0.6);
+}
+.dark .cv-chat .cv-card-unread { color: #04140c; }
+/* chip da coluna do CRM e etiquetas ficam discretos */
+.cv-chat .cv-card-stage {
+  border-color: var(--ch-line-strong);
+  background: var(--ch-soft);
+  color: var(--ch-text);
+}
+.cv-chat .cv-card-stage:hover { background: var(--ch-hover); }
+/* o fim da lista */
+.cv-chat .conversations-list-wrap > p { color: var(--ch-muted); font-size: 12px; }
+
+/* ── CENTRO: a conversa ────────────────────────────────────────────── */
+.cv-chat .conversation-details-wrap {
+  background-color: var(--ch-bg);
+  /* papel de parede: pontinhos quase invisíveis (WhatsApp tem doodles;
+     aqui é a versão Apple — só textura) */
+  background-image: radial-gradient(var(--ch-dots) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+  border-left-color: var(--ch-line) !important;
+}
+.cv-chat .conversation-details-wrap .bg-n-surface-1 { background-color: transparent; }
+/* cabeçalho da conversa: barra clara com desfoque, fio fino embaixo */
+.cv-chat .cv-chat-head {
+  background: color-mix(in srgb, var(--ch-panel) 84%, transparent);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border-bottom: 1px solid var(--ch-line) !important;
+}
+/* avisos (janela de 24 h etc.): pílula arredondada, não faixa */
+.cv-chat .woot-banner {
+  border-radius: 16px;
+  margin: 10px 12px 0;
+  height: auto;
+  min-height: 2.5rem;
+  padding: 8px 14px;
+  line-height: 1.35;
+}
+/* balões: 18 px de raio com "rabinho" curto (Apple); recebido branco,
+   enviado azul iMessage (já era) com sombra macia */
+.cv-chat .message-bubble-container .left-bubble {
+  border-radius: 18px 18px 18px 6px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.06), 0 1px 0 var(--ch-line);
+}
+.cv-chat .message-bubble-container .right-bubble {
+  border-radius: 18px 18px 6px 18px;
+  box-shadow: 0 6px 16px -10px rgba(29, 78, 216, 0.6);
+}
+.cv-chat .group-with-next + .message-bubble-container .left-bubble { border-top-left-radius: 6px; }
+.cv-chat .group-with-next + .message-bubble-container .right-bubble { border-top-right-radius: 6px; }
+.cv-chat .message-bubble-container { margin-bottom: 6px; }
+/* atividade (entrou, foi atribuída…): chip central discreto */
+.cv-chat .message-bubble-container [class*='bg-n-alpha-1'] {
+  background: color-mix(in srgb, var(--ch-panel) 70%, transparent);
+  border: 1px solid var(--ch-line);
+  border-radius: 9999px;
+  color: var(--ch-muted);
+}
+/* composer: cartão flutuante com cantos de 22 px e sombra macia */
+.cv-chat .conversation-details-wrap .reply-box {
+  margin: 0 12px 12px;
+  border-radius: 22px;
+  border-color: var(--ch-line-strong);
+  background: var(--ch-panel);
+  box-shadow: var(--ch-shadow);
+  overflow: hidden;
+}
+.cv-chat .conversation-details-wrap .reply-box.is-private {
+  background: #fff8e1;
+  border-color: rgba(217, 119, 6, 0.35);
+}
+.dark .cv-chat .conversation-details-wrap .reply-box.is-private { background: #2a2416; }
+/* vazio da direita quando nada está aberto */
+.cv-chat .conversation-details-wrap .cv-page { background: transparent; }
+
+/* ── DIREITA: o painel do paciente ─────────────────────────────────── */
+.cv-chat .cv-side-wrap {
+  background: var(--ch-bg);
+  border-left: 1px solid var(--ch-line) !important;
+}
+.cv-chat .cv-side > div:first-child {
+  /* cabeçalho "Paciente": mesma barra clara do cabeçalho da conversa */
+  background: color-mix(in srgb, var(--ch-panel) 84%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--ch-line);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.cv-chat .cv-side-card {
+  position: relative;
+  border-radius: 18px;
+  background: var(--ch-panel);
+  border: 1px solid var(--ch-line);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+.dark .cv-chat .cv-side-card { box-shadow: none; }
+.cv-chat .cv-side-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ch-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+/* squircle colorido ao lado do título de cada cartão */
+.cv-chat .cv-side-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  flex-shrink: 0;
+  background: var(--ch-ico, linear-gradient(135deg, #64748b, #94a3b8));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 3px 8px -4px rgba(0, 0, 0, 0.4);
+}
+.cv-chat .cv-side-icon-gold { --ch-ico: linear-gradient(135deg, #b8860b, #e5b93a); }
+.cv-chat .cv-side-icon-blue { --ch-ico: linear-gradient(135deg, #1d4ed8, #3b82f6); }
+.cv-chat .cv-side-icon-violet { --ch-ico: linear-gradient(135deg, #6d28d9, #a78bfa); }
+.cv-chat .cv-side-icon-green { --ch-ico: linear-gradient(135deg, #065f46, #10b981); }
+.cv-chat .cv-side-icon-amber { --ch-ico: linear-gradient(135deg, #b45309, #fbbf24); }
+.cv-chat .cv-side-icon-cyan { --ch-ico: linear-gradient(135deg, #0e7490, #22d3ee); }
+.cv-chat .cv-side-icon-rose { --ch-ico: linear-gradient(135deg, #be123c, #fb7185); }
+.cv-chat .cv-side-icon-slate { --ch-ico: linear-gradient(135deg, #334155, #64748b); }
+/* linha de ações redondas com rótulo (Contatos da Apple) */
+.cv-chat .cv-side-actions {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cv-chat .cv-side-action {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 58px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ch-muted);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.cv-chat .cv-side-action:disabled { opacity: 0.45; cursor: default; }
+.cv-chat .cv-side-action-btn,
+.cv-chat .cv-side-action > button:not(.cv-side-action-btn),
+.cv-chat .cv-side-action > div > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  font-size: 18px;
+  color: var(--ch-text);
+  background: var(--ch-soft);
+  border: 1px solid var(--ch-line);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.cv-chat .cv-side-action:hover .cv-side-action-btn,
+.cv-chat .cv-side-action > button:hover { transform: translateY(-1px); background: var(--ch-hover); }
+.cv-chat .cv-side-action-main .cv-side-action-btn {
+  color: #fff;
+  background: linear-gradient(135deg, #128c7e, #25d366);
+  border-color: transparent;
+  box-shadow: 0 8px 18px -8px rgba(18, 140, 126, 0.7);
+}
+.cv-chat .cv-side-action-danger .cv-side-action-btn { color: #dc2626; }
+/* linhas de dados do contato (telefone, e-mail…) */
+.cv-chat .cv-side-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: 14px;
+  background: var(--ch-soft);
+  padding: 8px 10px;
+}
+.cv-chat .cv-side-rows > * { height: auto; min-height: 24px; }
+/* botões pequenos do painel (Mover, Analisar…) */
+.cv-chat .cv-side-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ch-text);
+  background: var(--ch-soft);
+  border: 1px solid var(--ch-line-strong);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+  white-space: nowrap;
+}
+.cv-chat .cv-side-btn:hover { background: var(--ch-hover); transform: translateY(-1px); }
+.cv-chat .cv-side-btn:disabled { opacity: 0.5; transform: none; cursor: default; }
+.cv-chat .cv-side-btn-green {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #065f46, #10b981);
+  box-shadow: 0 6px 14px -8px rgba(6, 95, 70, 0.7);
+}
+.cv-chat .cv-side-btn-blue {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+}
+/* mini indicadores lado a lado */
+.cv-chat .cv-side-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.cv-chat .cv-side-stat {
+  border-radius: 12px;
+  background: var(--ch-soft);
+  padding: 8px 6px;
+  text-align: center;
+}
+.cv-chat .cv-side-stat b { display: block; font-size: 15px; line-height: 1.1; color: var(--ch-text); }
+.cv-chat .cv-side-stat span { display: block; font-size: 9.5px; color: var(--ch-muted); margin-top: 3px; line-height: 1.2; }
+/* gavetas (Conversa, Conversas anteriores, Anexos): cabeçalho limpo +
+   chevron; o corpo é o próprio cartão */
+.cv-chat .cv-side-card > .accordion-item > button {
+  background: transparent;
+  outline: none;
+  border-radius: 18px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.cv-chat .cv-side-card > .accordion-item > button h5 {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ch-muted);
+}
+.cv-chat .cv-side-card > .accordion-item > button .accordion-chevron { color: var(--ch-muted); }
+.cv-chat .cv-side-card > .accordion-item > div:last-child {
+  outline: none;
+  border-top: 1px solid var(--ch-line);
+  border-radius: 0 0 18px 18px;
+  padding: 12px 14px;
+}
+/* cartão de ligações: o CevicoCallsCard (variant panel) já traz o título
+   "Ligações · N" + botão Ligar — só tiramos a linha de cima dele */
+.cv-chat .cv-side-calls > div { border-top: 0 !important; padding-top: 0 !important; margin-top: 0 !important; }
+.cv-chat .cv-side-calls > div > p:first-child {
+  font-size: 11px !important;
+  letter-spacing: 0.06em;
+  color: var(--ch-muted) !important;
+  margin-bottom: 10px !important;
+}
+/* notas: caixa de texto no mesmo tom */
+.cv-chat .cv-side-card textarea {
+  border-radius: 12px;
+  background: var(--ch-soft);
+  border-color: var(--ch-line-strong);
+}
+/* texto miúdo do painel um pouco mais legível (contraste pedido) */
+.cv-chat .cv-side .text-n-slate-9 { color: var(--ch-muted); }
+.cv-chat .cv-side .text-n-slate-10 { color: var(--ch-muted); }
+
+/* ── celular: cartões um pouco mais compactos ─────────────────────── */
+@media (max-width: 767px) {
+  .cv-chat .cv-card { margin: 1px 6px; padding: 9px 8px; border-radius: 14px; }
+  .cv-chat .conversation-details-wrap .reply-box { margin: 0 8px 8px; border-radius: 18px; }
+}

@@ -40,6 +40,7 @@ import {
   inboxGradientFor,
   inboxSolidFor,
 } from '../helper/cevicoInboxColors.js';
+import { openNovaConversa } from '../helper/cevicoNovaConversa.js';
 import languages from 'dashboard/components/widgets/conversation/advancedFilterItems/languages';
 import countries from 'shared/constants/countries';
 import { generateValuesForEditCustomViews } from 'dashboard/helper/customViewsHelper';
@@ -1179,12 +1180,31 @@ watch(conversationFilters, (newVal, oldVal) => {
       @basic-filter-change="onBasicFilterChange"
     />
 
+    <!-- CEVICO 199 (22/09): NOVA CONVERSA à mão — com qualquer pessoa do
+         cadastro, por qualquer caixa. Abre o modal em 3 passos; a caixa
+         aberta em Conversas já vem escolhida no passo 2 -->
+    <div class="cv-page cv-overlay mx-3 mb-2 flex-shrink-0">
+      <div class="cv-blue flex items-center gap-2.5">
+        <button
+          class="cv-btn flex-shrink-0"
+          title="Começar uma conversa com alguém do cadastro"
+          @click="openNovaConversa({ inboxId: routeInboxId || null })"
+        >
+          <span class="i-lucide-message-square-plus text-sm" />
+          Nova conversa
+        </button>
+        <span class="text-[11px] text-n-slate-10 leading-snug min-w-0">
+          com qualquer pessoa do cadastro, por qualquer caixa
+        </span>
+      </div>
+    </div>
+
     <!-- CEVICO: escolha das caixas de entrada (aceita várias; salva no navegador).
          Pedido 22/07: TODAS as caixas à primeira vista — as pílulas se
          amontoam em quantas linhas precisarem (sem rolagem escondida) -->
     <div
       v-if="showInboxPills && pillInboxes.length"
-      class="flex flex-wrap items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 mx-3 mb-1.5 flex-shrink-0"
+      class="flex flex-wrap items-center bg-n-solid-2 border border-n-weak rounded-2xl p-1 gap-0.5 mx-3 mb-1.5 flex-shrink-0"
     >
       <button
         class="px-3 h-7 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex-shrink-0"
@@ -1239,202 +1259,187 @@ watch(conversationFilters, (newVal, oldVal) => {
     <div
       v-if="!hasAppliedFiltersOrActiveFolders"
       ref="journeyFilterWrap"
-      class="mx-3 mt-1.5 mb-0.5 space-y-1 relative"
+      class="cv-page cv-overlay mx-3 mt-1.5 mb-0.5 relative"
     >
-      <div class="flex items-center gap-1.5 flex-wrap">
-        <!-- Funil: só aparece quando há mais de um funil no CRM (14/09) -->
-        <template v-if="hasManyPipelines">
+      <div class="cv-blue space-y-1.5">
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <!-- Funil: só aparece quando há mais de um funil no CRM (14/09) -->
+          <template v-if="hasManyPipelines">
+            <button
+              v-if="!journeyPipelineId"
+              class="cv-chip cv-chip-lg !h-7 !font-medium"
+              :class="filterPanel === 'pipeline' ? 'cv-chip-on' : ''"
+              @click="toggleFilterPanel('pipeline')"
+            >
+              <span class="i-lucide-funnel text-[11px]" />
+              Funil
+              <span class="i-lucide-chevron-down text-[10px]" />
+            </button>
+            <button
+              v-else
+              class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
+              style="background: linear-gradient(135deg, #0F766E, #14B8A6)"
+              title="Clique para limpar"
+              @click="clearJourneyPipeline"
+            >
+              <span class="i-lucide-funnel text-[10px]" />
+              {{ selectedJourneyPipeline?.name || 'Funil' }}
+              <span class="i-lucide-x text-[10px]" />
+            </button>
+          </template>
+
+          <!-- Colunas CRM: gatilho ou pílula do selecionado -->
           <button
-            v-if="!journeyPipelineId"
-            class="inline-flex items-center gap-1 px-2 h-6 rounded-lg border text-[11px] font-medium transition-colors"
-            :class="filterPanel === 'pipeline'
-              ? 'border-n-brand bg-n-brand/10 text-n-brand'
-              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-            @click="toggleFilterPanel('pipeline')"
+            v-if="!journeyStageId"
+            class="cv-chip cv-chip-lg !h-7 !font-medium"
+            :class="filterPanel === 'stage' ? 'cv-chip-on' : ''"
+            @click="toggleFilterPanel('stage')"
           >
-            <span class="i-lucide-funnel text-[11px]" />
-            Funil
+            <span class="i-lucide-columns-3 text-[11px]" />
+            Colunas CRM
             <span class="i-lucide-chevron-down text-[10px]" />
           </button>
           <button
             v-else
             class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
-            style="background: linear-gradient(135deg, #0F766E, #14B8A6)"
+            :style="{ background: selectedJourneyStage?.color || '#2563EB' }"
             title="Clique para limpar"
-            @click="clearJourneyPipeline"
+            @click="journeyStageId = null"
           >
-            <span class="i-lucide-funnel text-[10px]" />
-            {{ selectedJourneyPipeline?.name || 'Funil' }}
+            {{ selectedJourneyStage?.name || 'Coluna' }}
             <span class="i-lucide-x text-[10px]" />
           </button>
-        </template>
 
-        <!-- Colunas CRM: gatilho ou pílula do selecionado -->
-        <button
-          v-if="!journeyStageId"
-          class="inline-flex items-center gap-1 px-2 h-6 rounded-lg border text-[11px] font-medium transition-colors"
-          :class="filterPanel === 'stage'
-            ? 'border-n-brand bg-n-brand/10 text-n-brand'
-            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-          @click="toggleFilterPanel('stage')"
-        >
-          <span class="i-lucide-columns-3 text-[11px]" />
-          Colunas CRM
-          <span class="i-lucide-chevron-down text-[10px]" />
-        </button>
-        <button
-          v-else
-          class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
-          :style="{ background: selectedJourneyStage?.color || '#2563EB' }"
-          title="Clique para limpar"
-          @click="journeyStageId = null"
-        >
-          {{ selectedJourneyStage?.name || 'Coluna' }}
-          <span class="i-lucide-x text-[10px]" />
-        </button>
-
-        <!-- Etiquetas: gatilho ou pílula do selecionado -->
-        <button
-          v-if="!journeyLabel"
-          class="inline-flex items-center gap-1 px-2 h-6 rounded-lg border text-[11px] font-medium transition-colors"
-          :class="filterPanel === 'label'
-            ? 'border-n-brand bg-n-brand/10 text-n-brand'
-            : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-          @click="toggleFilterPanel('label')"
-        >
-          <span class="i-lucide-tag text-[11px]" />
-          Etiquetas
-          <span class="i-lucide-chevron-down text-[10px]" />
-        </button>
-        <button
-          v-else
-          class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
-          :style="{ background: selectedJourneyLabel?.color || '#2563EB' }"
-          title="Clique para limpar"
-          @click="journeyLabel = null"
-        >
-          {{ journeyLabel }}
-          <span class="i-lucide-x text-[10px]" />
-        </button>
-      </div>
-
-      <!-- a JANELINHA (abre por cima da lista, fecha ao escolher/clicar fora) -->
-      <div
-        v-if="filterPanel"
-        class="absolute z-30 left-0 right-0 top-7 bg-n-solid-1 border border-n-weak rounded-xl shadow-xl p-2.5"
-      >
-        <div class="flex items-center gap-1 mb-2">
+          <!-- Etiquetas: gatilho ou pílula do selecionado -->
           <button
-            v-if="hasManyPipelines"
-            class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
-            :class="filterPanel === 'pipeline' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="filterPanel === 'pipeline' ? 'background: linear-gradient(135deg, #0F766E, #14B8A6)' : ''"
-            @click="filterPanel = 'pipeline'"
+            v-if="!journeyLabel"
+            class="cv-chip cv-chip-lg !h-7 !font-medium"
+            :class="filterPanel === 'label' ? 'cv-chip-on' : ''"
+            @click="toggleFilterPanel('label')"
           >
-            Funil
-          </button>
-          <button
-            class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
-            :class="filterPanel === 'stage' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="filterPanel === 'stage' ? 'background: linear-gradient(135deg, #152C61, #3B82F6)' : ''"
-            @click="filterPanel = 'stage'"
-          >
-            Colunas CRM
-          </button>
-          <button
-            class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
-            :class="filterPanel === 'label' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="filterPanel === 'label' ? 'background: linear-gradient(135deg, #B8860B, #D4AF37)' : ''"
-            @click="filterPanel = 'label'"
-          >
+            <span class="i-lucide-tag text-[11px]" />
             Etiquetas
+            <span class="i-lucide-chevron-down text-[10px]" />
           </button>
           <button
-            class="ml-auto w-6 h-6 rounded-lg flex items-center justify-center text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1"
-            @click="filterPanel = null"
+            v-else
+            class="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-[1.02]"
+            :style="{ background: selectedJourneyLabel?.color || '#2563EB' }"
+            title="Clique para limpar"
+            @click="journeyLabel = null"
           >
-            <span class="i-lucide-x text-xs" />
+            {{ journeyLabel }}
+            <span class="i-lucide-x text-[10px]" />
           </button>
         </div>
-        <div class="flex flex-wrap gap-1 max-h-44 overflow-y-auto" style="scrollbar-width: thin;">
-          <template v-if="filterPanel === 'pipeline'">
-            <button
-              v-for="p in crmPipelines"
-              :key="p.id"
-              class="inline-flex items-center gap-1 px-2 h-6 rounded-full border text-[11px] transition-colors whitespace-nowrap"
-              :class="p.id === journeyPipelineId
-                ? 'border-teal-500 bg-teal-500/10 text-teal-700 dark:text-teal-300'
-                : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50'"
-              @click="pickJourneyPipeline(p)"
-            >
-              <span class="i-lucide-funnel text-[10px]" />
-              {{ p.name }}
-              <span class="text-n-slate-9">· {{ (p.stages || []).length }} colunas</span>
-            </button>
-          </template>
-          <template v-else-if="filterPanel === 'stage'">
-            <button
-              v-for="s in journeyStages"
-              :key="s.id"
-              class="inline-flex items-center gap-1 px-2 h-6 rounded-full border border-n-weak text-[11px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
-              @click="pickJourneyStage(s)"
-            >
-              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: s.color || '#94A3B8' }" />
-              {{ s.name }}
-            </button>
-          </template>
-          <template v-else>
-            <button
-              v-for="lb in journeyLabels"
-              :key="lb.id"
-              class="inline-flex items-center gap-1 px-2 h-6 rounded-full border border-n-weak text-[11px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
-              @click="pickJourneyLabel(lb)"
-            >
-              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: lb.color || '#94A3B8' }" />
-              {{ lb.title }}
-            </button>
-          </template>
-        </div>
-      </div>
 
-      <!-- Não lidas no topo + ordenação (2 opções sempre à vista) -->
-      <div class="flex items-center gap-1.5 flex-wrap">
-        <button
-          class="flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition-colors flex-shrink-0"
-          :class="isUnreadFirst
-            ? 'bg-n-brand/10 text-n-brand'
-            : 'text-n-slate-11 hover:bg-n-alpha-1'"
-          @click="toggleUnreadFirst"
+        <!-- a JANELINHA (abre por cima da lista, fecha ao escolher/clicar fora) -->
+        <div
+          v-if="filterPanel"
+          class="cv-pop absolute z-30 left-0 right-0 top-8 p-3"
         >
-          <span
-            class="w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0"
-            :class="isUnreadFirst ? 'bg-n-brand border-n-brand' : 'border-n-slate-8'"
-          >
-            <span v-if="isUnreadFirst" class="i-lucide-check text-white text-[10px]" />
-          </span>
-          {{ $t('CHAT_LIST.UNREAD_FIRST') }}
-        </button>
-        <div class="flex items-center gap-1 ml-auto">
+          <div class="flex items-center gap-1 mb-2">
+            <button
+              v-if="hasManyPipelines"
+              class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
+              :class="filterPanel === 'pipeline' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="filterPanel === 'pipeline' ? 'background: linear-gradient(135deg, #0F766E, #14B8A6)' : ''"
+              @click="filterPanel = 'pipeline'"
+            >
+              Funil
+            </button>
+            <button
+              class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
+              :class="filterPanel === 'stage' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="filterPanel === 'stage' ? 'background: linear-gradient(135deg, #152C61, #3B82F6)' : ''"
+              @click="filterPanel = 'stage'"
+            >
+              Colunas CRM
+            </button>
+            <button
+              class="px-2.5 h-6 rounded-lg text-[11px] font-semibold transition-colors"
+              :class="filterPanel === 'label' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="filterPanel === 'label' ? 'background: linear-gradient(135deg, #B8860B, #D4AF37)' : ''"
+              @click="filterPanel = 'label'"
+            >
+              Etiquetas
+            </button>
+            <button
+              class="ml-auto w-6 h-6 rounded-lg flex items-center justify-center text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1"
+              @click="filterPanel = null"
+            >
+              <span class="i-lucide-x text-xs" />
+            </button>
+          </div>
+          <div class="flex flex-wrap gap-1 max-h-44 overflow-y-auto" style="scrollbar-width: thin;">
+            <template v-if="filterPanel === 'pipeline'">
+              <button
+                v-for="p in crmPipelines"
+                :key="p.id"
+                class="inline-flex items-center gap-1 px-2 h-6 rounded-full border text-[11px] transition-colors whitespace-nowrap"
+                :class="p.id === journeyPipelineId
+                  ? 'border-teal-500 bg-teal-500/10 text-teal-700 dark:text-teal-300'
+                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50'"
+                @click="pickJourneyPipeline(p)"
+              >
+                <span class="i-lucide-funnel text-[10px]" />
+                {{ p.name }}
+                <span class="text-n-slate-9">· {{ (p.stages || []).length }} colunas</span>
+              </button>
+            </template>
+            <template v-else-if="filterPanel === 'stage'">
+              <button
+                v-for="s in journeyStages"
+                :key="s.id"
+                class="inline-flex items-center gap-1 px-2 h-6 rounded-full border border-n-weak text-[11px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
+                @click="pickJourneyStage(s)"
+              >
+                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: s.color || '#94A3B8' }" />
+                {{ s.name }}
+              </button>
+            </template>
+            <template v-else>
+              <button
+                v-for="lb in journeyLabels"
+                :key="lb.id"
+                class="inline-flex items-center gap-1 px-2 h-6 rounded-full border border-n-weak text-[11px] text-n-slate-11 hover:bg-n-alpha-1 hover:border-n-brand/50 transition-colors whitespace-nowrap"
+                @click="pickJourneyLabel(lb)"
+              >
+                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ background: lb.color || '#94A3B8' }" />
+                {{ lb.title }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Não lidas no topo (chavinha) + ordem (segmentado) — kit 22/09 -->
+        <div class="flex items-center gap-2 flex-wrap">
           <button
-            class="inline-flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-medium border transition-colors"
-            :class="journeyOrder === 'last_activity_at_desc'
-              ? 'border-n-brand bg-n-brand/10 text-n-brand font-bold'
-              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-            title="Da mais recente para a mais antiga"
-            @click="journeyOrder = 'last_activity_at_desc'"
+            class="flex items-center gap-2 h-7 px-1.5 rounded-lg text-[11px] font-medium text-n-slate-11 hover:bg-n-alpha-1 transition-colors"
+            :title="isUnreadFirst ? 'Desligar: ordem só pela data' : 'Ligar: as não lidas sobem para o topo'"
+            @click="toggleUnreadFirst"
           >
-            <span class="i-lucide-arrow-down text-[10px]" /> Recentes primeiro
+            <span class="cv-switch" :class="isUnreadFirst ? 'cv-switch-on' : ''" />
+            {{ $t('CHAT_LIST.UNREAD_FIRST') }}
           </button>
-          <button
-            class="inline-flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-medium border transition-colors"
-            :class="journeyOrder === 'last_activity_at_asc'
-              ? 'border-n-brand bg-n-brand/10 text-n-brand font-bold'
-              : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-            title="Da mais antiga para a mais recente"
-            @click="journeyOrder = 'last_activity_at_asc'"
-          >
-            <span class="i-lucide-arrow-up text-[10px]" /> Antigas primeiro
-          </button>
+          <div class="cv-seg cv-seg-sm ml-auto">
+            <button
+              class="cv-seg-item"
+              :class="journeyOrder === 'last_activity_at_desc' ? 'cv-seg-on' : ''"
+              title="Da mais recente para a mais antiga"
+              @click="journeyOrder = 'last_activity_at_desc'"
+            >
+              <span class="i-lucide-arrow-down text-[10px]" /> Recentes primeiro
+            </button>
+            <button
+              class="cv-seg-item"
+              :class="journeyOrder === 'last_activity_at_asc' ? 'cv-seg-on' : ''"
+              title="Da mais antiga para a mais recente"
+              @click="journeyOrder = 'last_activity_at_asc'"
+            >
+              <span class="i-lucide-arrow-up text-[10px]" /> Antigas primeiro
+            </button>
+          </div>
         </div>
       </div>
     </div>

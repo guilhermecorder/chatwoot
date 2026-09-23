@@ -5,6 +5,7 @@ import { useAlert } from 'dashboard/composables';
 // hoje/ontem/últimos 7/mês/ano/personalizado) e a saúde da agenda —
 // com atalhos para agir rápido.
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { useUISettings } from 'dashboard/composables/useUISettings';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAccount } from 'dashboard/composables/useAccount';
@@ -1465,21 +1466,34 @@ const themePalette = computed(() => {
     family: [theme.primary, theme.pill, theme.action, theme.accent],
   };
 });
-// 🌈 nota "Seu painel, as suas cores" (some ao dispensar; por navegador)
+// 🌈 nota "Seu painel, as suas cores" — aparece UMA vez por PESSOA (22/09):
+// a dispensa fica em ui_settings (servidor), então some em todo aparelho;
+// o localStorage é só reforço para o caso de a gravação falhar.
+const { uiSettings, updateUISettings } = useUISettings();
 const DOPAMINE_NOTE_KEY = 'cevico_note_dopamine_colors_v1';
-const showDopamineNote = ref(false);
-try {
-  showDopamineNote.value = !localStorage.getItem(DOPAMINE_NOTE_KEY);
-} catch {
-  showDopamineNote.value = true;
-}
+const dopamineDismissedLocally = () => {
+  try {
+    return !!localStorage.getItem(DOPAMINE_NOTE_KEY);
+  } catch {
+    return false;
+  }
+};
+const showDopamineNote = computed(() => {
+  const dismissed = uiSettings.value?.cevico_notes_dismissed || {};
+  return !dismissed.dopamine_colors_v1 && !dopamineDismissedLocally();
+});
 const dismissDopamineNote = () => {
-  showDopamineNote.value = false;
   try {
     localStorage.setItem(DOPAMINE_NOTE_KEY, '1');
   } catch {
-    /* sem armazenamento: só some agora */
+    /* sem armazenamento: o servidor resolve */
   }
+  updateUISettings({
+    cevico_notes_dismissed: {
+      ...(uiSettings.value?.cevico_notes_dismissed || {}),
+      dopamine_colors_v1: true,
+    },
+  });
 };
 const pal = useCevicoPalette({
   scope: selectedPanel,

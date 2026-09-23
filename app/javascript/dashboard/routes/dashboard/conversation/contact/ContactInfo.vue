@@ -13,7 +13,10 @@ import SocialIcons from './SocialIcons.vue';
 import EditContact from './EditContact.vue';
 import ContactMergeModal from 'dashboard/modules/contact/ContactMergeModal.vue';
 import ContactDeleteModal from 'dashboard/modules/contact/ContactDeleteModal.vue';
-import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
+import {
+  openNovaConversa,
+  timeAgoPt,
+} from 'dashboard/helper/cevicoNovaConversa';
 import NextButton from 'dashboard/components-next/button/Button.vue';
 import VoiceCallButton from 'dashboard/components-next/Contacts/VoiceCallButton.vue';
 // 📞 CEVICO item 167: ligar pelo nosso módulo (Graph API + WebRTC)
@@ -26,7 +29,6 @@ export default {
     ContactInfoRow,
     EditContact,
     Avatar,
-    ComposeConversation,
     SocialIcons,
     ContactMergeModal,
     ContactDeleteModal,
@@ -65,6 +67,19 @@ export default {
     }),
     contactProfileLink() {
       return `/app/accounts/${this.$route.params.accountId}/contacts/${this.contact.id}`;
+    },
+    // "no cadastro desde ontem" / "no cadastro há 3 dias"
+    contactSince() {
+      const label = timeAgoPt(this.contact.created_at);
+      if (!label) return '';
+      if (label === 'hoje' || label === 'ontem') {
+        return `no cadastro desde ${label}`;
+      }
+      return `no cadastro ${label}`;
+    },
+    // CEVICO: com o módulo de ligações ligado, o telefone é o nosso
+    cevicoCallsOn() {
+      return this.$store.getters['crm/getSettings']?.calls?.enabled === true;
     },
     additionalAttributes() {
       return this.contact.additional_attributes || {};
@@ -109,6 +124,8 @@ export default {
   },
   methods: {
     dynamicTime,
+    openNovaConversa,
+    timeAgoPt,
     toggleEditModal() {
       this.showEditModal = !this.showEditModal;
     },
@@ -181,145 +198,93 @@ export default {
 </script>
 
 <template>
-  <div class="relative items-center w-full p-4">
-    <div class="flex flex-col w-full gap-2 text-left rtl:text-right">
-      <div class="flex flex-row justify-between">
-        <Avatar
-          v-if="showAvatar"
-          :src="contact.thumbnail"
-          :name="contact.name"
-          :status="contact.availability_status"
-          :size="48"
-          hide-offline-status
+  <!-- CEVICO 199 (22/09): ficha de identidade no estilo Contatos da Apple —
+       foto grande centralizada, nome, ações redondas com rótulo e só os
+       dados que existem (nada de "Indisponível" empilhado). -->
+  <div class="cv-side-card cv-side-id relative w-full p-5">
+    <div class="flex flex-col items-center text-center gap-1.5">
+      <Avatar
+        v-if="showAvatar"
+        :src="contact.thumbnail"
+        :name="contact.name"
+        :status="contact.availability_status"
+        :size="72"
+        hide-offline-status
+        rounded-full
+        gradient
+      />
+      <div
+        v-if="showAvatar"
+        class="group/name flex items-center justify-center min-w-0 gap-1.5 max-w-full mt-1"
+      >
+        <InlineInput
+          v-if="isEditingName"
+          ref="nameInput"
+          v-model="editName"
+          custom-input-class="!text-base !font-semibold !w-auto max-w-full [field-sizing:content] text-center"
+          class="!w-fit min-w-0"
+          @enter-press="saveNameEdit"
+          @escape-press="cancelNameEdit"
+          @blur="saveNameEdit"
+        />
+        <h3
+          v-else
+          class="flex-shrink max-w-full min-w-0 my-0 text-[17px] font-bold leading-tight break-words text-n-slate-12 cursor-pointer hover:text-n-slate-12/80"
+          :title="$t('CONTACT_PANEL.CLICK_TO_EDIT')"
+          @click="startEditingName"
+        >
+          {{ contact.name }}
+        </h3>
+        <NextButton
+          ghost
+          xs
+          slate
+          icon="i-lucide-pencil"
+          :title="$t('CONTACT_PANEL.CLICK_TO_EDIT')"
+          class="flex-shrink-0 -mx-1 opacity-0 transition-opacity"
+          :class="
+            isEditingName
+              ? 'invisible'
+              : 'group-hover/name:opacity-100 focus-visible:opacity-100'
+          "
+          @click="startEditingName"
         />
       </div>
+      <p
+        v-if="additionalAttributes.description"
+        class="text-xs text-n-slate-11 m-0 break-words max-w-full"
+      >
+        {{ additionalAttributes.description }}
+      </p>
+      <p
+        class="text-[11px] text-n-slate-10 m-0 flex items-center gap-1.5 flex-wrap justify-center"
+      >
+        <span v-if="contact.created_at">
+          {{ contactSince }}
+        </span>
+        <a
+          :href="contactProfileLink"
+          target="_blank"
+          rel="noopener nofollow noreferrer"
+          class="inline-flex items-center gap-0.5 text-n-slate-11 hover:text-n-slate-12"
+          title="Abrir a página completa do contato"
+        >
+          <span class="i-lucide-external-link text-[11px]" /> perfil completo
+        </a>
+      </p>
+    </div>
 
-      <div class="flex flex-col items-start gap-1.5 min-w-0 w-full">
-        <div v-if="showAvatar" class="flex items-center w-full min-w-0 gap-2">
-          <div class="group/name flex items-center min-w-0 gap-2">
-            <InlineInput
-              v-if="isEditingName"
-              ref="nameInput"
-              v-model="editName"
-              custom-input-class="!text-base !font-medium !w-auto max-w-full [field-sizing:content]"
-              class="!w-fit min-w-0"
-              @enter-press="saveNameEdit"
-              @escape-press="cancelNameEdit"
-              @blur="saveNameEdit"
-            />
-            <h3
-              v-else
-              class="flex-shrink max-w-full min-w-0 my-0 text-base capitalize break-words text-n-slate-12 cursor-pointer hover:text-n-slate-12/80"
-              :title="$t('CONTACT_PANEL.CLICK_TO_EDIT')"
-              @click="startEditingName"
-            >
-              {{ contact.name }}
-            </h3>
-            <NextButton
-              ghost
-              xs
-              slate
-              icon="i-lucide-pencil"
-              :title="$t('CONTACT_PANEL.CLICK_TO_EDIT')"
-              class="flex-shrink-0 -mx-1 opacity-0 transition-opacity"
-              :class="
-                isEditingName
-                  ? 'invisible'
-                  : 'group-hover/name:opacity-100 focus-visible:opacity-100'
-              "
-              @click="startEditingName"
-            />
-          </div>
-          <div class="flex flex-row items-center gap-2">
-            <span
-              v-if="contact.created_at"
-              v-tooltip.left="
-                `${$t('CONTACT_PANEL.CREATED_AT_LABEL')} ${dynamicTime(
-                  contact.created_at
-                )}`
-              "
-              class="i-lucide-info text-sm text-n-slate-10"
-            />
-            <a
-              :href="contactProfileLink"
-              target="_blank"
-              rel="noopener nofollow noreferrer"
-              class="leading-3"
-            >
-              <span class="i-lucide-external-link text-sm text-n-slate-10" />
-            </a>
-          </div>
-        </div>
-
-        <p v-if="additionalAttributes.description" class="break-words mb-0.5">
-          {{ additionalAttributes.description }}
-        </p>
-        <div class="flex flex-col items-start w-full gap-2">
-          <ContactInfoRow
-            :href="contact.email ? `mailto:${contact.email}` : ''"
-            :value="contact.email"
-            icon="mail"
-            emoji="✉️"
-            :title="$t('CONTACT_PANEL.EMAIL_ADDRESS')"
-            show-copy
-            editable
-            @update="value => onFieldUpdate('email', value)"
-          />
-          <ContactInfoRow
-            :href="contact.phone_number ? `tel:${contact.phone_number}` : ''"
-            :value="contact.phone_number"
-            icon="call"
-            emoji="📞"
-            :title="$t('CONTACT_PANEL.PHONE_NUMBER')"
-            show-copy
-            editable
-            @update="value => onFieldUpdate('phone_number', value)"
-          />
-          <ContactInfoRow
-            v-if="contact.identifier"
-            :value="contact.identifier"
-            icon="contact-identify"
-            emoji="🪪"
-            :title="$t('CONTACT_PANEL.IDENTIFIER')"
-          />
-          <ContactInfoRow
-            :value="additionalAttributes.company_name"
-            icon="building-bank"
-            emoji="🏢"
-            :title="$t('CONTACT_PANEL.COMPANY')"
-            editable
-            @update="
-              value =>
-                updateContactField({
-                  additional_attributes: {
-                    ...additionalAttributes,
-                    company_name: value,
-                  },
-                })
-            "
-          />
-          <ContactInfoRow
-            v-if="location || additionalAttributes.location"
-            :value="location || additionalAttributes.location"
-            icon="map"
-            emoji="🌍"
-            :title="$t('CONTACT_PANEL.LOCATION')"
-          />
-          <SocialIcons :social-profiles="socialProfiles" />
-        </div>
-      </div>
-      <div class="flex items-center w-full mt-0.5 gap-2">
-        <ComposeConversation :contact-id="String(contact.id)">
-          <template #trigger>
-            <NextButton
-              v-tooltip.top-end="$t('CONTACT_PANEL.NEW_MESSAGE')"
-              icon="i-ph-chat-circle-dots"
-              slate
-              faded
-              sm
-            />
-          </template>
-        </ComposeConversation>
+    <!-- ações redondas com rótulo -->
+    <div class="cv-side-actions mt-4">
+      <button
+        class="cv-side-action cv-side-action-main"
+        title="Começar uma conversa com esta pessoa por qualquer caixa"
+        @click="openNovaConversa({ contactId: contact.id })"
+      >
+        <span class="cv-side-action-btn"><span class="i-lucide-message-square-plus"/></span>
+        <span>Conversa</span>
+      </button>
+      <div class="cv-side-action" title="Ligar">
         <CevicoCallButton
           :phone="contact.phone_number"
           :contact-id="contact.id"
@@ -327,6 +292,13 @@ export default {
           :ghost="false"
           faded
         />
+        <span>Ligar</span>
+      </div>
+      <div
+        v-if="!cevicoCallsOn"
+        class="cv-side-action"
+        title="Ligar (Chatwoot)"
+      >
         <VoiceCallButton
           :phone="contact.phone_number"
           :contact-id="contact.id"
@@ -337,49 +309,105 @@ export default {
           slate
           :tooltip-label="$t('CONTACT_PANEL.CALL')"
         />
-        <NextButton
-          v-tooltip.top-end="$t('EDIT_CONTACT.BUTTON_LABEL')"
-          icon="i-ph-pencil-simple"
-          slate
-          faded
-          sm
-          @click="toggleEditModal"
-        />
-        <ContactMergeModal :primary-contact="contact">
-          <template #trigger>
-            <NextButton
-              v-tooltip.top-end="$t('CONTACT_PANEL.MERGE_CONTACT')"
-              icon="i-ph-arrows-merge"
-              slate
-              faded
-              sm
-              :disabled="uiFlags.isMerging"
-            />
-          </template>
-        </ContactMergeModal>
-        <ContactDeleteModal
-          v-if="isAdmin"
-          :contact="contact"
-          @deleted="$emit('panelClose')"
-        >
-          <template #trigger>
-            <NextButton
-              v-tooltip.top-end="$t('DELETE_CONTACT.BUTTON_LABEL')"
-              icon="i-ph-trash"
-              slate
-              faded
-              sm
-              ruby
-              :disabled="uiFlags.isDeleting"
-            />
-          </template>
-        </ContactDeleteModal>
+        <span>Ligar</span>
       </div>
-      <EditContact
-        :show="showEditModal"
+      <button
+        class="cv-side-action"
+        title="Editar o cadastro"
+        @click="toggleEditModal"
+      >
+        <span class="cv-side-action-btn"><span class="i-lucide-pencil-line"/></span>
+        <span>Editar</span>
+      </button>
+      <ContactMergeModal :primary-contact="contact">
+        <template #trigger>
+          <button
+            class="cv-side-action"
+            title="Juntar com outro cadastro da mesma pessoa"
+            :disabled="uiFlags.isMerging"
+          >
+            <span class="cv-side-action-btn"><span class="i-lucide-merge"/></span>
+            <span>Mesclar</span>
+          </button>
+        </template>
+      </ContactMergeModal>
+      <ContactDeleteModal
+        v-if="isAdmin"
         :contact="contact"
-        @cancel="toggleEditModal"
-      />
+        @deleted="$emit('panelClose')"
+      >
+        <template #trigger>
+          <button
+            class="cv-side-action cv-side-action-danger"
+            title="Excluir o contato"
+            :disabled="uiFlags.isDeleting"
+          >
+            <span class="cv-side-action-btn"><span class="i-lucide-trash-2"/></span>
+            <span>Excluir</span>
+          </button>
+        </template>
+      </ContactDeleteModal>
     </div>
+
+    <!-- dados de contato: telefone sempre (é o WhatsApp), o resto só se existir -->
+    <div class="cv-side-rows mt-4">
+      <ContactInfoRow
+        :href="contact.phone_number ? `tel:${contact.phone_number}` : ''"
+        :value="contact.phone_number"
+        icon="call"
+        emoji="📞"
+        :title="$t('CONTACT_PANEL.PHONE_NUMBER')"
+        show-copy
+        editable
+        @update="value => onFieldUpdate('phone_number', value)"
+      />
+      <ContactInfoRow
+        :href="contact.email ? `mailto:${contact.email}` : ''"
+        :value="contact.email"
+        icon="mail"
+        emoji="✉️"
+        :title="$t('CONTACT_PANEL.EMAIL_ADDRESS')"
+        show-copy
+        editable
+        @update="value => onFieldUpdate('email', value)"
+      />
+      <ContactInfoRow
+        v-if="contact.identifier"
+        :value="contact.identifier"
+        icon="contact-identify"
+        emoji="🪪"
+        :title="$t('CONTACT_PANEL.IDENTIFIER')"
+      />
+      <ContactInfoRow
+        v-if="additionalAttributes.company_name"
+        :value="additionalAttributes.company_name"
+        icon="building-bank"
+        emoji="🏢"
+        :title="$t('CONTACT_PANEL.COMPANY')"
+        editable
+        @update="
+          value =>
+            updateContactField({
+              additional_attributes: {
+                ...additionalAttributes,
+                company_name: value,
+              },
+            })
+        "
+      />
+      <ContactInfoRow
+        v-if="location || additionalAttributes.location"
+        :value="location || additionalAttributes.location"
+        icon="map"
+        emoji="🌍"
+        :title="$t('CONTACT_PANEL.LOCATION')"
+      />
+      <SocialIcons :social-profiles="socialProfiles" />
+    </div>
+    <EditContact
+      :show="showEditModal"
+      :contact="contact"
+      @cancel="toggleEditModal"
+    />
   </div>
 </template>

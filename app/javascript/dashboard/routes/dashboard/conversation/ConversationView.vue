@@ -195,7 +195,8 @@ export default {
 </script>
 
 <template>
-  <section class="flex w-full h-full min-w-0">
+  <!-- CEVICO 199: .cv-chat = pele "Apple × WhatsApp" do ambiente de Conversas -->
+  <section class="cv-chat flex w-full h-full min-w-0">
     <ChatList
       :show-conversation-list="showConversationList"
       :conversation-inbox="inboxId"

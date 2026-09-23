@@ -4,6 +4,7 @@ import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAccount } from 'dashboard/composables/useAccount';
 import OnboardingView from '../OnboardingView.vue';
 import EmptyStateMessage from './EmptyStateMessage.vue';
+import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
 
 export default {
   components: {
@@ -24,6 +25,7 @@ export default {
     return {
       isAdmin,
       accountScopedUrl,
+      openNovaConversa,
     };
   },
   computed: {
@@ -93,6 +95,21 @@ export default {
         v-else-if="allConversations.length && !currentChat.id"
         :message="conversationMissingMessage"
       />
+      <!-- CEVICO 199: daqui também dá para começar uma conversa -->
+      <div
+        v-if="!currentChat.id && inboxesList.length"
+        class="cv-page cv-overlay mt-2"
+      >
+        <div class="cv-blue flex flex-col items-center gap-2">
+          <button class="cv-btn cv-btn-lg" @click="openNovaConversa()">
+            <span class="i-lucide-message-square-plus text-sm" />
+            Nova conversa
+          </button>
+          <p class="text-[11px] text-n-slate-10 text-center max-w-xs">
+            Com qualquer pessoa do cadastro, por qualquer caixa — em 3 passos.
+          </p>
+        </div>
+      </div>
     </div>
   </div>
 </template>
