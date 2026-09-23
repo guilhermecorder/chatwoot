@@ -26,6 +26,12 @@ import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallB
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { inboxSolidFor } from 'dashboard/helper/cevicoInboxColors';
 import { formatPhoneBR } from 'dashboard/helper/cevicoCallsFormat';
+import {
+  KINDS as AGENDA_KINDS,
+  kindFor,
+  kindVars,
+  hexToRgbSpaced,
+} from 'dashboard/helper/cevicoAgenda';
 
 const router = useRouter();
 const store = useStore();
@@ -40,7 +46,7 @@ const pal = useCevicoPalette({
     { id: 'lista', label: 'Registros', icon: 'i-lucide-list' },
   ],
 });
-const { cvVars, blockVars, blockFamily } = pal;
+const { cvVars } = pal;
 
 // ── cores FIXAS do tipo (não seguem a paleta: verde = marcou, âmbar =
 //    remarcou, vermelho = cancelou, em qualquer tela) ──
@@ -82,22 +88,31 @@ const kindBarStyle = row => ({ background: kindMeta(row).color });
 
 // ── período + filtros ──
 const period = ref({ preset: 'last7', from: '', to: '' });
-// 🔪 item 208: chavinha Consultas | Cirurgias (como na Agenda): mesmo painel,
-// outro trilho da Agenda; todas as meninas podem acompanhar as cirurgias aqui
-const track = ref('consultas'); // 'consultas' | 'cirurgias'
-const TRACK_PILL = {
-  consultas: { background: 'linear-gradient(135deg, #152C61, #3B82F6)' },
-  cirurgias: { background: 'linear-gradient(135deg, #0369A1, #38BDF8)' },
+// 📅 item 210 (23/09): seletor Consultas | Teleconsultas | Exames | Cirurgias
+// (os mesmos 4 trilhos da Agenda, cada um na sua cor): tudo o que é marcado
+// passa por este ambiente; as meninas acompanham cada tipo no seu lugar
+const track = ref('consultas');
+const trackKind = computed(() => kindFor(track.value));
+const kindVarsOf = key => {
+  const kk = kindFor(key);
+  return {
+    '--k-grad': kk.grad,
+    '--k-deep': kk.deep,
+    '--k-rgb': hexToRgbSpaced(kk.color),
+    '--k-deep-rgb': hexToRgbSpaced(kk.deep),
+  };
 };
-const isSurgery = computed(() => track.value === 'cirurgias');
-const noun = computed(() => (isSurgery.value ? 'cirurgia' : 'consulta'));
-const nounPlural = computed(() => (isSurgery.value ? 'cirurgias' : 'consultas'));
+// 🎨 pedido 23/09: a COR do ambiente inteiro segue o tipo escolhido (como na
+// Agenda) — a pessoa não confunde consulta com cirurgia; a paleta da página
+// (Strawberry etc.) fica só de base
+const pageStyle = computed(() => ({ ...cvVars.value, ...kindVars(trackKind.value) }));
+const trackStyle = computed(() => kindVars(trackKind.value));
+const noun = computed(() => trackKind.value.noun);
+const nounPlural = computed(() => trackKind.value.plural);
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const MODES = computed(() => [
   { key: 'registradas', label: 'Registradas no período' },
-  {
-    key: 'consultas',
-    label: isSurgery.value ? 'Cirurgias do período' : 'Consultas do período',
-  },
+  { key: 'consultas', label: `${cap(nounPlural.value)} do período` },
 ]);
 const mode = ref('registradas');
 const KINDS = [
@@ -132,6 +147,10 @@ const UNITS = [
   { key: 'paulista', label: 'Av. Paulista' },
   { key: 'tatuape', label: 'Tatuapé' },
 ];
+// teleconsulta é online (sem unidade física): o filtro de unidade some
+const showUnitFilter = computed(
+  () => track.value === 'consultas' || track.value === 'exames'
+);
 const unit = ref('');
 const inboxId = ref('');
 const q = ref('');
@@ -229,7 +248,7 @@ const iaShare = computed(() => {
   if (!ia && !equipe) return 0;
   return Math.round((ia / (ia + equipe)) * 100);
 });
-const kpiGrad = i => blockFamily('resumo')[i % blockFamily('resumo').length];
+const kpiGrad = () => trackKind.value.grad2;
 
 // ── datas em pt-BR ──
 const pad = n => String(n).padStart(2, '0');
@@ -353,9 +372,11 @@ const openConversation = row => {
 };
 const patientUrl = row =>
   frontendURL(`accounts/${accountId.value}/patient/${row.contact.id}`);
+// abre a Agenda no DIA e no TRILHO da linha (consultas/teleconsultas/exames/cirurgias)
 const agendaUrl = row =>
   frontendURL(`accounts/${accountId.value}/agenda`, {
     date: dateKey(row.due_at),
+    kind: row.track || track.value,
   });
 
 // ── ajustes (só admin): abrir, mostrar a coluna efetiva e salvar ──
@@ -395,6 +416,9 @@ const saveBooking = async () => {
 //    atualização silenciosa a cada 60 s ──
 let searchTimer = null;
 let refreshTimer = null;
+watch(track, () => {
+  if (!showUnitFilter.value) unit.value = '';
+});
 watch([mode, unit, inboxId, track], () => fetchFeed());
 watch(period, () => fetchFeed(), { deep: true });
 watch(q, () => {
@@ -418,14 +442,16 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="cv-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1"
-    :style="cvVars"
+    :style="pageStyle"
   >
     <div class="max-w-6xl mx-auto w-full p-4 sm:p-8">
       <CevicoHero
         :pal="pal"
         title="Agendamentos"
-        subtitle="cada consulta marcada, remarcada ou cancelada, quem marcou e por qual caixa; abra a conversa, o Espaço do Paciente ou ligue daqui"
-        icon="i-lucide-calendar-check"
+        :subtitle="`${cap(nounPlural)} marcadas, remarcadas ou canceladas, quem marcou e por qual caixa; abra a conversa, o Espaço do Paciente ou ligue daqui`"
+        :icon="trackKind.icon"
+        :hero-bg="trackKind.hero"
+        :palette="false"
       >
         <template #chips>
           <span v-if="feed" class="cv-glass-chip">
@@ -437,8 +463,28 @@ onBeforeUnmount(() => {
             atualizando
           </span>
         </template>
-        <div class="flex items-center gap-2 flex-wrap">
-          <PeriodRuler v-model="period" glass />
+        <!-- 📅 o que MUDA a agenda, em destaque no banner: Consultas |
+             Teleconsultas | Exames | Cirurgias (a cor do ambiente acompanha) -->
+        <div class="w-full flex flex-col gap-2.5">
+          <div class="cv-ag-kindbar" role="tablist" aria-label="Tipo de agendamento">
+            <button
+              v-for="kk in AGENDA_KINDS"
+              :key="kk.key"
+              class="cv-ag-kind cv-ag-kind-hero"
+              :class="track === kk.key ? 'cv-ag-kind-on' : ''"
+              :style="kindVarsOf(kk.key)"
+              role="tab"
+              :aria-selected="track === kk.key"
+              :title="`${kk.label} — ${kk.hint}`"
+              @click="track = kk.key"
+            >
+              <span :class="kk.icon" class="text-sm" />
+              {{ kk.label }}
+            </button>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <PeriodRuler v-model="period" glass />
+          </div>
         </div>
       </CevicoHero>
 
@@ -460,7 +506,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- ═══════════ RESUMO ═══════════ -->
-        <section class="cv-block p-6 sm:p-9 mb-10" :style="blockVars('resumo')">
+        <section class="cv-block p-6 sm:p-9 mb-10" :style="trackStyle">
           <h2
             class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12 mb-1 flex items-center gap-2.5"
           >
@@ -508,7 +554,7 @@ onBeforeUnmount(() => {
               label="Pelo robô × pela equipe"
               :value="`${Number(counts.ia || 0)} × ${Number(counts.equipe || 0)}`"
               :sub="`${iaShare}% registrados pelo robô`"
-              :grad="kpiGrad(1)"
+              :grad="kpiGrad()"
               glass
               compact
             />
@@ -516,7 +562,7 @@ onBeforeUnmount(() => {
         </section>
 
         <!-- ═══════════ REGISTROS ═══════════ -->
-        <section class="cv-block p-6 sm:p-9 mb-10" :style="blockVars('lista')">
+        <section class="cv-block p-6 sm:p-9 mb-10" :style="trackStyle">
           <div class="flex items-center gap-2 flex-wrap mb-1">
             <h2
               class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12 flex items-center gap-2.5"
@@ -663,42 +709,6 @@ onBeforeUnmount(() => {
 
           <!-- filtros -->
           <div class="flex items-center gap-2 flex-wrap mb-3">
-            <!-- 🔪 item 208: trilho Consultas | Cirurgias (mesma chavinha da Agenda) -->
-            <div
-              class="flex items-center rounded-xl p-0.5 gap-0.5 border-2 transition-colors flex-shrink-0"
-              :class="
-                isSurgery
-                  ? 'bg-sky-400/10 border-sky-400/60'
-                  : 'bg-n-solid-2 border-n-weak'
-              "
-            >
-              <button
-                class="flex items-center gap-1.5 px-3 h-7 rounded-lg text-xs font-medium transition-colors"
-                :class="
-                  !isSurgery
-                    ? 'text-white'
-                    : 'text-n-slate-11 hover:bg-n-alpha-1'
-                "
-                :style="!isSurgery ? TRACK_PILL.consultas : {}"
-                @click="track = 'consultas'"
-              >
-                <span class="i-lucide-stethoscope text-sm" />
-                Consultas
-              </button>
-              <button
-                class="flex items-center gap-1.5 px-3 h-7 rounded-lg text-xs font-semibold transition-colors"
-                :class="
-                  isSurgery
-                    ? 'text-white'
-                    : 'text-n-slate-11 hover:bg-n-alpha-1'
-                "
-                :style="isSurgery ? TRACK_PILL.cirurgias : {}"
-                @click="track = 'cirurgias'"
-              >
-                <span class="i-lucide-slice text-sm" />
-                Cirurgias
-              </button>
-            </div>
             <div
               class="cv-seg cv-seg-sm inline-flex items-center gap-0.5 max-w-full overflow-x-auto"
             >
@@ -748,7 +758,11 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="flex items-center gap-2 flex-wrap mb-6">
-            <select v-model="unit" class="cv-input text-xs !w-auto">
+            <select
+              v-if="showUnitFilter"
+              v-model="unit"
+              class="cv-input text-xs !w-auto"
+            >
               <option v-for="u in UNITS" :key="u.key" :value="u.key">
                 {{ u.label }}
               </option>
@@ -813,7 +827,7 @@ onBeforeUnmount(() => {
               {{
                 hasFilters
                   ? 'experimente limpar os filtros ou mudar o período'
-                  : 'quando o robô ou a equipe confirmar uma consulta, ela aparece aqui'
+                  : `quando o robô ou a equipe confirmar ${noun === 'exame' ? 'um' : 'uma'} ${noun}, aparece aqui`
               }}
             </p>
           </div>

@@ -15,12 +15,16 @@ import { Doughnut } from 'vue-chartjs';
 import TasksAPI from 'dashboard/api/tasks';
 import CrmAPI from 'dashboard/api/crm';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import { useRouter } from 'vue-router';
 
 ChartJS.register(Title, Tooltip, Legend, ArcElement);
 
 const store = useStore();
+const router = useRouter();
 const { t } = useI18n();
+const accountId = useMapGetter('getCurrentAccountId');
 const { isAdmin } = useAdmin();
 
 const agents = useMapGetter('agents/getAgents');
@@ -50,12 +54,67 @@ const BLOCKS = [
   { id: 'doing', label: 'Fazendo', icon: 'i-lucide-loader' },
   { id: 'done', label: 'Feito', icon: 'i-lucide-check-circle-2' },
   { id: 'resumo', label: 'Resumo', icon: 'i-lucide-pie-chart' },
+  { id: 'notas', label: 'Notas dos pacientes', icon: 'i-lucide-sticky-note' },
 ];
 const BLOCK_ICON = Object.fromEntries(BLOCKS.map(b => [b.id, b.icon]));
 const pal = useCevicoPalette({ scope: 'crm:tarefas', blocks: BLOCKS });
 const { cvVars, blockVars } = pal;
 
 const plural = (n, one, many) => (n === 1 ? one : many);
+
+// ── 📝 NOTAS DOS PACIENTES (item 211): recados rápidos sobre um paciente,
+// da clínica inteira (a mesma nota do contato — aparece na ficha, no Espaço
+// do Paciente e no Meu Painel). Seguem o filtro de pessoa do topo. ──
+const patientNotes = ref([]);
+const isLoadingNotes = ref(false);
+const showNoteModal = ref(false);
+const fetchNotes = async () => {
+  isLoadingNotes.value = true;
+  try {
+    const { data } = await CrmAPI.patientNotes({ limit: 60 });
+    patientNotes.value = data;
+  } catch {
+    patientNotes.value = [];
+  } finally {
+    isLoadingNotes.value = false;
+  }
+};
+const visibleNotes = computed(() => {
+  if (filterAssignee.value === 'me')
+    return patientNotes.value.filter(n => n.mine);
+  if (filterAssignee.value)
+    return patientNotes.value.filter(
+      n => n.author?.id === Number(filterAssignee.value)
+    );
+  return patientNotes.value;
+});
+const onNoteSaved = note => {
+  patientNotes.value.unshift(note);
+  showNoteModal.value = false;
+};
+const deleteNote = async note => {
+  try {
+    await CrmAPI.deletePatientNote(note.id);
+    patientNotes.value = patientNotes.value.filter(n => n.id !== note.id);
+    useAlert('Nota apagada.');
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Não consegui apagar a nota.');
+  }
+};
+const openPatient = note => {
+  if (!note.contact?.id) return;
+  router.push({
+    name: 'patient_space',
+    params: { accountId: accountId.value, contactId: note.contact.id },
+  });
+};
+const fmtNoteAt = iso =>
+  new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
 // ── Celebração: EXPLOSÃO DE EMOJIS (sempre diferente) perto do painel ──
 // Nada de troféu: emojis aleatórios do set oficial voam do centro pra fora.
@@ -422,6 +481,7 @@ onMounted(() => {
   if (!agents.value.length) store.dispatch('agents/get');
   store.dispatch('crm/fetchSettings').catch(() => {}); // paletas do kit
   fetchTasks();
+  fetchNotes();
 });
 
 // ── Drag entre colunas ─────────────────────────────────────
@@ -656,24 +716,32 @@ const formatDue = iso => {
           </span>
         </template>
         <template #actions>
-          <button class="cevico-hero-btn" @click="openCreate">
+          <button
+            class="cevico-hero-btn"
+            title="Escrever um recado sobre um paciente"
+            @click="showNoteModal = true"
+          >
+            <span class="i-lucide-sticky-note text-sm" />Nova nota
+          </button>
+          <button class="cevico-hero-btn cevico-hero-btn-on" @click="openCreate">
             <span class="i-lucide-plus text-sm" />{{ $t('TASKS.NEW') }}
           </button>
         </template>
       </CevicoHero>
 
-      <!-- filtros: de quem são as tarefas -->
+      <!-- filtros: de quem são as tarefas — item 211: barra, seletor "Por
+           pessoa" e contagem com a MESMA altura (36 px) e os mesmos cantos -->
       <div class="flex items-center gap-2 flex-wrap mb-4">
-        <span class="cv-seg cv-seg-sm">
+        <span class="cv-seg !rounded-xl">
           <button
-            class="cv-seg-item"
+            class="cv-seg-item !rounded-[9px]"
             :class="{ 'cv-seg-on': filterAssignee === 'me' }"
             @click="filterAssignee = 'me'"
           >
             <span class="i-lucide-user text-xs" />{{ $t('TASKS.FILTER.MINE') }}
           </button>
           <button
-            class="cv-seg-item"
+            class="cv-seg-item !rounded-[9px]"
             :class="{ 'cv-seg-on': filterAssignee === '' }"
             @click="filterAssignee = ''"
           >
@@ -683,7 +751,7 @@ const formatDue = iso => {
         <select
           v-if="isAdmin"
           v-model="agentFilter"
-          class="cv-input !h-[30px] text-xs text-n-slate-12 max-w-full"
+          class="cv-input !h-9 !w-auto text-xs font-medium text-n-slate-12 max-w-full min-w-[160px]"
         >
           <option value="">Por pessoa…</option>
           <option
@@ -694,7 +762,7 @@ const formatDue = iso => {
             {{ agent.name }}
           </option>
         </select>
-        <span class="cv-chip ml-auto">
+        <span class="cv-chip cv-chip-lg !h-9 !rounded-xl ml-auto">
           {{ visibleTasks.length }}
           {{ plural(visibleTasks.length, 'tarefa', 'tarefas') }}
         </span>
@@ -736,16 +804,19 @@ const formatDue = iso => {
           :class="allDone ? 'cv-gold' : ''"
           :style="allDone ? undefined : blockVars(statusKey)"
         >
-          <header class="flex items-center gap-2.5 mb-3">
+          <!-- item 211: ícone, título e número na MESMA linha de base -->
+          <header class="flex items-center gap-2.5 mb-3 min-h-[30px]">
             <span class="cv-icon cv-icon-sm">
               <span :class="BLOCK_ICON[statusKey]" class="text-sm" />
             </span>
             <h2
-              class="text-base sm:text-lg font-bold tracking-tight text-n-slate-12 leading-tight min-w-0 break-words"
+              class="text-base sm:text-lg font-bold tracking-tight text-n-slate-12 leading-none min-w-0 break-words"
             >
               {{ $t(`TASKS.COLUMNS.${statusKey.toUpperCase()}`) }}
             </h2>
-            <span class="cv-chip ml-auto">{{ lists[statusKey].length }}</span>
+            <span class="cv-chip cv-chip-lg !h-[26px] ml-auto tabular-nums">{{
+              lists[statusKey].length
+            }}</span>
           </header>
 
           <p
@@ -857,12 +928,12 @@ const formatDue = iso => {
           :class="allDone ? 'cv-gold cevico-all-done-ring' : ''"
           :style="allDone ? undefined : blockVars('resumo')"
         >
-          <header class="flex items-center gap-2.5 mb-1">
+          <header class="flex items-center gap-2.5 mb-1 min-h-[30px]">
             <span class="cv-icon cv-icon-sm">
               <span class="i-lucide-pie-chart text-sm" />
             </span>
             <h2
-              class="text-base sm:text-lg font-bold tracking-tight text-n-slate-12 leading-tight"
+              class="text-base sm:text-lg font-bold tracking-tight text-n-slate-12 leading-none"
             >
               {{ $t('TASKS.DASHBOARD.TITLE') }}
             </h2>
@@ -1027,6 +1098,102 @@ const formatDue = iso => {
             </div>
           </div>
         </section>
+      </div>
+    </div>
+
+    <!-- 📝 NOTAS DOS PACIENTES (item 211): recados rápidos, da clínica inteira -->
+    <div class="max-w-[1600px] mx-auto w-full px-4 sm:px-6 pb-6">
+      <section class="cv-block p-4 sm:p-5" :style="blockVars('notas')">
+        <header class="flex items-center gap-2.5 mb-1 min-h-[30px] flex-wrap">
+          <span class="cv-icon cv-icon-sm">
+            <span class="i-lucide-sticky-note text-sm" />
+          </span>
+          <h2
+            class="text-base sm:text-lg font-bold tracking-tight text-n-slate-12 leading-none"
+          >
+            Notas dos pacientes
+          </h2>
+          <span class="cv-chip cv-chip-lg !h-[26px] tabular-nums">{{
+            visibleNotes.length
+          }}</span>
+          <button class="cv-btn cv-btn-sm ml-auto" @click="showNoteModal = true">
+            <span class="i-lucide-plus text-xs" />Nova nota
+          </button>
+        </header>
+        <p class="text-xs text-n-slate-10 mb-3">
+          recados rápidos sobre um paciente — a nota vai para a ficha, para o
+          Espaço do Paciente e para o Meu Painel de quem cuida
+        </p>
+        <p
+          v-if="!isLoadingNotes && !visibleNotes.length"
+          class="text-xs text-n-slate-9 text-center py-4"
+        >
+          Nenhuma nota ainda{{
+            filterAssignee ? ' desta pessoa' : ''
+          }}. Escreva a primeira em "Nova nota".
+        </p>
+        <div
+          v-else
+          class="grid gap-2.5 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 max-h-[26rem] overflow-y-auto pr-1"
+        >
+          <div
+            v-for="note in visibleNotes"
+            :key="note.id"
+            class="cv-sub cv-sub-hover rounded-2xl p-3.5 flex flex-col gap-1.5 min-w-0"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <button
+                class="text-sm font-semibold text-n-slate-12 truncate hover:underline text-left"
+                title="Abrir o Espaço do Paciente"
+                @click="openPatient(note)"
+              >
+                {{ note.contact?.name || 'Paciente' }}
+              </button>
+              <span class="text-[10px] text-n-slate-9 ml-auto whitespace-nowrap tabular-nums">{{
+                fmtNoteAt(note.created_at)
+              }}</span>
+              <button
+                v-if="note.mine || isAdmin"
+                class="text-n-slate-9 hover:text-red-500"
+                title="Apagar a nota"
+                @click="deleteNote(note)"
+              >
+                <span class="i-lucide-trash-2 text-xs" />
+              </button>
+            </div>
+            <p class="text-xs text-n-slate-11 leading-snug whitespace-pre-line break-words">
+              {{ note.content }}
+            </p>
+            <p class="text-[10px] text-n-slate-9">
+              por {{ note.author?.name?.split(' ')[0] || 'equipe' }}<template v-if="note.contact?.phone"> · {{ note.contact.phone }}</template>
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- modal: nova nota de paciente -->
+    <div
+      v-if="showNoteModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      @click.self="showNoteModal = false"
+    >
+      <div class="cv-modal w-full max-w-md flex flex-col" :style="blockVars('notas')">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="cv-glass w-10 h-10 flex items-center justify-center flex-shrink-0">
+            <span class="i-lucide-sticky-note text-base" />
+          </span>
+          <div class="flex-1 min-w-0">
+            <p class="text-[11px] opacity-85">Notas dos pacientes</p>
+            <h2 class="text-base font-bold leading-tight">Nova nota</h2>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn flex-shrink-0" aria-label="Fechar" @click="showNoteModal = false">
+            <span class="i-lucide-x text-base" />
+          </button>
+        </div>
+        <div class="p-5">
+          <PatientNoteForm @saved="onNoteSaved" @cancel="showNoteModal = false" />
+        </div>
       </div>
     </div>
 

@@ -40,6 +40,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       # Mentor do Time: feedback semanal individual (admin vê o time)
       weekly_feedback: weekly_feedback_json,
       my_tasks: my_tasks_json,
+      # 📝 notas dos pacientes (item 211): as últimas da clínica no bloco de tarefas
+      patient_notes: patient_notes_json,
       bug_reports: bug_reports_json,
       # status dos números de WhatsApp (item 88 — só o gestor vê)
       whatsapp_status: whatsapp_status_json,
@@ -721,13 +723,15 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # Cada aviso pode ter um painel de destino (user_id): o admin vê todos
   # (com o nome de quem vai atender); a atendente só vê os dela + os gerais.
   # tarefas esperando VOCÊ (aviso dourado no painel — criador atribuiu)
+  # item 211: a caixa do painel mostra até 40 (antes 5) — organizada para
+  # ter mais de 10 tarefas com clareza (lista rolável, duas colunas)
   def my_tasks_json
     open_tasks = account.tasks.where(assignee_id: Current.user.id, status: %w[todo doing])
                         .where.not(task_type: %w[consulta cirurgia])
                         .order(Arel.sql('priority DESC, due_at ASC NULLS LAST, created_at DESC'))
     {
       count: open_tasks.count,
-      items: open_tasks.limit(5).map do |t|
+      items: open_tasks.limit(40).map do |t|
         {
           id: t.id,
           title: t.title,
@@ -739,6 +743,20 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
         }
       end
     }
+  end
+
+  # 📝 notas dos pacientes (item 211): as 12 mais recentes da clínica
+  def patient_notes_json
+    account.notes.includes(:user, :contact).order(created_at: :desc).limit(12).map do |n|
+      {
+        id: n.id,
+        content: n.content.to_s.truncate(220),
+        created_at: n.created_at,
+        author_name: n.user&.name,
+        mine: n.user_id == Current.user.id,
+        contact: n.contact && { id: n.contact.id, name: n.contact.name }
+      }
+    end
   end
 
   # reports 🐞 de quem está logado: abertos + resolvidos na última semana

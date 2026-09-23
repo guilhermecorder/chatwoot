@@ -291,6 +291,9 @@ namespace :crm do
     member { post :update_profile }
     resources :clinical_notes, only: [:index, :create, :update, :destroy], controller: 'clinical_notes'
   end
+  # 📝 notas dos pacientes (item 211): recados rápidos sobre um paciente,
+  # de Tarefas / Meu Painel (a mesma Note do contato)
+  resources :patient_notes, only: [:index, :create, :destroy], controller: 'patient_notes'
   resource :home, only: [:show], controller: 'home' do
     # popup de prioridade máxima do Radar (checagem leve) e
     # pausa manual do radar pela atendente (com registro)

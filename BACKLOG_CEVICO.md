@@ -6171,6 +6171,67 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 211. 📝 TAREFAS + NOTAS DOS PACIENTES no Meu Painel · barra de Tarefas alinhada · seletor dos 4 tipos NO BANNER dos Agendamentos com a cor do ambiente · calendário da Agenda fecha ao clicar fora (pedidos 23/09 12h–13h, prints) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+- TAREFAS: barra "Minhas tarefas | Todas", o seletor "Por pessoa…" e a contagem com a MESMA altura (36 px) e os mesmos
+  cantos, numa linha só (o select tinha width 100% do CSS global → !w-auto). Cabeçalhos das colunas com ícone, título e
+  número na mesma linha de base (leading-none + chip de 26 px).
+- NOTAS DOS PACIENTES: recado rápido sobre um paciente. É a MESMA nota do contato do Chatwoot (Note) — aparece na ficha,
+  no Espaço do Paciente ("Notas da equipe") e no painel da conversa. Backend novo `crm/patient_notes` (index da clínica
+  inteira, mais recente primeiro, com paciente + autor; create {contact_id, content}; destroy = autor ou admin). Componente
+  compartilhado `PatientNoteForm.vue` (busca o paciente por nome/telefone com o createContactSearcher do Nova conversa,
+  escreve, salva; Ctrl/Cmd+Enter). Em TAREFAS: botão "Nova nota" no banner + bloco "Notas dos pacientes" abaixo do quadro
+  (cards em grade, rolável, seguem o filtro de pessoa do topo, lixeira para autor/admin, nome abre o Espaço do Paciente).
+- MEU PAINEL: a caixa virou "Tarefas e notas" — duas colunas (esperando você | notas dos pacientes), listas roláveis com
+  uma tarefa por linha (bolinha da prioridade, prazo em chip, atrasada em vermelho), até 40 tarefas (antes 5; home
+  my_tasks limit 40) e as 12 notas mais recentes (home patient_notes); "Nova nota" inline. Nos painéis AGENDAMENTO,
+  CONDUÇÃO e CIRURGIAS a caixa fica SEMPRE à mostra e ACIMA DE TUDO, logo abaixo do banner (TASKS_FIRST_PANELS fixa
+  'tarefas' em 1º no orderedBlocks, por cima do layout salvo); nos outros painéis continua como aviso com check.
+- AGENDAMENTOS: o seletor Consultas | Teleconsultas | Exames | Cirurgias subiu para o BANNER, em barra de vidro fumê
+  (.cv-ag-kindbar / .cv-ag-kind-hero: o escolhido acende em branco com a cor escura do tipo), acima da régua de período;
+  ao escolher, a COR DO AMBIENTE INTEIRO (banner, Resumo, Registros, botões) vira a do tipo (pageStyle = paleta base +
+  kindVars; CevicoHero ganhou props hero-bg e palette=false). Ícone e subtítulo do banner seguem o tipo.
+- AGENDA: o calendário do período fecha ao clicar fora (véu invisível atrás do popover).
+- Conferido no navegador local: barra de Tarefas, nota criada pela busca e vista em Tarefas + Meu Painel, painel
+  Agendamento com a caixa em 1º. Peças: TasksBoard.vue, InicioPage.vue, CrmAppointments.vue, CevicoHero.vue,
+  PatientNoteForm.vue (novo), patient_notes_controller.rb (novo), home_controller.rb, crm.js, cevico_crm.rb, _cevico-agenda.scss.
+
+## 210. 🍎📅 AGENDA NO DESIGN APPLE — Consultas | Teleconsultas | Exames | Cirurgias, abre na SEMANA; seletor dos 4 tipos nos Agendamentos; Espaço do Paciente no kit; paleta das Conversas por cima de tudo (pedidos 23/09 11h, prints) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+- AJUSTES RÁPIDOS: (a) a paleta "A sua cor nas Conversas" ficava POR TRÁS dos balões (o cabeçalho tem backdrop-filter,
+  que cria um contexto de empilhamento próprio) → o popup agora é teleportado para o body em posição fixa, com um véu
+  invisível para fechar ao clicar fora (BubbleThemePicker.vue); (b) "tons leitosos" → "tons suaves" (texto e comentários).
+- OS 4 TIPOS (helper/cevicoAgenda.js → KINDS, kindOf, kindVars): no banco, cirurgia = task_type 'cirurgia'; consulta,
+  teleconsulta e exame são task_type 'consulta' separados pela modality ('teleconsulta' | 'exames' | resto). Assim o
+  Atendente de Agendamento, o Secretário, a conferência do dia e o CRM seguem enxergando tudo como consulta. Cores:
+  consultas azul royal · teleconsultas violeta · exames verde-água · cirurgias azul-céu. Teleconsulta guarda unit
+  'online' (não ocupa bloco físico; UNIT_LABELS ganhou 'online' => 'Online'). Exame ocupa o bloco do médico como
+  consulta (a ocupação soma os dois — é o que o Atendente enxerga ao oferecer horário). MODALITIES ganhou 'teleconsulta'.
+  scanAgenda agora casa com o servidor: consulta COM unidade só ocupa o bloco daquela unidade (antes ocupava em todas).
+- AGENDA NOVA (routes/dashboard/agenda/AgendaBoard.vue reescrita + components-next/cevico/agenda/AgendaTimeColumn.vue +
+  assets/scss/_cevico-agenda.scss): página no kit "iMac G3 + vidro" vestindo a cor do trilho ativo; cabeçalho grudado de
+  vidro com o período grande (clica → calendário), ‹ Hoje ›, seletor Mês/Semana/Dia (padrão SEMANA) e "Nova consulta";
+  seletor dos 4 tipos com a contagem do período; filtros em linha (toda a clínica · médicos · unidades / locais). Vidros
+  de resumo (hoje, semana, por unidade/local) e ocupação numa linha só (abre em dia/semana/mês por tipo). MÊS: grade
+  limpa, hoje em círculo cheio, balões compactos, "+N mais" abre o dia. SEMANA/DIA: coluna de horas com as FAIXAS das
+  janelas (horário em que cada médico/sala atende), balões com altura = duração, encaixes dividindo a largura em raias
+  iguais, linha vermelha de AGORA, clique no vazio agenda (gruda no bloco da janela) e arrastar reagenda (confirma no
+  modal); a grade estica sozinha para cobrir horários fora do expediente. DIA: linha do tempo à esquerda + blocos das
+  janelas (livre/ocupado/cadeado, encaixe) + conferência do dia em cartões (compareceu/faltou/veio e não fez, indicação,
+  agendar cirurgia, marcar retorno a partir de exame/teleconsulta, respostas do formulário, Espaço do Paciente). Modal
+  de criar/editar em concha de vidro na cor do tipo, com o seletor de tipo dentro (ao criar), tipo de consulta
+  (avaliação/retorno), lista de exames (Pentacam, OCT, topografia…) ou procedimentos, unidade/online/local. Deep-links:
+  ?date=AAAA-MM-DD (abre o dia) · ?kind=exames · ?view=month|week|day. Tema Santorini/Flor del Mar saiu da Agenda (a cor
+  agora é a do tipo); Tarefas continua com o tema.
+- AGENDAMENTOS (CrmAppointments.vue): o mesmo seletor dos 4 tipos (cada um acende na sua cor) no lugar da chavinha
+  consultas|cirurgias; textos seguem o tipo; filtro de unidade some na teleconsulta; "Agenda" da linha abre o dia NO
+  TRILHO certo (?kind=). Backend: `GET crm/appointments/feed?track=consultas|teleconsultas|exames|cirurgias` (TRACKS;
+  scope por task_type + modality) e cada linha traz `modality` e `track`. Spec ampliada (5 exemplos verdes).
+- ESPAÇO DO PACIENTE (PatientSpace.vue): página vira .cv-page com a cor do paciente como paleta --cv*; cabeçalho com luzes
+  (cevico-hero) e pílulas de vidro; cartões de informação e blocos (Jornada, Espaço do Médico, Atualizações) em vidro
+  cristalino (cv-sub/cv-block) com o squircle do kit nos títulos; anotações em sub-cartões; modal em concha. Rótulos:
+  teleconsulta e Online entram na linha do tempo e nos próximos compromissos.
+- Conferido no navegador local (conta 3): semana/mês/dia nos 4 tipos, criar exame pelo modal (aparece no trilho verde-água
+  e no painel Agendamentos → Exames com o atalho Agenda), Espaço do Paciente, paleta das Conversas. Reversão: imagem anterior.
+
 ## 209. 🎨 A COR DE CADA UMA NAS CONVERSAS — fundo leitoso + balões, escolhas independentes (pedidos 23/09 10h15–10h40; sugestões das meninas: Vaneide Bondi blue bebê, Elizangela roxo bebê, Dalila soft pink, Natalia amarelo soft) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só)
 - Botão de paleta no cabeçalho da conversa (ao lado do telefone) abre "A sua cor nas Conversas" com DUAS escolhas que se
   combinam à vontade: FUNDO (bolinhas: Padrão · Bondi blue bebê · Azul bebê · Roxo bebê · Soft pink · Amarelo soft ·

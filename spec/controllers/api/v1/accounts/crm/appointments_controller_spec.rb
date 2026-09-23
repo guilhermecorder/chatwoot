@@ -26,6 +26,11 @@ RSpec.describe 'CEVICO Appointments feed', type: :request do
                           contact: contact, due_at: tz.now + 8.days, description: 'catarata OD')
     # tarefa de revisão do Secretário (sem data) fica fora do painel
     account.tasks.create!(title: '⚠️ Confirmar consulta: Dora', task_type: 'consulta', creator: admin, contact: contact)
+    # 📅 item 210: teleconsulta e exame têm trilho próprio (modality), fora do de consultas
+    account.tasks.create!(title: 'Teleconsulta: Fábio Reis', task_type: 'consulta', modality: 'teleconsulta', unit: 'online',
+                          creator: admin, due_at: tz.now + 9.days)
+    account.tasks.create!(title: 'Exame: Gina Melo', task_type: 'consulta', modality: 'exames', unit: 'paulista',
+                          creator: admin, due_at: tz.now + 10.days, procedure: 'Pentacam')
   end
 
   it 'lista o que aconteceu no período com tipo, origem, conversa, caixa, etiquetas e contagens' do # rubocop:disable RSpec/MultipleExpectations
@@ -93,5 +98,30 @@ RSpec.describe 'CEVICO Appointments feed', type: :request do
     expect(rows.first).to include('kind' => 'agendada', 'unit' => 'iop')
     expect(rows.first.keys).not_to include('price', 'valor')
     expect(response.parsed_body['track']).to eq('cirurgias')
+  end
+
+  # 📅 item 210 (23/09): seletor consultas | teleconsultas | exames | cirurgias
+  it 'track=teleconsultas e track=exames separam pela modality; consultas não os inclui', :aggregate_failures do
+    range = { preset: 'custom', from: tz.today.to_s, to: (tz.today + 12).to_s, mode: 'consultas' }
+
+    get base, params: range, headers: agent.create_new_auth_token, as: :json
+    names = response.parsed_body['rows'].pluck('name')
+    expect(names).to include('Ana Souza')
+    expect(names).not_to include('Fábio Reis', 'Gina Melo', 'Eva Prado')
+    expect(response.parsed_body['rows'].find { |r| r['name'] == 'Ana Souza' }['track']).to eq('consultas')
+
+    get base, params: range.merge(track: 'teleconsultas'), headers: agent.create_new_auth_token, as: :json
+    rows = response.parsed_body['rows']
+    expect(rows.pluck('name')).to eq(['Fábio Reis'])
+    expect(rows.first).to include('unit' => 'online', 'unit_label' => 'Online', 'modality' => 'teleconsulta', 'track' => 'teleconsultas')
+    expect(response.parsed_body['track']).to eq('teleconsultas')
+
+    get base, params: range.merge(track: 'exames'), headers: agent.create_new_auth_token, as: :json
+    rows = response.parsed_body['rows']
+    expect(rows.pluck('name')).to eq(['Gina Melo'])
+    expect(rows.first).to include('procedure' => 'Pentacam', 'track' => 'exames')
+
+    get base, params: range.merge(track: 'qualquer_coisa'), headers: agent.create_new_auth_token, as: :json
+    expect(response.parsed_body['track']).to eq('consultas')
   end
 end

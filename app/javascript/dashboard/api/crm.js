@@ -1084,6 +1084,22 @@ class CrmAPI extends ApiClient {
     );
   }
 
+  // 📝 notas dos pacientes (item 211): lista da clínica, criar, apagar
+  patientNotes(params = {}) {
+    return axios.get(`${this.url}/patient_notes`, { params });
+  }
+
+  createPatientNote(contactId, content) {
+    return axios.post(`${this.url}/patient_notes`, {
+      contact_id: contactId,
+      content,
+    });
+  }
+
+  deletePatientNote(id) {
+    return axios.delete(`${this.url}/patient_notes/${id}`);
+  }
+
   // item 95: renovar os ambientes (concluídos → coluna oculta)
   archiveDoneTasks() {
     return axios.post(`${this.url.replace(/crm$/, 'tasks')}/archive_done`);

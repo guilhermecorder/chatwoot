@@ -1,6 +1,6 @@
 // 🎨 CEVICO item 209 (23/09): A COR DE CADA UMA nas Conversas, em duas escolhas
 // INDEPENDENTES que se combinam à vontade:
-//   FUNDO  → pinta a conversa e a lista com um tom leitoso (ou preto de alto
+//   FUNDO  → pinta a conversa e a lista com um tom suave (ou preto de alto
 //            contraste, letra branca);
 //   BALÕES → o tom do balão recebido e do enviado.
 // As meninas passam o dia na tela: tons suaves para se orientar sem cansar a
@@ -9,7 +9,7 @@ export const BG_THEME_KEY = 'cevico_bg_theme';
 export const BUBBLE_THEME_KEY = 'cevico_bubble_theme';
 export const DEFAULT_THEME = 'padrao';
 
-// tons leitosos compartilhados: bg = fundo da conversa · list = fundo da lista
+// tons suaves compartilhados: bg = fundo da conversa · list = fundo da lista
 // (mais claro) · out = balão enviado (+ letra) · d* = versões do modo escuro
 const TONES = {
   bondi_bebe: {

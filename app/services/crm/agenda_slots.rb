@@ -16,7 +16,8 @@ module Crm::AgendaSlots
     { 'dow' => 5, 'unit' => 'tatuape',  'doctor' => 'Dra. Roberta Negri',   'start' => '10:30', 'end' => '13:00', 'block' => 10 }
   ].freeze
 
-  UNIT_LABELS = { 'tatuape' => 'Tatuapé', 'paulista' => 'Av. Paulista' }.freeze
+  # 'online' = teleconsulta (item 210): não é unidade física, não ocupa bloco
+  UNIT_LABELS = { 'tatuape' => 'Tatuapé', 'paulista' => 'Av. Paulista', 'online' => 'Online' }.freeze
   WEEKDAYS = %w[domingo segunda terça quarta quinta sexta sábado].freeze
 
   module_function

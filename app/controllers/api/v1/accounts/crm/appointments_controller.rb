@@ -14,13 +14,17 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   IA_MARKS = /pela IA|pelo Atendente|Atendente de Agendamento|Atendente P[oó]s|Secret[aá]rio da Agenda|Agente de Liga/i
   TZ = Crm::AgendaSlots::TZ
 
-  # GET /crm/appointments/feed?preset=today|last7|month|custom&from&to&mode=registradas|consultas&kind&unit&inbox_id&q
+  # 📅 item 210 (23/09): os 4 TRILHOS da Agenda no mesmo painel —
+  # consultas | teleconsultas | exames | cirurgias (o mesmo seletor da Agenda).
+  # cirurgias = task_type 'cirurgia'; os outros três são task_type 'consulta'
+  # separados pela modality ('teleconsulta' | 'exames' | o resto = consultas).
+  TRACKS = %w[consultas teleconsultas exames cirurgias].freeze
+
+  # GET /crm/appointments/feed?preset=today|last7|month|custom&from&to&mode=registradas|consultas&track&kind&unit&inbox_id&q
   def feed # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     since, until_at = standard_period_range || custom_period_range
     mode = params[:mode] == 'consultas' ? 'consultas' : 'registradas'
-    # 🔪 item 208 (23/09): chavinha Consultas | Cirurgias, como na Agenda —
-    # mesmo painel, outro trilho (task_type 'cirurgia'); sem valores, aberto ao time
-    track = params[:track] == 'cirurgias' ? 'cirurgia' : 'consulta'
+    track = TRACKS.include?(params[:track].to_s) ? params[:track].to_s : 'consultas'
     tasks = base_scope(since, until_at, mode, track).includes(:contact, :assignee, :creator).limit(LIMIT).to_a
     rows = build_rows(tasks)
     rows = rows.select { |r| r[:kind] == params[:kind] } if KINDS.include?(params[:kind].to_s)
@@ -29,7 +33,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     rows = filter_query(rows, params[:q])
 
     render json: {
-      mode: mode, track: track == 'cirurgia' ? 'cirurgias' : 'consultas', since: since, until: until_at, rows: rows, counts: counts(rows),
+      mode: mode, track: track, since: since, until: until_at, rows: rows, counts: counts(rows),
       booking: booking_json
     }
   end
@@ -38,16 +42,27 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
 
   # registradas = ACONTECEU no período (marcou/remarcou/cancelou);
   # consultas = a consulta É no período (o dia dela)
-  def base_scope(since, until_at, mode, track = 'consulta')
+  def base_scope(since, until_at, mode, track = 'consultas')
     # tarefas de REVISÃO do Secretário ("⚠️ Confirmar consulta…", sem data) não
     # são consultas marcadas: ficam em Tarefas, fora deste painel
-    scope = Current.account.tasks.where(task_type: track, archived_at: nil).where.not(due_at: nil)
-                   .where("title NOT LIKE '⚠️%'")
+    scope = track_scope(track).where(archived_at: nil).where.not(due_at: nil)
+                              .where("title NOT LIKE '⚠️%'")
     return scope.where(due_at: since..until_at).order(:due_at) if mode == 'consultas'
 
     scope.where('(tasks.created_at BETWEEN :s AND :u) OR (tasks.canceled_at BETWEEN :s AND :u) ' \
                 'OR (tasks.rescheduled_count > 0 AND tasks.updated_at BETWEEN :s AND :u)', s: since, u: until_at)
          .order(updated_at: :desc)
+  end
+
+  # o trilho em SQL (a mesma regra do kindOf do cevicoAgenda.js)
+  def track_scope(track)
+    tasks = Current.account.tasks
+    case track
+    when 'cirurgias' then tasks.where(task_type: 'cirurgia')
+    when 'teleconsultas' then tasks.where(task_type: 'consulta', modality: 'teleconsulta')
+    when 'exames' then tasks.where(task_type: 'consulta', modality: 'exames')
+    else tasks.where(task_type: 'consulta').where("modality IS NULL OR modality NOT IN ('teleconsulta', 'exames')")
+    end
   end
 
   def build_rows(tasks) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
@@ -65,7 +80,9 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
         unit_label: Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit,
         doctor: t.doctor,
         procedure: t.procedure,
-        name: t.title.to_s.sub(/\A(Consulta|Cirurgia):\s*/i, '').strip.presence || contact&.name || 'Paciente',
+        modality: t.modality,
+        track: track_of(t),
+        name: t.title.to_s.sub(/\A(Consulta|Teleconsulta|Exame|Cirurgia):\s*/i, '').strip.presence || contact&.name || 'Paciente',
         phone: t.phone.presence || contact&.phone_number,
         source: t.description.to_s.match?(IA_MARKS) ? 'ia' : 'equipe',
         rescheduled_count: t.rescheduled_count,
@@ -85,6 +102,14 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
         card: cards[t.contact_id]
       }
     end
+  end
+
+  def track_of(task)
+    return 'cirurgias' if task.task_type == 'cirurgia'
+    return 'teleconsultas' if task.modality == 'teleconsulta'
+    return 'exames' if task.modality == 'exames'
+
+    'consultas'
   end
 
   def kind_of(task)

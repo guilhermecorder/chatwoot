@@ -1,10 +1,13 @@
 <script setup>
-// Agenda de CONSULTAS da clínica — visões Mês / Semana / Dia.
-// Cada agendamento guarda: nome, telefone, problema (catarata, refrativa,
-// exames...), dia, horário, médico e unidade. Criado à mão ou pelo Agente
-// de Agendamento (IA) via ação de coluna do CRM.
-import { ref, computed, watch, onMounted } from 'vue';
+// 🍎📅 AGENDA no design Apple (item 210, 23/09) — Consultas | Teleconsultas |
+// Exames | Cirurgias, cada tipo no seu trilho e na sua cor, visões Mês /
+// Semana / Dia (abre na SEMANA). Cada agendamento guarda: nome, telefone,
+// problema/exame, dia, horário, médico e unidade (ou local da cirurgia, ou
+// "online" na teleconsulta). Criado à mão aqui ou pelo Atendente de
+// Agendamento (IA). Peças: kit "iMac G3 + vidro" + _cevico-agenda.scss.
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
+import AgendaTimeColumn from 'dashboard/components-next/cevico/agenda/AgendaTimeColumn.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
@@ -15,21 +18,20 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   addDays, addWeeks, addMonths, isSameDay, isSameMonth, format,
 } from 'date-fns';
-import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import {
-  DOCTORS, MODALITIES, resolveWindows, resolveBlocked, resolveBlockedDays,
+  DOCTORS, MODALITIES, KINDS, KIND_BY_KEY, ONLINE_UNIT,
+  kindFor, kindOf, kindVars, hexToRgbSpaced,
+  resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
-import { ALL_THEMES, resolveTheme } from 'dashboard/helper/cevicoThemes';
 
 const store = useStore();
 const { isAdmin } = useAdmin();
 const route = useRoute();
 const router = useRouter();
 
-// Espaço do Paciente: consulta amarrada ao contato (Fase 0) abre a
-// página única com toda a jornada do paciente
+// Espaço do Paciente: consulta amarrada ao contato abre a página única
 const openPatientSpace = task => {
   if (!task?.contact_id) return;
   router.push(frontendURL(`accounts/${route.params.accountId}/patient/${task.contact_id}`));
@@ -38,55 +40,40 @@ const openPatientSpace = task => {
 const agents = useMapGetter('agents/getAgents');
 const currentUser = useMapGetter('getCurrentUser');
 const allTasks = useMapGetter('tasks/getTasks');
+const crmSettings = useMapGetter('crm/getSettings');
 
 const isLoading = ref(true);
 const cursor = ref(new Date()); // data de referência da navegação
-const viewMode = ref('month'); // 'month' | 'week' | 'day'
+const viewMode = ref('week'); // 'month' | 'week' | 'day' — padrão SEMANA
 // filtro: 'clinic' (todas) | 'unit:x' | 'doctor:Nome' | 'me' | '<agentId>'
 const view = ref('clinic');
 
-// ── AGENDA PARALELA DE CIRURGIAS ──
-// Mesmo calendário, outro trilho: task_type 'cirurgia'. Tema AZUL CLARO
-// "vítreo" (referências do Guilherme), bem distinto do azul→roxo das
-// consultas — as cores dos médicos não mudam.
-const agendaMode = ref('consultas'); // 'consultas' | 'cirurgias'
-const isSurgeryMode = computed(() => agendaMode.value === 'cirurgias');
+// ── OS 4 TRILHOS: consultas | teleconsultas | exames | cirurgias ──
+const kind = ref('consultas');
+const k = computed(() => kindFor(kind.value)); // o tipo ativo (cor, nome, ícone)
+const pageVars = computed(() => kindVars(k.value));
+const isSurgeryMode = computed(() => kind.value === 'cirurgias');
+const isTele = computed(() => kind.value === 'teleconsultas');
+const isPhysical = computed(() => kind.value === 'consultas' || kind.value === 'exames');
 const isSurgeryTask = t => t.task_type === 'cirurgia';
-const modeFilter = list =>
-  isSurgeryMode.value ? list.filter(isSurgeryTask) : list.filter(t => !isSurgeryTask(t));
-
-const SURGERY_GRAD = 'linear-gradient(135deg, #0284C7 0%, #38BDF8 55%, #7DD3FC 100%)';
-const SURGERY_COLOR = '#0284C7';
-
-// ── TEMA DO AMBIENTE (Santorini, Flor del Mar...) — escolha do admin ──
-const theme = computed(() => resolveTheme(crmSettings.value));
-// trilho de cirurgias: a cor do tema "PUXANDO PARA O BRANCO" (diferença
-// bem evidente vs consultas) — o texto usa a cor escura do tema
-const surgeryGrad = computed(() => theme.value.surgeryGrad || SURGERY_GRAD);
-const surgeryInk = computed(() => theme.value.surgeryText || '#FFFFFF');
-const showThemeMenu = ref(false);
-const isSavingTheme = ref(false);
-const setTheme = async key => {
-  if (isSavingTheme.value) return;
-  isSavingTheme.value = true;
-  try {
-    await CrmAPI.updateTheme(key);
-    await store.dispatch('crm/fetchSettings');
-    showThemeMenu.value = false;
-    useAlert(`Tema aplicado: ${ALL_THEMES.find(t => t.key === key)?.label}`);
-  } catch {
-    useAlert('Erro ao trocar o tema.');
-  } finally {
-    isSavingTheme.value = false;
-  }
+const kindVarsOf = key => {
+  const kk = KIND_BY_KEY[key];
+  return {
+    '--k-grad': kk.grad,
+    '--k-deep': kk.deep,
+    '--k-rgb': hexToRgbSpaced(kk.color),
+    '--k-deep-rgb': hexToRgbSpaced(kk.deep),
+  };
 };
+// "Nova consulta" / "Agendar cirurgia" / "Novo exame"…
+const newLabel = computed(() =>
+  isSurgeryMode.value ? 'Agendar cirurgia' : `${k.value.article === 'o' ? 'Novo' : 'Nova'} ${k.value.noun}`
+);
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
 // ── JANELAS DA SALA CIRÚRGICA (clínica parceira + dia + horário + bloco) ──
-// Equivalente às janelas dos médicos, mas do trilho de cirurgias. O campo
-// unit da janela recebe a KEY do local — assim scanAgenda/ocupação funcionam.
 const surgeryWindows = computed(() => resolveSurgeryWindows(crmSettings.value));
-const surgeryWindowsForDay = day =>
-  surgeryWindows.value.filter(w => w.dow === day.getDay());
+const surgeryWindowsForDay = day => surgeryWindows.value.filter(w => w.dow === day.getDay());
 const surgeryLocationLabel = key =>
   surgeryLocations.value.find(l => l.key === key)?.label || key || 'Local a definir';
 
@@ -122,8 +109,9 @@ const saveSurgeryWindows = async () => {
 };
 
 // ── Duração dos agendamentos (blocos proporcionais nas visões) ──
-// CONFIGURÁVEL pelas janelas: o bloco da janela (médico ou sala cirúrgica)
-// onde o horário cai define a duração. Sem janela: consulta 15 · cirurgia 60.
+// O bloco da janela (médico ou sala) onde o horário cai define a duração.
+// Sem janela: consulta 15 · teleconsulta 20 · exame 30 · cirurgia 60.
+const DEFAULT_DURATION = { consultas: 15, teleconsultas: 20, exames: 30, cirurgias: 60 };
 const taskDuration = task => {
   const d = new Date(task.due_at);
   const mins = d.getHours() * 60 + d.getMinutes();
@@ -135,19 +123,17 @@ const taskDuration = task => {
     const [eh, em] = w.end.split(':').map(Number);
     return mins >= sh * 60 + sm && mins < eh * 60 + em;
   });
-  if (win?.block) return Number(win.block);
-  return isSurgeryTask(task) ? 60 : 15;
+  if (win?.block && kindOf(task) !== 'exames') return Number(win.block);
+  return DEFAULT_DURATION[kindOf(task)] || 15;
 };
 
-// Locais de cirurgia (clínicas parceiras — IOP etc.): editáveis pelo admin,
-// salvos em agenda_config.surgery_locations; a cirurgia guarda o local em unit
+// Locais de cirurgia (clínicas parceiras — IOP etc.)
 const DEFAULT_SURGERY_LOCATIONS = [
-  { key: 'iop', label: 'IOP' },              // geralmente PRK
-  { key: 'ocular_surgery', label: 'Ocular Surgery' }, // geralmente Lasik
+  { key: 'iop', label: 'IOP' },
+  { key: 'ocular_surgery', label: 'Ocular Surgery' },
 ];
-// cor de cada clínica: IOP azul claro · Ocular Surgery prateado
-const LOCATION_COLORS = { iop: '#38BDF8', ocular_surgery: '#94A3B8' };
-const LOCATION_FALLBACK = ['#38BDF8', '#94A3B8', '#0EA5E9', '#818CF8'];
+const LOCATION_COLORS = { iop: '#0EA5E9', ocular_surgery: '#64748B' };
+const LOCATION_FALLBACK = ['#0EA5E9', '#64748B', '#0284C7', '#818CF8'];
 const surgeryLocations = computed(() => {
   const list = crmSettings.value?.surgery_locations;
   const base = Array.isArray(list) && list.length ? list : DEFAULT_SURGERY_LOCATIONS;
@@ -156,8 +142,7 @@ const surgeryLocations = computed(() => {
     color: LOCATION_COLORS[l.key] || LOCATION_FALLBACK[i % LOCATION_FALLBACK.length],
   }));
 });
-const surgeryLocationOf = task =>
-  surgeryLocations.value.find(l => l.key === task.unit) || null;
+const surgeryLocationOf = task => surgeryLocations.value.find(l => l.key === task.unit) || null;
 
 const showLocationsModal = ref(false);
 const locationsDraft = ref([]);
@@ -170,7 +155,7 @@ const addLocationRow = () => locationsDraft.value.push({ key: '', label: '' });
 const removeLocationRow = i => locationsDraft.value.splice(i, 1);
 const slugifyLocation = text =>
   text.toString().trim().toLowerCase().normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 const saveLocations = async () => {
   if (isSavingLocations.value) return;
   isSavingLocations.value = true;
@@ -190,47 +175,53 @@ const saveLocations = async () => {
 };
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const WEEKDAY_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const VIEW_MODES = [
   { key: 'month', label: 'Mês', icon: 'i-lucide-calendar' },
   { key: 'week', label: 'Semana', icon: 'i-lucide-calendar-range' },
   { key: 'day', label: 'Dia', icon: 'i-lucide-calendar-check' },
-  // personalizado abre o calendário bonito p/ escolher a data (item 75)
-  { key: 'custom', label: 'Personalizado', icon: 'i-lucide-calendar-search' },
 ];
 
-// Unidades da clínica (agendas paralelas compartilhadas)
+// Unidades da clínica (+ "online" da teleconsulta)
 const UNITS = {
   tatuape:  { label: 'Tatuapé',      color: '#2563EB' },
   paulista: { label: 'Av. Paulista', color: '#EA580C' },
 };
+const ONLINE = { label: 'Online', color: '#7C3AED' };
 
 const PROBLEMAS = [
   'Catarata', 'Refrativa', 'Ceratocone', 'Lentes Fácicas',
-  'Exames', 'Consulta geral', 'Pós-operatório', 'Plástica ocular',
+  'Consulta geral', 'Pós-operatório', 'Plástica ocular', 'Retorno de exames',
 ];
-
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 07h às 20h (grade do DIA)
-// item 76: a SEMANA mostra só o expediente real (08h às 18h), espichada
-const WEEK_HOURS = Array.from({ length: 11 }, (_, i) => i + 8);
+const EXAMES = [
+  'Pentacam', 'Topografia', 'OCT', 'Biometria', 'Paquimetria', 'Campo visual',
+  'Retinografia', 'Microscopia especular', 'Mapeamento de retina', 'Aberrometria',
+];
+const PROCEDURES = [
+  'Catarata', 'Refrativa PRK', 'Refrativa Lasik', 'Lente Fácica',
+  'Lente de Foco Estendido', 'Trifocal', 'Anel de Ferrara', 'Pterígio',
+  'Capsulotomia YAG', 'Outro',
+];
+const procedureOptions = computed(() => {
+  if (form.value.kind === 'exames') return EXAMES;
+  if (form.value.kind === 'cirurgias') return PROCEDURES;
+  return PROBLEMAS;
+});
+const procedureLabel = computed(() => {
+  if (form.value.kind === 'exames') return 'Exame';
+  if (form.value.kind === 'cirurgias') return 'Procedimento';
+  return 'Problema';
+});
 
 // ── Médicos e janelas de avaliação da clínica ───────────────
-// (DOCTORS/DEFAULT_WINDOWS/slotsFor vivem em helper/cevicoAgenda.js,
-// compartilhados com os indicadores do Meu Painel)
-const doctorColor = name =>
-  DOCTORS.find(d => d.name === name)?.color || '#64748B';
-
-const WEEKDAY_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-
-const crmSettings = useMapGetter('crm/getSettings');
+const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
+const doctorShort = name => DOCTORS.find(d => d.name === name)?.short || name;
 const windows = computed(() => resolveWindows(crmSettings.value));
 
 // horários fechados com o cadeado ({date, time, unit})
 const blockedList = computed(() => resolveBlocked(crmSettings.value));
-const blockedSet = computed(
-  () => new Set(blockedList.value.map(b => blockKey(b.date, b.time, b.unit)))
-);
-const isBlocked = (day, win, slot) =>
-  blockedSet.value.has(blockKey(dateKey(day), slot, win.unit));
+const blockedSet = computed(() => new Set(blockedList.value.map(b => blockKey(b.date, b.time, b.unit))));
+const isBlocked = (day, win, slot) => blockedSet.value.has(blockKey(dateKey(day), slot, win.unit));
 
 const isSavingBlock = ref(false);
 const toggleBlock = async (day, win, slot) => {
@@ -238,9 +229,7 @@ const toggleBlock = async (day, win, slot) => {
   isSavingBlock.value = true;
   try {
     const key = { date: dateKey(day), time: slot, unit: win.unit };
-    const exists = blockedList.value.some(
-      b => b.date === key.date && b.time === key.time && b.unit === key.unit
-    );
+    const exists = blockedList.value.some(b => b.date === key.date && b.time === key.time && b.unit === key.unit);
     const next = exists
       ? blockedList.value.filter(b => !(b.date === key.date && b.time === key.time && b.unit === key.unit))
       : [...blockedList.value, { ...key, doctor: win.doctor }];
@@ -255,10 +244,9 @@ const toggleBlock = async (day, win, slot) => {
 };
 
 const isWeekend = day => day.getDay() === 0 || day.getDay() === 6;
-
-// dias inteiros fechados (feriado, congresso...)
 const blockedDays = computed(() => new Set(resolveBlockedDays(crmSettings.value)));
 const isDayBlocked = day => blockedDays.value.has(dateKey(day));
+// teleconsulta pode acontecer em qualquer dia útil, mesmo sem janela
 const isDayOff = day => isWeekend(day) || isDayBlocked(day);
 
 const toggleBlockDay = async day => {
@@ -280,17 +268,35 @@ const toggleBlockDay = async day => {
 
 const slotsFor = sharedSlotsFor;
 
-// janelas de um dia (respeitando o filtro de unidade/médico ativo);
-// no trilho de cirurgias, as janelas são as da SALA CIRÚRGICA
+// janelas de um dia no trilho ativo: consultas/exames = médicos (com o
+// filtro de unidade/médico); cirurgias = sala cirúrgica; teleconsultas = nenhuma
 const windowsForDay = day => {
   if (isSurgeryMode.value) return surgeryWindowsForDay(day);
+  if (isTele.value) return [];
   return windows.value
     .filter(w => w.dow === day.getDay())
     .filter(w => !activeUnit.value || w.unit === activeUnit.value)
     .filter(w => !activeDoctor.value || w.doctor === activeDoctor.value);
 };
+const toMin = hm => {
+  const [h, m] = hm.split(':').map(Number);
+  return h * 60 + m;
+};
+// faixas para a coluna de horas (semana/dia)
+const bandsForDay = day =>
+  windowsForDay(day).map(w => ({
+    key: (w.doctor || w.unit) + w.start,
+    startMin: toMin(w.start),
+    endMin: toMin(w.end),
+    block: Number(w.block) || 15,
+    color: winColor(w),
+    label: w.doctor ? doctorShort(w.doctor) : surgeryLocationLabel(w.unit),
+    title: `${winTitle(w)} · ${w.start}–${w.end} (${winUnitLabel(w)}) · blocos de ${w.block} min`,
+    unit: w.unit,
+    doctor: w.doctor || '',
+  }));
 
-// consultas ocupando um bloco (pode haver ENCAIXE: 2+ no mesmo horário)
+// agendamentos ocupando um bloco (pode haver ENCAIXE: 2+ no mesmo horário)
 const tasksAtSlotAll = (day, win, slot) =>
   dayTasks(day).filter(t => {
     const d = new Date(t.due_at);
@@ -306,25 +312,21 @@ const windowsByDow = computed(() => {
   return map;
 });
 
-// ── Edição das janelas (admin) ──────────────────────────────
+// ── Edição das janelas (admin) ──
 const isEditingWindows = ref(false);
 const editWindows = ref([]);
 const isSavingWindows = ref(false);
-
 const startEditWindows = () => {
   editWindows.value = windows.value.map(w => ({ ...w }));
   isEditingWindows.value = true;
 };
-
 const addWindow = () => {
   editWindows.value.push({
     dow: 1, unit: 'paulista', doctor: DOCTORS[0].name,
     turno: 'Manhã', start: '08:00', end: '11:00', block: 15,
   });
 };
-
 const removeWindow = i => editWindows.value.splice(i, 1);
-
 const saveWindows = async () => {
   isSavingWindows.value = true;
   try {
@@ -342,8 +344,7 @@ const saveWindows = async () => {
   }
 };
 
-// ── item 76: FECHAR/reabrir a agenda de um médico (as janelas dele
-// somem de toda parte até reabrir; personalizar dias/horários = Editar) ──
+// ── FECHAR/reabrir a agenda de um médico (item 76) ──
 const closedDoctors = computed(() => crmSettings.value?.agenda_closed_doctors || []);
 const isDoctorClosed = name => closedDoctors.value.includes(name);
 const togglingDoctor = ref('');
@@ -351,14 +352,10 @@ const toggleDoctorClosed = async name => {
   const wasClosed = isDoctorClosed(name);
   togglingDoctor.value = name;
   try {
-    const next = wasClosed
-      ? closedDoctors.value.filter(x => x !== name)
-      : [...closedDoctors.value, name];
+    const next = wasClosed ? closedDoctors.value.filter(x => x !== name) : [...closedDoctors.value, name];
     await CrmAPI.updateClosedDoctors(next);
     await store.dispatch('crm/fetchSettings');
-    useAlert(wasClosed
-      ? `Agenda de ${name} reaberta!`
-      : `Agenda de ${name} fechada — as janelas somem até reabrir.`);
+    useAlert(wasClosed ? `Agenda de ${name} reaberta!` : `Agenda de ${name} fechada — as janelas somem até reabrir.`);
   } catch {
     useAlert('Não consegui atualizar a agenda do médico.');
   } finally {
@@ -366,9 +363,9 @@ const toggleDoctorClosed = async name => {
   }
 };
 
-// ── item 76: etiquetas + resposta de formulário na lista do dia ──
+// ── etiquetas + resposta de formulário na lista do dia (item 76) ──
 const dayDetails = ref({});
-const formAnswersTask = ref(null); // { name, detail } → modal de leitura
+const formAnswersTask = ref(null);
 const loadDayDetails = async () => {
   const ids = dayViewTasks.value.filter(t => t.contact_id).map(t => t.id);
   if (!ids.length) {
@@ -382,7 +379,7 @@ const loadDayDetails = async () => {
     dayDetails.value = {};
   }
 };
-watch([viewMode, cursor, agendaMode, allTasks], () => {
+watch([viewMode, cursor, kind, allTasks], () => {
   if (viewMode.value === 'day') loadDayDetails();
 });
 const detailOf = task => dayDetails.value[task.id] || null;
@@ -391,26 +388,22 @@ const openFormAnswers = task => {
   if (detail?.form_response) formAnswersTask.value = { name: displayName(task), detail };
 };
 
-// ── Filtro de consultas ─────────────────────────────────────
-const activeUnit = computed(() =>
-  view.value.startsWith('unit:') ? view.value.slice(5) : null
-);
-// agenda de UM médico: só as janelas e consultas dele
-const activeDoctor = computed(() =>
-  view.value.startsWith('doctor:') ? view.value.slice(7) : null
-);
+// ── Filtro ──
+const activeUnit = computed(() => (view.value.startsWith('unit:') ? view.value.slice(5) : null));
+const activeDoctor = computed(() => (view.value.startsWith('doctor:') ? view.value.slice(7) : null));
+const isPersonalView = computed(() => view.value === 'me' || /^\d+$/.test(view.value));
+const isAppointment = t => t.task_type === 'consulta' || t.task_type === 'cirurgia' || t.unit;
 
-const isAppointment = t => t.task_type === 'consulta' || t.unit;
+// tudo o que está no calendário (canceladas ficam fora; continuam no banco)
+const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at));
+const inKind = t => kindOf(t) === kind.value;
 
 const visibleTasks = computed(() => {
-  // canceladas ficam fora do calendário (continuam no banco p/ indicadores)
-  const list = allTasks.value.filter(x => x.due_at && !x.canceled_at);
-  if (view.value === 'clinic') return modeFilter(list.filter(isAppointment));
-  if (activeUnit.value) return modeFilter(list.filter(x => x.unit === activeUnit.value));
-  if (activeDoctor.value)
-    return modeFilter(list.filter(x => isAppointment(x) && x.doctor === activeDoctor.value));
-  if (view.value === 'me')
-    return list.filter(x => !x.unit && x.assignee?.id === currentUser.value.id);
+  const list = liveTasks.value;
+  if (view.value === 'clinic') return list.filter(isAppointment).filter(inKind);
+  if (activeUnit.value) return list.filter(x => x.unit === activeUnit.value).filter(inKind);
+  if (activeDoctor.value) return list.filter(x => isAppointment(x) && x.doctor === activeDoctor.value).filter(inKind);
+  if (view.value === 'me') return list.filter(x => !x.unit && x.assignee?.id === currentUser.value.id);
   return list.filter(x => !x.unit && x.assignee?.id === Number(view.value));
 });
 
@@ -420,17 +413,39 @@ const tasksByDay = computed(() => {
     const key = format(new Date(task.due_at), 'yyyy-MM-dd');
     (map[key] ||= []).push(task);
   });
-  Object.values(map).forEach(arr =>
-    arr.sort((a, b) => new Date(a.due_at) - new Date(b.due_at))
-  );
+  Object.values(map).forEach(arr => arr.sort((a, b) => new Date(a.due_at) - new Date(b.due_at)));
   return map;
 });
-
 const dayTasks = day => tasksByDay.value[format(day, 'yyyy-MM-dd')] || [];
 const isToday = day => isSameDay(day, new Date());
 const inMonth = day => isSameMonth(day, cursor.value);
 
-// ── Calendário interativo (popover do rótulo de navegação) ──
+// ── intervalo visível (mês/semana/dia) → contagem por tipo no seletor ──
+const rangeStart = computed(() => {
+  if (viewMode.value === 'month') return startOfWeek(startOfMonth(cursor.value), { weekStartsOn: 0 });
+  if (viewMode.value === 'week') return startOfWeek(cursor.value, { weekStartsOn: 0 });
+  const d = new Date(cursor.value); d.setHours(0, 0, 0, 0); return d;
+});
+const rangeEnd = computed(() => {
+  if (viewMode.value === 'month') return addDays(endOfWeek(endOfMonth(cursor.value), { weekStartsOn: 0 }), 1);
+  if (viewMode.value === 'week') return addDays(startOfWeek(cursor.value, { weekStartsOn: 0 }), 7);
+  return addDays(rangeStart.value, 1);
+});
+const kindCounts = computed(() => {
+  const out = { consultas: 0, teleconsultas: 0, exames: 0, cirurgias: 0 };
+  const s = rangeStart.value.getTime();
+  const e = rangeEnd.value.getTime();
+  liveTasks.value.filter(isAppointment).forEach(t => {
+    const ts = new Date(t.due_at).getTime();
+    if (ts >= s && ts < e) out[kindOf(t)] += 1;
+  });
+  return out;
+});
+const rangeNoun = computed(() =>
+  ({ month: 'no mês', week: 'na semana', day: 'no dia' })[viewMode.value]
+);
+
+// ── Calendário interativo (popover do rótulo do período) ──
 const showDatePicker = ref(false);
 const pickerCursor = ref(new Date());
 const toggleDatePicker = () => {
@@ -438,19 +453,14 @@ const toggleDatePicker = () => {
   showDatePicker.value = !showDatePicker.value;
 };
 const pickerLabel = computed(() =>
-  pickerCursor.value
-    .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
-    .replace(/^./, c => c.toUpperCase())
+  cap(pickerCursor.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))
 );
 const pickerWeeks = computed(() => {
   const start = startOfWeek(startOfMonth(pickerCursor.value), { weekStartsOn: 0 });
   const end = endOfWeek(endOfMonth(pickerCursor.value), { weekStartsOn: 0 });
   const days = [];
   let d = start;
-  while (d <= end) {
-    days.push(d);
-    d = addDays(d, 1);
-  }
+  while (d <= end) { days.push(d); d = addDays(d, 1); }
   const out = [];
   for (let i = 0; i < days.length; i += 7) out.push(days.slice(i, i + 7));
   return out;
@@ -460,34 +470,36 @@ const pickDate = day => {
   showDatePicker.value = false;
 };
 
-// ── Navegação (muda conforme a visão) ───────────────────────
+// ── Navegação ──
 const step = dir => {
   if (viewMode.value === 'month') cursor.value = addMonths(cursor.value, dir);
   else if (viewMode.value === 'week') cursor.value = addWeeks(cursor.value, dir);
   else cursor.value = addDays(cursor.value, dir);
 };
 const goToday = () => { cursor.value = new Date(); };
-
-// item 75: HOJE com dia/mês/ano + passos de UM DIA (−dia / +dia) ao redor
-const todayFull = computed(() => format(cursor.value, 'dd/MM/yyyy'));
-const stepDay = dir => { cursor.value = addDays(cursor.value, dir); };
-const onViewMode = key => {
-  if (key === 'custom') { toggleDatePicker(); return; } // abre o calendário
-  viewMode.value = key;
-};
-
-const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
+const stepLabel = computed(() => ({ month: 'mês', week: 'semana', day: 'dia' })[viewMode.value]);
 
 const navLabel = computed(() => {
   if (viewMode.value === 'month') {
-    return capitalize(cursor.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+    return cap(cursor.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
   }
   if (viewMode.value === 'week') {
     const start = startOfWeek(cursor.value, { weekStartsOn: 0 });
     const end = endOfWeek(cursor.value, { weekStartsOn: 0 });
-    return `${start.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} — ${end.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
+    const sameMonth = start.getMonth() === end.getMonth();
+    const a = start.toLocaleDateString('pt-BR', { day: 'numeric', month: sameMonth ? undefined : 'short' });
+    const b = end.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+    return `${a} – ${cap(b)}`.replace(' de ', ' de ');
   }
-  return capitalize(cursor.value.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
+  return cap(cursor.value.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
+});
+const navSub = computed(() => {
+  if (viewMode.value === 'week') {
+    const start = startOfWeek(cursor.value, { weekStartsOn: 0 });
+    return `semana ${format(start, 'dd/MM')} – ${format(endOfWeek(cursor.value, { weekStartsOn: 0 }), 'dd/MM')}`;
+  }
+  if (viewMode.value === 'day') return format(cursor.value, 'dd/MM/yyyy');
+  return '';
 });
 
 // grade mensal (6 semanas, domingo primeiro)
@@ -496,17 +508,15 @@ const weeks = computed(() => {
   const end = endOfWeek(endOfMonth(cursor.value), { weekStartsOn: 0 });
   const days = [];
   let d = start;
-  while (d <= end) {
-    days.push(d);
-    d = addDays(d, 1);
-  }
+  while (d <= end) { days.push(d); d = addDays(d, 1); }
   const result = [];
   for (let i = 0; i < days.length; i += 7) result.push(days.slice(i, i + 7));
   return result;
 });
+const MONTH_MAX = 4;
 
-// dias da semana da visão semanal — toggle "remover sáb/dom" (item 76)
-const hideWeekend = ref(localStorage.getItem('cevico_agenda_hide_weekend') === '1');
+// dias da semana da visão semanal — "esconder sáb/dom" (item 76)
+const hideWeekend = ref(localStorage.getItem('cevico_agenda_hide_weekend') !== '0');
 const toggleWeekend = () => {
   hideWeekend.value = !hideWeekend.value;
   localStorage.setItem('cevico_agenda_hide_weekend', hideWeekend.value ? '1' : '0');
@@ -516,175 +526,133 @@ const weekDays = computed(() => {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   return hideWeekend.value ? days.filter(d => d.getDay() !== 0 && d.getDay() !== 6) : days;
 });
-const weekGridCols = computed(() => `52px repeat(${weekDays.value.length}, 1fr)`);
+const weekGridCols = computed(() => `56px repeat(${weekDays.value.length}, minmax(0, 1fr))`);
 
-// visão diária: consultas agrupadas por hora
+// ── grade de horas: o expediente (08–18) esticado até cobrir TUDO o que
+//    está marcado no intervalo (nada fica escondido) ──
+const WEEK_ROW_PX = 64;
+const DAY_ROW_PX = 96;
+const hourSpan = (tasks, baseStart, baseEnd) => {
+  let start = baseStart;
+  let end = baseEnd;
+  tasks.forEach(t => {
+    const d = new Date(t.due_at);
+    const h = d.getHours();
+    const endH = Math.ceil((h * 60 + d.getMinutes() + taskDuration(t)) / 60);
+    if (h < start) start = h;
+    if (endH > end) end = endH;
+  });
+  return { start: Math.max(6, start), end: Math.min(23, Math.max(end, start + 1)) };
+};
+const weekTasks = computed(() => weekDays.value.flatMap(d => dayTasks(d)));
+const weekSpan = computed(() => hourSpan(weekTasks.value, 8, 18));
+const weekHours = computed(() =>
+  Array.from({ length: weekSpan.value.end - weekSpan.value.start }, (_, i) => weekSpan.value.start + i)
+);
 const dayViewTasks = computed(() => dayTasks(cursor.value));
-const tasksOutsideHours = computed(() =>
-  dayViewTasks.value.filter(t => {
-    const h = new Date(t.due_at).getHours();
-    return h < HOURS[0] || h > HOURS[HOURS.length - 1];
-  })
+const daySpan = computed(() => hourSpan(dayViewTasks.value, 7, 20));
+const dayHours = computed(() =>
+  Array.from({ length: daySpan.value.end - daySpan.value.start }, (_, i) => daySpan.value.start + i)
 );
 
-// ── Blocos proporcionais ao tempo (visões semana e dia) ─────
-// 15 min = 25% de uma hora: o bloco ocupa exatamente o espaço do seu
-// tempo, deixando o espaço livre evidente para o próximo encaixe.
-const WEEK_ROW_PX = 64; // altura de 1 hora na grade semanal (espichada — item 76)
-const DAY_ROW_PX = 112; // altura de 1 hora na grade diária (mais vertical — item 76)
+// linha de AGORA (atualiza a cada minuto)
+const nowMinutes = ref(new Date().getHours() * 60 + new Date().getMinutes());
+let nowTimer = null;
 
-// posição do bloco DENTRO da célula da hora (semana)
-const weekBlockStyle = (task, idx) => {
-  const d = new Date(task.due_at);
-  const topPct = (d.getMinutes() / 60) * 100;
-  const heightPct = Math.max((taskDuration(task) / 60) * 100, 28);
-  return {
-    top: `${topPct}%`,
-    height: `${heightPct}%`,
-    left: `${2 + idx * 12}%`,
-    right: '2px',
-    zIndex: 5 + idx,
-  };
-};
-
-// posição do bloco na grade do DIA (a partir das 07:00)
-const dayBlockStyle = (task, list) => {
-  const d = new Date(task.due_at);
-  const minutes = (d.getHours() - HOURS[0]) * 60 + d.getMinutes();
-  // encaixes no mesmo horário deslocam pra direita
-  const sameTime = list.filter(
-    t => t.id !== task.id && new Date(t.due_at).getTime() === d.getTime()
-  );
-  const idx = sameTime.filter(t => t.id < task.id).length;
-  return {
-    top: `${(minutes / 60) * DAY_ROW_PX}px`,
-    height: `${Math.max((taskDuration(task) / 60) * DAY_ROW_PX - 2, 20)}px`,
-    left: `${56 + idx * 120}px`,
-    right: '8px',
-    zIndex: 5 + idx,
-  };
-};
-
-// clique num espaço vazio da grade do dia → agenda naquele horário (15 em 15)
-const onDayGridClick = evt => {
-  if (isDayOff(cursor.value)) return;
-  const rect = evt.currentTarget.getBoundingClientRect();
-  const minutes = ((evt.clientY - rect.top) / DAY_ROW_PX) * 60;
-  const total = Math.round(minutes / 15) * 15;
-  const h = HOURS[0] + Math.floor(total / 60);
-  const mm = total % 60;
-  openCreateOnDay(cursor.value, { time: `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}` });
-};
-const gridTasks = computed(() =>
-  dayViewTasks.value.filter(t => {
-    const h = new Date(t.due_at).getHours();
-    return h >= HOURS[0] && h <= HOURS[HOURS.length - 1];
-  })
-);
-
-// ── Helpers de exibição ─────────────────────────────────────
-const displayName = task => (task.title || '').replace(/^Consulta:\s*/i, '');
+// ── Helpers de exibição ──
+const displayName = task => (task.title || '').replace(/^(Consulta|Teleconsulta|Exame|Cirurgia):\s*/i, '');
 const chipTime = task =>
   new Date(task.due_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const unitOf = task => {
+  if (task.unit === ONLINE_UNIT) return ONLINE;
   if (task.unit && UNITS[task.unit]) return UNITS[task.unit];
   if (isSurgeryTask(task)) {
     const loc = surgeryLocationOf(task);
-    if (loc) return { label: loc.label, color: loc.color || SURGERY_COLOR };
+    if (loc) return { label: loc.label, color: loc.color };
   }
   return null;
 };
-const dotColor = task => unitOf(task)?.color || '#94A3B8';
-const isOverdue = task => task.status !== 'done' && new Date(task.due_at) < new Date();
-// modalidade da consulta (sem tipo = avaliação, caso das consultas antigas)
+// cor do balão: unidade (Tatuapé/Paulista), local da cirurgia, ou a cor do tipo
+const accentOf = task => unitOf(task)?.color || KIND_BY_KEY[kindOf(task)]?.color || '#2563EB';
+const evVars = task => ({ '--ev': accentOf(task), '--ev-rgb': hexToRgbSpaced(accentOf(task)) });
 const modalityOf = task =>
   MODALITIES.find(m => m.key === (task.modality || 'avaliacao')) || MODALITIES[0];
+const kindLabelOf = task => KIND_BY_KEY[kindOf(task)]?.noun || 'consulta';
 
-// ── Ocupação da agenda (% preenchida — dia/semana/mês) ──────
-// Segue a navegação do calendário e o filtro ativo (unidade/médico).
-// Fórmula: blocos ocupados ÷ blocos das janelas (cadeados fora da conta).
+// ── Ocupação da agenda (% preenchida — dia/semana/mês) ──
+// Consultas e exames dividem os MESMOS blocos dos médicos (a ocupação soma
+// os dois — é o que o Atendente enxerga ao oferecer horários); cirurgias
+// contra a sala cirúrgica; teleconsulta não ocupa bloco físico.
 const occWindows = computed(() => {
   if (isSurgeryMode.value) return surgeryWindows.value;
   return windows.value
     .filter(w => !activeUnit.value || w.unit === activeUnit.value)
     .filter(w => !activeDoctor.value || w.doctor === activeDoctor.value);
 });
+const occTasks = computed(() => {
+  const base = liveTasks.value.filter(isAppointment);
+  if (isSurgeryMode.value) return base.filter(isSurgeryTask);
+  return base
+    .filter(t => !isSurgeryTask(t) && t.unit !== ONLINE_UNIT)
+    .filter(t => !activeUnit.value || t.unit === activeUnit.value)
+    .filter(t => !activeDoctor.value || t.doctor === activeDoctor.value);
+});
 const occScan = (from, days) =>
   scanAgenda({
     windows: occWindows.value,
-    tasks: isSurgeryMode.value ? visibleTasks.value : visibleTasks.value.filter(isAppointment),
+    tasks: occTasks.value,
     blockedSet: blockedSet.value,
     blockedDays: blockedDays.value,
     from,
     days,
     freeLimit: 0,
   });
-
-// só faz sentido contra as janelas da clínica (não na agenda pessoal,
-// nem no trilho de cirurgias — que não usa as janelas de avaliação)
 const showOccupancy = computed(() => {
-  if (isSurgeryMode.value) return surgeryWindows.value.length > 0;
-  return view.value === 'clinic' || !!activeUnit.value || !!activeDoctor.value;
+  if (isTele.value || isPersonalView.value) return false;
+  return occWindows.value.length > 0;
 });
+const showOccDetail = ref(false);
 const occDay = computed(() => occScan(cursor.value, 1));
 const occWeek = computed(() => occScan(startOfWeek(cursor.value, { weekStartsOn: 0 }), 7));
-const occMonth = computed(() =>
-  occScan(startOfMonth(cursor.value), endOfMonth(cursor.value).getDate())
+const occMonth = computed(() => occScan(startOfMonth(cursor.value), endOfMonth(cursor.value).getDate()));
+const occCurrent = computed(() =>
+  ({ month: occMonth.value, week: occWeek.value, day: occDay.value })[viewMode.value]
 );
-
-const occDayLabel = computed(() =>
-  cursor.value.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-);
-const occWeekLabel = computed(() => {
-  const s = startOfWeek(cursor.value, { weekStartsOn: 0 });
-  const e = endOfWeek(cursor.value, { weekStartsOn: 0 });
-  const fmt = d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-  return `${fmt(s)}–${fmt(e)}`;
-});
-const occMonthLabel = computed(() =>
-  capitalize(cursor.value.toLocaleDateString('pt-BR', { month: 'long' }))
-);
-
-// verde = com vagas · dourado = enchendo · vermelho = quase cheia
+const occRows = computed(() => [
+  { key: 'day', label: 'Dia', sub: format(cursor.value, 'dd/MM'), scan: occDay.value },
+  { key: 'week', label: 'Semana', sub: `${format(startOfWeek(cursor.value, { weekStartsOn: 0 }), 'dd/MM')}–${format(endOfWeek(cursor.value, { weekStartsOn: 0 }), 'dd/MM')}`, scan: occWeek.value },
+  { key: 'month', label: 'Mês', sub: cap(cursor.value.toLocaleDateString('pt-BR', { month: 'long' })), scan: occMonth.value },
+]);
 const occColor = pct => {
   if (pct >= 80) return '#EF4444';
   if (pct >= 50) return '#D4A017';
   return '#22C55E';
 };
-
-// barra SEGMENTADA por tipo de consulta (avaliação/retorno/exames) —
-// mostra quanto da agenda está ocupada com cada modalidade
+const OCC_MODALITIES = MODALITIES.filter(m => m.key !== 'teleconsulta');
 const occSegments = scan => {
   if (isSurgeryMode.value || !scan.total) return null;
-  return MODALITIES
+  return OCC_MODALITIES
     .map(m => ({ ...m, count: scan.byModality?.[m.key] || 0 }))
     .filter(s => s.count > 0)
     .map(s => ({ ...s, pct: Math.round((s.count / scan.total) * 100) }));
 };
 const occCaption = scan => {
   if (!scan.total) return null;
-  const parts = (occSegments(scan) || [])
-    .map(s => `${s.label} ${s.pct}%`)
-    .join(' · ');
+  const parts = (occSegments(scan) || []).map(s => `${s.label} ${s.pct}%`).join(' · ');
   return parts || null;
 };
-
-// % de um dia específico (chip nas visões Mês/Semana)
 const dayOccupancy = day => {
-  if (isDayOff(day)) return null;
+  if (isDayOff(day) || !showOccupancy.value) return null;
   if (!occWindows.value.some(w => w.dow === day.getDay())) return null;
   return occScan(day, 1);
 };
 
-// ocupação de UMA janela de médico (visão Dia)
 // rótulos/cores da janela — médicos (consultas) OU sala cirúrgica (cirurgias)
 const winColor = win =>
-  win.doctor
-    ? doctorColor(win.doctor)
-    : surgeryLocations.value.find(l => l.key === win.unit)?.color || SURGERY_COLOR;
+  win.doctor ? doctorColor(win.doctor) : surgeryLocations.value.find(l => l.key === win.unit)?.color || k.value.color;
 const winTitle = win => win.doctor || `Sala cirúrgica — ${surgeryLocationLabel(win.unit)}`;
 const winUnitLabel = win => (win.doctor ? UNITS[win.unit]?.label : surgeryLocationLabel(win.unit));
-
+const winVars = win => ({ '--w': winColor(win), '--w-rgb': hexToRgbSpaced(winColor(win)), '--w-deep': winColor(win) });
 const winOccupancy = (day, win) => {
   const slots = slotsFor(win).filter(s => !isBlocked(day, win, s));
   const filled = slots.filter(s => taskAtSlot(day, win, s)).length;
@@ -692,34 +660,26 @@ const winOccupancy = (day, win) => {
   return { filled, total, pct: total ? Math.round((filled / total) * 100) : 0 };
 };
 
-// ── KPIs no estilo do Dashboard CRM (seguem o trilho ativo) ──
+// ── KPIs do trilho ativo ──
 const clinicTasks = computed(() =>
-  modeFilter(allTasks.value.filter(x => isAppointment(x) && x.due_at && x.status !== 'done'))
+  liveTasks.value.filter(x => isAppointment(x) && x.status !== 'done').filter(inKind)
 );
-const kpiToday = computed(() =>
-  clinicTasks.value.filter(x => isSameDay(new Date(x.due_at), new Date())).length
-);
+const kpiToday = computed(() => clinicTasks.value.filter(x => isSameDay(new Date(x.due_at), new Date())).length);
 const kpiWeek = computed(() => {
   const start = startOfWeek(new Date(), { weekStartsOn: 0 });
   const end = endOfWeek(new Date(), { weekStartsOn: 0 });
-  return clinicTasks.value.filter(x => {
-    const d = new Date(x.due_at);
-    return d >= start && d <= end;
-  }).length;
+  return clinicTasks.value.filter(x => { const d = new Date(x.due_at); return d >= start && d <= end; }).length;
 });
-const kpiByUnitMonth = computed(() => {
-  const inCursorMonth = clinicTasks.value.filter(x =>
-    isSameMonth(new Date(x.due_at), cursor.value)
-  );
-  const keys = isSurgeryMode.value
-    ? surgeryLocations.value.map(l => l.key)
-    : Object.keys(UNITS);
-  return Object.fromEntries(
-    keys.map(key => [key, inCursorMonth.filter(x => x.unit === key).length])
-  );
+const kpiPlaces = computed(() => {
+  const inCursorMonth = clinicTasks.value.filter(x => isSameMonth(new Date(x.due_at), cursor.value));
+  if (isTele.value) return [{ key: ONLINE_UNIT, label: 'Online — no mês', color: ONLINE.color, n: inCursorMonth.length }];
+  const places = isSurgeryMode.value
+    ? surgeryLocations.value.slice(0, 2).map(l => ({ key: l.key, label: l.label, color: l.color }))
+    : Object.entries(UNITS).map(([key, u]) => ({ key, label: u.label, color: u.color }));
+  return places.map(p => ({ ...p, label: `${p.label} — no mês`, n: inCursorMonth.filter(x => x.unit === p.key).length }));
 });
 
-// ── Fetch ──────────────────────────────────────────────────
+// ── Fetch ──
 const fetchTasks = async () => {
   isLoading.value = true;
   try {
@@ -732,7 +692,8 @@ const fetchTasks = async () => {
 };
 
 onMounted(async () => {
-  // deep-link "📆 Ver na agenda" (nota da IA): ?date=AAAA-MM-DD abre o DIA
+  // deep-links: ?date=AAAA-MM-DD abre o DIA; ?kind=exames abre o trilho;
+  // ?view=month|week|day escolhe a visão
   if (route.query.date) {
     const d = new Date(`${route.query.date}T12:00:00`);
     if (!Number.isNaN(d.getTime())) {
@@ -740,34 +701,60 @@ onMounted(async () => {
       viewMode.value = 'day';
     }
   }
+  if (route.query.kind && KIND_BY_KEY[route.query.kind]) kind.value = route.query.kind;
+  if (['month', 'week', 'day'].includes(route.query.view)) viewMode.value = route.query.view;
   if (!agents.value.length) store.dispatch('agents/get');
-  await store.dispatch('crm/fetchSettings').catch(() => {}); // janelas dos médicos
+  await store.dispatch('crm/fetchSettings').catch(() => {});
   fetchTasks();
-  loadCrmStages(); // colunas do CRM p/ a conferência do dia
+  loadCrmStages();
+  nowTimer = setInterval(() => {
+    const n = new Date();
+    nowMinutes.value = n.getHours() * 60 + n.getMinutes();
+  }, 60000);
 });
+onBeforeUnmount(() => clearInterval(nowTimer));
 
-// ── Modal criar/editar consulta ─────────────────────────────
+// ── Modal criar/editar ──
 const showModal = ref(false);
 const editingTask = ref(null);
 const isSaving = ref(false);
 const showDeleteConfirm = ref(false);
 
-const emptyForm = (day, prefill = {}) => ({
-  name: prefill.name || '',
-  phone: prefill.phone || '',
-  procedure: prefill.procedure || '',
-  doctor: prefill.doctor || activeDoctor.value || '',
-  modality: prefill.modality || 'avaliacao',
-  date: format(day || cursor.value, 'yyyy-MM-dd'),
-  time: prefill.time || '09:00',
-  unit: prefill.unit ||
-    (isSurgeryMode.value ? surgeryLocations.value[0]?.key : activeUnit.value || 'tatuape') || '',
-  status: 'todo',
-  canceled: false,
-  description: prefill.description || '',
-});
-
+const defaultModality = key => ({ consultas: 'avaliacao', teleconsultas: 'teleconsulta', exames: 'exames', cirurgias: '' })[key] || 'avaliacao';
+const defaultUnit = key => {
+  if (key === 'teleconsultas') return ONLINE_UNIT;
+  if (key === 'cirurgias') return surgeryLocations.value[0]?.key || '';
+  return activeUnit.value || 'tatuape';
+};
+const emptyForm = (day, prefill = {}) => {
+  const key = prefill.kind || kind.value;
+  return {
+    kind: key,
+    name: prefill.name || '',
+    phone: prefill.phone || '',
+    procedure: prefill.procedure || '',
+    doctor: prefill.doctor || activeDoctor.value || '',
+    modality: prefill.modality || defaultModality(key),
+    date: format(day || cursor.value, 'yyyy-MM-dd'),
+    time: prefill.time || '09:00',
+    unit: prefill.unit ?? defaultUnit(key),
+    status: 'todo',
+    canceled: false,
+    description: prefill.description || '',
+  };
+};
 const form = ref(emptyForm());
+const formKind = computed(() => kindFor(form.value.kind));
+const formVars = computed(() => kindVars(formKind.value));
+// trocar o tipo no modal (só ao criar): modalidade e unidade acompanham
+const setFormKind = key => {
+  if (editingTask.value || form.value.kind === key) return;
+  form.value.kind = key;
+  form.value.modality = defaultModality(key);
+  form.value.unit = defaultUnit(key);
+  if (key !== 'consultas' && key !== 'teleconsultas') form.value.procedure = '';
+};
+const consultaModalities = MODALITIES.filter(m => m.key === 'avaliacao' || m.key === 'retorno');
 
 const openCreateOnDay = (day, prefill = {}) => {
   editingTask.value = null;
@@ -775,30 +762,23 @@ const openCreateOnDay = (day, prefill = {}) => {
   showDeleteConfirm.value = false;
   showModal.value = true;
 };
-
-// clique num bloco livre da janela → consulta pré-preenchida
+// clique num bloco livre da janela → pré-preenchido com unidade e médico
 const openCreateSlot = (day, win, slot) =>
   openCreateOnDay(day, { time: slot, unit: win.unit, doctor: win.doctor });
-
-// mês: clicar no dia NAVEGA para a semana daquele dia (agendar é na
-// semana ou no botão +, onde o horário já vem entendido)
+// clique na coluna de horas (semana/dia)
+const onColumnCreate = ({ day, minutes, band }) => {
+  const time = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  openCreateOnDay(day, { time, unit: band?.unit, doctor: band?.doctor });
+};
+// mês: clicar no dia NAVEGA para a semana daquele dia
 const goToWeek = day => {
   cursor.value = new Date(day);
   viewMode.value = 'week';
 };
-
-// semana: a ALTURA do clique dentro da célula diz o horário — metade de
-// cima = hora cheia, metade de baixo = meia hora
-const openCreateAtPoint = (day, hour, evt) => {
-  const cell = evt.currentTarget;
-  const ratio = cell.clientHeight
-    ? Math.min(0.99, Math.max(0, evt.offsetY / cell.clientHeight))
-    : 0;
-  const half = ratio >= 0.5 ? '30' : '00';
-  openCreateOnDay(day, { time: `${String(hour).padStart(2, '0')}:${half}` });
+const goToDay = day => {
+  cursor.value = new Date(day);
+  viewMode.value = 'day';
 };
-
-// botão + flutuante: o caminho principal para agendar de qualquer visão
 const openCreateFab = () => {
   const base = viewMode.value === 'month' ? new Date() : new Date(cursor.value);
   openCreateOnDay(base);
@@ -809,11 +789,12 @@ const openEdit = task => {
   const pad = n => String(n).padStart(2, '0');
   editingTask.value = task;
   form.value = {
+    kind: kindOf(task),
     name: displayName(task),
     phone: task.phone ?? '',
     procedure: task.procedure ?? '',
     doctor: task.doctor ?? '',
-    modality: task.modality || 'avaliacao',
+    modality: task.modality || (task.task_type === 'cirurgia' ? '' : 'avaliacao'),
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
     time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
     unit: task.unit ?? '',
@@ -829,32 +810,34 @@ const save = async () => {
   if (!form.value.name.trim() || !form.value.date || isSaving.value) return;
   isSaving.value = true;
   try {
+    const fk = form.value.kind;
     const dueAt = new Date(`${form.value.date}T${form.value.time || '09:00'}`);
     const payload = {
       title: form.value.name.trim(),
       phone: form.value.phone.trim(),
       procedure: form.value.procedure.trim(),
       doctor: form.value.doctor.trim(),
-      modality: form.value.modality || 'avaliacao',
+      modality: fk === 'cirurgias' ? null : (form.value.modality || defaultModality(fk)),
       due_at: dueAt.toISOString(),
-      unit: form.value.unit,
+      unit: fk === 'teleconsultas' ? ONLINE_UNIT : form.value.unit,
       status: form.value.status,
       canceled: form.value.canceled,
       description: form.value.description,
-      // trilho ativo define o tipo; editar preserva o tipo original
-      task_type: editingTask.value?.task_type || (isSurgeryMode.value ? 'cirurgia' : 'consulta'),
+      task_type: fk === 'cirurgias' ? 'cirurgia' : 'consulta',
       priority: 'medium',
     };
+    const noun = kindFor(fk).noun;
     if (editingTask.value) {
       await store.dispatch('tasks/update', { id: editingTask.value.id, ...payload });
-      useAlert(isSurgeryTask(payload) ? 'Cirurgia atualizada' : 'Consulta atualizada');
+      useAlert(`${cap(noun)} atualizad${kindFor(fk).article}`);
     } else {
       await store.dispatch('tasks/create', payload);
-      useAlert(isSurgeryMode.value ? 'Cirurgia agendada 🔪' : 'Consulta agendada');
+      useAlert(`${cap(noun)} agendad${kindFor(fk).article} ${fk === 'cirurgias' ? '🔪' : '✓'}`);
+      if (fk !== kind.value) kind.value = fk; // mostra onde ficou
     }
     showModal.value = false;
   } catch {
-    useAlert('Erro ao salvar a consulta.');
+    useAlert('Erro ao salvar o agendamento.');
   } finally {
     isSaving.value = false;
   }
@@ -865,41 +848,29 @@ const removeTask = async () => {
   try {
     await store.dispatch('tasks/remove', editingTask.value.id);
     showModal.value = false;
-    useAlert('Consulta removida');
+    useAlert('Agendamento removido');
   } catch {
-    useAlert('Erro ao remover a consulta.');
+    useAlert('Erro ao remover.');
   }
 };
 
 // ── Conferência do dia: Compareceu / Faltou + Indicação de cirurgia ──
-// Marcar reflete no CRM: o card do paciente move para a coluna configurada
-// (modal "Janelas dos médicos" → Conferência do dia) e as automações da
-// coluna de destino disparam (régua de conversão/reagendamento).
-const PROCEDURES = [
-  'Catarata', 'Refrativa PRK', 'Refrativa Lasik', 'Lente Fácica',
-  'Lente de Foco Estendido', 'Trifocal', 'Anel de Ferrara', 'Pterígio',
-  'Capsulotomia YAG', 'Outro',
-];
 const savingAttendanceId = ref(0);
-const indicationPickerId = ref(0); // consulta com o seletor de procedimento aberto
+const indicationPickerId = ref(0);
 
 const setAttendance = async (task, value) => {
   if (savingAttendanceId.value) return;
   savingAttendanceId.value = task.id;
   try {
     const next = task.attendance === value ? null : value; // re-clique desfaz
-    const payload = {
-      id: task.id,
-      attendance: next,
-      status: next === 'attended' ? 'done' : 'todo',
-    };
+    const payload = { id: task.id, attendance: next, status: next === 'attended' ? 'done' : 'todo' };
     if (next !== 'attended') {
       payload.surgery_indication = null;
       payload.indicated_procedure = null;
       indicationPickerId.value = 0;
     }
     await store.dispatch('tasks/update', payload);
-    if (next === 'attended') useAlert('✓ Compareceu — agora marque se houve indicação de cirurgia.');
+    if (next === 'attended') useAlert(isSurgeryTask(task) ? '✓ Realizada.' : '✓ Compareceu — agora marque se houve indicação de cirurgia.');
     else if (next === 'missed') useAlert('✗ Falta registrada — card movido no CRM (se a coluna estiver configurada).');
   } catch {
     useAlert('Erro ao registrar a conferência.');
@@ -910,7 +881,6 @@ const setAttendance = async (task, value) => {
 
 const setIndication = async (task, value, procedure = null) => {
   if (savingAttendanceId.value) return;
-  // indicada exige escolher o procedimento primeiro
   if (value === 'indicated' && !procedure) {
     indicationPickerId.value = indicationPickerId.value === task.id ? 0 : task.id;
     return;
@@ -937,7 +907,7 @@ const noSurgeryReasonId = ref(0);
 const noSurgeryReason = ref('');
 const toggleNoSurgery = task => {
   if (task.attendance === 'attended_not_done') {
-    setAttendance(task, 'attended_not_done'); // re-clique desfaz
+    setAttendance(task, 'attended_not_done');
     return;
   }
   noSurgeryReasonId.value = noSurgeryReasonId.value === task.id ? 0 : task.id;
@@ -952,9 +922,7 @@ const confirmNoSurgery = async task => {
       id: task.id,
       attendance: 'attended_not_done',
       status: 'todo',
-      description: reason
-        ? `⚠️ Veio e não operou: ${reason}\n${task.description || ''}`
-        : task.description,
+      description: reason ? `⚠️ Veio e não operou: ${reason}\n${task.description || ''}` : task.description,
     });
     noSurgeryReasonId.value = 0;
     useAlert('Registrado: o paciente veio, mas a cirurgia não aconteceu.');
@@ -965,20 +933,36 @@ const confirmNoSurgery = async task => {
   }
 };
 
-// valor da cirurgia (só admin): vem do card do CRM + forma de pagamento da IA
 const fmtBRL = v =>
   Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
 // da consulta com indicação → agendar a CIRURGIA (trilho azul, pré-preenchida)
 const scheduleSurgeryFrom = task => {
-  agendaMode.value = 'cirurgias';
+  kind.value = 'cirurgias';
   editingTask.value = null;
   form.value = emptyForm(new Date(), {
+    kind: 'cirurgias',
     name: displayName(task),
     phone: task.phone || '',
     procedure: task.indicated_procedure || task.procedure || '',
-    unit: surgeryLocations.value[0]?.key || '', // local padrão (ex.: IOP)
+    unit: surgeryLocations.value[0]?.key || '',
     description: `Origem: consulta de ${format(new Date(task.due_at), 'dd/MM')} às ${chipTime(task)} — cirurgia indicada.`,
+  });
+  showDeleteConfirm.value = false;
+  showModal.value = true;
+};
+// do exame/teleconsulta/consulta → marcar um RETORNO presencial
+const scheduleFollowUpFrom = task => {
+  kind.value = 'consultas';
+  editingTask.value = null;
+  form.value = emptyForm(addDays(new Date(task.due_at), 7), {
+    kind: 'consultas',
+    name: displayName(task),
+    phone: task.phone || '',
+    doctor: task.doctor || '',
+    modality: 'retorno',
+    unit: task.unit && UNITS[task.unit] ? task.unit : 'tatuape',
+    description: `Origem: ${kindLabelOf(task)} de ${format(new Date(task.due_at), 'dd/MM')} às ${chipTime(task)}.`,
   });
   showDeleteConfirm.value = false;
   showModal.value = true;
@@ -990,9 +974,6 @@ const attendanceStages = ref({
   attended_stage_id: '', missed_stage_id: '', indicated_stage_id: '',
   surgery_done_stage_id: '', surgery_missed_stage_id: '',
 });
-// responsáveis pela conferência + prazo (uma pessoa para consultas, outra
-// para cirurgias — o admin escolhe); passou do prazo sem conferir →
-// tarefa automática "Concluir a conferência do dia" pra pessoa certa
 const attendanceOwners = ref({ consulta_user_id: '', cirurgia_user_id: '', deadline: '19:00' });
 const isSavingAttendanceCfg = ref(false);
 
@@ -1000,9 +981,7 @@ const loadCrmStages = async () => {
   try {
     await store.dispatch('crm/fetchPipelines');
     const pipelines = store.getters['crm/getPipelines'] || [];
-    allCrmStages.value = pipelines.flatMap(p =>
-      (p.stages || []).map(s => ({ id: s.id, name: s.name, pipeline: p.name }))
-    );
+    allCrmStages.value = pipelines.flatMap(p => (p.stages || []).map(s => ({ id: s.id, name: s.name, pipeline: p.name })));
     const own = crmSettings.value?.attendance_owners || {};
     attendanceOwners.value = {
       consulta_user_id: own.consulta_user_id || '',
@@ -1049,8 +1028,9 @@ const saveAttendanceStages = async () => {
 const printDayList = () => {
   const day = cursor.value;
   const list = [...dayViewTasks.value].sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
-  const title = `CEVICO — Consultas de ${day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}`;
+  const title = `CEVICO — ${cap(k.value.plural)} de ${day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}`;
   const esc = s => String(s ?? '').replace(/</g, '&lt;');
+  const procHeader = { cirurgias: 'Procedimento', exames: 'Exame' }[kind.value] || 'Problema';
   const rows = list.map(t => `
     <tr>
       <td class="time">${chipTime(t)}</td>
@@ -1067,7 +1047,7 @@ const printDayList = () => {
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
     <style>
       @page { size: A4 portrait; margin: 10mm; }
-      body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+      body { font-family: -apple-system, Inter, Arial, sans-serif; margin: 24px; color: #111; }
       h1 { font-size: 16px; margin: 0 0 2px; }
       p.sub { font-size: 11px; color: #555; margin: 0 0 14px; }
       table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -1079,9 +1059,9 @@ const printDayList = () => {
       @media print { body { margin: 10mm; } }
     </style></head><body>
     <h1>${title}</h1>
-    <p class="sub">${list.length} consulta(s) · Conferência do fim do dia: marque Compareceu, Faltou e Cirurgia indicada — depois registre no sistema (Agenda → visão Dia).</p>
+    <p class="sub">${list.length} ${k.value.noun}(s) · Conferência do fim do dia: marque Compareceu, Faltou e Cirurgia indicada — depois registre no sistema (Agenda → visão Dia).</p>
     <table><thead><tr>
-      <th>Hora</th><th>Paciente</th><th>Telefone</th><th>Problema</th><th>Médico</th><th>Unidade</th><th>Observações</th>
+      <th>Hora</th><th>Paciente</th><th>Telefone</th><th>${procHeader}</th><th>Médico</th><th>${isSurgeryMode.value ? 'Local' : 'Unidade'}</th><th>Observações</th>
       <th>Compareceu</th><th>Faltou</th><th>Cirurgia indicada</th>
     </tr></thead><tbody>${rows}</tbody></table>
     <script>window.onload = () => window.print();<\/script>
@@ -1092,127 +1072,57 @@ const printDayList = () => {
   w.document.close();
 };
 
-// ── Visão semanal (grade horária) ──
-const tasksAtDayHour = (day, hour) =>
-  dayTasks(day).filter(t => new Date(t.due_at).getHours() === hour);
-
+// ── arrastar-e-soltar (semana/dia): soltar = reagendar, confirmando no modal ──
 const dragTask = ref(null);
 const dragOverDay = ref('');
 const onDragStart = task => { dragTask.value = task; };
-
-// soltar numa célula = reagendar para aquele dia + hora (minutos mantidos);
-// abre o modal já preenchido para CONFIRMAR antes de salvar
-const onDropCell = (day, hour) => {
+const onDragOver = day => { if (dragTask.value) dragOverDay.value = dateKey(day); };
+const onDragLeave = day => { if (dragOverDay.value === dateKey(day)) dragOverDay.value = ''; };
+const onColumnDrop = ({ day, minutes }) => {
   const task = dragTask.value;
   dragTask.value = null;
   dragOverDay.value = '';
   if (!task || isDayOff(day)) return;
   const original = new Date(task.due_at);
-  const sameSpot = isSameDay(original, day) && original.getHours() === hour;
-  if (sameSpot) return;
+  const hh = Math.floor(minutes / 60);
+  const mm = minutes % 60;
+  if (isSameDay(original, day) && original.getHours() === hh && original.getMinutes() === mm) return;
   openEdit(task);
   form.value.date = format(day, 'yyyy-MM-dd');
-  form.value.time = `${String(hour).padStart(2, '0')}:${String(original.getMinutes()).padStart(2, '0')}`;
+  form.value.time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 };
+
+// contagem de pendentes da conferência
+const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance).length);
 </script>
 
 <template>
-  <div class="bg-n-surface-1 flex flex-col h-full w-full">
-    <!-- Top bar — visual alinhado ao Dashboard CRM (conteúdo centralizado) -->
-    <div class="px-4 sm:px-6 pt-5 pb-4 border-b border-n-weak flex-shrink-0">
-      <div class="max-w-[1440px] mx-auto">
-      <div class="flex flex-col gap-3">
-      <div class="flex items-center gap-3 flex-wrap">
-        <!-- Título com a ação principal logo abaixo (verde contrastante) -->
-        <div class="flex flex-col gap-2">
-          <h1
-            class="font-bold text-n-slate-12 flex items-center gap-2"
-            :class="isSurgeryMode ? 'text-xl' : 'text-lg'"
-          >
-            <span
-              class="w-8 h-8 rounded-lg flex items-center justify-center"
-              :class="isSurgeryMode ? 'cevico-glass cevico-surgery-ink' : ''"
-              :style="{ background: isSurgeryMode ? surgeryGrad : theme.primary, '--surg-text': surgeryInk }"
-            >
-              <span :class="isSurgeryMode ? 'i-lucide-slice' : 'i-lucide-calendar-days'" class="text-white text-base" />
-            </span>
-            <!-- título em destaque no trilho de cirurgias (a faixa saiu) -->
-            <span
-              v-if="isSurgeryMode"
-              class="bg-clip-text text-transparent"
-              :style="{ backgroundImage: theme.key === 'cevico' ? 'linear-gradient(135deg, #0369A1, #38BDF8)' : theme.primary }"
-            >Agenda de Cirurgias</span>
-            <template v-else>Agenda de Consultas</template>
-          </h1>
-          <button
-            class="flex items-center justify-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-white hover:opacity-90 transition-opacity shadow w-fit"
-            :class="isSurgeryMode ? 'cevico-glass cevico-surgery-ink' : ''"
-            :style="{ background: isSurgeryMode ? surgeryGrad : theme.action, '--surg-text': surgeryInk }"
-            @click="openCreateOnDay(new Date())"
-          >
-            <span class="i-lucide-plus text-sm" />
-            {{ isSurgeryMode ? 'Agendar cirurgia' : 'Nova consulta' }}
-          </button>
-        </div>
-
-        <!-- Navegação -->
-        <div class="flex items-center gap-1 sm:ml-auto flex-wrap">
-          <!-- 🎨 tema: botão independente, à ESQUERDA do calendário (item 75) -->
-          <button
-            v-if="isAdmin"
-            class="w-8 h-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 mr-1"
-            title="Tema do ambiente (Santorini, Flor del Mar...)"
-            @click="showThemeMenu = true"
-          >
-            <span class="i-lucide-palette text-sm" />
-          </button>
-          <!-- HOJE com a data completa + um dia pra trás / pra frente -->
-          <button
-            class="w-8 h-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:bg-n-alpha-1 text-[10px] font-bold"
-            title="Um dia para trás"
-            @click="stepDay(-1)"
-          >
-            −dia
-          </button>
-          <button
-            class="text-xs font-bold px-3 h-8 rounded-lg text-white flex items-center gap-1.5"
-            :style="{ background: theme.pill }"
-            title="Voltar para hoje"
-            @click="goToday"
-          >
-            Hoje
-            <span class="font-normal opacity-90">{{ todayFull }}</span>
-          </button>
-          <button
-            class="w-8 h-8 flex items-center justify-center rounded-lg border border-n-weak text-n-slate-10 hover:bg-n-alpha-1 text-[10px] font-bold"
-            title="Um dia para a frente"
-            @click="stepDay(1)"
-          >
-            +dia
-          </button>
-          <span class="w-px h-6 bg-n-weak mx-1.5" />
-          <button
-            class="w-8 h-8 flex items-center justify-center rounded-lg text-n-slate-10 hover:bg-n-alpha-1 i-lucide-chevron-left"
-            @click="step(-1)"
-          />
-          <!-- calendário interativo: clica no período e escolhe a data -->
+  <div class="cv-page cv-agenda flex flex-col h-full w-full bg-n-surface-1" :style="pageVars">
+    <!-- ══ CABEÇALHO grudado (vidro): período · navegação · visões · tipos ══ -->
+    <div class="cv-ag-top flex-shrink-0">
+      <div class="max-w-[1440px] mx-auto px-4 sm:px-6 pt-3 pb-3 flex flex-col gap-2.5">
+        <!-- linha 1: período grande à esquerda, visões + ação à direita -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <div class="cv-icon cv-icon-lg hidden sm:inline-flex" :title="`Agenda de ${k.plural}`">
+            <span :class="k.icon" class="text-lg" />
+          </div>
           <div class="relative">
-            <button
-              class="text-sm font-medium text-n-slate-12 min-w-[170px] text-center px-2 py-1 rounded-lg hover:bg-n-alpha-1 flex items-center justify-center gap-1.5"
-              title="Clique para escolher a data num calendário"
-              @click="toggleDatePicker"
-            >
-              {{ navLabel }}
-              <span class="i-lucide-chevron-down text-xs text-n-slate-9" />
+            <button class="cv-ag-period" title="Clique para escolher a data num calendário" @click="toggleDatePicker">
+              <span class="truncate max-w-[60vw] sm:max-w-none">{{ navLabel }}</span>
+              <span class="i-lucide-chevron-down text-xs opacity-60" />
             </button>
-            <div
-              v-if="showDatePicker"
-              class="absolute left-1/2 -translate-x-1/2 top-10 z-40 w-72 bg-n-solid-1 border border-n-weak rounded-3xl shadow-2xl p-4"
-            >
+            <!-- calendário interativo. O véu invisível que fecha ao clicar fora
+                 vai para o body: o cabeçalho tem backdrop-filter, e um fixed
+                 dentro dele só cobriria o próprio cabeçalho. z-10 fica abaixo
+                 do cabeçalho (z-20), então o calendário continua clicável. -->
+            <Teleport to="body">
+              <div v-if="showDatePicker" class="fixed inset-0 z-10" @click="showDatePicker = false" />
+            </Teleport>
+            <div v-if="showDatePicker" class="cv-pop cv-ag-pop absolute left-0 top-10 z-40 w-72 p-4">
               <div class="flex items-center justify-between mb-2">
-                <button class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-n-alpha-1 i-lucide-chevron-left text-n-slate-10" @click="pickerCursor = addMonths(pickerCursor, -1)" />
+                <button class="cv-ag-nav !w-7 !h-7" @click="pickerCursor = addMonths(pickerCursor, -1)"><span class="i-lucide-chevron-left text-sm" /></button>
                 <p class="text-sm font-bold text-n-slate-12">{{ pickerLabel }}</p>
-                <button class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-n-alpha-1 i-lucide-chevron-right text-n-slate-10" @click="pickerCursor = addMonths(pickerCursor, 1)" />
+                <button class="cv-ag-nav !w-7 !h-7" @click="pickerCursor = addMonths(pickerCursor, 1)"><span class="i-lucide-chevron-right text-sm" /></button>
               </div>
               <div class="grid grid-cols-7 mb-1">
                 <span v-for="wd in WEEKDAYS" :key="'p' + wd" class="text-center text-[10px] font-semibold text-n-slate-9">{{ wd.charAt(0) }}</span>
@@ -1221,1590 +1131,916 @@ const onDropCell = (day, hour) => {
                 <button
                   v-for="day in week"
                   :key="'pd' + day.toISOString()"
-                  class="h-8 w-8 mx-auto flex items-center justify-center rounded-full text-xs transition-colors"
+                  class="cv-ag-daynum mx-auto !w-8 !h-8 text-xs hover:bg-n-alpha-2"
                   :class="[
-                    isSameMonth(day, pickerCursor) ? 'text-n-slate-12 hover:bg-n-alpha-2' : 'text-n-slate-8 hover:bg-n-alpha-1',
-                    isSameDay(day, cursor) ? 'text-white font-bold' : '',
+                    isSameMonth(day, pickerCursor) ? '' : 'cv-ag-daynum-muted',
+                    isSameDay(day, cursor) ? 'cv-ag-daynum-today' : '',
                   ]"
-                  :style="isSameDay(day, cursor) ? { background: isSurgeryMode ? surgeryGrad : theme.pill, color: isSurgeryMode ? surgeryInk : '#fff' } : (isToday(day) ? { boxShadow: `inset 0 0 0 1.5px ${theme.ring}` } : {})"
+                  :style="!isSameDay(day, cursor) && isToday(day) ? { boxShadow: 'inset 0 0 0 1.5px var(--cv)' } : {}"
                   @click="pickDate(day)"
                 >
                   {{ day.getDate() }}
                 </button>
               </div>
-              <button
-                class="w-full mt-2 text-xs font-medium py-1.5 rounded-xl text-white"
-                :style="{ background: theme.primary }"
-                @click="pickDate(new Date())"
-              >
-                Hoje
-              </button>
+              <button class="cv-btn cv-btn-sm w-full mt-2" @click="pickDate(new Date())">Hoje</button>
             </div>
           </div>
-          <button
-            class="w-8 h-8 flex items-center justify-center rounded-lg text-n-slate-10 hover:bg-n-alpha-1 i-lucide-chevron-right"
-            @click="step(1)"
-          />
-        </div>
-      </div>
+          <p v-if="navSub" class="text-[11px] text-n-slate-9 hidden md:block">{{ navSub }}</p>
 
-      <!-- Linha 2: pré-definições SEMPRE alinhadas em linha (rola de lado se faltar espaço) -->
-      <div class="flex items-center gap-2 overflow-x-auto pb-0.5" style="scrollbar-width: thin">
-        <!-- Visões: Mês / Semana / Dia / Personalizado (item 75) -->
-        <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 flex-shrink-0">
-          <button
-            v-for="m in VIEW_MODES"
-            :key="m.key"
-            class="flex items-center gap-1.5 px-3 h-7 rounded-lg text-xs font-medium transition-colors"
-            :class="viewMode === m.key || (m.key === 'custom' && showDatePicker) ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="viewMode === m.key || (m.key === 'custom' && showDatePicker) ? { background: theme.pill } : {}"
-            @click="onViewMode(m.key)"
-          >
-            <span :class="m.icon" class="text-sm" />
-            {{ m.label }}
-          </button>
-        </div>
+          <div class="flex items-center gap-1.5 ml-auto">
+            <button class="cv-ag-nav" :title="`${cap(stepLabel)} anterior`" @click="step(-1)"><span class="i-lucide-chevron-left text-base" /></button>
+            <button class="cv-btn cv-btn-ghost cv-btn-sm" title="Voltar para hoje" @click="goToday">Hoje</button>
+            <button class="cv-ag-nav" :title="`${cap(stepLabel)} seguinte`" @click="step(1)"><span class="i-lucide-chevron-right text-base" /></button>
+          </div>
 
-        <!-- Trilho: Consultas | Cirurgias (agenda paralela, azul claro vítreo) -->
-        <div
-          class="flex items-center rounded-xl p-0.5 gap-0.5 border-2 transition-colors flex-shrink-0"
-          :class="isSurgeryMode ? 'bg-sky-400/10' : 'bg-n-solid-2'"
-          :style="{ borderColor: isSurgeryMode ? theme.ring : 'var(--n-weak, rgba(148,163,184,0.3))' }"
-        >
-          <button
-            class="flex items-center gap-1.5 px-3 h-7 rounded-lg text-xs font-medium transition-colors"
-            :class="!isSurgeryMode ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="!isSurgeryMode ? { background: theme.pill } : {}"
-            @click="agendaMode = 'consultas'"
-          >
-            <span class="i-lucide-stethoscope text-sm" />
-            Consultas
-          </button>
-          <button
-            class="flex items-center gap-1.5 px-3 h-7 rounded-lg text-xs font-semibold transition-colors"
-            :class="isSurgeryMode ? 'text-white cevico-glass cevico-surgery-ink' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="isSurgeryMode ? { background: surgeryGrad, '--surg-text': surgeryInk } : {}"
-            @click="agendaMode = 'cirurgias'"
-          >
-            <span class="i-lucide-slice text-sm" />
-            Cirurgias
+          <div class="cv-seg cv-seg-sm">
+            <button
+              v-for="m in VIEW_MODES"
+              :key="m.key"
+              class="cv-seg-item"
+              :class="viewMode === m.key ? 'cv-seg-on' : ''"
+              @click="viewMode = m.key"
+            >
+              <span :class="m.icon" class="text-sm" />
+              <span class="hidden sm:inline">{{ m.label }}</span>
+            </button>
+          </div>
+
+          <button class="cv-btn" @click="openCreateOnDay(viewMode === 'month' ? new Date() : cursor)">
+            <span class="i-lucide-plus text-sm" />
+            <span class="hidden sm:inline">{{ newLabel }}</span>
+            <span class="sm:hidden">{{ cap(k.noun) }}</span>
           </button>
         </div>
 
-        <div class="flex items-center gap-2 ml-auto flex-shrink-0">
-          <!-- consultas = janelas dos médicos · cirurgias = janela da SALA CIRÚRGICA -->
-          <button
-            v-if="!isSurgeryMode"
-            class="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 transition-colors whitespace-nowrap"
-            title="Janelas de avaliação dos médicos"
-            @click="showWindowsModal = true"
-          >
-            <span class="i-lucide-clock text-sm" />
-            Janelas dos médicos
-          </button>
-          <button
-            v-else
-            class="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border text-n-slate-11 hover:bg-n-alpha-1 transition-colors whitespace-nowrap"
-            :style="{ borderColor: theme.ring + '60' }"
-            title="Dias e horários em que a sala cirúrgica de cada clínica está disponível"
-            @click="openSurgeryWindowsModal"
-          >
-            <span class="i-lucide-clock text-sm" />
-            Janela da sala cirúrgica
-          </button>
-          <select
-            v-model="view"
-            class="h-9 text-sm border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-          >
-            <option value="clinic">Todas as consultas</option>
-            <optgroup label="Unidades">
-              <option v-for="(u, key) in UNITS" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
-            </optgroup>
-            <optgroup label="Médicos">
-              <option v-for="d in DOCTORS" :key="d.name" :value="`doctor:${d.name}`">{{ d.name }}</option>
-            </optgroup>
-            <option value="me">Minha agenda pessoal</option>
-            <optgroup v-if="isAdmin" label="Pessoas">
-              <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
-            </optgroup>
-          </select>
+        <!-- linha 2: os 4 TIPOS (cada um acende na sua cor) + filtros -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <div class="cv-seg overflow-x-auto" style="scrollbar-width: none">
+            <button
+              v-for="kk in KINDS"
+              :key="kk.key"
+              class="cv-ag-kind"
+              :class="kind === kk.key ? 'cv-ag-kind-on' : ''"
+              :style="kindVarsOf(kk.key)"
+              :title="`${kk.label} — ${kk.hint}`"
+              @click="kind = kk.key"
+            >
+              <span class="cv-ag-kind-dot" />
+              <span :class="kk.icon" class="text-sm hidden sm:inline" />
+              {{ kk.label }}
+              <span class="cv-ag-kind-n" :title="`${kindCounts[kk.key]} ${rangeNoun}`">{{ kindCounts[kk.key] }}</span>
+            </button>
+          </div>
+
+          <div class="flex items-center gap-1.5 ml-auto flex-wrap">
+            <button
+              v-if="viewMode === 'week'"
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              :title="hideWeekend ? 'Mostrar sábado e domingo' : 'Esconder sábado e domingo'"
+              @click="toggleWeekend"
+            >
+              <span :class="hideWeekend ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="text-xs" />
+              <span class="hidden md:inline">sáb/dom</span>
+            </button>
+            <button
+              v-if="viewMode === 'day' && dayViewTasks.length"
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              title="Abre a lista do dia pronta para imprimir ou salvar em PDF"
+              @click="printDayList"
+            >
+              <span class="i-lucide-printer text-xs" />
+              <span class="hidden md:inline">Imprimir</span>
+            </button>
+            <button
+              v-if="isPhysical"
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              title="Janelas de avaliação dos médicos"
+              @click="showWindowsModal = true"
+            >
+              <span class="i-lucide-clock text-xs" />
+              <span class="hidden md:inline">Janelas dos médicos</span>
+            </button>
+            <button
+              v-else-if="isSurgeryMode"
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              title="Dias e horários em que a sala cirúrgica de cada clínica está disponível"
+              @click="openSurgeryWindowsModal"
+            >
+              <span class="i-lucide-clock text-xs" />
+              <span class="hidden md:inline">Sala cirúrgica</span>
+            </button>
+            <select v-model="view" class="cv-input !h-8 text-xs !w-auto max-w-[180px]">
+              <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}</option>
+              <optgroup v-if="!isSurgeryMode && !isTele" label="Unidades">
+                <option v-for="(u, key) in UNITS" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
+              </optgroup>
+              <optgroup v-if="!isSurgeryMode" label="Médicos">
+                <option v-for="d in DOCTORS" :key="d.name" :value="`doctor:${d.name}`">{{ d.name }}</option>
+              </optgroup>
+              <option value="me">Minha agenda pessoal</option>
+              <optgroup v-if="isAdmin" label="Pessoas">
+                <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
+              </optgroup>
+            </select>
+          </div>
         </div>
-      </div>
 
-      <!-- seleção pré-configurada EM LINHA (item 76): só a agenda de um
-           médico, ou as cirurgias de um local -->
-      <div class="flex items-center gap-1.5 flex-wrap">
-        <span class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide">Ver:</span>
-        <button
-          class="px-2.5 h-7 rounded-full text-[11px] font-medium border transition-colors"
-          :class="view === 'clinic' ? 'text-white border-transparent font-bold' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="view === 'clinic' ? { background: isSurgeryMode ? surgeryGrad : theme.pill, color: isSurgeryMode ? surgeryInk : '#fff' } : {}"
-          @click="view = 'clinic'"
-        >
-          {{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}
-        </button>
-        <template v-if="!isSurgeryMode">
+        <!-- linha 3: atalhos em linha — um médico só / um local só -->
+        <div v-if="!isPersonalView" class="flex items-center gap-1.5 flex-wrap">
           <button
-            v-for="d in DOCTORS"
-            :key="'quick' + d.name"
-            class="px-2.5 h-7 rounded-full text-[11px] font-medium border transition-colors flex items-center gap-1.5"
-            :class="view === `doctor:${d.name}` ? 'text-white border-transparent font-bold' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="view === `doctor:${d.name}` ? { background: d.color } : {}"
-            @click="view = `doctor:${d.name}`"
+            class="cv-chip"
+            :class="view === 'clinic' ? 'cv-chip-on' : ''"
+            @click="view = 'clinic'"
           >
-            <span v-if="view !== `doctor:${d.name}`" class="w-2 h-2 rounded-full" :style="{ background: d.color }" />
-            {{ d.short }}
-            <span v-if="isDoctorClosed(d.name)" class="text-[9px]">⏸</span>
+            {{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}
           </button>
-        </template>
-        <template v-else>
-          <button
-            v-for="loc in surgeryLocations"
-            :key="'quickloc' + loc.key"
-            class="px-2.5 h-7 rounded-full text-[11px] font-medium border transition-colors"
-            :class="view === `unit:${loc.key}` ? 'border-transparent font-bold cevico-glass cevico-surgery-ink' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-            :style="view === `unit:${loc.key}` ? { background: surgeryGrad, '--surg-text': surgeryInk } : {}"
-            @click="view = `unit:${loc.key}`"
-          >
-            {{ loc.label }}
-          </button>
-        </template>
-      </div>
-      </div>
-
+          <template v-if="!isSurgeryMode">
+            <button
+              v-for="d in DOCTORS"
+              :key="'quick' + d.name"
+              class="cv-chip"
+              :class="view === `doctor:${d.name}` ? 'cv-chip-on' : ''"
+              :style="view === `doctor:${d.name}` ? { '--cv-grad': d.color, '--cv-deep-rgb': hexToRgbSpaced(d.color) } : {}"
+              @click="view = `doctor:${d.name}`"
+            >
+              <span class="w-2 h-2 rounded-full" :style="{ background: view === `doctor:${d.name}` ? '#fff' : d.color }" />
+              {{ d.short }}
+              <span v-if="isDoctorClosed(d.name)" class="text-[9px]" title="agenda fechada">⏸</span>
+            </button>
+            <template v-if="!isTele">
+              <span class="w-px h-4 bg-n-weak mx-0.5" />
+              <button
+                v-for="(u, key) in UNITS"
+                :key="'qu' + key"
+                class="cv-chip"
+                :class="view === `unit:${key}` ? 'cv-chip-on' : ''"
+                :style="view === `unit:${key}` ? { '--cv-grad': u.color, '--cv-deep-rgb': hexToRgbSpaced(u.color) } : {}"
+                @click="view = view === `unit:${key}` ? 'clinic' : `unit:${key}`"
+              >
+                <span class="w-2 h-2 rounded-full" :style="{ background: view === `unit:${key}` ? '#fff' : u.color }" />
+                {{ u.label }}
+              </button>
+            </template>
+          </template>
+          <template v-else>
+            <button
+              v-for="loc in surgeryLocations"
+              :key="'quickloc' + loc.key"
+              class="cv-chip"
+              :class="view === `unit:${loc.key}` ? 'cv-chip-on' : ''"
+              :style="view === `unit:${loc.key}` ? { '--cv-grad': loc.color, '--cv-deep-rgb': hexToRgbSpaced(loc.color) } : {}"
+              @click="view = `unit:${loc.key}`"
+            >
+              <span class="w-2 h-2 rounded-full" :style="{ background: view === `unit:${loc.key}` ? '#fff' : loc.color }" />
+              {{ loc.label }}
+            </button>
+            <button v-if="isAdmin" class="cv-chip" title="Gerenciar clínicas parceiras" @click="openLocationsModal">
+              <span class="i-lucide-map-pin text-[10px]" /> locais
+            </button>
+          </template>
+          <span class="text-[11px] text-n-slate-9 ml-auto hidden lg:inline">{{ k.hint }}</span>
+        </div>
       </div>
     </div>
 
-    <!-- 📖 respostas do formulário do paciente (o médico lê antes — item 76) -->
-    <div
-      v-if="formAnswersTask"
-      class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-      @click.self="formAnswersTask = null"
-    >
-      <div class="w-full max-w-lg max-h-[85vh] flex flex-col bg-n-solid-1 border border-n-weak rounded-3xl shadow-2xl overflow-hidden">
-        <div class="h-1.5 w-full flex-shrink-0" style="background: linear-gradient(90deg, #5B21B6, #7C3AED)" />
-        <div class="flex items-center gap-2 px-5 py-4 border-b border-n-weak flex-shrink-0">
-          <span class="w-8 h-8 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-            <span class="i-lucide-book-open-check text-white text-base" />
-          </span>
+    <!-- 📖 respostas do formulário do paciente -->
+    <div v-if="formAnswersTask" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click.self="formAnswersTask = null">
+      <div class="cv-modal cv-ag-pop w-full max-w-lg max-h-[85vh] flex flex-col">
+        <div class="cv-modal-head flex items-center gap-3" style="--cv-hero: linear-gradient(135deg, #5B21B6, #7C3AED)">
+          <span class="i-lucide-book-open-check text-xl" />
           <div class="flex-1 min-w-0">
-            <h2 class="text-sm font-bold text-n-slate-12 truncate">{{ formAnswersTask.name }}</h2>
-            <p class="text-[11px] text-n-slate-9">
+            <h2 class="text-sm font-bold truncate">{{ formAnswersTask.name }}</h2>
+            <p class="text-[11px] opacity-85">
               {{ formAnswersTask.detail.form_response.form }}
               · respondido em {{ new Date(formAnswersTask.detail.form_response.answered_at).toLocaleDateString('pt-BR') }}
             </p>
           </div>
-          <button class="i-lucide-x text-n-slate-10 hover:text-n-slate-12" @click="formAnswersTask = null" />
+          <button class="cv-glass-btn cv-iconbtn" @click="formAnswersTask = null"><span class="i-lucide-x" /></button>
         </div>
         <div class="flex-1 overflow-y-auto p-5 space-y-2.5">
-          <div
-            v-for="(ans, ai) in formAnswersTask.detail.form_response.answers"
-            :key="ai"
-            class="rounded-xl border border-n-weak bg-n-solid-2 px-3.5 py-2.5"
-          >
+          <div v-for="(ans, ai) in formAnswersTask.detail.form_response.answers" :key="ai" class="cv-sub px-3.5 py-2.5">
             <p class="text-[11px] font-semibold text-n-slate-10 mb-0.5">{{ ans.label }}</p>
-            <p class="text-sm text-n-slate-12">
-              {{ Array.isArray(ans.value) ? ans.value.join(', ') : (ans.value || '—') }}
-            </p>
+            <p class="text-sm text-n-slate-12">{{ Array.isArray(ans.value) ? ans.value.join(', ') : (ans.value || '—') }}</p>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 🎨 POPUP do tema: salta na tela (item 75) -->
-    <div
-      v-if="showThemeMenu"
-      class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-      @click.self="showThemeMenu = false"
-    >
-      <div class="cevico-theme-pop w-full max-w-md bg-n-solid-1 border border-n-weak rounded-3xl shadow-2xl p-5">
-        <div class="flex items-center gap-2 mb-3">
-          <span class="w-8 h-8 rounded-xl flex items-center justify-center" :style="{ background: theme.primary }">
-            <span class="i-lucide-palette text-white text-base" />
-          </span>
-          <div class="flex-1">
-            <h2 class="text-sm font-bold text-n-slate-12">Tema dos ambientes</h2>
-            <p class="text-[11px] text-n-slate-9">vale para a Agenda e as Tarefas — escolha o clima do dia</p>
-          </div>
-          <button class="i-lucide-x text-n-slate-10 hover:text-n-slate-12" @click="showThemeMenu = false" />
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <button
-            v-for="t in ALL_THEMES"
-            :key="t.key"
-            class="rounded-2xl border p-3 text-left transition-all hover:shadow-md disabled:opacity-50"
-            :class="theme.key === t.key ? 'border-transparent ring-2' : 'border-n-weak'"
-            :style="theme.key === t.key ? { '--tw-ring-color': t.ring } : {}"
-            :disabled="isSavingTheme"
-            @click="setTheme(t.key)"
-          >
-            <span class="block h-8 rounded-lg mb-2" :style="{ background: t.primary }" />
-            <span class="text-xs font-bold text-n-slate-12 flex items-center gap-1">
-              {{ t.emoji }} {{ t.label }}
-              <span v-if="theme.key === t.key" class="i-lucide-check text-sm text-green-500 ml-auto" />
-            </span>
-            <span class="block text-[10px] text-n-slate-9 leading-tight mt-0.5">{{ t.desc }}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Loading -->
     <SkeletonScreen v-if="isLoading" variant="calendar" />
 
-    <!-- ÁREA ROLÁVEL: KPIs + ocupação + calendário (cabeçalho acima fica FIXO) -->
-    <div v-else class="flex-1 min-h-0 overflow-y-auto" :style="isSurgeryMode ? { boxShadow: `inset 0 0 0 2px ${theme.key === 'cevico' ? 'rgba(56,189,248,0.3)' : theme.ring + '4D'}` } : {}">
-      <div class="px-4 sm:px-6 pt-4 max-w-[1440px] mx-auto">
-      <!-- KPIs no estilo do Dashboard -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div class="rounded-xl px-4 py-3 text-white shadow" :class="isSurgeryMode ? 'cevico-glass cevico-surgery-ink' : ''" :style="{ background: isSurgeryMode ? surgeryGrad : theme.primary, '--surg-text': surgeryInk }">
-          <p class="text-[11px] font-medium text-white/80">{{ isSurgeryMode ? 'Cirurgias hoje' : 'Consultas hoje' }}</p>
-          <p class="text-xl font-bold leading-tight">{{ kpiToday }}</p>
-        </div>
-        <div
-          class="rounded-xl px-4 py-3 shadow"
-          :class="isSurgeryMode ? 'cevico-glass' : 'text-white'"
-          :style="isSurgeryMode
-            ? { background: theme.surgerySoft, color: theme.surgerySoftText }
-            : { background: theme.pill }"
-        >
-          <p class="text-[11px] font-medium" :style="isSurgeryMode ? { color: theme.surgerySoftText, opacity: 0.85 } : { color: 'rgba(255,255,255,0.8)' }">Nesta semana</p>
-          <p class="text-xl font-bold leading-tight">{{ kpiWeek }}</p>
-        </div>
-        <template v-if="!isSurgeryMode">
-          <button
-            v-for="(u, key) in UNITS"
-            :key="key"
-            class="rounded-xl px-4 py-3 text-left shadow border transition-colors"
-            :style="view === `unit:${key}`
-              ? { background: u.color, borderColor: u.color, color: 'white' }
-              : { backgroundColor: u.color + '14', borderColor: u.color + '40' }"
-            @click="view = view === `unit:${key}` ? 'clinic' : `unit:${key}`"
-          >
-            <p class="text-[11px] font-medium flex items-center gap-1.5" :style="view === `unit:${key}` ? {} : { color: u.color }">
-              <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: view === `unit:${key}` ? 'white' : u.color }" />
-              {{ u.label }} — no mês
-            </p>
-            <p class="text-xl font-bold leading-tight" :style="view === `unit:${key}` ? {} : { color: u.color }">
-              {{ kpiByUnitMonth[key] || 0 }}
-            </p>
-          </button>
-        </template>
-        <!-- trilho de cirurgias: contagem por LOCAL (clínica parceira) -->
-        <template v-else>
-          <div
-            v-for="loc in surgeryLocations.slice(0, 2)"
-            :key="loc.key"
-            class="rounded-xl px-4 py-3 text-left shadow border"
-            :style="{ backgroundColor: loc.color + '14', borderColor: loc.color + '50' }"
-          >
-            <p class="text-[11px] font-medium flex items-center gap-1.5" :style="{ color: loc.color }">
-              <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: loc.color }" />
-              {{ loc.label }} — no mês
-            </p>
-            <p class="text-xl font-bold leading-tight" :style="{ color: loc.color }">
-              {{ kpiByUnitMonth[loc.key] || 0 }}
-            </p>
-          </div>
-        </template>
-      </div>
-
-      <!-- Ocupação da agenda (% preenchida no dia/semana/mês navegados) -->
-      <div v-if="showOccupancy" class="mt-3 rounded-xl border border-n-weak bg-n-solid-2 px-4 py-3">
-        <div class="flex items-center gap-2 mb-2.5 flex-wrap">
-          <span class="i-lucide-gauge text-sm text-n-slate-10" />
-          <p class="text-xs font-semibold text-n-slate-12">Ocupação da agenda</p>
-          <span
-            v-if="activeDoctor"
-            class="text-[10px] px-2 py-0.5 rounded-full font-semibold text-white"
-            :style="{ backgroundColor: doctorColor(activeDoctor) }"
-          >{{ activeDoctor }}</span>
-          <span
-            v-else-if="activeUnit"
-            class="text-[10px] px-2 py-0.5 rounded-full font-semibold text-white"
-            :style="{ backgroundColor: UNITS[activeUnit].color }"
-          >{{ UNITS[activeUnit].label }}</span>
-          <span v-else class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-n-alpha-2 text-n-slate-11">Toda a clínica</span>
-          <span v-if="isSurgeryMode" class="text-[10px] text-n-slate-9 ml-auto hidden sm:block">
-            🟢 com vagas · 🟡 enchendo · 🔴 quase cheia — cadeados fora da conta
-          </span>
-          <span v-else class="text-[10px] text-n-slate-9 ml-auto hidden sm:flex items-center gap-2.5">
-            <span v-for="m in MODALITIES" :key="m.key" class="flex items-center gap-1">
-              <span class="w-2 h-2 rounded-full" :style="{ background: m.color }" />{{ m.label }}
-            </span>
-            <span>— cadeados fora da conta</span>
-          </span>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <div class="flex items-center justify-between text-xs mb-1">
-              <span class="text-n-slate-11">Dia <span class="text-n-slate-9">({{ occDayLabel }})</span></span>
-              <span class="font-bold text-n-slate-12">{{ occDay.total ? occDay.pct + '%' : '—' }}</span>
+    <!-- ══ ÁREA ROLÁVEL ══ -->
+    <div v-else class="flex-1 min-h-0 overflow-y-auto">
+      <div class="px-4 sm:px-6 pt-4 pb-24 max-w-[1440px] mx-auto">
+        <!-- resumo do trilho: 4 vidros pequenos -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3">
+          <div class="cv-stat px-4 py-3 flex items-center gap-3">
+            <span class="cv-icon cv-icon-sm"><span :class="k.icon" class="text-xs" /></span>
+            <div class="min-w-0">
+              <p class="text-[11px] font-semibold text-n-slate-10 truncate">{{ cap(k.plural) }} hoje</p>
+              <p class="text-xl font-bold leading-tight text-n-slate-12 tabular-nums">{{ kpiToday }}</p>
             </div>
-            <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden flex">
-              <template v-if="occDay.total && occSegments(occDay)">
-                <div
-                  v-for="s in occSegments(occDay)"
-                  :key="s.key"
-                  class="h-full transition-all"
-                  :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }"
-                  :title="`${s.label}: ${s.count} bloco(s)`"
-                />
+          </div>
+          <div class="cv-stat px-4 py-3 flex items-center gap-3">
+            <span class="cv-icon cv-icon-sm"><span class="i-lucide-calendar-range text-xs" /></span>
+            <div class="min-w-0">
+              <p class="text-[11px] font-semibold text-n-slate-10 truncate">Nesta semana</p>
+              <p class="text-xl font-bold leading-tight text-n-slate-12 tabular-nums">{{ kpiWeek }}</p>
+            </div>
+          </div>
+          <button
+            v-for="p in kpiPlaces"
+            :key="p.key"
+            class="cv-stat px-4 py-3 flex items-center gap-3 text-left transition-transform hover:-translate-y-px"
+            :class="view === `unit:${p.key}` ? 'cv-sub-on' : ''"
+            :disabled="isTele"
+            :title="isTele ? '' : 'Ver só este lugar'"
+            @click="!isTele && (view = view === `unit:${p.key}` ? 'clinic' : `unit:${p.key}`)"
+          >
+            <span class="cv-icon cv-icon-sm" :style="{ background: p.color }"><span class="i-lucide-map-pin text-xs" /></span>
+            <div class="min-w-0">
+              <p class="text-[11px] font-semibold text-n-slate-10 truncate">{{ p.label }}</p>
+              <p class="text-xl font-bold leading-tight tabular-nums" :style="{ color: p.color }">{{ p.n }}</p>
+            </div>
+          </button>
+        </div>
+
+        <!-- Ocupação: uma linha fina; abre para ver dia/semana/mês por tipo -->
+        <div v-if="showOccupancy" class="cv-sub px-4 py-2.5 mb-3">
+          <button class="w-full flex items-center gap-2.5 text-left" @click="showOccDetail = !showOccDetail">
+            <span class="i-lucide-gauge text-sm text-n-slate-10" />
+            <p class="text-xs font-semibold text-n-slate-12 whitespace-nowrap">Ocupação</p>
+            <span class="cv-chip">{{ activeDoctor ? doctorShort(activeDoctor) : activeUnit ? (UNITS[activeUnit]?.label || surgeryLocationLabel(activeUnit)) : (isSurgeryMode ? 'todos os locais' : 'toda a clínica') }}</span>
+            <div class="cv-track cv-track-sm flex-1 min-w-[80px] flex">
+              <template v-if="occCurrent.total && occSegments(occCurrent)">
+                <div v-for="s in occSegments(occCurrent)" :key="s.key" class="h-full" :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }" :title="`${s.label}: ${s.count} bloco(s)`" />
               </template>
-              <div
-                v-else-if="occDay.total"
-                class="h-full rounded-full transition-all"
-                :style="{ width: Math.max(occDay.pct, 3) + '%', background: occColor(occDay.pct) }"
-              />
+              <div v-else-if="occCurrent.total" class="cv-fill" :style="{ width: Math.max(occCurrent.pct, 3) + '%', background: occColor(occCurrent.pct) }" />
             </div>
-            <p class="text-[10px] text-n-slate-9 mt-0.5">
-              {{ occDay.total ? `${occDay.filled} de ${occDay.total} blocos ocupados` : 'sem janela neste dia' }}
-              <template v-if="occCaption(occDay)"> · {{ occCaption(occDay) }}</template>
-            </p>
-          </div>
-          <div>
-            <div class="flex items-center justify-between text-xs mb-1">
-              <span class="text-n-slate-11">Semana <span class="text-n-slate-9">({{ occWeekLabel }})</span></span>
-              <span class="font-bold text-n-slate-12">{{ occWeek.total ? occWeek.pct + '%' : '—' }}</span>
+            <span class="text-xs font-bold text-n-slate-12 tabular-nums w-10 text-right">{{ occCurrent.total ? occCurrent.pct + '%' : '—' }}</span>
+            <span class="text-[10px] text-n-slate-9 hidden sm:inline">{{ rangeNoun }}</span>
+            <span :class="showOccDetail ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="text-xs text-n-slate-9" />
+          </button>
+          <div v-if="showOccDetail" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3 pt-3 border-t border-n-weak">
+            <div v-for="row in occRows" :key="row.key">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="text-n-slate-11">{{ row.label }} <span class="text-n-slate-9">({{ row.sub }})</span></span>
+                <span class="font-bold text-n-slate-12 tabular-nums">{{ row.scan.total ? row.scan.pct + '%' : '—' }}</span>
+              </div>
+              <div class="cv-track cv-track-sm flex">
+                <template v-if="row.scan.total && occSegments(row.scan)">
+                  <div v-for="s in occSegments(row.scan)" :key="s.key" class="h-full" :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }" :title="`${s.label}: ${s.count} bloco(s)`" />
+                </template>
+                <div v-else-if="row.scan.total" class="cv-fill" :style="{ width: Math.max(row.scan.pct, 3) + '%', background: occColor(row.scan.pct) }" />
+              </div>
+              <p class="text-[10px] text-n-slate-9 mt-0.5">
+                {{ row.scan.total ? `${row.scan.filled} de ${row.scan.total} blocos` : 'sem janela' }}
+                <template v-if="occCaption(row.scan)"> · {{ occCaption(row.scan) }}</template>
+              </p>
             </div>
-            <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden flex">
-              <template v-if="occWeek.total && occSegments(occWeek)">
-                <div
-                  v-for="s in occSegments(occWeek)"
-                  :key="s.key"
-                  class="h-full transition-all"
-                  :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }"
-                  :title="`${s.label}: ${s.count} bloco(s)`"
-                />
-              </template>
-              <div
-                v-else-if="occWeek.total"
-                class="h-full rounded-full transition-all"
-                :style="{ width: Math.max(occWeek.pct, 3) + '%', background: occColor(occWeek.pct) }"
-              />
-            </div>
-            <p class="text-[10px] text-n-slate-9 mt-0.5">
-              {{ occWeek.total ? `${occWeek.filled} de ${occWeek.total} blocos ocupados` : 'sem janelas na semana' }}
-              <template v-if="occCaption(occWeek)"> · {{ occCaption(occWeek) }}</template>
-            </p>
-          </div>
-          <div>
-            <div class="flex items-center justify-between text-xs mb-1">
-              <span class="text-n-slate-11">Mês <span class="text-n-slate-9">({{ occMonthLabel }})</span></span>
-              <span class="font-bold text-n-slate-12">{{ occMonth.total ? occMonth.pct + '%' : '—' }}</span>
-            </div>
-            <div class="h-2.5 bg-n-alpha-1 rounded-full overflow-hidden flex">
-              <template v-if="occMonth.total && occSegments(occMonth)">
-                <div
-                  v-for="s in occSegments(occMonth)"
-                  :key="s.key"
-                  class="h-full transition-all"
-                  :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }"
-                  :title="`${s.label}: ${s.count} bloco(s)`"
-                />
-              </template>
-              <div
-                v-else-if="occMonth.total"
-                class="h-full rounded-full transition-all"
-                :style="{ width: Math.max(occMonth.pct, 3) + '%', background: occColor(occMonth.pct) }"
-              />
-            </div>
-            <p class="text-[10px] text-n-slate-9 mt-0.5">
-              {{ occMonth.total ? `${occMonth.filled} de ${occMonth.total} blocos ocupados` : 'sem janelas no mês' }}
-              <template v-if="occCaption(occMonth)"> · {{ occCaption(occMonth) }}</template>
+            <p v-if="!isSurgeryMode" class="sm:col-span-3 text-[10px] text-n-slate-9 flex items-center gap-2.5 flex-wrap">
+              <span v-for="m in OCC_MODALITIES" :key="m.key" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" :style="{ background: m.color }" />{{ m.label }}</span>
+              <span>· consultas e exames dividem os mesmos blocos dos médicos · cadeados fora da conta</span>
             </p>
           </div>
         </div>
-      </div>
-      </div>
 
-    <!-- ══ VISÃO MENSAL ══ -->
-    <div v-if="viewMode === 'month'" class="p-3 sm:p-5 max-w-[1440px] mx-auto w-full">
-      <div class="grid grid-cols-7 gap-px mb-px">
-        <div v-for="wd in WEEKDAYS" :key="wd" class="text-center text-xs font-medium text-n-slate-10 py-1.5">
-          {{ wd }}
-        </div>
-      </div>
-      <div class="grid gap-px">
-        <div v-for="(week, wi) in weeks" :key="wi" class="grid grid-cols-7 gap-px">
-          <div
-            v-for="day in week"
-            :key="day.toISOString()"
-            class="border border-n-weak rounded-lg p-1.5 flex flex-col min-h-[104px] max-h-[160px] overflow-hidden cursor-pointer transition-colors hover:border-n-brand/50"
-            :class="[
-              inMonth(day) ? 'bg-n-solid-1' : 'bg-n-alpha-1 opacity-60',
-              isDayOff(day) ? 'opacity-50' : '',
-            ]"
-            title="Abrir a semana deste dia"
-            @click="goToWeek(day)"
-          >
-            <div class="flex items-center justify-between flex-shrink-0 mb-1">
-              <span
-                class="text-xs w-5 h-5 flex items-center justify-center rounded-full"
-                :class="isToday(day) ? 'text-white font-semibold' : (inMonth(day) ? 'text-n-slate-11' : 'text-n-slate-9')"
-                :style="isToday(day) ? { background: theme.primary } : {}"
-              >
-                {{ day.getDate() }}
-              </span>
-              <span v-if="isDayOff(day)" class="i-lucide-lock text-[10px]" :class="isDayBlocked(day) ? 'text-red-400' : 'text-n-slate-8'" :title="isDayBlocked(day) ? 'Dia fechado' : 'Sem agenda de avaliação'" />
-              <span v-else class="flex items-center gap-0.5">
-                <span
-                  v-for="w in windowsForDay(day)"
-                  :key="(w.doctor || w.unit) + w.start"
-                  class="w-1.5 h-1.5 rounded-full"
-                  :style="{ backgroundColor: winColor(w) }"
-                  :title="`${winTitle(w)} — ${w.start}`"
-                />
-                <span
-                  v-if="showOccupancy && dayOccupancy(day)"
-                  class="text-[9px] font-bold ml-0.5"
-                  :style="{ color: occColor(dayOccupancy(day).pct) }"
-                  :title="`${dayOccupancy(day).filled} de ${dayOccupancy(day).total} blocos ocupados`"
-                >{{ dayOccupancy(day).pct }}%</span>
-              </span>
-            </div>
-            <div class="flex-1 overflow-y-auto space-y-0.5 min-h-0" style="scrollbar-width:thin;">
-              <button
-                v-for="task in dayTasks(day)"
-                :key="task.id"
-                class="w-full flex items-center gap-1 px-1.5 py-0.5 rounded text-left text-[11px] leading-tight transition-colors"
-                :class="task.status === 'done'
-                  ? 'bg-green-500/10 text-green-700 dark:text-green-400 line-through'
-                  : (isOverdue(task) ? 'bg-red-500/10 text-red-600' : 'bg-n-alpha-2 text-n-slate-11 hover:bg-n-alpha-3')"
-                @click.stop="openEdit(task)"
-              >
-                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :style="{ backgroundColor: dotColor(task) }" />
-                <span class="text-[10px] text-n-slate-9 flex-shrink-0">{{ chipTime(task) }}</span>
-                <span class="truncate">{{ displayName(task) }}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ VISÃO SEMANAL ══ grade horária estilo Google: horas à esquerda,
-         célula vazia = 1 clique agenda, arrastar consulta = reagendar -->
-    <div v-else-if="viewMode === 'week'" class="p-3 sm:p-5 max-w-[1440px] mx-auto w-full">
-      <!-- toggle "remover sáb/dom": semana útil limpa, mais espaço (item 76) -->
-      <div class="flex items-center justify-end mb-2">
-        <button
-          class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 h-7 rounded-full border transition-colors"
-          :class="hideWeekend ? 'text-white border-transparent font-bold' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-          :style="hideWeekend ? { background: theme.pill } : {}"
-          @click="toggleWeekend"
-        >
-          <span :class="hideWeekend ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="text-xs" />
-          {{ hideWeekend ? 'Sáb/dom escondidos' : 'Esconder sáb/dom' }}
-        </button>
-      </div>
-      <div class="overflow-x-auto">
-      <div class="min-w-[760px] border border-n-weak rounded-xl overflow-hidden bg-n-solid-1">
-        <!-- Cabeçalho: dias da semana -->
-        <div class="grid bg-n-solid-2" :style="{ gridTemplateColumns: weekGridCols }">
-          <div class="border-b border-n-weak" />
-          <button
-            v-for="day in weekDays"
-            :key="'h' + day.toISOString()"
-            class="flex flex-col items-center py-2 border-b border-l border-n-weak hover:bg-n-alpha-1"
-            :class="isDayOff(day) ? 'opacity-50' : ''"
-            title="Agendar neste dia"
-            @click="!isDayOff(day) && openCreateOnDay(day)"
-          >
-            <span class="text-[10px] font-medium text-n-slate-10 uppercase">{{ WEEKDAYS[day.getDay()] }}</span>
-            <span
-              class="text-sm w-7 h-7 flex items-center justify-center rounded-full font-semibold"
-              :class="isToday(day) ? 'text-white' : 'text-n-slate-12'"
-              :style="isToday(day) ? { background: theme.primary } : {}"
-            >
-              {{ day.getDate() }}
-            </span>
-            <span v-if="isDayOff(day)" class="text-[9px] flex items-center gap-0.5" :class="isDayBlocked(day) ? 'text-red-400' : 'text-n-slate-9'">
-              <span class="i-lucide-lock text-[9px]" /> {{ isDayBlocked(day) ? 'Fechado' : 'Bloqueado' }}
-            </span>
-            <span v-else class="flex items-center gap-0.5 flex-wrap justify-center px-0.5">
-              <span
-                v-for="w in windowsForDay(day)"
-                :key="(w.doctor || w.unit) + w.start"
-                class="text-[8px] px-1 py-px rounded-full font-semibold text-white"
-                :style="{ backgroundColor: winColor(w) }"
-                :title="`${winTitle(w)} — ${w.start} às ${w.end} (${winUnitLabel(w)})`"
-              >
-                {{ w.doctor ? DOCTORS.find(d => d.name === w.doctor)?.short : surgeryLocationLabel(w.unit) }}
-              </span>
-              <span
-                v-if="showOccupancy && dayOccupancy(day)"
-                class="text-[9px] font-bold"
-                :style="{ color: occColor(dayOccupancy(day).pct) }"
-              >{{ dayOccupancy(day).pct }}%</span>
-            </span>
-          </button>
-        </div>
-
-        <!-- Linhas de hora (08–18, espichadas — item 76) -->
-        <div
-          v-for="hour in WEEK_HOURS"
-          :key="hour"
-          class="grid"
-          :style="{ gridTemplateColumns: weekGridCols }"
-        >
-          <div class="text-right pr-2 pt-1 text-[11px] text-n-slate-9 font-medium border-t border-n-weak">
-            {{ String(hour).padStart(2, '0') }}:00
-          </div>
-          <div
-            v-for="day in weekDays"
-            :key="day.toISOString() + hour"
-            class="relative border-t border-l border-n-weak h-16 transition-colors"
-            :class="[
-              isDayOff(day) ? 'bg-n-alpha-1' : 'cursor-pointer hover:bg-n-alpha-1',
-              dragOverDay === dateKey(day) && !isDayOff(day) ? 'bg-amber-400/10' : '',
-            ]"
-            :title="isDayOff(day) ? '' : 'Clique para agendar por volta das ' + String(hour).padStart(2, '0') + 'h (a altura do clique define a meia hora)'"
-            @click="!isDayOff(day) && openCreateAtPoint(day, hour, $event)"
-            @dragover.prevent="dragTask && !isDayOff(day) && (dragOverDay = dateKey(day))"
-            @dragleave="dragOverDay === dateKey(day) && (dragOverDay = '')"
-            @drop.prevent="onDropCell(day, hour)"
-          >
-            <!-- bloco PROPORCIONAL: 15 min = 25% da hora (o espaço livre fica evidente) -->
-            <button
-              v-for="(task, ti) in tasksAtDayHour(day, hour)"
-              :key="task.id"
-              draggable="true"
-              class="absolute text-left rounded-md border px-1 leading-tight cursor-grab active:cursor-grabbing hover:opacity-90 overflow-hidden flex items-center gap-1"
-              :class="task.attendance === 'missed' ? 'opacity-60' : ''"
-              :style="{ ...weekBlockStyle(task, ti), borderColor: dotColor(task) + '80', backgroundColor: dotColor(task) + '22' }"
-              :title="`${chipTime(task)} · ${displayName(task)} (${taskDuration(task)} min) · clique abre, arraste reagenda`"
-              @dragstart="onDragStart(task)"
-              @click.stop="openEdit(task)"
-            >
-              <span class="text-[9px] font-bold flex-shrink-0" :style="{ color: dotColor(task) }">{{ chipTime(task) }}</span>
-              <span class="text-[9px] font-medium text-n-slate-12 truncate" :class="task.attendance === 'missed' ? 'line-through' : ''">
-                {{ displayName(task) }}
-              </span>
-              <span v-if="task.attendance === 'attended'" class="text-[8px] text-green-600 flex-shrink-0">✓</span>
-              <span v-else-if="task.attendance === 'missed'" class="text-[8px] text-red-500 flex-shrink-0">✗</span>
-              <span v-else-if="task.attendance === 'attended_not_done'" class="text-[8px] flex-shrink-0">⚠️</span>
-              <span v-if="task.surgery_indication === 'indicated'" class="text-[8px] flex-shrink-0">🎯</span>
-            </button>
-          </div>
-        </div>
-      </div>
-      </div>
-      <p class="text-[10px] text-n-slate-9 mt-2 text-center">
-        Clique num espaço vazio para agendar naquele horário · arraste uma consulta para outro dia/hora para reagendar
-      </p>
-    </div>
-
-    <!-- ══ VISÃO DIÁRIA ══ (mais estreita e mais alta — item 76) -->
-    <div v-else class="p-3 sm:p-5">
-      <div class="max-w-3xl mx-auto">
-        <!-- Fim de semana / dia fechado -->
-        <div
-          v-if="isWeekend(cursor)"
-          class="flex items-center gap-2 rounded-xl border border-n-weak bg-n-alpha-1 px-4 py-3 mb-4 text-sm text-n-slate-10"
-        >
-          <span class="i-lucide-lock text-base" />
-          {{ WEEKDAY_FULL[cursor.getDay()] }} — sem agenda de avaliação em nenhuma unidade.
-        </div>
-        <div
-          v-else-if="isDayBlocked(cursor)"
-          class="flex items-center gap-2 rounded-xl border-2 border-red-500/30 bg-red-500/5 px-4 py-3 mb-4 text-sm text-n-slate-11 flex-wrap"
-        >
-          <span class="i-lucide-lock text-base text-red-500" />
-          <b>Dia fechado</b> — sem agenda de avaliação nesta data.
-          <button
-            v-if="isAdmin"
-            class="ml-auto text-xs font-medium px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
-            @click="toggleBlockDay(cursor)"
-          >
-            Reabrir dia
-          </button>
-        </div>
-        <div v-else-if="windowsForDay(cursor).length || dayViewTasks.length" class="flex items-center justify-end gap-2 mb-3 flex-wrap">
-          <button
-            v-if="dayViewTasks.length"
-            class="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg text-white hover:opacity-90 shadow"
-            :style="{ background: theme.accent }"
-            title="Abre a lista do dia pronta para imprimir ou salvar em PDF"
-            @click="printDayList"
-          >
-            <span class="i-lucide-printer text-xs" />
-            Imprimir lista (PDF)
-          </button>
-          <button
-            v-if="isAdmin && windowsForDay(cursor).length"
-            class="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-10 hover:text-red-500 hover:bg-n-alpha-1 transition-colors"
-            title="Fechar o dia inteiro (feriado, congresso, folga...)"
-            @click="toggleBlockDay(cursor)"
-          >
-            <span class="i-lucide-lock text-xs" />
-            Fechar este dia
-          </button>
-        </div>
-
-        <!-- Janelas de avaliação do dia (só no trilho de consultas) -->
-        <div v-for="win in (isDayBlocked(cursor) ? [] : windowsForDay(cursor))" :key="(win.doctor || win.unit) + win.start" class="rounded-2xl border-2 bg-n-solid-1 overflow-hidden mb-4" :style="{ borderColor: winColor(win) + '40' }">
-          <div class="h-1 w-full" :style="{ background: winColor(win) }" />
-          <div class="p-4">
-            <div class="flex items-center gap-2 flex-wrap mb-3">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" :style="{ background: winColor(win) }">
-                <span :class="win.doctor ? 'i-lucide-stethoscope' : 'i-lucide-slice'" class="text-white text-sm" />
-              </span>
-              <p class="text-sm font-bold text-n-slate-12">{{ winTitle(win) }}</p>
-              <span class="text-[10px] px-2 py-0.5 rounded-full font-medium" :style="{ backgroundColor: winColor(win) + '1A', color: winColor(win) }">
-                {{ winUnitLabel(win) }}
-              </span>
-              <span class="text-xs text-n-slate-10"><template v-if="win.turno">{{ win.turno }} · </template>{{ win.start }} às {{ win.end }} · blocos de {{ win.block }} min</span>
-              <span
-                class="text-[10px] px-2 py-0.5 rounded-full font-bold text-white ml-auto"
-                :style="{ backgroundColor: occColor(winOccupancy(cursor, win).pct) }"
-                :title="`${winOccupancy(cursor, win).filled} de ${winOccupancy(cursor, win).total} blocos ocupados`"
-              >
-                {{ winOccupancy(cursor, win).pct }}% ocupado
-              </span>
-            </div>
-            <!-- 4 horários por linha: blocos grandes, agenda mais vertical -->
-            <div class="grid grid-cols-4 gap-2">
-              <template v-for="slot in slotsFor(win)" :key="slot">
-                <!-- ocupado (com encaixe: "+" agenda outro paciente no mesmo horário) -->
-                <span v-if="taskAtSlot(cursor, win, slot)" class="relative group min-w-0">
-                  <button
-                    class="w-full rounded-lg px-1.5 py-1.5 text-[11px] font-medium text-white text-left truncate hover:opacity-90"
-                    :style="{ background: winColor(win) }"
-                    :title="tasksAtSlotAll(cursor, win, slot).map(displayName).join(' + ')"
-                    @click="openEdit(taskAtSlot(cursor, win, slot))"
-                  >
-                    {{ slot }} · {{ displayName(taskAtSlot(cursor, win, slot)) }}
-                    <span v-if="tasksAtSlotAll(cursor, win, slot).length > 1" class="font-bold">
-                      +{{ tasksAtSlotAll(cursor, win, slot).length - 1 }}
-                    </span>
-                  </button>
-                  <button
-                    class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-n-solid-3 border border-n-weak items-center justify-center hidden group-hover:flex hover:bg-n-alpha-2"
-                    title="Encaixe: agendar OUTRO paciente neste mesmo horário"
-                    @click.stop="openCreateSlot(cursor, win, slot)"
-                  >
-                    <span class="i-lucide-plus text-[9px] text-n-slate-10" />
-                  </button>
-                </span>
-                <!-- fechado com o cadeado -->
-                <button
-                  v-else-if="isBlocked(cursor, win, slot)"
-                  class="rounded-lg px-1.5 py-1.5 text-[11px] bg-n-alpha-2 text-n-slate-9 flex items-center justify-center gap-1"
-                  :title="isAdmin ? 'Horário fechado — clique para reabrir' : 'Horário fechado'"
-                  @click="isAdmin && toggleBlock(cursor, win, slot)"
-                >
-                  <span class="i-lucide-lock text-[10px]" />
-                  {{ slot }}
-                </button>
-                <!-- livre (com mini-cadeado para fechar) -->
-                <span v-else class="relative group">
-                  <button
-                    class="w-full rounded-lg px-1.5 py-1.5 text-[11px] border border-dashed text-n-slate-10 hover:text-n-slate-12 transition-colors"
-                    :style="{ borderColor: winColor(win) + '60' }"
-                    title="Bloco livre — clique para agendar"
-                    @click="openCreateSlot(cursor, win, slot)"
-                  >
-                    {{ slot }}
-                  </button>
-                  <button
-                    v-if="isAdmin"
-                    class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-n-solid-3 border border-n-weak items-center justify-center hidden group-hover:flex hover:bg-n-alpha-2"
-                    title="Fechar este horário 🔒"
-                    @click.stop="toggleBlock(cursor, win, slot)"
-                  >
-                    <span class="i-lucide-lock text-[9px] text-n-slate-10" />
-                  </button>
-                </span>
-              </template>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="!dayViewTasks.length && !windowsForDay(cursor).length && !isWeekend(cursor)" class="text-center py-16 text-n-slate-10">
-          <span class="i-lucide-calendar text-4xl mb-2 block mx-auto" />
-          <p class="text-sm">Nenhuma consulta neste dia.</p>
-          <button
-            class="mt-3 text-sm px-3 py-2 rounded-lg text-white"
-            :class="isSurgeryMode ? 'cevico-surgery-ink' : ''"
-            :style="{ background: isSurgeryMode ? surgeryGrad : theme.primary, '--surg-text': surgeryInk }"
-            @click="openCreateOnDay(cursor)"
-          >
-            {{ isSurgeryMode ? '+ Agendar cirurgia' : '+ Agendar consulta' }}
-          </button>
-        </div>
-        <template v-if="dayViewTasks.length">
-          <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-2 mt-2">
-            Linha do tempo do dia
-            <span class="normal-case font-normal">— cada bloco ocupa o espaço do seu tempo (consulta 15 min · cirurgia 1h)</span>
-          </p>
-          <!-- grade PROPORCIONAL: 1h = altura fixa; o bloco mede o tempo dele -->
-          <div
-            class="relative rounded-xl border border-n-weak bg-n-solid-1 mb-4"
-            :class="isDayOff(cursor) ? '' : 'cursor-pointer'"
-            :style="{ height: HOURS.length * DAY_ROW_PX + 'px' }"
-            title="Clique num espaço vazio para agendar naquele horário"
-            @click.self="onDayGridClick"
-          >
-            <div
-              v-for="(hour, hi) in HOURS"
-              :key="'linha' + hour"
-              class="absolute left-0 right-0 border-t border-n-weak pointer-events-none"
-              :style="{ top: hi * DAY_ROW_PX + 'px' }"
-            >
-              <span class="absolute left-1.5 top-0.5 text-[10px] text-n-slate-9 font-medium">{{ String(hour).padStart(2, '0') }}:00</span>
-            </div>
-            <button
-              v-for="task in gridTasks"
-              :key="'bloco' + task.id"
-              class="absolute rounded-lg border text-left px-2 py-0.5 overflow-hidden hover:opacity-90 leading-tight"
-              :style="{ ...dayBlockStyle(task, gridTasks), borderColor: dotColor(task), backgroundColor: dotColor(task) + '22' }"
-              :title="`${chipTime(task)} · ${displayName(task)} (${taskDuration(task)} min)`"
-              @click.stop="openEdit(task)"
-            >
-              <span class="text-[10px] font-bold" :style="{ color: dotColor(task) }">{{ chipTime(task) }}</span>
-              <span class="text-[10px] font-medium text-n-slate-12 ml-1">{{ displayName(task) }}</span>
-              <span v-if="task.attendance === 'attended'" class="text-[9px] text-green-600">✓</span>
-              <span v-else-if="task.attendance === 'missed'" class="text-[9px] text-red-500">✗</span>
-              <span v-else-if="task.attendance === 'attended_not_done'" class="text-[9px]">⚠️</span>
-            </button>
-          </div>
-
-          <!-- Conferência do dia: os cards completos com os botões -->
-          <div class="flex items-center gap-2 mb-2 mt-1 flex-wrap">
-            <p class="text-sm font-bold text-n-slate-12 flex items-center gap-1.5">
-              <span class="w-6 h-6 rounded-lg flex items-center justify-center" :style="{ background: isSurgeryMode ? surgeryGrad : theme.primary }">
-                <span class="i-lucide-clipboard-check text-white text-xs" :style="isSurgeryMode ? { color: surgeryInk } : {}" />
-              </span>
-              Conferência {{ isSurgeryMode ? 'das Cirurgias' : 'das Consultas' }} do dia
-            </p>
-            <span
-              v-if="dayViewTasks.filter(t => !t.attendance).length"
-              class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/15 text-amber-600"
-            >
-              {{ dayViewTasks.filter(t => !t.attendance).length }} pendente(s)
-            </span>
-            <span v-else class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-green-500/15 text-green-600">
-              tudo conferido ✓
-            </span>
-          </div>
-          <div class="space-y-2.5">
+        <!-- ══ MÊS ══ -->
+        <div v-if="viewMode === 'month'">
+          <div class="cv-ag-month">
+            <div v-for="wd in WEEKDAYS" :key="wd" class="cv-ag-month-head">{{ wd }}</div>
+            <template v-for="(week, wi) in weeks" :key="wi">
               <div
-                v-for="task in dayViewTasks"
-                :key="task.id"
-                class="w-full text-left rounded-2xl border px-4 py-3 transition-colors cursor-pointer"
-                :class="task.attendance === 'missed' ? 'opacity-75' : ''"
-                :style="{ borderColor: dotColor(task) + '50', backgroundColor: dotColor(task) + '0C' }"
-                @click="openEdit(task)"
+                v-for="day in week"
+                :key="day.toISOString()"
+                class="cv-ag-cell"
+                :class="{
+                  'cv-ag-cell-out': !inMonth(day),
+                  'cv-ag-cell-off': isDayOff(day),
+                  'cv-ag-cell-today': isToday(day),
+                }"
+                role="button"
+                title="Abrir a semana deste dia"
+                @click="goToWeek(day)"
               >
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="text-xs font-bold" :style="{ color: dotColor(task) }">{{ chipTime(task) }}</span>
-                  <span class="text-sm font-semibold text-n-slate-12" :class="task.attendance === 'missed' ? 'line-through' : ''">
-                    {{ displayName(task) }}
-                  </span>
-                  <span v-if="unitOf(task)" class="text-[10px] px-2 py-0.5 rounded-full font-medium" :style="{ backgroundColor: dotColor(task) + '1A', color: dotColor(task) }">
-                    {{ unitOf(task).label }}
-                  </span>
-                  <span v-if="task.attendance === 'attended'" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-green-500/15 text-green-600">
-                    {{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}
-                  </span>
-                  <span v-else-if="task.attendance === 'missed'" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-red-500/15 text-red-600">
-                    {{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}
-                  </span>
-                  <span v-else-if="task.attendance === 'attended_not_done'" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-amber-500/15 text-amber-600">
-                    ⚠️ Veio e não fez
-                  </span>
-                  <!-- 💰 valor do card do CRM + forma de pagamento (SÓ ADMIN) -->
-                  <span
-                    v-if="isAdmin && isSurgeryTask(task) && task.crm_value"
-                    class="text-[10px] px-2 py-0.5 rounded-full font-bold text-white ml-auto"
-                    style="background: linear-gradient(135deg, #065F46, #10B981)"
-                    :title="task.surgery_payment ? `Forma de pagamento: ${task.surgery_payment}` : 'Valor do card no CRM'"
-                  >
-                    💰 {{ fmtBRL(task.crm_value) }}<template v-if="task.surgery_payment"> · {{ task.surgery_payment }}</template>
-                  </span>
-                  <span v-if="task.surgery_indication === 'indicated'" class="text-[10px] px-2 py-0.5 rounded-full font-semibold text-white" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-                    🎯 {{ task.indicated_procedure || 'Cirurgia indicada' }}
-                  </span>
-                  <span v-else-if="task.surgery_indication === 'not_indicated'" class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-n-alpha-2 text-n-slate-10">
-                    Sem indicação
+                <div class="flex items-center justify-between">
+                  <span class="cv-ag-daynum !w-6 !h-6 text-xs" :class="[isToday(day) ? 'cv-ag-daynum-today' : '', !inMonth(day) ? 'cv-ag-daynum-muted' : '']">{{ day.getDate() }}</span>
+                  <span v-if="isDayOff(day)" class="i-lucide-lock text-[10px]" :class="isDayBlocked(day) ? 'text-red-400' : 'text-n-slate-8'" :title="isDayBlocked(day) ? 'Dia fechado' : 'Fim de semana'" />
+                  <span v-else class="flex items-center gap-0.5">
+                    <span v-for="w in windowsForDay(day)" :key="(w.doctor || w.unit) + w.start" class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: winColor(w) }" :title="`${winTitle(w)} — ${w.start}`" />
+                    <span v-if="dayOccupancy(day)" class="text-[9px] font-bold ml-0.5 tabular-nums" :style="{ color: occColor(dayOccupancy(day).pct) }" :title="`${dayOccupancy(day).filled} de ${dayOccupancy(day).total} blocos ocupados`">{{ dayOccupancy(day).pct }}%</span>
                   </span>
                 </div>
-                <div class="flex items-center gap-3 mt-1.5 text-[11px] text-n-slate-10 flex-wrap">
-                  <span
-                    v-if="!isSurgeryTask(task)"
-                    class="text-[10px] font-semibold px-1.5 py-px rounded-full text-white"
-                    :style="{ background: modalityOf(task).color }"
-                  >{{ modalityOf(task).label }}</span>
-                  <span v-if="task.phone" class="flex items-center gap-1"><span class="i-lucide-phone text-[10px]" />{{ task.phone }}</span>
-                  <span v-if="task.procedure" class="flex items-center gap-1"><span class="i-lucide-eye text-[10px]" />{{ task.procedure }}</span>
-                  <span v-if="task.doctor" class="flex items-center gap-1"><span class="i-lucide-stethoscope text-[10px]" />{{ task.doctor }}</span>
-                </div>
-
-                <!-- etiquetas do paciente + respostas do formulário (item 76) -->
-                <div
-                  v-if="detailOf(task) && (detailOf(task).labels.length || detailOf(task).form_response)"
-                  class="flex items-center gap-1.5 mt-1.5 flex-wrap"
-                >
-                  <span
-                    v-for="lbl in detailOf(task).labels"
-                    :key="task.id + lbl"
-                    class="text-[10px] px-2 py-0.5 rounded-full font-medium"
-                    :style="{ background: dotColor(task) + '18', color: dotColor(task) }"
-                  >
-                    🏷 {{ lbl }}
-                  </span>
+                <div class="flex flex-col gap-[3px] min-h-0">
                   <button
-                    v-if="detailOf(task).form_response"
-                    class="text-[10px] font-bold px-2.5 py-1 rounded-lg text-white hover:opacity-90"
-                    style="background: linear-gradient(135deg, #5B21B6, #7C3AED)"
-                    title="Respostas que o paciente deu no formulário — leia antes da consulta"
-                    @click.stop="openFormAnswers(task)"
+                    v-for="task in dayTasks(day).slice(0, MONTH_MAX)"
+                    :key="task.id"
+                    type="button"
+                    class="cv-ag-ev"
+                    :class="{ 'cv-ag-ev-done': task.status === 'done' && task.attendance !== 'missed', 'cv-ag-ev-missed': task.attendance === 'missed' }"
+                    :style="evVars(task)"
+                    :title="`${chipTime(task)} · ${displayName(task)}${unitOf(task) ? ' · ' + unitOf(task).label : ''}`"
+                    @click.stop="openEdit(task)"
                   >
-                    📖 Ler respostas do formulário
-                  </button>
-                </div>
-
-                <!-- Conferência do dia: compareceu/faltou → indicação de cirurgia -->
-                <div class="flex items-center gap-1.5 mt-2 pt-2 border-t flex-wrap" :style="{ borderColor: dotColor(task) + '30' }" @click.stop>
-                  <button
-                    class="text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50"
-                    :class="task.attendance === 'attended'
-                      ? 'bg-green-600 text-white border-green-600'
-                      : 'text-green-600 border-green-500/40 hover:bg-green-500/10'"
-                    :disabled="savingAttendanceId === task.id"
-                    @click="setAttendance(task, 'attended')"
-                  >
-                    {{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}
+                    <span class="cv-ag-ev-time">{{ chipTime(task) }}</span>
+                    <span class="cv-ag-ev-name">{{ displayName(task) }}</span>
                   </button>
                   <button
-                    v-if="isSurgeryTask(task)"
-                    class="text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50"
-                    :class="task.attendance === 'attended_not_done'
-                      ? 'bg-amber-500 text-white border-amber-500'
-                      : 'text-amber-600 border-amber-500/40 hover:bg-amber-500/10'"
-                    :disabled="savingAttendanceId === task.id"
-                    title="O paciente veio, mas a cirurgia não aconteceu — registre o motivo"
-                    @click="toggleNoSurgery(task)"
+                    v-if="dayTasks(day).length > MONTH_MAX"
+                    type="button"
+                    class="cv-ag-more text-left"
+                    title="Ver o dia inteiro"
+                    @click.stop="goToDay(day)"
                   >
-                    ⚠️ Veio e não fez
-                  </button>
-                  <button
-                    class="text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50"
-                    :class="task.attendance === 'missed'
-                      ? 'bg-red-600 text-white border-red-600'
-                      : 'text-red-500 border-red-500/40 hover:bg-red-500/10'"
-                    :disabled="savingAttendanceId === task.id"
-                    @click="setAttendance(task, 'missed')"
-                  >
-                    {{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}
-                  </button>
-                  <!-- motivo de "veio e não fez" -->
-                  <div v-if="noSurgeryReasonId === task.id" class="w-full flex items-center gap-1.5 mt-1.5">
-                    <input
-                      v-model="noSurgeryReason"
-                      class="flex-1 border border-amber-500/40 rounded-lg px-2.5 py-1.5 text-xs bg-n-solid-2 text-n-slate-12 focus:outline-none"
-                      placeholder="Qual foi o motivo? (pressão alta, desistiu, exame pendente...)"
-                      @keyup.enter="confirmNoSurgery(task)"
-                    />
-                    <button
-                      class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-500 text-white disabled:opacity-50"
-                      :disabled="savingAttendanceId === task.id"
-                      @click="confirmNoSurgery(task)"
-                    >
-                      Registrar
-                    </button>
-                  </div>
-
-                  <template v-if="task.attendance === 'attended' && !isSurgeryTask(task)">
-                    <span class="text-n-slate-8 text-[10px]">·</span>
-                    <button
-                      class="text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50"
-                      :class="task.surgery_indication === 'indicated'
-                        ? 'text-white border-transparent'
-                        : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                      :style="task.surgery_indication === 'indicated' ? { background: 'linear-gradient(135deg, #B8860B, #D4A017)' } : {}"
-                      :disabled="savingAttendanceId === task.id"
-                      @click="setIndication(task, 'indicated')"
-                    >
-                      🎯 Cirurgia indicada
-                    </button>
-                    <button
-                      class="text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50"
-                      :class="task.surgery_indication === 'not_indicated'
-                        ? 'bg-n-slate-11 text-white border-transparent'
-                        : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
-                      :disabled="savingAttendanceId === task.id"
-                      @click="setIndication(task, 'not_indicated')"
-                    >
-                      Sem indicação
-                    </button>
-                  </template>
-
-                  <!-- Indicada → agendar a CIRURGIA no trilho dourado -->
-                  <button
-                    v-if="!isSurgeryTask(task) && task.surgery_indication === 'indicated'"
-                    class="cevico-glass cevico-surgery-ink text-[11px] font-semibold px-2.5 py-1 rounded-lg text-white hover:opacity-90 shadow"
-                    :style="{ background: surgeryGrad, '--surg-text': surgeryInk }"
-                    title="Abre a Agenda de Cirurgias com os dados do paciente preenchidos"
-                    @click="scheduleSurgeryFrom(task)"
-                  >
-                    📅 Agendar cirurgia
-                  </button>
-                </div>
-                <!-- Escolha do procedimento indicado -->
-                <div v-if="indicationPickerId === task.id" class="flex flex-wrap gap-1 mt-1.5" @click.stop>
-                  <span class="text-[10px] text-n-slate-10 w-full">Qual procedimento foi indicado?</span>
-                  <button
-                    v-for="proc in PROCEDURES"
-                    :key="proc"
-                    class="text-[10px] font-medium px-2 py-1 rounded-lg border border-n-weak text-n-slate-11 hover:text-white hover:border-transparent transition-colors"
-                    :disabled="savingAttendanceId === task.id"
-                    @click="setIndication(task, 'indicated', proc)"
-                    @mouseenter="$event.target.style.background = 'linear-gradient(135deg, #B8860B, #D4A017)'"
-                    @mouseleave="$event.target.style.background = ''"
-                  >
-                    {{ proc }}
+                    +{{ dayTasks(day).length - MONTH_MAX }} mais
                   </button>
                 </div>
               </div>
+            </template>
           </div>
-          <!-- Fora do horário 07–20h -->
-          <div v-if="tasksOutsideHours.length" class="mt-3 pl-[60px] space-y-1.5">
-            <p class="text-[10px] text-n-slate-9 uppercase font-semibold">Outros horários</p>
-            <button
-              v-for="task in tasksOutsideHours"
-              :key="task.id"
-              class="w-full text-left rounded-xl border px-3 py-2 text-sm text-n-slate-12"
-              :style="{ borderColor: dotColor(task) + '50' }"
-              @click="openEdit(task)"
-            >
-              {{ chipTime(task) }} — {{ displayName(task) }}
-            </button>
-          </div>
-        </template>
-      </div>
-    </div>
-    </div>
-
-    <!-- Modal criar/editar consulta -->
-    <div
-      v-if="showModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      @click.self="showModal = false"
-    >
-      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
-        <div class="h-1.5 w-full flex-shrink-0" :style="{ background: isSurgeryMode ? surgeryGrad : theme.primary }" />
-        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
-          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-            <span :class="isSurgeryMode ? 'i-lucide-slice' : 'i-lucide-calendar-plus'" :style="isSurgeryMode ? { color: SURGERY_COLOR } : {}" class="text-n-brand" />
-            <template v-if="isSurgeryMode">{{ editingTask ? 'Editar cirurgia' : 'Agendar cirurgia' }}</template>
-            <template v-else>{{ editingTask ? 'Editar consulta' : 'Nova consulta' }}</template>
-          </h2>
-          <div class="flex items-center gap-1.5">
-            <button
-              v-if="editingTask?.contact_id"
-              class="flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 hover:text-n-brand"
-              title="Abrir o Espaço do Paciente"
-              @click="openPatientSpace(editingTask)"
-            >
-              <PatientSpaceIcon :size="18" />
-              Espaço do Paciente
-            </button>
-            <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showModal = false" />
-          </div>
+          <p class="text-[10px] text-n-slate-9 mt-2 text-center">clique num dia para abrir a semana · o número de cada tipo está no seletor acima</p>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-5 space-y-3.5">
-          <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">Nome do paciente *</label>
-            <input
-              v-model="form.name"
-              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-              placeholder="Maria Silva"
-            />
-          </div>
-          <!-- Modalidade — só no trilho de consultas -->
-          <div v-if="!isSurgeryMode">
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Tipo de consulta</label>
-            <div class="flex gap-1.5">
+        <!-- ══ SEMANA ══ -->
+        <div v-else-if="viewMode === 'week'" class="overflow-x-auto">
+          <div class="cv-ag-grid min-w-[720px]">
+            <div class="cv-ag-grid-head" :style="{ gridTemplateColumns: weekGridCols }">
+              <div />
               <button
-                v-for="m in MODALITIES"
-                :key="m.key"
+                v-for="day in weekDays"
+                :key="'h' + day.toISOString()"
                 type="button"
-                class="flex-1 text-xs font-medium px-2 py-1.5 rounded-lg border transition-colors"
-                :class="form.modality === m.key ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-                :style="form.modality === m.key ? { background: m.color } : {}"
-                @click="form.modality = m.key"
+                class="cv-ag-dayhead"
+                :class="{ 'cv-ag-dayhead-today': isToday(day), 'cv-ag-dayhead-off': isDayOff(day) }"
+                :title="isDayOff(day) ? (isDayBlocked(day) ? 'Dia fechado' : 'Fim de semana') : 'Abrir o dia'"
+                @click="goToDay(day)"
               >
-                {{ m.label }}
+                <span class="cv-ag-dayhead-wd">{{ WEEKDAYS[day.getDay()] }}</span>
+                <span class="cv-ag-daynum cv-ag-daynum-lg" :class="isToday(day) ? 'cv-ag-daynum-today' : ''">{{ day.getDate() }}</span>
+                <span v-if="isDayOff(day)" class="text-[9px] text-n-slate-9 flex items-center gap-0.5"><span class="i-lucide-lock text-[9px]" />{{ isDayBlocked(day) ? 'fechado' : 'sem agenda' }}</span>
+                <span v-else class="flex items-center gap-1 flex-wrap justify-center min-h-[16px]">
+                  <span v-for="w in windowsForDay(day)" :key="(w.doctor || w.unit) + w.start" class="cv-ag-win" :style="{ '--w': winColor(w) }" :title="`${winTitle(w)} — ${w.start} às ${w.end} (${winUnitLabel(w)})`">
+                    {{ w.doctor ? doctorShort(w.doctor) : surgeryLocationLabel(w.unit) }}
+                  </span>
+                  <span v-if="dayOccupancy(day)" class="text-[9px] font-bold tabular-nums" :style="{ color: occColor(dayOccupancy(day).pct) }">{{ dayOccupancy(day).pct }}%</span>
+                  <span v-else-if="dayTasks(day).length" class="text-[9px] font-semibold text-n-slate-9">{{ dayTasks(day).length }}</span>
+                </span>
+              </button>
+            </div>
+            <div class="cv-ag-grid-body" :style="{ gridTemplateColumns: weekGridCols }">
+              <div class="cv-ag-gutter" :style="{ height: weekHours.length * WEEK_ROW_PX + 'px' }">
+                <span v-for="(h, hi) in weekHours" :key="h" class="cv-ag-hour" :style="{ top: hi * WEEK_ROW_PX + 'px' }">{{ hi === 0 ? '' : String(h).padStart(2, '0') + ':00' }}</span>
+              </div>
+              <AgendaTimeColumn
+                v-for="day in weekDays"
+                :key="'c' + day.toISOString()"
+                :day="day"
+                :tasks="dayTasks(day)"
+                :bands="bandsForDay(day)"
+                :start-hour="weekSpan.start"
+                :end-hour="weekSpan.end"
+                :hour-px="WEEK_ROW_PX"
+                :day-off="isDayOff(day)"
+                :today="isToday(day)"
+                :now-minutes="nowMinutes"
+                :drop-active="dragOverDay === dateKey(day)"
+                :duration-of="taskDuration"
+                :accent-of="accentOf"
+                :name-of="displayName"
+                compact
+                @create="onColumnCreate"
+                @open="openEdit"
+                @dragstart="onDragStart"
+                @dragover="onDragOver"
+                @dragleave="onDragLeave"
+                @drop="onColumnDrop"
+              />
+            </div>
+          </div>
+          <p class="text-[10px] text-n-slate-9 mt-2 text-center">
+            clique num espaço vazio para agendar naquele horário · arraste um balão para reagendar · faixas coloridas = horário em que cada médico atende
+          </p>
+        </div>
+
+        <!-- ══ DIA ══ -->
+        <div v-else>
+          <!-- avisos do dia -->
+          <div v-if="isWeekend(cursor)" class="cv-sub flex items-center gap-2 px-4 py-3 mb-4 text-sm text-n-slate-10">
+            <span class="i-lucide-lock text-base" />
+            {{ WEEKDAY_FULL[cursor.getDay()] }} — sem agenda em nenhuma unidade.
+          </div>
+          <div v-else-if="isDayBlocked(cursor)" class="cv-block cv-strip cv-red flex items-center gap-2 px-4 py-3 mb-4 text-sm text-n-slate-11 flex-wrap">
+            <span class="i-lucide-lock text-base text-red-500" />
+            <b>Dia fechado</b> — sem agenda nesta data.
+            <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" @click="toggleBlockDay(cursor)">Reabrir dia</button>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <!-- linha do tempo do dia -->
+            <div class="lg:col-span-5">
+              <div class="cv-ag-grid">
+                <div class="cv-ag-grid-head" style="grid-template-columns: 56px minmax(0, 1fr)">
+                  <div />
+                  <div class="cv-ag-dayhead !items-start px-3 !py-2.5" :class="isToday(cursor) ? 'cv-ag-dayhead-today' : ''">
+                    <span class="cv-ag-dayhead-wd">{{ WEEKDAY_FULL[cursor.getDay()] }}</span>
+                    <span class="flex items-center gap-2">
+                      <span class="cv-ag-daynum cv-ag-daynum-lg" :class="isToday(cursor) ? 'cv-ag-daynum-today' : ''">{{ cursor.getDate() }}</span>
+                      <span class="text-sm font-semibold text-n-slate-12">{{ dayViewTasks.length }} {{ dayViewTasks.length === 1 ? k.noun : k.plural }}</span>
+                    </span>
+                  </div>
+                </div>
+                <div class="cv-ag-grid-body" style="grid-template-columns: 56px minmax(0, 1fr)">
+                  <div class="cv-ag-gutter" :style="{ height: dayHours.length * DAY_ROW_PX + 'px' }">
+                    <span v-for="(h, hi) in dayHours" :key="h" class="cv-ag-hour" :style="{ top: hi * DAY_ROW_PX + 'px' }">{{ hi === 0 ? '' : String(h).padStart(2, '0') + ':00' }}</span>
+                  </div>
+                  <AgendaTimeColumn
+                    :day="cursor"
+                    :tasks="dayViewTasks"
+                    :bands="bandsForDay(cursor)"
+                    :start-hour="daySpan.start"
+                    :end-hour="daySpan.end"
+                    :hour-px="DAY_ROW_PX"
+                    :day-off="isDayOff(cursor)"
+                    :today="isToday(cursor)"
+                    :now-minutes="nowMinutes"
+                    :drop-active="dragOverDay === dateKey(cursor)"
+                    :duration-of="taskDuration"
+                    :accent-of="accentOf"
+                    :name-of="displayName"
+                    @create="onColumnCreate"
+                    @open="openEdit"
+                    @dragstart="onDragStart"
+                    @dragover="onDragOver"
+                    @dragleave="onDragLeave"
+                    @drop="onColumnDrop"
+                  />
+                </div>
+              </div>
+              <p class="text-[10px] text-n-slate-9 mt-2 text-center">cada balão ocupa o espaço do seu tempo · clique no vazio para agendar</p>
+            </div>
+
+            <div class="lg:col-span-7 space-y-4">
+              <!-- janelas do dia: blocos de horário (livre / ocupado / cadeado) -->
+              <div v-if="!isDayBlocked(cursor) && windowsForDay(cursor).length" class="space-y-3">
+                <div v-for="win in windowsForDay(cursor)" :key="(win.doctor || win.unit) + win.start" class="cv-sub p-4" :style="winVars(win)">
+                  <div class="flex items-center gap-2 flex-wrap mb-3">
+                    <span class="cv-icon cv-icon-sm" :style="{ background: winColor(win) }">
+                      <span :class="win.doctor ? 'i-lucide-stethoscope' : 'i-lucide-slice'" class="text-xs" />
+                    </span>
+                    <p class="text-sm font-bold text-n-slate-12">{{ winTitle(win) }}</p>
+                    <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(winColor(win)), '--cv-deep': winColor(win) }">{{ winUnitLabel(win) }}</span>
+                    <span class="text-xs text-n-slate-10"><template v-if="win.turno">{{ win.turno }} · </template>{{ win.start }}–{{ win.end }} · {{ win.block }} min</span>
+                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold text-white ml-auto" :style="{ backgroundColor: occColor(winOccupancy(cursor, win).pct) }" :title="`${winOccupancy(cursor, win).filled} de ${winOccupancy(cursor, win).total} blocos ocupados`">
+                      {{ winOccupancy(cursor, win).pct }}%
+                    </span>
+                    <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-btn-danger" title="Fechar o dia inteiro (feriado, congresso, folga...)" @click="toggleBlockDay(cursor)">
+                      <span class="i-lucide-lock text-[10px]" /> fechar dia
+                    </button>
+                  </div>
+                  <div class="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2">
+                    <template v-for="slot in slotsFor(win)" :key="slot">
+                      <span v-if="taskAtSlot(cursor, win, slot)" class="relative group min-w-0">
+                        <button class="cv-ag-slot cv-ag-slot-taken truncate" :title="tasksAtSlotAll(cursor, win, slot).map(displayName).join(' + ')" @click="openEdit(taskAtSlot(cursor, win, slot))">
+                          <span class="tabular-nums opacity-90">{{ slot }}</span>
+                          <span class="truncate">{{ displayName(taskAtSlot(cursor, win, slot)) }}</span>
+                          <span v-if="tasksAtSlotAll(cursor, win, slot).length > 1" class="font-extrabold">+{{ tasksAtSlotAll(cursor, win, slot).length - 1 }}</span>
+                        </button>
+                        <button class="cv-ag-corner" title="Encaixe: agendar OUTRO paciente neste mesmo horário" @click.stop="openCreateSlot(cursor, win, slot)"><span class="i-lucide-plus" /></button>
+                      </span>
+                      <button v-else-if="isBlocked(cursor, win, slot)" class="cv-ag-slot cv-ag-slot-locked" :title="isAdmin ? 'Horário fechado — clique para reabrir' : 'Horário fechado'" @click="isAdmin && toggleBlock(cursor, win, slot)">
+                        <span class="i-lucide-lock text-[10px]" /> {{ slot }}
+                      </button>
+                      <span v-else class="relative group">
+                        <button class="cv-ag-slot cv-ag-slot-free tabular-nums" title="Bloco livre — clique para agendar" @click="openCreateSlot(cursor, win, slot)">{{ slot }}</button>
+                        <button v-if="isAdmin" class="cv-ag-corner" title="Fechar este horário 🔒" @click.stop="toggleBlock(cursor, win, slot)"><span class="i-lucide-lock" /></button>
+                      </span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <!-- vazio -->
+              <div v-if="!dayViewTasks.length && !windowsForDay(cursor).length && !isDayOff(cursor)" class="cv-sub text-center py-14 text-n-slate-10">
+                <span class="cv-icon cv-icon-xl mx-auto mb-3 block"><span :class="k.icon" class="text-xl" /></span>
+                <p class="text-sm">Nenhum{{ k.article === 'a' ? 'a' : '' }} {{ k.noun }} neste dia.</p>
+                <button class="cv-btn mt-3" @click="openCreateOnDay(cursor)"><span class="i-lucide-plus text-sm" /> {{ newLabel }}</button>
+              </div>
+
+              <!-- Conferência do dia -->
+              <template v-if="dayViewTasks.length">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="cv-icon cv-icon-sm"><span class="i-lucide-clipboard-check text-xs" /></span>
+                  <p class="text-sm font-bold text-n-slate-12">Conferência d{{ k.article }}s {{ k.plural }} do dia</p>
+                  <span v-if="pendingCount" class="cv-chip cv-amber">{{ pendingCount }} pendente(s)</span>
+                  <span v-else class="cv-chip cv-green">tudo conferido ✓</span>
+                </div>
+                <div class="space-y-2.5">
+                  <div
+                    v-for="task in dayViewTasks"
+                    :key="task.id"
+                    class="cv-ag-card"
+                    :class="task.attendance === 'missed' ? 'opacity-75' : ''"
+                    :style="evVars(task)"
+                    @click="openEdit(task)"
+                  >
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="text-sm font-extrabold tabular-nums" :style="{ color: accentOf(task) }">{{ chipTime(task) }}</span>
+                      <span class="text-sm font-semibold text-n-slate-12" :class="task.attendance === 'missed' ? 'line-through' : ''">{{ displayName(task) }}</span>
+                      <span v-if="unitOf(task)" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }">{{ unitOf(task).label }}</span>
+                      <span v-if="!isSurgeryTask(task) && !isTele" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(modalityOf(task).color), '--cv-deep': modalityOf(task).color }">{{ modalityOf(task).label }}</span>
+                      <span v-if="task.attendance === 'attended'" class="cv-chip cv-green">{{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}</span>
+                      <span v-else-if="task.attendance === 'missed'" class="cv-chip cv-red">{{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}</span>
+                      <span v-else-if="task.attendance === 'attended_not_done'" class="cv-chip cv-amber">⚠️ Veio e não fez</span>
+                      <span v-if="isAdmin && isSurgeryTask(task) && task.crm_value" class="cv-chip cv-green ml-auto" :title="task.surgery_payment ? `Forma de pagamento: ${task.surgery_payment}` : 'Valor do card no CRM'">
+                        💰 {{ fmtBRL(task.crm_value) }}<template v-if="task.surgery_payment"> · {{ task.surgery_payment }}</template>
+                      </span>
+                      <span v-if="task.surgery_indication === 'indicated'" class="cv-chip cv-gold cv-chip-on">🎯 {{ task.indicated_procedure || 'Cirurgia indicada' }}</span>
+                      <span v-else-if="task.surgery_indication === 'not_indicated'" class="cv-chip cv-slate">Sem indicação</span>
+                    </div>
+                    <div class="flex items-center gap-3 mt-1.5 text-[11px] text-n-slate-10 flex-wrap">
+                      <span v-if="task.phone" class="flex items-center gap-1"><span class="i-lucide-phone text-[10px]" />{{ task.phone }}</span>
+                      <span v-if="task.procedure" class="flex items-center gap-1"><span class="i-lucide-eye text-[10px]" />{{ task.procedure }}</span>
+                      <span v-if="task.doctor" class="flex items-center gap-1"><span class="i-lucide-stethoscope text-[10px]" />{{ task.doctor }}</span>
+                      <button v-if="task.contact_id" class="flex items-center gap-1 hover:underline" :style="{ color: accentOf(task) }" @click.stop="openPatientSpace(task)">
+                        <PatientSpaceIcon :size="12" /> Espaço do Paciente
+                      </button>
+                    </div>
+
+                    <div v-if="detailOf(task) && (detailOf(task).labels.length || detailOf(task).form_response)" class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                      <span v-for="lbl in detailOf(task).labels" :key="task.id + lbl" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }">🏷 {{ lbl }}</span>
+                      <button v-if="detailOf(task).form_response" class="cv-btn cv-btn-sm" style="--cv-grad: linear-gradient(135deg, #5B21B6, #7C3AED); --cv-deep-rgb: 91 33 182" title="Respostas que o paciente deu no formulário — leia antes da consulta" @click.stop="openFormAnswers(task)">
+                        📖 Ler respostas do formulário
+                      </button>
+                    </div>
+
+                    <!-- conferência: compareceu / faltou → indicação -->
+                    <div class="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-n-weak flex-wrap" @click.stop>
+                      <button class="cv-ag-act" style="--a: #059669" :class="task.attendance === 'attended' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setAttendance(task, 'attended')">
+                        {{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}
+                      </button>
+                      <button v-if="isSurgeryTask(task)" class="cv-ag-act" style="--a: #D97706" :class="task.attendance === 'attended_not_done' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" title="O paciente veio, mas a cirurgia não aconteceu — registre o motivo" @click="toggleNoSurgery(task)">
+                        ⚠️ Veio e não fez
+                      </button>
+                      <button class="cv-ag-act" style="--a: #DC2626" :class="task.attendance === 'missed' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setAttendance(task, 'missed')">
+                        {{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}
+                      </button>
+                      <div v-if="noSurgeryReasonId === task.id" class="w-full flex items-center gap-1.5 mt-1">
+                        <input v-model="noSurgeryReason" class="cv-input flex-1 !h-8 text-xs" placeholder="Qual foi o motivo? (pressão alta, desistiu, exame pendente...)" @keyup.enter="confirmNoSurgery(task)" />
+                        <button class="cv-btn cv-btn-sm cv-amber" :disabled="savingAttendanceId === task.id" @click="confirmNoSurgery(task)">Registrar</button>
+                      </div>
+
+                      <template v-if="task.attendance === 'attended' && !isSurgeryTask(task)">
+                        <span class="text-n-slate-8 text-[10px]">·</span>
+                        <button class="cv-ag-act" style="--a: #B8860B" :class="task.surgery_indication === 'indicated' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'indicated')">🎯 Cirurgia indicada</button>
+                        <button class="cv-ag-act" style="--a: #64748B" :class="task.surgery_indication === 'not_indicated' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'not_indicated')">Sem indicação</button>
+                        <button v-if="kind !== 'consultas' || task.modality === 'exames'" class="cv-ag-act" style="--a: #2563EB" title="Marcar um retorno presencial a partir deste atendimento" @click="scheduleFollowUpFrom(task)">📅 Marcar retorno</button>
+                      </template>
+                      <button v-if="!isSurgeryTask(task) && task.surgery_indication === 'indicated'" class="cv-btn cv-btn-sm" style="--cv-grad: linear-gradient(135deg, #0369A1, #38BDF8); --cv-deep-rgb: 7 89 133" title="Abre a Agenda de Cirurgias com os dados do paciente preenchidos" @click="scheduleSurgeryFrom(task)">
+                        🔪 Agendar cirurgia
+                      </button>
+                    </div>
+                    <div v-if="indicationPickerId === task.id" class="flex flex-wrap gap-1 mt-1.5" @click.stop>
+                      <span class="text-[10px] text-n-slate-10 w-full">Qual procedimento foi indicado?</span>
+                      <button v-for="proc in PROCEDURES" :key="proc" class="cv-chip cv-gold" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'indicated', proc)">{{ proc }}</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Modal criar/editar (a concha veste a cor do TIPO escolhido) ══ -->
+    <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" @click.self="showModal = false">
+      <div class="cv-modal cv-ag-pop w-full max-w-md max-h-[92vh] flex flex-col" :style="formVars">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span :class="formKind.icon" class="text-base" /></span>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-base font-bold leading-tight">
+              {{ editingTask ? `Editar ${formKind.noun}` : (formKind.key === 'cirurgias' ? 'Agendar cirurgia' : `${formKind.article === 'o' ? 'Novo' : 'Nova'} ${formKind.noun}`) }}
+            </h2>
+            <p class="text-[11px] opacity-85 truncate">{{ formKind.hint }}</p>
+          </div>
+          <button v-if="editingTask?.contact_id" class="cv-glass-btn" title="Abrir o Espaço do Paciente" @click="openPatientSpace(editingTask)">
+            <PatientSpaceIcon :size="16" /> <span class="hidden sm:inline">Paciente</span>
+          </button>
+          <button class="cv-glass-btn cv-iconbtn" @click="showModal = false"><span class="i-lucide-x" /></button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-5 space-y-4">
+          <!-- o TIPO (só ao criar) -->
+          <div v-if="!editingTask">
+            <span class="cv-label block mb-1.5">Tipo</span>
+            <div class="cv-seg cv-seg-sm w-full !flex">
+              <button
+                v-for="kk in KINDS"
+                :key="'fk' + kk.key"
+                type="button"
+                class="cv-ag-kind flex-1 justify-center !h-7 !px-2 text-[11px]"
+                :class="form.kind === kk.key ? 'cv-ag-kind-on' : ''"
+                :style="kindVarsOf(kk.key)"
+                @click="setFormKind(kk.key)"
+              >
+                <span :class="kk.icon" class="text-xs" />
+                <span class="hidden sm:inline">{{ kk.label.replace(/s$/, '') }}</span>
               </button>
             </div>
           </div>
+
+          <div>
+            <span class="cv-label block mb-1">Nome do paciente *</span>
+            <input v-model="form.name" class="cv-input w-full" placeholder="Nome completo" />
+          </div>
+
+          <div v-if="form.kind === 'consultas'">
+            <span class="cv-label block mb-1.5">Tipo de consulta</span>
+            <div class="cv-seg cv-seg-sm">
+              <button v-for="m in consultaModalities" :key="m.key" type="button" class="cv-seg-item" :class="form.modality === m.key ? 'cv-seg-on' : ''" @click="form.modality = m.key">{{ m.label }}</button>
+            </div>
+          </div>
+
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">Telefone</label>
-              <input
-                v-model="form.phone"
-                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-                placeholder="(11) 98888-7777"
-              />
+              <span class="cv-label block mb-1">Telefone</span>
+              <input v-model="form.phone" class="cv-input w-full" placeholder="(11) 98888-7777" />
             </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">Problema</label>
-              <input
-                v-model="form.procedure"
-                list="agenda-problemas"
-                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-                placeholder="Catarata, refrativa..."
-              />
-              <datalist id="agenda-problemas">
-                <option v-for="p in PROBLEMAS" :key="p" :value="p" />
+              <span class="cv-label block mb-1">{{ procedureLabel }}</span>
+              <input v-model="form.procedure" list="agenda-procedimentos" class="cv-input w-full" :placeholder="form.kind === 'exames' ? 'Pentacam, OCT…' : form.kind === 'cirurgias' ? 'Catarata, PRK…' : 'Catarata, refrativa…'" />
+              <datalist id="agenda-procedimentos">
+                <option v-for="p in procedureOptions" :key="p" :value="p" />
               </datalist>
             </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">Dia *</label>
-              <input
-                v-model="form.date"
-                type="date"
-                class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
-              />
+              <span class="cv-label block mb-1">Dia *</span>
+              <input v-model="form.date" type="date" class="cv-input w-full" />
             </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">Horário</label>
-              <input
-                v-model="form.time"
-                type="time"
-                class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
-              />
+              <span class="cv-label block mb-1">Horário</span>
+              <input v-model="form.time" type="time" class="cv-input w-full" />
             </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">Médico</label>
-              <select
-                v-model="form.doctor"
-                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
-              >
+              <span class="cv-label block mb-1">Médico</span>
+              <select v-model="form.doctor" class="cv-input w-full">
                 <option value="">A definir</option>
                 <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
               </select>
             </div>
-            <div v-if="!isSurgeryMode">
-              <label class="text-xs font-medium text-n-slate-11 block mb-1">Unidade</label>
-              <select
-                v-model="form.unit"
-                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
-              >
+            <div v-if="form.kind === 'teleconsultas'">
+              <span class="cv-label block mb-1">Onde</span>
+              <div class="cv-input w-full flex items-center gap-2 text-sm text-n-slate-11"><span class="i-lucide-video text-sm" /> Online (vídeo)</div>
+            </div>
+            <div v-else-if="form.kind !== 'cirurgias'">
+              <span class="cv-label block mb-1">Unidade</span>
+              <select v-model="form.unit" class="cv-input w-full">
                 <option v-for="(u, key) in UNITS" :key="key" :value="key">{{ u.label }}</option>
                 <option value="">Agenda pessoal (sem unidade)</option>
               </select>
             </div>
             <div v-else>
-              <label class="text-xs font-medium text-n-slate-11 mb-1 flex items-center justify-between">
+              <span class="cv-label mb-1 flex items-center justify-between">
                 Local da cirurgia
-                <button
-                  v-if="isAdmin"
-                  class="text-[10px] font-medium hover:underline"
-                  :style="{ color: SURGERY_COLOR }"
-                  @click="openLocationsModal"
-                >
-                  gerenciar
-                </button>
-              </label>
-              <select
-                v-model="form.unit"
-                class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
-              >
+                <button v-if="isAdmin" type="button" class="normal-case tracking-normal font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">gerenciar</button>
+              </span>
+              <select v-model="form.unit" class="cv-input w-full">
                 <option v-for="loc in surgeryLocations" :key="loc.key" :value="loc.key">{{ loc.label }}</option>
                 <option value="">A definir</option>
               </select>
             </div>
           </div>
+
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">Situação</label>
-            <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit">
-              <button
-                class="px-3 h-7 rounded-lg text-xs font-medium transition-colors"
-                :class="form.status === 'todo' ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-                :style="form.status === 'todo' ? { background: theme.pill } : {}"
-                @click="form.status = 'todo'"
-              >
-                Agendada
-              </button>
-              <button
-                class="px-3 h-7 rounded-lg text-xs font-medium transition-colors"
-                :class="form.status === 'done' ? 'bg-green-600 text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-                @click="form.status = 'done'"
-              >
-                Concluída
-              </button>
-              <button
-                v-if="editingTask"
-                class="px-3 h-7 rounded-lg text-xs font-medium transition-colors"
-                :class="form.canceled ? 'bg-red-600 text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-                @click="form.canceled = !form.canceled"
-              >
-                Cancelada
-              </button>
+            <span class="cv-label block mb-1.5">Situação</span>
+            <div class="cv-seg cv-seg-sm">
+              <button type="button" class="cv-seg-item" :class="form.status === 'todo' && !form.canceled ? 'cv-seg-on' : ''" @click="form.status = 'todo'; form.canceled = false">Agendada</button>
+              <button type="button" class="cv-seg-item" :class="form.status === 'done' && !form.canceled ? 'cv-seg-on' : ''" style="--cv-grad: linear-gradient(135deg, #047857, #10B981); --cv-deep-rgb: 6 95 70" @click="form.status = 'done'; form.canceled = false">Concluída</button>
+              <button v-if="editingTask" type="button" class="cv-seg-item" :class="form.canceled ? 'cv-seg-on' : ''" style="--cv-grad: linear-gradient(135deg, #991B1B, #EF4444); --cv-deep-rgb: 153 27 27" @click="form.canceled = !form.canceled">Cancelada</button>
             </div>
-            <p v-if="form.canceled" class="text-[10px] text-red-500 mt-1">
-              A consulta sai do calendário e conta no indicador de canceladas do Meu Painel.
-            </p>
+            <p v-if="form.canceled" class="text-[10px] text-red-500 mt-1">Sai do calendário e conta no indicador de canceladas.</p>
           </div>
+
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1">Observações</label>
-            <textarea
-              v-model="form.description"
-              rows="2"
-              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 resize-none focus:outline-none focus:border-n-brand"
-              placeholder="Convênio, pedido especial, retorno..."
-            />
+            <span class="cv-label block mb-1">Observações</span>
+            <textarea v-model="form.description" rows="2" class="cv-input w-full resize-none" placeholder="Convênio, pedido especial, retorno..." />
           </div>
         </div>
 
-        <div class="px-5 py-4 border-t border-n-weak flex-shrink-0 space-y-2">
+        <div class="cv-modal-foot space-y-2">
           <div class="flex gap-2">
-            <button
-              class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
-              :class="isSurgeryMode ? 'cevico-glass cevico-surgery-ink' : ''"
-              :style="{ background: isSurgeryMode ? surgeryGrad : theme.primary, '--surg-text': surgeryInk }"
-              :disabled="!form.name.trim() || !form.date || isSaving"
-              @click="save"
-            >
-              <template v-if="isSurgeryMode">{{ isSaving ? 'Salvando…' : (editingTask ? 'Salvar cirurgia' : 'Agendar cirurgia') }}</template>
-              <template v-else>{{ isSaving ? 'Salvando…' : (editingTask ? 'Salvar consulta' : 'Agendar consulta') }}</template>
+            <button class="cv-btn cv-btn-lg flex-1" :disabled="!form.name.trim() || !form.date || isSaving" @click="save">
+              <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
+              {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
             </button>
-            <button
-              class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11"
-              @click="showModal = false"
-            >
-              Cancelar
-            </button>
+            <button class="cv-btn cv-btn-ghost cv-btn-lg" @click="showModal = false">Cancelar</button>
           </div>
           <div v-if="editingTask">
-            <button
-              v-if="!showDeleteConfirm"
-              class="w-full py-1.5 text-xs text-red-500 hover:text-red-600"
-              @click="showDeleteConfirm = true"
-            >
-              Excluir consulta
-            </button>
+            <button v-if="!showDeleteConfirm" class="w-full py-1 text-xs text-red-500 hover:text-red-600" @click="showDeleteConfirm = true">Excluir {{ formKind.noun }}</button>
             <div v-else class="flex items-center gap-2">
               <span class="text-xs text-n-slate-11 flex-1">Excluir este agendamento?</span>
-              <button class="bg-red-500 text-white px-3 py-1 rounded-lg text-xs" @click="removeTask">
-                Excluir
-              </button>
-              <button class="border border-n-weak px-3 py-1 rounded-lg text-xs text-n-slate-11" @click="showDeleteConfirm = false">
-                Cancelar
-              </button>
+              <button class="cv-btn cv-btn-sm cv-red" @click="removeTask">Excluir</button>
+              <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="showDeleteConfirm = false">Cancelar</button>
             </div>
           </div>
         </div>
       </div>
     </div>
-    <!-- Modal: janela da SALA CIRÚRGICA (clínica + dia + horário + bloco) -->
-    <div
-      v-if="showSurgeryWindowsModal"
-      class="fixed inset-0 z-[55] flex items-center justify-center bg-black/60 p-4"
-      @click.self="showSurgeryWindowsModal = false"
-    >
-      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
-        <div class="h-1.5 w-full flex-shrink-0" :style="{ background: surgeryGrad }" />
-        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
-          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-clock" :style="{ color: SURGERY_COLOR }" />
-            Janela da sala cirúrgica
-          </h2>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showSurgeryWindowsModal = false" />
+
+    <!-- Modal: janela da SALA CIRÚRGICA -->
+    <div v-if="showSurgeryWindowsModal" class="fixed inset-0 z-[55] flex items-center justify-center bg-black/55 p-4" @click.self="showSurgeryWindowsModal = false">
+      <div class="cv-modal cv-ag-pop w-full max-w-lg max-h-[90vh] flex flex-col" :style="kindVars('cirurgias')">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="i-lucide-clock text-xl" />
+          <div class="flex-1">
+            <h2 class="text-base font-bold">Janela da sala cirúrgica</h2>
+            <p class="text-[11px] opacity-85">dias e horários em que a sala de cada clínica parceira está disponível</p>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn" @click="showSurgeryWindowsModal = false"><span class="i-lucide-x" /></button>
         </div>
         <div class="flex-1 overflow-y-auto p-5 space-y-3">
           <p class="text-xs text-n-slate-10">
-            Dias e horários em que a sala cirúrgica de cada clínica parceira está disponível.
             A ocupação e os blocos livres do trilho de cirurgias vêm daqui.
-            <button v-if="isAdmin" class="font-medium hover:underline" :style="{ color: SURGERY_COLOR }" @click="openLocationsModal">
-              Gerenciar clínicas →
-            </button>
+            <button v-if="isAdmin" class="font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">Gerenciar clínicas →</button>
           </p>
-          <div v-if="!editSurgeryWindows.length" class="text-center py-6 text-n-slate-10 text-sm">
-            Nenhuma janela ainda — adicione a primeira.
-          </div>
-          <div
-            v-for="(w, i) in editSurgeryWindows"
-            :key="i"
-            class="grid grid-cols-2 sm:grid-cols-6 gap-2 items-center rounded-xl border border-n-weak bg-n-solid-2 p-2.5"
-          >
-            <select v-model="w.dow" :disabled="!isAdmin" class="border border-n-weak rounded-lg px-1.5 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
+          <div v-if="!editSurgeryWindows.length" class="cv-sub text-center py-6 text-n-slate-10 text-sm">Nenhuma janela ainda — adicione a primeira.</div>
+          <div v-for="(w, i) in editSurgeryWindows" :key="i" class="cv-sub grid grid-cols-2 sm:grid-cols-6 gap-2 items-center p-2.5">
+            <select v-model="w.dow" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
               <option v-for="(d, di) in WEEKDAY_FULL" :key="di" :value="di">{{ d }}</option>
             </select>
-            <select v-model="w.location" :disabled="!isAdmin" class="border border-n-weak rounded-lg px-1.5 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
+            <select v-model="w.location" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
               <option v-for="loc in surgeryLocations" :key="loc.key" :value="loc.key">{{ loc.label }}</option>
             </select>
-            <input v-model="w.start" type="time" :disabled="!isAdmin" class="border border-n-weak rounded-lg px-1.5 py-1 text-xs bg-n-solid-1 text-n-slate-12" />
-            <input v-model="w.end" type="time" :disabled="!isAdmin" class="border border-n-weak rounded-lg px-1.5 py-1 text-xs bg-n-solid-1 text-n-slate-12" />
-            <select v-model="w.block" :disabled="!isAdmin" class="border border-n-weak rounded-lg px-1.5 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
-              <option :value="10">10 min</option>
-              <option :value="15">15 min</option>
-              <option :value="20">20 min</option>
-              <option :value="30">30 min</option>
-              <option :value="60">1 hora</option>
-              <option :value="90">1h30</option>
-              <option :value="120">2 horas</option>
+            <input v-model="w.start" type="time" :disabled="!isAdmin" class="cv-input !h-8 text-xs" />
+            <input v-model="w.end" type="time" :disabled="!isAdmin" class="cv-input !h-8 text-xs" />
+            <select v-model="w.block" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+              <option :value="10">10 min</option><option :value="15">15 min</option><option :value="20">20 min</option>
+              <option :value="30">30 min</option><option :value="60">1 hora</option><option :value="90">1h30</option><option :value="120">2 horas</option>
             </select>
             <button v-if="isAdmin" class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm justify-self-center" @click="removeSurgeryWindow(i)" />
           </div>
-          <button
-            v-if="isAdmin"
-            class="text-xs font-medium hover:underline flex items-center gap-1"
-            :style="{ color: SURGERY_COLOR }"
-            @click="addSurgeryWindow"
-          >
-            <span class="i-lucide-plus text-xs" />
-            Adicionar janela
-          </button>
+          <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addSurgeryWindow"><span class="i-lucide-plus text-xs" /> Adicionar janela</button>
         </div>
-        <div v-if="isAdmin" class="px-5 py-4 border-t border-n-weak flex gap-2 flex-shrink-0">
-          <button
-            class="flex-1 text-white rounded-lg py-2 text-sm font-medium cevico-glass cevico-surgery-ink disabled:opacity-50"
-            :style="{ background: surgeryGrad, '--surg-text': surgeryInk }"
-            :disabled="isSavingSurgeryWindows"
-            @click="saveSurgeryWindows"
-          >
-            {{ isSavingSurgeryWindows ? 'Salvando…' : 'Salvar janelas' }}
-          </button>
-          <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showSurgeryWindowsModal = false">
-            Cancelar
-          </button>
+        <div v-if="isAdmin" class="cv-modal-foot flex gap-2">
+          <button class="cv-btn flex-1" :disabled="isSavingSurgeryWindows" @click="saveSurgeryWindows">{{ isSavingSurgeryWindows ? 'Salvando…' : 'Salvar janelas' }}</button>
+          <button class="cv-btn cv-btn-ghost" @click="showSurgeryWindowsModal = false">Cancelar</button>
         </div>
       </div>
     </div>
 
-    <!-- Modal: locais de cirurgia (clínicas parceiras) -->
-    <div
-      v-if="showLocationsModal"
-      class="fixed inset-0 z-[55] flex items-center justify-center bg-black/60 p-4"
-      @click.self="showLocationsModal = false"
-    >
-      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden">
-        <div class="h-1.5 w-full flex-shrink-0" :style="{ background: SURGERY_GRAD }" />
-        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak">
-          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-map-pin" :style="{ color: SURGERY_COLOR }" />
-            Locais de cirurgia
-          </h2>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showLocationsModal = false" />
+    <!-- Modal: locais de cirurgia -->
+    <div v-if="showLocationsModal" class="fixed inset-0 z-[56] flex items-center justify-center bg-black/55 p-4" @click.self="showLocationsModal = false">
+      <div class="cv-modal cv-ag-pop w-full max-w-sm flex flex-col" :style="kindVars('cirurgias')">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="i-lucide-map-pin text-xl" />
+          <h2 class="text-base font-bold flex-1">Locais de cirurgia</h2>
+          <button class="cv-glass-btn cv-iconbtn" @click="showLocationsModal = false"><span class="i-lucide-x" /></button>
         </div>
         <div class="p-5 space-y-2">
-          <p class="text-xs text-n-slate-10">
-            Clínicas parceiras onde as cirurgias acontecem (ex.: IOP). Aparecem no campo
-            "Local da cirurgia" ao agendar.
-          </p>
+          <p class="text-xs text-n-slate-10">Clínicas parceiras onde as cirurgias acontecem (ex.: IOP). Aparecem no campo "Local da cirurgia" ao agendar.</p>
           <div v-for="(loc, i) in locationsDraft" :key="i" class="flex items-center gap-2">
-            <input
-              v-model="loc.label"
-              class="flex-1 border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none"
-              placeholder="Nome da clínica (ex.: IOP)"
-            />
+            <input v-model="loc.label" class="cv-input flex-1" placeholder="Nome da clínica (ex.: IOP)" />
             <button class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm" @click="removeLocationRow(i)" />
           </div>
-          <button
-            class="text-xs font-medium hover:underline flex items-center gap-1"
-            :style="{ color: SURGERY_COLOR }"
-            @click="addLocationRow"
-          >
-            <span class="i-lucide-plus text-xs" />
-            Adicionar local
-          </button>
+          <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="addLocationRow"><span class="i-lucide-plus text-xs" /> Adicionar local</button>
         </div>
-        <div class="px-5 py-4 border-t border-n-weak flex gap-2">
-          <button
-            class="flex-1 text-white rounded-lg py-2 text-sm font-medium cevico-glass cevico-surgery-ink disabled:opacity-50"
-            :style="{ background: surgeryGrad, '--surg-text': surgeryInk }"
-            :disabled="isSavingLocations"
-            @click="saveLocations"
-          >
-            {{ isSavingLocations ? 'Salvando…' : 'Salvar locais' }}
-          </button>
-          <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showLocationsModal = false">
-            Cancelar
-          </button>
+        <div class="cv-modal-foot flex gap-2">
+          <button class="cv-btn flex-1" :disabled="isSavingLocations" @click="saveLocations">{{ isSavingLocations ? 'Salvando…' : 'Salvar locais' }}</button>
+          <button class="cv-btn cv-btn-ghost" @click="showLocationsModal = false">Cancelar</button>
         </div>
       </div>
     </div>
 
-    <!-- Modal: janelas de avaliação dos médicos -->
-    <div
-      v-if="showWindowsModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      @click.self="showWindowsModal = false"
-    >
-      <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
-        <div class="h-1.5 w-full flex-shrink-0" :style="{ background: theme.primary }" />
-        <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
-          <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-clock text-n-brand" />
-            Janelas de avaliação dos médicos
-          </h2>
-          <div class="flex items-center gap-2">
-            <button
-              v-if="isAdmin && !isEditingWindows"
-              class="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
-              @click="startEditWindows"
-            >
-              <span class="i-lucide-pencil text-xs" />
-              Editar
-            </button>
-            <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showWindowsModal = false; isEditingWindows = false" />
+    <!-- Modal: janelas de avaliação dos médicos + conferência → CRM -->
+    <div v-if="showWindowsModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" @click.self="showWindowsModal = false; isEditingWindows = false">
+      <div class="cv-modal cv-ag-pop w-full max-w-lg max-h-[90vh] flex flex-col">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="i-lucide-clock text-xl" />
+          <div class="flex-1">
+            <h2 class="text-base font-bold">Janelas de avaliação dos médicos</h2>
+            <p class="text-[11px] opacity-85">quando cada médico atende, em qual unidade e de quanto em quanto tempo</p>
           </div>
+          <button v-if="isAdmin && !isEditingWindows" class="cv-glass-btn" @click="startEditWindows"><span class="i-lucide-pencil text-xs" /> Editar</button>
+          <button class="cv-glass-btn cv-iconbtn" @click="showWindowsModal = false; isEditingWindows = false"><span class="i-lucide-x" /></button>
         </div>
         <div class="flex-1 overflow-y-auto p-5 space-y-4">
-          <!-- Legenda dos médicos + FECHAR/reabrir a agenda (item 76) -->
+          <!-- médicos + FECHAR/reabrir a agenda -->
           <div class="space-y-1.5">
-            <div
-              v-for="d in DOCTORS"
-              :key="d.name"
-              class="flex items-center gap-2 flex-wrap rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2"
-              :class="isDoctorClosed(d.name) ? 'opacity-70' : ''"
-            >
+            <div v-for="d in DOCTORS" :key="d.name" class="cv-sub flex items-center gap-2 flex-wrap px-3 py-2" :class="isDoctorClosed(d.name) ? 'opacity-70' : ''">
               <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: d.color }" />
-              <span class="text-xs font-medium text-n-slate-12" :class="isDoctorClosed(d.name) ? 'line-through' : ''">{{ d.name }}</span>
-              <span v-if="isDoctorClosed(d.name)" class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-500/12 text-red-500">agenda fechada</span>
-              <button
-                v-if="isAdmin"
-                class="ml-auto text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50"
-                :class="isDoctorClosed(d.name)
-                  ? 'text-green-600 border-green-500/40 hover:bg-green-500/10'
-                  : 'text-red-500 border-red-500/40 hover:bg-red-500/10'"
-                :disabled="togglingDoctor === d.name"
-                :title="isDoctorClosed(d.name) ? 'Reabrir a agenda deste médico' : 'Fechar a agenda deste médico (as janelas somem até reabrir; para abrir em dias/horários personalizados use o Editar)'"
-                @click="toggleDoctorClosed(d.name)"
-              >
+              <span class="text-xs font-semibold text-n-slate-12" :class="isDoctorClosed(d.name) ? 'line-through' : ''">{{ d.name }}</span>
+              <span v-if="isDoctorClosed(d.name)" class="cv-chip cv-red">agenda fechada</span>
+              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :class="isDoctorClosed(d.name) ? 'cv-green' : 'cv-btn-danger'" :disabled="togglingDoctor === d.name" @click="toggleDoctorClosed(d.name)">
                 {{ isDoctorClosed(d.name) ? '▶️ Reabrir agenda' : '⏸ Fechar agenda' }}
               </button>
             </div>
-            <p v-if="isAdmin" class="text-[10px] text-n-slate-9">
-              fechar tira o médico de toda a agenda na hora; para abrir em dias/horários personalizados, use o <b>Editar</b>.
-            </p>
+            <p v-if="isAdmin" class="text-[10px] text-n-slate-9">fechar tira o médico de toda a agenda na hora; para abrir em dias/horários personalizados, use o <b>Editar</b>.</p>
           </div>
 
-          <!-- ═ Visualização ═ -->
           <template v-if="!isEditingWindows">
             <div v-for="dow in [1, 2, 3, 4, 5]" :key="dow">
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5">{{ WEEKDAY_FULL[dow] }}</p>
+              <p class="cv-label mb-1.5">{{ WEEKDAY_FULL[dow] }}</p>
               <div class="space-y-1.5">
-                <div
-                  v-for="w in windowsByDow[dow] || []"
-                  :key="w.doctor + w.start"
-                  class="flex items-center gap-2 rounded-xl border px-3 py-2 flex-wrap"
-                  :style="{ borderColor: doctorColor(w.doctor) + '40', backgroundColor: doctorColor(w.doctor) + '0A' }"
-                >
+                <div v-for="w in windowsByDow[dow] || []" :key="w.doctor + w.start" class="cv-row flex items-center gap-2 px-3 py-2 flex-wrap" :style="{ '--cv-rgb': hexToRgbSpaced(doctorColor(w.doctor)) }">
                   <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ backgroundColor: doctorColor(w.doctor) }" />
                   <span class="text-sm font-medium text-n-slate-12">{{ w.doctor }}</span>
-                  <span class="text-[10px] px-2 py-0.5 rounded-full font-medium" :style="{ backgroundColor: UNITS[w.unit].color + '1A', color: UNITS[w.unit].color }">
-                    {{ UNITS[w.unit].label }}
-                  </span>
+                  <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(UNITS[w.unit]?.color || '#64748B'), '--cv-deep': UNITS[w.unit]?.color }">{{ UNITS[w.unit]?.label || w.unit }}</span>
                   <span class="text-xs text-n-slate-10 ml-auto">{{ w.turno }} · {{ w.start }}–{{ w.end }} · {{ w.block }} min</span>
                 </div>
                 <p v-if="!(windowsByDow[dow] || []).length" class="text-xs text-n-slate-9 pl-1">— sem janela</p>
               </div>
             </div>
-
-            <div class="flex items-center gap-2 rounded-xl border border-n-weak bg-n-alpha-1 px-3 py-2 text-xs text-n-slate-10">
-              <span class="i-lucide-lock text-sm" />
-              Sábado e domingo: bloqueados — não existe agenda em nenhuma unidade.
+            <div class="cv-sub flex items-center gap-2 px-3 py-2 text-xs text-n-slate-10">
+              <span class="i-lucide-lock text-sm" /> Sábado e domingo: bloqueados — não existe agenda em nenhuma unidade.
             </div>
 
             <!-- Conferência do dia → colunas do CRM (admin) -->
-            <div v-if="isAdmin" class="rounded-xl border-2 border-n-weak bg-n-solid-2 p-3.5 space-y-2.5">
+            <div v-if="isAdmin" class="cv-sub p-3.5 space-y-2.5 cv-gold">
               <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
-                <span class="i-lucide-list-checks text-sm" style="color: #B8860B" />
-                Conferência do dia → CRM
+                <span class="i-lucide-list-checks text-sm" style="color: #B8860B" /> Conferência do dia → CRM
               </p>
               <p class="text-[11px] text-n-slate-10 leading-relaxed">
-                Ao marcar <b>Compareceu / Faltou / Cirurgia indicada</b> na lista do dia, o card do
-                paciente move sozinho para a coluna escolhida — e as automações dessa coluna disparam
-                (ex.: régua de reagendamento para quem faltou).
+                Ao marcar <b>Compareceu / Faltou / Cirurgia indicada</b> na lista do dia, o card do paciente move sozinho para a coluna escolhida — e as automações dessa coluna disparam.
               </p>
-              <!-- responsáveis + prazo: passou da hora sem conferir → tarefa automática -->
-              <div class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
-                <p class="text-[10px] font-semibold text-n-slate-11">
-                  ⏰ Prazo da conferência — sem conferir até o horário, nasce a tarefa
-                  "Concluir a conferência do dia" (badge na sidebar + aviso no Meu Painel da responsável)
-                </p>
+              <div class="cv-row cv-amber p-2.5 space-y-2">
+                <p class="text-[10px] font-semibold text-n-slate-11">⏰ Prazo da conferência — sem conferir até o horário, nasce a tarefa "Concluir a conferência do dia" para a responsável</p>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
-                    <label class="text-[10px] font-medium text-n-slate-10 block mb-0.5">Consultas — responsável</label>
-                    <select v-model="attendanceOwners.consulta_user_id" class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
+                    <span class="cv-label block mb-0.5">Consultas — responsável</span>
+                    <select v-model="attendanceOwners.consulta_user_id" class="cv-input w-full !h-8 text-xs">
                       <option value="">Ninguém (desligado)</option>
                       <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
                     </select>
                   </div>
                   <div>
-                    <label class="text-[10px] font-medium text-n-slate-10 block mb-0.5">Cirurgias — responsável</label>
-                    <select v-model="attendanceOwners.cirurgia_user_id" class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
+                    <span class="cv-label block mb-0.5">Cirurgias — responsável</span>
+                    <select v-model="attendanceOwners.cirurgia_user_id" class="cv-input w-full !h-8 text-xs">
                       <option value="">Ninguém (desligado)</option>
                       <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
                     </select>
                   </div>
                   <div>
-                    <label class="text-[10px] font-medium text-n-slate-10 block mb-0.5">Horário limite</label>
-                    <input v-model="attendanceOwners.deadline" type="time" class="w-full border border-n-weak rounded-lg px-2 py-1 text-xs bg-n-solid-1 text-n-slate-12" />
+                    <span class="cv-label block mb-0.5">Horário limite</span>
+                    <input v-model="attendanceOwners.deadline" type="time" class="cv-input w-full !h-8 text-xs" />
                   </div>
                 </div>
               </div>
               <div class="space-y-2">
-                <div>
-                  <label class="text-[10px] font-medium text-n-slate-10 block mb-0.5">✓ Compareceu → mover card para</label>
-                  <select v-model="attendanceStages.attended_stage_id" class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
-                    <option value="">Não mover</option>
-                    <option v-for="s in allCrmStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="text-[10px] font-medium text-n-slate-10 block mb-0.5">✗ Faltou → mover card para</label>
-                  <select v-model="attendanceStages.missed_stage_id" class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
-                    <option value="">Não mover</option>
-                    <option v-for="s in allCrmStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="text-[10px] font-medium text-n-slate-10 block mb-0.5">🎯 Cirurgia indicada → mover card para</label>
-                  <select v-model="attendanceStages.indicated_stage_id" class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
-                    <option value="">Não mover</option>
-                    <option v-for="s in allCrmStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
-                  </select>
-                </div>
-                <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide pt-1">Agenda de Cirurgias</p>
-                <div>
-                  <label class="text-[10px] font-medium text-n-slate-10 block mb-0.5">🔪 Cirurgia realizada → mover card para</label>
-                  <select v-model="attendanceStages.surgery_done_stage_id" class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
-                    <option value="">Não mover</option>
-                    <option v-for="s in allCrmStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="text-[10px] font-medium text-n-slate-10 block mb-0.5">✗ Não veio à cirurgia → mover card para</label>
-                  <select v-model="attendanceStages.surgery_missed_stage_id" class="w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
+                <div v-for="opt in [
+                  { key: 'attended_stage_id', label: '✓ Compareceu → mover card para' },
+                  { key: 'missed_stage_id', label: '✗ Faltou → mover card para' },
+                  { key: 'indicated_stage_id', label: '🎯 Cirurgia indicada → mover card para' },
+                  { key: 'surgery_done_stage_id', label: '🔪 Cirurgia realizada → mover card para' },
+                  { key: 'surgery_missed_stage_id', label: '✗ Não veio à cirurgia → mover card para' },
+                ]" :key="opt.key">
+                  <span class="cv-label block mb-0.5">{{ opt.label }}</span>
+                  <select v-model="attendanceStages[opt.key]" class="cv-input w-full !h-8 text-xs">
                     <option value="">Não mover</option>
                     <option v-for="s in allCrmStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
                   </select>
                 </div>
               </div>
-              <button
-                class="w-full text-white rounded-lg py-2 text-xs font-semibold disabled:opacity-50"
-                style="background: linear-gradient(135deg, #B8860B, #D4A017)"
-                :disabled="isSavingAttendanceCfg"
-                @click="saveAttendanceStages"
-              >
-                {{ isSavingAttendanceCfg ? 'Salvando…' : 'Salvar conferência do dia' }}
-              </button>
+              <button class="cv-btn w-full" :disabled="isSavingAttendanceCfg" @click="saveAttendanceStages">{{ isSavingAttendanceCfg ? 'Salvando…' : 'Salvar conferência do dia' }}</button>
             </div>
           </template>
 
-          <!-- ═ Edição (admin) ═ -->
+          <!-- edição (admin) -->
           <template v-else>
-            <div
-              v-for="(w, i) in editWindows"
-              :key="i"
-              class="rounded-xl border border-n-weak bg-n-solid-2 p-3 space-y-2"
-            >
+            <div v-for="(w, i) in editWindows" :key="i" class="cv-sub p-3 space-y-2">
               <div class="flex items-center gap-2 flex-wrap">
-                <select v-model.number="w.dow" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
+                <select v-model.number="w.dow" class="cv-input !h-8 text-xs !w-auto">
                   <option v-for="d in [1, 2, 3, 4, 5]" :key="d" :value="d">{{ WEEKDAY_FULL[d] }}</option>
                 </select>
-                <select v-model="w.doctor" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
+                <select v-model="w.doctor" class="cv-input !h-8 text-xs !w-auto">
                   <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
                 </select>
-                <select v-model="w.unit" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
+                <select v-model="w.unit" class="cv-input !h-8 text-xs !w-auto">
                   <option v-for="(u, key) in UNITS" :key="key" :value="key">{{ u.label }}</option>
                 </select>
                 <button class="ml-auto text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm" title="Remover janela" @click="removeWindow(i)" />
               </div>
               <div class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11">
-                <select v-model="w.turno" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
-                  <option value="Manhã">Manhã</option>
-                  <option value="Tarde">Tarde</option>
-                </select>
-                das
-                <input v-model="w.start" type="time" class="border border-n-weak rounded-lg px-2 py-1 text-xs bg-n-solid-1 text-n-slate-12" />
-                às
-                <input v-model="w.end" type="time" class="border border-n-weak rounded-lg px-2 py-1 text-xs bg-n-solid-1 text-n-slate-12" />
-                <span class="text-n-slate-9">(fim exclusivo)</span>
-                · blocos de
-                <select v-model.number="w.block" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-1 text-n-slate-12">
-                  <!-- 5 min (item 146): "abrir mais agenda" no Tatuapé — os
-                       agentes oferecem os horários novos sozinhos (o prompt
-                       nasce das janelas via Crm::AgendaSlots) -->
-                  <option :value="5">5 min</option>
-                  <option :value="10">10 min</option>
-                  <option :value="15">15 min</option>
-                  <option :value="20">20 min</option>
-                  <option :value="30">30 min</option>
+                <select v-model="w.turno" class="cv-input !h-8 text-xs !w-auto"><option value="Manhã">Manhã</option><option value="Tarde">Tarde</option></select>
+                das <input v-model="w.start" type="time" class="cv-input !h-8 text-xs !w-auto" />
+                às <input v-model="w.end" type="time" class="cv-input !h-8 text-xs !w-auto" />
+                <span class="text-n-slate-9">(fim exclusivo)</span> · blocos de
+                <select v-model.number="w.block" class="cv-input !h-8 text-xs !w-auto">
+                  <option :value="5">5 min</option><option :value="10">10 min</option><option :value="15">15 min</option><option :value="20">20 min</option><option :value="30">30 min</option>
                 </select>
               </div>
             </div>
-
-            <button
-              class="w-full py-2 rounded-xl border border-dashed border-n-weak text-xs text-n-slate-10 hover:text-n-slate-12 hover:bg-n-alpha-1"
-              @click="addWindow"
-            >
-              + Adicionar janela
-            </button>
-
+            <button class="cv-tile-add w-full py-2 text-xs" @click="addWindow">+ Adicionar janela</button>
             <div class="flex gap-2">
-              <button
-                class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
-                style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)"
-                :disabled="isSavingWindows"
-                @click="saveWindows"
-              >
-                {{ isSavingWindows ? 'Salvando…' : 'Salvar janelas' }}
-              </button>
-              <button
-                class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11"
-                @click="isEditingWindows = false"
-              >
-                Cancelar
-              </button>
+              <button class="cv-btn flex-1" :disabled="isSavingWindows" @click="saveWindows">{{ isSavingWindows ? 'Salvando…' : 'Salvar janelas' }}</button>
+              <button class="cv-btn cv-btn-ghost" @click="isEditingWindows = false">Cancelar</button>
             </div>
           </template>
         </div>
       </div>
     </div>
 
-    <!-- botão + flutuante: caminho principal para agendar consultas -->
-    <button
-      class="fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full text-white shadow-xl flex items-center justify-center transition-transform hover:scale-110 active:scale-95"
-      :style="{ background: theme.primary, boxShadow: '0 10px 26px rgba(0,0,0,.3)' }"
-      title="Agendar consulta"
-      @click="openCreateFab"
-    >
+    <!-- botão + flutuante -->
+    <button class="cv-ag-fab" :title="newLabel" @click="openCreateFab">
       <span class="i-lucide-plus text-2xl" />
     </button>
   </div>
 </template>
-
-<style scoped>
-/* tinta do trilho de cirurgias nos temas claros ("cor puxando pro branco"):
-   força a cor escura do tema no texto e nos ícones dos elementos claros */
-.cevico-surgery-ink,
-.cevico-surgery-ink * {
-  color: var(--surg-text, #fff) !important;
-}
-
-/* efeito "vidro" leve do trilho de cirurgias: brilho interno no topo +
-   sombra suave azulada (só box-shadow — não pesa nada) */
-.cevico-glass {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    inset 0 -1px 0 rgba(2, 132, 199, 0.25),
-    0 2px 8px rgba(56, 189, 248, 0.35);
-}
-
-/* popup do tema SALTA na tela (item 75) */
-.cevico-theme-pop {
-  animation: cevico-theme-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-@keyframes cevico-theme-pop {
-  from { opacity: 0; transform: scale(0.86) translateY(14px); }
-  to { opacity: 1; transform: none; }
-}
-</style>

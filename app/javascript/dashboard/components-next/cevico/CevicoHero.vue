@@ -15,6 +15,10 @@ const props = defineProps({
   icon: { type: String, default: '' }, // classe lucide (i-lucide-…)
   compact: { type: Boolean, default: true },
   eye: { type: Boolean, default: true },
+  // item 211: a página pode IMPOR o fundo do banner (Agendamentos: a cor do
+  // tipo escolhido) e esconder o chip da paleta quando a cor não é escolha
+  heroBg: { type: String, default: '' },
+  palette: { type: Boolean, default: true },
 });
 
 const { isAdmin } = useAdmin();
@@ -43,7 +47,7 @@ const onPaletteChip = () => openPalettePicker('panel');
   <div
     class="cevico-hero rounded-3xl text-white shadow-lg mb-5 relative transition-all"
     :class="compact ? 'p-5 sm:p-6' : 'p-6 sm:p-8'"
-    :style="{ background: pagePalette.hero }"
+    :style="{ background: heroBg || pagePalette.hero }"
   >
     <span class="cevico-hero-glow cevico-hero-glow-a" aria-hidden="true" />
     <span class="cevico-hero-glow cevico-hero-glow-b" aria-hidden="true" />
@@ -61,6 +65,7 @@ const onPaletteChip = () => openPalettePicker('panel');
               todayLabel
             }}</span>
           <button
+            v-if="palette"
             class="cevico-hero-chip cevico-hero-chip-btn"
             :title="
               isAdmin

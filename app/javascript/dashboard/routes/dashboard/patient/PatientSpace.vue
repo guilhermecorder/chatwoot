@@ -15,6 +15,7 @@ import PatientSpaceIcon from './PatientSpaceIcon.vue';
 import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsCard.vue';
 import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
 import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
+import { hexToRgbSpaced } from 'dashboard/helper/cevicoAgenda';
 
 const route = useRoute();
 const router = useRouter();
@@ -217,9 +218,10 @@ const fmtDuration = minutes => {
 const MODALITY_LABELS = {
   avaliacao: 'Avaliação',
   retorno: 'Retorno',
-  exames: 'Exames',
+  exames: 'Exame',
+  teleconsulta: 'Teleconsulta',
 };
-const UNIT_LABELS = { tatuape: 'Tatuapé', paulista: 'Av. Paulista' };
+const UNIT_LABELS = { tatuape: 'Tatuapé', paulista: 'Av. Paulista', online: 'Online' };
 const CHANNEL_LABELS = {
   Whatsapp: 'WhatsApp',
   FacebookPage: 'Instagram/Facebook',
@@ -320,6 +322,17 @@ const funnelJourney = computed(() => {
 const consultEvents = computed(() =>
   timeline.value.filter(e => e.type === 'consulta').reverse()
 );
+// variáveis do kit: a cor do paciente é a cor da página
+const pageVars = computed(() => ({
+  '--cv': theme.value.accent,
+  '--cv-rgb': hexToRgbSpaced(theme.value.accent),
+  '--cv-deep': theme.value.accent,
+  '--cv-deep-rgb': hexToRgbSpaced(theme.value.accent),
+  '--cv-grad': theme.value.accentGrad,
+  '--cv-grad-2': theme.value.accentGrad,
+  '--cv-grad-3': theme.value.accentGrad,
+  '--cv-hero': theme.value.grad,
+}));
 const surgeryEvents = computed(() =>
   timeline.value.filter(e => e.type === 'cirurgia').reverse()
 );
@@ -833,7 +846,13 @@ watch(contactId, () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
+  <!-- 🍎 item 210 (23/09): o Espaço do Paciente veste o kit "iMac G3 + vidro"
+       — a cor do paciente (sexo + idade) vira a paleta --cv* da página, e os
+       cartões passam a ser vidro (cv-block / cv-sub), no design Apple -->
+  <div
+    class="cv-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1"
+    :style="pageVars"
+  >
     <div class="max-w-6xl mx-auto w-full p-4 sm:p-8">
       <SkeletonScreen v-if="isLoading" variant="dashboard" />
 
@@ -846,13 +865,15 @@ watch(contactId, () => {
       <template v-else>
         <!-- ══ Cabeçalho dopamine (a cor segue o paciente) ══ -->
         <div
-          class="relative rounded-2xl p-5 mb-5 text-white shadow-lg"
+          class="cevico-hero relative rounded-3xl p-5 sm:p-6 mb-5 text-white shadow-lg"
           :class="isLightTheme ? 'cevico-ink-dark' : ''"
           :style="{ background: theme.grad }"
         >
+          <span class="cevico-hero-glow cevico-hero-glow-a" aria-hidden="true" />
+          <span class="cevico-hero-glow cevico-hero-glow-b" aria-hidden="true" />
           <div
             v-if="theme.stars"
-            class="absolute inset-0 rounded-2xl pointer-events-none"
+            class="absolute inset-0 rounded-3xl pointer-events-none"
             :style="{ backgroundImage: STAR_FIELD }"
           />
           <div class="relative flex items-start gap-4 flex-wrap">
@@ -921,7 +942,7 @@ watch(contactId, () => {
               <!-- 💬📞 chamar o paciente daqui mesmo: conversa nova, ligar, abrir a última conversa -->
               <div class="flex items-center gap-1.5 flex-wrap mt-2">
                 <button
-                  class="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[12px] font-semibold inline-flex items-center gap-1.5 transition-all"
+                  class="cevico-hero-btn"
                   title="Começar uma conversa com este paciente por qualquer caixa"
                   @click="openNovaConversa({ contactId: Number(contactId) })"
                 >
@@ -930,7 +951,7 @@ watch(contactId, () => {
                 </button>
                 <span
                   v-if="identity.phone_number && cevicoCallsOn"
-                  class="cevico-call-pill pl-1 pr-2.5 py-0.5 rounded-full bg-white/15 hover:bg-white/25 text-[12px] font-semibold inline-flex items-center gap-1 transition-all"
+                  class="cevico-call-pill cevico-hero-btn !pl-1"
                   title="Ligar para o paciente pelo WhatsApp"
                 >
                   <CevicoCallButton
@@ -943,7 +964,7 @@ watch(contactId, () => {
                 </span>
                 <button
                   v-if="lastConversationId"
-                  class="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[12px] font-semibold inline-flex items-center gap-1.5 transition-all"
+                  class="cevico-hero-btn"
                   :title="`Abrir a conversa mais recente (#${lastConversationId})`"
                   @click="openConversation(lastConversationId)"
                 >
@@ -987,7 +1008,7 @@ watch(contactId, () => {
               <div
                 v-for="card in identity.cards"
                 :key="card.id"
-                class="bg-white/12 backdrop-blur rounded-xl px-3.5 py-2.5"
+                class="cv-glass px-3.5 py-2.5"
               >
                 <p class="text-[10px] uppercase tracking-wide text-white/60">
                   {{ card.pipeline }}
@@ -1051,7 +1072,7 @@ watch(contactId, () => {
         <!-- ══ Cards de informação ══ -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           <!-- Consultas -->
-          <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+          <div class="cv-sub px-4 py-3.5">
             <p
               class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-1.5"
             >
@@ -1097,7 +1118,7 @@ watch(contactId, () => {
           />
 
           <!-- 🏥 Cirurgias no OftalmoFácil (item 157) — só admin recebe -->
-          <div v-if="isAdmin && surgeries.length" class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+          <div v-if="isAdmin && surgeries.length" class="cv-sub px-4 py-3.5">
             <p class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-2">
               <span class="i-lucide-hospital text-xs" :style="{ color: theme.accent }" />
               Cirurgias no OftalmoFácil · {{ surgeries.length }}
@@ -1124,7 +1145,7 @@ watch(contactId, () => {
           </div>
 
           <!-- Procedimento & investimento -->
-          <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+          <div class="cv-sub px-4 py-3.5">
             <p
               class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-1.5"
             >
@@ -1170,7 +1191,7 @@ watch(contactId, () => {
           </div>
 
           <!-- NPS & pesquisas -->
-          <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+          <div class="cv-sub px-4 py-3.5">
             <p
               class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-1.5"
             >
@@ -1209,7 +1230,7 @@ watch(contactId, () => {
           </div>
 
           <!-- Automações no contato -->
-          <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+          <div class="cv-sub px-4 py-3.5">
             <p
               class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-1.5"
             >
@@ -1282,19 +1303,16 @@ watch(contactId, () => {
         <div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
           <!-- ══ Jornada no funil (pilha de estágios) ══ -->
           <div class="lg:col-span-2 space-y-5">
-            <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
+            <div class="cv-block p-5 sm:p-6">
               <div class="flex items-center justify-between mb-1">
                 <h2
                   class="text-sm font-bold text-n-slate-12 flex items-center gap-2"
                 >
-                  <span
-                    class="i-lucide-layers text-base"
-                    :style="{ color: theme.accent }"
-                  />
+                  <span class="cv-icon cv-icon-sm"><span class="i-lucide-layers text-xs" /></span>
                   Jornada no funil
                 </h2>
                 <button
-                  class="text-[11px] text-n-slate-10 hover:text-n-slate-12"
+                  class="cv-chip"
                   @click="showDetailed = !showDetailed"
                 >
                   {{ showDetailed ? 'ver jornada' : 'eventos detalhados' }}
@@ -1391,7 +1409,7 @@ watch(contactId, () => {
 
                   <!-- resumo da jornada -->
                   <div
-                    class="mt-3 rounded-xl px-3.5 py-2.5 text-white"
+                    class="mt-3 rounded-2xl px-4 py-3 text-white cv-tile relative overflow-hidden"
                     :style="{ background: theme.accentGrad }"
                   >
                     <div
@@ -1628,22 +1646,19 @@ watch(contactId, () => {
           <div class="lg:col-span-3 space-y-5">
             <div
               v-if="notesAllowed"
-              class="bg-n-solid-2 border border-n-weak rounded-2xl p-5"
+              class="cv-block p-5 sm:p-6"
             >
               <div class="flex items-center justify-between mb-1">
                 <h2
                   class="text-sm font-bold text-n-slate-12 flex items-center gap-2"
                 >
-                  <span
-                    class="i-lucide-notebook-pen text-base"
-                    style="color: #b8860b"
-                  />
+                  <span class="cv-icon cv-icon-sm cv-gold"><span class="i-lucide-notebook-pen text-xs" /></span>
                   Espaço do Médico
                 </h2>
                 <div class="flex items-center gap-1.5">
                   <button
                     v-if="isAdmin"
-                    class="w-7 h-7 rounded-lg hover:bg-n-alpha-1 flex items-center justify-center text-n-slate-10"
+                    class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn"
                     title="Quem pode ver e anotar"
                     @click="showAccessConfig = !showAccessConfig"
                   >
@@ -1651,8 +1666,7 @@ watch(contactId, () => {
                   </button>
                   <button
                     v-if="canEditNotes"
-                    class="px-2.5 h-7 rounded-lg text-[11px] font-semibold text-white flex items-center gap-1 shadow-sm"
-                    :style="{ background: theme.accentGrad }"
+                    class="cv-btn cv-btn-sm"
                     @click="openNewNote"
                   >
                     <span class="i-lucide-plus text-xs" /> Nova anotação
@@ -1703,7 +1717,7 @@ watch(contactId, () => {
               <!-- "à uma vista": o resumo que o time bate o olho e entende -->
               <div
                 v-if="latestNote"
-                class="mb-4 rounded-xl p-3.5 text-white shadow-sm"
+                class="mb-4 rounded-2xl p-4 text-white shadow-sm cv-tile relative overflow-hidden"
                 :style="{ background: theme.accentGrad }"
               >
                 <p
@@ -1763,7 +1777,7 @@ watch(contactId, () => {
                 <div
                   v-for="note in notes"
                   :key="note.id"
-                  class="border border-n-weak rounded-xl p-3"
+                  class="cv-sub p-3.5"
                 >
                   <div class="flex items-start justify-between gap-2">
                     <div>
@@ -1932,14 +1946,11 @@ watch(contactId, () => {
             </div>
 
             <!-- ══ Atualizações do paciente ══ -->
-            <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
+            <div class="cv-block p-5 sm:p-6">
               <h2
                 class="text-sm font-bold text-n-slate-12 flex items-center gap-2 mb-3"
               >
-                <span
-                  class="i-lucide-bell-ring text-base"
-                  :style="{ color: theme.accent }"
-                />
+                <span class="cv-icon cv-icon-sm"><span class="i-lucide-bell-ring text-xs" /></span>
                 Atualizações do paciente
               </h2>
 
@@ -2038,7 +2049,7 @@ watch(contactId, () => {
       @click.self="showNoteForm = false"
     >
       <div
-        class="bg-n-solid-1 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5"
+        class="cv-modal w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5"
       >
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">

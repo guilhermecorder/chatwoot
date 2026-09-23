@@ -19,6 +19,7 @@ import CustomPanelGrid from 'dashboard/components-next/cevico/CustomPanelGrid.vu
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import AgendaDashboardCore from 'dashboard/components-next/cevico/AgendaDashboardCore.vue';
 import CrmAPI from 'dashboard/api/crm';
+import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
 import { ALL_THEMES } from 'dashboard/helper/cevicoThemes';
@@ -1430,6 +1431,7 @@ const BLOCK_ICONS = {
   atalhos: 'i-lucide-rocket',
   termometro: 'i-lucide-thermometer',
 };
+const TASKS_FIRST_PANELS = ['agendamento', 'conducao', 'cirurgia'];
 const TOP_BLOCKS_DEFAULT = [
   'whatsapp',
   'briefing',
@@ -1720,8 +1722,13 @@ const orderedBlocks = computed(() => {
     MAIN_BLOCKS_DEFAULT.includes(id)
   );
   const placed = new Set([...savedTop, ...savedMain]);
+  let top = [...savedTop, ...TOP_BLOCKS_DEFAULT.filter(id => !placed.has(id))];
+  // item 211 (pedido 23/09): nos painéis Agendamento, Condução e Cirurgias a
+  // caixa de tarefas e notas fica ACIMA DE TUDO, logo abaixo do banner
+  if (TASKS_FIRST_PANELS.includes(panelBase.value))
+    top = ['tarefas', ...top.filter(id => id !== 'tarefas')];
   return {
-    top: [...savedTop, ...TOP_BLOCKS_DEFAULT.filter(id => !placed.has(id))],
+    top,
     main: [...savedMain, ...MAIN_BLOCKS_DEFAULT.filter(id => !placed.has(id))],
   };
 });
@@ -2101,9 +2108,50 @@ const todayLabel = computed(() => {
   return label.charAt(0).toUpperCase() + label.slice(1);
 });
 
-// ── Tarefas esperando VOCÊ (aviso dourado) ──────────────────
+// ── Tarefas esperando VOCÊ + notas dos pacientes (item 211) ──────
 const myTasks = computed(() => data.value?.my_tasks?.items || []);
 const myTasksCount = computed(() => data.value?.my_tasks?.count || 0);
+const patientNotes = computed(() => data.value?.patient_notes || []);
+// a caixa fica sempre à mostra nos painéis em que é a primeira coisa
+const tasksBoxAlways = computed(() =>
+  TASKS_FIRST_PANELS.includes(panelBase.value)
+);
+const showNoteForm = ref(false);
+const onPanelNoteSaved = () => {
+  showNoteForm.value = false;
+  fetchData();
+};
+const deletePanelNote = async note => {
+  try {
+    await CrmAPI.deletePatientNote(note.id);
+    if (data.value?.patient_notes)
+      data.value.patient_notes = data.value.patient_notes.filter(
+        n => n.id !== note.id
+      );
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Não consegui apagar a nota.');
+  }
+};
+const openPatientFromNote = note => {
+  if (!note.contact?.id) return;
+  router.push({
+    name: 'patient_space',
+    params: { accountId: accountId.value, contactId: note.contact.id },
+  });
+};
+const fmtNoteAt = iso =>
+  new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+const TASK_DOT = {
+  urgent: '#dc2626',
+  high: '#d97706',
+  medium: 'var(--cv)',
+  low: '#94a3b8',
+};
 const TASK_PRIORITY_LABEL = {
   low: 'baixa',
   medium: 'média',
@@ -3854,27 +3902,44 @@ class="text-xs"/></span>
                 </template>
 
                 <template v-else-if="blockId === 'tarefas'">
-                  <!-- 📋 Tarefas esperando você (aviso DOURADO — coisa boa a fazer) -->
+                  <!-- 📋 Tarefas esperando você + 📝 notas dos pacientes (item 211):
+                       duas colunas, listas roláveis — cabe muito mais de 10 -->
                   <div
-                    v-if="myTasks.length && !avisoChecado(tasksSignature)"
+                    v-if="
+                      tasksBoxAlways ||
+                      ((myTasks.length || patientNotes.length) &&
+                        !avisoChecado(tasksSignature))
+                    "
                     class="cv-block mb-6"
                   >
                     <div class="p-4 sm:p-5">
-                      <div class="flex items-center gap-2 mb-3 flex-wrap">
-                        <span class="cv-icon">
-                          <span class="i-lucide-list-checks text-base" />
+                      <div class="flex items-center gap-2 mb-3 flex-wrap min-h-[30px]">
+                        <span class="cv-icon cv-icon-sm">
+                          <span class="i-lucide-list-checks text-sm" />
                         </span>
-                        <h2 class="text-sm font-bold text-n-slate-12">
-                          {{ myTasksCount }} tarefa(s) esperando você
+                        <h2 class="text-sm font-bold text-n-slate-12 leading-none">
+                          Tarefas e notas
                         </h2>
+                        <span class="cv-chip tabular-nums" :class="myTasksCount ? '' : 'cv-slate'">
+                          {{ myTasksCount }} {{ myTasksCount === 1 ? 'tarefa' : 'tarefas' }}
+                        </span>
+                        <span class="cv-chip cv-slate tabular-nums">
+                          {{ patientNotes.length }} {{ patientNotes.length === 1 ? 'nota' : 'notas' }}
+                        </span>
                         <button
-                          class="cv-btn cv-btn-sm ml-auto"
-                          @click="goToTasks"
+                          class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
+                          title="Escrever um recado sobre um paciente"
+                          @click="showNoteForm = !showNoteForm"
                         >
+                          <span class="i-lucide-sticky-note text-xs" />
+                          Nova nota
+                        </button>
+                        <button class="cv-btn cv-btn-sm" @click="goToTasks">
                           Abrir Tarefas
                           <span class="i-lucide-arrow-right text-xs" />
                         </button>
                         <button
+                          v-if="!tasksBoxAlways"
                           class="cv-btn cv-btn-ghost cv-iconbtn flex-shrink-0"
                           title="Dar check: esconder este aviso (volta quando houver tarefa nova)"
                           @click="checkAviso(tasksSignature)"
@@ -3882,50 +3947,92 @@ class="text-xs"/></span>
                           <span class="i-lucide-check text-sm" />
                         </button>
                       </div>
-                      <div class="space-y-1.5">
-                        <button
-                          v-for="task in myTasks"
-                          :key="task.id"
-                          class="cv-sub cv-sub-hover w-full flex items-center gap-2 flex-wrap px-3 py-2 text-left"
-                          @click="goToTasks"
-                        >
-                          <span
-                            class="i-lucide-circle-dot text-sm"
-                            style="color: var(--cv)"
-                          />
-                          <span
-                            class="text-sm font-medium text-n-slate-12 truncate"
-                            >{{ task.title }}</span>
-                          <span
-                            class="cv-chip"
-                            :class="
-                              ['high', 'urgent'].includes(task.priority)
-                                ? 'cv-red'
-                                : 'cv-slate'
-                            "
-                          >
-                            {{
-                              TASK_PRIORITY_LABEL[task.priority] ||
-                              task.priority
-                            }}
-                          </span>
-                          <span
-                            v-if="task.creator_name"
-                            class="text-[10px] text-n-slate-9"
-                            >de {{ task.creator_name.split(' ')[0] }}</span>
-                          <span
-                            v-if="task.comments_count"
-                            class="text-[10px] text-n-slate-9 inline-flex items-center gap-0.5"
-                            ><span
-                              class="i-lucide-message-circle text-[10px]"
-                            />{{ task.comments_count }}</span>
-                          <span
-                            v-if="task.due_at"
-                            class="text-[10px] text-n-slate-10 ml-auto inline-flex items-center gap-0.5"
-                            ><span class="i-lucide-alarm-clock text-[10px]" />{{
-                              fmtTaskDue(task.due_at)
-                            }}</span>
-                        </button>
+
+                      <div v-if="showNoteForm" class="cv-sub p-3.5 mb-3">
+                        <PatientNoteForm compact @saved="onPanelNoteSaved" @cancel="showNoteForm = false" />
+                      </div>
+
+                      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        <!-- TAREFAS: uma linha por tarefa, lista rolável -->
+                        <div class="min-w-0">
+                          <p class="cv-label mb-1.5 flex items-center gap-1.5">
+                            <span class="i-lucide-circle-dot text-[11px]" /> esperando você
+                          </p>
+                          <p v-if="!myTasks.length" class="text-xs text-n-slate-9 py-3 text-center cv-sub">
+                            Nada esperando você agora. ✨
+                          </p>
+                          <div v-else class="space-y-1 max-h-[22rem] overflow-y-auto pr-1">
+                            <button
+                              v-for="task in myTasks"
+                              :key="task.id"
+                              class="cv-sub cv-sub-hover w-full flex items-center gap-2 px-3 py-1.5 text-left min-w-0"
+                              @click="goToTasks"
+                            >
+                              <span
+                                class="w-2 h-2 rounded-full flex-shrink-0"
+                                :style="{ background: TASK_DOT[task.priority] || TASK_DOT.medium }"
+                                :title="TASK_PRIORITY_LABEL[task.priority] || task.priority"
+                              />
+                              <span class="text-[13px] font-medium text-n-slate-12 truncate min-w-0 flex-1">
+                                {{ task.title }}
+                              </span>
+                              <span
+                                v-if="task.comments_count"
+                                class="text-[10px] text-n-slate-9 inline-flex items-center gap-0.5 flex-shrink-0"
+                                ><span class="i-lucide-message-circle text-[10px]" />{{ task.comments_count }}</span>
+                              <span
+                                v-if="task.creator_name"
+                                class="text-[10px] text-n-slate-9 flex-shrink-0 hidden sm:inline"
+                                >de {{ task.creator_name.split(' ')[0] }}</span>
+                              <span
+                                v-if="task.due_at"
+                                class="cv-chip !h-5 !px-1.5 text-[10px] flex-shrink-0 tabular-nums"
+                                :class="new Date(task.due_at) < new Date() ? 'cv-red' : ''"
+                                ><span class="i-lucide-alarm-clock text-[10px]" />{{ fmtTaskDue(task.due_at) }}</span>
+                            </button>
+                          </div>
+                          <p v-if="myTasksCount > myTasks.length" class="text-[10px] text-n-slate-9 mt-1.5 text-right">
+                            mostrando {{ myTasks.length }} de {{ myTasksCount }} — as outras estão em Tarefas
+                          </p>
+                        </div>
+
+                        <!-- NOTAS DOS PACIENTES: as mais recentes da clínica -->
+                        <div class="min-w-0">
+                          <p class="cv-label mb-1.5 flex items-center gap-1.5">
+                            <span class="i-lucide-sticky-note text-[11px]" /> notas dos pacientes
+                          </p>
+                          <p v-if="!patientNotes.length" class="text-xs text-n-slate-9 py-3 text-center cv-sub">
+                            Nenhuma nota ainda — escreva a primeira em "Nova nota".
+                          </p>
+                          <div v-else class="space-y-1.5 max-h-[22rem] overflow-y-auto pr-1">
+                            <div
+                              v-for="note in patientNotes"
+                              :key="note.id"
+                              class="cv-sub px-3 py-2 min-w-0"
+                            >
+                              <div class="flex items-center gap-2 min-w-0">
+                                <button
+                                  class="text-[13px] font-semibold text-n-slate-12 truncate hover:underline text-left"
+                                  title="Abrir o Espaço do Paciente"
+                                  @click="openPatientFromNote(note)"
+                                >
+                                  {{ note.contact?.name || 'Paciente' }}
+                                </button>
+                                <span class="text-[10px] text-n-slate-9 ml-auto whitespace-nowrap tabular-nums">{{ fmtNoteAt(note.created_at) }}</span>
+                                <button
+                                  v-if="note.mine || isAdmin"
+                                  class="text-n-slate-9 hover:text-red-500 flex-shrink-0"
+                                  title="Apagar a nota"
+                                  @click="deletePanelNote(note)"
+                                >
+                                  <span class="i-lucide-trash-2 text-[11px]" />
+                                </button>
+                              </div>
+                              <p class="text-xs text-n-slate-11 leading-snug break-words line-clamp-2">{{ note.content }}</p>
+                              <p class="text-[10px] text-n-slate-9">por {{ note.author_name?.split(' ')[0] || 'equipe' }}</p>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
