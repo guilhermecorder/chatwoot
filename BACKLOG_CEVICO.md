@@ -6171,7 +6171,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 200. 🤖🔓 AGENTE "RODANDO SOLTO" + PAINEL DE AGENDAMENTOS + AFUNILAMENTO E PORTA ABERTA (pedido 22/09 noite, para os NÚMEROS NOVOS de 23/09) — CONSTRUÍDO, SEM commit, aguarda "pode subir"
+## 200. 🤖🔓 AGENTE "RODANDO SOLTO" + PAINEL DE AGENDAMENTOS + AFUNILAMENTO E PORTA ABERTA (pedido 22/09 noite, para os NÚMEROS NOVOS de 23/09) — SUBIU 22/09 21h ("vamos subir" → commits 47e03db [199] + 0a07510 [200] na feat/rodada-172, push para origin/develop = 0a07510 → imagem ghcr.io/guilhermecorder/chatwoot:0a07510, deploy WEB+SIDEKIQ sem migration; reversão = imagem em produção antes: 87c9564 ou 2d7b2b4)
 
 **Pedido dele (22/09, 19h40, com prints do teste no FECHAMENTO #10912 e do 🧪 Testar agente):**
 "vamos precisar atualizar o nosso prompt N8N em alguns pontos": (1) timing das mensagens entre 5 e 10 s da
@@ -6285,7 +6285,7 @@ pendente); node Code no lugar do split por IA (opcional); admin ligar/desligar "
 (1 linha em DAY_MENU_ITEMS + AgentAccessModal, se ele pedir).
 
 
-## 199. 💬 NOVA CONVERSA EM 3 PASSOS + topo de Conversas no kit Apple (pedido 22/09) — CONSTRUÍDO, SEM commit, aguarda "pode subir"
+## 199. 💬 NOVA CONVERSA EM 3 PASSOS + topo de Conversas no kit Apple (pedido 22/09) — SUBIU 22/09 21h junto com o 200 (commit 47e03db; o 200 depende dele) → imagem ghcr.io/guilhermecorder/chatwoot:0a07510
 - Pedido: "iniciar uma conversa com um contato que temos no nosso banco de dados, através de uma nova
   caixa de entrada — pra fazer isso é difícil; precisa ser fácil. Já vamos aproveitar a atualizar o layout."
   Antes o único caminho era o lápis minúsculo ao lado de "Pesquisar..." (janelinha com Para → Via →
