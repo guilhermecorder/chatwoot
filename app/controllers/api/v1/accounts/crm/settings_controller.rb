@@ -1018,6 +1018,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['panel_owners'] = raw.slice('agendamento', 'conducao', 'cirurgia')
                                .transform_values { |v| v.presence&.to_i }.compact
     end
+    # 🎨 COR DE CADA PESSOA (item 212): {user_id => '#hex'} escolhida pelo
+    # admin em Configurações → Painéis; vale na lista de Conversas (crachá +
+    # pílula), no painel da conversa e no filtro "quem cuida". Sem entrada =
+    # cor automática (ordem de entrada na equipe).
+    if params.key?(:person_colors)
+      raw = params.require(:person_colors).permit!.to_h
+      valid_ids = Current.account.users.pluck(:id).map(&:to_s)
+      cfg['person_colors'] = raw.slice(*valid_ids).transform_values { |v| v.to_s.strip.downcase }
+                                .select { |_, v| v.match?(/\A#[0-9a-f]{6}\z/) }
+    end
     # METAS por painel ({painel => {indicador => meta mensal}}): os cards
     # do Meu Painel mudam de cor conforme o desempenho contra a meta
     if params.key?(:panel_goals)
@@ -1137,6 +1147,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       kpi_layout: cfg['kpi_layout'] || {},
       block_layout: cfg['block_layout'] || {},
       panel_palettes: cfg['panel_palettes'] || {},
+      person_colors: cfg['person_colors'] || {},
       performance_metrics: cfg['performance_metrics'] || {},
       clinical_access: cfg['clinical_access'] || {},
       followup_hours: cfg['followup_hours'] || { 'start' => 8, 'end' => 20 },
@@ -1631,6 +1642,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       kpi_layout: (s.agenda_config || {})['kpi_layout'] || {},
       block_layout: (s.agenda_config || {})['block_layout'] || {},
       panel_palettes: (s.agenda_config || {})['panel_palettes'] || {},
+      person_colors: (s.agenda_config || {})['person_colors'] || {},
       performance_metrics: (s.agenda_config || {})['performance_metrics'] || {},
       performance_metric_keys: Crm::AgentPerformance::METRIC_KEYS,
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},

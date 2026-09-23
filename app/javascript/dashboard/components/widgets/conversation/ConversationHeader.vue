@@ -12,6 +12,10 @@ import ConversationCallButton from './ConversationCallButton.vue';
 // 📞 CEVICO item 167: botão de ligar pelo NOSSO módulo (substitui o Enterprise)
 import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
 import BubbleThemePicker from 'dashboard/components-next/cevico/BubbleThemePicker.vue';
+// 🤖 item 212: chavinha do Atendente IA no topo da conversa
+import ResponderSwitch from 'dashboard/components-next/cevico/conversas/ResponderSwitch.vue';
+// 🎨 item 212b: "foto" do paciente na cor de quem cuida
+import { useCevicoPersonColors } from 'dashboard/composables/useCevicoPersonColors';
 import wootConstants from 'dashboard/constants/globals';
 import { conversationListPageURL } from 'dashboard/helper/URLHelper';
 import { snoozedReopenTime } from 'dashboard/helper/snoozeHelpers';
@@ -39,6 +43,8 @@ const { width } = useElementSize(conversationHeader);
 const { isAWebWidgetInbox } = useInbox();
 
 const currentChat = computed(() => store.getters.getSelectedChat);
+const { patientGradientFor } = useCevicoPersonColors();
+const patientGradient = computed(() => patientGradientFor(currentChat.value));
 const accountId = computed(() => store.getters.getCurrentAccountId);
 
 const chatMetadata = computed(() => props.chat.meta);
@@ -136,6 +142,7 @@ const copyConversationId = async () => {
         hide-offline-status
         rounded-full
         gradient
+        :gradient-override="patientGradient"
       />
       <div class="flex flex-col items-start min-w-0 ms-2 overflow-hidden">
         <div class="flex flex-row items-center max-w-full gap-1 p-0 m-0">
@@ -182,6 +189,8 @@ const copyConversationId = async () => {
         :parent-width="width"
         class="hidden md:flex"
       />
+      <!-- 🤖 item 212: liga/desliga o Atendente IA nesta conversa -->
+      <ResponderSwitch :conversation-id="currentChat.id" :chat="currentChat" />
       <!-- 🎨 item 209: tema dos balões (por pessoa) -->
       <BubbleThemePicker />
       <CevicoCallButton

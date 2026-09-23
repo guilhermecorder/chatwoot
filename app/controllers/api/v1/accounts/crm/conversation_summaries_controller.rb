@@ -81,6 +81,13 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
     render json: { followup: followup_json }
   end
 
+  # GET /crm/conversation_summary/responder — item 212 (23/09): só o estado
+  # do Atendente IA nesta conversa, leve (sem previsões nem métricas), para a
+  # chavinha no topo da conversa.
+  def responder
+    render json: { responder: responder_json }
+  end
+
   # POST /crm/conversation_summary/toggle_responder — 🤖 item 207 (23/09):
   # botão "ligar/desligar a IA para esta pessoa" dentro da conversa. Mesmo
   # estado que o 👍/mensagem humana usam (cevico_atendente_wa), com nota
@@ -91,9 +98,9 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
     value = paused ? { 'paused' => true, 'reason' => 'botao', 'by' => Current.user.name, 'at' => Time.current.iso8601 } : {}
     Cevico::AttributeMerge.merge!(@conversation) { |attrs| attrs.merge(Crm::ResponderAgentJob::STATE_KEY => value) }
     note = if paused
-             "⏸ Atendente IA do WhatsApp DESLIGADO nesta conversa por #{Current.user.name} (botão do painel)."
+             "⏸ Atendente IA do WhatsApp DESLIGADO nesta conversa por #{Current.user.name} (chavinha da conversa)."
            else
-             "▶️ Atendente IA do WhatsApp LIGADO nesta conversa por #{Current.user.name} (botão do painel)."
+             "▶️ Atendente IA do WhatsApp LIGADO nesta conversa por #{Current.user.name} (chavinha da conversa)."
            end
     @conversation.messages.create!(account_id: @conversation.account_id, inbox_id: @conversation.inbox_id,
                                    message_type: :activity, private: true, content: note)

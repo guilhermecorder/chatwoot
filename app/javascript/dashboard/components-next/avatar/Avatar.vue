@@ -53,6 +53,12 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  // CEVICO 212b (23/09): degradê vindo de fora — a "foto" do paciente na cor
+  // de quem cuida dele (sem responsável = cinza neutro). Vale só sem foto.
+  gradientOverride: {
+    type: String,
+    default: '',
+  },
 });
 
 const emit = defineEmits(['upload', 'delete']);
@@ -145,7 +151,7 @@ const avatarStyles = computed(() => ({
   ...containerStyles.value,
   ...(useGradient.value
     ? {
-        backgroundImage: personGradient(props.name),
+        backgroundImage: props.gradientOverride || personGradient(props.name),
         boxShadow:
           'inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -8px 16px rgba(0,0,0,0.12)',
       }

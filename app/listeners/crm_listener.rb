@@ -270,8 +270,9 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
 
       Crm::InstagramAgentJob.set(wait: 12.seconds).perform_later(conversation.id, message.id)
     else # outgoing
-      return if message.additional_attributes&.[]('cevico_ia_agent').present? # do próprio agente
-      return if message.additional_attributes&.[]('cevico_followup_bot_id').present? # robô de follow-up
+      # item 212 (23/09): SÓ pessoa de verdade pausa — robô de follow-up,
+      # jornada, lembretes, campanhas e o próprio agente são "sistema"
+      return unless human_outgoing?(message)
 
       if message.content.to_s.strip == '👍'
         set_instagram_pause(conversation, false)
@@ -281,7 +282,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
         return if state['paused'] # já estava pausado — não repete a nota
 
         set_instagram_pause(conversation, true, reason: 'humano_assumiu')
-        note_instagram(conversation, '⏸ Atendente IA pausado — o atendimento humano assumiu esta conversa. Mande 👍 para reativar.')
+        note_instagram(conversation, "⏸ Atendente IA pausado — #{human_name(message)} assumiu esta conversa. Mande 👍 para reativar.")
       end
     end
   rescue StandardError => e
@@ -327,16 +328,18 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       Crm::ResponderAgentJob.set(wait: responder_delay(agents[key])).perform_later(conversation.id, message.id, key)
     else # outgoing: só importa para quem está AO VIVO
       return unless agents.values.any? { |a| Crm::ResponderAgentJob.live_mode?(a) }
-      return if message.additional_attributes&.[]('cevico_ia_agent').present? # do próprio agente
-      return if message.additional_attributes&.[]('cevico_followup_bot_id').present? # robô de follow-up
+      # item 212 (23/09): SÓ pessoa de verdade pausa — robô de follow-up,
+      # jornada, lembretes, campanhas e o próprio agente são "sistema"
+      return unless human_outgoing?(message)
 
       state = conversation.additional_attributes&.[](RESPONDER_STATE_KEY) || {}
       if message.content.to_s.strip == '👍'
         set_responder_pause(conversation, false)
         note_instagram(conversation, '▶️ Atendente IA do WhatsApp reativado nesta conversa (👍 do atendimento).')
       elsif !state['paused']
-        set_responder_pause(conversation, true, reason: 'humano_assumiu')
-        note_instagram(conversation, '⏸ Atendente IA do WhatsApp pausado — o atendimento humano assumiu esta conversa. Ligue de novo pelo botão do painel (ou mande 👍).')
+        set_responder_pause(conversation, true, reason: 'humano_assumiu', by: human_name(message))
+        note_instagram(conversation, "⏸ Atendente IA do WhatsApp pausado — #{human_name(message)} assumiu esta conversa. " \
+                                     'Ligue de novo pela chavinha no topo da conversa (ou mande 👍).')
       end
     end
   rescue StandardError => e
@@ -364,9 +367,25 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     nil
   end
 
-  def set_responder_pause(conversation, paused, reason: nil)
-    value = paused ? { 'paused' => true, 'reason' => reason, 'at' => Time.current.iso8601 }.compact : {}
+  def set_responder_pause(conversation, paused, reason: nil, by: nil)
+    value = paused ? { 'paused' => true, 'reason' => reason, 'by' => by, 'at' => Time.current.iso8601 }.compact : {}
     Cevico::AttributeMerge.merge!(conversation) { |attrs| attrs.merge(RESPONDER_STATE_KEY => value) }
+  end
+
+  # item 212: mensagem ENVIADA por uma pessoa da equipe? Tudo o que é
+  # automático (agente de IA, robô de follow-up, régua da jornada, lembrete,
+  # campanha, formulário disparado por automação — sem remetente ou com uma
+  # das marcas) é SISTEMA e não mexe na pausa do Atendente IA.
+  def human_outgoing?(message)
+    return false unless message.message_type == 'outgoing'
+    return false unless message.sender.is_a?(User)
+
+    attrs = message.additional_attributes || {}
+    AUTOMATED_MARKS.none? { |k| attrs[k].present? }
+  end
+
+  def human_name(message)
+    message.sender&.name.presence || 'o atendimento humano'
   end
 
   def set_instagram_pause(conversation, paused, reason: nil)

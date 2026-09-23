@@ -18,6 +18,7 @@ class ConversationApi extends ApiClient {
     updatedWithin,
     crmStageId,
     crmPipelineId,
+    assigneeIds,
   }) {
     return axios.get(this.url, {
       params: {
@@ -32,6 +33,9 @@ class ConversationApi extends ApiClient {
         updated_within: updatedWithin,
         crm_stage_id: crmStageId,
         crm_pipeline_id: crmPipelineId,
+        // item 212: filtro "quem cuida" (ids; 0 = sem responsável)
+        assignee_ids:
+          assigneeIds && assigneeIds.length ? assigneeIds : undefined,
       },
     });
   }

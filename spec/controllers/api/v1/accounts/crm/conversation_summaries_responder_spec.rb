@@ -34,6 +34,14 @@ RSpec.describe 'CRM conversation_summary — toggle_responder', type: :request d
     expect(conversation.messages.where(message_type: :activity).last.content).to include('LIGADO')
   end
 
+  # item 212: a chavinha do topo da conversa lê só o estado, sem o resumo inteiro
+  it 'GET /responder devolve só o estado do Atendente nesta conversa' do
+    get "#{base}/responder", params: { conversation_id: conversation.display_id }, headers: agent_user.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:success)
+    expect(response.parsed_body.keys).to eq(['responder'])
+    expect(response.parsed_body['responder']).to include('available' => true, 'live' => true, 'paused' => false)
+  end
+
   it 'o resumo da conversa traz o estado do Atendente (available=false em caixa sem agente)' do
     other = create(:conversation, account: account, inbox: create(:inbox, account: account), contact: contact)
     get base, params: { conversation_id: other.display_id }, headers: agent_user.create_new_auth_token, as: :json

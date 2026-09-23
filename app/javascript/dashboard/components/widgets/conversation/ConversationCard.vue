@@ -2,11 +2,9 @@
 import { computed, ref, watch } from 'vue';
 import { getLastMessage } from 'dashboard/helper/conversationHelper';
 import Avatar from 'next/avatar/Avatar.vue';
-import Icon from 'dashboard/components-next/icon/Icon.vue';
+import ChannelIcon from 'dashboard/components-next/icon/ChannelIcon.vue';
 import MessagePreview from './MessagePreview.vue';
-import InboxName from '../InboxName.vue';
 import TimeAgo from 'dashboard/components/ui/TimeAgo.vue';
-import CardLabels from './conversationCardComponents/CardLabels.vue';
 import CardPriorityIcon from 'dashboard/components-next/Conversation/ConversationCard/CardPriorityIcon.vue';
 import UnreadBadge from 'dashboard/components-next/Conversation/ConversationCard/UnreadBadge.vue';
 import SLACardLabel from './components/SLACardLabel.vue';
@@ -14,6 +12,8 @@ import VoiceCallStatus from './VoiceCallStatus.vue';
 import Checkbox from 'dashboard/components-next/checkbox/Checkbox.vue';
 import { useMapGetter } from 'dashboard/composables/store';
 import { inboxSolidFor } from 'dashboard/helper/cevicoInboxColors';
+import { firstNameOf, initialOf } from 'dashboard/helper/cevicoPersonColors';
+import { useCevicoPersonColors } from 'dashboard/composables/useCevicoPersonColors';
 import CrmAPI from 'dashboard/api/crm';
 
 const props = defineProps({
@@ -53,14 +53,6 @@ const voiceCallData = computed(() => {
   };
 });
 
-const showMetaSection = computed(() => {
-  return (
-    props.showInboxName ||
-    (props.showAssignee && props.assignee.name) ||
-    props.chat.priority
-  );
-});
-
 const isAgentBotAssignee = computed(
   () => props.chat?.meta?.assignee_type === 'AgentBot'
 );
@@ -68,10 +60,6 @@ const isAgentBotAssignee = computed(
 const hasSlaPolicyId = computed(
   () => props.chat?.applied_sla?.id && !props.currentContact?.blocked
 );
-
-const showLabelsSection = computed(() => {
-  return props.chat.labels?.length > 0 || hasSlaPolicyId.value;
-});
 
 const messagePreviewClass = computed(() => {
   return [
@@ -109,9 +97,10 @@ watch(
   }
 );
 
-// ── CEVICO (item 90 — 19/07): indicador VIVO da caixa + balão da jornada ──
-// nome do contato na cor sólida da própria caixa de entrada; chip com a
-// coluna do CRM que abre um balãozinho de "botões em linha" para mover
+// ── CEVICO (item 90 — 19/07 → 212 — 23/09): indicador VIVO da caixa + balão
+// da jornada — a cor sólida da caixa pinta o ícone do canal e o nome da caixa
+// na 2ª linha (o nome do paciente ficou neutro); chip com a coluna do CRM
+// que abre um balãozinho de "botões em linha" para mover
 const allInboxes = useMapGetter('inboxes/getInboxes');
 const crmPipelines = useMapGetter('crm/getPipelines');
 const nameColor = computed(() =>
@@ -153,13 +142,65 @@ const pickStage = async stage => {
     isMovingStage.value = false;
   }
 };
+
+// ── CEVICO item 212 (23/09): a COR DE CADA PESSOA no cartão ──────────────
+// crachá redondo sobre a foto do paciente + pílula com o primeiro nome, na
+// cor fixa da pessoa (helper cevicoPersonColors). Robô/Atendente IA = lilás.
+const { colorFor, patientGradientFor } = useCevicoPersonColors();
+// a "foto" do paciente (iniciais) na cor de quem cuida dele; sem ninguém = cinza
+const patientGradient = computed(() => patientGradientFor(props.chat));
+const hasAssignee = computed(() => !!props.assignee?.name);
+const assigneeColor = computed(() =>
+  colorFor({
+    id: props.assignee?.id,
+    name: props.assignee?.name,
+    assignee_type: props.chat?.meta?.assignee_type,
+  })
+);
+const assigneeFirst = computed(() => firstNameOf(props.assignee?.name));
+const assigneeInitial = computed(() => initialOf(props.assignee?.name));
+const showWhoRow = computed(() => props.showInboxName || props.showAssignee);
+
+// ── etiquetas SEM medir largura (item 212): o cartão antigo media os chips
+// no mount e, dentro da lista virtual, media 0 → etiquetas sumiam e sobrava
+// só um ">" (o "falhado" dos prints). Agora: até 3 sempre visíveis, o resto
+// atrás de um "+N" que abre e fecha.
+const accountLabels = useMapGetter('labels/getLabels');
+const activeLabels = computed(() => {
+  const titles = props.chat.labels || [];
+  if (!titles.length) return [];
+  return (accountLabels.value || []).filter(l => titles.includes(l.title));
+});
+const LABELS_SHOWN = 3;
+const labelsExpanded = ref(false);
+const visibleLabels = computed(() =>
+  labelsExpanded.value
+    ? activeLabels.value
+    : activeLabels.value.slice(0, LABELS_SHOWN)
+);
+const hiddenLabels = computed(() =>
+  Math.max(0, activeLabels.value.length - LABELS_SHOWN)
+);
+const toggleLabels = () => {
+  labelsExpanded.value = !labelsExpanded.value;
+};
+// a 4ª linha existe sempre que há jornada configurada (coluna ou "sem
+// coluna"), etiqueta ou SLA — assim os cartões ficam alinhados entre si
+const showJourneyRow = computed(
+  () =>
+    journeyStages.value.length > 0 ||
+    activeLabels.value.length > 0 ||
+    hasSlaPolicyId.value
+);
 </script>
 
 <template>
-  <!-- CEVICO 199 (22/09): cartão no formato do WhatsApp com acabamento Apple —
-       foto redonda grande, nome + hora na 1ª linha, caixa/responsável na 2ª,
-       prévia + bolinha verde de não lidas na 3ª, coluna do CRM e etiquetas
-       na 4ª. As classes cv-card* vestem o visual (_cevico-conversas.scss). -->
+  <!-- CEVICO 199 (22/09) + 212 (23/09): cartão no formato do WhatsApp com
+       acabamento Apple — foto redonda grande com o CRACHÁ de quem cuida,
+       nome + hora na 1ª linha, caixa (à esquerda) e responsável (pílula à
+       direita) na 2ª, prévia + bolinha verde na 3ª, coluna do CRM e
+       etiquetas em pílulas na 4ª. As classes cv-card* vestem o visual
+       (_cevico-conversas.scss). -->
   <div
     class="cv-card relative flex items-center gap-3 cursor-pointer conversation group"
     :class="{
@@ -184,6 +225,7 @@ const pickStage = async stage => {
         hide-offline-status
         rounded-full
         gradient
+        :gradient-override="patientGradient"
       >
         <template #overlay="{ size }">
           <label
@@ -196,15 +238,30 @@ const pickStage = async stage => {
           </label>
         </template>
       </Avatar>
+      <!-- crachá de quem cuida (cor fixa da pessoa) -->
+      <span
+        v-if="!hideThumbnail && showAssignee && hasAssignee"
+        class="cv-card-badge"
+        :style="{ background: assigneeColor.grad }"
+        :title="`Responsável: ${assignee.name}`"
+      >
+        <img
+          v-if="assignee.thumbnail && !isAgentBotAssignee"
+          :src="assignee.thumbnail"
+          alt=""
+        />
+        <span v-else-if="isAgentBotAssignee" class="i-lucide-bot text-[10px]" />
+        <span v-else>{{ assigneeInitial }}</span>
+      </span>
     </div>
 
-    <div class="flex-1 min-w-0 flex flex-col gap-0.5">
-      <!-- 1ª linha: nome (na cor da caixa) + prioridade + hora -->
+    <div class="flex-1 min-w-0 flex flex-col gap-[3px]">
+      <!-- 1ª linha: nome (NEUTRO — decisão dele 23/09: a cor da caixa fica
+           só na linha de baixo) + prioridade + hora -->
       <div class="flex items-center gap-2 min-w-0">
         <h4
           class="conversation--user flex-1 min-w-0 truncate text-[14px] leading-5 m-0 text-n-slate-12"
           :class="hasUnread ? 'font-bold' : 'font-semibold'"
-          :style="nameColor ? { color: nameColor } : {}"
           :title="currentContact.name"
         >
           {{ currentContact.name }}
@@ -225,21 +282,45 @@ const pickStage = async stage => {
         </span>
       </div>
 
-      <!-- 2ª linha: caixa de entrada + pessoa responsável -->
-      <div
-        v-if="showMetaSection"
-        class="flex items-center gap-2 min-w-0 text-[11px] leading-4"
-      >
-        <InboxName v-if="showInboxName" :inbox="inbox" class="min-w-0" />
+      <!-- 2ª linha: caixa de entrada (esquerda) + quem cuida (pílula à direita) -->
+      <div v-if="showWhoRow" class="flex items-center gap-2 min-w-0 leading-4">
         <span
-          v-if="showAssignee && assignee.name"
-          class="cv-card-assignee inline-flex items-center gap-0.5 min-w-0 truncate ml-auto"
+          v-if="showInboxName"
+          class="cv-card-inbox min-w-0"
+          :style="nameColor ? { color: nameColor } : {}"
+          :title="inbox.name"
         >
-          <Icon
-            :icon="isAgentBotAssignee ? 'i-lucide-bot' : 'i-lucide-user-round'"
-            class="size-3 flex-shrink-0"
-          />
-          <span class="truncate">{{ assignee.name }}</span>
+          <ChannelIcon :inbox="inbox" class="size-3.5 flex-shrink-0" />
+          <span class="truncate">{{ inbox.name }}</span>
+        </span>
+        <span
+          v-if="showAssignee"
+          class="cv-card-who ml-auto"
+          :class="hasAssignee ? '' : 'cv-card-who-none'"
+          :style="hasAssignee ? { '--pc': assigneeColor.solid } : {}"
+          :title="
+            hasAssignee
+              ? `Responsável: ${assignee.name}`
+              : 'Ninguém cuida desta conversa ainda'
+          "
+        >
+          <template v-if="hasAssignee">
+            <img
+              v-if="assignee.thumbnail && !isAgentBotAssignee"
+              :src="assignee.thumbnail"
+              alt=""
+            />
+            <span
+              v-else-if="isAgentBotAssignee"
+              class="i-lucide-bot text-[11px] flex-shrink-0"
+            />
+            <span v-else class="cv-card-who-dot" />
+            <span class="truncate">{{ assigneeFirst }}</span>
+          </template>
+          <template v-else>
+            <span class="i-lucide-user-round-x text-[11px] flex-shrink-0" />
+            <span class="truncate">sem responsável</span>
+          </template>
         </span>
       </div>
 
@@ -282,25 +363,32 @@ const pickStage = async stage => {
         />
       </div>
 
-      <!-- 4ª linha: coluna da jornada (CRM) + etiquetas -->
+      <!-- 4ª linha: coluna da jornada (CRM) + etiquetas, em pílulas -->
       <div
-        v-if="chatStage || showLabelsSection"
-        class="flex items-center gap-1 flex-wrap mt-0.5 min-w-0"
+        v-if="showJourneyRow"
+        class="cv-card-tags flex items-center gap-1 flex-wrap min-w-0"
       >
-        <div v-if="chatStage" class="relative min-w-0" @click.stop>
+        <div v-if="journeyStages.length" class="relative min-w-0" @click.stop>
           <button
+            v-if="chatStage"
             ref="chipEl"
-            class="cv-card-stage inline-flex items-center gap-1 h-5 px-1.5 rounded-full border text-[10px] font-medium transition-colors max-w-full"
+            class="cv-tag cv-tag-btn max-w-full"
+            :style="{ '--lb': chatStage.color || '#94A3B8' }"
             title="Coluna da jornada — toque para mover"
             @click="toggleStagePopover"
           >
-            <span
-              class="w-2 h-2 rounded-full flex-shrink-0"
-              :style="{ background: chatStage.color }"
-            />
+            <span class="cv-tag-dot" />
             <span class="truncate">{{ chatStage.name }}</span>
             <span class="i-lucide-chevron-down text-[10px] flex-shrink-0" />
           </button>
+          <span
+            v-else
+            class="cv-tag cv-tag-ghost"
+            title="Este paciente ainda não tem card na jornada (o card nasce sozinho na 1ª etapa ou pelo CRM)"
+          >
+            <span class="i-lucide-columns-3 text-[10px] flex-shrink-0" />
+            sem coluna
+          </span>
 
           <Teleport v-if="showStagePopover" to="body">
             <div
@@ -308,36 +396,26 @@ const pickStage = async stage => {
               @click.stop="showStagePopover = false"
             />
             <div
-              class="fixed z-[9999] w-64 rounded-xl border border-n-weak bg-white dark:bg-n-solid-2 shadow-xl p-2"
+              class="fixed z-[9999] w-64 rounded-2xl border border-n-weak bg-white dark:bg-n-solid-2 shadow-xl p-3"
               :style="{ left: `${popoverPos.x}px`, top: `${popoverPos.y}px` }"
               @click.stop
             >
-              <p class="text-[10px] font-bold text-n-slate-10 uppercase mb-1.5">
+              <p
+                class="text-[10px] font-bold text-n-slate-10 uppercase tracking-wide mb-2"
+              >
                 Mover para a coluna
               </p>
-              <div class="flex flex-wrap gap-1">
+              <div class="flex flex-wrap gap-1.5">
                 <button
                   v-for="s in journeyStages"
                   :key="s.id"
-                  class="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] font-medium border transition-all"
-                  :class="
-                    s.id === chat.crm_stage_id
-                      ? 'text-white'
-                      : 'text-n-slate-11 hover:bg-n-alpha-1 border-n-weak'
-                  "
-                  :style="
-                    s.id === chat.crm_stage_id
-                      ? { background: s.color, borderColor: s.color }
-                      : {}
-                  "
+                  class="cv-tag cv-tag-btn cv-tag-md"
+                  :class="s.id === chat.crm_stage_id ? 'cv-tag-solid' : ''"
+                  :style="{ '--lb': s.color || '#94A3B8' }"
                   :disabled="isMovingStage"
                   @click="pickStage(s)"
                 >
-                  <span
-                    v-if="s.id !== chat.crm_stage_id"
-                    class="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                    :style="{ background: s.color }"
-                  />
+                  <span v-if="s.id !== chat.crm_stage_id" class="cv-tag-dot" />
                   {{ s.name }}
                 </button>
               </div>
@@ -345,15 +423,25 @@ const pickStage = async stage => {
           </Teleport>
         </div>
 
-        <CardLabels
-          v-if="showLabelsSection"
-          :conversation-labels="chat.labels"
-          class="!mt-0 !mx-0 !mb-0 min-w-0"
+        <SLACardLabel v-if="hasSlaPolicyId" :chat="chat" />
+
+        <span
+          v-for="label in visibleLabels"
+          :key="label.id"
+          class="cv-tag max-w-full"
+          :style="{ '--lb': label.color || '#94A3B8' }"
+          :title="label.description || label.title"
         >
-          <template v-if="hasSlaPolicyId" #before>
-            <SLACardLabel :chat="chat" class="ltr:mr-1 rtl:ml-1" />
-          </template>
-        </CardLabels>
+          <span class="truncate">{{ label.title }}</span>
+        </span>
+        <button
+          v-if="hiddenLabels > 0"
+          class="cv-tag cv-tag-more"
+          :title="labelsExpanded ? 'Mostrar menos' : 'Ver todas as etiquetas'"
+          @click.stop="toggleLabels"
+        >
+          {{ labelsExpanded ? 'menos' : `+${hiddenLabels}` }}
+        </button>
       </div>
     </div>
   </div>

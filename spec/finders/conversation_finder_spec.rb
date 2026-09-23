@@ -24,6 +24,25 @@ describe ConversationFinder do
   end
 
   describe '#perform' do
+    # CEVICO item 212 (23/09): filtro "quem cuida" da lista de Conversas
+    context 'with assignee_ids (CEVICO quem cuida)' do
+      let!(:mine) { create(:conversation, account: account, inbox: inbox, assignee: user_1) }
+      let!(:theirs) { create(:conversation, account: account, inbox: inbox, assignee: user_2) }
+      let!(:nobody) { create(:conversation, account: account, inbox: inbox, assignee: nil) }
+
+      it 'só as conversas das pessoas pedidas', :aggregate_failures do
+        ids = described_class.new(admin, { status: 'open', assignee_type: 'all', assignee_ids: [user_2.id] }).perform[:conversations].map(&:id)
+        expect(ids).to include(theirs.id)
+        expect(ids).not_to include(mine.id, nobody.id)
+      end
+
+      it '0 = sem responsável (e soma com pessoas)', :aggregate_failures do
+        ids = described_class.new(admin, { status: 'open', assignee_type: 'all', assignee_ids: [0, user_1.id] }).perform[:conversations].map(&:id)
+        expect(ids).to include(mine.id, nobody.id)
+        expect(ids).not_to include(theirs.id)
+      end
+    end
+
     context 'with status' do
       let(:params) { { status: 'open', assignee_type: 'me' } }
 

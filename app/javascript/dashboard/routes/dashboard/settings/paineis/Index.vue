@@ -10,6 +10,12 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
 import { ALL_THEMES } from 'dashboard/helper/cevicoThemes';
+// 🎨 item 212: cor de cada pessoa (lista de Conversas)
+import {
+  PERSON_PALETTE,
+  personColorFor,
+  initialOf,
+} from 'dashboard/helper/cevicoPersonColors';
 
 const store = useStore();
 const agents = useMapGetter('agents/getAgents');
@@ -145,7 +151,32 @@ const loadFromSettings = () => {
   aiUserId.value = crmSettings.value?.ai_user_id || null;
   metricsCfg.value = { ...(crmSettings.value?.performance_metrics || {}) };
   panelThemes.value = { ...(crmSettings.value?.panel_themes || {}) };
+  personColors.value = { ...(crmSettings.value?.person_colors || {}) };
   if (!selPersonId.value && sortedAgents.value.length) selPersonId.value = sortedAgents.value[0].id;
+};
+
+// 🎨 item 212: cor de cada pessoa — {user_id: '#hex'}; sem entrada = automática
+const personColors = ref({});
+const personColor = id => personColorFor(agents.value || [], id, personColors.value);
+const isChosen = (id, hex) =>
+  String(personColors.value[String(id)] || '').toLowerCase() === hex.toLowerCase();
+const pickColor = async (id, hex) => {
+  const previous = { ...personColors.value };
+  const next = { ...personColors.value };
+  if (hex) next[String(id)] = hex.toLowerCase();
+  else delete next[String(id)];
+  personColors.value = next;
+  savingKey.value = `color:${id}`;
+  try {
+    await CrmAPI.updatePersonColors(personColors.value);
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Salvo! A cor já vale na lista de Conversas.');
+  } catch {
+    personColors.value = previous;
+    useAlert('Não consegui salvar — tenta de novo.');
+  } finally {
+    savingKey.value = '';
+  }
 };
 
 const pickAi = async userId => {
@@ -409,6 +440,58 @@ onMounted(async () => {
                 {{ t.emoji }} {{ t.label }}
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 🎨 Cor de cada pessoa (item 212): lista de Conversas -->
+      <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mt-4">
+        <div class="flex items-center gap-3 mb-1 flex-wrap">
+          <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #7C3AED, #22D3EE)">
+            <span class="i-lucide-user-round-pen text-white text-base" />
+          </span>
+          <div class="flex-1 min-w-[180px]">
+            <p class="text-sm font-bold text-n-slate-12">Cor de cada pessoa</p>
+            <p class="text-[11px] text-n-slate-10">
+              a cor que identifica a pessoa: a "foto" dos pacientes que ela cuida fica
+              na cor dela (na lista, no topo da conversa e na ficha), mais o crachá, a
+              pílula do responsável e o filtro "quem cuida". Sem responsável = cinza.
+              "Automática" segue a ordem de entrada na equipe.
+            </p>
+          </div>
+        </div>
+        <div class="mt-3 divide-y divide-n-weak">
+          <div
+            v-for="a in sortedAgents"
+            :key="a.id"
+            class="flex items-center gap-2 flex-wrap py-2.5"
+          >
+            <span
+              class="w-8 h-8 rounded-full inline-flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0 shadow-sm"
+              :style="{ background: personColor(a.id).grad }"
+            >
+              <img v-if="a.thumbnail" :src="a.thumbnail" class="w-full h-full object-cover" alt="" />
+              <template v-else>{{ initialOf(a.available_name || a.name) }}</template>
+            </span>
+            <span class="text-xs font-semibold text-n-slate-12 w-28 truncate">{{ a.available_name || a.name }}</span>
+            <button
+              class="h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors"
+              :class="!personColors[String(a.id)] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+              :style="!personColors[String(a.id)] ? { background: '#64748B' } : {}"
+              @click="pickColor(a.id, null)"
+            >
+              Automática
+            </button>
+            <button
+              v-for="c in PERSON_PALETTE"
+              :key="c.solid"
+              class="w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 flex-shrink-0"
+              :class="isChosen(a.id, c.solid) ? 'border-n-slate-12 scale-110' : 'border-white/70 dark:border-black/40'"
+              :style="{ background: c.grad }"
+              :title="c.solid"
+              @click="pickColor(a.id, c.solid)"
+            />
+            <span v-if="savingKey === `color:${a.id}`" class="i-lucide-loader-circle animate-spin text-sm text-n-brand" />
           </div>
         </div>
       </div>

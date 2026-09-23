@@ -44,6 +44,7 @@ export const applyPageFilters = (conversation, filters) => {
     conversationType,
     crmStageId,
     crmPipelineId,
+    assigneeIds,
   } = filters;
   const {
     status: chatStatus,
@@ -71,6 +72,11 @@ export const applyPageFilters = (conversation, filters) => {
   } else if (crmPipelineId) {
     const pipelineIds = (chatCrmPipelineIds || []).map(Number);
     shouldFilter = shouldFilter && pipelineIds.includes(Number(crmPipelineId));
+  }
+  // item 212: filtro "quem cuida" (0 = sem responsável)
+  if (assigneeIds && assigneeIds.length) {
+    const who = meta.assignee?.id ? Number(meta.assignee.id) : 0;
+    shouldFilter = shouldFilter && assigneeIds.map(Number).includes(who);
   }
   shouldFilter = filterByUnattended(
     shouldFilter,

@@ -113,6 +113,39 @@ RSpec.describe CrmListener do
       expect(conversation.messages.where(message_type: :activity).last.content).to include('pausado')
     end
 
+    # item 212 (23/09): robô de follow-up, régua da jornada, lembrete/campanha
+    # e formulário disparado por automação são SISTEMA — não pausam a IA
+    it 'mensagem do robô de follow-up (marca cevico_followup_bot_id) NÃO pausa nem deixa nota', :aggregate_failures do
+      robot = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'oi, ainda quer?',
+                               sender: human, additional_attributes: { 'cevico_followup_bot_id' => 7, 'cevico_followup_step' => 0 })
+      fire(robot)
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_blank
+      expect(conversation.messages.where(message_type: :activity)).to be_empty
+    end
+
+    it 'régua da jornada (cevico_journey) e lembrete (cevico_auto) também não pausam' do
+      %w[cevico_journey cevico_auto].each do |mark|
+        auto = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'lembrete',
+                                sender: human, additional_attributes: { mark => 'x' })
+        fire(auto)
+      end
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_blank
+    end
+
+    it 'mensagem enviada SEM remetente (campanha/automação nativa) não pausa' do
+      # (a factory sempre põe um remetente; aqui criamos direto, como as automações fazem)
+      auto = conversation.messages.create!(account: account, inbox: inbox, message_type: :outgoing, content: 'formulário')
+      fire(auto)
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_blank
+    end
+
+    it 'a nota de pausa diz QUEM assumiu e o estado guarda o nome' do
+      outgoing = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'oi', sender: human)
+      fire(outgoing)
+      expect(conversation.reload.additional_attributes.dig('cevico_atendente_wa', 'by')).to eq(human.name)
+      expect(conversation.messages.where(message_type: :activity).last.content).to include(human.name)
+    end
+
     it 'pausado, a mensagem do paciente NÃO vai para o agente' do
       conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true } })
       expect { fire(incoming) }.not_to have_enqueued_job(Crm::ResponderAgentJob)

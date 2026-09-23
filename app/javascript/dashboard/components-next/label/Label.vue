@@ -45,21 +45,18 @@ const colorClasses = computed(() => COLOR_CLASSES[props.color]);
 </script>
 
 <template>
+  <!-- CEVICO 212: com cor própria vira pílula com a tinta da cor (cv-tag-tint) -->
   <div
     :title="labelDescription"
-    class="rounded-lg -outline-offset-1 outline outline-1 inline-flex items-center flex-shrink-0"
+    class="rounded-full -outline-offset-1 outline outline-1 inline-flex items-center flex-shrink-0"
     :class="[
       colorClasses,
-      compact ? 'px-1.5 h-6 gap-1 rounded-md' : 'px-2.5 h-8 gap-1.5 rounded-lg',
+      labelColor ? 'cv-tag-tint font-semibold' : '',
+      compact ? 'px-2 h-6 gap-1 rounded-full' : 'px-3 h-8 gap-1.5 rounded-full',
     ]"
+    :style="labelColor ? { '--lb': labelColor } : {}"
   >
-    <span
-      v-if="labelColor"
-      class="rounded-sm flex-shrink-0"
-      :class="compact ? 'size-1.5' : 'size-2'"
-      :style="{ background: labelColor }"
-    />
-    <slot v-else name="icon" />
+    <slot v-if="!labelColor" name="icon" />
     <span
       class="whitespace-nowrap"
       :class="compact ? 'text-label-small' : 'text-label !font-420'"

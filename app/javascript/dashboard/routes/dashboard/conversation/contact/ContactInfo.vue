@@ -9,6 +9,11 @@ import { dynamicTime } from 'shared/helpers/timeHelper';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import ContactInfoRow from './ContactInfoRow.vue';
 import Avatar from 'next/avatar/Avatar.vue';
+import {
+  personColorFor,
+  BOT_COLOR,
+  UNASSIGNED_COLOR,
+} from 'dashboard/helper/cevicoPersonColors';
 import SocialIcons from './SocialIcons.vue';
 import EditContact from './EditContact.vue';
 import ContactMergeModal from 'dashboard/modules/contact/ContactMergeModal.vue';
@@ -67,6 +72,18 @@ export default {
     }),
     contactProfileLink() {
       return `/app/accounts/${this.$route.params.accountId}/contacts/${this.contact.id}`;
+    },
+    // 🎨 item 212b: a "foto" do paciente na cor de quem cuida da conversa
+    patientGradient() {
+      const assignee = this.currentChat?.meta?.assignee;
+      if (!assignee?.id && !assignee?.name) return UNASSIGNED_COLOR.grad;
+      if (this.currentChat?.meta?.assignee_type === 'AgentBot')
+        return BOT_COLOR.grad;
+      return personColorFor(
+        this.$store.getters['agents/getAgents'] || [],
+        assignee.id ?? assignee.name,
+        this.$store.getters['crm/getSettings']?.person_colors || {}
+      ).grad;
     },
     // "no cadastro desde ontem" / "no cadastro há 3 dias"
     contactSince() {
@@ -212,6 +229,7 @@ export default {
         hide-offline-status
         rounded-full
         gradient
+        :gradient-override="patientGradient"
       />
       <div
         v-if="showAvatar"
@@ -281,7 +299,9 @@ export default {
         title="Começar uma conversa com esta pessoa por qualquer caixa"
         @click="openNovaConversa({ contactId: contact.id })"
       >
-        <span class="cv-side-action-btn"><span class="i-lucide-message-square-plus"/></span>
+        <span class="cv-side-action-btn"
+          ><span class="i-lucide-message-square-plus"
+        /></span>
         <span>Conversa</span>
       </button>
       <div class="cv-side-action" title="Ligar">
@@ -316,7 +336,9 @@ export default {
         title="Editar o cadastro"
         @click="toggleEditModal"
       >
-        <span class="cv-side-action-btn"><span class="i-lucide-pencil-line"/></span>
+        <span class="cv-side-action-btn"
+          ><span class="i-lucide-pencil-line"
+        /></span>
         <span>Editar</span>
       </button>
       <ContactMergeModal :primary-contact="contact">
@@ -326,7 +348,9 @@ export default {
             title="Juntar com outro cadastro da mesma pessoa"
             :disabled="uiFlags.isMerging"
           >
-            <span class="cv-side-action-btn"><span class="i-lucide-merge"/></span>
+            <span class="cv-side-action-btn"
+              ><span class="i-lucide-merge"
+            /></span>
             <span>Mesclar</span>
           </button>
         </template>
@@ -342,7 +366,9 @@ export default {
             title="Excluir o contato"
             :disabled="uiFlags.isDeleting"
           >
-            <span class="cv-side-action-btn"><span class="i-lucide-trash-2"/></span>
+            <span class="cv-side-action-btn"
+              ><span class="i-lucide-trash-2"
+            /></span>
             <span>Excluir</span>
           </button>
         </template>

@@ -6171,7 +6171,84 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 211. 📝 TAREFAS + NOTAS DOS PACIENTES no Meu Painel · barra de Tarefas alinhada · seletor dos 4 tipos NO BANNER dos Agendamentos com a cor do ambiente · calendário da Agenda fecha ao clicar fora (pedidos 23/09 12h–13h, prints) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+## 212. 🎨 COR DE CADA PESSOA na lista de Conversas · chavinha do Atendente IA no topo da conversa · robô de follow-up é SISTEMA · etiquetas no design Apple (pedidos 23/09 tarde, 5 prints) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+- PEDIDO (depois de implantar o db5df13: "ficou legal"): (1) a chavinha do Atendente IA deve ficar NA CONVERSA, não na
+  aba do paciente, menorzinha, liga/desliga; (2) o "robô de follow-up" saía na cor humana e PAUSAVA a IA → tem que
+  ser reconhecido como sistema e não interferir; (3) balões/fundo coloridos aprovados, mas equilibrar o layout
+  (respiros); (4) sistema de cor para RESPONSÁVEL e CAIXA na coluna da lista — identificar quem cuida só de bater o
+  olho em "Todas"; (5) cartões "falhados" sem coluna/etiqueta; (6) etiquetas quadradas → design moderno Apple, no
+  sistema inteiro; (7) "a barra dos contatos precisa ser bonita e inteligente; as pessoas vão se orientar pelas cores"
+  — ele pediu para ser questionado.
+- CHAVINHA DA IA (ResponderSwitch.vue, novo, no ConversationHeader ao lado da paleta): pílula "🤖 IA ligada/em
+  sombra/desligada" + interruptor iOS (30×18); verde = respondendo, azul = sombra, cinza = desligada; some quando a
+  caixa não tem agente. Lê `GET crm/conversation_summary/responder` (rota nova, só o estado — sem previsões nem
+  métricas) e espelha o estado pelo websocket (`chat.additional_attributes.cevico_atendente_wa`): quando alguém da
+  equipe responde, a chavinha apaga sozinha. O botão saiu do ConversationSummaryCard (a trava do follow-up continua lá).
+  Notas internas dizem "chavinha da conversa".
+- ROBÔ = SISTEMA (crm_listener.rb): `human_outgoing?` — só mensagem ENVIADA por um User de verdade e SEM marca
+  automática (`AUTOMATED_MARKS` = cevico_auto, cevico_journey, cevico_followup_bot_id, cevico_ia_agent) mexe na
+  pausa do Atendente IA (WhatsApp e Instagram). Antes só duas marcas eram ignoradas: régua da jornada, lembrete D-1,
+  campanha e formulário por automação (sem remetente) pausavam a IA como se fosse humano. A nota de pausa agora diz
+  QUEM assumiu ("⏸ … — Vaneide assumiu esta conversa") e o estado guarda `by`. Specs: +4 no
+  crm_listener_responders_spec (25 verdes) + GET responder no conversation_summaries_responder_spec.
+- BALÃO AUTOMÁTICO (Message.vue): qualquer mensagem com marca automática vira variante BOT (lilás #ede9fe claro /
+  #312e81 escuro, fora do tema de balões da pessoa) com avatar de ROBÔ e tooltip "Enviada por Robô de follow-up
+  (automático, em nome de Vaneide)". As marcas passaram a viajar no payload da API (`_message.json.jbuilder` ganhou
+  `additional_attributes`) — antes só chegavam pelo websocket, e ao recarregar a tela o balão voltava a azul.
+- COR DE CADA PESSOA (helper `cevicoPersonColors.js`, 10 tons dopamina, ordem de entrada na equipe = cor estável,
+  robô = lilás): no cartão da lista (ConversationCard.vue) → CRACHÁ redondo de 20 px sobre a foto do paciente
+  (foto da pessoa ou inicial) + PÍLULA com o primeiro nome à direita da 2ª linha; sem responsável = "sem
+  responsável" cinza (aparece em "Todas" e nos filtros, como antes). Caixa de entrada = nome do paciente na cor da
+  caixa (já era) + linha 2 com ícone do canal e nome da caixa em versalete na mesma cor. Os botões "Pessoa
+  responsável" do painel (ConversationAction.vue) usam a MESMA cor: escolhido = pílula cheia, os outros = bolinha.
+- ETIQUETAS APPLE (global): `components/ui/Label.vue` (woot-label, usado no sistema inteiro) e
+  `components-next/label/Label.vue` viraram PÍLULA com a tinta da própria cor (fundo 13% da cor sobre branco,
+  letra 78% da cor sobre preto, fio 28%; escuro 26%/62%/42% — `color-mix`), sem quadradinho; × redondo. Classes
+  reutilizáveis `.cv-tag` (+ -btn/-md/-solid/-ghost/-more/-dot/-tint) no `_cevico-glass.scss`. Coluna do CRM no
+  cartão = a mesma pílula (cor da coluna) com chevron; sem card = "sem coluna" tracejada (a 4ª linha existe sempre
+  que há jornada — cartões alinhados); popover "Mover para a coluna" nas pílulas.
+- FALHADOS: o CardLabels antigo media a largura dos chips no mount e, dentro da lista virtual, media 0 → etiquetas
+  invisíveis e só um ">" sobrando. O cartão novo não mede nada: até 3 etiquetas + "+N" que abre/fecha.
+- RESPIROS: cartão 11×12 px por dentro e 2 px entre cartões, linhas com 3 px, separador a partir da foto (68 px);
+  paleta "A sua cor" com 316 px, p-4, bolinhas 32 px, gap 8, rodapé "Agora" em caixinha.
+- TESTADO 23/09 no docker local (conta 3, 1440 claro+escuro, 760): chavinha liga/desliga (POST toggle_responder
+  200, nota interna, label muda), atribuição pinta crachá + pílula + chip do painel, etiquetas/colunas em pílula,
+  balões automáticos lilás com robô, paleta com respiro; filtro "quem cuida" (GET conversations?assignee_ids[]=1
+  → só a conversa dele; soma com dani; "Todas" limpa); cor escolhida em Painéis (POST update_agenda 200) muda o
+  crachá/pílula na lista. Specs: 50 exemplos verdes (finder + listener + summaries). Lint: só avisos i18n (raw text) + `vue/no-root-v-if` no
+  ResponderSwitch (aceitável); rubocop = só as métricas pré-existentes do crm_listener. Duas mensagens de teste
+  criadas na conversa #363 local (apagadas ao final).
+- RESPOSTAS DELE (23/09, 4 perguntas) e o que foi construído em cima:
+  (1) NOME NEUTRO — o nome do paciente ficou preto; a cor da caixa mora só na linha 2 (ícone do canal + nome da
+  caixa em versalete). (2) SÓ O ADMIN escolhe a cor de cada pessoa → bloco "Cor de cada pessoa" em Configurações →
+  Painéis (10 bolinhas da paleta + "Automática"); guardado em `agenda_config.person_colors` ({user_id: '#hex'},
+  sanitizado, só ids da conta) via `settings/update_agenda`; sai em `crm/getSettings.person_colors`; helper
+  `personColorFor(agents, id, overrides)` + composable `useCevicoPersonColors()` (cartão, painel, filtro, Painéis).
+  (3) FILTRO "QUEM CUIDA" no topo da lista (ChatList.vue, abaixo das caixas): fileira de avatares na cor de cada
+  pessoa (Todas · pessoas · ninguém); toque filtra, soma com mais toques, fica no navegador (`cevico_conv_who`),
+  pula a aba para "Todas"; entra no resumo do topo recolhido ("só Vaneide"). Backend: `assignee_ids` no
+  ConversationFinder (`filter_by_assignee_ids`, 0 = sem responsável) + filtro local em helpers.js (websocket) +
+  spec 2/2. (4) CRACHÁ só em "Todas" e filtros (mantido).
+- 212b (23/09, "a cor dos pacientes da cor da atendente"): a "foto" do paciente (iniciais sem foto) fica na COR
+  DE QUEM CUIDA da conversa — na lista (44 px), no topo da conversa (32) e na ficha do painel (72); sem
+  responsável = cinza neutro (UNASSIGNED_COLOR); robô = lilás. Avatar.vue ganhou a prop `gradientOverride`;
+  composable `patientGradientFor(chat)`. A foto real (Instagram/upload) continua por cima. O degradê por hash do
+  nome (item 199) ficou só onde não há conversa (ex.: Contatos).
+- 212c (23/09, print "recolher, minimizar → mais conversas"): o topo da lista de Conversas começa RECOLHIDO para
+  todo mundo (uma linha: botão azul "Filtros ⌄" + resumo do que está valendo + nova conversa); quem abre fica
+  aberto só no próprio navegador (`cevico_conversas_topo_recolhido` = '0'). Botão de recolher agora tem nome
+  ("Recolher ⌃") em vez da setinha cinza.
+- PEÇAS: ResponderSwitch.vue (novo), cevicoPersonColors.js (novo), useCevicoPersonColors.js (novo),
+  Avatar.vue (gradientOverride), ContactInfo.vue (foto na cor de quem cuida),
+  ChatList.vue (fileira quem cuida), settings/paineis/Index.vue (cor por pessoa), conversation_finder.rb,
+  api/inbox/conversation.js, store conversations/helpers.js, settings_controller.rb (person_colors),
+  ConversationCard.vue (reescrito),
+  ConversationHeader.vue, ConversationSummaryCard.vue, ConversationAction.vue, Message.vue, ui/Label.vue,
+  next/label/Label.vue, BubbleThemePicker.vue, _cevico-conversas.scss, _cevico-glass.scss, crm.js, crm_listener.rb,
+  conversation_summaries_controller.rb (+ `responder`), routes/cevico_crm.rb, _message.json.jbuilder, 2 specs.
+- REVERSÃO: imagem :db5df13 (produção atual). Sem migration.
+
+## 211. 📝 TAREFAS + NOTAS DOS PACIENTES no Meu Painel · barra de Tarefas alinhada · seletor dos 4 tipos NO BANNER dos Agendamentos com a cor do ambiente · calendário da Agenda fecha ao clicar fora (pedidos 23/09 12h–13h, prints) — SUBIU 23/09 12h36 (commit db5df13 no develop → imagem ghcr :db5df13, WEB só, sem migration; reversão :a943128)
 - TAREFAS: barra "Minhas tarefas | Todas", o seletor "Por pessoa…" e a contagem com a MESMA altura (36 px) e os mesmos
   cantos, numa linha só (o select tinha width 100% do CSS global → !w-auto). Cabeçalhos das colunas com ícone, título e
   número na mesma linha de base (leading-none + chip de 26 px).
@@ -6195,7 +6272,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   Agendamento com a caixa em 1º. Peças: TasksBoard.vue, InicioPage.vue, CrmAppointments.vue, CevicoHero.vue,
   PatientNoteForm.vue (novo), patient_notes_controller.rb (novo), home_controller.rb, crm.js, cevico_crm.rb, _cevico-agenda.scss.
 
-## 210. 🍎📅 AGENDA NO DESIGN APPLE — Consultas | Teleconsultas | Exames | Cirurgias, abre na SEMANA; seletor dos 4 tipos nos Agendamentos; Espaço do Paciente no kit; paleta das Conversas por cima de tudo (pedidos 23/09 11h, prints) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+## 210. 🍎📅 AGENDA NO DESIGN APPLE — Consultas | Teleconsultas | Exames | Cirurgias, abre na SEMANA; seletor dos 4 tipos nos Agendamentos; Espaço do Paciente no kit; paleta das Conversas por cima de tudo (pedidos 23/09 11h, prints) — SUBIU 23/09 12h36 (commit db5df13 no develop → imagem ghcr :db5df13, WEB só, sem migration; reversão :a943128)
 - AJUSTES RÁPIDOS: (a) a paleta "A sua cor nas Conversas" ficava POR TRÁS dos balões (o cabeçalho tem backdrop-filter,
   que cria um contexto de empilhamento próprio) → o popup agora é teleportado para o body em posição fixa, com um véu
   invisível para fechar ao clicar fora (BubbleThemePicker.vue); (b) "tons leitosos" → "tons suaves" (texto e comentários).

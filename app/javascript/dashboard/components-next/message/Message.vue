@@ -153,6 +153,28 @@ const inbox = computed(() => inboxGetter.value(props.inboxId) || {});
 const isOnChatwootCloud = useMapGetter('globalConfig/isOnChatwootCloud');
 const { replaceInstallationName } = useBranding();
 
+// 🤖 CEVICO item 212 (23/09): mensagem AUTOMÁTICA da clínica (Atendente IA,
+// robô de follow-up, régua da jornada, lembrete/campanha) é SISTEMA: balão
+// lilás e avatar de robô, mesmo quando foi enviada "em nome" de alguém da
+// equipe — assim ninguém confunde com resposta humana.
+// (a lista converte as chaves para camelCase — cevicoIaAgent —; pelo
+// websocket podem chegar como no banco — cevico_ia_agent; aceita as duas)
+const CEVICO_AUTOMATED = [
+  ['cevicoIaAgent', 'cevico_ia_agent', 'Atendente IA'],
+  ['cevicoFollowupBotId', 'cevico_followup_bot_id', 'Robô de follow-up'],
+  ['cevicoJourney', 'cevico_journey', 'Jornada do paciente'],
+  ['cevicoAuto', 'cevico_auto', 'Envio automático'],
+];
+const cevicoAutomatedKind = computed(() => {
+  const attrs = props.additionalAttributes || {};
+  const present = k =>
+    attrs[k] !== undefined && attrs[k] !== null && attrs[k] !== '';
+  const hit = CEVICO_AUTOMATED.find(
+    ([camel, snake]) => present(camel) || present(snake)
+  );
+  return hit ? hit[2] : null;
+});
+
 const isCaptainMessage = computed(() => {
   const senderType = props.sender?.type ?? props.senderType;
   return senderType === SENDER_TYPES.CAPTAIN_ASSISTANT;
@@ -187,6 +209,7 @@ const variant = computed(() => {
   const isBot =
     props.sender?.type === SENDER_TYPES.AGENT_BOT ||
     props.senderType === SENDER_TYPES.AGENT_BOT ||
+    !!cevicoAutomatedKind.value ||
     (!props.sender && !props.additionalAttributes?.senderName);
   if (isBot && props.messageType === MESSAGE_TYPES.OUTGOING) {
     return MESSAGE_VARIANTS.BOT;
@@ -494,6 +517,15 @@ const avatarInfo = computed(() => {
     };
   }
 
+  // CEVICO 212: automática → robô, com o nome do robô
+  if (cevicoAutomatedKind.value) {
+    return {
+      name: cevicoAutomatedKind.value,
+      src: '',
+      iconName: 'i-lucide-bot',
+    };
+  }
+
   // If no sender, check for Slack (or other integration) sender info
   if (!props.sender) {
     const { senderName, senderAvatarUrl } = props.additionalAttributes || {};
@@ -526,6 +558,12 @@ const avatarTooltip = computed(() => {
     return replaceInstallationName(t('CONVERSATION.NATIVE_APP_ADVISORY'));
   }
   if (avatarInfo.value.name === '') return '';
+  if (cevicoAutomatedKind.value) {
+    const who = props.sender?.name
+      ? ` (automático, em nome de ${props.sender.name})`
+      : ' (automático)';
+    return `${t('CONVERSATION.SENT_BY')} ${cevicoAutomatedKind.value}${who}`;
+  }
   return `${t('CONVERSATION.SENT_BY')} ${avatarInfo.value.name}`;
 });
 

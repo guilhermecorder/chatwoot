@@ -86,6 +86,7 @@ class ConversationFinder # rubocop:disable Metrics/ClassLength
     filter_by_labels
     filter_by_crm_stage
     filter_by_crm_pipeline
+    filter_by_assignee_ids
     filter_by_query
     filter_by_source_id
   end
@@ -186,6 +187,19 @@ class ConversationFinder # rubocop:disable Metrics/ClassLength
 
     @conversations = @conversations.joins(contact: :crm_contacts)
                                    .where(crm_contacts: { stage_id: params[:crm_stage_id] })
+  end
+
+  # item 212 (23/09): filtro "quem cuida" da lista de Conversas — os avatares
+  # coloridos no topo; assignee_ids = ids de pessoas (0 = sem responsável)
+  def filter_by_assignee_ids
+    ids = Array(params[:assignee_ids]).map(&:to_i)
+    return if ids.empty?
+
+    @conversations = if ids.include?(0)
+                       @conversations.where(assignee_id: [nil] + ids.reject(&:zero?))
+                     else
+                       @conversations.where(assignee_id: ids)
+                     end
   end
 
   # filtro da jornada CEVICO: conversas cujo contato está em QUALQUER coluna do funil

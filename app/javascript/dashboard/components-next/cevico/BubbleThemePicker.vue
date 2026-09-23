@@ -36,7 +36,7 @@ const title = computed(
 const place = () => {
   const rect = anchor.value?.getBoundingClientRect();
   if (!rect) return;
-  const width = 288;
+  const width = 316;
   const right = Math.max(8, window.innerWidth - rect.right);
   const fitsRight = right + width <= window.innerWidth - 8;
   popStyle.value = {
@@ -89,29 +89,29 @@ const pickBubble = t => {
         <!-- véu invisível: clicar fora fecha (sem prender a rolagem) -->
         <div class="fixed inset-0 z-[9998]" @click="close" />
         <div
-          class="cv-bubble-pop fixed z-[9999] p-3 rounded-2xl shadow-2xl bg-n-solid-1 border border-n-weak"
+          class="cv-bubble-pop fixed z-[9999] p-4 rounded-[20px] shadow-2xl bg-n-solid-1 border border-n-weak"
           :style="popStyle"
           role="dialog"
           aria-label="A sua cor nas Conversas"
         >
-          <p class="text-[11px] font-semibold text-n-slate-12 mb-0.5">
+          <p class="text-[13px] font-semibold text-n-slate-12 mb-1 tracking-tight">
             A sua cor nas Conversas
           </p>
-          <p class="text-[10px] text-n-slate-10 mb-2.5 leading-snug">
+          <p class="text-[11px] text-n-slate-10 mb-4 leading-relaxed">
             Tons suaves para se orientar sem cansar a vista. Combine fundo e
             balões como preferir. Vale só para você, em qualquer aparelho.
           </p>
 
           <p
-            class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-10 mb-1.5"
+            class="text-[10px] font-semibold uppercase tracking-[0.08em] text-n-slate-10 mb-2"
           >
             Fundo
           </p>
-          <div class="flex flex-wrap gap-1.5 mb-3">
+          <div class="flex flex-wrap gap-2 mb-4">
             <button
               v-for="t in BG_THEMES"
               :key="`bg-${t.key}`"
-              class="w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 flex items-center justify-center"
+              class="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 flex items-center justify-center shadow-sm"
               :class="t.key === bgKey ? 'border-n-brand' : 'border-black/10'"
               :style="{ background: t.swatch }"
               :title="t.label"
@@ -126,15 +126,15 @@ const pickBubble = t => {
           </div>
 
           <p
-            class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-10 mb-1.5"
+            class="text-[10px] font-semibold uppercase tracking-[0.08em] text-n-slate-10 mb-2"
           >
             Balões
           </p>
-          <div class="flex flex-wrap gap-1.5">
+          <div class="flex flex-wrap gap-2">
             <button
               v-for="t in BUBBLE_THEMES"
               :key="`bb-${t.key}`"
-              class="h-7 w-11 rounded-full border-2 transition-transform hover:scale-105 flex items-center justify-center gap-0.5 bg-n-alpha-1"
+              class="h-8 w-12 rounded-full border-2 transition-transform hover:scale-105 flex items-center justify-center gap-1 bg-n-alpha-1 shadow-sm"
               :class="
                 t.key === bubbleKey ? 'border-n-brand' : 'border-black/10'
               "
@@ -142,16 +142,18 @@ const pickBubble = t => {
               @click="pickBubble(t)"
             >
               <span
-                class="w-3.5 h-3.5 rounded-full border border-black/10"
+                class="w-4 h-4 rounded-full border border-black/10"
                 :style="{ background: t.swatch.in }"
               />
               <span
-                class="w-3.5 h-3.5 rounded-full border border-black/10"
+                class="w-4 h-4 rounded-full border border-black/10"
                 :style="{ background: t.swatch.out }"
               />
             </button>
           </div>
-          <p class="text-[10px] text-n-slate-10 mt-2.5 leading-snug">
+          <p
+            class="text-[11px] text-n-slate-11 mt-4 px-3 py-2 rounded-xl bg-n-alpha-1 leading-snug"
+          >
             Agora: fundo <b>{{ findBgTheme(bgKey).label }}</b> · balões
             <b>{{ findBubbleTheme(bubbleKey).label }}</b>
           </p>

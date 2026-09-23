@@ -1230,3 +1230,94 @@
 .cv-page .cv-switch-lg::after { width: 20px; height: 20px; top: 2px; left: 2px; }
 .cv-page .cv-switch-lg.cv-switch-on::after { transform: translateX(20px); }
 .cv-page .cv-switch:disabled { opacity: 0.5; cursor: default; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   🏷️ ETIQUETAS / PÍLULAS (item 212, 23/09) — o design Apple das etiquetas
+   em todo o sistema: pílula com a TINTA da própria cor (fundo bem claro
+   na cor, letra na cor escurecida, fio sutil). Vale fora do .cv-page.
+   Uso: <span class="cv-tag" style="--lb: #hex">texto</span>
+     .cv-tag-btn   → clicável   · .cv-tag-md → 24 px  · .cv-tag-solid → cheia
+     .cv-tag-ghost → tracejada  · .cv-tag-more → "+N"  · .cv-tag-dot → bolinha
+     .cv-tag-tint  → só a tinta (para o Label do components-next)
+   ══════════════════════════════════════════════════════════════════════ */
+.cv-tag {
+  --lb: #64748b;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+  background: color-mix(in srgb, var(--lb) 13%, #fff);
+  color: color-mix(in srgb, var(--lb) 78%, #111);
+  border: 1px solid color-mix(in srgb, var(--lb) 28%, transparent);
+}
+.cv-tag > .truncate { overflow: hidden; text-overflow: ellipsis; }
+.cv-tag-md { height: 24px; padding: 0 10px; font-size: 11.5px; }
+.cv-tag-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--lb);
+  flex-shrink: 0;
+}
+button.cv-tag, .cv-tag-btn {
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.12s ease, background 0.12s ease;
+}
+button.cv-tag:hover, .cv-tag-btn:hover {
+  background: color-mix(in srgb, var(--lb) 20%, #fff);
+  transform: translateY(-1px);
+}
+button.cv-tag:disabled { opacity: 0.55; transform: none; cursor: default; }
+.cv-tag-solid,
+.cv-tag-solid:hover {
+  background: var(--lb);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 4px 10px -6px color-mix(in srgb, var(--lb) 80%, #000);
+}
+.cv-tag-ghost {
+  background: transparent;
+  color: #8e8e93;
+  border: 1px dashed rgba(0, 0, 0, 0.2);
+  font-weight: 500;
+}
+.cv-tag-more {
+  background: rgba(0, 0, 0, 0.06);
+  color: #6e6e73;
+  border-color: transparent;
+  padding: 0 7px;
+}
+.cv-tag-tint {
+  background: color-mix(in srgb, var(--lb) 13%, #fff) !important;
+  color: color-mix(in srgb, var(--lb) 78%, #111) !important;
+  outline-color: color-mix(in srgb, var(--lb) 28%, transparent) !important;
+}
+.dark .cv-tag,
+.dark .cv-tag-tint {
+  background: color-mix(in srgb, var(--lb) 26%, #0f1115) !important;
+  color: color-mix(in srgb, var(--lb) 62%, #fff) !important;
+  border-color: color-mix(in srgb, var(--lb) 42%, transparent);
+  outline-color: color-mix(in srgb, var(--lb) 42%, transparent) !important;
+}
+.dark button.cv-tag:hover, .dark .cv-tag-btn:hover {
+  background: color-mix(in srgb, var(--lb) 34%, #0f1115) !important;
+}
+.dark .cv-tag-solid, .dark .cv-tag-solid:hover {
+  background: var(--lb) !important;
+  color: #fff !important;
+}
+.dark .cv-tag-ghost {
+  background: transparent !important;
+  color: #98989f !important;
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.dark .cv-tag-more { background: rgba(255, 255, 255, 0.08) !important; color: #b4b4bc !important; }

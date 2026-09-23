@@ -184,6 +184,13 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 🤖 item 212: só o estado do Atendente IA nesta conversa (chavinha do topo)
+  getResponderState(conversationId) {
+    return axios.get(`${this.url}/conversation_summary/responder`, {
+      params: { conversation_id: conversationId },
+    });
+  }
+
   // 🤖 item 207: liga/desliga o Atendente IA do WhatsApp para ESTA conversa
   toggleResponder(conversationId, paused) {
     return axios.post(`${this.url}/conversation_summary/toggle_responder`, {
@@ -332,6 +339,13 @@ class CrmAPI extends ApiClient {
   }
 
   // responsável por painel do Meu Painel (Configurações → Painéis)
+  // 🎨 item 212: cor de cada pessoa ({user_id: '#hex'}; sem entrada = automática)
+  updatePersonColors(personColors) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      person_colors: personColors,
+    });
+  }
+
   updatePanelOwners(panelOwners) {
     return axios.post(`${this.url}/settings/update_agenda`, {
       panel_owners: panelOwners,

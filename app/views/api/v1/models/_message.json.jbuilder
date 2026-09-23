@@ -7,6 +7,10 @@ json.message_type message.message_type_before_type_cast
 json.content_type message.content_type
 json.status message.status
 json.content_attributes message.content_attributes
+# CEVICO 212: as marcas automáticas (cevico_ia_agent, cevico_followup_bot_id,
+# cevico_journey, cevico_auto) precisam chegar na tela também ao recarregar a
+# conversa — o balão vira "sistema" (lilás + robô). O websocket já mandava.
+json.additional_attributes message.additional_attributes
 json.created_at message.created_at.to_i
 json.private message.private
 json.source_id message.source_id
