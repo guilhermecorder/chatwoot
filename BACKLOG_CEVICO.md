@@ -6171,6 +6171,35 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 204. 👂🖼️ ÁUDIO E IMAGEM DO PACIENTE LIDOS PELO AGENTE PRÓPRIO (pedido 22/09, 22h40, "muitíssimo importante, quero deixar pronto pra amanhã") — CONSTRUÍDO 22/09 noite na feat/rodada-172, SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, sem migration, sem variável nova)
+- Contexto: a migração do N8N para o agente próprio foi FEITA e testada por ele em 22/09 à noite (CEVICO_RESPONDERS_LIVE=true,
+  imagem 3617e2b, N8N + webhook desligados). Lacuna que sobrou: o N8N transcrevia áudio (OpenAI) e descrevia foto; o agente
+  próprio via só "[áudio]" e pedia para escrever.
+- O que faz agora: todo áudio ou imagem que o paciente manda numa caixa atendida pelos Atendentes do WhatsApp passa pelo
+  Gemini 2.5 Flash na hora (mesmo padrão da transcrição de vídeo dos criativos, item 181) e vira texto:
+  · áudio → transcrição fiel, gravada em attachment.meta['transcribed_text'] (a chave que o Chatwoot JÁ mostra embaixo do
+    player de áudio para a equipe) + meta['cevico_media'] (status, modelo, inaudível);
+  · imagem → tipo (receita | pedido_exame | exame_laudo | foto_olho | print | comprovante | documento | outro) + o que a foto
+    mostra (sem diagnóstico) + TODO o texto legível; a bolha da imagem ganha a leitura embaixo (✨, clique expande) e a
+    miniatura (imagem com legenda) mostra no tooltip;
+  · o Atendente lê na conversa "[áudio transcrito: "…"]" / "[imagem (pedido_exame): … · texto na imagem: "…"]" e responde ao
+    CONTEÚDO como se fosse texto (Roteiro v1 e v2 ganharam a regra; a antiga "não consigo ouvir áudio" só vale quando
+    vier "[áudio sem transcrição …]", isto é, sem chave ou falha).
+- Peças: app/services/crm/media_reading_service.rb (leitura + rótulos + read_pending!), app/jobs/crm/media_reading_job.rb
+  (disparado pelo CrmListener em toda mensagem do paciente com áudio/imagem nas caixas dos Atendentes, mesmo com o agente
+  pausado ou coluna sem dono: a equipe se beneficia), Crm::ResponderAgentJob (read_pending! antes da IA = garantia + evento
+  "midia" no registro do card), Crm::ResponderAgentService (marcadores → texto lido; corte de 2.400 chars quando há mídia),
+  Attachment#file_metadata (transcribed_text também para imagem), Roteiros v1/v2, AutomationsHub (linha "Áudio e imagem"
+  no card dos 2 Atendentes: cinza = lendo pelo Gemini; âmbar = falta a chave), bubbles/Image.vue + chips/Image.vue.
+- Custo: Gemini 2.5 Flash (áudio US$ 1,00/M entrada, imagem 0,30/M, saída 2,50/M) registrado em Crm::AiUsage como
+  agent_key media_reading. Falha não insiste (status failed); sem chave = skipped e o agente segue pedindo texto.
+- Limites: 15 MB por anexo; até 4 anexos pendentes por chamada do Atendente (latência); só mensagens do paciente (incoming).
+- PRÉ-REQUISITO NA VPS: a chave do Gemini em CRM → Integrações → IA (a mesma dos criativos). Se já estiver lá, nada a fazer.
+- Testes: spec/services/crm/media_reading_service_spec.rb (6) + exemplos novos em responder_agent_service_spec,
+  responder_agent_job_spec e crm_listener_responders_spec — 74/74 verdes no docker (22/09 22h50). Corrigida de brinde a
+  ordem frágil de um exemplo do job (order(:id)).
+- Reversão: imagem anterior (3617e2b). Sem migration.
+
 ## 203. 🙈 BOTÃO "RECOLHER" NO TOPO DE CONVERSAS (pedido 22/09, 21h40, print do FECHAMENTO) — AGUARDA "pode construir" (SESSÃO NOVA)
 - Pedido: "quero um botão 'recolher', para deixar mais clean a visualização de CONVERSAS". O topo (botão Nova
   conversa + frase, pílulas das caixas, chips Funil/Colunas CRM/Etiquetas, chavinha Não lidas, segmentado de ordem)
@@ -6206,7 +6235,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   toque antes de agendar × qualquer toque na janela); linha de base = leads sem toque automático que agendaram;
   depois o funil completo (agendou → compareceu → indicou cirurgia → operou, a Agenda já guarda). Sem migration.
 
-## 200. 🤖🔓 AGENTE "RODANDO SOLTO" + PAINEL DE AGENDAMENTOS + AFUNILAMENTO E PORTA ABERTA (pedido 22/09 noite, para os NÚMEROS NOVOS de 23/09) — SUBIU 22/09 21h ("vamos subir" → commits 47e03db [199] + 0a07510 [200] na feat/rodada-172, push para origin/develop = 0a07510 → imagem ghcr.io/guilhermecorder/chatwoot:0a07510, deploy WEB+SIDEKIQ sem migration; reversão = imagem em produção antes: 87c9564 ou 2d7b2b4)
+## 200. 🤖🔓 AGENTE "RODANDO SOLTO" + PAINEL DE AGENDAMENTOS + AFUNILAMENTO E PORTA ABERTA (pedido 22/09 noite, para os NÚMEROS NOVOS de 23/09) — SUBIU 22/09 21h ("vamos subir" → commits 47e03db [199] + 0a07510 [200] na feat/rodada-172, push para origin/develop = 0a07510; + correção dos prompts 22h em 3617e2b → IMAGEM FINAL ghcr.io/guilhermecorder/chatwoot:3617e2b, deploy WEB+SIDEKIQ sem migration; reversão = imagem em produção antes: 87c9564 ou 2d7b2b4)
 
 **Pedido dele (22/09, 19h40, com prints do teste no FECHAMENTO #10912 e do 🧪 Testar agente):**
 "vamos precisar atualizar o nosso prompt N8N em alguns pontos": (1) timing das mensagens entre 5 e 10 s da

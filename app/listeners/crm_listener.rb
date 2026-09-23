@@ -310,6 +310,11 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     return if agents.empty?
 
     if message.message_type == 'incoming'
+      # 👂🖼️ item 204: áudio/imagem do paciente vira texto na hora (equipe vê
+      # embaixo do anexo; o Atendente lê como se fosse escrito) — em toda caixa
+      # atendida, mesmo que a coluna não tenha dono ou o agente esteja pausado
+      Crm::MediaReadingJob.perform_later(message.id) if Crm::MediaReadingService.message_has_media?(message)
+
       key = responder_owner_for(conversation, agents)
       return if key.blank?
 

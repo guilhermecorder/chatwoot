@@ -215,8 +215,9 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       "#{task.doctor.presence || 'médico a definir'} (id #{task.id})"
   end
 
-  # últimas N mensagens reais (nada de notas internas); áudio/imagem viram
-  # marcadores — na Rodada 1 o agente pede por texto (transcrição vem na R2)
+  # últimas N mensagens reais (nada de notas internas); áudio/imagem entram
+  # como TEXTO lido pelo Gemini (item 204: "[áudio transcrito: …]", "[imagem
+  # (receita): … · texto na imagem: …]"); sem leitura, o marcador pede texto
   # Conversa SIMULADA (rake cevico:wa_agent_simulate): ninguém responde de
   # verdade, então as próprias notas de sombra entram como falas da CLÍNICA —
   # senão o agente acha que toda mensagem é o primeiro contato.
@@ -234,12 +235,14 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       next if m.private?
 
       body = m.content.to_s.strip
-      marks = m.attachments.map { |a| "[#{attachment_label(a.file_type)}]" }
+      marks = m.attachments.map { |a| Crm::MediaReadingService.transcript_label(a) }
       text = [body.presence, marks.presence&.join(' ')].compact.join(' ')
       next if text.blank?
 
       author = m.incoming? ? 'PACIENTE' : 'CLÍNICA'
-      "[#{m.created_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')}] #{author}: #{text.truncate(600)}"
+      # áudio transcrito/imagem lida podem passar de 600: o corte vale só para o texto digitado
+      stamp = m.created_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')
+      "[#{stamp}] #{author}: #{text.truncate(marks.any? ? 2400 : 600)}"
     end
     lines.empty? ? nil : lines.join("\n")
   end
@@ -254,10 +257,5 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
     text = Array(shadow['mensagens']).join(' ')
     "[#{message.created_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')}] CLÍNICA: #{text.truncate(900)}"
-  end
-
-  def attachment_label(file_type)
-    { 'audio' => 'áudio: peça para o paciente escrever', 'image' => 'imagem', 'video' => 'vídeo',
-      'file' => 'arquivo', 'location' => 'localização', 'contact' => 'contato' }[file_type.to_s] || file_type.to_s
   end
 end

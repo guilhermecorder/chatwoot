@@ -34,6 +34,16 @@ RSpec.describe Crm::ResponderAgentJob do
     described_class.perform_now(conversation.id, message.id, 'atendente_agendamento')
   end
 
+  # 👂🖼️ item 204: antes de montar a resposta, lê o que faltar e anota no registro do card
+  it 'lê áudio/imagem pendentes antes da IA e registra "midia" no card' do
+    stub_ai(ai_reply)
+    allow(Crm::MediaReadingService).to receive(:read_pending!).with(conversation).and_return('audio' => 1, 'image' => 2)
+    run
+    events = settings.reload.ai_config.dig('atendente_agendamento_state', 'events')
+    midia = events.find { |e| e['type'] == 'midia' }
+    expect(midia['note']).to eq('1 áudio(s) transcrito(s) · 2 imagem(ns) lida(s)')
+  end
+
   describe 'SOMBRA' do
     it 'escreve a nota interna com o que teria respondido e NÃO manda nada ao paciente', :aggregate_failures do
       stub_ai(ai_reply)
@@ -159,7 +169,7 @@ RSpec.describe Crm::ResponderAgentJob do
                                acoes: [{ 'ferramenta' => 'remarcar_consulta', 'ok' => true, 'resumo' => 'remarcou Maria p/ seg 28/09 08:30' }]))
         expect_any_instance_of(described_class).not_to receive(:book!) # rubocop:disable RSpec/AnyInstance
         run
-        expect(conversation.messages.where(message_type: :outgoing).map(&:content)).to eq(ai_reply[:mensagens])
+        expect(conversation.messages.where(message_type: :outgoing).order(:id).map(&:content)).to eq(ai_reply[:mensagens])
         expect(account.tasks.count).to eq(0)
       end
     end

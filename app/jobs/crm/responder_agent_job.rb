@@ -44,6 +44,10 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     # anti-picada: só trabalha se esta ainda é a ÚLTIMA mensagem do paciente
     return if last_incoming_id(conversation) != trigger_message_id
 
+    # 👂🖼️ item 204: áudio/imagem ainda não lidos (o MediaReadingJob costuma
+    # chegar antes; aqui é a garantia) — o Atendente responde ao CONTEÚDO
+    read_pending_media(account, conversation, agent_key)
+
     if live_mode?(cfg)
       run_live(account, conversation, cfg, agent_key, trigger_message_id)
     else
@@ -93,6 +97,18 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
   def live_mode?(cfg)
     self.class.live_mode?(cfg)
+  end
+
+  def read_pending_media(account, conversation, agent_key)
+    done = Crm::MediaReadingService.read_pending!(conversation)
+    return if done.blank?
+
+    parts = []
+    parts << "#{done['audio']} áudio(s) transcrito(s)" if done['audio'].to_i.positive?
+    parts << "#{done['image']} imagem(ns) lida(s)" if done['image'].to_i.positive?
+    log_event(account, agent_key, conversation, 'midia', parts.join(' · ')) if parts.any?
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgentJob] leitura de mídia falhou: #{e.message}"
   end
 
   # ── SOMBRA ──────────────────────────────────────────────────────────────

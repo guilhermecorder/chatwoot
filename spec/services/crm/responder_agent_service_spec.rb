@@ -62,6 +62,27 @@ RSpec.describe Crm::ResponderAgentService do
     expect(Crm::AiUsage.where(account: account, agent_key: 'atendente_pos').count).to eq(2)
   end
 
+  # 👂🖼️ item 204: áudio transcrito e imagem lida entram como texto do PACIENTE
+  it 'áudio transcrito e imagem lida entram na conversa como texto; sem leitura, o marcador pede para escrever', :aggregate_failures do
+    audio_msg = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: nil)
+    audio = audio_msg.attachments.create!(account_id: account.id, file_type: :audio,
+                                          file: Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.ogg'), 'audio/ogg'))
+    audio.update!(meta: { 'transcribed_text' => 'quero remarcar a consulta da minha mãe', 'cevico_media' => { 'status' => 'done' } })
+    image_msg = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: 'olha aqui')
+    image_msg.attachments.create!(account_id: account.id, file_type: :image,
+                                  file: Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.png'), 'image/png'))
+
+    calls = []
+    allow(messages_api).to receive(:create) do |**params|
+      calls << params
+      round2
+    end
+    service.call
+    transcript = calls.first[:messages].first[:content]
+    expect(transcript).to include('PACIENTE: [áudio transcrito: "quero remarcar a consulta da minha mãe"]')
+    expect(transcript).to include('PACIENTE: olha aqui [imagem: não foi possível ler; pergunte ao paciente o que ele enviou]')
+  end
+
   it 'passa do teto de voltas → última chamada sem ferramentas (tool_choice none)' do
     calls = []
     allow(messages_api).to receive(:create) do |**params|

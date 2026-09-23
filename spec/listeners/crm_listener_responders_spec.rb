@@ -38,6 +38,26 @@ RSpec.describe CrmListener do
     create(:message, account: account, inbox: conv.inbox, conversation: conv, message_type: :incoming, content: content)
   end
 
+  # 👂🖼️ item 204: áudio/imagem do paciente → leitura na hora, em qualquer caixa atendida
+  it 'mensagem com áudio → dispara o MediaReadingJob na hora (além do job do agente)', :aggregate_failures do
+    Crm::Contact.where(contact_id: contact.id).delete_all
+    message = incoming(content: nil)
+    message.attachments.create!(account_id: account.id, file_type: :audio,
+                                file: Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.ogg'), 'audio/ogg'))
+    fire(message)
+    expect(Crm::MediaReadingJob).to have_been_enqueued.with(message.id)
+    expect(Crm::ResponderAgentJob).to have_been_enqueued.with(conversation.id, message.id, 'atendente_agendamento')
+  end
+
+  it 'mensagem só de texto não dispara leitura de mídia; caixa fora do agente também não' do
+    expect { fire(incoming) }.not_to have_enqueued_job(Crm::MediaReadingJob)
+    other = create(:conversation, account: account, inbox: other_inbox, contact: contact)
+    message = incoming(other, content: nil)
+    message.attachments.create!(account_id: account.id, file_type: :image,
+                                file: Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.png'), 'image/png'))
+    expect { fire(message) }.not_to have_enqueued_job(Crm::MediaReadingJob)
+  end
+
   it 'sem card no CRM (contato novo) → agenda o job do agente com 12 s de espera' do
     Crm::Contact.where(contact_id: contact.id).delete_all
     expect { fire(incoming) }.to have_enqueued_job(Crm::ResponderAgentJob).with(conversation.id, kind_of(Integer), 'atendente_agendamento')
