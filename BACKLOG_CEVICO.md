@@ -6171,7 +6171,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 214. 💸🧹 GASTO fase 2 (saída curta + esforço low + Haiku no Pós) e LISTA DE CONVERSAS LIMPA para atendentes (pedidos 23/09 noite) — SUBIU 23/09 (commit no develop, WEB+SIDEKIQ, sem migration; reversão :1ae7f51)
+## 214. 💸🧹 GASTO fase 2 (saída curta + esforço low + Haiku no Pós) e LISTA DE CONVERSAS LIMPA para atendentes (pedidos 23/09 noite) — SUBIU 23/09 (commit ae90377 no develop → imagem ghcr :ae90377, WEB+SIDEKIQ, sem migration; reversão :1ae7f51)
 - PEDIDO: "1 e 3 fazem sentido juntos" (das opções de baratear) + "quero poder selecionar se agentes terão a
   conversa clean ou não — as meninas não querem a coluna e as etiquetas, mas os admin querem".
 - GASTO: (a) campo `leitura` da resposta do Atendente (só a equipe lê) passou a pedir UMA frase de até 12
@@ -6181,6 +6181,12 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
 - LISTA LIMPA: `agenda_config.list_clean_for_agents` (update_agenda; sai em crm/getSettings); chavinha em
   Configurações → Painéis ("Lista de Conversas limpa para atendentes"); ConversationCard esconde a 4ª linha
   (coluna do CRM + etiquetas + SLA) quando ligado E a pessoa não é admin (useAdmin). Cor/crachá/quem cuida ficam.
+- 214b (23/09 noite, depois do ae90377): a chavinha virou TRÊS MODOS em Painéis ("Tudo" · "Só sem a coluna" ·
+  "Sem coluna e etiquetas") — `agenda_config.list_clean_mode` (full | no_stage | clean; o booleano antigo ligado
+  vale como clean). No modo clean o cartão vira `.cv-card-clean`: nome 15,5 px, pílula de quem cuida maior,
+  linhas com 5 px, padding 13 px ("nomes um pouco maiores e realinhados"). + FIO QUASE INVISÍVEL em volta de
+  cada cartão (rgba 0,0,0,.055; escuro .07) que fica AZULADO ao passar o mouse (fundo azul 5% + fio azul 35%),
+  igual ao cartão aberto; o separador embutido (linha depois da foto) saiu; 4 px entre cartões.
 - REVERSÃO: imagem :1ae7f51.
 
 ## 213. 💸 CACHE DO ROTEIRO — gasto dos agentes de IA (pedido 23/09: "está muito bom, mas inviável financeiramente como está") — SUBIU 23/09 (commit 1ae7f51 no develop → imagem ghcr :1ae7f51, WEB+SIDEKIQ, sem migration; reversão :1af4f6f)

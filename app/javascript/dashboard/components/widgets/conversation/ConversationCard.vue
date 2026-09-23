@@ -189,18 +189,25 @@ const toggleLabels = () => {
 // atendentes deixam de ver a coluna do CRM e as etiquetas; admin vê sempre
 const { isAdmin } = useAdmin();
 const crmSettings = useMapGetter('crm/getSettings');
-const cleanList = computed(
-  () => !isAdmin.value && crmSettings.value?.list_clean_for_agents === true
-);
+// modos: full (tudo) · no_stage (só sem a coluna) · clean (sem coluna e etiquetas)
+const listMode = computed(() => {
+  if (isAdmin.value) return 'full';
+  const mode = crmSettings.value?.list_clean_mode;
+  if (['full', 'no_stage', 'clean'].includes(mode)) return mode;
+  return crmSettings.value?.list_clean_for_agents === true ? 'clean' : 'full';
+});
+const hideStage = computed(() => listMode.value !== 'full');
+const hideLabels = computed(() => listMode.value === 'clean');
 // a 4ª linha existe sempre que há jornada configurada (coluna ou "sem
 // coluna"), etiqueta ou SLA — assim os cartões ficam alinhados entre si
 const showJourneyRow = computed(
   () =>
-    !cleanList.value &&
-    (journeyStages.value.length > 0 ||
-      activeLabels.value.length > 0 ||
-      hasSlaPolicyId.value)
+    (!hideStage.value && journeyStages.value.length > 0) ||
+    (!hideLabels.value &&
+      (activeLabels.value.length > 0 || hasSlaPolicyId.value))
 );
+// sem nada embaixo (modo clean): nomes um pouco maiores e linhas realinhadas
+const isCleanCard = computed(() => listMode.value === 'clean');
 </script>
 
 <template>
@@ -216,6 +223,7 @@ const showJourneyRow = computed(
       'cv-card-on active animate-card-select': isActiveChat,
       'cv-card-sel selected': selected,
       'cv-card-compact': compact,
+      'cv-card-clean': isCleanCard,
     }"
     @click="$emit('click', $event)"
     @contextmenu="$emit('contextmenu', $event)"
@@ -377,7 +385,11 @@ const showJourneyRow = computed(
         v-if="showJourneyRow"
         class="cv-card-tags flex items-center gap-1 flex-wrap min-w-0"
       >
-        <div v-if="journeyStages.length" class="relative min-w-0" @click.stop>
+        <div
+          v-if="journeyStages.length && !hideStage"
+          class="relative min-w-0"
+          @click.stop
+        >
           <button
             v-if="chatStage"
             ref="chipEl"
@@ -432,10 +444,10 @@ const showJourneyRow = computed(
           </Teleport>
         </div>
 
-        <SLACardLabel v-if="hasSlaPolicyId" :chat="chat" />
+        <SLACardLabel v-if="hasSlaPolicyId && !hideLabels" :chat="chat" />
 
         <span
-          v-for="label in visibleLabels"
+          v-for="label in hideLabels ? [] : visibleLabels"
           :key="label.id"
           class="cv-tag max-w-full"
           :style="{ '--lb': label.color || '#94A3B8' }"
@@ -444,7 +456,7 @@ const showJourneyRow = computed(
           <span class="truncate">{{ label.title }}</span>
         </span>
         <button
-          v-if="hiddenLabels > 0"
+          v-if="hiddenLabels > 0 && !hideLabels"
           class="cv-tag cv-tag-more"
           :title="labelsExpanded ? 'Mostrar menos' : 'Ver todas as etiquetas'"
           @click.stop="toggleLabels"

@@ -46,32 +46,25 @@
   background: var(--ch-panel);
   border-right: 1px solid var(--ch-line);
 }
-/* item 212: mais respiro — cartão 12 px por dentro, 2 px entre eles */
+/* item 212/214: cada cartão com um fio quase invisível em volta (pedido
+   23/09 noite: "leve linha transparente quase invisível demarcando os cards");
+   ao passar o mouse o fio e o fundo ficam azulados, como o cartão aberto */
 .cv-chat .cv-card {
-  margin: 2px 8px;
+  margin: 4px 8px;
   padding: 11px 12px;
   border-radius: 16px;
-  border: 1px solid transparent;
-  transition: background 0.15s ease, transform 0.15s ease;
+  border: 1px solid rgba(0, 0, 0, 0.055);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
-/* separador embutido (estilo Mensagens da Apple): começa depois da foto */
-.cv-chat .cv-card + .cv-card::before {
-  content: '';
-  position: absolute;
-  left: 68px;
-  right: 14px;
-  top: -1px;
-  height: 1px;
-  background: var(--ch-line);
-  pointer-events: none;
+.dark .cv-chat .cv-card { border-color: rgba(255, 255, 255, 0.07); }
+.cv-chat .cv-card:hover {
+  background: rgba(37, 99, 235, 0.05);
+  border-color: rgba(37, 99, 235, 0.35);
 }
-.cv-chat .cv-card:hover { background: var(--ch-hover); }
-.cv-chat .cv-card:hover::before,
-.cv-chat .cv-card:hover + .cv-card::before,
-.cv-chat .cv-card-on::before,
-.cv-chat .cv-card-on + .cv-card::before,
-.cv-chat .cv-card-sel::before,
-.cv-chat .cv-card-sel + .cv-card::before { opacity: 0; }
+.dark .cv-chat .cv-card:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(96, 165, 250, 0.45);
+}
 /* a conversa aberta: cartão cheio, azul royal bem leve, fio azul na esquerda */
 .cv-chat .cv-card-on,
 .cv-chat .cv-card-on:hover {
@@ -241,6 +234,17 @@
   .cv-chat .cv-who-item { padding-right: 3px; }
   .cv-chat .cv-who-item:not(.cv-who-on) .cv-who-name { display: none; }
 }
+
+/* ── item 214: cartão LIMPO (sem coluna e etiquetas, modo das atendentes):
+   nomes um pouco maiores, linhas mais respiradas, tudo alinhado ao centro ── */
+.cv-chat .cv-card-clean { padding: 13px 12px; }
+.cv-chat .cv-card-clean > div:last-child { gap: 5px; }
+.cv-chat .cv-card-clean .conversation--user { font-size: 15.5px; line-height: 20px; }
+.cv-chat .cv-card-clean .cv-card-inbox { font-size: 11px; }
+.cv-chat .cv-card-clean .cv-card-who { height: 21px; font-size: 11.5px; padding: 0 9px 0 6px; max-width: 60%; }
+.cv-chat .cv-card-clean .cv-card-who img { width: 14px; height: 14px; }
+.cv-chat .cv-card-clean .cv-card-preview { font-size: 13.5px; }
+.cv-chat .cv-card-clean .cv-card-time { font-size: 11.5px; }
 
 /* ── item 212: CHAVINHA do Atendente IA no topo da conversa ───────── */
 .cv-chat .cv-ia {

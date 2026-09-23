@@ -340,9 +340,11 @@ class CrmAPI extends ApiClient {
 
   // responsável por painel do Meu Painel (Configurações → Painéis)
   // 🧹 item 214: lista de Conversas limpa (sem coluna/etiquetas) para atendentes
-  updateListClean(enabled) {
+  // modos: full (tudo) · no_stage (só sem a coluna) · clean (sem coluna e etiquetas)
+  updateListClean(mode) {
     return axios.post(`${this.url}/settings/update_agenda`, {
-      list_clean_for_agents: enabled,
+      list_clean_mode: mode,
+      list_clean_for_agents: mode === 'clean',
     });
   }
 

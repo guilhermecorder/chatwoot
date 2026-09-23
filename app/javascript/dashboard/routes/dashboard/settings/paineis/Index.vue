@@ -78,22 +78,35 @@ const owners = ref({}); // { painel => user_id }
 const aiUserId = ref(null); // login que o Atendimento IA usa
 const savingKey = ref('');
 
-// 🧹 item 214: lista de Conversas limpa para atendentes (admins veem tudo)
-const listClean = ref(false);
-const toggleListClean = async () => {
-  const previous = listClean.value;
-  listClean.value = !previous;
+// 🧹 item 214: como as ATENDENTES veem os cartões de Conversas (admins veem tudo)
+const LIST_MODES = [
+  { key: 'full', label: 'Tudo', desc: 'coluna do CRM e etiquetas no cartão' },
+  {
+    key: 'no_stage',
+    label: 'Só sem a coluna',
+    desc: 'esconde a coluna do CRM; etiquetas ficam',
+  },
+  {
+    key: 'clean',
+    label: 'Sem coluna e etiquetas',
+    desc: 'só nome, caixa, quem cuida e a última mensagem — nomes maiores',
+  },
+];
+const listMode = ref('full');
+const listModeDesc = computed(
+  () => LIST_MODES.find(m => m.key === listMode.value)?.desc || ''
+);
+const pickListMode = async mode => {
+  const previous = listMode.value;
+  if (mode === previous) return;
+  listMode.value = mode;
   savingKey.value = 'listclean';
   try {
-    await CrmAPI.updateListClean(listClean.value);
+    await CrmAPI.updateListClean(mode);
     await store.dispatch('crm/fetchSettings');
-    useAlert(
-      listClean.value
-        ? 'Atendentes passam a ver a lista limpa.'
-        : 'Atendentes voltam a ver coluna e etiquetas.'
-    );
+    useAlert('Salvo! Vale na lista de Conversas das atendentes.');
   } catch {
-    listClean.value = previous;
+    listMode.value = previous;
     useAlert('Não consegui salvar — tenta de novo.');
   } finally {
     savingKey.value = '';
@@ -175,7 +188,7 @@ const loadFromSettings = () => {
   metricsCfg.value = { ...(crmSettings.value?.performance_metrics || {}) };
   panelThemes.value = { ...(crmSettings.value?.panel_themes || {}) };
   personColors.value = { ...(crmSettings.value?.person_colors || {}) };
-  listClean.value = crmSettings.value?.list_clean_for_agents === true;
+  listMode.value = crmSettings.value?.list_clean_mode || 'full';
   if (!selPersonId.value && sortedAgents.value.length) selPersonId.value = sortedAgents.value[0].id;
 };
 
@@ -468,32 +481,34 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 🧹 Lista limpa para atendentes (item 214) -->
+      <!-- 🧹 Lista de Conversas das atendentes (item 214): três modos -->
       <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mt-4">
-        <div class="flex items-center gap-3 flex-wrap">
+        <div class="flex items-center gap-3 mb-1 flex-wrap">
           <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #0F766E, #2DD4BF)">
             <span class="i-lucide-brush-cleaning text-white text-base" />
           </span>
           <div class="flex-1 min-w-[180px]">
-            <p class="text-sm font-bold text-n-slate-12">Lista de Conversas limpa para atendentes</p>
+            <p class="text-sm font-bold text-n-slate-12">Lista de Conversas das atendentes</p>
             <p class="text-[11px] text-n-slate-10">
-              ligado: as atendentes veem os cartões só com nome, caixa, quem cuida e a última
-              mensagem — sem a coluna do CRM e sem etiquetas. Administradores veem tudo sempre.
+              o que aparece em cada cartão para quem não é administrador. Administradores veem tudo sempre.
             </p>
           </div>
           <span v-if="savingKey === 'listclean'" class="i-lucide-loader-circle animate-spin text-sm text-n-brand" />
+        </div>
+        <div class="flex items-center gap-1.5 flex-wrap mt-3">
           <button
-            class="relative w-11 h-6 rounded-full transition-colors flex-shrink-0"
-            :class="listClean ? 'bg-teal-600' : 'bg-n-slate-6'"
-            :title="listClean ? 'Desligar: atendentes voltam a ver coluna e etiquetas' : 'Ligar: atendentes veem a lista limpa'"
-            @click="toggleListClean"
+            v-for="m in LIST_MODES"
+            :key="m.key"
+            class="h-8 px-3 rounded-lg text-xs font-medium border transition-colors"
+            :class="listMode === m.key ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
+            :style="listMode === m.key ? { background: 'linear-gradient(135deg, #0F766E, #2DD4BF)' } : {}"
+            :title="m.desc"
+            @click="pickListMode(m.key)"
           >
-            <span
-              class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"
-              :class="listClean ? 'translate-x-5' : ''"
-            />
+            {{ m.label }}
           </button>
         </div>
+        <p class="text-[11px] text-n-slate-10 mt-2">{{ listModeDesc }}</p>
       </div>
 
       <!-- 🎨 Cor de cada pessoa (item 212): lista de Conversas -->
