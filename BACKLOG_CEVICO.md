@@ -6171,6 +6171,17 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 225. 🖨️☑️ IMPRIMIR COM ESCOLHA DE COLUNAS E ORIENTAÇÃO (pedido 24/09 tarde: "sistema de checkbox de quais colunas eu vou querer imprimir, inclusive a orientação") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+- Botão "Imprimir" da Agenda abre um painel (kit, 2 seções numeradas): 1 Orientação (em pé / deitada) · 2 Colunas
+  (caixinhas, na ordem da folha): Hora, Paciente, Telefone, Problema/exame/procedimento, Médico, Unidade/local,
+  Observações, Pagamento, Presença, Origem do paciente, Anotações, Nota fiscal. Padrão = a folha do item 224
+  (médico e unidade desligados). "Voltar ao padrão". Rodapé: Cancelar + Imprimir à direita.
+- Escolha salva por pessoa em localStorage `cevico_agenda_print` ({orientation, cols}). `printDayList` monta
+  cabeçalho/colgroup/células só das colunas marcadas (`PRINT_COLUMNS`, larguras ×1,25 na paisagem; sem Anotações a
+  tabela vira largura automática). Presença em Cirurgias mostra "Realizada" no lugar de "Cirurgia indicada".
+- CSS `.cv-ag-check` em `_cevico-agenda.scss`. Conferido pelo HTML gerado (retrato padrão e paisagem com
+  médico/unidade sem origem); template compila no Vite.
+
 ## 224. 📅🔎 AGENDA: "+N" NO BLOCO DO MÉDICO ABRE A LISTA DE QUEM ESTÁ NO HORÁRIO + MODAL DE CONSULTA EM SEÇÕES (leitura em F / Gutenberg, mais contraste) (pedido 24/09 tarde, prints + referências de UX) — SUBIU 24/09 (commit c75f12e no develop → imagem ghcr :c75f12e, WEB só, sem migration; reversão :91991b9)
 - BUG (print dele): "08:30 Rony Maran… +2" abria só o primeiro paciente. Agora `openSlot` → se há mais de um no
   bloco, abre a lista "N pacientes no mesmo horário" (`slotPicker`: número, nome, problema, telefone, situação,

@@ -1184,33 +1184,77 @@ const printObs = raw => {
   }
   return t;
 };
+// 🖨️ 24/09 (pedido dele): a pessoa ESCOLHE as colunas e a orientação da folha
+// (caixinhas no painel "Imprimir"), lembrado no navegador dela.
+const PRINT_COLUMNS = [
+  { key: 'time', label: 'Hora', width: 34, on: true },
+  { key: 'name', label: 'Paciente', width: 86, on: true },
+  { key: 'phone', label: 'Telefone', width: 70, on: true },
+  { key: 'proc', label: 'Problema / exame / procedimento', width: 56, on: true },
+  { key: 'doctor', label: 'Médico', width: 60, on: false },
+  { key: 'unit', label: 'Unidade / local', width: 58, on: false },
+  { key: 'obs', label: 'Observações', width: 58, on: true },
+  { key: 'pay', label: 'Pagamento (dinheiro · pix · débito · crédito)', width: 56, on: true },
+  { key: 'pres', label: 'Presença (compareceu · faltou · cirurgia indicada)', width: 80, on: true },
+  { key: 'origin', label: 'Origem do paciente (6 opções com valor)', width: 116, on: true },
+  { key: 'notes', label: 'Anotações (espaço em branco)', width: 0, on: true },
+  { key: 'nf', label: 'Nota fiscal (sim · não)', width: 34, on: true },
+];
+const PRINT_KEY = 'cevico_agenda_print';
+const loadPrintOpts = () => {
+  const base = { orientation: 'portrait', cols: Object.fromEntries(PRINT_COLUMNS.map(c => [c.key, c.on])) };
+  try {
+    const saved = JSON.parse(localStorage.getItem(PRINT_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      if (saved.orientation === 'landscape' || saved.orientation === 'portrait') base.orientation = saved.orientation;
+      if (saved.cols) PRINT_COLUMNS.forEach(c => { if (typeof saved.cols[c.key] === 'boolean') base.cols[c.key] = saved.cols[c.key]; });
+    }
+  } catch (e) { /* sem preferências salvas */ }
+  return base;
+};
+const printOpts = ref(loadPrintOpts());
+const showPrintModal = ref(false);
+const printColsOn = computed(() => PRINT_COLUMNS.filter(c => printOpts.value.cols[c.key]));
+const resetPrintOpts = () => { printOpts.value = { orientation: 'portrait', cols: Object.fromEntries(PRINT_COLUMNS.map(c => [c.key, c.on])) }; };
 const printDayList = () => {
+  localStorage.setItem(PRINT_KEY, JSON.stringify(printOpts.value));
   const day = cursor.value;
   const list = [...dayViewTasks.value].sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
   const title = `CEVICO — ${cap(k.value.plural)} de ${day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}`;
   const esc = s => String(s ?? '').replace(/</g, '&lt;');
   const procHeader = { cirurgias: 'Procedimento', exames: 'Exame' }[kind.value] || 'Problema';
-  const rows = list.map(t => `
-    <tr>
-      <td class="time">${chipTime(t)}</td>
-      <td class="name"><b>${esc(displayName(t))}</b></td>
-      <td class="phone">${esc(printPhone(t.phone))}</td>
-      <td class="proc">${esc(t.procedure || '')}</td>
-      <td class="obs">${esc(printObs(t.description))}</td>
-      <td class="opts"><span><i></i>Dinheiro</span><span><i></i>Pix</span><span><i></i>Débito</span><span><i></i>Crédito</span></td>
-      <td class="opts"><span><i></i>Compareceu</span><span><i></i>Faltou</span><span><i></i>Cirurgia indicada</span></td>
-      <td class="opts origin">${['Indicação', 'Site', 'WhatsApp', 'Médico parceiro', 'Pac. antigo / Rotina', 'Convênio'].map(o => `<span><i></i>${o} <em>R$ ____</em></span>`).join('')}</td>
-      <td class="notes"></td>
-      <td class="opts"><span><i></i>Sim</span><span><i></i>Não</span></td>
-    </tr>`).join('');
+  const opt = label => `<span><i></i>${label}</span>`;
+  const cols = printColsOn.value;
+  const cell = {
+    time: t => `<td class="time">${chipTime(t)}</td>`,
+    name: t => `<td class="name"><b>${esc(displayName(t))}</b></td>`,
+    phone: t => `<td class="phone">${esc(printPhone(t.phone))}</td>`,
+    proc: t => `<td class="proc">${esc(t.procedure || '')}</td>`,
+    doctor: t => `<td class="doc">${esc(doctorShort(t.doctor || '') || '')}</td>`,
+    unit: t => `<td class="doc">${esc(unitOf(t)?.label || '')}</td>`,
+    obs: t => `<td class="obs">${esc(printObs(t.description))}</td>`,
+    pay: () => `<td class="opts">${['Dinheiro', 'Pix', 'Débito', 'Crédito'].map(opt).join('')}</td>`,
+    pres: () => `<td class="opts">${['Compareceu', 'Faltou', isSurgeryMode.value ? 'Realizada' : 'Cirurgia indicada'].map(opt).join('')}</td>`,
+    origin: () => `<td class="opts origin">${['Indicação', 'Site', 'WhatsApp', 'Médico parceiro', 'Pac. antigo / Rotina', 'Convênio'].map(o => opt(`${o} <em>R$ ____</em>`)).join('')}</td>`,
+    notes: () => '<td class="notes"></td>',
+    nf: () => `<td class="opts">${['Sim', 'Não'].map(opt).join('')}</td>`,
+  };
+  const head = {
+    time: 'Hora', name: 'Paciente', phone: 'Telefone', proc: procHeader, doctor: 'Médico', unit: isSurgeryMode.value ? 'Local' : 'Unidade',
+    obs: 'Obs.', pay: 'Pagamento', pres: 'Presença', origin: 'Origem do paciente', notes: 'Anotações', nf: 'Nota fiscal',
+  };
+  const landscape = printOpts.value.orientation === 'landscape';
+  const rows = list.map(t => `<tr>${cols.map(c => cell[c.key](t)).join('')}</tr>`).join('');
+  const colgroup = cols.map(c => `<col${c.width ? ` style="width:${Math.round(c.width * (landscape ? 1.25 : 1))}px"` : ''}>`).join('');
+  const hasNotes = printOpts.value.cols.notes;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
     <style>
-      @page { size: A4 portrait; margin: 7mm 6mm; }
+      @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 7mm 6mm; }
       body { font-family: -apple-system, Inter, Arial, sans-serif; margin: 14px; color: #111; }
       h1 { font-size: 14px; margin: 0 0 2px; }
       p.sub { font-size: 9px; color: #555; margin: 0 0 8px; }
       /* cantos arredondados: a tabela precisa de border-spacing 0 (collapse não arredonda) */
-      table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.5px; table-layout: fixed;
+      table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.5px; table-layout: ${hasNotes ? 'fixed' : 'auto'};
               border: 1px solid #999; border-radius: 10px; overflow: hidden; }
       th, td { border-right: 1px solid #999; border-bottom: 1px solid #999; padding: 3px 4px; text-align: left; vertical-align: top; }
       th:last-child, td:last-child { border-right: 0; }
@@ -1218,36 +1262,29 @@ const printDayList = () => {
       th { background: #eee; font-size: 8px; text-transform: uppercase; letter-spacing: .02em; }
       /* bolinha para preencher à caneta */
       i { display: inline-block; width: 8px; height: 8px; border: 1px solid #333; border-radius: 50%; vertical-align: -1px; margin-right: 3px; }
-      col.c-nf { width: 34px; } col.c-origin { width: 116px; }
-      td.origin em { font-style: normal; color: #777; }
-      td.origin span { white-space: nowrap; overflow: hidden; }
       td.time { font-weight: bold; white-space: nowrap; }
       td.phone { font-size: 8.5px; white-space: nowrap; }
+      td.doc { font-size: 8.5px; }
       td.obs { font-size: 7.5px; color: #444; line-height: 1.2; word-break: break-word; }
       td.opts { font-size: 8px; white-space: nowrap; line-height: 1.4; }
       td.opts span { display: block; }
-      tr { min-height: 44px; }
+      td.origin em { font-style: normal; color: #777; }
+      td.origin span { white-space: nowrap; overflow: hidden; }
       td.notes { background: #fff; }
-      /* retrato (~718px úteis): tudo cabe na lateral da folha; anotações fica com o resto */
-      col.c-time { width: 34px; } col.c-name { width: 86px; } col.c-phone { width: 70px; }
-      col.c-proc { width: 56px; } col.c-obs { width: 58px; }
-      col.c-pay { width: 56px; } col.c-pres { width: 80px; } col.c-notes { width: auto; }
       @media print { body { margin: 0; } tr { page-break-inside: avoid; } }
     </style></head><body>
     <h1>${title}</h1>
     <p class="sub">${list.length} ${k.value.noun}(s) · Conferência do fim do dia: marque a forma de pagamento e a presença — depois registre no sistema (Agenda → visão Dia).</p>
     <table>
-    <colgroup><col class="c-time"><col class="c-name"><col class="c-phone"><col class="c-proc"><col class="c-obs"><col class="c-pay"><col class="c-pres"><col class="c-origin"><col class="c-notes"><col class="c-nf"></colgroup>
-    <thead><tr>
-      <th>Hora</th><th>Paciente</th><th>Telefone</th><th>${procHeader}</th><th>Obs.</th>
-      <th>Pagamento</th><th>Presença</th><th>Origem do paciente</th><th>Anotações</th><th>Nota fiscal</th>
-    </tr></thead><tbody>${rows}</tbody></table>
+    <colgroup>${colgroup}</colgroup>
+    <thead><tr>${cols.map(c => `<th>${head[c.key]}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
     <script>window.onload = () => window.print();<\/script>
     </body></html>`;
   const w = window.open('', '_blank');
   if (!w) { useAlert('O navegador bloqueou a janela — libere pop-ups para imprimir.'); return; }
   w.document.write(html);
   w.document.close();
+  showPrintModal.value = false;
 };
 
 // ── arrastar-e-soltar (semana/dia): soltar = reagendar, confirmando no modal ──
@@ -1384,7 +1421,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               v-if="viewMode === 'day' && dayViewTasks.length"
               class="cv-btn cv-btn-ghost cv-btn-sm"
               title="Abre a lista do dia pronta para imprimir ou salvar em PDF"
-              @click="printDayList"
+              @click="showPrintModal = true"
             >
               <span class="i-lucide-printer text-xs" />
               <span class="hidden md:inline">Imprimir</span>
@@ -2082,6 +2119,46 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <button class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!form.name.trim() || !form.date || isSaving" @click="save">
             <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
             {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Imprimir: escolher colunas e orientação ══ -->
+    <div v-if="showPrintModal" class="fixed inset-0 z-[52] flex items-center justify-center bg-black/55 p-4" @click.self="showPrintModal = false">
+      <div class="cv-modal cv-ag-pop w-full max-w-md max-h-[92vh] flex flex-col" :style="kindVars(kind)">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-printer text-base" /></span>
+          <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">Imprimir a lista do dia</p>
+            <h2 class="text-base font-bold leading-tight truncate">{{ cursor.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' }) }}</h2>
+            <p class="text-[11px] opacity-90 truncate">{{ dayViewTasks.length }} {{ dayViewTasks.length === 1 ? k.noun : k.plural }} · {{ printColsOn.length }} colunas · a escolha fica salva neste navegador</p>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn" @click="showPrintModal = false"><span class="i-lucide-x" /></button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-4 cv-ag-form">
+          <section class="cv-ag-sec">
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">1</span><div><h3>Orientação da folha</h3><p>em pé cabe mais linhas; deitada dá mais espaço para anotar</p></div></header>
+            <div class="cv-seg cv-seg-sm">
+              <button type="button" class="cv-seg-item" :class="printOpts.orientation === 'portrait' ? 'cv-seg-on' : ''" @click="printOpts.orientation = 'portrait'"><span class="i-lucide-rectangle-vertical text-xs" /> Em pé (retrato)</button>
+              <button type="button" class="cv-seg-item" :class="printOpts.orientation === 'landscape' ? 'cv-seg-on' : ''" @click="printOpts.orientation = 'landscape'"><span class="i-lucide-rectangle-horizontal text-xs" /> Deitada (paisagem)</button>
+            </div>
+          </section>
+          <section class="cv-ag-sec">
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">2</span><div><h3>Colunas</h3><p>marque o que deve sair na folha, na ordem em que aparecem</p></div></header>
+            <div class="space-y-1.5">
+              <label v-for="c in PRINT_COLUMNS" :key="c.key" class="cv-ag-check">
+                <input v-model="printOpts.cols[c.key]" type="checkbox" />
+                <span>{{ c.label }}</span>
+              </label>
+            </div>
+            <button type="button" class="text-xs font-semibold hover:underline mt-3" style="color: var(--cv)" @click="resetPrintOpts">↺ Voltar ao padrão</button>
+          </section>
+        </div>
+        <div class="cv-modal-foot flex items-center gap-2">
+          <button class="cv-btn cv-btn-ghost cv-btn-lg ml-auto" @click="showPrintModal = false">Cancelar</button>
+          <button class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!printColsOn.length" @click="printDayList">
+            <span class="i-lucide-printer text-sm" /> Imprimir
           </button>
         </div>
       </div>

@@ -641,3 +641,20 @@
 .cv-page .cv-ag-rail-btn:hover { filter: brightness(1.06); }
 @media (min-width: 1024px) { .cv-page .cv-ag-rail-vert { writing-mode: vertical-rl; margin-top: 6px; } }
 @media (prefers-reduced-motion: reduce) { .cv-page .cv-ag-side { transition: none; } }
+
+/* ── 24/09: caixinhas do painel "Imprimir" (colunas da folha) ── */
+.cv-page .cv-ag-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.cv-page .cv-ag-check:hover { background: rgb(var(--cv-rgb) / 0.08); border-color: rgb(var(--cv-rgb) / 0.25); }
+.cv-page .cv-ag-check input { width: 16px; height: 16px; accent-color: var(--cv); flex-shrink: 0; }
+.dark .cv-page .cv-ag-check { color: #fff; }
