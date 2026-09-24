@@ -199,6 +199,8 @@ const evClass = ev => ({
     >
       <span class="cv-ag-ev-time">{{ ev.time }}</span>
       <span class="cv-ag-ev-name">{{ ev.name }}</span>
+      <!-- 🏥 item 228: selo de origem (veio de outro sistema) -->
+      <span v-if="ev.task.source" class="cv-ag-ev-src" :title="`Veio do Oftalmofácil${ev.task.source_detail ? ' · ' + ev.task.source_detail : ''}`">{{ compact ? 'OF' : (ev.task.source_detail || 'Oftalmofácil') }}</span>
       <span v-if="badges(ev.task).length" class="cv-ag-ev-badges">
         <span v-for="(b, bi) in badges(ev.task)" :key="bi">{{ b }}</span>
       </span>

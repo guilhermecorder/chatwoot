@@ -314,6 +314,23 @@ class CrmAPI extends ApiClient {
 
   // 📅 ambiente Agendamentos (item 200): cada consulta marcada, remarcada ou
   // cancelada no período (preset/from/to, mode, kind, unit, inbox_id, q)
+  // 🏥 item 229: ambiente Oftalmofácil (espelho do hub, só leitura)
+  oftalmofacilOverview(params) {
+    return axios.get(`${this.url}/oftalmofacil/overview`, { params });
+  }
+
+  oftalmofacilItems(params) {
+    return axios.get(`${this.url}/oftalmofacil/items`, { params });
+  }
+
+  oftalmofacilPatients(params) {
+    return axios.get(`${this.url}/oftalmofacil/patients`, { params });
+  }
+
+  oftalmofacilItem(id) {
+    return axios.get(`${this.url}/oftalmofacil/items/${id}`);
+  }
+
   appointmentsFeed(params) {
     return axios.get(`${this.url}/appointments/feed`, { params });
   }

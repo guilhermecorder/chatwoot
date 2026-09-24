@@ -10,7 +10,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # escopos de paleta dos Relatórios/Dashboards (rodada 163) — além dos painéis
   REPORT_PALETTE_SCOPES = %w[report:crm report:campanhas report:funil report:medicos report:agentes
                              report:agenda report:meta report:google report:whatsapp report:etiquetas
-                             report:criativos crm:chamadas crm:jornada crm:paginas crm:formularios crm:tarefas].freeze
+                             report:criativos crm:chamadas crm:jornada crm:paginas crm:formularios crm:tarefas
+                             crm:agendamentos crm:oftalmofacil].freeze
 
   # integração/config sensível = admin (ou área concedida). Leitura (show) e os
   # atalhos usados pela tela do atendente ficam livres.
@@ -642,6 +643,28 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       raw = params[:doctors].respond_to?(:to_unsafe_h) ? params[:doctors].to_unsafe_h : {}
       of['doctors'] = raw.to_h { |crm, name| [crm.to_s.gsub(/\D/, '')[0, 12], name.to_s.strip[0, 80]] }
                          .reject { |crm, name| crm.blank? || name.blank? }
+    end
+    # 🏥 item 228: hub de parceiros + Agenda unificada
+    %w[partners_enabled agenda_enabled].each do |k|
+      of[k] = ActiveModel::Type::Boolean.new.cast(params[k]) == true if params.key?(k)
+    end
+    %w[partner_pipeline_id own_pipeline_id].each do |k|
+      next unless params.key?(k)
+
+      id = params[k].to_i
+      of[k] = id.positive? && Current.account.crm_pipelines.exists?(id: id) ? id : nil
+    end
+    if params.key?(:agenda_from)
+      of['agenda_from'] = begin
+        Date.parse(params[:agenda_from].to_s).iso8601
+      rescue ArgumentError, TypeError
+        nil
+      end
+    end
+    if params.key?(:clinics)
+      raw = params[:clinics].respond_to?(:to_unsafe_h) ? params[:clinics].to_unsafe_h : {}
+      of['clinics'] = raw.to_h { |name, unit| [name.to_s.strip[0, 120], unit.to_s.strip[0, 40]] }
+                         .reject { |name, unit| name.blank? || unit.blank? }
     end
     of['updated_at'] = Time.current.iso8601
     cfg['oftalmofacil'] = of
@@ -1558,6 +1581,20 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       configured: Crm::OftalmofacilSyncService.configured?(of),
       last_sync_at: of['last_sync_at'], last_run_at: of['last_run_at'], last_result: of['last_result'],
       mirror_count: Crm::OftalmofacilSurgery.where(account_id: s.account_id).count,
+      # 🏥 item 228: parceiros + Agenda
+      partners_enabled: of['partners_enabled'] == true,
+      partner_pipeline_id: of['partner_pipeline_id'],
+      own_pipeline_id: of['own_pipeline_id'],
+      agenda_enabled: of['agenda_enabled'] == true,
+      agenda_from: of['agenda_from'],
+      clinics: of['clinics'] || {},
+      partners_seen: Crm::OftalmofacilSurgery.where(account_id: s.account_id).group(:provider_name).count
+                                              .map { |name, total| { name: name, total: total } }.sort_by { |x| -x[:total] },
+      clinics_seen: Crm::OftalmofacilSurgery.where(account_id: s.account_id).where.not(clinic_name: [nil, ''])
+                                             .group(:clinic_name).count.map { |name, total| { name: name, total: total } }.sort_by { |x| -x[:total] },
+      types_seen: Crm::OftalmofacilSurgery.where(account_id: s.account_id).group(:procedure_type).count
+                                           .map { |name, total| { name: name.presence || '(sem tipo)', total: total } }.sort_by { |x| -x[:total] },
+      agenda_count: s.account.tasks.where(source: 'oftalmofacil').count,
       updated_at: of['updated_at']
     }
   end

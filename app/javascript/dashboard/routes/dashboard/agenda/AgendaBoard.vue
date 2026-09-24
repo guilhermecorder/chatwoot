@@ -442,8 +442,14 @@ const isAppointment = t => t.task_type === 'consulta' || t.task_type === 'cirurg
 const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at));
 const inKind = t => kindOf(t) === kind.value;
 
+// 🏥 item 228: origem do agendamento — 'all' | 'cevico' (nasceu aqui) | 'oftalmofacil'
+const originFilter = ref('all');
+const inOrigin = t => originFilter.value === 'all' || (originFilter.value === 'cevico' ? !t.source : t.source === originFilter.value);
+const hasExternal = computed(() => liveTasks.value.some(t => t.source));
+const originLabel = t => (t.source === 'oftalmofacil' ? (t.source_detail || 'Oftalmofácil') : '');
+
 const visibleTasks = computed(() => {
-  const list = liveTasks.value;
+  const list = liveTasks.value.filter(inOrigin);
   if (view.value === 'clinic') return list.filter(isAppointment).filter(inKind);
   if (activeUnit.value) return list.filter(x => x.unit === activeUnit.value).filter(inKind);
   if (activeDoctor.value) return list.filter(x => isAppointment(x) && x.doctor === activeDoctor.value).filter(inKind);
@@ -1522,6 +1528,13 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <span class="i-lucide-map-pin text-[10px]" /> locais
             </button>
           </template>
+          <template v-if="hasExternal">
+            <span class="w-px h-4 bg-n-weak mx-0.5" />
+            <span class="text-[10px] font-bold uppercase tracking-wider text-n-slate-10">Origem</span>
+            <button v-for="o in [['all', 'Todas'], ['cevico', 'CEVICO'], ['oftalmofacil', 'Oftalmofácil']]" :key="'orig' + o[0]" class="cv-chip" :class="originFilter === o[0] ? 'cv-chip-on' : ''" @click="originFilter = o[0]">
+              <span v-if="o[0] === 'oftalmofacil'" class="i-lucide-hospital text-[10px]" />{{ o[1] }}
+            </button>
+          </template>
           <span class="text-[11px] text-n-slate-9 ml-auto hidden lg:inline">{{ k.hint }}</span>
         </div>
       </div>
@@ -1895,6 +1908,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <span class="text-sm font-extrabold tabular-nums" :style="{ color: accentOf(task) }">{{ chipTime(task) }}</span>
                       <span class="text-sm font-semibold text-n-slate-12" :class="task.attendance === 'missed' ? 'line-through' : ''">{{ displayName(task) }}</span>
                       <span v-if="unitOf(task)" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }">{{ unitOf(task).label }}</span>
+                      <span v-if="task.source" class="cv-chip cv-slate" :title="`Veio do ${task.source === 'oftalmofacil' ? 'Oftalmofácil' : task.source}${task.source_detail ? ' · parceiro: ' + task.source_detail : ''}`"><span class="i-lucide-hospital text-[10px]" /> {{ originLabel(task) }}</span>
                       <span v-if="!isSurgeryTask(task) && !isTele" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(modalityOf(task).color), '--cv-deep': modalityOf(task).color }">{{ modalityOf(task).label }}</span>
                       <span v-if="task.attendance === 'attended'" class="cv-chip cv-green">{{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}</span>
                       <span v-else-if="task.attendance === 'missed'" class="cv-chip cv-red">{{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}</span>
@@ -2181,7 +2195,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <span class="cv-ag-num">{{ i + 1 }}</span>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-bold text-n-slate-12 truncate">{{ displayName(t) }}</p>
-              <p class="text-xs text-n-slate-11 truncate">{{ t.procedure || 'sem problema informado' }} · {{ t.phone || 'sem telefone' }}</p>
+              <p class="text-xs text-n-slate-11 truncate">{{ t.procedure || 'sem problema informado' }} · {{ t.phone || 'sem telefone' }}<template v-if="t.source"> · {{ originLabel(t) }}</template></p>
             </div>
             <span class="cv-chip" :class="t.status === 'done' ? 'cv-green' : t.canceled_at ? 'cv-red' : ''">{{ slotStatus(t) }}</span>
             <span class="i-lucide-chevron-right text-n-slate-10" />

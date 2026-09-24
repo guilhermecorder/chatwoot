@@ -36,7 +36,10 @@ class Crm::OftalmofacilSyncJob < ApplicationJob
     of['last_result'] = {
       'pulled' => result.pulled, 'created_contacts' => result.created_contacts, 'moved' => result.moved,
       'ahead' => result.ahead, 'labeled' => result.labeled, 'errors' => result.errors.first(5),
-      'error_count' => result.errors.size
+      'error_count' => result.errors.size,
+      # item 228
+      'tasks_created' => result.tasks_created, 'tasks_updated' => result.tasks_updated,
+      'partners' => result.partners, 'skipped_partners' => result.skipped_partners
     }
     agenda['oftalmofacil'] = of
     settings.update!(agenda_config: agenda)

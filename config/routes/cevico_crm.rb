@@ -315,6 +315,11 @@ namespace :crm do
   resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
   # 📅 Painel de Agendamentos (item 200): marcadas/remarcadas/canceladas no período
   get 'appointments/feed', to: 'appointments#feed'
+  # 🏥 ambiente Oftalmofácil dentro do sistema (item 229): espelho do hub, só leitura
+  get 'oftalmofacil/overview', to: 'oftalmofacil#overview'
+  get 'oftalmofacil/items', to: 'oftalmofacil#items'
+  get 'oftalmofacil/patients', to: 'oftalmofacil#patients'
+  get 'oftalmofacil/items/:id', to: 'oftalmofacil#show'
   # 📞 Ligações nativas de WhatsApp (item 167): lista/atender/recusar/
   # desligar/gravação/transcrição, ligar p/ o paciente e o dashboard
   resources :calls, only: [:index, :show], controller: 'calls' do

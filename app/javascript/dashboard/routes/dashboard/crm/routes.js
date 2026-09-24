@@ -4,6 +4,7 @@ import CrmCampaigns from './CrmCampaigns.vue';
 import CrmJourney from './CrmJourney.vue';
 import CrmCalls from './CrmCalls.vue';
 import CrmAppointments from './CrmAppointments.vue';
+import OftalmofacilHub from './OftalmofacilHub.vue';
 import CrmCampaignsDashboard from './CrmCampaignsDashboard.vue';
 import CrmForms from './CrmForms.vue';
 import CrmIntegrationsPage from './CrmIntegrationsPage.vue';
@@ -36,6 +37,13 @@ export default {
       name: 'crm_appointments',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmAppointments,
+    },
+    // 🏥 item 229: ambiente Oftalmofácil (espelho do hub) dentro do sistema
+    {
+      path: frontendURL('accounts/:accountId/crm/oftalmofacil'),
+      name: 'crm_oftalmofacil',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: OftalmofacilHub,
     },
     {
       path: frontendURL('accounts/:accountId/crm/campaigns'),

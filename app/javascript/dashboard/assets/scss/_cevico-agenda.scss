@@ -658,3 +658,138 @@
 .cv-page .cv-ag-check:hover { background: rgb(var(--cv-rgb) / 0.08); border-color: rgb(var(--cv-rgb) / 0.25); }
 .cv-page .cv-ag-check input { width: 16px; height: 16px; accent-color: var(--cv); flex-shrink: 0; }
 .dark .cv-page .cv-ag-check { color: #fff; }
+
+/* ── 24/09 item 228: selo de ORIGEM no balão (veio do Oftalmofácil) ── */
+.cv-page .cv-ag-ev-src {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1px dashed rgba(255, 255, 255, 0.7);
+  line-height: 1.3;
+  margin-top: 1px;
+}
+
+/* ── 🏥 item 229: ambiente Oftalmofácil — tabelas, semana e tutorial ── */
+.cv-page .cv-of-tablewrap { overflow-x: auto; border-radius: 14px; border: 1px solid rgb(var(--cv-rgb) / 0.18); background: rgba(255, 255, 255, 0.7); }
+.dark .cv-page .cv-of-tablewrap { background: rgba(255, 255, 255, 0.03); }
+.cv-page .cv-of-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.cv-page .cv-of-table th {
+  position: sticky; top: 0; z-index: 1;
+  text-align: left; padding: 9px 10px; font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
+  color: #334155; background: rgb(var(--cv-rgb) / 0.09); border-bottom: 1px solid rgb(var(--cv-rgb) / 0.2); white-space: nowrap;
+}
+.dark .cv-page .cv-of-table th { color: rgba(255, 255, 255, 0.75); background: rgba(255, 255, 255, 0.06); }
+.cv-page .cv-of-table td { padding: 8px 10px; border-bottom: 1px solid rgb(var(--cv-rgb) / 0.1); color: #1f2937; vertical-align: middle; }
+.dark .cv-page .cv-of-table td { color: rgba(255, 255, 255, 0.85); border-bottom-color: rgba(255, 255, 255, 0.06); }
+.cv-page .cv-of-table tbody tr { cursor: pointer; transition: background 0.12s ease; }
+.cv-page .cv-of-table tbody tr:nth-child(even) td { background: rgb(var(--cv-rgb) / 0.025); }
+.cv-page .cv-of-table tbody tr:hover td { background: rgb(var(--cv-rgb) / 0.1); }
+.cv-page .cv-of-table tbody tr:last-child td { border-bottom: 0; }
+.cv-page .cv-of-ico { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 9px; color: #475569; }
+.cv-page .cv-of-ico:hover { background: rgb(var(--cv-rgb) / 0.15); color: var(--cv-deep); }
+.dark .cv-page .cv-of-ico { color: rgba(255, 255, 255, 0.7); }
+.cv-page .cv-of-dot { display: inline-block; width: 7px; height: 7px; border-radius: 9999px; margin-left: 6px; vertical-align: middle; }
+.cv-page .cv-of-dot-red { background: #EF4444; }
+
+/* semana do hub */
+.cv-page .cv-of-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 1023px) { .cv-page .cv-of-week { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cv-page .cv-of-day { border-radius: 14px; border: 1px solid rgb(var(--cv-rgb) / 0.18); background: rgba(255, 255, 255, 0.6); min-height: 220px; display: flex; flex-direction: column; overflow: hidden; }
+.dark .cv-page .cv-of-day { background: rgba(255, 255, 255, 0.03); }
+.cv-page .cv-of-day-today { border-color: var(--cv); box-shadow: 0 0 0 3px rgb(var(--cv-rgb) / 0.15); }
+.cv-page .cv-of-day-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid rgb(var(--cv-rgb) / 0.12); background: rgb(var(--cv-rgb) / 0.06); }
+.cv-page .cv-of-day-wd { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+.cv-page .cv-of-day-num { font-size: 15px; font-weight: 800; color: #0f172a; }
+.dark .cv-page .cv-of-day-num { color: #fff; }
+.cv-page .cv-of-day-today .cv-of-day-num { color: var(--cv-deep); }
+.cv-page .cv-of-day-body { padding: 6px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.cv-page .cv-of-ev {
+  position: relative; text-align: left; border-radius: 10px; padding: 5px 8px 5px 10px; font-size: 11px; line-height: 1.25;
+  background: #EFF6FF; border-left: 3px solid #3B82F6; color: #1e293b; display: flex; flex-direction: column; gap: 1px;
+}
+.cv-page .cv-of-ev:hover { filter: brightness(0.97); }
+.cv-page .cv-of-ev-aguardando_pagamento { background: #FFFBEB; border-left-color: #F59E0B; }
+.cv-page .cv-of-ev-realizada { background: #ECFDF5; border-left-color: #10B981; }
+.cv-page .cv-of-ev-cancelada { background: #FEF2F2; border-left-color: #EF4444; text-decoration: line-through; opacity: 0.75; }
+.cv-page .cv-of-ev-ausente { background: #FDF2F8; border-left-color: #EC4899; }
+.dark .cv-page .cv-of-ev { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.cv-page .cv-of-ev-time { font-weight: 800; font-size: 10px; font-variant-numeric: tabular-nums; }
+.cv-page .cv-of-ev-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-page .cv-of-ev-sub { font-size: 10px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dark .cv-page .cv-of-ev-sub { color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-of-ev-flag { position: absolute; top: 4px; right: 5px; font-size: 10px; color: #047857; }
+
+/* tutorial de primeiro uso */
+.cv-page .cv-of-tour { position: fixed; inset: 0; z-index: 60; }
+.cv-page .cv-of-tour-spot {
+  position: fixed; border-radius: 16px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(2, 6, 23, 0.55), 0 0 0 3px rgb(var(--cv-rgb) / 0.9);
+  transition: top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+.cv-page .cv-of-tour-pop {
+  position: fixed; width: 360px; max-width: calc(100vw - 32px); padding: 14px 16px; border-radius: 16px;
+  background: #fff; border: 1px solid rgb(var(--cv-rgb) / 0.3); box-shadow: 0 24px 48px -16px rgba(2, 6, 23, 0.5);
+}
+.dark .cv-page .cv-of-tour-pop { background: #17191c; }
+
+/* ── item 229, 3ª passada: mês, tabela agrupada com sanfona, cards de indicadores ── */
+.cv-page .cv-of-month-head { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
+.cv-page .cv-of-month-head span { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; padding: 0 8px; }
+.cv-page .cv-of-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cv-page .cv-of-mcell {
+  min-height: 108px; border-radius: 12px; padding: 6px; cursor: pointer;
+  border: 1px solid rgb(var(--cv-rgb) / 0.16); background: rgba(255, 255, 255, 0.6); transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.cv-page .cv-of-mcell:hover { border-color: var(--cv); box-shadow: 0 6px 16px -10px rgb(var(--cv-deep-rgb) / 0.5); }
+.dark .cv-page .cv-of-mcell { background: rgba(255, 255, 255, 0.03); }
+.cv-page .cv-of-mcell-out { opacity: 0.45; }
+.cv-page .cv-of-mcell-today { border-color: var(--cv); box-shadow: 0 0 0 3px rgb(var(--cv-rgb) / 0.15); }
+.cv-page .cv-of-mnum { font-size: 12px; font-weight: 800; color: #0f172a; }
+.dark .cv-page .cv-of-mnum { color: #fff; }
+.cv-page .cv-of-mcell-today .cv-of-mnum { color: var(--cv-deep); }
+.cv-page .cv-of-mcount { font-size: 10px; font-weight: 800; color: #fff; background: var(--cv-grad); border-radius: 9999px; padding: 0 6px; line-height: 16px; }
+.cv-page .cv-of-mchip {
+  display: block; width: 100%; text-align: left; font-size: 10px; line-height: 1.25; padding: 2px 5px 2px 6px; margin-bottom: 2px;
+  border-radius: 6px; border-left: 3px solid #3B82F6; background: #EFF6FF; color: #1e293b;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cv-page .cv-of-mchip-time { font-weight: 800; font-variant-numeric: tabular-nums; }
+.dark .cv-page .cv-of-mchip { background: rgba(255, 255, 255, 0.06); color: #fff; }
+@media (max-width: 767px) { .cv-page .cv-of-month { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cv-page .cv-of-month-head { display: none; } .cv-page .cv-of-mcell-out { display: none; } }
+
+/* tabela agrupada: cabeçalho de grupos + separadores verticais entre grupos */
+.cv-page .cv-of-table-grouped th.cv-of-sep, .cv-page .cv-of-table-grouped td.cv-of-sep { border-left: 2px solid rgb(var(--cv-rgb) / 0.22); }
+.cv-page .cv-of-table-grouped tr.cv-of-grp th { top: 0; text-align: center; font-size: 10px; letter-spacing: 0.08em; background: rgb(var(--cv-rgb) / 0.16); color: var(--cv-deep); border-bottom: 1px solid rgb(var(--cv-rgb) / 0.25); }
+.dark .cv-page .cv-of-table-grouped tr.cv-of-grp th { color: #fff; }
+.cv-page .cv-of-table-grouped thead tr:nth-child(2) th { top: 31px; }
+.cv-page .cv-of-table tr.cv-of-row-open td { background: rgb(var(--cv-rgb) / 0.12) !important; }
+.cv-page .cv-of-table tr.cv-of-expand td { background: rgb(var(--cv-rgb) / 0.05); cursor: default; padding: 12px 14px 14px; border-bottom: 2px solid rgb(var(--cv-rgb) / 0.22); }
+.cv-page .cv-of-table tr.cv-of-expand:hover td { background: rgb(var(--cv-rgb) / 0.05); }
+.cv-page .cv-of-ico.rotate-180 { transform: rotate(180deg); }
+
+/* cards de indicadores (parceiros, clínicas) */
+.cv-page .cv-of-card { border-radius: 16px; padding: 16px; background: rgba(255, 255, 255, 0.72); border: 1px solid rgb(var(--cv-rgb) / 0.18); }
+.dark .cv-page .cv-of-card { background: rgba(255, 255, 255, 0.04); }
+.cv-page .cv-of-stat { border-radius: 12px; padding: 8px 6px; text-align: center; background: rgb(var(--cv-rgb) / 0.07); }
+.cv-page .cv-of-stat b { display: block; font-size: 16px; font-weight: 800; color: #0f172a; line-height: 1.1; }
+.dark .cv-page .cv-of-stat b { color: #fff; }
+.cv-page .cv-of-stat span { display: block; font-size: 10px; color: #64748b; margin-top: 2px; }
+
+/* tabela que CABE na largura (pedido dele: sem barra de rolagem nos itens) */
+.cv-page .cv-of-table-fit { table-layout: fixed; }
+.cv-page .cv-of-table-fit td { vertical-align: top; overflow-wrap: anywhere; }
+.cv-page .cv-of-table-fit td.cv-of-sep, .cv-page .cv-of-table-fit th.cv-of-sep { border-left: 2px solid rgb(var(--cv-rgb) / 0.22); }
+.cv-page .cv-of-main { display: block; font-weight: 700; color: #0f172a; line-height: 1.25; }
+.dark .cv-page .cv-of-main { color: #fff; }
+.cv-page .cv-of-sub { display: block; font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.25; }
+.dark .cv-page .cv-of-sub { color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-of-tablewrap:has(.cv-of-table-fit) { overflow-x: visible; }

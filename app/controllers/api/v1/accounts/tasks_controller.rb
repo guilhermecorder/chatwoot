@@ -3,7 +3,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
 
   before_action :task, only: [:update, :destroy]
 
-  def index
+  def index # rubocop:disable Metrics/AbcSize
     # cards arquivados (coluna oculta do item 95) ficam fora do board
     tasks = Current.account.tasks.where(archived_at: nil)
                    .includes(:creator, :assignee, files_attachments: :blob)
@@ -12,7 +12,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
     # e as das UNIDADES (agenda compartilhada). Admin vê tudo.
     unless Current.account_user.administrator?
       uid = Current.user.id
-      tasks = tasks.where('assignee_id = :uid OR creator_id = :uid OR unit IS NOT NULL', uid: uid)
+      # item 228: agendamentos vindos de outro sistema (Oftalmofácil) são da clínica toda
+      tasks = tasks.where('assignee_id = :uid OR creator_id = :uid OR unit IS NOT NULL OR source IS NOT NULL', uid: uid)
     end
 
     tasks = tasks.where(assignee_id: params[:assignee_id]) if params[:assignee_id].present?
@@ -168,6 +169,10 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
       attendance: t.attendance,
       surgery_indication: t.surgery_indication,
       indicated_procedure: t.indicated_procedure,
+      booking_kind: t.booking_kind,
+      # item 228: origem do agendamento (nil = nasceu aqui)
+      source: t.source,
+      source_detail: t.source_detail,
       comments: Array(t.comments),
       attachments: task_files_json(t),
       creator: { id: t.creator.id, name: t.creator.name },

@@ -179,8 +179,13 @@ onMounted(async () => {
     ...oftalmo.value,
     db_host: of.db_host || '', db_port: of.db_port || 3306, db_name: of.db_name || '', db_user: of.db_user || '',
     db_password: '', provider_name: of.provider_name || 'CATARATA_SP', enabled: !!of.enabled,
+    // 🏥 item 228: hub de parceiros + Agenda unificada
+    partners_enabled: !!of.partners_enabled, partner_pipeline_id: of.partner_pipeline_id || null,
+    own_pipeline_id: of.own_pipeline_id || null, agenda_enabled: !!of.agenda_enabled, agenda_from: of.agenda_from || '',
   };
   oftalmoDoctors.value = Object.entries(of.doctors || {}).map(([crm, name]) => ({ crm, name }));
+  oftalmoClinics.value = Object.entries(of.clinics || {}).map(([name, unit]) => ({ name, unit }));
+  if (!crmPipelines.value.length) store.dispatch('crm/fetchPipelines').catch(() => {});
 
   const m = settings.value.meta_ads || {};
   meta.value = {
@@ -214,8 +219,30 @@ const sheetsStatus = computed(() => settings.value.sheets || {});
 
 // ── OftalmoFácil (conexão nativa) ──────────────────────────
 // item 157: a conexão real é o BANCO (usuário só-leitura) + fornecedor + de-para de médicos
-const oftalmo = ref({ base_url: '', api_key: '', db_host: '', db_port: 3306, db_name: '', db_user: '', db_password: '', provider_name: 'CATARATA_SP', enabled: false });
+const oftalmo = ref({
+  base_url: '', api_key: '', db_host: '', db_port: 3306, db_name: '', db_user: '', db_password: '', provider_name: 'CATARATA_SP', enabled: false,
+  partners_enabled: false, partner_pipeline_id: null, own_pipeline_id: null, agenda_enabled: false, agenda_from: '',
+});
 const oftalmoDoctors = ref([]); // [{ crm, name }]
+// 🏥 item 228: de-para clínica do OftalmoFácil → unidade/local da Agenda
+const oftalmoClinics = ref([]); // [{ name, unit }]
+const addOftalmoClinic = (name = '') => oftalmoClinics.value.push({ name, unit: '' });
+const crmPipelines = useMapGetter('crm/getPipelines');
+const oftalmoUnitOptions = computed(() => {
+  const base = [
+    { key: 'paulista', label: 'Av. Paulista (consultas/exames)' },
+    { key: 'tatuape', label: 'Tatuapé (consultas/exames)' },
+  ];
+  const locs = Array.isArray(settings.value.surgery_locations) && settings.value.surgery_locations.length
+    ? settings.value.surgery_locations
+    : [{ key: 'iop', label: 'IOP' }, { key: 'ocular_surgery', label: 'Ocular Surgery' }];
+  return base.concat(locs.map(l => ({ key: l.key, label: `${l.label} (cirurgias)` })));
+});
+// parceiros/clínicas/tipos vistos: do espelho (já sincronizado) ou do teste de conexão (retrato do hub inteiro)
+const oftalmoPartnersSeen = computed(() => oftalmoTest.value?.partners?.length ? oftalmoTest.value.partners : (oftalmoStatus.value.partners_seen || []).map(p => ({ ...p, own: (p.name || '').toLowerCase().includes((oftalmo.value.provider_name || '').toLowerCase()) })));
+const oftalmoClinicsSeen = computed(() => oftalmoTest.value?.clinics?.length ? oftalmoTest.value.clinics : (oftalmoStatus.value.clinics_seen || []));
+const oftalmoTypesSeen = computed(() => oftalmoTest.value?.procedure_types?.length ? oftalmoTest.value.procedure_types : (oftalmoStatus.value.types_seen || []));
+const clinicMapped = name => oftalmoClinics.value.some(c => c.name.trim().toLowerCase() === String(name).trim().toLowerCase());
 const isOftalmoTesting = ref(false);
 const oftalmoTest = ref(null);
 const isOftalmoSyncing = ref(false);
@@ -261,6 +288,13 @@ const saveOftalmo = async () => {
       provider_name: oftalmo.value.provider_name.trim(),
       enabled: oftalmo.value.enabled,
       doctors: Object.fromEntries(oftalmoDoctors.value.filter(d => d.crm && d.name).map(d => [String(d.crm).replace(/\D/g, ''), d.name.trim()])),
+      // 🏥 item 228
+      partners_enabled: oftalmo.value.partners_enabled,
+      partner_pipeline_id: oftalmo.value.partner_pipeline_id || null,
+      own_pipeline_id: oftalmo.value.own_pipeline_id || null,
+      agenda_enabled: oftalmo.value.agenda_enabled,
+      agenda_from: oftalmo.value.agenda_from || null,
+      clinics: Object.fromEntries(oftalmoClinics.value.filter(c => c.name.trim() && c.unit).map(c => [c.name.trim(), c.unit])),
     });
     oftalmo.value.api_key = ''; // nunca fica na tela depois de salvar
     await store.dispatch('crm/fetchSettings');
@@ -1201,6 +1235,81 @@ const fetchWorkflows = async () => {
             <p v-if="!oftalmoDoctors.length" class="text-[11px] text-n-slate-9">Nenhum ainda — até preencher, a ficha mostra "CRM 170937".</p>
           </div>
 
+          <!-- 🏥 item 228: o OftalmoFácil é um HUB de parceiros. CATARATA_SP = a CEVICO; o resto = parceiros -->
+          <div class="mt-3 rounded-lg border border-n-weak bg-n-alpha-1 p-3">
+            <div class="flex items-center gap-2 mb-1.5">
+              <p class="text-xs font-medium text-n-slate-12">🤝 Parceiros do hub</p>
+              <span class="text-[10px] text-n-slate-9">o fornecedor acima é a CEVICO; todos os OUTROS fornecedores são parceiros de aquisição</span>
+            </div>
+            <label class="flex items-center gap-2 text-xs text-n-slate-12 mb-2">
+              <input v-model="oftalmo.partners_enabled" type="checkbox" class="rounded" />
+              Ler também os parceiros (sem isso, só as cirurgias do fornecedor da CEVICO entram)
+            </label>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="text-[11px] text-n-slate-11">
+                Funil dos <b>parceiros</b> (cards de quem veio do hub)
+                <select v-model="oftalmo.partner_pipeline_id" class="mt-1 w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2">
+                  <option :value="null">— sem funil: fica só no espelho e na Agenda —</option>
+                  <option v-for="p in crmPipelines" :key="'pp' + p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+              </label>
+              <label class="text-[11px] text-n-slate-11">
+                Funil da <b>CEVICO</b> (cirurgias do nosso fornecedor)
+                <select v-model="oftalmo.own_pipeline_id" class="mt-1 w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2">
+                  <option :value="null">— o primeiro funil (padrão) —</option>
+                  <option v-for="p in crmPipelines" :key="'op' + p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+              </label>
+            </div>
+            <p class="text-[10px] text-n-slate-9 mt-1.5">Cada funil precisa ter as colunas "Cirurgia Agendada", "Cirurgia Realizada" e "Pós Operatório" (procura pelo nome, só dentro do funil escolhido). Contato de parceiro ganha as etiquetas <code>oftalmofacil</code> e <code>of_&lt;parceiro&gt;</code>.</p>
+            <div v-if="oftalmoPartnersSeen.length" class="mt-2 flex flex-wrap gap-1">
+              <span v-for="p in oftalmoPartnersSeen" :key="'ps' + p.name" class="text-[10px] px-2 py-0.5 rounded-full border" :class="p.own ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-n-weak text-n-slate-11'" :title="p.own ? 'É a CEVICO' : 'Parceiro'">
+                {{ p.own ? '⭐ ' : '' }}{{ p.name }} · {{ p.total }}
+              </span>
+            </div>
+            <p v-else class="text-[10px] text-n-slate-9 mt-2">Clique em "Testar conexão" para ver quem são os parceiros que existem lá.</p>
+          </div>
+
+          <!-- 🏥 item 228: Agenda unificada -->
+          <div class="mt-3 rounded-lg border border-n-weak bg-n-alpha-1 p-3">
+            <div class="flex items-center gap-2 mb-1.5">
+              <p class="text-xs font-medium text-n-slate-12">📅 Agenda unificada</p>
+              <span class="text-[10px] text-n-slate-9">cada cirurgia/exame/consulta do hub vira um agendamento na Agenda, com o selo de origem</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 items-end">
+              <label class="flex items-center gap-2 text-xs text-n-slate-12">
+                <input v-model="oftalmo.agenda_enabled" type="checkbox" class="rounded" />
+                Criar agendamentos na Agenda
+              </label>
+              <label class="text-[11px] text-n-slate-11">
+                Só a partir de (data do procedimento) — vale para a Agenda e para os PARCEIROS
+                <input v-model="oftalmo.agenda_from" type="date" class="mt-1 w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2" />
+              </label>
+            </div>
+            <p class="text-[10px] text-n-slate-9 mt-1.5">Parceiro com data ANTES dessa data fica só no espelho (não vira paciente, card nem agendamento); a CEVICO mantém o histórico inteiro. Sem data = segunda-feira desta semana. Acompanha o hub: mudou a data lá, muda aqui; realizada = concluída e "compareceu"; cancelada sai do calendário; ausente = "faltou". Entram como "Lançada" (não contam como agendamento novo). Hoje: <b>{{ oftalmoStatus.agenda_count || 0 }}</b> agendamento(s) na Agenda vindos do hub.</p>
+
+            <div class="flex items-center gap-2 mt-3 mb-1.5">
+              <p class="text-xs font-medium text-n-slate-12">📍 Clínicas do hub → local na Agenda</p>
+              <button class="ml-auto text-[11px] text-n-brand hover:underline" @click="addOftalmoClinic()">+ adicionar</button>
+            </div>
+            <div v-for="(c, ci) in oftalmoClinics" :key="'cl' + ci" class="grid grid-cols-[1fr_1fr_auto] gap-2 mb-1.5">
+              <input v-model="c.name" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2" placeholder="nome da clínica como aparece lá" />
+              <select v-model="c.unit" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2">
+                <option value="">— escolha o local —</option>
+                <option v-for="u in oftalmoUnitOptions" :key="'uo' + u.key" :value="u.key">{{ u.label }}</option>
+              </select>
+              <button class="i-lucide-x text-n-slate-9 hover:text-red-500 text-sm" @click="oftalmoClinics.splice(ci, 1)" />
+            </div>
+            <div v-if="oftalmoClinicsSeen.length" class="flex flex-wrap gap-1 mt-1">
+              <button v-for="c in oftalmoClinicsSeen" :key="'cs' + c.name" class="text-[10px] px-2 py-0.5 rounded-full border border-n-weak hover:bg-n-alpha-2" :class="clinicMapped(c.name) ? 'text-emerald-700 border-emerald-300' : 'text-n-slate-11'" :title="clinicMapped(c.name) ? 'já mapeada' : 'clique para adicionar ao de-para'" @click="!clinicMapped(c.name) && addOftalmoClinic(c.name)">
+                {{ clinicMapped(c.name) ? '✓ ' : '+ ' }}{{ c.name }} · {{ c.total }}
+              </button>
+            </div>
+            <p v-if="oftalmoTypesSeen.length" class="text-[10px] text-n-slate-9 mt-2">
+              Tipos de procedimento lá: <span v-for="(t, ti) in oftalmoTypesSeen" :key="'ty' + t.name">{{ ti ? ' · ' : '' }}{{ t.name }} ({{ t.total }})</span>. "Exame" vai para o trilho Exames, "Consulta" para Consultas, o resto para Cirurgias.
+            </p>
+          </div>
+
           <div class="flex gap-2 mt-3 flex-wrap">
             <button class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50 transition-colors" style="background: #45B5AA" :disabled="isOftalmoSaving" @click="saveOftalmo">
               {{ isOftalmoSaving ? 'Salvando...' : 'Salvar conexão' }}
@@ -1221,6 +1330,9 @@ const fetchWorkflows = async () => {
             <b>{{ oftalmoStatus.last_result?.pulled || 0 }}</b> lidas · <b>{{ oftalmoStatus.last_result?.moved || 0 }}</b> cards movidos ·
             <b>{{ oftalmoStatus.last_result?.created_contacts || 0 }}</b> pacientes criados · <b>{{ oftalmoStatus.last_result?.ahead || 0 }}</b> preservados 🛡️ ·
             <b>{{ oftalmoStatus.mirror_count || 0 }}</b> cirurgias espelhadas no total
+            <template v-if="oftalmoStatus.last_result?.tasks_created || oftalmoStatus.last_result?.tasks_updated"> · Agenda: <b>{{ oftalmoStatus.last_result.tasks_created || 0 }}</b> criados, <b>{{ oftalmoStatus.last_result.tasks_updated || 0 }}</b> atualizados</template>
+            <template v-if="oftalmoStatus.last_result?.partners"> · <b>{{ oftalmoStatus.last_result.partners }}</b> de parceiros</template>
+            <span v-if="oftalmoStatus.last_result?.skipped_partners" class="text-amber-600"> · {{ oftalmoStatus.last_result.skipped_partners }} de parceiro sem funil (escolha o funil dos parceiros)</span>
             <span v-if="oftalmoStatus.last_result?.error_count" class="text-red-500"> · {{ oftalmoStatus.last_result.error_count }} erro(s): {{ (oftalmoStatus.last_result.errors || [])[0] }}</span>
             <button class="ml-2 text-n-brand hover:underline" @click="syncOftalmo(true)">recarregar tudo do zero</button>
           </div>

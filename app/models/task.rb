@@ -14,12 +14,15 @@
 #  description         :text
 #  doctor              :string
 #  due_at              :datetime
+#  external_ref        :string
 #  indicated_procedure :string
 #  modality            :string
 #  phone               :string
 #  priority            :integer          default("medium"), not null
 #  procedure           :string
 #  rescheduled_count   :integer          default(0), not null
+#  source              :string
+#  source_detail       :string
 #  status              :integer          default("todo"), not null
 #  surgery_indication  :string
 #  task_type           :string
@@ -34,12 +37,13 @@
 #
 # Indexes
 #
-#  index_tasks_on_account_id             (account_id)
-#  index_tasks_on_account_id_and_status  (account_id,status)
-#  index_tasks_on_account_id_and_unit    (account_id,unit)
-#  index_tasks_on_assignee_id            (assignee_id)
-#  index_tasks_on_contact_id             (contact_id)
-#  index_tasks_on_creator_id             (creator_id)
+#  index_tasks_on_account_and_external_ref  (account_id,external_ref) UNIQUE WHERE (external_ref IS NOT NULL)
+#  index_tasks_on_account_id                (account_id)
+#  index_tasks_on_account_id_and_status     (account_id,status)
+#  index_tasks_on_account_id_and_unit       (account_id,unit)
+#  index_tasks_on_assignee_id               (assignee_id)
+#  index_tasks_on_contact_id                (contact_id)
+#  index_tasks_on_creator_id                (creator_id)
 #
 # Foreign Keys
 #

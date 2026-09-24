@@ -6171,6 +6171,135 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 230. 🔎 BUSCA QUE SUGERE ENQUANTO ESCREVE, POR AMBIENTE (pedido 24/09 noite: "deixar pra próxima") — AGUARDA "pode construir"
+- Pedido: em todo mecanismo de pesquisa, ir encontrando os termos conforme a pessoa digita (sugestões ao vivo),
+  relacionadas ao ambiente onde está: na aba Oftalmofácil puxa pacientes/registros do hub; a barra de pesquisa
+  geral do sistema puxa de tudo (pacientes, conversas, agenda, CRM, hub); no CRM puxa do próprio CRM; e assim
+  por diante.
+- Caminho sugerido: componente de busca do kit (`CevicoSearch`) com lista de sugestões (nome, telefone, CPF,
+  parceiro, procedimento) e escopo por tela; endpoint leve de sugestão (`/crm/search/suggest?scope=…&q=…`,
+  até 8 resultados, 250 ms de espera); na barra geral, resultados agrupados por ambiente com atalho para abrir.
+
+## 229. 🏥🖥️ ABA "OFTALMOFÁCIL" — o hub dentro do sistema, no design Apple (degrau 1: espelho só leitura) (pedido 24/09 fim de tarde: "aba lateral, ambiente interno do que é o Oftalmofácil… espelhado num primeiro momento, migração total no futuro" → "vamos em frente") — CONSTRUÍDO, SEM commit, sobe JUNTO com 226 + 228 (WEB+SIDEKIQ, migration do 228)
+- BACKEND `Api::V1::Accounts::Crm::OftalmofacilController` (rotas crm/oftalmofacil/overview | items | items/:id; só
+  leitura do ESPELHO, nada toca o banco deles): overview = totais por status, PARCEIROS (nosso ⭐ × parceiro,
+  agendados/realizados/cancelados/faltas, quantos já estão na nossa Agenda, valores só admin), meses (data do
+  procedimento), clínicas (com o de-para → local), tipos e a SAÚDE DA AGENDA (marcados de hoje em diante × já na
+  Agenda × faltando × sem paciente casado × agendamento sem local × clínicas sem de-para × "agendada" com data
+  passada > 7 dias); items = lista paginada com filtros (lado nosso/parceiros, status, na/fora da Agenda, sem
+  paciente, parceiro, clínica, tipo, busca por nome/telefone/CPF, período opcional) e, em cada linha, o estado na
+  Agenda (task: local, médico, presença, cancelada) e no CRM (coluna/funil); show = ficha + raw (admin).
+  Escopo de paleta `crm:oftalmofacil` (e `crm:agendamentos`, que faltava) liberado. Spec de request (2 exemplos).
+  Armadilha: método `config` no controller sombreia o do Rails (500 "logger for Hash") → `of_config`.
+- TELA `crm/OftalmofacilHub.vue` (rota crm/oftalmofacil, kit + leitura em F): hero verde-petróleo com chips
+  (espelhados, sincronizado às, avisos "parceiros desligados"/"Agenda desligada"), botão Configurar (admin →
+  Integrações), abas Visão geral | Itens no banner, régua de período. Visão geral = seções numeradas 1 Saúde da
+  Agenda (KPIs clicáveis que abrem a lista já filtrada + 3 caixas: sem local, clínicas sem de-para, "agendada" no
+  passado), 2 Parceiros (linhas com chips e x/y na Agenda; valor p/ admin), 3 Por mês (barras total × realizado)
+  + clínicas/tipos clicáveis. Itens = chips de filtro (lado, status, Agenda, sem paciente, no período) + busca +
+  selects, linhas com data/hora, paciente, status, parceiro (⭐ CEVICO), clínica → local (âmbar se sem de-para),
+  procedimento/olho, médico, selo da Agenda e do CRM; ações Paciente · Agenda (dia/tipo) · Ficha. Ficha em modal
+  com 3 seções (Paciente · Procedimento · Do nosso lado) + registro bruto (admin) e ações à direita.
+- MENU: item "Oftalmofácil" (`Cevico Oftalmofacil`, ícone hospital, cor #64d2ff) na gaveta Atendimento depois
+  de Agendamentos, visível para todo atendente (dá para esconder em Personalizar menu, chave `oftalmofacil`).
+- Ajuda a organizar a Agenda: mostra o que do hub ainda não virou balão, o que está sem local/médico, quem não
+  casou com paciente e as clínicas que faltam mapear — tudo clicável até a linha.
+- Degraus seguintes (fora daqui): 2) ações do nosso lado (presença, anotação, mensagem) gravadas aqui;
+  3) portal do parceiro = migração total (decisão comercial com o Henrique).
+- 2ª PASSADA (feedback dele no localhost: "mais intuitiva… navegável como o frontend do Oftalmofácil, mas
+  melhorado, mais organizado" + "micro tutorial com popups na primeira vez"): a tela virou um AMBIENTE com 6
+  áreas no banner (Visão geral · Agenda · Itens · Parceiros · Clínicas · Pacientes; `?view=` na URL): Visão
+  geral = Saúde da Agenda + Próximos dias (lista da semana) + resumo/top parceiros + Por mês; Agenda = SEMANA do
+  hub em 7 colunas (setas, Hoje, cartões por status com ✓ quando já está na nossa Agenda); Itens, Parceiros,
+  Clínicas e Pacientes em TABELAS (`.cv-of-table`, cabeçalho fixo, zebra, linha clicável → ficha/itens);
+  endpoint novo `crm/oftalmofacil/patients` (agrupa por paciente: itens, primeiro/último, tem marcado,
+  parceiros, contato aqui). TUTORIAL de primeiro uso (`cevico_of_tour_done` no navegador; botão "Tutorial" no
+  banner para rever): 8 balões com holofote no alvo (áreas, período, saúde, próximos, semana, filtros,
+  parceiros, configurar). Corrigido: aba ativa do banner ficava branca sem texto (faltava `--k-deep`) e o
+  import da paleta (named export) que deixava o app inteiro em branco.
+- 3ª PASSADA (prints dele com os dados reais da planilha do Henrique carregados no espelho local — 1.074
+  itens, conta 3): (1) AGENDA DO MÊS (grade de semanas, 3 cartões por dia + "+N", KPIs do mês, clique no dia →
+  semana; chave Mês | Semana; itens por 500); (2) ITENS: cabeçalho AGRUPADO (Quando · Paciente · De onde · O quê ·
+  Situação) com separadores verticais e SANFONA na linha (Paciente / Procedimento / Do nosso lado + botões
+  Paciente · Agenda · Expandir = ficha completa em popup); (3) VISÃO GERAL ganhou "Representatividade":
+  procedimentos mais indicados (HBars itens × realizados), fatia das clínicas, dos parceiros e dos tipos
+  (ShareBar); (4) PARCEIROS e (5) CLÍNICAS viraram cards de indicadores (fatia %, itens, % realizados, %
+  cancel.+faltas, na Agenda, procedimentos de cada um em barras) + ShareBar geral. Backend: overview devolve
+  `procedures`, `top_procedures` por parceiro/clínica e status por clínica (`top_by`); PER_MAX 500.
+- 4ª PASSADA: AGENDA DO HUB com MÊS · SEMANA · DIA no formato da nossa Agenda (reusa `AgendaTimeColumn`:
+  semana = 7 colunas de horas 07–20h com balões por status; dia = coluna de horas + "Itens do dia" em cartões
+  `cv-ag-card`, como a visão Dia; mês → clique no dia abre o Dia; item sem hora entra às 08:00 com aviso).
+  ITENS: tabela que CABE sem rolagem (`cv-of-table-fit`, 5 colunas de 2 linhas: Quando · Paciente · De onde ·
+  O quê · Situação + seta da sanfona).
+- 6ª PASSADA: "Itens" virou "REGISTROS" (a planilha de tudo que aconteceu) e foi para a DIREITA do banner.
+- 5ª PASSADA: "Saúde da Agenda" virou "VOLUME DE AGENDAMENTOS"; Parceiros e Clínicas mostram cartões só dos 7
+  mais representativos (TOP_CARDS) e uma busca por nome acha os demais (ele espera muitos parceiros).
+- Verificação: template/script compilam no Vite; specs verdes; dados reais locais = planilha 20260903_REPORT.xlsx
+  carregada só no espelho (tmp/of_report.csv, runner), de-para local IOP/Ocular Surgery + 3 médicos.
+
+## 228. 🏥🤝📅 OFTALMOFÁCIL = HUB DE PARCEIROS + AGENDA UNIFICADA — FASE 1 "construir o ambiente" (pedido 24/09 tarde: "todos os contatos que vierem do Oftalmofácil, com exceção do CATARATA_SP, vão para o outro ambiente; compartilham a mesma agenda") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, COM MIGRATION → BACKUP antes)
+- ENTENDIMENTO: o Oftalmofácil é um hub onde clínicas/médicos parceiros indicam cirurgias, exames e consultas.
+  O fornecedor CATARATA_SP é a própria CEVICO; todos os OUTROS fornecedores são parceiros de aquisição.
+- MIGRATION `20260924180000_add_source_to_tasks`: tasks.source ('oftalmofacil'), tasks.source_detail (parceiro),
+  tasks.external_ref (chave do item lá; índice único por conta). Sem cron novo.
+- SYNC (`OftalmofacilSyncService`): com `partners_enabled` lê TODOS os fornecedores (a consulta MySQL deixa de
+  filtrar pelo fornecedor); `own_provider?` separa nosso × parceiro. Card: nosso → funil da CEVICO
+  (`own_pipeline_id` ou o 1º funil); parceiro → `partner_pipeline_id` (funil OFTALMOFÁCIL); sem funil de
+  parceiro configurado = não cria card (conta em `skipped_partners`). `stage_like` agora procura a coluna SÓ
+  dentro do funil escolhido (antes era em qualquer funil — ambíguo). Contato: `additional_attributes.origem`
+  + `parceiro`; etiquetas `oftalmofacil` (todos) e `of_<parceiro>` (parceiros).
+- JANELA "desta semana em diante" (pedido dele, 24/09 noite): parceiro com data anterior a `agenda_from` (padrão:
+  segunda desta semana) fica SÓ no espelho (`applied_action = mirror_only`): sem paciente, card ou agendamento.
+  A CEVICO (CATARATA_SP) mantém o histórico inteiro. Spec cobre.
+- AGENDA (`sync_task!`, com `agenda_enabled`): item com data ≥ `agenda_from` (padrão: segunda desta semana) vira
+  Task idempotente por external_ref: tipo pelo procedimento lá (Exame → trilho Exames, Consulta → Consultas,
+  resto → Cirurgias), título "Cirurgia/Exame/Consulta: nome", data+hora (08:00 se sem hora), telefone, contato,
+  médico pelo de-para de CRM, local pelo de-para `clinics` (clínica lá → paulista/tatuape/local de cirurgia),
+  `booking_kind = registro`, source/source_detail, observação "Oftalmofácil · parceiro · clínica · tipo · R$ ·
+  status lá" (só sobrescreve a observação que o próprio sync escreveu). Acompanha: realizada → concluída +
+  compareceu; cancelada → cancelada; ausente → faltou; agendada → reaberta. Criador = 1º admin; responsável pelo
+  TaskOwner.
+- PROBE ("Testar conexão") agora devolve o retrato do hub inteiro: parceiros (com ⭐ na CEVICO), clínicas e
+  tipos de procedimento, com contagens. `oftalmofacil_json` devolve também partners_seen/clinics_seen/types_seen
+  (do espelho) e agenda_count.
+- TELA (card OftalmoFácil em Integrações): blocos "🤝 Parceiros do hub" (ler parceiros; funil dos parceiros;
+  funil da CEVICO; chips dos parceiros vistos) e "📅 Agenda unificada" (ligar; a partir de; de-para clínica →
+  local com sugestões clicáveis das clínicas vistas; tipos vistos). Última sincronização mostra Agenda
+  criados/atualizados, itens de parceiros e "sem funil".
+- AGENDA (tela): balão com selo tracejado "Oftalmofácil"/nome do parceiro (OF na semana), chip 🏥 no cartão da
+  conferência, origem na lista do "+N", filtro **Origem: Todas | CEVICO | Oftalmofácil** (aparece quando há
+  agendamento externo). `task_json` passou a devolver booking_kind, source e source_detail. Agente comum enxerga
+  os agendamentos com origem (antes só via os com unidade).
+- TESTES: `spec/services/crm/oftalmofacil_sync_service_spec.rb` (novo, 5 exemplos: parceiro × nosso, Agenda,
+  acompanhamento de status/exame, janela + sem funil, filtro do fornecedor). engine_spec tem 2 falhas ANTIGAS
+  (já falhavam sem estas mudanças).
+- FASE 2 (depois de subir, com clareza): 1) rodar a rake dos 723 (`cevico:oftalmofacil_backdate_agendadas`);
+  2) na tela: ligar "Ler parceiros", escolher o funil OFTALMOFÁCIL, mapear clínicas, ligar a Agenda com a data;
+  3) "recarregar tudo do zero" (silencioso) para trazer os parceiros; 4) conferir a semana na Agenda; 5) regra
+  para "agendada" no passado (decisão dele).
+- Reversão: imagem anterior (a migration só ADICIONA colunas; pode ficar).
+
+## 227. 🏥📅 OFTALMOFÁCIL → AGENDA UNIFICADA ("estamos saindo do Google Agenda", pedido 24/09 tarde) — PLANO ENTREGUE, AGUARDA decisões + "pode construir"
+- Plano em ~/Desktop/CLAUDE CODE/CEVICO/docs/OFTALMOFACIL_AGENDA_UNIFICADA_2026-09-24.md. Resumo: (A) funil
+  OFTALMOFÁCIL como destino explícito do sync (pipeline_id na integração) + regra "lead CEVICO anda no CEVICO,
+  paciente só-Oftalmofácil vai para o OFTALMOFÁCIL" + etiqueta `oftalmofacil`; (B) sync cria/atualiza Task de
+  cirurgia (booking_kind registro, source/external_ref → MIGRATION) para data ≥ segunda desta semana, com selo
+  "Oftalmofácil" na Agenda/conferência/folha e de-para clínica → local; (C) rake dos 723 (existe desde o 166,
+  não rodou em produção) + retrodatar também no funil OFTALMOFÁCIL + regra p/ "agendada" no passado; (D) KPIs
+  do painel ficam limpos por consequência (só o 1º funil).
+- Diagnóstico importante: hoje `stage_like` procura "Cirurgia Agendada" em QUALQUER funil (ordem de posição) —
+  com o funil OFTALMOFÁCIL criado à mão, o destino ficou ambíguo.
+- Decisões dele: regra A; de-para clínica → local; regra dos "agendada" no passado; janela (só daqui pra frente
+  × histórico de setembro).
+
+## 226. 🔘 CONVERSAS: CHAVINHA ABERTAS | TODAS na cabeceira da lista (pedido 24/09 tarde: "pras meninas conseguirem se organizar melhor") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só)
+- Diagnóstico: o seletor de status nunca esteve escondido (fica no menu "⋯" da lista, ConversationBasicFilter),
+  mas era um menu discreto; a pílula ao lado do título só MOSTRAVA o status.
+- `ChatListHeader.vue`: a pílula virou uma chavinha de dois botões **Abertas | Todas** (`.cv-status-seg`, azul
+  no ativo), ligada ao mesmo filtro de status (`onBasicFilterChange('open'|'all','status')`), salvo nas
+  preferências da pessoa como antes. Resolvidas/Pendentes/Adiadas continuam no menu; quando um deles está ativo,
+  aparece como terceira pílula. CSS em `_cevico-conversas.scss`. Compila no Vite; não conferido visualmente.
+
 ## 225. 🖨️☑️ IMPRIMIR COM ESCOLHA DE COLUNAS E ORIENTAÇÃO (pedido 24/09 tarde: "sistema de checkbox de quais colunas eu vou querer imprimir, inclusive a orientação") — SUBIU 24/09 (commit e619cf7 no develop → imagem ghcr :e619cf7, WEB só, sem migration; reversão :c75f12e)
 - Botão "Imprimir" da Agenda abre um painel (kit, 2 seções numeradas): 1 Orientação (em pé / deitada) · 2 Colunas
   (caixinhas, na ordem da folha): Hora, Paciente, Telefone, Problema/exame/procedimento, Médico, Unidade/local,

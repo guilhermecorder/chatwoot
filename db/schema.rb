@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_23_230000) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_24_180000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -2228,6 +2228,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_23_230000) do
     t.string "booking_kind"
     t.datetime "confirmed_at"
     t.datetime "declined_at"
+    t.string "source"
+    t.string "source_detail"
+    t.string "external_ref"
+    t.index ["account_id", "external_ref"], name: "index_tasks_on_account_and_external_ref", unique: true, where: "(external_ref IS NOT NULL)"
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
     t.index ["account_id", "unit"], name: "index_tasks_on_account_id_and_unit"
     t.index ["account_id"], name: "index_tasks_on_account_id"
