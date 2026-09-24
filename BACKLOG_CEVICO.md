@@ -6171,7 +6171,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 225. 🖨️☑️ IMPRIMIR COM ESCOLHA DE COLUNAS E ORIENTAÇÃO (pedido 24/09 tarde: "sistema de checkbox de quais colunas eu vou querer imprimir, inclusive a orientação") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+## 225. 🖨️☑️ IMPRIMIR COM ESCOLHA DE COLUNAS E ORIENTAÇÃO (pedido 24/09 tarde: "sistema de checkbox de quais colunas eu vou querer imprimir, inclusive a orientação") — SUBIU 24/09 (commit e619cf7 no develop → imagem ghcr :e619cf7, WEB só, sem migration; reversão :c75f12e)
 - Botão "Imprimir" da Agenda abre um painel (kit, 2 seções numeradas): 1 Orientação (em pé / deitada) · 2 Colunas
   (caixinhas, na ordem da folha): Hora, Paciente, Telefone, Problema/exame/procedimento, Médico, Unidade/local,
   Observações, Pagamento, Presença, Origem do paciente, Anotações, Nota fiscal. Padrão = a folha do item 224
