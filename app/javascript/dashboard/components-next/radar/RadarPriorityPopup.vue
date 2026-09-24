@@ -105,10 +105,14 @@ const KIND_LABEL = {
   journey_reply: '🗓️ Respondeu "não vou"',
   agente_remarcou: '🔧 Agente remarcou a consulta',
   agente_cancelou: '🔧 Agente cancelou a consulta',
+  nao_confirmou: '❌ Respondeu NÃO ao lembrete da consulta',
 };
 const kindLabel = computed(() => KIND_LABEL[alert.value?.kind] || '');
-const isAgentAlert = computed(() =>
-  String(alert.value?.kind || '').startsWith('agente_')
+// item 217: o "não confirmou" usa o mesmo caminho (aviso amarrado à consulta)
+const isAgentAlert = computed(
+  () =>
+    String(alert.value?.kind || '').startsWith('agente_') ||
+    alert.value?.kind === 'nao_confirmou'
 );
 
 const attendNow = () => {

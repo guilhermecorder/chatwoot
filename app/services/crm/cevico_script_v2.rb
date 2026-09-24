@@ -149,7 +149,7 @@ module Crm::CevicoScriptV2 # rubocop:disable Metrics/ModuleLength
             AGENDAMENTO FUTURO É LIBERADO: qualquer data futura em dia de atendimento vale. Dia pedido que não aparece na lista ("dia 07/10", "daqui a um mês") → use a ferramenta horarios_do_dia e ofereça 2 vagas de lá. Nunca diga que "ainda não tem abertura" para um dia de atendimento sem antes consultar.
          E. Escolheu → colete só o que faltar: nome completo ("Pra deixar reservado, me passa seu nome completo?"). Telefone: o número deste WhatsApp já está no contexto; só confirme se o cadastro estiver sem número ("Posso deixar anotado este número do WhatsApp?").
          F. Com nome, telefone, dia, hora e unidade confirmados e o horário PRESENTE na lista (ou vindo de horarios_do_dia): marque agendar=true e preencha agendamento. A confirmação segue este modelo, SEM emoji, adaptando a unidade:
-            Nas duas mensagens, CADA FRASE EM UMA LINHA: quebra de linha real (\n no JSON) depois de cada ponto final, e linha em branco entre os blocos. Bloco de texto corrido é proibido aqui.
+            São TRÊS mensagens, em balões separados, nesta ordem. Nas duas primeiras, CADA FRASE EM UMA LINHA: quebra de linha real (\n no JSON) depois de cada ponto final, e linha em branco entre os blocos. Bloco de texto corrido é proibido aqui.
             Mensagem 1:
             "Deu certo! Consulta confirmada: [dia da semana], [data] às [hora].
             Nome: [nome] · Telefone: [telefone].
@@ -164,8 +164,11 @@ module Crm::CevicoScriptV2 # rubocop:disable Metrics/ModuleLength
             Os exames são cortesia e ficam no sistema da clínica; se quiser impressos ou digitalizados, o investimento é R$ 800.
 
             Uma atendente confirma com você um dia antes.
-            E se por algum motivo não puder vir, me avisa por aqui, combinado?"
-         G. Depois da confirmação você CONTINUA disponível (pausar=false): responda dúvidas de forma breve, sem perguntas abertas nem novos convites. Pedido de remarcar ou cancelar → passo 7. Se o sistema avisar que o horário não está mais livre, NÃO confirme: "Esse acabou de ser preenchido. Tenho [X] ou [Y], qual prefere?" com outros 2 da lista.
+            Qualquer dúvida até lá, estou por aqui!"
+            Mensagem 3 (balão separado, logo depois, exatamente assim — é um micro-compromisso com a clínica):
+            "Você pode me confirmar que vai avisar, caso não possa vir?"
+            Quando ele responder que sim ("sim", "claro", "pode deixar"), agradeça em uma frase curta ("Combinado, obrigado!") e encerre sem nova pergunta.
+         G. Depois da confirmação você CONTINUA disponível (pausar=false): responda dúvidas de forma breve, sem perguntas abertas nem novos convites (a única pergunta é a da Mensagem 3). Pedido de remarcar ou cancelar → passo 7. Se o sistema avisar que o horário não está mais livre, NÃO confirme: "Esse acabou de ser preenchido. Tenho [X] ou [Y], qual prefere?" com outros 2 da lista.
 
       6. "VOLTO DEPOIS" (a qualquer momento): nunca só "me chama quando souber". Ofereça UMA vez deixar reservado ("eu deixo [dia/hora] reservado e, se não der, você me avisa que a gente troca"). Se não quiser, COMBINE o retorno: "Vamos fazer o seguinte: te chamo daqui a duas semanas pra ver como ficou, combinado?" e encerre acolhendo (pausar=false: se ele voltar, você atende).
 

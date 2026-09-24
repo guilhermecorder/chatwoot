@@ -5,9 +5,12 @@
 #  id                  :bigint           not null, primary key
 #  archived_at         :datetime
 #  attendance          :string
+#  booking_kind        :string
 #  canceled_at         :datetime
 #  comments            :jsonb            not null
 #  completed_at        :datetime
+#  confirmed_at        :datetime
+#  declined_at         :datetime
 #  description         :text
 #  doctor              :string
 #  due_at              :datetime
@@ -58,6 +61,19 @@ class Task < ApplicationRecord
   has_many_attached :files
 
   validates :title, presence: true
+
+  # 📅 item 217 (23/09): o que CONTA como agendamento.
+  #   nil / 'agendamento' = consulta NOVA (o robô ou a equipe marcou nesta conversa)
+  #   'registro'          = já estava marcada fora do sistema (Oftalmofácil/telefone)
+  #                         e foi só lançada na Agenda — aparece como "Lançada",
+  #                         fica fora de "Consultas agendadas" e da taxa
+  BOOKING_KINDS = %w[agendamento registro].freeze
+  validates :booking_kind, inclusion: { in: BOOKING_KINDS }, allow_blank: true
+  scope :bookings, -> { where("tasks.booking_kind IS NULL OR tasks.booking_kind <> 'registro'") }
+
+  def registered_only?
+    booking_kind == 'registro'
+  end
   validate :contact_belongs_to_account
 
   enum status: { todo: 0, doing: 1, done: 2 }

@@ -61,8 +61,13 @@ class Crm::KpiBagService
     add.call('new_conversations', 'Novas conversas', 'n',
              @account.conversations.where(created_at: since..until_at),
              @account.conversations.where(created_at: prev_since..prev_until), 'conversations.created_at')
-    add.call('appointments_booked', 'Consultas agendadas (registradas)', 'n',
+    add.call('appointments_booked', 'Consultas agendadas (novas)', 'n',
              booked(since, until_at), booked(prev_since, prev_until), 'tasks.created_at')
+    # 📅 item 217: confirmou (SIM ao lembrete) e lançadas (já estavam marcadas fora do sistema)
+    add.call('appointments_confirmed', 'Consultas confirmadas (SIM ao lembrete)', 'n',
+             confirmed(since, until_at), confirmed(prev_since, prev_until), 'tasks.confirmed_at')
+    add.call('appointments_registered', 'Consultas lançadas (já estavam marcadas)', 'n',
+             registered(since, until_at), registered(prev_since, prev_until), 'tasks.created_at')
     add.call('appointments_due', 'Consultas do período (pela data)', 'n',
              due_tasks('consulta', since, until_at), due_tasks('consulta', prev_since, prev_until), 'tasks.due_at')
     add.call('indications', 'Indicações de cirurgia (consultas)', 'n',
@@ -110,9 +115,19 @@ class Crm::KpiBagService
   end
 
   # ── escopos ───────────────────────────────────────────────────────────
+  # item 217: só consulta NOVA conta como agendamento ('registro' = lançamento
+  # de consulta que já existia fora do sistema)
   def booked(since, until_at)
-    @account.tasks.where(task_type: 'consulta', created_at: since..until_at)
+    @account.tasks.bookings.where(task_type: 'consulta', created_at: since..until_at)
             .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
+  end
+
+  def confirmed(since, until_at)
+    @account.tasks.where(task_type: 'consulta', confirmed_at: since..until_at)
+  end
+
+  def registered(since, until_at)
+    @account.tasks.where(task_type: 'consulta', booking_kind: 'registro', created_at: since..until_at)
   end
 
   def created_tasks(type, since, until_at)

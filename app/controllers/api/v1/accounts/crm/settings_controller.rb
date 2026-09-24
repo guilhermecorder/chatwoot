@@ -866,6 +866,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         l.permit(:key, :label).to_h
       end.select { |l| l['label'].present? }
     end
+    # 🔬 janela de EXAMES (unidade + dia + horário + bloco) — 23/09
+    if params.key?(:exam_windows)
+      cfg['exam_windows'] = Array(params[:exam_windows]).map do |w|
+        w.permit(:dow, :unit, :start, :end, :block).to_h
+      end
+    end
     # janelas da SALA CIRÚRGICA (clínica parceira + dia + horário + bloco)
     if params.key?(:surgery_windows)
       cfg['surgery_windows'] = Array(params[:surgery_windows]).map do |w|
@@ -1146,6 +1152,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       attendance_owners: cfg['attendance_owners'] || {},
       surgery_locations: cfg['surgery_locations'] || [],
       surgery_windows: cfg['surgery_windows'] || [],
+      exam_windows: cfg['exam_windows'] || [],
       agenda_theme: cfg['theme'],
       panel_assignments: cfg['panel_assignments'] || {},
       panel_owners: panel_owners_json(cfg),
@@ -1342,18 +1349,39 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ── Relatório de uso/custo dos agentes de IA ────────────────────────────────
 
+  # ?date=AAAA-MM-DD (23/09): análise de UM dia — totais e quebra por agente
+  # daquele dia (fuso da clínica), além dos períodos de sempre
   def ai_usage
     scope = Crm::AiUsage.where(account: Current.account)
     render json: {
       by_agent: usage_breakdown(scope, :agent_key),
       by_model: usage_breakdown(scope, :model),
       periods: {
-        today: usage_totals(scope.where(created_at: Date.current.all_day)),
+        today: usage_totals(scope.where(created_at: ActiveSupport::TimeZone['America/Sao_Paulo'].now.all_day)), # dia da clínica, não UTC
         last7: usage_totals(scope.where(created_at: 7.days.ago..Time.current)),
         last30: usage_totals(scope.where(created_at: 30.days.ago..Time.current)),
         all: usage_totals(scope)
-      }
+      },
+      day: usage_day(scope, params[:date])
     }
+  end
+
+  def usage_day(scope, raw)
+    return nil if raw.blank?
+
+    tz = ActiveSupport::TimeZone['America/Sao_Paulo']
+    day = tz.parse(raw.to_s)
+    return nil if day.nil?
+
+    day_scope = scope.where(created_at: day.all_day)
+    {
+      date: day.to_date.iso8601,
+      totals: usage_totals(day_scope),
+      by_agent: usage_breakdown(day_scope, :agent_key, period: false),
+      by_model: usage_breakdown(day_scope, :model, period: false)
+    }
+  rescue ArgumentError
+    nil
   end
 
   # ── Configurações → Domínio (público das páginas/formulários) ──────────────
@@ -1492,8 +1520,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     { http_ok: false, http_error: e.class.name.demodulize }
   end
 
-  def usage_breakdown(scope, column)
-    last30 = scope.where(created_at: 30.days.ago..Time.current)
+  def usage_breakdown(scope, column, period: true)
+    last30 = period ? scope.where(created_at: 30.days.ago..Time.current) : scope
     last30.group(column)
           .pluck(column, Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'))
           .map do |key, calls, input, output, cost|
@@ -1639,6 +1667,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},
       surgery_locations: (s.agenda_config || {})['surgery_locations'] || [],
       surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
+      exam_windows: (s.agenda_config || {})['exam_windows'] || [],
       agenda_theme: (s.agenda_config || {})['theme'],
       # 🕐 janela de envio dos robôs de follow-up (item 147; padrão 08h–20h)
       followup_hours: (s.agenda_config || {})['followup_hours'] || { 'start' => 8, 'end' => 20 },

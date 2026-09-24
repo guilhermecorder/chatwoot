@@ -6171,6 +6171,117 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 222. 🗣️ MICRO-COMPROMISSO DEPOIS DO AGENDAMENTO — "Você pode me confirmar que vai avisar, caso não possa vir?" (pedido 23/09 noite, depois do 1º agendamento real "seguiu muito bem o roteiro") — CONSTRUÍDO, SEM commit, aguarda "pode subir" (SIDEKIQ+WEB, sem migration)
+- Roteiro 1 e Roteiro 2 (passo F do agendamento): a confirmação passa a ser TRÊS balões — 1) "Deu certo! Consulta
+  confirmada…", 2) PS1/PS2 + particular + exames + "Uma atendente confirma um dia antes / Qualquer dúvida, estou por
+  aqui!", 3) balão separado, exatamente: "Você pode me confirmar que vai avisar, caso não possa vir?" (objetivo dele:
+  mais um micro-compromisso com a clínica). Com o "sim" → "Combinado, obrigado!" e encerra sem nova pergunta. No v2
+  saiu a frase antiga "E se por algum motivo não puder vir, me avisa por aqui, combinado?" (virou o balão 3).
+- Seções personalizadas do Roteiro em produção VENCEM o padrão: se a seção do agendamento estiver personalizada, é
+  preciso apagá-la (volta ao padrão novo) ou colar o balão 3 nela.
+
+## 221. 💸📅 GASTO COM OS AGENTES — caixa de seleção do DIA para análise (pedido 23/09 noite, print) — CONSTRUÍDO, SEM commit, aguarda "pode subir" (WEB só)
+- `settings#ai_usage?date=AAAA-MM-DD` devolve `day: { date, totals, by_agent, by_model }` daquele dia (fuso SP), além
+  dos períodos de sempre. Hub → Agentes de IA → bloco Gasto: linha "Analisar o dia" com ‹ › + campo de data (máx. hoje)
+  + chips Hoje/Ontem + "Voltar aos 30 dias"; escolhido um dia, a lista "Por agente (dia)" e o total/chamadas/tokens
+  passam a ser daquele dia; os 4 cards de período continuam.
+
+## 220. 🎨 MENU — gaveta Atendimento sem 3 ícones verdes seguidos (pedido 23/09 noite, print) — CONSTRUÍDO, SEM commit, aguarda "pode subir" (WEB só)
+- Sidebar: cabeçalho Atendimento laranja (#ff9f0a), Conversas verde, Chamadas índigo (#5856d6), Agenda vermelho,
+  Agendamentos azul — sequência laranja/verde/índigo/vermelho/azul.
+
+## 219. 🔬 AGENDA DE EXAMES com janela própria (seg–sex 08h–17h, IOP Av. Paulista) e cor só dos exames (pedido 23/09 noite, print) — CONSTRUÍDO, SEM commit, aguarda "pode subir" (WEB só)
+- PEDIDO: "paga a AGENDA DE EXAMES: é possível agendar das 08 às 17h no IOP da Av. Paulista, de segunda a sexta; por
+  isso os exames devem ter uma cor específica só deles, para serem facilmente identificados na agenda". Até aqui os
+  exames dividiam os blocos dos médicos (item 210).
+- FEITO: `DEFAULT_EXAM_WINDOWS` + `resolveExamWindows` (cevicoAgenda.js; agenda_config.exam_windows, padrão seg–sex
+  08:00–17:00 paulista bloco 30 min); `settings#update_agenda` salva `exam_windows` (exposto no settings JSON);
+  `CrmAPI.updateExamWindows`. AgendaBoard: trilho Exames usa as janelas de exames (dia/semana/mês, faixas, ocupação,
+  duração dos balões), botão "Janela de exames" (modal editável pelo admin: dia, unidade, início, fim, bloco), exames
+  na COR DOS EXAMES (verde-água #0D9488) em balões, faixas e bolinhas — antes o balão pegava a cor da unidade; o
+  trilho Consultas deixa de contar exames na ocupação. Texto do rodapé da ocupação atualizado.
+- FORA: o Atendente de IA não marca exames (segue chamar_humano: "quer exame isolado com pedido médico").
+
+## 218. 🩹 SELETOR DE EMOJI "NÃO ABRE" para as atendentes (feedback 23/09 noite) — CONSTRUÍDO, SEM commit, aguarda "pode subir" (WEB só)
+- PEDIDO: "as meninas estão clicando no botão de emoji, no ambiente de conversas, mas nem abre a janelinha
+  pra elas (confirma se vc ajustou isso)". O item 206 (overflow) já estava em produção e o seletor abre
+  normalmente no local (conferido no navegador, conversa com janela de 24h aberta).
+- CAUSA PROVÁVEL (não é o CSS): o seletor é um componente carregado SOB DEMANDA (defineAsyncComponent sem
+  tratamento de erro). Depois de cada deploy, as abas que ficaram abertas ainda pedem os arquivos da versão
+  anterior (nome com hash) → 404 → o clique não faz nada. Hoje houve 5 deploys; as abas das meninas ficam
+  abertas o dia inteiro. Sintoma idêntico ao console local ("An unknown error occurred when fetching the
+  script" / 404). Vale para TODO componente sob demanda (modais, popups).
+- FEITO: (1) `entrypoints/dashboard.js` ouve `vite:preloadError` (evento oficial do Vite) e recarrega a
+  página UMA vez (guarda de 60 s na sessionStorage — sem ciclo); (2) `ReplyBox.vue`: o seletor de emoji
+  tenta carregar 2x e, se falhar, recarrega a página (rascunho por conversa fica salvo). Sem migration.
+- ORIENTAÇÃO para a equipe até subir: depois de cada deploy, dar F5 (recarregar) na aba do sistema.
+
+## 217. 📅 O QUE CONTA COMO AGENDAMENTO — marcada × remarcada × confirmada × não confirmou × cancelada × lançada (feedback 23/09 noite: "registrar os dados corretamente é de importância máxima") — CONSTRUÍDO 23/09 ("show bora"), SEM commit, aguarda "pode subir" (WEB+SIDEKIQ, COM migration → BACKUP antes)
+- PEDIDO: "ele agendou muitas consultas, não tenho certeza se esse número está correto; acho que ele contou as
+  mensagens de confirmação de consulta… precisamos ajustar o que é agendamento, reagendamento e confirmação".
+  Prints: Meu Painel "Consultas agendadas 31 (+182%)", "Taxa de agendamento 45,6%"; Agendamentos "Marcadas 27 ·
+  Remarcadas 7 · Canceladas 1 · robô 19 × equipe 16"; registros de hoje 18:29–18:36 "Marcada · Equipe · com
+  Laura/Natalia" para consultas de AMANHÃ (24/09) em conversas da caixa CONFIRMAÇÃO DE CONSULTA, inclusive
+  paciente já em "Desmarcou a Consulta".
+- DIAGNÓSTICO (código): (a) "Marcada" = QUALQUER task consulta criada no período (created_at) — não distingue
+  consulta nova (agendamento de venda) de consulta JÁ MARCADA fora do sistema (Oftalmofácil/telefone) que a
+  equipe lança na Agenda depois; as linhas "Equipe" das 18:30 não têm marca de IA na descrição → foram criadas
+  pela equipe na Agenda/Tarefas (creator = a pessoa), muito provavelmente o lançamento das consultas de amanhã
+  na hora da confirmação — o sistema conta cada uma como agendamento novo. (b) A confirmação do D-1 ("sim")
+  hoje vira só uma marca no contato (cevico_appt_reminders[task].confirmed) + nota; não aparece no painel nem
+  nos indicadores; um "NÃO" não vira nada. (c) As âncoras ("consulta confirmada/marcada…") em mensagem
+  ENVIADA por pessoa disparam o Secretário; template do lembrete via SendTemplateService é ignorado
+  (cevico_auto), mas template enviado à mão pelo seletor nativo do WhatsApp NÃO tem a marca → pode gerar
+  consulta "pela IA" a partir de uma confirmação. (d) KPIs "Consultas agendadas"/"Taxa de agendamento"/metas/
+  histórico/Gestor (kpi_bag_service `booked`, home_controller `booked_scope`, goal_period_history) contam
+  created_at → inflam com (a).
+- PROPOSTA: migration `tasks.booking_kind` ('agendamento' padrão | 'registro' = já estava marcada) +
+  `tasks.confirmed_at`; formulário da Agenda/Tarefas pergunta "Consulta nova × Já estava marcada (só
+  registrando)"; painel Agendamentos com 5 tipos: Marcada · Remarcada · Confirmada (SIM ao D-1) · Cancelada ·
+  Lançada; robô × equipe só entre marcadas/remarcadas; KPIs contam só booking_kind='agendamento' + indicador
+  novo "Consultas confirmadas"; toggle por linha (admin) para corrigir o tipo; âncoras ignoram a caixa do
+  lembrete e a extração ganha `confirmacao` (nunca cria consulta a partir de confirmação: acha a existente →
+  confirmed_at; não acha → cria como 'registro'); "NÃO" ao D-1 → marca "não confirmou" + etiqueta
+  confirmar_urgente + aviso no Meu Painel (não cancela sozinho); rake `cevico:reclassify_bookings` em dry-run
+  para reclassificar os lançamentos de hoje (ele confere a lista antes).
+- PERGUNTAS: confirmar que as linhas das 18:30 foram lançadas à mão na Agenda pela Laura/Natalia (e por quê:
+  confirmação do dia seguinte?); "NÃO" ao D-1 deve cancelar sozinho ou só avisar?
+- CONSTRUÍDO 23/09 (a mensagem de confirmação dele = modelo "Confirmamos a avaliação do(a) paciente… Você
+  confirma a consulta?" com botões SIM/NÃO, enviada pelo lembrete D-1):
+  - Migration `20260923230000_add_booking_kind_and_confirmation_to_tasks` (tasks.booking_kind, confirmed_at,
+    declined_at) → BACKUP antes do deploy. `Task::BOOKING_KINDS` + scope `Task.bookings` (nil/agendamento).
+  - Formulário da Agenda (`AgendaBoard.vue`): "Esta consulta é → Nova (agendamento) | Já estava marcada" com
+    dica; vai no payload (`booking_kind`); `tasks_controller` aceita (vazio = nova).
+  - Painel Agendamentos (`appointments_controller#feed` + `CrmAppointments.vue`): no modo "registradas" cada
+    ACONTECIMENTO do período vira uma linha (marcada/lançada pela created_at, remarcada, confirmada pelo
+    confirmed_at, não confirmou pelo declined_at, cancelada) — a mesma consulta pode ter 2 linhas; 6 tipos com
+    cor (confirmada azul royal, não confirmou rosa `.cv-pink` novo no kit, lançada cinza); 7 cards no Resumo;
+    chips de filtro; robô × equipe só entre marcadas/remarcadas/canceladas; linhas com `task_id`; botão do admin
+    "já estava marcada ↔ contar como nova" em cada linha (PATCH tasks booking_kind) para corrigir o passado.
+  - KPIs: `kpi_bag#booked`, `home_controller#booked_scope`, `goal_period_history appointments_booked` e
+    `agent_performance` usam `Task.bookings` (lançada fica fora); indicadores novos `appointments_confirmed`
+    ("Consultas confirmadas (SIM ao lembrete)") e `appointments_registered` ("Consultas lançadas"); rótulo
+    "Consultas agendadas (novas)".
+  - Listener: SIM ao lembrete → `task.confirmed_at` (+ nota, como antes); NÃO/"não vou poder"/👎 →
+    `task.declined_at`, etiqueta `confirmar_urgente` (criada se faltar, vermelha) no paciente e na conversa,
+    nota "❌ … ligue para remarcar ou cancelar" e aviso no Meu Painel (`Crm::AgentAlert` kind `nao_confirmou`,
+    rótulos no InicioPage/RadarPriorityPopup) — NUNCA cancela sozinho; SIM depois desfaz o NÃO. Na caixa do
+    lembrete (agenda_config appointment_reminders d1/d0 inbox_id) "consulta confirmada/agendada/marcada" da
+    equipe NÃO dispara o Secretário (remarquei/cancelei continuam).
+  - Secretário: extração ganhou `confirmacao` (conversa é confirmação de consulta já marcada); Applier
+    `apply_confirmation`: consulta já na Agenda → só registra; não está → cria como LANÇADA (`booking_kind`
+    'registro' no Recorder) com nota "LANÇADA… não conta como agendamento novo".
+  - Rake `cevico:reclassify_bookings[account_id,YYYY-MM-DD]` (DRY-RUN lista; `DRY=0` aplica; `HOURS=48`):
+    consultas da equipe (sem marca de IA) criadas no dia com a consulta até 48 h depois → 'registro'.
+  - Specs: crm_listener_confirmation_spec (4), appointment_applier_confirmation_spec (2), appointments feed
+    atualizado (Carla marcada E cancelada no dia = 2 linhas) — 17/17 verdes + anchor spec; rubocop limpo nos
+    arquivos novos. Migration rodada no docker dev+test (schema.rb atualizado).
+- PÓS-DEPLOY (ele): backup → implantar WEB+SIDEKIQ → rodar no contêiner WEB:
+  `bundle exec rails 'cevico:reclassify_bookings[1,2026-09-23]'` (lista) e, conferido, com `DRY=0`; repetir para
+  dias anteriores se quiser; avisar a equipe: ao lançar consulta que já estava marcada, escolher "Já estava
+  marcada" no formulário da Agenda.
+- FICOU DE FORA: histórico de confirmações anteriores (só a marca no contato; não migrado para confirmed_at).
+
 ## 216. 🤖 AGENTES DE IA NAS COLUNAS SEM DONO — Retorno (fundo de funil), Pré-cirúrgico, Pós-operatório (pedido 23/09 noite) — ANÁLISE ENTREGUE, AGUARDA decisões + "pode construir"
 - PEDIDO: "analisar possibilidades de outros agentes nas colunas que temos, para atendimento";
   exemplo dele = fundo de funil: passou em consulta, recebeu orçamento, pediu um tempo, robô de

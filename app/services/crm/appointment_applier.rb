@@ -32,6 +32,10 @@ class Crm::AppointmentApplier
       # "remarcou para quinta" (novo horário confirmado) segue o caminho
       # normal, que já REAGENDA a consulta futura em vez de duplicar
       return apply_cancel(account, result, contact, conversation, name) if result[:cancel] && !booked
+      # 📅 item 217: conversa de CONFIRMAÇÃO ("Você confirma a consulta?") de uma
+      # consulta que já estava marcada — nunca vira agendamento novo: se ela já
+      # está na Agenda, nada a criar; se não está, entra como LANÇADA (registro)
+      return apply_confirmation(account, result, contact, conversation, name, default_unit) if booked && result[:confirmation]
       return apply_booking(account, result, contact, conversation, name, default_unit) if booked
 
       apply_revision(account, result, contact, conversation, name)
@@ -60,6 +64,26 @@ class Crm::AppointmentApplier
       note += " #{effects_text}" if effects_text.present?
       private_note(account, conversation, note)
       outcome
+    end
+
+    def apply_confirmation(account, result, contact, conversation, name, default_unit)
+      phone = result[:phone].presence || contact&.phone_number
+      if Crm::AppointmentRecorder.future_appointment(account, phone, name, contact)
+        Crm::AppointmentRecorder.log_activity(account, result, contact, conversation, :confirmation)
+        return :confirmation
+      end
+
+      outcome = Crm::AppointmentRecorder.record(
+        account: account, result: result, contact: contact,
+        conversation: conversation, default_unit: default_unit, booking_kind: 'registro'
+      )
+      return outcome if outcome != :created
+
+      local_time = result[:starts_at].in_time_zone('America/Sao_Paulo')
+      private_note(account, conversation,
+                   "📅 Consulta de #{name} — #{local_time.strftime('%d/%m/%Y às %H:%M')} — LANÇADA na Agenda a partir da " \
+                   'confirmação (já estava marcada fora do sistema; não conta como agendamento novo).')
+      :registered
     end
 
     def apply_cancel(account, result, contact, conversation, name)

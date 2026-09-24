@@ -6,9 +6,12 @@
 # histórico (Crm::AgendaBackfillJob). NÃO fala com o paciente: só escreve na
 # Agenda interna.
 class Crm::AppointmentRecorder
-  def self.record(account:, result:, contact: nil, conversation: nil, default_unit: nil)
+  # booking_kind (item 217): nil = agendamento novo; 'registro' = a consulta já
+  # estava marcada fora do sistema (confirmação lida na conversa) — entra na
+  # Agenda como "Lançada", fora de "Consultas agendadas"
+  def self.record(account:, result:, contact: nil, conversation: nil, default_unit: nil, booking_kind: nil)
     outcome = do_record(account: account, result: result, contact: contact,
-                        conversation: conversation, default_unit: default_unit)
+                        conversation: conversation, default_unit: default_unit, booking_kind: booking_kind)
     stamp_gender(contact, result[:gender])
     log_activity(account, result, contact, conversation, outcome)
     outcome
@@ -30,7 +33,7 @@ class Crm::AppointmentRecorder
     Rails.logger.warn "[Crm::AppointmentRecorder] sexo: #{e.message}"
   end
 
-  def self.do_record(account:, result:, contact: nil, conversation: nil, default_unit: nil)
+  def self.do_record(account:, result:, contact: nil, conversation: nil, default_unit: nil, booking_kind: nil)
     return :skipped unless result[:found] && result[:starts_at].present?
 
     name  = result[:name].presence || contact&.name.presence || 'Paciente'
@@ -79,6 +82,7 @@ class Crm::AppointmentRecorder
       procedure: result[:procedure].presence,
       doctor: result[:doctor].presence,
       task_type: 'consulta',
+      booking_kind: booking_kind.presence,
       priority: :medium,
       status: :todo,
       creator: creator,

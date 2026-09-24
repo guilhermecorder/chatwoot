@@ -121,9 +121,19 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   ).freeze
   ANCHOR_THROTTLE = 90.seconds
 
+  # item 217: na CAIXA DO LEMBRETE (confirmação da véspera) "consulta
+  # confirmada/agendada/marcada" é a equipe confirmando uma consulta que JÁ
+  # existe — não dispara leitura (virava consulta nova); remarcação e
+  # cancelamento continuam valendo lá também
+  RESCHEDULE_OR_CANCEL_ANCHORS = Regexp.union(
+    /consulta\s+(remarcada|reagendada|cancelada|desmarcada)/i,
+    /\b(remarquei|reagendei|cancelei|desmarquei)\b/i
+  ).freeze
+
   def handle_booking_anchor(message, contact)
     return unless booking_anchor?(message)
     return if automated_message?(message) || anchor_recently?(contact)
+    return if reminder_inbox?(message) && !message.content.to_s.match?(RESCHEDULE_OR_CANCEL_ANCHORS)
 
     Cevico::AttributeMerge.merge!(contact) do |attrs|
       attrs.merge('cevico_anchor_read_at' => Time.current.iso8601)
@@ -135,6 +145,13 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
 
   def booking_anchor?(message)
     message.message_type == 'outgoing' && message.content.to_s.match?(BOOKING_ANCHORS)
+  end
+
+  # caixas dos lembretes D-1/D-0 (Automações → Robôs → Lembretes do dia da consulta)
+  def reminder_inbox?(message)
+    cfg = CrmSetting.find_by(account_id: message.account_id)&.agenda_config&.dig('appointment_reminders') || {}
+    ids = %w[d1 d0].filter_map { |r| cfg.dig(r, 'inbox_id').presence&.to_i }
+    ids.include?(message.inbox_id)
   end
 
   # mensagem de robô/jornada/agente interno (marcas em additional_attributes)
@@ -175,9 +192,22 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     /\b(vou\s+sim|pode\s+confirmar|presenca\s+confirmada|ok|okay|blz|beleza|combinado|certo)\b/i
   )
 
+  # ❌ item 217: "NÃO" ao lembrete (botão do modelo ou texto) → a consulta fica
+  # marcada como NÃO CONFIRMOU (declined_at), etiqueta confirmar_urgente no
+  # paciente e na conversa, nota na conversa e aviso no Meu Painel de quem
+  # cuida — NUNCA cancela sozinho (decisão dele: a equipe liga e decide)
+  DECLINE_WORDS = Regexp.union(
+    /\A\s*(nao|n|no|nope)\s*[.!]*\s*\z/i,
+    /\b(nao\s+vou|nao\s+posso|nao\s+poderei|nao\s+consigo|nao\s+confirmo|nao\s+da\b|nao\s+vai\s+dar|desmarc|cancel)/i
+  )
+  DECLINE_LABEL = 'confirmar_urgente'.freeze
+
   def handle_appointment_confirmation(message, contact) # rubocop:disable Metrics/CyclomaticComplexity
     return unless message.message_type == 'incoming'
-    return unless confirmation_text?(message.content)
+
+    confirmed = confirmation_text?(message.content)
+    declined = !confirmed && decline_text?(message.content)
+    return unless confirmed || declined
 
     marks = (contact.additional_attributes || {})['cevico_appt_reminders'] || {}
     return if marks.empty?
@@ -185,7 +215,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     task = pending_confirmation_task(contact, marks)
     return if task.nil?
 
-    record_confirmation(message, contact, task)
+    confirmed ? record_confirmation(message, contact, task) : record_decline(message, contact, task)
   rescue StandardError => e
     Rails.logger.error "[CrmListener] confirmação de consulta: #{e.message}"
   end
@@ -193,8 +223,19 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   def confirmation_text?(raw)
     return true if raw.to_s.include?('👍')
 
-    text = raw.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase.strip
+    text = normalize_reply(raw)
     text.present? && text.match?(CONFIRM_WORDS)
+  end
+
+  def decline_text?(raw)
+    return true if raw.to_s.include?('👎')
+
+    text = normalize_reply(raw)
+    text.present? && text.match?(DECLINE_WORDS)
+  end
+
+  def normalize_reply(raw)
+    raw.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase.strip
   end
 
   # a consulta de hoje/amanhã que RECEBEU o lembrete D-1 e ainda não foi
@@ -215,6 +256,9 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       (all[task.id.to_s] ||= {})['confirmed'] = Time.current.iso8601
       attrs.merge('cevico_appt_reminders' => all)
     end
+    # item 217: a confirmação fica NA CONSULTA (painel Agendamentos "Confirmada",
+    # indicador "Consultas confirmadas"); um NÃO anterior é desfeito
+    task.update!(confirmed_at: Time.current, declined_at: nil)
     dia = task.due_at.in_time_zone(ActiveSupport::TimeZone['America/Sao_Paulo'])
     message.conversation.messages.create!(
       account_id: contact.account_id,
@@ -223,6 +267,36 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       private: true,
       content: "✅ Paciente CONFIRMOU a consulta de #{dia.strftime('%d/%m às %H:%M')} respondendo ao lembrete."
     )
+  end
+
+  def record_decline(message, contact, task)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      all = attrs['cevico_appt_reminders'] || {}
+      (all[task.id.to_s] ||= {})['declined'] = Time.current.iso8601
+      attrs.merge('cevico_appt_reminders' => all)
+    end
+    task.update!(declined_at: Time.current)
+    account = contact.account
+    ensure_decline_label!(account)
+    contact.add_labels([DECLINE_LABEL]) unless contact.label_list.include?(DECLINE_LABEL)
+    conversation = message.conversation
+    conversation.add_labels([DECLINE_LABEL]) unless conversation.label_list.include?(DECLINE_LABEL)
+    dia = task.due_at.in_time_zone(ActiveSupport::TimeZone['America/Sao_Paulo'])
+    conversation.messages.create!(
+      account_id: contact.account_id,
+      inbox_id: conversation.inbox_id,
+      message_type: :outgoing,
+      private: true,
+      content: "❌ Paciente respondeu NÃO ao lembrete da consulta de #{dia.strftime('%d/%m às %H:%M')}. " \
+               'A consulta continua na Agenda — ligue para remarcar ou cancelar (etiqueta confirmar_urgente).'
+    )
+    Crm::AgentAlert.push(account: account, kind: 'nao_confirmou', task: task, conversation: conversation, agent_key: 'lembrete')
+  end
+
+  def ensure_decline_label!(account)
+    return if account.labels.exists?(title: DECLINE_LABEL)
+
+    account.labels.create!(title: DECLINE_LABEL, color: '#DC2626', show_on_sidebar: true)
   end
 
   def recheck_recently?(contact)

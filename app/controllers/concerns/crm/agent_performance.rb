@@ -48,7 +48,7 @@ module Crm
                         .where.not(user_id: nil)
       resolved = resolved.where(user_id: user_ids) if user_ids
       resolved = resolved.group(:user_id).count
-      consultas = account.tasks.where(task_type: 'consulta', created_at: range)
+      consultas = account.tasks.bookings.where(task_type: 'consulta', created_at: range) # item 217: lançamento não é agendamento
       consultas = consultas.where(creator_id: user_ids) if user_ids
       consultas = consultas.group(:creator_id).count
       # cirurgias AGENDADAS pela pessoa (papel da Elizangela — item 139)

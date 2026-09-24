@@ -616,7 +616,8 @@ const MENU_LAYOUT = [
   { solo: 'Inicio' }, // como está meu dia?
   {
     name: 'group:atendimento', // quem eu atendo agora?
-    color: '#34c759',
+    // 23/09: laranja (o verde ficava repetido 3x com Conversas e Chamadas)
+    color: '#ff9f0a',
     label: 'Atendimento',
     icon: 'i-lucide-headset',
     items: [
@@ -742,7 +743,7 @@ const leafBadge = item => {
 // azulejos coloridos por item (como os ícones dos Ajustes do iPhone)
 const TILE_COLORS = {
   Conversation: '#34c759',
-  'Cevico Calls': '#30d158',
+  'Cevico Calls': '#5856d6', // 23/09: índigo — a gaveta Atendimento alterna laranja/verde/índigo/vermelho/azul
   Inbox: '#007aff',
   Agenda: '#ff3b30',
   'Cevico Appointments': '#0a84ff',

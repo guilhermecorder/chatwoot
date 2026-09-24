@@ -962,8 +962,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # consultas AGENDADAS de verdade no período: criadas no período e marcadas
   # para a frente (due_at >= criação). Registro retroativo de histórico
   # (consulta que já tinha acontecido) não é agendamento novo.
+  # item 217: consulta LANÇADA (já estava marcada fora do sistema) não é agendamento
   def booked_scope(account, since, until_at)
-    account.tasks.where(task_type: 'consulta', created_at: since..until_at)
+    account.tasks.bookings.where(task_type: 'consulta', created_at: since..until_at)
            .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
   end
 

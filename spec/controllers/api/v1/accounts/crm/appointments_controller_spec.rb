@@ -16,10 +16,17 @@ RSpec.describe 'CEVICO Appointments feed', type: :request do
     account.tasks.create!(title: 'Consulta: Ana Souza', task_type: 'consulta', unit: 'paulista', creator: admin,
                           contact: contact, phone: contact.phone_number, due_at: tz.now + 3.days,
                           description: "Conversa ##{conversation.display_id} — agendado pela IA")
+    # remarcada HOJE (criada há 2 dias): no painel aparece só o acontecimento de hoje
     account.tasks.create!(title: 'Consulta: Bruno Lima', task_type: 'consulta', unit: 'tatuape', creator: admin,
-                          due_at: tz.now + 5.days, rescheduled_count: 1, description: 'marcada pela recepção')
+                          due_at: tz.now + 5.days, rescheduled_count: 1, description: 'marcada pela recepção',
+                          created_at: 2.days.ago)
     account.tasks.create!(title: 'Consulta: Carla Dias', task_type: 'consulta', unit: 'paulista', creator: admin,
                           due_at: tz.now + 6.days, canceled_at: Time.current)
+    # 📅 item 217: lançada (já estava marcada fora do sistema) e confirmada (SIM ao lembrete)
+    account.tasks.create!(title: 'Consulta: Hugo Neri', task_type: 'consulta', unit: 'tatuape', creator: admin,
+                          due_at: tz.now + 1.day, booking_kind: 'registro', created_at: 3.days.ago, updated_at: 3.days.ago)
+    account.tasks.create!(title: 'Consulta: Iara Luz', task_type: 'consulta', unit: 'paulista', creator: admin,
+                          due_at: tz.now + 1.day, confirmed_at: Time.current, created_at: 2.days.ago, updated_at: 2.days.ago)
     account.tasks.create!(title: 'Ligar para fornecedor', task_type: 'ligacao', creator: admin)
     # 🔪 item 208: cirurgia fica no trilho de cirurgias (track=cirurgias), fora do de consultas
     account.tasks.create!(title: 'Cirurgia: Eva Prado', task_type: 'cirurgia', unit: 'iop', creator: admin,
@@ -39,7 +46,12 @@ RSpec.describe 'CEVICO Appointments feed', type: :request do
     expect(response).to have_http_status(:success)
     body = response.parsed_body
     expect(body['mode']).to eq('registradas')
-    expect(body['counts']).to include('total' => 3, 'agendada' => 1, 'reagendada' => 1, 'cancelada' => 1, 'ia' => 1, 'equipe' => 2)
+    # item 217: cada ACONTECIMENTO do período é uma linha — Carla foi marcada E cancelada hoje (2 linhas)
+    expect(body['counts']).to include('total' => 5, 'agendada' => 2, 'reagendada' => 1, 'cancelada' => 1, 'confirmada' => 1,
+                                      'lancada' => 0, 'nao_confirmou' => 0, 'ia' => 1, 'equipe' => 3)
+    # a confirmação de hoje aparece como acontecimento; o lançamento de 3 dias atrás não (fora do período)
+    expect(body['rows'].find { |r| r['name'] == 'Iara Luz' }).to include('kind' => 'confirmada', 'task_id' => be_a(Integer))
+    expect(body['rows'].map { |r| r['name'] }).not_to include('Hugo Neri')
 
     ana = body['rows'].find { |r| r['name'] == 'Ana Souza' }
     expect(ana['kind']).to eq('agendada')
@@ -49,7 +61,7 @@ RSpec.describe 'CEVICO Appointments feed', type: :request do
     expect(ana['contact']).to include('id' => contact.id, 'phone' => '+5511999990000')
     expect(ana['contact']['labels']).to include('orcamento_catarata', 'consulta_agendada')
     expect(body['rows'].find { |r| r['name'] == 'Bruno Lima' }['kind']).to eq('reagendada')
-    expect(body['rows'].find { |r| r['name'] == 'Carla Dias' }['kind']).to eq('cancelada')
+    expect(body['rows'].select { |r| r['name'] == 'Carla Dias' }.map { |r| r['kind'] }).to contain_exactly('agendada', 'cancelada')
     expect(body['booking']).to include('labels_enabled' => true, 'can_edit' => false)
     expect(body['booking']['labels']).to include('created' => 'consulta_agendada')
   end

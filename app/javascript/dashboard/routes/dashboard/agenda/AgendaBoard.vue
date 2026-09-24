@@ -22,7 +22,7 @@ import CrmAPI from 'dashboard/api/crm';
 import {
   DOCTORS, MODALITIES, KINDS, KIND_BY_KEY, ONLINE_UNIT,
   kindFor, kindOf, kindVars, hexToRgbSpaced,
-  resolveWindows, resolveBlocked, resolveBlockedDays,
+  resolveWindows, resolveBlocked, resolveBlockedDays, resolveExamWindows,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
 
@@ -55,6 +55,10 @@ const pageVars = computed(() => kindVars(k.value));
 const isSurgeryMode = computed(() => kind.value === 'cirurgias');
 const isTele = computed(() => kind.value === 'teleconsultas');
 const isPhysical = computed(() => kind.value === 'consultas' || kind.value === 'exames');
+// 🔬 23/09: exames têm JANELA PRÓPRIA (seg–sex 08h–17h na Av. Paulista por
+// padrão) e cor só deles — não dividem mais os blocos dos médicos
+const isExam = computed(() => kind.value === 'exames');
+const EXAM_COLOR = KIND_BY_KEY.exames.color;
 const isSurgeryTask = t => t.task_type === 'cirurgia';
 const kindVarsOf = key => {
   const kk = KIND_BY_KEY[key];
@@ -76,6 +80,41 @@ const surgeryWindows = computed(() => resolveSurgeryWindows(crmSettings.value));
 const surgeryWindowsForDay = day => surgeryWindows.value.filter(w => w.dow === day.getDay());
 const surgeryLocationLabel = key =>
   surgeryLocations.value.find(l => l.key === key)?.label || key || 'Local a definir';
+
+// ── JANELA DE EXAMES (unidade + dia + horário + bloco) — 23/09 ──
+const examWindows = computed(() => resolveExamWindows(crmSettings.value));
+const examWindowsForDay = day =>
+  examWindows.value
+    .filter(w => w.dow === day.getDay())
+    .filter(w => !activeUnit.value || w.unit === activeUnit.value);
+const showExamWindowsModal = ref(false);
+const editExamWindows = ref([]);
+const isSavingExamWindows = ref(false);
+const openExamWindowsModal = () => {
+  editExamWindows.value = examWindows.value.map(w => ({ ...w }));
+  showExamWindowsModal.value = true;
+};
+const addExamWindow = () => {
+  editExamWindows.value.push({ dow: 1, unit: 'paulista', start: '08:00', end: '17:00', block: 30, exam: true });
+};
+const removeExamWindow = i => editExamWindows.value.splice(i, 1);
+const saveExamWindows = async () => {
+  if (isSavingExamWindows.value) return;
+  isSavingExamWindows.value = true;
+  try {
+    const clean = editExamWindows.value
+      .filter(w => w.start && w.end && w.unit)
+      .map(w => ({ dow: Number(w.dow), unit: w.unit, start: w.start, end: w.end, block: Number(w.block) || 30 }));
+    await CrmAPI.updateExamWindows(clean);
+    await store.dispatch('crm/fetchSettings');
+    showExamWindowsModal.value = false;
+    useAlert('Janela de exames salva!');
+  } catch {
+    useAlert('Erro ao salvar a janela de exames.');
+  } finally {
+    isSavingExamWindows.value = false;
+  }
+};
 
 const showSurgeryWindowsModal = ref(false);
 const editSurgeryWindows = ref([]);
@@ -115,7 +154,7 @@ const DEFAULT_DURATION = { consultas: 15, teleconsultas: 20, exames: 30, cirurgi
 const taskDuration = task => {
   const d = new Date(task.due_at);
   const mins = d.getHours() * 60 + d.getMinutes();
-  const list = isSurgeryTask(task) ? surgeryWindows.value : windows.value;
+  const list = isSurgeryTask(task) ? surgeryWindows.value : kindOf(task) === 'exames' ? examWindows.value : windows.value;
   const win = list.find(w => {
     if (w.dow !== d.getDay()) return false;
     if (task.unit && w.unit !== task.unit) return false;
@@ -123,7 +162,7 @@ const taskDuration = task => {
     const [eh, em] = w.end.split(':').map(Number);
     return mins >= sh * 60 + sm && mins < eh * 60 + em;
   });
-  if (win?.block && kindOf(task) !== 'exames') return Number(win.block);
+  if (win?.block) return Number(win.block);
   return DEFAULT_DURATION[kindOf(task)] || 15;
 };
 
@@ -272,6 +311,7 @@ const slotsFor = sharedSlotsFor;
 // filtro de unidade/médico); cirurgias = sala cirúrgica; teleconsultas = nenhuma
 const windowsForDay = day => {
   if (isSurgeryMode.value) return surgeryWindowsForDay(day);
+  if (isExam.value) return examWindowsForDay(day);
   if (isTele.value) return [];
   return windows.value
     .filter(w => w.dow === day.getDay())
@@ -290,7 +330,7 @@ const bandsForDay = day =>
     endMin: toMin(w.end),
     block: Number(w.block) || 15,
     color: winColor(w),
-    label: w.doctor ? doctorShort(w.doctor) : surgeryLocationLabel(w.unit),
+    label: w.doctor ? doctorShort(w.doctor) : w.exam ? 'Exames' : surgeryLocationLabel(w.unit),
     title: `${winTitle(w)} · ${w.start}–${w.end} (${winUnitLabel(w)}) · blocos de ${w.block} min`,
     unit: w.unit,
     doctor: w.doctor || '',
@@ -573,7 +613,8 @@ const unitOf = task => {
   return null;
 };
 // cor do balão: unidade (Tatuapé/Paulista), local da cirurgia, ou a cor do tipo
-const accentOf = task => unitOf(task)?.color || KIND_BY_KEY[kindOf(task)]?.color || '#2563EB';
+const accentOf = task =>
+  kindOf(task) === 'exames' ? EXAM_COLOR : unitOf(task)?.color || KIND_BY_KEY[kindOf(task)]?.color || '#2563EB';
 const evVars = task => ({ '--ev': accentOf(task), '--ev-rgb': hexToRgbSpaced(accentOf(task)) });
 const modalityOf = task =>
   MODALITIES.find(m => m.key === (task.modality || 'avaliacao')) || MODALITIES[0];
@@ -585,6 +626,7 @@ const kindLabelOf = task => KIND_BY_KEY[kindOf(task)]?.noun || 'consulta';
 // contra a sala cirúrgica; teleconsulta não ocupa bloco físico.
 const occWindows = computed(() => {
   if (isSurgeryMode.value) return surgeryWindows.value;
+  if (isExam.value) return examWindows.value.filter(w => !activeUnit.value || w.unit === activeUnit.value);
   return windows.value
     .filter(w => !activeUnit.value || w.unit === activeUnit.value)
     .filter(w => !activeDoctor.value || w.doctor === activeDoctor.value);
@@ -592,8 +634,11 @@ const occWindows = computed(() => {
 const occTasks = computed(() => {
   const base = liveTasks.value.filter(isAppointment);
   if (isSurgeryMode.value) return base.filter(isSurgeryTask);
+  if (isExam.value) {
+    return base.filter(t => kindOf(t) === 'exames').filter(t => !activeUnit.value || t.unit === activeUnit.value);
+  }
   return base
-    .filter(t => !isSurgeryTask(t) && t.unit !== ONLINE_UNIT)
+    .filter(t => !isSurgeryTask(t) && t.unit !== ONLINE_UNIT && kindOf(t) !== 'exames')
     .filter(t => !activeUnit.value || t.unit === activeUnit.value)
     .filter(t => !activeDoctor.value || t.doctor === activeDoctor.value);
 });
@@ -648,10 +693,15 @@ const dayOccupancy = day => {
 };
 
 // rótulos/cores da janela — médicos (consultas) OU sala cirúrgica (cirurgias)
-const winColor = win =>
-  win.doctor ? doctorColor(win.doctor) : surgeryLocations.value.find(l => l.key === win.unit)?.color || k.value.color;
-const winTitle = win => win.doctor || `Sala cirúrgica — ${surgeryLocationLabel(win.unit)}`;
-const winUnitLabel = win => (win.doctor ? UNITS[win.unit]?.label : surgeryLocationLabel(win.unit));
+const winColor = win => {
+  if (win.exam) return EXAM_COLOR;
+  return win.doctor ? doctorColor(win.doctor) : surgeryLocations.value.find(l => l.key === win.unit)?.color || k.value.color;
+};
+const winTitle = win => {
+  if (win.exam) return `Exames — ${UNITS[win.unit]?.label || win.unit}`;
+  return win.doctor || `Sala cirúrgica — ${surgeryLocationLabel(win.unit)}`;
+};
+const winUnitLabel = win => (win.doctor || win.exam ? UNITS[win.unit]?.label : surgeryLocationLabel(win.unit));
 const winVars = win => ({ '--w': winColor(win), '--w-rgb': hexToRgbSpaced(winColor(win)), '--w-deep': winColor(win) });
 const winOccupancy = (day, win) => {
   const slots = slotsFor(win).filter(s => !isBlocked(day, win, s));
@@ -741,9 +791,19 @@ const emptyForm = (day, prefill = {}) => {
     status: 'todo',
     canceled: false,
     description: prefill.description || '',
+    // 📅 item 217: consulta NOVA (conta como agendamento) × JÁ ESTAVA MARCADA
+    // fora do sistema (só lançando na Agenda — vira "Lançada", fora dos números)
+    booking_kind: prefill.booking_kind || 'agendamento',
   };
 };
 const form = ref(emptyForm());
+const BOOKING_KINDS = [
+  { key: 'agendamento', label: 'Nova (agendamento)', hint: 'Foi marcada agora, pelo robô ou pela equipe — conta em "Consultas agendadas".' },
+  { key: 'registro', label: 'Já estava marcada', hint: 'Veio do Oftalmofácil/telefone e só está sendo lançada na Agenda — aparece como "Lançada" e fica fora dos números de agendamento.' },
+];
+const bookingHint = computed(
+  () => (BOOKING_KINDS.find(b => b.key === form.value.booking_kind) || BOOKING_KINDS[0]).hint
+);
 const formKind = computed(() => kindFor(form.value.kind));
 const formVars = computed(() => kindVars(formKind.value));
 // trocar o tipo no modal (só ao criar): modalidade e unidade acompanham
@@ -801,6 +861,7 @@ const openEdit = task => {
     status: task.status === 'done' ? 'done' : 'todo',
     canceled: !!task.canceled_at,
     description: task.description ?? '',
+    booking_kind: task.booking_kind || 'agendamento',
   };
   showDeleteConfirm.value = false;
   showModal.value = true;
@@ -825,6 +886,7 @@ const save = async () => {
       description: form.value.description,
       task_type: fk === 'cirurgias' ? 'cirurgia' : 'consulta',
       priority: 'medium',
+      booking_kind: fk === 'cirurgias' ? null : form.value.booking_kind,
     };
     const noun = kindFor(fk).noun;
     if (editingTask.value) {
@@ -1212,7 +1274,16 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <span class="hidden md:inline">Imprimir</span>
             </button>
             <button
-              v-if="isPhysical"
+              v-if="isExam"
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              title="Dias e horários em que a clínica faz exames (padrão: segunda a sexta, 08h–17h, Av. Paulista)"
+              @click="openExamWindowsModal"
+            >
+              <span class="i-lucide-clock text-xs" />
+              <span class="hidden md:inline">Janela de exames</span>
+            </button>
+            <button
+              v-else-if="isPhysical"
               class="cv-btn cv-btn-ghost cv-btn-sm"
               title="Janelas de avaliação dos médicos"
               @click="showWindowsModal = true"
@@ -1399,7 +1470,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
             <p v-if="!isSurgeryMode" class="sm:col-span-3 text-[10px] text-n-slate-9 flex items-center gap-2.5 flex-wrap">
               <span v-for="m in OCC_MODALITIES" :key="m.key" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" :style="{ background: m.color }" />{{ m.label }}</span>
-              <span>· consultas e exames dividem os mesmos blocos dos médicos · cadeados fora da conta</span>
+              <span>· {{ isExam ? 'exames têm janela própria (seg–sex 08h–17h por padrão)' : 'exames têm janela própria, fora dos blocos dos médicos' }} · cadeados fora da conta</span>
             </p>
           </div>
         </div>
@@ -1760,6 +1831,15 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </div>
 
+          <!-- 📅 item 217: o que conta como agendamento -->
+          <div v-if="form.kind !== 'cirurgias'">
+            <span class="cv-label block mb-1.5">Esta {{ formKind.noun }} é</span>
+            <div class="cv-seg cv-seg-sm flex-wrap">
+              <button v-for="b in BOOKING_KINDS" :key="b.key" type="button" class="cv-seg-item" :class="form.booking_kind === b.key ? 'cv-seg-on' : ''" @click="form.booking_kind = b.key">{{ b.label }}</button>
+            </div>
+            <p class="text-[11px] text-n-slate-10 mt-1.5 leading-snug">{{ bookingHint }}</p>
+          </div>
+
           <div class="grid grid-cols-2 gap-3">
             <div>
               <span class="cv-label block mb-1">Telefone</span>
@@ -1883,6 +1963,46 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
         <div v-if="isAdmin" class="cv-modal-foot flex gap-2">
           <button class="cv-btn flex-1" :disabled="isSavingSurgeryWindows" @click="saveSurgeryWindows">{{ isSavingSurgeryWindows ? 'Salvando…' : 'Salvar janelas' }}</button>
           <button class="cv-btn cv-btn-ghost" @click="showSurgeryWindowsModal = false">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🔬 Modal: janela de exames (23/09) -->
+    <div v-if="showExamWindowsModal" class="fixed inset-0 z-[55] flex items-center justify-center bg-black/55 p-4" @click.self="showExamWindowsModal = false">
+      <div class="cv-modal cv-ag-pop w-full max-w-lg max-h-[90vh] flex flex-col" :style="kindVars('exames')">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="i-lucide-scan-eye text-xl" />
+          <div class="flex-1">
+            <h2 class="text-base font-bold">Janela de exames</h2>
+            <p class="text-[11px] opacity-85">dias, horários e unidade em que a clínica faz exames — separada da agenda dos médicos</p>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn" @click="showExamWindowsModal = false"><span class="i-lucide-x" /></button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-3">
+          <p class="text-xs text-n-slate-10">
+            Padrão da CEVICO: segunda a sexta, das 08h às 17h, no IOP da Av. Paulista, em blocos de 30 min. A ocupação e os blocos livres do trilho de exames vêm daqui; os exames aparecem na cor deles em toda a agenda.
+          </p>
+          <div v-if="!editExamWindows.length" class="cv-sub text-center py-6 text-n-slate-10 text-sm">Nenhuma janela — adicione a primeira.</div>
+          <div v-for="(w, i) in editExamWindows" :key="i" class="cv-sub grid grid-cols-2 sm:grid-cols-6 gap-2 items-center p-2.5">
+            <select v-model="w.dow" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+              <option v-for="(d, di) in WEEKDAY_FULL" :key="di" :value="di">{{ d }}</option>
+            </select>
+            <select v-model="w.unit" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+              <option v-for="(u, key) in UNITS" :key="key" :value="key">{{ u.label }}</option>
+            </select>
+            <input v-model="w.start" type="time" :disabled="!isAdmin" class="cv-input !h-8 text-xs" />
+            <input v-model="w.end" type="time" :disabled="!isAdmin" class="cv-input !h-8 text-xs" />
+            <select v-model="w.block" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+              <option :value="10">10 min</option><option :value="15">15 min</option><option :value="20">20 min</option>
+              <option :value="30">30 min</option><option :value="45">45 min</option><option :value="60">1 hora</option>
+            </select>
+            <button v-if="isAdmin" class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm justify-self-center" @click="removeExamWindow(i)" />
+          </div>
+          <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addExamWindow"><span class="i-lucide-plus text-xs" /> Adicionar janela</button>
+        </div>
+        <div v-if="isAdmin" class="cv-modal-foot flex gap-2">
+          <button class="cv-btn flex-1" :disabled="isSavingExamWindows" @click="saveExamWindows">{{ isSavingExamWindows ? 'Salvando…' : 'Salvar janela' }}</button>
+          <button class="cv-btn cv-btn-ghost" @click="showExamWindowsModal = false">Cancelar</button>
         </div>
       </div>
     </div>

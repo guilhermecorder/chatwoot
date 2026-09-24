@@ -2328,9 +2328,17 @@ const ALERT_KIND_META = {
     label: 'Agente cancelou a consulta',
     color: '#b91c1c',
   },
+  // item 217: paciente respondeu NÃO ao lembrete da véspera (consulta segue na Agenda)
+  nao_confirmou: {
+    icon: 'i-lucide-message-circle-x',
+    label: 'Respondeu NÃO ao lembrete da consulta',
+    color: '#db2777',
+  },
 };
 const alertKindMeta = alert => ALERT_KIND_META[alert?.kind] || null;
-const isAgentAlert = alert => String(alert?.kind || '').startsWith('agente_');
+const isAgentAlert = alert =>
+  String(alert?.kind || '').startsWith('agente_') ||
+  alert?.kind === 'nao_confirmou';
 const openAgendaFromAlert = alert =>
   router.push({
     name: 'agenda_board',

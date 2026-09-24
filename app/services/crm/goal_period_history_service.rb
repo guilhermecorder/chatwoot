@@ -83,7 +83,7 @@ class Crm::GoalPeriodHistoryService
                                  .where(crm_pipelines: { account_id: @account.id })
                                  .where(contacts: { created_at: from..to })
                                  .group(trunc.call('contacts.created_at')).count,
-      'appointments_booked' => @account.tasks.where(task_type: 'consulta', created_at: from..to)
+      'appointments_booked' => @account.tasks.bookings.where(task_type: 'consulta', created_at: from..to)
                                        .group(trunc.call('tasks.created_at')).count,
       'consultations_attended' => @account.tasks.where(task_type: 'consulta', attendance: 'attended', due_at: from..to)
                                           .group(trunc.call('tasks.due_at')).count,

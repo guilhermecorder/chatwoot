@@ -118,6 +118,31 @@ initializeChatwootEvents();
 initializeAnalyticsEvents();
 initalizeRouter();
 
+// 🩹 item 218 (23/09): depois de CADA deploy, as abas que ficaram abertas
+// ainda apontam para os arquivos da versão anterior (nome com hash). Um
+// componente carregado sob demanda (seletor de emoji, modais…) pede um
+// arquivo que não existe mais → 404 → "clica e não abre nada". O Vite avisa
+// pelo evento vite:preloadError; aqui a página recarrega UMA vez (guarda na
+// sessionStorage evita ciclo se a falha for outra) e volta com os arquivos
+// novos. Mesma receita da documentação do Vite.
+window.addEventListener('vite:preloadError', event => {
+  const KEY = 'cevico_preload_reload_at';
+  let last = 0;
+  try {
+    last = Number(window.sessionStorage.getItem(KEY) || 0);
+  } catch {
+    last = 0;
+  }
+  if (Date.now() - last < 60_000) return; // já recarregou há menos de 1 min
+  try {
+    window.sessionStorage.setItem(KEY, String(Date.now()));
+  } catch {
+    // sessionStorage indisponível: recarrega mesmo assim (uma vez por evento)
+  }
+  event.preventDefault();
+  window.location.reload();
+});
+
 window.onload = () => {
   app.mount('#app');
 };

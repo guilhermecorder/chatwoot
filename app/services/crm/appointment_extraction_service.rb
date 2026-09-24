@@ -54,9 +54,15 @@ class Crm::AppointmentExtractionService
         enum: %w[masculino feminino desconhecido],
         description: 'Sexo do PACIENTE da consulta, deduzido do nome ou do contexto ' \
                      '("minha mãe", "meu pai", "ele/ela"). Na dúvida, desconhecido.'
+      },
+      confirmacao: {
+        type: 'boolean',
+        description: 'true se esta conversa é a CONFIRMAÇÃO de uma consulta que JÁ ESTAVA marcada ' \
+                     '(a clínica manda "Confirmamos a avaliação… Você confirma a consulta?" / lembrete da ' \
+                     'véspera e o paciente responde SIM ou NÃO) — e NÃO um agendamento novo combinado aqui.'
       }
     },
-    required: %w[encontrado nome telefone data hora unidade problema medico observacoes valor_consulta reagendamento cancelamento sexo],
+    required: %w[encontrado nome telefone data hora unidade problema medico observacoes valor_consulta reagendamento cancelamento sexo confirmacao],
     additionalProperties: false
   }.freeze
 
@@ -95,6 +101,11 @@ class Crm::AppointmentExtractionService
       João → masculino) ou pelo contexto ("minha mãe", "meu avô", "ela"). Atenção:
       quem conversa pode estar marcando para OUTRA pessoa — o que vale é o
       paciente. Nome ambíguo e sem pistas no texto → desconhecido.
+    - confirmacao=true quando a conversa é só a CONFIRMAÇÃO de uma consulta que já
+      estava marcada (mensagem da clínica "Confirmamos a avaliação do(a) paciente…
+      Você confirma a consulta?" ou lembrete da véspera, com o paciente respondendo
+      SIM/NÃO). Nesse caso preencha data/hora da consulta confirmada normalmente,
+      mas o sistema NÃO conta como agendamento novo.
     - Não invente dados: campo não confirmado fica vazio.
   PROMPT
 
@@ -138,6 +149,7 @@ class Crm::AppointmentExtractionService
       reschedule: parsed['reagendamento'] == true,
       cancel: parsed['cancelamento'] == true,
       gender: %w[masculino feminino].include?(parsed['sexo']) ? parsed['sexo'] : nil,
+      confirmation: parsed['confirmacao'] == true,
       model: model
     }
   rescue Anthropic::Errors::AuthenticationError

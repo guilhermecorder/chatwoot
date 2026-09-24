@@ -1910,6 +1910,49 @@ const toggleAgent = async key => {
 const aiUsage = ref(null);
 const usageByAgent = key =>
   (aiUsage.value?.by_agent || []).find(r => r.key === key) || null;
+// 📅 23/09: caixa de seleção do DIA para análise — escolhido um dia, a lista
+// "por agente" e os totais passam a ser daquele dia (sem dia = 30 dias)
+const usageDay = ref('');
+const isLoadingUsageDay = ref(false);
+const pad2 = n => String(n).padStart(2, '0');
+const dayKey = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const usageDayLabel = computed(() => {
+  if (!usageDay.value) return '';
+  const [y, m, d] = usageDay.value.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const label = dt.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+});
+const usageRows = computed(() =>
+  usageDay.value && aiUsage.value?.day ? aiUsage.value.day.by_agent || [] : aiUsage.value?.by_agent || []
+);
+const usageDayTotals = computed(() => (usageDay.value ? aiUsage.value?.day?.totals || null : null));
+const loadUsage = async () => {
+  isLoadingUsageDay.value = true;
+  try {
+    const { data } = await CrmAPI.getAiUsage(usageDay.value ? { date: usageDay.value } : {});
+    aiUsage.value = data;
+  } catch {
+    // mantém o que já estava na tela
+  } finally {
+    isLoadingUsageDay.value = false;
+  }
+};
+const setUsageDay = value => {
+  usageDay.value = value || '';
+  loadUsage();
+};
+const yesterdayKey = computed(() => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return dayKey(d);
+});
+const shiftUsageDay = delta => {
+  const base = usageDay.value ? new Date(`${usageDay.value}T12:00:00`) : new Date();
+  base.setDate(base.getDate() + delta);
+  if (base > new Date()) return;
+  setUsageDay(dayKey(base));
+};
 // gastos que não são de um card de agente (Gemini): nome legível na lista
 const EXTRA_USAGE_TITLES = {
   media_reading: 'Leitura de áudio e imagem (Gemini)',
@@ -3910,6 +3953,36 @@ onUnmounted(() => {
               </div>
             </div>
 
+            <!-- 📅 caixa de seleção do dia (23/09): análise de um dia específico -->
+            <div class="flex items-center gap-2 flex-wrap mb-4">
+              <span class="cv-label">Analisar o dia</span>
+              <button class="cv-btn cv-btn-ghost cv-iconbtn" title="Dia anterior" @click="shiftUsageDay(-1)">
+                <span class="i-lucide-chevron-left text-sm" />
+              </button>
+              <input
+                :value="usageDay"
+                type="date"
+                :max="dayKey(new Date())"
+                class="cv-input !h-8 text-xs !w-auto"
+                title="Escolha um dia para ver o gasto e a lista por agente daquele dia"
+                @change="setUsageDay($event.target.value)"
+              />
+              <button class="cv-btn cv-btn-ghost cv-iconbtn" title="Dia seguinte" :disabled="!usageDay || usageDay >= dayKey(new Date())" @click="shiftUsageDay(1)">
+                <span class="i-lucide-chevron-right text-sm" />
+              </button>
+              <button class="cv-chip" :class="usageDay === dayKey(new Date()) ? 'cv-chip-on' : ''" @click="setUsageDay(dayKey(new Date()))">Hoje</button>
+              <button class="cv-chip" :class="usageDay === yesterdayKey ? 'cv-chip-on' : ''" @click="setUsageDay(yesterdayKey)">Ontem</button>
+              <button v-if="usageDay" class="cv-chip" @click="setUsageDay('')">
+                <span class="i-lucide-x text-[10px]" /> Voltar aos 30 dias
+              </button>
+              <span v-if="isLoadingUsageDay" class="i-lucide-loader-2 animate-spin text-xs text-n-slate-9" />
+              <span v-if="usageDayTotals" class="ml-auto text-xs text-n-slate-11">
+                <b class="text-n-slate-12 tabular-nums">{{ fmtUsd(usageDayTotals.cost_usd) }}</b>
+                em {{ usageDayLabel }} · {{ usageDayTotals.calls || 0 }} chamada(s) ·
+                {{ fmtTokens(usageDayTotals.input_tokens) }} entrada · {{ fmtTokens(usageDayTotals.output_tokens) }} saída
+              </span>
+            </div>
+
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
               <div
                 v-for="p in USAGE_PERIODS"
@@ -3928,10 +4001,10 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div v-if="aiUsage.by_agent?.length" class="space-y-1.5">
-              <p class="cv-label mb-1">Por agente (30 dias)</p>
+            <div v-if="usageRows.length" class="space-y-1.5">
+              <p class="cv-label mb-1">Por agente ({{ usageDay ? usageDayLabel : '30 dias' }})</p>
               <div
-                v-for="row in aiUsage.by_agent"
+                v-for="row in usageRows"
                 :key="row.key"
                 class="cv-row px-3 py-2 flex items-center gap-2 text-xs text-n-slate-11 flex-wrap"
               >
@@ -3955,8 +4028,7 @@ onUnmounted(() => {
               </div>
             </div>
             <p v-else class="text-xs text-n-slate-10">
-              Nenhuma análise registrada ainda — os custos aparecem aqui
-              conforme os agentes rodarem.
+              {{ usageDay ? `Nenhuma chamada à IA em ${usageDayLabel}.` : 'Nenhuma análise registrada ainda — os custos aparecem aqui conforme os agentes rodarem.' }}
             </p>
           </div>
 

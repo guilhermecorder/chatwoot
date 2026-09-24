@@ -146,6 +146,28 @@ export const resolveBlocked = settings =>
 
 // janelas da SALA CIRÚRGICA (trilho de cirurgias) — unit recebe a key do
 // local para reusar slotsFor/scanAgenda/blockKey sem mudança
+// 🔬 AGENDA DE EXAMES (23/09, pedido dele): os exames têm janela PRÓPRIA,
+// separada dos médicos — padrão: segunda a sexta, 08h–17h, no IOP da Av.
+// Paulista, blocos de 30 min. Editável em Agenda → trilho Exames → "Janela
+// de exames" (agenda_config.exam_windows).
+export const DEFAULT_EXAM_WINDOWS = [1, 2, 3, 4, 5].map(dow => ({
+  dow,
+  unit: 'paulista',
+  start: '08:00',
+  end: '17:00',
+  block: 30,
+}));
+export const resolveExamWindows = settings =>
+  Array.isArray(settings?.exam_windows) && settings.exam_windows.length
+    ? settings.exam_windows.map(w => ({
+        ...w,
+        dow: Number(w.dow),
+        block: Number(w.block) || 30,
+        unit: w.unit || 'paulista',
+        exam: true,
+      }))
+    : DEFAULT_EXAM_WINDOWS.map(w => ({ ...w, exam: true }));
+
 export const resolveSurgeryWindows = settings =>
   Array.isArray(settings?.surgery_windows)
     ? settings.surgery_windows.map(w => ({

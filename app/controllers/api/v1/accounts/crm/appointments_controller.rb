@@ -9,7 +9,18 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   include Crm::ResolvesPeriod
 
   LIMIT = 500
-  KINDS = %w[agendada reagendada cancelada].freeze
+  # 📅 item 217 (23/09): o que CONTA como o quê
+  #   agendada     = consulta NOVA criada no período (robô ou equipe)
+  #   lancada      = consulta que já estava marcada fora do sistema e foi só
+  #                  lançada na Agenda (booking_kind 'registro') — não é agendamento
+  #   reagendada   = mudou de dia/hora
+  #   confirmada   = paciente respondeu SIM ao lembrete da véspera
+  #   nao_confirmou= paciente respondeu NÃO ao lembrete (consulta segue na Agenda)
+  #   cancelada    = desmarcada
+  # No modo "registradas" cada ACONTECIMENTO do período vira uma linha (a
+  # mesma consulta pode ter sido marcada e confirmada no período).
+  KINDS = %w[agendada lancada reagendada confirmada nao_confirmou cancelada].freeze
+  EVENT_GAP = 5.seconds
   # quem marcou: rastro que o Secretário/Atendente deixa na descrição
   IA_MARKS = /pela IA|pelo Atendente|Atendente de Agendamento|Atendente P[oó]s|Secret[aá]rio da Agenda|Agente de Liga/i
   TZ = Crm::AgendaSlots::TZ
@@ -26,7 +37,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     mode = params[:mode] == 'consultas' ? 'consultas' : 'registradas'
     track = TRACKS.include?(params[:track].to_s) ? params[:track].to_s : 'consultas'
     tasks = base_scope(since, until_at, mode, track).includes(:contact, :assignee, :creator).limit(LIMIT).to_a
-    rows = build_rows(tasks)
+    rows = build_rows(tasks, mode, since, until_at)
     rows = rows.select { |r| r[:kind] == params[:kind] } if KINDS.include?(params[:kind].to_s)
     rows = rows.select { |r| r[:unit] == params[:unit] } if params[:unit].present?
     rows = rows.select { |r| r.dig(:conversation, :inbox_id) == params[:inbox_id].to_i } if params[:inbox_id].present?
@@ -50,6 +61,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     return scope.where(due_at: since..until_at).order(:due_at) if mode == 'consultas'
 
     scope.where('(tasks.created_at BETWEEN :s AND :u) OR (tasks.canceled_at BETWEEN :s AND :u) ' \
+                'OR (tasks.confirmed_at BETWEEN :s AND :u) OR (tasks.declined_at BETWEEN :s AND :u) ' \
                 'OR (tasks.rescheduled_count > 0 AND tasks.updated_at BETWEEN :s AND :u)', s: since, u: until_at)
          .order(updated_at: :desc)
   end
@@ -65,16 +77,43 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     end
   end
 
-  def build_rows(tasks) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def build_rows(tasks, mode, since, until_at) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     conversations = conversations_for(tasks)
     cards = cards_for(tasks)
-    tasks.map do |t|
-      contact = t.contact
-      conversation = conversations[t.id]
-      {
-        id: t.id,
-        kind: kind_of(t),
-        event_at: event_at(t),
+    rows = tasks.flat_map do |t|
+      events = mode == 'consultas' ? [[kind_of(t), event_at(t)]] : events_of(t, since, until_at)
+      events.map { |kind, at| row_for(t, kind, at, conversations[t.id], cards) }
+    end
+    mode == 'consultas' ? rows : rows.sort_by { |r| r[:event_at] }.reverse
+  end
+
+  # os acontecimentos DESTA consulta dentro do período (modo registradas)
+  def events_of(task, since, until_at) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    range = since..until_at
+    ev = []
+    ev << [task.registered_only? ? 'lancada' : 'agendada', task.created_at] if range.cover?(task.created_at)
+    ev << ['confirmada', task.confirmed_at] if task.confirmed_at && range.cover?(task.confirmed_at)
+    ev << ['nao_confirmou', task.declined_at] if task.declined_at && range.cover?(task.declined_at)
+    ev << ['cancelada', task.canceled_at] if task.canceled_at && range.cover?(task.canceled_at)
+    # reagendamento não tem carimbo próprio: vale o updated_at, desde que não
+    # seja só o rastro de outro acontecimento (criação/confirmação/cancelamento)
+    if task.rescheduled_count.to_i.positive? && range.cover?(task.updated_at) &&
+       [task.created_at, task.confirmed_at, task.declined_at, task.canceled_at].compact.none? { |t| (task.updated_at - t).abs < EVENT_GAP }
+      ev << ['reagendada', task.updated_at]
+    end
+    ev.presence || [[kind_of(task), event_at(task)]]
+  end
+
+  def row_for(t, kind, at, conversation, cards) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    contact = t.contact
+    {
+        id: "#{t.id}-#{kind}",
+        task_id: t.id,
+        booking_kind: t.booking_kind,
+        confirmed_at: t.confirmed_at,
+        declined_at: t.declined_at,
+        kind: kind,
+        event_at: at,
         due_at: t.due_at,
         unit: t.unit,
         unit_label: Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit,
@@ -100,8 +139,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
           inbox_name: conversation.inbox&.name, labels: conversation.cached_label_list_array
         },
         card: cards[t.contact_id]
-      }
-    end
+    }
   end
 
   def track_of(task)
@@ -112,9 +150,13 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     'consultas'
   end
 
+  # estado atual da consulta (modo "consultas do período": uma linha por consulta)
   def kind_of(task)
     return 'cancelada' if task.canceled_at.present?
     return 'reagendada' if task.rescheduled_count.to_i.positive?
+    return 'nao_confirmou' if task.declined_at.present?
+    return 'confirmada' if task.confirmed_at.present?
+    return 'lancada' if task.registered_only?
 
     'agendada'
   end
@@ -122,6 +164,8 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   def event_at(task)
     return task.canceled_at if task.canceled_at.present?
     return task.updated_at if task.rescheduled_count.to_i.positive?
+    return task.declined_at if task.declined_at.present?
+    return task.confirmed_at if task.confirmed_at.present?
 
     task.created_at
   end
@@ -161,15 +205,17 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     end
   end
 
+  # robô × equipe só entre o que foi MARCADO/REMARCADO/CANCELADO (confirmação
+  # é do paciente; lançamento é sempre da equipe)
+  BOOKING_KINDS_FOR_SOURCE = %w[agendada reagendada cancelada].freeze
+
   def counts(rows)
-    {
+    booked = rows.select { |r| BOOKING_KINDS_FOR_SOURCE.include?(r[:kind]) }
+    KINDS.to_h { |k| [k.to_sym, rows.count { |r| r[:kind] == k }] }.merge(
       total: rows.size,
-      agendada: rows.count { |r| r[:kind] == 'agendada' },
-      reagendada: rows.count { |r| r[:kind] == 'reagendada' },
-      cancelada: rows.count { |r| r[:kind] == 'cancelada' },
-      ia: rows.count { |r| r[:source] == 'ia' },
-      equipe: rows.count { |r| r[:source] == 'equipe' }
-    }
+      ia: booked.count { |r| r[:source] == 'ia' },
+      equipe: booked.count { |r| r[:source] == 'equipe' }
+    )
   end
 
   # configuração dos efeitos (etiquetas + colunas) + colunas disponíveis p/ o admin escolher

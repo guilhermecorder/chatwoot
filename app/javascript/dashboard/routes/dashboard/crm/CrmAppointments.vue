@@ -17,6 +17,7 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import CrmAPI from 'dashboard/api/crm';
+import TasksAPI from 'dashboard/api/tasks';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
@@ -75,6 +76,31 @@ const KIND_META = {
     tone: 'cv-red',
     icon: 'i-lucide-calendar-x',
   },
+  // 📅 item 217 (23/09): o que conta como o quê
+  confirmada: {
+    label: 'Confirmada',
+    verb: 'confirmou às',
+    color: '#2563eb',
+    light: '#60a5fa',
+    tone: 'cv-blue',
+    icon: 'i-lucide-calendar-check',
+  },
+  nao_confirmou: {
+    label: 'Não confirmou',
+    verb: 'respondeu NÃO às',
+    color: '#db2777',
+    light: '#f472b6',
+    tone: 'cv-pink',
+    icon: 'i-lucide-message-circle-x',
+  },
+  lancada: {
+    label: 'Lançada',
+    verb: 'lançou às',
+    color: '#64748b',
+    light: '#94a3b8',
+    tone: 'cv-slate',
+    icon: 'i-lucide-clipboard-list',
+  },
 };
 const kindMeta = row => KIND_META[row.kind] || KIND_META.agendada;
 const kindLabel = row => {
@@ -130,13 +156,53 @@ const KINDS = [
     countKey: 'reagendada',
   },
   {
+    key: 'confirmada',
+    label: 'Confirmadas',
+    tone: 'cv-blue',
+    countKey: 'confirmada',
+  },
+  {
+    key: 'nao_confirmou',
+    label: 'Não confirmou',
+    tone: 'cv-pink',
+    countKey: 'nao_confirmou',
+  },
+  {
     key: 'cancelada',
     label: 'Canceladas',
     tone: 'cv-red',
     countKey: 'cancelada',
   },
+  {
+    key: 'lancada',
+    label: 'Lançadas',
+    tone: 'cv-slate',
+    countKey: 'lancada',
+  },
 ];
 const kind = ref('');
+// 📅 item 217: o admin corrige o tipo de uma consulta ali mesmo — "Nova
+// (agendamento)" ↔ "Já estava marcada (lançada)". A lista recarrega.
+const isTogglingKind = ref(null);
+const canEditKind = computed(() => booking.value?.can_edit === true);
+const toggleBookingKind = async row => {
+  if (isTogglingKind.value) return;
+  isTogglingKind.value = row.task_id;
+  const next = row.booking_kind === 'registro' ? 'agendamento' : 'registro';
+  try {
+    await TasksAPI.update(row.task_id, { booking_kind: next });
+    useAlert(
+      next === 'registro'
+        ? 'Marcada como "já estava marcada": sai de Consultas agendadas.'
+        : 'Marcada como consulta nova: conta em Consultas agendadas.'
+    );
+    await fetchFeed({ quiet: true });
+  } catch {
+    useAlert('Não deu para mudar o tipo desta consulta.');
+  } finally {
+    isTogglingKind.value = null;
+  }
+};
 const SOURCES = [
   { key: 'ia', label: 'Robô', icon: 'i-lucide-bot', countKey: 'ia' },
   { key: 'equipe', label: 'Equipe', icon: 'i-lucide-user', countKey: 'equipe' },
@@ -448,7 +514,7 @@ onBeforeUnmount(() => {
       <CevicoHero
         :pal="pal"
         title="Agendamentos"
-        :subtitle="`${cap(nounPlural)} marcadas, remarcadas ou canceladas, quem marcou e por qual caixa; abra a conversa, o Espaço do Paciente ou ligue daqui`"
+        :subtitle="`${cap(nounPlural)} marcadas, remarcadas, confirmadas, canceladas ou lançadas, quem marcou e por qual caixa; abra a conversa, o Espaço do Paciente ou ligue daqui`"
         :icon="trackKind.icon"
         :hero-bg="trackKind.hero"
         :palette="false"
@@ -519,7 +585,7 @@ onBeforeUnmount(() => {
             {{
               mode === 'consultas'
                 ? `${nounPlural} cuja data cai no período escolhido`
-                : `o que aconteceu no período com as ${nounPlural}: marcações, remarcações e cancelamentos`
+                : `o que aconteceu no período com as ${nounPlural}: marcações, remarcações, confirmações, cancelamentos e lançamentos (consulta que já estava marcada fora do sistema)`
             }}
           </p>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -542,6 +608,24 @@ onBeforeUnmount(() => {
               compact
             />
             <DashKpi
+              label="Confirmadas"
+              :value="Number(counts.confirmada || 0)"
+              sub="responderam SIM ao lembrete"
+              :from="KIND_META.confirmada.color"
+              :to="KIND_META.confirmada.light"
+              glass
+              compact
+            />
+            <DashKpi
+              label="Não confirmou"
+              :value="Number(counts.nao_confirmou || 0)"
+              sub="responderam NÃO — ligar"
+              :from="KIND_META.nao_confirmou.color"
+              :to="KIND_META.nao_confirmou.light"
+              glass
+              compact
+            />
+            <DashKpi
               label="Canceladas"
               :value="Number(counts.cancelada || 0)"
               sub="desmarcadas no período"
@@ -551,9 +635,18 @@ onBeforeUnmount(() => {
               compact
             />
             <DashKpi
+              label="Lançadas"
+              :value="Number(counts.lancada || 0)"
+              sub="já estavam marcadas fora do sistema"
+              :from="KIND_META.lancada.color"
+              :to="KIND_META.lancada.light"
+              glass
+              compact
+            />
+            <DashKpi
               label="Pelo robô × pela equipe"
               :value="`${Number(counts.ia || 0)} × ${Number(counts.equipe || 0)}`"
-              :sub="`${iaShare}% registrados pelo robô`"
+              :sub="`${iaShare}% das marcações pelo robô`"
               :grad="kpiGrad()"
               glass
               compact
@@ -930,6 +1023,22 @@ onBeforeUnmount(() => {
                             · com {{ row.assignee.name }}
                           </template>
                         </span>
+                        <!-- 📅 item 217: o admin corrige "nova" ↔ "já estava marcada" -->
+                        <button
+                          v-if="canEditKind && (row.kind === 'agendada' || row.kind === 'lancada')"
+                          class="cv-chip"
+                          :class="row.booking_kind === 'registro' ? 'cv-slate' : 'cv-green'"
+                          :disabled="isTogglingKind === row.task_id"
+                          :title="
+                            row.booking_kind === 'registro'
+                              ? 'Está como já marcada fora do sistema (fora dos números). Clique para contar como consulta nova.'
+                              : 'Está contando como consulta nova. Clique se ela já estava marcada fora do sistema (só foi lançada).'
+                          "
+                          @click="toggleBookingKind(row)"
+                        >
+                          <span class="i-lucide-arrow-left-right text-[10px]" />
+                          {{ row.booking_kind === 'registro' ? 'contar como nova' : 'já estava marcada' }}
+                        </button>
                         <span
                           v-for="lb in shownLabels(row)"
                           :key="lb"

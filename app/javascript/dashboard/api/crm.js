@@ -283,8 +283,8 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/script_versions/${id}/restore`);
   }
 
-  getAiUsage() {
-    return axios.get(`${this.url}/settings/ai_usage`);
+  getAiUsage(params = {}) {
+    return axios.get(`${this.url}/settings/ai_usage`, { params });
   }
 
   updateAgendaWindows(windows) {
@@ -410,6 +410,13 @@ class CrmAPI extends ApiClient {
   updateSurgeryLocations(surgeryLocations) {
     return axios.post(`${this.url}/settings/update_agenda`, {
       surgery_locations: surgeryLocations,
+    });
+  }
+
+  // 🔬 janela de exames (unidade + dia + horário + bloco) — 23/09
+  updateExamWindows(examWindows) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      exam_windows: examWindows,
     });
   }
 

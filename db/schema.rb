@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_21_120000) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_23_230000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -2225,6 +2225,9 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_21_120000) do
     t.string "modality"
     t.bigint "contact_id"
     t.datetime "archived_at"
+    t.string "booking_kind"
+    t.datetime "confirmed_at"
+    t.datetime "declined_at"
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
     t.index ["account_id", "unit"], name: "index_tasks_on_account_id_and_unit"
     t.index ["account_id"], name: "index_tasks_on_account_id"

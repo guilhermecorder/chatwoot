@@ -61,10 +61,25 @@ import { LOCAL_STORAGE_KEYS } from 'dashboard/constants/localStorage';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
 import { LocalStorage } from 'shared/helpers/localStorage';
 import { emitter } from 'shared/helpers/mitt';
-const EmojiIconPicker = defineAsyncComponent(
-  () =>
-    import('dashboard/components-next/emoji-icon-picker/EmojiIconPicker.vue')
-);
+// 🩹 item 218 (23/09): o seletor de emoji é carregado sob demanda; depois de
+// um deploy o arquivo antigo some (404) e o clique não abria nada. Agora
+// tenta de novo 2x e, se continuar falhando, recarrega a página (que volta
+// com os arquivos novos) — a pessoa só perde o clique, não o texto digitado
+// (o rascunho fica salvo por conversa).
+const EmojiIconPicker = defineAsyncComponent({
+  loader: () =>
+    import('dashboard/components-next/emoji-icon-picker/EmojiIconPicker.vue'),
+  onError(error, retry, fail, attempts) {
+    if (attempts <= 2) {
+      retry();
+      return;
+    }
+    // eslint-disable-next-line no-console
+    console.warn('[CEVICO] seletor de emoji não carregou; recarregando', error);
+    window.location.reload();
+    fail();
+  },
+});
 
 export default {
   components: {

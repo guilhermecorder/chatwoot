@@ -6,7 +6,8 @@
 # Direcionado à pessoa que cuida da consulta (task.assignee_id); sem
 # responsável = todos veem.
 class Crm::AgentAlert
-  KINDS = %w[agente_remarcou agente_cancelou].freeze
+  # item 217: 'nao_confirmou' = paciente respondeu NÃO ao lembrete da véspera
+  KINDS = %w[agente_remarcou agente_cancelou nao_confirmou].freeze
   TTL = 24.hours
   MAX_ALERTS = 30
   TZ = Crm::AgendaSlots::TZ
@@ -65,8 +66,8 @@ class Crm::AgentAlert
       'contact_name' => patient_name,
       # telefone da CONSULTA (pode ser de um familiar), não o do WhatsApp que pediu
       'phone' => @task.phone.presence || contact&.phone_number,
-      'stage_name' => @kind == 'agente_cancelou' ? 'Consulta cancelada' : 'Consulta remarcada',
-      'motivo' => motivo, 'acao' => 'Conferir na Agenda',
+      'stage_name' => stage_name,
+      'motivo' => motivo, 'acao' => @kind == 'nao_confirmou' ? 'Ligar para o paciente' : 'Conferir na Agenda',
       'user_id' => @task.assignee_id, 'user_name' => @task.assignee&.name,
       'created_at' => Time.current.iso8601
     }
@@ -76,10 +77,20 @@ class Crm::AgentAlert
     @task.title.to_s.sub(/\AConsulta:\s*/i, '').strip.presence || 'Paciente'
   end
 
+  def stage_name
+    case @kind
+    when 'agente_cancelou' then 'Consulta cancelada'
+    when 'nao_confirmou' then 'Não confirmou a consulta'
+    else 'Consulta remarcada'
+    end
+  end
+
   def motivo
     at = @task.due_at.in_time_zone(TZ)
     when_text = "#{WEEKDAYS_SHORT[at.wday]} #{at.strftime('%d/%m %H:%M')} · #{Crm::AgendaSlots::UNIT_LABELS[@task.unit] || @task.unit}"
     agent = AGENT_NAMES[@agent_key] || @agent_key
+    return "#{patient_name} respondeu NÃO ao lembrete da consulta de #{when_text} — ligar para remarcar ou cancelar" if @kind == 'nao_confirmou'
+
     if @kind == 'agente_cancelou'
       "O #{agent} cancelou a consulta de #{patient_name} que era #{when_text}"
     else

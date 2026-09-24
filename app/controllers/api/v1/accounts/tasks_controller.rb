@@ -126,9 +126,12 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
   end
 
   def task_params
-    params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id, :unit,
-                  :phone, :procedure, :doctor, :modality, :attendance, :surgery_indication, :indicated_procedure,
-                  :contact_id)
+    attrs = params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id, :unit,
+                          :phone, :procedure, :doctor, :modality, :attendance, :surgery_indication, :indicated_procedure,
+                          :contact_id, :booking_kind)
+    # item 217: vazio = agendamento (padrão); só 'registro' muda a contagem
+    attrs[:booking_kind] = nil if attrs.key?(:booking_kind) && attrs[:booking_kind].blank?
+    attrs
   end
 
   # Conferência do dia → CRM: compareceu/faltou/cirurgia indicada movem o
