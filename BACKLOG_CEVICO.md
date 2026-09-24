@@ -6171,7 +6171,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 223. 🖨️📋 FOLHA DO DIA ENXUTA (espaço para anotações) + EXAMES NOVOS NA AGENDA + ROTEIRO: 3 MÉDICOS, TABELA DE EXAMES, CASOS ESPECIAIS (PDF das meninas) e VÍDEO DO MÉDICO (pedidos 24/09 manhã, prints + PDF) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, sem migration)
+## 223. 🖨️📋 FOLHA DO DIA ENXUTA (espaço para anotações) + EXAMES NOVOS NA AGENDA + ROTEIRO: 3 MÉDICOS, TABELA DE EXAMES, CASOS ESPECIAIS (PDF das meninas) e VÍDEO DO MÉDICO (pedidos 24/09 manhã, prints + PDF) — SUBIU 24/09 (commit 91991b9 no develop → imagem ghcr :91991b9, WEB+SIDEKIQ, sem migration; reversão :5f087ca)
 - IMPRESSÃO DO DIA (`AgendaBoard.vue` → `printDayList`): folha em PAISAGEM; saiu a coluna Unidade (vai
   pequenininha embaixo do médico, que aparece pelo nome curto); telefone estreito e formatado; observações em letra
   menor e em minúsculas (só rebaixa o que veio TODO em maiúscula, ex.: "Retorno de 30 dias PRK valor: R$0");
