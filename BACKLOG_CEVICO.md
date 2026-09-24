@@ -6171,7 +6171,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 224. 📅🔎 AGENDA: "+N" NO BLOCO DO MÉDICO ABRE A LISTA DE QUEM ESTÁ NO HORÁRIO + MODAL DE CONSULTA EM SEÇÕES (leitura em F / Gutenberg, mais contraste) (pedido 24/09 tarde, prints + referências de UX) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+## 224. 📅🔎 AGENDA: "+N" NO BLOCO DO MÉDICO ABRE A LISTA DE QUEM ESTÁ NO HORÁRIO + MODAL DE CONSULTA EM SEÇÕES (leitura em F / Gutenberg, mais contraste) (pedido 24/09 tarde, prints + referências de UX) — SUBIU 24/09 (commit c75f12e no develop → imagem ghcr :c75f12e, WEB só, sem migration; reversão :91991b9)
 - BUG (print dele): "08:30 Rony Maran… +2" abria só o primeiro paciente. Agora `openSlot` → se há mais de um no
   bloco, abre a lista "N pacientes no mesmo horário" (`slotPicker`: número, nome, problema, telefone, situação,
   seta) e o clique abre a edição daquele paciente; botão "Encaixar outro paciente neste horário" no fim.
