@@ -6171,7 +6171,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 222. 🗣️ MICRO-COMPROMISSO DEPOIS DO AGENDAMENTO — "Você pode me confirmar que vai avisar, caso não possa vir?" (pedido 23/09 noite, depois do 1º agendamento real "seguiu muito bem o roteiro") — CONSTRUÍDO, SEM commit, aguarda "pode subir" (SIDEKIQ+WEB, sem migration)
+## 222. 🗣️ MICRO-COMPROMISSO DEPOIS DO AGENDAMENTO — "Você pode me confirmar que vai avisar, caso não possa vir?" (pedido 23/09 noite, depois do 1º agendamento real "seguiu muito bem o roteiro") — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
 - Roteiro 1 e Roteiro 2 (passo F do agendamento): a confirmação passa a ser TRÊS balões — 1) "Deu certo! Consulta
   confirmada…", 2) PS1/PS2 + particular + exames + "Uma atendente confirma um dia antes / Qualquer dúvida, estou por
   aqui!", 3) balão separado, exatamente: "Você pode me confirmar que vai avisar, caso não possa vir?" (objetivo dele:
@@ -6180,17 +6180,17 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
 - Seções personalizadas do Roteiro em produção VENCEM o padrão: se a seção do agendamento estiver personalizada, é
   preciso apagá-la (volta ao padrão novo) ou colar o balão 3 nela.
 
-## 221. 💸📅 GASTO COM OS AGENTES — caixa de seleção do DIA para análise (pedido 23/09 noite, print) — CONSTRUÍDO, SEM commit, aguarda "pode subir" (WEB só)
+## 221. 💸📅 GASTO COM OS AGENTES — caixa de seleção do DIA para análise (pedido 23/09 noite, print) — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
 - `settings#ai_usage?date=AAAA-MM-DD` devolve `day: { date, totals, by_agent, by_model }` daquele dia (fuso SP), além
   dos períodos de sempre. Hub → Agentes de IA → bloco Gasto: linha "Analisar o dia" com ‹ › + campo de data (máx. hoje)
   + chips Hoje/Ontem + "Voltar aos 30 dias"; escolhido um dia, a lista "Por agente (dia)" e o total/chamadas/tokens
   passam a ser daquele dia; os 4 cards de período continuam.
 
-## 220. 🎨 MENU — gaveta Atendimento sem 3 ícones verdes seguidos (pedido 23/09 noite, print) — CONSTRUÍDO, SEM commit, aguarda "pode subir" (WEB só)
+## 220. 🎨 MENU — gaveta Atendimento sem 3 ícones verdes seguidos (pedido 23/09 noite, print) — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
 - Sidebar: cabeçalho Atendimento laranja (#ff9f0a), Conversas verde, Chamadas índigo (#5856d6), Agenda vermelho,
   Agendamentos azul — sequência laranja/verde/índigo/vermelho/azul.
 
-## 219. 🔬 AGENDA DE EXAMES com janela própria (seg–sex 08h–17h, IOP Av. Paulista) e cor só dos exames (pedido 23/09 noite, print) — CONSTRUÍDO, SEM commit, aguarda "pode subir" (WEB só)
+## 219. 🔬 AGENDA DE EXAMES com janela própria (seg–sex 08h–17h, IOP Av. Paulista) e cor só dos exames (pedido 23/09 noite, print) — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
 - PEDIDO: "paga a AGENDA DE EXAMES: é possível agendar das 08 às 17h no IOP da Av. Paulista, de segunda a sexta; por
   isso os exames devem ter uma cor específica só deles, para serem facilmente identificados na agenda". Até aqui os
   exames dividiam os blocos dos médicos (item 210).
@@ -6202,7 +6202,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   trilho Consultas deixa de contar exames na ocupação. Texto do rodapé da ocupação atualizado.
 - FORA: o Atendente de IA não marca exames (segue chamar_humano: "quer exame isolado com pedido médico").
 
-## 218. 🩹 SELETOR DE EMOJI "NÃO ABRE" para as atendentes (feedback 23/09 noite) — CONSTRUÍDO, SEM commit, aguarda "pode subir" (WEB só)
+## 218. 🩹 SELETOR DE EMOJI "NÃO ABRE" para as atendentes (feedback 23/09 noite) — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
 - PEDIDO: "as meninas estão clicando no botão de emoji, no ambiente de conversas, mas nem abre a janelinha
   pra elas (confirma se vc ajustou isso)". O item 206 (overflow) já estava em produção e o seletor abre
   normalmente no local (conferido no navegador, conversa com janela de 24h aberta).
@@ -6216,7 +6216,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   tenta carregar 2x e, se falhar, recarrega a página (rascunho por conversa fica salvo). Sem migration.
 - ORIENTAÇÃO para a equipe até subir: depois de cada deploy, dar F5 (recarregar) na aba do sistema.
 
-## 217. 📅 O QUE CONTA COMO AGENDAMENTO — marcada × remarcada × confirmada × não confirmou × cancelada × lançada (feedback 23/09 noite: "registrar os dados corretamente é de importância máxima") — CONSTRUÍDO 23/09 ("show bora"), SEM commit, aguarda "pode subir" (WEB+SIDEKIQ, COM migration → BACKUP antes)
+## 217. 📅 O QUE CONTA COMO AGENDAMENTO — marcada × remarcada × confirmada × não confirmou × cancelada × lançada (feedback 23/09 noite: "registrar os dados corretamente é de importância máxima") — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1) COM MIGRATION → BACKUP antes
 - PEDIDO: "ele agendou muitas consultas, não tenho certeza se esse número está correto; acho que ele contou as
   mensagens de confirmação de consulta… precisamos ajustar o que é agendamento, reagendamento e confirmação".
   Prints: Meu Painel "Consultas agendadas 31 (+182%)", "Taxa de agendamento 45,6%"; Agendamentos "Marcadas 27 ·
