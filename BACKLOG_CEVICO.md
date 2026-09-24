@@ -6171,6 +6171,37 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 224. 📅🔎 AGENDA: "+N" NO BLOCO DO MÉDICO ABRE A LISTA DE QUEM ESTÁ NO HORÁRIO + MODAL DE CONSULTA EM SEÇÕES (leitura em F / Gutenberg, mais contraste) (pedido 24/09 tarde, prints + referências de UX) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+- BUG (print dele): "08:30 Rony Maran… +2" abria só o primeiro paciente. Agora `openSlot` → se há mais de um no
+  bloco, abre a lista "N pacientes no mesmo horário" (`slotPicker`: número, nome, problema, telefone, situação,
+  seta) e o clique abre a edição daquele paciente; botão "Encaixar outro paciente neste horário" no fim.
+- MODAL criar/editar reorganizado pelos padrões de leitura que ele mandou (Gutenberg: área ótica primária no canto
+  superior esquerdo, terminal no inferior direito; padrão em F): cabeçalho = tipo pequeno + NOME DO PACIENTE em
+  destaque + resumo "qui 24/09 · 09:45 · Gustavo · Av. Paulista" (`formSummary`); corpo em 4 seções numeradas
+  (`.cv-ag-sec`, barra da cor do tipo à esquerda, título forte): 1 Paciente (nome, telefone) · 2 Quando e onde
+  (dia, hora, médico, unidade/local) · 3 Motivo (tipo de consulta, problema/exame/procedimento, "esta consulta é")
+  · 4 Situação (agendada/concluída/cancelada + observações); rodapé = Excluir discreto à esquerda, Cancelar e o
+  botão principal "Salvar consulta" no canto inferior direito. Rótulos com mais contraste (`.cv-ag-form .cv-label`
+  11px escuro), inputs brancos com borda na cor do tipo. CSS em `_cevico-agenda.scss`.
+- FOLHA DO DIA, 5ª passada (print da produção: "anotações ficou gigante e a folha saiu deitada"): volta para
+  RETRATO, sem a coluna Médico, Obs. com 1/3 da largura (58 px, 70 letras, 7,5 px), fontes um ponto menores,
+  "Pac. antigo / Rotina"; Anotações fica com o resto (~185 px). Conferido no navegador em 794 px de largura.
+- PAINEL DIREITO DA VISÃO DIA RECOLHÍVEL (print dele: "muito espaço em branco inútil à direita, agenda
+  apertada"): a grade 5/7 virou flex; botão "Recolher" no topo do painel (bloco do médico + conferência) → vira um
+  trilho de 52 px (botão para reabrir, chip de pendentes, rótulo vertical) e o calendário do dia ganha a largura
+  toda (balões lado a lado ficam largos, nomes inteiros); transição de largura 0,28 s; lembrado em
+  localStorage `cevico_agenda_day_panel`. No celular o trilho vira uma barra em cima. CSS `.cv-ag-side*` em
+  `_cevico-agenda.scss`.
+- 2ª passada ("esse tipo de recurso para regular o tamanho", print do puxador de janela do macOS): DIVISOR
+  ARRASTÁVEL entre o calendário e o painel (`.cv-ag-splitter`, pilula que acende na cor do tipo): arrasta =
+  regula a largura do painel (26–72 %, `dayPanelPct`, lembrado em `cevico_agenda_day_panel_pct`); arrastou até
+  quase o fim (<16 %) = recolhe; clique duplo = volta aos 58 %. Só no desktop (lg); pointer events, sem
+  transição durante o arrasto.
+- Verificação (modal/lista/painel): template e SCSS compilam no Vite; NÃO conferido visualmente (sem sessão logada no navegador da
+  sessão; Chrome da extensão desconectado) → conferir na conta 3 depois de subir, claro e escuro.
+- Fora desta rodada (ele: "vamos precisar aprimorar essa agenda nas funcionalidades"): aplicar os mesmos padrões
+  de leitura aos outros modais da Agenda (janelas dos médicos, sala cirúrgica, encaixe) e ao cartão de conferência.
+
 ## 223. 🖨️📋 FOLHA DO DIA ENXUTA (espaço para anotações) + EXAMES NOVOS NA AGENDA + ROTEIRO: 3 MÉDICOS, TABELA DE EXAMES, CASOS ESPECIAIS (PDF das meninas) e VÍDEO DO MÉDICO (pedidos 24/09 manhã, prints + PDF) — SUBIU 24/09 (commit 91991b9 no develop → imagem ghcr :91991b9, WEB+SIDEKIQ, sem migration; reversão :5f087ca)
 - IMPRESSÃO DO DIA (`AgendaBoard.vue` → `printDayList`): folha em PAISAGEM; saiu a coluna Unidade (vai
   pequenininha embaixo do médico, que aparece pelo nome curto); telefone estreito e formatado; observações em letra

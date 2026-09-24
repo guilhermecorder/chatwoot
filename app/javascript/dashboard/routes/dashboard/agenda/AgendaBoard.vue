@@ -565,6 +565,43 @@ const toggleWeekend = () => {
   hideWeekend.value = !hideWeekend.value;
   localStorage.setItem('cevico_agenda_hide_weekend', hideWeekend.value ? '1' : '0');
 };
+// 24/09 (pedido dele): a metade direita da visão Dia (bloco do médico +
+// conferência) RECOLHE, como a barra lateral; o calendário ganha a largura toda.
+const dayPanelOpen = ref(localStorage.getItem('cevico_agenda_day_panel') !== '0');
+const toggleDayPanel = () => {
+  dayPanelOpen.value = !dayPanelOpen.value;
+  localStorage.setItem('cevico_agenda_day_panel', dayPanelOpen.value ? '1' : '0');
+};
+// DIVISOR ARRASTÁVEL entre o calendário e o painel (o "puxador" de janela que
+// ele mostrou): arrasta para regular a largura; arrastou até quase o fim =
+// recolhe; clique duplo = volta ao padrão. Lembrado por pessoa.
+const DAY_PANEL_DEFAULT = 58;
+const dayPanelPct = ref(Number(localStorage.getItem('cevico_agenda_day_panel_pct')) || DAY_PANEL_DEFAULT);
+const dayLayoutEl = ref(null);
+const isSplitting = ref(false);
+const startSplit = e => {
+  const box = dayLayoutEl.value?.getBoundingClientRect();
+  if (!box) return;
+  e.preventDefault();
+  isSplitting.value = true;
+  const move = ev => {
+    const pct = ((box.right - ev.clientX) / box.width) * 100;
+    if (pct < 16) { dayPanelOpen.value = false; localStorage.setItem('cevico_agenda_day_panel', '0'); stop(); return; }
+    dayPanelPct.value = Math.round(Math.min(72, Math.max(26, pct)));
+  };
+  const stop = () => {
+    isSplitting.value = false;
+    localStorage.setItem('cevico_agenda_day_panel_pct', String(dayPanelPct.value));
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', stop);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', stop);
+};
+const resetSplit = () => {
+  dayPanelPct.value = DAY_PANEL_DEFAULT;
+  localStorage.setItem('cevico_agenda_day_panel_pct', String(DAY_PANEL_DEFAULT));
+};
 const weekDays = computed(() => {
   const start = startOfWeek(cursor.value, { weekStartsOn: 0 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
@@ -848,6 +885,36 @@ const openCreateFab = () => {
   openCreateOnDay(base);
 };
 
+// ── 24/09 (bug dele): o "+N" no bloco do médico abria só o primeiro
+// paciente. Agora abre a LISTA de quem está no horário; um clique = editar.
+const slotPicker = ref(null);
+const openSlot = (day, win, slot) => {
+  const list = tasksAtSlotAll(day, win, slot);
+  if (list.length <= 1) { if (list[0]) openEdit(list[0]); return; }
+  slotPicker.value = { day, win, slot, tasks: list };
+};
+const pickFromSlot = task => { slotPicker.value = null; openEdit(task); };
+const slotStatus = t => (t.canceled_at ? 'Cancelada' : t.status === 'done' ? 'Concluída' : 'Agendada');
+const encaixeFromSlot = () => {
+  const p = slotPicker.value; slotPicker.value = null;
+  if (p) openCreateSlot(p.day, p.win, p.slot);
+};
+// resumo no topo do modal (quando · médico · onde), para a leitura em F:
+// quem e quando ficam no canto superior esquerdo, a ação no inferior direito
+const formSummary = computed(() => {
+  const f = form.value;
+  const parts = [];
+  if (f.date) {
+    const d = new Date(`${f.date}T${f.time || '09:00'}`);
+    parts.push(d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }) + (f.time ? ` · ${f.time}` : ''));
+  }
+  if (f.doctor) parts.push(doctorShort(f.doctor));
+  if (f.unit === ONLINE_UNIT) parts.push('Online');
+  else if (UNITS[f.unit]) parts.push(UNITS[f.unit].label);
+  else if (f.kind === 'cirurgias' && f.unit) parts.push(surgeryLocations.value?.find(l => l.key === f.unit)?.label || '');
+  return parts.filter(Boolean).join(' · ');
+});
+
 const openEdit = task => {
   const d = new Date(task.due_at);
   const pad = n => String(n).padStart(2, '0');
@@ -1091,12 +1158,12 @@ const saveAttendanceStages = async () => {
 };
 
 // ── Imprimir a lista do dia (PDF pelo diálogo de impressão) ──
-// 24/09 (pedido dele): folha enxuta, com ESPAÇO PARA ANOTAÇÕES. Saiu a coluna
-// de unidade (vai pequenininha embaixo do médico), telefone estreito,
-// observações em letra menor e minúscula, Pagamento com as 4 opções para a
-// recepção marcar (dinheiro/pix/débito/crédito) e Presença unificada
-// (compareceu/faltou/cirurgia indicada) numa coluna só. Paisagem, para a
-// coluna de anotações ter largura de verdade.
+// 24/09 (pedido dele): folha enxuta, com ESPAÇO PARA ANOTAÇÕES. Saíram as
+// colunas de unidade e de médico, telefone estreito, observações em letra
+// menor e minúscula (1/3 da largura de antes), Pagamento com as 4 opções para a
+// recepção marcar (dinheiro/pix/débito/crédito), Presença unificada
+// (compareceu/faltou/cirurgia indicada), Origem do paciente, Anotações e Nota
+// fiscal. RETRATO (a paisagem "saiu deitada"): tudo cabe na lateral da folha.
 const printPhone = raw => {
   const d = String(raw || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
   if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
@@ -1106,7 +1173,7 @@ const printPhone = raw => {
 // "RETORNO DE 30 DIAS PRK VALOR: R$0" → "Retorno de 30 dias PRK valor: R$0"
 // (só rebaixa o que veio TODO em maiúscula; texto já normal fica como está)
 const printObs = raw => {
-  const t = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  const t = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 70);
   if (!t) return '';
   const letters = t.replace(/[^A-Za-zÀ-ÿ]/g, '');
   if (letters && letters === letters.toUpperCase()) {
@@ -1129,51 +1196,50 @@ const printDayList = () => {
       <td class="name"><b>${esc(displayName(t))}</b></td>
       <td class="phone">${esc(printPhone(t.phone))}</td>
       <td class="proc">${esc(t.procedure || '')}</td>
-      <td class="doc">${esc(doctorShort(t.doctor || '') || '')}<small>${esc(unitOf(t)?.label || '')}</small></td>
       <td class="obs">${esc(printObs(t.description))}</td>
       <td class="opts"><span><i></i>Dinheiro</span><span><i></i>Pix</span><span><i></i>Débito</span><span><i></i>Crédito</span></td>
       <td class="opts"><span><i></i>Compareceu</span><span><i></i>Faltou</span><span><i></i>Cirurgia indicada</span></td>
-      <td class="opts origin">${['Indicação', 'Site', 'WhatsApp', 'Médico parceiro', 'Paciente antigo / Rotina', 'Convênio'].map(o => `<span><i></i>${o} <em>R$ _____</em></span>`).join('')}</td>
+      <td class="opts origin">${['Indicação', 'Site', 'WhatsApp', 'Médico parceiro', 'Pac. antigo / Rotina', 'Convênio'].map(o => `<span><i></i>${o} <em>R$ ____</em></span>`).join('')}</td>
       <td class="notes"></td>
       <td class="opts"><span><i></i>Sim</span><span><i></i>Não</span></td>
     </tr>`).join('');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
     <style>
-      @page { size: A4 landscape; margin: 8mm 9mm; }
-      body { font-family: -apple-system, Inter, Arial, sans-serif; margin: 18px; color: #111; }
-      h1 { font-size: 15px; margin: 0 0 2px; }
-      p.sub { font-size: 10px; color: #555; margin: 0 0 10px; }
+      @page { size: A4 portrait; margin: 7mm 6mm; }
+      body { font-family: -apple-system, Inter, Arial, sans-serif; margin: 14px; color: #111; }
+      h1 { font-size: 14px; margin: 0 0 2px; }
+      p.sub { font-size: 9px; color: #555; margin: 0 0 8px; }
       /* cantos arredondados: a tabela precisa de border-spacing 0 (collapse não arredonda) */
-      table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 10.5px; table-layout: fixed;
+      table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.5px; table-layout: fixed;
               border: 1px solid #999; border-radius: 10px; overflow: hidden; }
-      th, td { border-right: 1px solid #999; border-bottom: 1px solid #999; padding: 4px 5px; text-align: left; vertical-align: top; }
+      th, td { border-right: 1px solid #999; border-bottom: 1px solid #999; padding: 3px 4px; text-align: left; vertical-align: top; }
       th:last-child, td:last-child { border-right: 0; }
       tbody tr:last-child td { border-bottom: 0; }
-      th { background: #eee; font-size: 9px; text-transform: uppercase; letter-spacing: .02em; }
+      th { background: #eee; font-size: 8px; text-transform: uppercase; letter-spacing: .02em; }
       /* bolinha para preencher à caneta */
-      i { display: inline-block; width: 9px; height: 9px; border: 1px solid #333; border-radius: 50%; vertical-align: -1px; margin-right: 4px; }
-      col.c-nf { width: 46px; } col.c-origin { width: 150px; }
+      i { display: inline-block; width: 8px; height: 8px; border: 1px solid #333; border-radius: 50%; vertical-align: -1px; margin-right: 3px; }
+      col.c-nf { width: 34px; } col.c-origin { width: 116px; }
       td.origin em { font-style: normal; color: #777; }
       td.origin span { white-space: nowrap; overflow: hidden; }
       td.time { font-weight: bold; white-space: nowrap; }
-      td.phone { font-size: 9.5px; white-space: nowrap; }
-      td.doc small { display: block; font-size: 8.5px; color: #666; }
-      td.obs { font-size: 8.5px; color: #444; line-height: 1.25; }
-      td.opts { font-size: 9px; white-space: nowrap; line-height: 1.45; }
+      td.phone { font-size: 8.5px; white-space: nowrap; }
+      td.obs { font-size: 7.5px; color: #444; line-height: 1.2; word-break: break-word; }
+      td.opts { font-size: 8px; white-space: nowrap; line-height: 1.4; }
       td.opts span { display: block; }
       tr { min-height: 44px; }
       td.notes { background: #fff; }
-      col.c-time { width: 42px; } col.c-name { width: 118px; } col.c-phone { width: 90px; }
-      col.c-proc { width: 82px; } col.c-doc { width: 74px; } col.c-obs { width: 122px; }
-      col.c-pay { width: 68px; } col.c-pres { width: 96px; } col.c-notes { width: auto; }
+      /* retrato (~718px úteis): tudo cabe na lateral da folha; anotações fica com o resto */
+      col.c-time { width: 34px; } col.c-name { width: 86px; } col.c-phone { width: 70px; }
+      col.c-proc { width: 56px; } col.c-obs { width: 58px; }
+      col.c-pay { width: 56px; } col.c-pres { width: 80px; } col.c-notes { width: auto; }
       @media print { body { margin: 0; } tr { page-break-inside: avoid; } }
     </style></head><body>
     <h1>${title}</h1>
     <p class="sub">${list.length} ${k.value.noun}(s) · Conferência do fim do dia: marque a forma de pagamento e a presença — depois registre no sistema (Agenda → visão Dia).</p>
     <table>
-    <colgroup><col class="c-time"><col class="c-name"><col class="c-phone"><col class="c-proc"><col class="c-doc"><col class="c-obs"><col class="c-pay"><col class="c-pres"><col class="c-origin"><col class="c-notes"><col class="c-nf"></colgroup>
+    <colgroup><col class="c-time"><col class="c-name"><col class="c-phone"><col class="c-proc"><col class="c-obs"><col class="c-pay"><col class="c-pres"><col class="c-origin"><col class="c-notes"><col class="c-nf"></colgroup>
     <thead><tr>
-      <th>Hora</th><th>Paciente</th><th>Telefone</th><th>${procHeader}</th><th>Médico</th><th>Observações</th>
+      <th>Hora</th><th>Paciente</th><th>Telefone</th><th>${procHeader}</th><th>Obs.</th>
       <th>Pagamento</th><th>Presença</th><th>Origem do paciente</th><th>Anotações</th><th>Nota fiscal</th>
     </tr></thead><tbody>${rows}</tbody></table>
     <script>window.onload = () => window.print();<\/script>
@@ -1655,9 +1721,9 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" @click="toggleBlockDay(cursor)">Reabrir dia</button>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <!-- linha do tempo do dia -->
-            <div class="lg:col-span-5">
+          <div ref="dayLayoutEl" class="flex flex-col lg:flex-row gap-4 items-start" :class="isSplitting ? 'select-none cursor-col-resize' : ''">
+            <!-- linha do tempo do dia (ganha a largura toda quando o painel recolhe) -->
+            <div class="flex-1 min-w-0 w-full">
               <div class="cv-ag-grid">
                 <div class="cv-ag-grid-head" style="grid-template-columns: 56px minmax(0, 1fr)">
                   <div />
@@ -1699,7 +1765,32 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <p class="text-[10px] text-n-slate-9 mt-2 text-center">cada balão ocupa o espaço do seu tempo · clique no vazio para agendar</p>
             </div>
 
-            <div class="lg:col-span-7 space-y-4">
+            <!-- painel do dia (recolhível): trilho fino quando fechado -->
+            <div v-if="!dayPanelOpen" class="cv-ag-side cv-ag-side-rail w-full lg:w-[52px] flex lg:flex-col items-center gap-2 p-1.5">
+              <button class="cv-ag-rail-btn" title="Mostrar o bloco do médico e a conferência do dia" @click="toggleDayPanel">
+                <span class="i-lucide-panel-right-open text-base" />
+              </button>
+              <span v-if="pendingCount" class="cv-chip cv-amber cv-ag-rail-vert" :title="`${pendingCount} pendente(s) na conferência`">{{ pendingCount }} pend.</span>
+              <span v-else-if="dayViewTasks.length" class="cv-chip cv-green" title="Conferência do dia completa">✓</span>
+              <span class="text-[10px] font-bold text-n-slate-10 cv-ag-rail-vert select-none">Bloco do médico · Conferência</span>
+            </div>
+            <!-- divisor arrastável (só no desktop) -->
+            <div
+              v-if="dayPanelOpen"
+              class="cv-ag-splitter hidden lg:flex"
+              title="Arraste para regular a largura · clique duplo volta ao padrão · arraste até o fim para recolher"
+              @pointerdown="startSplit"
+              @dblclick="resetSplit"
+            >
+              <span class="cv-ag-splitter-pill" />
+            </div>
+            <div v-if="dayPanelOpen" class="cv-ag-side w-full space-y-4" :class="isSplitting ? 'cv-ag-side-dragging' : ''" :style="{ '--side': dayPanelPct + '%' }">
+              <div class="flex items-center gap-2">
+                <span class="cv-label !mb-0">Bloco do médico · Conferência</span>
+                <button class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" title="Recolher este painel e dar a largura toda ao calendário" @click="toggleDayPanel">
+                  <span class="i-lucide-panel-right-close text-sm" /> <span class="hidden sm:inline">Recolher</span>
+                </button>
+              </div>
               <!-- janelas do dia: blocos de horário (livre / ocupado / cadeado) -->
               <div v-if="!isDayBlocked(cursor) && windowsForDay(cursor).length" class="space-y-3">
                 <div v-for="win in windowsForDay(cursor)" :key="(win.doctor || win.unit) + win.start" class="cv-sub p-4" :style="winVars(win)">
@@ -1720,7 +1811,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   <div class="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2">
                     <template v-for="slot in slotsFor(win)" :key="slot">
                       <span v-if="taskAtSlot(cursor, win, slot)" class="relative group min-w-0">
-                        <button class="cv-ag-slot cv-ag-slot-taken truncate" :title="tasksAtSlotAll(cursor, win, slot).map(displayName).join(' + ')" @click="openEdit(taskAtSlot(cursor, win, slot))">
+                        <button class="cv-ag-slot cv-ag-slot-taken truncate" :title="tasksAtSlotAll(cursor, win, slot).map(displayName).join(' + ')" @click="openSlot(cursor, win, slot)">
                           <span class="tabular-nums opacity-90">{{ slot }}</span>
                           <span class="truncate">{{ displayName(taskAtSlot(cursor, win, slot)) }}</span>
                           <span v-if="tasksAtSlotAll(cursor, win, slot).length > 1" class="font-extrabold">+{{ tasksAtSlotAll(cursor, win, slot).length - 1 }}</span>
@@ -1838,10 +1929,11 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
         <div class="cv-modal-head flex items-center gap-3">
           <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span :class="formKind.icon" class="text-base" /></span>
           <div class="flex-1 min-w-0">
-            <h2 class="text-base font-bold leading-tight">
+            <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">
               {{ editingTask ? `Editar ${formKind.noun}` : (formKind.key === 'cirurgias' ? 'Agendar cirurgia' : `${formKind.article === 'o' ? 'Novo' : 'Nova'} ${formKind.noun}`) }}
-            </h2>
-            <p class="text-[11px] opacity-85 truncate">{{ formKind.hint }}</p>
+            </p>
+            <h2 class="text-base font-bold leading-tight truncate">{{ form.name.trim() || (editingTask ? formKind.noun : 'Paciente') }}</h2>
+            <p class="text-[11px] opacity-90 truncate">{{ formSummary || formKind.hint }}</p>
           </div>
           <button v-if="editingTask?.contact_id" class="cv-glass-btn" title="Abrir o Espaço do Paciente" @click="openPatientSpace(editingTask)">
             <PatientSpaceIcon :size="16" /> <span class="hidden sm:inline">Paciente</span>
@@ -1849,7 +1941,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <button class="cv-glass-btn cv-iconbtn" @click="showModal = false"><span class="i-lucide-x" /></button>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-5 space-y-4">
+        <div class="flex-1 overflow-y-auto p-5 space-y-4 cv-ag-form">
           <!-- o TIPO (só ao criar) -->
           <div v-if="!editingTask">
             <span class="cv-label block mb-1.5">Tipo</span>
@@ -1869,109 +1961,155 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </div>
 
-          <div>
-            <span class="cv-label block mb-1">Nome do paciente *</span>
-            <input v-model="form.name" class="cv-input w-full" placeholder="Nome completo" />
-          </div>
 
-          <div v-if="form.kind === 'consultas'">
-            <span class="cv-label block mb-1.5">Tipo de consulta</span>
-            <div class="cv-seg cv-seg-sm">
-              <button v-for="m in consultaModalities" :key="m.key" type="button" class="cv-seg-item" :class="form.modality === m.key ? 'cv-seg-on' : ''" @click="form.modality = m.key">{{ m.label }}</button>
+          <!-- 1 · quem -->
+          <section class="cv-ag-sec">
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">1</span><div><h3>Paciente</h3><p>quem vem</p></div></header>
+            <div class="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-3">
+              <div>
+                <span class="cv-label block mb-1">Nome do paciente *</span>
+                <input v-model="form.name" class="cv-input w-full" placeholder="Nome completo" />
+              </div>
+              <div>
+                <span class="cv-label block mb-1">Telefone</span>
+                <input v-model="form.phone" class="cv-input w-full" placeholder="(11) 98888-7777" />
+              </div>
             </div>
-          </div>
+          </section>
 
-          <!-- 📅 item 217: o que conta como agendamento -->
-          <div v-if="form.kind !== 'cirurgias'">
-            <span class="cv-label block mb-1.5">Esta {{ formKind.noun }} é</span>
-            <div class="cv-seg cv-seg-sm flex-wrap">
-              <button v-for="b in BOOKING_KINDS" :key="b.key" type="button" class="cv-seg-item" :class="form.booking_kind === b.key ? 'cv-seg-on' : ''" @click="form.booking_kind = b.key">{{ b.label }}</button>
+          <!-- 2 · quando e onde -->
+          <section class="cv-ag-sec">
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">2</span><div><h3>Quando e onde</h3><p>dia, horário, médico e unidade</p></div></header>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <span class="cv-label block mb-1">Dia *</span>
+                <input v-model="form.date" type="date" class="cv-input w-full" />
+              </div>
+              <div>
+                <span class="cv-label block mb-1">Horário</span>
+                <input v-model="form.time" type="time" class="cv-input w-full" />
+              </div>
+              <div>
+                <span class="cv-label block mb-1">Médico</span>
+                <select v-model="form.doctor" class="cv-input w-full">
+                  <option value="">A definir</option>
+                  <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
+                </select>
+              </div>
+              <div v-if="form.kind === 'teleconsultas'">
+                <span class="cv-label block mb-1">Onde</span>
+                <div class="cv-input w-full flex items-center gap-2 text-sm text-n-slate-11"><span class="i-lucide-video text-sm" /> Online (vídeo)</div>
+              </div>
+              <div v-else-if="form.kind !== 'cirurgias'">
+                <span class="cv-label block mb-1">Unidade</span>
+                <select v-model="form.unit" class="cv-input w-full">
+                  <option v-for="(u, key) in UNITS" :key="key" :value="key">{{ u.label }}</option>
+                  <option value="">Agenda pessoal (sem unidade)</option>
+                </select>
+              </div>
+              <div v-else>
+                <span class="cv-label mb-1 flex items-center justify-between">
+                  Local da cirurgia
+                  <button v-if="isAdmin" type="button" class="normal-case tracking-normal font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">gerenciar</button>
+                </span>
+                <select v-model="form.unit" class="cv-input w-full">
+                  <option v-for="loc in surgeryLocations" :key="loc.key" :value="loc.key">{{ loc.label }}</option>
+                  <option value="">A definir</option>
+                </select>
+              </div>
             </div>
-            <p class="text-[11px] text-n-slate-10 mt-1.5 leading-snug">{{ bookingHint }}</p>
-          </div>
+          </section>
 
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <span class="cv-label block mb-1">Telefone</span>
-              <input v-model="form.phone" class="cv-input w-full" placeholder="(11) 98888-7777" />
+          <!-- 3 · motivo -->
+          <section class="cv-ag-sec">
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">3</span><div><h3>Motivo</h3><p>{{ form.kind === 'cirurgias' ? 'procedimento' : form.kind === 'exames' ? 'exame e origem do agendamento' : 'tipo, problema e origem do agendamento' }}</p></div></header>
+            <div class="space-y-3">
+              <div v-if="form.kind === 'consultas'">
+                <span class="cv-label block mb-1.5">Tipo de consulta</span>
+                <div class="cv-seg cv-seg-sm">
+                  <button v-for="m in consultaModalities" :key="m.key" type="button" class="cv-seg-item" :class="form.modality === m.key ? 'cv-seg-on' : ''" @click="form.modality = m.key">{{ m.label }}</button>
+                </div>
+              </div>
+              <div>
+                <span class="cv-label block mb-1">{{ procedureLabel }}</span>
+                <input v-model="form.procedure" list="agenda-procedimentos" class="cv-input w-full" :placeholder="form.kind === 'exames' ? 'Pentacam, OCT…' : form.kind === 'cirurgias' ? 'Catarata, PRK…' : 'Catarata, refrativa…'" />
+                <datalist id="agenda-procedimentos">
+                  <option v-for="p in procedureOptions" :key="p" :value="p" />
+                </datalist>
+              </div>
+              <!-- 📅 item 217: o que conta como agendamento -->
+              <div v-if="form.kind !== 'cirurgias'">
+                <span class="cv-label block mb-1.5">Esta {{ formKind.noun }} é</span>
+                <div class="cv-seg cv-seg-sm flex-wrap">
+                  <button v-for="b in BOOKING_KINDS" :key="b.key" type="button" class="cv-seg-item" :class="form.booking_kind === b.key ? 'cv-seg-on' : ''" @click="form.booking_kind = b.key">{{ b.label }}</button>
+                </div>
+                <p class="text-[11px] text-n-slate-11 mt-1.5 leading-snug">{{ bookingHint }}</p>
+              </div>
             </div>
-            <div>
-              <span class="cv-label block mb-1">{{ procedureLabel }}</span>
-              <input v-model="form.procedure" list="agenda-procedimentos" class="cv-input w-full" :placeholder="form.kind === 'exames' ? 'Pentacam, OCT…' : form.kind === 'cirurgias' ? 'Catarata, PRK…' : 'Catarata, refrativa…'" />
-              <datalist id="agenda-procedimentos">
-                <option v-for="p in procedureOptions" :key="p" :value="p" />
-              </datalist>
-            </div>
-            <div>
-              <span class="cv-label block mb-1">Dia *</span>
-              <input v-model="form.date" type="date" class="cv-input w-full" />
-            </div>
-            <div>
-              <span class="cv-label block mb-1">Horário</span>
-              <input v-model="form.time" type="time" class="cv-input w-full" />
-            </div>
-            <div>
-              <span class="cv-label block mb-1">Médico</span>
-              <select v-model="form.doctor" class="cv-input w-full">
-                <option value="">A definir</option>
-                <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
-              </select>
-            </div>
-            <div v-if="form.kind === 'teleconsultas'">
-              <span class="cv-label block mb-1">Onde</span>
-              <div class="cv-input w-full flex items-center gap-2 text-sm text-n-slate-11"><span class="i-lucide-video text-sm" /> Online (vídeo)</div>
-            </div>
-            <div v-else-if="form.kind !== 'cirurgias'">
-              <span class="cv-label block mb-1">Unidade</span>
-              <select v-model="form.unit" class="cv-input w-full">
-                <option v-for="(u, key) in UNITS" :key="key" :value="key">{{ u.label }}</option>
-                <option value="">Agenda pessoal (sem unidade)</option>
-              </select>
-            </div>
-            <div v-else>
-              <span class="cv-label mb-1 flex items-center justify-between">
-                Local da cirurgia
-                <button v-if="isAdmin" type="button" class="normal-case tracking-normal font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">gerenciar</button>
-              </span>
-              <select v-model="form.unit" class="cv-input w-full">
-                <option v-for="loc in surgeryLocations" :key="loc.key" :value="loc.key">{{ loc.label }}</option>
-                <option value="">A definir</option>
-              </select>
-            </div>
-          </div>
+          </section>
 
-          <div>
-            <span class="cv-label block mb-1.5">Situação</span>
-            <div class="cv-seg cv-seg-sm">
-              <button type="button" class="cv-seg-item" :class="form.status === 'todo' && !form.canceled ? 'cv-seg-on' : ''" @click="form.status = 'todo'; form.canceled = false">Agendada</button>
-              <button type="button" class="cv-seg-item" :class="form.status === 'done' && !form.canceled ? 'cv-seg-on' : ''" style="--cv-grad: linear-gradient(135deg, #047857, #10B981); --cv-deep-rgb: 6 95 70" @click="form.status = 'done'; form.canceled = false">Concluída</button>
-              <button v-if="editingTask" type="button" class="cv-seg-item" :class="form.canceled ? 'cv-seg-on' : ''" style="--cv-grad: linear-gradient(135deg, #991B1B, #EF4444); --cv-deep-rgb: 153 27 27" @click="form.canceled = !form.canceled">Cancelada</button>
+          <!-- 4 · situação -->
+          <section class="cv-ag-sec">
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">4</span><div><h3>Situação</h3><p>como está e o que anotar</p></div></header>
+            <div class="space-y-3">
+              <div>
+                <div class="cv-seg cv-seg-sm">
+                  <button type="button" class="cv-seg-item" :class="form.status === 'todo' && !form.canceled ? 'cv-seg-on' : ''" @click="form.status = 'todo'; form.canceled = false">Agendada</button>
+                  <button type="button" class="cv-seg-item" :class="form.status === 'done' && !form.canceled ? 'cv-seg-on' : ''" style="--cv-grad: linear-gradient(135deg, #047857, #10B981); --cv-deep-rgb: 6 95 70" @click="form.status = 'done'; form.canceled = false">Concluída</button>
+                  <button v-if="editingTask" type="button" class="cv-seg-item" :class="form.canceled ? 'cv-seg-on' : ''" style="--cv-grad: linear-gradient(135deg, #991B1B, #EF4444); --cv-deep-rgb: 153 27 27" @click="form.canceled = !form.canceled">Cancelada</button>
+                </div>
+                <p v-if="form.canceled" class="text-[10px] text-red-500 mt-1">Sai do calendário e conta no indicador de canceladas.</p>
+              </div>
+              <div>
+                <span class="cv-label block mb-1">Observações</span>
+                <textarea v-model="form.description" rows="2" class="cv-input w-full resize-none" placeholder="Convênio, pedido especial, retorno..." />
+              </div>
             </div>
-            <p v-if="form.canceled" class="text-[10px] text-red-500 mt-1">Sai do calendário e conta no indicador de canceladas.</p>
-          </div>
-
-          <div>
-            <span class="cv-label block mb-1">Observações</span>
-            <textarea v-model="form.description" rows="2" class="cv-input w-full resize-none" placeholder="Convênio, pedido especial, retorno..." />
-          </div>
+          </section>
         </div>
 
-        <div class="cv-modal-foot space-y-2">
-          <div class="flex gap-2">
-            <button class="cv-btn cv-btn-lg flex-1" :disabled="!form.name.trim() || !form.date || isSaving" @click="save">
-              <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
-              {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
-            </button>
-            <button class="cv-btn cv-btn-ghost cv-btn-lg" @click="showModal = false">Cancelar</button>
-          </div>
-          <div v-if="editingTask">
-            <button v-if="!showDeleteConfirm" class="w-full py-1 text-xs text-red-500 hover:text-red-600" @click="showDeleteConfirm = true">Excluir {{ formKind.noun }}</button>
+        <!-- rodapé: excluir discreto à esquerda, ação principal no canto inferior DIREITO (área terminal da leitura) -->
+        <div class="cv-modal-foot flex items-center gap-2 flex-wrap">
+          <div v-if="editingTask" class="mr-auto">
+            <button v-if="!showDeleteConfirm" class="text-xs text-n-slate-11 hover:text-red-600 flex items-center gap-1" @click="showDeleteConfirm = true"><span class="i-lucide-trash-2 text-xs" /> Excluir</button>
             <div v-else class="flex items-center gap-2">
-              <span class="text-xs text-n-slate-11 flex-1">Excluir este agendamento?</span>
+              <span class="text-xs text-n-slate-11">Excluir este agendamento?</span>
               <button class="cv-btn cv-btn-sm cv-red" @click="removeTask">Excluir</button>
-              <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="showDeleteConfirm = false">Cancelar</button>
+              <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="showDeleteConfirm = false">Não</button>
             </div>
           </div>
+          <button class="cv-btn cv-btn-ghost cv-btn-lg" :class="editingTask ? '' : 'ml-auto'" @click="showModal = false">Cancelar</button>
+          <button class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!form.name.trim() || !form.date || isSaving" @click="save">
+            <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
+            {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Quem está neste horário (o "+N" do bloco do médico) ══ -->
+    <div v-if="slotPicker" class="fixed inset-0 z-[52] flex items-center justify-center bg-black/55 p-4" @click.self="slotPicker = null">
+      <div class="cv-modal cv-ag-pop w-full max-w-sm flex flex-col" :style="kindVars(kind)">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-users text-base" /></span>
+          <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">{{ slotPicker.tasks.length }} pacientes no mesmo horário</p>
+            <h2 class="text-base font-bold leading-tight">{{ slotPicker.slot }} · {{ winTitle(slotPicker.win) }}</h2>
+            <p class="text-[11px] opacity-90 truncate">{{ slotPicker.day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' }) }} · clique para abrir</p>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn" @click="slotPicker = null"><span class="i-lucide-x" /></button>
+        </div>
+        <div class="p-4 space-y-2">
+          <button v-for="(t, i) in slotPicker.tasks" :key="t.id" class="cv-ag-slotrow" @click="pickFromSlot(t)">
+            <span class="cv-ag-num">{{ i + 1 }}</span>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-bold text-n-slate-12 truncate">{{ displayName(t) }}</p>
+              <p class="text-xs text-n-slate-11 truncate">{{ t.procedure || 'sem problema informado' }} · {{ t.phone || 'sem telefone' }}</p>
+            </div>
+            <span class="cv-chip" :class="t.status === 'done' ? 'cv-green' : t.canceled_at ? 'cv-red' : ''">{{ slotStatus(t) }}</span>
+            <span class="i-lucide-chevron-right text-n-slate-10" />
+          </button>
+          <button class="cv-btn cv-btn-ghost w-full mt-1" @click="encaixeFromSlot"><span class="i-lucide-plus text-sm" /> Encaixar outro paciente neste horário</button>
         </div>
       </div>
     </div>

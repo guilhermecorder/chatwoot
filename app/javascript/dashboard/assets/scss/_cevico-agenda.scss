@@ -542,3 +542,102 @@
   background: #fff;
   box-shadow: 0 8px 18px -8px rgba(0, 0, 0, 0.45);
 }
+
+/* ── 24/09: modal de consulta com SEÇÕES numeradas (leitura em F / Gutenberg:
+   quem e quando no canto superior esquerdo, ação principal no inferior
+   direito) e mais contraste nos rótulos; lista "quem está neste horário" ── */
+.cv-page .cv-ag-form .cv-label { font-size: 11px; letter-spacing: 0.04em; color: #1f2937; opacity: 1; }
+.dark .cv-page .cv-ag-form .cv-label { color: #fff; opacity: 0.85; }
+.cv-page .cv-ag-form .cv-input { background: #fff; border-color: rgb(var(--cv-rgb) / 0.35); }
+.dark .cv-page .cv-ag-form .cv-input { background: rgba(255, 255, 255, 0.06); }
+.cv-page .cv-ag-sec {
+  border-radius: 16px;
+  padding: 12px 14px 14px;
+  background: rgb(var(--cv-rgb) / 0.05);
+  border: 1px solid rgb(var(--cv-rgb) / 0.18);
+  border-left: 4px solid var(--cv);
+}
+.dark .cv-page .cv-ag-sec { background: rgba(255, 255, 255, 0.04); border-color: rgb(var(--cv-rgb) / 0.3); border-left-color: var(--cv); }
+.cv-page .cv-ag-sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.cv-page .cv-ag-sec-head h3 { font-size: 13px; font-weight: 800; line-height: 1.1; color: var(--cv-deep); }
+.dark .cv-page .cv-ag-sec-head h3 { color: #fff; }
+.cv-page .cv-ag-sec-head p { font-size: 11px; line-height: 1.2; color: #64748b; margin-top: 1px; }
+.dark .cv-page .cv-ag-sec-head p { color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-ag-num {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--cv-grad);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px -2px rgb(var(--cv-deep-rgb) / 0.6);
+}
+.cv-page .cv-ag-slotrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgb(var(--cv-rgb) / 0.2);
+  background: rgb(var(--cv-rgb) / 0.05);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.cv-page .cv-ag-slotrow:hover { border-color: var(--cv); background: rgb(var(--cv-rgb) / 0.1); }
+.dark .cv-page .cv-ag-slotrow { background: rgba(255, 255, 255, 0.04); }
+
+/* ── 24/09: painel direito da visão Dia recolhível (como a barra lateral) ── */
+.cv-page .cv-ag-side { flex-shrink: 0; transition: width 0.28s ease; }
+@media (min-width: 1024px) { .cv-page .cv-ag-side { width: var(--side, 58%); } }
+.cv-page .cv-ag-side-dragging { transition: none; }
+/* o puxador entre as duas metades */
+.cv-page .cv-ag-splitter {
+  flex: 0 0 14px;
+  margin: 0 -5px;
+  align-self: stretch;
+  min-height: 240px;
+  cursor: col-resize;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  touch-action: none;
+}
+.cv-page .cv-ag-splitter-pill {
+  width: 4px;
+  height: 48px;
+  border-radius: 9999px;
+  background: rgb(var(--cv-rgb) / 0.35);
+  transition: background 0.15s ease, height 0.15s ease;
+}
+.cv-page .cv-ag-splitter:hover .cv-ag-splitter-pill, .cv-page .cv-ag-splitter:active .cv-ag-splitter-pill {
+  background: var(--cv);
+  height: 72px;
+}
+.cv-page .cv-ag-side-rail {
+  border-radius: 16px;
+  background: rgb(var(--cv-rgb) / 0.06);
+  border: 1px dashed rgb(var(--cv-rgb) / 0.3);
+  position: sticky;
+  top: 8px;
+}
+.dark .cv-page .cv-ag-side-rail { background: rgba(255, 255, 255, 0.04); }
+.cv-page .cv-ag-rail-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: var(--cv-grad);
+  box-shadow: 0 6px 14px -8px rgb(var(--cv-deep-rgb) / 0.7);
+}
+.cv-page .cv-ag-rail-btn:hover { filter: brightness(1.06); }
+@media (min-width: 1024px) { .cv-page .cv-ag-rail-vert { writing-mode: vertical-rl; margin-top: 6px; } }
+@media (prefers-reduced-motion: reduce) { .cv-page .cv-ag-side { transition: none; } }
