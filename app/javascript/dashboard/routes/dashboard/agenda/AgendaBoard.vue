@@ -232,9 +232,13 @@ const PROBLEMAS = [
   'Catarata', 'Refrativa', 'Ceratocone', 'Lentes Fácicas',
   'Consulta geral', 'Pós-operatório', 'Plástica ocular', 'Retorno de exames',
 ];
+// 🔬 24/09 (pedido dele): OCT separado por tipo, curva tensional e os dois
+// procedimentos a laser da quarta 14h (iridotomia e capsulotomia) entram na lista
 const EXAMES = [
-  'Pentacam', 'Topografia', 'OCT', 'Biometria', 'Paquimetria', 'Campo visual',
+  'Pentacam', 'Topografia', 'OCT Córnea', 'OCT Retina', 'OCT Nervo', 'OCT Segmento',
+  'Biometria', 'Paquimetria', 'Campo visual', 'Curva tensional diária',
   'Retinografia', 'Microscopia especular', 'Mapeamento de retina', 'Aberrometria',
+  'Iridotomia', 'Capsulotomia',
 ];
 const PROCEDURES = [
   'Catarata', 'Refrativa PRK', 'Refrativa Lasik', 'Lente Fácica',
@@ -1087,6 +1091,32 @@ const saveAttendanceStages = async () => {
 };
 
 // ── Imprimir a lista do dia (PDF pelo diálogo de impressão) ──
+// 24/09 (pedido dele): folha enxuta, com ESPAÇO PARA ANOTAÇÕES. Saiu a coluna
+// de unidade (vai pequenininha embaixo do médico), telefone estreito,
+// observações em letra menor e minúscula, Pagamento com as 4 opções para a
+// recepção marcar (dinheiro/pix/débito/crédito) e Presença unificada
+// (compareceu/faltou/cirurgia indicada) numa coluna só. Paisagem, para a
+// coluna de anotações ter largura de verdade.
+const printPhone = raw => {
+  const d = String(raw || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return String(raw || '');
+};
+// "RETORNO DE 30 DIAS PRK VALOR: R$0" → "Retorno de 30 dias PRK valor: R$0"
+// (só rebaixa o que veio TODO em maiúscula; texto já normal fica como está)
+const printObs = raw => {
+  const t = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  if (!t) return '';
+  const letters = t.replace(/[^A-Za-zÀ-ÿ]/g, '');
+  if (letters && letters === letters.toUpperCase()) {
+    const low = t.toLowerCase();
+    // siglas que precisam continuar em maiúscula
+    const fixed = low.replace(/\b(prk|lasik|oct|yag|iol|icl|lio|r\$)/g, m => m.toUpperCase());
+    return fixed.charAt(0).toUpperCase() + fixed.slice(1);
+  }
+  return t;
+};
 const printDayList = () => {
   const day = cursor.value;
   const list = [...dayViewTasks.value].sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
@@ -1096,35 +1126,55 @@ const printDayList = () => {
   const rows = list.map(t => `
     <tr>
       <td class="time">${chipTime(t)}</td>
-      <td><b>${esc(displayName(t))}</b></td>
-      <td>${esc(t.phone || '')}</td>
-      <td>${esc(t.procedure || '')}</td>
-      <td>${esc(t.doctor || '')}</td>
-      <td>${unitOf(t)?.label || ''}</td>
-      <td class="obs">${esc((t.description || '').slice(0, 90))}</td>
-      <td class="check">☐</td>
-      <td class="check">☐</td>
-      <td class="check">☐</td>
+      <td class="name"><b>${esc(displayName(t))}</b></td>
+      <td class="phone">${esc(printPhone(t.phone))}</td>
+      <td class="proc">${esc(t.procedure || '')}</td>
+      <td class="doc">${esc(doctorShort(t.doctor || '') || '')}<small>${esc(unitOf(t)?.label || '')}</small></td>
+      <td class="obs">${esc(printObs(t.description))}</td>
+      <td class="opts"><span><i></i>Dinheiro</span><span><i></i>Pix</span><span><i></i>Débito</span><span><i></i>Crédito</span></td>
+      <td class="opts"><span><i></i>Compareceu</span><span><i></i>Faltou</span><span><i></i>Cirurgia indicada</span></td>
+      <td class="opts origin">${['Indicação', 'Site', 'WhatsApp', 'Médico parceiro', 'Paciente antigo / Rotina', 'Convênio'].map(o => `<span><i></i>${o} <em>R$ _____</em></span>`).join('')}</td>
+      <td class="notes"></td>
+      <td class="opts"><span><i></i>Sim</span><span><i></i>Não</span></td>
     </tr>`).join('');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
     <style>
-      @page { size: A4 portrait; margin: 10mm; }
-      body { font-family: -apple-system, Inter, Arial, sans-serif; margin: 24px; color: #111; }
-      h1 { font-size: 16px; margin: 0 0 2px; }
-      p.sub { font-size: 11px; color: #555; margin: 0 0 14px; }
-      table { width: 100%; border-collapse: collapse; font-size: 11px; }
-      th, td { border: 1px solid #999; padding: 5px 6px; text-align: left; vertical-align: top; }
-      th { background: #eee; font-size: 10px; text-transform: uppercase; }
+      @page { size: A4 landscape; margin: 8mm 9mm; }
+      body { font-family: -apple-system, Inter, Arial, sans-serif; margin: 18px; color: #111; }
+      h1 { font-size: 15px; margin: 0 0 2px; }
+      p.sub { font-size: 10px; color: #555; margin: 0 0 10px; }
+      /* cantos arredondados: a tabela precisa de border-spacing 0 (collapse não arredonda) */
+      table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 10.5px; table-layout: fixed;
+              border: 1px solid #999; border-radius: 10px; overflow: hidden; }
+      th, td { border-right: 1px solid #999; border-bottom: 1px solid #999; padding: 4px 5px; text-align: left; vertical-align: top; }
+      th:last-child, td:last-child { border-right: 0; }
+      tbody tr:last-child td { border-bottom: 0; }
+      th { background: #eee; font-size: 9px; text-transform: uppercase; letter-spacing: .02em; }
+      /* bolinha para preencher à caneta */
+      i { display: inline-block; width: 9px; height: 9px; border: 1px solid #333; border-radius: 50%; vertical-align: -1px; margin-right: 4px; }
+      col.c-nf { width: 46px; } col.c-origin { width: 150px; }
+      td.origin em { font-style: normal; color: #777; }
+      td.origin span { white-space: nowrap; overflow: hidden; }
       td.time { font-weight: bold; white-space: nowrap; }
-      td.check { text-align: center; font-size: 14px; width: 52px; }
-      td.obs { font-size: 10px; color: #444; }
-      @media print { body { margin: 10mm; } }
+      td.phone { font-size: 9.5px; white-space: nowrap; }
+      td.doc small { display: block; font-size: 8.5px; color: #666; }
+      td.obs { font-size: 8.5px; color: #444; line-height: 1.25; }
+      td.opts { font-size: 9px; white-space: nowrap; line-height: 1.45; }
+      td.opts span { display: block; }
+      tr { min-height: 44px; }
+      td.notes { background: #fff; }
+      col.c-time { width: 42px; } col.c-name { width: 118px; } col.c-phone { width: 90px; }
+      col.c-proc { width: 82px; } col.c-doc { width: 74px; } col.c-obs { width: 122px; }
+      col.c-pay { width: 68px; } col.c-pres { width: 96px; } col.c-notes { width: auto; }
+      @media print { body { margin: 0; } tr { page-break-inside: avoid; } }
     </style></head><body>
     <h1>${title}</h1>
-    <p class="sub">${list.length} ${k.value.noun}(s) · Conferência do fim do dia: marque Compareceu, Faltou e Cirurgia indicada — depois registre no sistema (Agenda → visão Dia).</p>
-    <table><thead><tr>
-      <th>Hora</th><th>Paciente</th><th>Telefone</th><th>${procHeader}</th><th>Médico</th><th>${isSurgeryMode.value ? 'Local' : 'Unidade'}</th><th>Observações</th>
-      <th>Compareceu</th><th>Faltou</th><th>Cirurgia indicada</th>
+    <p class="sub">${list.length} ${k.value.noun}(s) · Conferência do fim do dia: marque a forma de pagamento e a presença — depois registre no sistema (Agenda → visão Dia).</p>
+    <table>
+    <colgroup><col class="c-time"><col class="c-name"><col class="c-phone"><col class="c-proc"><col class="c-doc"><col class="c-obs"><col class="c-pay"><col class="c-pres"><col class="c-origin"><col class="c-notes"><col class="c-nf"></colgroup>
+    <thead><tr>
+      <th>Hora</th><th>Paciente</th><th>Telefone</th><th>${procHeader}</th><th>Médico</th><th>Observações</th>
+      <th>Pagamento</th><th>Presença</th><th>Origem do paciente</th><th>Anotações</th><th>Nota fiscal</th>
     </tr></thead><tbody>${rows}</tbody></table>
     <script>window.onload = () => window.print();<\/script>
     </body></html>`;

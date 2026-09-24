@@ -3,13 +3,27 @@ require 'rails_helper'
 RSpec.describe Crm::CevicoScript do
   let(:account) { create(:account) }
 
-  it 'monta o Roteiro padrão com as 5 seções e a tabela de preços oficial' do
+  it 'monta o Roteiro padrão com as 6 seções e a tabela de preços oficial' do
     text = described_class.text(account)
     expect(text).to include('ROTEIRO CEVICO')
     described_class::SECTIONS.each { |sec| expect(text).to include("== #{sec['title'].upcase} ==") }
     expect(text).to include('Guilherme, atendente da CEVICO')
     expect(text).not_to include('{{TABELA_DE_PRECOS}}')
     expect(text).to include('PRK R$ 4.900') # tabela padrão do sistema entrou no lugar do marcador
+  end
+
+  # 24/09: os 3 médicos como equipe, tabela de exames avulsos, casos especiais e vídeo do médico
+  it 'ensina os três médicos, os exames avulsos, os casos especiais e o vídeo do médico (v1 e v2)', :aggregate_failures do
+    %w[v1 v2].each do |version|
+      text = described_class.text(account, version)
+      expect(text).to include('TRÊS oftalmologistas da CEVICO')
+      expect(text).to include('avaliam o seu caso em conjunto')
+      expect(text).to include('OCT de segmento R$ 700').and include('curva tensional diária R$ 200')
+      expect(text).to include('CERATOCONE').and include('LENTE ESCLERAL').and include('Vinicius Almeida')
+      expect(text).to include('== VÍDEOS DOS MÉDICOS ==').and include('Dr. Gustavo Bittar · refrativa: https://www.instagram.com/reel/DPUSQsyAjdK/')
+      expect(described_class.stage_prompt(account, 'atendente_agendamento', version)).to include('D2. VÍDEO DO MÉDICO')
+    end
+    expect(described_class::SECTIONS.pluck('key')).to include('doctor_videos')
   end
 
   it 'seção personalizada vence o padrão; seção em branco volta ao padrão' do

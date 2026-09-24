@@ -6171,6 +6171,47 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 223. 🖨️📋 FOLHA DO DIA ENXUTA (espaço para anotações) + EXAMES NOVOS NA AGENDA + ROTEIRO: 3 MÉDICOS, TABELA DE EXAMES, CASOS ESPECIAIS (PDF das meninas) e VÍDEO DO MÉDICO (pedidos 24/09 manhã, prints + PDF) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, sem migration)
+- IMPRESSÃO DO DIA (`AgendaBoard.vue` → `printDayList`): folha em PAISAGEM; saiu a coluna Unidade (vai
+  pequenininha embaixo do médico, que aparece pelo nome curto); telefone estreito e formatado; observações em letra
+  menor e em minúsculas (só rebaixa o que veio TODO em maiúscula, ex.: "Retorno de 30 dias PRK valor: R$0");
+  coluna PAGAMENTO com ☐ Dinheiro ☐ Pix ☐ Débito ☐ Crédito; coluna PRESENÇA unificada (☐ Compareceu ☐ Faltou
+  ☐ Cirurgia indicada); coluna ANOTAÇÕES em branco ocupando o resto da largura; linha não quebra entre páginas.
+  2ª passada ("ficou bacana"): cantos da tabela arredondados (border-spacing 0), bolinhas (○) no lugar dos
+  quadradinhos; Anotações fica livre e NOTA FISCAL (○ Sim ○ Não) é a última coluna, própria (3ª passada);
+  coluna ORIGEM DO PACIENTE (○ Indicação / Site / WhatsApp / Médico parceiro / Paciente antigo-Rotina / Convênio,
+  cada uma com "R$ _____") antes de Anotações (4ª passada). Ordem final: Hora · Paciente · Telefone · Problema ·
+  Médico · Observações · Pagamento · Presença · Origem · Anotações · Nota fiscal.
+- EXAMES na lista do formulário da Agenda (`EXAMES`): OCT separado em Córnea/Retina/Nervo/Segmento, Curva
+  tensional diária, Iridotomia e Capsulotomia (além dos que já existiam).
+- ROTEIRO v1 e v2 (`cevico_script.rb` / `cevico_script_v2.rb`), DADOS OFICIAIS:
+  · MÉDICOS: as consultas são com os TRÊS oftalmologistas (sócios, todos excelentes; CRMs do PDF), sempre
+    apresentados como equipe; argumento dele: "muitas vezes os três avaliam o seu caso em conjunto, caso a caso, e
+    acompanham a sua jornada inteira: da primeira consulta à cirurgia e aos retornos". Saiu o "refrativa = Dr.
+    Gustavo" (print da conversa). Paciente que pede um médico específico sem motivo clínico → os três + horários.
+  · EXAMES AVULSOS com a tabela particular: topografia 200, pentacam 350, OCT córnea/retina/nervo 350, OCT
+    segmento 700, paquimetria 200, microscopia 200, biometria 200, retinografia 200, tonometria 200, mapeamento
+    200 (só com o médico), curva tensional 200 (só sexta 13h), iridotomia 790/olho e capsulotomia 500/olho (quarta
+    14h, só com pedido médico). Depois do valor: foto do pedido médico + chamar_humano (equipe agenda).
+  · CASOS ESPECIAIS (PDF "respostas para perguntas específicas"): ceratocone → Dr. Gustavo, R$ 350, Paulista
+    seg/qui; retina → Dr. Henrique, R$ 300, ter/qua Paulista; glaucoma → Dra. Roberta, R$ 300, ter tarde Paulista
+    e sex tarde Tatuapé; frase de correção "houve um equívoco no agendamento…" quando já marcaram por R$ 150; teste
+    de lente escleral (com/sem pedido, R$ 350, 3 h, acompanhante, lente R$ 2.500/olho em 3x, entrada 1.500);
+    menor de 21; crianças (Dra. Daniela); estrabismo; ptose (Vinicius Almeida, IPR); redes sociais.
+  · OBJEÇÕES novas: "qual médico me atende / quero o Dr. X", ceratocone/retina/glaucoma, filho/criança/idade,
+    estrabismo/ptose/lente escleral → apontam para CASOS ESPECIAIS.
+- SEÇÃO NOVA no card do Roteiro: "Vídeos dos médicos" (`doctor_videos`, 6ª seção; entra nas versões/histórico e
+  no v2 por herança). Regra: logo depois de o paciente ESCOLHER o horário (passo D2, antes do nome), "Você já
+  conhece o(a) [médico], que vai te atender?" → sim: "Que bom!"; não: "Quer que eu te mande um vídeo dele(a)
+  falando sobre [procedimento]?" → sim: balão só com o link. SÓ oferece se houver link http para aquele médico;
+  médico sem vídeo daquele procedimento = pula o passo. LINKS já no padrão (mandados por ele 24/09): Gustavo ·
+  refrativa (reel DPUSQsyAjdK), Henrique · refrativa (reel DY7pYqngRyp), Roberta · catarata (reel CvNISgmAuNi) e
+  Roberta · glaucoma (reel C02RO8_OfFl). Vídeo novo = editar a seção no card do Roteiro (mesmo formato).
+- Testes: `spec/services/crm/cevico_script_spec.rb` (6 seções + exemplo novo v1/v2).
+- Produção estava com 0 seções personalizadas (23/09): o padrão novo vale direto. Se alguma seção estiver
+  "personalizada" no card, é preciso "Restaurar padrão" dela para ver o texto novo.
+- Deploy = WEB+SIDEKIQ (roteiro roda no Sidekiq), sem migration; reversão = imagem :5f087ca.
+
 ## 222. 🗣️ MICRO-COMPROMISSO DEPOIS DO AGENDAMENTO — "Você pode me confirmar que vai avisar, caso não possa vir?" (pedido 23/09 noite, depois do 1º agendamento real "seguiu muito bem o roteiro") — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
 - Roteiro 1 e Roteiro 2 (passo F do agendamento): a confirmação passa a ser TRÊS balões — 1) "Deu certo! Consulta
   confirmada…", 2) PS1/PS2 + particular + exames + "Uma atendente confirma um dia antes / Qualquer dúvida, estou por

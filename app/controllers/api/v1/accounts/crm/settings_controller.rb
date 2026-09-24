@@ -444,7 +444,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       script['updated_at'] = Time.current.iso8601
       cfg['script'] = script
     end
-    # 🧪 (22/09) Roteiro v2 PARALELO: as 5 seções + os Passos dos dois atendentes
+    # 🧪 (22/09) Roteiro v2 PARALELO: as seções do Roteiro + os Passos dos dois atendentes
     # (chaves stage_*), tudo num card só; em branco = padrão do v2. Só o 🧪 Testar
     # agente lê isto — nada de sombra ou ao vivo muda ao salvar aqui.
     if params[:script_v2].present?
@@ -1846,7 +1846,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       # 🗣️ rodada 188: Roteiro CEVICO (fonte única) + registro/sombra do Atendente de Agendamento
       script: Crm::CevicoScript.sections(s.account),
       script_updated_at: cfg.dig('script', 'updated_at'),
-      # 🧪 (22/09) Roteiro v2 paralelo (5 seções + passos dos 2 atendentes), só para o teste
+      # 🧪 (22/09) Roteiro v2 paralelo (seções do Roteiro + passos dos 2 atendentes), só para o teste
       script_v2: Crm::CevicoScript.sections(s.account, 'v2'),
       script_v2_updated_at: cfg.dig('script_v2', 'updated_at'),
       responder_events: %w[atendente_agendamento atendente_pos].index_with { |k| Array(cfg.dig("#{k}_state", 'events')).first(30) },
