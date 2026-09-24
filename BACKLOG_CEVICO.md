@@ -6180,7 +6180,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   parceiro, procedimento) e escopo por tela; endpoint leve de sugestão (`/crm/search/suggest?scope=…&q=…`,
   até 8 resultados, 250 ms de espera); na barra geral, resultados agrupados por ambiente com atalho para abrir.
 
-## 229. 🏥🖥️ ABA "OFTALMOFÁCIL" — o hub dentro do sistema, no design Apple (degrau 1: espelho só leitura) (pedido 24/09 fim de tarde: "aba lateral, ambiente interno do que é o Oftalmofácil… espelhado num primeiro momento, migração total no futuro" → "vamos em frente") — CONSTRUÍDO, SEM commit, sobe JUNTO com 226 + 228 (WEB+SIDEKIQ, migration do 228)
+## 229. 🏥🖥️ ABA "OFTALMOFÁCIL" — o hub dentro do sistema, no design Apple (degrau 1: espelho só leitura) (pedido 24/09 fim de tarde: "aba lateral, ambiente interno do que é o Oftalmofácil… espelhado num primeiro momento, migração total no futuro" → "vamos em frente") — SUBIU 24/09 (commit 18f45f9 no develop → imagem ghcr :18f45f9, junto com 226 + 228; reversão :e619cf7)
 - BACKEND `Api::V1::Accounts::Crm::OftalmofacilController` (rotas crm/oftalmofacil/overview | items | items/:id; só
   leitura do ESPELHO, nada toca o banco deles): overview = totais por status, PARCEIROS (nosso ⭐ × parceiro,
   agendados/realizados/cancelados/faltas, quantos já estão na nossa Agenda, valores só admin), meses (data do
@@ -6237,7 +6237,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
 - Verificação: template/script compilam no Vite; specs verdes; dados reais locais = planilha 20260903_REPORT.xlsx
   carregada só no espelho (tmp/of_report.csv, runner), de-para local IOP/Ocular Surgery + 3 médicos.
 
-## 228. 🏥🤝📅 OFTALMOFÁCIL = HUB DE PARCEIROS + AGENDA UNIFICADA — FASE 1 "construir o ambiente" (pedido 24/09 tarde: "todos os contatos que vierem do Oftalmofácil, com exceção do CATARATA_SP, vão para o outro ambiente; compartilham a mesma agenda") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, COM MIGRATION → BACKUP antes)
+## 228. 🏥🤝📅 OFTALMOFÁCIL = HUB DE PARCEIROS + AGENDA UNIFICADA — FASE 1 "construir o ambiente" (pedido 24/09 tarde: "todos os contatos que vierem do Oftalmofácil, com exceção do CATARATA_SP, vão para o outro ambiente; compartilham a mesma agenda") — SUBIU 24/09 (commit 18f45f9 no develop → imagem ghcr :18f45f9, WEB+SIDEKIQ COM MIGRATION → BACKUP antes; reversão :e619cf7)
 - ENTENDIMENTO: o Oftalmofácil é um hub onde clínicas/médicos parceiros indicam cirurgias, exames e consultas.
   O fornecedor CATARATA_SP é a própria CEVICO; todos os OUTROS fornecedores são parceiros de aquisição.
 - MIGRATION `20260924180000_add_source_to_tasks`: tasks.source ('oftalmofacil'), tasks.source_detail (parceiro),
@@ -6292,7 +6292,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
 - Decisões dele: regra A; de-para clínica → local; regra dos "agendada" no passado; janela (só daqui pra frente
   × histórico de setembro).
 
-## 226. 🔘 CONVERSAS: CHAVINHA ABERTAS | TODAS na cabeceira da lista (pedido 24/09 tarde: "pras meninas conseguirem se organizar melhor") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só)
+## 226. 🔘 CONVERSAS: CHAVINHA ABERTAS | TODAS na cabeceira da lista (pedido 24/09 tarde: "pras meninas conseguirem se organizar melhor") — SUBIU 24/09 (commit 18f45f9 no develop → imagem ghcr :18f45f9, WEB+SIDEKIQ COM MIGRATION; reversão :e619cf7)
 - Diagnóstico: o seletor de status nunca esteve escondido (fica no menu "⋯" da lista, ConversationBasicFilter),
   mas era um menu discreto; a pílula ao lado do título só MOSTRAVA o status.
 - `ChatListHeader.vue`: a pílula virou uma chavinha de dois botões **Abertas | Todas** (`.cv-status-seg`, azul
