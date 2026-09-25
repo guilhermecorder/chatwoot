@@ -84,7 +84,12 @@ class Crm::GoalPeriodHistoryService
                                  .where(contacts: { created_at: from..to })
                                  .group(trunc.call('contacts.created_at')).count,
       'appointments_booked' => @account.tasks.bookings.where(task_type: 'consulta', created_at: from..to)
+                                       .where(canceled_at: nil).where(source_detail: nil)
+                                       .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
                                        .group(trunc.call('tasks.created_at')).count,
+      # 📊 item 233: entradas na coluna de agendamento (a taxa oficial)
+      'appointments_created' => Crm::BookingRate.entries(@account, from, to)
+                                                .group(trunc.call('crm_contact_stage_logs.entered_at')).count,
       'consultations_attended' => @account.tasks.where(task_type: 'consulta', attendance: 'attended', due_at: from..to)
                                           .group(trunc.call('tasks.due_at')).count,
       'surgeries_booked' => @account.tasks.where(task_type: 'cirurgia', created_at: from..to)
@@ -116,7 +121,7 @@ class Crm::GoalPeriodHistoryService
       den.to_f.positive? ? ((num.to_f / den) * 100).round(1) : 0
     end
     {
-      'rate_scheduling' => pct.call(values['appointments_booked'], values['new_leads']),
+      'rate_scheduling' => pct.call(values['appointments_created'], values['new_leads']), # item 233
       'rate_attendance' => pct.call(values['consultations_attended'], values['appointments_booked']),
       'rate_surgery' => pct.call(values['surgeries_booked'], values['consultations_attended'])
     }

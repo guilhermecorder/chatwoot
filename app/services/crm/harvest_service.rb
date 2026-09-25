@@ -276,7 +276,7 @@ class Crm::HarvestService
     optout_tags = ActsAsTaggableOn::Tag.where('name = ? OR name LIKE ?', 'nao_perturbe', 'perda\\_%').ids
     recent_harvest_tags = ActsAsTaggableOn::Tag.where('name LIKE ?', 'colheita\\_%').ids
 
-    ids = []
+    ids = Crm::PartnerGuard.excluded_contact_ids(account) # 🚧 item 231 (cerca dos parceiros)
     if optout_tags.any?
       ids += ActsAsTaggableOn::Tagging.where(taggable_type: 'Contact', context: 'labels', tag_id: optout_tags)
                                       .pluck(:taggable_id)

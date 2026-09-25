@@ -242,7 +242,13 @@ watch(crmSettings, settings => {
   }
 });
 
+// ⚡ item 237: o cesto vai em PARALELO com o home (antes esperava o home
+// voltar) e uma resposta atrasada de "este ano" não atropela o período que a
+// pessoa escolheu depois (contador de sequência)
+let homeSeq = 0;
 const fetchData = async () => {
+  const seq = ++homeSeq;
+  fetchKpiBag();
   try {
     const { preset, from, to } = period.value;
     const { data: payload } = await CrmAPI.getHome({
@@ -255,25 +261,29 @@ const fetchData = async () => {
       // só o Personalizado manda De/Até; nos presets o backend resolve
       ...(preset === 'custom' ? { from, to } : {}),
     });
+    if (seq !== homeSeq) return;
     data.value = payload;
-    fetchKpiBag();
   } catch {
+    if (seq !== homeSeq) return;
     data.value = data.value || {};
   } finally {
-    isLoading.value = false;
+    if (seq === homeSeq) isLoading.value = false;
   }
 };
 
 // cesto de indicadores (item 141): série + período anterior — alimenta os
 // gráficos dos popups e os cards do "+"; carrega em paralelo, sem travar
 const kpiBag = ref(null);
+let kpiSeq = 0;
 const fetchKpiBag = async () => {
+  const seq = ++kpiSeq;
   try {
     const { preset, from, to } = period.value;
     const { data: bag } = await CrmAPI.getKpiBag({
       preset,
       ...(preset === 'custom' ? { from, to } : {}),
     });
+    if (seq !== kpiSeq) return;
     kpiBag.value = bag;
   } catch {
     kpiBag.value = kpiBag.value || null;
@@ -535,16 +545,16 @@ const rawPanelTiles = computed(() => {
         gk: 'booking_conversion',
         pct: true,
         sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`,
-        components: ['new_leads', 'appointments_booked'],
+        components: ['new_leads', 'appointments_created'],
         compare: [
           { label: 'leads', value: d.new_leads ?? 0 },
           {
-            label: 'avançaram a Agendamento',
+            label: 'entraram em Agendamento',
             value: d.appointments_created ?? 0,
           },
         ],
         about:
-          'Dos leads que chegaram no período, quantos já avançaram até "Agendamento de Consulta" no CRM (coorte). A taxa madura é a de períodos já fechados — a de hoje ainda amadurece.',
+          'Taxa oficial (item 233): pacientes que MUDARAM DE COLUNA para "Agendamento de Consulta" no CRM no período ÷ leads do período. Só a mudança de coluna conta — exame, pós-operatório, teleconsulta e Oftalmofácil ficam fora.',
       },
       {
         label: 'Comparecimento',
@@ -619,28 +629,28 @@ const rawPanelTiles = computed(() => {
       judged: true,
       chip: booking30Chip.value,
       grad: booking30Chip.value.grad,
-      sub: `${data.value?.appointments_30d ?? 0} consultas ÷ ${data.value?.new_contacts_30d ?? 0} leads · 30 dias`,
+      sub: `${data.value?.appointments_30d ?? 0} entraram em Agendamento ÷ ${data.value?.new_contacts_30d ?? 0} leads · 30 dias`,
       compare: [
         { label: 'leads (30d)', value: data.value?.new_contacts_30d ?? 0 },
-        { label: 'consultas (30d)', value: data.value?.appointments_30d ?? 0 },
+        { label: 'entraram em Agendamento (30d)', value: data.value?.appointments_30d ?? 0 },
       ],
       details: [
         {
-          label: 'Consultas ÷ leads (Google+Instagram)',
+          label: 'Entradas em Agendamento de Consulta ÷ leads',
           value: `${data.value?.appointments_30d ?? 0} ÷ ${data.value?.new_contacts_30d ?? 0} = ${bookingRate30.value ?? '—'}%`,
         },
         { label: 'Referência', value: '15% muito bom · 10% bom · 5% fraco' },
       ],
       about:
-        'Dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos viraram consulta agendada. É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência.',
+        'Dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos mudaram de coluna para "Agendamento de Consulta" no CRM (taxa oficial: só a mudança de coluna conta — exame, pós-op, tele e Oftalmofácil ficam fora). É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência.',
     },
     {
-      label: 'Consultas agendadas',
+      label: 'Marcadas na Agenda',
       icon: 'i-lucide-calendar-check',
       value: d.appointments_booked ?? 0,
       gk: 'appointments_booked',
       chartKey: 'appointments_booked',
-      sub: 'registradas no período',
+      sub: 'consultas novas no período (sem exame, tele, cancelada ou Oftalmofácil)',
       details: [
         {
           label: '⚡ Chegaram e agendaram no mesmo período',
@@ -1154,10 +1164,10 @@ const READY_FORMULAS = [
     items: [
       {
         label: 'Taxa de agendamento',
-        expr: 'appointments_booked / new_leads * 100',
+        expr: 'appointments_created / new_leads * 100',
         format: 'percent',
         icon: 'i-lucide-percent',
-        note: 'consultas agendadas ÷ leads · referência: 15% muito bom · 10% bom · 5% fraco',
+        note: 'entradas em Agendamento de Consulta (mudança de coluna no CRM) ÷ leads · referência: 15% muito bom · 10% bom · 5% fraco',
       },
       {
         label: 'Comparecimento',
@@ -1892,7 +1902,7 @@ const isSavingGoals = ref(false);
 const GOAL_FIELDS = {
   agendamento: [
     { gk: 'new_leads', label: 'Novos contatos no mês' },
-    { gk: 'appointments_booked', label: 'Consultas agendadas no mês' },
+    { gk: 'appointments_booked', label: 'Marcadas na Agenda no mês' },
     { gk: 'booking_conversion', label: 'Taxa de agendamento (%)', pct: true },
     { gk: 'surgeries_closed', label: 'Cirurgias fechadas no mês' },
   ],
@@ -3026,6 +3036,10 @@ const refreshAll = () => {
   // arrasto trocava as listas do vuedraggable e quebrava o movimento
   if (organizeMode.value) return;
   store.dispatch('tasks/fetch').catch(() => {});
+  // item 237: mês/ano/personalizado mudam devagar e custam caro — a
+  // atualização automática só refaz os períodos curtos (o servidor guarda
+  // os longos por 10 min de qualquer forma)
+  if (['month', 'last_month', 'year', 'custom'].includes(period.value?.preset)) return;
   fetchData();
 };
 const onVisible = () => {

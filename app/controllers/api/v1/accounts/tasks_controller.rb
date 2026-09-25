@@ -6,7 +6,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
   def index # rubocop:disable Metrics/AbcSize
     # cards arquivados (coluna oculta do item 95) ficam fora do board
     tasks = Current.account.tasks.where(archived_at: nil)
-                   .includes(:creator, :assignee, files_attachments: :blob)
+                   .includes(:creator, :assignee, :contact, files_attachments: :blob) # item 237: :contact evita N+1
 
     # Privacidade: agente comum só vê as próprias tarefas (criadas por/para ele)
     # e as das UNIDADES (agenda compartilhada). Admin vê tudo.

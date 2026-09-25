@@ -25,6 +25,7 @@
 #
 # Indexes
 #
+#  index_contacts_on_account_and_created_at              (account_id,created_at)
 #  index_contacts_on_account_id                          (account_id)
 #  index_contacts_on_account_id_and_contact_type         (account_id,contact_type)
 #  index_contacts_on_account_id_and_last_activity_at     (account_id,last_activity_at DESC NULLS LAST)

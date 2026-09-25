@@ -167,6 +167,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
       break if rows.size < BATCH
     end
     @result.cursor = max_seen
+    Crm::PartnerGuard.forget!(@account) # a lista de pacientes de parceiro pode ter mudado
     @result
   rescue StandardError => e
     @result.errors << friendly_error(e)
@@ -432,10 +433,15 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     if moved
       @result.moved += 1
       backdate!(card, stage, surgery)
-      fire_automations(card, stage, previous_stage) if !@silent && recent_event?(surgery)
+      # 🚧 item 231: card no funil dos PARCEIROS nunca dispara automação
+      fire_automations(card, stage, previous_stage) if !@silent && recent_event?(surgery) && !partner_card?(card)
       return card.previous_changes.key?('id') ? 'created_card' : 'moved'
     end
     'kept'
+  end
+
+  def partner_card?(card)
+    partner_pipeline.present? && card.pipeline_id == partner_pipeline.id
   end
 
   def recent_event?(surgery)
@@ -539,6 +545,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   def task_kind(surgery)
     t = surgery.procedure_type.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase
     return { task_type: 'consulta', modality: 'exames', prefix: 'Exame' } if t.include?('exam')
+    return { task_type: 'consulta', modality: 'pos_op', prefix: 'Pós-operatório' } if t.match?(/p[o]s.?op|pos.?operat|retorno p/) # item 234
     return { task_type: 'consulta', modality: 'avaliacao', prefix: 'Consulta' } if t.include?('consult')
 
     { task_type: 'cirurgia', modality: nil, prefix: 'Cirurgia' }

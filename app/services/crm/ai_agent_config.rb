@@ -229,6 +229,8 @@ module Crm::AiAgentConfig
       model: model,
       input_tokens: input,
       output_tokens: output,
+      cache_read_tokens: read,     # item 232: quanto da entrada veio do cache
+      cache_write_tokens: written,
       cost_usd: cost.round(6)
     )
   rescue StandardError => e

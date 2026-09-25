@@ -654,6 +654,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       id = params[k].to_i
       of[k] = id.positive? && Current.account.crm_pipelines.exists?(id: id) ? id : nil
     end
+    # 🚧 item 231: caixa(s) por onde a equipe fala com os pacientes dos parceiros
+    of['partner_inbox_ids'] = Array(params[:partner_inbox_ids]).map(&:to_i) & Current.account.inboxes.pluck(:id) if params.key?(:partner_inbox_ids)
     if params.key?(:agenda_from)
       of['agenda_from'] = begin
         Date.parse(params[:agenda_from].to_s).iso8601
@@ -905,13 +907,15 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # cancelada (etiquetas + coluna do card) — tela Agendamentos → Ajustes, só admin
     if params.key?(:booking) && Current.account_user.administrator?
       raw = params[:booking].respond_to?(:permit) ? params[:booking] : ActionController::Parameters.new(params[:booking].to_h)
-      booking = raw.permit(:stage_id, :cancel_stage_id, :labels_enabled, labels: %i[created rescheduled canceled]).to_h
+      booking = raw.permit(:stage_id, :cancel_stage_id, :budget_stage_id, :labels_enabled, labels: %i[created rescheduled canceled]).to_h
       valid_stage_ids = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: Current.account.id }).pluck(:id)
       cfg['booking'] = {
         'labels_enabled' => ActiveModel::Type::Boolean.new.cast(booking['labels_enabled']) != false,
         'labels' => (booking['labels'] || {}).to_h.transform_values { |v| v.to_s.strip.downcase.gsub(/[^\p{L}\p{N}_-]/, '')[0, 40] }.compact_blank,
         'stage_id' => (valid_stage_ids.include?(booking['stage_id'].to_i) ? booking['stage_id'].to_i : nil),
-        'cancel_stage_id' => (valid_stage_ids.include?(booking['cancel_stage_id'].to_i) ? booking['cancel_stage_id'].to_i : nil)
+        'cancel_stage_id' => (valid_stage_ids.include?(booking['cancel_stage_id'].to_i) ? booking['cancel_stage_id'].to_i : nil),
+        # 💰 item 236: coluna de "Envio de Orçamento" (o card anda sozinho quando a clínica manda um valor)
+        'budget_stage_id' => (valid_stage_ids.include?(booking['budget_stage_id'].to_i) ? booking['budget_stage_id'].to_i : nil)
       }
     end
     # tema visual dos ambientes (Santorini, Flor del Mar...) — escolha do admin
@@ -1546,17 +1550,20 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def usage_breakdown(scope, column, period: true)
     last30 = period ? scope.where(created_at: 30.days.ago..Time.current) : scope
     last30.group(column)
-          .pluck(column, Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'))
-          .map do |key, calls, input, output, cost|
-            { key: key, calls: calls, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4) }
+          .pluck(column, Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'),
+                  Arel.sql('SUM(cache_read_tokens)'))
+          .map do |key, calls, input, output, cost, cached|
+            { key: key, calls: calls, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4),
+              cache_pct: input.to_i.positive? ? ((cached.to_i * 100.0) / input.to_i).round : 0 } # item 232
           end
           .sort_by { |r| -r[:cost_usd] }
   end
 
   def usage_totals(scope)
-    calls, input, output, cost = scope.pick(Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'),
-                                            Arel.sql('SUM(cost_usd)'))
-    { calls: calls.to_i, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4) }
+    calls, input, output, cost, cached = scope.pick(Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'),
+                                                    Arel.sql('SUM(cost_usd)'), Arel.sql('SUM(cache_read_tokens)'))
+    { calls: calls.to_i, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4),
+      cache_pct: input.to_i.positive? ? ((cached.to_i * 100.0) / input.to_i).round : 0 } # item 232
   end
 
   def crm_settings
@@ -1585,6 +1592,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       partners_enabled: of['partners_enabled'] == true,
       partner_pipeline_id: of['partner_pipeline_id'],
       own_pipeline_id: of['own_pipeline_id'],
+      partner_inbox_ids: Array(of['partner_inbox_ids']), # 🚧 item 231
       agenda_enabled: of['agenda_enabled'] == true,
       agenda_from: of['agenda_from'],
       clinics: of['clinics'] || {},

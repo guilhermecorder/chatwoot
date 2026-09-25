@@ -74,7 +74,8 @@ class Crm::MessageAutomation < ApplicationRecord
   # nao_perturbe / perda_* nunca entram)
   def excluded_contact_ids
     to_exclude = Array(exclude_labels) + [marker_label]
-    account.contacts.tagged_with(to_exclude.compact, any: true).pluck(:id) | Crm::OptOut.excluded_contact_ids(account)
+    account.contacts.tagged_with(to_exclude.compact, any: true).pluck(:id) | Crm::OptOut.excluded_contact_ids(account) |
+      Crm::PartnerGuard.excluded_contact_ids(account) # 🚧 item 231 (cerca dos parceiros)
   end
 
   private

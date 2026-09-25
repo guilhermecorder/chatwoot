@@ -6,6 +6,9 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     conversation, account = extract_conversation_and_account(event)
     contact = conversation.contact
     return if contact.blank?
+    # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub / conversa
+    # na caixa dos parceiros NÃO ganha card no funil da CEVICO
+    return if Crm::PartnerGuard.partner_conversation?(conversation)
 
     pipeline = account.crm_pipelines.order(:position).first
     return if pipeline.blank?
@@ -35,6 +38,16 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     return if message.blank? || message.private?
     return unless %w[incoming outgoing].include?(message.message_type)
 
+    # 🚧 item 231 (cerca dos parceiros): conversa de paciente de parceiro do
+    # hub (ou na caixa dos parceiros) — nenhum agente de IA, robô, secretário
+    # ou automação de coluna; só o pedido de "pare" (opt-out) continua valendo
+    if Crm::PartnerGuard.partner_conversation?(message.conversation)
+      Crm::PartnerGuard.block!('mensagem (agentes/automações)', conversation: message.conversation) if message.message_type == 'incoming'
+      partner_contact = message.conversation&.contact
+      handle_opt_out(message, partner_contact) if partner_contact.present?
+      return
+    end
+
     handle_instagram_agent(message) # Atendente IA das caixas configuradas
     handle_responder_agents(message) # 🗣️ respondedores do WhatsApp por coluna (rodada 188)
 
@@ -42,6 +55,9 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     return if contact.blank?
 
     handle_opt_out(message, contact)
+
+    # 💰 item 236: a clínica mandou um VALOR → card anda para "Envio de Orçamento"
+    Crm::BudgetSideEffects.apply(account: message.account, contact: contact, message: message) if message.message_type == 'outgoing'
 
     # releitura do Secretário da Agenda (rodada 148): resposta de quem tem
     # tarefa de revisão aberta, ou pedido de remarcar/cancelar de quem tem

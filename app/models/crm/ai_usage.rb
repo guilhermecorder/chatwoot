@@ -3,15 +3,17 @@
 #
 # Table name: crm_ai_usages
 #
-#  id            :bigint           not null, primary key
-#  agent_key     :string           not null
-#  cost_usd      :decimal(12, 6)   default(0.0), not null
-#  input_tokens  :integer          default(0), not null
-#  model         :string           not null
-#  output_tokens :integer          default(0), not null
-#  created_at    :datetime         not null
-#  updated_at    :datetime         not null
-#  account_id    :bigint           not null
+#  id                 :bigint           not null, primary key
+#  agent_key          :string           not null
+#  cache_read_tokens  :integer          default(0), not null
+#  cache_write_tokens :integer          default(0), not null
+#  cost_usd           :decimal(12, 6)   default(0.0), not null
+#  input_tokens       :integer          default(0), not null
+#  model              :string           not null
+#  output_tokens      :integer          default(0), not null
+#  created_at         :datetime         not null
+#  updated_at         :datetime         not null
+#  account_id         :bigint           not null
 #
 # Indexes
 #

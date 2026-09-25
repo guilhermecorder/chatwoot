@@ -12,6 +12,17 @@ const isLoading = ref(true);
 const data = ref(null);
 const period = ref({ preset: 'month' });
 const cut = ref('by_procedure');
+// 🚧 item 231: por padrão só a CEVICO (CATARATA_SP); parceiros do hub à parte, para não misturar
+const side = ref('own');
+const SIDES = [
+  { key: 'own', label: 'CEVICO' },
+  { key: 'partners', label: 'Parceiros do hub' },
+  { key: 'all', label: 'Tudo' },
+];
+const setSide = key => {
+  side.value = key;
+  load();
+};
 
 const CUTS = [
   { key: 'by_procedure', label: 'Por procedimento', icon: 'i-lucide-scissors' },
@@ -30,7 +41,7 @@ const fmtMonth = m => {
 const load = async () => {
   isLoading.value = true;
   try {
-    const { data: payload } = await CrmAPI.getProfitability(period.value);
+    const { data: payload } = await CrmAPI.getProfitability({ ...period.value, side: side.value });
     data.value = payload;
   } catch {
     data.value = null;
@@ -73,7 +84,12 @@ const maxMonth = computed(() => Math.max(1, ...monthly.value.map(m => m.receita 
           O que sobra de verdade — receita, custo do prestador, taxa da plataforma e resultado CEVICO, direto do OftalmoFácil
         </p>
       </div>
-      <PeriodRuler :model-value="period" @update:model-value="onPeriod" />
+      <div class="flex items-center gap-2 flex-wrap">
+        <div class="flex items-center gap-1 rounded-full border border-n-weak bg-n-solid-2 p-0.5" title="De quem são as cirurgias: só a CEVICO (fornecedor CATARATA_SP), só os parceiros do hub ou tudo junto">
+          <button v-for="s in SIDES" :key="s.key" class="px-2.5 py-1 rounded-full text-[11px] font-medium transition" :class="side === s.key ? 'bg-n-brand text-white' : 'text-n-slate-11 hover:text-n-slate-12'" @click="setSide(s.key)">{{ s.label }}</button>
+        </div>
+        <PeriodRuler :model-value="period" @update:model-value="onPeriod" />
+      </div>
     </div>
 
     <SkeletonScreen v-if="isLoading" variant="dashboard" />

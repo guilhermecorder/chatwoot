@@ -78,6 +78,9 @@ class Crm::Campaign < ApplicationRecord
     # opt-out fixo (conformidade 20/09): nao_perturbe / perda_* nunca entram
     quiet_ids = Crm::OptOut.excluded_contact_ids(account)
     contacts = contacts.where.not(id: quiet_ids) if quiet_ids.any?
+    # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub nunca entra
+    partner_ids = Crm::PartnerGuard.excluded_contact_ids(account)
+    contacts = contacts.where.not(id: partner_ids) if partner_ids.any?
     contacts = apply_period_filter(contacts)
     contacts.where.not(phone_number: [nil, '']).distinct
   end

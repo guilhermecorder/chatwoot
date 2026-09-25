@@ -1,6 +1,13 @@
 class CrmAutomationFireJob < ApplicationJob
   queue_as :default
 
+  # 🚧 item 231 (cerca dos parceiros): para paciente de PARCEIRO do hub só
+  # passam ações internas (etiqueta, mover, avisar a equipe…). Tudo que fala
+  # com ele ou manda dado pra fora (mensagem, modelo, n8n, webhook, eventos de
+  # anúncio, agendar) é bloqueado — vale para entrou/saiu, parado, valor e
+  # mensagem criada, porque todos passam por aqui.
+  PARTNER_SAFE_ACTIONS = %w[apply_label log_timeline move_card notify_team set_value ai_analyze closing_extract nps_score].freeze
+
   def perform(automation_id, contact_id, extra_payload = {})
     automation = Crm::Automation.find_by(id: automation_id)
     return unless automation&.active?
@@ -12,6 +19,11 @@ class CrmAutomationFireJob < ApplicationJob
     # contact_id de outra conta — o endpoint trigger recebe cru — vazava)
     contact = pipeline.account.contacts.find_by(id: contact_id)
     return unless contact
+
+    if !PARTNER_SAFE_ACTIONS.include?(automation.action_type) && Crm::PartnerGuard.partner_contact?(contact)
+      Crm::PartnerGuard.block!("automação #{automation.id} (#{automation.action_type})", contact: contact)
+      return
+    end
 
     return unless should_fire?(automation, contact)
 

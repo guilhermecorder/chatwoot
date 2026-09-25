@@ -18,6 +18,7 @@
 #
 #  index_crm_contact_stage_logs_on_crm_contact_id                 (crm_contact_id)
 #  index_crm_contact_stage_logs_on_crm_contact_id_and_entered_at  (crm_contact_id,entered_at)
+#  index_crm_stage_logs_on_stage_and_entered_at                   (stage_id,entered_at)
 #
 class Crm::StageLog < ApplicationRecord
   self.table_name = 'crm_contact_stage_logs'

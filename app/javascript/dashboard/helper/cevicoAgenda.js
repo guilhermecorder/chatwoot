@@ -204,9 +204,61 @@ export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 export const MODALITIES = [
   { key: 'avaliacao', label: 'Avaliação', color: '#2563EB' },
   { key: 'retorno', label: 'Retorno', color: '#D4A017' },
+  { key: 'pos_op', label: 'Pós-operatório', color: '#DB2777' }, // item 234
   { key: 'exames', label: 'Exames', color: '#0D9488' },
   { key: 'teleconsulta', label: 'Teleconsulta', color: '#7C3AED' },
 ];
+
+// 🎨 item 234 (25/09, pedido dele: "cada coisa precisa ter a sua própria cor"
+// + "agenda geral" com CAMADAS): os 6 TIPOS de agendamento. Cada tipo tem cor
+// própria e vira uma camada que liga/desliga na Agenda; o balão veste a cor
+// do TIPO (a unidade virou uma etiqueta pequena). `kind` = trilho antigo que
+// o backend e o painel de Agendamentos ainda usam; `resource` = o que o tipo
+// ocupa (janela do médico, janela de exames, sala cirúrgica ou nada/online).
+const mkType = t => ({
+  ...t,
+  grad: `linear-gradient(135deg, ${t.deep}, ${t.color})`,
+  grad2: `linear-gradient(135deg, ${t.color}, ${t.light})`,
+  grad3: `linear-gradient(135deg, ${t.light}, ${t.pale})`,
+  hero: `linear-gradient(135deg, ${t.dark} 0%, ${t.deep} 55%, ${t.light} 100%)`,
+});
+export const TYPES = [
+  mkType({ key: 'avaliacao', label: 'Avaliação', noun: 'avaliação', plural: 'avaliações', article: 'a', icon: 'i-lucide-stethoscope',
+    color: '#2563EB', deep: '#1E40AF', light: '#60A5FA', pale: '#BFDBFE', dark: '#172554', kind: 'consultas', modality: 'avaliacao',
+    resource: 'doctor', hint: 'primeira consulta com o médico, nas unidades' }),
+  mkType({ key: 'retorno', label: 'Retorno', noun: 'retorno', plural: 'retornos', article: 'o', icon: 'i-lucide-rotate-ccw',
+    color: '#D4A017', deep: '#A16207', light: '#FACC15', pale: '#FEF08A', dark: '#713F12', kind: 'consultas', modality: 'retorno',
+    resource: 'doctor', hint: 'volta ao médico depois de exames ou tratamento' }),
+  mkType({ key: 'pos_op', label: 'Pós-operatório', noun: 'pós-operatório', plural: 'pós-operatórios', article: 'o', icon: 'i-lucide-heart-pulse',
+    color: '#DB2777', deep: '#9D174D', light: '#F472B6', pale: '#FBCFE8', dark: '#500724', kind: 'consultas', modality: 'pos_op',
+    resource: 'doctor', hint: 'revisão depois da cirurgia' }),
+  mkType({ key: 'exames', label: 'Exame', noun: 'exame', plural: 'exames', article: 'o', icon: 'i-lucide-scan-eye',
+    color: '#0D9488', deep: '#0F766E', light: '#2DD4BF', pale: '#99F6E4', dark: '#134E4A', kind: 'exames', modality: 'exames',
+    resource: 'exam', hint: 'pentacam, OCT, topografia… na janela de exames' }),
+  mkType({ key: 'teleconsulta', label: 'Teleconsulta', noun: 'teleconsulta', plural: 'teleconsultas', article: 'a', icon: 'i-lucide-video',
+    color: '#7C3AED', deep: '#5B21B6', light: '#A78BFA', pale: '#DDD6FE', dark: '#3B0764', kind: 'teleconsultas', modality: 'teleconsulta',
+    resource: 'online', hint: 'consulta por vídeo, sem unidade' }),
+  mkType({ key: 'cirurgia', label: 'Cirurgia', noun: 'cirurgia', plural: 'cirurgias', article: 'a', icon: 'i-lucide-slice',
+    color: '#EA580C', deep: '#9A3412', light: '#FB923C', pale: '#FED7AA', dark: '#431407', kind: 'cirurgias', modality: null,
+    resource: 'surgery', hint: 'sala cirúrgica das clínicas parceiras' }),
+];
+export const TYPE_BY_KEY = Object.fromEntries(TYPES.map(t => [t.key, t]));
+// a "Agenda geral" (todas as camadas ligadas) veste um tom neutro
+export const GENERAL_TYPE = mkType({ key: 'geral', label: 'Agenda geral', noun: 'agendamento', plural: 'agendamentos', article: 'o',
+  icon: 'i-lucide-layers', color: '#475569', deep: '#1E293B', light: '#94A3B8', pale: '#CBD5E1', dark: '#0F172A', kind: null,
+  modality: null, resource: null, hint: 'todos os tipos juntos — ligue e desligue as camadas' });
+export const typeOf = task => {
+  if (!task) return 'avaliacao';
+  if (task.task_type === 'cirurgia') return 'cirurgia';
+  return TYPE_BY_KEY[task.modality] ? task.modality : 'avaliacao';
+};
+// ?kind=consultas (links antigos) → camadas
+export const LEGACY_KIND_TO_TYPES = {
+  consultas: ['avaliacao', 'retorno', 'pos_op'],
+  teleconsultas: ['teleconsulta'],
+  exames: ['exames'],
+  cirurgias: ['cirurgia'],
+};
 export const modalityFor = key =>
   MODALITIES.find(m => m.key === (key || 'avaliacao')) || MODALITIES[0];
 

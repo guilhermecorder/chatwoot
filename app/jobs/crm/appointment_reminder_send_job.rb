@@ -61,6 +61,11 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
   def send_for(account, inbox, rcfg, regua, task) # rubocop:disable Metrics/CyclomaticComplexity
     contact = task.contact
     return if contact.nil? || contact.phone_number.blank?
+    # 🚧 item 231 (cerca dos parceiros): consulta/exame de parceiro do hub não recebe lembrete
+    if Crm::PartnerGuard.partner_task?(task) || Crm::PartnerGuard.partner_contact?(contact)
+      Crm::PartnerGuard.block!("lembrete #{regua} (agendamento #{task.id})", contact: contact)
+      return
+    end
 
     marks = (contact.additional_attributes || {}).dig('cevico_appt_reminders', task.id.to_s) || {}
     return if marks[regua].present?

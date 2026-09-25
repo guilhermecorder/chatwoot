@@ -11,7 +11,11 @@ module Crm::LeadsUniverse
 
   def scope(account, since, until_at)
     base = account.contacts.where(created_at: since..until_at)
-    inbox_ids = capture_inbox_ids(account)
+    # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub e caixa
+    # dos parceiros nunca contam como lead da CEVICO
+    partner_ids = Crm::PartnerGuard.excluded_contact_ids(account)
+    base = base.where.not(id: partner_ids) if partner_ids.any?
+    inbox_ids = capture_inbox_ids(account) - Crm::PartnerGuard.partner_inbox_ids(account)
     return base if inbox_ids.empty?
 
     base.joins(:conversations).where(conversations: { inbox_id: inbox_ids }).distinct

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_24_180000) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_25_090100) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1212,6 +1212,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_24_180000) do
     t.bigint "company_id"
     t.index "lower((email)::text), account_id", name: "index_contacts_on_lower_email_account_id"
     t.index ["account_id", "contact_type"], name: "index_contacts_on_account_id_and_contact_type"
+    t.index ["account_id", "created_at"], name: "index_contacts_on_account_and_created_at"
     t.index ["account_id", "email", "phone_number", "identifier"], name: "index_contacts_on_nonempty_fields", where: "(((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))"
     t.index ["account_id", "last_activity_at"], name: "index_contacts_on_account_id_and_last_activity_at", order: { last_activity_at: "DESC NULLS LAST" }
     t.index ["account_id"], name: "index_contacts_on_account_id"
@@ -1371,6 +1372,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_24_180000) do
     t.decimal "cost_usd", precision: 12, scale: 6, default: "0.0", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "cache_read_tokens", default: 0, null: false
+    t.integer "cache_write_tokens", default: 0, null: false
     t.index ["account_id", "agent_key"], name: "index_crm_ai_usages_on_account_id_and_agent_key"
     t.index ["account_id", "created_at"], name: "index_crm_ai_usages_on_account_id_and_created_at"
     t.index ["account_id"], name: "index_crm_ai_usages_on_account_id"
@@ -1475,6 +1478,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_24_180000) do
     t.datetime "updated_at", null: false
     t.index ["crm_contact_id", "entered_at"], name: "index_crm_contact_stage_logs_on_crm_contact_id_and_entered_at"
     t.index ["crm_contact_id"], name: "index_crm_contact_stage_logs_on_crm_contact_id"
+    t.index ["stage_id", "entered_at"], name: "index_crm_stage_logs_on_stage_and_entered_at"
   end
 
   create_table "crm_contacts", force: :cascade do |t|
@@ -1980,6 +1984,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_24_180000) do
     t.index ["account_id"], name: "index_messages_on_account_id"
     t.index ["content"], name: "index_messages_on_content", opclass: :gin_trgm_ops, using: :gin
     t.index ["conversation_id", "account_id", "message_type", "created_at"], name: "index_messages_on_conversation_account_type_created"
+    t.index ["conversation_id", "message_type", "created_at"], name: "index_messages_on_conversation_type_created"
     t.index ["conversation_id"], name: "index_messages_on_conversation_id"
     t.index ["created_at"], name: "index_messages_on_created_at"
     t.index ["inbox_id"], name: "index_messages_on_inbox_id"
@@ -2233,6 +2238,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_24_180000) do
     t.string "external_ref"
     t.index ["account_id", "external_ref"], name: "index_tasks_on_account_and_external_ref", unique: true, where: "(external_ref IS NOT NULL)"
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
+    t.index ["account_id", "task_type", "created_at"], name: "index_tasks_on_account_type_created"
+    t.index ["account_id", "task_type", "due_at"], name: "index_tasks_on_account_type_due"
     t.index ["account_id", "unit"], name: "index_tasks_on_account_id_and_unit"
     t.index ["account_id"], name: "index_tasks_on_account_id"
     t.index ["assignee_id"], name: "index_tasks_on_assignee_id"

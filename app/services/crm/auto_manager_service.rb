@@ -22,7 +22,8 @@ class Crm::AutoManagerService
 
   INDICATOR_LABELS = {
     'new_leads' => 'Leads novos',
-    'appointments_booked' => 'Consultas agendadas',
+    'appointments_booked' => 'Marcadas na Agenda',
+    'appointments_created' => 'Entradas em Agendamento de Consulta',
     'consultations_attended' => 'Comparecimentos',
     'surgeries_booked' => 'Cirurgias agendadas',
     'revenue_closed' => 'Faturamento fechado',

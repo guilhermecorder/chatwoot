@@ -14,17 +14,22 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
 
   def show
     since, until_at = resolve_range
-
-    render json: {
-      period: params[:preset].presence || 'month',
-      consultas: consultas_kpis(since, until_at),
-      by_modality: by_modality(since, until_at),
-      by_doctor: by_doctor(since, until_at),
-      by_unit: by_unit(since, until_at),
-      by_weekday: by_weekday(since, until_at),
-      cirurgias: cirurgias_kpis(since, until_at),
-      upcoming: upcoming_stats
-    }
+    preset = params[:preset].presence || 'month'
+    # ⚡ item 237: guardado por conta+período (3 min; 10 min em ano/mês passado/personalizado)
+    ttl = %w[year last_month custom].include?(preset) ? 10.minutes : 3.minutes
+    payload = Rails.cache.fetch("cevico:agenda_dash:#{account.id}:#{preset}:#{since.to_i}:#{until_at.to_i}", expires_in: ttl) do
+      JSON.parse({
+        period: preset,
+        consultas: consultas_kpis(since, until_at),
+        by_modality: by_modality(since, until_at),
+        by_doctor: by_doctor(since, until_at),
+        by_unit: by_unit(since, until_at),
+        by_weekday: by_weekday(since, until_at),
+        cirurgias: cirurgias_kpis(since, until_at),
+        upcoming: upcoming_stats
+      }.to_json)
+    end
+    render json: payload
   end
 
   private
@@ -87,7 +92,8 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
     }
   end
 
-  MODALITY_LABELS = { 'avaliacao' => 'Avaliação', 'retorno' => 'Retorno', 'exames' => 'Exames' }.freeze
+  MODALITY_LABELS = { 'avaliacao' => 'Avaliação', 'retorno' => 'Retorno', 'pos_op' => 'Pós-operatório', 'exames' => 'Exames',
+                      'teleconsulta' => 'Teleconsulta' }.freeze # item 234
 
   def by_modality(since, until_at)
     scope = consultas(since, until_at)

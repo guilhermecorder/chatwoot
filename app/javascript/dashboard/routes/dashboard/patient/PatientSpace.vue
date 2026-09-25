@@ -218,6 +218,7 @@ const fmtDuration = minutes => {
 const MODALITY_LABELS = {
   avaliacao: 'Avaliação',
   retorno: 'Retorno',
+  pos_op: 'Pós-operatório',
   exames: 'Exame',
   teleconsulta: 'Teleconsulta',
 };

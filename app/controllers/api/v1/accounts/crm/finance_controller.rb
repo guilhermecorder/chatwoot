@@ -34,6 +34,12 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     scope = Crm::OftalmofacilSurgery.where(account: Current.account).in_period(from, to)
                                     .where(status_kind: %w[realizada agendada aguardando_pagamento])
     rows = scope.to_a
+    # 🚧 item 231: por padrão só o que é da CEVICO (CATARATA_SP); side=partners
+    # mostra os parceiros do hub, side=all junta tudo
+    side = %w[own partners all].include?(params[:side].to_s) ? params[:side].to_s : 'own'
+    own = Crm::PartnerGuard.own_provider_name(Current.account)
+    rows = rows.select { |s| Crm::PartnerGuard.partner_surgery?(s, own: own) } if side == 'partners'
+    rows = rows.reject { |s| Crm::PartnerGuard.partner_surgery?(s, own: own) } if side == 'own'
     doctors = (CrmSetting.find_by(account: Current.account)&.agenda_config || {}).dig('oftalmofacil', 'doctors') || {}
     marketing = marketing_spend(from, to)
     sums = lambda do |list|
@@ -60,6 +66,7 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     end
     render json: {
       period: { from: from.iso8601, to: to.iso8601, preset: params[:preset].presence },
+      side: side,
       has_data: Crm::OftalmofacilSurgery.where(account: Current.account).exists?,
       summary: summary,
       by_procedure: group.call(->(s) { s.procedure_name.to_s.presence || 'Sem procedimento' }, ->(k) { k }),

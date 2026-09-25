@@ -78,7 +78,8 @@ RSpec.describe Crm::ResponderAgentService do
       round2
     end
     service.call
-    transcript = calls.first[:messages].first[:content]
+    # item 232: o turno do usuário virou 2 blocos (conversa marcada para cache + contexto vivo)
+    transcript = calls.first[:messages].first[:content].map { |b| b[:text] }.join("\n")
     expect(transcript).to include('PACIENTE: [áudio transcrito: "quero remarcar a consulta da minha mãe"]')
     expect(transcript).to include('PACIENTE: olha aqui [imagem: não foi possível ler; pergunte ao paciente o que ele enviou]')
   end

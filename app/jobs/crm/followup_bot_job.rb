@@ -161,6 +161,12 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       # abertas — a mensagem sai pelo número da própria conversa
       scope = scope.where(inbox_id: bot.inbox_id) if bot.inbox_id.present?
     end
+    # 🚧 item 231 (cerca dos parceiros): caixas dos parceiros e pacientes de
+    # parceiro do hub ficam fora de qualquer robô
+    partner_inboxes = Crm::PartnerGuard.partner_inbox_ids(bot.account)
+    scope = scope.where.not(inbox_id: partner_inboxes) if partner_inboxes.any?
+    partner_ids = Crm::PartnerGuard.excluded_contact_ids(bot.account)
+    scope = scope.where.not(contact_id: partner_ids) if partner_ids.any?
     scope
   end
 
@@ -207,6 +213,8 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     # TRAVA individual: atendente pausou o follow-up para este paciente
     # (botão na janelinha da conversa) — nenhum robô cutuca
     return plan.merge(reason: 'pausado_para_paciente') if paused_for_patient?(conversation)
+    # 🚧 item 231: paciente de parceiro do hub — nenhum robô cutuca
+    return plan.merge(reason: 'paciente_de_parceiro') if Crm::PartnerGuard.partner_conversation?(conversation)
     # etiqueta de encerramento (nao_perturbe / perda_* / lista da conta) — nenhum robô cutuca
     return plan.merge(reason: 'etiqueta_de_encerramento') if stop_label?(bot.account, conversation)
     return plan.merge(reason: 'etiquetas') unless labels_match?(bot, conversation)

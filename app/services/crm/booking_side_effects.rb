@@ -38,7 +38,8 @@ class Crm::BookingSideEffects
         'labels_enabled' => cfg['labels_enabled'] != false,
         'labels' => labels,
         'stage_id' => cfg['stage_id'].presence&.to_i,
-        'cancel_stage_id' => cfg['cancel_stage_id'].presence&.to_i
+        'cancel_stage_id' => cfg['cancel_stage_id'].presence&.to_i,
+        'budget_stage_id' => cfg['budget_stage_id'].presence&.to_i # 💰 item 236
       }
     end
 

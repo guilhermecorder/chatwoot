@@ -6171,6 +6171,103 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 237. ⚡ MEU PAINEL LENTO ("demora absurdo pra carregar mês/mês passado/personalizado; este ano nem carrega", 25/09) — CONSTRUÍDO 25/09 SEM commit, sobe junto com 231–236 (WEB+SIDEKIQ, COM MIGRATION de índices → BACKUP antes)
+- DIAGNÓSTICO: `GET /crm/home` passava dos 15 s do rack-timeout em "este ano". Culpados: (1) Radar com UMA QUERY POR
+  AVISO (até 400) em `agent_performance.rb#radar_stats` + um find_by por pessoa; (2) todas as mensagens enviadas do
+  período carregadas no Ruby DUAS vezes (workday_stats + off_hours_days); (3) KpiBag ~124 queries (2 `total_of` por
+  indicador + 4 por coluna do funil) sem índice em crm_contact_stage_logs(stage_id, entered_at); (4) `reached_stage_count`
+  recarregando funis em laço e `leads_by_inbox` com 3+ queries POR CAIXA; (5) universo de leads recalculado 6x por
+  request; (6) índices faltando em contacts(account,created_at), tasks(account,task_type,due_at/created_at),
+  messages(conversation,message_type,created_at); (7) tela: kpis só depois do home, resposta velha atropelava a nova,
+  auto-refresh de 2 min refazia "este ano". Bug de quebra: preset `custom` no `agenda_until` esticava até hoje.
+- FEITO: Radar = 1 query (VALUES + LATERAL) + nomes em lote; mensagens enviadas = 1 pluck por request (memo);
+  KpiBag = total pela soma dos baldes + cache 2 min (período aberto) / 10 min (fechado); home = funis e universo
+  memoizados, `leads_by_inbox` numa query (e já pela taxa oficial), MIOLO (painel + desempenho + meta de resposta)
+  em cache por pessoa+painel+período (1 min curtos / 10 min mês·ano·custom, JSON round-trip); agenda_dashboard em
+  cache 3/10 min; cerca de parceiros cache 10 min + `forget!` no fim do sync; tasks/fetch com `:contact`; migration
+  `20260925090100_add_cevico_dashboard_indexes` (5 índices, `algorithm: :concurrently`, `if_not_exists`);
+  InicioPage: kpis em PARALELO, contador de sequência (home e kpis), auto-refresh só nos períodos curtos; fix do custom.
+- Deploy: a migration de índices roda sem travar as tabelas (concurrently). Reversão = imagem anterior (índices
+  podem ficar). Se ainda houver timeout no 1º "este ano" frio: subir RACK_TIMEOUT_SERVICE_TIMEOUT=40 no EasyPanel.
+
+## 236. 💰 CARD ANDA SOZINHO PARA "ENVIO DE ORÇAMENTO" (25/09: "a automação não é 100% precisa… lead pula de Novos Contatos direto pra Agendamento") — CONSTRUÍDO 25/09 SEM commit
+- `Crm::BudgetSideEffects`: mensagem de SAÍDA (robô ou equipe, não privada) com "R$ 1.234" / "1.234 reais" → se o card
+  do funil está ANTES da coluna de orçamento, move (só pra frente, nunca volta) e dispara as automações da coluna
+  (entrou/saiu) como um arrasto. Chamado pelo CrmListener em toda mensagem enviada (depois da cerca: parceiro nunca).
+  Coluna: `agenda_config.booking.budget_stage_id` (Agendamentos → Ajustes → "Quando a clínica manda um valor, mover
+  o card para") ou a 1ª coluna do 1º funil com "orçamento" no nome. Spec 4/4.
+- Por que: a taxa oficial (233) precisa da passagem certa; a automação por palavras continua valendo por cima.
+
+## 235. 📊 AGENDAMENTOS: CAIXAS E UNIDADES MÚLTIPLAS + EMPILHAMENTO POR CAIXA (25/09: "quero poder selecionar mais de uma caixa de entrada, e as duas unidades… empilhamento de caixa de entrada") — CONSTRUÍDO 25/09 SEM commit
+- Backend `appointments#feed`: `units[]` e `inbox_ids[]` (os antigos `unit`/`inbox_id` seguem valendo); devolve
+  `by_inbox` (quantos registros por caixa, robô × equipe) contado ANTES do filtro de caixa.
+- Tela: os selects viram CHIPS que ligam/desligam (Av. Paulista · Tatuapé; cada caixa com o número que trouxe);
+  barra "De onde vêm os registros · por caixa de entrada" (ShareBar do kit) acima da lista.
+
+## 234. 🎨 AGENDA POR TIPO COM CAMADAS (25/09: "cada coisa precisa ter a sua própria cor… agenda geral… apertar esses botões para ver as camadas") — CONSTRUÍDO 25/09 SEM commit
+- `cevicoAgenda.js`: 6 TIPOS (`TYPES`): Avaliação azul · Retorno dourado · Pós-operatório rosa (modalidade NOVA
+  `pos_op`) · Exame teal · Teleconsulta violeta · Cirurgia laranja; `typeOf(task)`, `GENERAL_TYPE` (tom neutro),
+  `LEGACY_KIND_TO_TYPES` (?kind= antigo). `KINDS`/`kindOf` continuam para o backend e o painel de Agendamentos.
+- AgendaBoard: o seletor exclusivo virou CAMADAS (`layers`, salvas no navegador): "Geral" liga todas; clique
+  liga/desliga um tipo; clique duplo deixa só ele (a página veste a cor dele). Balão = cor do TIPO; a unidade virou
+  ETIQUETA no balão (`tag-of` no AgendaTimeColumn, `.cv-ag-ev-tag`). Janelas somam os recursos ligados (médicos +
+  sala; janela de exames só quando Exame está sozinho). Modal: seletor de tipo com as 6 opções (`setFormType`);
+  "Tipo de consulta" só ao editar. Conferência: chip do TIPO sempre + chip da unidade na cor da unidade.
+- Backend: `pos_op` nos rótulos do Dashboard da Agenda (+ teleconsulta, que faltava), no `task_kind` do sync
+  Oftalmofácil e no Espaço do Paciente. Deep-link novo `?types=exames,cirurgia`.
+
+## 233. 📊 TAXA DE AGENDAMENTO OFICIAL = MUDANÇA DE COLUNA NO CRM (25/09: "está contando todo tipo de agendamento… resumir à mudança de coluna de envio de orçamento para agendamento de consulta") — CONSTRUÍDO 25/09 SEM commit
+- Antes: numerador = cards cuja coluna ATUAL é Agendamento ou posterior (coorte por criação do contato); "Consultas
+  agendadas" = toda consulta criada (tele, exame, cancelada, Oftalmofácil); 3 fórmulas diferentes (card, % 30 dias,
+  fórmula do "+"/Metas/Gestor Autônomo).
+- `Crm::BookingRate`: numerador = pacientes DISTINTOS que ENTRARAM na coluna de agendamento no período (histórico de
+  colunas, `event_type: entered`), vindos de Envio de Orçamento OU de qualquer coluna anterior (decisão dele: pulo
+  direto conta); coluna = a dos efeitos do agendamento (Agendamentos → Ajustes) ou a 1ª com "agendamento" no nome;
+  denominador = universo de leads. Aplicada em: home (`booking_conversion`, `appointments_created`, `appointments_30d`,
+  `leads_by_inbox`), KpiBag (`appointments_created` = "Entrou em Agendamento de Consulta (taxa oficial)"), Metas
+  (`rate_scheduling`), Gestor Autônomo, fórmula pronta do "+".
+- "Consultas agendadas" virou "MARCADAS NA AGENDA": consulta nova, sem exame/tele, não cancelada, sem item de
+  parceiro (home, KpiBag, Metas). Textos dos cards do Meu Painel atualizados. Spec 4/4.
+
+## 232. 💸 CACHE DO ATENDENTE: CONVERSA CACHEADA + % DO CACHE NA TELA (e-mail "prompt cache hit rate is low", 25/09) — CONSTRUÍDO 25/09 SEM commit (COM MIGRATION: 2 colunas em crm_ai_usages)
+- Diagnóstico: o roteiro (~8k tokens) já era cacheado (213), mas o contexto vivo (agora, vagas) vinha ANTES da
+  transcrição no turno do usuário → nada dela cacheava, e cada volta de ferramenta reenviava tudo; e a tabela de uso
+  não guardava cache lido/gravado (só o log).
+- `ResponderAgentService#user_content`: 2 blocos — conversa (marcada `cache_control` 5 min) e depois o contexto +
+  "responda à última mensagem". `record_usage` grava `cache_read_tokens`/`cache_write_tokens`; Gasto da IA mostra
+  "% do cache" por agente e no dia. Regra de TTL: roteiro 1 h (antes) e conversa 5 min (depois) — ordem certa.
+- Decisões dele (fora do código): esforço do Atendente (hoje alto) e modelo — testar "médio" no Testar agente.
+
+## 231. 🚧 CERCA DOS PARCEIROS — paciente do Oftalmofácil NUNCA recebe mensagem automática (pedido 24/09 noite: "os pacientes da OFTALMOFÁCIL NÃO PODEM RECEBER MENSAGENS DA NOSSA IA; só a caixa Oftalmofácil /inboxes/12 fala com eles… isso precisa ser feito") — CONSTRUÍDO 24/09 SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, sem migration)
+- DIAGNÓSTICO (levantamento dos 16 caminhos que mandam mensagem sozinhos): NENHUM excluía a caixa 12, o funil
+  OFTALMOFÁCIL ou a etiqueta de origem; só `nao_perturbe`/`perda_*` bloqueavam. Toda conversa nova (inclusive na
+  caixa 12) ganhava card no 1º funil (CEVICO); robô de follow-up global sem caixa rodava em todas; lembretes D-1/D-0
+  e Jornada pegavam consultas/cirurgias de parceiro sem filtro; o sync disparava automação no card do funil OF.
+- `Crm::PartnerGuard` (app/services/crm/partner_guard.rb): UMA função "paciente de parceiro?" = card no funil dos
+  parceiros (partner_pipeline_id) OU etiqueta `of_<parceiro>` OU additional_attributes.parceiro OU conversa numa
+  caixa dos parceiros (`agenda_config.oftalmofacil.partner_inbox_ids`, novo). ATENÇÃO: a etiqueta `oftalmofacil`
+  sozinha NÃO serve (a CATARATA_SP também ganha e é a CEVICO). `excluded_contact_ids` (cache 60 s) para públicos;
+  `partner_task?` (task source oftalmofacil + source_detail); `partner_surgery?` (fornecedor ≠ CATARATA_SP).
+  Cada bloqueio deixa "[cerca OF] bloqueado: …" no log.
+- APLICADA em: CrmListener (conversa nova de parceiro/caixa 12 NÃO cria card no funil CEVICO; mensagem de parceiro
+  não aciona Atendente WhatsApp/Instagram, secretário, âncora de agendamento nem automação "mensagem criada" — só o
+  opt-out); CrmAutomationFireJob (ações que falam/mandam dado pra fora bloqueadas: send_form, send_template, n8n,
+  webhook, meta/google ads, schedule_appointment; ações internas passam — cobre entrou/saiu, parado, valor);
+  FollowupBotJob (caixas dos parceiros e pacientes de parceiro fora do escopo + motivo `paciente_de_parceiro`);
+  AppointmentReminderSendJob (pula consulta/exame de parceiro); Jornada (planner ignora cirurgia/consulta de
+  parceiro; dispatcher bloqueia); Campanha WhatsApp/ligação e Régua (público sem parceiros); Colheita; Agente de
+  Ligação (leads sem resposta); sync (card no funil OF nunca dispara automação); LeadsUniverse (parceiro e caixa
+  dos parceiros nunca contam como lead da CEVICO); Lucratividade (`side=own|partners|all`, padrão CEVICO).
+- TELA: card OftalmoFácil → bloco "🚧 Cerca dos parceiros" com as caixas (marcar a "Oftalmofácil", id 12);
+  Financeiro → Lucratividade com chavinha CEVICO | Parceiros do hub | Tudo.
+- FORA DO CÓDIGO (conferir na tela): caixa 12 sem AgentBot/Captain, sem regra de automação nativa que envie
+  mensagem, sem CSAT; nenhum agente de IA com a caixa 12 marcada.
+- TESTES: `spec/services/crm/partner_guard_spec.rb` (6 exemplos: reconhecimento por card/etiqueta/atributo sem
+  confundir a CEVICO; conversa na caixa 12; sem card no funil CEVICO; automação bloqueada × interna passa;
+  campanha/régua; lembrete + follow-up). 111 exemplos verdes nas suítes vizinhas; engine_spec mantém as 2 falhas
+  ANTIGAS. Vue: os 2 componentes compilam.
+- Reversão: imagem anterior (sem migration).
+
 ## 230. 🔎 BUSCA QUE SUGERE ENQUANTO ESCREVE, POR AMBIENTE (pedido 24/09 noite: "deixar pra próxima") — AGUARDA "pode construir"
 - Pedido: em todo mecanismo de pesquisa, ir encontrando os termos conforme a pessoa digita (sugestões ao vivo),
   relacionadas ao ambiente onde está: na aba Oftalmofácil puxa pacientes/registros do hub; a barra de pesquisa

@@ -3980,6 +3980,7 @@ onUnmounted(() => {
                 <b class="text-n-slate-12 tabular-nums">{{ fmtUsd(usageDayTotals.cost_usd) }}</b>
                 em {{ usageDayLabel }} · {{ usageDayTotals.calls || 0 }} chamada(s) ·
                 {{ fmtTokens(usageDayTotals.input_tokens) }} entrada · {{ fmtTokens(usageDayTotals.output_tokens) }} saída
+                <span v-if="usageDayTotals.cache_pct !== undefined" :title="'Fatia da entrada que veio do cache (custa 10%). Baixo = o roteiro está sendo pago cheio.'" class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold" :class="usageDayTotals.cache_pct >= 50 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'">{{ usageDayTotals.cache_pct }}% do cache</span>
               </span>
             </div>
 
@@ -4022,6 +4023,7 @@ onUnmounted(() => {
                 <span>{{ row.calls }} {{ usageNoun(row.key) }}</span>
                 <span class="text-n-slate-9">· {{ fmtTokens(row.input_tokens) }} tokens entrada ·
                   {{ fmtTokens(row.output_tokens) }} saída</span>
+                <span v-if="row.cache_pct !== undefined" title="Fatia da entrada lida do cache (custa 10%)" class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold" :class="row.cache_pct >= 50 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'">{{ row.cache_pct }}% cache</span>
                 <span class="ml-auto font-bold text-n-slate-12 tabular-nums">{{
                   fmtUsd(row.cost_usd)
                 }}</span>

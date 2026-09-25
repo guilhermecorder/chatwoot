@@ -70,7 +70,8 @@ class Crm::VoiceAgent::UnresponsiveLeads
     @excluded_ids ||= begin
       campaign_ids = Crm::CallCampaign.where(account_id: account.id, status: OPEN_CAMPAIGN_STATUSES).pluck(:id)
       queued = Crm::CallCampaignContact.where(call_campaign_id: campaign_ids, status: %w[queued calling]).pluck(:contact_id)
-      (Crm::OptOut.excluded_contact_ids(account) + queued).to_set
+      # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub nunca recebe ligação
+      (Crm::OptOut.excluded_contact_ids(account) + queued + Crm::PartnerGuard.excluded_contact_ids(account)).to_set
     end
   end
 

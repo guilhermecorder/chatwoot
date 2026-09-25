@@ -61,7 +61,8 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
     # aliases distintos: 3 SUMs sem alias viram colunas homônimas "sum" e
     # o cast do pluck mistura os tipos (custo virava 0)
     by_agent = usages.group(:agent_key).pluck(:agent_key, Arel.sql('COUNT(*) AS calls'), Arel.sql('SUM(cost_usd) AS sum_cost'),
-                                              Arel.sql('SUM(input_tokens) AS sum_in'), Arel.sql('SUM(output_tokens) AS sum_out'))
+                                              Arel.sql('SUM(input_tokens) AS sum_in'), Arel.sql('SUM(output_tokens) AS sum_out'),
+                                              Arel.sql('SUM(cache_read_tokens) AS sum_cache'))
                      .index_by(&:first)
     last_calls = all_usages.group(:agent_key).maximum(:created_at)
     daily = daily_series
@@ -76,6 +77,8 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
         calls: row ? row[1] : 0,
         cost_usd: row ? row[2].to_f.round(4) : 0,
         tokens: row ? row[3].to_i + row[4].to_i : 0,
+        # item 232: fatia da entrada que veio do cache (0–100)
+        cache_pct: row && row[3].to_i.positive? ? ((row[5].to_i * 100.0) / row[3].to_i).round : 0,
         last_call_at: last_calls[key]&.iso8601,
         daily: daily[key] || []
       }
@@ -86,6 +89,7 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
       totals: {
         calls: usages.count,
         cost_usd: usages.sum(:cost_usd).to_f.round(4),
+        cache_pct: usages.sum(:input_tokens).positive? ? ((usages.sum(:cache_read_tokens) * 100.0) / usages.sum(:input_tokens)).round : 0,
         active_agents: agents.count { |a| a[:enabled] },
         top_agent: agents.max_by { |a| a[:calls] }&.then { |a| a[:calls].positive? ? a[:name] : nil }
       },

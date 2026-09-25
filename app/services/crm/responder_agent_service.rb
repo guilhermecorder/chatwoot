@@ -93,7 +93,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     params = {
       model: model, max_tokens: 2048, system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
-      messages: [{ role: 'user', content: context_block + transcript }]
+      messages: [{ role: 'user', content: user_content(transcript) }]
     }
     params[:tools] = tools.definitions if tools
 
@@ -191,9 +191,24 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       HORÁRIOS DISPONÍVEIS (vagas LIVRES reais das próximas 4 semanas; ofereça no máximo 2 por vez, só destes; para um dia específico fora desta lista use a ferramenta horarios_do_dia — agendamento futuro é liberado):
       #{Crm::AgendaSlots.free_slots_text(@account, days: 28, per_window: 3)}
 
-      #{voice? ? 'LIGAÇÃO ATÉ AGORA (PACIENTE = quem está na linha; CLÍNICA = você, falando)' : 'CONVERSA ATÉ AGORA (PACIENTE = quem você atende; CLÍNICA = você/equipe)'}:
-
     CTX
+  end
+
+  # 💸 item 232 (25/09): a CONVERSA vai primeiro, em bloco próprio marcado
+  # para cache (5 min). Entre uma mensagem picada e a outra, e entre as voltas
+  # de ferramenta da mesma resposta, esse prefixo repete e a Anthropic cobra
+  # 10%. O contexto vivo (agora, vagas, coluna) muda a cada chamada — por isso
+  # vem DEPOIS, fora do trecho guardado.
+  def user_content(transcript)
+    header = if voice?
+               'LIGAÇÃO ATÉ AGORA (PACIENTE = quem está na linha; CLÍNICA = você, falando):'
+             else
+               'CONVERSA ATÉ AGORA (PACIENTE = quem você atende; CLÍNICA = você/equipe):'
+             end
+    [
+      { type: 'text', text: "#{header}\n#{transcript}", cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: "#{context_block}\nResponda à ÚLTIMA mensagem do PACIENTE da conversa acima, seguindo o Roteiro." }
+    ]
   end
 
   def card_stage_name

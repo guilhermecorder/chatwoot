@@ -22,6 +22,8 @@ const props = defineProps({
   durationOf: { type: Function, required: true },
   accentOf: { type: Function, required: true },
   nameOf: { type: Function, required: true },
+  // item 234: etiqueta pequena no balão (ex.: a unidade) — { label, short } ou null
+  tagOf: { type: Function, default: null },
   compact: { type: Boolean, default: false },
 });
 const emit = defineEmits(['create', 'open', 'dragstart', 'drop', 'dragover', 'dragleave']);
@@ -201,6 +203,7 @@ const evClass = ev => ({
       <span class="cv-ag-ev-name">{{ ev.name }}</span>
       <!-- 🏥 item 228: selo de origem (veio de outro sistema) -->
       <span v-if="ev.task.source" class="cv-ag-ev-src" :title="`Veio do Oftalmofácil${ev.task.source_detail ? ' · ' + ev.task.source_detail : ''}`">{{ compact ? 'OF' : (ev.task.source_detail || 'Oftalmofácil') }}</span>
+      <span v-if="tagOf && tagOf(ev.task)" class="cv-ag-ev-tag" :title="tagOf(ev.task).label">{{ compact ? tagOf(ev.task).short : tagOf(ev.task).label }}</span>
       <span v-if="badges(ev.task).length" class="cv-ag-ev-badges">
         <span v-for="(b, bi) in badges(ev.task)" :key="bi">{{ b }}</span>
       </span>

@@ -39,13 +39,19 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     tasks = base_scope(since, until_at, mode, track).includes(:contact, :assignee, :creator).limit(LIMIT).to_a
     rows = build_rows(tasks, mode, since, until_at)
     rows = rows.select { |r| r[:kind] == params[:kind] } if KINDS.include?(params[:kind].to_s)
-    rows = rows.select { |r| r[:unit] == params[:unit] } if params[:unit].present?
-    rows = rows.select { |r| r.dig(:conversation, :inbox_id) == params[:inbox_id].to_i } if params[:inbox_id].present?
+    # 📊 item 235: unidades e caixas MÚLTIPLAS (units[]=paulista&units[]=tatuape;
+    # inbox_ids[]=12&inbox_ids[]=3) — os antigos unit / inbox_id continuam valendo
+    units = Array(params[:units]).map(&:to_s).compact_blank.presence || Array(params[:unit].presence).map(&:to_s)
+    rows = rows.select { |r| units.include?(r[:unit].to_s) } if units.any?
+    # empilhamento por caixa: contado ANTES do filtro de caixa, pra mostrar a fatia de cada uma
+    by_inbox = stack_by_inbox(rows)
+    inbox_ids = Array(params[:inbox_ids]).map(&:to_i).select(&:positive?).presence || Array(params[:inbox_id].presence).map(&:to_i)
+    rows = rows.select { |r| inbox_ids.include?(r.dig(:conversation, :inbox_id).to_i) } if inbox_ids.any?
     rows = filter_query(rows, params[:q])
 
     render json: {
       mode: mode, track: track, since: since, until: until_at, rows: rows, counts: counts(rows),
-      booking: booking_json
+      by_inbox: by_inbox, booking: booking_json
     }
   end
 
@@ -208,6 +214,14 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   # robô × equipe só entre o que foi MARCADO/REMARCADO/CANCELADO (confirmação
   # é do paciente; lançamento é sempre da equipe)
   BOOKING_KINDS_FOR_SOURCE = %w[agendada reagendada cancelada].freeze
+
+  # item 235: quantos registros vieram de cada caixa (ordem: maior primeiro)
+  def stack_by_inbox(rows)
+    rows.group_by { |r| [r.dig(:conversation, :inbox_id), r.dig(:conversation, :inbox_name)] }
+        .map { |(id, name), list| { inbox_id: id, name: name.presence || 'sem conversa', count: list.size,
+                                    ia: list.count { |r| r[:source] == 'ia' }, equipe: list.count { |r| r[:source] == 'equipe' } } }
+        .sort_by { |h| -h[:count] }
+  end
 
   def counts(rows)
     booked = rows.select { |r| BOOKING_KINDS_FOR_SOURCE.include?(r[:kind]) }

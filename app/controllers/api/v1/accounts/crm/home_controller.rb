@@ -20,23 +20,32 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
 
   def show
     since, until_at = resolve_range
+    # ⚡ item 237 (25/09): o MIOLO pesado (painel do período + desempenho +
+    # meta de resposta) fica guardado por pessoa+painel+período: 1 min nos
+    # períodos curtos, 10 min em mês/ano/personalizado (a tela atualiza a
+    # cada 2 min e refazia tudo; "este ano" passava do limite de 15 s)
+    heavy = Rails.cache.fetch(heavy_cache_key(since, until_at), expires_in: heavy_ttl) do
+      JSON.parse({ panel_data: panel_data(since, until_at),
+                   response_goal: response_goal_json(since, until_at),
+                   my_performance: my_performance_json(since, until_at) }.to_json)
+    end
 
     render json: {
       period: params[:preset].presence || 'today',
       panel: panel_key,
-      panel_data: panel_data(since, until_at),
+      panel_data: heavy['panel_data'],
       # termômetros de agora (independem do período)
       open_conversations: account.conversations.open.count,
       unanswered: account.conversations.open.where.not(waiting_since: nil).count,
       appointments_today: active_consultas.where(due_at: TZ.now.all_day).count,
       new_contacts_30d: leads_count(30.days.ago, Time.current),
-      appointments_30d: reached_stage_count(/agendamento/i, 30.days.ago, Time.current),
+      appointments_30d: Crm::BookingRate.count(account, 30.days.ago, Time.current), # item 233
       next_appointments: next_appointments_json,
       opportunity_alerts: opportunity_alerts_json,
       # meta de tempo de atendimento (relatório pessoal por atendente)
-      response_goal: response_goal_json(since, until_at),
+      response_goal: heavy['response_goal'],
       # bloco "Meu desempenho" (item 138): a pessoa + o Atendimento IA
-      my_performance: my_performance_json(since, until_at),
+      my_performance: heavy['my_performance'],
       # Mentor do Time: feedback semanal individual (admin vê o time)
       weekly_feedback: weekly_feedback_json,
       my_tasks: my_tasks_json,
@@ -49,7 +58,17 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       manager_brief: manager_brief_json,
       # metas do painel + fator do período + recordes (cards vivos)
       goals: goals_json
-    }.merge(panel_key == 'agendamento' ? panel_data(since, until_at) : {}) # compat: campos antigos no topo
+    }.merge(panel_key == 'agendamento' ? heavy['panel_data'] : {}) # compat: campos antigos no topo
+  end
+
+  HEAVY_PRESETS = %w[month last_month year custom].freeze
+
+  def heavy_cache_key(since, until_at)
+    ['cevico:home', account.id, Current.user.id, panel_key, params[:doctor].to_s, params[:preset].to_s, since.to_i, until_at.to_i].join(':')
+  end
+
+  def heavy_ttl
+    HEAVY_PRESETS.include?(params[:preset].to_s) ? 10.minutes : 1.minute
   end
 
   # briefing diário do Gestor Autônomo — admin vê tudo; atendente comum não
@@ -309,7 +328,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     when 'week'  then now.end_of_week.end_of_day
     when 'month' then now.end_of_month.end_of_day
     when 'year'  then now.end_of_year.end_of_day
-    when 'yesterday', 'last_week', 'last_month' then until_at
+    when 'yesterday', 'last_week', 'last_month', 'custom' then until_at # item 237: custom não estica até hoje
     else now.end_of_day # hoje
     end
   end
@@ -318,7 +337,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def agendamento_metrics(since, until_at)
     universe = leads_scope(since, until_at)
     leads = universe.count
-    agendadas = reached_stage_count(/agendamento/i, since, until_at, universe: universe)
+    # 📊 item 233: taxa OFICIAL = quem ENTROU na coluna "Agendamento de Consulta"
+    # no período (mudança de coluna no CRM), não a coluna atual nem a Agenda
+    agendadas = Crm::BookingRate.count(account, since, until_at)
     {
       new_leads: leads,
       appointments_created: agendadas,
@@ -484,7 +505,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # Se a conta não tiver caixas com esses nomes (ex.: ambiente local),
   # conta todos os contatos novos para o painel não ficar zerado.
   def leads_scope(since, until_at)
-    Crm::LeadsUniverse.scope(account, since, until_at)
+    @leads_scopes ||= {}
+    @leads_scopes[[since.to_i, until_at.to_i]] ||= Crm::LeadsUniverse.scope(account, since, until_at) # item 237: 1x por período
   end
 
   def leads_count(since, until_at)
@@ -508,10 +530,14 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
                     .joins(:conversations).where(conversations: { inbox_id: inbox_ids })
                     .group('conversations.inbox_id').count('DISTINCT contacts.id')
     names = account.inboxes.where(id: counts.keys).pluck(:id, :name).to_h
+    # item 233 + 237: "agendaram" = entraram na coluna de agendamento no período
+    # (taxa oficial), numa query só para todas as caixas (antes: 3+ por caixa)
+    booked_by_inbox = Crm::BookingRate.entries(account, since, until_at)
+                                      .joins(crm_contact: { contact: :conversations })
+                                      .where(contacts: { created_at: since..until_at }, conversations: { inbox_id: inbox_ids })
+                                      .group('conversations.inbox_id').count('DISTINCT crm_contacts.contact_id')
     counts.map do |id, c|
-      universe = account.contacts.where(created_at: since..until_at)
-                        .joins(:conversations).where(conversations: { inbox_id: id }).distinct
-      booked = reached_stage_count(/agendamento/i, since, until_at, universe: universe)
+      booked = booked_by_inbox[id].to_i
       { name: names[id].to_s, count: c, booked: booked, rate: pct(booked, c) }
     end.sort_by { |h| -h[:count] }
   end
@@ -671,8 +697,12 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }
   end
 
+  def pipelines_with_stages
+    @pipelines_with_stages ||= account.crm_pipelines.includes(:stages).to_a # item 237: 1x por request
+  end
+
   def reached_stage_count(pattern, since, until_at, exclude: /pós/i, universe: nil)
-    account.crm_pipelines.includes(:stages).sum do |pipeline|
+    pipelines_with_stages.sum do |pipeline|
       stage_ids = reached_stage_ids(pipeline, pattern, exclude)
       next 0 if stage_ids.empty?
 
@@ -966,6 +996,11 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def booked_scope(account, since, until_at)
     account.tasks.bookings.where(task_type: 'consulta', created_at: since..until_at)
            .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
+           # item 233: "Marcadas na Agenda" = consulta nova de verdade — sem exame,
+           # teleconsulta, cancelada ou item de parceiro do Oftalmofácil
+           .where(canceled_at: nil)
+           .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
+           .where(source_detail: nil)
   end
 
   def pct(part, total)

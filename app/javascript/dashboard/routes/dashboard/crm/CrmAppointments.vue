@@ -21,6 +21,7 @@ import TasksAPI from 'dashboard/api/tasks';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import Avatar from 'dashboard/components-next/avatar/Avatar.vue';
 import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
@@ -209,30 +210,51 @@ const SOURCES = [
 ];
 const source = ref('');
 const UNITS = [
-  { key: '', label: 'Todas as unidades' },
-  { key: 'paulista', label: 'Av. Paulista' },
-  { key: 'tatuape', label: 'Tatuapé' },
+  { key: 'paulista', label: 'Av. Paulista', color: '#EA580C' },
+  { key: 'tatuape', label: 'Tatuapé', color: '#2563EB' },
 ];
 // teleconsulta é online (sem unidade física): o filtro de unidade some
 const showUnitFilter = computed(
   () => track.value === 'consultas' || track.value === 'exames'
 );
-const unit = ref('');
-const inboxId = ref('');
+// 📊 item 235: unidades e caixas MÚLTIPLAS (chips que ligam/desligam)
+const units = ref([]);
+const inboxIds = ref([]);
 const q = ref('');
+const byInbox = ref([]); // empilhamento por caixa, vem do servidor
 const inboxOptions = computed(() =>
   (inboxes.value || []).map(i => ({ id: i.id, name: i.name }))
 );
+const toggleIn = (list, value) => {
+  const i = list.value.indexOf(value);
+  if (i >= 0) list.value.splice(i, 1);
+  else list.value.push(value);
+};
+const toggleUnit = key => toggleIn(units, key);
+const toggleInbox = id => toggleIn(inboxIds, Number(id));
+const inboxCount = id =>
+  (byInbox.value || []).find(b => Number(b.inbox_id) === Number(id))?.count || 0;
+const stackTotal = computed(() =>
+  (byInbox.value || []).reduce((s, b) => s + (b.count || 0), 0)
+);
+const INBOX_STACK_COLORS = ['#2563EB', '#EA580C', '#059669', '#7C3AED', '#DB2777', '#0D9488', '#D4A017', '#64748B'];
+const stackItems = computed(() =>
+  (byInbox.value || []).map((b, i) => ({
+    label: b.name,
+    value: b.count,
+    color: INBOX_STACK_COLORS[i % INBOX_STACK_COLORS.length],
+  }))
+);
 const hasFilters = computed(
   () =>
-    Boolean(kind.value || source.value || unit.value || inboxId.value) ||
+    Boolean(kind.value || source.value || units.value.length || inboxIds.value.length) ||
     String(q.value || '').trim().length > 0
 );
 const clearFilters = () => {
   kind.value = '';
   source.value = '';
-  unit.value = '';
-  inboxId.value = '';
+  units.value = [];
+  inboxIds.value = [];
   q.value = '';
 };
 
@@ -242,8 +264,8 @@ const feedParams = () => {
   const p = period.value || {};
   const params = { preset: p.preset, mode: mode.value, track: track.value };
   if (p.preset === 'custom') Object.assign(params, { from: p.from, to: p.to });
-  if (unit.value) params.unit = unit.value;
-  if (inboxId.value) params.inbox_id = inboxId.value;
+  if (units.value.length) params.units = [...units.value];
+  if (inboxIds.value.length) params.inbox_ids = [...inboxIds.value];
   const term = String(q.value || '').trim();
   if (term.length >= 2) params.q = term;
   return params;
@@ -258,6 +280,7 @@ const form = ref({
   labels: { created: '', rescheduled: '', canceled: '' },
   stage_id: '',
   cancel_stage_id: '',
+  budget_stage_id: '', // 💰 item 236
 });
 const syncForm = cfg => {
   if (!cfg) return;
@@ -270,6 +293,7 @@ const syncForm = cfg => {
     },
     stage_id: cfg.stage_id ? String(cfg.stage_id) : '',
     cancel_stage_id: cfg.cancel_stage_id ? String(cfg.cancel_stage_id) : '',
+    budget_stage_id: cfg.budget_stage_id ? String(cfg.budget_stage_id) : '',
   };
 };
 
@@ -289,6 +313,7 @@ const fetchFeed = async ({ quiet = false } = {}) => {
     const { data } = await CrmAPI.appointmentsFeed(feedParams());
     if (seq !== fetchSeq) return; // chegou uma busca mais nova
     feed.value = data;
+    byInbox.value = data.by_inbox || []; // item 235: empilhamento por caixa
     if (!showSettings.value) syncForm(data.booking);
   } catch (error) {
     if (seq !== fetchSeq) return;
@@ -467,6 +492,7 @@ const saveBooking = async () => {
       labels: { ...form.value.labels },
       stage_id: form.value.stage_id || null,
       cancel_stage_id: form.value.cancel_stage_id || null,
+      budget_stage_id: form.value.budget_stage_id || null, // 💰 item 236
     });
     useAlert('Ajustes salvos.');
     showSettings.value = false;
@@ -483,9 +509,10 @@ const saveBooking = async () => {
 let searchTimer = null;
 let refreshTimer = null;
 watch(track, () => {
-  if (!showUnitFilter.value) unit.value = '';
+  if (!showUnitFilter.value) units.value = [];
 });
-watch([mode, unit, inboxId, track], () => fetchFeed());
+watch([mode, track], () => fetchFeed());
+watch([units, inboxIds], () => fetchFeed(), { deep: true }); // item 235
 watch(period, () => fetchFeed(), { deep: true });
 watch(q, () => {
   clearTimeout(searchTimer);
@@ -772,6 +799,26 @@ onBeforeUnmount(() => {
                   </option>
                 </select>
               </label>
+              <label class="flex flex-col gap-1 sm:col-span-2">
+                <span class="cv-label">
+                  💰 Quando a clínica manda um valor (R$), mover o card para
+                </span>
+                <select v-model="form.budget_stage_id" class="cv-input w-full">
+                  <option value="">
+                    a coluna do 1º funil com "orçamento" no nome
+                  </option>
+                  <option
+                    v-for="st in booking.stages"
+                    :key="'b' + st.id"
+                    :value="String(st.id)"
+                  >
+                    {{ st.pipeline }} · {{ st.name }}
+                  </option>
+                </select>
+                <span class="text-[11px] text-n-slate-9">
+                  Robô ou equipe: qualquer mensagem enviada com "R$ 1.234" ou "1.234 reais" leva o card pra frente até essa coluna (nunca volta). É o que faz a taxa de agendamento contar a passagem certa.
+                </span>
+              </label>
             </div>
 
             <div class="flex items-center justify-end gap-2">
@@ -851,29 +898,32 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="flex items-center gap-2 flex-wrap mb-6">
-            <select
-              v-if="showUnitFilter"
-              v-model="unit"
-              class="cv-input text-xs !w-auto"
-            >
-              <option v-for="u in UNITS" :key="u.key" :value="u.key">
+            <!-- 📊 item 235: unidades e caixas MÚLTIPLAS (ligue quantas quiser) -->
+            <div v-if="showUnitFilter" class="flex items-center gap-1.5 flex-wrap" title="Unidades: ligue uma ou as duas">
+              <button
+                v-for="u in UNITS"
+                :key="u.key"
+                class="cv-chip"
+                :class="units.includes(u.key) ? 'cv-chip-on' : ''"
+                @click="toggleUnit(u.key)"
+              >
+                <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: u.color }" />
                 {{ u.label }}
-              </option>
-            </select>
-            <select
-              v-if="inboxOptions.length > 1"
-              v-model="inboxId"
-              class="cv-input text-xs !w-auto"
-            >
-              <option value="">Qualquer caixa</option>
-              <option
+              </button>
+            </div>
+            <div v-if="inboxOptions.length > 1" class="flex items-center gap-1.5 flex-wrap" title="Caixas de entrada: ligue quantas quiser (o número é quanto cada uma trouxe no período)">
+              <button
                 v-for="i in inboxOptions"
                 :key="i.id"
-                :value="String(i.id)"
+                class="cv-chip"
+                :class="inboxIds.includes(Number(i.id)) ? 'cv-chip-on' : ''"
+                @click="toggleInbox(i.id)"
               >
+                <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: inboxSolidFor(inboxes, i.id) }" />
                 {{ i.name }}
-              </option>
-            </select>
+                <span class="opacity-80 tabular-nums">{{ inboxCount(i.id) }}</span>
+              </button>
+            </div>
             <input
               v-model="q"
               type="search"
@@ -903,6 +953,15 @@ onBeforeUnmount(() => {
               />
               Atualizar
             </button>
+          </div>
+
+          <!-- 📊 item 235: de onde vêm os registros (fatia de cada caixa, antes do filtro de caixa) -->
+          <div v-if="stackItems.length > 1" class="cv-sub p-3 mb-4">
+            <div class="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
+              <p class="cv-label">De onde vêm os registros · por caixa de entrada</p>
+              <span class="text-[11px] text-n-slate-9">{{ stackTotal }} no período</span>
+            </div>
+            <ShareBar :items="stackItems" :max="8" />
           </div>
 
           <!-- vazio -->

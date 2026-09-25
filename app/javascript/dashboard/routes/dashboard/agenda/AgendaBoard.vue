@@ -20,7 +20,8 @@ import {
 } from 'date-fns';
 import CrmAPI from 'dashboard/api/crm';
 import {
-  DOCTORS, MODALITIES, KINDS, KIND_BY_KEY, ONLINE_UNIT,
+  DOCTORS, MODALITIES, ONLINE_UNIT,
+  TYPES, TYPE_BY_KEY, GENERAL_TYPE, typeOf, LEGACY_KIND_TO_TYPES,
   kindFor, kindOf, kindVars, hexToRgbSpaced,
   resolveWindows, resolveBlocked, resolveBlockedDays, resolveExamWindows,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
@@ -48,28 +49,59 @@ const viewMode = ref('week'); // 'month' | 'week' | 'day' — padrão SEMANA
 // filtro: 'clinic' (todas) | 'unit:x' | 'doctor:Nome' | 'me' | '<agentId>'
 const view = ref('clinic');
 
-// ── OS 4 TRILHOS: consultas | teleconsultas | exames | cirurgias ──
-const kind = ref('consultas');
-const k = computed(() => kindFor(kind.value)); // o tipo ativo (cor, nome, ícone)
+// ── 🎨 item 234 (25/09): CAMADAS por TIPO — avaliação · retorno · pós-op ·
+// exame · teleconsulta · cirurgia. Todas ligadas = "Agenda geral" (tom
+// neutro); uma só = a página veste a cor daquele tipo. Fica salvo no navegador.
+const LAYERS_KEY = 'cevico_agenda_layers';
+const loadLayers = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYERS_KEY) || 'null');
+    if (Array.isArray(saved) && saved.some(x => TYPE_BY_KEY[x])) return saved.filter(x => TYPE_BY_KEY[x]);
+  } catch (e) { /* sem preferência salva */ }
+  return TYPES.map(t => t.key);
+};
+const layers = ref(new Set(loadLayers()));
+const persistLayers = () => {
+  try { localStorage.setItem(LAYERS_KEY, JSON.stringify([...layers.value])); } catch (e) { /* sem espaço */ }
+};
+const layerOn = key => layers.value.has(key);
+const toggleLayer = key => {
+  const next = new Set(layers.value);
+  if (next.has(key) && next.size > 1) next.delete(key);
+  else next.add(key);
+  layers.value = next;
+  persistLayers();
+};
+const soloLayer = key => { layers.value = new Set([key]); persistLayers(); };
+const allLayers = () => { layers.value = new Set(TYPES.map(t => t.key)); persistLayers(); };
+const ensureLayer = key => {
+  if (!TYPE_BY_KEY[key] || layers.value.has(key)) return;
+  const next = new Set(layers.value); next.add(key); layers.value = next; persistLayers();
+};
+const activeTypes = computed(() => TYPES.filter(t => layers.value.has(t.key)));
+const isGeneral = computed(() => activeTypes.value.length === TYPES.length);
+const singleType = computed(() => (activeTypes.value.length === 1 ? activeTypes.value[0] : null));
+const k = computed(() => singleType.value || GENERAL_TYPE); // o "tipo" da página (cor, nome, ícone)
 const pageVars = computed(() => kindVars(k.value));
-const isSurgeryMode = computed(() => kind.value === 'cirurgias');
-const isTele = computed(() => kind.value === 'teleconsultas');
-const isPhysical = computed(() => kind.value === 'consultas' || kind.value === 'exames');
-// 🔬 23/09: exames têm JANELA PRÓPRIA (seg–sex 08h–17h na Av. Paulista por
-// padrão) e cor só deles — não dividem mais os blocos dos médicos
-const isExam = computed(() => kind.value === 'exames');
-const EXAM_COLOR = KIND_BY_KEY.exames.color;
+const resources = computed(() => new Set(activeTypes.value.map(t => t.resource)));
+// modos "só um recurso" (o resto da tela decide janelas, ocupação e filtros por eles)
+const isSurgeryMode = computed(() => resources.value.size === 1 && resources.value.has('surgery'));
+const isTele = computed(() => resources.value.size === 1 && resources.value.has('online'));
+const isExam = computed(() => resources.value.size === 1 && resources.value.has('exam'));
+const isPhysical = computed(() => resources.value.has('doctor') || resources.value.has('exam'));
+const showSurgery = computed(() => resources.value.has('surgery'));
+const EXAM_COLOR = TYPE_BY_KEY.exames.color;
 const isSurgeryTask = t => t.task_type === 'cirurgia';
-const kindVarsOf = key => {
-  const kk = KIND_BY_KEY[key];
+const typeVarsOf = key => {
+  const tt = TYPE_BY_KEY[key] || GENERAL_TYPE;
   return {
-    '--k-grad': kk.grad,
-    '--k-deep': kk.deep,
-    '--k-rgb': hexToRgbSpaced(kk.color),
-    '--k-deep-rgb': hexToRgbSpaced(kk.deep),
+    '--k-grad': tt.grad,
+    '--k-deep': tt.deep,
+    '--k-rgb': hexToRgbSpaced(tt.color),
+    '--k-deep-rgb': hexToRgbSpaced(tt.deep),
   };
 };
-// "Nova consulta" / "Agendar cirurgia" / "Novo exame"…
+// "Nova avaliação" / "Agendar cirurgia" / "Novo agendamento" (geral)
 const newLabel = computed(() =>
   isSurgeryMode.value ? 'Agendar cirurgia' : `${k.value.article === 'o' ? 'Novo' : 'Nova'} ${k.value.noun}`
 );
@@ -223,10 +255,10 @@ const VIEW_MODES = [
 
 // Unidades da clínica (+ "online" da teleconsulta)
 const UNITS = {
-  tatuape:  { label: 'Tatuapé',      color: '#2563EB' },
-  paulista: { label: 'Av. Paulista', color: '#EA580C' },
+  tatuape:  { label: 'Tatuapé',      short: 'TAT', color: '#2563EB' },
+  paulista: { label: 'Av. Paulista', short: 'PAU', color: '#EA580C' },
 };
-const ONLINE = { label: 'Online', color: '#7C3AED' };
+const ONLINE = { label: 'Online', short: 'ON', color: '#7C3AED' };
 
 const PROBLEMAS = [
   'Catarata', 'Refrativa', 'Ceratocone', 'Lentes Fácicas',
@@ -313,14 +345,20 @@ const slotsFor = sharedSlotsFor;
 
 // janelas de um dia no trilho ativo: consultas/exames = médicos (com o
 // filtro de unidade/médico); cirurgias = sala cirúrgica; teleconsultas = nenhuma
+// item 234: com várias camadas ligadas, as janelas dos recursos ligados se
+// somam (médicos + sala cirúrgica); a janela de exames (dia inteiro) só
+// aparece quando a camada de exames está sozinha, para não sujar a semana
 const windowsForDay = day => {
-  if (isSurgeryMode.value) return surgeryWindowsForDay(day);
-  if (isExam.value) return examWindowsForDay(day);
-  if (isTele.value) return [];
-  return windows.value
-    .filter(w => w.dow === day.getDay())
-    .filter(w => !activeUnit.value || w.unit === activeUnit.value)
-    .filter(w => !activeDoctor.value || w.doctor === activeDoctor.value);
+  const out = [];
+  if (resources.value.has('doctor')) {
+    out.push(...windows.value
+      .filter(w => w.dow === day.getDay())
+      .filter(w => !activeUnit.value || w.unit === activeUnit.value)
+      .filter(w => !activeDoctor.value || w.doctor === activeDoctor.value));
+  }
+  if (isExam.value) out.push(...examWindowsForDay(day));
+  if (showSurgery.value) out.push(...surgeryWindowsForDay(day));
+  return out;
 };
 const toMin = hm => {
   const [h, m] = hm.split(':').map(Number);
@@ -423,7 +461,7 @@ const loadDayDetails = async () => {
     dayDetails.value = {};
   }
 };
-watch([viewMode, cursor, kind, allTasks], () => {
+watch([viewMode, cursor, layers, allTasks], () => {
   if (viewMode.value === 'day') loadDayDetails();
 });
 const detailOf = task => dayDetails.value[task.id] || null;
@@ -440,7 +478,7 @@ const isAppointment = t => t.task_type === 'consulta' || t.task_type === 'cirurg
 
 // tudo o que está no calendário (canceladas ficam fora; continuam no banco)
 const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at));
-const inKind = t => kindOf(t) === kind.value;
+const inKind = t => layers.value.has(typeOf(t)); // item 234: camadas por tipo
 
 // 🏥 item 228: origem do agendamento — 'all' | 'cevico' (nasceu aqui) | 'oftalmofacil'
 const originFilter = ref('all');
@@ -482,12 +520,12 @@ const rangeEnd = computed(() => {
   return addDays(rangeStart.value, 1);
 });
 const kindCounts = computed(() => {
-  const out = { consultas: 0, teleconsultas: 0, exames: 0, cirurgias: 0 };
+  const out = Object.fromEntries(TYPES.map(t => [t.key, 0]));
   const s = rangeStart.value.getTime();
   const e = rangeEnd.value.getTime();
   liveTasks.value.filter(isAppointment).forEach(t => {
     const ts = new Date(t.due_at).getTime();
-    if (ts >= s && ts < e) out[kindOf(t)] += 1;
+    if (ts >= s && ts < e) out[typeOf(t)] += 1;
   });
   return out;
 });
@@ -647,7 +685,7 @@ const nowMinutes = ref(new Date().getHours() * 60 + new Date().getMinutes());
 let nowTimer = null;
 
 // ── Helpers de exibição ──
-const displayName = task => (task.title || '').replace(/^(Consulta|Teleconsulta|Exame|Cirurgia):\s*/i, '');
+const displayName = task => (task.title || '').replace(/^(Consulta|Teleconsulta|Exame|Cirurgia|P[oó]s-operat[oó]rio):\s*/i, '');
 const chipTime = task =>
   new Date(task.due_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const unitOf = task => {
@@ -659,13 +697,17 @@ const unitOf = task => {
   }
   return null;
 };
-// cor do balão: unidade (Tatuapé/Paulista), local da cirurgia, ou a cor do tipo
-const accentOf = task =>
-  kindOf(task) === 'exames' ? EXAM_COLOR : unitOf(task)?.color || KIND_BY_KEY[kindOf(task)]?.color || '#2563EB';
+// item 234: cor do balão = a cor do TIPO (avaliação, retorno, pós-op, exame,
+// tele, cirurgia); a unidade/local vira uma etiqueta pequena no balão
+const accentOf = task => TYPE_BY_KEY[typeOf(task)]?.color || '#2563EB';
+const tagOf = task => {
+  const u = unitOf(task);
+  return u ? { label: u.label, short: u.short || u.label.slice(0, 3).toUpperCase() } : null;
+};
 const evVars = task => ({ '--ev': accentOf(task), '--ev-rgb': hexToRgbSpaced(accentOf(task)) });
 const modalityOf = task =>
   MODALITIES.find(m => m.key === (task.modality || 'avaliacao')) || MODALITIES[0];
-const kindLabelOf = task => KIND_BY_KEY[kindOf(task)]?.noun || 'consulta';
+const kindLabelOf = task => TYPE_BY_KEY[typeOf(task)]?.noun || 'consulta';
 
 // ── Ocupação da agenda (% preenchida — dia/semana/mês) ──
 // Consultas e exames dividem os MESMOS blocos dos médicos (a ocupação soma
@@ -798,7 +840,13 @@ onMounted(async () => {
       viewMode.value = 'day';
     }
   }
-  if (route.query.kind && KIND_BY_KEY[route.query.kind]) kind.value = route.query.kind;
+  // item 234: ?types=exames,cirurgia liga só essas camadas; ?kind= (links antigos) também vale
+  if (route.query.types) {
+    const wanted = String(route.query.types).split(',').filter(x => TYPE_BY_KEY[x]);
+    if (wanted.length) layers.value = new Set(wanted);
+  } else if (route.query.kind && LEGACY_KIND_TO_TYPES[route.query.kind]) {
+    layers.value = new Set(LEGACY_KIND_TO_TYPES[route.query.kind]);
+  }
   if (['month', 'week', 'day'].includes(route.query.view)) viewMode.value = route.query.view;
   if (!agents.value.length) store.dispatch('agents/get');
   await store.dispatch('crm/fetchSettings').catch(() => {});
@@ -824,7 +872,7 @@ const defaultUnit = key => {
   return activeUnit.value || 'tatuape';
 };
 const emptyForm = (day, prefill = {}) => {
-  const key = prefill.kind || kind.value;
+  const key = prefill.kind || k.value.kind || 'consultas';
   return {
     kind: key,
     name: prefill.name || '',
@@ -851,17 +899,27 @@ const BOOKING_KINDS = [
 const bookingHint = computed(
   () => (BOOKING_KINDS.find(b => b.key === form.value.booking_kind) || BOOKING_KINDS[0]).hint
 );
-const formKind = computed(() => kindFor(form.value.kind));
-const formVars = computed(() => kindVars(formKind.value));
-// trocar o tipo no modal (só ao criar): modalidade e unidade acompanham
-const setFormKind = key => {
-  if (editingTask.value || form.value.kind === key) return;
-  form.value.kind = key;
-  form.value.modality = defaultModality(key);
-  form.value.unit = defaultUnit(key);
-  if (key !== 'consultas' && key !== 'teleconsultas') form.value.procedure = '';
+// item 234: o TIPO do formulário (6 opções) — o trilho + a modalidade por trás
+const formType = computed(() => {
+  if (form.value.kind === 'cirurgias') return TYPE_BY_KEY.cirurgia;
+  if (form.value.kind === 'teleconsultas') return TYPE_BY_KEY.teleconsulta;
+  if (form.value.kind === 'exames') return TYPE_BY_KEY.exames;
+  return TYPE_BY_KEY[form.value.modality] || TYPE_BY_KEY.avaliacao;
+});
+const formKind = formType; // nome antigo, mesmo objeto (noun/article/icon/hint)
+const formVars = computed(() => kindVars(formType.value));
+const setFormType = key => {
+  const tt = TYPE_BY_KEY[key];
+  if (editingTask.value || !tt) return;
+  const prevKind = form.value.kind;
+  form.value.kind = tt.kind;
+  form.value.modality = tt.modality || '';
+  if (prevKind !== tt.kind) {
+    form.value.unit = defaultUnit(tt.kind);
+    if (tt.kind !== 'consultas' && tt.kind !== 'teleconsultas') form.value.procedure = '';
+  }
 };
-const consultaModalities = MODALITIES.filter(m => m.key === 'avaliacao' || m.key === 'retorno');
+const consultaModalities = MODALITIES.filter(m => ['avaliacao', 'retorno', 'pos_op'].includes(m.key));
 
 const openCreateOnDay = (day, prefill = {}) => {
   editingTask.value = null;
@@ -972,7 +1030,7 @@ const save = async () => {
     } else {
       await store.dispatch('tasks/create', payload);
       useAlert(`${cap(noun)} agendad${kindFor(fk).article} ${fk === 'cirurgias' ? '🔪' : '✓'}`);
-      if (fk !== kind.value) kind.value = fk; // mostra onde ficou
+      ensureLayer(formType.value.key); // mostra onde ficou
     }
     showModal.value = false;
   } catch {
@@ -1077,7 +1135,7 @@ const fmtBRL = v =>
 
 // da consulta com indicação → agendar a CIRURGIA (trilho azul, pré-preenchida)
 const scheduleSurgeryFrom = task => {
-  kind.value = 'cirurgias';
+  ensureLayer('cirurgia');
   editingTask.value = null;
   form.value = emptyForm(new Date(), {
     kind: 'cirurgias',
@@ -1092,7 +1150,7 @@ const scheduleSurgeryFrom = task => {
 };
 // do exame/teleconsulta/consulta → marcar um RETORNO presencial
 const scheduleFollowUpFrom = task => {
-  kind.value = 'consultas';
+  ensureLayer('retorno');
   editingTask.value = null;
   form.value = emptyForm(addDays(new Date(task.due_at), 7), {
     kind: 'consultas',
@@ -1228,7 +1286,7 @@ const printDayList = () => {
   const list = [...dayViewTasks.value].sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
   const title = `CEVICO — ${cap(k.value.plural)} de ${day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}`;
   const esc = s => String(s ?? '').replace(/</g, '&lt;');
-  const procHeader = { cirurgias: 'Procedimento', exames: 'Exame' }[kind.value] || 'Problema';
+  const procHeader = { cirurgias: 'Procedimento', exames: 'Exame' }[k.value.kind] || 'Problema';
   const opt = label => `<span><i></i>${label}</span>`;
   const cols = printColsOn.value;
   const cell = {
@@ -1394,22 +1452,32 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           </button>
         </div>
 
-        <!-- linha 2: os 4 TIPOS (cada um acende na sua cor) + filtros -->
+        <!-- linha 2 (item 234): CAMADAS por tipo — cada uma na sua cor; "Geral" liga todas -->
         <div class="flex items-center gap-2 flex-wrap">
           <div class="cv-seg overflow-x-auto" style="scrollbar-width: none">
             <button
-              v-for="kk in KINDS"
-              :key="kk.key"
+              class="cv-ag-kind cv-ag-kind-all"
+              :class="isGeneral ? 'cv-ag-kind-on' : ''"
+              title="Agenda geral — todas as camadas ligadas. Clique num tipo para ligar/desligar só ele; clique duplo deixa só aquele tipo"
+              @click="allLayers()"
+            >
+              <span class="i-lucide-layers text-sm" />
+              <span class="hidden sm:inline">Geral</span>
+            </button>
+            <button
+              v-for="tt in TYPES"
+              :key="tt.key"
               class="cv-ag-kind"
-              :class="kind === kk.key ? 'cv-ag-kind-on' : ''"
-              :style="kindVarsOf(kk.key)"
-              :title="`${kk.label} — ${kk.hint}`"
-              @click="kind = kk.key"
+              :class="layerOn(tt.key) ? 'cv-ag-kind-on' : 'opacity-60'"
+              :style="typeVarsOf(tt.key)"
+              :title="`${tt.label} — ${tt.hint} · clique: liga/desliga esta camada · clique duplo: só este tipo`"
+              @click="toggleLayer(tt.key)"
+              @dblclick.prevent="soloLayer(tt.key)"
             >
               <span class="cv-ag-kind-dot" />
-              <span :class="kk.icon" class="text-sm hidden sm:inline" />
-              {{ kk.label }}
-              <span class="cv-ag-kind-n" :title="`${kindCounts[kk.key]} ${rangeNoun}`">{{ kindCounts[kk.key] }}</span>
+              <span :class="tt.icon" class="text-sm hidden sm:inline" />
+              {{ tt.label }}
+              <span class="cv-ag-kind-n" :title="`${kindCounts[tt.key]} ${rangeNoun}`">{{ kindCounts[tt.key] }}</span>
             </button>
           </div>
 
@@ -1742,6 +1810,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 :drop-active="dragOverDay === dateKey(day)"
                 :duration-of="taskDuration"
                 :accent-of="accentOf"
+                :tag-of="tagOf"
                 :name-of="displayName"
                 compact
                 @create="onColumnCreate"
@@ -1802,6 +1871,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     :drop-active="dragOverDay === dateKey(cursor)"
                     :duration-of="taskDuration"
                     :accent-of="accentOf"
+                    :tag-of="tagOf"
                     :name-of="displayName"
                     @create="onColumnCreate"
                     @open="openEdit"
@@ -1907,9 +1977,9 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <div class="flex items-center gap-2 flex-wrap">
                       <span class="text-sm font-extrabold tabular-nums" :style="{ color: accentOf(task) }">{{ chipTime(task) }}</span>
                       <span class="text-sm font-semibold text-n-slate-12" :class="task.attendance === 'missed' ? 'line-through' : ''">{{ displayName(task) }}</span>
-                      <span v-if="unitOf(task)" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }">{{ unitOf(task).label }}</span>
+                      <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }" :title="TYPE_BY_KEY[typeOf(task)].hint"><span :class="TYPE_BY_KEY[typeOf(task)].icon" class="text-[10px]" /> {{ TYPE_BY_KEY[typeOf(task)].label }}</span>
+                      <span v-if="unitOf(task)" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(unitOf(task).color), '--cv-deep': unitOf(task).color }"><span class="i-lucide-map-pin text-[10px]" /> {{ unitOf(task).label }}</span>
                       <span v-if="task.source" class="cv-chip cv-slate" :title="`Veio do ${task.source === 'oftalmofacil' ? 'Oftalmofácil' : task.source}${task.source_detail ? ' · parceiro: ' + task.source_detail : ''}`"><span class="i-lucide-hospital text-[10px]" /> {{ originLabel(task) }}</span>
-                      <span v-if="!isSurgeryTask(task) && !isTele" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(modalityOf(task).color), '--cv-deep': modalityOf(task).color }">{{ modalityOf(task).label }}</span>
                       <span v-if="task.attendance === 'attended'" class="cv-chip cv-green">{{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}</span>
                       <span v-else-if="task.attendance === 'missed'" class="cv-chip cv-red">{{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}</span>
                       <span v-else-if="task.attendance === 'attended_not_done'" class="cv-chip cv-amber">⚠️ Veio e não fez</span>
@@ -1955,7 +2025,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         <span class="text-n-slate-8 text-[10px]">·</span>
                         <button class="cv-ag-act" style="--a: #B8860B" :class="task.surgery_indication === 'indicated' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'indicated')">🎯 Cirurgia indicada</button>
                         <button class="cv-ag-act" style="--a: #64748B" :class="task.surgery_indication === 'not_indicated' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'not_indicated')">Sem indicação</button>
-                        <button v-if="kind !== 'consultas' || task.modality === 'exames'" class="cv-ag-act" style="--a: #2563EB" title="Marcar um retorno presencial a partir deste atendimento" @click="scheduleFollowUpFrom(task)">📅 Marcar retorno</button>
+                        <button v-if="['exames', 'teleconsulta'].includes(typeOf(task))" class="cv-ag-act" style="--a: #2563EB" title="Marcar um retorno presencial a partir deste atendimento" @click="scheduleFollowUpFrom(task)">📅 Marcar retorno</button>
                       </template>
                       <button v-if="!isSurgeryTask(task) && task.surgery_indication === 'indicated'" class="cv-btn cv-btn-sm" style="--cv-grad: linear-gradient(135deg, #0369A1, #38BDF8); --cv-deep-rgb: 7 89 133" title="Abre a Agenda de Cirurgias com os dados do paciente preenchidos" @click="scheduleSurgeryFrom(task)">
                         🔪 Agendar cirurgia
@@ -1981,7 +2051,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span :class="formKind.icon" class="text-base" /></span>
           <div class="flex-1 min-w-0">
             <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">
-              {{ editingTask ? `Editar ${formKind.noun}` : (formKind.key === 'cirurgias' ? 'Agendar cirurgia' : `${formKind.article === 'o' ? 'Novo' : 'Nova'} ${formKind.noun}`) }}
+              {{ editingTask ? `Editar ${formKind.noun}` : (formKind.key === 'cirurgia' ? 'Agendar cirurgia' : `${formKind.article === 'o' ? 'Novo' : 'Nova'} ${formKind.noun}`) }}
             </p>
             <h2 class="text-base font-bold leading-tight truncate">{{ form.name.trim() || (editingTask ? formKind.noun : 'Paciente') }}</h2>
             <p class="text-[11px] opacity-90 truncate">{{ formSummary || formKind.hint }}</p>
@@ -1998,16 +2068,17 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <span class="cv-label block mb-1.5">Tipo</span>
             <div class="cv-seg cv-seg-sm w-full !flex">
               <button
-                v-for="kk in KINDS"
-                :key="'fk' + kk.key"
+                v-for="tt in TYPES"
+                :key="'ft' + tt.key"
                 type="button"
-                class="cv-ag-kind flex-1 justify-center !h-7 !px-2 text-[11px]"
-                :class="form.kind === kk.key ? 'cv-ag-kind-on' : ''"
-                :style="kindVarsOf(kk.key)"
-                @click="setFormKind(kk.key)"
+                class="cv-ag-kind flex-1 justify-center !h-7 !px-1.5 text-[11px]"
+                :class="formType.key === tt.key ? 'cv-ag-kind-on' : ''"
+                :style="typeVarsOf(tt.key)"
+                :title="`${tt.label} — ${tt.hint}`"
+                @click="setFormType(tt.key)"
               >
-                <span :class="kk.icon" class="text-xs" />
-                <span class="hidden sm:inline">{{ kk.label.replace(/s$/, '') }}</span>
+                <span :class="tt.icon" class="text-xs" />
+                <span class="hidden md:inline">{{ tt.label }}</span>
               </button>
             </div>
           </div>
@@ -2075,7 +2146,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <section class="cv-ag-sec">
             <header class="cv-ag-sec-head"><span class="cv-ag-num">3</span><div><h3>Motivo</h3><p>{{ form.kind === 'cirurgias' ? 'procedimento' : form.kind === 'exames' ? 'exame e origem do agendamento' : 'tipo, problema e origem do agendamento' }}</p></div></header>
             <div class="space-y-3">
-              <div v-if="form.kind === 'consultas'">
+              <div v-if="editingTask && form.kind === 'consultas'">
                 <span class="cv-label block mb-1.5">Tipo de consulta</span>
                 <div class="cv-seg cv-seg-sm">
                   <button v-for="m in consultaModalities" :key="m.key" type="button" class="cv-seg-item" :class="form.modality === m.key ? 'cv-seg-on' : ''" @click="form.modality = m.key">{{ m.label }}</button>
@@ -2140,7 +2211,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
 
     <!-- ══ Imprimir: escolher colunas e orientação ══ -->
     <div v-if="showPrintModal" class="fixed inset-0 z-[52] flex items-center justify-center bg-black/55 p-4" @click.self="showPrintModal = false">
-      <div class="cv-modal cv-ag-pop w-full max-w-md max-h-[92vh] flex flex-col" :style="kindVars(kind)">
+      <div class="cv-modal cv-ag-pop w-full max-w-md max-h-[92vh] flex flex-col" :style="pageVars">
         <div class="cv-modal-head flex items-center gap-3">
           <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-printer text-base" /></span>
           <div class="flex-1 min-w-0">
@@ -2180,7 +2251,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
 
     <!-- ══ Quem está neste horário (o "+N" do bloco do médico) ══ -->
     <div v-if="slotPicker" class="fixed inset-0 z-[52] flex items-center justify-center bg-black/55 p-4" @click.self="slotPicker = null">
-      <div class="cv-modal cv-ag-pop w-full max-w-sm flex flex-col" :style="kindVars(kind)">
+      <div class="cv-modal cv-ag-pop w-full max-w-sm flex flex-col" :style="pageVars">
         <div class="cv-modal-head flex items-center gap-3">
           <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-users text-base" /></span>
           <div class="flex-1 min-w-0">

@@ -41,6 +41,8 @@
 #  index_tasks_on_account_id                (account_id)
 #  index_tasks_on_account_id_and_status     (account_id,status)
 #  index_tasks_on_account_id_and_unit       (account_id,unit)
+#  index_tasks_on_account_type_created      (account_id,task_type,created_at)
+#  index_tasks_on_account_type_due          (account_id,task_type,due_at)
 #  index_tasks_on_assignee_id               (assignee_id)
 #  index_tasks_on_contact_id                (contact_id)
 #  index_tasks_on_creator_id                (creator_id)

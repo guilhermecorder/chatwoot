@@ -70,9 +70,12 @@ class Crm::Journey::Planner
     false
   end
 
+  # 🚧 item 231: cirurgia de PARCEIRO do hub fica fora da jornada
   def surgery_events(target)
+    own = Crm::PartnerGuard.own_provider_name(account)
     Crm::OftalmofacilSurgery.where(account_id: account.id, status_kind: 'agendada', surgery_date: target)
                             .where.not(contact_id: nil)
+                            .reject { |s| Crm::PartnerGuard.partner_surgery?(s, own: own) }
                             .map { |s| { contact_id: s.contact_id, source: s, event_key: "surgery:#{s.id}" } }
   end
 
@@ -80,6 +83,7 @@ class Crm::Journey::Planner
     day_start = TZ.local(target.year, target.month, target.day)
     account.tasks.where(task_type: 'consulta', canceled_at: nil, archived_at: nil)
            .where(due_at: day_start..day_start.end_of_day).where.not(contact_id: nil)
+           .reject { |t| Crm::PartnerGuard.partner_task?(t) } # 🚧 item 231
            .map { |t| { contact_id: t.contact_id, source: t, event_key: "task:#{t.id}" } }
   end
 

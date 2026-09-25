@@ -28,6 +28,15 @@ class Crm::KpiBagService
     # baldes do período ANTERIOR (item 144): a série sobreposta no gráfico
     # compara balde a balde, não só a média
     prev_keys = bucket_keys(prev_since, prev_until)
+    # ⚡ item 237: cesto guardado por conta+período (2 min com o período aberto,
+    # 10 min fechado) — a tela atualiza a cada 2 min e refazia ~120 queries
+    ttl = @until_at >= Time.current ? 2.minutes : 10.minutes
+    Rails.cache.fetch("cevico:kpibag:#{@account.id}:#{@since.to_i}:#{@until_at.to_i}:#{@granularity}", expires_in: ttl) do
+      build_bag(prev_since, prev_until, keys, prev_keys)
+    end
+  end
+
+  def build_bag(prev_since, prev_until, keys, prev_keys)
     {
       granularity: @granularity,
       points: keys.map { |k, label| { key: k, label: label } },
@@ -48,8 +57,9 @@ class Crm::KpiBagService
       metrics[key] = {
         label: label,
         unit: unit,
-        value: total_of(cur_scope, sum: sum),
-        prev: total_of(prev_scope, sum: sum),
+        # item 237: o total é a soma dos baldes (antes: 2 queries a mais por indicador)
+        value: series.values.sum.to_f.round(2),
+        prev: prev_series.values.sum.to_f.round(2),
         series: keys.map { |k| (series[k] || 0).to_f.round(2) },
         prev_series: prev_keys.map { |k| (prev_series[k] || 0).to_f.round(2) }
       }
@@ -61,8 +71,12 @@ class Crm::KpiBagService
     add.call('new_conversations', 'Novas conversas', 'n',
              @account.conversations.where(created_at: since..until_at),
              @account.conversations.where(created_at: prev_since..prev_until), 'conversations.created_at')
-    add.call('appointments_booked', 'Consultas agendadas (novas)', 'n',
+    add.call('appointments_booked', 'Marcadas na Agenda (consultas novas, sem exame/tele)', 'n',
              booked(since, until_at), booked(prev_since, prev_until), 'tasks.created_at')
+    # 📊 item 233: a TAXA oficial usa a ENTRADA na coluna de agendamento do CRM
+    add.call('appointments_created', 'Entrou em Agendamento de Consulta (taxa oficial)', 'n',
+             Crm::BookingRate.entries(@account, since, until_at), Crm::BookingRate.entries(@account, prev_since, prev_until),
+             'crm_contact_stage_logs.entered_at')
     # 📅 item 217: confirmou (SIM ao lembrete) e lançadas (já estavam marcadas fora do sistema)
     add.call('appointments_confirmed', 'Consultas confirmadas (SIM ao lembrete)', 'n',
              confirmed(since, until_at), confirmed(prev_since, prev_until), 'tasks.confirmed_at')
@@ -120,6 +134,9 @@ class Crm::KpiBagService
   def booked(since, until_at)
     @account.tasks.bookings.where(task_type: 'consulta', created_at: since..until_at)
             .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
+            .where(canceled_at: nil) # item 233: sem exame, tele, cancelada ou parceiro
+            .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
+            .where(source_detail: nil)
   end
 
   def confirmed(since, until_at)

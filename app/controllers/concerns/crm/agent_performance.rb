@@ -109,11 +109,7 @@ module Crm
     # horário de atendimento real, para feedback.
 
     def workday_stats(range, user_ids: nil) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-      scope = account.messages.reorder(nil)
-                     .where(message_type: :outgoing, private: false, created_at: range, sender_type: 'User')
-                     .where.not(sender_id: nil)
-      scope = scope.where(sender_id: user_ids) if user_ids
-      rows = scope.pluck(:sender_id, :created_at)
+      rows = outgoing_rows(range, user_ids)
 
       by_user = Hash.new { |h, k| h[k] = [] }
       rows.each { |uid, at| by_user[uid] << at.in_time_zone(PERF_TZ) }
@@ -147,6 +143,21 @@ module Crm
       end
     end
 
+    # item 237: (remetente, instante) de cada mensagem enviada no período —
+    # UMA ida ao banco por request, reaproveitada pelo retrato do expediente
+    # e pelos dias fora do horário
+    def outgoing_rows(range, user_ids = nil)
+      @outgoing_rows_memo ||= {}
+      key = [range.begin.to_i, range.end.to_i, user_ids && Array(user_ids).sort]
+      @outgoing_rows_memo[key] ||= begin
+        scope = account.messages.reorder(nil)
+                       .where(message_type: :outgoing, private: false, created_at: range, sender_type: 'User')
+                       .where.not(sender_id: nil)
+        scope = scope.where(sender_id: user_ids) if user_ids
+        scope.pluck(:sender_id, :created_at)
+      end
+    end
+
     def minutes_of_day(time)
       (time.hour * 60) + time.min
     end
@@ -175,6 +186,10 @@ module Crm
       # aviso — até 400 idas ao banco por abertura do dashboard)
       display_ids = history.filter_map { |h| h['conversation_id'] }.uniq
       conv_by_display = account.conversations.where(display_id: display_ids).index_by(&:display_id)
+      # ⚡ item 237 (25/09): a 1ª resposta depois de CADA aviso numa query só
+      # (antes: uma por aviso, até 400 idas ao banco — o Meu Painel "este ano"
+      # nem carregava)
+      replies = first_replies_after(history, conv_by_display)
 
       history.each do |h|
         detected_at = parse_time(h['detected_at'])
@@ -184,11 +199,7 @@ module Crm
         conversation = conv_by_display[h['conversation_id']]
         next if conversation.blank?
 
-        first_reply = conversation.messages
-                                  .where(message_type: :outgoing, private: false)
-                                  .where('created_at > ?', detected_at)
-                                  .reorder(:created_at) # fura o default_scope de propósito
-                                  .first
+        first_reply = replies[[conversation.id, detected_at.to_i]]
         next if first_reply.blank?
 
         minutes = (first_reply.created_at - detected_at) / 60.0
@@ -212,7 +223,7 @@ module Crm
         by_target: by_target.map do |user_id, t|
           {
             user_id: user_id,
-            user_name: user_id ? account.users.find_by(id: user_id)&.available_name : 'Todos os painéis',
+            user_name: user_id ? user_names[user_id] : 'Todos os painéis',
             total: t[:total],
             responded: t[:responded],
             response_rate: t[:total].positive? ? (t[:responded].to_f / t[:total] * 100).round(1) : 0.0,
@@ -221,6 +232,44 @@ module Crm
         end.sort_by { |t| -t[:total] },
         by_responder: by_responder
       }
+    end
+
+    FirstReply = Struct.new(:created_at, :sender_type, :sender_id)
+
+    # item 237: [conversa, instante do aviso] → primeira mensagem de SAÍDA
+    # depois do aviso, para todos os avisos de uma vez (VALUES + LATERAL)
+    def first_replies_after(history, conv_by_display)
+      pairs = history.filter_map do |h|
+        conv = conv_by_display[h['conversation_id']]
+        at = parse_time(h['detected_at'])
+        [conv.id, at] if conv && at
+      end.uniq { |id, at| [id, at.to_i] }
+      return {} if pairs.empty?
+
+      values = pairs.each_with_index.map do |(id, at), idx|
+        ActiveRecord::Base.sanitize_sql_array(['(?, ?, ?::timestamp)', idx, id, at.utc.strftime('%Y-%m-%d %H:%M:%S.%6N')])
+      end.join(', ')
+      sql = <<~SQL.squish
+        SELECT v.idx, m.created_at, m.sender_type, m.sender_id
+        FROM (VALUES #{values}) AS v(idx, conv_id, detected_at)
+        LEFT JOIN LATERAL (
+          SELECT created_at, sender_type, sender_id FROM messages
+          WHERE conversation_id = v.conv_id AND message_type = 1 AND private = false AND created_at > v.detected_at
+          ORDER BY created_at LIMIT 1
+        ) m ON TRUE
+      SQL
+      ActiveRecord::Base.connection.exec_query(sql).each_with_object({}) do |row, acc|
+        next if row['created_at'].blank?
+
+        id, at = pairs[row['idx'].to_i]
+        created = row['created_at'].is_a?(Time) ? row['created_at'] : Time.zone.parse(row['created_at'].to_s)
+        acc[[id, at.to_i]] = FirstReply.new(created, row['sender_type'], row['sender_id'])
+      end
+    end
+
+    # nomes de quem recebeu aviso, em lote (antes: um find_by por pessoa)
+    def user_names
+      @user_names ||= Hash.new { |h, id| h[id] = account.users.find_by(id: id)&.available_name }
     end
 
     def radar_history

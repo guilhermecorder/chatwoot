@@ -182,6 +182,7 @@ onMounted(async () => {
     // 🏥 item 228: hub de parceiros + Agenda unificada
     partners_enabled: !!of.partners_enabled, partner_pipeline_id: of.partner_pipeline_id || null,
     own_pipeline_id: of.own_pipeline_id || null, agenda_enabled: !!of.agenda_enabled, agenda_from: of.agenda_from || '',
+    partner_inbox_ids: (of.partner_inbox_ids || []).map(Number), // 🚧 item 231
   };
   oftalmoDoctors.value = Object.entries(of.doctors || {}).map(([crm, name]) => ({ crm, name }));
   oftalmoClinics.value = Object.entries(of.clinics || {}).map(([name, unit]) => ({ name, unit }));
@@ -221,13 +222,14 @@ const sheetsStatus = computed(() => settings.value.sheets || {});
 // item 157: a conexão real é o BANCO (usuário só-leitura) + fornecedor + de-para de médicos
 const oftalmo = ref({
   base_url: '', api_key: '', db_host: '', db_port: 3306, db_name: '', db_user: '', db_password: '', provider_name: 'CATARATA_SP', enabled: false,
-  partners_enabled: false, partner_pipeline_id: null, own_pipeline_id: null, agenda_enabled: false, agenda_from: '',
+  partners_enabled: false, partner_pipeline_id: null, own_pipeline_id: null, agenda_enabled: false, agenda_from: '', partner_inbox_ids: [],
 });
 const oftalmoDoctors = ref([]); // [{ crm, name }]
 // 🏥 item 228: de-para clínica do OftalmoFácil → unidade/local da Agenda
 const oftalmoClinics = ref([]); // [{ name, unit }]
 const addOftalmoClinic = (name = '') => oftalmoClinics.value.push({ name, unit: '' });
 const crmPipelines = useMapGetter('crm/getPipelines');
+const allInboxes = useMapGetter('inboxes/getInboxes'); // 🚧 item 231: caixa(s) dos parceiros
 const oftalmoUnitOptions = computed(() => {
   const base = [
     { key: 'paulista', label: 'Av. Paulista (consultas/exames)' },
@@ -292,6 +294,7 @@ const saveOftalmo = async () => {
       partners_enabled: oftalmo.value.partners_enabled,
       partner_pipeline_id: oftalmo.value.partner_pipeline_id || null,
       own_pipeline_id: oftalmo.value.own_pipeline_id || null,
+      partner_inbox_ids: oftalmo.value.partner_inbox_ids, // 🚧 item 231
       agenda_enabled: oftalmo.value.agenda_enabled,
       agenda_from: oftalmo.value.agenda_from || null,
       clinics: Object.fromEntries(oftalmoClinics.value.filter(c => c.name.trim() && c.unit).map(c => [c.name.trim(), c.unit])),
@@ -1262,6 +1265,17 @@ const fetchWorkflows = async () => {
               </label>
             </div>
             <p class="text-[10px] text-n-slate-9 mt-1.5">Cada funil precisa ter as colunas "Cirurgia Agendada", "Cirurgia Realizada" e "Pós Operatório" (procura pelo nome, só dentro do funil escolhido). Contato de parceiro ganha as etiquetas <code>oftalmofacil</code> e <code>of_&lt;parceiro&gt;</code>.</p>
+            <!-- 🚧 item 231: a CERCA — caixa(s) por onde a equipe fala com os pacientes dos parceiros -->
+            <div class="mt-2 rounded-lg border border-amber-200 bg-amber-50/60 dark:bg-amber-900/10 dark:border-amber-800 p-2">
+              <p class="text-[11px] font-medium text-n-slate-12">🚧 Cerca dos parceiros — caixa(s) por onde a equipe fala com esses pacientes</p>
+              <p class="text-[10px] text-n-slate-9 mt-0.5">Paciente de parceiro (card no funil dos parceiros, etiqueta <code>of_…</code> ou conversa nessas caixas) <b>nunca</b> recebe agente de IA, robô de follow-up, automação de coluna, lembrete, jornada, campanha, régua, colheita nem ligação da IA — e não ganha card no funil da CEVICO nem conta como lead. Só gente fala com ele, por aqui.</p>
+              <div class="flex flex-wrap gap-1.5 mt-1.5">
+                <label v-for="ib in allInboxes" :key="'pib' + ib.id" class="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border cursor-pointer" :class="oftalmo.partner_inbox_ids.includes(ib.id) ? 'border-amber-400 bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-100' : 'border-n-weak text-n-slate-11'">
+                  <input v-model="oftalmo.partner_inbox_ids" type="checkbox" :value="ib.id" class="rounded" /> {{ ib.name }}
+                </label>
+                <span v-if="!allInboxes.length" class="text-[10px] text-n-slate-9">nenhuma caixa de entrada cadastrada</span>
+              </div>
+            </div>
             <div v-if="oftalmoPartnersSeen.length" class="mt-2 flex flex-wrap gap-1">
               <span v-for="p in oftalmoPartnersSeen" :key="'ps' + p.name" class="text-[10px] px-2 py-0.5 rounded-full border" :class="p.own ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-n-weak text-n-slate-11'" :title="p.own ? 'É a CEVICO' : 'Parceiro'">
                 {{ p.own ? '⭐ ' : '' }}{{ p.name }} · {{ p.total }}

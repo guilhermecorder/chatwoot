@@ -76,6 +76,8 @@ class Crm::Journey::Dispatcher
   def blocker_for(message, contact)
     return ['skipped', 'Mensagem desligada'] unless message&.active?
     return ['skipped', 'Paciente sem telefone'] if contact.nil? || contact.phone_number.blank?
+    # 🚧 item 231 (cerca dos parceiros)
+    return ['skipped', 'Paciente de parceiro do Oftalmofácil: sem mensagens automáticas'] if Crm::PartnerGuard.partner_contact?(contact)
     return ['skipped', 'Paciente pediu para não receber mensagens'] if message.respect_quiet && settings.quiet?(contact.label_list)
 
     nil
