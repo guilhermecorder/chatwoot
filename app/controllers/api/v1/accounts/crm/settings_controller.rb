@@ -17,6 +17,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # atalhos usados pela tela do atendente ficam livres.
   # 🧹 item 214: como as atendentes veem os cartões de Conversas
   LIST_CLEAN_MODES = %w[full no_stage clean].freeze
+  # item 239: "quantos indicadores eu quiser" no Meu Painel (antes: 40 no total)
+  KPI_LAYOUT_MAX = 200
 
   ADMIN_SETTINGS_ACTIONS = %i[
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
@@ -979,10 +981,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       raw = params.require(:kpi_layout).permit!.to_h
       cfg['kpi_layout'] = raw.slice(*layout_panel_keys(cfg)).transform_values do |v|
         h = v.to_h
+        # item 239: sem teto prático de cards (200), card GRANDE (2×2, resumo) e
+        # ESPAÇOS vazios ("gap:…") que entram na ordem como um card qualquer
         {
-          'order' => Array(h['order']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40),
-          'hidden' => Array(h['hidden']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40),
-          'colors' => sanitize_kpi_colors(h['colors'])
+          'order' => Array(h['order']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(KPI_LAYOUT_MAX),
+          'hidden' => Array(h['hidden']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(KPI_LAYOUT_MAX),
+          'colors' => sanitize_kpi_colors(h['colors']),
+          'sizes' => (h['sizes'] || {}).to_h.to_a.first(KPI_LAYOUT_MAX).each_with_object({}) do |(k, size), acc|
+            acc[k.to_s[0, 40]] = 'lg' if size.to_s == 'lg' && k.present?
+          end,
+          'spacers' => Array(h['spacers']).map(&:to_s).grep(/\Agap:[a-z0-9]{1,20}\z/).uniq.first(60)
         }
       end
     end
@@ -1013,7 +1021,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # indicador pronto OU fórmula sobre o cesto de indicadores, com cor,
     # formato e painel de destino. Sanitizado campo a campo.
     if params.key?(:custom_kpis)
-      cfg['custom_kpis'] = Array(params[:custom_kpis]).first(40).filter_map do |raw|
+      cfg['custom_kpis'] = Array(params[:custom_kpis]).first(KPI_LAYOUT_MAX).filter_map do |raw|
         k = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
         expr = k['expr'].to_s.strip[0, 200]
         next if expr.blank? || expr !~ %r{\A[a-z0-9_+\-*/().\s]+\z}i
@@ -1026,6 +1034,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           'format' => %w[number percent currency].include?(k['format'].to_s) ? k['format'].to_s : 'number',
           'color' => k['color'].to_s[0, 120],
           'icon' => k['icon'].to_s[/\Ai-lucide-[a-z0-9-]{1,40}\z/] || 'i-lucide-sparkles',
+          # item 241: ícone escolhido À MÃO no construtor (senão o nome decide)
+          'icon_manual' => ActiveModel::Type::Boolean.new.cast(k['icon_manual']) || false,
           'panel' => %w[all agendamento conducao cirurgia medico gestor].include?(k['panel'].to_s) ? k['panel'].to_s : 'all',
           'note' => k['note'].to_s.strip[0, 200]
         }
@@ -2053,7 +2063,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   def sanitize_kpi_colors(raw)
-    (raw || {}).to_h.to_a.first(40).each_with_object({}) do |(k, v), acc|
+    (raw || {}).to_h.to_a.first(KPI_LAYOUT_MAX).each_with_object({}) do |(k, v), acc|
       key = k.to_s[0, 40]
       color = v.to_s.strip[0, 160]
       next if key.blank? || color.blank?

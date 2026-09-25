@@ -6171,6 +6171,112 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
+## 239. 🧩 MEU PAINEL: INDICADORES SEM LIMITE + CARD GRANDE (2×2, resumo) + ESPAÇOS VAZIOS + NOSSAS PALETAS (25/09 tarde: "adicionar quantos indicadores eu quiser… mais paletas (as nossas)… indicador maior com o tamanho de 4 quadrados, um resumo dele… espaçar alguns indicadores") — CONSTRUÍDO SEM COMMIT (WEB só, sem migration)
+- Backend (`settings#update_agenda`): `KPI_LAYOUT_MAX = 200` (antes 40 cards do "+" NO TOTAL, 40 na ordem/ocultos/
+  cores por painel); `kpi_layout[painel]` ganhou `sizes` ({id => 'lg'}) e `spacers` (["gap:xxxx"], até 60).
+- Tela (InicioPage): no Modo edição cada card tem o botão ⤢ "Card grande" (col-span-2 row-span-2) e o rodapé do
+  "Novo indicador" ganhou "espaço vazio" (quadrado tracejado que arrasta como um card; fora do modo edição fica
+  invisível; ✕ tira). Card GRANDE = resumo: número em text-5xl + tendência, gráfico do popup (MiniBars com período
+  anterior) num vidro claro, "pico em X · média Y", as 3 primeiras linhas de detalhe e "ver tudo" (abre o popup).
+  Variante por pessoa sem layout próprio parte do layout que está mostrando (não perde tamanhos/espaços).
+- Paletas: seletor de cor do card e do "Novo indicador" em GRUPOS — Família deste painel · Marca CEVICO (navy,
+  navy claro, ouro) · iMac G3 (7 × tom/claro/complementar) · Frutas da Apple (10 × 3) · Temas e sinais.
+- Armadilha: comentário HTML antes do elemento no `#item` do vuedraggable = "Item slot must have only one child"
+  (a fileira some) — comentário vai DENTRO do elemento.
+- Conferido no localhost conta 3: card grande com gráfico (este ano), espaço vazio no modo edição/invisível fora,
+  seletor com os 5 grupos; estado de teste desfeito.
+- 2ª passada ("quero o gráfico em linha quando num período maior"): `MiniBars` ganhou a prop `line` (linha + área
+  em degradê, ponto no pico e no balde ativo, mesmo eixo/tooltip/período anterior); o card grande usa linha quando
+  a série tem mais de 14 baldes (este mês, este ano, personalizado longo) e barras nos períodos curtos.
+
+## 245. 🔀 REGRA B — "QUEM CHEGOU PRIMEIRO" na cerca dos parceiros (25/09 noite: "um paciente pode ter passado por um e por outro ao longo da jornada… vamos de B") — CONSTRUÍDO SEM COMMIT (WEB+SIDEKIQ)
+- `Crm::PartnerGuard.partner_contact?` = tem marca de parceiro (atributo, etiqueta of_, card no funil deles) E NÃO é
+  `cevico_first?`. `cevico_first_ids`: card num funil da CEVICO criado ANTES do 1º card no funil dos parceiros e do
+  1º item de PARCEIRO no hub (COALESCE(of_created_at, created_at)); sem entrada de parceiro = CEVICO.
+  `excluded_contact_ids` desconta esses (campanhas, régua, colheita, robôs e universo de leads voltam a contar).
+- Continuam protegidos para TODOS: conversa na caixa dos parceiros (`partner_inbox?`/`partner_conversation?`) e os
+  agendamentos do parceiro (`partner_task?`: lembretes/jornada). Quem veio pelo parceiro primeiro e depois
+  aparece no funil da CEVICO continua parceiro (sem IA).
+- Spec: +1 exemplo (CEVICO→parceiro = CEVICO; parceiro→CEVICO = parceiro; caixa dos parceiros fechada) — 18/18.
+
+## 244. 🗓️ CABEÇALHO DAS AGENDAS EM BLOCOS + MINI MÊS SEMPRE ABERTO (25/09 noite: "na agenda semanal quero aquela micro agenda do mês já aberta… dividir em 2 ou 3 blocos… títulos curtos e grandes… o mesmo para a agenda Oftalmofácil") — CONSTRUÍDO SEM COMMIT (WEB só)
+- Agenda geral: o cabeçalho grudado virou BLOCOS no topo da área rolável (o mini mês é alto): ① "Calendário"
+  (272px, só desktop) = Hoje + mini mês (segue a data; semana em vista em faixa na cor; setas só folheiam) +
+  Mês/Semana/Dia; ② período = rótulo curto (Semana · 20/09–26/09) + título GRANDE (text-2xl) + ‹ › + ferramentas
+  (sáb/dom, imprimir, janelas) + Novo; ③ "Filtros" = CAMADAS e QUEM (clínica/médicos/unidades/origem + seletor).
+  Celular: sem o mini mês; título abre o popover antigo; Hoje e Mês/Semana/Dia em ícones no bloco ②.
+- Hub Oftalmofácil (aba Agenda): mesmos blocos — ① Calendário igual; ② "Semana · agenda do hub" + título grande +
+  ‹ ›; ③ "Encontrar" = PACIENTE (busca) + STATUS (legenda, antes no rodapé).
+- CSS: `.cv-ag-block`, `.cv-ag-block-title`, `.cv-ag-block-sub`, `.cv-ag-row-label`, `.cv-ag-mini-week(-on)`,
+  camadas compactas dentro do bloco. ARMADILHA: `lg:hidden` em `.cv-btn`/`.cv-seg` não esconde (o kit define
+  display com mais especificidade) — envolver num <span>/<div> com lg:hidden.
+- Conferido no localhost conta 3 (1400px): as duas agendas com os 3 blocos.
+
+## 243. 🎨 AGENDAS ALINHADAS (geral + hub): camadas suaves, topo em 3 linhas, cartão do dia em grade, navegação do hub no jeito Google (25/09 noite: "filtros mais amigáveis e transparentes… alinhamento vertical e horizontal… negrito no procedimento… navegação da agenda do Oftalmofácil simples e eficaz como a do Google, fácil achar as pessoas") — CONSTRUÍDO SEM COMMIT (WEB só)
+- Camadas (`.cv-ag-kind-on`): ligado = vidro leve na cor do tipo (fundo 13%, contorno, letra escura, bolinha
+  cheia); desligado = neutro com bolinha vazada. Ícone do tipo só em telas 2xl (a bolinha identifica).
+- Agenda geral, topo: linha 1 sem quebrar no desktop (período · ‹ Hoje › · Mês/Semana/Dia · Novo); linha 2 só as
+  camadas (quebram em vez de rolar/cortar); linha 3 atalhos (clínica/médicos/unidades/origem) à esquerda +
+  ferramentas (sáb/dom, imprimir, janelas — texto só em 2xl) e o seletor à direita.
+- Cartão do DIA em grade `.cv-ag-card-grid` (52px | 1fr | 176px): hora · nome + PROCEDIMENTO EM NEGRITO + linha
+  de detalhes · coluna de selos com a mesma largura (tipo, unidade, origem, presença, valor, indicação) — igual na
+  Agenda geral e no hub; no celular os selos descem em linha.
+- Hub (aba Agenda): barra única [Hoje] [‹] [›] + título do período ("Setembro de 2026", "20 – 26 de setembro de
+  2026", "Terça-feira, 1 de setembro de 2026") com calendário para pular de data + "Encontrar paciente na
+  agenda…" (nome/telefone/CPF, 8 resultados, clique abre o DIA dele) + Mês/Semana/Dia com ícones.
+- Conferido no localhost conta 3 (1280px): camadas numa linha, topo alinhado, cartões em grade nos dois, busca
+  "Severino" → abriu 01/09.
+
+## 242. 🕐 OFTALMOFÁCIL: HORA ERRADA ("39600.0") + FUSO (25/09 noite: "o horário que ele está pegando é o errado, acho que esse número 39600.0 tem algo a ver") — CONSTRUÍDO SEM COMMIT (WEB+SIDEKIQ, sem migration)
+- Causa 1: o MySQL do hub devolve SCH_ITE_HOUR em SEGUNDOS desde a meia-noite (39600.0 = 11:00; 40800 = 11:20);
+  o sync gravava "39600.0" e `Time.zone.parse("2026-10-06 39600.0")` = meia-noite. Causa 2: o app roda em UTC —
+  mesmo com "11:00" o agendamento cairia 3h antes. Resultado: agendamentos do hub às 21:00 da VÉSPERA (fora da
+  grade 07–20h → pareciam sumidos), "NaN:NaN" na semana do hub e "39600.0" nos cartões.
+- `Crm::OftalmofacilSurgery.normalize_hour` (segundos/"HH:MM:SS"/Time → "HH:MM"; 0 = sem hora), `#hour_hhmm`,
+  `#local_time` (America/Sao_Paulo); sync grava normalizado e usa `local_time` no due_at e no reference_time; API
+  do hub devolve `hour_hhmm` (registros antigos já aparecem certos).
+- DEPOIS DE IMPLANTAR: card OftalmoFácil → "recarregar tudo do zero" (reescreve a hora do espelho e o horário de
+  cada agendamento pelo external_ref). Spec: +1 exemplo (39600.0 → 11:00 SP); 12/12 verdes (sync + cerca).
+- 3 pacientes "que não entraram": nada no código barra contato já existente da CEVICO (o sync casa pelo telefone/
+  CPF/nome e cria card no funil OF + agendamento). Hipótese forte: estavam na VÉSPERA às 21:00 pelo bug acima.
+  Conferir depois da recarga; se ainda faltar, rodar o diagnóstico por nome (console) — e decidir a regra da
+  "pessoa nos dois funis" (ver resposta de 25/09).
+
+## 241. 🧮 ÍCONES QUE COMBINAM COM O NOME + FÓRMULA LIVRE COM COLUNAS E COM OS SEUS INDICADORES (25/09 tarde: "os ícones precisam ser correspondentes com seus nomes e intenções… no criar indicador, selecionar colunas ou indicadores já existentes e fazer fórmulas de forma livre, ou com outros indicadores") — CONSTRUÍDO SEM COMMIT (WEB só)
+- ÍCONES: `ICON_RULES` (nome sem acento → ícone lucide: orçamento=receipt, agendamento=calendar-check, consulta=
+  stethoscope, comparecimento=user-check, falta=user-x, confirmação=check-check, indicação=target, fechamento=
+  handshake, cirurgia=heart-pulse, pós-op=bandage, exame=scan-eye, tele=video, faturamento/ticket=banknote, leads=
+  user-plus, conversa, ligação, campanha, NPS, tempo, unidade, meta…; sem regra: % / R$ / activity). Vale para os
+  cards do "+" E os fixos (mesma regra → "Fechamento de cirurgias" igual nos dois). Os ícones antigos vinham da
+  fórmula pronta e não seguiam o nome; agora só vence o ícone escolhido À MÃO no construtor (`icon_manual`, novo no
+  sanitizador do backend). Construtor: linha "Ícone" com "automático" (mostra o do nome) + 25 ícones.
+- FÓRMULA: cada card do "+" vira a variável `kpi_<id>`; `withCustomVars` resolve em cadeia com trava de ciclo e
+  entra em todos os mapas (totais, anterior, balde a balde, recorte do popup) → série, tendência e gráfico funcionam.
+  Construtor: "Montar fórmula" com "Lê-se: «Taxa de agendamento» ÷ Novos contatos × 100", botões + − × ÷ ( ) ×100,
+  limpar, busca e 3 grupos com o valor atual: ⭐ Seus indicadores · 🧭 Colunas do CRM (entrou na coluna) · 📊
+  Indicadores do sistema; "Indicador pronto" ganhou "⭐ Seus indicadores". Prévia sem o próprio (evita ciclo).
+  Apagar um indicador usado por outro pede confirmação.
+- Conferido no localhost conta 3: ícones dos cards, fórmula com indicador próprio (prévia 87,5 em "este ano").
+
+## 240. ➖ "ATENÇÃO HOJE" (quadro de avisos do Gestor) MINIMIZA E REAPARECE (25/09 tarde: "precisa ser algo que eu posso fechar ou minimizar, e aí aparece de novo") — CONSTRUÍDO SEM COMMIT (WEB só)
+- Botão "–" no quadro → vira uma barrinha na mesma cor (título + "N aviso(s)" + ▾); clique na barrinha abre de novo.
+- REABRE SOZINHO quando muda a "impressão digital" dos avisos (cor do semáforo + TIPOS de aviso — não os números:
+  62 → 63 conversas não reabre; surgir "sem conferência" reabre) ou quando vira o dia. Guardado no navegador de
+  cada pessoa (`cevico_gestor_verdict_min` = {day, print}; sem armazenamento = minimiza só na visita).
+
+## 238. 📥 "MARCADAS NA AGENDA" POR CAIXA DE ENTRADA + NOMES CLAROS NO AGENDAMENTOS (25/09 tarde: "não entendi registradas no período/consultas do período… seria ótimo se o card mostrasse a partir de quais caixas") — CONSTRUÍDO SEM COMMIT (WEB só, sem migration)
+- `Crm::TaskConversations` (novo): a regra "de qual conversa/caixa saiu a consulta" (Conversa #N citada na
+  descrição, a última; senão a conversa mais recente do paciente) extraída do AppointmentsController e usada nos
+  dois lugares → os números por caixa batem entre Agendamentos e Meu Painel.
+- home: `appointments_booked_by_inbox` [{inbox_id, name, count}] ("sem conversa" no fim). Card "Marcadas na
+  Agenda": linha de baixo = "GOOGLE 9 · INSTAGRAM 6…"; popup com barras "📥 Marcadas por caixa de entrada"
+  (`compareInboxesTitle`) + linhas com nome, número e % do total; o texto das exclusões foi para o "sobre".
+- Agendamentos: "Registradas no período" → **Marcações do período** (o que foi marcado/remarcado/confirmado/
+  cancelado nestes dias, não importa para quando é a consulta); "Consultas do período" → **Agenda do período**
+  (as consultas com DATA nestes dias, não importa quando foram marcadas); frase explicando embaixo da chave.
+- Testes: appointments_controller_spec 5/5; rubocop limpo no arquivo novo; conferido no localhost conta 3
+  (chave + frase visíveis; API devolve a chave nova). Popup não conferido visualmente (card fora do layout local).
+
 ## 237. ⚡ MEU PAINEL LENTO ("demora absurdo pra carregar mês/mês passado/personalizado; este ano nem carrega", 25/09) — SUBIU 25/09 (commit df925a1 no develop → imagem ghcr :df925a1, WEB+SIDEKIQ COM MIGRATION → BACKUP antes; reversão :18f45f9)
 - DIAGNÓSTICO: `GET /crm/home` passava dos 15 s do rack-timeout em "este ano". Culpados: (1) Radar com UMA QUERY POR
   AVISO (até 400) em `agent_performance.rb#radar_stats` + um find_by por pessoa; (2) todas as mensagens enviadas do

@@ -15,6 +15,14 @@
 #   · additional_attributes.parceiro preenchido (o sync grava)
 #   · conversa numa caixa dos parceiros (agenda_config.oftalmofacil.partner_inbox_ids)
 #
+# REGRA B (item 245, 25/09 — "um paciente pode ter passado por um e por outro
+# ao longo da jornada"): QUEM CHEGOU PRIMEIRO. Se a pessoa já era da CEVICO
+# (card num funil da CEVICO criado ANTES da entrada dela no parceiro — card no
+# funil dos parceiros ou item de parceiro marcado no hub), ela continua sendo
+# lead da CEVICO: IA, automações e campanhas voltam a valer nas caixas da
+# CEVICO. Continuam protegidos mesmo assim: a conversa na caixa dos parceiros
+# (partner_inbox?) e os agendamentos do parceiro (partner_task?).
+#
 # Cada bloqueio deixa uma linha "[cerca OF] bloqueado: …" no log.
 module Crm::PartnerGuard
   module_function
@@ -62,11 +70,46 @@ module Crm::PartnerGuard
 
   def partner_contact?(contact)
     return false if contact.blank?
+
+    partner_marked?(contact) && !cevico_first?(contact)
+  end
+
+  # tem alguma marca de parceiro (atributo, etiqueta of_ ou card no funil deles)
+  def partner_marked?(contact)
     return true if (contact.additional_attributes || {})['parceiro'].present?
     return true if contact.label_list.any? { |l| l.to_s.start_with?(LABEL_PREFIX) }
 
     pid = partner_pipeline_id(contact.account)
     pid.present? && Crm::Contact.exists?(contact_id: contact.id, pipeline_id: pid)
+  end
+
+  # regra B: a pessoa já era da CEVICO antes de entrar pelo parceiro?
+  def cevico_first?(contact)
+    contact.present? && cevico_first_ids(contact.account, [contact.id]).any?
+  end
+
+  # dos ids informados, os que têm card num funil da CEVICO criado ANTES da
+  # entrada no parceiro (1º card no funil dos parceiros ou 1º item de parceiro
+  # marcado no hub; sem nenhum dos dois = CEVICO)
+  def cevico_first_ids(account, ids) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    ids = Array(ids).compact
+    return [] if account.blank? || ids.empty?
+
+    pid = partner_pipeline_id(account)
+    own = Crm::Contact.where(contact_id: ids)
+    own = own.where.not(pipeline_id: pid) if pid
+    own_first = own.group(:contact_id).minimum(:created_at)
+    return [] if own_first.empty?
+
+    starts = pid ? Crm::Contact.where(contact_id: own_first.keys, pipeline_id: pid).group(:contact_id).minimum(:created_at) : {}
+    items = Crm::OftalmofacilSurgery.where(account_id: account.id, contact_id: own_first.keys)
+    own_name = own_provider_name(account)
+    items = items.where.not('LOWER(provider_name) LIKE ?', "%#{own_name}%") if own_name.present?
+    item_starts = items.group(:contact_id).minimum(Arel.sql('COALESCE(of_created_at, created_at)'))
+    own_first.select do |cid, t|
+      start = [starts[cid], item_starts[cid]].compact.min
+      start.nil? || t < start
+    end.keys
   end
 
   def partner_conversation?(conversation)
@@ -99,7 +142,8 @@ module Crm::PartnerGuard
     ids |= account.conversations.where(inbox_id: inbox_ids).where.not(contact_id: nil).distinct.pluck(:contact_id) if inbox_ids.any?
 
     ids |= account.contacts.where("COALESCE(additional_attributes->>'parceiro', '') <> ''").pluck(:id)
-    ids.compact.uniq
+    ids = ids.compact.uniq
+    ids - cevico_first_ids(account, ids) # regra B: quem já era da CEVICO continua lead da CEVICO
   end
 
   # apaga o cache (o sync chama depois de rodar)

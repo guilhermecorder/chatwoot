@@ -350,6 +350,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       # (Preencher histórico / disparo retroativo) — fica FORA do contador
       # (foi o "88 agendadas" fantasma de 15/07).
       appointments_booked: booked_scope(account, since, until_at).count,
+      # item 238: de quais caixas vieram as "Marcadas na Agenda" (mesma regra
+      # do ambiente Agendamentos: conversa citada na consulta ou a mais recente)
+      appointments_booked_by_inbox: Crm::TaskConversations.count_by_inbox(account, booked_scope(account, since, until_at).to_a),
       # e destes, quantos CHEGARAM E AGENDARAM no mesmo período (lead novo
       # que já saiu com consulta — o atendimento no timing perfeito)
       appointments_same_day: booked_scope(account, since, until_at)

@@ -176,20 +176,10 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     task.created_at
   end
 
-  # a conversa de onde a consulta saiu ("Conversa #123" na descrição; vale a
-  # ÚLTIMA citada = reagendamento mais recente); sem rastro, a conversa mais
-  # recente do paciente
-  def conversations_for(tasks) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    wanted = {}
-    tasks.each do |t|
-      ids = t.description.to_s.scan(/Conversa #(\d+)/).flatten
-      wanted[t.id] = ids.last.to_i if ids.any?
-    end
-    by_display = Current.account.conversations.where(display_id: wanted.values.uniq).includes(:inbox).index_by(&:display_id)
-    fallback_ids = tasks.reject { |t| by_display[wanted[t.id]] }.filter_map(&:contact_id).uniq
-    latest = Current.account.conversations.where(contact_id: fallback_ids).includes(:inbox)
-                    .order(last_activity_at: :desc).group_by(&:contact_id).transform_values(&:first)
-    tasks.to_h { |t| [t.id, by_display[wanted[t.id]] || latest[t.contact_id]] }
+  # a conversa de onde a consulta saiu — regra compartilhada com o Meu Painel
+  # (item 238: Crm::TaskConversations)
+  def conversations_for(tasks)
+    Crm::TaskConversations.for(Current.account, tasks)
   end
 
   def cards_for(tasks)

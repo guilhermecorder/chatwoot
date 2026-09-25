@@ -70,6 +70,35 @@ class Crm::OftalmofacilSurgery < ApplicationRecord
   end
 
   # rótulo humano da classificação
+  # 🕐 item 242: o MySQL do hub devolve a HORA como SEGUNDOS desde a meia-noite
+  # ("39600.0" = 11:00); também aceita "11:00:00" e Time. 0/vazio = sem hora.
+  def self.normalize_hour(raw)
+    s = raw.respond_to?(:strftime) ? raw.strftime('%H:%M') : raw.to_s.strip
+    return nil if s.blank?
+
+    if s.match?(/\A\d+(\.\d+)?\z/)
+      secs = s.to_f.round
+      return nil unless secs.positive? && secs < 86_400
+
+      return format('%<h>02d:%<m>02d', h: secs / 3600, m: (secs % 3600) / 60)
+    end
+    m = s.match(/(\d{1,2}):(\d{2})/)
+    m ? format('%<h>02d:%<m>02d', h: m[1].to_i, m: m[2].to_i) : nil
+  end
+
+  # hora "HH:MM" mesmo nos registros gravados antes da correção
+  def hour_hhmm
+    self.class.normalize_hour(surgery_hour)
+  end
+
+  # data + hora no fuso de SÃO PAULO (o app roda em UTC: sem isso a hora
+  # certa ainda cairia 3h antes) — sem hora = fallback
+  def local_time(fallback = '08:00')
+    return nil if surgery_date.blank?
+
+    ActiveSupport::TimeZone['America/Sao_Paulo'].parse("#{surgery_date.iso8601} #{hour_hhmm || fallback}")
+  end
+
   def status_kind_label
     {
       'agendada' => 'Agendada', 'realizada' => 'Realizada', 'cancelada' => 'Cancelada',

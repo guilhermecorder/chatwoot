@@ -30,6 +30,9 @@ const props = defineProps({
   axis: { type: Boolean, default: null },
   // valor escrito em cima de cada barra (automático: quando cabe)
   showValues: { type: Boolean, default: null },
+  // item 239 (pedido 25/09): LINHA com área em vez de barras — para períodos
+  // longos (muitos baldes), onde as barras viram palitinhos
+  line: { type: Boolean, default: false },
 });
 
 // ── medidas: o SVG tem a largura REAL do contêiner (1 unidade = 1px), então
@@ -102,6 +105,15 @@ const bars = computed(() =>
     };
   })
 );
+// modo LINHA: a série do período como linha + área em degradê
+const linePts = computed(() => nums.value.map((v, i) => ({ x: centerX(i), y: yFor(v) })));
+const linePath = computed(() => linePts.value.map(p => `${p.x},${p.y}`).join(' '));
+const areaPath = computed(() => {
+  const pts = linePts.value;
+  if (!pts.length) return '';
+  return `${pts[0].x},${baseY.value} ${linePath.value} ${pts[pts.length - 1].x},${baseY.value}`;
+});
+const maxIdx = computed(() => (dataMax.value > 0 ? nums.value.indexOf(dataMax.value) : -1));
 // período anterior como LINHA tracejada com pontinhos (fantasma)
 const prevPts = computed(() => (prevSlice.value || []).map((v, i) => ({ x: centerX(i), y: yFor(v) })));
 const prevLine = computed(() =>
@@ -134,7 +146,9 @@ const tickIdx = computed(() => {
   return idx;
 });
 const showVals = computed(() =>
-  props.showValues === null
+  props.line
+    ? false
+    : props.showValues === null
     ? props.values.length <= 16 && props.height >= 70 && barW.value >= 14
     : props.showValues
 );
@@ -195,6 +209,10 @@ const tooltip = computed(() => {
           <stop offset="0" :stop-color="color" stop-opacity="1" />
           <stop offset="1" :stop-color="color" stop-opacity="0.45" />
         </linearGradient>
+        <linearGradient :id="uid + 'a'" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" :stop-color="color" stop-opacity="0.38" />
+          <stop offset="1" :stop-color="color" stop-opacity="0.03" />
+        </linearGradient>
       </defs>
       <!-- linhas-guia + valores do eixo (teto e metade) -->
       <g v-for="(t, ti) in gridTicks" :key="'g' + ti">
@@ -227,8 +245,28 @@ const tooltip = computed(() => {
         :x1="L" :x2="W - PAD" :y1="refY" :y2="refY"
         stroke="currentColor" stroke-dasharray="4 3" stroke-width="1" class="text-n-slate-9" opacity="0.7"
       />
+      <!-- modo LINHA: área + linha + ponto no pico e no balde ativo -->
+      <g v-if="line && linePts.length" style="pointer-events: none">
+        <polygon :points="areaPath" :fill="`url(#${uid}a)`" />
+        <polyline
+          :points="linePath"
+          fill="none" :stroke="color" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+        />
+        <circle
+          v-if="maxIdx >= 0"
+          :cx="linePts[maxIdx].x" :cy="linePts[maxIdx].y" r="3.2" :fill="color" stroke="#fff" stroke-width="1.2"
+        />
+        <template v-if="active !== null && linePts[active]">
+          <line
+            :x1="linePts[active].x" :x2="linePts[active].x" :y1="chartTop" :y2="baseY"
+            :stroke="color" stroke-width="0.8" opacity="0.4"
+          />
+          <circle :cx="linePts[active].x" :cy="linePts[active].y" r="3.6" :fill="color" stroke="#fff" stroke-width="1.4" />
+        </template>
+      </g>
       <g v-for="b in bars" :key="b.i">
         <rect
+          v-if="!line"
           :x="b.x" :y="b.y" :width="barW" :height="b.h" :rx="Math.min(3, barW / 2)"
           :fill="`url(#${uid})`" :opacity="active === b.i || b.isMax ? 1 : 0.82"
         />

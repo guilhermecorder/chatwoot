@@ -558,6 +558,37 @@ const pickDate = day => {
   showDatePicker.value = false;
 };
 
+// ── item 244: MINI CALENDÁRIO sempre aberto (bloco "Calendário", como o do
+// Google Agenda): segue a data escolhida, destaca a semana/dia em vista, e as
+// setas dele só folheiam os meses (sem mudar a agenda até clicar num dia) ──
+const miniCursor = ref(startOfMonth(new Date()));
+watch(cursor, c => { miniCursor.value = startOfMonth(c); }, { immediate: true });
+const miniLabel = computed(() =>
+  cap(miniCursor.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))
+);
+const miniWeeks = computed(() => {
+  const start = startOfWeek(startOfMonth(miniCursor.value), { weekStartsOn: 0 });
+  const out = [];
+  let d = start;
+  for (let w = 0; w < 6; w += 1) {
+    const week = [];
+    for (let i = 0; i < 7; i += 1) { week.push(d); d = addDays(d, 1); }
+    out.push(week);
+  }
+  // 6ª linha inteira do mês seguinte? corta
+  return isSameMonth(out[5][0], miniCursor.value) ? out : out.slice(0, 5);
+});
+const miniInView = day => {
+  if (viewMode.value === 'day') return isSameDay(day, cursor.value);
+  if (viewMode.value === 'week') {
+    const a = startOfWeek(cursor.value, { weekStartsOn: 0 });
+    const b = endOfWeek(cursor.value, { weekStartsOn: 0 });
+    return day >= a && day <= b;
+  }
+  return false;
+};
+const miniPick = day => { cursor.value = new Date(day); };
+
 // ── Navegação ──
 const step = dir => {
   if (viewMode.value === 'month') cursor.value = addMonths(cursor.value, dir);
@@ -1377,237 +1408,11 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
 
 <template>
   <div class="cv-page cv-agenda flex flex-col h-full w-full bg-n-surface-1" :style="pageVars">
-    <!-- ══ CABEÇALHO grudado (vidro): período · navegação · visões · tipos ══ -->
-    <div class="cv-ag-top flex-shrink-0">
-      <div class="max-w-[1440px] mx-auto px-4 sm:px-6 pt-3 pb-3 flex flex-col gap-2.5">
-        <!-- linha 1: período grande à esquerda, visões + ação à direita -->
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="cv-icon cv-icon-lg hidden sm:inline-flex" :title="`Agenda de ${k.plural}`">
-            <span :class="k.icon" class="text-lg" />
-          </div>
-          <div class="relative">
-            <button class="cv-ag-period" title="Clique para escolher a data num calendário" @click="toggleDatePicker">
-              <span class="truncate max-w-[60vw] sm:max-w-none">{{ navLabel }}</span>
-              <span class="i-lucide-chevron-down text-xs opacity-60" />
-            </button>
-            <!-- calendário interativo. O véu invisível que fecha ao clicar fora
-                 vai para o body: o cabeçalho tem backdrop-filter, e um fixed
-                 dentro dele só cobriria o próprio cabeçalho. z-10 fica abaixo
-                 do cabeçalho (z-20), então o calendário continua clicável. -->
-            <Teleport to="body">
-              <div v-if="showDatePicker" class="fixed inset-0 z-10" @click="showDatePicker = false" />
-            </Teleport>
-            <div v-if="showDatePicker" class="cv-pop cv-ag-pop absolute left-0 top-10 z-40 w-72 p-4">
-              <div class="flex items-center justify-between mb-2">
-                <button class="cv-ag-nav !w-7 !h-7" @click="pickerCursor = addMonths(pickerCursor, -1)"><span class="i-lucide-chevron-left text-sm" /></button>
-                <p class="text-sm font-bold text-n-slate-12">{{ pickerLabel }}</p>
-                <button class="cv-ag-nav !w-7 !h-7" @click="pickerCursor = addMonths(pickerCursor, 1)"><span class="i-lucide-chevron-right text-sm" /></button>
-              </div>
-              <div class="grid grid-cols-7 mb-1">
-                <span v-for="wd in WEEKDAYS" :key="'p' + wd" class="text-center text-[10px] font-semibold text-n-slate-9">{{ wd.charAt(0) }}</span>
-              </div>
-              <div v-for="(week, wi) in pickerWeeks" :key="'pw' + wi" class="grid grid-cols-7">
-                <button
-                  v-for="day in week"
-                  :key="'pd' + day.toISOString()"
-                  class="cv-ag-daynum mx-auto !w-8 !h-8 text-xs hover:bg-n-alpha-2"
-                  :class="[
-                    isSameMonth(day, pickerCursor) ? '' : 'cv-ag-daynum-muted',
-                    isSameDay(day, cursor) ? 'cv-ag-daynum-today' : '',
-                  ]"
-                  :style="!isSameDay(day, cursor) && isToday(day) ? { boxShadow: 'inset 0 0 0 1.5px var(--cv)' } : {}"
-                  @click="pickDate(day)"
-                >
-                  {{ day.getDate() }}
-                </button>
-              </div>
-              <button class="cv-btn cv-btn-sm w-full mt-2" @click="pickDate(new Date())">Hoje</button>
-            </div>
-          </div>
-          <p v-if="navSub" class="text-[11px] text-n-slate-9 hidden md:block">{{ navSub }}</p>
-
-          <div class="flex items-center gap-1.5 ml-auto">
-            <button class="cv-ag-nav" :title="`${cap(stepLabel)} anterior`" @click="step(-1)"><span class="i-lucide-chevron-left text-base" /></button>
-            <button class="cv-btn cv-btn-ghost cv-btn-sm" title="Voltar para hoje" @click="goToday">Hoje</button>
-            <button class="cv-ag-nav" :title="`${cap(stepLabel)} seguinte`" @click="step(1)"><span class="i-lucide-chevron-right text-base" /></button>
-          </div>
-
-          <div class="cv-seg cv-seg-sm">
-            <button
-              v-for="m in VIEW_MODES"
-              :key="m.key"
-              class="cv-seg-item"
-              :class="viewMode === m.key ? 'cv-seg-on' : ''"
-              @click="viewMode = m.key"
-            >
-              <span :class="m.icon" class="text-sm" />
-              <span class="hidden sm:inline">{{ m.label }}</span>
-            </button>
-          </div>
-
-          <button class="cv-btn" @click="openCreateOnDay(viewMode === 'month' ? new Date() : cursor)">
-            <span class="i-lucide-plus text-sm" />
-            <span class="hidden sm:inline">{{ newLabel }}</span>
-            <span class="sm:hidden">{{ cap(k.noun) }}</span>
-          </button>
-        </div>
-
-        <!-- linha 2 (item 234): CAMADAS por tipo — cada uma na sua cor; "Geral" liga todas -->
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="cv-seg overflow-x-auto" style="scrollbar-width: none">
-            <button
-              class="cv-ag-kind cv-ag-kind-all"
-              :class="isGeneral ? 'cv-ag-kind-on' : ''"
-              title="Agenda geral — todas as camadas ligadas. Clique num tipo para ligar/desligar só ele; clique duplo deixa só aquele tipo"
-              @click="allLayers()"
-            >
-              <span class="i-lucide-layers text-sm" />
-              <span class="hidden sm:inline">Geral</span>
-            </button>
-            <button
-              v-for="tt in TYPES"
-              :key="tt.key"
-              class="cv-ag-kind"
-              :class="layerOn(tt.key) ? 'cv-ag-kind-on' : 'opacity-60'"
-              :style="typeVarsOf(tt.key)"
-              :title="`${tt.label} — ${tt.hint} · clique: liga/desliga esta camada · clique duplo: só este tipo`"
-              @click="toggleLayer(tt.key)"
-              @dblclick.prevent="soloLayer(tt.key)"
-            >
-              <span class="cv-ag-kind-dot" />
-              <span :class="tt.icon" class="text-sm hidden sm:inline" />
-              {{ tt.label }}
-              <span class="cv-ag-kind-n" :title="`${kindCounts[tt.key]} ${rangeNoun}`">{{ kindCounts[tt.key] }}</span>
-            </button>
-          </div>
-
-          <div class="flex items-center gap-1.5 ml-auto flex-wrap">
-            <button
-              v-if="viewMode === 'week'"
-              class="cv-btn cv-btn-ghost cv-btn-sm"
-              :title="hideWeekend ? 'Mostrar sábado e domingo' : 'Esconder sábado e domingo'"
-              @click="toggleWeekend"
-            >
-              <span :class="hideWeekend ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="text-xs" />
-              <span class="hidden md:inline">sáb/dom</span>
-            </button>
-            <button
-              v-if="viewMode === 'day' && dayViewTasks.length"
-              class="cv-btn cv-btn-ghost cv-btn-sm"
-              title="Abre a lista do dia pronta para imprimir ou salvar em PDF"
-              @click="showPrintModal = true"
-            >
-              <span class="i-lucide-printer text-xs" />
-              <span class="hidden md:inline">Imprimir</span>
-            </button>
-            <button
-              v-if="isExam"
-              class="cv-btn cv-btn-ghost cv-btn-sm"
-              title="Dias e horários em que a clínica faz exames (padrão: segunda a sexta, 08h–17h, Av. Paulista)"
-              @click="openExamWindowsModal"
-            >
-              <span class="i-lucide-clock text-xs" />
-              <span class="hidden md:inline">Janela de exames</span>
-            </button>
-            <button
-              v-else-if="isPhysical"
-              class="cv-btn cv-btn-ghost cv-btn-sm"
-              title="Janelas de avaliação dos médicos"
-              @click="showWindowsModal = true"
-            >
-              <span class="i-lucide-clock text-xs" />
-              <span class="hidden md:inline">Janelas dos médicos</span>
-            </button>
-            <button
-              v-else-if="isSurgeryMode"
-              class="cv-btn cv-btn-ghost cv-btn-sm"
-              title="Dias e horários em que a sala cirúrgica de cada clínica está disponível"
-              @click="openSurgeryWindowsModal"
-            >
-              <span class="i-lucide-clock text-xs" />
-              <span class="hidden md:inline">Sala cirúrgica</span>
-            </button>
-            <select v-model="view" class="cv-input !h-8 text-xs !w-auto max-w-[180px]">
-              <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}</option>
-              <optgroup v-if="!isSurgeryMode && !isTele" label="Unidades">
-                <option v-for="(u, key) in UNITS" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
-              </optgroup>
-              <optgroup v-if="!isSurgeryMode" label="Médicos">
-                <option v-for="d in DOCTORS" :key="d.name" :value="`doctor:${d.name}`">{{ d.name }}</option>
-              </optgroup>
-              <option value="me">Minha agenda pessoal</option>
-              <optgroup v-if="isAdmin" label="Pessoas">
-                <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
-              </optgroup>
-            </select>
-          </div>
-        </div>
-
-        <!-- linha 3: atalhos em linha — um médico só / um local só -->
-        <div v-if="!isPersonalView" class="flex items-center gap-1.5 flex-wrap">
-          <button
-            class="cv-chip"
-            :class="view === 'clinic' ? 'cv-chip-on' : ''"
-            @click="view = 'clinic'"
-          >
-            {{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}
-          </button>
-          <template v-if="!isSurgeryMode">
-            <button
-              v-for="d in DOCTORS"
-              :key="'quick' + d.name"
-              class="cv-chip"
-              :class="view === `doctor:${d.name}` ? 'cv-chip-on' : ''"
-              :style="view === `doctor:${d.name}` ? { '--cv-grad': d.color, '--cv-deep-rgb': hexToRgbSpaced(d.color) } : {}"
-              @click="view = `doctor:${d.name}`"
-            >
-              <span class="w-2 h-2 rounded-full" :style="{ background: view === `doctor:${d.name}` ? '#fff' : d.color }" />
-              {{ d.short }}
-              <span v-if="isDoctorClosed(d.name)" class="text-[9px]" title="agenda fechada">⏸</span>
-            </button>
-            <template v-if="!isTele">
-              <span class="w-px h-4 bg-n-weak mx-0.5" />
-              <button
-                v-for="(u, key) in UNITS"
-                :key="'qu' + key"
-                class="cv-chip"
-                :class="view === `unit:${key}` ? 'cv-chip-on' : ''"
-                :style="view === `unit:${key}` ? { '--cv-grad': u.color, '--cv-deep-rgb': hexToRgbSpaced(u.color) } : {}"
-                @click="view = view === `unit:${key}` ? 'clinic' : `unit:${key}`"
-              >
-                <span class="w-2 h-2 rounded-full" :style="{ background: view === `unit:${key}` ? '#fff' : u.color }" />
-                {{ u.label }}
-              </button>
-            </template>
-          </template>
-          <template v-else>
-            <button
-              v-for="loc in surgeryLocations"
-              :key="'quickloc' + loc.key"
-              class="cv-chip"
-              :class="view === `unit:${loc.key}` ? 'cv-chip-on' : ''"
-              :style="view === `unit:${loc.key}` ? { '--cv-grad': loc.color, '--cv-deep-rgb': hexToRgbSpaced(loc.color) } : {}"
-              @click="view = `unit:${loc.key}`"
-            >
-              <span class="w-2 h-2 rounded-full" :style="{ background: view === `unit:${loc.key}` ? '#fff' : loc.color }" />
-              {{ loc.label }}
-            </button>
-            <button v-if="isAdmin" class="cv-chip" title="Gerenciar clínicas parceiras" @click="openLocationsModal">
-              <span class="i-lucide-map-pin text-[10px]" /> locais
-            </button>
-          </template>
-          <template v-if="hasExternal">
-            <span class="w-px h-4 bg-n-weak mx-0.5" />
-            <span class="text-[10px] font-bold uppercase tracking-wider text-n-slate-10">Origem</span>
-            <button v-for="o in [['all', 'Todas'], ['cevico', 'CEVICO'], ['oftalmofacil', 'Oftalmofácil']]" :key="'orig' + o[0]" class="cv-chip" :class="originFilter === o[0] ? 'cv-chip-on' : ''" @click="originFilter = o[0]">
-              <span v-if="o[0] === 'oftalmofacil'" class="i-lucide-hospital text-[10px]" />{{ o[1] }}
-            </button>
-          </template>
-          <span class="text-[11px] text-n-slate-9 ml-auto hidden lg:inline">{{ k.hint }}</span>
-        </div>
-      </div>
-    </div>
-
+    <!-- ══ item 244: o cabeçalho virou BLOCOS dentro da área rolável (o mini
+         calendário é alto; grudado no topo roubaria a grade). Desktop: bloco
+         "Calendário" à esquerda (mini mês sempre aberto + Hoje + Mês/Semana/Dia);
+         à direita o bloco do PERÍODO (título grande, ‹ ›, novo) e o de FILTROS
+         (camadas, quem, ferramentas). Celular: sem o mini mês, com o popover. ══ -->
     <!-- 📖 respostas do formulário do paciente -->
     <div v-if="formAnswersTask" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click.self="formAnswersTask = null">
       <div class="cv-modal cv-ag-pop w-full max-w-lg max-h-[85vh] flex flex-col">
@@ -1636,6 +1441,286 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
     <!-- ══ ÁREA ROLÁVEL ══ -->
     <div v-else class="flex-1 min-h-0 overflow-y-auto">
       <div class="px-4 sm:px-6 pt-4 pb-24 max-w-[1440px] mx-auto">
+        <div class="grid grid-cols-1 lg:grid-cols-[272px_minmax(0,1fr)] gap-3 mb-3">
+          <!-- ① CALENDÁRIO -->
+          <section class="cv-ag-block hidden lg:flex flex-col p-3.5">
+            <div class="flex items-center gap-2 mb-2">
+              <p class="cv-ag-block-title flex-1">Calendário</p>
+              <button class="cv-btn cv-btn-ghost cv-btn-sm" title="Voltar para hoje" @click="goToday">Hoje</button>
+            </div>
+            <div class="flex items-center justify-between mb-1">
+              <button class="cv-ag-nav !w-7 !h-7" title="Mês anterior" @click="miniCursor = addMonths(miniCursor, -1)"><span class="i-lucide-chevron-left text-sm" /></button>
+              <p class="text-sm font-bold text-n-slate-12">{{ miniLabel }}</p>
+              <button class="cv-ag-nav !w-7 !h-7" title="Mês seguinte" @click="miniCursor = addMonths(miniCursor, 1)"><span class="i-lucide-chevron-right text-sm" /></button>
+            </div>
+            <div class="grid grid-cols-7 mb-0.5">
+              <span v-for="wd in WEEKDAYS" :key="'mini' + wd" class="text-center text-[10px] font-semibold text-n-slate-9">{{ wd.charAt(0) }}</span>
+            </div>
+            <div v-for="(week, wi) in miniWeeks" :key="'mw' + wi" class="cv-ag-mini-week grid grid-cols-7" :class="miniInView(week[3]) && viewMode === 'week' ? 'cv-ag-mini-week-on' : ''">
+              <button
+                v-for="day in week"
+                :key="'md' + day.toISOString()"
+                class="cv-ag-daynum mx-auto !w-8 !h-8 text-xs hover:bg-n-alpha-2"
+                :class="[
+                  isSameMonth(day, miniCursor) ? '' : 'cv-ag-daynum-muted',
+                  viewMode === 'day' && isSameDay(day, cursor) ? 'cv-ag-daynum-today' : '',
+                ]"
+                :style="isToday(day) && !(viewMode === 'day' && isSameDay(day, cursor)) ? { boxShadow: 'inset 0 0 0 1.5px var(--cv)' } : {}"
+                @click="miniPick(day)"
+              >
+                {{ day.getDate() }}
+              </button>
+            </div>
+            <div class="cv-seg cv-seg-sm grid grid-cols-3 mt-auto pt-2">
+              <button
+                v-for="m in VIEW_MODES"
+                :key="'vm' + m.key"
+                class="cv-seg-item justify-center"
+                :class="viewMode === m.key ? 'cv-seg-on' : ''"
+                @click="viewMode = m.key"
+              >
+                <span :class="m.icon" class="text-sm" />
+                {{ m.label }}
+              </button>
+            </div>
+          </section>
+
+          <div class="flex flex-col gap-3 min-w-0">
+            <!-- ② PERÍODO -->
+            <section class="cv-ag-block p-4 flex items-center gap-3 flex-wrap">
+              <div class="cv-icon cv-icon-lg hidden sm:inline-flex" :title="`Agenda de ${k.plural}`">
+                <span :class="k.icon" class="text-lg" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="cv-ag-block-title">{{ cap(stepLabel) }}<span v-if="navSub" class="cv-ag-block-sub"> · {{ navSub }}</span></p>
+                <!-- desktop: título grande; celular: o título abre o calendário -->
+                <h2 class="hidden lg:block text-2xl font-bold tracking-tight text-n-slate-12 truncate">{{ navLabel }}</h2>
+                <div class="lg:hidden">
+                  <div class="relative">
+                              <button class="cv-ag-period" title="Clique para escolher a data num calendário" @click="toggleDatePicker">
+                                <span class="truncate max-w-[60vw] lg:max-w-[360px]">{{ navLabel }}</span>
+                                <span class="i-lucide-chevron-down text-xs opacity-60" />
+                              </button>
+                              <!-- calendário interativo. O véu invisível que fecha ao clicar fora
+                                   vai para o body: o cabeçalho tem backdrop-filter, e um fixed
+                                   dentro dele só cobriria o próprio cabeçalho. z-10 fica abaixo
+                                   do cabeçalho (z-20), então o calendário continua clicável. -->
+                              <Teleport to="body">
+                                <div v-if="showDatePicker" class="fixed inset-0 z-10" @click="showDatePicker = false" />
+                              </Teleport>
+                              <div v-if="showDatePicker" class="cv-pop cv-ag-pop absolute left-0 top-10 z-40 w-72 p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                  <button class="cv-ag-nav !w-7 !h-7" @click="pickerCursor = addMonths(pickerCursor, -1)"><span class="i-lucide-chevron-left text-sm" /></button>
+                                  <p class="text-sm font-bold text-n-slate-12">{{ pickerLabel }}</p>
+                                  <button class="cv-ag-nav !w-7 !h-7" @click="pickerCursor = addMonths(pickerCursor, 1)"><span class="i-lucide-chevron-right text-sm" /></button>
+                                </div>
+                                <div class="grid grid-cols-7 mb-1">
+                                  <span v-for="wd in WEEKDAYS" :key="'p' + wd" class="text-center text-[10px] font-semibold text-n-slate-9">{{ wd.charAt(0) }}</span>
+                                </div>
+                                <div v-for="(week, wi) in pickerWeeks" :key="'pw' + wi" class="grid grid-cols-7">
+                                  <button
+                                    v-for="day in week"
+                                    :key="'pd' + day.toISOString()"
+                                    class="cv-ag-daynum mx-auto !w-8 !h-8 text-xs hover:bg-n-alpha-2"
+                                    :class="[
+                                      isSameMonth(day, pickerCursor) ? '' : 'cv-ag-daynum-muted',
+                                      isSameDay(day, cursor) ? 'cv-ag-daynum-today' : '',
+                                    ]"
+                                    :style="!isSameDay(day, cursor) && isToday(day) ? { boxShadow: 'inset 0 0 0 1.5px var(--cv)' } : {}"
+                                    @click="pickDate(day)"
+                                  >
+                                    {{ day.getDate() }}
+                                  </button>
+                                </div>
+                                <button class="cv-btn cv-btn-sm w-full mt-2" @click="pickDate(new Date())">Hoje</button>
+                              </div>
+                            </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5 ml-auto">
+                <button class="cv-ag-nav" :title="`${cap(stepLabel)} anterior`" @click="step(-1)"><span class="i-lucide-chevron-left text-base" /></button>
+                <span class="lg:hidden"><button class="cv-btn cv-btn-ghost cv-btn-sm" title="Voltar para hoje" @click="goToday">Hoje</button></span>
+                <button class="cv-ag-nav" :title="`${cap(stepLabel)} seguinte`" @click="step(1)"><span class="i-lucide-chevron-right text-base" /></button>
+              </div>
+              <div class="lg:hidden">
+                <div class="cv-seg cv-seg-sm">
+                  <button v-for="m in VIEW_MODES" :key="'vmm' + m.key" class="cv-seg-item" :class="viewMode === m.key ? 'cv-seg-on' : ''" @click="viewMode = m.key">
+                    <span :class="m.icon" class="text-sm" />
+                  </button>
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5">
+                  <button
+                    v-if="viewMode === 'week'"
+                    class="cv-btn cv-btn-ghost cv-btn-sm"
+                    :title="hideWeekend ? 'Mostrar sábado e domingo' : 'Esconder sábado e domingo'"
+                    @click="toggleWeekend"
+                  >
+                    <span :class="hideWeekend ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="text-xs" />
+                    <span class="hidden 2xl:inline">sáb/dom</span>
+                  </button>
+                  <button
+                    v-if="viewMode === 'day' && dayViewTasks.length"
+                    class="cv-btn cv-btn-ghost cv-btn-sm"
+                    title="Abre a lista do dia pronta para imprimir ou salvar em PDF"
+                    @click="showPrintModal = true"
+                  >
+                    <span class="i-lucide-printer text-xs" />
+                    <span class="hidden 2xl:inline">Imprimir</span>
+                  </button>
+                  <button
+                    v-if="isExam"
+                    class="cv-btn cv-btn-ghost cv-btn-sm"
+                    title="Dias e horários em que a clínica faz exames (padrão: segunda a sexta, 08h–17h, Av. Paulista)"
+                    @click="openExamWindowsModal"
+                  >
+                    <span class="i-lucide-clock text-xs" />
+                    <span class="hidden 2xl:inline">Janela de exames</span>
+                  </button>
+                  <button
+                    v-else-if="isPhysical"
+                    class="cv-btn cv-btn-ghost cv-btn-sm"
+                    title="Janelas de avaliação dos médicos"
+                    @click="showWindowsModal = true"
+                  >
+                    <span class="i-lucide-clock text-xs" />
+                    <span class="hidden 2xl:inline">Janelas dos médicos</span>
+                  </button>
+                  <button
+                    v-else-if="isSurgeryMode"
+                    class="cv-btn cv-btn-ghost cv-btn-sm"
+                    title="Dias e horários em que a sala cirúrgica de cada clínica está disponível"
+                    @click="openSurgeryWindowsModal"
+                  >
+                    <span class="i-lucide-clock text-xs" />
+                    <span class="hidden 2xl:inline">Sala cirúrgica</span>
+                  </button>
+              </div>
+              <button class="cv-btn" @click="openCreateOnDay(viewMode === 'month' ? new Date() : cursor)">
+                <span class="i-lucide-plus text-sm" />
+                <span class="hidden sm:inline">{{ newLabel }}</span>
+                <span class="sm:hidden">{{ cap(k.noun) }}</span>
+              </button>
+            </section>
+
+            <!-- ③ FILTROS -->
+            <section class="cv-ag-block p-4 flex flex-col gap-2.5 flex-1">
+              <p class="cv-ag-block-title">Filtros</p>
+              <div class="flex items-start gap-3">
+                <span class="cv-ag-row-label">Camadas</span>
+                <div class="min-w-0 flex-1">
+                  <div class="cv-seg flex-wrap max-w-full">
+                    <button
+                      class="cv-ag-kind cv-ag-kind-all"
+                      :class="isGeneral ? 'cv-ag-kind-on' : ''"
+                      title="Agenda geral — todas as camadas ligadas. Clique num tipo para ligar/desligar só ele; clique duplo deixa só aquele tipo"
+                      @click="allLayers()"
+                    >
+                      <span class="i-lucide-layers text-sm" />
+                      <span class="hidden sm:inline">Geral</span>
+                    </button>
+                    <button
+                      v-for="tt in TYPES"
+                      :key="tt.key"
+                      class="cv-ag-kind"
+                      :class="layerOn(tt.key) ? 'cv-ag-kind-on' : 'opacity-60'"
+                      :style="typeVarsOf(tt.key)"
+                      :title="`${tt.label} — ${tt.hint} · clique: liga/desliga esta camada · clique duplo: só este tipo`"
+                      @click="toggleLayer(tt.key)"
+                      @dblclick.prevent="soloLayer(tt.key)"
+                    >
+                      <span class="cv-ag-kind-dot" />
+                      <span :class="tt.icon" class="text-sm hidden 2xl:inline" />
+                      {{ tt.label }}
+                      <span class="cv-ag-kind-n" :title="`${kindCounts[tt.key]} ${rangeNoun}`">{{ kindCounts[tt.key] }}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-start gap-3 flex-wrap lg:flex-nowrap">
+                <span class="cv-ag-row-label">Quem</span>
+                <div class="min-w-0 flex-1 flex items-start gap-2 flex-wrap">
+                  <div v-if="!isPersonalView" class="flex items-center gap-1.5 flex-wrap min-w-0">
+                    <button
+                      class="cv-chip"
+                      :class="view === 'clinic' ? 'cv-chip-on' : ''"
+                      @click="view = 'clinic'"
+                    >
+                      {{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}
+                    </button>
+                    <template v-if="!isSurgeryMode">
+                      <button
+                        v-for="d in DOCTORS"
+                        :key="'quick' + d.name"
+                        class="cv-chip"
+                        :class="view === `doctor:${d.name}` ? 'cv-chip-on' : ''"
+                        :style="view === `doctor:${d.name}` ? { '--cv-grad': d.color, '--cv-deep-rgb': hexToRgbSpaced(d.color) } : {}"
+                        @click="view = `doctor:${d.name}`"
+                      >
+                        <span class="w-2 h-2 rounded-full" :style="{ background: view === `doctor:${d.name}` ? '#fff' : d.color }" />
+                        {{ d.short }}
+                        <span v-if="isDoctorClosed(d.name)" class="text-[9px]" title="agenda fechada">⏸</span>
+                      </button>
+                      <template v-if="!isTele">
+                        <span class="w-px h-4 bg-n-weak mx-0.5" />
+                        <button
+                          v-for="(u, key) in UNITS"
+                          :key="'qu' + key"
+                          class="cv-chip"
+                          :class="view === `unit:${key}` ? 'cv-chip-on' : ''"
+                          :style="view === `unit:${key}` ? { '--cv-grad': u.color, '--cv-deep-rgb': hexToRgbSpaced(u.color) } : {}"
+                          @click="view = view === `unit:${key}` ? 'clinic' : `unit:${key}`"
+                        >
+                          <span class="w-2 h-2 rounded-full" :style="{ background: view === `unit:${key}` ? '#fff' : u.color }" />
+                          {{ u.label }}
+                        </button>
+                      </template>
+                    </template>
+                    <template v-else>
+                      <button
+                        v-for="loc in surgeryLocations"
+                        :key="'quickloc' + loc.key"
+                        class="cv-chip"
+                        :class="view === `unit:${loc.key}` ? 'cv-chip-on' : ''"
+                        :style="view === `unit:${loc.key}` ? { '--cv-grad': loc.color, '--cv-deep-rgb': hexToRgbSpaced(loc.color) } : {}"
+                        @click="view = `unit:${loc.key}`"
+                      >
+                        <span class="w-2 h-2 rounded-full" :style="{ background: view === `unit:${loc.key}` ? '#fff' : loc.color }" />
+                        {{ loc.label }}
+                      </button>
+                      <button v-if="isAdmin" class="cv-chip" title="Gerenciar clínicas parceiras" @click="openLocationsModal">
+                        <span class="i-lucide-map-pin text-[10px]" /> locais
+                      </button>
+                    </template>
+                    <template v-if="hasExternal">
+                      <span class="w-px h-4 bg-n-weak mx-0.5" />
+                      <span class="text-[10px] font-bold uppercase tracking-wider text-n-slate-10">Origem</span>
+                      <button v-for="o in [['all', 'Todas'], ['cevico', 'CEVICO'], ['oftalmofacil', 'Oftalmofácil']]" :key="'orig' + o[0]" class="cv-chip" :class="originFilter === o[0] ? 'cv-chip-on' : ''" @click="originFilter = o[0]">
+                        <span v-if="o[0] === 'oftalmofacil'" class="i-lucide-hospital text-[10px]" />{{ o[1] }}
+                      </button>
+                    </template>
+                  </div>
+                  <div class="flex items-center gap-1.5 ml-auto flex-wrap">
+                    <select v-model="view" class="cv-input !h-8 text-xs !w-auto max-w-[160px]" title="Ver a agenda de…">
+                      <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}</option>
+                      <optgroup v-if="!isSurgeryMode && !isTele" label="Unidades">
+                        <option v-for="(u, key) in UNITS" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
+                      </optgroup>
+                      <optgroup v-if="!isSurgeryMode" label="Médicos">
+                        <option v-for="d in DOCTORS" :key="d.name" :value="`doctor:${d.name}`">{{ d.name }}</option>
+                      </optgroup>
+                      <option value="me">Minha agenda pessoal</option>
+                      <optgroup v-if="isAdmin" label="Pessoas">
+                        <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+
         <!-- resumo do trilho: 4 vidros pequenos -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3">
           <div class="cv-stat px-4 py-3 flex items-center gap-3">
@@ -1974,28 +2059,33 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     :style="evVars(task)"
                     @click="openEdit(task)"
                   >
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <span class="text-sm font-extrabold tabular-nums" :style="{ color: accentOf(task) }">{{ chipTime(task) }}</span>
-                      <span class="text-sm font-semibold text-n-slate-12" :class="task.attendance === 'missed' ? 'line-through' : ''">{{ displayName(task) }}</span>
-                      <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }" :title="TYPE_BY_KEY[typeOf(task)].hint"><span :class="TYPE_BY_KEY[typeOf(task)].icon" class="text-[10px]" /> {{ TYPE_BY_KEY[typeOf(task)].label }}</span>
-                      <span v-if="unitOf(task)" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(unitOf(task).color), '--cv-deep': unitOf(task).color }"><span class="i-lucide-map-pin text-[10px]" /> {{ unitOf(task).label }}</span>
-                      <span v-if="task.source" class="cv-chip cv-slate" :title="`Veio do ${task.source === 'oftalmofacil' ? 'Oftalmofácil' : task.source}${task.source_detail ? ' · parceiro: ' + task.source_detail : ''}`"><span class="i-lucide-hospital text-[10px]" /> {{ originLabel(task) }}</span>
-                      <span v-if="task.attendance === 'attended'" class="cv-chip cv-green">{{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}</span>
-                      <span v-else-if="task.attendance === 'missed'" class="cv-chip cv-red">{{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}</span>
-                      <span v-else-if="task.attendance === 'attended_not_done'" class="cv-chip cv-amber">⚠️ Veio e não fez</span>
-                      <span v-if="isAdmin && isSurgeryTask(task) && task.crm_value" class="cv-chip cv-green ml-auto" :title="task.surgery_payment ? `Forma de pagamento: ${task.surgery_payment}` : 'Valor do card no CRM'">
-                        💰 {{ fmtBRL(task.crm_value) }}<template v-if="task.surgery_payment"> · {{ task.surgery_payment }}</template>
-                      </span>
-                      <span v-if="task.surgery_indication === 'indicated'" class="cv-chip cv-gold cv-chip-on">🎯 {{ task.indicated_procedure || 'Cirurgia indicada' }}</span>
-                      <span v-else-if="task.surgery_indication === 'not_indicated'" class="cv-chip cv-slate">Sem indicação</span>
-                    </div>
-                    <div class="flex items-center gap-3 mt-1.5 text-[11px] text-n-slate-10 flex-wrap">
-                      <span v-if="task.phone" class="flex items-center gap-1"><span class="i-lucide-phone text-[10px]" />{{ task.phone }}</span>
-                      <span v-if="task.procedure" class="flex items-center gap-1"><span class="i-lucide-eye text-[10px]" />{{ task.procedure }}</span>
-                      <span v-if="task.doctor" class="flex items-center gap-1"><span class="i-lucide-stethoscope text-[10px]" />{{ task.doctor }}</span>
-                      <button v-if="task.contact_id" class="flex items-center gap-1 hover:underline" :style="{ color: accentOf(task) }" @click.stop="openPatientSpace(task)">
-                        <PatientSpaceIcon :size="12" /> Espaço do Paciente
-                      </button>
+                    <!-- item 243: GRADE — hora | quem e o quê (procedimento em negrito) | selos alinhados à direita -->
+                    <div class="cv-ag-card-grid">
+                      <span class="cv-ag-card-time" :style="{ color: accentOf(task) }">{{ chipTime(task) }}</span>
+                      <div class="min-w-0">
+                        <p class="text-sm font-semibold text-n-slate-12 truncate" :class="task.attendance === 'missed' ? 'line-through' : ''">{{ displayName(task) }}</p>
+                        <p v-if="task.procedure" class="cv-ag-card-proc"><span class="i-lucide-eye text-[11px] opacity-60" /> {{ task.procedure }}</p>
+                        <div class="cv-ag-card-meta">
+                          <span v-if="task.phone"><span class="i-lucide-phone text-[10px]" />{{ task.phone }}</span>
+                          <span v-if="task.doctor"><span class="i-lucide-stethoscope text-[10px]" />{{ task.doctor }}</span>
+                          <button v-if="task.contact_id" class="hover:underline text-[11px] font-semibold" :style="{ color: accentOf(task) }" @click.stop="openPatientSpace(task)">
+                            <PatientSpaceIcon :size="12" /> Espaço do Paciente
+                          </button>
+                        </div>
+                      </div>
+                      <div class="cv-ag-card-pills">
+                        <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }" :title="TYPE_BY_KEY[typeOf(task)].hint"><span :class="TYPE_BY_KEY[typeOf(task)].icon" class="text-[10px] shrink-0" /> {{ TYPE_BY_KEY[typeOf(task)].label }}</span>
+                        <span v-if="unitOf(task)" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(unitOf(task).color), '--cv-deep': unitOf(task).color }"><span class="i-lucide-map-pin text-[10px] shrink-0" /> <span class="truncate">{{ unitOf(task).label }}</span></span>
+                        <span v-if="task.source" class="cv-chip cv-slate" :title="`Veio do ${task.source === 'oftalmofacil' ? 'Oftalmofácil' : task.source}${task.source_detail ? ' · parceiro: ' + task.source_detail : ''}`"><span class="i-lucide-hospital text-[10px] shrink-0" /> <span class="truncate">{{ originLabel(task) }}</span></span>
+                        <span v-if="task.attendance === 'attended'" class="cv-chip cv-green">{{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}</span>
+                        <span v-else-if="task.attendance === 'missed'" class="cv-chip cv-red">{{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}</span>
+                        <span v-else-if="task.attendance === 'attended_not_done'" class="cv-chip cv-amber">⚠️ Veio e não fez</span>
+                        <span v-if="isAdmin && isSurgeryTask(task) && task.crm_value" class="cv-chip cv-green" :title="task.surgery_payment ? `Forma de pagamento: ${task.surgery_payment}` : 'Valor do card no CRM'">
+                          💰 {{ fmtBRL(task.crm_value) }}<template v-if="task.surgery_payment"> · {{ task.surgery_payment }}</template>
+                        </span>
+                        <span v-if="task.surgery_indication === 'indicated'" class="cv-chip cv-gold cv-chip-on" :title="task.indicated_procedure || 'Cirurgia indicada'"><span class="truncate">🎯 {{ task.indicated_procedure || 'Cirurgia indicada' }}</span></span>
+                        <span v-else-if="task.surgery_indication === 'not_indicated'" class="cv-chip cv-slate">Sem indicação</span>
+                      </div>
                     </div>
 
                     <div v-if="detailOf(task) && (detailOf(task).labels.length || detailOf(task).form_response)" class="flex items-center gap-1.5 mt-1.5 flex-wrap">

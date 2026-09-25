@@ -58,7 +58,7 @@ RSpec.describe Crm::OftalmofacilSyncService do
     expect(task).to be_present
     expect(task.task_type).to eq('cirurgia')
     expect(task.title).to eq('Cirurgia: Maria Parceira')
-    expect(task.due_at.strftime('%Y-%m-%d %H:%M')).to eq('2026-09-30 09:30')
+    expect(task.due_at.in_time_zone('America/Sao_Paulo').strftime('%Y-%m-%d %H:%M')).to eq('2026-09-30 09:30')
     expect(task.unit).to eq('iop')
     expect(task.doctor).to eq('Dr. Henrique Gemelli')
     expect(task.source).to eq('oftalmofacil')
@@ -66,6 +66,20 @@ RSpec.describe Crm::OftalmofacilSyncService do
     expect(task.booking_kind).to eq('registro')
     expect(task.description).to start_with('Oftalmofácil · CLINICA VISAO NORTE · IOP Paulista')
     expect(result.tasks_created).to eq(1)
+  end
+
+  # 🕐 item 242: o MySQL do hub manda a hora em SEGUNDOS ("39600.0" = 11:00) e o
+  # app roda em UTC — o agendamento tem que cair às 11:00 de São Paulo
+  it 'hora em segundos vira HH:MM e o agendamento cai na hora certa de São Paulo', :aggregate_failures do
+    run_with([row('SCH_ITE_HOUR' => '39600.0', 'SCH_ITE_TOKEN' => 'tok-h')])
+    surgery = Crm::OftalmofacilSurgery.find_by(item_token: 'tok-h')
+    expect(surgery.surgery_hour).to eq('11:00')
+    task = account.tasks.find_by(external_ref: 'tok-h')
+    expect(task.due_at.in_time_zone('America/Sao_Paulo').strftime('%Y-%m-%d %H:%M')).to eq('2026-09-30 11:00')
+    expect(Crm::OftalmofacilSurgery.normalize_hour('40800.0')).to eq('11:20')
+    expect(Crm::OftalmofacilSurgery.normalize_hour('14:05:00')).to eq('14:05')
+    expect(Crm::OftalmofacilSurgery.normalize_hour('0')).to be_nil
+    expect(Crm::OftalmofacilSurgery.new(surgery_hour: '54000.0').hour_hhmm).to eq('15:00')
   end
 
   it 'nosso (CATARATA_SP) → card no funil da CEVICO, sem etiqueta de parceiro, agendamento sem parceiro', :aggregate_failures do

@@ -225,6 +225,84 @@ const dayRows = computed(() => weekByDay.value[dateKey(dayCursor.value)] || []);
 watch(dayCursor, d => { const ws = startOfWeek(d); if (dateKey(ws) !== dateKey(weekStart.value)) weekStart.value = ws; });
 const dayCellMax = 3;
 
+// ── item 243: navegação no jeito do Google Agenda — [Hoje] [‹] [›] + título
+// do período (clique = calendário para pular de data) + busca de paciente
+// que leva ao dia dele. Uma barra só para Mês · Semana · Dia. ──
+const cap1 = t => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
+const calTitle = computed(() => {
+  if (calMode.value === 'month') return cap1(monthLabel.value);
+  if (calMode.value === 'day')
+    return cap1(dayCursor.value.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }));
+  const a = weekDays.value[0];
+  const b = weekDays.value[6];
+  const sameMonth = a.getMonth() === b.getMonth();
+  const left = sameMonth ? a.getDate() : a.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' });
+  return `${left} – ${b.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+});
+const calLoading = computed(() => (calMode.value === 'month' ? isLoadingMonth.value : isLoadingWeek.value));
+const calStep = n => {
+  if (calMode.value === 'month') shiftMonth(n);
+  else if (calMode.value === 'week') shiftWeek(n);
+  else shiftDay(n);
+};
+const jumpTo = d => {
+  const x = new Date(d);
+  dayCursor.value = x;
+  weekStart.value = startOfWeek(x);
+  const ms = new Date(x.getFullYear(), x.getMonth(), 1);
+  if (dateKey(ms) !== dateKey(monthStart.value)) monthStart.value = ms;
+};
+const calToday = () => jumpTo(new Date());
+// calendário do título (pular para qualquer data)
+const showCalPicker = ref(false);
+const pickerCursor = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+const pickerShift = n => { pickerCursor.value = new Date(pickerCursor.value.getFullYear(), pickerCursor.value.getMonth() + n, 1); };
+const pickerLabel = computed(() => cap1(pickerCursor.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })));
+const pickerDays = computed(() => {
+  const start = startOfWeek(pickerCursor.value);
+  return Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return d; });
+});
+const pickDay = d => { jumpTo(d); showCalPicker.value = false; };
+// item 244: o mini mês fica SEMPRE aberto no bloco "Calendário" e segue a data
+watch([calMode, dayCursor, monthStart], () => {
+  const base = calMode.value === 'month' ? monthStart.value : dayCursor.value;
+  pickerCursor.value = new Date(base.getFullYear(), base.getMonth(), 1);
+}, { immediate: true });
+const pickerInView = d => {
+  if (calMode.value === 'day') return dateKey(d) === dateKey(dayCursor.value);
+  if (calMode.value === 'week') { const a = weekStart.value; const b = new Date(a); b.setDate(b.getDate() + 6); return d >= a && d <= new Date(b.getFullYear(), b.getMonth(), b.getDate(), 23, 59); }
+  return false;
+};
+const pickerWeeksRows = computed(() => {
+  const days = pickerDays.value;
+  const rows = [];
+  for (let i = 0; i < days.length; i += 7) rows.push(days.slice(i, i + 7));
+  return rows[5] && rows[5][0].getMonth() !== pickerCursor.value.getMonth() ? rows.slice(0, 5) : rows;
+});
+const calModeTitle = computed(() => ({ month: 'Mês', week: 'Semana', day: 'Dia' })[calMode.value]);
+// 🔎 encontrar paciente na agenda do hub (nome, telefone ou CPF) → abre o dia dele
+const calQuery = ref('');
+const calHits = ref([]);
+const calSearching = ref(false);
+let calQTimer = null;
+watch(calQuery, q => {
+  clearTimeout(calQTimer);
+  if (String(q || '').trim().length < 2) { calHits.value = []; return; }
+  calQTimer = setTimeout(async () => {
+    calSearching.value = true;
+    try {
+      const { data } = await CrmAPI.oftalmofacilItems({ q: q.trim(), per: 8 });
+      calHits.value = data?.rows || [];
+    } catch { calHits.value = []; } finally { calSearching.value = false; }
+  }, 300);
+});
+const goToHit = r => {
+  jumpTo(new Date(`${r.surgery_date}T12:00:00`));
+  calMode.value = 'day';
+  calQuery.value = '';
+  calHits.value = [];
+};
+
 // ── sanfona nos itens (pedido dele: expandir na linha, não popup) ──
 const expandedId = ref(null);
 const rowDetails = ref({});
@@ -533,35 +611,85 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 
         <!-- ═══════════ AGENDA (mês · semana) ═══════════ -->
         <section v-if="view === 'agenda'" class="cv-block p-4 sm:p-6 mb-8" :style="blockVars('agenda')">
-          <div class="flex items-center gap-2 flex-wrap mb-4">
-            <div><h2 class="text-xl font-bold tracking-tight text-n-slate-12">Agenda do hub</h2><p class="text-xs text-n-slate-10">o que está marcado lá, no mesmo formato da nossa Agenda · mês em grade, semana e dia com a coluna de horas · no mês, clique no dia para abri-lo</p></div>
-            <div class="ml-auto flex items-center gap-2 flex-wrap">
-              <div class="cv-seg cv-seg-sm">
-                <button type="button" class="cv-seg-item" :class="calMode === 'month' ? 'cv-seg-on' : ''" @click="calMode = 'month'">Mês</button>
-                <button type="button" class="cv-seg-item" :class="calMode === 'week' ? 'cv-seg-on' : ''" @click="calMode = 'week'">Semana</button>
-                <button type="button" class="cv-seg-item" :class="calMode === 'day' ? 'cv-seg-on' : ''" @click="calMode = 'day'">Dia</button>
+          <!-- item 244: cabeçalho em BLOCOS (igual à Agenda geral): ① Calendário com o
+               mini mês sempre aberto + Hoje + Mês/Semana/Dia · ② período em título
+               grande + ‹ › · ③ encontrar paciente -->
+          <div class="grid grid-cols-1 lg:grid-cols-[272px_minmax(0,1fr)] gap-3 mb-4">
+            <section class="cv-ag-block flex flex-col p-3.5">
+              <div class="flex items-center gap-2 mb-2">
+                <p class="cv-ag-block-title flex-1">Calendário</p>
+                <button class="cv-btn cv-btn-ghost cv-btn-sm" title="Voltar para hoje" @click="calToday">Hoje</button>
               </div>
-              <template v-if="calMode === 'month'">
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="shiftMonth(-1)"><span class="i-lucide-chevron-left" /></button>
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)">Hoje</button>
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="shiftMonth(1)"><span class="i-lucide-chevron-right" /></button>
-                <span class="cv-chip cv-chip-on capitalize">{{ monthLabel }}</span>
-                <span v-if="isLoadingMonth" class="cv-chip"><span class="i-lucide-loader-2 animate-spin text-xs" /></span>
-              </template>
-              <template v-else-if="calMode === 'day'">
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="shiftDay(-1)"><span class="i-lucide-chevron-left" /></button>
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="dayCursor = new Date()">Hoje</button>
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="shiftDay(1)"><span class="i-lucide-chevron-right" /></button>
-                <span class="cv-chip cv-chip-on capitalize">{{ dayLabel }}</span>
-                <span v-if="isLoadingWeek" class="cv-chip"><span class="i-lucide-loader-2 animate-spin text-xs" /></span>
-              </template>
-              <template v-else>
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="shiftWeek(-1)"><span class="i-lucide-chevron-left" /></button>
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="weekStart = startOfWeek(new Date())">Hoje</button>
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="shiftWeek(1)"><span class="i-lucide-chevron-right" /></button>
-                <span class="cv-chip cv-chip-on capitalize">{{ weekLabel }}</span>
-                <span v-if="isLoadingWeek" class="cv-chip"><span class="i-lucide-loader-2 animate-spin text-xs" /></span>
-              </template>
+              <div class="flex items-center justify-between mb-1">
+                <button class="cv-ag-nav !w-7 !h-7" title="Mês anterior" @click="pickerShift(-1)"><span class="i-lucide-chevron-left text-sm" /></button>
+                <p class="text-sm font-bold text-n-slate-12">{{ pickerLabel }}</p>
+                <button class="cv-ag-nav !w-7 !h-7" title="Mês seguinte" @click="pickerShift(1)"><span class="i-lucide-chevron-right text-sm" /></button>
+              </div>
+              <div class="grid grid-cols-7 mb-0.5">
+                <span v-for="(wd, wi) in ['S', 'T', 'Q', 'Q', 'S', 'S', 'D']" :key="'pw' + wi" class="text-center text-[10px] font-semibold text-n-slate-9">{{ wd }}</span>
+              </div>
+              <div v-for="(row, ri) in pickerWeeksRows" :key="'pr' + ri" class="cv-ag-mini-week grid grid-cols-7" :class="calMode === 'week' && pickerInView(row[3]) ? 'cv-ag-mini-week-on' : ''">
+                <button
+                  v-for="d in row"
+                  :key="'pk' + dateKey(d)"
+                  class="cv-ag-daynum mx-auto !w-8 !h-8 text-xs hover:bg-n-alpha-2"
+                  :class="[d.getMonth() === pickerCursor.getMonth() ? '' : 'cv-ag-daynum-muted', calMode === 'day' && pickerInView(d) ? 'cv-ag-daynum-today' : '']"
+                  :style="dateKey(d) === todayKey && !(calMode === 'day' && pickerInView(d)) ? { boxShadow: 'inset 0 0 0 1.5px var(--cv)' } : {}"
+                  @click="pickDay(d)"
+                >
+                  {{ d.getDate() }}
+                </button>
+              </div>
+              <div class="cv-seg cv-seg-sm grid grid-cols-3 mt-auto pt-2">
+                <button type="button" class="cv-seg-item justify-center" :class="calMode === 'month' ? 'cv-seg-on' : ''" @click="calMode = 'month'"><span class="i-lucide-calendar text-sm" /> Mês</button>
+                <button type="button" class="cv-seg-item justify-center" :class="calMode === 'week' ? 'cv-seg-on' : ''" @click="calMode = 'week'"><span class="i-lucide-calendar-range text-sm" /> Semana</button>
+                <button type="button" class="cv-seg-item justify-center" :class="calMode === 'day' ? 'cv-seg-on' : ''" @click="calMode = 'day'"><span class="i-lucide-calendar-check text-sm" /> Dia</button>
+              </div>
+            </section>
+
+            <div class="flex flex-col gap-3 min-w-0">
+              <section class="cv-ag-block p-4 flex items-center gap-3 flex-wrap">
+                <span class="cv-icon cv-icon-lg hidden sm:inline-flex"><span class="i-lucide-hospital text-lg" /></span>
+                <div class="min-w-0 flex-1">
+                  <p class="cv-ag-block-title">{{ calModeTitle }} <span class="cv-ag-block-sub">· agenda do hub</span></p>
+                  <h2 class="text-2xl font-bold tracking-tight text-n-slate-12 truncate">{{ calTitle }}</h2>
+                </div>
+                <span v-if="calLoading" class="i-lucide-loader-2 animate-spin text-sm text-n-slate-9" />
+                <div class="flex items-center gap-1.5 ml-auto">
+                  <button class="cv-ag-nav" title="Anterior" @click="calStep(-1)"><span class="i-lucide-chevron-left text-base" /></button>
+                  <button class="cv-ag-nav" title="Seguinte" @click="calStep(1)"><span class="i-lucide-chevron-right text-base" /></button>
+                </div>
+              </section>
+              <section class="cv-ag-block p-4 flex flex-col gap-2.5 flex-1">
+                <p class="cv-ag-block-title">Encontrar</p>
+                <div class="flex items-start gap-3 flex-wrap">
+                  <span class="cv-ag-row-label">Paciente</span>
+              <!-- encontrar paciente -->
+              <div class="relative w-full sm:w-72">
+                <span class="i-lucide-search absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-n-slate-9" />
+                <input v-model="calQuery" class="cv-input w-full !h-8 !pl-7 text-xs" placeholder="Encontrar paciente na agenda…" />
+                <div v-if="calQuery.trim().length >= 2" class="cv-pop cv-ag-pop absolute right-0 top-10 z-40 w-[22rem] max-w-[90vw] p-1.5">
+                  <p v-if="calSearching" class="text-[11px] text-n-slate-10 px-2 py-1.5">procurando…</p>
+                  <p v-else-if="!calHits.length" class="text-[11px] text-n-slate-10 px-2 py-1.5">ninguém com "{{ calQuery }}" no hub</p>
+                  <button v-for="h in calHits" :key="'hit' + h.id" class="w-full text-left rounded-lg px-2 py-1.5 hover:bg-n-alpha-2 flex items-center gap-2" @click="goToHit(h)">
+                    <span class="w-1.5 h-8 rounded-full shrink-0" :style="{ background: statusMeta(h.status_kind).dot }" />
+                    <span class="min-w-0 flex-1">
+                      <span class="block text-xs font-semibold text-n-slate-12 truncate">{{ h.patient_name }}</span>
+                      <span class="block text-[10px] text-n-slate-10 truncate capitalize">{{ fmtDateLong(h.surgery_date) }} · {{ h.surgery_hour || 'sem hora' }} · {{ h.procedure_name || h.procedure_type }}</span>
+                    </span>
+                    <span class="i-lucide-arrow-right text-xs text-n-slate-9" />
+                  </button>
+                </div>
+              </div>
+                </div>
+                <div class="flex items-start gap-3 flex-wrap">
+                  <span class="cv-ag-row-label">Status</span>
+                  <div class="flex items-center gap-3 flex-wrap pt-2 text-[11px] text-n-slate-10">
+                    <span v-for="st in STATUS" :key="'lg' + st.key" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" :style="{ background: st.dot }" /> {{ st.label }}</span>
+                    <span class="flex items-center gap-1"><span class="i-lucide-check text-[11px]" /> = já está na nossa Agenda</span>
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
 
@@ -636,28 +764,28 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
             <div class="flex-1 min-w-0 w-full space-y-2.5">
               <div class="flex items-center gap-2"><span class="cv-icon cv-icon-sm"><span class="i-lucide-list text-xs" /></span><p class="text-sm font-bold text-n-slate-12">Itens do dia</p><span class="cv-chip cv-chip-on">{{ dayRows.length }}</span></div>
               <div v-if="!dayRows.length" class="cv-sub p-8 text-center text-sm text-n-slate-10">Nada marcado no hub neste dia.</div>
-              <div v-for="r in dayRows" :key="'dr' + r.id" class="cv-ag-card" :style="{ '--cv': statusMeta(r.status_kind).dot }" @click="openDetail(r)">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="text-sm font-extrabold tabular-nums" :style="{ color: statusMeta(r.status_kind).dot }">{{ r.surgery_hour || '—' }}</span>
-                  <span class="text-sm font-semibold text-n-slate-12">{{ r.patient_name }}</span>
-                  <span class="cv-chip" :class="statusMeta(r.status_kind).tone">{{ r.status_kind_label }}</span>
-                  <span class="cv-chip" :class="r.own ? 'cv-gold' : ''"><span :class="r.own ? 'i-lucide-star' : 'i-lucide-handshake'" class="text-xs" /> {{ r.provider_name }}</span>
-                  <span class="cv-chip ml-auto" :class="agendaStateOf(r).tone"><span :class="agendaStateOf(r).icon" class="text-xs" /> {{ agendaStateOf(r).label }}</span>
+              <!-- item 243: cartão em GRADE — hora | quem e o quê | selos alinhados à direita -->
+              <div v-for="r in dayRows" :key="'dr' + r.id" class="cv-ag-card cv-ag-card-grid" :style="{ '--cv': statusMeta(r.status_kind).dot }" @click="openDetail(r)">
+                <span class="cv-ag-card-time" :style="{ color: statusMeta(r.status_kind).dot }">{{ r.surgery_hour || '—' }}</span>
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-n-slate-12 truncate">{{ r.own ? '⭐ ' : '' }}{{ r.patient_name }}</p>
+                  <p v-if="r.procedure_name" class="cv-ag-card-proc"><span class="i-lucide-eye text-[11px] opacity-60" /> {{ r.procedure_name }}<span v-if="r.eye" class="font-normal text-n-slate-10"> · {{ r.eye }}</span></p>
+                  <div class="cv-ag-card-meta">
+                    <span v-if="r.patient_phone"><span class="i-lucide-phone text-[10px]" />{{ r.patient_phone }}</span>
+                    <span v-if="r.clinic_name"><span class="i-lucide-map-pin text-[10px]" />{{ r.clinic_name }}<template v-if="r.unit"> → {{ unitLabel(r.unit) }}</template></span>
+                    <span v-if="r.doctor || r.doctor_crm"><span class="i-lucide-stethoscope text-[10px]" />{{ r.doctor || `CRM ${r.doctor_crm}` }}</span>
+                    <router-link v-if="patientUrl(r)" class="hover:underline font-semibold" style="color: var(--cv)" :to="patientUrl(r)" @click.stop><span class="i-lucide-user-round text-[10px]" /> Paciente</router-link>
+                  </div>
                 </div>
-                <div class="flex items-center gap-3 mt-1.5 text-[11px] text-n-slate-10 flex-wrap">
-                  <span v-if="r.patient_phone" class="flex items-center gap-1"><span class="i-lucide-phone text-[10px]" />{{ r.patient_phone }}</span>
-                  <span v-if="r.procedure_name" class="flex items-center gap-1"><span class="i-lucide-eye text-[10px]" />{{ r.procedure_name }}<template v-if="r.eye"> · {{ r.eye }}</template></span>
-                  <span v-if="r.clinic_name" class="flex items-center gap-1"><span class="i-lucide-map-pin text-[10px]" />{{ r.clinic_name }}<template v-if="r.unit"> → {{ unitLabel(r.unit) }}</template></span>
-                  <span v-if="r.doctor || r.doctor_crm" class="flex items-center gap-1"><span class="i-lucide-stethoscope text-[10px]" />{{ r.doctor || `CRM ${r.doctor_crm}` }}</span>
-                  <router-link v-if="patientUrl(r)" class="flex items-center gap-1 hover:underline font-semibold" style="color: var(--cv)" :to="patientUrl(r)" @click.stop><span class="i-lucide-user-round text-[10px]" /> Paciente</router-link>
+                <div class="cv-ag-card-pills">
+                  <span class="cv-chip" :class="statusMeta(r.status_kind).tone">{{ r.status_kind_label }}</span>
+                  <span class="cv-chip" :class="r.own ? 'cv-gold' : ''" :title="r.provider_name"><span :class="r.own ? 'i-lucide-star' : 'i-lucide-handshake'" class="text-xs shrink-0" /> <span class="truncate">{{ r.provider_name }}</span></span>
+                  <span class="cv-chip" :class="agendaStateOf(r).tone"><span :class="agendaStateOf(r).icon" class="text-xs shrink-0" /> <span class="truncate">{{ agendaStateOf(r).label }}</span></span>
                 </div>
               </div>
             </div>
           </div>
-          <div class="flex items-center gap-3 flex-wrap mt-3 text-[11px] text-n-slate-10">
-            <span v-for="st in STATUS" :key="st.key" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" :style="{ background: st.dot }" /> {{ st.label }}</span>
-            <span class="ml-auto">✓ no canto = já está na nossa Agenda</span>
-          </div>
+
         </section>
 
         <!-- ═══════════ ITENS (tabela) ═══════════ -->

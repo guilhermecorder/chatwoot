@@ -51,6 +51,30 @@ RSpec.describe Crm::PartnerGuard do
     expect(described_class.excluded_contact_ids(account)).to contain_exactly(by_card.id, by_label.id, by_attr.id)
   end
 
+  # 🔀 item 245 (regra B, 25/09): quem chegou primeiro. Já era da CEVICO antes
+  # do parceiro → continua lead da CEVICO (IA nas caixas da CEVICO); a caixa dos
+  # parceiros continua fechada para ele. Veio pelo parceiro primeiro → parceiro.
+  it 'regra B: quem já era da CEVICO antes do parceiro continua da CEVICO; quem veio pelo parceiro primeiro, não', :aggregate_failures do
+    both_cevico_first = create(:contact, account: account, name: 'CEVICO depois parceiro', phone_number: '+5511966660000')
+    Crm::Contact.create!(contact: both_cevico_first, pipeline: cevico, stage: cevico.stages.first, created_at: 10.days.ago)
+    Crm::Contact.create!(contact: both_cevico_first, pipeline: partners, stage: partners.stages.first, created_at: 1.day.ago)
+    both_cevico_first.add_labels(%w[oftalmofacil of_clinica_visao_norte])
+
+    both_partner_first = create(:contact, account: account, name: 'Parceiro depois CEVICO', phone_number: '+5511977770000')
+    Crm::Contact.create!(contact: both_partner_first, pipeline: partners, stage: partners.stages.first, created_at: 10.days.ago)
+    Crm::Contact.create!(contact: both_partner_first, pipeline: cevico, stage: cevico.stages.first, created_at: 1.day.ago)
+
+    expect(described_class.partner_contact?(both_cevico_first)).to be false
+    expect(described_class.partner_contact?(both_partner_first)).to be true
+    expect(described_class.excluded_contact_ids(account)).not_to include(both_cevico_first.id)
+    expect(described_class.excluded_contact_ids(account)).to include(both_partner_first.id)
+    # a caixa dos parceiros continua fechada, mesmo para quem é da CEVICO
+    conv = create(:conversation, account: account, inbox: partner_inbox, contact: both_cevico_first)
+    expect(described_class.partner_conversation?(conv)).to be true
+    cevico_conv = create(:conversation, account: account, inbox: cevico_inbox, contact: both_cevico_first)
+    expect(described_class.partner_conversation?(cevico_conv)).to be false
+  end
+
   it 'conversa na caixa dos parceiros é de parceiro mesmo sem card/etiqueta; na caixa da CEVICO só se o paciente for', :aggregate_failures do
     stranger = create(:contact, account: account, phone_number: '+5511955550000')
     expect(described_class.partner_conversation?(create(:conversation, account: account, inbox: partner_inbox, contact: stranger))).to be true

@@ -240,7 +240,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
       clinic_id: row['SCH_ITE_CLINIC'], doctor_crm: row['SCH_DOCTOR'].to_s.strip.presence,
       procedure_name: row['PRO_NAME'].to_s.presence, procedure_type: row['PRO_TYP_VALUE'].to_s.presence,
       eye: row['EYE_VALUE'].to_s.presence,
-      surgery_date: parse_date(row['SCH_ITE_DATE']), surgery_hour: row['SCH_ITE_HOUR'].to_s.presence,
+      surgery_date: parse_date(row['SCH_ITE_DATE']), surgery_hour: Crm::OftalmofacilSurgery.normalize_hour(row['SCH_ITE_HOUR']),
       amount: row['SCH_ITE_AMOUNT'], clinic_price: row['SCH_ITE_CLINIC_PRICE'], profit: row['SCH_ITE_PROFIT'],
       rebate: row['SCH_ITE_REBATE'], paid_amount: row['PAID_AMOUNT'],
       of_created_at: parse_time(row['SCH_ITE_DATE_CREATION']), of_modified_at: parse_time(row['SCH_ITE_LAST_MODIFICATION']),
@@ -474,7 +474,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   def reference_time(surgery)
     return surgery.of_created_at unless surgery.status_kind == 'realizada'
 
-    surgery.surgery_date && Time.zone.parse("#{surgery.surgery_date.iso8601} #{surgery.surgery_hour.presence || '12:00'}")
+    surgery.local_time('12:00')
   end
 
   def label_for(surgery)
@@ -496,7 +496,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     attrs = {
       title: "#{kind[:prefix]}: #{surgery.patient_name.presence || contact.name}",
       task_type: kind[:task_type], modality: kind[:modality],
-      due_at: Time.zone.parse("#{surgery.surgery_date.iso8601} #{surgery.surgery_hour.presence || '08:00'}"),
+      due_at: surgery.local_time, # item 242: hora certa (segundos → HH:MM) no fuso de São Paulo
       phone: surgery.patient_phone.presence && e164(surgery.patient_phone),
       procedure: [surgery.procedure_name, surgery.eye].compact_blank.join(' · ').presence,
       doctor: doctor_name_for(surgery.doctor_crm),

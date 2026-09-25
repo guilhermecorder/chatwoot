@@ -253,7 +253,7 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
       doctor_crm: s.doctor_crm, doctor: doctor_name(s.doctor_crm),
       procedure_name: s.procedure_name, procedure_type: s.procedure_type, eye: s.eye,
       status_kind: s.status_kind, status_label: s.status_label, status_kind_label: s.status_kind_label,
-      surgery_date: s.surgery_date, surgery_hour: s.surgery_hour,
+      surgery_date: s.surgery_date, surgery_hour: s.hour_hhmm,
       amount: admin? ? s.amount : nil, paid_amount: admin? ? s.paid_amount : nil,
       of_created_at: s.of_created_at, of_modified_at: s.of_modified_at,
       contact: contact ? { id: contact.id, name: contact.name, phone: contact.phone_number } : nil,

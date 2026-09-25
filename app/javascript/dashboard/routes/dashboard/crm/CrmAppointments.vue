@@ -137,10 +137,20 @@ const trackStyle = computed(() => kindVars(trackKind.value));
 const noun = computed(() => trackKind.value.noun);
 const nounPlural = computed(() => trackKind.value.plural);
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+// item 238: nomes que se explicam ("Registradas no período" confundia)
 const MODES = computed(() => [
-  { key: 'registradas', label: 'Registradas no período' },
-  { key: 'consultas', label: `${cap(nounPlural.value)} do período` },
+  {
+    key: 'registradas',
+    label: 'Marcações do período',
+    hint: `o que foi marcado, remarcado, confirmado ou cancelado nestes dias — não importa para quando é a ${noun.value}`,
+  },
+  {
+    key: 'consultas',
+    label: 'Agenda do período',
+    hint: `as ${nounPlural.value} com DATA nestes dias — não importa quando foram marcadas`,
+  },
 ]);
+const modeHint = computed(() => MODES.value.find(m => m.key === mode.value)?.hint || '');
 const mode = ref('registradas');
 const KINDS = [
   { key: '', label: 'Todas', tone: 'cv-blue', countKey: 'total' },
@@ -857,11 +867,15 @@ onBeforeUnmount(() => {
                 :key="m.key"
                 class="cv-seg-item"
                 :class="mode === m.key ? 'cv-seg-on' : ''"
+                :title="m.hint"
                 @click="mode = m.key"
               >
                 {{ m.label }}
               </button>
             </div>
+            <p class="basis-full text-[11px] text-n-slate-11 -mt-1">
+              {{ modeHint }}
+            </p>
             <div class="flex items-center gap-1.5 flex-wrap">
               <button
                 v-for="k in KINDS"

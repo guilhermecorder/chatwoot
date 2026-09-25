@@ -55,17 +55,25 @@
   line-height: 1.3;
   font-variant-numeric: tabular-nums;
 }
+/* 25/09 (item 243, "cores mais amigáveis e transparentes"): LIGADO = vidro
+   leve na cor do tipo (fundo translúcido, letra na cor escura, bolinha cheia);
+   DESLIGADO = neutro, bolinha vazada. Antes o ligado era o degradê cheio — com
+   "Geral" todas acendiam juntas e a barra ficava agressiva. */
 .cv-page .cv-ag-kind-on,
 .cv-page .cv-ag-kind-on:hover {
-  color: #fff;
-  background: var(--k-grad);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    0 6px 14px -6px rgb(var(--k-deep-rgb) / 0.7);
+  color: var(--k-deep);
+  background: rgb(var(--k-rgb) / 0.13);
+  box-shadow: inset 0 0 0 1px rgb(var(--k-rgb) / 0.34);
 }
-.cv-page .cv-ag-kind-on .cv-ag-kind-dot { background: #fff; box-shadow: none; }
-.cv-page .cv-ag-kind-on .cv-ag-kind-n { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.cv-page .cv-ag-kind-on:hover { background: rgb(var(--k-rgb) / 0.19); }
+.cv-page .cv-ag-kind:not(.cv-ag-kind-on) .cv-ag-kind-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px rgb(var(--k-rgb) / 0.65);
+}
+.cv-page .cv-ag-kind-on .cv-ag-kind-n { background: rgb(var(--k-rgb) / 0.2); color: var(--k-deep); }
 .dark .cv-page .cv-ag-kind { color: rgba(255, 255, 255, 0.86); }
+.dark .cv-page .cv-ag-kind-on,
+.dark .cv-page .cv-ag-kind-on:hover { color: #fff; background: rgb(var(--k-rgb) / 0.26); }
 .dark .cv-page .cv-ag-kind .cv-ag-kind-n { color: #fff; background: rgb(var(--k-rgb) / 0.3); }
 
 /* botão redondo de navegação (‹ ›) */
@@ -815,3 +823,94 @@
 .cv-page .cv-of-sub { display: block; font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.25; }
 .dark .cv-page .cv-of-sub { color: rgba(255, 255, 255, 0.6); }
 .cv-page .cv-of-tablewrap:has(.cv-of-table-fit) { overflow-x: visible; }
+
+/* ── item 243 (25/09): cartão do DIA em grade — hora | quem e o quê | selos.
+   A coluna de selos tem largura fixa e os selos a mesma largura: de um cartão
+   para o outro tudo cai na mesma vertical (Agenda geral e Agenda do hub) ── */
+.cv-page .cv-ag-card-grid {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 176px;
+  column-gap: 14px;
+  align-items: start;
+}
+.cv-page .cv-ag-card-time {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.cv-page .cv-ag-card-proc {
+  margin-top: 2px;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #0f172a;
+}
+.dark .cv-page .cv-ag-card-proc { color: #fff; }
+.cv-page .cv-ag-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #64748b;
+}
+.cv-page .cv-ag-card-meta > * { display: inline-flex; align-items: center; gap: 4px; }
+.cv-page .cv-ag-card-pills {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.cv-page .cv-ag-card-pills .cv-chip {
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+@media (max-width: 640px) {
+  .cv-page .cv-ag-card-grid { grid-template-columns: 44px minmax(0, 1fr); row-gap: 8px; }
+  .cv-page .cv-ag-card-pills { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
+  .cv-page .cv-ag-card-pills .cv-chip { width: auto; }
+}
+
+/* ── item 244 (25/09): cabeçalho da Agenda em BLOCOS — Calendário (mini mês
+   sempre aberto) · Período (título grande) · Filtros. Vale para a Agenda geral
+   e para a Agenda do hub Oftalmofácil. ── */
+.cv-page .cv-ag-block {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgb(var(--cv-rgb) / 0.16);
+  box-shadow: 0 10px 28px -18px rgb(var(--cv-deep-rgb, 15 23 42) / 0.35);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+.dark .cv-page .cv-ag-block { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.1); }
+.cv-page .cv-ag-block-title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+  line-height: 1.2;
+}
+.dark .cv-page .cv-ag-block-title { color: #fff; }
+.cv-page .cv-ag-block-sub { font-size: 11px; font-weight: 500; color: #94a3b8; letter-spacing: 0; }
+.cv-page .cv-ag-row-label {
+  flex-shrink: 0;
+  width: 70px;
+  padding-top: 8px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+@media (max-width: 640px) { .cv-page .cv-ag-row-label { display: none; } }
+/* semana em vista no mini calendário: faixa na cor do dia */
+.cv-page .cv-ag-mini-week { border-radius: 10px; }
+.cv-page .cv-ag-mini-week-on { background: rgb(var(--cv-rgb) / 0.13); box-shadow: inset 0 0 0 1px rgb(var(--cv-rgb) / 0.25); }
+.cv-page .cv-ag-mini-week-on .cv-ag-daynum { font-weight: 700; color: var(--cv-deep, #0f172a); }
+/* camadas mais compactas dentro do bloco Filtros (cabem numa linha) */
+.cv-page .cv-ag-block .cv-ag-kind { height: 29px; padding: 0 9px 0 7px; gap: 5px; font-size: 12px; border-radius: 10px; }
+.cv-page .cv-ag-block .cv-ag-kind .cv-ag-kind-n { font-size: 10.5px; padding: 0 5px; }
