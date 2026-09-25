@@ -6171,7 +6171,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
   só o banner, as abas novas e o contraste de texto do kit).
 
-## 237. ⚡ MEU PAINEL LENTO ("demora absurdo pra carregar mês/mês passado/personalizado; este ano nem carrega", 25/09) — CONSTRUÍDO 25/09 SEM commit, sobe junto com 231–236 (WEB+SIDEKIQ, COM MIGRATION de índices → BACKUP antes)
+## 237. ⚡ MEU PAINEL LENTO ("demora absurdo pra carregar mês/mês passado/personalizado; este ano nem carrega", 25/09) — SUBIU 25/09 (commit df925a1 no develop → imagem ghcr :df925a1, WEB+SIDEKIQ COM MIGRATION → BACKUP antes; reversão :18f45f9)
 - DIAGNÓSTICO: `GET /crm/home` passava dos 15 s do rack-timeout em "este ano". Culpados: (1) Radar com UMA QUERY POR
   AVISO (até 400) em `agent_performance.rb#radar_stats` + um find_by por pessoa; (2) todas as mensagens enviadas do
   período carregadas no Ruby DUAS vezes (workday_stats + off_hours_days); (3) KpiBag ~124 queries (2 `total_of` por
@@ -6190,7 +6190,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
 - Deploy: a migration de índices roda sem travar as tabelas (concurrently). Reversão = imagem anterior (índices
   podem ficar). Se ainda houver timeout no 1º "este ano" frio: subir RACK_TIMEOUT_SERVICE_TIMEOUT=40 no EasyPanel.
 
-## 236. 💰 CARD ANDA SOZINHO PARA "ENVIO DE ORÇAMENTO" (25/09: "a automação não é 100% precisa… lead pula de Novos Contatos direto pra Agendamento") — CONSTRUÍDO 25/09 SEM commit
+## 236. 💰 CARD ANDA SOZINHO PARA "ENVIO DE ORÇAMENTO" (25/09: "a automação não é 100% precisa… lead pula de Novos Contatos direto pra Agendamento") — SUBIU 25/09 (commit df925a1 → imagem :df925a1)
 - `Crm::BudgetSideEffects`: mensagem de SAÍDA (robô ou equipe, não privada) com "R$ 1.234" / "1.234 reais" → se o card
   do funil está ANTES da coluna de orçamento, move (só pra frente, nunca volta) e dispara as automações da coluna
   (entrou/saiu) como um arrasto. Chamado pelo CrmListener em toda mensagem enviada (depois da cerca: parceiro nunca).
@@ -6198,13 +6198,13 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   o card para") ou a 1ª coluna do 1º funil com "orçamento" no nome. Spec 4/4.
 - Por que: a taxa oficial (233) precisa da passagem certa; a automação por palavras continua valendo por cima.
 
-## 235. 📊 AGENDAMENTOS: CAIXAS E UNIDADES MÚLTIPLAS + EMPILHAMENTO POR CAIXA (25/09: "quero poder selecionar mais de uma caixa de entrada, e as duas unidades… empilhamento de caixa de entrada") — CONSTRUÍDO 25/09 SEM commit
+## 235. 📊 AGENDAMENTOS: CAIXAS E UNIDADES MÚLTIPLAS + EMPILHAMENTO POR CAIXA (25/09: "quero poder selecionar mais de uma caixa de entrada, e as duas unidades… empilhamento de caixa de entrada") — SUBIU 25/09 (commit df925a1 → imagem :df925a1)
 - Backend `appointments#feed`: `units[]` e `inbox_ids[]` (os antigos `unit`/`inbox_id` seguem valendo); devolve
   `by_inbox` (quantos registros por caixa, robô × equipe) contado ANTES do filtro de caixa.
 - Tela: os selects viram CHIPS que ligam/desligam (Av. Paulista · Tatuapé; cada caixa com o número que trouxe);
   barra "De onde vêm os registros · por caixa de entrada" (ShareBar do kit) acima da lista.
 
-## 234. 🎨 AGENDA POR TIPO COM CAMADAS (25/09: "cada coisa precisa ter a sua própria cor… agenda geral… apertar esses botões para ver as camadas") — CONSTRUÍDO 25/09 SEM commit
+## 234. 🎨 AGENDA POR TIPO COM CAMADAS (25/09: "cada coisa precisa ter a sua própria cor… agenda geral… apertar esses botões para ver as camadas") — SUBIU 25/09 (commit df925a1 → imagem :df925a1)
 - `cevicoAgenda.js`: 6 TIPOS (`TYPES`): Avaliação azul · Retorno dourado · Pós-operatório rosa (modalidade NOVA
   `pos_op`) · Exame teal · Teleconsulta violeta · Cirurgia laranja; `typeOf(task)`, `GENERAL_TYPE` (tom neutro),
   `LEGACY_KIND_TO_TYPES` (?kind= antigo). `KINDS`/`kindOf` continuam para o backend e o painel de Agendamentos.
@@ -6216,7 +6216,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
 - Backend: `pos_op` nos rótulos do Dashboard da Agenda (+ teleconsulta, que faltava), no `task_kind` do sync
   Oftalmofácil e no Espaço do Paciente. Deep-link novo `?types=exames,cirurgia`.
 
-## 233. 📊 TAXA DE AGENDAMENTO OFICIAL = MUDANÇA DE COLUNA NO CRM (25/09: "está contando todo tipo de agendamento… resumir à mudança de coluna de envio de orçamento para agendamento de consulta") — CONSTRUÍDO 25/09 SEM commit
+## 233. 📊 TAXA DE AGENDAMENTO OFICIAL = MUDANÇA DE COLUNA NO CRM (25/09: "está contando todo tipo de agendamento… resumir à mudança de coluna de envio de orçamento para agendamento de consulta") — SUBIU 25/09 (commit df925a1 → imagem :df925a1)
 - Antes: numerador = cards cuja coluna ATUAL é Agendamento ou posterior (coorte por criação do contato); "Consultas
   agendadas" = toda consulta criada (tele, exame, cancelada, Oftalmofácil); 3 fórmulas diferentes (card, % 30 dias,
   fórmula do "+"/Metas/Gestor Autônomo).
@@ -6229,7 +6229,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
 - "Consultas agendadas" virou "MARCADAS NA AGENDA": consulta nova, sem exame/tele, não cancelada, sem item de
   parceiro (home, KpiBag, Metas). Textos dos cards do Meu Painel atualizados. Spec 4/4.
 
-## 232. 💸 CACHE DO ATENDENTE: CONVERSA CACHEADA + % DO CACHE NA TELA (e-mail "prompt cache hit rate is low", 25/09) — CONSTRUÍDO 25/09 SEM commit (COM MIGRATION: 2 colunas em crm_ai_usages)
+## 232. 💸 CACHE DO ATENDENTE: CONVERSA CACHEADA + % DO CACHE NA TELA (e-mail "prompt cache hit rate is low", 25/09) — SUBIU 25/09 (commit df925a1 → imagem :df925a1; COM MIGRATION: 2 colunas em crm_ai_usages)
 - Diagnóstico: o roteiro (~8k tokens) já era cacheado (213), mas o contexto vivo (agora, vagas) vinha ANTES da
   transcrição no turno do usuário → nada dela cacheava, e cada volta de ferramenta reenviava tudo; e a tabela de uso
   não guardava cache lido/gravado (só o log).
@@ -6238,7 +6238,7 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   "% do cache" por agente e no dia. Regra de TTL: roteiro 1 h (antes) e conversa 5 min (depois) — ordem certa.
 - Decisões dele (fora do código): esforço do Atendente (hoje alto) e modelo — testar "médio" no Testar agente.
 
-## 231. 🚧 CERCA DOS PARCEIROS — paciente do Oftalmofácil NUNCA recebe mensagem automática (pedido 24/09 noite: "os pacientes da OFTALMOFÁCIL NÃO PODEM RECEBER MENSAGENS DA NOSSA IA; só a caixa Oftalmofácil /inboxes/12 fala com eles… isso precisa ser feito") — CONSTRUÍDO 24/09 SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, sem migration)
+## 231. 🚧 CERCA DOS PARCEIROS — paciente do Oftalmofácil NUNCA recebe mensagem automática (pedido 24/09 noite: "os pacientes da OFTALMOFÁCIL NÃO PODEM RECEBER MENSAGENS DA NOSSA IA; só a caixa Oftalmofácil /inboxes/12 fala com eles… isso precisa ser feito") — SUBIU 25/09 (commit df925a1 no develop → imagem ghcr :df925a1, junto com 232–237; reversão :18f45f9)
 - DIAGNÓSTICO (levantamento dos 16 caminhos que mandam mensagem sozinhos): NENHUM excluía a caixa 12, o funil
   OFTALMOFÁCIL ou a etiqueta de origem; só `nao_perturbe`/`perda_*` bloqueavam. Toda conversa nova (inclusive na
   caixa 12) ganhava card no 1º funil (CEVICO); robô de follow-up global sem caixa rodava em todas; lembretes D-1/D-0
