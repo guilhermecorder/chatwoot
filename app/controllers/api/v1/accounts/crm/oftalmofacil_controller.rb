@@ -115,6 +115,24 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     render json: payload
   end
 
+  # 🔎 item 249 (26/09): CONFERÊNCIA DO DIA — cada item marcado no hub para a
+  # data × o que está na nossa Agenda, com o motivo em palavras simples.
+  # ?date=AAAA-MM-DD (padrão: próximo dia útil) · ?hub=1 consulta o banco do
+  # hub (só leitura) para achar item que o incremental nunca leu.
+  def day_check
+    date = safe_date(params[:date]) || Crm::OftalmofacilDayCheck.default_date
+    render json: Crm::OftalmofacilDayCheck.new(account: Current.account, date: date, config: of_config)
+                                          .report(hub: params[:hub].to_s == '1')
+  end
+
+  # traz para a Agenda o que faltou no dia (só admin; nada muda no hub)
+  def reconcile_day
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless admin?
+
+    date = safe_date(params[:date]) || Crm::OftalmofacilDayCheck.default_date
+    render json: Crm::OftalmofacilDayCheck.new(account: Current.account, date: date, config: of_config).reconcile!
+  end
+
   private
 
   def admin?

@@ -36,17 +36,20 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   FIRE_WINDOW_DAYS = 2       # cirurgia nova/futura (até 2 dias atrás) dispara automações
   ORIGIN_LABEL = 'oftalmofacil'.freeze
 
-  Result = Struct.new(:pulled, :created_contacts, :moved, :ahead, :labeled, :errors, :cursor,
+  Result = Struct.new(:pulled, :created_contacts, :moved, :ahead, :labeled, :errors, :cursor, :cursor_id,
                       :tasks_created, :tasks_updated, :partners, :skipped_partners, keyword_init: true)
 
   def initialize(account:, config: nil, silent: nil, since: :cursor)
     @account = account
     @config = config || (CrmSetting.find_by(account: account)&.agenda_config || {})['oftalmofacil'] || {}
-    @since = since == :cursor ? @config['last_sync_at'].presence : since
+    # item 249 (26/09): cursor em DUAS partes (momento + id do último item lido).
+    # Antes, dois itens gravados no MESMO segundo na virada de um lote de 500
+    # eram pulados para sempre ("> momento" deixava o segundo de fora).
+    @since, @since_id = since == :cursor ? [@config['last_sync_at'].presence, @config['last_sync_id'].to_i] : [since, 0]
     # sem cursor = primeira carga (histórico) = silêncio nas automações
     @silent = silent.nil? ? @since.blank? : silent
     @result = Result.new(pulled: 0, created_contacts: 0, moved: 0, ahead: 0, labeled: 0, errors: [], cursor: @since,
-                         tasks_created: 0, tasks_updated: 0, partners: 0, skipped_partners: 0)
+                         cursor_id: @since_id, tasks_created: 0, tasks_updated: 0, partners: 0, skipped_partners: 0)
   end
 
   # ── parceiros × nosso ──────────────────────────────────────────────────
@@ -150,16 +153,24 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     return @result.tap { |r| r.errors << 'Conexão não configurada' } unless self.class.configured?(@config)
 
     max_seen = @since
+    max_seen_id = @since_id
     loop do
-      rows = pull_batch(max_seen)
+      rows = pull_batch(max_seen, max_seen_id)
       break if rows.empty?
 
       rows.each do |row|
         surgery = upsert_mirror(row)
         apply(surgery)
         @result.pulled += 1
-        mod = row['SCH_ITE_LAST_MODIFICATION'].to_s.presence || row['SCH_ITE_DATE_CREATION'].to_s
-        max_seen = mod if mod.present? && (max_seen.blank? || mod > max_seen)
+        mod = cursor_stamp(row['SCH_ITE_LAST_MODIFICATION'].presence || row['SCH_ITE_DATE_CREATION'])
+        next if mod.blank?
+
+        if max_seen.blank? || mod > max_seen
+          max_seen = mod
+          max_seen_id = row['SCH_ITE_ID'].to_i
+        elsif mod == max_seen
+          max_seen_id = [max_seen_id, row['SCH_ITE_ID'].to_i].max
+        end
       rescue StandardError => e
         @result.errors << "item #{row['SCH_ITE_TOKEN']}: #{e.message}"
         Rails.logger.error "[OftalmoFácil sync] #{row['SCH_ITE_TOKEN']}: #{e.class} #{e.message}"
@@ -167,6 +178,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
       break if rows.size < BATCH
     end
     @result.cursor = max_seen
+    @result.cursor_id = max_seen_id
     Crm::PartnerGuard.forget!(@account) # a lista de pacientes de parceiro pode ter mudado
     @result
   rescue StandardError => e
@@ -176,7 +188,62 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     @connection&.close
   end
 
+  # ── item 249: conferência de UM DIA direto no hub (só leitura) ──────────
+  # Tudo o que está marcado lá para a data, sem depender do cursor — é o que
+  # a "Conferência do dia" usa para achar item que o incremental nunca leu.
+  def pull_day(date)
+    iso = date.to_date.iso8601
+    br = date.to_date.strftime('%d/%m/%Y')
+    sql = "#{PULL_SELECT} WHERE (i.SCH_ITE_DATE = ? OR i.SCH_ITE_DATE = ?) " \
+          "#{partners_enabled? ? '' : 'AND (p.PROV_NAME LIKE ? OR p.PROV_SOCIAL_NAME LIKE ?) '}" \
+          'ORDER BY i.SCH_ITE_HOUR ASC, i.SCH_ITE_ID ASC LIMIT 500'
+    binds = [iso, br]
+    binds += [provider_pattern, provider_pattern] unless partners_enabled?
+    query(sql, binds)
+  ensure
+    @connection&.close
+    @connection = nil
+  end
+
+  # reprocessa linhas vindas do hub (pull_day) — espelha e trata cada uma,
+  # em silêncio (sem disparar automação de coluna). Devolve o Result.
+  def reprocess_rows!(rows)
+    Array(rows).each do |row|
+      surgery = upsert_mirror(row)
+      apply(surgery)
+      @result.pulled += 1
+    rescue StandardError => e
+      @result.errors << "item #{row['SCH_ITE_TOKEN']}: #{e.message}"
+    end
+    Crm::PartnerGuard.forget!(@account)
+    @result
+  end
+
+  # reprocessa a partir do ESPELHO (quando o hub não responde): a linha crua
+  # guardada em `raw` passa de novo por espelho + tratamento
+  def reapply_from_mirror!(surgeries)
+    Array(surgeries).each do |s|
+      next if s.raw.blank?
+
+      apply(upsert_mirror(s.raw))
+      @result.pulled += 1
+    rescue StandardError => e
+      @result.errors << "item #{s.item_token}: #{e.message}"
+    end
+    Crm::PartnerGuard.forget!(@account)
+    @result
+  end
+
   private
+
+  # momento do cursor sempre no MESMO formato ("AAAA-MM-DD HH:MM:SS"): o
+  # ruby-mysql devolve Time para DATETIME e o to_s trazia o fuso no fim
+  def cursor_stamp(value)
+    return nil if value.blank?
+    return value.strftime('%Y-%m-%d %H:%M:%S') if value.respond_to?(:strftime)
+
+    value.to_s.strip[0, 19]
+  end
 
   def provider_pattern
     "%#{@config['provider_name'].to_s.strip}%"
@@ -184,34 +251,39 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
 
   # uma linha por ITEM (a cirurgia), com paciente, prestador, procedimento,
   # olho, status e o total pago (transações aprovadas do agendamento)
-  def pull_batch(since) # rubocop:disable Metrics/MethodLength
-    sql = <<~SQL.squish
-      SELECT i.SCH_ITE_ID, i.SCH_ITE_SCH_ID, i.SCH_ITE_TOKEN, i.SCH_ITE_STATUS,
-             i.SCH_ITE_DATE, i.SCH_ITE_HOUR, i.SCH_ITE_AMOUNT, i.SCH_ITE_CLINIC_PRICE, i.SCH_ITE_PROFIT,
-             i.SCH_ITE_REBATE, i.SCH_ITE_DATE_CREATION, i.SCH_ITE_LAST_MODIFICATION, i.SCH_ITE_CLINIC,
-             s.SCH_DOCTOR, s.SCH_PATIENT_NAME, s.SCH_PATIENT_CPF, s.SCH_PATIENT_PHONE, s.SCH_PATIENT_MAIL,
-             p.PROV_NAME, c.CLI_NAME, pr.PRO_NAME, pt.PRO_TYP_VALUE, e.EYE_VALUE,
-             st.TB_STA_APP_ID_VALUE AS STATUS_LABEL,
-             pat.PAT_CPF, pat.PAT_EMAIL, pat.PAT_PHONE,
-             (SELECT COALESCE(SUM(t.TRA_RECEIVED_AMOUNT), 0) FROM TRANSACTIONS t
-               WHERE t.TRA_SCHEDULING_ID = s.SCH_ID AND t.TRA_STATUS = 'Y') AS PAID_AMOUNT
-      FROM SCHEDULING_ITEMS i
-      JOIN SCHEDULING s ON s.SCH_ID = i.SCH_ITE_SCH_ID
-      JOIN PROVIDERS p ON p.PROV_ID = s.SCH_PROVIDER
-      LEFT JOIN CLINICS c ON c.CLI_ID = i.SCH_ITE_CLINIC
-      LEFT JOIN PROCEDURES pr ON pr.PRO_ID = i.SCH_ITE_PROCEDURE
-      LEFT JOIN PROCEDURES_TYPE pt ON pt.PRO_TYP_ID = i.SCH_ITE_PROCEDURE_TYPE
-      LEFT JOIN EYES e ON e.EYE_ID = i.SCH_ITE_EYE
-      LEFT JOIN TB_STATUS_APPOINTMENTS st ON st.TB_STA_APP_ID = i.SCH_ITE_STATUS
-      LEFT JOIN PAT_SCHEDULING_LINK lk ON lk.PAT_SCH_SCH_ID = s.SCH_ID
-      LEFT JOIN PAT_PATIENTS pat ON pat.PAT_ID = lk.PAT_SCH_PAT_ID
-      WHERE #{partners_enabled? ? '1 = 1' : '(p.PROV_NAME LIKE ? OR p.PROV_SOCIAL_NAME LIKE ?)'}
-        #{since.present? ? 'AND COALESCE(i.SCH_ITE_LAST_MODIFICATION, i.SCH_ITE_DATE_CREATION) > ?' : ''}
-      ORDER BY COALESCE(i.SCH_ITE_LAST_MODIFICATION, i.SCH_ITE_DATE_CREATION) ASC, i.SCH_ITE_ID ASC
-      LIMIT #{BATCH}
-    SQL
+  PULL_SELECT = <<~SQL.squish
+    SELECT i.SCH_ITE_ID, i.SCH_ITE_SCH_ID, i.SCH_ITE_TOKEN, i.SCH_ITE_STATUS,
+           i.SCH_ITE_DATE, i.SCH_ITE_HOUR, i.SCH_ITE_AMOUNT, i.SCH_ITE_CLINIC_PRICE, i.SCH_ITE_PROFIT,
+           i.SCH_ITE_REBATE, i.SCH_ITE_DATE_CREATION, i.SCH_ITE_LAST_MODIFICATION, i.SCH_ITE_CLINIC,
+           s.SCH_DOCTOR, s.SCH_PATIENT_NAME, s.SCH_PATIENT_CPF, s.SCH_PATIENT_PHONE, s.SCH_PATIENT_MAIL,
+           p.PROV_NAME, c.CLI_NAME, pr.PRO_NAME, pt.PRO_TYP_VALUE, e.EYE_VALUE,
+           st.TB_STA_APP_ID_VALUE AS STATUS_LABEL,
+           pat.PAT_CPF, pat.PAT_EMAIL, pat.PAT_PHONE,
+           (SELECT COALESCE(SUM(t.TRA_RECEIVED_AMOUNT), 0) FROM TRANSACTIONS t
+             WHERE t.TRA_SCHEDULING_ID = s.SCH_ID AND t.TRA_STATUS = 'Y') AS PAID_AMOUNT
+    FROM SCHEDULING_ITEMS i
+    JOIN SCHEDULING s ON s.SCH_ID = i.SCH_ITE_SCH_ID
+    JOIN PROVIDERS p ON p.PROV_ID = s.SCH_PROVIDER
+    LEFT JOIN CLINICS c ON c.CLI_ID = i.SCH_ITE_CLINIC
+    LEFT JOIN PROCEDURES pr ON pr.PRO_ID = i.SCH_ITE_PROCEDURE
+    LEFT JOIN PROCEDURES_TYPE pt ON pt.PRO_TYP_ID = i.SCH_ITE_PROCEDURE_TYPE
+    LEFT JOIN EYES e ON e.EYE_ID = i.SCH_ITE_EYE
+    LEFT JOIN TB_STATUS_APPOINTMENTS st ON st.TB_STA_APP_ID = i.SCH_ITE_STATUS
+    LEFT JOIN PAT_SCHEDULING_LINK lk ON lk.PAT_SCH_SCH_ID = s.SCH_ID
+    LEFT JOIN PAT_PATIENTS pat ON pat.PAT_ID = lk.PAT_SCH_PAT_ID
+  SQL
+
+  def pull_batch(since, since_id = 0)
+    where = [partners_enabled? ? '1 = 1' : '(p.PROV_NAME LIKE ? OR p.PROV_SOCIAL_NAME LIKE ?)']
+    if since.present?
+      where << '(COALESCE(i.SCH_ITE_LAST_MODIFICATION, i.SCH_ITE_DATE_CREATION) > ? ' \
+               'OR (COALESCE(i.SCH_ITE_LAST_MODIFICATION, i.SCH_ITE_DATE_CREATION) = ? AND i.SCH_ITE_ID > ?))'
+    end
+    sql = "#{PULL_SELECT} WHERE #{where.join(' AND ')} " \
+          'ORDER BY COALESCE(i.SCH_ITE_LAST_MODIFICATION, i.SCH_ITE_DATE_CREATION) ASC, i.SCH_ITE_ID ASC ' \
+          "LIMIT #{BATCH}"
     binds = partners_enabled? ? [] : [provider_pattern, provider_pattern]
-    binds << since if since.present?
+    binds += [since, since, since_id.to_i] if since.present?
     query(sql, binds)
   end
 

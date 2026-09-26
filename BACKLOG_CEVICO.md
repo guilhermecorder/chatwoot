@@ -6189,6 +6189,41 @@ o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
   em degradê, ponto no pico e no balde ativo, mesmo eixo/tooltip/período anterior); o card grande usa linha quando
   a série tem mais de 14 baldes (este mês, este ano, personalizado longo) e barras nos períodos curtos.
 
+## 248. 🧩 MEU PAINEL: GRÁFICO EM LINHA (mín. 7 dias), MODELOS PRONTOS, MÉDIA HISTÓRICA, BLOCOS LADO A LADO E MODO EDIÇÃO DESTRAVADO (26/09: "o gráfico fica em hoje com uma coluna… no mínimo os últimos 7 dias… em linha… pré-definições com nossos indicadores, cores e animações da média histórica… no modo edição tem uma trava… dividir na vertical e na horizontal… excluir e restaurar… já monte um padrão bonito") — CONSTRUÍDO SEM COMMIT (WEB só, sem migration)
+- Card GRANDE: `TileLine.vue` (novo) = linha branca + área sobre a cor do card, anterior tracejado, pico e último
+  ponto, rótulos nas pontas, dica no toque. Em "hoje/ontem" busca o cesto dos últimos 7 dias (`trendBag`).
+  Cards pequenos: flex vertical, sparkline encostada no rodapé (mt-auto) → alinhadas na fileira.
+- MÉDIA HISTÓRICA: `histBag` = cesto dos últimos 90 dias (custom, por dia, cache 30 min). `tileHist`: contagem =
+  ritmo por dia × dias do período (hoje: proporcional às horas 07–19h); taxa (%) = taxa dos 90 dias; ±10% →
+  "▲ x% acima"/"▼ x% abaixo" + brilho suave pulsando (acima) / contorno âmbar (abaixo); sem julgamento se
+  a média esperada < 3. Liga/desliga no modo edição ("média histórica") e os modelos ligam.
+- MODELOS (`helper/cevicoPanelPresets.js`): "Funil do lead" (agendamento; 2 grandes: Novos contatos e
+  Faturamento + orçamento, agendamento, taxas, marcadas, comparecimento, indicações, confirmadas), "Enxuto",
+  "Visão do gestor". `{stage:regex}` acha a coluna do CRM pelo nome. Aplicar = cria os cards do "+"
+  (`<painel>_p_*`, icon_manual), oculta o resto e grava ordem/tamanhos/cores/`preset`/`judge`; "restaurar
+  modelo" reaplica; lixeira nos cards do "+" (exclui de vez), ✕ oculta os fixos (voltam pelos chips).
+- MODO EDIÇÃO: blocos ficam ABERTOS (a trava era o recolhimento automático; "recolher blocos" virou opção);
+  cada bloco tem "metade | inteiro" (`block_layout.half`, grade 2 colunas no desktop) → painel dividido na
+  horizontal e na vertical. Backend: `kpi_layout.preset/judge` e `block_layout.half` no sanitizador.
+- Conferido no localhost conta 3: modelo aplicado (10 cards, 2 grandes simétricos), linhas nos grandes em
+  "este ano", sparklines no rodapé, selos da média; compila.
+
+## 247. 🎈 BALÃO DA GRADE NÃO ESPREME O NOME (25/09 noite: "está desse jeito, zoado") — CONSTRUÍDO SEM COMMIT (WEB só)
+- `.cv-ag-ev-block > * { flex-shrink: 0 }` (as linhas se espremiam e o nome ficava por baixo dos selos) e selos de
+  parceiro/unidade só com altura ≥ 50px (`roomy`/`cv-ag-ev-tight`); dica do balão ganhou parceiro e unidade.
+- Correção dos 93 agendamentos OF às 21h: comando de console rodado por ele em produção (25/09).
+
+## 246. 👥 AGENDAMENTOS EM BLOCOS + QUANDO O LEAD CHEGOU + LISTA | CARDS (25/09: "não consigo passar o olho e entender… visualização em cards… o que é consulta nova, de lead que chegou no dia, na semana ou antes… o que está sendo considerado agendamento") — CONSTRUÍDO SEM COMMIT (WEB só)
+- Backend: `Crm::LeadCohort.of(contact, task)` (dias entre o cadastro e a marcação, fuso SP: mesmo_dia · semana
+  1–7 · mes 8–30 · antes >30 · sem_cadastro); cada linha do feed ganha `lead_arrived_at`/`lead_cohort` e
+  `counts.cohorts` (das marcadas). Spec do controller 5/5.
+- Tela: Resumo ganhou "Quando esses leads chegaram" (ShareBar + chips que filtram) e "O que cada número quer
+  dizer" (marcada, não é marcada, caixa, Marcadas na Agenda, Entrou em Agendamento, % 30 dias, chegaram e
+  agendaram, cuidado com fórmula que mistura coortes). Registros: blocos Ver (Marcações|Agenda do período,
+  Lista|Cards, busca) · Situação (registro, quem marcou, lead chegou) · Onde (unidade, caixa, de onde).
+  Cards: quem + hora, situação, blocos Consulta e De onde (caixa, coorte, coluna do CRM), ações. Selo de coorte
+  também na lista. Visão lembrada por pessoa (`cevico_appts_view`).
+
 ## 245. 🔀 REGRA B — "QUEM CHEGOU PRIMEIRO" na cerca dos parceiros (25/09 noite: "um paciente pode ter passado por um e por outro ao longo da jornada… vamos de B") — CONSTRUÍDO SEM COMMIT (WEB+SIDEKIQ)
 - `Crm::PartnerGuard.partner_contact?` = tem marca de parceiro (atributo, etiqueta of_, card no funil deles) E NÃO é
   `cevico_first?`. `cevico_first_ids`: card num funil da CEVICO criado ANTES do 1º card no funil dos parceiros e do
@@ -7921,3 +7956,110 @@ com parâmetros diferentes selecionáveis por chavinhas.
   (regras da caixa); agora aponta para Programação.
 - Testes: `spec/services/crm/journey/map_service_spec.rb` (adivinhação, fontes,
   personalização ponta a ponta).
+
+# RODADA 26/09 — itens 249–251 (agenda do hub × nossa Agenda · confirmação de consulta interna · Atendente de Pós-operatório)
+
+## 249. ✅ 🔎 CONFERÊNCIA DO DIA — cirurgias do hub do Oftalmofácil × nossa Agenda (pedido dele 26/09: "segunda teremos 10 cirurgias que não estão encontradas na agenda")
+- Problema: item marcado no hub não aparece na Agenda e ninguém sabe POR QUÊ.
+  Causas possíveis mapeadas: sync incremental nunca releu o item (criado antes
+  de ligar a Agenda unificada e nunca modificado lá); dois itens gravados no
+  mesmo segundo na virada de um lote de 500 (o segundo era pulado para sempre);
+  linha com erro pulada; hora em segundos/fuso (item 242) deixando o
+  agendamento às 21h da véspera; clínica sem de-para (some nas abas por
+  unidade); Agenda unificada desligada; data antes da janela.
+- CONSTRUÍDO: `Crm::OftalmofacilDayCheck` (relatório item a item de UM dia:
+  situação + motivo em palavras simples; `reconcile!` traz o que falta,
+  primeiro pelo hub — só leitura — senão pelo espelho) · endpoints
+  `GET crm/oftalmofacil/day_check?date=&hub=1` e `POST reconcile_day` (admin) ·
+  bloco "✓ Conferência do dia" no ambiente Oftalmofácil (seletor de data,
+  "perguntar ao hub", 4 números, tabela só dos problemas, botão "Trazer N
+  para a Agenda", "o que cada situação quer dizer") · rake
+  `cevico:agenda_dia` (DIA= HUB=1 FIX=1) para o terminal da VPS.
+- Sync: cursor em DUAS partes (momento + `last_sync_id`, desempate por id —
+  fim do item pulado na virada do lote); momento do cursor sempre
+  "AAAA-MM-DD HH:MM:SS"; `pull_day`, `reprocess_rows!`, `reapply_from_mirror!`
+  públicos; SELECT compartilhado (PULL_SELECT).
+- Testes: `spec/services/crm/oftalmofacil_day_check_spec.rb` (8) + sync (6)
+  verdes; visual conta 3 com 4 itens semeados (ok / falta / hora errada /
+  sem local) → "Trazer 2" criou 1 e corrigiu 1; semente apagada.
+- SEM commit, WEB só (rake/serviço no mesmo build). Reversão: imagem anterior.
+
+## 250. ✅ 📋 CONFIRMAÇÃO DE CONSULTA INTERNA (D-2) — substitui os fluxos N8N "CONFIRMACAO CONSULTA PAULISTA/TATUAPÉ" (pedido dele 26/09: "montar internamente esse agente de confirmação, levando em conta a NOSSA agenda e as nossas fontes de pacientes")
+- O N8N lia o Google Agenda ([Av. Paulista]/[Tatuapé] - CEVICO) 2 dias antes
+  às 10h (sexta também D+3), extraía Nome/Telefone/Valor da descrição e
+  mandava o modelo `confirmacao_consulta_paulista` / `confirmao_consulta_tatuape`
+  (4 variáveis: nome, data, hora, valor; padrão 150,00) pela caixa 5.
+- AGORA: régua **D-2** dentro de `Crm::AppointmentReminderSendJob` (junto da
+  D-1/D-0 do item 156), fonte = NOSSA Agenda (consultas `consulta`, não
+  canceladas, sem presença, `confirmed_at` vazio, com telefone), modelo POR
+  UNIDADE (units.paulista / units.tatuape + geral opcional), variáveis
+  {{nome}} {{data}} {{hora}} {{valor}} {{unidade}} (+ {{contact.name}}), valor
+  = "Valor: X"/"R$ X" na observação da consulta senão o padrão (150,00),
+  modalidades (padrão avaliação+retorno), ponte de fim de semana (sexta manda
+  também a de segunda), marca anti-duplicata por consulta, cerca dos
+  parceiros, quem já confirmou não recebe. MODO SOMBRA (padrão): não manda,
+  registra "quem receberia" em `agenda_config.appointment_reminders_state.d2`
+  (lista no card) — para comparar com o N8N antes de desligá-lo.
+- Confirmação por resposta (CrmListener): "sim/confirmo/👍" de quem recebeu
+  D-2 OU D-1, janela de 4 dias → `confirmed_at` + nota ✅; "não" → declined +
+  aviso no Radar (já existia).
+- UI (Automações → Robôs → "Lembretes do dia da consulta"): régua D-2 com
+  Sombra|Ao vivo, valor padrão, "sexta adianta a de segunda", chips de
+  modalidade, caixa, modelo da Paulista / Tatuapé / geral, última rodada
+  (enviadas ou receberiam + puladas com motivo). settings: sanitize da d2.
+- Testes: `spec/jobs/crm/appointment_reminder_send_job_d2_spec.rb` (5) +
+  `spec/listeners/crm_listener_confirmation_spec.rb` verdes.
+- PÓS-DEPLOY DELE: ver seção no doc AGENDA_CONFIRMACAO_POSOP_2026-09-26.md
+  (ligar em sombra 1 semana → comparar → ligar ao vivo → desligar N8N).
+
+## 251. ✅ 🩺 ATENDENTE DE PÓS-OPERATÓRIO (agente `atendente_pos_op`; pedido dele 26/09: "responder 24h dúvidas simples como colírio, ardência; quando necessário gerar tarefa para a agente responsável no Meu Painel")
+- Mesmo motor dos atendentes (Roteiro + bloco da etapa + trava; sombra →
+  ao vivo; pausa/👍; 🧪 Testar agente; cache; áudio/imagem). Bloco da etapa
+  novo em `Crm::CevicoScript::STAGE_PROMPTS['atendente_pos_op']` escrito a
+  partir do PDF "informações cirurgia e pós-op" (sintomas esperados,
+  colírios, dor PRK, compressas PRK×LASIK, banho/cabelo, telas, exercício 7/30
+  dias, maquiagem 7/30, álcool 7, viagem, alimentação, óculos, lente
+  terapêutica, retorno) + REGRA VERMELHA (dor forte, perda súbita de visão,
+  secreção, trauma, lente deslocada → tarefa urgente + chamar humano + pronto
+  atendimento + (11) 98769-0286) + REGRA AMARELA (dúvida do caso, receita,
+  atestado, documento → tarefa). Nunca diagnostica/muda colírio/cita médico
+  fora do Roteiro (regra Jorge Haddad respeitada).
+- Contexto vivo: "Cirurgia realizada: dd/mm (há N dias) · procedimento ·
+  médico · unidade" lido da Agenda (inclusive Oftalmofácil) + retorno marcado.
+- Ferramenta nova `abrir_tarefa {motivo, detalhes, urgencia}` → `Crm::HandoffTask`
+  (tarefa tipo `pos_op` — entra em "tarefas esperando você" do Meu Painel;
+  responsável = pessoa escolhida no card `task_assignee_id` → quem cuida da
+  coluna → conferência de cirurgia; 1 aberta por paciente, chamadas novas
+  complementam; urgente = prioridade urgente + aviso `pos_op_atencao` no Radar
+  do Meu Painel + nota na conversa). Chamar humano no pós-op SEMPRE deixa a
+  tarefa (mesmo se a IA esquecer a ferramenta). Em sombra só simula.
+- Dono da conversa também pela AGENDA: `recent_surgery_days` (padrão 60) —
+  paciente com cirurgia realizada nos últimos N dias é dele mesmo sem card na
+  coluna (CrmListener#responder_owner_for).
+- Registro do agente: RESPONDER_KEYS, RESPONDER_TOOLS_KEYS, RECOMMENDED
+  (Sonnet 5 · médio — maior risco clínico), RESPONDER_AGENTS, AGENT_NAMES
+  (tools + alert), AGENT_META (Painel dos agentes), fluxograma
+  `Crm::FlowMap::Flows::AtendentePosOp`, settings (permit + arrays viraram
+  `CrmListener::RESPONDER_KEYS`), Hub (card, defaults, loadResponder, campos
+  "Quem recebe as tarefas" e "Cirurgia recente na Agenda (dias)"), Orientações
+  (label), Radar (`pos_op_atencao`).
+- Testes: `spec/services/crm/handoff_task_spec.rb` (7) + responder job/
+  service/tools + flow registry + partner guard: 42/42 verdes. Visual conta 3:
+  card abre, campos aparecem.
+- PÓS-DEPLOY DELE: caixa(s) + colunas Cirurgia Realizada / Pós Operatório +
+  responsável + sombra por 1–2 semanas → revisar notas na tela Sombra →
+  ao vivo (24h = dias/horas vazios). Detalhes no doc.
+
+## 252. ✅ 🐛 Busca "Encontrar paciente" por baixo dos "Itens do dia" + painel do dia da Agenda geral no layout de CAIXAS do Oftalmofácil (pedido dele 26/09, print da produção)
+- BUG: `.cv-ag-block` tem backdrop-filter (contexto de empilhamento próprio); a lista de resultados
+  (z-40 dentro do bloco) ficava atrás dos cartões do dia. Correção: o bloco "Encontrar" sobe
+  (`relative z-30`) enquanto a busca está aberta — OftalmofacilHub; mesma proteção no bloco
+  "Período" da Agenda geral quando o calendário do celular está aberto. Conferido no DOM: o
+  elemento mais alto no rodapé da lista agora é a própria lista (8 resultados).
+- LAYOUT: ele gosta mais da agenda do Oftalmofácil (coluna de horas + caixas limpas), mas a Agenda
+  geral tem os filtros importantes. O painel do dia da Agenda geral ganhou o seletor
+  **Itens do dia | Bloco do médico · Conferência** (gravado em `cevico_agenda_day_panel_mode`,
+  padrão Itens do dia): "Itens do dia" = só as caixas (hora | quem e o quê | selos), sem a grade
+  de horários e sem os botões de compareceu/faltou (a caixa abre no clique, onde a conferência
+  continua); "Bloco do médico" = o de sempre. Filtros (camadas, quem, unidade, origem) intactos.
+- Sem backend. Conferido local (conta 3, 23/09: 4 itens nas caixas).

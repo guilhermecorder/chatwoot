@@ -898,8 +898,9 @@
 .cv-page .cv-ag-block-sub { font-size: 11px; font-weight: 500; color: #94a3b8; letter-spacing: 0; }
 .cv-page .cv-ag-row-label {
   flex-shrink: 0;
-  width: 70px;
+  width: 88px;
   padding-top: 8px;
+  white-space: nowrap;
   font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -914,3 +915,10 @@
 /* camadas mais compactas dentro do bloco Filtros (cabem numa linha) */
 .cv-page .cv-ag-block .cv-ag-kind { height: 29px; padding: 0 9px 0 7px; gap: 5px; font-size: 12px; border-radius: 10px; }
 .cv-page .cv-ag-block .cv-ag-kind .cv-ag-kind-n { font-size: 10.5px; padding: 0 5px; }
+
+/* ── item 247 (25/09): balão da grade não ESPREME as linhas (o nome ficava por
+   baixo dos selos): cada linha mantém a altura e o que não cabe é cortado; em
+   balão baixo os selos de parceiro/unidade saem (ficam na dica e no cartão) ── */
+.cv-page .cv-ag-ev-block > * { flex-shrink: 0; max-width: 100%; }
+.cv-page .cv-ag-ev-block.cv-ag-ev-tight .cv-ag-ev-src,
+.cv-page .cv-ag-ev-block.cv-ag-ev-tight .cv-ag-ev-tag { display: none; }

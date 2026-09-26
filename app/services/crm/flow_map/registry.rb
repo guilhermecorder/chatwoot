@@ -13,6 +13,7 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::Instagram,
     Crm::FlowMap::Flows::AtendenteAgendamento,
     Crm::FlowMap::Flows::AtendentePos,
+    Crm::FlowMap::Flows::AtendentePosOp,
     Crm::FlowMap::Flows::Comments,
     Crm::FlowMap::Flows::Nps,
     Crm::FlowMap::Flows::Conversation,

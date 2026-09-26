@@ -391,6 +391,54 @@ const clinicOptions = computed(() => (overview.value?.clinics || []).map(c => c.
 const typeOptions = computed(() => (overview.value?.types || []).map(t => t.name).filter(n => n && !n.startsWith('(')));
 const monthMax = computed(() => Math.max(1, ...(overview.value?.months || []).map(m => m.total)));
 const health = computed(() => overview.value?.agenda || {});
+
+// 🔎 item 249: CONFERÊNCIA DO DIA — cada item do hub para a data × nossa Agenda
+const nextBusinessDay = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return dateKey(d);
+};
+const dayCheckDate = ref(nextBusinessDay());
+const dayCheck = ref(null);
+const dayCheckLoading = ref(false);
+const dayCheckFixing = ref(false);
+const dayCheckMsg = ref('');
+const dayCheckHub = ref(true);
+const fetchDayCheck = async () => {
+  dayCheckLoading.value = true;
+  dayCheckMsg.value = '';
+  try {
+    const { data } = await CrmAPI.oftalmofacilDayCheck({ date: dayCheckDate.value, hub: dayCheckHub.value ? 1 : 0 });
+    dayCheck.value = data;
+  } catch (e) {
+    dayCheckMsg.value = 'Não consegui conferir o dia. Tente de novo.';
+  } finally {
+    dayCheckLoading.value = false;
+  }
+};
+const reconcileDay = async () => {
+  dayCheckFixing.value = true;
+  dayCheckMsg.value = '';
+  try {
+    const { data } = await CrmAPI.oftalmofacilReconcileDay(dayCheckDate.value);
+    dayCheck.value = data;
+    const errs = (data.errors || []).length;
+    dayCheckMsg.value = `${data.fixed || 0} item(ns) reprocessado(s) · ${data.tasks_created || 0} agendamento(s) criado(s) · ${data.tasks_updated || 0} atualizado(s)${errs ? ` · ${errs} aviso(s)` : ''}`;
+  } catch (e) {
+    dayCheckMsg.value = e?.response?.data?.error || 'Não consegui trazer os agendamentos. Tente de novo.';
+  } finally {
+    dayCheckFixing.value = false;
+  }
+};
+const dayCheckProblems = computed(() => (dayCheck.value?.rows || []).filter(r => !['ok', 'cancelada'].includes(r.situation)));
+const dayCheckOk = computed(() => (dayCheck.value?.rows || []).filter(r => r.situation === 'ok'));
+const dayCheckTone = s => (s === 'ok' ? 'cv-green' : s === 'cancelada' ? 'cv-slate' : ['sem_agendamento', 'nao_lido', 'hora_errada'].includes(s) ? 'cv-amber' : 'cv-rose');
+const dayCheckLabel = computed(() => {
+  if (!dayCheck.value) return '';
+  const d = new Date(`${dayCheck.value.date}T12:00:00`);
+  return `${dayCheck.value.weekday}, ${d.toLocaleDateString('pt-BR')}`;
+});
 const pageStyle = computed(() => cvVars.value);
 const upcomingRows = computed(() => (week.value?.rows || []).filter(r => r.surgery_date >= todayKey && r.status_kind !== 'cancelada').slice(0, 8));
 
@@ -518,6 +566,62 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
               </div>
               <div class="cv-sub p-4"><p class="cv-label mb-1">"Agendada" com data passada</p><p class="text-2xl font-bold text-n-slate-12">{{ health.past_still_scheduled || 0 }}</p><p class="text-[11px] text-n-slate-10">há mais de 7 dias sem o hub atualizar o status</p></div>
             </div>
+          </section>
+
+          <!-- 🔎 item 249 · conferência do dia: hub × Agenda, item por item, com o motivo -->
+          <section class="cv-block p-6 sm:p-9 mb-8" :style="blockVars('agenda')" data-tour="daycheck">
+            <div class="flex items-start gap-3 mb-1 flex-wrap">
+              <span class="cv-ag-num">✓</span>
+              <div class="flex-1 min-w-[220px]">
+                <h2 class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12">Conferência do dia</h2>
+                <p class="text-xs text-n-slate-10">cada cirurgia, exame ou consulta marcada no hub para o dia × o que está na nossa Agenda, com o motivo quando falta</p>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <input v-model="dayCheckDate" type="date" class="cv-input text-sm" style="margin-bottom: 0; width: 160px" />
+                <label class="flex items-center gap-1.5 text-[11px] text-n-slate-11 cursor-pointer" title="Também pergunta ao banco do hub (só leitura): acha item que o sistema nunca leu">
+                  <input v-model="dayCheckHub" type="checkbox" style="margin: 0" /> perguntar ao hub
+                </label>
+                <button class="cv-btn cv-btn-sm" :disabled="dayCheckLoading" @click="fetchDayCheck">{{ dayCheckLoading ? 'Conferindo…' : 'Conferir' }}</button>
+                <button v-if="isAdmin && dayCheck && dayCheck.summary?.corrigiveis" class="cv-btn cv-btn-sm" style="background: linear-gradient(135deg, #B8860B, #F5D061); color: #1a1a1a; border-color: transparent" :disabled="dayCheckFixing" title="Reprocessa só o que falta neste dia — nada muda no hub" @click="reconcileDay">{{ dayCheckFixing ? 'Trazendo…' : `Trazer ${dayCheck.summary.corrigiveis} para a Agenda` }}</button>
+              </div>
+            </div>
+            <p v-if="dayCheckMsg" class="text-xs font-semibold mt-2" style="color: var(--cv)">{{ dayCheckMsg }}</p>
+            <template v-if="dayCheck">
+              <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-5">
+                <DashKpi label="No hub para o dia" :value="Number(dayCheck.summary?.total || 0)" :sub="dayCheckLabel" grad="linear-gradient(135deg, #0F766E, #2DD4BF)" glass compact />
+                <DashKpi label="Na Agenda, certinho" :value="dayCheckOk.length" sub="dia certo e com local" grad="linear-gradient(135deg, #047857, #10B981)" glass compact />
+                <DashKpi label="Com problema" :value="Number(dayCheck.summary?.problemas || 0)" sub="falta, hora errada, sem local…" :grad="dayCheck.summary?.problemas ? 'linear-gradient(135deg, #B45309, #F59E0B)' : ''" glass compact />
+                <DashKpi label="Corrigíveis agora" :value="Number(dayCheck.summary?.corrigiveis || 0)" :sub="dayCheck.hub?.checked ? 'hub consultado ✓' : dayCheck.hub?.error || 'só pelo espelho'" :grad="dayCheck.summary?.corrigiveis ? 'linear-gradient(135deg, #B8860B, #F5D061)' : ''" glass compact />
+              </div>
+              <div v-if="!dayCheck.config?.agenda_enabled" class="cv-sub p-3 mt-3 text-xs text-n-slate-11">⚠️ A <b>Agenda unificada está desligada</b> no card do Oftalmofácil (Integrações): nada do hub vira agendamento até ligar.</div>
+              <div v-if="dayCheck.config?.error_count" class="cv-sub p-3 mt-3 text-xs text-n-slate-11">⚠️ O último sync terminou com {{ dayCheck.config.error_count }} erro(s): <span v-for="e in dayCheck.config.last_errors" :key="e" class="cv-chip cv-rose ml-1">{{ e }}</span></div>
+              <div v-if="dayCheckProblems.length" class="mt-4 overflow-x-auto">
+                <table class="cv-of-table cv-of-table-fit">
+                  <thead><tr><th class="text-left">Hora</th><th class="text-left">Paciente</th><th class="text-left">Clínica → local</th><th class="text-left">Tipo</th><th class="text-left">Hub diz</th><th class="text-left">Situação</th></tr></thead>
+                  <tbody>
+                    <tr v-for="r in dayCheckProblems" :key="r.token">
+                      <td class="font-mono">{{ r.hour || '—' }}</td>
+                      <td><b>{{ r.patient }}</b><span v-if="r.phone_tail" class="text-n-slate-9"> · …{{ r.phone_tail }}</span><span v-if="!r.own" class="cv-chip cv-slate ml-1">{{ r.provider }}</span></td>
+                      <td>{{ r.clinic || '—' }} <span class="text-n-slate-9">→ {{ r.unit_label || 'sem local' }}</span></td>
+                      <td>{{ r.kind }}<span v-if="r.procedure" class="text-n-slate-9"> · {{ r.procedure }}</span></td>
+                      <td>{{ r.status_label }}</td>
+                      <td><span class="cv-chip" :class="dayCheckTone(r.situation)">{{ r.situation_label }}</span><p v-if="r.reason" class="text-[11px] text-n-slate-10 mt-0.5">{{ r.reason }}</p></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p v-else class="text-sm font-semibold text-emerald-700 mt-4">Tudo o que o hub tem para {{ dayCheckLabel }} está na nossa Agenda ✓</p>
+              <div v-if="dayCheck.strays?.length" class="cv-sub p-3 mt-3 text-xs text-n-slate-11">
+                <p class="font-semibold mb-1">Na nossa Agenda neste dia, mas o hub marca outra data:</p>
+                <p v-for="t in dayCheck.strays" :key="t.task_id">• {{ t.title }} — hub: {{ t.hub_date || 'sem item' }} {{ t.hub_status ? `(${t.hub_status})` : '' }}</p>
+              </div>
+              <details v-if="dayCheckOk.length" class="mt-3">
+                <summary class="text-xs font-semibold text-n-slate-11 cursor-pointer">Ver os {{ dayCheckOk.length }} que estão certinhos</summary>
+                <p v-for="r in dayCheckOk" :key="r.token" class="text-xs text-n-slate-11 mt-1">✓ {{ r.hour || '—' }} · {{ r.patient }} · {{ r.kind }} · {{ r.unit_label }}</p>
+              </details>
+              <p class="text-[11px] text-n-slate-10 mt-4"><b>O que cada situação quer dizer:</b> <i>Falta na Agenda</i> = o hub tem e a Agenda não (o botão traz). <i>Hub tem, sistema nunca leu</i> = o sync incremental pulou o item (o botão traz). <i>Em outro dia/hora</i> = está na Agenda, mas no horário errado (o botão corrige). <i>Sem local</i> = a clínica do hub não tem de-para para um local nosso — some nas abas por unidade; mapeie em Integrações. <i>Cancelada na nossa Agenda</i> = a equipe cancelou aqui; o botão não mexe.</p>
+            </template>
+            <p v-else class="text-xs text-n-slate-10 mt-4">Escolha o dia e clique em Conferir. Segunda-feira já vem selecionada quando é fim de semana.</p>
           </section>
 
           <!-- 2 · representatividade: o que e quem pesa mais no volume -->
@@ -660,7 +764,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                   <button class="cv-ag-nav" title="Seguinte" @click="calStep(1)"><span class="i-lucide-chevron-right text-base" /></button>
                 </div>
               </section>
-              <section class="cv-ag-block p-4 flex flex-col gap-2.5 flex-1">
+              <!-- bug 26/09: o bloco tem backdrop-filter (contexto de empilhamento próprio) e a lista
+                   de resultados ficava POR BAIXO dos "Itens do dia"; com a busca aberta o bloco sobe -->
+              <section class="cv-ag-block p-4 flex flex-col gap-2.5 flex-1" :class="calQuery.trim().length >= 2 ? 'relative z-30' : ''">
                 <p class="cv-ag-block-title">Encontrar</p>
                 <div class="flex items-start gap-3 flex-wrap">
                   <span class="cv-ag-row-label">Paciente</span>

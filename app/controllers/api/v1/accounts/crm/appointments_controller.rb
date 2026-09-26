@@ -144,7 +144,11 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
           display_id: conversation.display_id, inbox_id: conversation.inbox_id,
           inbox_name: conversation.inbox&.name, labels: conversation.cached_label_list_array
         },
-        card: cards[t.contact_id]
+        card: cards[t.contact_id],
+        # item 246: QUANDO o lead chegou em relação à marcação (coorte) —
+        # "consulta de lead que chegou no dia, na semana ou antes"
+        lead_arrived_at: contact&.created_at,
+        lead_cohort: Crm::LeadCohort.of(contact, t)
     }
   end
 
@@ -213,12 +217,15 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
         .sort_by { |h| -h[:count] }
   end
 
-  def counts(rows)
+  def counts(rows) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     booked = rows.select { |r| BOOKING_KINDS_FOR_SOURCE.include?(r[:kind]) }
+    marcadas = rows.select { |r| r[:kind] == 'agendada' }
     KINDS.to_h { |k| [k.to_sym, rows.count { |r| r[:kind] == k }] }.merge(
       total: rows.size,
       ia: booked.count { |r| r[:source] == 'ia' },
-      equipe: booked.count { |r| r[:source] == 'equipe' }
+      equipe: booked.count { |r| r[:source] == 'equipe' },
+      # item 246: das MARCADAS, quando o lead tinha chegado
+      cohorts: (Crm::LeadCohort::KEYS + ['sem_cadastro']).index_with { |c| marcadas.count { |r| r[:lead_cohort] == c } }
     )
   end
 

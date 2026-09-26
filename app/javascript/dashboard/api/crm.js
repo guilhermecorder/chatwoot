@@ -331,6 +331,15 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/oftalmofacil/items/${id}`);
   }
 
+  // 🔎 item 249: conferência de um dia (hub × Agenda) e trazer o que faltou
+  oftalmofacilDayCheck(params) {
+    return axios.get(`${this.url}/oftalmofacil/day_check`, { params });
+  }
+
+  oftalmofacilReconcileDay(date) {
+    return axios.post(`${this.url}/oftalmofacil/reconcile_day`, { date });
+  }
+
   appointmentsFeed(params) {
     return axios.get(`${this.url}/appointments/feed`, { params });
   }

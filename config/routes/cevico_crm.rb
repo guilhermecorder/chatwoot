@@ -320,6 +320,9 @@ namespace :crm do
   get 'oftalmofacil/items', to: 'oftalmofacil#items'
   get 'oftalmofacil/patients', to: 'oftalmofacil#patients'
   get 'oftalmofacil/items/:id', to: 'oftalmofacil#show'
+  # 🔎 item 249: conferência de um dia (hub × Agenda) + trazer o que faltou
+  get 'oftalmofacil/day_check', to: 'oftalmofacil#day_check'
+  post 'oftalmofacil/reconcile_day', to: 'oftalmofacil#reconcile_day'
   # 📞 Ligações nativas de WhatsApp (item 167): lista/atender/recusar/
   # desligar/gravação/transcrição, ligar p/ o paciente e o dashboard
   resources :calls, only: [:index, :show], controller: 'calls' do

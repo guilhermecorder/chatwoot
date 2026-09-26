@@ -27,6 +27,12 @@ import {
   IMAC_PALETTES,
   FRUIT_PALETTES,
 } from 'dashboard/helper/cevicoPalettes';
+import {
+  PANEL_PRESETS,
+  PRESET_BY_KEY,
+  buildPreset,
+} from 'dashboard/helper/cevicoPanelPresets';
+import TileLine from 'dashboard/components-next/cevico/TileLine.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import CevicoPalettePicker from 'dashboard/components-next/cevico/CevicoPalettePicker.vue';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
@@ -289,8 +295,43 @@ const fetchKpiBag = async () => {
     });
     if (seq !== kpiSeq) return;
     kpiBag.value = bag;
+    fetchTrendBag(preset);
+    fetchHistBag();
   } catch {
     kpiBag.value = kpiBag.value || null;
+  }
+};
+
+// ── item 248: o gráfico do card GRANDE mostra no MÍNIMO 7 dias (em "hoje" /
+// "ontem" o cesto da régua tem 1 balde só) e o julgamento pela MÉDIA
+// HISTÓRICA usa os últimos 90 dias (média por dia de cada indicador) ──
+const trendBag = ref(null);
+const fetchTrendBag = async preset => {
+  if (!['today', 'yesterday'].includes(preset)) {
+    trendBag.value = null;
+    return;
+  }
+  try {
+    const { data } = await CrmAPI.getKpiBag({ preset: 'last7' });
+    trendBag.value = data;
+  } catch {
+    trendBag.value = null;
+  }
+};
+const histBag = ref(null);
+let histLoadedAt = 0;
+const fetchHistBag = async () => {
+  if (histBag.value && Date.now() - histLoadedAt < 30 * 60 * 1000) return;
+  const d = new Date();
+  const ymd = x => x.toLocaleDateString('sv-SE');
+  const to = new Date(d); to.setDate(to.getDate() - 1);
+  const from = new Date(d); from.setDate(from.getDate() - 90);
+  try {
+    const { data } = await CrmAPI.getKpiBag({ preset: 'custom', from: ymd(from), to: ymd(to), granularity: 'day' });
+    histBag.value = data;
+    histLoadedAt = Date.now();
+  } catch {
+    histBag.value = null;
   }
 };
 
@@ -1924,6 +1965,8 @@ const saveKpiLayout = async patch => {
     colors: patch.colors ?? cur.colors ?? {},
     sizes: patch.sizes ?? cur.sizes ?? {},
     spacers: patch.spacers ?? cur.spacers ?? [],
+    preset: patch.preset !== undefined ? patch.preset : cur.preset || null,
+    judge: patch.judge ?? cur.judge ?? false,
   };
   isSavingLayout.value = true;
   try {
@@ -1971,16 +2014,20 @@ const removeSpacer = tile =>
 // média e as primeiras linhas de detalhe
 const tileBigSummary = tile => {
   if (!tile?.big || panelBase.value === 'medico') return null;
-  const points = kpiBag.value?.points || [];
+  // item 248: no mínimo 7 dias — em "hoje"/"ontem" usa o cesto dos últimos 7
+  const base = kpiBag.value;
+  const bag = (base?.points || []).length >= 7 || !trendBag.value ? base : trendBag.value;
+  const points = bag?.points || [];
   let values;
   let prevValues = null;
   if (tile.def) {
-    values = tile.series || [];
+    values = points.map((_, i) => evaluateFormula(tile.def.expr, bagAtOf(bag, i)) ?? 0);
     prevValues = points.map(
-      (_, i) => evaluateFormula(tile.def.expr, bagPrevAtOf(kpiBag.value, i)) ?? 0
+      (_, i) => evaluateFormula(tile.def.expr, bagPrevAtOf(bag, i)) ?? 0
     );
   } else {
-    const m = bagMetricFor(tile);
+    const key = tile.chartKey === 'auto' ? bagMetricByLabelOf(bag, tile.chartMatch) : tile.chartKey;
+    const m = key ? bag?.metrics?.[key] : null;
     values = m?.series || [];
     prevValues = m?.prev_series || null;
   }
@@ -1995,12 +2042,68 @@ const tileBigSummary = tile => {
     labels: points.map(p => p.label),
     prevValues: prevValues?.length === nums.length ? prevValues : null,
     format: fmt,
-    color: hexFromGrad(tileVisual(tile).grad) || '#152C61',
     hasData,
+    widened: bag !== base,
     peakText: hasData
-      ? `pico ${points[peakAt]?.label ? `em ${points[peakAt].label}` : ''}: ${fmt(peak)} · média ${fmt(avg)}`
+      ? `pico ${points[peakAt]?.label ? `em ${points[peakAt].label}` : ''}: ${fmt(peak)} · média ${fmt(avg)}${bag !== base ? ' · últimos 7 dias' : ''}`
       : '',
     details: (tile.details || []).slice(0, 3),
+  };
+};
+
+// ── item 248: JULGAMENTO PELA MÉDIA HISTÓRICA (90 dias) — liga no modo edição
+// ("média histórica") e nos modelos prontos. Contagem: compara o ritmo por
+// dia do período com a média por dia dos 90 dias; taxa (%): compara a taxa
+// do período com a taxa dos 90 dias. ±10% = acima/abaixo (cor + brilho). ──
+const periodDays = computed(() => {
+  const n = (kpiBag.value?.points || []).length || 1;
+  const per = { day: 1, week: 7, month: 30 }[kpiBag.value?.granularity] || 1;
+  return Math.max(1, n * per);
+});
+const histJudgeOn = computed(() => Boolean(kpiLayout.value?.judge));
+const tileHist = tile => {
+  if (!histJudgeOn.value || !histBag.value?.metrics || tile.spacer) return null;
+  const hb = histBag.value;
+  const HIST_DAYS = Math.max(1, (hb.points || []).length || 90);
+  let value = null;
+  let expected = null;
+  let fmt = 'number';
+  if (tile.def) {
+    value = tile.rawValue;
+    fmt = tile.def.format;
+    const histVal = evaluateFormula(tile.def.expr, bagTotalsOf(hb));
+    if (histVal === null || histVal === undefined) return null;
+    expected = fmt === 'percent' ? histVal : (histVal / HIST_DAYS) * periodDays.value;
+  } else if (tile.chartKey && !tile.pct && !tile.compare) {
+    const key = tile.chartKey === 'auto' ? bagMetricByLabelOf(kpiBag.value, tile.chartMatch) : tile.chartKey;
+    const m = key ? bagMetrics.value[key] : null;
+    const h = key ? hb.metrics[key] : null;
+    if (!m || !h) return null;
+    value = m.value;
+    expected = (h.value / HIST_DAYS) * periodDays.value;
+    fmt = m.unit === 'brl' ? 'currency' : 'number';
+  } else {
+    return null;
+  }
+  if (value === null || value === undefined || !expected) return null;
+  // hoje: compara com a média PROPORCIONAL às horas já passadas do expediente
+  // (07h–19h) — de manhã, "0 até agora" não é "100% abaixo"
+  if (fmt !== 'percent' && period.value?.preset === 'today') {
+    const h = new Date().getHours() + new Date().getMinutes() / 60;
+    expected *= Math.min(1, Math.max(0, (h - 7) / 12));
+  }
+  // pouco volume esperado = sem julgamento (evita ruído)
+  if (fmt !== 'percent' && expected < 3) return null;
+  const ratio = value / expected;
+  const pct = Math.round((ratio - 1) * 100);
+  const dir = ratio >= 1.1 ? 'up' : ratio <= 0.9 ? 'down' : 'flat';
+  return {
+    dir,
+    text:
+      dir === 'flat'
+        ? 'na média dos 90 dias'
+        : `${dir === 'up' ? '▲' : '▼'} ${Math.abs(pct)}% ${dir === 'up' ? 'acima' : 'abaixo'} da média`,
+    title: `média histórica (90 dias) para este período: ${formatKpi(expected, fmt)}`,
   };
 };
 
@@ -2069,11 +2172,74 @@ onMounted(() => {
     dragMainBlocks.value = [...v.main];
   });
 });
-const saveBlockLayout = async () => {
+// ── item 248: blocos em MEIA largura (lado a lado) + modo edição DESTRAVADO
+// (os blocos ficam abertos; "recolher" é opcional, só pra reordenar) ──
+const collapseBlocks = ref(false);
+const halfBlocks = computed(() => new Set(blockLayout.value?.half || []));
+const blockHalf = id => halfBlocks.value.has(id);
+const toggleBlockHalf = id => {
+  const next = new Set(halfBlocks.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  saveBlockLayout([...next]);
+};
+const toggleHistJudge = () => saveKpiLayout({ judge: !histJudgeOn.value });
+
+// ── item 248: MODELOS PRONTOS (cevicoPanelPresets.js) — aplicar monta os cards
+// do "+" do modelo (ids <painel>_p_…), oculta o resto e grava ordem, tamanhos,
+// cores e a média histórica ligada; "restaurar modelo" reaplica o último ──
+const showPresets = ref(false);
+const isApplyingPreset = ref(false);
+const panelPresets = computed(() => {
+  const mine = PANEL_PRESETS.filter(p => p.panels.includes(panelBase.value));
+  const others = PANEL_PRESETS.filter(p => !p.panels.includes(panelBase.value));
+  return [...mine, ...others];
+});
+const currentPreset = computed(() => PRESET_BY_KEY[kpiLayout.value?.preset] || null);
+const applyPreset = async preset => {
+  if (!preset || isApplyingPreset.value) return;
+  isApplyingPreset.value = true;
+  try {
+    const base = panelBase.value;
+    const fixedIds = rawPanelTiles.value.map(t => t.id || t.gk || slugId(t.label));
+    const { defs, layout } = buildPreset(preset, {
+      panel: base,
+      metrics: bagMetrics.value,
+      fixedIds,
+    });
+    const prefix = `${base}_p_`;
+    const list = (crmSettings.value?.custom_kpis || []).filter(
+      k => !String(k.id).startsWith(prefix)
+    );
+    await CrmAPI.updateCustomKpis([...list, ...defs]);
+    await store.dispatch('crm/fetchSettings');
+    const keep = new Set(layout.order);
+    const hidden = allPanelTiles.value.map(t => t.id).filter(id => !keep.has(id));
+    await saveKpiLayout({ ...layout, hidden });
+    showPresets.value = false;
+  } finally {
+    isApplyingPreset.value = false;
+  }
+};
+const restorePreset = () => applyPreset(currentPreset.value);
+const presetSwatch = t => {
+  const [key, step] = t.color || ['bondi', 1];
+  const pal = [...IMAC_PALETTES, ...FRUIT_PALETTES].find(p => p.key === key);
+  return pal?.family?.[step] || '#94a3b8';
+};
+// excluir de vez um card do "+" (os fixos só ocultam — voltam pelos chips)
+const deleteTileKpi = tile => {
+  if (!tile?.def) return;
+  // eslint-disable-next-line no-alert
+  if (!window.confirm(`Excluir o indicador "${tile.label}"? (dá pra recriar no "+" ou restaurando o modelo)`)) return;
+  deleteKpi(tile.def);
+};
+const saveBlockLayout = async half => {
   const all = { ...(crmSettings.value?.block_layout || {}) };
   all[selectedPanel.value] = {
     top: [...dragTopBlocks.value],
     main: [...dragMainBlocks.value],
+    half: Array.isArray(half) ? half : [...halfBlocks.value],
   };
   isSavingLayout.value = true;
   try {
@@ -2695,11 +2861,18 @@ const ALERT_KIND_META = {
     label: 'Respondeu NÃO ao lembrete da consulta',
     color: '#db2777',
   },
+  // item 251: sintoma de alerta no pós-operatório (tarefa urgente aberta pelo Atendente de Pós-operatório)
+  pos_op_atencao: {
+    icon: 'i-lucide-heart-pulse',
+    label: 'Pós-operatório: atenção agora',
+    color: '#be123c',
+  },
 };
 const alertKindMeta = alert => ALERT_KIND_META[alert?.kind] || null;
 const isAgentAlert = alert =>
   String(alert?.kind || '').startsWith('agente_') ||
-  alert?.kind === 'nao_confirmou';
+  alert?.kind === 'nao_confirmou' ||
+  alert?.kind === 'pos_op_atencao';
 const openAgendaFromAlert = alert =>
   router.push({
     name: 'agenda_board',
@@ -3710,6 +3883,42 @@ onUnmounted(() => {
             <span class="i-lucide-palette text-xs" />
             Paleta
           </button>
+          <!-- item 248: modelos prontos · média histórica · recolher blocos -->
+          <button
+            v-if="isAdmin"
+            class="cv-btn cv-btn-sm"
+            title="Painéis prontos com os nossos indicadores, cores e a média histórica"
+            @click="showPresets = true"
+          >
+            <span class="i-lucide-layout-template text-xs" />
+            Modelos
+          </button>
+          <button
+            v-if="isAdmin && currentPreset"
+            class="cv-btn cv-btn-ghost cv-btn-sm"
+            :title="`Volta este painel ao modelo &quot;${currentPreset.label}&quot; (cards, tamanhos e cores)`"
+            @click="restorePreset"
+          >
+            <span class="i-lucide-rotate-ccw text-xs" />
+            restaurar modelo
+          </button>
+          <button
+            class="cv-btn cv-btn-sm"
+            :class="histJudgeOn ? '' : 'cv-btn-ghost'"
+            title="Cada card compara o período com a média dos últimos 90 dias: acima brilha, abaixo fica âmbar"
+            @click="toggleHistJudge"
+          >
+            <span class="i-lucide-activity text-xs" />
+            média histórica {{ histJudgeOn ? 'ligada' : 'desligada' }}
+          </button>
+          <button
+            class="cv-btn cv-btn-ghost cv-btn-sm"
+            title="Recolhe os blocos em barrinhas (mais fácil pra reordenar)"
+            @click="collapseBlocks = !collapseBlocks"
+          >
+            <span :class="collapseBlocks ? 'i-lucide-unfold-vertical' : 'i-lucide-fold-vertical'" class="text-xs" />
+            {{ collapseBlocks ? 'abrir blocos' : 'recolher blocos' }}
+          </button>
           <span
             v-if="isSavingLayout"
             class="i-lucide-loader-circle animate-spin text-sm text-n-slate-10"
@@ -3866,10 +4075,11 @@ onUnmounted(() => {
           :animation="220"
           :disabled="!organizeMode"
           ghost-class="opacity-30"
+          class="grid grid-cols-1 lg:grid-cols-2 gap-x-6"
           @end="saveBlockLayout"
         >
           <template #item="{ element: blockId }">
-            <section :style="blockVars(blockId)">
+            <section :style="blockVars(blockId)" class="min-w-0" :class="blockHalf(blockId) ? '' : 'lg:col-span-2'">
               <div
                 v-if="organizeMode"
                 class="cevico-block-handle cv-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 text-xs font-semibold"
@@ -3898,6 +4108,16 @@ class="text-xs"/></span>
                   <span class="i-lucide-palette text-[10px]" />
                   {{ blockPalette(blockId).label }}
                 </button>
+                <button
+                  class="cv-chip"
+                  :title="blockHalf(blockId) ? 'Voltar à largura inteira' : 'Meia largura — fica lado a lado com o bloco vizinho'"
+                  @pointerdown.stop
+                  @mousedown.stop
+                  @click.stop="toggleBlockHalf(blockId)"
+                >
+                  <span :class="blockHalf(blockId) ? 'i-lucide-rectangle-horizontal' : 'i-lucide-columns-2'" class="text-[10px]" />
+                  {{ blockHalf(blockId) ? 'inteiro' : 'metade' }}
+                </button>
                 <span
                   class="text-n-slate-9 font-normal ml-auto hidden sm:inline"
                   >⠿ arraste pra mudar a ordem</span>
@@ -3905,7 +4125,7 @@ class="text-xs"/></span>
 
               <!-- no modo edição os blocos RECOLHEM em barrinhas: arrasto curto,
                  sem rolagem infinita no meio do movimento -->
-              <template v-if="!organizeMode">
+              <template v-if="!organizeMode || !collapseBlocks">
                 <template v-if="blockId === 'whatsapp'">
                   <!-- 💬 Números de WhatsApp (item 88 v2 — pedido 20/07): faixa MINI
              e discreta com o STATUS DA CONTA na Meta; fica vermelha só
@@ -4713,10 +4933,11 @@ class="text-xs"/></span>
           :animation="220"
           :disabled="!organizeMode"
           ghost-class="opacity-30"
+          class="grid grid-cols-1 lg:grid-cols-2 gap-x-6"
           @end="saveBlockLayout"
         >
           <template #item="{ element: blockId }">
-            <section :style="blockVars(blockId)">
+            <section :style="blockVars(blockId)" class="min-w-0" :class="blockHalf(blockId) ? '' : 'lg:col-span-2'">
               <div
                 v-if="organizeMode"
                 class="cevico-block-handle cv-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 text-xs font-semibold"
@@ -4745,6 +4966,16 @@ class="text-xs"/></span>
                   <span class="i-lucide-palette text-[10px]" />
                   {{ blockPalette(blockId).label }}
                 </button>
+                <button
+                  class="cv-chip"
+                  :title="blockHalf(blockId) ? 'Voltar à largura inteira' : 'Meia largura — fica lado a lado com o bloco vizinho'"
+                  @pointerdown.stop
+                  @mousedown.stop
+                  @click.stop="toggleBlockHalf(blockId)"
+                >
+                  <span :class="blockHalf(blockId) ? 'i-lucide-rectangle-horizontal' : 'i-lucide-columns-2'" class="text-[10px]" />
+                  {{ blockHalf(blockId) ? 'inteiro' : 'metade' }}
+                </button>
                 <span
                   v-if="blockId === 'indicadores'"
                   class="text-n-slate-9 font-normal ml-auto hidden sm:inline"
@@ -4757,7 +4988,7 @@ class="text-xs"/></span>
 
               <!-- no modo edição só a FILEIRA fica aberta (é nela que se mexe
                  nos cards); os demais blocos recolhem em barrinhas -->
-              <template v-if="!organizeMode || blockId === 'indicadores'">
+              <template v-if="!organizeMode || !collapseBlocks || blockId === 'indicadores'">
                 <template v-if="blockId === 'indicadores'">
                   <template v-if="!currentPanel.custom">
                     <!-- Indicadores do período — mudam com o painel escolhido -->
@@ -4801,7 +5032,10 @@ class="text-xs"/></span>
                           v-else
                           class="cv-tile relative rounded-2xl p-4 sm:p-5 text-white shadow-lg transition-all duration-700"
                           :class="[
-                            tile.big ? 'col-span-2 row-span-2 flex flex-col' : '',
+                            'flex flex-col',
+                            tile.big ? 'col-span-2 row-span-2' : '',
+                            tileHist(tile)?.dir === 'up' ? 'cv-tile-hist-up' : '',
+                            tileHist(tile)?.dir === 'down' ? 'cv-tile-hist-down' : '',
                             tileVisual(tile).pulse ? 'cevico-meta-pulse' : '',
                             tileVisual(tile).isRecord
                               ? 'ring-2 ring-amber-300/80'
@@ -4818,10 +5052,7 @@ class="text-xs"/></span>
                             :intensity="tileVisual(tile).auraIntensity"
                             gold
                           />
-                          <div
-                            class="relative"
-                            :class="tile.big ? 'h-full flex flex-col' : ''"
-                          >
+                          <div class="relative flex-1 flex flex-col">
                             <div
                               class="flex items-center gap-1.5 mb-1.5 text-white/85"
                             >
@@ -4860,6 +5091,14 @@ class="text-xs"/></span>
                                 @click.stop="openColorPicker(tile)"
                               >
                                 <span class="i-lucide-paintbrush text-[11px]" />
+                              </button>
+                              <button
+                                v-if="organizeMode && tile.def"
+                                class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-600 transition-colors"
+                                title="Excluir este indicador de vez (volta restaurando o modelo ou criando no +)"
+                                @click.stop="deleteTileKpi(tile)"
+                              >
+                                <span class="i-lucide-trash-2 text-[11px]" />
                               </button>
                               <button
                                 v-if="organizeMode"
@@ -4949,22 +5188,15 @@ class="text-xs"/></span>
                             <!-- item 239: card GRANDE = resumo do indicador (o
                    gráfico do popup, pico/média e as primeiras linhas) -->
                             <template v-if="tile.big && tileBigSummary(tile)">
-                              <div
-                                v-if="tileBigSummary(tile).hasData"
-                                class="mt-3 rounded-xl bg-white/90 dark:bg-white/85 px-2.5 pt-2 pb-1.5 text-n-slate-12"
-                              >
-                                <MiniBars
+                              <div v-if="tileBigSummary(tile).hasData" class="mt-3">
+                                <TileLine
                                   :values="tileBigSummary(tile).values"
                                   :labels="tileBigSummary(tile).labels"
                                   :prev-values="tileBigSummary(tile).prevValues"
                                   :format="tileBigSummary(tile).format"
-                                  :color="tileBigSummary(tile).color"
-                                  :height="120"
-                                  :line="tileBigSummary(tile).values.length > 14"
+                                  :height="124"
                                 />
-                                <p
-                                  class="text-[10px] text-n-slate-11 mt-0.5 truncate"
-                                >
+                                <p class="text-[10px] text-white/80 mt-1 truncate">
                                   ✨ {{ tileBigSummary(tile).peakText }}
                                 </p>
                               </div>
@@ -4998,9 +5230,16 @@ class="text-xs"/></span>
                                 <span class="i-lucide-arrow-right text-[11px]" />
                               </button>
                             </template>
+                            <!-- item 248: selo da MÉDIA HISTÓRICA (90 dias) -->
+                            <span
+                              v-if="tileHist(tile) && tileHist(tile).dir !== 'flat'"
+                              class="self-start mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                              :class="tileHist(tile).dir === 'up' ? 'bg-white/25' : 'bg-black/25'"
+                              :title="tileHist(tile).title"
+                              >{{ tileHist(tile).text }}</span>
                             <svg
                               v-if="!tile.big && tileSpark(tile)"
-                              class="w-full mt-2"
+                              class="w-full mt-auto pt-2"
                               viewBox="0 0 100 24"
                               preserveAspectRatio="none"
                               style="height: 24px"
@@ -6744,6 +6983,51 @@ class="text-lg"
     :pal="pal"
     :title="`Paleta de cores · ${currentPanel.label}`"
   />
+  <!-- 🧩 item 248: MODELOS PRONTOS do painel -->
+  <Teleport to="body">
+    <div
+      v-if="showPresets"
+      class="cv-page cv-overlay fixed inset-0 z-[72] flex items-center justify-center bg-black/50 p-4"
+      :style="cvVars"
+      @click.self="showPresets = false"
+    >
+      <div class="cv-modal w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div class="cv-modal-head !p-5 flex items-center gap-3">
+          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-layout-template text-lg" /></span>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-bold">Modelos prontos · {{ currentPanel.label }}</p>
+            <p class="text-[11px] text-white/80">nossos indicadores já montados, com cores das paletas e a média histórica ligada — os cards de agora ficam ocultos (voltam pelos chips)</p>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn" @click="showPresets = false"><span class="i-lucide-x text-sm" /></button>
+        </div>
+        <div class="p-5 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div v-for="pr in panelPresets" :key="pr.key" class="cv-ag-block p-4 flex flex-col gap-3">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">{{ pr.emoji }}</span>
+              <p class="cv-ag-block-title flex-1">{{ pr.label }}</p>
+              <span v-if="currentPreset && currentPreset.key === pr.key" class="cv-chip cv-green">em uso</span>
+              <span v-else-if="!pr.panels.includes(panelBase)" class="cv-chip">de outro painel</span>
+            </div>
+            <p class="text-[11px] text-n-slate-10 leading-snug">{{ pr.desc }}</p>
+            <!-- miniatura da grade: 4 colunas, grande = 2×2 -->
+            <div class="grid grid-cols-4 gap-1 auto-rows-[18px]">
+              <span
+                v-for="(t, ti) in pr.tiles"
+                :key="pr.key + ti"
+                class="rounded-md"
+                :class="t.size === 'lg' ? 'col-span-2 row-span-2' : ''"
+                :style="t.spacer ? { border: '1.5px dashed rgb(148 163 184 / .6)' } : { background: presetSwatch(t) }"
+              />
+            </div>
+            <button class="cv-btn cv-btn-sm self-end" :disabled="isApplyingPreset" @click="applyPreset(pr)">
+              <span :class="isApplyingPreset ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-xs" />
+              Usar este modelo
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
   <!-- 🎨 Cor de qualquer card (item 143): palheta do modo organizar -->
   <Teleport to="body">
     <div
@@ -6989,5 +7273,25 @@ class="text-lg"
   .cevico-kpi-pop-leave-to .cevico-kpi-panel {
     transform: none;
   }
+}
+
+/* item 248: MÉDIA HISTÓRICA — acima (≥ +10%) brilha suave; abaixo (≤ −10%) contorno âmbar */
+.cv-tile-hist-up {
+  animation: cv-hist-glow 2.8s ease-in-out infinite;
+}
+@keyframes cv-hist-glow {
+  0%,
+  100% {
+    box-shadow: 0 14px 30px -14px rgba(0, 0, 0, 0.4), 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% {
+    box-shadow: 0 14px 30px -14px rgba(0, 0, 0, 0.4), 0 0 22px 2px rgba(255, 255, 255, 0.35);
+  }
+}
+.cv-tile-hist-down {
+  box-shadow: inset 0 0 0 2px rgba(251, 191, 36, 0.75), 0 14px 30px -14px rgba(0, 0, 0, 0.4) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cv-tile-hist-up { animation: none; }
 }
 </style>

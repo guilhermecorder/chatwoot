@@ -50,6 +50,9 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
                                  what: 'conversa com o paciente no WhatsApp da recepção até a consulta agendada' },
     'atendente_pos' => { name: 'Atendente Pós-agendamento', icon: 'i-lucide-life-buoy', color: '#0F5FA6',
                          what: 'suporte a quem já marcou: dúvidas da consulta, remarcar e cancelar' },
+    # 🩺 item 251: pós-operatório 24h com as orientações oficiais; o resto vira tarefa
+    'atendente_pos_op' => { name: 'Atendente de Pós-operatório', icon: 'i-lucide-heart-pulse', color: '#BE123C',
+                            what: 'responde 24h as dúvidas simples de quem operou (colírio, ardência, banho) e abre tarefa para a equipe no resto' },
     # 🤖📞 item 169: roda na ElevenLabs; cada ligação vira 1 linha em crm_ai_usages (custo em US$)
     'voice' => { name: 'Agente de Ligação', icon: 'i-lucide-phone-call', color: '#7C3AED',
                  what: 'assistente virtual que atende as ligações no número da clínica e liga para pacientes nas campanhas' }

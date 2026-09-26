@@ -16,8 +16,12 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   MAX_RESULTS = 5
   LOCK_TTL = 30.seconds
   NAMES = %w[buscar_consulta remarcar_consulta cancelar_consulta confirmar_presenca horarios_do_dia].freeze
+  TASK_TOOL_NAME = 'abrir_tarefa'.freeze
+  ALL_NAMES = (NAMES + [TASK_TOOL_NAME]).freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
-                  'voice' => 'Agente de Ligação' }.freeze
+                  'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
+  # 🩺 item 251: só o Atendente de Pós-operatório abre tarefa para a equipe
+  TASK_TOOL_KEYS = %w[atendente_pos_op].freeze
   WEEKDAYS_SHORT = %w[dom seg ter qua qui sex sáb].freeze
 
   attr_reader :acoes
@@ -32,7 +36,35 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   # definições para a API (input_schema em JSON Schema)
-  def definitions # rubocop:disable Metrics/MethodLength
+  def definitions
+    list = base_definitions
+    list << task_definition if TASK_TOOL_KEYS.include?(@agent_key)
+    list
+  end
+
+  # 🩺 item 251: tarefa para a pessoa responsável (Meu Painel) — dúvida do caso,
+  # sintoma de alerta, documento, pedido de humano
+  def task_definition
+    {
+      name: 'abrir_tarefa',
+      description: 'Abre uma TAREFA para a pessoa da equipe responsável (aparece no Meu Painel dela) quando a dúvida não ' \
+                   'está nas orientações oficiais, envolve o caso clínico, documento/receita/atestado, ou é um sintoma de ' \
+                   'alerta. Devolve ok=true e o id. Se já houver tarefa aberta deste paciente, ela é complementada.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          motivo: { type: 'string', description: 'Motivo em UMA frase curta (ex.: "dor forte no olho direito há 2h")' },
+          detalhes: { type: 'string', description: 'O que o paciente relatou, com as palavras dele, e o que você respondeu' },
+          urgencia: { type: 'string', enum: %w[alta normal],
+                      description: 'alta = sintoma/alerta (equipe avisada na hora); normal = dúvida/documento' }
+        },
+        required: %w[motivo urgencia],
+        additionalProperties: false
+      }
+    }
+  end
+
+  def base_definitions # rubocop:disable Metrics/MethodLength
     [
       {
         name: 'buscar_consulta',
@@ -119,6 +151,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     when 'cancelar_consulta' then cancelar(args)
     when 'confirmar_presenca' then confirmar(args)
     when 'horarios_do_dia' then horarios_do_dia(args)
+    when 'abrir_tarefa' then abrir_tarefa(args)
     else
       { ok: false, motivo: "Ferramenta desconhecida: #{name}" }
     end
@@ -297,6 +330,27 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     task.update!(description: append_note(task.description, "Presença confirmada pelo paciente (WhatsApp, #{agent_name}) em #{stamp}"))
     log_acao('confirmar_presenca', true, "presença confirmada: #{patient_name(task)} (#{when_label(task)})")
     { ok: true, consulta: serialize(task) }
+  end
+
+  # ── 🩺 tarefa para a equipe (item 251) ──────────────────────────────────
+  def abrir_tarefa(args) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return refuse('abrir_tarefa', 'Esta ferramenta não está disponível para este agente.') unless TASK_TOOL_KEYS.include?(@agent_key)
+
+    motivo = args['motivo'].to_s.strip.first(120)
+    return refuse('abrir_tarefa', 'Informe o motivo em uma frase.') if motivo.blank?
+
+    urgencia = args['urgencia'].to_s == 'alta' ? 'alta' : 'normal'
+    unless @live
+      log_acao('abrir_tarefa', true, "abriria tarefa (#{urgencia}): #{motivo} (simulado)")
+      return { simulado: true, ok: true, mensagem: 'Em sombra nada foi criado; a tarefa seria aberta para a equipe.' }
+    end
+
+    outcome = Crm::HandoffTask.open!(account: @account, contact: @contact, conversation: @conversation, agent_key: @agent_key,
+                                     motivo: motivo, detalhes: args['detalhes'], urgencia: urgencia)
+    task = outcome[:task]
+    verb = outcome[:created] ? 'abriu' : 'complementou'
+    log_acao('abrir_tarefa', true, "#{verb} tarefa ##{task.id} (#{urgencia}) p/ #{task.assignee&.name || 'equipe'}: #{motivo}")
+    { ok: true, id: task.id, criada: outcome[:created], responsavel: task.assignee&.name, urgencia: urgencia }
   end
 
   # ── vagas de um dia específico (item 200: agendamento futuro liberado) ──

@@ -41,6 +41,8 @@ module Crm::AiAgentConfig
     # O admin ainda pode escolher outro modelo/esforço por agente.
     'atendente_agendamento' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # conversa com paciente até agendar
     'atendente_pos' => { 'model' => 'claude-haiku-4-5', 'effort' => nil }, # suporte a quem já agendou (dúvidas, remarcar)
+    # 🩺 item 251: pós-operatório é o de MAIOR risco clínico — Sonnet, esforço médio
+    'atendente_pos_op' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' },
     # 🎙️ rodada 195: simulador POR TEXTO do Agente de Ligação (a voz real roda na ElevenLabs)
     'voice' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }
   ).freeze
@@ -49,7 +51,7 @@ module Crm::AiAgentConfig
   # (Instagram/comentários nas caixas escolhidas; atendentes do WhatsApp; e o
   # Agente de Ligação, cujo simulador por texto usa o mesmo motor — 195).
   # Todos os demais seguem a trava operacional de leitura.
-  RESPONDER_AGENTS = %w[instagram comments atendente_agendamento atendente_pos voice].freeze
+  RESPONDER_AGENTS = %w[instagram comments atendente_agendamento atendente_pos atendente_pos_op voice].freeze
 
   # preço US$ por milhão de tokens (entrada / saída)
   PRICING = {

@@ -87,6 +87,8 @@ const events = computed(() => {
       name: props.nameOf(it.task),
       dur: it.dur,
       short: h < 34,
+      // item 247: selos (parceiro/unidade) só quando cabem sem espremer o nome
+      roomy: h >= 50,
       style: {
         top: `${top}px`,
         height: `${h}px`,
@@ -155,6 +157,7 @@ const badges = task => {
 };
 const evClass = ev => ({
   'cv-ag-ev-short': ev.short,
+  'cv-ag-ev-tight': !ev.roomy,
   'cv-ag-ev-done': ev.task.status === 'done' && ev.task.attendance !== 'missed',
   'cv-ag-ev-missed': ev.task.attendance === 'missed',
 });
@@ -195,7 +198,7 @@ const evClass = ev => ({
       :class="evClass(ev)"
       :style="ev.style"
       draggable="true"
-      :title="`${ev.time} · ${ev.name} (${ev.dur} min) — clique abre, arraste reagenda`"
+      :title="`${ev.time} · ${ev.name} (${ev.dur} min)${ev.task.source_detail ? ' · ' + ev.task.source_detail : ''}${tagOf && tagOf(ev.task) ? ' · ' + tagOf(ev.task).label : ''} — clique abre, arraste reagenda`"
       @dragstart="emit('dragstart', ev.task)"
       @click.stop="emit('open', ev.task)"
     >

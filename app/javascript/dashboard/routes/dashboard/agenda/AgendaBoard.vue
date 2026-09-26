@@ -643,6 +643,15 @@ const toggleWeekend = () => {
 // 24/09 (pedido dele): a metade direita da visão Dia (bloco do médico +
 // conferência) RECOLHE, como a barra lateral; o calendário ganha a largura toda.
 const dayPanelOpen = ref(localStorage.getItem('cevico_agenda_day_panel') !== '0');
+// 26/09 (pedido dele: "pegar o layout de caixas" da agenda do Oftalmofácil):
+// o painel do dia tem dois jeitos — 'itens' = só as caixas do dia, limpas
+// (hora | quem e o quê | selos), como no Oftalmofácil; 'bloco' = o bloco do
+// médico com a grade de horários + conferência com os botões. Fica gravado.
+const dayPanelMode = ref(localStorage.getItem('cevico_agenda_day_panel_mode') === 'bloco' ? 'bloco' : 'itens');
+const setDayPanelMode = mode => {
+  dayPanelMode.value = mode;
+  localStorage.setItem('cevico_agenda_day_panel_mode', mode);
+};
 const toggleDayPanel = () => {
   dayPanelOpen.value = !dayPanelOpen.value;
   localStorage.setItem('cevico_agenda_day_panel', dayPanelOpen.value ? '1' : '0');
@@ -1486,8 +1495,8 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           </section>
 
           <div class="flex flex-col gap-3 min-w-0">
-            <!-- ② PERÍODO -->
-            <section class="cv-ag-block p-4 flex items-center gap-3 flex-wrap">
+            <!-- ② PERÍODO (o bloco sobe quando o calendário está aberto: backdrop-filter cria contexto de empilhamento) -->
+            <section class="cv-ag-block p-4 flex items-center gap-3 flex-wrap" :class="showDatePicker ? 'relative z-30' : ''">
               <div class="cv-icon cv-icon-lg hidden sm:inline-flex" :title="`Agenda de ${k.plural}`">
                 <span :class="k.icon" class="text-lg" />
               </div>
@@ -1977,7 +1986,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </button>
               <span v-if="pendingCount" class="cv-chip cv-amber cv-ag-rail-vert" :title="`${pendingCount} pendente(s) na conferência`">{{ pendingCount }} pend.</span>
               <span v-else-if="dayViewTasks.length" class="cv-chip cv-green" title="Conferência do dia completa">✓</span>
-              <span class="text-[10px] font-bold text-n-slate-10 cv-ag-rail-vert select-none">Bloco do médico · Conferência</span>
+              <span class="text-[10px] font-bold text-n-slate-10 cv-ag-rail-vert select-none">Itens do dia · Conferência</span>
             </div>
             <!-- divisor arrastável (só no desktop) -->
             <div
@@ -1990,14 +1999,21 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <span class="cv-ag-splitter-pill" />
             </div>
             <div v-if="dayPanelOpen" class="cv-ag-side w-full space-y-4" :class="isSplitting ? 'cv-ag-side-dragging' : ''" :style="{ '--side': dayPanelPct + '%' }">
-              <div class="flex items-center gap-2">
-                <span class="cv-label !mb-0">Bloco do médico · Conferência</span>
+              <div class="flex items-center gap-2 flex-wrap">
+                <div class="cv-seg cv-seg-sm">
+                  <button class="cv-seg-item" :class="dayPanelMode === 'itens' ? 'cv-seg-on' : ''" title="Só as caixas do dia: hora, quem, o quê e os selos (clique na caixa para abrir)" @click="setDayPanelMode('itens')">
+                    <span class="i-lucide-list text-sm" /> Itens do dia
+                  </button>
+                  <button class="cv-seg-item" :class="dayPanelMode === 'bloco' ? 'cv-seg-on' : ''" title="Bloco do médico com a grade de horários + conferência (compareceu / faltou / indicação)" @click="setDayPanelMode('bloco')">
+                    <span class="i-lucide-stethoscope text-sm" /> Bloco do médico · Conferência
+                  </button>
+                </div>
                 <button class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" title="Recolher este painel e dar a largura toda ao calendário" @click="toggleDayPanel">
                   <span class="i-lucide-panel-right-close text-sm" /> <span class="hidden sm:inline">Recolher</span>
                 </button>
               </div>
-              <!-- janelas do dia: blocos de horário (livre / ocupado / cadeado) -->
-              <div v-if="!isDayBlocked(cursor) && windowsForDay(cursor).length" class="space-y-3">
+              <!-- janelas do dia: blocos de horário (livre / ocupado / cadeado) — só no modo Bloco do médico -->
+              <div v-if="dayPanelMode === 'bloco' && !isDayBlocked(cursor) && windowsForDay(cursor).length" class="space-y-3">
                 <div v-for="win in windowsForDay(cursor)" :key="(win.doctor || win.unit) + win.start" class="cv-sub p-4" :style="winVars(win)">
                   <div class="flex items-center gap-2 flex-wrap mb-3">
                     <span class="cv-icon cv-icon-sm" :style="{ background: winColor(win) }">
@@ -2036,7 +2052,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
 
               <!-- vazio -->
-              <div v-if="!dayViewTasks.length && !windowsForDay(cursor).length && !isDayOff(cursor)" class="cv-sub text-center py-14 text-n-slate-10">
+              <div v-if="!dayViewTasks.length && (dayPanelMode === 'itens' || !windowsForDay(cursor).length) && !isDayOff(cursor)" class="cv-sub text-center py-14 text-n-slate-10">
                 <span class="cv-icon cv-icon-xl mx-auto mb-3 block"><span :class="k.icon" class="text-xl" /></span>
                 <p class="text-sm">Nenhum{{ k.article === 'a' ? 'a' : '' }} {{ k.noun }} neste dia.</p>
                 <button class="cv-btn mt-3" @click="openCreateOnDay(cursor)"><span class="i-lucide-plus text-sm" /> {{ newLabel }}</button>
@@ -2045,8 +2061,9 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <!-- Conferência do dia -->
               <template v-if="dayViewTasks.length">
                 <div class="flex items-center gap-2 flex-wrap">
-                  <span class="cv-icon cv-icon-sm"><span class="i-lucide-clipboard-check text-xs" /></span>
-                  <p class="text-sm font-bold text-n-slate-12">Conferência d{{ k.article }}s {{ k.plural }} do dia</p>
+                  <span class="cv-icon cv-icon-sm"><span :class="dayPanelMode === 'itens' ? 'i-lucide-list' : 'i-lucide-clipboard-check'" class="text-xs" /></span>
+                  <p class="text-sm font-bold text-n-slate-12">{{ dayPanelMode === 'itens' ? 'Itens do dia' : `Conferência d${k.article}s ${k.plural} do dia` }}</p>
+                  <span v-if="dayPanelMode === 'itens'" class="cv-chip cv-chip-on">{{ dayViewTasks.length }}</span>
                   <span v-if="pendingCount" class="cv-chip cv-amber">{{ pendingCount }} pendente(s)</span>
                   <span v-else class="cv-chip cv-green">tudo conferido ✓</span>
                 </div>
@@ -2095,8 +2112,8 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       </button>
                     </div>
 
-                    <!-- conferência: compareceu / faltou → indicação -->
-                    <div class="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-n-weak flex-wrap" @click.stop>
+                    <!-- conferência: compareceu / faltou → indicação (modo Bloco do médico; no modo Itens a caixa abre no clique) -->
+                    <div v-if="dayPanelMode === 'bloco'" class="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-n-weak flex-wrap" @click.stop>
                       <button class="cv-ag-act" style="--a: #059669" :class="task.attendance === 'attended' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setAttendance(task, 'attended')">
                         {{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}
                       </button>

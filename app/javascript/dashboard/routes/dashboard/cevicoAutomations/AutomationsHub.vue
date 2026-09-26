@@ -350,6 +350,27 @@ const aiAgents = ref({
     hours_end: '',
     live_days: [],
   },
+  // 🩺 item 251: pós-operatório 24h — + quem recebe as tarefas e a janela de cirurgia recente
+  atendente_pos_op: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    mode: 'shadow',
+    inbox_ids: [],
+    stage_ids: [],
+    no_card: false,
+    after_booking_stage_id: '',
+    shadow_daily_cap: 30,
+    reply_delay_seconds: 6,
+    hours_start: '',
+    hours_end: '',
+    live_days: [],
+    task_assignee_id: '',
+    recent_surgery_days: 60,
+  },
 });
 
 const LOOKBACK_OPTIONS = [
@@ -473,11 +494,16 @@ const instagramStats = () => {
   };
 };
 // 🗣️ rodada 188: atendentes do WhatsApp (A = agendamento, B = pós-agendamento)
-const RESPONDER_WA_KEYS = ['atendente_agendamento', 'atendente_pos'];
+const RESPONDER_WA_KEYS = [
+  'atendente_agendamento',
+  'atendente_pos',
+  'atendente_pos_op',
+];
 // quem CONVERSA com o paciente não "analisa": cada chamada à IA é uma resposta
 const RESPONDER_NOUN_KEYS = [
   'atendente_agendamento',
   'atendente_pos',
+  'atendente_pos_op',
   'instagram',
   'comments',
   'voice',
@@ -1573,6 +1599,8 @@ const snapshotAgent = key => {
     snap.hours_end = a.hours_end;
     snap.mode = a.mode;
     snap.live_days = [...(a.live_days || [])];
+    snap.task_assignee_id = a.task_assignee_id;
+    snap.recent_surgery_days = a.recent_surgery_days;
   }
   // 🎙️ rodada 195
   if (key === 'voice') {
@@ -1643,6 +1671,8 @@ const discardEdit = key => {
       a.hours_end = snap.hours_end;
       a.mode = snap.mode || 'shadow';
       a.live_days = [...(snap.live_days || [])];
+      a.task_assignee_id = snap.task_assignee_id || '';
+      a.recent_surgery_days = snap.recent_surgery_days;
     }
     // 🎙️ rodada 195
     if (key === 'voice') {
@@ -1722,6 +1752,16 @@ const packAgentFields = key => {
       30,
       Math.max(3, Number(a.reply_delay_seconds) || 6)
     );
+    if (key === 'atendente_pos_op') {
+      // 🩺 quem recebe as tarefas + janela de cirurgia recente pela Agenda (0 = só pela coluna)
+      fields.task_assignee_id = a.task_assignee_id
+        ? Number(a.task_assignee_id)
+        : null;
+      fields.recent_surgery_days = Math.min(
+        365,
+        Math.max(0, Number(a.recent_surgery_days) || 0)
+      );
+    }
     fields.hours_start = a.hours_start || '';
     fields.hours_end = a.hours_end || '';
     // 🟢 rodada 193: ao vivo só dentro da janela (dias + horas); fora dela
@@ -2134,6 +2174,40 @@ const AGENT_META = {
     suggestion:
       'Conversa ao vivo — Sonnet no esforço médio equilibra qualidade e custo. Compare na tela Sombra antes de ligar.',
   },
+  // 🩺 item 251: pós-operatório 24h — orientações oficiais + tarefa para a equipe
+  atendente_pos_op: {
+    title: 'Atendente de Pós-operatório',
+    icon: 'i-lucide-heart-pulse',
+    gradient: 'linear-gradient(135deg, #BE123C, #FB7185)',
+    color: '#BE123C',
+    tag: 'WhatsApp · pós-op 24h',
+    description:
+      'Acolhe quem JÁ OPEROU, a qualquer hora: ardência, areia no olho, colírio (como pingar, nunca muda a receita), banho, cabelo, telas, maquiagem, sol, exercício, viagem, compressas (PRK × LASIK), lente terapêutica e o retorno — com os textos das orientações oficiais da clínica. O que sai disso (dúvida do caso, receita, atestado, insatisfação) vira TAREFA no Meu Painel da responsável; sintoma de alerta (dor forte, perda de visão, secreção, trauma) orienta pronto atendimento, avisa a equipe na hora e o agente se pausa. Lê a cirurgia na Agenda (data, procedimento, há quantos dias). Nasce em SOMBRA.',
+    triggers: [
+      {
+        icon: 'i-lucide-message-square',
+        label:
+          'Mensagem do paciente numa caixa de WhatsApp escolhida (24h; espera os segundos de "Responde em")',
+      },
+      {
+        icon: 'i-lucide-columns-3',
+        label:
+          'Nas colunas marcadas (ex.: Cirurgia Realizada, Pós Operatório) OU com cirurgia realizada na Agenda nos últimos N dias',
+      },
+      {
+        icon: 'i-lucide-clipboard-list',
+        label:
+          'Abre tarefa para a pessoa responsável em tudo que não é dúvida simples; sintoma de alerta = tarefa urgente + aviso no painel',
+      },
+      {
+        icon: 'i-lucide-shield-alert',
+        label:
+          'Nunca diagnostica, nunca muda colírio, nunca promete resultado. Paciente de parceiro do hub nunca recebe.',
+      },
+    ],
+    suggestion:
+      'Maior risco clínico dos atendentes: Sonnet no esforço médio. Deixe em sombra por mais tempo e revise as notas antes de ligar.',
+  },
   atendente_pos: {
     title: 'Atendente Pós-agendamento',
     icon: 'i-lucide-life-buoy',
@@ -2501,6 +2575,7 @@ const AGENT_GROUPS = [
     keys: [
       'atendente_agendamento',
       'atendente_pos',
+      'atendente_pos_op',
       'conversation',
       'scheduler',
       'instagram',
@@ -2669,6 +2744,9 @@ const loadAgents = async () => {
         (draft?.reply_delay_seconds ?? real.reply_delay_seconds) || 6,
       hours_start: (draft?.hours_start ?? real.hours_start) || '',
       hours_end: (draft?.hours_end ?? real.hours_end) || '',
+      task_assignee_id: (draft?.task_assignee_id ?? real.task_assignee_id) || '',
+      recent_surgery_days:
+        draft?.recent_surgery_days ?? real.recent_surgery_days ?? 60,
     };
   };
   aiAgents.value = {
@@ -2693,6 +2771,7 @@ const loadAgents = async () => {
     },
     atendente_agendamento: loadResponder('atendente_agendamento'),
     atendente_pos: loadResponder('atendente_pos'),
+    atendente_pos_op: loadResponder('atendente_pos_op'),
     opportunity: {
       ...load('opportunity'),
       watchers: oppDraft?.watchers?.length
@@ -3170,6 +3249,20 @@ const toggleStopLabel = title => {
 // Cada régua: hora, caixa do WhatsApp e mensagem modelo ({{hora}} e
 // {{unidade}} nas variáveis viram o dado da consulta; {{contact.name}} = nome)
 const REMINDER_DEFAULTS = {
+  // 📋 item 250 (26/09): D-2 = confirmação COMPLETA (endereço, valor, regras),
+  // modelo por unidade, sombra antes de desligar o N8N, sexta adianta a segunda
+  d2: {
+    enabled: false,
+    hour: 10,
+    inbox_id: null,
+    template_params: null,
+    message_preview: '',
+    mode: 'shadow',
+    default_value: '150,00',
+    weekend_bridge: true,
+    modalities: ['avaliacao', 'retorno'],
+    units: {},
+  },
   d1: {
     enabled: false,
     hour: 10,
@@ -3186,14 +3279,44 @@ const REMINDER_DEFAULTS = {
   },
 };
 const REMINDER_LABELS = {
+  d2: '📋 Dois dias antes (D-2) — confirmação completa, por unidade',
   d1: '📨 Véspera (D-1) — pede confirmação',
   d0: '☀️ No dia (D-0) — o lembrete da manhã',
 };
+const REMINDER_KEYS = ['d2', 'd1', 'd0'];
+// slots de modelo: a D-2 tem um modelo por UNIDADE (+ um geral, opcional)
+const REMINDER_UNITS = [
+  { key: 'paulista', label: 'Av. Paulista' },
+  { key: 'tatuape', label: 'Tatuapé' },
+];
+const reminderSlots = k =>
+  k === 'd2' ? [...REMINDER_UNITS.map(u => `d2:${u.key}`), 'd2'] : [k];
+const slotBase = slot => slot.split(':')[0];
+const slotLabel = slot => {
+  const unit = slot.split(':')[1];
+  if (!unit) return slot === 'd2' ? 'Modelo geral (outros locais)' : '';
+  return `Modelo da ${REMINDER_UNITS.find(u => u.key === unit)?.label || unit}`;
+};
+const REMINDER_MODALITIES = [
+  { key: 'avaliacao', label: 'Avaliação' },
+  { key: 'retorno', label: 'Retorno' },
+  { key: 'teleconsulta', label: 'Teleconsulta' },
+  { key: 'exames', label: 'Exames' },
+];
 const apptReminders = ref(JSON.parse(JSON.stringify(REMINDER_DEFAULTS)));
-const reminderTemplates = ref({ d1: [], d0: [] });
-const reminderTplName = ref({ d1: '', d0: '' });
-const reminderVars = ref({ d1: {}, d0: {} });
+const reminderTemplates = ref({ d2: [], d1: [], d0: [] });
+const reminderTplName = ref({ 'd2:paulista': '', 'd2:tatuape': '', d2: '', d1: '', d0: '' });
+const reminderVars = ref({ 'd2:paulista': {}, 'd2:tatuape': {}, d2: {}, d1: {}, d0: {} });
 const savingReminders = ref(false);
+const reminderState = computed(
+  () => settings.value?.appointment_reminders_state?.d2 || null
+);
+const toggleReminderModality = m => {
+  const list = apptReminders.value.d2.modalities || [];
+  apptReminders.value.d2.modalities = list.includes(m)
+    ? list.filter(x => x !== m)
+    : [...list, m];
+};
 
 const loadReminderTemplates = async (k, inboxId) => {
   if (!inboxId) return;
@@ -3209,16 +3332,35 @@ watch(
   s => {
     const cfgAll = s?.appointment_reminders;
     if (!cfgAll) return;
-    ['d1', 'd0'].forEach(k => {
+    REMINDER_KEYS.forEach(k => {
       const c = cfgAll[k];
       if (!c) return;
       apptReminders.value[k] = {
+        ...REMINDER_DEFAULTS[k],
         enabled: !!c.enabled,
         hour: c.hour ?? REMINDER_DEFAULTS[k].hour,
         inbox_id: c.inbox_id || null,
         template_params: c.template_params || null,
         message_preview: c.message_preview || '',
       };
+      if (k === 'd2') {
+        apptReminders.value.d2.mode = c.mode === 'live' ? 'live' : 'shadow';
+        apptReminders.value.d2.default_value = c.default_value || '150,00';
+        apptReminders.value.d2.weekend_bridge = c.weekend_bridge !== false;
+        apptReminders.value.d2.modalities = c.modalities?.length
+          ? [...c.modalities]
+          : ['avaliacao', 'retorno'];
+        apptReminders.value.d2.units = JSON.parse(
+          JSON.stringify(c.units || {})
+        );
+        REMINDER_UNITS.forEach(u => {
+          const ut = c.units?.[u.key]?.template_params;
+          reminderTplName.value[`d2:${u.key}`] = ut?.name || '';
+          reminderVars.value[`d2:${u.key}`] = {
+            ...(ut?.processed_params?.body || {}),
+          };
+        });
+      }
       reminderTplName.value[k] = c.template_params?.name || '';
       reminderVars.value[k] = {
         ...(c.template_params?.processed_params?.body || {}),
@@ -3232,15 +3374,51 @@ const whatsappInboxesRobos = computed(() =>
   (inboxes.value || []).filter(i => i.channel_type === 'Channel::Whatsapp')
 );
 const onReminderInbox = k => {
-  reminderTplName.value[k] = '';
-  reminderVars.value[k] = {};
+  reminderSlots(k).forEach(slot => {
+    reminderTplName.value[slot] = '';
+    reminderVars.value[slot] = {};
+  });
   loadReminderTemplates(k, apptReminders.value[k].inbox_id);
 };
+// k pode ser uma régua ('d1') ou um slot da D-2 ('d2:paulista'): a lista de
+// modelos é sempre a da caixa da régua
 const reminderTpl = k =>
-  reminderTemplates.value[k].find(t => t.name === reminderTplName.value[k]) ||
-  null;
+  (reminderTemplates.value[slotBase(k)] || []).find(
+    t => t.name === reminderTplName.value[k]
+  ) || null;
 const reminderBody = k =>
   reminderTpl(k)?.components?.find(c => c.type === 'BODY')?.text || '';
+const savedSlotName = slot => {
+  const unit = slot.split(':')[1];
+  if (unit) return apptReminders.value.d2.units?.[unit]?.template_params?.name;
+  return apptReminders.value[slot]?.template_params?.name;
+};
+const slotPayload = slot => {
+  const tpl = reminderTpl(slot);
+  if (tpl) {
+    return {
+      template_params: {
+        name: tpl.name,
+        namespace: tpl.namespace ?? '',
+        language: tpl.language,
+        category: tpl.category,
+        processed_params: { body: { ...reminderVars.value[slot] } },
+      },
+      message_preview: reminderBody(slot),
+    };
+  }
+  const unit = slot.split(':')[1];
+  const saved = unit
+    ? apptReminders.value.d2.units?.[unit]
+    : apptReminders.value[slot];
+  // mantém a modelo já salva quando o admin não re-selecionou
+  return saved?.template_params
+    ? {
+        template_params: saved.template_params,
+        message_preview: saved.message_preview,
+      }
+    : {};
+};
 const reminderTokens = k => {
   const s = new Set();
   const re = /\{\{\s*(\d+)\s*\}\}/g;
@@ -3254,25 +3432,33 @@ const reminderTokens = k => {
 };
 const saveReminders = async () => {
   const payload = {};
-  for (const k of ['d1', 'd0']) {
+  for (const k of REMINDER_KEYS) {
     const r = apptReminders.value[k];
-    const tpl = reminderTpl(k);
-    payload[k] = { enabled: r.enabled, hour: r.hour, inbox_id: r.inbox_id };
-    if (tpl) {
-      payload[k].template_params = {
-        name: tpl.name,
-        namespace: tpl.namespace ?? '',
-        language: tpl.language,
-        category: tpl.category,
-        processed_params: { body: { ...reminderVars.value[k] } },
-      };
-      payload[k].message_preview = reminderBody(k);
-    } else if (r.template_params) {
-      // mantém a modelo já salva quando o admin não re-selecionou
-      payload[k].template_params = r.template_params;
-      payload[k].message_preview = r.message_preview;
-    }
-    if (
+    payload[k] = {
+      enabled: r.enabled,
+      hour: r.hour,
+      inbox_id: r.inbox_id,
+      ...slotPayload(k),
+    };
+    if (k === 'd2') {
+      payload.d2.mode = r.mode === 'live' ? 'live' : 'shadow';
+      payload.d2.default_value = r.default_value || '150,00';
+      payload.d2.weekend_bridge = r.weekend_bridge !== false;
+      payload.d2.modalities = r.modalities || [];
+      payload.d2.units = {};
+      REMINDER_UNITS.forEach(u => {
+        const p = slotPayload(`d2:${u.key}`);
+        if (p.template_params) payload.d2.units[u.key] = p;
+      });
+      const hasTemplate =
+        payload.d2.template_params || Object.keys(payload.d2.units).length;
+      if (payload.d2.enabled && payload.d2.mode === 'live' && (!payload.d2.inbox_id || !hasTemplate)) {
+        useAlert(
+          'Para a confirmação D-2 ficar ao vivo, escolha a caixa e pelo menos um modelo (Paulista ou Tatuapé).'
+        );
+        return;
+      }
+    } else if (
       payload[k].enabled &&
       (!payload[k].inbox_id || !payload[k].template_params)
     ) {
@@ -3573,13 +3759,16 @@ onUnmounted(() => {
               <Spinner v-if="savingReminders" :size="14" class="text-n-brand" />
             </div>
             <p class="mt-1 text-[11px] text-n-slate-10 leading-relaxed">
-              Pela <b>data da consulta</b>: a véspera pede a confirmação
-              ("responde SIM") e a manhã do dia lembra o paciente. Quem responde
-              confirmando ganha o ✅ registrado na conversa. Envio por
-              <b>mensagem modelo</b> — chega mesmo fora da janela de 24h.
+              Pela <b>data da consulta</b>, lendo a <b>nossa Agenda</b>: dois
+              dias antes vai a confirmação completa (endereço, valor, regras —
+              o que o N8N mandava lendo o Google Agenda), a véspera pede a
+              confirmação ("responde SIM") e a manhã do dia lembra o paciente.
+              Quem responde confirmando ganha o ✅ registrado na conversa e na
+              consulta. Envio por <b>mensagem modelo</b> — chega mesmo fora da
+              janela de 24h. Paciente de parceiro do hub nunca recebe.
             </p>
             <div
-              v-for="k in ['d1', 'd0']"
+              v-for="k in REMINDER_KEYS"
               :key="`rem-${k}`"
               class="mt-3 p-3 rounded-lg bg-n-solid-1 border border-n-weak"
             >
@@ -3617,6 +3806,57 @@ onUnmounted(() => {
                   </option>
                 </select>
               </div>
+              <!-- 📋 D-2: sombra × ao vivo, valor padrão, ponte de fim de semana, modalidades -->
+              <template v-if="k === 'd2'">
+                <div class="mt-2 flex items-center gap-2 flex-wrap text-[11px] text-n-slate-11">
+                  <div class="cv-seg cv-seg-sm cv-green">
+                    <button
+                      class="cv-seg-item"
+                      :class="apptReminders.d2.mode !== 'live' ? 'cv-seg-on' : ''"
+                      title="Só lista quem receberia (para comparar com o N8N). Nada chega ao paciente."
+                      @click="apptReminders.d2.mode = 'shadow'"
+                    >
+                      🕶️ Sombra
+                    </button>
+                    <button
+                      class="cv-seg-item"
+                      :class="apptReminders.d2.mode === 'live' ? 'cv-seg-on' : ''"
+                      title="Manda de verdade. Desligue o fluxo do N8N antes — nunca os dois juntos."
+                      @click="apptReminders.d2.mode = 'live'"
+                    >
+                      🟢 Ao vivo
+                    </button>
+                  </div>
+                  <label class="flex items-center gap-1">
+                    valor padrão R$
+                    <input
+                      v-model="apptReminders.d2.default_value"
+                      class="text-xs border border-n-weak rounded-lg px-2 py-1 bg-n-solid-2"
+                      style="margin-bottom: 0; width: 72px"
+                      placeholder="150,00"
+                    />
+                  </label>
+                  <label class="flex items-center gap-1 cursor-pointer" title="Na sexta manda também a de segunda (como o N8N fazia)">
+                    <input v-model="apptReminders.d2.weekend_bridge" type="checkbox" style="margin: 0" />
+                    sexta adianta a de segunda
+                  </label>
+                  <span class="ml-auto flex items-center gap-1 flex-wrap">
+                    <button
+                      v-for="m in REMINDER_MODALITIES"
+                      :key="`rm-${m.key}`"
+                      class="cv-chip"
+                      :class="(apptReminders.d2.modalities || []).includes(m.key) ? 'cv-chip-on' : ''"
+                      @click="toggleReminderModality(m.key)"
+                    >
+                      {{ m.label }}
+                    </button>
+                  </span>
+                </div>
+                <p class="mt-1 text-[10px] text-n-slate-9">
+                  Valor: se a observação da consulta tiver "Valor: 250,00" (ou "R$ 250"), vale ela; senão o padrão. Quem já
+                  confirmou não recebe de novo. Só as modalidades marcadas recebem.
+                </p>
+              </template>
               <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <select
                   v-model.number="apptReminders[k].inbox_id"
@@ -3633,49 +3873,77 @@ onUnmounted(() => {
                     {{ i.name }}
                   </option>
                 </select>
-                <select
-                  v-model="reminderTplName[k]"
-                  class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2"
-                  style="margin-bottom: 0"
-                >
-                  <option value="">
-                    {{
-                      apptReminders[k].template_params?.name
-                        ? `Modelo salva: ${apptReminders[k].template_params.name}`
-                        : 'Mensagem modelo…'
-                    }}
-                  </option>
-                  <option
-                    v-for="t in reminderTemplates[k]"
-                    :key="`rt-${k}-${t.name}-${t.language}`"
-                    :value="t.name"
-                  >
-                    {{ t.name }} ({{ t.language }})
-                  </option>
-                </select>
-              </div>
-              <template v-if="reminderTpl(k)">
-                <p
-                  class="mt-2 text-[11px] text-n-slate-10 whitespace-pre-wrap bg-n-alpha-1 rounded-lg px-2 py-1.5"
-                >
-                  {{ reminderBody(k) }}
-                </p>
-                <div class="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                  <input
-                    v-for="token in reminderTokens(k)"
-                    :key="`rv-${k}-${token}`"
-                    v-model="reminderVars[k][token]"
-                    class="text-xs border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2 font-mono"
+                <template v-for="slot in reminderSlots(k)" :key="`rs-${slot}`">
+                  <p v-if="k === 'd2'" class="text-[11px] font-semibold text-n-slate-11 sm:col-span-2 -mb-1 mt-1">
+                    {{ slotLabel(slot) }}
+                  </p>
+                  <select
+                    v-model="reminderTplName[slot]"
+                    class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2"
+                    :class="k === 'd2' ? 'sm:col-span-2' : ''"
                     style="margin-bottom: 0"
-                    :placeholder="`Variável {{${token}}} — ex.: {{contact.name}}, {{hora}} ou {{unidade}}`"
-                  />
-                </div>
-                <p class="mt-1 text-[10px] text-n-slate-9">
-                  Nas variáveis: <code>{{ '\{\{contact.name\}\}' }}</code> =
-                  nome · <code>{{ '\{\{hora\}\}' }}</code> = horário da consulta
-                  · <code>{{ '\{\{unidade\}\}' }}</code> = Av. Paulista/Tatuapé
+                  >
+                    <option value="">
+                      {{
+                        savedSlotName(slot)
+                          ? `Modelo salva: ${savedSlotName(slot)}`
+                          : 'Mensagem modelo…'
+                      }}
+                    </option>
+                    <option
+                      v-for="t in reminderTemplates[k]"
+                      :key="`rt-${slot}-${t.name}-${t.language}`"
+                      :value="t.name"
+                    >
+                      {{ t.name }} ({{ t.language }})
+                    </option>
+                  </select>
+                  <template v-if="reminderTpl(slot)">
+                    <p
+                      class="text-[11px] text-n-slate-10 whitespace-pre-wrap bg-n-alpha-1 rounded-lg px-2 py-1.5 sm:col-span-2"
+                    >
+                      {{ reminderBody(slot) }}
+                    </p>
+                    <input
+                      v-for="token in reminderTokens(slot)"
+                      :key="`rv-${slot}-${token}`"
+                      v-model="reminderVars[slot][token]"
+                      class="text-xs border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2 font-mono"
+                      style="margin-bottom: 0"
+                      :placeholder="`Variável {{${token}}} — ex.: {{nome}}, {{data}}, {{hora}}, {{valor}} ou {{unidade}}`"
+                    />
+                  </template>
+                </template>
+              </div>
+              <p class="mt-1 text-[10px] text-n-slate-9">
+                Nas variáveis: <code>{{ '\{\{nome\}\}' }}</code> = nome do paciente ·
+                <code>{{ '\{\{data\}\}' }}</code> = data dd/mm/aaaa ·
+                <code>{{ '\{\{hora\}\}' }}</code> = horário ·
+                <code>{{ '\{\{valor\}\}' }}</code> = valor da avaliação ·
+                <code>{{ '\{\{unidade\}\}' }}</code> = Av. Paulista/Tatuapé ·
+                <code>{{ '\{\{contact.name\}\}' }}</code> = nome do cadastro
+              </p>
+              <!-- última rodada da D-2: quem recebeu / receberia e quem foi pulado -->
+              <div
+                v-if="k === 'd2' && reminderState"
+                class="mt-2 p-2.5 rounded-lg bg-n-alpha-1 text-[11px] text-n-slate-11"
+              >
+                <p class="font-semibold">
+                  Última rodada ({{ reminderState.mode === 'live' ? 'ao vivo' : 'sombra' }}) —
+                  {{ new Date(reminderState.last_run_at).toLocaleString('pt-BR') }} · consultas de
+                  {{ (reminderState.dates || []).map(d => new Date(`${d}T12:00:00`).toLocaleDateString('pt-BR')).join(' e ') }}:
+                  <b>{{ (reminderState.sent || []).length }}</b>
+                  {{ reminderState.mode === 'live' ? 'enviada(s)' : 'receberia(m)' }} ·
+                  <b>{{ (reminderState.skipped || []).length }}</b> pulada(s)
                 </p>
-              </template>
+                <p v-for="e in (reminderState.sent || []).slice(0, 40)" :key="`rs-s-${e.task_id}`">
+                  ✓ {{ e.when }} · {{ e.name }} · {{ e.unit }} · …{{ e.phone_tail }}
+                  <span class="text-n-slate-9">{{ e.template ? `(${e.template})` : '' }}</span>
+                </p>
+                <p v-for="e in (reminderState.skipped || []).slice(0, 40)" :key="`rs-k-${e.task_id}`" class="text-amber-700">
+                  ↷ {{ e.when }} · {{ e.name }} · {{ e.unit }} — {{ e.why }}
+                </p>
+              </div>
             </div>
             <div class="mt-3 flex items-center gap-2">
               <button
@@ -5002,11 +5270,65 @@ onUnmounted(() => {
                           {{
                             key === 'atendente_agendamento'
                               ? 'Sugestão inicial: Sem card + Novos Contatos + Envio de Orçamento.'
-                              : 'Sugestão inicial: Agendamento de Consulta + Consulta Confirmada + Desmarcou a Consulta.'
+                              : key === 'atendente_pos_op'
+                                ? 'Sugestão inicial: Cirurgia Realizada + Pós Operatório (e a janela de cirurgia recente abaixo cobre quem está fora da coluna).'
+                                : 'Sugestão inicial: Agendamento de Consulta + Consulta Confirmada + Desmarcou a Consulta.'
                           }}
                           Card mudou de coluna = muda quem fala, na hora. Uma
                           coluna tem um dono só.
                         </p>
+                      </div>
+
+                      <!-- 🩺 pós-op (item 251): quem recebe as tarefas + cirurgia recente pela Agenda -->
+                      <div
+                        v-if="key === 'atendente_pos_op'"
+                        class="grid grid-cols-1 sm:grid-cols-2 gap-3"
+                      >
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Quem recebe as tarefas
+                            <span class="text-n-slate-9 font-normal">(Meu Painel)</span></label>
+                          <select
+                            v-model="agent.task_assignee_id"
+                            :disabled="!editingAgent[key]"
+                            class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                          >
+                            <option value="">— quem cuida da coluna do paciente —</option>
+                            <option
+                              v-for="u in teamAgents"
+                              :key="`pos-op-owner-${u.id}`"
+                              :value="u.id"
+                            >
+                              {{ u.name }}
+                            </option>
+                          </select>
+                          <p class="text-[10px] text-n-slate-9 mt-1">
+                            Sem escolha: vale quem cuida da coluna do paciente
+                            (Painéis) ou o responsável pela conferência de
+                            cirurgia. Sintoma de alerta também acende o aviso
+                            no painel.
+                          </p>
+                        </div>
+                        <div>
+                          <label
+                            class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                            >Cirurgia recente na Agenda
+                            <span class="text-n-slate-9 font-normal">(dias)</span></label>
+                          <input
+                            v-model.number="agent.recent_surgery_days"
+                            type="number"
+                            min="0"
+                            max="365"
+                            :disabled="!editingAgent[key]"
+                            class="cv-input w-full text-sm disabled:cursor-not-allowed"
+                          />
+                          <p class="text-[10px] text-n-slate-9 mt-1">
+                            Quem operou nesses últimos dias (pela Agenda, inclusive
+                            Oftalmofácil) é atendido por este agente mesmo que o
+                            card não esteja na coluna. 0 = só pela coluna.
+                          </p>
+                        </div>
                       </div>
 
                       <!-- ao agendar → coluna / teto da sombra / responde em / horário -->

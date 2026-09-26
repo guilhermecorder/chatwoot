@@ -234,6 +234,9 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
     send_replies(conversation, Array(result[:mensagens]), trigger_message_id, agent_key)
     handoff_note(conversation, agent_key) if result[:chamar_humano]
+    # 🩺 item 251: no pós-operatório, chamar humano SEMPRE deixa uma tarefa no
+    # Meu Painel da responsável (mesmo que a IA tenha esquecido a ferramenta)
+    ensure_handoff_task(conversation, result, agent_key) if result[:chamar_humano] && agent_key == 'atendente_pos_op'
     pause_reason = pause_reason_for(result, booked)
     pause!(conversation, pause_reason, agent_key) if pause_reason
     detail = "etapa #{result[:etapa]} · #{Array(result[:mensagens]).size} msg(s)"
@@ -313,6 +316,16 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
         additional_attributes: { 'cevico_ia_agent' => agent_key }
       )
     end
+  end
+
+  def ensure_handoff_task(conversation, result, agent_key)
+    return if Array(result[:acoes]).any? { |a| a['ferramenta'] == 'abrir_tarefa' && a['ok'] }
+
+    Crm::HandoffTask.open!(account: conversation.account, contact: conversation.contact, conversation: conversation,
+                           agent_key: agent_key, motivo: result[:leitura].to_s.presence || 'Paciente pediu atenção da equipe',
+                           detalhes: Array(result[:mensagens]).join(' '), urgencia: 'alta')
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgentJob] tarefa de passagem: #{e.message}"
   end
 
   def handoff_note(conversation, agent_key)

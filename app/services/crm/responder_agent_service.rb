@@ -58,7 +58,8 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # 🔧 rodada 192: só estes respondedores recebem ferramentas (buscar/remarcar/
   # cancelar/confirmar presença — Crm::ResponderTools); os demais seguem iguais.
   # 🎙️ 195: o simulador por texto do Agente de Ligação também (é sempre sombra).
-  RESPONDER_TOOLS_KEYS = %w[atendente_agendamento atendente_pos voice].freeze
+  # 🩺 item 251: o Atendente de Pós-operatório também (retorno pela Agenda + abrir_tarefa)
+  RESPONDER_TOOLS_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op voice].freeze
   # voltas de tool use por resposta: a IA pede → o sistema executa → a IA lê.
   # Passou do teto, a última chamada vai com tool_choice none (tem que responder).
   MAX_TOOL_ROUNDS = 5
@@ -187,7 +188,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       - Paciente (cadastro): #{contact&.name.presence || 'sem nome'} · telefone deste WhatsApp: #{phone || 'desconhecido (peça o número antes de agendar)'}
       - Coluna do paciente no CRM: #{card_stage_name || 'sem card (contato novo)'}
       - Consulta futura já marcada: #{future_appointment_text}
-      #{"- Motivo da ligação: #{call_objective}\n" if voice?}
+      #{"- Motivo da ligação: #{call_objective}\n" if voice?}#{"- Cirurgia realizada: #{surgery_text}\n" if pos_op?}
       HORÁRIOS DISPONÍVEIS (vagas LIVRES reais das próximas 4 semanas; ofereça no máximo 2 por vez, só destes; para um dia específico fora desta lista use a ferramenta horarios_do_dia — agendamento futuro é liberado):
       #{Crm::AgendaSlots.free_slots_text(@account, days: 28, per_window: 3)}
 
@@ -209,6 +210,36 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       { type: 'text', text: "#{header}\n#{transcript}", cache_control: { type: 'ephemeral' } },
       { type: 'text', text: "#{context_block}\nResponda à ÚLTIMA mensagem do PACIENTE da conversa acima, seguindo o Roteiro." }
     ]
+  end
+
+  # 🩺 item 251: o Atendente de Pós-operatório precisa saber QUAL cirurgia e há
+  # quantos dias — a orientação muda (PRK × LASIK, 2 dias × 20 dias)
+  def pos_op?
+    @agent_key == 'atendente_pos_op'
+  end
+
+  SURGERY_UNKNOWN = 'não encontrada na Agenda (pergunte qual cirurgia e quando foi)'.freeze
+
+  def surgery_text # rubocop:disable Metrics/AbcSize
+    task = last_surgery_task
+    return SURGERY_UNKNOWN if task.blank?
+
+    at = task.due_at.in_time_zone(Crm::AgendaSlots::TZ)
+    days = (Crm::AgendaSlots::TZ.now.to_date - at.to_date).to_i
+    parts = ["#{at.strftime('%d/%m/%Y')} (há #{days} dia#{'s' unless days == 1})", task.procedure.presence, task.doctor.presence,
+             Crm::AgendaSlots::UNIT_LABELS[task.unit.to_s] || task.unit.presence]
+    parts << "presença: #{task.attendance == 'attended' ? 'realizada' : task.attendance}" if task.attendance.present?
+    parts.compact.join(' · ')
+  end
+
+  def last_surgery_task
+    contact = @conversation.contact
+    return nil if contact.blank?
+
+    Task.for_patient(@account, contact)
+        .where(task_type: 'cirurgia', canceled_at: nil)
+        .where('due_at <= ?', Time.current)
+        .order(due_at: :desc).first
   end
 
   def card_stage_name

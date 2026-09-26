@@ -32,6 +32,7 @@ class Crm::OftalmofacilSyncJob < ApplicationJob
     agenda = settings.agenda_config || {}
     of = agenda['oftalmofacil'] || {}
     of['last_sync_at'] = result.cursor if result.cursor.present?
+    of['last_sync_id'] = result.cursor_id.to_i if result.cursor.present? # item 249: desempate do cursor
     of['last_run_at'] = Time.current.iso8601
     of['last_result'] = {
       'pulled' => result.pulled, 'created_contacts' => result.created_contacts, 'moved' => result.moved,

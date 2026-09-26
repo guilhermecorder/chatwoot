@@ -7,12 +7,14 @@
 # responsável = todos veem.
 class Crm::AgentAlert
   # item 217: 'nao_confirmou' = paciente respondeu NÃO ao lembrete da véspera
-  KINDS = %w[agente_remarcou agente_cancelou nao_confirmou].freeze
+  # item 251: 'pos_op_atencao' = sintoma de alerta no pós-operatório (tarefa urgente aberta)
+  KINDS = %w[agente_remarcou agente_cancelou nao_confirmou pos_op_atencao].freeze
   TTL = 24.hours
   MAX_ALERTS = 30
   TZ = Crm::AgendaSlots::TZ
   WEEKDAYS_SHORT = %w[dom seg ter qua qui sex sáb].freeze
-  AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento' }.freeze
+  AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
+                  'atendente_pos_op' => 'Atendente de Pós-operatório' }.freeze
 
   def self.push(account:, kind:, task:, conversation:, agent_key:)
     raise ArgumentError, "kind inválido: #{kind}" unless KINDS.include?(kind.to_s)
@@ -67,13 +69,23 @@ class Crm::AgentAlert
       # telefone da CONSULTA (pode ser de um familiar), não o do WhatsApp que pediu
       'phone' => @task.phone.presence || contact&.phone_number,
       'stage_name' => stage_name,
-      'motivo' => motivo, 'acao' => @kind == 'nao_confirmou' ? 'Ligar para o paciente' : 'Conferir na Agenda',
+      'motivo' => motivo, 'acao' => acao,
       'user_id' => @task.assignee_id, 'user_name' => @task.assignee&.name,
       'created_at' => Time.current.iso8601
     }
   end
 
+  def acao
+    case @kind
+    when 'nao_confirmou' then 'Ligar para o paciente'
+    when 'pos_op_atencao' then 'Falar com o paciente agora'
+    else 'Conferir na Agenda'
+    end
+  end
+
   def patient_name
+    return (@task.contact&.name.presence || 'Paciente') if @kind == 'pos_op_atencao'
+
     @task.title.to_s.sub(/\AConsulta:\s*/i, '').strip.presence || 'Paciente'
   end
 
@@ -81,11 +93,16 @@ class Crm::AgentAlert
     case @kind
     when 'agente_cancelou' then 'Consulta cancelada'
     when 'nao_confirmou' then 'Não confirmou a consulta'
+    when 'pos_op_atencao' then 'Pós-operatório: atenção'
     else 'Consulta remarcada'
     end
   end
 
   def motivo
+    if @kind == 'pos_op_atencao'
+      return "#{patient_name}: #{@task.title.to_s.split(' — ').last} — #{AGENT_NAMES[@agent_key] || @agent_key} pediu atenção"
+    end
+
     at = @task.due_at.in_time_zone(TZ)
     when_text = "#{WEEKDAYS_SHORT[at.wday]} #{at.strftime('%d/%m %H:%M')} · #{Crm::AgendaSlots::UNIT_LABELS[@task.unit] || @task.unit}"
     agent = AGENT_NAMES[@agent_key] || @agent_key

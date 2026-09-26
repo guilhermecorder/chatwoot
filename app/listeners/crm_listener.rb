@@ -254,16 +254,22 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     raw.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase.strip
   end
 
-  # a consulta de hoje/amanhã que RECEBEU o lembrete D-1 e ainda não foi
-  # confirmada — sem lembrete enviado, um "sim" solto não marca nada
+  # a consulta dos próximos dias que RECEBEU a confirmação D-2 (item 250) ou o
+  # lembrete D-1 e ainda não foi confirmada — sem lembrete enviado, um "sim"
+  # solto não marca nada. Janela de 4 dias cobre a D-2 adiantada na sexta (D-3).
   def pending_confirmation_task(contact, marks)
     today = ActiveSupport::TimeZone['America/Sao_Paulo'].now.beginning_of_day
     contact.account.tasks
            .where(id: marks.keys.map(&:to_i), task_type: 'consulta', canceled_at: nil)
-           .where(due_at: today..(today + 2.days))
+           .where(due_at: today..(today + 4.days))
            .where(attendance: [nil, ''])
            .order(:due_at)
-           .find { |t| marks[t.id.to_s]['d1'].present? && marks[t.id.to_s]['confirmed'].blank? }
+           .find { |t| awaiting_confirmation?(marks[t.id.to_s]) }
+  end
+
+  def awaiting_confirmation?(entry)
+    entry = entry || {}
+    (entry['d1'].present? || entry['d2'].present?) && entry['confirmed'].blank?
   end
 
   def record_confirmation(message, contact, task)
@@ -387,7 +393,8 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   # e a equipe continuam respondendo; a sombra só observa). AO VIVO, humano
   # respondendo pausa o agente e 👍 reativa — igual ao Atendente Instagram,
   # mas com estado próprio (cevico_atendente_wa).
-  RESPONDER_KEYS = %w[atendente_agendamento atendente_pos].freeze
+  # 🩺 item 251: + Atendente de Pós-operatório (colunas de cirurgia realizada / pós-op)
+  RESPONDER_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op].freeze
   RESPONDER_STATE_KEY = Crm::ResponderAgentJob::STATE_KEY
 
   def handle_responder_agents(message)
@@ -454,7 +461,21 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       return key if stage_id.present? && Array(a['stage_ids']).map(&:to_i).include?(stage_id)
       return key if stage_id.nil? && a['no_card'] == true
     end
+    # 🩺 item 251: a AGENDA também decide — paciente com cirurgia realizada nos
+    # últimos N dias (recent_surgery_days) é do Pós-operatório mesmo que o card
+    # não esteja na coluna certa (ou não exista)
+    agents.each do |key, a|
+      days = a['recent_surgery_days'].to_i
+      return key if days.positive? && recent_surgery?(conversation.account, contact, days)
+    end
     nil
+  end
+
+  def recent_surgery?(account, contact, days)
+    Task.for_patient(account, contact).where(task_type: 'cirurgia', canceled_at: nil)
+        .where(due_at: days.days.ago..Time.current).exists?
+  rescue StandardError
+    false
   end
 
   def set_responder_pause(conversation, paused, reason: nil, by: nil)

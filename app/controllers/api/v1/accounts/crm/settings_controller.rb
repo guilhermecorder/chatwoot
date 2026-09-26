@@ -409,7 +409,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                                                        { inbox_ids: [], stage_ids: [], live_days: [] }],
                                 # 🗣️ Atendente Pós-agendamento (agente B): suporte a quem já marcou
                                 atendente_pos: agent_fields + [:mode, :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
-                                                               { inbox_ids: [], stage_ids: [], live_days: [] }])
+                                                               { inbox_ids: [], stage_ids: [], live_days: [] }],
+                                # 🩺 Atendente de Pós-operatório (item 251): + quem recebe as tarefas
+                                # (task_assignee_id) e a janela de "cirurgia recente" pela Agenda (dias)
+                                atendente_pos_op: agent_fields + [:mode, :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
+                                                                  :task_assignee_id, :recent_surgery_days,
+                                                                  { inbox_ids: [], stage_ids: [], live_days: [] }])
                         .to_h
       # 🟢 Ao vivo (193): exige pelo menos uma caixa marcada — sem caixa o agente
       # não escuta ninguém e o admin acha que está atendendo. Dias fora de 0..6 caem.
@@ -990,8 +995,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           'sizes' => (h['sizes'] || {}).to_h.to_a.first(KPI_LAYOUT_MAX).each_with_object({}) do |(k, size), acc|
             acc[k.to_s[0, 40]] = 'lg' if size.to_s == 'lg' && k.present?
           end,
-          'spacers' => Array(h['spacers']).map(&:to_s).grep(/\Agap:[a-z0-9]{1,20}\z/).uniq.first(60)
-        }
+          'spacers' => Array(h['spacers']).map(&:to_s).grep(/\Agap:[a-z0-9]{1,20}\z/).uniq.first(60),
+          # item 248: modelo aplicado (para "restaurar o modelo") + julgamento pela média histórica
+          'preset' => h['preset'].to_s[/\A[a-z0-9_-]{1,40}\z/],
+          'judge' => ActiveModel::Type::Boolean.new.cast(h['judge']) || false
+        }.compact
       end
     end
     # ORDEM DOS BLOCOS do Meu Painel (item 143): arrasto magnético em TODOS
@@ -1003,7 +1011,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         h = v.to_h
         {
           'top' => Array(h['top']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
-          'main' => Array(h['main']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20)
+          'main' => Array(h['main']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
+          # item 248: blocos em MEIA largura (lado a lado) — divide o painel na horizontal
+          'half' => Array(h['half']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20)
         }
       end
     end
@@ -1068,7 +1078,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # coluna do CRM e sem etiquetas (elas não querem); admins veem tudo.
     cfg['list_clean_for_agents'] = ActiveModel::Type::Boolean.new.cast(params[:list_clean_for_agents]) == true if params.key?(:list_clean_for_agents)
     # modos (pedido 23/09 noite): full = tudo · no_stage = só sem a coluna · clean = sem coluna e etiquetas
-    cfg['list_clean_mode'] = params[:list_clean_mode].to_s if params.key?(:list_clean_mode) && LIST_CLEAN_MODES.include?(params[:list_clean_mode].to_s)
+    if params.key?(:list_clean_mode) && LIST_CLEAN_MODES.include?(params[:list_clean_mode].to_s)
+      cfg['list_clean_mode'] = params[:list_clean_mode].to_s
+    end
     # 🎨 COR DE CADA PESSOA (item 212): {user_id => '#hex'} escolhida pelo
     # admin em Configurações → Painéis; vale na lista de Conversas (crachá +
     # pílula), no painel da conversa e no filtro "quem cuida". Sem entrada =
@@ -1207,6 +1219,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       followup_hours: cfg['followup_hours'] || { 'start' => 8, 'end' => 20 },
       followup_stop_labels: cfg['followup_stop_labels'] || [],
       appointment_reminders: cfg['appointment_reminders'] || {},
+      appointment_reminders_state: cfg[Crm::AppointmentReminderSendJob::STATE_KEY] || {},
       panel_variants: cfg['panel_variants'] || []
     }
   end
@@ -1220,21 +1233,48 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # cada régua (d1/d0) do lembrete: liga/desliga, hora cheia, caixa do
   # WhatsApp e a mensagem modelo (mesmo formato das Campanhas); lixo cai fora
+  # item 250 (26/09): a régua D-2 (confirmação completa) tem modo sombra/ao vivo,
+  # modelo POR UNIDADE (units.paulista / units.tatuape), valor padrão da
+  # avaliação, modalidades atendidas e a ponte de fim de semana (sexta → segunda)
   def sanitize_appointment_reminders(raw)
-    %w[d1 d0].index_with do |regua|
+    Crm::AppointmentReminderSendJob::REGUAS.index_with do |regua|
       r = raw[regua].is_a?(ActionController::Parameters) ? raw[regua] : ActionController::Parameters.new
-      tp = if r[:template_params].is_a?(ActionController::Parameters)
-             r[:template_params].permit(:name, :namespace, :language, :category,
-                                        processed_params: {}).to_h
-           end
-      {
+      base = {
         'enabled' => ActiveModel::Type::Boolean.new.cast(r[:enabled]) == true,
         'hour' => r[:hour].to_i.clamp(0, 23),
         'inbox_id' => r[:inbox_id].to_i,
-        'template_params' => tp.presence,
+        'template_params' => reminder_template_params(r[:template_params]),
         'message_preview' => r[:message_preview].to_s[0, 2000].presence
-      }.compact
+      }
+      base.merge!(sanitize_d2_extras(r)) if regua == 'd2'
+      base.compact
     end
+  end
+
+  def reminder_template_params(value)
+    return nil unless value.is_a?(ActionController::Parameters)
+
+    value.permit(:name, :namespace, :language, :category, processed_params: {}).to_h.presence
+  end
+
+  def sanitize_d2_extras(r) # rubocop:disable Naming/MethodParameterName
+    units = {}
+    if r[:units].is_a?(ActionController::Parameters)
+      Crm::AgendaSlots::UNIT_LABELS.each_key do |unit|
+        u = r[:units][unit]
+        next unless u.is_a?(ActionController::Parameters)
+
+        tp = reminder_template_params(u[:template_params])
+        units[unit] = { 'template_params' => tp, 'message_preview' => u[:message_preview].to_s[0, 2000].presence }.compact if tp
+      end
+    end
+    {
+      'mode' => r[:mode].to_s == 'live' ? 'live' : 'shadow',
+      'default_value' => r[:default_value].to_s.strip[0, 20].presence,
+      'weekend_bridge' => ActiveModel::Type::Boolean.new.cast(r[:weekend_bridge]) != false,
+      'modalities' => Array(r[:modalities]).map(&:to_s).select { |m| %w[avaliacao retorno teleconsulta exames pos_op].include?(m) }.presence,
+      'units' => units.presence
+    }
   end
 
   # Colunas onde o Secretário da Agenda atua: a tela manda a lista de
@@ -1561,7 +1601,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     last30 = period ? scope.where(created_at: 30.days.ago..Time.current) : scope
     last30.group(column)
           .pluck(column, Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'),
-                  Arel.sql('SUM(cache_read_tokens)'))
+                 Arel.sql('SUM(cache_read_tokens)'))
           .map do |key, calls, input, output, cost, cached|
             { key: key, calls: calls, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4),
               cache_pct: input.to_i.positive? ? ((cached.to_i * 100.0) / input.to_i).round : 0 } # item 232
@@ -1607,11 +1647,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_from: of['agenda_from'],
       clinics: of['clinics'] || {},
       partners_seen: Crm::OftalmofacilSurgery.where(account_id: s.account_id).group(:provider_name).count
-                                              .map { |name, total| { name: name, total: total } }.sort_by { |x| -x[:total] },
+                                             .map { |name, total| { name: name, total: total } }.sort_by { |x| -x[:total] },
       clinics_seen: Crm::OftalmofacilSurgery.where(account_id: s.account_id).where.not(clinic_name: [nil, ''])
-                                             .group(:clinic_name).count.map { |name, total| { name: name, total: total } }.sort_by { |x| -x[:total] },
+                                            .group(:clinic_name).count.map { |name, total| { name: name, total: total } }.sort_by { |x| -x[:total] },
       types_seen: Crm::OftalmofacilSurgery.where(account_id: s.account_id).group(:procedure_type).count
-                                           .map { |name, total| { name: name.presence || '(sem tipo)', total: total } }.sort_by { |x| -x[:total] },
+                                          .map { |name, total| { name: name.presence || '(sem tipo)', total: total } }.sort_by { |x| -x[:total] },
       agenda_count: s.account.tasks.where(source: 'oftalmofacil').count,
       updated_at: of['updated_at']
     }
@@ -1730,6 +1770,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       followup_stop_labels: (s.agenda_config || {})['followup_stop_labels'] || [],
       # 📅 lembretes do dia da consulta D-1/D-0 (item 156)
       appointment_reminders: (s.agenda_config || {})['appointment_reminders'] || {},
+      appointment_reminders_state: (s.agenda_config || {})[Crm::AppointmentReminderSendJob::STATE_KEY] || {},
       # tabela de preços vigente (com os padrões quando não há tabela salva)
       price_table: {
         items: Cevico::PriceList.items(Current.account),
@@ -1786,13 +1827,15 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # próprio `permitted` (inteiros 0..6, sem repetição). Devolve a mensagem de
   # erro ou nil. Ao vivo sem caixa marcada (nem agora, nem já gravada) = 422.
   def responder_live_error(existing, permitted) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    %w[atendente_agendamento atendente_pos].each do |key|
+    CrmListener::RESPONDER_KEYS.each do |key|
       agent = permitted[key]
       next if agent.blank?
 
       agent['live_days'] = Array(agent['live_days']).map(&:to_i).select { |d| d.between?(0, 6) }.uniq if agent.key?('live_days')
       next unless agent['mode'] == 'live'
-      return 'O modo Ao vivo está trancado no servidor (variável CEVICO_RESPONDERS_LIVE). Por enquanto os atendentes só trabalham em sombra.' unless Crm::ResponderAgentJob::LIVE_ENABLED
+      unless Crm::ResponderAgentJob::LIVE_ENABLED
+        return 'O modo Ao vivo está trancado no servidor (variável CEVICO_RESPONDERS_LIVE). Por enquanto os atendentes só trabalham em sombra.'
+      end
 
       inboxes = agent.key?('inbox_ids') ? Array(agent['inbox_ids']) : Array(existing.dig(key, 'inbox_ids'))
       return 'Para ficar Ao vivo, marque pelo menos uma caixa de WhatsApp para o atendente.' if inboxes.compact_blank.empty?
@@ -1801,7 +1844,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   def responder_stage_conflict(existing, permitted)
-    keys = %w[atendente_agendamento atendente_pos]
+    keys = CrmListener::RESPONDER_KEYS
     merged = keys.index_with { |k| (existing[k] || {}).merge(permitted[k] || {}) }
     seen = {}
     keys.each do |k|
@@ -1885,7 +1928,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'voice' => Crm::CevicoScript::STAGE_PROMPTS['voice'],
       # 🗣️ rodada 188: o prompt do Atendente é o BLOCO DA ETAPA; o Roteiro vai à parte (script)
       'atendente_agendamento' => Crm::CevicoScript::STAGE_PROMPTS['atendente_agendamento'],
-      'atendente_pos' => Crm::CevicoScript::STAGE_PROMPTS['atendente_pos']
+      'atendente_pos' => Crm::CevicoScript::STAGE_PROMPTS['atendente_pos'],
+      'atendente_pos_op' => Crm::CevicoScript::STAGE_PROMPTS['atendente_pos_op']
     }
     {
       api_key_set: cfg['api_key'].present?,
@@ -1904,8 +1948,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       # 🧪 (22/09) Roteiro v2 paralelo (seções do Roteiro + passos dos 2 atendentes), só para o teste
       script_v2: Crm::CevicoScript.sections(s.account, 'v2'),
       script_v2_updated_at: cfg.dig('script_v2', 'updated_at'),
-      responder_events: %w[atendente_agendamento atendente_pos].index_with { |k| Array(cfg.dig("#{k}_state", 'events')).first(30) },
-      responder_shadow_today: %w[atendente_agendamento atendente_pos].index_with do |k|
+      responder_events: CrmListener::RESPONDER_KEYS.index_with { |k| Array(cfg.dig("#{k}_state", 'events')).first(30) },
+      responder_shadow_today: CrmListener::RESPONDER_KEYS.index_with do |k|
         (cfg.dig("#{k}_state", 'shadow_days', Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s) || {}).slice('count', 'conversation_ids')
       end,
       live_enabled: Crm::ResponderAgentJob::LIVE_ENABLED,
