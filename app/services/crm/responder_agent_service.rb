@@ -188,7 +188,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       - Paciente (cadastro): #{contact&.name.presence || 'sem nome'} · telefone deste WhatsApp: #{phone || 'desconhecido (peça o número antes de agendar)'}
       - Coluna do paciente no CRM: #{card_stage_name || 'sem card (contato novo)'}
       - Consulta futura já marcada: #{future_appointment_text}
-      #{"- Motivo da ligação: #{call_objective}\n" if voice?}#{"- Cirurgia realizada: #{surgery_text}\n" if pos_op?}
+      #{"- Motivo da ligação: #{call_objective}\n" if voice?}#{pos_op_context if pos_op?}
       HORÁRIOS DISPONÍVEIS (vagas LIVRES reais das próximas 4 semanas; ofereça no máximo 2 por vez, só destes; para um dia específico fora desta lista use a ferramenta horarios_do_dia — agendamento futuro é liberado):
       #{Crm::AgendaSlots.free_slots_text(@account, days: 28, per_window: 3)}
 
@@ -216,6 +216,17 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # quantos dias — a orientação muda (PRK × LASIK, 2 dias × 20 dias)
   def pos_op?
     @agent_key == 'atendente_pos_op'
+  end
+
+  # item 256: cirurgia + pesquisa de satisfação + links oficiais (Google e formulário)
+  def pos_op_context
+    cfg = Crm::NpsSurvey.config(@account)
+    lines = ["- Cirurgia realizada: #{surgery_text}"]
+    nps = Crm::NpsSurvey.context_text(@conversation.contact)
+    lines << "- Pesquisa de satisfação (NPS): #{nps}" if nps
+    lines << "- Link para avaliar no Google: #{cfg['google_review_url']}" if cfg['google_review_url'].present?
+    lines << "- Formulário de relato (notas baixas): #{cfg['complaint_form_url']}" if cfg['complaint_form_url'].present?
+    "#{lines.join("\n")}\n"
   end
 
   SURGERY_UNKNOWN = 'não encontrada na Agenda (pergunte qual cirurgia e quando foi)'.freeze

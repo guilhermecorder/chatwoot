@@ -1,20 +1,21 @@
-# 🔔 Lembretes D-1/D-0 + confirmação (item 156) — passos reais de
+# 🔔 Confirmação de consulta (itens 156/250/253) — lembretes dN (0 a 7 dias
+# antes) + confirmação por resposta — passos reais de
 # app/jobs/crm/appointment_reminder_send_job.rb, crm_listener.rb (resposta
 # "confirmo") e attendance_reminder_job.rb (conferência do dia) — item 170.
 class Crm::FlowMap::Flows::Reminders
   FLOW = Crm::FlowMap::Flow.define(:reminders) do # rubocop:disable Metrics/BlockLength
-    name 'Lembretes da consulta'
+    name 'Confirmação de consulta'
     group 'Atendimento ao paciente'
     icon 'i-lucide-bell-ring'
     color '#D97706'
-    what 'manda o lembrete da véspera e do dia da consulta e registra quem confirmou'
-    config tab: 'robos', anchor: 'lembretes'
+    what 'manda a confirmação da consulta (quantos lembretes quiser: 2 dias antes, véspera, no dia) e registra quem confirmou'
+    config tab: 'agentes', anchor: 'confirmacao'
     trigger :cron, 'A cada 15 min (só age na hora configurada)'
     jobs 'Crm::AppointmentReminderSendJob', 'Crm::AttendanceReminderJob'
 
-    node :regua, 'Para cada régua: D-1 (véspera) e D-0 (no dia)', kind: :loop
+    node :regua, 'Para cada lembrete (0 a 7 dias antes)', kind: :loop
     node :ligada, 'Régua ligada?', kind: :decision
-    node :hora, 'É a hora configurada (D-1 10h, D-0 7h)?', kind: :decision
+    node :hora, 'É a hora configurada do lembrete?', kind: :decision
     node :caixa, 'Tem caixa e modelo?', kind: :decision
     node :alvo, 'Consultas do dia-alvo sem presença marcada'
     node :consulta, 'Para cada consulta', kind: :loop
@@ -59,19 +60,22 @@ class Crm::FlowMap::Flows::Reminders
     edge :limite, :fim, 'não'
 
     live do |account|
-      cfg = agenda(account)['appointment_reminders'] || {}
-      d1 = cfg['d1'] || {}
-      d0 = cfg['d0'] || {}
-      owners = (agenda(account)['attendance_owners'] || {}).values.compact_blank
+      ag = agenda(account)
+      rules = (ag['appointment_reminders'] || {}).select { |k, _| k.to_s.match?(/\Ad[0-7]\z/) }
+      master = ag.dig('appointment_confirmation', 'enabled') != false
+      on = rules.select { |_k, r| r['enabled'] == true }
+      owners = (ag['attendance_owners'] || {}).values.compact_blank
+      last = (ag['appointment_reminders_state'] || {}).values.filter_map { |st| st['last_run_at'] }.max
       {
-        enabled: d1['enabled'] == true || d0['enabled'] == true,
-        last_run_at: nil,
+        enabled: master && on.any?,
+        last_run_at: last,
         counters: {
-          'D-1 (véspera)' => d1['enabled'] == true ? "ligado às #{d1['hour'].presence || '10:00'}" : 'desligado',
-          'D-0 (no dia)' => d0['enabled'] == true ? "ligado às #{d0['hour'].presence || '07:00'}" : 'desligado',
+          'lembretes' => rules.size,
+          'ligados' => master ? on.size : 0,
+          'ao vivo' => master ? on.count { |_k, r| r['mode'] != 'shadow' } : 0,
           'responsáveis pela conferência' => owners.size
         },
-        note: 'a marca de envio fica em cada consulta (sem histórico geral)'
+        note: 'a marca de envio fica em cada consulta; a última rodada de cada lembrete aparece no card'
       }
     end
   end

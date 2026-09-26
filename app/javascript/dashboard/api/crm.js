@@ -312,6 +312,20 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 📊 item 256: pesquisa de satisfação pós-cirurgia (NPS)
+  saveNpsSurvey(survey) {
+    return axios.post(`${this.url}/settings/update_agenda`, { nps_survey: survey });
+  }
+
+  // 📅 item 253: agente "Confirmação de consulta" (Agentes de IA) — lembretes
+  // (dN = N dias antes) e/ou o interruptor geral; manda só o que vier
+  saveAppointmentConfirmation({ reminders, enabled } = {}) {
+    const body = {};
+    if (reminders !== undefined) body.appointment_reminders = reminders;
+    if (enabled !== undefined) body.appointment_confirmation = { enabled };
+    return axios.post(`${this.url}/settings/update_agenda`, body);
+  }
+
   // 📅 ambiente Agendamentos (item 200): cada consulta marcada, remarcada ou
   // cancelada no período (preset/from/to, mode, kind, unit, inbox_id, q)
   // 🏥 item 229: ambiente Oftalmofácil (espelho do hub, só leitura)

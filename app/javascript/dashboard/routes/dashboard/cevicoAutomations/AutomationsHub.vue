@@ -22,6 +22,8 @@ import AiAgentsDashboard from './AiAgentsDashboard.vue';
 import ShadowReviewModal from './ShadowReviewModal.vue';
 import AgentTestModal from './AgentTestModal.vue';
 import GuidancesPanel from './GuidancesPanel.vue';
+import ConfirmationAgentCard from './ConfirmationAgentCard.vue';
+import NpsSurveyCard from './NpsSurveyCard.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import CrmAPI from 'dashboard/api/crm';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
@@ -1889,7 +1891,7 @@ const openFlow = key => {
 // "Abrir configuração" no mapa chega com ?tab=agentes&agent=<chave>:
 // expande o card certo e desce até ele
 const focusAgent = key => {
-  if (!key || !aiAgents.value[key]) return;
+  if (!key || (!aiAgents.value[key] && !['confirmacao', 'nps_survey'].includes(key))) return;
   expandedAgents.value = { ...expandedAgents.value, [key]: true };
   nextTick(() => {
     setTimeout(() => {
@@ -3244,239 +3246,20 @@ const toggleStopLabel = title => {
   );
 };
 
-// 📅 LEMBRETES DO DIA DA CONSULTA (item 156, pacote comparecimento):
-// D-1 = véspera pedindo confirmação por resposta · D-0 = no dia (ex.: 07h).
-// Cada régua: hora, caixa do WhatsApp e mensagem modelo ({{hora}} e
-// {{unidade}} nas variáveis viram o dado da consulta; {{contact.name}} = nome)
-const REMINDER_DEFAULTS = {
-  // 📋 item 250 (26/09): D-2 = confirmação COMPLETA (endereço, valor, regras),
-  // modelo por unidade, sombra antes de desligar o N8N, sexta adianta a segunda
-  d2: {
-    enabled: false,
-    hour: 10,
-    inbox_id: null,
-    template_params: null,
-    message_preview: '',
-    mode: 'shadow',
-    default_value: '150,00',
-    weekend_bridge: true,
-    modalities: ['avaliacao', 'retorno'],
-    units: {},
-  },
-  d1: {
-    enabled: false,
-    hour: 10,
-    inbox_id: null,
-    template_params: null,
-    message_preview: '',
-  },
-  d0: {
-    enabled: false,
-    hour: 7,
-    inbox_id: null,
-    template_params: null,
-    message_preview: '',
-  },
-};
-const REMINDER_LABELS = {
-  d2: '📋 Dois dias antes (D-2) — confirmação completa, por unidade',
-  d1: '📨 Véspera (D-1) — pede confirmação',
-  d0: '☀️ No dia (D-0) — o lembrete da manhã',
-};
-const REMINDER_KEYS = ['d2', 'd1', 'd0'];
-// slots de modelo: a D-2 tem um modelo por UNIDADE (+ um geral, opcional)
-const REMINDER_UNITS = [
-  { key: 'paulista', label: 'Av. Paulista' },
-  { key: 'tatuape', label: 'Tatuapé' },
-];
-const reminderSlots = k =>
-  k === 'd2' ? [...REMINDER_UNITS.map(u => `d2:${u.key}`), 'd2'] : [k];
-const slotBase = slot => slot.split(':')[0];
-const slotLabel = slot => {
-  const unit = slot.split(':')[1];
-  if (!unit) return slot === 'd2' ? 'Modelo geral (outros locais)' : '';
-  return `Modelo da ${REMINDER_UNITS.find(u => u.key === unit)?.label || unit}`;
-};
-const REMINDER_MODALITIES = [
-  { key: 'avaliacao', label: 'Avaliação' },
-  { key: 'retorno', label: 'Retorno' },
-  { key: 'teleconsulta', label: 'Teleconsulta' },
-  { key: 'exames', label: 'Exames' },
-];
-const apptReminders = ref(JSON.parse(JSON.stringify(REMINDER_DEFAULTS)));
-const reminderTemplates = ref({ d2: [], d1: [], d0: [] });
-const reminderTplName = ref({ 'd2:paulista': '', 'd2:tatuape': '', d2: '', d1: '', d0: '' });
-const reminderVars = ref({ 'd2:paulista': {}, 'd2:tatuape': {}, d2: {}, d1: {}, d0: {} });
-const savingReminders = ref(false);
-const reminderState = computed(
-  () => settings.value?.appointment_reminders_state?.d2 || null
-);
-const toggleReminderModality = m => {
-  const list = apptReminders.value.d2.modalities || [];
-  apptReminders.value.d2.modalities = list.includes(m)
-    ? list.filter(x => x !== m)
-    : [...list, m];
-};
-
-const loadReminderTemplates = async (k, inboxId) => {
-  if (!inboxId) return;
-  try {
-    const data = await store.dispatch('crm/fetchWhatsappTemplates', inboxId);
-    reminderTemplates.value[k] = Array.isArray(data) ? data : [];
-  } catch {
-    reminderTemplates.value[k] = [];
-  }
-};
-watch(
-  settings,
-  s => {
-    const cfgAll = s?.appointment_reminders;
-    if (!cfgAll) return;
-    REMINDER_KEYS.forEach(k => {
-      const c = cfgAll[k];
-      if (!c) return;
-      apptReminders.value[k] = {
-        ...REMINDER_DEFAULTS[k],
-        enabled: !!c.enabled,
-        hour: c.hour ?? REMINDER_DEFAULTS[k].hour,
-        inbox_id: c.inbox_id || null,
-        template_params: c.template_params || null,
-        message_preview: c.message_preview || '',
-      };
-      if (k === 'd2') {
-        apptReminders.value.d2.mode = c.mode === 'live' ? 'live' : 'shadow';
-        apptReminders.value.d2.default_value = c.default_value || '150,00';
-        apptReminders.value.d2.weekend_bridge = c.weekend_bridge !== false;
-        apptReminders.value.d2.modalities = c.modalities?.length
-          ? [...c.modalities]
-          : ['avaliacao', 'retorno'];
-        apptReminders.value.d2.units = JSON.parse(
-          JSON.stringify(c.units || {})
-        );
-        REMINDER_UNITS.forEach(u => {
-          const ut = c.units?.[u.key]?.template_params;
-          reminderTplName.value[`d2:${u.key}`] = ut?.name || '';
-          reminderVars.value[`d2:${u.key}`] = {
-            ...(ut?.processed_params?.body || {}),
-          };
-        });
-      }
-      reminderTplName.value[k] = c.template_params?.name || '';
-      reminderVars.value[k] = {
-        ...(c.template_params?.processed_params?.body || {}),
-      };
-      if (c.inbox_id) loadReminderTemplates(k, c.inbox_id);
-    });
-  },
-  { immediate: true }
-);
-const whatsappInboxesRobos = computed(() =>
-  (inboxes.value || []).filter(i => i.channel_type === 'Channel::Whatsapp')
-);
-const onReminderInbox = k => {
-  reminderSlots(k).forEach(slot => {
-    reminderTplName.value[slot] = '';
-    reminderVars.value[slot] = {};
+// 📅 item 253 (26/09): os LEMBRETES / CONFIRMAÇÃO DE CONSULTA saíram daqui e
+// viraram o card "Confirmação de consulta" em Agentes de IA
+// (ConfirmationAgentCard.vue). Na aba Robôs fica só o atalho.
+const goToConfirmation = () => {
+  activeTab.value = 'agentes';
+  router.replace({ query: { tab: 'agentes' } });
+  expandedAgents.value = { ...expandedAgents.value, confirmacao: true };
+  nextTick(() => {
+    setTimeout(() => {
+      document
+        .getElementById('cv-agent-confirmacao')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
   });
-  loadReminderTemplates(k, apptReminders.value[k].inbox_id);
-};
-// k pode ser uma régua ('d1') ou um slot da D-2 ('d2:paulista'): a lista de
-// modelos é sempre a da caixa da régua
-const reminderTpl = k =>
-  (reminderTemplates.value[slotBase(k)] || []).find(
-    t => t.name === reminderTplName.value[k]
-  ) || null;
-const reminderBody = k =>
-  reminderTpl(k)?.components?.find(c => c.type === 'BODY')?.text || '';
-const savedSlotName = slot => {
-  const unit = slot.split(':')[1];
-  if (unit) return apptReminders.value.d2.units?.[unit]?.template_params?.name;
-  return apptReminders.value[slot]?.template_params?.name;
-};
-const slotPayload = slot => {
-  const tpl = reminderTpl(slot);
-  if (tpl) {
-    return {
-      template_params: {
-        name: tpl.name,
-        namespace: tpl.namespace ?? '',
-        language: tpl.language,
-        category: tpl.category,
-        processed_params: { body: { ...reminderVars.value[slot] } },
-      },
-      message_preview: reminderBody(slot),
-    };
-  }
-  const unit = slot.split(':')[1];
-  const saved = unit
-    ? apptReminders.value.d2.units?.[unit]
-    : apptReminders.value[slot];
-  // mantém a modelo já salva quando o admin não re-selecionou
-  return saved?.template_params
-    ? {
-        template_params: saved.template_params,
-        message_preview: saved.message_preview,
-      }
-    : {};
-};
-const reminderTokens = k => {
-  const s = new Set();
-  const re = /\{\{\s*(\d+)\s*\}\}/g;
-  const b = reminderBody(k);
-  let m = re.exec(b);
-  while (m !== null) {
-    s.add(m[1]);
-    m = re.exec(b);
-  }
-  return [...s];
-};
-const saveReminders = async () => {
-  const payload = {};
-  for (const k of REMINDER_KEYS) {
-    const r = apptReminders.value[k];
-    payload[k] = {
-      enabled: r.enabled,
-      hour: r.hour,
-      inbox_id: r.inbox_id,
-      ...slotPayload(k),
-    };
-    if (k === 'd2') {
-      payload.d2.mode = r.mode === 'live' ? 'live' : 'shadow';
-      payload.d2.default_value = r.default_value || '150,00';
-      payload.d2.weekend_bridge = r.weekend_bridge !== false;
-      payload.d2.modalities = r.modalities || [];
-      payload.d2.units = {};
-      REMINDER_UNITS.forEach(u => {
-        const p = slotPayload(`d2:${u.key}`);
-        if (p.template_params) payload.d2.units[u.key] = p;
-      });
-      const hasTemplate =
-        payload.d2.template_params || Object.keys(payload.d2.units).length;
-      if (payload.d2.enabled && payload.d2.mode === 'live' && (!payload.d2.inbox_id || !hasTemplate)) {
-        useAlert(
-          'Para a confirmação D-2 ficar ao vivo, escolha a caixa e pelo menos um modelo (Paulista ou Tatuapé).'
-        );
-        return;
-      }
-    } else if (
-      payload[k].enabled &&
-      (!payload[k].inbox_id || !payload[k].template_params)
-    ) {
-      useAlert(
-        `Escolha a caixa e a mensagem modelo do lembrete "${k === 'd1' ? 'véspera' : 'no dia'}" antes de ligar.`
-      );
-      return;
-    }
-  }
-  savingReminders.value = true;
-  try {
-    await CrmAPI.updateAppointmentReminders(payload);
-    useAlert('Lembretes de consulta salvos');
-  } catch {
-    useAlert('Erro ao salvar os lembretes');
-  } finally {
-    savingReminders.value = false;
-  }
 };
 
 onMounted(async () => {
@@ -3742,220 +3525,26 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 📅 Lembretes do dia da consulta (item 156): D-1 véspera com
-             confirmação por resposta + D-0 no dia — pacote comparecimento -->
+          <!-- 📅 item 253: lembretes e confirmação de consulta agora ficam em
+               Agentes de IA → "Confirmação de consulta"; aqui só o atalho -->
           <div
             v-if="isAdmin"
-            class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl"
+            class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl flex items-center gap-3 flex-wrap"
           >
-            <div class="flex items-center gap-2 flex-wrap">
-              <span
-                class="i-lucide-calendar-check text-sm"
-                style="color: #b8860b"
-              />
+            <span class="i-lucide-calendar-check text-base" style="color: #b45309" />
+            <div class="flex-1 min-w-[220px]">
               <p class="text-sm font-semibold text-n-slate-12">
-                Lembretes do dia da consulta
+                Confirmação e lembretes de consulta
               </p>
-              <Spinner v-if="savingReminders" :size="14" class="text-n-brand" />
-            </div>
-            <p class="mt-1 text-[11px] text-n-slate-10 leading-relaxed">
-              Pela <b>data da consulta</b>, lendo a <b>nossa Agenda</b>: dois
-              dias antes vai a confirmação completa (endereço, valor, regras —
-              o que o N8N mandava lendo o Google Agenda), a véspera pede a
-              confirmação ("responde SIM") e a manhã do dia lembra o paciente.
-              Quem responde confirmando ganha o ✅ registrado na conversa e na
-              consulta. Envio por <b>mensagem modelo</b> — chega mesmo fora da
-              janela de 24h. Paciente de parceiro do hub nunca recebe.
-            </p>
-            <div
-              v-for="k in REMINDER_KEYS"
-              :key="`rem-${k}`"
-              class="mt-3 p-3 rounded-lg bg-n-solid-1 border border-n-weak"
-            >
-              <div class="flex items-center gap-2 flex-wrap">
-                <button
-                  class="w-9 h-5 rounded-full transition-colors relative flex-shrink-0"
-                  :class="
-                    apptReminders[k].enabled ? 'bg-green-500' : 'bg-n-slate-6'
-                  "
-                  :title="
-                    apptReminders[k].enabled
-                      ? 'Ligado — clique para desligar'
-                      : 'Desligado — clique para ligar'
-                  "
-                  @click="apptReminders[k].enabled = !apptReminders[k].enabled"
-                >
-                  <span
-                    class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
-                    :class="
-                      apptReminders[k].enabled ? 'left-[18px]' : 'left-0.5'
-                    "
-                  />
-                </button>
-                <p class="text-xs font-semibold text-n-slate-12">
-                  {{ REMINDER_LABELS[k] }}
-                </p>
-                <span class="text-[11px] text-n-slate-11 ml-auto">enviar às</span>
-                <select
-                  v-model.number="apptReminders[k].hour"
-                  class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-2"
-                  style="width: 84px; margin-bottom: 0"
-                >
-                  <option v-for="h in 24" :key="`rh-${k}-${h}`" :value="h - 1">
-                    {{ String(h - 1).padStart(2, '0') }}h
-                  </option>
-                </select>
-              </div>
-              <!-- 📋 D-2: sombra × ao vivo, valor padrão, ponte de fim de semana, modalidades -->
-              <template v-if="k === 'd2'">
-                <div class="mt-2 flex items-center gap-2 flex-wrap text-[11px] text-n-slate-11">
-                  <div class="cv-seg cv-seg-sm cv-green">
-                    <button
-                      class="cv-seg-item"
-                      :class="apptReminders.d2.mode !== 'live' ? 'cv-seg-on' : ''"
-                      title="Só lista quem receberia (para comparar com o N8N). Nada chega ao paciente."
-                      @click="apptReminders.d2.mode = 'shadow'"
-                    >
-                      🕶️ Sombra
-                    </button>
-                    <button
-                      class="cv-seg-item"
-                      :class="apptReminders.d2.mode === 'live' ? 'cv-seg-on' : ''"
-                      title="Manda de verdade. Desligue o fluxo do N8N antes — nunca os dois juntos."
-                      @click="apptReminders.d2.mode = 'live'"
-                    >
-                      🟢 Ao vivo
-                    </button>
-                  </div>
-                  <label class="flex items-center gap-1">
-                    valor padrão R$
-                    <input
-                      v-model="apptReminders.d2.default_value"
-                      class="text-xs border border-n-weak rounded-lg px-2 py-1 bg-n-solid-2"
-                      style="margin-bottom: 0; width: 72px"
-                      placeholder="150,00"
-                    />
-                  </label>
-                  <label class="flex items-center gap-1 cursor-pointer" title="Na sexta manda também a de segunda (como o N8N fazia)">
-                    <input v-model="apptReminders.d2.weekend_bridge" type="checkbox" style="margin: 0" />
-                    sexta adianta a de segunda
-                  </label>
-                  <span class="ml-auto flex items-center gap-1 flex-wrap">
-                    <button
-                      v-for="m in REMINDER_MODALITIES"
-                      :key="`rm-${m.key}`"
-                      class="cv-chip"
-                      :class="(apptReminders.d2.modalities || []).includes(m.key) ? 'cv-chip-on' : ''"
-                      @click="toggleReminderModality(m.key)"
-                    >
-                      {{ m.label }}
-                    </button>
-                  </span>
-                </div>
-                <p class="mt-1 text-[10px] text-n-slate-9">
-                  Valor: se a observação da consulta tiver "Valor: 250,00" (ou "R$ 250"), vale ela; senão o padrão. Quem já
-                  confirmou não recebe de novo. Só as modalidades marcadas recebem.
-                </p>
-              </template>
-              <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <select
-                  v-model.number="apptReminders[k].inbox_id"
-                  class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2"
-                  style="margin-bottom: 0"
-                  @change="onReminderInbox(k)"
-                >
-                  <option :value="null">Caixa do WhatsApp…</option>
-                  <option
-                    v-for="i in whatsappInboxesRobos"
-                    :key="`ri-${k}-${i.id}`"
-                    :value="i.id"
-                  >
-                    {{ i.name }}
-                  </option>
-                </select>
-                <template v-for="slot in reminderSlots(k)" :key="`rs-${slot}`">
-                  <p v-if="k === 'd2'" class="text-[11px] font-semibold text-n-slate-11 sm:col-span-2 -mb-1 mt-1">
-                    {{ slotLabel(slot) }}
-                  </p>
-                  <select
-                    v-model="reminderTplName[slot]"
-                    class="text-sm border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2"
-                    :class="k === 'd2' ? 'sm:col-span-2' : ''"
-                    style="margin-bottom: 0"
-                  >
-                    <option value="">
-                      {{
-                        savedSlotName(slot)
-                          ? `Modelo salva: ${savedSlotName(slot)}`
-                          : 'Mensagem modelo…'
-                      }}
-                    </option>
-                    <option
-                      v-for="t in reminderTemplates[k]"
-                      :key="`rt-${slot}-${t.name}-${t.language}`"
-                      :value="t.name"
-                    >
-                      {{ t.name }} ({{ t.language }})
-                    </option>
-                  </select>
-                  <template v-if="reminderTpl(slot)">
-                    <p
-                      class="text-[11px] text-n-slate-10 whitespace-pre-wrap bg-n-alpha-1 rounded-lg px-2 py-1.5 sm:col-span-2"
-                    >
-                      {{ reminderBody(slot) }}
-                    </p>
-                    <input
-                      v-for="token in reminderTokens(slot)"
-                      :key="`rv-${slot}-${token}`"
-                      v-model="reminderVars[slot][token]"
-                      class="text-xs border border-n-weak rounded-lg px-2 py-1.5 bg-n-solid-2 font-mono"
-                      style="margin-bottom: 0"
-                      :placeholder="`Variável {{${token}}} — ex.: {{nome}}, {{data}}, {{hora}}, {{valor}} ou {{unidade}}`"
-                    />
-                  </template>
-                </template>
-              </div>
-              <p class="mt-1 text-[10px] text-n-slate-9">
-                Nas variáveis: <code>{{ '\{\{nome\}\}' }}</code> = nome do paciente ·
-                <code>{{ '\{\{data\}\}' }}</code> = data dd/mm/aaaa ·
-                <code>{{ '\{\{hora\}\}' }}</code> = horário ·
-                <code>{{ '\{\{valor\}\}' }}</code> = valor da avaliação ·
-                <code>{{ '\{\{unidade\}\}' }}</code> = Av. Paulista/Tatuapé ·
-                <code>{{ '\{\{contact.name\}\}' }}</code> = nome do cadastro
+              <p class="text-[11px] text-n-slate-10">
+                Mudaram para <b>Agentes de IA → Confirmação de consulta</b>: quantos
+                lembretes quiser (2 dias antes, véspera, no dia…), cada um com
+                modelo por unidade e modo sombra.
               </p>
-              <!-- última rodada da D-2: quem recebeu / receberia e quem foi pulado -->
-              <div
-                v-if="k === 'd2' && reminderState"
-                class="mt-2 p-2.5 rounded-lg bg-n-alpha-1 text-[11px] text-n-slate-11"
-              >
-                <p class="font-semibold">
-                  Última rodada ({{ reminderState.mode === 'live' ? 'ao vivo' : 'sombra' }}) —
-                  {{ new Date(reminderState.last_run_at).toLocaleString('pt-BR') }} · consultas de
-                  {{ (reminderState.dates || []).map(d => new Date(`${d}T12:00:00`).toLocaleDateString('pt-BR')).join(' e ') }}:
-                  <b>{{ (reminderState.sent || []).length }}</b>
-                  {{ reminderState.mode === 'live' ? 'enviada(s)' : 'receberia(m)' }} ·
-                  <b>{{ (reminderState.skipped || []).length }}</b> pulada(s)
-                </p>
-                <p v-for="e in (reminderState.sent || []).slice(0, 40)" :key="`rs-s-${e.task_id}`">
-                  ✓ {{ e.when }} · {{ e.name }} · {{ e.unit }} · …{{ e.phone_tail }}
-                  <span class="text-n-slate-9">{{ e.template ? `(${e.template})` : '' }}</span>
-                </p>
-                <p v-for="e in (reminderState.skipped || []).slice(0, 40)" :key="`rs-k-${e.task_id}`" class="text-amber-700">
-                  ↷ {{ e.when }} · {{ e.name }} · {{ e.unit }} — {{ e.why }}
-                </p>
-              </div>
             </div>
-            <div class="mt-3 flex items-center gap-2">
-              <button
-                class="text-sm px-4 py-2 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 disabled:opacity-60"
-                :disabled="savingReminders"
-                @click="saveReminders"
-              >
-                Salvar lembretes
-              </button>
-              <span class="text-[11px] text-n-slate-10">1 envio por consulta em cada régua — reprocessar não
-                duplica.</span>
-            </div>
+            <button class="cv-btn cv-btn-sm" @click="goToConfirmation">
+              <span class="i-lucide-arrow-right text-xs" /> Abrir
+            </button>
           </div>
 
           <div v-if="loadingBots" class="flex justify-center py-10">
@@ -4662,11 +4251,33 @@ onUnmounted(() => {
             <div class="flex items-center gap-2 pt-2">
               <span class="text-base">{{ group.icon }}</span>
               <p class="cv-label !text-[11px]">{{ group.title }}</p>
-              <span class="cv-chip cv-slate">{{ group.keys.length }}</span>
+              <span class="cv-chip cv-slate">{{
+                group.keys.length +
+                (group.title === 'Atendimento ao paciente' ? 2 : 0)
+              }}</span>
             </div>
             <div
               :class="agentsView === 'cards' ? 'cv-agents-grid' : 'space-y-5'"
             >
+              <!-- 📅 item 253: Confirmação de consulta (robô de mensagem modelo, sem IA) — mesmo visual dos agentes -->
+              <ConfirmationAgentCard
+                v-if="group.title === 'Atendimento ao paciente'"
+                :view="agentsView"
+                :open="!!expandedAgents.confirmacao"
+                :opening="openingAgent === 'confirmacao'"
+                :is-admin="isAdmin"
+                @toggle="toggleAgentExpand('confirmacao')"
+              />
+              <!-- 📊 item 256: Pesquisa de satisfação (NPS) pós-cirurgia -->
+              <NpsSurveyCard
+                v-if="group.title === 'Atendimento ao paciente'"
+                :view="agentsView"
+                :open="!!expandedAgents.nps_survey"
+                :opening="openingAgent === 'nps_survey'"
+                :is-admin="isAdmin"
+                @toggle="toggleAgentExpand('nps_survey')"
+                @open-agent="focusAgent"
+              />
               <div
                 v-for="(agent, key) in groupAgents(group)"
                 :id="`cv-agent-${key}`"

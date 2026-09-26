@@ -74,4 +74,11 @@ RSpec.describe CrmListener do
                              content: 'Prontinho, remarquei: quinta 10h.')
     expect { fire(moved) }.to have_enqueued_job(Crm::SchedulerRecheckJob)
   end
+
+  it 'paciente do Oftalmofácil: SIM ao lembrete confirma a consulta, mas nenhum agente é chamado', :aggregate_failures do
+    contact.update!(additional_attributes: contact.additional_attributes.merge('parceiro' => 'CLINICA X'))
+    expect(listener).not_to receive(:handle_responder_agents)
+    fire(incoming('sim'))
+    expect(task.reload.confirmed_at).to be_present
+  end
 end

@@ -45,10 +45,16 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       Crm::PartnerGuard.block!('mensagem (agentes/automações)', conversation: message.conversation) if message.message_type == 'incoming'
       partner_contact = message.conversation&.contact
       handle_opt_out(message, partner_contact) if partner_contact.present?
+      # "sim/não" ao lembrete de confirmação (lido por palavra, sem IA) — o
+      # lembrete pode ir para eles pela caixa liberada no card de Confirmação
+      handle_appointment_confirmation(message, partner_contact) if partner_contact.present?
       return
     end
 
     handle_instagram_agent(message) # Atendente IA das caixas configuradas
+    # 📊 item 256: nota da pesquisa de satisfação lida ANTES do atendente (ele já
+    # recebe a nota gravada no contexto quando responde)
+    Crm::NpsSurvey.handle_reply(message, message.conversation&.contact) if message.message_type == 'incoming'
     handle_responder_agents(message) # 🗣️ respondedores do WhatsApp por coluna (rodada 188)
 
     contact = message.conversation&.contact
@@ -254,22 +260,24 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     raw.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase.strip
   end
 
-  # a consulta dos próximos dias que RECEBEU a confirmação D-2 (item 250) ou o
-  # lembrete D-1 e ainda não foi confirmada — sem lembrete enviado, um "sim"
-  # solto não marca nada. Janela de 4 dias cobre a D-2 adiantada na sexta (D-3).
+  # a consulta dos próximos dias que RECEBEU um lembrete de confirmação (1 a 7
+  # dias antes — item 253) e ainda não foi confirmada — sem lembrete enviado, um
+  # "sim" solto não marca nada. Janela de 8 dias cobre o lembrete mais longe.
   def pending_confirmation_task(contact, marks)
     today = ActiveSupport::TimeZone['America/Sao_Paulo'].now.beginning_of_day
     contact.account.tasks
            .where(id: marks.keys.map(&:to_i), task_type: 'consulta', canceled_at: nil)
-           .where(due_at: today..(today + 4.days))
+           .where(due_at: today..(today + 8.days))
            .where(attendance: [nil, ''])
            .order(:due_at)
            .find { |t| awaiting_confirmation?(marks[t.id.to_s]) }
   end
 
+  CONFIRMATION_MARKS = (1..7).map { |n| "d#{n}" }.freeze
+
   def awaiting_confirmation?(entry)
-    entry = entry || {}
-    (entry['d1'].present? || entry['d2'].present?) && entry['confirmed'].blank?
+    entry ||= {}
+    CONFIRMATION_MARKS.any? { |k| entry[k].present? } && entry['confirmed'].blank?
   end
 
   def record_confirmation(message, contact, task)
@@ -456,11 +464,16 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     contact = conversation.contact
     return nil if contact.blank?
 
+    # 📊 item 256: quem recebeu a pesquisa de satisfação há pouco conversa com o
+    # Atendente de Pós-operatório (a nota e as outras dúvidas), seja qual for a coluna
+    return 'atendente_pos_op' if agents.key?('atendente_pos_op') && Crm::NpsSurvey.recent?(contact)
+
     stage_id = Crm::Contact.where(contact_id: contact.id).order(:updated_at).last&.stage_id
     agents.each do |key, a|
       return key if stage_id.present? && Array(a['stage_ids']).map(&:to_i).include?(stage_id)
       return key if stage_id.nil? && a['no_card'] == true
     end
+    # rubocop:disable Style/CombinableLoops -- de propósito: a COLUNA vence; a cirurgia recente só vale se nenhuma coluna casou
     # 🩺 item 251: a AGENDA também decide — paciente com cirurgia realizada nos
     # últimos N dias (recent_surgery_days) é do Pós-operatório mesmo que o card
     # não esteja na coluna certa (ou não exista)
@@ -468,12 +481,13 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       days = a['recent_surgery_days'].to_i
       return key if days.positive? && recent_surgery?(conversation.account, contact, days)
     end
+    # rubocop:enable Style/CombinableLoops
     nil
   end
 
   def recent_surgery?(account, contact, days)
     Task.for_patient(account, contact).where(task_type: 'cirurgia', canceled_at: nil)
-        .where(due_at: days.days.ago..Time.current).exists?
+        .exists?(due_at: days.days.ago..Time.current)
   rescue StandardError
     false
   end

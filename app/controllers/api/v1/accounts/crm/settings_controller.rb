@@ -1189,7 +1189,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # 📅 LEMBRETES DO DIA DA CONSULTA (item 156): D-1 véspera c/ confirmação
     # + D-0 no dia (ex.: 07h) — cada régua com hora, caixa e mensagem modelo
     if params.key?(:appointment_reminders) && Current.account_user.administrator?
-      cfg['appointment_reminders'] = sanitize_appointment_reminders(params.require(:appointment_reminders))
+      cfg['appointment_reminders'] = sanitize_appointment_reminders(params[:appointment_reminders])
+    end
+    # item 256: pesquisa de satisfação pós-cirurgia (NPS)
+    if params.key?(:nps_survey) && Current.account_user.administrator?
+      cfg[Crm::NpsSurvey::CONFIG_KEY] = sanitize_nps_survey(params[:nps_survey])
+    end
+    # item 253: interruptor geral do agente "Confirmação de consulta" (Agentes de IA)
+    if params.key?(:appointment_confirmation) && Current.account_user.administrator?
+      enabled = ActiveModel::Type::Boolean.new.cast(params.dig(:appointment_confirmation, :enabled)) == true
+      cfg[Crm::AppointmentReminderSendJob::MASTER_KEY] = { 'enabled' => enabled, 'updated_at' => Time.current.iso8601 }
     end
     crm_settings.update!(agenda_config: cfg)
     render json: {
@@ -1233,22 +1242,58 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # cada régua (d1/d0) do lembrete: liga/desliga, hora cheia, caixa do
   # WhatsApp e a mensagem modelo (mesmo formato das Campanhas); lixo cai fora
-  # item 250 (26/09): a régua D-2 (confirmação completa) tem modo sombra/ao vivo,
-  # modelo POR UNIDADE (units.paulista / units.tatuape), valor padrão da
-  # avaliação, modalidades atendidas e a ponte de fim de semana (sexta → segunda)
+  # item 253 (26/09): QUANTOS lembretes quiser (chaves d0..d7 = dias antes). O que
+  # não vem na lista é apagado. Cada um tem modo sombra/ao vivo, modelo POR
+  # UNIDADE (units.paulista / units.tatuape) + geral, valor padrão, modalidades
+  # atendidas e a ponte de fim de semana (sexta → segunda, só para 1–2 dias antes)
   def sanitize_appointment_reminders(raw)
-    Crm::AppointmentReminderSendJob::REGUAS.index_with do |regua|
+    return {} unless raw.is_a?(ActionController::Parameters)
+
+    (Crm::AppointmentReminderSendJob::REGUAS & raw.keys).index_with do |regua|
       r = raw[regua].is_a?(ActionController::Parameters) ? raw[regua] : ActionController::Parameters.new
-      base = {
+      {
         'enabled' => ActiveModel::Type::Boolean.new.cast(r[:enabled]) == true,
         'hour' => r[:hour].to_i.clamp(0, 23),
         'inbox_id' => r[:inbox_id].to_i,
         'template_params' => reminder_template_params(r[:template_params]),
         'message_preview' => r[:message_preview].to_s[0, 2000].presence
-      }
-      base.merge!(sanitize_d2_extras(r)) if regua == 'd2'
-      base.compact
+      }.merge(sanitize_reminder_extras(r)).compact
     end
+  end
+
+  # item 256: pesquisa de satisfação — tipos de cirurgia (palavras + dias depois),
+  # modo, hora, caixa, modelo da Meta, links e intervalo mínimo entre pesquisas
+  def sanitize_nps_survey(raw) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return {} unless raw.is_a?(ActionController::Parameters)
+
+    rules = Array(raw[:rules]).first(10).filter_map do |r|
+      next unless r.is_a?(ActionController::Parameters)
+
+      label = r[:label].to_s.strip.first(40)
+      next if label.blank?
+
+      { 'key' => (r[:key].to_s.presence || label).parameterize(separator: '_').first(30), 'label' => label,
+        'days_after' => r[:days_after].to_i.clamp(1, 365), 'enabled' => ActiveModel::Type::Boolean.new.cast(r[:enabled]) != false,
+        'keywords' => Array(r[:keywords]).map { |w| w.to_s.strip.downcase.first(30) }.compact_blank.uniq.first(30) }
+    end
+    {
+      'enabled' => ActiveModel::Type::Boolean.new.cast(raw[:enabled]) == true,
+      'mode' => raw[:mode].to_s == 'live' ? 'live' : 'shadow',
+      'hour' => raw[:hour].to_i.clamp(0, 23),
+      'inbox_id' => raw[:inbox_id].to_i,
+      'template_params' => reminder_template_params(raw[:template_params]),
+      'message_preview' => raw[:message_preview].to_s[0, 2000].presence,
+      'google_review_url' => safe_url(raw[:google_review_url]),
+      'complaint_form_url' => safe_url(raw[:complaint_form_url]),
+      'min_interval_days' => raw[:min_interval_days].to_i.positive? ? raw[:min_interval_days].to_i.clamp(7, 365) : 60,
+      'rules' => rules.presence,
+      'updated_at' => Time.current.iso8601
+    }.compact
+  end
+
+  def safe_url(value)
+    url = value.to_s.strip.first(300)
+    url.match?(%r{\Ahttps?://\S+\z}) ? url : nil
   end
 
   def reminder_template_params(value)
@@ -1257,7 +1302,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     value.permit(:name, :namespace, :language, :category, processed_params: {}).to_h.presence
   end
 
-  def sanitize_d2_extras(r) # rubocop:disable Naming/MethodParameterName
+  def sanitize_reminder_extras(r) # rubocop:disable Naming/MethodParameterName, Metrics/AbcSize, Metrics/CyclomaticComplexity
     units = {}
     if r[:units].is_a?(ActionController::Parameters)
       Crm::AgendaSlots::UNIT_LABELS.each_key do |unit|
@@ -1271,10 +1316,24 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     {
       'mode' => r[:mode].to_s == 'live' ? 'live' : 'shadow',
       'default_value' => r[:default_value].to_s.strip[0, 20].presence,
-      'weekend_bridge' => ActiveModel::Type::Boolean.new.cast(r[:weekend_bridge]) != false,
+      'weekend_bridge' => ActiveModel::Type::Boolean.new.cast(r[:weekend_bridge]) == true,
       'modalities' => Array(r[:modalities]).map(&:to_s).select { |m| %w[avaliacao retorno teleconsulta exames pos_op].include?(m) }.presence,
-      'units' => units.presence
+      'units' => units.presence,
+      'partner' => sanitize_reminder_partner(r[:partner])
     }
+  end
+
+  # pacientes do Oftalmofácil (26/09): a caixa escolhida e o modelo dela — só
+  # por aqui a cerca dos parceiros libera o lembrete (ver AppointmentReminderSendJob)
+  def sanitize_reminder_partner(raw)
+    return nil unless raw.is_a?(ActionController::Parameters)
+
+    {
+      'enabled' => ActiveModel::Type::Boolean.new.cast(raw[:enabled]) == true,
+      'inbox_id' => raw[:inbox_id].to_i.positive? ? raw[:inbox_id].to_i : nil,
+      'template_params' => reminder_template_params(raw[:template_params]),
+      'message_preview' => raw[:message_preview].to_s[0, 2000].presence
+    }.compact
   end
 
   # Colunas onde o Secretário da Agenda atua: a tela manda a lista de
@@ -1771,6 +1830,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       # 📅 lembretes do dia da consulta D-1/D-0 (item 156)
       appointment_reminders: (s.agenda_config || {})['appointment_reminders'] || {},
       appointment_reminders_state: (s.agenda_config || {})[Crm::AppointmentReminderSendJob::STATE_KEY] || {},
+      appointment_confirmation: (s.agenda_config || {})[Crm::AppointmentReminderSendJob::MASTER_KEY] || {},
+      # 📊 item 256: pesquisa de satisfação (com os tipos padrão quando ainda não salvou)
+      nps_survey: Crm::NpsSurvey.config(s.account),
+      nps_survey_state: (s.agenda_config || {})[Crm::NpsSurvey::STATE_KEY] || {},
       # tabela de preços vigente (com os padrões quando não há tabela salva)
       price_table: {
         items: Cevico::PriceList.items(Current.account),

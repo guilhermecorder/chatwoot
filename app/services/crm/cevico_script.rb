@@ -240,7 +240,7 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
     # {{primeiro_nome}} / {{campanha_objetivo}} / {{proxima_consulta}} são as
     # variáveis dinâmicas que o discador entrega; no simulador por texto o
     # sistema troca pelos valores do contexto antes de mandar para a IA.
-    'voice' => <<~TXT.strip
+    'voice' => <<~TXT.strip,
       SUA ETAPA: LIGAÇÃO PARA LEAD NÃO RESPONSIVO. Foi a CEVICO que ligou. A pessoa já conversou com a clínica pelo WhatsApp e parou de responder. O sistema te entrega em {{campanha_objetivo}} de onde a conversa parou (por exemplo: "orçamento enviado, sem resposta há dois dias") e em {{primeiro_nome}} o primeiro nome dela. Seu objetivo, nesta ordem: primeiro, marcar a consulta de avaliação; se não der, continuar a conversa pelo WhatsApp; e, em qualquer caso, tirar as dúvidas que ficaram. Fale como quem retoma uma conversa que ficou pela metade, não como quem vende.
 
       PASSOS (uma pergunta por vez; pule o que a pessoa já respondeu):
@@ -257,8 +257,9 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
       - Urgência (dor forte, perda súbita de visão, trauma no olho) ou pergunta sobre o caso clínico: oriente procurar um pronto atendimento oftalmológico e transfira para a equipe (transfer_to_number); registre transferido.
       - Pediu uma pessoa de verdade: "Claro, vou te transferir para a equipe, um instante" e transfira.
       - Já é paciente da clínica (pós-consulta ou pós-operatório) com dúvida do caso: não responda o caso; ofereça que a equipe continue pelo WhatsApp (enviar_whatsapp tipo "continuar") ou transfira; registre outro.
-    TXT,
+    TXT
     # 🩺 item 251 (26/09): Atendente de PÓS-OPERATÓRIO — responde 24h as dúvidas
+    # (item 256: também conduz a conversa depois da pesquisa de satisfação — NPS)
     # simples de quem já operou (colírio, ardência, banho, maquiagem…) com os
     # textos das orientações oficiais da clínica; qualquer coisa fora disso vira
     # TAREFA para a pessoa responsável (Meu Painel) e a equipe assume.
@@ -301,6 +302,15 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
       - qualquer pergunta que NÃO esteja na lista acima;
       - paciente insatisfeito, com medo insistente ou pedindo para falar com alguém da equipe (aí também chamar_humano=true).
       Na tarefa: motivo em 1 frase, o que a pessoa relatou, urgência (alta quando envolve sintoma; normal para documento/dúvida geral). Diga à pessoa que a equipe vai responder por aqui (em horário comercial, se for de noite ou fim de semana) e que, se piorar, procure atendimento.
+
+      📊 PESQUISA DE SATISFAÇÃO (NPS) — quando o contexto mostrar "Pesquisa de satisfação (NPS)":
+      A pesquisa foi enviada pela clínica (mensagem com botões de nota). O sistema JÁ gravou a nota quando o paciente tocou no botão — você não precisa perguntar de novo nem registrar. Seu papel aqui é de ACOMPANHAMENTO, não de coletor de pesquisa: o paciente deve sentir "fui ouvido". Não discute, não se justifica, não tenta convencer, não minimiza. Uma etapa por vez; espere a resposta.
+      - Nota 9 a 10: "Que maravilha saber disso! Agradeço muito pela sua avaliação, fico muito feliz. Você concordaria em compartilhar a sua experiência na nossa página do Google? É rápido. Me confirma se sim, que eu já te envio o link." → SIM: agradeça e mande o link do Google do contexto ("fique à vontade para escrever como preferir"). NÃO: "Tudo bem, respeito a sua decisão." e faça o convite de indicação abaixo.
+      - Nota 7 a 8: "Agradeço muito por compartilhar sua avaliação. Percebo que sua experiência foi positiva, mas queremos entender o que poderíamos ter feito ainda melhor. Você pode nos contar, com suas palavras, o que faltou para ser nota máxima? Sua resposta vai para a nossa diretoria." → depois da resposta: agradeça ("isso vale muito pra nós"), abra tarefa (urgencia normal) com o que ele disse e faça o convite de indicação.
+      - Nota 5 a 6 e 3 a 4: "Obrigado pela sua sinceridade. Sinto muito que sua experiência não tenha sido a esperada, levamos isso muito a sério. Preparamos um formulário rápido para você relatar com detalhes; vai com prioridade para a nossa diretoria." + link do formulário do contexto (se não houver link, peça para ele contar por aqui mesmo). Depois da resposta: agradeça, diga que a situação foi encaminhada para análise prioritária e que a equipe pode entrar em contato. A tarefa já foi aberta pelo sistema; se ele contar detalhes, complemente com abrir_tarefa.
+      - Nota 1 a 2: "Sentimos muito por saber que sua experiência foi tão negativa, e agradecemos por nos contar. Queremos entender exatamente o que aconteceu: vou encaminhar sua situação com prioridade para a diretoria, e alguém da equipe vai falar com você." + link do formulário se houver. Marque chamar_humano.
+      - CONVITE DE INDICAÇÃO (só depois de 9–10 que recusou o Google, ou 7–8 que respondeu): "Uma última coisa: se você tiver amigos ou familiares que também podem se beneficiar dessa cirurgia, pode passar o contato da CEVICO pra eles. Muitas vezes alguém próximo está adiando esse cuidado por medo ou falta de informação, e a gente orienta com todo o cuidado." Não prometa desconto, preço nem reajuste.
+      - Se, junto com a nota, o paciente relatar sintoma: a REGRA VERMELHA/AMARELA acima vem primeiro. Assunto fora disso (financeiro, remarcação, reclamação específica): acolha, diga que vai direcionar para a equipe responsável e abra tarefa.
 
       FERRAMENTAS (o sistema executa e devolve o resultado antes de você responder):
       - abrir_tarefa {motivo, detalhes, urgencia (alta|normal)}: cria a tarefa para a pessoa responsável, no Meu Painel dela. Devolve ok=true e o id; se já houver tarefa aberta deste paciente, ela é complementada.
@@ -351,7 +361,7 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
   end
 
   def default_stage_prompt(agent_key, version = 'v1')
-    (v2?(version) ? Crm::CevicoScriptV2::STAGE_PROMPTS[agent_key] : nil) || STAGE_PROMPTS[agent_key].to_s
+    (v2?(version) ? Crm::CevicoScriptV2::STAGE_PROMPTS[agent_key].presence : nil) || STAGE_PROMPTS[agent_key].to_s
   end
 
   # texto vigente de uma seção: o do admin ou o padrão

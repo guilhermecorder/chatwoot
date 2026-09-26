@@ -5053,20 +5053,13 @@ class="text-xs"/></span>
                             gold
                           />
                           <div class="relative flex-1 flex flex-col">
+                            <!-- 26/09 (pedido dele): no modo edição os botões ganham uma faixa
+                                 própria — antes dividiam a linha e cortavam o nome ("Conv…", "Taxa …") -->
                             <div
-                              class="flex items-center gap-1.5 mb-1.5 text-white/85"
+                              v-if="organizeMode"
+                              class="flex items-center justify-end gap-1 mb-1.5"
                             >
-                              <span
-                                :class="tile.icon"
-                                class="text-sm flex-shrink-0"
-                              />
-                              <p
-                                class="text-xs font-medium flex-1 min-w-0 truncate"
-                              >
-                                {{ tile.label }}
-                              </p>
                               <button
-                                v-if="organizeMode"
                                 class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
                                 :title="
                                   tile.big
@@ -5085,7 +5078,6 @@ class="text-xs"/></span>
                                 />
                               </button>
                               <button
-                                v-if="organizeMode"
                                 class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
                                 title="Trocar a cor deste card"
                                 @click.stop="openColorPicker(tile)"
@@ -5093,7 +5085,7 @@ class="text-xs"/></span>
                                 <span class="i-lucide-paintbrush text-[11px]" />
                               </button>
                               <button
-                                v-if="organizeMode && tile.def"
+                                v-if="tile.def"
                                 class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-600 transition-colors"
                                 title="Excluir este indicador de vez (volta restaurando o modelo ou criando no +)"
                                 @click.stop="deleteTileKpi(tile)"
@@ -5101,16 +5093,30 @@ class="text-xs"/></span>
                                 <span class="i-lucide-trash-2 text-[11px]" />
                               </button>
                               <button
-                                v-if="organizeMode"
                                 class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-500/80 transition-colors"
                                 title="Ocultar este card (dá pra restaurar depois)"
                                 @click.stop="hideTile(tile)"
                               >
                                 <span class="i-lucide-x text-[11px]" />
                               </button>
+                            </div>
+                            <div
+                              class="flex items-start gap-1.5 mb-1.5 text-white/85"
+                            >
+                              <span
+                                :class="tile.icon"
+                                class="text-sm flex-shrink-0 mt-px"
+                              />
+                              <!-- nome COMPLETO: quebra em até 2 linhas; o texto inteiro no toque/mouse -->
+                              <p
+                                class="text-xs font-medium flex-1 min-w-0 leading-snug line-clamp-2 break-words"
+                                :title="tile.label"
+                              >
+                                {{ tile.label }}
+                              </p>
                               <button
-                                v-else-if="tile.details?.length || tile.about"
-                                class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/30 transition-colors"
+                                v-if="!organizeMode && (tile.details?.length || tile.about)"
+                                class="w-6 h-6 flex-shrink-0 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/30 transition-colors"
                                 title="Ver detalhes deste indicador"
                                 @click.stop="openKpi(tile)"
                               >

@@ -20,7 +20,7 @@
 #   antes_da_janela data anterior à janela da Agenda unificada (agenda_from)
 #   agenda_desligada a Agenda unificada está desligada no card do Oftalmofácil
 #   cancelada       cancelada no hub (não deve aparecer na Agenda — normal)
-class Crm::OftalmofacilDayCheck
+class Crm::OftalmofacilDayCheck # rubocop:disable Metrics/ClassLength
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   PROBLEMS = %w[sem_agendamento nao_lido hora_errada sem_local cancelado_aqui arquivado antes_da_janela agenda_desligada].freeze
   FIXABLE = %w[sem_agendamento nao_lido hora_errada].freeze
@@ -220,8 +220,14 @@ class Crm::OftalmofacilDayCheck
   def remote_rows
     return { checked: false, error: 'Conexão com o hub não configurada.' } unless Crm::OftalmofacilSyncService.configured?(config)
 
-    rows = Crm::OftalmofacilSyncService.new(account: account, config: config, silent: true, since: nil).pull_day(date)
-    { checked: true, total: rows.size, rows: rows }
+    service = Crm::OftalmofacilSyncService.new(account: account, config: config, silent: true, since: nil)
+    rows = service.pull_day(date)
+    raw = begin
+      service.count_raw_dates([date])
+    rescue StandardError
+      nil
+    end
+    { checked: true, total: rows.size, raw_total: raw, incomplete: raw ? [raw - rows.size, 0].max : nil, rows: rows }
   rescue StandardError => e
     { checked: false, error: "Hub não respondeu: #{e.message.truncate(120)}" }
   end

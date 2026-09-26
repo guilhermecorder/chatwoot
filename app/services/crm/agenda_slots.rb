@@ -1,7 +1,7 @@
 # Vagas LIVRES da agenda de consultas, calculadas no servidor — mesma conta
 # da Agenda/Meu Painel (janelas dos médicos × consultas marcadas × cadeados).
 # Usado pelo Atendente Instagram para oferecer só horários que existem.
-module Crm::AgendaSlots
+module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   # espelho do DEFAULT_WINDOWS do frontend (cevicoAgenda.js) — vale enquanto
@@ -54,10 +54,40 @@ module Crm::AgendaSlots
     day_slots(ctx, date, per_window: per_window).select { |s| unit.blank? || s[:unit] == unit }
   end
 
+  # item 255 (26/09): agendamento do Oftalmofácil OCUPA o horário da unidade
+  # dele por sobreposição de tempo (mesma duração padrão da tela da Agenda) —
+  # a IA nunca oferece nem grava em cima de um paciente do hub
+  HUB_DURATION = { 'cirurgia' => 60, 'exames' => 30 }.freeze
+
+  def hub_busy(account, from_date, to_date)
+    account.tasks.where(source: 'oftalmofacil', canceled_at: nil, archived_at: nil)
+           .where.not(unit: [nil, ''])
+           .where(due_at: TZ.parse(from_date.to_s).beginning_of_day..TZ.parse(to_date.to_s).end_of_day)
+           .pluck(:due_at, :unit, :task_type, :modality)
+           .map do |due, unit, type, modality|
+             at = due.in_time_zone(TZ)
+             start = (at.hour * 60) + at.min
+             mins = HUB_DURATION[type] || HUB_DURATION[modality] || 15
+             { date: at.to_date, unit: unit, from: start, to: start + mins }
+           end
+  end
+
+  def hub_overlap?(ctx, day, hhmm, win)
+    start = hm_to_min(hhmm)
+    finish = start + win['block'].to_i
+    ctx[:hub_busy].any? { |b| b[:date] == day && b[:unit] == win['unit'] && b[:from] < finish && b[:to] > start }
+  end
+
+  def hm_to_min(hhmm)
+    hours, mins = hhmm.split(':').map(&:to_i)
+    (hours * 60) + mins
+  end
+
   # tudo o que a conta de vagas precisa, calculado UMA vez para o intervalo
-  def slot_context(account, from_date, to_date)
+  def slot_context(account, from_date, to_date) # rubocop:disable Metrics/AbcSize
     cfg = agenda_config(account)
     {
+      hub_busy: hub_busy(account, from_date, to_date),
       now: TZ.now,
       wins: windows(account),
       blocked: Array(cfg['blocked']).to_set { |b| "#{b['date']}|#{b['time']}|#{b['unit']}" },
@@ -84,6 +114,7 @@ module Crm::AgendaSlots
         next if slot_time <= ctx[:now]
         next if ctx[:blocked].include?("#{day}|#{hm}|#{win['unit']}")
         next if ctx[:occupied].include?("#{day}|#{hm}|#{win['unit']}") || ctx[:occupied].include?("#{day}|#{hm}|")
+        next if hub_overlap?(ctx, day, hm, win)
 
         slots << { date: day, time: hm, unit: win['unit'], doctor: win['doctor'] }
         taken += 1

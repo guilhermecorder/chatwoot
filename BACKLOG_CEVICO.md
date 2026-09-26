@@ -8063,3 +8063,101 @@ com parâmetros diferentes selecionáveis por chavinhas.
   de horários e sem os botões de compareceu/faltou (a caixa abre no clique, onde a conferência
   continua); "Bloco do médico" = o de sempre. Filtros (camadas, quem, unidade, origem) intactos.
 - Sem backend. Conferido local (conta 3, 23/09: 4 itens nas caixas).
+
+> 26/09: 246–252 SUBIRAM no commit 04a06ed (develop) → imagem ghcr.io/guilhermecorder/chatwoot:04a06ed · Implantar WEB+SIDEKIQ juntos, sem migration · reversão :e47c19a.
+
+## 253. ✅ 📅 AGENTE "CONFIRMAÇÃO DE CONSULTA" no ambiente dos agentes + QUANTOS lembretes quiser (pedido dele 26/09: "não achei ele aqui… só consigo construir um? … preferiria no ambiente dos agentes, mais bonito e organizado")
+- Card próprio `ConfirmationAgentCard.vue` no grupo "Atendimento ao paciente" de Agentes de IA
+  (mesmo visual: fio na cor, interruptor geral, Abrir, Cards | Lista, situação em 4 números,
+  "como funciona"). Não usa IA (mensagem modelo da Meta).
+- Lembretes: 0 a 7 dias antes (chaves dN em agenda_config.appointment_reminders; d2/d1/d0 antigas
+  continuam), atalhos "2 dias antes / Véspera / No dia / outro". Cada lembrete: liga/desliga,
+  quando, hora, Sombra | Ao vivo, valor padrão, quem recebe (modalidades; nenhuma = todas),
+  sexta adianta a de segunda (1–2 dias antes), caixa, modelo da Av. Paulista / Tatuapé / geral
+  com variáveis preenchidas sozinhas ({{nome}} {{data}} {{hora}} {{valor}}), última rodada
+  (enviadas/receberiam + puladas com motivo), apagar.
+- Backend: job itera as chaves dN presentes; interruptor geral `appointment_confirmation.enabled`;
+  sombra em qualquer lembrete (lembrete antigo sem 'mode' segue AO VIVO — nada muda para quem já
+  usava); modelo por unidade em todos; ponte de fim de semana só com a opção ligada; registro de
+  rodada em todos; sanitize apaga o que não vem. Listener: "sim" vale para lembrete de 1–7 dias.
+- Aba Robôs: o card antigo virou atalho "Abrir" → Agentes de IA. Mapa de fluxos: "Confirmação de
+  consulta" aponta para o card novo.
+- Testes: appointment_reminder_send_job_d2_spec (8, inclui 2 lembretes simultâneos, interruptor
+  geral e lembrete antigo ao vivo) + listeners + flow registry verdes. Visual local: card abre,
+  "2 dias antes" + "No dia" criados e salvos juntos; config local restaurada.
+
+## 254. ✅ 🩹 A AGENDA SE CONSERTA SOZINHA — hub do Oftalmofácil × Agenda unificada (print dele 26/09: 28/09 com 14 itens no hub, 3 cancelados, só 3 na Agenda; "no Oftalmofácil tem 17")
+- Causa: itens lidos ANTES de ligar a Agenda unificada nunca voltaram pelo incremental (só relê o
+  que muda lá) → ficaram "fora da Agenda" (Antonio entrou porque o item dele mudou depois).
+- `heal_agenda!` (toda rodada, 15 min): espelho dos próximos 14 dias sem agendamento, com
+  agendamento em outro dia, ou cancelado lá e ativo aqui → refaz só o agendamento (sync_task!;
+  sem contato → tratamento completo). Não reabre o que a equipe cancelou; não usa o hub.
+- `refresh_upcoming!` (rodada das :07 e na recarga completa): pergunta ao hub os próximos 7 dias
+  e traz o que nunca foi lido. `pull_dates`: data do hub em DATE, DATETIME ou texto dd/mm/aaaa
+  com ou sem zero (a conferência do dia usa a mesma busca).
+- last_result ganha `healed` e `unread_found`.
+- Testes: sync spec +4 (item lido antes da Agenda, dia errado/cancelado/equipe/fora da janela,
+  nunca lido, formatos de data) — 18/18 com a conferência.
+
+## 255. ✅ 🚫 PACIENTE DO OFTALMOFÁCIL OCUPA O HORÁRIO — fim do agendamento duplo (pedido dele 26/09: "os pacientes do Oftalmofácil concorrem pelos mesmos horários… é obrigatório exibir para evitar agendamento duplo")
+- Servidor (`Crm::AgendaSlots`): vagas livres (IA oferece / trava do agendamento / remarcar) agora
+  descontam TODO agendamento do Oftalmofácil da mesma unidade por SOBREPOSIÇÃO de tempo
+  (cirurgia 60 min, exame 30, demais 15 — igual à tela). Antes só consulta com hora idêntica
+  bloqueava: cirurgia do hub não bloqueava nada.
+- Tela da Agenda: o bloco do médico conta como ocupado por qualquer agendamento do dia
+  (independe das camadas/filtros ligados) que sobreponha o bloco; hub ocupa qualquer janela da
+  unidade dele. Formulário: aviso "Horário ocupado por paciente do Oftalmofácil" (vermelho) ou
+  "encaixe" (âmbar) listando quem está lá; salvar em cima do hub pede confirmação.
+- Hub: leitura aceita item SEM fornecedor (LEFT JOIN PROVIDERS → "(sem fornecedor)", tratado como
+  parceiro/cerca) e a conferência do dia mostra a contagem CRUA do banco do hub × o que dá para
+  ler (itens sem agendamento-pai aparecem como aviso em vez de sumir).
+- Testes: agenda_slots_future_spec +1 (sobreposição, cancelada não ocupa, outra unidade livre).
+
+## 256. ✅ 📊 PESQUISA DE SATISFAÇÃO (NPS) PÓS-CIRURGIA + Pós-operatório conduz a resposta (substitui "AGENTE DE NPS" do N8N; pedido dele 26/09: "enviar a mensagem de NPS escolhendo data de acordo com cada tipo de cirurgia… e o agente de pós-operatório atender o paciente que respondeu e suas outras dúvidas")
+- `Crm::NpsSurvey` + `Crm::NpsSurveySendJob` (cron 5,20,35,50 — ⚠️ SIDEKIQ): N dias depois da
+  cirurgia REALIZADA na Agenda (presença/concluída; hub da CEVICO incluso; parceiro fora),
+  dia POR TIPO (catarata 30, refrativa 15, outras 15 — palavras do procedimento, editáveis),
+  hora, sombra | ao vivo, caixa, modelo da Meta com botões, {{nome}} {{procedimento}}
+  {{data_cirurgia}} {{dias}}, 1 por cirurgia, intervalo mínimo por pessoa (60 d, 2º olho),
+  nao_perturbe/perda_* fora. Última rodada e respostas em agenda_config.nps_survey_state.
+- Resposta SEM IA no CrmListener (antes do atendente): "🟢 9 a 10", "9-10", "10", "nota 8" (só no
+  início/sozinho — "pingo de 3 a 4 vezes" não conta) → etiqueta nps-9-10…nps-1-2 (painel de
+  satisfação já usa), additional_attributes.nps, nota interna; 5–6 tarefa, 1–4 tarefa urgente +
+  Radar. Quem recebeu a pesquisa nos últimos 10 dias é do Atendente de Pós-operatório.
+- Atendente de Pós-operatório: bloco "PESQUISA DE SATISFAÇÃO" no roteiro (textos do N8N adaptados:
+  Google p/ 9–10, "o que faltou" p/ 7–8, formulário p/ notas baixas, chamar humano no 1–2,
+  convite de indicação SEM a frase "vai aumentar 20–30%" — pendente de confirmação dele; sem
+  Jorge Haddad). Contexto ganha a nota e os links (Google e formulário; padrão = os do N8N).
+- Card `NpsSurveyCard.vue` em Agentes de IA (grupo Atendimento ao paciente): interruptor, 4
+  números, aviso se o Pós-operatório está desligado / sem a caixa, envio, tipos de cirurgia
+  (liga/desliga, dias, palavras, novo/apagar), links, última rodada e respostas por faixa.
+- Flow `nps_survey` no mapa. Testes: nps_survey_spec (8) + registry.
+
+## 257. ✅ 🏷️ Meu Painel: nome do indicador COMPLETO nos cards (print dele 26/09: "% de agen…", "Conv…", "Taxa …")
+- No modo edição os 4 botões dividiam a linha com o nome; agora ficam numa faixa própria acima
+  e o nome quebra em até 2 linhas (texto inteiro no mouse).
+
+## 258. 🐛 Roteiro do Atendente de Pós-operatório estava DENTRO do Agente de Ligação (achado 26/09 noite, EM PRODUÇÃO desde 04a06ed)
+- Causa: na inserção do item 251 a vírgula foi para a linha de fechamento do heredoc ("TXT,") em vez
+  da abertura do 'voice' → o texto do pós-operatório colou no fim do bloco da ligação e a chave
+  'atendente_pos_op' não existia (o agente rodaria só com o Roteiro, sem os passos). O agente
+  nasceu desligado: nenhum paciente atendido com isso. A ligação carregava o texto a mais.
+- Correção + teste de regressão (cevico_script_spec: cada etapa com o próprio texto, nada vaza
+  para a ligação, sem "Haddad"). Também: fallback do v2 usa .presence; mapa da jornada usa os
+  lembretes dN (sempre D-1/D-0 + os salvos) e aponta para o card novo.
+- Falhas pré-existentes conferidas contra 04a06ed (falham igual lá): journey engine ReplyService
+  (2), voice script "R$", voice post_call / calls webhook (matcher de fila), leadsquared setup,
+  setup_job, installation_webhook.
+
+## 259. ✅ 📅 Confirmação de consulta também para os PACIENTES DO OFTALMOFÁCIL — por UMA caixa escolhida (pedido dele 26/09 noite: "o agente de confirmação precisa enviar mensagem para pessoas da oftalmofacil também… uma das caixas de entrada deve poder enviar para esses pacientes")
+- A regra de ouro de 24/09 continua: nenhuma IA fala com paciente de parceiro. O que muda: cada
+  lembrete ganha o bloco "Pacientes do Oftalmofácil" (liga/desliga + caixa + modelo próprio).
+  Ligado → a consulta/exame do parceiro sai SÓ por essa caixa, com esse modelo (nunca o da CEVICO);
+  desligado → pulada pela cerca, como antes. Sem modelo próprio → pulada ("Oftalmofácil: sem modelo").
+- Caixa sugerida = a 1ª marcada como "dos parceiros" na integração Oftalmofácil (caixa 12), aparece
+  com "(Oftalmofácil)" na lista; ele pode escolher outra. Hora, sombra/ao vivo e "Quem recebe" são os
+  do lembrete. Variável nova {{parceiro}} = nome do parceiro do hub. Rodada lista "· Oftalmofácil (X)".
+- A resposta "sim/não" do paciente de parceiro agora é lida (por palavra, sem IA) mesmo dentro da
+  cerca → confirmed_at / declined_at + nota + aviso no Radar; agentes e automações seguem travados.
+- Config: agenda_config.appointment_reminders.dN.partner = { enabled, inbox_id, template_params,
+  message_preview }. Testes: appointment_reminder_send_job_d2_spec (+3) e crm_listener_confirmation (+1).

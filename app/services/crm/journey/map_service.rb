@@ -134,15 +134,22 @@ class Crm::Journey::MapService # rubocop:disable Metrics/ClassLength
   end
 
   # ── fontes ──────────────────────────────────────────────────────────────
-  def reminder_items # rubocop:disable Metrics/CyclomaticComplexity
+  REMINDER_NAMES = { 0 => 'D-0 · dia da consulta', 1 => 'D-1 · véspera da consulta' }.freeze
+
+  # item 253: todos os lembretes da Confirmação de consulta (0 a 7 dias antes);
+  # véspera e dia aparecem sempre (como antes), mais os outros salvos
+  def reminder_items # rubocop:disable Metrics/CyclomaticComplexity, Metrics/AbcSize, Metrics/PerceivedComplexity
     cfg = (CrmSetting.find_by(account: @account)&.agenda_config || {})['appointment_reminders'] || {}
-    { 'd1' => 'D-1 · véspera da consulta', 'd0' => 'D-0 · dia da consulta' }.map do |key, name|
+    keys = (Crm::AppointmentReminderSendJob::REGUAS & cfg.keys) | %w[d1 d0]
+    keys.sort_by { |k| -Crm::AppointmentReminderSendJob.days_of(k) }.map do |key|
+      days = Crm::AppointmentReminderSendJob.days_of(key)
+      name = REMINDER_NAMES[days] || "D-#{days} · #{days} dias antes"
       rule = (cfg[key] || {}).to_h
-      hour = rule['hour'].presence || Crm::AppointmentReminderSendJob::DEFAULT_HOURS[key]
+      hour = rule['hour'].presence || Crm::AppointmentReminderSendJob.default_hour(key)
       { id: "reminder:#{key}", kind: 'reminder', name: "Lembrete #{name}", step: 'consulta',
         enabled: rule['enabled'] == true, when_label: "às #{format('%02d', hour.to_i)}:00",
         detail: rule['message_preview'].to_s.truncate(90).presence || 'mensagem-modelo do lembrete',
-        route: { name: 'cevico_automations', query: { tab: 'robos' } } }
+        route: { name: 'cevico_automations', query: { tab: 'agentes', agent: 'confirmacao' } } }
     end
   end
 

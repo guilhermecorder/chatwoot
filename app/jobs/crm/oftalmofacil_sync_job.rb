@@ -21,10 +21,14 @@ class Crm::OftalmofacilSyncJob < ApplicationJob
 
   private
 
-  def run_for(settings, cfg, full) # rubocop:disable Metrics/AbcSize
+  def run_for(settings, cfg, full) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     service = Crm::OftalmofacilSyncService.new(account: settings.account, config: cfg,
                                                since: full ? nil : :cursor, silent: full ? true : nil)
     result = service.call
+    # item 254: a Agenda se conserta sozinha (próximos 14 dias, pelo espelho) e,
+    # na rodada das :07, pergunta ao hub os próximos 7 dias atrás do que nunca veio
+    service.heal_agenda!
+    service.refresh_upcoming! if full || Time.current.min < 15
 
     # cursor + resumo da rodada (relê a config fresca pra não sobrescrever
     # o que o admin salvou enquanto o job rodava)
@@ -40,7 +44,9 @@ class Crm::OftalmofacilSyncJob < ApplicationJob
       'error_count' => result.errors.size,
       # item 228
       'tasks_created' => result.tasks_created, 'tasks_updated' => result.tasks_updated,
-      'partners' => result.partners, 'skipped_partners' => result.skipped_partners
+      'partners' => result.partners, 'skipped_partners' => result.skipped_partners,
+      # item 254
+      'healed' => result.healed, 'unread_found' => result.unread_found
     }
     agenda['oftalmofacil'] = of
     settings.update!(agenda_config: agenda)

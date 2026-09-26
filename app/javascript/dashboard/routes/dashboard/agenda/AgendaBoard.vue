@@ -378,13 +378,43 @@ const bandsForDay = day =>
     doctor: w.doctor || '',
   }));
 
-// agendamentos ocupando um bloco (pode haver ENCAIXE: 2+ no mesmo horário)
-const tasksAtSlotAll = (day, win, slot) =>
-  dayTasks(day).filter(t => {
-    const d = new Date(t.due_at);
-    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    return hm === slot && (!t.unit || t.unit === win.unit);
+// item 255 (26/09, regra dele: "os pacientes do Oftalmofácil concorrem pelos
+// mesmos horários — evitar agendamento duplo"): quem OCUPA um bloco vem de
+// TODOS os agendamentos do dia (não só das camadas/filtros ligados) e conta
+// por SOBREPOSIÇÃO de tempo (um exame às 08:10 de 30 min ocupa os blocos
+// das 08:00, 08:15 e 08:30). Agendamento do Oftalmofácil ocupa qualquer
+// janela da unidade dele (consulta, exame ou sala cirúrgica).
+const liveTasksByDay = computed(() => {
+  const map = {};
+  liveTasks.value.forEach(task => {
+    const key = format(new Date(task.due_at), 'yyyy-MM-dd');
+    (map[key] ||= []).push(task);
   });
+  Object.values(map).forEach(arr => arr.sort((a, b) => new Date(a.due_at) - new Date(b.due_at)));
+  return map;
+});
+const isSurgeryWin = win => !win.doctor && !win.exam;
+const taskStartMin = t => {
+  const d = new Date(t.due_at);
+  return d.getHours() * 60 + d.getMinutes();
+};
+const occupiesWindow = (t, win) => {
+  const fromHub = t.source === 'oftalmofacil';
+  const unitOk = t.unit ? t.unit === win.unit : !fromHub;
+  if (!unitOk) return false;
+  if (fromHub) return true;
+  return isSurgeryWin(win) ? isSurgeryTask(t) : !isSurgeryTask(t);
+};
+// agendamentos ocupando um bloco (pode haver ENCAIXE: 2+ no mesmo horário)
+const tasksAtSlotAll = (day, win, slot) => {
+  const start = toMin(slot);
+  const end = start + (Number(win.block) || 15);
+  return (liveTasksByDay.value[format(day, 'yyyy-MM-dd')] || []).filter(t => {
+    if (!occupiesWindow(t, win)) return false;
+    const tStart = taskStartMin(t);
+    return tStart < end && tStart + taskDuration(t) > start;
+  });
+};
 const taskAtSlot = (day, win, slot) => tasksAtSlotAll(day, win, slot)[0];
 
 const showWindowsModal = ref(false);
@@ -1042,8 +1072,36 @@ const openEdit = task => {
   showModal.value = true;
 };
 
+// item 255: CONFLITO de horário no formulário — quem já está no mesmo local
+// sobrepondo o horário escolhido (qualquer camada, inclusive Oftalmofácil)
+const formConflicts = computed(() => {
+  if (!showModal.value || !form.value.date || !form.value.time) return [];
+  const fk = form.value.kind;
+  if (fk === 'teleconsultas') return [];
+  const unit = form.value.unit;
+  const start = toMin(form.value.time);
+  const end = start + (DEFAULT_DURATION[fk] || 15);
+  return (liveTasksByDay.value[form.value.date] || []).filter(t => {
+    if (editingTask.value && t.id === editingTask.value.id) return false;
+    if (t.unit ? t.unit !== unit : t.source === 'oftalmofacil') return false;
+    const tStart = taskStartMin(t);
+    return tStart < end && tStart + taskDuration(t) > start;
+  });
+});
+const hubConflicts = computed(() => formConflicts.value.filter(t => t.source === 'oftalmofacil'));
+const hmOf = t => format(new Date(t.due_at), 'HH:mm');
+
 const save = async () => {
   if (!form.value.name.trim() || !form.value.date || isSaving.value) return;
+  // item 255: horário tomado por paciente do Oftalmofácil = confirmação explícita
+  const timeChanged = !editingTask.value ||
+    format(new Date(editingTask.value.due_at), "yyyy-MM-dd'T'HH:mm") !== `${form.value.date}T${form.value.time}` ||
+    editingTask.value.unit !== form.value.unit;
+  if (timeChanged && hubConflicts.value.length) {
+    const who = hubConflicts.value.map(t => `${hmOf(t)} ${displayName(t)}`).join(', ');
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Este horário já está ocupado por paciente do Oftalmofácil (${who}). Agendar mesmo assim?`)) return;
+  }
   isSaving.value = true;
   try {
     const fk = form.value.kind;
@@ -2297,6 +2355,11 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           </section>
         </div>
 
+        <!-- item 255: aviso de horário ocupado (qualquer camada, inclusive Oftalmofácil) -->
+        <div v-if="formConflicts.length" class="mx-5 mb-2 p-3 rounded-xl text-xs" :class="hubConflicts.length ? 'bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300'">
+          <p class="font-bold flex items-center gap-1.5"><span class="i-lucide-triangle-alert text-sm" /> {{ hubConflicts.length ? 'Horário ocupado por paciente do Oftalmofácil' : 'Já tem agendamento neste horário (encaixe)' }}</p>
+          <p v-for="t in formConflicts" :key="'cf' + t.id" class="mt-0.5">• {{ hmOf(t) }} · {{ displayName(t) }} · {{ TYPE_BY_KEY[typeOf(t)]?.label || 'Agendamento' }}<template v-if="t.source === 'oftalmofacil'"> · Oftalmofácil{{ t.source_detail ? ` (${t.source_detail})` : '' }}</template></p>
+        </div>
         <!-- rodapé: excluir discreto à esquerda, ação principal no canto inferior DIREITO (área terminal da leitura) -->
         <div class="cv-modal-foot flex items-center gap-2 flex-wrap">
           <div v-if="editingTask" class="mr-auto">

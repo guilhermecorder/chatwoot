@@ -23,6 +23,7 @@ RSpec.describe Crm::FlowMap::Registry do
       'Crm::CreativeJob' => 'creative',
       'Crm::AdInsightsSyncJob' => 'creatives_center',
       'Crm::AppointmentReminderSendJob' => 'reminders',
+      'Crm::NpsSurveySendJob' => 'nps_survey',
       'Crm::JourneyRunJob' => 'journey',
       'Crm::OftalmofacilSyncJob' => 'oftalmofacil',
       'Crm::VoiceAgent::CampaignDialerJob' => 'voice',

@@ -37,7 +37,11 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   ORIGIN_LABEL = 'oftalmofacil'.freeze
 
   Result = Struct.new(:pulled, :created_contacts, :moved, :ahead, :labeled, :errors, :cursor, :cursor_id,
-                      :tasks_created, :tasks_updated, :partners, :skipped_partners, keyword_init: true)
+                      :tasks_created, :tasks_updated, :partners, :skipped_partners, :healed, :unread_found,
+                      keyword_init: true)
+  # item 254: a Agenda se conserta sozinha nos próximos dias (ver heal_agenda!)
+  HEAL_DAYS = 14
+  UPCOMING_DAYS = 7
 
   def initialize(account:, config: nil, silent: nil, since: :cursor)
     @account = account
@@ -49,7 +53,8 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     # sem cursor = primeira carga (histórico) = silêncio nas automações
     @silent = silent.nil? ? @since.blank? : silent
     @result = Result.new(pulled: 0, created_contacts: 0, moved: 0, ahead: 0, labeled: 0, errors: [], cursor: @since,
-                         cursor_id: @since_id, tasks_created: 0, tasks_updated: 0, partners: 0, skipped_partners: 0)
+                         cursor_id: @since_id, tasks_created: 0, tasks_updated: 0, partners: 0, skipped_partners: 0,
+                         healed: 0, unread_found: 0)
   end
 
   # ── parceiros × nosso ──────────────────────────────────────────────────
@@ -186,23 +191,85 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     @result
   ensure
     @connection&.close
+    @connection = nil
   end
 
   # ── item 249: conferência de UM DIA direto no hub (só leitura) ──────────
   # Tudo o que está marcado lá para a data, sem depender do cursor — é o que
   # a "Conferência do dia" usa para achar item que o incremental nunca leu.
   def pull_day(date)
-    iso = date.to_date.iso8601
-    br = date.to_date.strftime('%d/%m/%Y')
-    sql = "#{PULL_SELECT} WHERE (i.SCH_ITE_DATE = ? OR i.SCH_ITE_DATE = ?) " \
+    pull_dates([date.to_date])
+  end
+
+  # item 254: vários dias numa consulta só. A data lá pode vir como DATE,
+  # DATETIME ou texto "dd/mm/aaaa" (com ou sem zero à esquerda) — aceita todos.
+  def pull_dates(dates)
+    dates = Array(dates).map(&:to_date).uniq
+    return [] if dates.empty?
+
+    clause, binds = date_clause(dates)
+    sql = "#{PULL_SELECT} WHERE #{clause} " \
           "#{partners_enabled? ? '' : 'AND (p.PROV_NAME LIKE ? OR p.PROV_SOCIAL_NAME LIKE ?) '}" \
-          'ORDER BY i.SCH_ITE_HOUR ASC, i.SCH_ITE_ID ASC LIMIT 500'
-    binds = [iso, br]
+          "ORDER BY i.SCH_ITE_DATE ASC, i.SCH_ITE_HOUR ASC, i.SCH_ITE_ID ASC LIMIT #{BATCH * 2}"
     binds += [provider_pattern, provider_pattern] unless partners_enabled?
     query(sql, binds)
   ensure
     @connection&.close
     @connection = nil
+  end
+
+  # item 255: contagem CRUA do hub para o dia (sem nenhum JOIN) — se passar da
+  # leitura completa, há item lá sem agendamento-pai (SCHEDULING) e a
+  # conferência mostra a diferença em vez de sumir com ele em silêncio
+  def count_raw_dates(dates)
+    clause, binds = date_clause(Array(dates).map(&:to_date).uniq)
+    query("SELECT COUNT(*) AS total FROM SCHEDULING_ITEMS i WHERE #{clause}", binds).first&.[]('total').to_i
+  ensure
+    @connection&.close
+    @connection = nil
+  end
+
+  def date_clause(dates)
+    texts = dates.flat_map { |d| [d.iso8601, d.strftime('%d/%m/%Y'), "#{d.day}/#{d.month}/#{d.year}"] }.uniq
+    isos = dates.map(&:iso8601)
+    ["(i.SCH_ITE_DATE IN (#{(['?'] * texts.size).join(', ')}) OR DATE(i.SCH_ITE_DATE) IN (#{(['?'] * isos.size).join(', ')}))",
+     texts + isos]
+  end
+
+  # ── item 254 (26/09): A AGENDA SE CONSERTA SOZINHA ─────────────────────
+  # Caso real: 28/09 tinha 11 itens ativos no hub e só 3 na Agenda — os itens
+  # lidos ANTES de a Agenda unificada ser ligada nunca voltaram pelo
+  # incremental (ele só relê o que muda lá). A cada rodada, todo item do
+  # espelho dos próximos HEAL_DAYS dias SEM agendamento (ou com agendamento
+  # em outro dia, ou cancelado lá e ativo aqui) passa de novo pelo tratamento
+  # da Agenda. Não precisa do hub (usa o espelho) e é idempotente.
+  def heal_agenda!(days: HEAL_DAYS)
+    return @result unless agenda_enabled?
+
+    heal_candidates(days).each do |surgery|
+      heal_one!(surgery)
+    rescue StandardError => e
+      @result.errors << "agenda #{surgery.item_token}: #{e.message}"
+    end
+    @result
+  end
+
+  # uma vez por hora: pergunta ao hub tudo o que está marcado nos próximos
+  # UPCOMING_DAYS dias e traz o que o sistema nunca leu (cursor pulou, linha
+  # com erro, etc.). Só leitura lá; em silêncio aqui.
+  def refresh_upcoming!(days: UPCOMING_DAYS) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+    return @result unless self.class.configured?(@config) && agenda_enabled?
+
+    rows = pull_dates((Date.current..(Date.current + days)).to_a)
+    known = Crm::OftalmofacilSurgery.where(account_id: @account.id, item_token: rows.map { |r| r['SCH_ITE_TOKEN'].to_s })
+                                    .pluck(:item_token).to_set
+    unread = rows.reject { |r| r['SCH_ITE_TOKEN'].blank? || known.include?(r['SCH_ITE_TOKEN'].to_s) }
+    @result.unread_found += unread.size
+    reprocess_rows!(unread) if unread.any?
+    @result
+  rescue StandardError => e
+    @result.errors << "próximos dias: #{friendly_error(e)}"
+    @result
   end
 
   # reprocessa linhas vindas do hub (pull_day) — espelha e trata cada uma,
@@ -236,6 +303,32 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
 
   private
 
+  def heal_candidates(days) # rubocop:disable Metrics/AbcSize
+    from = [Date.current, agenda_from].max
+    scope = Crm::OftalmofacilSurgery.where(account_id: @account.id, surgery_date: from..(Date.current + days))
+    tasks = @account.tasks.where(external_ref: scope.select(:item_token)).index_by(&:external_ref)
+    scope.to_a.select do |s|
+      task = tasks[s.item_token]
+      next s.status_kind != 'cancelada' if task.nil?
+      next false if task.archived_at.present?
+      next task.canceled_at.nil? if s.status_kind == 'cancelada'
+      next false if task.canceled_at.present? # a equipe cancelou aqui: não reabre sozinho
+
+      task.due_at.nil? || task.due_at.in_time_zone('America/Sao_Paulo').to_date != s.surgery_date
+    end
+  end
+
+  def heal_one!(surgery)
+    contact = surgery.contact_id && @account.contacts.find_by(id: surgery.contact_id)
+    before = @result.tasks_created + @result.tasks_updated
+    if contact
+      sync_task!(contact, surgery, !own_provider?(surgery.provider_name))
+    else
+      apply(surgery)
+    end
+    @result.healed += 1 if @result.tasks_created + @result.tasks_updated > before
+  end
+
   # momento do cursor sempre no MESMO formato ("AAAA-MM-DD HH:MM:SS"): o
   # ruby-mysql devolve Time para DATETIME e o to_s trazia o fuso no fim
   def cursor_stamp(value)
@@ -256,14 +349,14 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
            i.SCH_ITE_DATE, i.SCH_ITE_HOUR, i.SCH_ITE_AMOUNT, i.SCH_ITE_CLINIC_PRICE, i.SCH_ITE_PROFIT,
            i.SCH_ITE_REBATE, i.SCH_ITE_DATE_CREATION, i.SCH_ITE_LAST_MODIFICATION, i.SCH_ITE_CLINIC,
            s.SCH_DOCTOR, s.SCH_PATIENT_NAME, s.SCH_PATIENT_CPF, s.SCH_PATIENT_PHONE, s.SCH_PATIENT_MAIL,
-           p.PROV_NAME, c.CLI_NAME, pr.PRO_NAME, pt.PRO_TYP_VALUE, e.EYE_VALUE,
+           COALESCE(p.PROV_NAME, '(sem fornecedor)') AS PROV_NAME, c.CLI_NAME, pr.PRO_NAME, pt.PRO_TYP_VALUE, e.EYE_VALUE,
            st.TB_STA_APP_ID_VALUE AS STATUS_LABEL,
            pat.PAT_CPF, pat.PAT_EMAIL, pat.PAT_PHONE,
            (SELECT COALESCE(SUM(t.TRA_RECEIVED_AMOUNT), 0) FROM TRANSACTIONS t
              WHERE t.TRA_SCHEDULING_ID = s.SCH_ID AND t.TRA_STATUS = 'Y') AS PAID_AMOUNT
     FROM SCHEDULING_ITEMS i
     JOIN SCHEDULING s ON s.SCH_ID = i.SCH_ITE_SCH_ID
-    JOIN PROVIDERS p ON p.PROV_ID = s.SCH_PROVIDER
+    LEFT JOIN PROVIDERS p ON p.PROV_ID = s.SCH_PROVIDER
     LEFT JOIN CLINICS c ON c.CLI_ID = i.SCH_ITE_CLINIC
     LEFT JOIN PROCEDURES pr ON pr.PRO_ID = i.SCH_ITE_PROCEDURE
     LEFT JOIN PROCEDURES_TYPE pt ON pt.PRO_TYP_ID = i.SCH_ITE_PROCEDURE_TYPE

@@ -53,6 +53,16 @@ RSpec.describe Crm::CevicoScript do
     end
   end
 
+  # 26/09: cada atendente tem o SEU bloco de passos (um heredoc mal fechado já
+  # colou o do pós-operatório dentro do Agente de Ligação)
+  it 'cada etapa tem o próprio texto: pós-operatório não vaza para a ligação', :aggregate_failures do
+    prompts = described_class::STAGE_PROMPTS
+    expect(prompts.keys).to include('atendente_agendamento', 'atendente_pos', 'voice', 'atendente_pos_op')
+    expect(prompts['atendente_pos_op']).to include('PESQUISA DE SATISFAÇÃO').and include('REGRA VERMELHA')
+    expect(prompts['voice']).not_to include('REGRA VERMELHA')
+    expect(prompts.values.join).not_to include('Haddad')
+  end
+
   # 🧪 22/09: Roteiro v2 paralelo (só para o Testar agente)
   describe 'versão v2 (paralela)' do
     it 'tem padrão próprio nas 5 seções, título próprio e os passos dos 2 atendentes como seções extras', :aggregate_failures do

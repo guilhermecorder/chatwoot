@@ -37,4 +37,26 @@ RSpec.describe Crm::AgendaSlots do
   it 'free_slots continua igual para os próximos dias' do
     expect(described_class.free_slots(account, days: 14, per_window: 1)).to all(include(:date, :time, :unit, :doctor))
   end
+
+  # 🚫 item 255: paciente do Oftalmofácil ocupa o horário (nada de agendamento duplo)
+  it 'cirurgia e exame do Oftalmofácil ocupam os blocos que sobrepõem, só na unidade deles', :aggregate_failures do
+    user = create(:user, account: account)
+    free = ->(time, unit = 'paulista') { described_class.slot_available?(account, date: far_wednesday, time: time, unit: unit) }
+    expect([free.call('13:00'), free.call('13:15'), free.call('14:00'), free.call('14:30')]).to all(be(true))
+
+    account.tasks.create!(title: 'Cirurgia: Hub', task_type: 'cirurgia', unit: 'paulista', creator: user, source: 'oftalmofacil',
+                          external_ref: 'hub-1', due_at: tz.parse("#{far_wednesday} 13:10"))
+    account.tasks.create!(title: 'Exame: Hub', task_type: 'consulta', modality: 'exames', unit: 'paulista', creator: user,
+                          source: 'oftalmofacil', external_ref: 'hub-2', due_at: tz.parse("#{far_wednesday} 14:20"))
+    account.tasks.create!(title: 'Cancelada: Hub', task_type: 'cirurgia', unit: 'paulista', creator: user, source: 'oftalmofacil',
+                          external_ref: 'hub-3', due_at: tz.parse("#{far_wednesday} 16:00"), canceled_at: Time.current)
+
+    expect(free.call('13:00')).to be(false) # 13:00–13:15 × cirurgia 13:10–14:10
+    expect(free.call('14:00')).to be(false)
+    expect(free.call('14:15')).to be(false) # exame 14:20–14:50
+    expect(free.call('14:45')).to be(false)
+    expect(free.call('15:00')).to be(true)
+    expect(free.call('16:00')).to be(true)  # cancelada não ocupa
+    expect(free.call('08:30', 'tatuape')).to be(true) # outra unidade
+  end
 end

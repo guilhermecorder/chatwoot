@@ -144,4 +144,73 @@ RSpec.describe Crm::OftalmofacilSyncService do
     expect(captured[0]).to include('PROV_NAME LIKE ?')
     expect(captured[1]).to eq(['%CATARATA_SP%', '%CATARATA_SP%'])
   end
+
+  # 🩹 item 254 (26/09): caso real de 28/09 — 11 itens ativos no hub, só 3 na Agenda
+  describe 'a Agenda se conserta sozinha' do
+    include ActiveSupport::Testing::TimeHelpers
+
+    let(:tz) { ActiveSupport::TimeZone['America/Sao_Paulo'] }
+
+    around { |ex| travel_to(tz.parse('2026-09-26 10:00')) { ex.run } }
+
+    def read_without_agenda(rows)
+      off = described_class.new(account: account, config: config.merge('agenda_enabled' => false), silent: true, since: nil)
+      allow(off).to receive(:query).and_return(rows, [])
+      off.call
+    end
+
+    it 'item lido ANTES de ligar a Agenda ganha o agendamento na próxima rodada, sem o hub', :aggregate_failures do
+      read_without_agenda([row('SCH_ITE_TOKEN' => 'antes', 'SCH_ITE_DATE' => '28/09/2026', 'SCH_ITE_HOUR' => '27000.0',
+                               'PROV_NAME' => 'CATARATA_SP')])
+      expect(account.tasks.find_by(external_ref: 'antes')).to be_nil
+
+      result = service.heal_agenda!
+      task = account.tasks.find_by(external_ref: 'antes')
+      expect(result.healed).to eq(1)
+      expect(task.due_at.in_time_zone(tz).strftime('%d/%m %H:%M')).to eq('28/09 07:30')
+      expect(task.unit).to eq('iop')
+      expect(described_class.new(account: account, config: config, since: nil).heal_agenda!.healed).to eq(0) # idempotente
+    end
+
+    it 'corrige dia errado e cancelamento do hub; não reabre o que a equipe cancelou nem mexe fora da janela', :aggregate_failures do
+      run_with([row('SCH_ITE_TOKEN' => 'hora', 'SCH_ITE_DATE' => '29/09/2026', 'SCH_ITE_HOUR' => '09:00'),
+                row('SCH_ITE_ID' => 2, 'SCH_ITE_TOKEN' => 'canc', 'SCH_ITE_DATE' => '29/09/2026', 'SCH_PATIENT_PHONE' => '11911112222'),
+                row('SCH_ITE_ID' => 3, 'SCH_ITE_TOKEN' => 'equipe', 'SCH_ITE_DATE' => '29/09/2026', 'SCH_PATIENT_PHONE' => '11933334444'),
+                row('SCH_ITE_ID' => 4, 'SCH_ITE_TOKEN' => 'longe', 'SCH_ITE_DATE' => '30/11/2026', 'SCH_PATIENT_PHONE' => '11955556666')])
+      account.tasks.find_by(external_ref: 'hora').update!(due_at: tz.parse('2026-09-28 21:00'))
+      Crm::OftalmofacilSurgery.find_by(item_token: 'canc').update!(status_kind: 'cancelada')
+      account.tasks.find_by(external_ref: 'equipe').update!(canceled_at: Time.current)
+      Crm::OftalmofacilSurgery.find_by(item_token: 'longe').update!(surgery_date: Date.new(2026, 9, 29))
+      account.tasks.find_by(external_ref: 'longe').update!(due_at: tz.parse('2026-11-30 09:30'))
+
+      described_class.new(account: account, config: config, since: nil).heal_agenda!(days: 3)
+      expect(account.tasks.find_by(external_ref: 'hora').due_at.in_time_zone(tz).to_date).to eq(Date.new(2026, 9, 29))
+      expect(account.tasks.find_by(external_ref: 'canc').canceled_at).to be_present
+      expect(account.tasks.find_by(external_ref: 'equipe').canceled_at).to be_present
+      expect(account.tasks.find_by(external_ref: 'longe').due_at.in_time_zone(tz).to_date).to eq(Date.new(2026, 9, 29))
+    end
+
+    it 'uma vez por hora traz do hub o que nunca foi lido nos próximos dias (e ignora o que já está no espelho)', :aggregate_failures do
+      run_with([row('SCH_ITE_TOKEN' => 'lido', 'SCH_ITE_DATE' => '28/09/2026')])
+      fresh = described_class.new(account: account, config: config, since: nil)
+      novos = [row('SCH_ITE_TOKEN' => 'lido', 'SCH_ITE_DATE' => '28/09/2026'),
+               row('SCH_ITE_ID' => 9, 'SCH_ITE_TOKEN' => 'nunca-lido', 'SCH_ITE_DATE' => '28/09/2026',
+                   'SCH_PATIENT_NAME' => 'Carmem de Azevedo', 'SCH_PATIENT_PHONE' => '11977770000')]
+      allow(fresh).to receive(:query).and_return(novos)
+      result = fresh.refresh_upcoming!
+      expect(result.unread_found).to eq(1)
+      expect(account.tasks.find_by(external_ref: 'nunca-lido').title).to eq('Cirurgia: Carmem de Azevedo')
+    end
+
+    it 'a busca por dia aceita a data do hub em qualquer formato (DATE, texto com e sem zero)' do
+      captured = nil
+      allow(service).to receive(:query) { |sql, binds|
+        captured = [sql, binds]
+        []
+      }
+      service.pull_day(Date.new(2026, 9, 8))
+      expect(captured[1]).to include('2026-09-08', '08/09/2026', '8/9/2026')
+      expect(captured[0]).to include('DATE(i.SCH_ITE_DATE) IN')
+    end
+  end
 end

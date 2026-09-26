@@ -20,6 +20,7 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::Calls,
     Crm::FlowMap::Flows::Voice,
     Crm::FlowMap::Flows::Reminders,
+    Crm::FlowMap::Flows::NpsSurvey,
     Crm::FlowMap::Flows::Journey,
     Crm::FlowMap::Flows::FollowupBots,
     # Vendas e fechamento
