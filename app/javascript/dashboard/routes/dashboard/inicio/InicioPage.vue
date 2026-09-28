@@ -2248,7 +2248,12 @@ const panelTiles = computed(() => {
     id,
     spacer: true,
   }));
-  const all = [...allPanelTiles.value, ...spacers];
+  // item 275: DIVISÓRIAS com título ("Início da jornada"…) — faixa de
+  // largura inteira que separa seções do painel; arrasta como um card
+  const dividers = Object.entries(kpiLayout.value.dividers || {}).map(
+    ([id, label]) => ({ id, divider: true, label })
+  );
+  const all = [...allPanelTiles.value, ...spacers, ...dividers];
   const rank = t => {
     const i = order.indexOf(t.id);
     return i === -1 ? 1000 + all.indexOf(t) : i;
@@ -2257,11 +2262,17 @@ const panelTiles = computed(() => {
     .filter(t => !hidden.has(t.id))
     .sort((a, b) => rank(a) - rank(b))
     .map(t => {
-      if (t.spacer) return t;
+      if (t.spacer || t.divider) return t;
       const out = colors[t.id] ? { ...t, customGrad: colors[t.id] } : { ...t };
       // item 266b: com a grade do ímã salva, "grande" = largura ≥ metade
+      // lê a grade SALVA (não a viva: a viva depende desta lista → laço)
       const cell = (kpiLayout.value.grid || []).find(g => g && g.id === t.id);
-      if (cell ? cell.w >= TILE_BIG_W : sizes[t.id] === 'lg') out.big = true;
+      const big = cell
+        ? kpiLayout.value.grid_units
+          ? isBigCell(cell)
+          : cell.w >= 6 // grade antiga de 12 colunas
+        : sizes[t.id] === 'lg';
+      if (big) out.big = true;
       return out;
     });
 });
@@ -2286,6 +2297,9 @@ const saveKpiLayout = async patch => {
     trend: patch.trend ?? cur.trend ?? false,
     grid: patch.grid ?? cur.grid ?? [],
     auto_palette: patch.auto_palette ?? cur.auto_palette ?? true,
+    dividers: patch.dividers ?? cur.dividers ?? {},
+    cols: patch.cols ?? cur.cols ?? 4,
+    grid_units: patch.grid_units ?? cur.grid_units ?? false,
   };
   isSavingLayout.value = true;
   try {
@@ -2301,10 +2315,30 @@ const saveKpiLayout = async patch => {
 // para esticar; card com metade da largura ou mais vira o "grande" (resumo com
 // gráfico). Salvo em kpi_layout.grid ({id,x,y,w,h}); `order`/`sizes` seguem
 // gravados (derivados) para quem lê o formato antigo. ──
-const TILE_W = 3;
-const TILE_H = 6; // altura de partida; no ímã auto-height a medida do conteúdo manda
-const TILE_BIG_W = 6;
-const TILE_BIG_H = 12; // 2×2 = 346 px
+// 28/09 (pedidos dele, em sequência: "tamanho padrão, um 2/3 etc" → "parou
+// de ter a visualização quadrada… precisamos de mais liberdade"): a grade
+// dos indicadores tem N QUADRADOS POR LINHA (2 a 12, por painel) e cada card
+// mede em quadrados: largura 1..N e altura 1..3 quadrados (setinhas − / +
+// ou puxando a borda). 1×1 = um quadrado de verdade; 2×2 = o card grande
+// com o resumo. Nada de fração forçada.
+const TILE_COLS_MIN = 2;
+const TILE_COLS_MAX = 12;
+const TILE_H = 6; // 1 quadrado de altura = 6 linhas = 166 px
+const TILE_H_MAX = 3; // até 3 quadrados de altura
+const TILE_BIG_H = 12; // 2 quadrados de altura
+const TILE_BIG_W = 2; // resumo (card grande) = 2×2 quadrados ou mais
+const tileCols = computed(() => {
+  const n = Number(kpiLayout.value?.cols);
+  return n >= TILE_COLS_MIN && n <= TILE_COLS_MAX ? n : 4;
+});
+const tileSnap = computed(() => ({
+  x: 1,
+  h: TILE_H,
+  cols: tileCols.value,
+  minW: 1,
+}));
+const isBigCell = cell =>
+  !!cell && cell.w >= TILE_BIG_W && cell.h >= TILE_BIG_H;
 // posição de fábrica = a fileira de hoje: da esquerda para a direita em 4
 // colunas, card grande ocupando 2×2 (o ímã arruma o resto)
 const tileDefaults = computed(() => {
@@ -2312,17 +2346,18 @@ const tileDefaults = computed(() => {
   let y = 0;
   let rowH = TILE_H;
   return panelTiles.value.map(t => {
-    const w = t.big ? TILE_BIG_W : TILE_W;
-    const h = t.big ? TILE_BIG_H : TILE_H;
-    if (x + w > 12) {
+    const cols = tileCols.value;
+    const w = t.divider ? cols : t.big ? TILE_BIG_W : 1;
+    const h = t.divider ? 2 : t.big ? TILE_BIG_H : TILE_H;
+    if (x + w > cols) {
       x = 0;
       y += rowH;
       rowH = TILE_H;
     }
-    const cell = { id: t.id, x, y, w, h, hidden: false };
+    const cell = { id: t.id, x, y, w, h, hidden: false, free: !!t.divider };
     x += w;
     rowH = Math.max(rowH, h);
-    if (x >= 12) {
+    if (x >= cols) {
       x = 0;
       y += rowH;
       rowH = TILE_H;
@@ -2330,14 +2365,42 @@ const tileDefaults = computed(() => {
     return cell;
   });
 });
-const tileGridComputed = computed(() =>
-  mergeLayout(
-    (kpiLayout.value.grid || [])
-      .filter(g => g && g.id)
-      .map(g => ({ ...g, hidden: false })),
-    tileDefaults.value
-  )
-);
+// 28/09: grade de 4 colunas (snap 3) — o card nunca fica "meia coluna" torto
+// item 276: ALTURA PADRÃO sempre — 1 altura; 2 alturas só no card grande
+// (metade da linha ou mais); divisória = 2 linhas. Também conserta grades
+// salvas na fase "altura pelo conteúdo" (270), que guardavam alturas em
+// linhas de 4 px
+// grade salva ANTES dos quadrados (12 colunas; card = 3, grande = 6; alturas
+// da fase "pelo conteúdo" em linhas de 4 px) → converte para quadrados uma
+// vez; a partir daí `grid_units` marca que a grade já é em quadrados
+const legacyToSquares = (cell, cols) => {
+  const unit = 12 / cols;
+  const isDiv = String(cell.id).startsWith('div:');
+  const w = isDiv ? cols : Math.max(1, Math.round(cell.w / unit));
+  const x = Math.max(0, Math.min(cols - w, Math.round(cell.x / unit)));
+  const h = isDiv ? 2 : cell.h >= TILE_BIG_H && w >= 2 ? TILE_BIG_H : TILE_H;
+  return { ...cell, x, w, h };
+};
+const standardH = cell => {
+  if (String(cell.id).startsWith('div:')) return 2;
+  const units = Math.round(cell.h / TILE_H);
+  return Math.max(1, Math.min(TILE_H_MAX, units || 1)) * TILE_H;
+};
+const tileGridComputed = computed(() => {
+  const cols = tileCols.value;
+  const inSquares = !!kpiLayout.value.grid_units;
+  const saved = (kpiLayout.value.grid || [])
+    .filter(g => g && g.id)
+    .map(g =>
+      inSquares ? { ...g, h: standardH(g) } : legacyToSquares(g, cols)
+    )
+    .map(g => ({
+      ...g,
+      hidden: false,
+      free: String(g.id).startsWith('div:'),
+    }));
+  return mergeLayout(saved, tileDefaults.value, tileSnap.value);
+});
 const tileGrid = ref([]);
 onMounted(() => {
   tileGrid.value = [...tileGridComputed.value];
@@ -2356,10 +2419,11 @@ const saveTileGrid = () => {
   const ordered = tileCellsOrdered();
   const sizes = {};
   ordered.forEach(c => {
-    if (c.w >= TILE_BIG_W) sizes[c.id] = 'lg';
+    if (isBigCell(c)) sizes[c.id] = 'lg';
   });
   return saveKpiLayout({
     grid: stripCells(ordered),
+    grid_units: true,
     order: ordered.map(c => c.id),
     sizes,
   });
@@ -2381,6 +2445,9 @@ const resetKpiLayout = () => {
     sizes: {},
     spacers: [],
     grid: [],
+    dividers: {},
+    cols: 4,
+    grid_units: true,
   });
   resetBlockLayout();
 };
@@ -2389,13 +2456,52 @@ const resetKpiLayout = () => {
 const toggleTileSize = tile => {
   const cell = tileGrid.value.find(c => c.id === tile.id);
   if (!cell) return;
-  const big = cell.w >= TILE_BIG_W;
+  const big = isBigCell(cell);
   tileGrid.value = placeBlock(
     tileGrid.value,
     tile.id,
-    big ? { w: TILE_W, h: TILE_H } : { w: TILE_BIG_W, h: TILE_BIG_H }
+    big ? { w: 1, h: TILE_H } : { w: TILE_BIG_W, h: TILE_BIG_H },
+    tileSnap.value
   );
   saveTileGrid();
+};
+// largura e altura em QUADRADOS, com setinhas (− / +)
+const stepTileSize = (tile, dw, dh) => {
+  const cell = tileGrid.value.find(c => c.id === tile.id);
+  if (!cell) return;
+  const w = Math.max(1, Math.min(tileCols.value, cell.w + dw));
+  const hUnits = Math.max(
+    1,
+    Math.min(TILE_H_MAX, Math.round(cell.h / TILE_H) + dh)
+  );
+  const h = hUnits * TILE_H;
+  if (w === cell.w && h === cell.h) return;
+  tileGrid.value = placeBlock(
+    tileGrid.value,
+    tile.id,
+    { w, h },
+    tileSnap.value
+  );
+  saveTileGrid();
+};
+const tileSizeOf = tile => {
+  const cell = tileGrid.value.find(c => c.id === tile.id) || {};
+  return {
+    w: cell.w || 1,
+    h: Math.max(1, Math.round((cell.h || TILE_H) / TILE_H)),
+  };
+};
+// quantos quadrados por linha (2 a 12): cada card guarda o tamanho em
+// quadrados; só o que não cabe mais é apertado
+const setTileCols = cols => {
+  if (cols < TILE_COLS_MIN || cols > TILE_COLS_MAX || cols === tileCols.value)
+    return;
+  const grid = tileGrid.value.map(c => {
+    const isDiv = String(c.id).startsWith('div:');
+    const w = isDiv ? cols : Math.min(cols, c.w);
+    return { ...c, w, x: Math.max(0, Math.min(cols - w, c.x)) };
+  });
+  saveKpiLayout({ cols, grid: stripCells(grid), grid_units: true });
 };
 const addSpacer = () => {
   const id = `gap:${Date.now().toString(36)}`;
@@ -2405,10 +2511,40 @@ const addSpacer = () => {
     spacers: [...(kpiLayout.value.spacers || []), id],
     // entra no FIM da fileira (a ordem atual + ele)
     order: [...ordered.map(c => c.id), id],
+    grid: [...stripCells(ordered), { id, x: 0, y: bottom, w: 1, h: TILE_H }],
+  });
+};
+// item 275: divisória com título — entra no fim, largura inteira
+const addDivider = () => {
+  const id = `div:${Date.now().toString(36)}`;
+  const ordered = tileCellsOrdered();
+  const bottom = ordered.reduce((m, c) => Math.max(m, c.y + c.h), 0);
+  saveKpiLayout({
+    dividers: { ...(kpiLayout.value.dividers || {}), [id]: 'Nova seção' },
+    order: [...ordered.map(c => c.id), id],
     grid: [
       ...stripCells(ordered),
-      { id, x: 0, y: bottom, w: TILE_W, h: TILE_H },
+      { id, x: 0, y: bottom, w: tileCols.value, h: 2, free: true },
     ],
+    grid_units: true,
+  });
+};
+const renameDivider = (tile, label) => {
+  const text = String(label || '')
+    .trim()
+    .slice(0, 60);
+  if (!text || text === tile.label) return;
+  saveKpiLayout({
+    dividers: { ...(kpiLayout.value.dividers || {}), [tile.id]: text },
+  });
+};
+const removeDivider = tile => {
+  const dividers = { ...(kpiLayout.value.dividers || {}) };
+  delete dividers[tile.id];
+  saveKpiLayout({
+    dividers,
+    order: (kpiLayout.value.order || []).filter(id => id !== tile.id),
+    grid: stripCells(tileGrid.value.filter(c => c.id !== tile.id)),
   });
 };
 const removeSpacer = tile =>
@@ -2498,7 +2634,13 @@ const toggleTrend = async () => {
   }
 };
 const tileHist = tile => {
-  if (!histJudgeOn.value || !histBag.value?.metrics || tile.spacer) return null;
+  if (
+    !histJudgeOn.value ||
+    !histBag.value?.metrics ||
+    tile.spacer ||
+    tile.divider
+  )
+    return null;
   const hb = histBag.value;
   const HIST_DAYS = Math.max(1, (hb.points || []).length || 90);
   let value = null;
@@ -2921,7 +3063,7 @@ const tierWord = tier => {
   return 'apoio';
 };
 const tilePalette = tile => {
-  if (!autoPalette.value || tile?.spacer) return null;
+  if (!autoPalette.value || tile?.spacer || tile?.divider) return null;
   const { family, tier } = classifyKpi(tile);
   const fill = dayFill(clock.value);
   return {
@@ -3033,7 +3175,7 @@ const gestorSignals = computed(() => {
   if (panelBase.value !== 'gestor' || !data.value) return [];
   const sigs = [];
   (panelTiles.value || [])
-    .filter(t => !t.spacer)
+    .filter(t => !t.spacer && !t.divider)
     .forEach(tile => {
       const st = tileState(tile);
       if (st.status === 'bad')
@@ -4332,7 +4474,9 @@ onUnmounted(() => {
     class="cv-page h-full w-full overflow-y-auto bg-n-surface-1"
     :style="cvVars"
   >
-    <div class="max-w-5xl mx-auto p-4 sm:p-8">
+    <!-- 28/09 (pedido: "no desktop quero poder usar todo esse espaço para
+         montar meus dashboards"): sem teto de largura — o painel ocupa a tela -->
+    <div class="max-w-none mx-auto p-4 sm:p-8 2xl:px-12">
       <!-- Boas-vindas (varredura de design 12/09): cabeçalho moderno — chips
            de vidro com o dia e o painel, saudação grande, lead do painel, o
            PULSO do momento em vidros clicáveis e o olho CEVICO como marca
@@ -4577,6 +4721,32 @@ onUnmounted(() => {
             <span class="i-lucide-trending-up text-xs" />
             tendência {{ trendOn ? 'ligada' : 'desligada' }}
           </button>
+          <!-- item 276: quantos QUADRADOS por linha (2 a 12) -->
+          <span
+            class="cv-seg cv-seg-sm items-center"
+            title="Quantos quadrados cabem numa linha dos indicadores — cada card mede em quadrados (largura × altura)"
+          >
+            <span class="text-[10px] text-n-slate-10 px-2"
+              >quadrados por linha</span
+            >
+            <button
+              class="cv-seg-item"
+              :disabled="tileCols <= TILE_COLS_MIN"
+              @click="setTileCols(tileCols - 1)"
+            >
+              <span class="i-lucide-minus text-xs" />
+            </button>
+            <span class="cv-seg-item cv-seg-on tabular-nums">{{
+              tileCols
+            }}</span>
+            <button
+              class="cv-seg-item"
+              :disabled="tileCols >= TILE_COLS_MAX"
+              @click="setTileCols(tileCols + 1)"
+            >
+              <span class="i-lucide-plus text-xs" />
+            </button>
+          </span>
           <button
             class="cv-btn cv-btn-ghost cv-btn-sm"
             title="Recolhe os blocos em barrinhas (mais fácil pra reordenar)"
@@ -5618,15 +5788,8 @@ onUnmounted(() => {
               Painel por pessoa
             </button>
           </div>
-          <!-- atalho pro Dashboard da Agenda em TODOS os painéis (item 86) -->
-          <button
-            class="cv-btn"
-            title="Dashboard da Agenda — comparecimento, ocupação, cirurgias"
-            @click="goToAgendaDashboard"
-          >
-            <span class="i-lucide-calendar-range text-sm" />
-            Dashboard da Agenda
-          </button>
+          <!-- (28/09) o atalho "Dashboard da Agenda" saiu daqui a pedido dele —
+               o bloco Dashboard da Agenda continua no painel e em Acesso rápido -->
           <!-- pílulas de médico (só no painel Médicos) -->
           <div v-if="panelBase === 'medico'" class="cv-seg overflow-x-auto">
             <button
@@ -5834,12 +5997,27 @@ onUnmounted(() => {
                     <!-- 28/09 (pedido: "os quadradinhos dos indicadores ajustem seu tamanho
                          de acordo com as informações deles"): altura pelo CONTEÚDO (auto-height);
                          só a largura se estica -->
+                    <!-- item 275: EDITAR direto no ambiente dos indicadores -->
+                    <div
+                      v-if="isAdmin && !currentPanel.custom && !organizeMode"
+                      class="flex justify-end -mb-2"
+                    >
+                      <button
+                        class="cv-btn cv-btn-ghost cv-btn-sm"
+                        title="Editar os indicadores: arrastar, esticar, ocultar, cores, divisórias, modelos"
+                        @click="toggleEditMode"
+                      >
+                        <span class="i-lucide-pencil-ruler text-xs" />
+                        editar indicadores
+                      </button>
+                    </div>
                     <MagnetBoard
                       v-model:layout="tileGrid"
-                      auto-height
+                      :snap="tileSnap"
+                      :cols="tileCols"
                       :locked="blocksLocked"
                       :stack-below="600"
-                      handle=".cv-tile, .cv-tile-gap"
+                      handle=".cv-tile, .cv-tile-gap, .cv-tile-div"
                       class="mb-4"
                       @moved="onKpiReorder"
                     >
@@ -5849,8 +6027,45 @@ onUnmounted(() => {
                           v-for="tile in [tileById[cell.id]]"
                           :key="tile ? tile.id : cell.id"
                         >
+                          <!-- item 275: DIVISÓRIA com título — separa seções ("Início da jornada"…) -->
                           <div
-                            v-if="tile && tile.spacer"
+                            v-if="tile && tile.divider"
+                            class="cv-tile-div relative flex items-center gap-3 py-2"
+                            :class="
+                              organizeMode
+                                ? 'cursor-grab active:cursor-grabbing'
+                                : ''
+                            "
+                          >
+                            <span class="cv-tile-div-line" />
+                            <input
+                              v-if="organizeMode"
+                              :value="tile.label"
+                              class="cv-tile-div-input"
+                              maxlength="60"
+                              title="Nome da seção — Enter para salvar"
+                              data-no-drag
+                              @keydown.enter.prevent="
+                                renameDivider(tile, $event.target.value)
+                              "
+                              @blur="renameDivider(tile, $event.target.value)"
+                            />
+                            <h3 v-else class="cv-tile-div-title">
+                              {{ tile.label }}
+                            </h3>
+                            <span class="cv-tile-div-line" />
+                            <button
+                              v-if="organizeMode"
+                              class="w-6 h-6 rounded-md flex items-center justify-center hover:bg-red-500/80 hover:text-white transition-colors flex-shrink-0"
+                              title="Tirar esta divisória"
+                              data-no-drag
+                              @click.stop="removeDivider(tile)"
+                            >
+                              <span class="i-lucide-x text-[11px]" />
+                            </button>
+                          </div>
+                          <div
+                            v-else-if="tile && tile.spacer"
                             class="cv-tile-gap relative rounded-2xl h-full min-h-[150px] flex items-center justify-center"
                             :class="
                               organizeMode
@@ -5879,7 +6094,7 @@ onUnmounted(() => {
                           </div>
                           <div
                             v-else-if="tile"
-                            class="cv-tile relative rounded-2xl min-h-[124px] overflow-hidden p-4 sm:p-5 text-white shadow-lg transition-colors duration-700 flex flex-col"
+                            class="cv-tile relative rounded-2xl h-full overflow-hidden p-4 sm:p-5 text-white shadow-lg transition-colors duration-700 flex flex-col"
                             :class="[
                               tileHist(tile)?.dir === 'up'
                                 ? 'cv-tile-hist-up'
@@ -5936,12 +6151,59 @@ onUnmounted(() => {
                                 v-if="organizeMode"
                                 class="flex items-center justify-end gap-1 mb-1.5"
                               >
+                                <!-- item 276: tamanho em QUADRADOS — largura e altura com − / + -->
+                                <span
+                                  class="flex items-center rounded-md bg-white/15 overflow-hidden mr-1 text-[10px] font-bold"
+                                  :title="`largura ${tileSizeOf(tile).w} × altura ${tileSizeOf(tile).h} quadrado(s)`"
+                                >
+                                  <button
+                                    class="h-6 w-5 hover:bg-white/35"
+                                    title="Mais estreito"
+                                    @click.stop="stepTileSize(tile, -1, 0)"
+                                  >
+                                    <span
+                                      class="i-lucide-chevron-left text-[11px]"
+                                    />
+                                  </button>
+                                  <span class="px-0.5 tabular-nums"
+                                    >{{ tileSizeOf(tile).w }}×{{
+                                      tileSizeOf(tile).h
+                                    }}</span
+                                  >
+                                  <button
+                                    class="h-6 w-5 hover:bg-white/35"
+                                    title="Mais largo"
+                                    @click.stop="stepTileSize(tile, 1, 0)"
+                                  >
+                                    <span
+                                      class="i-lucide-chevron-right text-[11px]"
+                                    />
+                                  </button>
+                                  <button
+                                    class="h-6 w-5 hover:bg-white/35 border-l border-white/20"
+                                    title="Mais baixo"
+                                    @click.stop="stepTileSize(tile, 0, -1)"
+                                  >
+                                    <span
+                                      class="i-lucide-chevron-up text-[11px]"
+                                    />
+                                  </button>
+                                  <button
+                                    class="h-6 w-5 hover:bg-white/35"
+                                    title="Mais alto"
+                                    @click.stop="stepTileSize(tile, 0, 1)"
+                                  >
+                                    <span
+                                      class="i-lucide-chevron-down text-[11px]"
+                                    />
+                                  </button>
+                                </span>
                                 <button
                                   class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
                                   :title="
                                     tile.big
                                       ? 'Voltar ao tamanho normal (1 quadrado) — ou puxe a borda/canto do card'
-                                      : 'Card grande: 4 quadrados, com o resumo do indicador — ou puxe a borda/canto do card'
+                                      : 'Card grande: 2×2 quadrados, com o resumo do indicador — ou puxe a borda/canto do card'
                                   "
                                   @click.stop="toggleTileSize(tile)"
                                 >
@@ -6065,19 +6327,19 @@ onUnmounted(() => {
                               <template v-if="tile.sub">
                                 <!-- linhas curtas propositais: nada de frase quebrando no meio -->
                                 <p
-                                  class="text-[11px] text-white/75 break-words mt-1"
+                                  class="text-[11px] text-white/75 truncate mt-1"
                                 >
                                   {{ tile.sub }}
                                 </p>
                                 <p
                                   v-if="tile.sub2"
-                                  class="text-[11px] text-white/80 break-words"
+                                  class="text-[11px] text-white/80 truncate"
                                 >
                                   {{ tile.sub2 }}
                                 </p>
                                 <p
                                   v-if="tile.sub3"
-                                  class="text-[11px] text-white/80 break-words"
+                                  class="text-[11px] text-white/80 truncate"
                                 >
                                   {{ tile.sub3 }}
                                 </p>
@@ -6105,13 +6367,13 @@ onUnmounted(() => {
                                     "
                                   />
                                   <p
-                                    class="text-[10px] text-white/80 mt-1 break-words"
+                                    class="text-[10px] text-white/80 mt-1 truncate"
                                   >
                                     ✨ {{ tileBigSummary(tile).peakText }}
                                   </p>
                                   <p
                                     v-if="tileBigSummary(tile).trendWords"
-                                    class="text-[10px] text-white/90 mt-0.5 break-words font-semibold"
+                                    class="text-[10px] text-white/90 mt-0.5 truncate font-semibold"
                                   >
                                     📈 tendência:
                                     {{ tileBigSummary(tile).trendWords.text }}
@@ -6127,10 +6389,9 @@ onUnmounted(() => {
                                     :key="ri"
                                     class="flex items-center justify-between gap-3 text-[11px] rounded-lg bg-white/15 px-2.5 py-1"
                                   >
-                                    <span
-                                      class="text-white/80 min-w-0 break-words"
-                                      >{{ row.label }}</span
-                                    >
+                                    <span class="text-white/80 truncate">{{
+                                      row.label
+                                    }}</span>
                                     <b class="tabular-nums truncate">{{
                                       row.value
                                     }}</b>
@@ -6275,6 +6536,16 @@ onUnmounted(() => {
                         >
                           <span class="i-lucide-square-dashed text-xs" />
                           espaço vazio
+                        </button>
+                        <!-- item 275: divisória com título (largura inteira) -->
+                        <button
+                          v-if="organizeMode"
+                          class="rounded-lg py-1 text-[11px] font-medium flex items-center justify-center gap-1 opacity-80 hover:opacity-100"
+                          title="Uma faixa de largura inteira com um título, para separar seções (Início · Meio · Fim da jornada)"
+                          @click="addDivider"
+                        >
+                          <span class="i-lucide-minus text-xs" />
+                          divisória
                         </button>
                       </div>
                     </div>
@@ -8769,5 +9040,34 @@ onUnmounted(() => {
   .cv-tile-hist-up {
     animation: none;
   }
+}
+/* item 275: divisória com título entre seções dos indicadores */
+.cv-tile-div-line {
+  flex: 1;
+  height: 1px;
+  background: rgb(var(--cv-rgb) / 0.35);
+}
+.cv-tile-div-title,
+.cv-tile-div-input {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--cv-deep);
+  white-space: nowrap;
+}
+.cv-tile-div-input {
+  border: 1px dashed rgb(var(--cv-rgb) / 0.5);
+  border-radius: 8px;
+  padding: 2px 8px;
+  background: rgb(255 255 255 / 0.6);
+  min-width: 14rem;
+}
+.dark .cv-tile-div-title {
+  color: #fff;
+}
+.dark .cv-tile-div-input {
+  background: rgb(0 0 0 / 0.3);
+  color: #fff;
 }
 </style>

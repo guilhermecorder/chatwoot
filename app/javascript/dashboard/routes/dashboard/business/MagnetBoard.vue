@@ -14,7 +14,7 @@
 // conteúdo (altura 0) não ocupa vaga. `stack-below` e `handle` (seletor da
 // alça) também viraram props para cada tela usar o seu.
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { COLS, place, compact, boardHeight } from './magnetLayout';
+import { place, compact, boardHeight, colsOf } from './magnetLayout';
 
 const props = defineProps({
   layout: { type: Array, required: true }, // [{ id, x, y, w, h, hidden }]
@@ -25,8 +25,18 @@ const props = defineProps({
   stackBelow: { type: Number, default: 760 },
   // onde se pega para arrastar (seletor CSS)
   handle: { type: String, default: '[data-drag-handle]' },
+  // 28/09: x e largura só em múltiplos de N colunas (cards: 3 → grade de 4)
+  snap: { type: [Number, Object], default: 1 },
+  // 28/09: quantas colunas tem a grade (blocos = 12; cards = N quadrados por linha)
+  cols: { type: Number, default: 12 },
 });
 const emit = defineEmits(['update:layout', 'moved']);
+// opções do motor (snap + colunas), sempre juntas
+const layoutOpts = computed(() =>
+  props.snap && typeof props.snap === 'object'
+    ? { ...props.snap, cols: props.cols }
+    : { x: props.snap || 1, cols: props.cols }
+);
 
 // altura de 1 linha da grade (px): no modo automático a linha é mais fina
 // (passo de 18 px) para a altura medida "bater" com o conteúdo
@@ -50,7 +60,11 @@ onMounted(() => {
 const stacked = computed(
   () => width.value > 0 && width.value < props.stackBelow
 );
-const colW = computed(() => (width.value - GAP * (COLS - 1)) / COLS);
+const colW = computed(
+  () =>
+    (width.value - GAP * (colsOf(layoutOpts.value) - 1)) /
+    colsOf(layoutOpts.value)
+);
 const toPx = it => ({
   left: it.x * (colW.value + GAP),
   top: it.y * (ROW + GAP),
@@ -123,7 +137,7 @@ const visible = computed(() => {
 // no modo automático a arrumação é calculada aqui (as alturas mudam com o
 // conteúdo e com a largura da tela); o que se salva é só a ORDEM (x/y/w)
 const arranged = computed(() =>
-  props.autoHeight ? compact(visible.value) : visible.value
+  props.autoHeight ? compact(visible.value, layoutOpts.value) : visible.value
 );
 
 // ── arrastar / esticar ─────────────────────────────────────────────────────
@@ -181,14 +195,18 @@ const onMove = e => {
     const h = a.dir.includes('s') ? a.origPx.height + dy : a.origPx.height;
     livePx.value = {
       ...a.origPx,
-      width: Math.max(colW.value * 2, w),
+      width: Math.max(
+        colW.value *
+          Math.max(layoutOpts.value.minW ?? 2, layoutOpts.value.x || 1),
+        w
+      ),
       height: props.autoHeight ? a.origPx.height : Math.max(ROW * 4, h),
     };
     target = { w: Math.round((livePx.value.width + GAP) / stepX) };
     if (!props.autoHeight)
       target.h = Math.round((livePx.value.height + GAP) / stepY);
   }
-  const next = place(arranged.value, a.id, target);
+  const next = place(arranged.value, a.id, target, layoutOpts.value);
   const was = byId.value[a.id];
   const now = next.find(i => i.id === a.id);
   if (
@@ -399,7 +417,7 @@ const isParked = item => props.autoHeight && measured.value[item.id] === 0;
     width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
     height 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.mb-stacked .mb-item {
+.mb-stacked > .mb-item {
   position: relative;
   transform: none !important;
   width: auto !important;
@@ -426,7 +444,7 @@ const isParked = item => props.autoHeight && measured.value[item.id] === 0;
     top 0.42s cubic-bezier(0.34, 1.56, 0.64, 1),
     width 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.mb-stacked .mb-item.mb-auto {
+.mb-stacked > .mb-item.mb-auto {
   left: auto !important;
   top: auto !important;
 }
@@ -439,7 +457,7 @@ const isParked = item => props.autoHeight && measured.value[item.id] === 0;
   pointer-events: none;
   opacity: 0;
 }
-.mb-stacked .mb-item.mb-parked {
+.mb-stacked > .mb-item.mb-parked {
   display: none;
 }
 .mb-item.mb-inhand {

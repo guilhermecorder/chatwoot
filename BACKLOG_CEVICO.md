@@ -8446,3 +8446,46 @@ com parâmetros diferentes selecionáveis por chavinhas.
 - O FloatingCallWidget (canal de voz do Chatwoot/Twilio, ringtone.mp3) NÃO mudou — o nosso é o CEVICO.
 - Deploy WEB só, sem migration. SEM commit — aguarda "pode subir".
 
+> 28/09 15h30: 269 v2 + 270 + 271 + 273 SUBIRAM no commit 7f0521a (develop, --no-verify dele) → build
+> "Build & Push Docker Image" VERDE 15h37 → imagem ghcr.io/guilhermecorder/chatwoot:7f0521a p/ Implantar WEB
+> (SIDEKIQ junto não faz mal), sem migration · reversão :33b2d49.
+
+## 274. ✅ 📐 Cards do Meu Painel presos na grade de 4 colunas (28/09, print de produção: "a organização dele ainda está meio estranha… se organiza feio")
+- Causa: o ímã deixava card em QUALQUER coluna das 12 (x=1, x=4…) — ao arrastar, o vizinho "abria espaço"
+  deslizando de 1 em 1 coluna; com altura variável (270) isso virou escadinha torta.
+- Agora: magnetLayout ganhou `snap` (clampItem/compact/place/mergeLayout): x e largura só em múltiplos de
+  3 colunas (grade de 4; grande = 6). MagnetBoard prop `snap`; InicioPage passa TILE_W nos cards
+  (mergeLayout, placeBlock e no quadro). Layout salvo torto se conserta sozinho ao abrir (sem migration).
+  Spec magnetLayout.spec (8 verdes, novo caso de snap). Blocos do painel e Painel do empresário seguem
+  livres (snap 1). Deploy WEB só. SEM commit — aguarda "pode subir".
+
+## 275. ✅ 🗺️ MEU PAINEL: largura toda no desktop + modelo "Jornada completa · 3 seções" + DIVISÓRIAS com título + editar direto nos indicadores + sem o botão "Dashboard da Agenda" (28/09 tarde; pedido dele com print)
+- LARGURA: o Meu Painel perdeu o teto `max-w-5xl` — ocupa a tela inteira no desktop (`max-w-none`, gutter maior em 2xl).
+- DIVISÓRIAS: novo tipo de card `div:<id>` em `kpi_layout.dividers` ({id => título}); faixa de largura inteira
+  (w=12) com linha + título em caixa alta na cor funda do painel; no modo edição vira input (Enter/blur salva)
+  com X para tirar; botão "divisória" ao lado de "espaço vazio"; arrasta pelo ímã como card. Servidor sanitiza
+  (até 30, título 60 chars). Divisória fica fora de paleta/julgamento/sinais do gestor.
+- MODELO "Jornada completa · 3 seções" (cevicoPanelPresets.js; painéis Gestor e Agendamento): Início da jornada
+  (novos contatos grande · orçamento · entrou em agendamento · marcadas leads novos · marcadas base · taxa de
+  agendamento leads novos · confirmadas · comparecimentos) · Meio (taxa de comparecimento grande · faltas ·
+  indicações · taxa de indicação) · Fim (cirurgias marcadas após indicação · taxa de fechamento · cirurgias
+  realizadas grande · faturamento grande · ticket médio = faturamento ÷ cirurgias). Por procedimento e % =
+  popup de Cirurgias realizadas/Faturamento (quebras do item 267). buildPreset gera as divisórias e zera a grade.
+- EDITAR: botão "editar indicadores" (lápis) no topo do bloco de indicadores (admin, painel não-custom) — o
+  mesmo Modo edição do topo. Botão "Dashboard da Agenda" REMOVIDO da faixa do seletor (bloco e Acesso rápido continuam).
+- Deploy WEB só, sem migration. SEM commit — aguarda "pode subir" (junto com o 274).
+
+## 276. ✅ 🟦 GRADE EM QUADRADOS: N quadrados por linha + largura × altura livres por card (28/09 tarde; "prefiro tamanho padrão, um 2/3 etc" → "parou de ter a visualização quadrada… precisamos de mais liberdade")
+- DESFAZ o 270 (altura pelo conteúdo) e a versão "frações" da tarde: a grade dos indicadores passa a ter
+  N QUADRADOS POR LINHA (`kpi_layout.cols`, 2 a 12, padrão 4; setinhas − / + "quadrados por linha" na
+  barra do modo edição). Cada card mede em quadrados: largura 1..N e altura 1..3 (setinhas ◂ ▸ ▴ ▾ no
+  card, ou puxando a borda/canto). 1×1 = quadrado de verdade; 2×2 = card grande com resumo (isBigCell).
+- MOTOR: magnetLayout aceita opções { x, h, cols, minW } (cols da grade e largura mínima 1); MagnetBoard
+  ganhou prop `cols`. Blocos e Painel do empresário seguem em 12 colunas.
+- MIGRAÇÃO SEM MIGRATION: `kpi_layout.grid_units` marca grade em quadrados; grade antiga (12 colunas, card
+  = 3, grande = 6, alturas da fase 270 em linhas de 4 px) é convertida ao abrir (legacyToSquares). Servidor:
+  cols 2..12, grid_units, w mínimo 1.
+- Bug de tabela corrigido no ímã: `.mb-stacked` só afeta os filhos diretos (um quadro dentro de outro não
+  virava coluna única). Espaços vazios e divisórias seguem (divisória = linha inteira × 2 linhas).
+- Testado local via console (painel do navegador escondido): 8 specs do motor verdes. Deploy WEB só, sem
+  migration. SEM commit — aguarda "pode subir" (com 274 + 275).

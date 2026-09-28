@@ -65,4 +65,53 @@ describe('magnetLayout', () => {
     expect(out.tl).toMatchObject({ x: 0, y: 0 });
     expect(out.radar).toMatchObject({ x: 4, y: 0 });
   });
+
+  it('snap 3: x e largura só em múltiplos de 3 (grade de 4 colunas), sem meia coluna', () => {
+    const items = [
+      { id: 'a', x: 1, y: 0, w: 3, h: 6 },
+      { id: 'b', x: 4, y: 0, w: 4, h: 6 },
+      { id: 'c', x: 7, y: 0, w: 3, h: 10 },
+      { id: 'd', x: 10, y: 0, w: 2, h: 6 },
+      { id: 'e', x: 2, y: 6, w: 3, h: 6 },
+    ];
+    const out = compact(items, 3);
+    out.forEach(i => {
+      expect(i.x % 3).toBe(0);
+      expect(i.w % 3).toBe(0);
+      expect(i.w).toBeGreaterThanOrEqual(3);
+    });
+    // ninguém se sobrepõe
+    out.forEach(a =>
+      out
+        .filter(b => b.id !== a.id)
+        .forEach(b => {
+          const ox = a.x < b.x + b.w && a.x + a.w > b.x;
+          const oy = a.y < b.y + b.h && a.y + a.h > b.y;
+          expect(ox && oy).toBe(false);
+        })
+    );
+    // vizinho empurrado desliza só de 3 em 3
+    const moved = place(out, 'e', { x: 0, y: 0 }, 3);
+    moved.forEach(i => expect(i.x % 3).toBe(0));
+  });
+
+  it('opções {cols, h, minW}: grade de 8 quadrados, altura em múltiplos de 6, divisória livre', () => {
+    const opts = { x: 1, h: 6, cols: 8, minW: 1 };
+    const out = compact(
+      [
+        { id: 'div', x: 0, y: 0, w: 8, h: 2, free: true },
+        { id: 'a', x: 0, y: 2, w: 1, h: 7 },
+        { id: 'b', x: 1, y: 2, w: 9, h: 12 },
+        { id: 'c', x: 7, y: 2, w: 2, h: 4 },
+      ],
+      opts
+    );
+    const by = Object.fromEntries(out.map(i => [i.id, i]));
+    expect(by.div.h).toBe(2);
+    expect(by.a.h).toBe(6);
+    expect(by.b.w).toBe(8);
+    expect(by.b.h).toBe(12);
+    expect(by.c.x + by.c.w).toBeLessThanOrEqual(8);
+    expect(by.c.h).toBe(6);
+  });
 });

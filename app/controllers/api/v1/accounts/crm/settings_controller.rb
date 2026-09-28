@@ -1009,13 +1009,21 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
             acc[k.to_s[0, 40]] = 'lg' if size.to_s == 'lg' && k.present?
           end,
           'spacers' => Array(h['spacers']).map(&:to_s).grep(/\Agap:[a-z0-9]{1,20}\z/).uniq.first(60),
+          # item 276: cards por linha (3 · 4 · 6); ausente = 4
+          'cols' => h['cols'].to_i.between?(2, 12) ? h['cols'].to_i : nil,
+          # item 276: grade já em quadrados (senão é a antiga de 12 colunas e o painel converte)
+          'grid_units' => ActiveModel::Type::Boolean.new.cast(h['grid_units']) ? true : nil,
+          # item 275: divisórias com título ({"div:abc" => "Início da jornada"})
+          'dividers' => (h['dividers'] || {}).to_h.to_a.first(30).each_with_object({}) do |(k, label), acc|
+            acc[k.to_s] = label.to_s.strip[0, 60] if k.to_s.match?(/\Adiv:[a-z0-9]{1,20}\z/) && label.to_s.strip.present?
+          end,
           # item 248: modelo aplicado (para "restaurar o modelo") + julgamento pela média histórica
           'preset' => h['preset'].to_s[/\A[a-z0-9_-]{1,40}\z/],
           'judge' => ActiveModel::Type::Boolean.new.cast(h['judge']) || false,
           # item 266: linha de tendência nos gráficos do painel
           'trend' => ActiveModel::Type::Boolean.new.cast(h['trend']) || false,
           # item 266b: grade do ímã dos cards ({id,x,y,w,h}); ausente → o painel monta pela ordem
-          'grid' => sanitize_tile_grid(h['grid']),
+          'grid' => sanitize_tile_grid(h['grid'], min_w: 1),
           # item 269: paleta automática dos indicadores (família + nível); ausente = ligada
           'auto_palette' => h.key?('auto_palette') ? ActiveModel::Type::Boolean.new.cast(h['auto_palette']) == true : nil
         }.compact
@@ -2259,7 +2267,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   # item 266b: célula do card na grade de 12 colunas; h em linhas de 16 px
-  def sanitize_tile_grid(list)
+  # min_w: blocos = 2 colunas; cards do Meu Painel (item 276) = 1 quadrado
+  def sanitize_tile_grid(list, min_w: 2)
     return nil unless list.is_a?(Array)
 
     list.first(KPI_LAYOUT_MAX).filter_map do |raw|
@@ -2267,7 +2276,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       id = g['id'].to_s[0, 40]
       next if id.blank?
 
-      w = g['w'].to_i.clamp(2, 12)
+      w = g['w'].to_i.clamp(min_w, 12)
       { 'id' => id, 'x' => g['x'].to_i.clamp(0, 12 - w), 'y' => g['y'].to_i.clamp(0, 9999), 'w' => w,
         'h' => g['h'].to_i.clamp(4, 80) }
     end
