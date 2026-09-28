@@ -894,6 +894,15 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/home/kpis`, { params });
   }
 
+  // 🌪️ item 271: funil de aquisição por turma (90 dias) + da porta pra dentro
+  getAcquisitionFunnel(params = {}) {
+    return axios.get(`${this.url}/funnels/acquisition`, { params });
+  }
+
+  getClinicFunnel(params = {}) {
+    return axios.get(`${this.url}/funnels/clinic`, { params });
+  }
+
   // ordem + ocultos + cores da fileira de indicadores por painel (itens 142/143)
   updateKpiLayout(kpiLayout) {
     return axios.post(`${this.url}/settings/update_agenda`, {

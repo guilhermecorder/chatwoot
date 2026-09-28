@@ -16,6 +16,7 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import RingtonePicker from 'dashboard/components-next/cevico/calls/RingtonePicker.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import HBars from 'dashboard/components-next/cevico/HBars.vue';
@@ -332,6 +333,8 @@ const VIEWS = [
     icon: 'i-lucide-git-commit-vertical',
   },
 ];
+// item 273: biblioteca de toques (botão no topo)
+const showRingtones = ref(false);
 const view = ref(localStorage.getItem('cevico_calls_view') || 'list');
 watch(view, v => localStorage.setItem('cevico_calls_view', v));
 
@@ -585,7 +588,18 @@ onBeforeUnmount(() => {
             {{ liveSorted.length }} na linha agora
           </span>
         </template>
+        <template #actions>
+          <button
+            class="cv-glass-btn"
+            title="Escolher o toque que avisa quando alguém liga"
+            @click="showRingtones = true"
+          >
+            <span class="i-lucide-bell-ring text-sm" />
+            <span class="hidden sm:inline">Toque</span>
+          </button>
+        </template>
       </CevicoHero>
+      <RingtonePicker v-if="showRingtones" @close="showRingtones = false" />
 
       <!-- módulo desligado -->
       <div

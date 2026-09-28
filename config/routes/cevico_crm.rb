@@ -316,6 +316,9 @@ namespace :crm do
   resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
   # 📅 Painel de Agendamentos (item 200): marcadas/remarcadas/canceladas no período
   get 'appointments/feed', to: 'appointments#feed'
+  # 🌪️ item 271: funil de aquisição por turma + da porta pra dentro (Gestor)
+  get 'funnels/acquisition', to: 'funnels#acquisition'
+  get 'funnels/clinic', to: 'funnels#clinic'
   # 🏥 ambiente Oftalmofácil dentro do sistema (item 229): espelho do hub, só leitura
   get 'oftalmofacil/overview', to: 'oftalmofacil#overview'
   get 'oftalmofacil/items', to: 'oftalmofacil#items'

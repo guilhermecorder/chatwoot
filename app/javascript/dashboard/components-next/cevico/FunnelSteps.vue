@@ -7,10 +7,15 @@
 import { computed } from 'vue';
 
 const props = defineProps({
-  // [{ label, value, color?, hint? }]
+  // [{ label, value, color?, hint?, sub?, key? }]
   steps: { type: Array, default: () => [] },
   height: { type: Number, default: 150 },
+  // item 271: etapa clicável (abre a lista de quem chegou nela)
+  clickable: { type: Boolean, default: false },
+  // texto do rodapé das colunas: "X% <startText>" (padrão: "dos <1ª etapa>")
+  startText: { type: String, default: '' },
 });
+const emit = defineEmits(['pick']);
 const nums = computed(() => props.steps.map(s => Number(s.value) || 0));
 const max = computed(() => Math.max(1, ...nums.value));
 const pct = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 10 : null);
@@ -37,17 +42,26 @@ const fmtN = n => n.toLocaleString('pt-BR');
         <span class="i-lucide-arrow-right text-sm" />
         <span class="cv-funnel-arrow-sub">da etapa anterior</span>
       </div>
-      <div class="cv-funnel-col" :style="{ '--c': c.color }">
+      <component
+        :is="clickable ? 'button' : 'div'"
+        class="cv-funnel-col"
+        :class="clickable ? 'cv-funnel-col-btn' : ''"
+        :style="{ '--c': c.color }"
+        :title="clickable ? `ver quem chegou em ${c.label}` : undefined"
+        @click="clickable && emit('pick', c)"
+      >
         <p class="cv-funnel-n">{{ fmtN(c.n) }}</p>
         <div class="cv-funnel-track">
           <div class="cv-funnel-bar" :style="{ height: c.h + '%' }" />
         </div>
         <p class="cv-funnel-label">{{ c.label }}</p>
         <p v-if="c.fromStart !== null" class="cv-funnel-start">
-          {{ fmtPct(c.fromStart) }} dos {{ cols[0].label.toLowerCase() }}
+          {{ fmtPct(c.fromStart) }}
+          {{ startText || `dos ${cols[0].label.toLowerCase()}` }}
         </p>
         <p v-else-if="c.hint" class="cv-funnel-start">{{ c.hint }}</p>
-      </div>
+        <p v-if="c.sub" class="cv-funnel-sub">{{ c.sub }}</p>
+      </component>
     </template>
   </div>
 </template>
@@ -114,6 +128,27 @@ const fmtN = n => n.toLocaleString('pt-BR');
   margin-top: 2px;
   font-size: 10px;
   color: #64748b;
+}
+.cv-funnel-sub {
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--c);
+  opacity: 0.85;
+}
+.cv-funnel-col-btn {
+  border: 0;
+  background: transparent;
+  padding: 4px 2px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+.cv-funnel-col-btn:hover {
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+  transform: translateY(-1px);
 }
 .cv-funnel-arrow {
   align-self: center;

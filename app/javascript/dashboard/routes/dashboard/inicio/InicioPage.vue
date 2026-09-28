@@ -36,10 +36,13 @@ import CevicoPalettePicker from 'dashboard/components-next/cevico/CevicoPaletteP
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
 import FunnelSteps from 'dashboard/components-next/cevico/FunnelSteps.vue';
 import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
+import PatientListPopup from 'dashboard/components-next/cevico/PatientListPopup.vue';
 import {
   classifyKpi,
   kpiGrad,
-  kpiGradSoft,
+  kpiGlass,
+  kpiEdge,
+  kpiInkDark,
   dayFill,
   KPI_LEGEND,
   KPI_FAMILIES,
@@ -271,6 +274,7 @@ let homeSeq = 0;
 const fetchData = async () => {
   const seq = ++homeSeq;
   fetchKpiBag();
+  fetchFunnels(); // item 271 (só no Gestor)
   try {
     const { preset, from, to } = period.value;
     const { data: payload } = await CrmAPI.getHome({
@@ -292,6 +296,123 @@ const fetchData = async () => {
     if (seq === homeSeq) isLoading.value = false;
   }
 };
+
+// ── 🌪️ item 271 (28/09): os DOIS FUNIS do Gestor — aquisição por TURMA de
+// chegada (horizonte 90 dias, decisão dele) e "da porta pra dentro" (por
+// consulta com data no período). Cada etapa abre a lista de pacientes. ──
+const acqFunnel = ref(null);
+const clinicFunnel = ref(null);
+const funnelLoading = ref(false);
+const funnelHorizon = ref(90);
+const funnelPopup = ref(null);
+let funnelSeq = 0;
+const fetchFunnels = async () => {
+  if (panelBase.value !== 'gestor') return;
+  const seq = ++funnelSeq;
+  funnelLoading.value = true;
+  const { preset, from, to } = period.value;
+  const params = { preset, ...(preset === 'custom' ? { from, to } : {}) };
+  try {
+    const [a, c] = await Promise.all([
+      CrmAPI.getAcquisitionFunnel({ ...params, horizon: funnelHorizon.value }),
+      CrmAPI.getClinicFunnel(params),
+    ]);
+    if (seq !== funnelSeq) return;
+    acqFunnel.value = a.data;
+    clinicFunnel.value = c.data;
+  } catch {
+    if (seq !== funnelSeq) return;
+    acqFunnel.value = acqFunnel.value || null;
+  } finally {
+    if (seq === funnelSeq) funnelLoading.value = false;
+  }
+};
+watch(funnelHorizon, fetchFunnels);
+const FUNNEL_HORIZONS = [30, 60, 90, 180];
+const funnelPerson = p => ({
+  id: p.id,
+  contact_id: p.id > 0 ? p.id : null,
+  task_id: p.task_id,
+  name: p.name,
+  phone: p.phone,
+  origin: p.origin,
+  when: p.arrived_at || p.due_at,
+  meta: p.doctor ? `${p.doctor} · ${p.unit}` : undefined,
+});
+const funnelStepsOf = (bag, blockId) => {
+  const fam = blockFamily(blockId);
+  return (bag?.steps || []).map((st, i) => ({
+    key: st.key,
+    label: st.label,
+    value: st.count,
+    hint: st.hint,
+    color: fam[i % fam.length] || undefined,
+    sub:
+      st.median_days !== null && st.median_days !== undefined && i > 0
+        ? `≈ ${String(st.median_days).replace('.', ',')} dias`
+        : '',
+  }));
+};
+const acqSteps = computed(() =>
+  funnelStepsOf(acqFunnel.value, 'funil_aquisicao')
+);
+const clinicSteps = computed(() =>
+  funnelStepsOf(clinicFunnel.value, 'porta_dentro')
+);
+// cabeçalho do popup na cor FUNDA do bloco (a família pode ser clara; o
+// texto do cabeçalho é branco)
+const funnelGrad = blockId => {
+  const v = blockVars(blockId) || {};
+  return `linear-gradient(135deg, ${v['--cv-deep'] || '#1e3a8a'}, ${v['--cv'] || '#1d4ed8'})`;
+};
+const openFunnelList = (bag, blockId, key, which, title, subtitle) => {
+  const list = bag?.lists?.[key]?.[which] || [];
+  funnelPopup.value = {
+    title,
+    subtitle,
+    people: list.map(funnelPerson),
+    grad: funnelGrad(blockId),
+    icon: which === 'stopped' ? 'i-lucide-octagon-pause' : 'i-lucide-users',
+  };
+};
+const pickAcq = c =>
+  openFunnelList(
+    acqFunnel.value,
+    'funil_aquisicao',
+    c.key,
+    'reached',
+    `${c.label} · turma do período`,
+    c.hint
+  );
+const pickClinic = c =>
+  openFunnelList(
+    clinicFunnel.value,
+    'porta_dentro',
+    c.key,
+    'reached',
+    `${c.label} · consultas do período`,
+    c.hint
+  );
+const stoppedChips = bag =>
+  (bag?.steps || [])
+    .map((st, i, arr) => ({
+      key: st.key,
+      label: st.label,
+      n: bag?.lists?.[st.key]?.stopped?.length || 0,
+      next: arr[i + 1]?.label,
+    }))
+    .filter(x => x.n && x.next);
+const openSideList = (key, title) => {
+  const list = clinicFunnel.value?.lists?.[key] || [];
+  funnelPopup.value = {
+    title,
+    subtitle: 'consultas com data no período',
+    people: list.map(funnelPerson),
+    grad: funnelGrad('porta_dentro'),
+    icon: 'i-lucide-calendar-x',
+  };
+};
+const funnelPct = (a, b) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
 
 // cesto de indicadores (item 141): série + período anterior — alimenta os
 // gráficos dos popups e os cards do "+"; carrega em paralelo, sem travar
@@ -1896,6 +2017,8 @@ const BLOCK_LABELS = {
   tarefas: 'Tarefas esperando você',
   mentor: 'Feedback da semana',
   indicadores: 'Indicadores do período',
+  funil_aquisicao: 'Funil de aquisição · por turma',
+  porta_dentro: 'Da porta pra dentro',
   desempenho: 'Meu desempenho',
   agenda_dashboard: 'Dashboard da Agenda',
   saude_agenda: 'Saúde da Agenda',
@@ -1910,6 +2033,8 @@ const BLOCK_ICONS = {
   tarefas: 'i-lucide-list-checks',
   mentor: 'i-lucide-graduation-cap',
   indicadores: 'i-lucide-layout-grid',
+  funil_aquisicao: 'i-lucide-filter',
+  porta_dentro: 'i-lucide-door-open',
   desempenho: 'i-lucide-target',
   agenda_dashboard: 'i-lucide-calendar-days',
   saude_agenda: 'i-lucide-activity',
@@ -1927,6 +2052,8 @@ const TOP_BLOCKS_DEFAULT = [
 ];
 const MAIN_BLOCKS_DEFAULT = [
   'indicadores',
+  'funil_aquisicao',
+  'porta_dentro',
   'desempenho',
   'agenda_dashboard',
   'saude_agenda',
@@ -2175,7 +2302,7 @@ const saveKpiLayout = async patch => {
 // gráfico). Salvo em kpi_layout.grid ({id,x,y,w,h}); `order`/`sizes` seguem
 // gravados (derivados) para quem lê o formato antigo. ──
 const TILE_W = 3;
-const TILE_H = 6; // 6 linhas = 166 px (o card pequeno de hoje)
+const TILE_H = 6; // altura de partida; no ímã auto-height a medida do conteúdo manda
 const TILE_BIG_W = 6;
 const TILE_BIG_H = 12; // 2×2 = 346 px
 // posição de fábrica = a fileira de hoje: da esquerda para a direita em 4
@@ -2796,13 +2923,17 @@ const tierWord = tier => {
 const tilePalette = tile => {
   if (!autoPalette.value || tile?.spacer) return null;
   const { family, tier } = classifyKpi(tile);
+  const fill = dayFill(clock.value);
   return {
     family,
     tier,
     label: `${KPI_FAMILIES[family]?.label || 'Outros'} · ${tierWord(tier)}`,
     grad: kpiGrad(family, tier, isDarkUi.value),
-    soft: kpiGradSoft(family, tier, isDarkUi.value),
-    darkText: tier === 'tertiary' && !isDarkUi.value,
+    // vidro 100% transparente de manhã; a cor entra por cima (opacidade = hora)
+    soft: kpiGlass(isDarkUi.value),
+    edge: kpiEdge(family, isDarkUi.value),
+    fill,
+    darkText: kpiInkDark(tier, fill, isDarkUi.value),
   };
 };
 
@@ -2820,8 +2951,11 @@ const tileVisual = tile => {
     // paleta automática (item 269); desligada, a cor escolhida (item 143),
     // o chip "Muito bom" e a família do dia
     grad,
-    // fundo "vazio" (o card enche ao longo do dia); no alerta, sem enchimento
+    // fundo de VIDRO (a cor vai ficando densa ao longo do dia); no alerta,
+    // cor cheia direto
     soft: alert ? null : pal?.soft || null,
+    edge: alert ? null : pal?.edge || null,
+    fill: pal?.fill ?? 1,
     darkText: !alert && !!pal?.darkText,
     palette: pal,
     aura: st.isRecord,
@@ -4497,7 +4631,7 @@ onUnmounted(() => {
           </span>
           <span class="text-n-slate-9"
             >· cor cheia = resultado principal · média = volume · clara = apoio
-            · o card enche até as 19h ({{ fillPct }}% agora)</span
+            · a cor vai ficando densa até as 19h ({{ fillPct }}% agora)</span
           >
         </div>
         <div
@@ -5697,8 +5831,12 @@ onUnmounted(() => {
                 <template v-if="blockId === 'indicadores'">
                   <template v-if="!currentPanel.custom">
                     <!-- Indicadores do período — mudam com o painel escolhido -->
+                    <!-- 28/09 (pedido: "os quadradinhos dos indicadores ajustem seu tamanho
+                         de acordo com as informações deles"): altura pelo CONTEÚDO (auto-height);
+                         só a largura se estica -->
                     <MagnetBoard
                       v-model:layout="tileGrid"
+                      auto-height
                       :locked="blocksLocked"
                       :stack-below="600"
                       handle=".cv-tile, .cv-tile-gap"
@@ -5741,9 +5879,8 @@ onUnmounted(() => {
                           </div>
                           <div
                             v-else-if="tile"
-                            class="cv-tile relative rounded-2xl h-full overflow-hidden p-4 sm:p-5 text-white shadow-lg transition-all duration-700"
+                            class="cv-tile relative rounded-2xl min-h-[124px] overflow-hidden p-4 sm:p-5 text-white shadow-lg transition-colors duration-700 flex flex-col"
                             :class="[
-                              'flex flex-col',
                               tileHist(tile)?.dir === 'up'
                                 ? 'cv-tile-hist-up'
                                 : '',
@@ -5757,10 +5894,14 @@ onUnmounted(() => {
                               organizeMode
                                 ? 'cursor-grab active:cursor-grabbing ring-2 ring-dashed ring-white/60'
                                 : '',
+                              tileVisual(tile).darkText
+                                ? 'cv-tile-ink-dark'
+                                : '',
                             ]"
                             :style="{
                               background:
                                 tileVisual(tile).soft || tileVisual(tile).grad,
+                              borderColor: tileVisual(tile).edge || undefined,
                               color: tileVisual(tile).darkText
                                 ? '#0f172a'
                                 : undefined,
@@ -5771,15 +5912,13 @@ onUnmounted(() => {
                                 : undefined
                             "
                           >
-                            <!-- item 269: o card ENCHE do fundo para cima ao longo do dia (07h → 19h) -->
+                            <!-- item 269 v2: o card nasce 100% TRANSPARENTE e a cor vai ficando
+                                 DENSA ao longo do dia (07h vidro → 19h cor cheia) -->
                             <div
                               v-if="tileVisual(tile).soft"
                               class="cv-tile-fill"
-                              :class="{
-                                'cv-tile-fill-dark': tileVisual(tile).darkText,
-                              }"
                               :style="{
-                                height: fillPct + '%',
+                                opacity: tileVisual(tile).fill,
                                 background: tileVisual(tile).grad,
                               }"
                               aria-hidden="true"
@@ -5926,19 +6065,19 @@ onUnmounted(() => {
                               <template v-if="tile.sub">
                                 <!-- linhas curtas propositais: nada de frase quebrando no meio -->
                                 <p
-                                  class="text-[11px] text-white/75 truncate mt-1"
+                                  class="text-[11px] text-white/75 break-words mt-1"
                                 >
                                   {{ tile.sub }}
                                 </p>
                                 <p
                                   v-if="tile.sub2"
-                                  class="text-[11px] text-white/80 truncate"
+                                  class="text-[11px] text-white/80 break-words"
                                 >
                                   {{ tile.sub2 }}
                                 </p>
                                 <p
                                   v-if="tile.sub3"
-                                  class="text-[11px] text-white/80 truncate"
+                                  class="text-[11px] text-white/80 break-words"
                                 >
                                   {{ tile.sub3 }}
                                 </p>
@@ -5966,13 +6105,13 @@ onUnmounted(() => {
                                     "
                                   />
                                   <p
-                                    class="text-[10px] text-white/80 mt-1 truncate"
+                                    class="text-[10px] text-white/80 mt-1 break-words"
                                   >
                                     ✨ {{ tileBigSummary(tile).peakText }}
                                   </p>
                                   <p
                                     v-if="tileBigSummary(tile).trendWords"
-                                    class="text-[10px] text-white/90 mt-0.5 truncate font-semibold"
+                                    class="text-[10px] text-white/90 mt-0.5 break-words font-semibold"
                                   >
                                     📈 tendência:
                                     {{ tileBigSummary(tile).trendWords.text }}
@@ -5988,9 +6127,10 @@ onUnmounted(() => {
                                     :key="ri"
                                     class="flex items-center justify-between gap-3 text-[11px] rounded-lg bg-white/15 px-2.5 py-1"
                                   >
-                                    <span class="text-white/80 truncate">{{
-                                      row.label
-                                    }}</span>
+                                    <span
+                                      class="text-white/80 min-w-0 break-words"
+                                      >{{ row.label }}</span
+                                    >
                                     <b class="tabular-nums truncate">{{
                                       row.value
                                     }}</b>
@@ -6826,6 +6966,343 @@ onUnmounted(() => {
                       }}
                       consultas hoje</span
                     >
+                  </div>
+                </template>
+                <!-- 🌪️ item 271: FUNIL DE AQUISIÇÃO POR TURMA (Gestor) -->
+                <template v-else-if="blockId === 'funil_aquisicao'">
+                  <div
+                    v-if="panelBase === 'gestor'"
+                    class="cv-block p-5 sm:p-6 mb-6"
+                  >
+                    <div
+                      class="flex items-center justify-between mb-1 flex-wrap gap-2"
+                    >
+                      <div class="flex items-center gap-2">
+                        <span class="cv-icon"
+                          ><span class="i-lucide-filter text-base"
+                        /></span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Funil de aquisição · por turma
+                        </h2>
+                      </div>
+                      <div
+                        class="cv-seg cv-seg-sm"
+                        title="até quantos dias depois de chegar contam as etapas"
+                      >
+                        <button
+                          v-for="h in FUNNEL_HORIZONS"
+                          :key="'fh' + h"
+                          class="cv-seg-item"
+                          :class="funnelHorizon === h ? 'cv-seg-on' : ''"
+                          @click="funnelHorizon = h"
+                        >
+                          {{ h }} dias
+                        </button>
+                      </div>
+                    </div>
+                    <p class="text-[11px] text-n-slate-10 mb-4">
+                      quem <b>chegou</b> no período escolhido acima (leads pelas
+                      caixas de captação) e até onde cada um foi nos
+                      {{ funnelHorizon }} dias seguintes · clique numa etapa
+                      para ver os nomes · "≈ dias" = tempo típico desde a etapa
+                      anterior
+                    </p>
+                    <div
+                      v-if="funnelLoading && !acqFunnel"
+                      class="text-xs text-n-slate-10 py-6 text-center"
+                    >
+                      <span class="i-lucide-loader-circle animate-spin" />
+                      montando a turma…
+                    </div>
+                    <template v-else-if="acqFunnel && acqFunnel.total">
+                      <FunnelSteps
+                        :steps="acqSteps"
+                        :height="130"
+                        clickable
+                        @pick="pickAcq"
+                      />
+                      <div class="flex items-center gap-1.5 flex-wrap mt-4">
+                        <span class="text-[10px] text-n-slate-9 mr-1"
+                          >parou em:</span
+                        >
+                        <button
+                          v-for="c in stoppedChips(acqFunnel)"
+                          :key="'as' + c.key"
+                          class="cv-chip"
+                          :title="`chegaram em ${c.label} e não passaram para ${c.next} · clique para ver`"
+                          @click="
+                            openFunnelList(
+                              acqFunnel,
+                              'funil_aquisicao',
+                              c.key,
+                              'stopped',
+                              `Pararam em ${c.label}`,
+                              `chegaram aqui e não passaram para ${c.next}`
+                            )
+                          "
+                        >
+                          {{ c.label }} <b class="tabular-nums">{{ c.n }}</b>
+                        </button>
+                        <span
+                          v-if="acqFunnel.by_source"
+                          class="cv-chip ml-auto"
+                          title="das consultas marcadas da turma, quem marcou"
+                        >
+                          <span class="i-lucide-bot text-xs" /> robô
+                          <b class="tabular-nums">{{
+                            acqFunnel.by_source.ia
+                          }}</b>
+                          × equipe
+                          <b class="tabular-nums">{{
+                            acqFunnel.by_source.equipe
+                          }}</b>
+                        </span>
+                      </div>
+                      <div
+                        v-if="acqFunnel.by_origin?.length"
+                        class="cv-sub mt-4 p-3 overflow-x-auto"
+                      >
+                        <p class="text-[10px] font-bold text-n-slate-11 mb-2">
+                          por onde chegaram (caixa da primeira conversa)
+                        </p>
+                        <table class="w-full text-[11px] tabular-nums">
+                          <thead>
+                            <tr class="text-n-slate-9 text-left">
+                              <th class="font-semibold pb-1">origem</th>
+                              <th
+                                v-for="st in acqFunnel.steps"
+                                :key="'ah' + st.key"
+                                class="font-semibold pb-1 text-right"
+                              >
+                                {{ st.label }}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr
+                              v-for="o in acqFunnel.by_origin.slice(0, 8)"
+                              :key="'ao' + o.name"
+                              class="border-t border-n-slate-4"
+                            >
+                              <td
+                                class="py-1 pr-2 font-semibold text-n-slate-12 truncate max-w-[10rem]"
+                              >
+                                {{ o.name }}
+                              </td>
+                              <td
+                                v-for="st in acqFunnel.steps"
+                                :key="'ac' + o.name + st.key"
+                                class="py-1 text-right text-n-slate-11"
+                              >
+                                {{ o.steps[st.key] }}
+                                <span
+                                  v-if="st.key !== 'arrived'"
+                                  class="text-n-slate-8"
+                                  >·
+                                  {{
+                                    funnelPct(o.steps[st.key], o.total)
+                                  }}</span
+                                >
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+                    <p v-else class="text-xs text-n-slate-10 py-6 text-center">
+                      nenhum lead chegou no período escolhido
+                    </p>
+                  </div>
+                </template>
+                <!-- 🚪 item 271: DA PORTA PRA DENTRO (Gestor) -->
+                <template v-else-if="blockId === 'porta_dentro'">
+                  <div
+                    v-if="panelBase === 'gestor'"
+                    class="cv-block p-5 sm:p-6 mb-6"
+                  >
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="cv-icon"
+                        ><span class="i-lucide-door-open text-base"
+                      /></span>
+                      <h2 class="text-sm font-bold text-n-slate-12">
+                        Da porta pra dentro
+                      </h2>
+                    </div>
+                    <p class="text-[11px] text-n-slate-10 mb-4">
+                      quem tinha <b>consulta com data</b> no período (sem
+                      exame/tele) e o que aconteceu depois: presença, indicação,
+                      cirurgia marcada, realizada e pesquisa respondida · clique
+                      numa etapa para ver os nomes
+                    </p>
+                    <div
+                      v-if="funnelLoading && !clinicFunnel"
+                      class="text-xs text-n-slate-10 py-6 text-center"
+                    >
+                      <span class="i-lucide-loader-circle animate-spin" />
+                      conferindo as consultas…
+                    </div>
+                    <template v-else-if="clinicFunnel && clinicFunnel.total">
+                      <FunnelSteps
+                        :steps="clinicSteps"
+                        :height="130"
+                        clickable
+                        @pick="pickClinic"
+                      />
+                      <div class="flex items-center gap-1.5 flex-wrap mt-4">
+                        <button
+                          class="cv-chip cv-red"
+                          title="não vieram (falta registrada) · clique para ver"
+                          @click="openSideList('missed', 'Faltas em consultas')"
+                        >
+                          <span class="i-lucide-user-x text-xs" /> faltas
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.missed
+                          }}</b>
+                          <span class="opacity-60"
+                            >·
+                            {{
+                              funnelPct(
+                                clinicFunnel.side.missed,
+                                clinicFunnel.total
+                              )
+                            }}</span
+                          >
+                        </button>
+                        <button
+                          class="cv-chip"
+                          title="desmarcadas · clique para ver"
+                          @click="
+                            openSideList('canceled', 'Consultas canceladas')
+                          "
+                        >
+                          <span class="i-lucide-calendar-x text-xs" />
+                          canceladas
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.canceled
+                          }}</b>
+                        </button>
+                        <button
+                          class="cv-chip"
+                          title="mudaram de dia ou hora · clique para ver"
+                          @click="
+                            openSideList('rescheduled', 'Consultas remarcadas')
+                          "
+                        >
+                          <span class="i-lucide-refresh-cw text-xs" />
+                          remarcadas
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.rescheduled
+                          }}</b>
+                        </button>
+                        <span
+                          v-if="clinicFunnel.side.pending"
+                          class="cv-chip cv-amber"
+                          title="consulta já passou e ninguém marcou se o paciente veio — o funil fica cego aqui"
+                        >
+                          <span class="i-lucide-circle-help text-xs" /> sem
+                          registro de presença
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.pending
+                          }}</b>
+                        </span>
+                        <span
+                          v-if="clinicFunnel.side.future"
+                          class="cv-chip"
+                          title="consultas do período que ainda vão acontecer"
+                        >
+                          <span class="i-lucide-clock text-xs" /> ainda vão
+                          acontecer
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.future
+                          }}</b>
+                        </span>
+                      </div>
+                      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
+                        <div
+                          v-for="grp in [
+                            ['por médico', clinicFunnel.by_doctor],
+                            ['por unidade', clinicFunnel.by_unit],
+                          ]"
+                          :key="grp[0]"
+                          class="cv-sub p-3 overflow-x-auto"
+                        >
+                          <p class="text-[10px] font-bold text-n-slate-11 mb-2">
+                            {{ grp[0] }}
+                          </p>
+                          <table class="w-full text-[11px] tabular-nums">
+                            <thead>
+                              <tr class="text-n-slate-9 text-left">
+                                <th class="font-semibold pb-1">&nbsp;</th>
+                                <th class="font-semibold pb-1 text-right">
+                                  consultas
+                                </th>
+                                <th class="font-semibold pb-1 text-right">
+                                  vieram
+                                </th>
+                                <th class="font-semibold pb-1 text-right">
+                                  indicação
+                                </th>
+                                <th class="font-semibold pb-1 text-right">
+                                  cirurgia
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr
+                                v-for="o in (grp[1] || []).slice(0, 8)"
+                                :key="grp[0] + o.name"
+                                class="border-t border-n-slate-4"
+                              >
+                                <td
+                                  class="py-1 pr-2 font-semibold text-n-slate-12 truncate max-w-[9rem]"
+                                >
+                                  {{ o.name }}
+                                </td>
+                                <td class="py-1 text-right text-n-slate-11">
+                                  {{ o.total }}
+                                </td>
+                                <td class="py-1 text-right text-n-slate-11">
+                                  {{ o.steps.attended }}
+                                  <span class="text-n-slate-8"
+                                    >·
+                                    {{
+                                      funnelPct(o.steps.attended, o.total)
+                                    }}</span
+                                  >
+                                </td>
+                                <td class="py-1 text-right text-n-slate-11">
+                                  {{ o.steps.indicated }}
+                                  <span class="text-n-slate-8"
+                                    >·
+                                    {{
+                                      funnelPct(
+                                        o.steps.indicated,
+                                        o.steps.attended
+                                      )
+                                    }}</span
+                                  >
+                                </td>
+                                <td class="py-1 text-right text-n-slate-11">
+                                  {{ o.steps.surgery_booked }}
+                                  <span class="text-n-slate-8"
+                                    >·
+                                    {{
+                                      funnelPct(
+                                        o.steps.surgery_booked,
+                                        o.steps.indicated
+                                      )
+                                    }}</span
+                                  >
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </template>
+                    <p v-else class="text-xs text-n-slate-10 py-6 text-center">
+                      nenhuma consulta com data no período
+                    </p>
                   </div>
                 </template>
               </template>
@@ -8089,6 +8566,17 @@ onUnmounted(() => {
       </div>
     </div>
   </Teleport>
+  <!-- item 271: lista de pacientes por trás de uma etapa do funil -->
+  <PatientListPopup
+    v-if="funnelPopup"
+    :title="funnelPopup.title"
+    :subtitle="funnelPopup.subtitle"
+    :people="funnelPopup.people"
+    :grad="funnelPopup.grad"
+    :icon="funnelPopup.icon"
+    :account-id="accountId"
+    @close="funnelPopup = null"
+  />
 </template>
 
 <style scoped>

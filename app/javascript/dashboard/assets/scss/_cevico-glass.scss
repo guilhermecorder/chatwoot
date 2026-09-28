@@ -366,29 +366,26 @@
 .cv-page .cv-seg-sm .cv-seg-item { height: 26px; padding: 0 9px; font-size: 11px; border-radius: 9px; }
 .cv-page .cv-seg-sm { padding: 2px; border-radius: 12px; }
 
-/* ── item 269: o card de indicador ENCHE ao longo do dia — camada de cor cheia
-   subindo do fundo, com uma linha de luz na superfície ── */
+/* ── item 269 v2: o card de indicador nasce 100% TRANSPARENTE (vidro) e a
+   cor da família vai ficando DENSA ao longo do dia — uma camada de cor cheia
+   cobrindo o card inteiro, com opacidade = hora do dia (07h 0 → 19h 1) ── */
 .cv-tile-fill {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 0;
-  border-radius: 0 0 16px 16px;
-  transition: height 1.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  border-radius: inherit;
+  transition: opacity 1.2s cubic-bezier(0.2, 0.8, 0.2, 1);
   pointer-events: none;
 }
-.cv-tile-fill::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.55);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+/* enquanto a cor está rala (tema claro), o texto é escuro — inclusive os
+   pedaços que usam text-white/85 etc. */
+.cv-tile-ink-dark,
+.cv-tile-ink-dark [class*='text-white'] {
+  color: #0f172a !important;
 }
-.cv-tile-fill-dark::before { background: rgba(255, 255, 255, 0.8); }
+.cv-tile-ink-dark [class*='text-white/'] { color: rgb(15 23 42 / 0.78) !important; }
+/* pílulas/faixas brancas translúcidas somem no vidro → viram cinza-escuro leve */
+.cv-tile-ink-dark [class*='bg-white/'] { background-color: rgb(15 23 42 / 0.07) !important; }
 .cv-tile > .relative { z-index: 1; }
 /* ── CARDS de indicador: a família opaca do dia ganha o acabamento de
    vidro (borda clara, crista, brilho interno) ── */

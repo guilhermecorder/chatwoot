@@ -11,6 +11,10 @@
 // É um SINGLETON por aba (uma chamada por vez): a store Pinia e o popup falam
 // com a mesma sessão.
 import { ref } from 'vue';
+import {
+  startRingtoneLoop,
+  getRingtoneKey,
+} from 'dashboard/helper/cevicoRingtones';
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 const ICE_TIMEOUT_MS = 3000;
@@ -31,9 +35,6 @@ let remoteSource = null;
 let recorder = null;
 let chunks = [];
 let recordingStartedAt = null;
-
-let ringCtx = null;
-let ringTimer = null;
 
 // ── áudio remoto ──
 const attachRemoteAudio = () => {
@@ -260,57 +261,21 @@ const hangup = async () => {
   return recording;
 };
 
-// ── toque de chamada em WebAudio: 2 osciladores (440 + 480 Hz), "tum-tum" ──
-const beep = (ctx, at, dur) => {
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0, at);
-  gain.gain.linearRampToValueAtTime(0.18, at + 0.03);
-  gain.gain.setValueAtTime(0.18, at + dur - 0.05);
-  gain.gain.linearRampToValueAtTime(0, at + dur);
-  gain.connect(ctx.destination);
-  [440, 480].forEach(freq => {
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    osc.connect(gain);
-    osc.start(at);
-    osc.stop(at + dur + 0.05);
-  });
-};
-
-const ringOnce = () => {
-  if (!ringCtx) return;
-  const t = ringCtx.currentTime + 0.05;
-  beep(ringCtx, t, 0.22); // tum
-  beep(ringCtx, t + 0.34, 0.22); // tum
-};
-
+// ── toque de chamada: biblioteca de toques (item 273 — helper/cevicoRingtones.js);
+// cada pessoa escolhe o seu em Chamadas → Toque ──
+let stopRing = null;
 const startRingtone = () => {
-  if (ringTimer) return;
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  if (!Ctx) return;
+  if (stopRing) return;
   try {
-    ringCtx = new Ctx();
-    if (ringCtx.state === 'suspended') {
-      const resuming = ringCtx.resume();
-      if (resuming && resuming.catch) resuming.catch(() => {});
-    }
-    ringOnce();
-    ringTimer = setInterval(ringOnce, 2600);
+    stopRing = startRingtoneLoop(getRingtoneKey());
   } catch {
-    ringCtx = null;
-    ringTimer = null;
+    stopRing = null;
   }
 };
 
 const stopRingtone = () => {
-  if (ringTimer) clearInterval(ringTimer);
-  ringTimer = null;
-  if (ringCtx) {
-    const closing = ringCtx.close();
-    if (closing && closing.catch) closing.catch(() => {});
-  }
-  ringCtx = null;
+  if (stopRing) stopRing();
+  stopRing = null;
 };
 
 // ── Notification do navegador ("📞 Fulano está ligando") ──

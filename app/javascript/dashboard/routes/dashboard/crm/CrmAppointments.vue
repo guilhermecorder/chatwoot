@@ -22,6 +22,7 @@ import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
+import PatientListPopup from 'dashboard/components-next/cevico/PatientListPopup.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import Avatar from 'dashboard/components-next/avatar/Avatar.vue';
 import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
@@ -464,13 +465,127 @@ const busy = computed(() => isLoading.value || isRefreshing.value);
 const rows = computed(() => feed.value?.rows || []);
 const counts = computed(() => feed.value?.counts || {});
 const booking = computed(() => feed.value?.booking || null);
+// ── item 271 (28/09): QUEM são os pacientes das marcadas + a LISTA por trás
+// de cada card ("não tenho informações claras sobre eles — e preciso ter") ──
+const PATIENT_KINDS = [
+  {
+    key: 'novo',
+    label: 'leads novos',
+    one: 'lead novo',
+    color: '#1d4ed8',
+    hint: 'chegaram há até 30 dias',
+  },
+  {
+    key: 'lead_antigo',
+    label: 'leads antigos',
+    one: 'lead antigo',
+    color: '#0891b2',
+    hint: 'chegaram há mais de 30 dias e nunca tinham consultado — ainda é aquisição',
+  },
+  {
+    key: 'retorno',
+    label: 'retornos',
+    one: 'retorno',
+    color: '#7c3aed',
+    hint: 'já tinham consultado antes',
+  },
+  {
+    key: 'cirurgia',
+    label: 'pacientes de cirurgia',
+    one: 'paciente de cirurgia',
+    color: '#be123c',
+    hint: 'já tinham cirurgia (Agenda ou Oftalmofácil)',
+  },
+  {
+    key: 'sem_cadastro',
+    label: 'sem cadastro',
+    color: '#64748b',
+    hint: 'consulta sem paciente ligado',
+  },
+];
+const kindCounts = computed(() => counts.value?.kinds || {});
+const listPopup = ref(null);
+const personOf = r => ({
+  id: r.task_id,
+  task_id: r.task_id,
+  contact_id: r.contact?.id,
+  name: r.name,
+  phone: r.phone,
+  origin: r.origin_inbox?.name,
+  when: r.event_at,
+  meta: [
+    r.unit_label,
+    r.source === 'ia'
+      ? 'pelo Atendente de IA'
+      : r.creator?.name
+        ? `por ${r.creator.name}`
+        : null,
+  ]
+    .filter(Boolean)
+    .join(' · '),
+  conversation_id: r.conversation?.display_id,
+});
+const openList = (title, subtitle, list, grad, icon = 'i-lucide-users') => {
+  listPopup.value = { title, subtitle, people: list.map(personOf), grad, icon };
+};
+const gradOf = k =>
+  `linear-gradient(135deg, ${KIND_META[k].color}, ${KIND_META[k].light})`;
+const openKindList = k =>
+  openList(
+    `${KIND_META[k].label}s no período`,
+    KIND_META[k].label.toLowerCase(),
+    rows.value.filter(r => r.kind === k),
+    gradOf(k),
+    KIND_META[k].icon
+  );
+const openSourceList = src =>
+  openList(
+    src === 'ia' ? 'Marcadas pelo Atendente de IA' : 'Marcadas pela equipe',
+    'das marcadas no período',
+    rows.value.filter(r => r.kind === 'agendada' && r.source === src),
+    src === 'ia'
+      ? 'linear-gradient(135deg, #7c3aed, #a78bfa)'
+      : 'linear-gradient(135deg, #0f766e, #2dd4bf)',
+    src === 'ia' ? 'i-lucide-bot' : 'i-lucide-users'
+  );
+const openPatientKind = pk =>
+  openList(
+    `Marcadas · ${pk.label}`,
+    pk.hint,
+    rows.value.filter(r => r.kind === 'agendada' && r.patient_kind === pk.key),
+    `linear-gradient(135deg, ${pk.color}, ${pk.color}99)`,
+    'i-lucide-user-round'
+  );
+const openOriginList = o => {
+  const ids = new Set(o.task_ids || []);
+  openList(
+    `Marcadas que chegaram por ${o.name || 'fora do sistema'}`,
+    'caixa da primeira conversa do paciente',
+    rows.value.filter(r => r.kind === 'agendada' && ids.has(r.task_id)),
+    `linear-gradient(135deg, ${o.inbox_id ? inboxSolidFor(inboxes.value, o.inbox_id) : '#94a3b8'}, #0f172a)`,
+    'i-lucide-inbox'
+  );
+};
+const marcadasKindsText = computed(() =>
+  PATIENT_KINDS.filter(k => kindCounts.value[k.key])
+    .map(
+      k =>
+        `${kindCounts.value[k.key]} ${kindCounts.value[k.key] === 1 ? k.one || k.label : k.label}`
+    )
+    .join(' · ')
+);
+
 // item 267: quantas das marcadas são de LEAD NOVO (chegou há até 30 dias) × da BASE
 const marcadasSub = computed(() => {
   const c = counts.value?.cohorts || {};
   const novos = (c.mesmo_dia || 0) + (c.semana || 0) + (c.mes || 0);
   const base = (c.antes || 0) + (c.sem_cadastro || 0);
   if (!novos && !base) return `${nounPlural.value} novas`;
-  return `${novos} de leads novos · ${base} de pacientes da base`;
+  // item 271: a "base" aberta (leads antigos · retornos · cirurgia · sem cadastro)
+  return (
+    marcadasKindsText.value ||
+    `${novos} de leads novos · ${base} de pacientes da base`
+  );
 });
 const iaShare = computed(() => {
   const ia = Number(counts.value.ia || 0);
@@ -760,68 +875,157 @@ onBeforeUnmount(() => {
             }}
           </p>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <DashKpi
-              label="Marcadas"
-              :value="Number(counts.agendada || 0)"
-              :sub="marcadasSub"
-              :from="KIND_META.agendada.color"
-              :to="KIND_META.agendada.light"
-              glass
-              compact
-            />
-            <DashKpi
-              label="Remarcadas"
-              :value="Number(counts.reagendada || 0)"
-              sub="mudaram de dia ou hora"
-              :from="KIND_META.reagendada.color"
-              :to="KIND_META.reagendada.light"
-              glass
-              compact
-            />
-            <DashKpi
-              label="Confirmadas"
-              :value="Number(counts.confirmada || 0)"
-              sub="responderam SIM ao lembrete"
-              :from="KIND_META.confirmada.color"
-              :to="KIND_META.confirmada.light"
-              glass
-              compact
-            />
-            <DashKpi
-              label="Não confirmou"
-              :value="Number(counts.nao_confirmou || 0)"
-              sub="responderam NÃO — ligar"
-              :from="KIND_META.nao_confirmou.color"
-              :to="KIND_META.nao_confirmou.light"
-              glass
-              compact
-            />
-            <DashKpi
-              label="Canceladas"
-              :value="Number(counts.cancelada || 0)"
-              sub="desmarcadas no período"
-              :from="KIND_META.cancelada.color"
-              :to="KIND_META.cancelada.light"
-              glass
-              compact
-            />
-            <DashKpi
-              label="Lançadas"
-              :value="Number(counts.lancada || 0)"
-              sub="já estavam marcadas fora do sistema"
-              :from="KIND_META.lancada.color"
-              :to="KIND_META.lancada.light"
-              glass
-              compact
-            />
-            <DashKpi
-              label="Marcadas pelo Atendente de IA × pela equipe"
-              :value="`${Number(counts.ia || 0)} × ${Number(counts.equipe || 0)}`"
-              :sub="`das ${Number(counts.agendada || 0)} marcadas, ${iaShare}% foram pelo Atendente de IA`"
-              :grad="kpiGrad()"
-              glass
-              compact
-            />
+            <div
+              class="cursor-pointer transition-transform hover:-translate-y-0.5"
+              title="ver a lista de pacientes"
+              @click="openKindList('agendada')"
+            >
+              <DashKpi
+                label="Marcadas"
+                :value="Number(counts.agendada || 0)"
+                :sub="marcadasSub"
+                :from="KIND_META.agendada.color"
+                :to="KIND_META.agendada.light"
+                glass
+                compact
+              />
+            </div>
+            <div
+              class="cursor-pointer transition-transform hover:-translate-y-0.5"
+              title="ver a lista de pacientes"
+              @click="openKindList('reagendada')"
+            >
+              <DashKpi
+                label="Remarcadas"
+                :value="Number(counts.reagendada || 0)"
+                sub="mudaram de dia ou hora"
+                :from="KIND_META.reagendada.color"
+                :to="KIND_META.reagendada.light"
+                glass
+                compact
+              />
+            </div>
+            <div
+              class="cursor-pointer transition-transform hover:-translate-y-0.5"
+              title="ver a lista de pacientes"
+              @click="openKindList('confirmada')"
+            >
+              <DashKpi
+                label="Confirmadas"
+                :value="Number(counts.confirmada || 0)"
+                sub="responderam SIM ao lembrete"
+                :from="KIND_META.confirmada.color"
+                :to="KIND_META.confirmada.light"
+                glass
+                compact
+              />
+            </div>
+            <div
+              class="cursor-pointer transition-transform hover:-translate-y-0.5"
+              title="ver a lista de pacientes"
+              @click="openKindList('nao_confirmou')"
+            >
+              <DashKpi
+                label="Não confirmou"
+                :value="Number(counts.nao_confirmou || 0)"
+                sub="responderam NÃO — ligar"
+                :from="KIND_META.nao_confirmou.color"
+                :to="KIND_META.nao_confirmou.light"
+                glass
+                compact
+              />
+            </div>
+            <div
+              class="cursor-pointer transition-transform hover:-translate-y-0.5"
+              title="ver a lista de pacientes"
+              @click="openKindList('cancelada')"
+            >
+              <DashKpi
+                label="Canceladas"
+                :value="Number(counts.cancelada || 0)"
+                sub="desmarcadas no período"
+                :from="KIND_META.cancelada.color"
+                :to="KIND_META.cancelada.light"
+                glass
+                compact
+              />
+            </div>
+            <div
+              class="cursor-pointer transition-transform hover:-translate-y-0.5"
+              title="ver a lista de pacientes"
+              @click="openKindList('lancada')"
+            >
+              <DashKpi
+                label="Lançadas"
+                :value="Number(counts.lancada || 0)"
+                sub="já estavam marcadas fora do sistema"
+                :from="KIND_META.lancada.color"
+                :to="KIND_META.lancada.light"
+                glass
+                compact
+              />
+            </div>
+            <div
+              class="cursor-pointer transition-transform hover:-translate-y-0.5"
+              title="ver quem o Atendente de IA marcou e quem a equipe marcou"
+              @click="
+                openSourceList(
+                  Number(counts.ia || 0) >= Number(counts.equipe || 0)
+                    ? 'ia'
+                    : 'equipe'
+                )
+              "
+            >
+              <DashKpi
+                label="Marcadas pelo Atendente de IA × pela equipe"
+                :value="`${Number(counts.ia || 0)} × ${Number(counts.equipe || 0)}`"
+                :sub="`das ${Number(counts.agendada || 0)} marcadas, ${iaShare}% foram pelo Atendente de IA`"
+                :grad="kpiGrad()"
+                glass
+                compact
+              />
+            </div>
+          </div>
+
+          <!-- item 271: QUEM SÃO os pacientes das marcadas — cada chip abre a lista -->
+          <div class="cv-ag-divider" />
+          <div class="cv-ag-block p-5 sm:p-6">
+            <p class="cv-ag-block-title">Quem são os pacientes das marcadas</p>
+            <p class="cv-ag-block-sub mb-4">
+              das <b>{{ Number(counts.agendada || 0) }} marcadas</b>, quem é
+              cada paciente: lead novo (até 30 dias), lead antigo (chegou há
+              mais tempo e nunca tinha consultado — ainda é aquisição), retorno
+              (já consultou), paciente de cirurgia ou sem cadastro · clique para
+              ver os nomes
+            </p>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button
+                v-for="pk in PATIENT_KINDS"
+                :key="'pk' + pk.key"
+                class="cv-chip"
+                :class="kindCounts[pk.key] ? '' : 'opacity-50'"
+                :title="pk.hint"
+                :disabled="!kindCounts[pk.key]"
+                @click="openPatientKind(pk)"
+              >
+                <span
+                  class="w-2 h-2 rounded-full"
+                  :style="{ background: pk.color }"
+                />
+                {{ pk.label }}
+                <span class="opacity-80 tabular-nums">{{
+                  kindCounts[pk.key] || 0
+                }}</span>
+                <span v-if="counts.agendada" class="opacity-60 tabular-nums"
+                  >·
+                  {{
+                    Math.round(
+                      ((kindCounts[pk.key] || 0) / counts.agendada) * 100
+                    )
+                  }}%</span
+                >
+              </button>
+            </div>
           </div>
 
           <!-- 27/09: DE QUAIS CAIXAS VIERAM as marcadas (caixa de origem do paciente) -->
@@ -842,11 +1046,12 @@ onBeforeUnmount(() => {
               v-if="originTotal"
               class="flex items-center gap-2 flex-wrap mt-4"
             >
-              <span
+              <button
                 v-for="o in originItems"
                 :key="o.key"
                 class="cv-chip"
-                :title="o.hint"
+                :title="o.hint + ' · clique para ver os nomes'"
+                @click="openOriginList(byOrigin[o.i])"
               >
                 <span
                   class="w-2 h-2 rounded-full"
@@ -857,7 +1062,7 @@ onBeforeUnmount(() => {
                 <span class="opacity-60 tabular-nums"
                   >· {{ Math.round((o.value / originTotal) * 100) }}%</span
                 >
-              </span>
+              </button>
             </div>
           </div>
 
@@ -1744,4 +1949,14 @@ onBeforeUnmount(() => {
       </template>
     </div>
   </div>
+  <PatientListPopup
+    v-if="listPopup"
+    :title="listPopup.title"
+    :subtitle="listPopup.subtitle"
+    :people="listPopup.people"
+    :grad="listPopup.grad"
+    :icon="listPopup.icon"
+    :account-id="accountId"
+    @close="listPopup = null"
+  />
 </template>

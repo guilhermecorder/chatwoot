@@ -9,7 +9,8 @@
 // faturamento, consultas marcadas) em cor cheia; secundário = volume que
 // explica (novos contatos, entrou em…, indicações) em cor média; terciário =
 // apoio (confirmadas, lançadas, faltas, "pela data") em cor clara.
-// O card ENCHE ao longo do dia (07h vazio → 19h cheio) — ver dayFill().
+// O card nasce TRANSPARENTE e a cor vai ficando DENSA ao longo do dia
+// (07h vidro → 19h cor cheia) — ver dayFill().
 
 export const KPI_FAMILIES = {
   financeiro: {
@@ -105,26 +106,36 @@ export const kpiGrad = (family, tier, dark = false) => {
     : `linear-gradient(135deg, ${mix(f.c1, '#fff', 62)}, ${mix(f.c2, '#fff', 62)})`;
 };
 
-// a versão "vazia" do card (antes de encher): a mesma cor, bem mais leve
-export const kpiGradSoft = (family, tier, dark = false) => {
+// o card NASCE 100% transparente (vidro) e a cor da família vai ficando
+// mais DENSA ao longo do dia — o vidro é o mesmo para todas as famílias
+export const kpiGlass = (dark = false) =>
+  dark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.34)';
+
+// borda fina na cor da família, para o card ainda ter identidade de manhã
+export const kpiEdge = (family, dark = false) => {
   const f = KPI_FAMILIES[family] || KPI_FAMILIES.outros;
-  const p = tier === 'tertiary' ? 78 : 55;
-  return dark
-    ? `linear-gradient(135deg, ${mix(f.c1, '#0b0d12', p)}, ${mix(f.c2, '#0b0d12', p)})`
-    : `linear-gradient(135deg, ${mix(f.c1, '#fff', p)}, ${mix(f.c2, '#fff', p)})`;
+  return mix(dark ? f.c2 : f.c1, 'transparent', dark ? 55 : 60);
 };
 
-// 0 → 1 ao longo do dia útil: 07h vazio, 19h cheio (fora disso, cheio à noite
-// e vazio de madrugada até as 07h)
+// texto escuro enquanto a cor ainda está rala (tema claro); no escuro, sempre
+// claro. Terciário é cor clara mesmo cheio → texto escuro o dia todo.
+export const kpiInkDark = (tier, fill, dark = false) => {
+  if (dark) return false;
+  if (tier === 'tertiary') return true;
+  return fill < 0.5;
+};
+
+// 0 → 1 ao longo do dia útil: 07h 100% transparente, 19h cor cheia (fora
+// disso, cheio à noite e transparente de madrugada até as 07h)
 export const dayFill = (now = new Date(), start = 7, end = 19) => {
   // hora de SÃO PAULO, seja qual for o fuso do computador
   const sp = new Date(
     now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
   );
   const h = sp.getHours() + sp.getMinutes() / 60;
-  if (h < start) return 0.06;
+  if (h < start) return 0;
   if (h >= end) return 1;
-  return Math.max(0.06, Math.min(1, (h - start) / (end - start)));
+  return Math.max(0, Math.min(1, (h - start) / (end - start)));
 };
 
 export const KPI_LEGEND = [

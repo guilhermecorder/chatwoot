@@ -8374,3 +8374,75 @@ com parâmetros diferentes selecionáveis por chavinhas.
   do fundo conforme a hora de SÃO PAULO (07h = 6% · 19h = 100%; relógio a cada minuto), com uma linha
   de luz na superfície; o popup usa a cor cheia. Título do card: "Agendamento · resultado principal ·
   57% do dia". Servidor: sanitize `auto_palette` (ausente = ligada). Deploy WEB só. SEM commit.
+
+> 28/09: 267–269 SUBIRAM no commit 33b2d49 (develop) → imagem ghcr.io/guilhermecorder/chatwoot:33b2d49
+> · Implantar WEB (SIDEKIQ junto não faz mal), sem migration · reversão :82f289d.
+> 28/09 17h: :33b2d49 IMPLANTADA (produção = 260–269).
+> 28/09 tarde — 269 v2 (feedback dele no print de produção: "não ficou legal, era pra ser 100% transparente
+> e ele vai ficando mais denso com o passar do tempo"): SAI o enchimento tipo líquido (faixa subindo do
+> fundo + linha de luz). AGORA o card nasce em VIDRO 100% transparente (kpiGlass) com só uma borda fina na
+> cor da família (kpiEdge) e a camada `.cv-tile-fill` cobre o card inteiro com opacidade = hora de SP
+> (07h 0 → 19h 1; dayFill sem piso de 6%). Texto: tema claro fica escuro enquanto a cor está rala
+> (fill < 50%) e sempre no terciário (`kpiInkDark` → classe `.cv-tile-ink-dark`, que também escurece os
+> text-white/NN e as pílulas bg-white/NN); no escuro, sempre claro. Legenda: "a cor vai ficando densa até
+> as 19h (N% agora)". Testado local (14h26 = 62%; manhã simulada a 12% no console). SEM commit, WEB só.
+
+## 270. ✅ 📐 CARDS DE INDICADOR COM O TAMANHO DO CONTEÚDO (28/09 tarde; pedido: "precisamos que os quadradinhos dos indicadores ajustem seu tamanho, de acordo com as informações deles... isso é importante")
+- Antes: cada card tinha altura FIXA na grade do ímã (3×6 = 166 px, grande 6×12 = 346 px) → card com
+  só um número sobrava espaço vazio; card com gráfico/quebras apertava e os textos viravam "…".
+- Agora: o MagnetBoard dos cards usa `auto-height` (o mesmo modo dos blocos do Meu Painel): cada card é
+  medido e a altura vem do conteúdo; quem está embaixo desce/sobe sozinho. Só a largura se estica
+  (alça da borda direita); w ≥ 6 continua virando o card "grande" com gráfico. Altura mínima 124 px.
+- Textos que eram cortados (`truncate`) no card agora quebram linha: subtítulo "anterior: …", legenda
+  "leads que chegaram no período…", pico/tendência do card grande e o nome das linhas de detalhe.
+- Sem backend novo (kpi_layout.grid continua {id,x,y,w,h}; h vira só ponto de partida).
+- Testado local junto com o 269 v2. SEM commit — aguarda "pode subir" (WEB só).
+
+
+## 271. ✅ 🌪️ FUNIL DE AQUISIÇÃO por turma + "DA PORTA PRA DENTRO" + a "base" aberta com nomes (28/09 tarde; pedido: "preciso entender os indicadores de agendamento certinho… o funil de aquisição é de importância extrema, assim quanto 'da porta pra dentro'… vamos fazer os 3 blocos")
+- DIAGNÓSTICO no banco real (backup 21/09 restaurado local em `cevico_analise`, 30 dias de marcadas): a
+  "base" (52) era 29 LEADS ANTIGOS (chegaram há meses pelo Google/Instagram e só agora marcaram = ainda é
+  aquisição), 16 RETORNOS (já tinham consultado) e 7 PACIENTES DE CIRURGIA (Oftalmofácil). Mais da metade
+  da "base" era aquisição escondida pela régua de 30 dias.
+- Decisões dele: base = "retornos, exames etc." (descoberto acima); turma de 90 dias; bloco 1 em
+  Agendamentos, funis 2 e 3 no Gestor do Meu Painel (tem o ímã).
+- BLOCO 1 (Agendamentos → Resumo): `Crm::PatientKind` (services/crm/patient_kind.rb) classifica cada
+  marcada em novo · lead_antigo · retorno · cirurgia · sem_cadastro (3 consultas no banco, nunca 1 por
+  tarefa) e devolve a caixa de ORIGEM por linha (`origin_inbox`); feed traz `patient_kind`, `counts.kinds`
+  e `by_origin[].task_ids`. Tela: card Marcadas com "22 leads novos · 29 leads antigos · 16 retornos…",
+  faixa "Quem são os pacientes das marcadas" com chips clicáveis, TODOS os cards do Resumo clicáveis
+  (Marcadas/Remarcadas/Confirmadas/Não confirmou/Canceladas/Lançadas/IA × equipe) e os chips de origem
+  também → `PatientListPopup.vue` (components-next/cevico; kit .cv-modal, busca por nome/telefone,
+  copiar lista, clique abre a conversa ou o Espaço do Paciente).
+- BLOCOS 2 e 3 (Gestor): `Crm::FunnelService` (services/crm/funnel_service.rb) + `FunnelsController`
+  (GET crm/funnels/acquisition?preset&horizon · crm/funnels/clinic?preset; cache 10 min; CrmAPI
+  getAcquisitionFunnel/getClinicFunnel).
+  · AQUISIÇÃO POR TURMA: quem CHEGOU no período (LeadsUniverse) e até onde foi em N dias (30/60/90/180,
+    padrão 90): chegou → conversou (mensagem recebida depois da nossa 1ª enviada) → orçamento (entrou na
+    coluna de orçamento ou depois; quem marcou também conta) → marcou consulta → compareceu → indicação →
+    cirurgia marcada (Agenda ou Oftalmofácil) → cirurgia realizada (realizada/aguardando pagamento).
+    Cascata: etapa alcançada implica as anteriores. Mediana de dias entre etapas ("≈ 3 dias"), tabela por
+    origem, robô × equipe nas marcadas, chips "parou em X" e lista por etapa (chegou/parou).
+  · DA PORTA PRA DENTRO: consultas com DATA no período → compareceram → indicação → cirurgia marcada →
+    realizada → respondeu NPS; ao lado faltas · canceladas · remarcadas · SEM REGISTRO DE PRESENÇA (o
+    funil fica cego aí) · ainda vão acontecer; tabelas por médico e por unidade; tudo com lista.
+  · `FunnelSteps.vue` ganhou `clickable` (emite pick) e `sub` por coluna. Blocos `funil_aquisicao` e
+    `porta_dentro` no MAIN_BLOCKS_DEFAULT (aparecem só com panelBase gestor), ímã normal.
+- Validação no banco real (turma de junho, 90 dias): 1.249 chegaram → 1.104 conversaram → 63 marcaram →
+  20 compareceram (presença pouco registrada) → 11 indicações → 49 cirurgias marcadas (Oftalmofácil
+  ligado ao contato). Por isso o chip "sem registro de presença" ficou em destaque.
+- Deploy WEB só, sem migration. SEM commit — aguarda "pode subir" (junto com 269 v2 e 270).
+
+## 273. ✅ 🔔 TOQUE DAS CHAMADAS — biblioteca com 6 toques (28/09 tarde; pedido: "precisamos mudar o toque do telefonema… um ring ring das antigas… uma biblioteca com uns 5 pra gente escolher: um mais moderno, um mais clássico etc.")
+- helper/cevicoRingtones.js: 6 toques SINTETIZADOS em WebAudio (sem arquivo de áudio, sem direito autoral):
+  Ring ring clássico (padrão; duas campainhas de telefone de disco batidas 20x/s, ring… ring…) ·
+  Telefone fixo (trim-trim 400+450 Hz) · Moderno (marimba subindo) · Discreto (dois sininhos leves) ·
+  Retrô digital (trinado de onda quadrada) · Tum-tum (o de antes, 440+480 Hz). Cada toque = função que
+  desenha 1 ciclo e devolve o período; `startRingtoneLoop`/`previewRingtone`; escolha em localStorage
+  `cevico_ringtone` (cada atendente escolhe o seu neste computador).
+- useCevicoCallSession.js: startRingtone/stopRingtone passam a usar a biblioteca (mesma assinatura p/ a
+  store cevicoCalls). RingtonePicker.vue (components-next/cevico/calls): modal do kit com ouvir/escolher;
+  botão "Toque" (sino) no topo da tela Chamadas (CevicoHero #actions).
+- O FloatingCallWidget (canal de voz do Chatwoot/Twilio, ringtone.mp3) NÃO mudou — o nosso é o CEVICO.
+- Deploy WEB só, sem migration. SEM commit — aguarda "pode subir".
+

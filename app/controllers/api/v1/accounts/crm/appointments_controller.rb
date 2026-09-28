@@ -84,12 +84,15 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     end
   end
 
-  def build_rows(tasks, mode, since, until_at) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def build_rows(tasks, mode, since, until_at) # rubocop:disable Metrics/AbcSize
     conversations = conversations_for(tasks)
     cards = cards_for(tasks)
+    # item 271: quem é o paciente (lead novo/antigo, retorno, cirurgia) + caixa de origem
+    kinds = Crm::PatientKind.for_tasks(Current.account, tasks)
+    origins = Crm::PatientKind.origin_inbox_by_contact(Current.account, tasks.map(&:contact_id))
     rows = tasks.flat_map do |t|
       events = mode == 'consultas' ? [[kind_of(t), event_at(t)]] : events_of(t, since, until_at)
-      events.map { |kind, at| row_for(t, kind, at, conversations[t.id], cards) }
+      events.map { |kind, at| row_for(t, kind, at, conversations[t.id], cards).merge(patient_kind: kinds[t.id], origin_inbox: origins[t.contact_id]) }
     end
     mode == 'consultas' ? rows : rows.sort_by { |r| r[:event_at] }.reverse
   end
@@ -222,19 +225,18 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   # das MARCADAS, a caixa de ORIGEM do paciente = a da PRIMEIRA conversa dele
   # (por onde ele chegou: Google, Instagram…), não a da conversa mais recente —
   # assim a caixa "Confirmação de consulta" não rouba o crédito
-  def stack_by_origin(rows) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  def stack_by_origin(rows)
     marcadas = rows.select { |r| r[:kind] == 'agendada' }
-    ids = marcadas.filter_map { |r| r.dig(:contact, :id) }.uniq
-    first = Conversation.where(account_id: Current.account.id, contact_id: ids)
-                        .select('DISTINCT ON (contact_id) contact_id, inbox_id').order('contact_id, created_at ASC')
-                        .to_h { |c| [c.contact_id, c.inbox_id] }
-    names = Current.account.inboxes.where(id: first.values.uniq).pluck(:id, :name).to_h
-    marcadas.group_by { |r| first[r.dig(:contact, :id)] }
-            .map { |inbox_id, list| { inbox_id: inbox_id, name: inbox_id ? names[inbox_id] : 'sem conversa', count: list.size } }
-            .sort_by { |h| -h[:count] }
+    # item 271: a origem já vem em cada linha (Crm::PatientKind.origin_inbox_by_contact)
+    groups = marcadas.group_by { |r| r.dig(:origin_inbox, :id) }
+    stacks = groups.map do |inbox_id, list|
+      { inbox_id: inbox_id, name: inbox_id ? list.first.dig(:origin_inbox, :name) : 'sem conversa', count: list.size,
+        task_ids: list.map { |r| r[:task_id] } }
+    end
+    stacks.sort_by { |h| -h[:count] }
   end
 
-  def counts(rows) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def counts(rows) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
     booked = rows.select { |r| BOOKING_KINDS_FOR_SOURCE.include?(r[:kind]) }
     marcadas = rows.select { |r| r[:kind] == 'agendada' }
     KINDS.to_h { |k| [k.to_sym, rows.count { |r| r[:kind] == k }] }.merge(
@@ -242,7 +244,9 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
       ia: booked.count { |r| r[:source] == 'ia' },
       equipe: booked.count { |r| r[:source] == 'equipe' },
       # item 246: das MARCADAS, quando o lead tinha chegado
-      cohorts: (Crm::LeadCohort::KEYS + ['sem_cadastro']).index_with { |c| marcadas.count { |r| r[:lead_cohort] == c } }
+      cohorts: (Crm::LeadCohort::KEYS + ['sem_cadastro']).index_with { |c| marcadas.count { |r| r[:lead_cohort] == c } },
+      # item 271: das MARCADAS, quem é o paciente (novo · lead antigo · retorno · cirurgia · sem cadastro)
+      kinds: Crm::PatientKind::KINDS.index_with { |k| marcadas.count { |r| r[:patient_kind] == k } }
     )
   end
 

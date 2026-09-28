@@ -48,7 +48,10 @@ RSpec.describe 'CEVICO Appointments feed', type: :request do
     expect(body['mode']).to eq('registradas')
     # item 217: cada ACONTECIMENTO do período é uma linha — Carla foi marcada E cancelada hoje (2 linhas)
     expect(body['counts']).to include('total' => 5, 'agendada' => 2, 'reagendada' => 1, 'cancelada' => 1, 'confirmada' => 1,
-                                      'lancada' => 0, 'nao_confirmou' => 0, 'ia' => 1, 'equipe' => 3)
+                                      # item 267: robô × equipe conta SÓ as marcadas; item 271: quem é o paciente
+                                      'lancada' => 0, 'nao_confirmou' => 0, 'ia' => 1, 'equipe' => 1)
+    expect(body['counts']['kinds']).to include('novo' => 1, 'sem_cadastro' => 1)
+    expect(body['rows'].map { |r| r['patient_kind'] }).to all(be_in(Crm::PatientKind::KINDS))
     # a confirmação de hoje aparece como acontecimento; o lançamento de 3 dias atrás não (fora do período)
     expect(body['rows'].find { |r| r['name'] == 'Iara Luz' }).to include('kind' => 'confirmada', 'task_id' => be_a(Integer))
     expect(body['rows'].map { |r| r['name'] }).not_to include('Hugo Neri')
