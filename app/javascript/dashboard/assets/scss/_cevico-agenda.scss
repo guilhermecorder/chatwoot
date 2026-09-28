@@ -888,26 +888,42 @@
 }
 .dark .cv-page .cv-ag-block { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.1); }
 .cv-page .cv-ag-block-title {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 800;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   color: #0f172a;
   line-height: 1.2;
+  margin-bottom: 4px;
 }
+/* 27/09 (pedido dele): mais RESPIRO entre as seções da mesma caixa e uma
+   divisória de verdade — "a falta de espaçamento deixa tudo embaralhado" */
+.cv-page .cv-ag-divider {
+  height: 1px;
+  margin: 28px 0 24px;
+  background: linear-gradient(90deg, transparent, rgb(var(--cv-rgb) / 0.35) 20%, rgb(var(--cv-rgb) / 0.35) 80%, transparent);
+}
+.dark .cv-page .cv-ag-divider { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18) 20%, rgba(255, 255, 255, 0.18) 80%, transparent); }
+.cv-page .cv-ag-block > .cv-ag-block-title + .cv-ag-block-sub { display: block; margin-top: -2px; }
+.cv-page .cv-ag-block .cv-ag-block-title:not(:first-child) { margin-top: 18px; }
 .dark .cv-page .cv-ag-block-title { color: #fff; }
-.cv-page .cv-ag-block-sub { font-size: 11px; font-weight: 500; color: #94a3b8; letter-spacing: 0; }
+.cv-page .cv-ag-block-sub { font-size: 12px; font-weight: 500; color: #94a3b8; letter-spacing: 0; line-height: 1.45; }
 .cv-page .cv-ag-row-label {
   flex-shrink: 0;
-  width: 88px;
+  width: 96px;
   padding-top: 8px;
   white-space: nowrap;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #64748b;
 }
 @media (max-width: 640px) { .cv-page .cv-ag-row-label { display: none; } }
+/* 28/09 (item 266): dentro de Situação/Onde as pílulas respiram (gap maior) e
+   cada linha tem o seu espaço; o rótulo alinha com a 1ª pílula */
+.cv-page .cv-ag-filters > .flex { gap: 16px; }
+.cv-page .cv-ag-filters > .flex > .flex { gap: 8px 10px; }
+.cv-page .cv-ag-filters .cv-ag-row-label { padding-top: 9px; width: 104px; }
 /* semana em vista no mini calendário: faixa na cor do dia */
 .cv-page .cv-ag-mini-week { border-radius: 10px; }
 .cv-page .cv-ag-mini-week-on { background: rgb(var(--cv-rgb) / 0.13); box-shadow: inset 0 0 0 1px rgb(var(--cv-rgb) / 0.25); }

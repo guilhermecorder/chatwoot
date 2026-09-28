@@ -132,7 +132,10 @@ const kindVarsOf = key => {
 // 🎨 pedido 23/09: a COR do ambiente inteiro segue o tipo escolhido (como na
 // Agenda) — a pessoa não confunde consulta com cirurgia; a paleta da página
 // (Strawberry etc.) fica só de base
-const pageStyle = computed(() => ({ ...cvVars.value, ...kindVars(trackKind.value) }));
+const pageStyle = computed(() => ({
+  ...cvVars.value,
+  ...kindVars(trackKind.value),
+}));
 const trackStyle = computed(() => kindVars(trackKind.value));
 const noun = computed(() => trackKind.value.noun);
 const nounPlural = computed(() => trackKind.value.plural);
@@ -150,7 +153,9 @@ const MODES = computed(() => [
     hint: `as ${nounPlural.value} com DATA nestes dias — não importa quando foram marcadas`,
   },
 ]);
-const modeHint = computed(() => MODES.value.find(m => m.key === mode.value)?.hint || '');
+const modeHint = computed(
+  () => MODES.value.find(m => m.key === mode.value)?.hint || ''
+);
 const mode = ref('registradas');
 const KINDS = [
   { key: '', label: 'Todas', tone: 'cv-blue', countKey: 'total' },
@@ -232,6 +237,20 @@ const units = ref([]);
 const inboxIds = ref([]);
 const q = ref('');
 const byInbox = ref([]); // empilhamento por caixa, vem do servidor
+const byOrigin = ref([]); // 27/09: das marcadas, a caixa por onde o paciente CHEGOU
+const originItems = computed(() =>
+  (byOrigin.value || []).map((b, i) => ({
+    key: `o${b.inbox_id || 'none'}`,
+    label: b.name || 'sem conversa',
+    value: b.count,
+    color: b.inbox_id ? inboxSolidFor(inboxes.value, b.inbox_id) : '#94a3b8',
+    hint: `${b.count} marcada(s) de pacientes que chegaram por ${b.name || 'fora do sistema'}`,
+    i,
+  }))
+);
+const originTotal = computed(() =>
+  (byOrigin.value || []).reduce((s, b) => s + (b.count || 0), 0)
+);
 const inboxOptions = computed(() =>
   (inboxes.value || []).map(i => ({ id: i.id, name: i.name }))
 );
@@ -243,11 +262,21 @@ const toggleIn = (list, value) => {
 const toggleUnit = key => toggleIn(units, key);
 const toggleInbox = id => toggleIn(inboxIds, Number(id));
 const inboxCount = id =>
-  (byInbox.value || []).find(b => Number(b.inbox_id) === Number(id))?.count || 0;
+  (byInbox.value || []).find(b => Number(b.inbox_id) === Number(id))?.count ||
+  0;
 const stackTotal = computed(() =>
   (byInbox.value || []).reduce((s, b) => s + (b.count || 0), 0)
 );
-const INBOX_STACK_COLORS = ['#2563EB', '#EA580C', '#059669', '#7C3AED', '#DB2777', '#0D9488', '#D4A017', '#64748B'];
+const INBOX_STACK_COLORS = [
+  '#2563EB',
+  '#EA580C',
+  '#059669',
+  '#7C3AED',
+  '#DB2777',
+  '#0D9488',
+  '#D4A017',
+  '#64748B',
+];
 const stackItems = computed(() =>
   (byInbox.value || []).map((b, i) => ({
     label: b.name,
@@ -257,26 +286,68 @@ const stackItems = computed(() =>
 );
 // ── item 246: QUANDO o lead chegou em relação à marcação (coorte) ──
 const COHORTS = [
-  { key: 'mesmo_dia', label: 'no mesmo dia', short: 'chegou no dia', color: '#059669' },
-  { key: 'semana', label: 'até 7 dias antes', short: 'chegou na semana', color: '#2563EB' },
-  { key: 'mes', label: '8 a 30 dias antes', short: 'chegou no mês', color: '#D97706' },
-  { key: 'antes', label: 'há mais de 30 dias', short: 'lead antigo', color: '#7C3AED' },
-  { key: 'sem_cadastro', label: 'sem cadastro ligado', short: 'sem cadastro', color: '#94A3B8' },
+  {
+    key: 'mesmo_dia',
+    label: 'no mesmo dia',
+    short: 'chegou no dia',
+    color: '#059669',
+  },
+  {
+    key: 'semana',
+    label: 'até 7 dias antes',
+    short: 'chegou na semana',
+    color: '#2563EB',
+  },
+  {
+    key: 'mes',
+    label: '8 a 30 dias antes',
+    short: 'chegou no mês',
+    color: '#D97706',
+  },
+  {
+    key: 'antes',
+    label: 'há mais de 30 dias',
+    short: 'lead antigo',
+    color: '#7C3AED',
+  },
+  {
+    key: 'sem_cadastro',
+    label: 'sem cadastro ligado',
+    short: 'sem cadastro',
+    color: '#94A3B8',
+  },
 ];
 const COHORT_BY_KEY = Object.fromEntries(COHORTS.map(c => [c.key, c]));
 const cohort = ref('');
 const cohortItems = computed(() => {
   const c = counts.value?.cohorts || {};
-  return COHORTS.map(x => ({ label: x.label, value: c[x.key] || 0, color: x.color })).filter(x => x.value > 0);
+  return COHORTS.map(x => ({
+    label: x.label,
+    value: c[x.key] || 0,
+    color: x.color,
+  })).filter(x => x.value > 0);
 });
-const cohortTotal = computed(() => cohortItems.value.reduce((a, b) => a + b.value, 0));
+const cohortTotal = computed(() =>
+  cohortItems.value.reduce((a, b) => a + b.value, 0)
+);
 // "chegou há 5 dias" / "chegou no dia" (a partir do cadastro do contato)
 const cohortChip = row => {
   const meta = COHORT_BY_KEY[row.lead_cohort];
   if (!meta) return null;
-  if (!row.lead_arrived_at || row.lead_cohort === 'mesmo_dia') return { ...meta, text: meta.short };
-  const days = Math.max(1, Math.round((new Date(row.event_at || row.due_at || Date.now()) - new Date(row.lead_arrived_at)) / 86400000));
-  const text = days > 60 ? `lead há ${Math.round(days / 30)} meses` : `chegou há ${days} dia${days === 1 ? '' : 's'}`;
+  if (!row.lead_arrived_at || row.lead_cohort === 'mesmo_dia')
+    return { ...meta, text: meta.short };
+  const days = Math.max(
+    1,
+    Math.round(
+      (new Date(row.event_at || row.due_at || Date.now()) -
+        new Date(row.lead_arrived_at)) /
+        86400000
+    )
+  );
+  const text =
+    days > 60
+      ? `lead há ${Math.round(days / 30)} meses`
+      : `chegou há ${days} dia${days === 1 ? '' : 's'}`;
   return { ...meta, text };
 };
 // ── item 246: visualização em LISTA ou em CARDS (lembrada por pessoa) ──
@@ -300,8 +371,13 @@ const showGlossary = ref(false);
 
 const hasFilters = computed(
   () =>
-    Boolean(kind.value || source.value || cohort.value || units.value.length || inboxIds.value.length) ||
-    String(q.value || '').trim().length > 0
+    Boolean(
+      kind.value ||
+        source.value ||
+        cohort.value ||
+        units.value.length ||
+        inboxIds.value.length
+    ) || String(q.value || '').trim().length > 0
 );
 const clearFilters = () => {
   kind.value = '';
@@ -368,6 +444,7 @@ const fetchFeed = async ({ quiet = false } = {}) => {
     if (seq !== fetchSeq) return; // chegou uma busca mais nova
     feed.value = data;
     byInbox.value = data.by_inbox || []; // item 235: empilhamento por caixa
+    byOrigin.value = data.by_origin || [];
     if (!showSettings.value) syncForm(data.booking);
   } catch (error) {
     if (seq !== fetchSeq) return;
@@ -614,7 +691,11 @@ onBeforeUnmount(() => {
         <!-- 📅 o que MUDA a agenda, em destaque no banner: Consultas |
              Teleconsultas | Exames | Cirurgias (a cor do ambiente acompanha) -->
         <div class="w-full flex flex-col gap-2.5">
-          <div class="cv-ag-kindbar" role="tablist" aria-label="Tipo de agendamento">
+          <div
+            class="cv-ag-kindbar"
+            role="tablist"
+            aria-label="Tipo de agendamento"
+          >
             <button
               v-for="kk in AGENDA_KINDS"
               :key="kk.key"
@@ -735,47 +816,132 @@ onBeforeUnmount(() => {
             />
           </div>
 
+          <!-- 27/09: DE QUAIS CAIXAS VIERAM as marcadas (caixa de origem do paciente) -->
+          <div class="cv-ag-divider" />
+          <div class="cv-ag-block p-5 sm:p-6">
+            <p class="cv-ag-block-title">De quais caixas vieram as marcações</p>
+            <p class="cv-ag-block-sub mb-4">
+              das <b>{{ Number(counts.agendada || 0) }} marcadas</b>, a caixa
+              por onde o paciente <b>chegou</b> (a primeira conversa dele:
+              Google, Instagram…), não a da conversa mais recente — por isso a
+              caixa de confirmação não rouba o crédito
+            </p>
+            <ShareBar v-if="originTotal" :items="originItems" :max="8" />
+            <p v-else class="text-[11px] text-n-slate-9">
+              nenhuma marcação no período
+            </p>
+            <div
+              v-if="originTotal"
+              class="flex items-center gap-2 flex-wrap mt-4"
+            >
+              <span
+                v-for="o in originItems"
+                :key="o.key"
+                class="cv-chip"
+                :title="o.hint"
+              >
+                <span
+                  class="w-2 h-2 rounded-full"
+                  :style="{ background: o.color }"
+                />
+                {{ o.label }}
+                <span class="opacity-80 tabular-nums">{{ o.value }}</span>
+                <span class="opacity-60 tabular-nums"
+                  >· {{ Math.round((o.value / originTotal) * 100) }}%</span
+                >
+              </span>
+            </div>
+          </div>
+
           <!-- item 246: ENTENDER as marcações — quando o lead chegou + o que conta -->
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-5">
-            <div class="cv-ag-block p-4">
+          <div class="cv-ag-divider" />
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div class="cv-ag-block p-5 sm:p-6">
               <p class="cv-ag-block-title">Quando esses leads chegaram</p>
-              <p class="text-[11px] text-n-slate-10 mb-2.5">
-                das <b>{{ Number(counts.agendada || 0) }} marcadas</b>, quantos dias entre o paciente
-                chegar (cadastro) e a {{ noun }} ser marcada · clique para filtrar a lista
+              <p class="cv-ag-block-sub mb-4">
+                das <b>{{ Number(counts.agendada || 0) }} marcadas</b>, quantos
+                dias entre o paciente chegar (cadastro) e a {{ noun }} ser
+                marcada · clique para filtrar a lista
               </p>
               <ShareBar v-if="cohortTotal" :items="cohortItems" :max="5" />
-              <p v-else class="text-[11px] text-n-slate-9">nenhuma marcação no período</p>
+              <p v-else class="text-[11px] text-n-slate-9">
+                nenhuma marcação no período
+              </p>
               <div class="flex items-center gap-1.5 flex-wrap mt-2.5">
                 <button
-                  v-for="c in COHORTS.filter(x => (counts.cohorts || {})[x.key])"
+                  v-for="c in COHORTS.filter(
+                    x => (counts.cohorts || {})[x.key]
+                  )"
                   :key="'coh' + c.key"
                   class="cv-chip"
                   :class="cohort === c.key ? 'cv-chip-on' : ''"
                   @click="cohort = cohort === c.key ? '' : c.key"
                 >
-                  <span class="w-2 h-2 rounded-full" :style="{ background: c.color }" />
+                  <span
+                    class="w-2 h-2 rounded-full"
+                    :style="{ background: c.color }"
+                  />
                   {{ c.label }}
-                  <span class="opacity-80 tabular-nums">{{ counts.cohorts[c.key] }}</span>
+                  <span class="opacity-80 tabular-nums">{{
+                    counts.cohorts[c.key]
+                  }}</span>
                 </button>
               </div>
             </div>
-            <div class="cv-ag-block p-4">
+            <div class="cv-ag-block p-5 sm:p-6">
               <div class="flex items-center gap-2">
-                <p class="cv-ag-block-title flex-1">O que cada número quer dizer</p>
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="showGlossary = !showGlossary">
+                <p class="cv-ag-block-title flex-1">
+                  O que cada número quer dizer
+                </p>
+                <button
+                  class="cv-btn cv-btn-ghost cv-btn-sm"
+                  @click="showGlossary = !showGlossary"
+                >
                   {{ showGlossary ? 'recolher' : 'ver tudo' }}
                 </button>
               </div>
-              <ul class="mt-2 space-y-1.5 text-[11.5px] text-n-slate-11 leading-snug">
-                <li><b>Marcada</b> = {{ noun }} NOVA criada no período, pelo robô ou pela equipe — o lead pode ter chegado hoje ou há meses (veja ao lado).</li>
-                <li><b>Não é marcada:</b> lançada (já estava marcada fora do sistema), remarcação, confirmação — cada uma tem o seu cartão.</li>
+              <ul
+                class="mt-2 space-y-1.5 text-[11.5px] text-n-slate-11 leading-snug"
+              >
+                <li>
+                  <b>Marcada</b> = {{ noun }} NOVA criada no período, pelo robô
+                  ou pela equipe — o lead pode ter chegado hoje ou há meses
+                  (veja ao lado).
+                </li>
+                <li>
+                  <b>Não é marcada:</b> lançada (já estava marcada fora do
+                  sistema), remarcação, confirmação — cada uma tem o seu cartão.
+                </li>
                 <template v-if="showGlossary">
-                  <li><b>Caixa de entrada</b> = a da conversa de onde a {{ noun }} saiu (ou a conversa mais recente do paciente).</li>
-                  <li><b>Meu Painel · Marcadas na Agenda</b> = estas mesmas marcadas, sem exame, tele, cancelada e parceiro do Oftalmofácil.</li>
-                  <li><b>Meu Painel · Entrou em Agendamento</b> = pessoas cujo card MUDOU para a coluna "Agendamento de Consulta" no período (é a taxa oficial). Difere das marcadas: quem já estava na coluna, ou foi marcado sem card, não entra.</li>
-                  <li><b>% de agendamento</b> = entradas nessa coluna ÷ leads, sempre dos últimos 30 dias (taxa madura).</li>
-                  <li><b>Chegaram e agendaram</b> = lead que chegou no período E já foi marcado no mesmo período (a coorte "no mesmo dia/semana" ao lado).</li>
-                  <li><b>Cuidado com fórmulas que misturam</b> "entrou em Agendamento hoje" ÷ "leads de hoje": os agendados de hoje vieram de vários dias; os leads de hoje ainda vão agendar.</li>
+                  <li>
+                    <b>Caixa de entrada</b> = a da conversa de onde a
+                    {{ noun }} saiu (ou a conversa mais recente do paciente).
+                  </li>
+                  <li>
+                    <b>Meu Painel · Marcadas na Agenda</b> = estas mesmas
+                    marcadas, sem exame, tele, cancelada e parceiro do
+                    Oftalmofácil.
+                  </li>
+                  <li>
+                    <b>Meu Painel · Entrou em Agendamento</b> = pessoas cujo
+                    card MUDOU para a coluna "Agendamento de Consulta" no
+                    período (é a taxa oficial). Difere das marcadas: quem já
+                    estava na coluna, ou foi marcado sem card, não entra.
+                  </li>
+                  <li>
+                    <b>% de agendamento</b> = entradas nessa coluna ÷ leads,
+                    sempre dos últimos 30 dias (taxa madura).
+                  </li>
+                  <li>
+                    <b>Chegaram e agendaram</b> = lead que chegou no período E
+                    já foi marcado no mesmo período (a coorte "no mesmo
+                    dia/semana" ao lado).
+                  </li>
+                  <li>
+                    <b>Cuidado com fórmulas que misturam</b> "entrou em
+                    Agendamento hoje" ÷ "leads de hoje": os agendados de hoje
+                    vieram de vários dias; os leads de hoje ainda vão agendar.
+                  </li>
                 </template>
               </ul>
             </div>
@@ -917,7 +1083,10 @@ onBeforeUnmount(() => {
                   </option>
                 </select>
                 <span class="text-[11px] text-n-slate-9">
-                  Robô ou equipe: qualquer mensagem enviada com "R$ 1.234" ou "1.234 reais" leva o card pra frente até essa coluna (nunca volta). É o que faz a taxa de agendamento contar a passagem certa.
+                  Robô ou equipe: qualquer mensagem enviada com "R$ 1.234" ou
+                  "1.234 reais" leva o card pra frente até essa coluna (nunca
+                  volta). É o que faz a taxa de agendamento contar a passagem
+                  certa.
                 </span>
               </label>
             </div>
@@ -949,7 +1118,9 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- item 246: filtros em BLOCOS (regra das telas): ① Ver · ② Situação · ③ Onde -->
-          <section class="cv-ag-block p-4 mb-3 flex items-center gap-3 flex-wrap">
+          <section
+            class="cv-ag-block p-4 mb-3 flex items-center gap-3 flex-wrap"
+          >
             <p class="cv-ag-block-title">Ver</p>
             <div class="cv-seg cv-seg-sm inline-flex items-center gap-0.5">
               <button
@@ -963,11 +1134,22 @@ onBeforeUnmount(() => {
                 {{ m.label }}
               </button>
             </div>
-            <div class="cv-seg cv-seg-sm inline-flex items-center gap-0.5" title="Como mostrar os registros">
-              <button class="cv-seg-item" :class="listView === 'lista' ? 'cv-seg-on' : ''" @click="listView = 'lista'">
+            <div
+              class="cv-seg cv-seg-sm inline-flex items-center gap-0.5"
+              title="Como mostrar os registros"
+            >
+              <button
+                class="cv-seg-item"
+                :class="listView === 'lista' ? 'cv-seg-on' : ''"
+                @click="listView = 'lista'"
+              >
                 <span class="i-lucide-list text-sm" /> Lista
               </button>
-              <button class="cv-seg-item" :class="listView === 'cards' ? 'cv-seg-on' : ''" @click="listView = 'cards'">
+              <button
+                class="cv-seg-item"
+                :class="listView === 'cards' ? 'cv-seg-on' : ''"
+                @click="listView = 'cards'"
+              >
                 <span class="i-lucide-layout-grid text-sm" /> Cards
               </button>
             </div>
@@ -977,7 +1159,11 @@ onBeforeUnmount(() => {
               placeholder="Buscar por nome ou telefone…"
               class="cv-input !h-8 text-xs w-full sm:!w-auto sm:min-w-[14rem] sm:ml-auto"
             />
-            <button v-if="hasFilters" class="cv-btn cv-btn-ghost cv-btn-sm" @click="clearFilters">
+            <button
+              v-if="hasFilters"
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              @click="clearFilters"
+            >
               <span class="i-lucide-x text-xs" /> Limpar
             </button>
             <button
@@ -986,15 +1172,27 @@ onBeforeUnmount(() => {
               title="Buscar de novo agora (a tela também atualiza sozinha a cada minuto)"
               @click="fetchFeed({ quiet: true })"
             >
-              <span :class="busy ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-refresh-cw'" class="text-xs" />
+              <span
+                :class="
+                  busy
+                    ? 'i-lucide-loader-2 animate-spin'
+                    : 'i-lucide-refresh-cw'
+                "
+                class="text-xs"
+              />
               Atualizar
             </button>
-            <p class="basis-full text-[11px] text-n-slate-10 -mt-1">{{ modeHint }}</p>
+            <p class="basis-full text-[11px] text-n-slate-10 -mt-1">
+              {{ modeHint }}
+            </p>
           </section>
 
-          <div class="grid grid-cols-1 xl:grid-cols-2 gap-3 mb-6">
-            <section class="cv-ag-block p-4 flex flex-col gap-2.5">
-              <p class="cv-ag-block-title">Situação</p>
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-8">
+            <!-- 28/09 (item 266): mais RESPIRO entre as linhas e entre as pílulas -->
+            <section
+              class="cv-ag-block p-6 sm:p-7 flex flex-col gap-6 cv-ag-filters"
+            >
+              <p class="cv-ag-block-title !mb-0">Situação</p>
               <div class="flex items-start gap-3">
                 <span class="cv-ag-row-label">Registro</span>
                 <div class="flex items-center gap-1.5 flex-wrap min-w-0">
@@ -1006,7 +1204,9 @@ onBeforeUnmount(() => {
                     @click="kind = k.key"
                   >
                     {{ k.label }}
-                    <span class="opacity-80 tabular-nums">{{ counts[k.countKey] || 0 }}</span>
+                    <span class="opacity-80 tabular-nums">{{
+                      counts[k.countKey] || 0
+                    }}</span>
                   </button>
                 </div>
               </div>
@@ -1018,12 +1218,18 @@ onBeforeUnmount(() => {
                     :key="sr.key"
                     class="cv-chip cv-blue"
                     :class="source === sr.key ? 'cv-chip-on' : ''"
-                    :title="sr.key === 'ia' ? 'Só o que o robô marcou, remarcou ou cancelou' : 'Só o que a equipe marcou, remarcou ou cancelou'"
+                    :title="
+                      sr.key === 'ia'
+                        ? 'Só o que o robô marcou, remarcou ou cancelou'
+                        : 'Só o que a equipe marcou, remarcou ou cancelou'
+                    "
                     @click="source = source === sr.key ? '' : sr.key"
                   >
                     <span :class="sr.icon" class="text-xs" />
                     {{ sr.label }}
-                    <span class="opacity-80 tabular-nums">{{ counts[sr.countKey] || 0 }}</span>
+                    <span class="opacity-80 tabular-nums">{{
+                      counts[sr.countKey] || 0
+                    }}</span>
                   </button>
                 </div>
               </div>
@@ -1038,20 +1244,30 @@ onBeforeUnmount(() => {
                     :title="`Marcadas cujo paciente chegou ${c.label} da marcação`"
                     @click="cohort = cohort === c.key ? '' : c.key"
                   >
-                    <span class="w-2 h-2 rounded-full" :style="{ background: c.color }" />
+                    <span
+                      class="w-2 h-2 rounded-full"
+                      :style="{ background: c.color }"
+                    />
                     {{ c.label }}
-                    <span class="opacity-80 tabular-nums">{{ (counts.cohorts || {})[c.key] || 0 }}</span>
+                    <span class="opacity-80 tabular-nums">{{
+                      (counts.cohorts || {})[c.key] || 0
+                    }}</span>
                   </button>
                 </div>
               </div>
             </section>
 
-            <section class="cv-ag-block p-4 flex flex-col gap-2.5">
-              <p class="cv-ag-block-title">Onde</p>
+            <section
+              class="cv-ag-block p-6 sm:p-7 flex flex-col gap-6 cv-ag-filters"
+            >
+              <p class="cv-ag-block-title !mb-0">Onde</p>
               <!-- 📊 item 235: unidades e caixas MÚLTIPLAS (ligue quantas quiser) -->
               <div v-if="showUnitFilter" class="flex items-start gap-3">
                 <span class="cv-ag-row-label">Unidade</span>
-                <div class="flex items-center gap-1.5 flex-wrap min-w-0" title="Unidades: ligue uma ou as duas">
+                <div
+                  class="flex items-center gap-1.5 flex-wrap min-w-0"
+                  title="Unidades: ligue uma ou as duas"
+                >
                   <button
                     v-for="u in UNITS"
                     :key="u.key"
@@ -1059,14 +1275,23 @@ onBeforeUnmount(() => {
                     :class="units.includes(u.key) ? 'cv-chip-on' : ''"
                     @click="toggleUnit(u.key)"
                   >
-                    <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: u.color }" />
+                    <span
+                      class="w-2 h-2 rounded-full flex-shrink-0"
+                      :style="{ background: u.color }"
+                    />
                     {{ u.label }}
                   </button>
                 </div>
               </div>
-              <div v-if="inboxOptions.length > 1" class="flex items-start gap-3">
+              <div
+                v-if="inboxOptions.length > 1"
+                class="flex items-start gap-3"
+              >
                 <span class="cv-ag-row-label">Caixa</span>
-                <div class="flex items-center gap-1.5 flex-wrap min-w-0" title="Caixas de entrada: ligue quantas quiser (o número é quanto cada uma trouxe no período)">
+                <div
+                  class="flex items-center gap-1.5 flex-wrap min-w-0"
+                  title="Caixas de entrada: ligue quantas quiser (o número é quanto cada uma trouxe no período)"
+                >
                   <button
                     v-for="i in inboxOptions"
                     :key="i.id"
@@ -1074,9 +1299,14 @@ onBeforeUnmount(() => {
                     :class="inboxIds.includes(Number(i.id)) ? 'cv-chip-on' : ''"
                     @click="toggleInbox(i.id)"
                   >
-                    <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: inboxSolidFor(inboxes, i.id) }" />
+                    <span
+                      class="w-2 h-2 rounded-full flex-shrink-0"
+                      :style="{ background: inboxSolidFor(inboxes, i.id) }"
+                    />
                     {{ i.name }}
-                    <span class="opacity-80 tabular-nums">{{ inboxCount(i.id) }}</span>
+                    <span class="opacity-80 tabular-nums">{{
+                      inboxCount(i.id)
+                    }}</span>
                   </button>
                 </div>
               </div>
@@ -1085,7 +1315,9 @@ onBeforeUnmount(() => {
                 <span class="cv-ag-row-label">De onde</span>
                 <div class="min-w-0 flex-1 pt-1.5">
                   <ShareBar :items="stackItems" :max="8" />
-                  <p class="text-[10px] text-n-slate-9 mt-1">{{ stackTotal }} registros no período, por caixa de entrada</p>
+                  <p class="text-[10px] text-n-slate-9 mt-1">
+                    {{ stackTotal }} registros no período, por caixa de entrada
+                  </p>
                 </div>
               </div>
             </section>
@@ -1115,12 +1347,16 @@ onBeforeUnmount(() => {
                consulta · de onde · situação), leitura de relance -->
           <div v-else-if="listView === 'cards'" class="space-y-7">
             <div v-for="g in groups" :key="'cg' + g.key">
-              <h3 class="text-sm font-bold text-n-slate-12 mb-2.5 flex items-center gap-2">
+              <h3
+                class="text-sm font-bold text-n-slate-12 mb-2.5 flex items-center gap-2"
+              >
                 <span class="i-lucide-calendar-days text-sm" />
                 {{ g.label }}
                 <span class="cv-chip">{{ g.rows.length }}</span>
               </h3>
-              <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+              <div
+                class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3"
+              >
                 <div
                   v-for="row in g.rows"
                   :key="'c' + row.id"
@@ -1129,52 +1365,115 @@ onBeforeUnmount(() => {
                 >
                   <!-- quem + quando aconteceu -->
                   <div class="flex items-start gap-3">
-                    <Avatar :name="row.name" :src="row.contact?.thumbnail || ''" :size="40" rounded-full gradient />
+                    <Avatar
+                      :name="row.name"
+                      :src="row.contact?.thumbnail || ''"
+                      :size="40"
+                      rounded-full
+                      gradient
+                    />
                     <div class="min-w-0 flex-1">
-                      <p class="text-sm font-bold text-n-slate-12 truncate">{{ row.name }}</p>
-                      <p class="text-[11px] text-n-slate-10 tabular-nums">{{ phoneOf(row) || 'sem telefone' }}</p>
+                      <p class="text-sm font-bold text-n-slate-12 truncate">
+                        {{ row.name }}
+                      </p>
+                      <p class="text-[11px] text-n-slate-10 tabular-nums">
+                        {{ phoneOf(row) || 'sem telefone' }}
+                      </p>
                     </div>
                     <div class="text-right shrink-0">
-                      <p class="text-base font-bold tabular-nums text-n-slate-12 leading-none">{{ rowClock(row) }}</p>
-                      <p class="text-[10px] text-n-slate-9 mt-1">{{ rowClockCaption(row) }}</p>
+                      <p
+                        class="text-base font-bold tabular-nums text-n-slate-12 leading-none"
+                      >
+                        {{ rowClock(row) }}
+                      </p>
+                      <p class="text-[10px] text-n-slate-9 mt-1">
+                        {{ rowClockCaption(row) }}
+                      </p>
                     </div>
                   </div>
                   <!-- situação -->
                   <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="cv-chip" :class="kindMeta(row).tone"><span :class="kindMeta(row).icon" class="text-xs" /> {{ kindLabel(row) }}</span>
-                    <span class="cv-chip" :class="row.source === 'ia' ? 'cv-blue' : ''">
-                      <span :class="row.source === 'ia' ? 'i-lucide-bot' : 'i-lucide-user'" class="text-xs" />
-                      {{ row.source === 'ia' ? 'Robô' : 'Equipe' }}<template v-if="row.assignee?.name"> · {{ row.assignee.name }}</template>
+                    <span class="cv-chip" :class="kindMeta(row).tone"
+                      ><span :class="kindMeta(row).icon" class="text-xs" />
+                      {{ kindLabel(row) }}</span
+                    >
+                    <span
+                      class="cv-chip"
+                      :class="row.source === 'ia' ? 'cv-blue' : ''"
+                    >
+                      <span
+                        :class="
+                          row.source === 'ia' ? 'i-lucide-bot' : 'i-lucide-user'
+                        "
+                        class="text-xs"
+                      />
+                      {{ row.source === 'ia' ? 'Robô' : 'Equipe'
+                      }}<template v-if="row.assignee?.name">
+                        · {{ row.assignee.name }}</template
+                      >
                     </span>
                   </div>
                   <!-- blocos: consulta · de onde -->
                   <div class="grid grid-cols-2 gap-2">
                     <div class="cv-stat !p-2.5">
-                      <p class="cv-ag-row-label !w-auto !pt-0 mb-1">{{ cap(noun) }}</p>
-                      <p class="text-[11.5px] text-n-slate-12 leading-snug">{{ whenOf(row) }}</p>
+                      <p class="cv-ag-row-label !w-auto !pt-0 mb-1">
+                        {{ cap(noun) }}
+                      </p>
+                      <p class="text-[11.5px] text-n-slate-12 leading-snug">
+                        {{ whenOf(row) }}
+                      </p>
                     </div>
                     <div class="cv-stat !p-2.5">
                       <p class="cv-ag-row-label !w-auto !pt-0 mb-1">De onde</p>
-                      <p class="text-[11.5px] text-n-slate-12 leading-snug truncate">
-                        <span class="i-lucide-inbox text-[10px]" /> {{ row.conversation?.inbox_name || 'sem conversa' }}
+                      <p
+                        class="text-[11.5px] text-n-slate-12 leading-snug truncate"
+                      >
+                        <span class="i-lucide-inbox text-[10px]" />
+                        {{ row.conversation?.inbox_name || 'sem conversa' }}
                       </p>
-                      <p v-if="cohortChip(row)" class="text-[11px] font-semibold mt-0.5" :style="{ color: cohortChip(row).color }">
+                      <p
+                        v-if="cohortChip(row)"
+                        class="text-[11px] font-semibold mt-0.5"
+                        :style="{ color: cohortChip(row).color }"
+                      >
                         {{ cohortChip(row).text }}
                       </p>
-                      <p v-if="row.card?.stage" class="text-[11px] text-n-slate-10 mt-0.5 truncate" :title="row.card.pipeline">
-                        <span class="inline-block w-1.5 h-1.5 rounded-full align-middle" :style="stageDotStyle(row)" /> {{ row.card.stage }}
+                      <p
+                        v-if="row.card?.stage"
+                        class="text-[11px] text-n-slate-10 mt-0.5 truncate"
+                        :title="row.card.pipeline"
+                      >
+                        <span
+                          class="inline-block w-1.5 h-1.5 rounded-full align-middle"
+                          :style="stageDotStyle(row)"
+                        />
+                        {{ row.card.stage }}
                       </p>
                     </div>
                   </div>
                   <!-- ações -->
-                  <div class="flex items-center gap-1.5 mt-auto pt-1 border-t border-n-weak">
-                    <button class="cv-btn cv-btn-ghost cv-btn-sm" :disabled="!row.conversation" @click="openConversation(row)">
+                  <div
+                    class="flex items-center gap-1.5 mt-auto pt-1 border-t border-n-weak"
+                  >
+                    <button
+                      class="cv-btn cv-btn-ghost cv-btn-sm"
+                      :disabled="!row.conversation"
+                      @click="openConversation(row)"
+                    >
                       <span class="i-lucide-message-circle text-xs" /> Conversa
                     </button>
-                    <router-link v-if="row.contact?.id" class="cv-btn cv-btn-ghost cv-btn-sm" :to="patientUrl(row)">
+                    <router-link
+                      v-if="row.contact?.id"
+                      class="cv-btn cv-btn-ghost cv-btn-sm"
+                      :to="patientUrl(row)"
+                    >
                       <span class="i-lucide-user-round text-xs" /> Paciente
                     </router-link>
-                    <router-link v-if="row.due_at" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :to="agendaUrl(row)">
+                    <router-link
+                      v-if="row.due_at"
+                      class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
+                      :to="agendaUrl(row)"
+                    >
                       <span class="i-lucide-calendar-days text-xs" /> Agenda
                     </router-link>
                   </div>
@@ -1285,17 +1584,31 @@ onBeforeUnmount(() => {
                         <span
                           v-if="cohortChip(row)"
                           class="cv-chip"
-                          :style="{ '--cv-rgb': hexToRgbSpaced(cohortChip(row).color), '--cv-deep': cohortChip(row).color }"
-                          :title="row.lead_arrived_at ? `Paciente chegou em ${new Date(row.lead_arrived_at).toLocaleDateString('pt-BR')}` : 'sem cadastro ligado'"
+                          :style="{
+                            '--cv-rgb': hexToRgbSpaced(cohortChip(row).color),
+                            '--cv-deep': cohortChip(row).color,
+                          }"
+                          :title="
+                            row.lead_arrived_at
+                              ? `Paciente chegou em ${new Date(row.lead_arrived_at).toLocaleDateString('pt-BR')}`
+                              : 'sem cadastro ligado'
+                          "
                         >
                           <span class="i-lucide-user-plus text-[10px]" />
                           {{ cohortChip(row).text }}
                         </span>
                         <!-- 📅 item 217: o admin corrige "nova" ↔ "já estava marcada" -->
                         <button
-                          v-if="canEditKind && (row.kind === 'agendada' || row.kind === 'lancada')"
+                          v-if="
+                            canEditKind &&
+                            (row.kind === 'agendada' || row.kind === 'lancada')
+                          "
                           class="cv-chip"
-                          :class="row.booking_kind === 'registro' ? 'cv-slate' : 'cv-green'"
+                          :class="
+                            row.booking_kind === 'registro'
+                              ? 'cv-slate'
+                              : 'cv-green'
+                          "
                           :disabled="isTogglingKind === row.task_id"
                           :title="
                             row.booking_kind === 'registro'
@@ -1305,7 +1618,11 @@ onBeforeUnmount(() => {
                           @click="toggleBookingKind(row)"
                         >
                           <span class="i-lucide-arrow-left-right text-[10px]" />
-                          {{ row.booking_kind === 'registro' ? 'contar como nova' : 'já estava marcada' }}
+                          {{
+                            row.booking_kind === 'registro'
+                              ? 'contar como nova'
+                              : 'já estava marcada'
+                          }}
                         </button>
                         <span
                           v-for="lb in shownLabels(row)"

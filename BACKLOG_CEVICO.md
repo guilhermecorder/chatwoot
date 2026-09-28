@@ -8161,3 +8161,145 @@ com parâmetros diferentes selecionáveis por chavinhas.
   cerca → confirmed_at / declined_at + nota + aviso no Radar; agentes e automações seguem travados.
 - Config: agenda_config.appointment_reminders.dN.partner = { enabled, inbox_id, template_params,
   message_preview }. Testes: appointment_reminder_send_job_d2_spec (+3) e crm_listener_confirmation (+1).
+
+## 260. ✅ 📊 NPS v1.1 do N8N TRAZIDO PARA DENTRO (27/09 — "só falta 1 fluxo": o último do N8N)
+- Comparação com o fluxo "NPS v1.1" (planilha CONFIRMACOES CIRURGICAS → caixa 6 → modelo
+  nps_pesquisa_de_satisfacao → 6 h depois texto com o link do Google). O item 256 já cobria o
+  principal; faltavam 3 peças, agora no Crm::NpsSurvey + card:
+  · dias padrão = INTENÇÃO do N8N: LASIK/SMILE 1 dia, PRK 29, catarata 15, outras refrativas 15,
+    outras 15 (o 1º tipo que casar vence);
+  · catch_up_days (padrão 7): quem ficou para trás ainda recebe, 1 vez por cirurgia;
+  · lembrete para quem não respondeu (reminder: N horas, MODELO da Meta, 8h–20h, 1 vez, não vai
+    se o paciente já escreveu);
+  · agradecimento com o link do Google para 9–10 e 7–8, SEM IA, só quando o Atendente de
+    Pós-operatório não está ao vivo na conversa (texto editável; {{link}} {{nome}}).
+- BUGS do N8N achados (motivo a mais para desligar): o Switch tinha a regra "PRK" comparando o
+  procedimento com ele mesmo (casa sempre) → catarata ia em 29 dias, não 15; a leitura da planilha
+  não filtrava NPS_ENVIADO e o gatilho é toda sexta → quem operou há >30 dias recebia a pesquisa
+  TODA sexta; o texto de 6 h ia para OUTRO servidor (robomaster-chatwoot) e é texto livre fora da
+  janela de 24 h (não chegaria). O JSON exportado tem o token de API em claro → trocar o token
+  depois de desligar o N8N.
+- Testes: nps_survey_spec 12 exemplos (LASIK 1 / PRK 29 / catarata 15, recuperação, lembrete,
+  agradecimento com e sem Pós-op ao vivo).
+
+## 261. ✅ 👑 PAINEL DO EMPRESÁRIO em ambiente próprio, no TOPO do menu (27/09)
+- Rota nova cevico_business (/empresario, só admin), item "Painel do empresário" com coroa
+  dourada acima do Meu Painel; a aba antiga do Estratégico virou atalho; BusinessPanel.vue saiu.
+- Quadros com ÍMÃ (business/MagnetBoard.vue + magnetLayout.js, grade de 12 colunas): pega pelo
+  título e arrasta (sem "modo edição"), os vizinhos abrem espaço AO VIVO e escorregam de lado
+  antes de descer, a vaga dourada pulsa onde vai encaixar, soltou = desliza com molinha; borda
+  direita / de baixo / canto esticam. Menu ⋯: largura ⅓ ½ ⅔ inteira, "altura do tamanho do
+  conteúdo", esconder. Barra: Arrumar sozinho, Quadros (escondidos), Travar, voltar ao padrão.
+  Conteúdo se reorganiza pela largura do QUADRO (container queries). Tela estreita = 1 coluna.
+- Tudo com DATA: cada anotação guarda created_at; botão "atualizar" = ✅ ação feita, 🏆
+  conquistado, ↪️ pivotou, ✏️ ajuste (+ nota) → histórico no item + LINHA DO TEMPO (quadro novo,
+  filtros, "registrar marco"). Objetivos/Metas/Atividades viraram listas de até 8 com conquista.
+- TEIA RADAR gêmea (GlassRadar.vue, SVG de vidro): "Hoje" (azul) × "Onde queremos chegar"
+  (dourado), áreas Marketing, Comercial, Financeiro, Operacional, Estrutura física, Pessoas
+  (renomear/pôr/tirar, 3–10); puxa a ponta da teia ou a régua (0–10, meio em meio); nota do
+  porquê por área; "Onde focar" = maior distância com "+ ação" para a Semana; "Salvar retrato"
+  com data e comparar com retrato antigo (tracejado + evolução por área).
+- Servidor: strategy_controller sanitiza datas/histórico/layout/radar/events (sem migration,
+  agenda_config.business_board). Testes: magnetLayout.spec.js (7) + strategy_business_board_spec (2).
+
+## 262. 💡 PROPOSTA: novos agentes por ROI/CAC/conversão (27/09) — nada construído
+- docs/AGENTES_ROI_JORNADA_2026-09-27.md (pasta CEVICO): ranking 1) Horários concretos (v2 A/B),
+  2) Atendente de Retorno, 3) Segundo Olho, 4) Reativação da base, 5) Indicação, 6) Analista de
+  CAC (depois da decisão "caixa de origem"), 7) Resgate de falta, 8) Pré-cirúrgico, 9) Coach.
+  Aguarda "pode construir".
+
+## 263. ✅ 🎨 Acabamentos 27/09 (noite): teia transparente, Tarefas e notas limpo, linha de média, Mentor com papéis
+- Teia radar: fundo do disco transparente (só um brilho leve na cor); rótulos maiores.
+- Meu Painel → "Tarefas e notas" redesenhado (pedido: "clean e organizado"): UMA lista por vez
+  (abas Esperando você | Notas dos pacientes, abre onde há coisa), linhas separadas por fio em vez
+  de caixinhas (kit novo `.cv-list` / `.cv-list-row` / `.cv-avatar` em _cevico-glass.scss), nota com
+  avatar de iniciais + nome + hora · autor, lixeira só no hover; cabeçalho com subtítulo
+  "N tarefas esperando você · N notas da equipe" e botões "+ Nota" / "Tarefas".
+- LINHA DE MÉDIA (pedido: "linha de tendência… um parâmetro para seguir"): tracejada com o valor
+  na ponta no gráfico do card grande (TileLine), no gráfico do popup (MiniBars, prop `average`,
+  padrão ligado) e tracinho na sparkline dos cards pequenos. Média = baldes com valor (os dias que
+  ainda não chegaram não puxam para baixo).
+- MENTOR DO TIME ("o agente de feedback precisa levar em conta as nossas melhorias e seus papéis e
+  responsabilidades"): (a) agenda_config.team_roles {user_id → papel, responsabilidades}, editável
+  em Agentes de IA → Mentor → "Papéis e responsabilidades" (CrmAPI.updateTeamRoles); sem texto, o
+  Mentor deduz pelo painel atribuído / responsável de painel / conferência do dia / médico / admin;
+  (b) payload ganha `papel_e_responsabilidades` e `o_sistema_faz_sozinho` (atendentes ligados e se
+  estão ao vivo ou em sombra, nº de robôs de follow-up, confirmação, NPS, Radar, ligação, Agenda/
+  Tarefas); (c) prompt: julga só pelo papel, nunca cobra o que o sistema faz sozinho, soluções usam
+  as ferramentas pelo nome; (d) o login da IA sai do feedback e da mediana; notas privadas não
+  contam como mensagem. Testes: weekly_mentor_service_roles_spec (3).
+
+## 264. ✅ 👑 Painel do empresário — rodada de ajustes dele (27/09 noite, com prints)
+- Teia: alça pegável mesmo em 0 (fica um pouco afastada no eixo; clique no eixo também dá a nota);
+  réguas por área SAÍRAM ("vamos editar direto no gráfico"); média na legenda; "Onde focar",
+  "Retratos" e "Áreas" viraram abas (chips) que abrem embaixo.
+- "Semana do empresário" → "COISAS MUITO IMPORTANTES" (subtítulo: semana do empresário): UMA lista;
+  à direita, alinhadas, as chavinhas A fazer · Fazendo · Feito (segmentado); feitos recolhidos.
+- Objetivos do ano SMART: Específico (texto) + Mensurável + Alcançável + Realista + Tempo (data);
+  5 bolinhas S·M·A·R·T mostram o que falta; chips de medida e prazo (vermelho se venceu).
+- Métricas da empresa: fontes Oftalmofácil (faturamento = soma das cirurgias REALIZADAS da CEVICO no
+  mês, parceiros fora; nº de cirurgias; agendadas; ticket) · Financeiro · Estimativa (você digita
+  faturamento/cirurgias/custo, com data); "Vendas" virou "Cirurgias". strategy#show devolve `metrics`.
+- Matrizes como GRÁFICO: eixos com seta e "baixa → alta" nas pontas, plano cortado em 4, cada
+  quadrante diz sua posição ("alta importância · alta urgência"), mover item entre quadrantes;
+  quadros maiores por padrão (metade da largura cada).
+- "Pessoas estratégicas" → "Equipe" (subtítulo: pessoas estratégicas: sócios, mentores…).
+- Quadro novo "Atividades principais" (ultra específicas, quantas quiser: o quê, por quê, quem,
+  frequência); em Problemas → Solução, botão "→ atividade principal" leva a solução para lá.
+- Servidor: sanitize SMART (measure/achievable/realistic/due), core_activities, estimates.
+
+## 265. ✅ 📅 Agendamentos: "de quais caixas vieram" + respiro (27/09 noite)
+- Resumo ganhou o bloco "De quais caixas vieram as marcações": das MARCADAS, a caixa por onde o
+  paciente CHEGOU (primeira conversa dele) — não a conversa mais recente, então a caixa de
+  confirmação não rouba o crédito (é a recomendação de 26/09, agora aplicada aqui; `by_origin`).
+- Espaçamento (pedido: "a falta de espaçamento deixa tudo embaralhado"): divisórias `.cv-ag-divider`
+  entre as seções do mesmo bloco, títulos `.cv-ag-block-title` 15→17px com margem, subtítulos 12px,
+  blocos p-5/p-6 e gap-4/gap-5 nos Filtros (Situação/Onde) — vale para a AGENDA também (Calendário,
+  navegação e Filtros usam as mesmas classes).
+
+## 266. ✅ 🧲 Ímã no Meu Painel + linha de tendência + anotar nas matrizes + acabamentos (28/09)
+- MATRIZES (Painel do empresário): cada quadrante tem a caixa "+ anotar em X e Enter" SEMPRE à vista
+  (o "+" do título só leva o cursor até ela; agora o "+" tem borda/cor do quadrante). Testado: anota,
+  aparece com data, salva (save_business_board), ✕ apaga.
+- ÍMÃ NO MEU PAINEL (mesma tecnologia do Painel do empresário): MagnetBoard ganhou `auto-height`
+  (altura medida pelo conteúdo via ResizeObserver + medida síncrona na montagem; quadro com 0 px de
+  conteúdo não ocupa vaga), `stack-below` (Meu Painel: 700 px de largura do quadro) e `handle`
+  (seletor da alça). No modo automático anda por left/top (transform viraria "containing block" de
+  fixed/sticky). Meu Painel: as duas áreas (avisos e conteúdo) são MagnetBoards; alça = "orelha" ⠿
+  no meio da borda de cima do bloco (aparece no hover; sempre visível no toque) + a barrinha do modo
+  edição; larguras ⅓ ½ ⅔ inteira na barrinha (substituem "metade/inteiro") ou puxando a borda
+  direita; "blocos soltos/travados" na barra de edição. Salvo em block_layout[painel].grid_top /
+  grid_main ({id,x,y,w}) + locked; quem só tinha ordem antiga + half ganha a grade a partir dela;
+  `half` continua salvo (derivado: w ≤ 6). Servidor: sanitize_block_grid (ids, x/w em 12 colunas).
+  Testado: arrastar Feedback acima de Tarefas (POST update_agenda 200, persistiu após recarregar),
+  ½ de largura, voltar.
+- LINHA DE TENDÊNCIA (pedido: "os indicadores devem ter a opção da linha de tendência"): helper
+  components-next/cevico/trend.js (regressão linear sobre os baldes COM valor, mín. 3; `trendText`
+  = "subindo ~4,7% por semana" / "caindo…" / "estável"). Prop `trend` + `granularity` em TileLine
+  (reta amarela sólida + leitura no topo), MiniBars (reta rosa com ponto na ponta + leitura) e
+  sparkline dos cards pequenos (reta amarela). Liga/desliga em DOIS lugares: barra do modo edição
+  ("tendência ligada/desligada") e chip dentro do popup; salvo por painel em kpi_layout.trend
+  (quem não pode salvar fica ligado só na visita). Popup ganhou a frase "tendência: … — reta
+  traçada sobre os N baldes com valor" (verde/vermelho/cinza); card grande ganhou "📈 tendência: …".
+  Nota: a frase antiga do popup ("média 1,3 por semana") usa TODOS os baldes; a linha de média do
+  gráfico usa só os com valor — os dois estão rotulados, mas vale unificar se ele estranhar.
+- AGENDAMENTOS: Lista | Cards já existia (item 246) e continua; Situação/Onde ganharam mais respiro
+  (p-6/p-7, gap-6 entre linhas, 8–10 px entre pílulas, rótulo 104 px alinhado com a 1ª pílula —
+  classe `.cv-ag-filters`).
+- AGENDA: Mês · Semana · Dia do Calendário em células iguais e centradas (o `pt-2` desalinhava as
+  pílulas; agora `.cv-seg.grid`), e o item LIGADO de qualquer segmentado tem anel claro por dentro +
+  fio escuro por fora + sombra no texto → contraste em todas as paletas (claro e escuro).
+- 266b (28/09, print dele: "o recurso de mudar de tamanho e etc. deve ser aplicável ao ambiente de
+  indicadores"): os CARDS DE INDICADOR também vivem num MagnetBoard (modo de altura fixa: linha de
+  16 px; card pequeno = 3 col × 6 linhas = 166 px; grande 2×2 = 6 × 12 = 346 px). Pega o card e
+  arrasta a qualquer hora (os botões do card continuam clicáveis; o clique que vem depois de um
+  arrasto é engolido pelo MagnetBoard), puxa a borda direita, a de baixo ou o canto para esticar;
+  card com metade da largura ou mais vira "grande" (resumo com gráfico); o botão ⤢ do modo edição
+  alterna pequeno ↔ grande pela grade. Espaço vazio continua existindo. "+ Novo indicador" ficou
+  numa fileira abaixo do ímã. Salvo em kpi_layout.grid ({id,x,y,w,h}); order/sizes seguem gravados
+  (derivados). Servidor: sanitize_tile_grid. Testado: trocar 2 cards de lugar, esticar pelo canto
+  (4×10) e voltar, botão de detalhes abre o popup; layout do teste devolvido. Abaixo de 600 px de
+  largura do bloco vira uma coluna.
+- Testes: trend.spec.js (4), magnetLayout.spec.js (7, intactos), settings_block_layout_spec.rb (2,
+  cobre grid_top/grid_main/locked e kpi_layout.grid). Deploy = WEB só (sem migration). SEM commit —
+  aguarda "pode subir".

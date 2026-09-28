@@ -1538,23 +1538,27 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 {{ day.getDate() }}
               </button>
             </div>
-            <div class="cv-seg cv-seg-sm grid grid-cols-3 mt-auto pt-2">
-              <button
-                v-for="m in VIEW_MODES"
-                :key="'vm' + m.key"
-                class="cv-seg-item justify-center"
-                :class="viewMode === m.key ? 'cv-seg-on' : ''"
-                @click="viewMode = m.key"
-              >
-                <span :class="m.icon" class="text-sm" />
-                {{ m.label }}
-              </button>
+            <!-- 28/09 (item 266): Mês · Semana · Dia em células iguais, sem o
+                 pt-2 que desalinhava as pílulas dentro do segmentado -->
+            <div class="mt-auto pt-3">
+              <div class="cv-seg cv-seg-sm grid grid-cols-3 gap-1 w-full">
+                <button
+                  v-for="m in VIEW_MODES"
+                  :key="'vm' + m.key"
+                  class="cv-seg-item justify-center"
+                  :class="viewMode === m.key ? 'cv-seg-on' : ''"
+                  @click="viewMode = m.key"
+                >
+                  <span :class="m.icon" class="text-sm" />
+                  {{ m.label }}
+                </button>
+              </div>
             </div>
           </section>
 
           <div class="flex flex-col gap-3 min-w-0">
             <!-- ② PERÍODO (o bloco sobe quando o calendário está aberto: backdrop-filter cria contexto de empilhamento) -->
-            <section class="cv-ag-block p-4 flex items-center gap-3 flex-wrap" :class="showDatePicker ? 'relative z-30' : ''">
+            <section class="cv-ag-block p-5 sm:p-6 flex items-center gap-4 flex-wrap" :class="showDatePicker ? 'relative z-30' : ''">
               <div class="cv-icon cv-icon-lg hidden sm:inline-flex" :title="`Agenda de ${k.plural}`">
                 <span :class="k.icon" class="text-lg" />
               </div>
@@ -1671,7 +1675,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </section>
 
             <!-- ③ FILTROS -->
-            <section class="cv-ag-block p-4 flex flex-col gap-2.5 flex-1">
+            <section class="cv-ag-block p-5 sm:p-6 flex flex-col gap-4 flex-1">
               <p class="cv-ag-block-title">Filtros</p>
               <div class="flex items-start gap-3">
                 <span class="cv-ag-row-label">Camadas</span>

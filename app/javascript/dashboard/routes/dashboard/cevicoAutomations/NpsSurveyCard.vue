@@ -81,6 +81,17 @@ const hydrate = s => {
     google_review_url: c.google_review_url || '',
     complaint_form_url: c.complaint_form_url || '',
     min_interval_days: c.min_interval_days || 60,
+    catch_up_days: c.catch_up_days ?? 7,
+    thanks_enabled: c.thanks_enabled !== false,
+    thanks_text: c.thanks_text || '',
+    reminder: {
+      enabled: c.reminder?.enabled === true,
+      hours: c.reminder?.hours || 6,
+      tplName: c.reminder?.template_params?.name || '',
+      vars: { ...(c.reminder?.template_params?.processed_params?.body || {}) },
+      savedTpl: c.reminder?.template_params || null,
+      preview: c.reminder?.message_preview || '',
+    },
     rules: (c.rules || []).map(r => {
       uid += 1;
       return {
@@ -160,6 +171,61 @@ const onInbox = () => {
   touch();
 };
 
+// ── lembrete para quem não respondeu (outra mensagem modelo da mesma caixa) ──
+const remTpl = computed(
+  () =>
+    templates.value.find(t => t.name === form.value?.reminder.tplName) || null
+);
+const remBody = computed(
+  () =>
+    remTpl.value?.components?.find(c => c.type === 'BODY')?.text ||
+    form.value?.reminder.preview ||
+    ''
+);
+const remTokens = computed(() => {
+  const found = new Set();
+  const re = /\{\{\s*(\d+)\s*\}\}/g;
+  let m = re.exec(remBody.value);
+  while (m !== null) {
+    found.add(m[1]);
+    m = re.exec(remBody.value);
+  }
+  return [...found];
+});
+const onPickReminder = () => {
+  form.value.reminder.vars = {};
+  remTokens.value.forEach(t => {
+    form.value.reminder.vars[t] = SUGGESTED_VARS[t] || '';
+  });
+  touch();
+};
+const reminderPayload = () => {
+  const r = form.value.reminder;
+  let templateParams = null;
+  if (remTpl.value) {
+    templateParams = {
+      name: remTpl.value.name,
+      namespace: remTpl.value.namespace ?? '',
+      language: remTpl.value.language,
+      category: remTpl.value.category,
+      processed_params: { body: { ...r.vars } },
+    };
+  } else if (r.tplName && r.savedTpl?.name === r.tplName) {
+    templateParams = {
+      ...r.savedTpl,
+      processed_params: { body: { ...r.vars } },
+    };
+  }
+  return {
+    enabled: r.enabled,
+    hours: Number(r.hours) || 6,
+    template_params: templateParams,
+    message_preview: remBody.value,
+  };
+};
+const DEFAULT_THANKS_HINT =
+  'Muito obrigado pela sua resposta! 💙 … deixe também a sua avaliação no Google: {{link}}';
+
 // ── tipos de cirurgia ─────────────────────────────────────────────────────
 const addRule = () => {
   uid += 1;
@@ -210,6 +276,10 @@ const payload = (overrides = {}) => {
     google_review_url: f.google_review_url,
     complaint_form_url: f.complaint_form_url,
     min_interval_days: f.min_interval_days,
+    catch_up_days: Number(f.catch_up_days) || 0,
+    thanks_enabled: f.thanks_enabled,
+    thanks_text: f.thanks_text,
+    reminder: reminderPayload(),
     rules: f.rules
       .filter(r => r.label.trim())
       .map(r => ({
@@ -232,6 +302,8 @@ const problem = computed(() => {
   if (!f.tplName) return 'escolha a mensagem modelo';
   if (!f.rules.some(r => r.enabled && r.label.trim()))
     return 'deixe pelo menos um tipo de cirurgia ligado';
+  if (f.reminder.enabled && !f.reminder.tplName)
+    return 'escolha o modelo do lembrete (ou desligue o lembrete)';
   return '';
 });
 const save = async (overrides = {}) => {
@@ -708,7 +780,7 @@ const compact = computed(() => props.view === 'cards' && !props.open);
           </div>
           <p class="text-[10px] text-n-slate-9">
             O tipo sai das palavras do procedimento na Agenda (ex.: "faco",
-            "catarata", "lio" = Catarata; "lasik", "prk" = Refrativa). O tipo
+            "catarata", "lio" = Catarata; "lasik" = LASIK; "prk" = PRK). Vale o 1º tipo que casar, de cima para baixo. O tipo
             SEM palavras pega todas as outras cirurgias{{
               hasCatchAll
                 ? ''
@@ -742,6 +814,131 @@ const compact = computed(() => props.view === 'cards' && !props.open);
               placeholder="https://forms.gle/…"
               @input="touch"
             />
+          </div>
+        </div>
+
+        <!-- depois da pesquisa: atrasados, lembrete e agradecimento -->
+        <div class="rounded-xl border border-n-weak p-3 space-y-3">
+          <p class="cv-label !mb-0">Depois da pesquisa</p>
+
+          <div
+            class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11"
+          >
+            <span class="i-lucide-history text-sm text-n-slate-10" />
+            Quem ficou para trás ainda recebe até
+            <input
+              v-model.number="form.catch_up_days"
+              type="number"
+              min="0"
+              max="30"
+              class="cv-input !w-16 !h-8 text-sm text-center"
+              style="margin-bottom: 0"
+              @input="touch"
+            />
+            dias depois do dia certo (1 pesquisa por cirurgia, nunca repete).
+          </div>
+
+          <div class="space-y-1.5">
+            <label
+              class="flex items-center gap-2 text-xs text-n-slate-12 font-medium cursor-pointer"
+            >
+              <input
+                v-model="form.reminder.enabled"
+                type="checkbox"
+                style="margin: 0"
+                @change="touch"
+              />
+              <span class="i-lucide-bell-ring text-sm text-n-slate-10" />
+              Lembrete para quem não respondeu, depois de
+              <input
+                v-model.number="form.reminder.hours"
+                type="number"
+                min="1"
+                max="72"
+                class="cv-input !w-16 !h-8 text-sm text-center"
+                style="margin-bottom: 0"
+                @input="touch"
+              />
+              horas
+            </label>
+            <template v-if="form.reminder.enabled">
+              <select
+                v-model="form.reminder.tplName"
+                class="cv-input w-full sm:w-80 !h-8 text-xs"
+                style="margin-bottom: 0"
+                @change="onPickReminder"
+              >
+                <option value="">
+                  — escolha a mensagem modelo do lembrete —
+                </option>
+                <option
+                  v-if="
+                    form.reminder.tplName &&
+                    !templates.some(t => t.name === form.reminder.tplName)
+                  "
+                  :value="form.reminder.tplName"
+                >
+                  {{ form.reminder.tplName }} (salva)
+                </option>
+                <option
+                  v-for="t in templates"
+                  :key="'rem' + t.name + t.language"
+                  :value="t.name"
+                >
+                  {{ t.name }} ({{ t.language }})
+                </option>
+              </select>
+              <p
+                v-if="remBody"
+                class="text-[10px] text-n-slate-10 whitespace-pre-wrap max-h-24 overflow-auto bg-n-alpha-1 rounded-lg px-2 py-1.5"
+              >
+                {{ remBody }}
+              </p>
+              <input
+                v-for="token in remTokens"
+                :key="'remv' + token"
+                v-model="form.reminder.vars[token]"
+                class="cv-input w-full sm:w-80 !h-7 text-[11px] font-mono"
+                style="margin-bottom: 0"
+                :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                @input="touch"
+              />
+              <p class="text-[10px] text-n-slate-9">
+                Precisa ser mensagem MODELO: sem resposta do paciente o WhatsApp
+                não deixa mandar texto livre. Vai 1 vez, das 8h às 20h, e não
+                vai se o paciente já escreveu qualquer coisa.
+              </p>
+            </template>
+          </div>
+
+          <div class="space-y-1.5">
+            <label
+              class="flex items-center gap-2 text-xs text-n-slate-12 font-medium cursor-pointer"
+            >
+              <input
+                v-model="form.thanks_enabled"
+                type="checkbox"
+                style="margin: 0"
+                @change="touch"
+              />
+              <span class="i-lucide-heart-handshake text-sm text-n-slate-10" />
+              Agradecer notas 9–10 e 7–8 com o link do Google (sem IA)
+            </label>
+            <textarea
+              v-if="form.thanks_enabled"
+              v-model="form.thanks_text"
+              rows="3"
+              class="cv-input w-full text-xs"
+              style="margin-bottom: 0"
+              :placeholder="DEFAULT_THANKS_HINT"
+              @input="touch"
+            />
+            <p v-if="form.thanks_enabled" class="text-[10px] text-n-slate-9">
+              Só vai quando o Atendente de Pós-operatório NÃO está ao vivo na
+              conversa (com ele ao vivo, quem agradece é ele). Em branco = texto
+              padrão. <code v-pre>{{ link }}</code> = link do Google acima ·
+              <code v-pre>{{ nome }}</code> = primeiro nome.
+            </p>
           </div>
         </div>
 
@@ -788,6 +985,10 @@ const compact = computed(() => props.view === 'cards' && !props.open);
                 >{{ meta.label }}: <b>{{ bandCounts[band] }}</b></span
               >
             </div>
+            <p v-if="(state.reminders || []).length" class="text-n-slate-10">
+              🔔 {{ state.reminders.length }} lembrete(s) · último
+              {{ fmtDate(state.last_reminder_at) }}
+            </p>
             <p v-for="a in answers.slice(0, 20)" :key="a.at + a.contact_id">
               <span
                 class="font-bold"

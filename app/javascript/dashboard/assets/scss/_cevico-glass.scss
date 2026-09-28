@@ -340,6 +340,28 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.4),
     0 4px 10px -4px rgb(var(--cv-deep-rgb) / 0.7);
 }
+/* 28/09 (item 266): o item ligado tem CONTRASTE em qualquer paleta — anel
+   claro por dentro e fio escuro por fora, para não sumir em paletas escuras
+   (navy) nem claras (ouro/amarelo) */
+.cv-page .cv-seg-on,
+.cv-page .cv-seg-on:hover {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 0 0 1px rgb(var(--cv-deep-rgb) / 0.35),
+    0 4px 10px -4px rgb(var(--cv-deep-rgb) / 0.7);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+}
+.dark .cv-page .cv-seg-on,
+.dark .cv-page .cv-seg-on:hover {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 4px 12px -4px rgba(0, 0, 0, 0.6);
+}
+/* segmentado em GRADE (Mês · Semana · Dia do calendário): células iguais, tudo centrado */
+.cv-page .cv-seg.grid { display: grid; }
+.cv-page .cv-seg.grid .cv-seg-item { width: 100%; justify-content: center; }
 .cv-page .cv-seg-icon { width: 30px; padding: 0; justify-content: center; }
 .cv-page .cv-seg-sm .cv-seg-item { height: 26px; padding: 0 9px; font-size: 11px; border-radius: 9px; }
 .cv-page .cv-seg-sm { padding: 2px; border-radius: 12px; }
@@ -383,6 +405,41 @@
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
 }
 .dark .cv-page .cv-editbar { background: rgba(20, 21, 23, 0.78); box-shadow: none; }
+/* 🧲 item 266 (28/09): alça ⠿ dos blocos do Meu Painel (ímã) — uma "orelha"
+   no meio da borda de cima do bloco; aparece ao passar o mouse e some quando
+   os blocos estão travados. Sem prefixo .cv-page: o Meu Painel não o tem. */
+.cv-mb-grip {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  height: 24px;
+  padding: 0 14px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--cv-deep, #0f172a);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgb(var(--cv-rgb, 15 23 42) / 0.35);
+  box-shadow: 0 6px 14px -8px rgb(var(--cv-deep-rgb, 15 23 42) / 0.6);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  touch-action: none;
+  user-select: none;
+}
+.cv-mb-grip > span { transform: rotate(90deg); }
+.cv-mb-grip:active { cursor: grabbing; }
+.cv-mb-block:hover > .cv-mb-grip,
+.mb-inhand .cv-mb-grip { opacity: 1; }
+.cv-mb-grip:hover { transform: translateX(-50%) scale(1.06); }
+.dark .cv-mb-grip { color: #fff; background: rgba(28, 30, 36, 0.95); border-color: rgba(255, 255, 255, 0.28); }
+/* no toque não há hover: a orelha fica sempre à vista, mais discreta */
+@media (hover: none) { .cv-mb-grip { opacity: 0.7; } }
+
 .cv-page .cv-handle {
   border-radius: 14px;
   border: 2px dashed rgb(var(--cv-rgb) / 0.45);
@@ -1322,3 +1379,36 @@ button.cv-tag:disabled { opacity: 0.55; transform: none; cursor: default; }
   border-color: rgba(255, 255, 255, 0.22);
 }
 .dark .cv-tag-more { background: rgba(255, 255, 255, 0.08) !important; color: #b4b4bc !important; }
+
+/* ── LISTA LIMPA (27/09, "clean e organizado"): linhas separadas por um fio,
+   sem caixinha por item — Tarefas e notas do Meu Painel. Reusar em toda
+   listagem curta do kit. ── */
+.cv-page .cv-list { display: flex; flex-direction: column; }
+.cv-page .cv-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 8px;
+  border-radius: 10px;
+  border-bottom: 1px solid rgb(var(--cv-rgb) / 0.1);
+  transition: background 0.15s ease;
+}
+.cv-page .cv-list-row:last-child { border-bottom: 0; }
+.cv-page .cv-list-row:hover { background: rgb(var(--cv-rgb) / 0.06); }
+.cv-page .cv-list-row.group { align-items: flex-start; }
+.dark .cv-page .cv-list-row { border-bottom-color: rgba(255, 255, 255, 0.07); }
+.dark .cv-page .cv-list-row:hover { background: rgba(255, 255, 255, 0.05); }
+.cv-page .cv-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--cv-deep), var(--cv));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 10px -6px rgb(var(--cv-deep-rgb) / 0.6);
+}

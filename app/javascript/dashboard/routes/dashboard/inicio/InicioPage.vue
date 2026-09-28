@@ -23,20 +23,22 @@ import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vu
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
 import { ALL_THEMES } from 'dashboard/helper/cevicoThemes';
-import {
-  IMAC_PALETTES,
-  FRUIT_PALETTES,
-} from 'dashboard/helper/cevicoPalettes';
+import { IMAC_PALETTES, FRUIT_PALETTES } from 'dashboard/helper/cevicoPalettes';
 import {
   PANEL_PRESETS,
   PRESET_BY_KEY,
   buildPreset,
 } from 'dashboard/helper/cevicoPanelPresets';
 import TileLine from 'dashboard/components-next/cevico/TileLine.vue';
+import { trendOf, trendText } from 'dashboard/components-next/cevico/trend';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import CevicoPalettePicker from 'dashboard/components-next/cevico/CevicoPalettePicker.vue';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
-import draggable from 'vuedraggable';
+import MagnetBoard from 'dashboard/routes/dashboard/business/MagnetBoard.vue';
+import {
+  mergeLayout,
+  place as placeBlock,
+} from 'dashboard/routes/dashboard/business/magnetLayout';
 import {
   evaluateFormula,
   variablesIn,
@@ -324,10 +326,17 @@ const fetchHistBag = async () => {
   if (histBag.value && Date.now() - histLoadedAt < 30 * 60 * 1000) return;
   const d = new Date();
   const ymd = x => x.toLocaleDateString('sv-SE');
-  const to = new Date(d); to.setDate(to.getDate() - 1);
-  const from = new Date(d); from.setDate(from.getDate() - 90);
+  const to = new Date(d);
+  to.setDate(to.getDate() - 1);
+  const from = new Date(d);
+  from.setDate(from.getDate() - 90);
   try {
-    const { data } = await CrmAPI.getKpiBag({ preset: 'custom', from: ymd(from), to: ymd(to), granularity: 'day' });
+    const { data } = await CrmAPI.getKpiBag({
+      preset: 'custom',
+      from: ymd(from),
+      to: ymd(to),
+      granularity: 'day',
+    });
     histBag.value = data;
     histLoadedAt = Date.now();
   } catch {
@@ -678,7 +687,10 @@ const rawPanelTiles = computed(() => {
       sub: `${data.value?.appointments_30d ?? 0} entraram em Agendamento ÷ ${data.value?.new_contacts_30d ?? 0} leads · 30 dias`,
       compare: [
         { label: 'leads (30d)', value: data.value?.new_contacts_30d ?? 0 },
-        { label: 'entraram em Agendamento (30d)', value: data.value?.appointments_30d ?? 0 },
+        {
+          label: 'entraram em Agendamento (30d)',
+          value: data.value?.appointments_30d ?? 0,
+        },
       ],
       details: [
         {
@@ -1028,7 +1040,24 @@ const tileSpark = tile => {
     22 - ((Number(v) || 0) / max) * 20,
   ]);
   const line = pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-  return { line, area: `0,24 ${line} 100,24` };
+  // 27/09: média dos baldes com valor → tracinho de referência
+  const filled = series.map(v => Number(v) || 0).filter(v => v > 0);
+  const avg =
+    filled.length >= 2
+      ? filled.reduce((a, v) => a + v, 0) / filled.length
+      : null;
+  const avgY = avg === null ? null : 22 - (avg / max) * 20;
+  // 28/09 (item 266): reta de tendência (regressão sobre os baldes com valor)
+  const t = trendOn.value ? trendOf(series) : null;
+  const trend = t
+    ? {
+        x1: (t.first / (n - 1)) * 100,
+        y1: 22 - (Math.min(max, t.y0) / max) * 20,
+        x2: (t.last / (n - 1)) * 100,
+        y2: 22 - (Math.min(max, t.y1) / max) * 20,
+      }
+    : null;
+  return { line, area: `0,24 ${line} 100,24`, avgY, trend };
 };
 // primeira cor de um gradiente CSS (o gráfico do popup na cor do card)
 const hexFromGrad = grad =>
@@ -1275,6 +1304,15 @@ const BUCKET_WORD = {
   week: ['semana', 'semanas'],
   month: ['mês', 'meses'],
 };
+// item 266: a tendência do gráfico do popup em palavras
+const modalTrendWords = computed(() =>
+  modalChart.value && !modalChart.value.compare
+    ? trendText(
+        modalChart.value.values || [],
+        modalBag.value?.granularity || 'day'
+      )
+    : null
+);
 const modalInsight = computed(() => {
   const c = modalChart.value;
   if (!c || c.compare || isLoadingModalBag.value) return '';
@@ -1551,7 +1589,10 @@ const kpiFormulaGroups = computed(() => {
   const sys = kpiCatalog.value.filter(m => !m.key.startsWith('stage_'));
   return [
     { title: '⭐ Seus indicadores', items: myKpiItems.value.filter(match) },
-    { title: '🧭 Colunas do CRM (entrou na coluna)', items: cols.filter(match) },
+    {
+      title: '🧭 Colunas do CRM (entrou na coluna)',
+      items: cols.filter(match),
+    },
     { title: '📊 Indicadores do sistema', items: sys.filter(match) },
   ].filter(g => g.items.length);
 });
@@ -1583,9 +1624,21 @@ const OUR_PALETTE_GROUPS = [
   { title: 'Frutas da Apple', list: FRUIT_PALETTES },
 ];
 const BRAND_COLORS = [
-  { key: 'navy', grad: 'linear-gradient(135deg, #0B1A3D, #152C61)', title: 'CEVICO · navy' },
-  { key: 'navy2', grad: 'linear-gradient(135deg, #152C61, #2A4A94)', title: 'CEVICO · navy claro' },
-  { key: 'ouro', grad: 'linear-gradient(135deg, #A8841F, #D4AF37)', title: 'CEVICO · ouro' },
+  {
+    key: 'navy',
+    grad: 'linear-gradient(135deg, #0B1A3D, #152C61)',
+    title: 'CEVICO · navy',
+  },
+  {
+    key: 'navy2',
+    grad: 'linear-gradient(135deg, #152C61, #2A4A94)',
+    title: 'CEVICO · navy claro',
+  },
+  {
+    key: 'ouro',
+    grad: 'linear-gradient(135deg, #A8841F, #D4AF37)',
+    title: 'CEVICO · ouro',
+  },
 ];
 const kpiColorGroups = computed(() => [
   {
@@ -1602,7 +1655,11 @@ const kpiColorGroups = computed(() => [
     items: g.list.flatMap(p => [
       { key: `${p.key}-1`, grad: p.family[1], title: `${p.label}` },
       { key: `${p.key}-3`, grad: p.family[3], title: `${p.label} · claro` },
-      { key: `${p.key}-alt`, grad: p.altFamily[1], title: `${p.label} · complementar` },
+      {
+        key: `${p.key}-alt`,
+        grad: p.altFamily[1],
+        title: `${p.label} · complementar`,
+      },
     ]),
   })),
   {
@@ -1934,24 +1991,15 @@ const panelTiles = computed(() => {
     .map(t => {
       if (t.spacer) return t;
       const out = colors[t.id] ? { ...t, customGrad: colors[t.id] } : { ...t };
-      if (sizes[t.id] === 'lg') out.big = true;
+      // item 266b: com a grade do ímã salva, "grande" = largura ≥ metade
+      const cell = (kpiLayout.value.grid || []).find(g => g && g.id === t.id);
+      if (cell ? cell.w >= TILE_BIG_W : sizes[t.id] === 'lg') out.big = true;
       return out;
     });
 });
 const hiddenTiles = computed(() => {
   const hidden = new Set(kpiLayout.value.hidden || []);
   return allPanelTiles.value.filter(t => hidden.has(t.id));
-});
-// lista viva do arrasto (vuedraggable precisa de v-model próprio)
-const dragTiles = ref([]);
-// o watcher nasce DENTRO do onMounted: registrar watch(panelTiles) no setup
-// avaliaria os tiles antes de várias consts lá de baixo existirem (TDZ) e
-// envenenaria os computeds com undefined
-onMounted(() => {
-  dragTiles.value = [...panelTiles.value];
-  watch(panelTiles, v => {
-    dragTiles.value = [...v];
-  });
 });
 const isSavingLayout = ref(false);
 const saveKpiLayout = async patch => {
@@ -1967,6 +2015,8 @@ const saveKpiLayout = async patch => {
     spacers: patch.spacers ?? cur.spacers ?? [],
     preset: patch.preset !== undefined ? patch.preset : cur.preset || null,
     judge: patch.judge ?? cur.judge ?? false,
+    trend: patch.trend ?? cur.trend ?? false,
+    grid: patch.grid ?? cur.grid ?? [],
   };
   isSavingLayout.value = true;
   try {
@@ -1976,8 +2026,76 @@ const saveKpiLayout = async patch => {
     isSavingLayout.value = false;
   }
 };
-const onKpiReorder = () =>
-  saveKpiLayout({ order: dragTiles.value.map(t => t.id) });
+// ── 🧲 item 266b (28/09, pedido: "o recurso de mudar de tamanho e etc. deve ser
+// aplicável ao ambiente de indicadores"): os CARDS também vivem num MagnetBoard
+// (grade de 12 colunas, linha de 16 px): pega e arrasta, puxa a borda/canto
+// para esticar; card com metade da largura ou mais vira o "grande" (resumo com
+// gráfico). Salvo em kpi_layout.grid ({id,x,y,w,h}); `order`/`sizes` seguem
+// gravados (derivados) para quem lê o formato antigo. ──
+const TILE_W = 3;
+const TILE_H = 6; // 6 linhas = 166 px (o card pequeno de hoje)
+const TILE_BIG_W = 6;
+const TILE_BIG_H = 12; // 2×2 = 346 px
+// posição de fábrica = a fileira de hoje: da esquerda para a direita em 4
+// colunas, card grande ocupando 2×2 (o ímã arruma o resto)
+const tileDefaults = computed(() => {
+  let x = 0;
+  let y = 0;
+  let rowH = TILE_H;
+  return panelTiles.value.map(t => {
+    const w = t.big ? TILE_BIG_W : TILE_W;
+    const h = t.big ? TILE_BIG_H : TILE_H;
+    if (x + w > 12) {
+      x = 0;
+      y += rowH;
+      rowH = TILE_H;
+    }
+    const cell = { id: t.id, x, y, w, h, hidden: false };
+    x += w;
+    rowH = Math.max(rowH, h);
+    if (x >= 12) {
+      x = 0;
+      y += rowH;
+      rowH = TILE_H;
+    }
+    return cell;
+  });
+});
+const tileGridComputed = computed(() =>
+  mergeLayout(
+    (kpiLayout.value.grid || [])
+      .filter(g => g && g.id)
+      .map(g => ({ ...g, hidden: false })),
+    tileDefaults.value
+  )
+);
+const tileGrid = ref([]);
+onMounted(() => {
+  tileGrid.value = [...tileGridComputed.value];
+  watch(tileGridComputed, v => {
+    tileGrid.value = [...v];
+  });
+});
+const tileById = computed(() =>
+  Object.fromEntries(panelTiles.value.map(t => [t.id, t]))
+);
+const tileCellsOrdered = () =>
+  [...tileGrid.value].sort((a, b) => a.y - b.y || a.x - b.x);
+const stripCells = list =>
+  list.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
+const saveTileGrid = () => {
+  const ordered = tileCellsOrdered();
+  const sizes = {};
+  ordered.forEach(c => {
+    if (c.w >= TILE_BIG_W) sizes[c.id] = 'lg';
+  });
+  return saveKpiLayout({
+    grid: stripCells(ordered),
+    order: ordered.map(c => c.id),
+    sizes,
+  });
+};
+const onKpiReorder = saveTileGrid;
 const hideTile = tile =>
   saveKpiLayout({
     hidden: [...new Set([...(kpiLayout.value.hidden || []), tile.id])],
@@ -1987,28 +2105,48 @@ const restoreTile = tile =>
     hidden: (kpiLayout.value.hidden || []).filter(id => id !== tile.id),
   });
 const resetKpiLayout = () => {
-  saveKpiLayout({ order: [], hidden: [], colors: {}, sizes: {}, spacers: [] });
+  saveKpiLayout({
+    order: [],
+    hidden: [],
+    colors: {},
+    sizes: {},
+    spacers: [],
+    grid: [],
+  });
   resetBlockLayout();
 };
-// ── item 239: tamanho do card (1 quadrado × 4 quadrados) e espaços vazios ──
+// ── item 239 → 266b: tamanho do card (pequeno ↔ grande 2×2) agora é a grade
+// do ímã; espaços vazios continuam existindo (um quadrado que você arrasta) ──
 const toggleTileSize = tile => {
-  const sizes = { ...(kpiLayout.value.sizes || {}) };
-  if (sizes[tile.id] === 'lg') delete sizes[tile.id];
-  else sizes[tile.id] = 'lg';
-  saveKpiLayout({ sizes });
+  const cell = tileGrid.value.find(c => c.id === tile.id);
+  if (!cell) return;
+  const big = cell.w >= TILE_BIG_W;
+  tileGrid.value = placeBlock(
+    tileGrid.value,
+    tile.id,
+    big ? { w: TILE_W, h: TILE_H } : { w: TILE_BIG_W, h: TILE_BIG_H }
+  );
+  saveTileGrid();
 };
 const addSpacer = () => {
   const id = `gap:${Date.now().toString(36)}`;
+  const ordered = tileCellsOrdered();
+  const bottom = ordered.reduce((m, c) => Math.max(m, c.y + c.h), 0);
   saveKpiLayout({
     spacers: [...(kpiLayout.value.spacers || []), id],
     // entra no FIM da fileira (a ordem atual + ele)
-    order: [...dragTiles.value.map(t => t.id), id],
+    order: [...ordered.map(c => c.id), id],
+    grid: [
+      ...stripCells(ordered),
+      { id, x: 0, y: bottom, w: TILE_W, h: TILE_H },
+    ],
   });
 };
 const removeSpacer = tile =>
   saveKpiLayout({
     spacers: (kpiLayout.value.spacers || []).filter(id => id !== tile.id),
     order: (kpiLayout.value.order || []).filter(id => id !== tile.id),
+    grid: stripCells(tileGrid.value.filter(c => c.id !== tile.id)),
   });
 // resumo do card GRANDE: a mesma série do popup + período anterior, pico,
 // média e as primeiras linhas de detalhe
@@ -2016,17 +2154,23 @@ const tileBigSummary = tile => {
   if (!tile?.big || panelBase.value === 'medico') return null;
   // item 248: no mínimo 7 dias — em "hoje"/"ontem" usa o cesto dos últimos 7
   const base = kpiBag.value;
-  const bag = (base?.points || []).length >= 7 || !trendBag.value ? base : trendBag.value;
+  const bag =
+    (base?.points || []).length >= 7 || !trendBag.value ? base : trendBag.value;
   const points = bag?.points || [];
   let values;
   let prevValues = null;
   if (tile.def) {
-    values = points.map((_, i) => evaluateFormula(tile.def.expr, bagAtOf(bag, i)) ?? 0);
+    values = points.map(
+      (_, i) => evaluateFormula(tile.def.expr, bagAtOf(bag, i)) ?? 0
+    );
     prevValues = points.map(
       (_, i) => evaluateFormula(tile.def.expr, bagPrevAtOf(bag, i)) ?? 0
     );
   } else {
-    const key = tile.chartKey === 'auto' ? bagMetricByLabelOf(bag, tile.chartMatch) : tile.chartKey;
+    const key =
+      tile.chartKey === 'auto'
+        ? bagMetricByLabelOf(bag, tile.chartMatch)
+        : tile.chartKey;
     const m = key ? bag?.metrics?.[key] : null;
     values = m?.series || [];
     prevValues = m?.prev_series || null;
@@ -2037,12 +2181,17 @@ const tileBigSummary = tile => {
   const peak = hasData ? Math.max(...nums) : 0;
   const peakAt = nums.indexOf(peak);
   const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+  const trendWords = trendOn.value
+    ? trendText(nums, bag?.granularity || 'day')
+    : null;
   return {
     values: nums,
     labels: points.map(p => p.label),
     prevValues: prevValues?.length === nums.length ? prevValues : null,
     format: fmt,
     hasData,
+    granularity: bag?.granularity || 'day',
+    trendWords,
     widened: bag !== base,
     peakText: hasData
       ? `pico ${points[peakAt]?.label ? `em ${points[peakAt].label}` : ''}: ${fmt(peak)} · média ${fmt(avg)}${bag !== base ? ' · últimos 7 dias' : ''}`
@@ -2061,6 +2210,24 @@ const periodDays = computed(() => {
   return Math.max(1, n * per);
 });
 const histJudgeOn = computed(() => Boolean(kpiLayout.value?.judge));
+// ── item 266 (28/09): LINHA DE TENDÊNCIA nos indicadores — regressão sobre
+// os baldes com valor, no gráfico do popup, no card grande e na sparkline.
+// Fica salva por painel (kpi_layout.trend); enquanto não salva, vale o toque
+// local (quem não é admin também consegue ligar para olhar) ──
+const trendLocal = ref(null);
+const trendOn = computed(() =>
+  trendLocal.value === null ? Boolean(kpiLayout.value?.trend) : trendLocal.value
+);
+const toggleTrend = async () => {
+  const next = !trendOn.value;
+  trendLocal.value = next;
+  try {
+    await saveKpiLayout({ trend: next });
+    trendLocal.value = null;
+  } catch {
+    // sem permissão de salvar: fica ligado só nesta visita
+  }
+};
 const tileHist = tile => {
   if (!histJudgeOn.value || !histBag.value?.metrics || tile.spacer) return null;
   const hb = histBag.value;
@@ -2073,9 +2240,13 @@ const tileHist = tile => {
     fmt = tile.def.format;
     const histVal = evaluateFormula(tile.def.expr, bagTotalsOf(hb));
     if (histVal === null || histVal === undefined) return null;
-    expected = fmt === 'percent' ? histVal : (histVal / HIST_DAYS) * periodDays.value;
+    expected =
+      fmt === 'percent' ? histVal : (histVal / HIST_DAYS) * periodDays.value;
   } else if (tile.chartKey && !tile.pct && !tile.compare) {
-    const key = tile.chartKey === 'auto' ? bagMetricByLabelOf(kpiBag.value, tile.chartMatch) : tile.chartKey;
+    const key =
+      tile.chartKey === 'auto'
+        ? bagMetricByLabelOf(kpiBag.value, tile.chartMatch)
+        : tile.chartKey;
     const m = key ? bagMetrics.value[key] : null;
     const h = key ? hb.metrics[key] : null;
     if (!m || !h) return null;
@@ -2161,27 +2332,102 @@ const orderedBlocks = computed(() => {
     main: [...savedMain, ...MAIN_BLOCKS_DEFAULT.filter(id => !placed.has(id))],
   };
 });
-const dragTopBlocks = ref([]);
-const dragMainBlocks = ref([]);
-// mesmo cuidado do dragTiles: o watch nasce dentro do onMounted (TDZ)
-onMounted(() => {
-  dragTopBlocks.value = [...orderedBlocks.value.top];
-  dragMainBlocks.value = [...orderedBlocks.value.main];
-  watch(orderedBlocks, v => {
-    dragTopBlocks.value = [...v.top];
-    dragMainBlocks.value = [...v.main];
-  });
-});
 // ── item 248: blocos em MEIA largura (lado a lado) + modo edição DESTRAVADO
 // (os blocos ficam abertos; "recolher" é opcional, só pra reordenar) ──
 const collapseBlocks = ref(false);
 const halfBlocks = computed(() => new Set(blockLayout.value?.half || []));
-const blockHalf = id => halfBlocks.value.has(id);
-const toggleBlockHalf = id => {
-  const next = new Set(halfBlocks.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  saveBlockLayout([...next]);
+
+// ── 🧲 item 266 (28/09): o ÍMÃ do Painel do empresário chega ao Meu Painel.
+// Cada área (avisos em cima, conteúdo embaixo) é um MagnetBoard em modo
+// "altura pelo conteúdo": pega pela alça ⠿ (ou pela barrinha do modo edição)
+// e arrasta a qualquer hora; puxa a borda direita para esticar; larguras
+// rápidas ⅓ ½ ⅔ inteira na barrinha. Salvo por painel em
+// block_layout[painel].grid_top / grid_main ({id,x,y,w}); quem ainda só tinha
+// a ordem antiga + "metade" ganha a grade a partir dela. ──
+const BLOCK_ROWS = 8; // altura provisória até o quadro ser medido
+const gridFromLegacy = (ids, half) => {
+  let x = 0;
+  let y = 0;
+  return ids.map(id => {
+    const w = half.has(id) ? 6 : 12;
+    if (x + w > 12) {
+      x = 0;
+      y += BLOCK_ROWS;
+    }
+    const cell = { id, x, y, w, h: BLOCK_ROWS, hidden: false };
+    x += w;
+    if (x >= 12) {
+      x = 0;
+      y += BLOCK_ROWS;
+    }
+    return cell;
+  });
+};
+const blockGrids = computed(() => {
+  const bl = blockLayout.value || {};
+  const make = (key, ids) => {
+    const saved = Array.isArray(bl[key]) ? bl[key] : null;
+    const base = saved
+      ? saved
+          .filter(g => g && ids.includes(g.id))
+          .map(g => ({ ...g, h: g.h || BLOCK_ROWS, hidden: false }))
+      : gridFromLegacy(ids, halfBlocks.value);
+    return mergeLayout(
+      base,
+      ids.map((id, i) => ({
+        id,
+        x: 0,
+        y: i * BLOCK_ROWS,
+        w: 12,
+        h: BLOCK_ROWS,
+        hidden: false,
+      }))
+    );
+  };
+  return {
+    top: make('grid_top', orderedBlocks.value.top),
+    main: make('grid_main', orderedBlocks.value.main),
+  };
+});
+const topGrid = ref([]);
+const mainGrid = ref([]);
+const blocksLocked = ref(false);
+onMounted(() => {
+  topGrid.value = [...blockGrids.value.top];
+  mainGrid.value = [...blockGrids.value.main];
+  blocksLocked.value = Boolean(blockLayout.value?.locked);
+  watch(blockGrids, v => {
+    topGrid.value = [...v.top];
+    mainGrid.value = [...v.main];
+  });
+  watch(
+    () => blockLayout.value?.locked,
+    v => {
+      blocksLocked.value = Boolean(v);
+    }
+  );
+});
+const gridOf = area => (area === 'top' ? topGrid : mainGrid);
+const blockAreaOf = id =>
+  topGrid.value.some(i => i.id === id) ? 'top' : 'main';
+const blockWidth = id => {
+  const g = [...topGrid.value, ...mainGrid.value].find(i => i.id === id);
+  return g ? g.w : 12;
+};
+const BLOCK_WIDTHS = [
+  { w: 4, label: '⅓' },
+  { w: 6, label: '½' },
+  { w: 8, label: '⅔' },
+  { w: 12, label: 'inteira' },
+];
+const setBlockWidth = (id, w) => {
+  const grid = gridOf(blockAreaOf(id));
+  grid.value = placeBlock(grid.value, id, { w });
+  saveBlockLayout();
+};
+const toggleBlocksLock = () => {
+  blocksLocked.value = !blocksLocked.value;
+  saveBlockLayout();
 };
 const toggleHistJudge = () => saveKpiLayout({ judge: !histJudgeOn.value });
 
@@ -2195,13 +2441,17 @@ const panelPresets = computed(() => {
   const others = PANEL_PRESETS.filter(p => !p.panels.includes(panelBase.value));
   return [...mine, ...others];
 });
-const currentPreset = computed(() => PRESET_BY_KEY[kpiLayout.value?.preset] || null);
+const currentPreset = computed(
+  () => PRESET_BY_KEY[kpiLayout.value?.preset] || null
+);
 const applyPreset = async preset => {
   if (!preset || isApplyingPreset.value) return;
   isApplyingPreset.value = true;
   try {
     const base = panelBase.value;
-    const fixedIds = rawPanelTiles.value.map(t => t.id || t.gk || slugId(t.label));
+    const fixedIds = rawPanelTiles.value.map(
+      t => t.id || t.gk || slugId(t.label)
+    );
     const { defs, layout } = buildPreset(preset, {
       panel: base,
       metrics: bagMetrics.value,
@@ -2214,7 +2464,9 @@ const applyPreset = async preset => {
     await CrmAPI.updateCustomKpis([...list, ...defs]);
     await store.dispatch('crm/fetchSettings');
     const keep = new Set(layout.order);
-    const hidden = allPanelTiles.value.map(t => t.id).filter(id => !keep.has(id));
+    const hidden = allPanelTiles.value
+      .map(t => t.id)
+      .filter(id => !keep.has(id));
     await saveKpiLayout({ ...layout, hidden });
     showPresets.value = false;
   } finally {
@@ -2231,15 +2483,29 @@ const presetSwatch = t => {
 const deleteTileKpi = tile => {
   if (!tile?.def) return;
   // eslint-disable-next-line no-alert
-  if (!window.confirm(`Excluir o indicador "${tile.label}"? (dá pra recriar no "+" ou restaurando o modelo)`)) return;
+  if (
+    !window.confirm(
+      `Excluir o indicador "${tile.label}"? (dá pra recriar no "+" ou restaurando o modelo)`
+    )
+  )
+    return;
   deleteKpi(tile.def);
 };
-const saveBlockLayout = async half => {
+const saveBlockLayout = async () => {
   const all = { ...(crmSettings.value?.block_layout || {}) };
+  const orderOf = list =>
+    [...list].sort((a, b) => a.y - b.y || a.x - b.x).map(i => i.id);
+  const strip = list => list.map(({ id, x, y, w }) => ({ id, x, y, w }));
   all[selectedPanel.value] = {
-    top: [...dragTopBlocks.value],
-    main: [...dragMainBlocks.value],
-    half: Array.isArray(half) ? half : [...halfBlocks.value],
+    top: orderOf(topGrid.value),
+    main: orderOf(mainGrid.value),
+    // compatibilidade com quem lê "metade": largura até meia página
+    half: [...topGrid.value, ...mainGrid.value]
+      .filter(i => i.w <= 6)
+      .map(i => i.id),
+    grid_top: strip(topGrid.value),
+    grid_main: strip(mainGrid.value),
+    locked: blocksLocked.value,
   };
   isSavingLayout.value = true;
   try {
@@ -2445,21 +2711,23 @@ const saveGoals = async () => {
 const gestorSignals = computed(() => {
   if (panelBase.value !== 'gestor' || !data.value) return [];
   const sigs = [];
-  (panelTiles.value || []).filter(t => !t.spacer).forEach(tile => {
-    const st = tileState(tile);
-    if (st.status === 'bad')
-      sigs.push({
-        level: 'red',
-        icon: 'i-lucide-trending-down',
-        text: `${tile.label}: muito abaixo da meta (${tile.value})`,
-      });
-    else if (st.status === 'warn')
-      sigs.push({
-        level: 'amber',
-        icon: 'i-lucide-alert-triangle',
-        text: `${tile.label}: abaixo do ritmo da meta (${tile.value})`,
-      });
-  });
+  (panelTiles.value || [])
+    .filter(t => !t.spacer)
+    .forEach(tile => {
+      const st = tileState(tile);
+      if (st.status === 'bad')
+        sigs.push({
+          level: 'red',
+          icon: 'i-lucide-trending-down',
+          text: `${tile.label}: muito abaixo da meta (${tile.value})`,
+        });
+      else if (st.status === 'warn')
+        sigs.push({
+          level: 'amber',
+          icon: 'i-lucide-alert-triangle',
+          text: `${tile.label}: abaixo do ritmo da meta (${tile.value})`,
+        });
+    });
   const alerts = radarAlerts.value.length;
   if (alerts)
     sigs.push({
@@ -2531,7 +2799,9 @@ const verdictPrint = computed(() =>
 );
 const verdictMinSaved = ref(null);
 try {
-  verdictMinSaved.value = JSON.parse(localStorage.getItem(VERDICT_KEY) || 'null');
+  verdictMinSaved.value = JSON.parse(
+    localStorage.getItem(VERDICT_KEY) || 'null'
+  );
 } catch {
   verdictMinSaved.value = null;
 }
@@ -2544,7 +2814,8 @@ const setVerdictMinimized = on => {
     ? { day: todayKey(), print: verdictPrint.value }
     : null;
   try {
-    if (on) localStorage.setItem(VERDICT_KEY, JSON.stringify(verdictMinSaved.value));
+    if (on)
+      localStorage.setItem(VERDICT_KEY, JSON.stringify(verdictMinSaved.value));
     else localStorage.removeItem(VERDICT_KEY);
   } catch {
     // navegador sem armazenamento: minimiza só nesta visita
@@ -2637,8 +2908,31 @@ const todayLabel = computed(() => {
 
 // ── Tarefas esperando VOCÊ + notas dos pacientes (item 211) ──────
 const myTasks = computed(() => data.value?.my_tasks?.items || []);
+const noteInitials = name =>
+  (name || '?')
+    .trim()
+    .split(/\s+/)
+    .map(w => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 const myTasksCount = computed(() => data.value?.my_tasks?.count || 0);
 const patientNotes = computed(() => data.value?.patient_notes || []);
+// 27/09: uma lista por vez — abre em "Esperando você" se houver tarefa, senão nas notas
+const tasksTab = ref('tarefas');
+const tasksTabPicked = ref(false);
+watch(
+  [myTasks, patientNotes],
+  ([tasks, notes]) => {
+    if (tasksTabPicked.value) return;
+    tasksTab.value = tasks.length || !notes.length ? 'tarefas' : 'notas';
+  },
+  { immediate: true }
+);
+const pickTasksTab = tab => {
+  tasksTab.value = tab;
+  tasksTabPicked.value = true;
+};
 // a caixa fica sempre à mostra nos painéis em que é a primeira coisa
 const tasksBoxAlways = computed(() =>
   TASKS_FIRST_PANELS.includes(panelBase.value)
@@ -2976,12 +3270,17 @@ const leadsInboxSub = computed(() => {
 });
 // item 238: "Marcadas na Agenda" por caixa de entrada (linha de baixo do card)
 const bookedInboxSub = computed(() => {
-  const list = (data.value?.appointments_booked_by_inbox || []).filter(i => i.count > 0);
-  if (!list.length) return 'consultas novas no período (sem exame, tele, cancelada ou Oftalmofácil)';
+  const list = (data.value?.appointments_booked_by_inbox || []).filter(
+    i => i.count > 0
+  );
+  if (!list.length)
+    return 'consultas novas no período (sem exame, tele, cancelada ou Oftalmofácil)';
   return list.map(i => `${shortInboxName(i.name)} ${i.count}`).join(' · ');
 });
 const pctOf = (part, total) =>
-  total ? String(Math.round((part / total) * 1000) / 10).replace('.', ',') : '0';
+  total
+    ? String(Math.round((part / total) * 1000) / 10).replace('.', ',')
+    : '0';
 // conversão POR CAIXA: dos que chegaram por ela, % que avançou a Agendamento
 const leadsInboxConversion = computed(() => {
   const list = (data.value?.leads_by_inbox || []).filter(i => i.count > 0);
@@ -3571,7 +3870,8 @@ const refreshAll = () => {
   // item 237: mês/ano/personalizado mudam devagar e custam caro — a
   // atualização automática só refaz os períodos curtos (o servidor guarda
   // os longos por 10 min de qualquer forma)
-  if (['month', 'last_month', 'year', 'custom'].includes(period.value?.preset)) return;
+  if (['month', 'last_month', 'year', 'custom'].includes(period.value?.preset))
+    return;
   fetchData();
 };
 const onVisible = () => {
@@ -3731,9 +4031,11 @@ onUnmounted(() => {
         <div class="relative z-10 flex flex-col gap-4" style="color: #fff">
           <div class="flex items-start justify-between gap-3 flex-wrap">
             <div class="flex items-center gap-1.5 flex-wrap">
-              <span class="cevico-hero-chip"><span class="i-lucide-calendar-days text-xs" />{{
+              <span class="cevico-hero-chip"
+                ><span class="i-lucide-calendar-days text-xs" />{{
                   todayLabel
-                }}</span>
+                }}</span
+              >
               <!-- 🍎🍊 a paleta do painel: cor do dia (iMac G3), uma fruta ou a
                    salada — o admin escolhe aqui; quem não é admin passeia
                    pelas cores do dia só nesta tela -->
@@ -3758,7 +4060,8 @@ onUnmounted(() => {
                   v-if="flavorPreview !== null && pagePalette === dayFlavor"
                   class="opacity-75 font-normal"
                 >
-                  · prévia</span>
+                  · prévia</span
+                >
                 <span
                   v-if="isAdmin"
                   class="i-lucide-palette text-[10px] opacity-80"
@@ -3768,7 +4071,8 @@ onUnmounted(() => {
                 <span :class="currentPanel.icon" class="text-xs" />
                 Painel de {{ currentPanel.label
                 }}<template v-if="currentPanel.who">
-                  · {{ currentPanel.who }}</template>
+                  · {{ currentPanel.who }}</template
+                >
               </span>
               <!-- 🧑‍🤝‍🧑 painel por pessoa: o admin edita nome/pessoas daqui -->
               <button
@@ -3821,7 +4125,8 @@ onUnmounted(() => {
               style="color: #fff"
             >
               {{ greeting
-              }}<template v-if="firstName">, {{ firstName }}</template>! 👋
+              }}<template v-if="firstName">, {{ firstName }}</template
+              >! 👋
             </h1>
             <p
               class="text-sm sm:text-[15px] mt-2.5 max-w-2xl leading-relaxed"
@@ -3857,7 +4162,8 @@ onUnmounted(() => {
                 <span
                   class="text-[11px] mt-1"
                   style="color: rgba(255, 255, 255, 0.82)"
-                  >{{ p.label }}</span>
+                  >{{ p.label }}</span
+                >
               </span>
             </button>
           </div>
@@ -3872,9 +4178,30 @@ onUnmounted(() => {
         class="cv-editbar sticky top-0 z-40 px-4 py-3 mb-6"
       >
         <div class="flex items-center gap-2 flex-wrap">
-          <span class="cv-icon cv-icon-sm"><span class="i-lucide-pencil-ruler text-xs"/></span>
+          <span class="cv-icon cv-icon-sm"
+            ><span class="i-lucide-pencil-ruler text-xs"
+          /></span>
           <b class="text-xs text-n-slate-12">Modo edição</b>
-          <span class="text-[11px] text-n-slate-10">⠿ arraste as barrinhas e os cards · 🖌 troca a cor · ✕ oculta</span>
+          <span class="text-[11px] text-n-slate-10"
+            >🧲 pegue um bloco e arraste (os vizinhos abrem espaço) · puxe a
+            borda direita para esticar · 🖌 troca a cor · ✕ oculta</span
+          >
+          <button
+            class="cv-btn cv-btn-sm"
+            :class="blocksLocked ? '' : 'cv-btn-ghost'"
+            :title="
+              blocksLocked
+                ? 'Destravar: os blocos voltam a se mover pela alça ⠿'
+                : 'Travar: nenhum bloco se move sem querer (as alças somem)'
+            "
+            @click="toggleBlocksLock"
+          >
+            <span
+              :class="blocksLocked ? 'i-lucide-lock' : 'i-lucide-lock-open'"
+              class="text-xs"
+            />
+            blocos {{ blocksLocked ? 'travados' : 'soltos' }}
+          </button>
           <button
             class="cv-btn cv-btn-ghost cv-btn-sm"
             title="Cores do painel: cor do dia, uma paleta fixa (iMac G3 ou frutas da Apple) ou salada de frutas — e a paleta de cada bloco"
@@ -3912,11 +4239,27 @@ onUnmounted(() => {
             média histórica {{ histJudgeOn ? 'ligada' : 'desligada' }}
           </button>
           <button
+            class="cv-btn cv-btn-sm"
+            :class="trendOn ? '' : 'cv-btn-ghost'"
+            title="Linha de tendência nos gráficos (card grande, popup e sparkline): reta que mostra para onde o indicador está indo"
+            @click="toggleTrend"
+          >
+            <span class="i-lucide-trending-up text-xs" />
+            tendência {{ trendOn ? 'ligada' : 'desligada' }}
+          </button>
+          <button
             class="cv-btn cv-btn-ghost cv-btn-sm"
             title="Recolhe os blocos em barrinhas (mais fácil pra reordenar)"
             @click="collapseBlocks = !collapseBlocks"
           >
-            <span :class="collapseBlocks ? 'i-lucide-unfold-vertical' : 'i-lucide-fold-vertical'" class="text-xs" />
+            <span
+              :class="
+                collapseBlocks
+                  ? 'i-lucide-unfold-vertical'
+                  : 'i-lucide-fold-vertical'
+              "
+              class="text-xs"
+            />
             {{ collapseBlocks ? 'abrir blocos' : 'recolher blocos' }}
           </button>
           <span
@@ -4000,7 +4343,8 @@ onUnmounted(() => {
             <span
               class="cv-notice-dopamine-orb flex-shrink-0"
               aria-hidden="true"
-              >🌈</span>
+              >🌈</span
+            >
             <div class="min-w-0 flex-1">
               <h2
                 class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
@@ -4040,7 +4384,9 @@ onUnmounted(() => {
         >
           <div class="p-4 sm:p-5">
             <div class="flex items-center gap-2 mb-2">
-              <span class="cv-icon"><span class="i-lucide-party-popper text-base"/></span>
+              <span class="cv-icon"
+                ><span class="i-lucide-party-popper text-base"
+              /></span>
               <h2 class="text-sm font-bold text-n-slate-12">
                 {{
                   data.bug_reports.resolved.length === 1
@@ -4056,9 +4402,11 @@ onUnmounted(() => {
                 class="cv-sub text-xs text-n-slate-11 px-3 py-2"
               >
                 ✅ {{ r.title }}
-                <span class="text-n-slate-9">— resolvido
+                <span class="text-n-slate-9"
+                  >— resolvido
                   {{ new Date(r.completed_at).toLocaleDateString('pt-BR') }}.
-                  Obrigado por avisar! 💙</span>
+                  Obrigado por avisar! 💙</span
+                >
               </p>
             </div>
           </div>
@@ -4068,25 +4416,34 @@ onUnmounted(() => {
              de painel): no modo organizar, cada bloco ganha a barrinha de
              arrasto e pode trocar de lugar — inclusive cruzar pra área de
              conteúdo lá embaixo (mesmo grupo do vuedraggable) -->
-        <draggable
-          v-model="dragTopBlocks"
-          :item-key="id => id"
-          handle=".cevico-block-handle"
-          :animation="220"
-          :disabled="!organizeMode"
-          ghost-class="opacity-30"
-          class="grid grid-cols-1 lg:grid-cols-2 gap-x-6"
-          @end="saveBlockLayout"
+        <MagnetBoard
+          v-model:layout="topGrid"
+          :locked="blocksLocked"
+          auto-height
+          :stack-below="700"
+          handle="[data-drag-handle], .cevico-block-handle"
+          @moved="saveBlockLayout"
         >
-          <template #item="{ element: blockId }">
-            <section :style="blockVars(blockId)" class="min-w-0" :class="blockHalf(blockId) ? '' : 'lg:col-span-2'">
+          <template #card="{ item: { id: blockId } }">
+            <section
+              :style="blockVars(blockId)"
+              class="min-w-0 relative cv-mb-block"
+            >
+              <span
+                v-if="!blocksLocked"
+                class="cv-mb-grip"
+                data-drag-handle
+                :title="`Mover “${BLOCK_LABELS[blockId]}”: pegue aqui e arraste`"
+                ><span class="i-lucide-grip-vertical"
+              /></span>
               <div
                 v-if="organizeMode"
                 class="cevico-block-handle cv-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 text-xs font-semibold"
               >
                 <span class="i-lucide-grip-vertical text-sm opacity-60" />
-                <span class="cv-icon cv-icon-sm"><span :class="BLOCK_ICONS[blockId]"
-class="text-xs"/></span>
+                <span class="cv-icon cv-icon-sm"
+                  ><span :class="BLOCK_ICONS[blockId]" class="text-xs"
+                /></span>
                 {{ BLOCK_LABELS[blockId] }}
                 <button
                   v-if="isAdmin"
@@ -4108,19 +4465,26 @@ class="text-xs"/></span>
                   <span class="i-lucide-palette text-[10px]" />
                   {{ blockPalette(blockId).label }}
                 </button>
-                <button
-                  class="cv-chip"
-                  :title="blockHalf(blockId) ? 'Voltar à largura inteira' : 'Meia largura — fica lado a lado com o bloco vizinho'"
+                <span
+                  class="cv-seg cv-seg-sm"
+                  title="Largura do bloco (ou puxe a borda direita)"
                   @pointerdown.stop
                   @mousedown.stop
-                  @click.stop="toggleBlockHalf(blockId)"
                 >
-                  <span :class="blockHalf(blockId) ? 'i-lucide-rectangle-horizontal' : 'i-lucide-columns-2'" class="text-[10px]" />
-                  {{ blockHalf(blockId) ? 'inteiro' : 'metade' }}
-                </button>
+                  <button
+                    v-for="o in BLOCK_WIDTHS"
+                    :key="o.w"
+                    class="cv-seg-item !h-6 !px-2"
+                    :class="blockWidth(blockId) === o.w ? 'cv-seg-on' : ''"
+                    @click.stop="setBlockWidth(blockId, o.w)"
+                  >
+                    {{ o.label }}
+                  </button>
+                </span>
                 <span
                   class="text-n-slate-9 font-normal ml-auto hidden sm:inline"
-                  >⠿ arraste pra mudar a ordem</span>
+                  >⠿ pegue e arraste · puxe a borda direita para esticar</span
+                >
               </div>
 
               <!-- no modo edição os blocos RECOLHEM em barrinhas: arrasto curto,
@@ -4136,7 +4500,9 @@ class="text-xs"/></span>
                     :class="waProblem ? 'cv-red' : ''"
                     title="Status das contas de WhatsApp na Meta (atualiza a cada 10 min) — detalhes em Relatórios → Saúde do WhatsApp"
                   >
-                    <span class="cv-icon cv-icon-sm"><span class="i-lucide-phone text-xs"/></span>
+                    <span class="cv-icon cv-icon-sm"
+                      ><span class="i-lucide-phone text-xs"
+                    /></span>
                     <span
                       v-for="w in whatsappStatus"
                       :key="w.id"
@@ -4156,7 +4522,8 @@ class="text-xs"/></span>
                       <span
                         v-if="w.reauthorization_required"
                         class="text-red-500 font-bold whitespace-nowrap"
-                        >precisa reautorizar</span>
+                        >precisa reautorizar</span
+                      >
                       <template v-else>
                         <span class="text-n-slate-9 whitespace-nowrap">{{
                           waQuality(w).label
@@ -4164,11 +4531,13 @@ class="text-xs"/></span>
                         <span
                           v-if="waTier(w.limit_tier)"
                           class="text-n-slate-9 whitespace-nowrap"
-                          >· limite {{ waTier(w.limit_tier) }}</span>
+                          >· limite {{ waTier(w.limit_tier) }}</span
+                        >
                         <span
                           v-if="w.failed_24h"
                           class="text-amber-600 whitespace-nowrap"
-                          >· {{ w.failed_24h }} falha(s) 24h</span>
+                          >· {{ w.failed_24h }} falha(s) 24h</span
+                        >
                       </template>
                     </span>
                   </div>
@@ -4193,7 +4562,9 @@ class="text-xs"/></span>
                         <h2 class="text-sm font-bold text-n-slate-12">
                           Briefing do Gestor
                         </h2>
-                        <span class="text-[11px] text-n-slate-9 ml-auto">funil de hoje vs a média de 12 semanas</span>
+                        <span class="text-[11px] text-n-slate-9 ml-auto"
+                          >funil de hoje vs a média de 12 semanas</span
+                        >
                       </div>
 
                       <p
@@ -4261,7 +4632,8 @@ class="text-xs"/></span>
                         <span
                           v-if="radarLastRun"
                           class="text-[11px] ml-auto text-n-slate-9"
-                          >auditoria às {{ radarLastRun }}</span>
+                          >auditoria às {{ radarLastRun }}</span
+                        >
                         <button
                           v-if="radarStatus && isAdmin"
                           class="cv-btn cv-btn-ghost cv-btn-sm"
@@ -4319,11 +4691,13 @@ class="text-xs"/></span>
                           <span
                             class="text-[11px] font-semibold truncate"
                             style="color: #334155"
-                            >{{ p.contact_name }}</span>
+                            >{{ p.contact_name }}</span
+                          >
                           <span
                             class="text-[10px] ml-auto flex-shrink-0"
                             style="color: #047857"
-                            >{{ waitingLabel(p) }}</span>
+                            >{{ waitingLabel(p) }}</span
+                          >
                         </div>
 
                         <!-- card da FRENTE (pulsa como Tarefas 100%) -->
@@ -4412,7 +4786,8 @@ class="text-xs"/></span>
                                 background: rgba(212, 160, 23, 0.14);
                                 color: #92600a;
                               "
-                              >📌 para {{ radarFront.user_name }}</span>
+                              >📌 para {{ radarFront.user_name }}</span
+                            >
                           </div>
                           <div
                             class="rounded-r-lg px-2 py-1.5"
@@ -4503,8 +4878,9 @@ class="text-xs"/></span>
                 </template>
 
                 <template v-else-if="blockId === 'tarefas'">
-                  <!-- 📋 Tarefas esperando você + 📝 notas dos pacientes (item 211):
-                       duas colunas, listas roláveis — cabe muito mais de 10 -->
+                  <!-- 📋 Tarefas e notas (redesenho 27/09, "clean e organizado"):
+                       UMA lista por vez (abas), linhas com fio em vez de caixinhas,
+                       sem coluna vazia ocupando espaço -->
                   <div
                     v-if="
                       tasksBoxAlways ||
@@ -4514,104 +4890,182 @@ class="text-xs"/></span>
                     class="cv-block mb-6"
                   >
                     <div class="p-4 sm:p-5">
-                      <div class="flex items-center gap-2 mb-3 flex-wrap min-h-[30px]">
+                      <div class="flex items-center gap-3 mb-3 min-h-[30px]">
                         <span class="cv-icon cv-icon-sm">
                           <span class="i-lucide-list-checks text-sm" />
                         </span>
-                        <h2 class="text-sm font-bold text-n-slate-12 leading-none">
-                          Tarefas e notas
-                        </h2>
-                        <span class="cv-chip tabular-nums" :class="myTasksCount ? '' : 'cv-slate'">
-                          {{ myTasksCount }} {{ myTasksCount === 1 ? 'tarefa' : 'tarefas' }}
-                        </span>
-                        <span class="cv-chip cv-slate tabular-nums">
-                          {{ patientNotes.length }} {{ patientNotes.length === 1 ? 'nota' : 'notas' }}
-                        </span>
-                        <button
-                          class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
-                          title="Escrever um recado sobre um paciente"
-                          @click="showNoteForm = !showNoteForm"
-                        >
-                          <span class="i-lucide-sticky-note text-xs" />
-                          Nova nota
-                        </button>
-                        <button class="cv-btn cv-btn-sm" @click="goToTasks">
-                          Abrir Tarefas
-                          <span class="i-lucide-arrow-right text-xs" />
-                        </button>
-                        <button
-                          v-if="!tasksBoxAlways"
-                          class="cv-btn cv-btn-ghost cv-iconbtn flex-shrink-0"
-                          title="Dar check: esconder este aviso (volta quando houver tarefa nova)"
-                          @click="checkAviso(tasksSignature)"
-                        >
-                          <span class="i-lucide-check text-sm" />
-                        </button>
+                        <div class="min-w-0">
+                          <h2
+                            class="text-sm font-bold text-n-slate-12 leading-none"
+                          >
+                            Tarefas e notas
+                          </h2>
+                          <p
+                            class="text-[11px] text-n-slate-9 mt-0.5 tabular-nums"
+                          >
+                            {{ myTasksCount }}
+                            {{
+                              myTasksCount === 1
+                                ? 'tarefa esperando você'
+                                : 'tarefas esperando você'
+                            }}
+                            · {{ patientNotes.length }}
+                            {{ patientNotes.length === 1 ? 'nota' : 'notas' }}
+                            da equipe
+                          </p>
+                        </div>
+                        <div class="ml-auto flex items-center gap-1.5">
+                          <button
+                            class="cv-btn cv-btn-ghost cv-btn-sm"
+                            title="Escrever um recado sobre um paciente"
+                            @click="showNoteForm = !showNoteForm"
+                          >
+                            <span class="i-lucide-plus text-xs" />
+                            Nota
+                          </button>
+                          <button class="cv-btn cv-btn-sm" @click="goToTasks">
+                            Tarefas
+                            <span class="i-lucide-arrow-right text-xs" />
+                          </button>
+                          <button
+                            v-if="!tasksBoxAlways"
+                            class="cv-btn cv-btn-ghost cv-iconbtn flex-shrink-0"
+                            title="Dar check: esconder este aviso (volta quando houver tarefa nova)"
+                            @click="checkAviso(tasksSignature)"
+                          >
+                            <span class="i-lucide-check text-sm" />
+                          </button>
+                        </div>
                       </div>
 
                       <div v-if="showNoteForm" class="cv-sub p-3.5 mb-3">
-                        <PatientNoteForm compact @saved="onPanelNoteSaved" @cancel="showNoteForm = false" />
+                        <PatientNoteForm
+                          compact
+                          @saved="onPanelNoteSaved"
+                          @cancel="showNoteForm = false"
+                        />
                       </div>
 
-                      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                        <!-- TAREFAS: uma linha por tarefa, lista rolável -->
-                        <div class="min-w-0">
-                          <p class="cv-label mb-1.5 flex items-center gap-1.5">
-                            <span class="i-lucide-circle-dot text-[11px]" /> esperando você
-                          </p>
-                          <p v-if="!myTasks.length" class="text-xs text-n-slate-9 py-3 text-center cv-sub">
-                            Nada esperando você agora. ✨
-                          </p>
-                          <div v-else class="space-y-1 max-h-[22rem] overflow-y-auto pr-1">
-                            <button
-                              v-for="task in myTasks"
-                              :key="task.id"
-                              class="cv-sub cv-sub-hover w-full flex items-center gap-2 px-3 py-1.5 text-left min-w-0"
-                              @click="goToTasks"
-                            >
-                              <span
-                                class="w-2 h-2 rounded-full flex-shrink-0"
-                                :style="{ background: TASK_DOT[task.priority] || TASK_DOT.medium }"
-                                :title="TASK_PRIORITY_LABEL[task.priority] || task.priority"
-                              />
-                              <span class="text-[13px] font-medium text-n-slate-12 truncate min-w-0 flex-1">
-                                {{ task.title }}
-                              </span>
-                              <span
-                                v-if="task.comments_count"
-                                class="text-[10px] text-n-slate-9 inline-flex items-center gap-0.5 flex-shrink-0"
-                                ><span class="i-lucide-message-circle text-[10px]" />{{ task.comments_count }}</span>
-                              <span
-                                v-if="task.creator_name"
-                                class="text-[10px] text-n-slate-9 flex-shrink-0 hidden sm:inline"
-                                >de {{ task.creator_name.split(' ')[0] }}</span>
-                              <span
-                                v-if="task.due_at"
-                                class="cv-chip !h-5 !px-1.5 text-[10px] flex-shrink-0 tabular-nums"
-                                :class="new Date(task.due_at) < new Date() ? 'cv-red' : ''"
-                                ><span class="i-lucide-alarm-clock text-[10px]" />{{ fmtTaskDue(task.due_at) }}</span>
-                            </button>
-                          </div>
-                          <p v-if="myTasksCount > myTasks.length" class="text-[10px] text-n-slate-9 mt-1.5 text-right">
-                            mostrando {{ myTasks.length }} de {{ myTasksCount }} — as outras estão em Tarefas
-                          </p>
-                        </div>
+                      <div class="cv-seg cv-seg-sm mb-2">
+                        <button
+                          class="cv-seg-item"
+                          :class="tasksTab === 'tarefas' ? 'cv-seg-on' : ''"
+                          @click="pickTasksTab('tarefas')"
+                        >
+                          <span class="i-lucide-circle-dot text-[11px]" />
+                          Esperando você
+                          <span class="tabular-nums opacity-70">{{
+                            myTasksCount
+                          }}</span>
+                        </button>
+                        <button
+                          class="cv-seg-item"
+                          :class="tasksTab === 'notas' ? 'cv-seg-on' : ''"
+                          @click="pickTasksTab('notas')"
+                        >
+                          <span class="i-lucide-sticky-note text-[11px]" />
+                          Notas dos pacientes
+                          <span class="tabular-nums opacity-70">{{
+                            patientNotes.length
+                          }}</span>
+                        </button>
+                      </div>
 
-                        <!-- NOTAS DOS PACIENTES: as mais recentes da clínica -->
-                        <div class="min-w-0">
-                          <p class="cv-label mb-1.5 flex items-center gap-1.5">
-                            <span class="i-lucide-sticky-note text-[11px]" /> notas dos pacientes
-                          </p>
-                          <p v-if="!patientNotes.length" class="text-xs text-n-slate-9 py-3 text-center cv-sub">
-                            Nenhuma nota ainda — escreva a primeira em "Nova nota".
-                          </p>
-                          <div v-else class="space-y-1.5 max-h-[22rem] overflow-y-auto pr-1">
-                            <div
-                              v-for="note in patientNotes"
-                              :key="note.id"
-                              class="cv-sub px-3 py-2 min-w-0"
+                      <!-- TAREFAS: uma linha por tarefa -->
+                      <template v-if="tasksTab === 'tarefas'">
+                        <p
+                          v-if="!myTasks.length"
+                          class="text-xs text-n-slate-9 py-5 text-center"
+                        >
+                          Nada esperando você agora. ✨
+                        </p>
+                        <div
+                          v-else
+                          class="cv-list max-h-[22rem] overflow-y-auto"
+                        >
+                          <button
+                            v-for="task in myTasks"
+                            :key="task.id"
+                            class="cv-list-row w-full text-left"
+                            @click="goToTasks"
+                          >
+                            <span
+                              class="w-2 h-2 rounded-full flex-shrink-0"
+                              :style="{
+                                background:
+                                  TASK_DOT[task.priority] || TASK_DOT.medium,
+                              }"
+                              :title="
+                                TASK_PRIORITY_LABEL[task.priority] ||
+                                task.priority
+                              "
+                            />
+                            <span
+                              class="text-[13px] font-medium text-n-slate-12 truncate min-w-0 flex-1"
                             >
-                              <div class="flex items-center gap-2 min-w-0">
+                              {{ task.title }}
+                            </span>
+                            <span
+                              v-if="task.comments_count"
+                              class="text-[10px] text-n-slate-9 inline-flex items-center gap-0.5 flex-shrink-0"
+                              ><span
+                                class="i-lucide-message-circle text-[10px]"
+                              />{{ task.comments_count }}</span
+                            >
+                            <span
+                              v-if="task.creator_name"
+                              class="text-[10px] text-n-slate-9 flex-shrink-0 hidden sm:inline"
+                              >de {{ task.creator_name.split(' ')[0] }}</span
+                            >
+                            <span
+                              v-if="task.due_at"
+                              class="cv-chip !h-5 !px-1.5 text-[10px] flex-shrink-0 tabular-nums"
+                              :class="
+                                new Date(task.due_at) < new Date()
+                                  ? 'cv-red'
+                                  : ''
+                              "
+                              ><span
+                                class="i-lucide-alarm-clock text-[10px]"
+                              />{{ fmtTaskDue(task.due_at) }}</span
+                            >
+                          </button>
+                        </div>
+                        <p
+                          v-if="myTasksCount > myTasks.length"
+                          class="text-[10px] text-n-slate-9 mt-1.5 text-right"
+                        >
+                          mostrando {{ myTasks.length }} de {{ myTasksCount }} —
+                          as outras estão em Tarefas
+                        </p>
+                      </template>
+
+                      <!-- NOTAS: avatar com iniciais, nome, hora, texto em 2 linhas -->
+                      <template v-else>
+                        <p
+                          v-if="!patientNotes.length"
+                          class="text-xs text-n-slate-9 py-5 text-center"
+                        >
+                          Nenhuma nota ainda — escreva a primeira em "+ Nota".
+                        </p>
+                        <div
+                          v-else
+                          class="cv-list max-h-[22rem] overflow-y-auto"
+                        >
+                          <div
+                            v-for="note in patientNotes"
+                            :key="note.id"
+                            class="cv-list-row group"
+                          >
+                            <button
+                              class="cv-avatar flex-shrink-0"
+                              title="Abrir o Espaço do Paciente"
+                              @click="openPatientFromNote(note)"
+                            >
+                              {{ noteInitials(note.contact?.name) }}
+                            </button>
+                            <div class="min-w-0 flex-1">
+                              <div class="flex items-baseline gap-2 min-w-0">
                                 <button
                                   class="text-[13px] font-semibold text-n-slate-12 truncate hover:underline text-left"
                                   title="Abrir o Espaço do Paciente"
@@ -4619,22 +5073,32 @@ class="text-xs"/></span>
                                 >
                                   {{ note.contact?.name || 'Paciente' }}
                                 </button>
-                                <span class="text-[10px] text-n-slate-9 ml-auto whitespace-nowrap tabular-nums">{{ fmtNoteAt(note.created_at) }}</span>
+                                <span
+                                  class="text-[10px] text-n-slate-9 whitespace-nowrap tabular-nums"
+                                >
+                                  {{ fmtNoteAt(note.created_at) }} ·
+                                  {{
+                                    note.author_name?.split(' ')[0] || 'equipe'
+                                  }}
+                                </span>
                                 <button
                                   v-if="note.mine || isAdmin"
-                                  class="text-n-slate-9 hover:text-red-500 flex-shrink-0"
+                                  class="ml-auto text-n-slate-9 hover:text-red-500 opacity-0 group-hover:opacity-100 flex-shrink-0"
                                   title="Apagar a nota"
                                   @click="deletePanelNote(note)"
                                 >
                                   <span class="i-lucide-trash-2 text-[11px]" />
                                 </button>
                               </div>
-                              <p class="text-xs text-n-slate-11 leading-snug break-words line-clamp-2">{{ note.content }}</p>
-                              <p class="text-[10px] text-n-slate-9">por {{ note.author_name?.split(' ')[0] || 'equipe' }}</p>
+                              <p
+                                class="text-xs text-n-slate-11 leading-snug break-words line-clamp-2"
+                              >
+                                {{ note.content }}
+                              </p>
                             </div>
                           </div>
                         </div>
-                      </div>
+                      </template>
                     </div>
                   </div>
                 </template>
@@ -4758,7 +5222,7 @@ class="text-xs"/></span>
               </template>
             </section>
           </template>
-        </draggable>
+        </MagnetBoard>
 
         <!-- Seletor de painel (cada pessoa no seu) -->
         <div class="flex items-center gap-2 flex-wrap mb-3">
@@ -4926,25 +5390,34 @@ class="text-xs"/></span>
 
         <!-- ⠿ BLOCOS MÓVEIS (item 143) — área de CONTEÚDO: os blocos abaixo
              do seletor se movem com o mesmo arrasto magnético dos cards -->
-        <draggable
-          v-model="dragMainBlocks"
-          :item-key="id => id"
-          handle=".cevico-block-handle"
-          :animation="220"
-          :disabled="!organizeMode"
-          ghost-class="opacity-30"
-          class="grid grid-cols-1 lg:grid-cols-2 gap-x-6"
-          @end="saveBlockLayout"
+        <MagnetBoard
+          v-model:layout="mainGrid"
+          :locked="blocksLocked"
+          auto-height
+          :stack-below="700"
+          handle="[data-drag-handle], .cevico-block-handle"
+          @moved="saveBlockLayout"
         >
-          <template #item="{ element: blockId }">
-            <section :style="blockVars(blockId)" class="min-w-0" :class="blockHalf(blockId) ? '' : 'lg:col-span-2'">
+          <template #card="{ item: { id: blockId } }">
+            <section
+              :style="blockVars(blockId)"
+              class="min-w-0 relative cv-mb-block"
+            >
+              <span
+                v-if="!blocksLocked"
+                class="cv-mb-grip"
+                data-drag-handle
+                :title="`Mover “${BLOCK_LABELS[blockId]}”: pegue aqui e arraste`"
+                ><span class="i-lucide-grip-vertical"
+              /></span>
               <div
                 v-if="organizeMode"
                 class="cevico-block-handle cv-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 text-xs font-semibold"
               >
                 <span class="i-lucide-grip-vertical text-sm opacity-60" />
-                <span class="cv-icon cv-icon-sm"><span :class="BLOCK_ICONS[blockId]"
-class="text-xs"/></span>
+                <span class="cv-icon cv-icon-sm"
+                  ><span :class="BLOCK_ICONS[blockId]" class="text-xs"
+                /></span>
                 {{ BLOCK_LABELS[blockId] }}
                 <button
                   v-if="isAdmin"
@@ -4966,365 +5439,462 @@ class="text-xs"/></span>
                   <span class="i-lucide-palette text-[10px]" />
                   {{ blockPalette(blockId).label }}
                 </button>
-                <button
-                  class="cv-chip"
-                  :title="blockHalf(blockId) ? 'Voltar à largura inteira' : 'Meia largura — fica lado a lado com o bloco vizinho'"
+                <span
+                  class="cv-seg cv-seg-sm"
+                  title="Largura do bloco (ou puxe a borda direita)"
                   @pointerdown.stop
                   @mousedown.stop
-                  @click.stop="toggleBlockHalf(blockId)"
                 >
-                  <span :class="blockHalf(blockId) ? 'i-lucide-rectangle-horizontal' : 'i-lucide-columns-2'" class="text-[10px]" />
-                  {{ blockHalf(blockId) ? 'inteiro' : 'metade' }}
-                </button>
+                  <button
+                    v-for="o in BLOCK_WIDTHS"
+                    :key="o.w"
+                    class="cv-seg-item !h-6 !px-2"
+                    :class="blockWidth(blockId) === o.w ? 'cv-seg-on' : ''"
+                    @click.stop="setBlockWidth(blockId, o.w)"
+                  >
+                    {{ o.label }}
+                  </button>
+                </span>
                 <span
                   v-if="blockId === 'indicadores'"
                   class="text-n-slate-9 font-normal ml-auto hidden sm:inline"
-                  >os cards ficam abertos pra editar cor e ordem</span>
+                  >🧲 cards: pegue e arraste · puxe a borda ou o canto para
+                  esticar</span
+                >
                 <span
                   v-else
                   class="text-n-slate-9 font-normal ml-auto hidden sm:inline"
-                  >⠿ arraste pra mudar a ordem</span>
+                  >⠿ pegue e arraste · puxe a borda direita para esticar</span
+                >
               </div>
 
               <!-- no modo edição só a FILEIRA fica aberta (é nela que se mexe
                  nos cards); os demais blocos recolhem em barrinhas -->
-              <template v-if="!organizeMode || !collapseBlocks || blockId === 'indicadores'">
+              <template
+                v-if="
+                  !organizeMode || !collapseBlocks || blockId === 'indicadores'
+                "
+              >
                 <template v-if="blockId === 'indicadores'">
                   <template v-if="!currentPanel.custom">
                     <!-- Indicadores do período — mudam com o painel escolhido -->
-                    <draggable
-                      v-model="dragTiles"
-                      item-key="id"
-                      :animation="220"
-                      :disabled="!organizeMode"
-                      ghost-class="opacity-30"
-                      class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4"
-                      @end="onKpiReorder"
+                    <MagnetBoard
+                      v-model:layout="tileGrid"
+                      :locked="blocksLocked"
+                      :stack-below="600"
+                      handle=".cv-tile, .cv-tile-gap"
+                      class="mb-4"
+                      @moved="onKpiReorder"
                     >
-                      <template #item="{ element: tile }">
-                        <div
-                          v-if="tile.spacer"
-                          class="relative rounded-2xl min-h-[150px] flex items-center justify-center"
-                          :class="
-                            organizeMode
-                              ? 'cv-tile-add cursor-grab active:cursor-grabbing'
-                              : ''
-                          "
-                          :aria-hidden="!organizeMode"
+                      <!-- (v-for de 1 item = jeito de nomear `tile` a partir da célula da grade) -->
+                      <template #card="{ item: cell }">
+                        <template
+                          v-for="tile in [tileById[cell.id]]"
+                          :key="tile ? tile.id : cell.id"
                         >
-                          <!-- item 239: ESPAÇO vazio — só aparece tracejado no modo edição
+                          <div
+                            v-if="tile && tile.spacer"
+                            class="cv-tile-gap relative rounded-2xl h-full min-h-[150px] flex items-center justify-center"
+                            :class="
+                              organizeMode
+                                ? 'cv-tile-add cursor-grab active:cursor-grabbing'
+                                : ''
+                            "
+                            :aria-hidden="!organizeMode"
+                          >
+                            <!-- item 239: ESPAÇO vazio — só aparece tracejado no modo edição
                                (comentário aqui dentro: o slot do draggable aceita 1 filho só) -->
-                          <template v-if="organizeMode">
-                            <span class="text-xs font-medium opacity-80 flex items-center gap-1.5">
-                              <span class="i-lucide-square-dashed text-sm" />
-                              espaço vazio
-                            </span>
-                            <button
-                              class="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center hover:bg-red-500/80 hover:text-white transition-colors"
-                              title="Tirar este espaço"
-                              @click.stop="removeSpacer(tile)"
-                            >
-                              <span class="i-lucide-x text-[11px]" />
-                            </button>
-                          </template>
-                        </div>
-                        <div
-                          v-else
-                          class="cv-tile relative rounded-2xl p-4 sm:p-5 text-white shadow-lg transition-all duration-700"
-                          :class="[
-                            'flex flex-col',
-                            tile.big ? 'col-span-2 row-span-2' : '',
-                            tileHist(tile)?.dir === 'up' ? 'cv-tile-hist-up' : '',
-                            tileHist(tile)?.dir === 'down' ? 'cv-tile-hist-down' : '',
-                            tileVisual(tile).pulse ? 'cevico-meta-pulse' : '',
-                            tileVisual(tile).isRecord
-                              ? 'ring-2 ring-amber-300/80'
-                              : '',
-                            organizeMode
-                              ? 'cursor-grab active:cursor-grabbing ring-2 ring-dashed ring-white/60'
-                              : '',
-                          ]"
-                          :style="{ background: tileVisual(tile).grad }"
-                        >
-                          <!-- 🏆 recorde: átomos orbitando o card em sentido horário -->
-                          <TileAura
-                            v-if="tileVisual(tile).aura"
-                            :intensity="tileVisual(tile).auraIntensity"
-                            gold
-                          />
-                          <div class="relative flex-1 flex flex-col">
-                            <!-- 26/09 (pedido dele): no modo edição os botões ganham uma faixa
-                                 própria — antes dividiam a linha e cortavam o nome ("Conv…", "Taxa …") -->
-                            <div
-                              v-if="organizeMode"
-                              class="flex items-center justify-end gap-1 mb-1.5"
-                            >
-                              <button
-                                class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
-                                :title="
-                                  tile.big
-                                    ? 'Voltar ao tamanho normal (1 quadrado)'
-                                    : 'Card grande: 4 quadrados, com o resumo do indicador'
-                                "
-                                @click.stop="toggleTileSize(tile)"
+                            <template v-if="organizeMode">
+                              <span
+                                class="text-xs font-medium opacity-80 flex items-center gap-1.5"
                               >
-                                <span
-                                  :class="
-                                    tile.big
-                                      ? 'i-lucide-minimize-2'
-                                      : 'i-lucide-maximize-2'
-                                  "
-                                  class="text-[11px]"
-                                />
-                              </button>
+                                <span class="i-lucide-square-dashed text-sm" />
+                                espaço vazio
+                              </span>
                               <button
-                                class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
-                                title="Trocar a cor deste card"
-                                @click.stop="openColorPicker(tile)"
-                              >
-                                <span class="i-lucide-paintbrush text-[11px]" />
-                              </button>
-                              <button
-                                v-if="tile.def"
-                                class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-600 transition-colors"
-                                title="Excluir este indicador de vez (volta restaurando o modelo ou criando no +)"
-                                @click.stop="deleteTileKpi(tile)"
-                              >
-                                <span class="i-lucide-trash-2 text-[11px]" />
-                              </button>
-                              <button
-                                class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-500/80 transition-colors"
-                                title="Ocultar este card (dá pra restaurar depois)"
-                                @click.stop="hideTile(tile)"
+                                class="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center hover:bg-red-500/80 hover:text-white transition-colors"
+                                title="Tirar este espaço"
+                                @click.stop="removeSpacer(tile)"
                               >
                                 <span class="i-lucide-x text-[11px]" />
                               </button>
-                            </div>
-                            <div
-                              class="flex items-start gap-1.5 mb-1.5 text-white/85"
-                            >
-                              <span
-                                :class="tile.icon"
-                                class="text-sm flex-shrink-0 mt-px"
-                              />
-                              <!-- nome COMPLETO: quebra em até 2 linhas; o texto inteiro no toque/mouse -->
-                              <p
-                                class="text-xs font-medium flex-1 min-w-0 leading-snug line-clamp-2 break-words"
-                                :title="tile.label"
+                            </template>
+                          </div>
+                          <div
+                            v-else-if="tile"
+                            class="cv-tile relative rounded-2xl h-full overflow-hidden p-4 sm:p-5 text-white shadow-lg transition-all duration-700"
+                            :class="[
+                              'flex flex-col',
+                              tileHist(tile)?.dir === 'up'
+                                ? 'cv-tile-hist-up'
+                                : '',
+                              tileHist(tile)?.dir === 'down'
+                                ? 'cv-tile-hist-down'
+                                : '',
+                              tileVisual(tile).pulse ? 'cevico-meta-pulse' : '',
+                              tileVisual(tile).isRecord
+                                ? 'ring-2 ring-amber-300/80'
+                                : '',
+                              organizeMode
+                                ? 'cursor-grab active:cursor-grabbing ring-2 ring-dashed ring-white/60'
+                                : '',
+                            ]"
+                            :style="{ background: tileVisual(tile).grad }"
+                          >
+                            <!-- 🏆 recorde: átomos orbitando o card em sentido horário -->
+                            <TileAura
+                              v-if="tileVisual(tile).aura"
+                              :intensity="tileVisual(tile).auraIntensity"
+                              gold
+                            />
+                            <div class="relative flex-1 flex flex-col">
+                              <!-- 26/09 (pedido dele): no modo edição os botões ganham uma faixa
+                                 própria — antes dividiam a linha e cortavam o nome ("Conv…", "Taxa …") -->
+                              <div
+                                v-if="organizeMode"
+                                class="flex items-center justify-end gap-1 mb-1.5"
                               >
-                                {{ tile.label }}
-                              </p>
-                              <button
-                                v-if="!organizeMode && (tile.details?.length || tile.about)"
-                                class="w-6 h-6 flex-shrink-0 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/30 transition-colors"
-                                title="Ver detalhes deste indicador"
-                                @click.stop="openKpi(tile)"
+                                <button
+                                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
+                                  :title="
+                                    tile.big
+                                      ? 'Voltar ao tamanho normal (1 quadrado) — ou puxe a borda/canto do card'
+                                      : 'Card grande: 4 quadrados, com o resumo do indicador — ou puxe a borda/canto do card'
+                                  "
+                                  @click.stop="toggleTileSize(tile)"
+                                >
+                                  <span
+                                    :class="
+                                      tile.big
+                                        ? 'i-lucide-minimize-2'
+                                        : 'i-lucide-maximize-2'
+                                    "
+                                    class="text-[11px]"
+                                  />
+                                </button>
+                                <button
+                                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
+                                  title="Trocar a cor deste card"
+                                  @click.stop="openColorPicker(tile)"
+                                >
+                                  <span
+                                    class="i-lucide-paintbrush text-[11px]"
+                                  />
+                                </button>
+                                <button
+                                  v-if="tile.def"
+                                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-600 transition-colors"
+                                  title="Excluir este indicador de vez (volta restaurando o modelo ou criando no +)"
+                                  @click.stop="deleteTileKpi(tile)"
+                                >
+                                  <span class="i-lucide-trash-2 text-[11px]" />
+                                </button>
+                                <button
+                                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-500/80 transition-colors"
+                                  title="Ocultar este card (dá pra restaurar depois)"
+                                  @click.stop="hideTile(tile)"
+                                >
+                                  <span class="i-lucide-x text-[11px]" />
+                                </button>
+                              </div>
+                              <div
+                                class="flex items-start gap-1.5 mb-1.5 text-white/85"
                               >
-                                <span class="i-lucide-maximize-2 text-[11px]" />
-                              </button>
-                            </div>
-                            <!-- número grande + selos + TENDÊNCIA vs período anterior
+                                <span
+                                  :class="tile.icon"
+                                  class="text-sm flex-shrink-0 mt-px"
+                                />
+                                <!-- nome COMPLETO: quebra em até 2 linhas; o texto inteiro no toque/mouse -->
+                                <p
+                                  class="text-xs font-medium flex-1 min-w-0 leading-snug line-clamp-2 break-words"
+                                  :title="tile.label"
+                                >
+                                  {{ tile.label }}
+                                </p>
+                                <button
+                                  v-if="
+                                    !organizeMode &&
+                                    (tile.details?.length || tile.about)
+                                  "
+                                  class="w-6 h-6 flex-shrink-0 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/30 transition-colors"
+                                  title="Ver detalhes deste indicador"
+                                  @click.stop="openKpi(tile)"
+                                >
+                                  <span
+                                    class="i-lucide-maximize-2 text-[11px]"
+                                  />
+                                </button>
+                              </div>
+                              <!-- número grande + selos + TENDÊNCIA vs período anterior
                    (varredura 12/09: os selos saíram da linha do nome, que
                    vivia truncado — "Novos c… 🏆 RECORDE") -->
-                            <div
-                              class="flex items-end justify-between gap-2 flex-wrap"
-                            >
-                              <p
-                                class="font-bold tabular-nums tracking-tight leading-none"
-                                :class="tile.big ? 'text-5xl' : 'text-3xl'"
-                              >
-                                {{ tile.value }}
-                              </p>
                               <div
-                                class="flex items-center gap-1 flex-wrap justify-end"
+                                class="flex items-end justify-between gap-2 flex-wrap"
                               >
-                                <span
-                                  v-if="tileVisual(tile).isRecord"
-                                  class="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-300 text-amber-900"
-                                  title="Melhor resultado já registrado neste tipo de período"
-                                  >🏆 RECORDE</span>
-                                <span
-                                  v-else-if="tileVisual(tile).status === 'meta'"
-                                  class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/25"
-                                  title="Meta batida"
-                                  >✓ META</span>
-                                <span
-                                  v-else-if="tileVisual(tile).status === 'bad'"
-                                  class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/25"
-                                  title="Muito abaixo do ritmo da meta"
-                                  >⚠️</span>
-                                <span
-                                  v-if="tileTrend(tile)"
-                                  class="text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums"
-                                  :class="
-                                    tileTrend(tile).up
-                                      ? 'bg-white/25'
-                                      : 'bg-black/20'
-                                  "
-                                  :title="tileTrend(tile).title"
-                                  >{{ tileTrend(tile).text }}</span>
-                              </div>
-                            </div>
-                            <span
-                              v-if="tile.chip"
-                              class="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20"
-                              >{{ tile.chip.label }}</span>
-                            <template v-if="tile.sub">
-                              <!-- linhas curtas propositais: nada de frase quebrando no meio -->
-                              <p
-                                class="text-[11px] text-white/75 truncate mt-1"
-                              >
-                                {{ tile.sub }}
-                              </p>
-                              <p
-                                v-if="tile.sub2"
-                                class="text-[11px] text-white/80 truncate"
-                              >
-                                {{ tile.sub2 }}
-                              </p>
-                              <p
-                                v-if="tile.sub3"
-                                class="text-[11px] text-white/80 truncate"
-                              >
-                                {{ tile.sub3 }}
-                              </p>
-                            </template>
-                            <!-- ✨ sparkline: a forma do período num relance (mesma série do
-                   gráfico do popup; some quando não há série ou movimento) -->
-                            <!-- item 239: card GRANDE = resumo do indicador (o
-                   gráfico do popup, pico/média e as primeiras linhas) -->
-                            <template v-if="tile.big && tileBigSummary(tile)">
-                              <div v-if="tileBigSummary(tile).hasData" class="mt-3">
-                                <TileLine
-                                  :values="tileBigSummary(tile).values"
-                                  :labels="tileBigSummary(tile).labels"
-                                  :prev-values="tileBigSummary(tile).prevValues"
-                                  :format="tileBigSummary(tile).format"
-                                  :height="124"
-                                />
-                                <p class="text-[10px] text-white/80 mt-1 truncate">
-                                  ✨ {{ tileBigSummary(tile).peakText }}
-                                </p>
-                              </div>
-                              <div
-                                v-if="tileBigSummary(tile).details.length"
-                                class="mt-2 space-y-1"
-                              >
-                                <div
-                                  v-for="(row, ri) in tileBigSummary(tile)
-                                    .details"
-                                  :key="ri"
-                                  class="flex items-center justify-between gap-3 text-[11px] rounded-lg bg-white/15 px-2.5 py-1"
+                                <p
+                                  class="font-bold tabular-nums tracking-tight leading-none"
+                                  :class="tile.big ? 'text-5xl' : 'text-3xl'"
                                 >
-                                  <span class="text-white/80 truncate">{{
-                                    row.label
-                                  }}</span>
-                                  <b class="tabular-nums truncate">{{
-                                    row.value
-                                  }}</b>
+                                  {{ tile.value }}
+                                </p>
+                                <div
+                                  class="flex items-center gap-1 flex-wrap justify-end"
+                                >
+                                  <span
+                                    v-if="tileVisual(tile).isRecord"
+                                    class="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-300 text-amber-900"
+                                    title="Melhor resultado já registrado neste tipo de período"
+                                    >🏆 RECORDE</span
+                                  >
+                                  <span
+                                    v-else-if="
+                                      tileVisual(tile).status === 'meta'
+                                    "
+                                    class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/25"
+                                    title="Meta batida"
+                                    >✓ META</span
+                                  >
+                                  <span
+                                    v-else-if="
+                                      tileVisual(tile).status === 'bad'
+                                    "
+                                    class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/25"
+                                    title="Muito abaixo do ritmo da meta"
+                                    >⚠️</span
+                                  >
+                                  <span
+                                    v-if="tileTrend(tile)"
+                                    class="text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums"
+                                    :class="
+                                      tileTrend(tile).up
+                                        ? 'bg-white/25'
+                                        : 'bg-black/20'
+                                    "
+                                    :title="tileTrend(tile).title"
+                                    >{{ tileTrend(tile).text }}</span
+                                  >
                                 </div>
                               </div>
-                              <button
-                                v-if="
-                                  !organizeMode &&
-                                  (tile.details?.length || tile.about)
-                                "
-                                class="mt-auto pt-2 self-start text-[11px] font-semibold text-white/85 hover:text-white flex items-center gap-1"
-                                @click.stop="openKpi(tile)"
+                              <span
+                                v-if="tile.chip"
+                                class="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20"
+                                >{{ tile.chip.label }}</span
                               >
-                                ver tudo
-                                <span class="i-lucide-arrow-right text-[11px]" />
-                              </button>
-                            </template>
-                            <!-- item 248: selo da MÉDIA HISTÓRICA (90 dias) -->
-                            <span
-                              v-if="tileHist(tile) && tileHist(tile).dir !== 'flat'"
-                              class="self-start mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full"
-                              :class="tileHist(tile).dir === 'up' ? 'bg-white/25' : 'bg-black/25'"
-                              :title="tileHist(tile).title"
-                              >{{ tileHist(tile).text }}</span>
-                            <svg
-                              v-if="!tile.big && tileSpark(tile)"
-                              class="w-full mt-auto pt-2"
-                              viewBox="0 0 100 24"
-                              preserveAspectRatio="none"
-                              style="height: 24px"
-                              aria-hidden="true"
-                            >
-                              <polygon
-                                :points="tileSpark(tile).area"
-                                fill="rgba(255,255,255,0.18)"
-                              />
-                              <polyline
-                                :points="tileSpark(tile).line"
-                                fill="none"
-                                stroke="rgba(255,255,255,0.85)"
-                                stroke-width="1.6"
-                                stroke-linejoin="round"
-                                stroke-linecap="round"
-                                vector-effect="non-scaling-stroke"
-                              />
-                            </svg>
-                            <!-- medidor da meta (aparece quando o admin definiu meta) -->
-                            <div
-                              v-if="tileVisual(tile).ratio !== null"
-                              class="mt-2"
-                            >
+                              <template v-if="tile.sub">
+                                <!-- linhas curtas propositais: nada de frase quebrando no meio -->
+                                <p
+                                  class="text-[11px] text-white/75 truncate mt-1"
+                                >
+                                  {{ tile.sub }}
+                                </p>
+                                <p
+                                  v-if="tile.sub2"
+                                  class="text-[11px] text-white/80 truncate"
+                                >
+                                  {{ tile.sub2 }}
+                                </p>
+                                <p
+                                  v-if="tile.sub3"
+                                  class="text-[11px] text-white/80 truncate"
+                                >
+                                  {{ tile.sub3 }}
+                                </p>
+                              </template>
+                              <!-- ✨ sparkline: a forma do período num relance (mesma série do
+                   gráfico do popup; some quando não há série ou movimento) -->
+                              <!-- item 239: card GRANDE = resumo do indicador (o
+                   gráfico do popup, pico/média e as primeiras linhas) -->
+                              <template v-if="tile.big && tileBigSummary(tile)">
+                                <div
+                                  v-if="tileBigSummary(tile).hasData"
+                                  class="mt-3"
+                                >
+                                  <TileLine
+                                    :values="tileBigSummary(tile).values"
+                                    :labels="tileBigSummary(tile).labels"
+                                    :prev-values="
+                                      tileBigSummary(tile).prevValues
+                                    "
+                                    :format="tileBigSummary(tile).format"
+                                    :height="124"
+                                    :trend="trendOn"
+                                    :granularity="
+                                      tileBigSummary(tile).granularity
+                                    "
+                                  />
+                                  <p
+                                    class="text-[10px] text-white/80 mt-1 truncate"
+                                  >
+                                    ✨ {{ tileBigSummary(tile).peakText }}
+                                  </p>
+                                  <p
+                                    v-if="tileBigSummary(tile).trendWords"
+                                    class="text-[10px] text-white/90 mt-0.5 truncate font-semibold"
+                                  >
+                                    📈 tendência:
+                                    {{ tileBigSummary(tile).trendWords.text }}
+                                  </p>
+                                </div>
+                                <div
+                                  v-if="tileBigSummary(tile).details.length"
+                                  class="mt-2 space-y-1"
+                                >
+                                  <div
+                                    v-for="(row, ri) in tileBigSummary(tile)
+                                      .details"
+                                    :key="ri"
+                                    class="flex items-center justify-between gap-3 text-[11px] rounded-lg bg-white/15 px-2.5 py-1"
+                                  >
+                                    <span class="text-white/80 truncate">{{
+                                      row.label
+                                    }}</span>
+                                    <b class="tabular-nums truncate">{{
+                                      row.value
+                                    }}</b>
+                                  </div>
+                                </div>
+                                <button
+                                  v-if="
+                                    !organizeMode &&
+                                    (tile.details?.length || tile.about)
+                                  "
+                                  class="mt-auto pt-2 self-start text-[11px] font-semibold text-white/85 hover:text-white flex items-center gap-1"
+                                  @click.stop="openKpi(tile)"
+                                >
+                                  ver tudo
+                                  <span
+                                    class="i-lucide-arrow-right text-[11px]"
+                                  />
+                                </button>
+                              </template>
+                              <!-- item 248: selo da MÉDIA HISTÓRICA (90 dias) -->
+                              <span
+                                v-if="
+                                  tileHist(tile) &&
+                                  tileHist(tile).dir !== 'flat'
+                                "
+                                class="self-start mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                :class="
+                                  tileHist(tile).dir === 'up'
+                                    ? 'bg-white/25'
+                                    : 'bg-black/25'
+                                "
+                                :title="tileHist(tile).title"
+                                >{{ tileHist(tile).text }}</span
+                              >
+                              <svg
+                                v-if="!tile.big && tileSpark(tile)"
+                                class="w-full mt-auto pt-2"
+                                viewBox="0 0 100 24"
+                                preserveAspectRatio="none"
+                                style="height: 24px"
+                                aria-hidden="true"
+                              >
+                                <polygon
+                                  :points="tileSpark(tile).area"
+                                  fill="rgba(255,255,255,0.18)"
+                                />
+                                <line
+                                  v-if="tileSpark(tile).avgY !== null"
+                                  x1="0"
+                                  x2="100"
+                                  :y1="tileSpark(tile).avgY"
+                                  :y2="tileSpark(tile).avgY"
+                                  stroke="rgba(255,255,255,0.7)"
+                                  stroke-width="1"
+                                  stroke-dasharray="3 3"
+                                  vector-effect="non-scaling-stroke"
+                                />
+                                <polyline
+                                  :points="tileSpark(tile).line"
+                                  fill="none"
+                                  stroke="rgba(255,255,255,0.85)"
+                                  stroke-width="1.6"
+                                  stroke-linejoin="round"
+                                  stroke-linecap="round"
+                                  vector-effect="non-scaling-stroke"
+                                />
+                                <!-- item 266: reta de tendência (amarela, sólida) -->
+                                <line
+                                  v-if="tileSpark(tile).trend"
+                                  :x1="tileSpark(tile).trend.x1"
+                                  :y1="tileSpark(tile).trend.y1"
+                                  :x2="tileSpark(tile).trend.x2"
+                                  :y2="tileSpark(tile).trend.y2"
+                                  stroke="#FFE08A"
+                                  stroke-width="1.8"
+                                  stroke-linecap="round"
+                                  vector-effect="non-scaling-stroke"
+                                />
+                              </svg>
+                              <!-- medidor da meta (aparece quando o admin definiu meta) -->
                               <div
-                                class="h-1.5 rounded-full bg-black/20 overflow-hidden"
+                                v-if="tileVisual(tile).ratio !== null"
+                                class="mt-2"
                               >
                                 <div
-                                  class="h-full rounded-full bg-white/85 transition-all duration-700"
-                                  :style="{
-                                    width:
-                                      Math.min(
-                                        100,
-                                        Math.round(tileVisual(tile).ratio * 100)
-                                      ) + '%',
-                                  }"
-                                />
+                                  class="h-1.5 rounded-full bg-black/20 overflow-hidden"
+                                >
+                                  <div
+                                    class="h-full rounded-full bg-white/85 transition-all duration-700"
+                                    :style="{
+                                      width:
+                                        Math.min(
+                                          100,
+                                          Math.round(
+                                            tileVisual(tile).ratio * 100
+                                          )
+                                        ) + '%',
+                                    }"
+                                  />
+                                </div>
+                                <p class="text-[9px] text-white/70 mt-0.5">
+                                  {{
+                                    Math.round(tileVisual(tile).ratio * 100)
+                                  }}% do ritmo da meta
+                                  <template v-if="!tile.pct">
+                                    · esperado
+                                    {{ Math.ceil(tileVisual(tile).expected) }}
+                                  </template>
+                                </p>
                               </div>
-                              <p class="text-[9px] text-white/70 mt-0.5">
-                                {{ Math.round(tileVisual(tile).ratio * 100) }}%
-                                do ritmo da meta
-                                <template v-if="!tile.pct">
-                                  · esperado
-                                  {{ Math.ceil(tileVisual(tile).expected) }}
-                                </template>
-                              </p>
                             </div>
                           </div>
-                        </div>
+                        </template>
                       </template>
+                    </MagnetBoard>
 
-                      <!-- ➕ card novo (admin, item 141) — o modo edição agora liga no
-               botão "Modo edição" do topo (item 143) -->
-                      <template #footer>
-                        <div
-                          v-if="isAdmin && !currentPanel.custom"
-                          class="cv-tile-add flex flex-col items-stretch justify-center p-3 min-h-[120px]"
+                    <!-- ➕ card novo (admin, item 141) — o modo edição agora liga no
+               botão "Modo edição" do topo (item 143); fica abaixo do ímã -->
+                    <div
+                      v-if="isAdmin && !currentPanel.custom"
+                      class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4"
+                    >
+                      <div
+                        class="cv-tile-add flex flex-col items-stretch justify-center p-3 min-h-[120px]"
+                      >
+                        <button
+                          class="flex-1 rounded-xl transition-colors flex flex-col items-center justify-center gap-0.5 py-2"
+                          title="Criar um card de indicador: indicador pronto, fórmula (ex.: agendamentos / leads) e cor"
+                          @click="openKpiBuilder(null)"
                         >
-                          <button
-                            class="flex-1 rounded-xl transition-colors flex flex-col items-center justify-center gap-0.5 py-2"
-                            title="Criar um card de indicador: indicador pronto, fórmula (ex.: agendamentos / leads) e cor"
-                            @click="openKpiBuilder(null)"
+                          <span class="i-lucide-plus text-2xl" />
+                          <span class="text-xs font-medium"
+                            >Novo indicador</span
                           >
-                            <span class="i-lucide-plus text-2xl" />
-                            <span class="text-xs font-medium">Novo indicador</span>
-                          </button>
-                          <!-- item 239: espaço vazio para organizar a fileira -->
-                          <button
-                            v-if="organizeMode"
-                            class="mt-1 rounded-lg py-1 text-[11px] font-medium flex items-center justify-center gap-1 opacity-80 hover:opacity-100"
-                            title="Um quadrado vazio, que você arrasta para onde quiser (só aparece no modo edição)"
-                            @click="addSpacer"
-                          >
-                            <span class="i-lucide-square-dashed text-xs" />
-                            espaço vazio
-                          </button>
-                        </div>
-                      </template>
-                    </draggable>
+                        </button>
+                        <!-- item 239: espaço vazio para organizar a fileira -->
+                        <button
+                          v-if="organizeMode"
+                          class="mt-1 rounded-lg py-1 text-[11px] font-medium flex items-center justify-center gap-1 opacity-80 hover:opacity-100"
+                          title="Um quadrado vazio, que você arrasta para onde quiser (só aparece no modo edição)"
+                          @click="addSpacer"
+                        >
+                          <span class="i-lucide-square-dashed text-xs" />
+                          espaço vazio
+                        </button>
+                      </div>
+                    </div>
 
                     <!-- Linha de destaque do painel -->
                     <div
@@ -5364,11 +5934,14 @@ class="text-xs"/></span>
                             : 'Meu desempenho'
                         }}
                       </h2>
-                      <span class="cv-chip">velocidades no horário comercial · 08h–17h</span>
+                      <span class="cv-chip"
+                        >velocidades no horário comercial · 08h–17h</span
+                      >
                       <span
                         v-if="perf?.previous?.label"
                         class="text-[10px] text-n-slate-9 ml-auto"
-                        >setinhas comparam com {{ perf.previous.label }}</span>
+                        >setinhas comparam com {{ perf.previous.label }}</span
+                      >
                     </div>
 
                     <div
@@ -5389,7 +5962,9 @@ class="text-xs"/></span>
                           <p class="text-sm font-bold text-n-slate-12 flex-1">
                             {{ col.title }}
                           </p>
-                          <span class="text-[10px] text-n-slate-10">{{ col.row.messages_sent }} mensagens</span>
+                          <span class="text-[10px] text-n-slate-10"
+                            >{{ col.row.messages_sent }} mensagens</span
+                          >
                         </div>
 
                         <div
@@ -5411,7 +5986,8 @@ class="text-xs"/></span>
                                 class="text-[10px] font-bold"
                                 :title="'antes: ' + t.delta.prev"
                                 :style="{ color: t.delta.color }"
-                                >{{ t.delta.arrow }}</span>
+                                >{{ t.delta.arrow }}</span
+                              >
                             </p>
                             <p class="text-[10px] text-n-slate-10">
                               {{ t.label }}
@@ -5435,7 +6011,8 @@ class="text-xs"/></span>
                               · respondeu em
                               <b class="text-n-slate-12">{{
                                 perfFmtMin(col.row.radar_avg_response_min)
-                              }}</b></template>
+                              }}</b></template
+                            >
                           </span>
                           <span
                             v-if="col.row.workday"
@@ -5489,7 +6066,8 @@ class="text-xs"/></span>
                               >:
                               {{
                                 col.row.off_hours.days.slice(0, 3).join(' · ')
-                              }}</template>
+                              }}</template
+                            >
                           </span>
                         </div>
                       </div>
@@ -5512,7 +6090,9 @@ class="text-xs"/></span>
                         <h2 class="text-sm font-bold text-n-slate-12">
                           Dashboard da Agenda
                         </h2>
-                        <span class="text-[10px] text-n-slate-9">segue o período escolhido acima</span>
+                        <span class="text-[10px] text-n-slate-9"
+                          >segue o período escolhido acima</span
+                        >
                       </div>
                       <button
                         class="cv-btn cv-btn-ghost cv-btn-sm"
@@ -5576,9 +6156,15 @@ class="text-xs"/></span>
                           <div
                             class="flex items-center justify-between text-xs mb-1.5"
                           >
-                            <span class="text-n-slate-11">Agenda cheia
-                              <span class="text-n-slate-9">(próx. 7 dias)</span></span>
-                            <span class="font-bold text-base text-n-slate-12">{{ fillNext7.pct }}%</span>
+                            <span class="text-n-slate-11"
+                              >Agenda cheia
+                              <span class="text-n-slate-9"
+                                >(próx. 7 dias)</span
+                              ></span
+                            >
+                            <span class="font-bold text-base text-n-slate-12"
+                              >{{ fillNext7.pct }}%</span
+                            >
                           </div>
                           <div class="cv-track">
                             <div
@@ -5597,9 +6183,15 @@ class="text-xs"/></span>
                           <div
                             class="flex items-center justify-between text-xs mb-1.5"
                           >
-                            <span class="text-n-slate-11">Aproveitamento
-                              <span class="text-n-slate-9">(últimos 7 dias)</span></span>
-                            <span class="font-bold text-base text-n-slate-12">{{ usageLast7.pct }}%</span>
+                            <span class="text-n-slate-11"
+                              >Aproveitamento
+                              <span class="text-n-slate-9"
+                                >(últimos 7 dias)</span
+                              ></span
+                            >
+                            <span class="font-bold text-base text-n-slate-12"
+                              >{{ usageLast7.pct }}%</span
+                            >
                           </div>
                           <div class="cv-track">
                             <div
@@ -5617,8 +6209,12 @@ class="text-xs"/></span>
                           <div
                             class="flex items-center justify-between text-xs mb-1.5"
                           >
-                            <span class="text-n-slate-11">Comparecimento
-                              <span class="text-n-slate-9">(30 dias)</span></span>
+                            <span class="text-n-slate-11"
+                              >Comparecimento
+                              <span class="text-n-slate-9"
+                                >(30 dias)</span
+                              ></span
+                            >
                             <span class="font-bold text-base text-n-slate-12">{{
                               attendance === null ? '—' : attendance + '%'
                             }}</span>
@@ -5692,14 +6288,20 @@ class="text-xs"/></span>
                             style="color: var(--cv)"
                           />
                           Agenda de Cirurgias
-                          <span class="text-[10px] font-normal text-n-slate-9">sala cirúrgica (IOP, Ocular Surgery...)</span>
+                          <span class="text-[10px] font-normal text-n-slate-9"
+                            >sala cirúrgica (IOP, Ocular Surgery...)</span
+                          >
                         </p>
                         <div>
                           <div
                             class="flex items-center justify-between text-xs mb-1.5"
                           >
-                            <span class="text-n-slate-11">Sala cheia
-                              <span class="text-n-slate-9">(próx. 7 dias)</span></span>
+                            <span class="text-n-slate-11"
+                              >Sala cheia
+                              <span class="text-n-slate-9"
+                                >(próx. 7 dias)</span
+                              ></span
+                            >
                             <span class="font-bold text-base text-n-slate-12">{{
                               surgFillNext7.total
                                 ? surgFillNext7.pct + '%'
@@ -5726,8 +6328,12 @@ class="text-xs"/></span>
                           <div
                             class="flex items-center justify-between text-xs mb-1.5"
                           >
-                            <span class="text-n-slate-11">Aproveitamento
-                              <span class="text-n-slate-9">(últimos 7 dias)</span></span>
+                            <span class="text-n-slate-11"
+                              >Aproveitamento
+                              <span class="text-n-slate-9"
+                                >(últimos 7 dias)</span
+                              ></span
+                            >
                             <span class="font-bold text-base text-n-slate-12">{{
                               surgUsageLast7.total
                                 ? surgUsageLast7.pct + '%'
@@ -5757,9 +6363,14 @@ class="text-xs"/></span>
                                 class="i-lucide-target text-xs"
                                 style="color: var(--cv)"
                               />Meta do mês
-                              <span class="text-n-slate-9">({{ surgeryGoalTarget }} cirurgias)</span></span>
-                            <span class="font-bold text-base text-n-slate-12">{{ surgeriesDoneMonth }} de
-                              {{ surgeryGoalTarget }}</span>
+                              <span class="text-n-slate-9"
+                                >({{ surgeryGoalTarget }} cirurgias)</span
+                              ></span
+                            >
+                            <span class="font-bold text-base text-n-slate-12"
+                              >{{ surgeriesDoneMonth }} de
+                              {{ surgeryGoalTarget }}</span
+                            >
                           </div>
                           <div class="cv-track">
                             <div
@@ -5831,7 +6442,9 @@ class="text-xs"/></span>
                             <span class="text-n-slate-10 truncate">{{
                               g.label
                             }}</span>
-                            <b class="text-n-slate-12">{{ g.current }}/{{ g.target }}</b>
+                            <b class="text-n-slate-12"
+                              >{{ g.current }}/{{ g.target }}</b
+                            >
                           </div>
                           <div class="cv-track cv-track-sm">
                             <div
@@ -5946,11 +6559,15 @@ class="text-xs"/></span>
                   <div
                     class="cv-block cv-strip flex flex-wrap items-center gap-2 px-3 py-2 mb-4"
                   >
-                    <span class="cv-icon cv-icon-sm"><span class="i-lucide-thermometer text-xs"/></span>
-                    <span class="cv-chip"><span class="i-lucide-inbox text-xs" />{{
+                    <span class="cv-icon cv-icon-sm"
+                      ><span class="i-lucide-thermometer text-xs"
+                    /></span>
+                    <span class="cv-chip"
+                      ><span class="i-lucide-inbox text-xs" />{{
                         data.open_conversations ?? 0
                       }}
-                      conversas abertas agora</span>
+                      conversas abertas agora</span
+                    >
                     <span
                       class="cv-chip"
                       :class="(data.unanswered ?? 0) > 0 ? 'cv-amber' : ''"
@@ -5960,16 +6577,18 @@ class="text-xs"/></span>
                       }}
                       aguardando resposta
                     </span>
-                    <span class="cv-chip"><span class="i-lucide-calendar-check text-xs" />{{
+                    <span class="cv-chip"
+                      ><span class="i-lucide-calendar-check text-xs" />{{
                         data.appointments_today ?? 0
                       }}
-                      consultas hoje</span>
+                      consultas hoje</span
+                    >
                   </div>
                 </template>
               </template>
             </section>
           </template>
-        </draggable>
+        </MagnetBoard>
       </template>
 
       <!-- Admin: quem vê qual painel -->
@@ -5982,7 +6601,8 @@ class="text-xs"/></span>
           <div class="cv-modal-head flex items-center gap-3">
             <span
               class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
-              ><span class="i-lucide-settings-2 text-base"/></span>
+              ><span class="i-lucide-settings-2 text-base"
+            /></span>
             <div class="flex-1 min-w-0">
               <h2 class="text-base font-bold leading-tight">
                 Painel de cada pessoa
@@ -6052,7 +6672,8 @@ class="text-xs"/></span>
           <div class="cv-modal-head flex items-center gap-3">
             <span
               class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
-              ><span class="i-lucide-user-plus text-base"/></span>
+              ><span class="i-lucide-user-plus text-base"
+            /></span>
             <div class="flex-1 min-w-0">
               <h2 class="text-base font-bold leading-tight">
                 {{
@@ -6114,7 +6735,8 @@ class="text-xs"/></span>
                 <span
                   v-if="!teamAgents.length"
                   class="text-[11px] text-n-slate-9"
-                  >carregando o time…</span>
+                  >carregando o time…</span
+                >
               </div>
               <p class="text-[10px] text-n-slate-9 mt-1.5">
                 Quem está na lista fica travado neste painel (dá pra mudar
@@ -6179,7 +6801,8 @@ class="text-xs"/></span>
           <div class="cv-modal-head flex items-center gap-3">
             <span
               class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
-              ><span class="i-lucide-target text-base"/></span>
+              ><span class="i-lucide-target text-base"
+            /></span>
             <div class="flex-1 min-w-0">
               <h3 class="text-base font-bold leading-tight">
                 Metas — {{ currentPanel.label }}
@@ -6297,7 +6920,8 @@ class="text-xs"/></span>
                 <span
                   class="text-sm font-bold"
                   :class="modalDelta.up ? 'text-emerald-200' : 'text-red-200'"
-                  >{{ modalDelta.text }}</span>
+                  >{{ modalDelta.text }}</span
+                >
                 <span class="text-[10px] text-white/75">{{
                   modalDelta.sub
                 }}</span>
@@ -6347,6 +6971,8 @@ class="text-xs"/></span>
                       : null
                   "
                   :format="chartFormat(kpiModal)"
+                  :trend="trendOn && !modalChart.compare"
+                  :granularity="modalBag?.granularity || 'day'"
                 />
               </div>
               <!-- recorte sem nenhum movimento: fala com a pessoa em vez do vazio -->
@@ -6394,10 +7020,41 @@ class="text-xs"/></span>
                         : 'dia'
                   }}
                 </span>
-                <span v-if="modalMarkers.length"
-class="flex items-center gap-1"
-                  >📌 ação da empresa</span>
+                <span v-if="modalMarkers.length" class="flex items-center gap-1"
+                  >📌 ação da empresa</span
+                >
+                <!-- item 266: a linha de tendência liga e desliga aqui mesmo -->
+                <button
+                  class="cv-chip !h-6 !text-[10px] ml-auto"
+                  :class="trendOn ? 'cv-chip-on' : ''"
+                  title="Linha de tendência: reta que mostra para onde o indicador está indo (regressão sobre os dias com valor)"
+                  @click="toggleTrend"
+                >
+                  <span class="i-lucide-trending-up text-[10px]" />
+                  tendência {{ trendOn ? 'ligada' : 'desligada' }}
+                </button>
               </div>
+              <p
+                v-if="trendOn && modalTrendWords"
+                class="text-[11px] mt-1.5 flex items-start gap-1.5 leading-snug font-semibold"
+                :style="{
+                  color:
+                    modalTrendWords.dir > 0
+                      ? '#059669'
+                      : modalTrendWords.dir < 0
+                        ? '#DC2626'
+                        : '#64748B',
+                }"
+              >
+                <span
+                  class="i-lucide-trending-up text-xs mt-0.5 flex-shrink-0"
+                />
+                <span
+                  >tendência: {{ modalTrendWords.text }} — reta traçada sobre os
+                  {{ modalChart.values.filter(v => v > 0).length }} baldes com
+                  valor</span
+                >
+              </p>
               <!-- 💡 o gráfico lido em uma frase: pico, média e total — quem
                  não lê gráfico entende o período mesmo assim -->
               <p
@@ -6418,7 +7075,9 @@ class="flex items-center gap-1"
                 style="border-top: 1px solid rgb(var(--cv-rgb) / 0.18)"
               >
                 <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0">Período</span>
+                  <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0"
+                    >Período</span
+                  >
                   <span class="cv-seg cv-seg-sm flex-wrap">
                     <button
                       v-for="p in MODAL_PRESETS"
@@ -6432,7 +7091,9 @@ class="flex items-center gap-1"
                   </span>
                 </div>
                 <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0">Ver por</span>
+                  <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0"
+                    >Ver por</span
+                  >
                   <span class="cv-seg cv-seg-sm flex-wrap">
                     <button
                       v-for="g in MODAL_GRAINS"
@@ -6455,7 +7116,9 @@ class="flex items-center gap-1"
             >
               <p class="text-[11px] font-medium text-n-slate-11">
                 🧩 De onde vem este número
-                <span class="font-normal text-n-slate-9">· {{ modalRangeLabel }}</span>
+                <span class="font-normal text-n-slate-9"
+                  >· {{ modalRangeLabel }}</span
+                >
               </p>
               <div v-for="comp in modalComponents" :key="comp.key">
                 <div
@@ -6484,7 +7147,9 @@ class="flex items-center gap-1"
             >
               <p class="text-[11px] font-medium text-n-slate-11">
                 🏥 Por unidade
-                <span class="font-normal text-n-slate-9">· consultas e comparecimento do período</span>
+                <span class="font-normal text-n-slate-9"
+                  >· consultas e comparecimento do período</span
+                >
               </p>
               <div
                 v-for="u in kpiModal.units"
@@ -6547,7 +7212,10 @@ class="flex items-center gap-1"
               class="cv-sub px-3 py-2"
             >
               <p class="text-[11px] font-medium text-n-slate-11 mb-1">
-                {{ kpiModal.compareInboxesTitle || '📥 Leads por caixa de entrada' }}
+                {{
+                  kpiModal.compareInboxesTitle ||
+                  '📥 Leads por caixa de entrada'
+                }}
               </p>
               <MiniBars
                 :values="kpiModal.compareInboxes.map(i => i.value)"
@@ -6616,8 +7284,7 @@ class="flex items-center gap-1"
         >
           <span
             class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
-            ><span :class="kpiIcon(kpiBuilder)"
-class="text-lg"
+            ><span :class="kpiIcon(kpiBuilder)" class="text-lg"
           /></span>
           <div class="flex-1 min-w-0">
             <p class="text-sm font-bold">
@@ -6715,7 +7382,9 @@ class="text-lg"
                 Montar fórmula
               </button>
             </span>
-            <span class="text-[10px] text-n-slate-9 ml-1">os números abaixo são do período da régua</span>
+            <span class="text-[10px] text-n-slate-9 ml-1"
+              >os números abaixo são do período da régua</span
+            >
           </div>
 
           <!-- indicadores prontos: primeiro as TAXAS já formuladas por
@@ -6740,7 +7409,11 @@ class="text-lg"
                     if (!kpiBuilder.label) kpiBuilder.label = m.label;
                   "
                 >
-                  <span class="truncate flex items-center gap-1.5"><span :class="m.icon" class="text-xs shrink-0" />{{ m.label }}</span><b class="whitespace-nowrap">{{ m.value }}</b>
+                  <span class="truncate flex items-center gap-1.5"
+                    ><span :class="m.icon" class="text-xs shrink-0" />{{
+                      m.label
+                    }}</span
+                  ><b class="whitespace-nowrap">{{ m.value }}</b>
                 </button>
               </div>
             </div>
@@ -6760,7 +7433,8 @@ class="text-lg"
                   :title="f.note"
                   @click="applyReadyFormula(f)"
                 >
-                  <span class="truncate">{{ f.label }}</span><b class="whitespace-nowrap">{{ f.value }}</b>
+                  <span class="truncate">{{ f.label }}</span
+                  ><b class="whitespace-nowrap">{{ f.value }}</b>
                 </button>
               </div>
             </div>
@@ -6779,7 +7453,8 @@ class="text-lg"
                     if (!kpiBuilder.label) kpiBuilder.label = m.label;
                   "
                 >
-                  <span class="truncate">{{ m.label }}</span><b class="whitespace-nowrap">{{ m.value }}</b>
+                  <span class="truncate">{{ m.label }}</span
+                  ><b class="whitespace-nowrap">{{ m.value }}</b>
                 </button>
               </div>
             </div>
@@ -6789,8 +7464,8 @@ class="text-lg"
                SEUS indicadores + operações; lê-se em português embaixo -->
           <div v-else class="space-y-2">
             <p class="text-[11px] text-n-slate-10">
-              Clique nos blocos para montar a conta, ou escreva à vontade (números
-              também valem, ex.: <b>÷ 2</b> ou <b>× 100</b>).
+              Clique nos blocos para montar a conta, ou escreva à vontade
+              (números também valem, ex.: <b>÷ 2</b> ou <b>× 100</b>).
             </p>
             <div
               v-if="kpiBuilder.expr"
@@ -6999,22 +7674,45 @@ class="text-lg"
     >
       <div class="cv-modal w-full max-w-3xl max-h-[90vh] flex flex-col">
         <div class="cv-modal-head !p-5 flex items-center gap-3">
-          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-layout-template text-lg" /></span>
+          <span
+            class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
+            ><span class="i-lucide-layout-template text-lg"
+          /></span>
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-bold">Modelos prontos · {{ currentPanel.label }}</p>
-            <p class="text-[11px] text-white/80">nossos indicadores já montados, com cores das paletas e a média histórica ligada — os cards de agora ficam ocultos (voltam pelos chips)</p>
+            <p class="text-sm font-bold">
+              Modelos prontos · {{ currentPanel.label }}
+            </p>
+            <p class="text-[11px] text-white/80">
+              nossos indicadores já montados, com cores das paletas e a média
+              histórica ligada — os cards de agora ficam ocultos (voltam pelos
+              chips)
+            </p>
           </div>
-          <button class="cv-glass-btn cv-iconbtn" @click="showPresets = false"><span class="i-lucide-x text-sm" /></button>
+          <button class="cv-glass-btn cv-iconbtn" @click="showPresets = false">
+            <span class="i-lucide-x text-sm" />
+          </button>
         </div>
         <div class="p-5 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div v-for="pr in panelPresets" :key="pr.key" class="cv-ag-block p-4 flex flex-col gap-3">
+          <div
+            v-for="pr in panelPresets"
+            :key="pr.key"
+            class="cv-ag-block p-4 flex flex-col gap-3"
+          >
             <div class="flex items-center gap-2">
               <span class="text-lg">{{ pr.emoji }}</span>
               <p class="cv-ag-block-title flex-1">{{ pr.label }}</p>
-              <span v-if="currentPreset && currentPreset.key === pr.key" class="cv-chip cv-green">em uso</span>
-              <span v-else-if="!pr.panels.includes(panelBase)" class="cv-chip">de outro painel</span>
+              <span
+                v-if="currentPreset && currentPreset.key === pr.key"
+                class="cv-chip cv-green"
+                >em uso</span
+              >
+              <span v-else-if="!pr.panels.includes(panelBase)" class="cv-chip"
+                >de outro painel</span
+              >
             </div>
-            <p class="text-[11px] text-n-slate-10 leading-snug">{{ pr.desc }}</p>
+            <p class="text-[11px] text-n-slate-10 leading-snug">
+              {{ pr.desc }}
+            </p>
             <!-- miniatura da grade: 4 colunas, grande = 2×2 -->
             <div class="grid grid-cols-4 gap-1 auto-rows-[18px]">
               <span
@@ -7022,11 +7720,26 @@ class="text-lg"
                 :key="pr.key + ti"
                 class="rounded-md"
                 :class="t.size === 'lg' ? 'col-span-2 row-span-2' : ''"
-                :style="t.spacer ? { border: '1.5px dashed rgb(148 163 184 / .6)' } : { background: presetSwatch(t) }"
+                :style="
+                  t.spacer
+                    ? { border: '1.5px dashed rgb(148 163 184 / .6)' }
+                    : { background: presetSwatch(t) }
+                "
               />
             </div>
-            <button class="cv-btn cv-btn-sm self-end" :disabled="isApplyingPreset" @click="applyPreset(pr)">
-              <span :class="isApplyingPreset ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-xs" />
+            <button
+              class="cv-btn cv-btn-sm self-end"
+              :disabled="isApplyingPreset"
+              @click="applyPreset(pr)"
+            >
+              <span
+                :class="
+                  isApplyingPreset
+                    ? 'i-lucide-loader-2 animate-spin'
+                    : 'i-lucide-check'
+                "
+                class="text-xs"
+              />
               Usar este modelo
             </button>
           </div>
@@ -7288,16 +8001,24 @@ class="text-lg"
 @keyframes cv-hist-glow {
   0%,
   100% {
-    box-shadow: 0 14px 30px -14px rgba(0, 0, 0, 0.4), 0 0 0 0 rgba(255, 255, 255, 0);
+    box-shadow:
+      0 14px 30px -14px rgba(0, 0, 0, 0.4),
+      0 0 0 0 rgba(255, 255, 255, 0);
   }
   50% {
-    box-shadow: 0 14px 30px -14px rgba(0, 0, 0, 0.4), 0 0 22px 2px rgba(255, 255, 255, 0.35);
+    box-shadow:
+      0 14px 30px -14px rgba(0, 0, 0, 0.4),
+      0 0 22px 2px rgba(255, 255, 255, 0.35);
   }
 }
 .cv-tile-hist-down {
-  box-shadow: inset 0 0 0 2px rgba(251, 191, 36, 0.75), 0 14px 30px -14px rgba(0, 0, 0, 0.4) !important;
+  box-shadow:
+    inset 0 0 0 2px rgba(251, 191, 36, 0.75),
+    0 14px 30px -14px rgba(0, 0, 0, 0.4) !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  .cv-tile-hist-up { animation: none; }
+  .cv-tile-hist-up {
+    animation: none;
+  }
 }
 </style>

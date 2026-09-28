@@ -806,8 +806,16 @@ const scriptVersion = ref('v1');
 const scriptIsV2 = computed(() => scriptVersion.value === 'v2');
 const SCRIPT_VERSION_TABS = [
   // nomes claros (pedido 22/09: "melhorar a nomenclatura para poder testar")
-  { key: 'v1', label: 'Roteiro 1 · Fiel ao N8N', hint: 'estrutura do robô do N8N + regras de 22/09; é o que os atendentes leem' },
-  { key: 'v2', label: '🧪 Roteiro 2 · Otimizado pela análise', hint: 'análise do banco de 22/09 + regras de 22/09; só o Testar agente lê' },
+  {
+    key: 'v1',
+    label: 'Roteiro 1 · Fiel ao N8N',
+    hint: 'estrutura do robô do N8N + regras de 22/09; é o que os atendentes leem',
+  },
+  {
+    key: 'v2',
+    label: '🧪 Roteiro 2 · Otimizado pela análise',
+    hint: 'análise do banco de 22/09 + regras de 22/09; só o Testar agente lê',
+  },
 ];
 const scriptSections = computed(() =>
   scriptIsV2.value
@@ -892,6 +900,45 @@ const instagramInboxNames = agent =>
 const isGeneratingInsights = ref(false);
 // Mentor do Time pontual: gera o feedback dos últimos 7 dias agora
 const isRunningMentor = ref(false);
+// 27/09: papel e responsabilidades de cada pessoa — o Mentor julga cada um pelo papel
+const teamRoles = ref({});
+const teamRolesDirty = ref(false);
+const savingTeamRoles = ref(false);
+watch(
+  () => settings.value?.team_roles,
+  roles => {
+    if (!teamRolesDirty.value)
+      teamRoles.value = JSON.parse(JSON.stringify(roles || {}));
+  },
+  { immediate: true }
+);
+const roleOf = id => {
+  if (!teamRoles.value[id])
+    teamRoles.value[id] = { papel: '', responsabilidades: '' };
+  return teamRoles.value[id];
+};
+const touchTeamRoles = () => {
+  teamRolesDirty.value = true;
+};
+const saveTeamRoles = async () => {
+  savingTeamRoles.value = true;
+  try {
+    await CrmAPI.updateTeamRoles(teamRoles.value);
+    teamRolesDirty.value = false;
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Papéis salvos ✓ — o Mentor usa a partir da próxima rodada.');
+  } catch {
+    useAlert('Não consegui salvar os papéis. Tente de novo.');
+  } finally {
+    savingTeamRoles.value = false;
+  }
+};
+const humanTeam = computed(() =>
+  (teamAgents.value || []).filter(
+    ag => ag.id !== Number(settings.value?.ai_user_id)
+  )
+);
+
 const runMentorNow = async () => {
   if (isRunningMentor.value) return;
   isRunningMentor.value = true;
@@ -1891,7 +1938,11 @@ const openFlow = key => {
 // "Abrir configuração" no mapa chega com ?tab=agentes&agent=<chave>:
 // expande o card certo e desce até ele
 const focusAgent = key => {
-  if (!key || (!aiAgents.value[key] && !['confirmacao', 'nps_survey'].includes(key))) return;
+  if (
+    !key ||
+    (!aiAgents.value[key] && !['confirmacao', 'nps_survey'].includes(key))
+  )
+    return;
   expandedAgents.value = { ...expandedAgents.value, [key]: true };
   nextTick(() => {
     setTimeout(() => {
@@ -1957,22 +2008,33 @@ const usageByAgent = key =>
 const usageDay = ref('');
 const isLoadingUsageDay = ref(false);
 const pad2 = n => String(n).padStart(2, '0');
-const dayKey = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const dayKey = d =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 const usageDayLabel = computed(() => {
   if (!usageDay.value) return '';
   const [y, m, d] = usageDay.value.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
-  const label = dt.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  const label = dt.toLocaleDateString('pt-BR', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+  });
   return label.charAt(0).toUpperCase() + label.slice(1);
 });
 const usageRows = computed(() =>
-  usageDay.value && aiUsage.value?.day ? aiUsage.value.day.by_agent || [] : aiUsage.value?.by_agent || []
+  usageDay.value && aiUsage.value?.day
+    ? aiUsage.value.day.by_agent || []
+    : aiUsage.value?.by_agent || []
 );
-const usageDayTotals = computed(() => (usageDay.value ? aiUsage.value?.day?.totals || null : null));
+const usageDayTotals = computed(() =>
+  usageDay.value ? aiUsage.value?.day?.totals || null : null
+);
 const loadUsage = async () => {
   isLoadingUsageDay.value = true;
   try {
-    const { data } = await CrmAPI.getAiUsage(usageDay.value ? { date: usageDay.value } : {});
+    const { data } = await CrmAPI.getAiUsage(
+      usageDay.value ? { date: usageDay.value } : {}
+    );
     aiUsage.value = data;
   } catch {
     // mantém o que já estava na tela
@@ -1990,7 +2052,9 @@ const yesterdayKey = computed(() => {
   return dayKey(d);
 });
 const shiftUsageDay = delta => {
-  const base = usageDay.value ? new Date(`${usageDay.value}T12:00:00`) : new Date();
+  const base = usageDay.value
+    ? new Date(`${usageDay.value}T12:00:00`)
+    : new Date();
   base.setDate(base.getDate() + delta);
   if (base > new Date()) return;
   setUsageDay(dayKey(base));
@@ -2746,7 +2810,8 @@ const loadAgents = async () => {
         (draft?.reply_delay_seconds ?? real.reply_delay_seconds) || 6,
       hours_start: (draft?.hours_start ?? real.hours_start) || '',
       hours_end: (draft?.hours_end ?? real.hours_end) || '',
-      task_assignee_id: (draft?.task_assignee_id ?? real.task_assignee_id) || '',
+      task_assignee_id:
+        (draft?.task_assignee_id ?? real.task_assignee_id) || '',
       recent_surgery_days:
         draft?.recent_surgery_days ?? real.recent_surgery_days ?? 60,
     };
@@ -3520,7 +3585,8 @@ onUnmounted(() => {
                 <span
                   v-if="!accountLabels.length"
                   class="text-[11px] text-n-slate-9"
-                  >Nenhuma etiqueta cadastrada na conta ainda.</span>
+                  >Nenhuma etiqueta cadastrada na conta ainda.</span
+                >
               </div>
             </div>
           </div>
@@ -3531,15 +3597,18 @@ onUnmounted(() => {
             v-if="isAdmin"
             class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl flex items-center gap-3 flex-wrap"
           >
-            <span class="i-lucide-calendar-check text-base" style="color: #b45309" />
+            <span
+              class="i-lucide-calendar-check text-base"
+              style="color: #b45309"
+            />
             <div class="flex-1 min-w-[220px]">
               <p class="text-sm font-semibold text-n-slate-12">
                 Confirmação e lembretes de consulta
               </p>
               <p class="text-[11px] text-n-slate-10">
-                Mudaram para <b>Agentes de IA → Confirmação de consulta</b>: quantos
-                lembretes quiser (2 dias antes, véspera, no dia…), cada um com
-                modelo por unidade e modo sombra.
+                Mudaram para <b>Agentes de IA → Confirmação de consulta</b>:
+                quantos lembretes quiser (2 dias antes, véspera, no dia…), cada
+                um com modelo por unidade e modo sombra.
               </p>
             </div>
             <button class="cv-btn cv-btn-sm" @click="goToConfirmation">
@@ -3637,14 +3706,16 @@ onUnmounted(() => {
                     Última rodada {{ fmtLogDate(bot.activity.last_run.at) }} ·
                     <template
                       v-if="bot.activity.last_run.status === 'fora_da_janela'"
-                      >fora da janela (não enviou)</template>
+                      >fora da janela (não enviou)</template
+                    >
                     <template
                       v-else-if="
                         bot.activity.last_run.status === 'fora_do_expediente'
                       "
                       >fora do horário de envio ({{
                         followupHoursLabel
-                      }})</template>
+                      }})</template
+                    >
                     <template v-else>
                       {{ bot.activity.last_run.candidates }} conversa(s) na mira
                       ·
@@ -3652,16 +3723,20 @@ onUnmounted(() => {
                         :class="
                           bot.activity.last_run.sent ? 'text-green-600' : ''
                         "
-                        >{{ bot.activity.last_run.sent }} enviada(s)</b>
+                        >{{ bot.activity.last_run.sent }} enviada(s)</b
+                      >
                     </template>
                   </span>
                   <span
                     v-if="reasonLine(bot.activity.last_run)"
                     class="text-n-slate-9"
-                    >{{ reasonLine(bot.activity.last_run) }}</span>
+                    >{{ reasonLine(bot.activity.last_run) }}</span
+                  >
                 </template>
-                <span v-else>Sem rodadas registradas ainda (o registro começa após esta
-                  atualização).</span>
+                <span v-else
+                  >Sem rodadas registradas ainda (o registro começa após esta
+                  atualização).</span
+                >
                 <button
                   v-if="bot.activity?.events?.length"
                   class="text-n-brand font-medium hover:underline"
@@ -3691,9 +3766,11 @@ onUnmounted(() => {
                   <span class="text-n-slate-9 flex-shrink-0">{{
                     fmtLogDate(ev.at)
                   }}</span>
-                  <span class="text-n-slate-11 truncate">{{ ev.contact || 'Contato' }} · conversa #{{
+                  <span class="text-n-slate-11 truncate"
+                    >{{ ev.contact || 'Contato' }} · conversa #{{
                       ev.conversation_id
-                    }}</span>
+                    }}</span
+                  >
                   <span class="text-n-slate-10 truncate">{{
                     ev.type === 'error' ? `erro: ${ev.note}` : ev.note
                   }}</span>
@@ -3777,7 +3854,9 @@ onUnmounted(() => {
             v-if="!aiConfigured"
             class="cv-block cv-strip cv-amber px-4 py-3.5 flex items-center gap-3 flex-wrap"
           >
-            <span class="cv-icon cv-icon-sm"><span class="i-lucide-key-round text-xs"/></span>
+            <span class="cv-icon cv-icon-sm"
+              ><span class="i-lucide-key-round text-xs"
+            /></span>
             <p class="text-xs text-n-slate-11 flex-1 min-w-0">
               A Claude ainda não está conectada. Os agentes ficam prontos, mas
               só funcionam com a chave da API.
@@ -3799,7 +3878,9 @@ onUnmounted(() => {
             :style="blockVars('gasto')"
           >
             <div class="flex items-center gap-3 mb-4">
-              <span class="cv-icon cv-icon-lg"><span class="i-lucide-wallet text-base"/></span>
+              <span class="cv-icon cv-icon-lg"
+                ><span class="i-lucide-wallet text-base"
+              /></span>
               <div class="min-w-0">
                 <p class="text-base font-bold text-n-slate-12 leading-tight">
                   Gasto com os agentes de IA
@@ -3813,7 +3894,11 @@ onUnmounted(() => {
             <!-- 📅 caixa de seleção do dia (23/09): análise de um dia específico -->
             <div class="flex items-center gap-2 flex-wrap mb-4">
               <span class="cv-label">Analisar o dia</span>
-              <button class="cv-btn cv-btn-ghost cv-iconbtn" title="Dia anterior" @click="shiftUsageDay(-1)">
+              <button
+                class="cv-btn cv-btn-ghost cv-iconbtn"
+                title="Dia anterior"
+                @click="shiftUsageDay(-1)"
+              >
                 <span class="i-lucide-chevron-left text-sm" />
               </button>
               <input
@@ -3824,20 +3909,57 @@ onUnmounted(() => {
                 title="Escolha um dia para ver o gasto e a lista por agente daquele dia"
                 @change="setUsageDay($event.target.value)"
               />
-              <button class="cv-btn cv-btn-ghost cv-iconbtn" title="Dia seguinte" :disabled="!usageDay || usageDay >= dayKey(new Date())" @click="shiftUsageDay(1)">
+              <button
+                class="cv-btn cv-btn-ghost cv-iconbtn"
+                title="Dia seguinte"
+                :disabled="!usageDay || usageDay >= dayKey(new Date())"
+                @click="shiftUsageDay(1)"
+              >
                 <span class="i-lucide-chevron-right text-sm" />
               </button>
-              <button class="cv-chip" :class="usageDay === dayKey(new Date()) ? 'cv-chip-on' : ''" @click="setUsageDay(dayKey(new Date()))">Hoje</button>
-              <button class="cv-chip" :class="usageDay === yesterdayKey ? 'cv-chip-on' : ''" @click="setUsageDay(yesterdayKey)">Ontem</button>
+              <button
+                class="cv-chip"
+                :class="usageDay === dayKey(new Date()) ? 'cv-chip-on' : ''"
+                @click="setUsageDay(dayKey(new Date()))"
+              >
+                Hoje
+              </button>
+              <button
+                class="cv-chip"
+                :class="usageDay === yesterdayKey ? 'cv-chip-on' : ''"
+                @click="setUsageDay(yesterdayKey)"
+              >
+                Ontem
+              </button>
               <button v-if="usageDay" class="cv-chip" @click="setUsageDay('')">
                 <span class="i-lucide-x text-[10px]" /> Voltar aos 30 dias
               </button>
-              <span v-if="isLoadingUsageDay" class="i-lucide-loader-2 animate-spin text-xs text-n-slate-9" />
-              <span v-if="usageDayTotals" class="ml-auto text-xs text-n-slate-11">
-                <b class="text-n-slate-12 tabular-nums">{{ fmtUsd(usageDayTotals.cost_usd) }}</b>
-                em {{ usageDayLabel }} · {{ usageDayTotals.calls || 0 }} chamada(s) ·
-                {{ fmtTokens(usageDayTotals.input_tokens) }} entrada · {{ fmtTokens(usageDayTotals.output_tokens) }} saída
-                <span v-if="usageDayTotals.cache_pct !== undefined" :title="'Fatia da entrada que veio do cache (custa 10%). Baixo = o roteiro está sendo pago cheio.'" class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold" :class="usageDayTotals.cache_pct >= 50 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'">{{ usageDayTotals.cache_pct }}% do cache</span>
+              <span
+                v-if="isLoadingUsageDay"
+                class="i-lucide-loader-2 animate-spin text-xs text-n-slate-9"
+              />
+              <span
+                v-if="usageDayTotals"
+                class="ml-auto text-xs text-n-slate-11"
+              >
+                <b class="text-n-slate-12 tabular-nums">{{
+                  fmtUsd(usageDayTotals.cost_usd)
+                }}</b>
+                em {{ usageDayLabel }} ·
+                {{ usageDayTotals.calls || 0 }} chamada(s) ·
+                {{ fmtTokens(usageDayTotals.input_tokens) }} entrada ·
+                {{ fmtTokens(usageDayTotals.output_tokens) }} saída
+                <span
+                  v-if="usageDayTotals.cache_pct !== undefined"
+                  :title="'Fatia da entrada que veio do cache (custa 10%). Baixo = o roteiro está sendo pago cheio.'"
+                  class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+                  :class="
+                    usageDayTotals.cache_pct >= 50
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200'
+                      : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'
+                  "
+                  >{{ usageDayTotals.cache_pct }}% do cache</span
+                >
               </span>
             </div>
 
@@ -3860,7 +3982,9 @@ onUnmounted(() => {
             </div>
 
             <div v-if="usageRows.length" class="space-y-1.5">
-              <p class="cv-label mb-1">Por agente ({{ usageDay ? usageDayLabel : '30 dias' }})</p>
+              <p class="cv-label mb-1">
+                Por agente ({{ usageDay ? usageDayLabel : '30 dias' }})
+              </p>
               <div
                 v-for="row in usageRows"
                 :key="row.key"
@@ -3878,16 +4002,32 @@ onUnmounted(() => {
                   row.key
                 }}</span>
                 <span>{{ row.calls }} {{ usageNoun(row.key) }}</span>
-                <span class="text-n-slate-9">· {{ fmtTokens(row.input_tokens) }} tokens entrada ·
-                  {{ fmtTokens(row.output_tokens) }} saída</span>
-                <span v-if="row.cache_pct !== undefined" title="Fatia da entrada lida do cache (custa 10%)" class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold" :class="row.cache_pct >= 50 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'">{{ row.cache_pct }}% cache</span>
+                <span class="text-n-slate-9"
+                  >· {{ fmtTokens(row.input_tokens) }} tokens entrada ·
+                  {{ fmtTokens(row.output_tokens) }} saída</span
+                >
+                <span
+                  v-if="row.cache_pct !== undefined"
+                  title="Fatia da entrada lida do cache (custa 10%)"
+                  class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+                  :class="
+                    row.cache_pct >= 50
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200'
+                      : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'
+                  "
+                  >{{ row.cache_pct }}% cache</span
+                >
                 <span class="ml-auto font-bold text-n-slate-12 tabular-nums">{{
                   fmtUsd(row.cost_usd)
                 }}</span>
               </div>
             </div>
             <p v-else class="text-xs text-n-slate-10">
-              {{ usageDay ? `Nenhuma chamada à IA em ${usageDayLabel}.` : 'Nenhuma análise registrada ainda — os custos aparecem aqui conforme os agentes rodarem.' }}
+              {{
+                usageDay
+                  ? `Nenhuma chamada à IA em ${usageDayLabel}.`
+                  : 'Nenhuma análise registrada ainda — os custos aparecem aqui conforme os agentes rodarem.'
+              }}
             </p>
           </div>
 
@@ -3898,14 +4038,18 @@ onUnmounted(() => {
               :class="scriptExpanded ? 'mb-4' : ''"
               @click="scriptExpanded = !scriptExpanded"
             >
-              <span class="cv-icon cv-icon-xl"><span class="i-lucide-scroll-text text-lg"/></span>
+              <span class="cv-icon cv-icon-xl"
+                ><span class="i-lucide-scroll-text text-lg"
+              /></span>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                   <p class="text-base font-bold text-n-slate-12 leading-tight">
                     Roteiro CEVICO
                   </p>
                   <span class="cv-chip" :class="scriptIsV2 ? 'cv-amber' : ''">{{
-                    scriptIsV2 ? '🧪 Roteiro 2 · só no teste' : 'Roteiro 1 · fonte única dos atendentes'
+                    scriptIsV2
+                      ? '🧪 Roteiro 2 · só no teste'
+                      : 'Roteiro 1 · fonte única dos atendentes'
                   }}</span>
                   <span class="cv-chip cv-slate">
                     {{ scriptSections.filter(sec => sec.custom).length }} de
@@ -3972,12 +4116,12 @@ onUnmounted(() => {
                 v-if="scriptIsV2"
                 class="cv-sub px-3.5 py-2.5 text-[11px] text-n-slate-11 leading-relaxed mb-3"
               >
-                🧪 <b>Roteiro 2 · Otimizado pela análise</b> (22/09): mesmo processo
-                de vendas, com flexibilidade e o conhecimento da equipe. Só o
-                <b>Testar agente</b> lê esta versão (escolha "Roteiro 2" lá).
-                Nenhum atendente em sombra ou ao vivo usa o v2. Aqui também
-                ficam os <b>Passos</b> dos dois atendentes do v2. Seção em
-                branco volta ao padrão do v2.
+                🧪 <b>Roteiro 2 · Otimizado pela análise</b> (22/09): mesmo
+                processo de vendas, com flexibilidade e o conhecimento da
+                equipe. Só o <b>Testar agente</b> lê esta versão (escolha
+                "Roteiro 2" lá). Nenhum atendente em sombra ou ao vivo usa o v2.
+                Aqui também ficam os <b>Passos</b> dos dois atendentes do v2.
+                Seção em branco volta ao padrão do v2.
               </div>
               <div
                 v-else
@@ -4043,7 +4187,8 @@ onUnmounted(() => {
                   <pre
                     v-else
                     class="text-xs text-n-slate-11 whitespace-pre-wrap font-sans leading-relaxed max-h-72 overflow-y-auto"
-                    >{{ sec.text }}</pre>
+                    >{{ sec.text }}</pre
+                  >
                   <div
                     v-if="scriptEditing"
                     class="flex items-center gap-2 mt-2 flex-wrap"
@@ -4055,10 +4200,12 @@ onUnmounted(() => {
                     >
                       ↺ Restaurar padrão desta seção
                     </button>
-                    <span class="text-[11px] text-n-slate-9">{{
+                    <span class="text-[11px] text-n-slate-9"
+                      >{{
                         (scriptDraft[sec.key] || '').length
                       }}
-                      caracteres</span>
+                      caracteres</span
+                    >
                   </div>
                 </div>
               </template>
@@ -4120,8 +4267,10 @@ onUnmounted(() => {
                   <p class="text-sm font-bold text-n-slate-12">
                     🕘 Histórico de versões
                   </p>
-                  <span class="text-[11px] text-n-slate-9">uma versão é guardada antes de cada edição e de cada
-                    orientação aplicada · últimas 30</span>
+                  <span class="text-[11px] text-n-slate-9"
+                    >uma versão é guardada antes de cada edição e de cada
+                    orientação aplicada · últimas 30</span
+                  >
                   <button
                     class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
                     :disabled="loadingVersions"
@@ -4168,8 +4317,11 @@ onUnmounted(() => {
                     >
                       {{ v.note || 'sem nota' }}
                       <template v-if="v.author?.name">
-                        · {{ v.author.name }}</template>
-                      <template v-if="v.size">· {{ v.size }} caracteres</template>
+                        · {{ v.author.name }}</template
+                      >
+                      <template v-if="v.size"
+                        >· {{ v.size }} caracteres</template
+                      >
                     </span>
                     <button
                       class="cv-btn cv-btn-sm cv-btn-ghost"
@@ -4226,7 +4378,9 @@ onUnmounted(() => {
           <div class="flex items-center justify-between gap-2 flex-wrap pt-1">
             <p class="text-sm font-bold text-n-slate-12">
               Agentes
-              <span class="text-n-slate-9 font-normal text-xs">· clique num card para abrir e configurar</span>
+              <span class="text-n-slate-9 font-normal text-xs"
+                >· clique num card para abrir e configurar</span
+              >
             </p>
             <div class="cv-seg cv-seg-sm">
               <button
@@ -4355,7 +4509,8 @@ onUnmounted(() => {
                           v-if="agent.has_draft"
                           class="cv-chip cv-amber"
                           title="Rascunho salvo que ainda não vale"
-                          >📝 Rascunho</span>
+                          >📝 Rascunho</span
+                        >
                       </div>
                     </div>
                     <p
@@ -4488,7 +4643,8 @@ onUnmounted(() => {
                       <div>
                         <label
                           class="text-xs font-medium text-n-slate-11 block mb-1.5"
-                          >Modelo de IA</label>
+                          >Modelo de IA</label
+                        >
                         <select
                           v-model="agent.model"
                           :disabled="!editingAgent[key]"
@@ -4511,7 +4667,9 @@ onUnmounted(() => {
                           class="text-xs font-medium text-n-slate-11 block mb-1.5"
                         >
                           Esforço
-                          <span class="text-n-slate-9 font-normal">(quanto pensa)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(quanto pensa)</span
+                          >
                         </label>
                         <select
                           v-model="agent.effort"
@@ -4617,15 +4775,18 @@ onUnmounted(() => {
                                 agent.no_card !== false
                                   ? '(inclui sem card)'
                                   : ''
-                              }}</span>
+                              }}</span
+                            >
                           </p>
                         </div>
                         <div class="cv-stat px-3 py-2">
                           <p class="text-[10px] text-n-slate-10">Sombra hoje</p>
                           <p class="text-sm font-bold text-n-slate-12">
                             {{ shadowTodayConversations(key) }}
-                            <span class="text-[10px] font-normal text-n-slate-9">/
-                              {{ agent.shadow_daily_cap || 30 }} conversas</span>
+                            <span class="text-[10px] font-normal text-n-slate-9"
+                              >/
+                              {{ agent.shadow_daily_cap || 30 }} conversas</span
+                            >
                           </p>
                         </div>
                       </div>
@@ -4730,9 +4891,11 @@ onUnmounted(() => {
                       >
                         <p class="text-xs font-bold text-n-slate-12">
                           🟢 Janela ao vivo
-                          <span class="text-n-slate-9 font-normal">(nenhum dia marcado = todos os dias; as horas ficam
+                          <span class="text-n-slate-9 font-normal"
+                            >(nenhum dia marcado = todos os dias; as horas ficam
                             no campo "Horário em que atende sozinho"
-                            abaixo)</span>
+                            abaixo)</span
+                          >
                         </p>
                         <div class="flex flex-wrap gap-1.5">
                           <button
@@ -4779,7 +4942,9 @@ onUnmounted(() => {
                       <div>
                         <p class="text-xs font-medium text-n-slate-11 mb-1.5">
                           Caixas de WhatsApp em que ele lê
-                          <span class="text-n-slate-9 font-normal">(nenhuma marcada = desligado na prática)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(nenhuma marcada = desligado na prática)</span
+                          >
                         </p>
                         <div class="flex flex-wrap gap-1.5">
                           <button
@@ -4817,8 +4982,10 @@ onUnmounted(() => {
                       <div>
                         <p class="text-xs font-medium text-n-slate-11 mb-1.5">
                           Colunas do CRM em que ELE fala
-                          <span class="text-n-slate-9 font-normal">(o card do paciente nessas colunas = este agente;
-                            nas outras, ninguém)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(o card do paciente nessas colunas = este agente;
+                            nas outras, ninguém)</span
+                          >
                         </p>
                         <div
                           v-if="!allStages.length"
@@ -4899,13 +5066,18 @@ onUnmounted(() => {
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Quem recebe as tarefas
-                            <span class="text-n-slate-9 font-normal">(Meu Painel)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(Meu Painel)</span
+                            ></label
+                          >
                           <select
                             v-model="agent.task_assignee_id"
                             :disabled="!editingAgent[key]"
                             class="cv-input w-full text-sm disabled:cursor-not-allowed"
                           >
-                            <option value="">— quem cuida da coluna do paciente —</option>
+                            <option value="">
+                              — quem cuida da coluna do paciente —
+                            </option>
                             <option
                               v-for="u in teamAgents"
                               :key="`pos-op-owner-${u.id}`"
@@ -4917,15 +5089,18 @@ onUnmounted(() => {
                           <p class="text-[10px] text-n-slate-9 mt-1">
                             Sem escolha: vale quem cuida da coluna do paciente
                             (Painéis) ou o responsável pela conferência de
-                            cirurgia. Sintoma de alerta também acende o aviso
-                            no painel.
+                            cirurgia. Sintoma de alerta também acende o aviso no
+                            painel.
                           </p>
                         </div>
                         <div>
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Cirurgia recente na Agenda
-                            <span class="text-n-slate-9 font-normal">(dias)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(dias)</span
+                            ></label
+                          >
                           <input
                             v-model.number="agent.recent_surgery_days"
                             type="number"
@@ -4935,9 +5110,10 @@ onUnmounted(() => {
                             class="cv-input w-full text-sm disabled:cursor-not-allowed"
                           />
                           <p class="text-[10px] text-n-slate-9 mt-1">
-                            Quem operou nesses últimos dias (pela Agenda, inclusive
-                            Oftalmofácil) é atendido por este agente mesmo que o
-                            card não esteja na coluna. 0 = só pela coluna.
+                            Quem operou nesses últimos dias (pela Agenda,
+                            inclusive Oftalmofácil) é atendido por este agente
+                            mesmo que o card não esteja na coluna. 0 = só pela
+                            coluna.
                           </p>
                         </div>
                       </div>
@@ -4947,7 +5123,8 @@ onUnmounted(() => {
                         <div v-if="key === 'atendente_agendamento'">
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
-                            >Ao agendar (ao vivo), mover o card para</label>
+                            >Ao agendar (ao vivo), mover o card para</label
+                          >
                           <select
                             v-model="agent.after_booking_stage_id"
                             :disabled="!editingAgent[key]"
@@ -4967,7 +5144,10 @@ onUnmounted(() => {
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Teto da sombra
-                            <span class="text-n-slate-9 font-normal">(conversas por dia)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(conversas por dia)</span
+                            ></label
+                          >
                           <input
                             v-model.number="agent.shadow_daily_cap"
                             type="number"
@@ -5031,7 +5211,10 @@ onUnmounted(() => {
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Horário em que atende sozinho
-                            <span class="text-n-slate-9 font-normal">(janela ao vivo; vazio = o dia inteiro)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(janela ao vivo; vazio = o dia inteiro)</span
+                            ></label
+                          >
                           <div class="flex items-center gap-1.5">
                             <input
                               v-model="agent.hours_start"
@@ -5085,12 +5268,14 @@ onUnmounted(() => {
                           <span class="i-lucide-scroll-text text-xs" /> Ver o
                           Roteiro CEVICO
                         </button>
-                        <span class="text-[10px] text-n-slate-9">O campo <b>Passos desta etapa</b> abaixo é só o passo
+                        <span class="text-[10px] text-n-slate-9"
+                          >O campo <b>Passos desta etapa</b> abaixo é só o passo
                           a passo deste agente{{
                             key === 'atendente_agendamento'
                               ? ' (recepção → agendamento)'
                               : ' (suporte a quem já marcou)'
-                          }}.</span>
+                          }}.</span
+                        >
                       </div>
 
                       <!-- 📒 Registro de atividade -->
@@ -5112,9 +5297,9 @@ onUnmounted(() => {
                             }}</span>
                             · #{{ ev.conversation_id }} {{ ev.contact }} —
                             {{ ATENDENTE_EVENT_LABELS[ev.type] || ev.type }}
-                            <span v-if="ev.note"
-class="text-n-slate-9"
-                              >({{ ev.note }})</span>
+                            <span v-if="ev.note" class="text-n-slate-9"
+                              >({{ ev.note }})</span
+                            >
                           </p>
                         </div>
                       </div>
@@ -5163,7 +5348,8 @@ class="text-n-slate-9"
                             <span
                               v-if="voiceStageNames(agent).length"
                               class="text-[10px] font-normal text-n-slate-9 block"
-                              >{{ voiceStageNames(agent).join(' · ') }}</span>
+                              >{{ voiceStageNames(agent).join(' · ') }}</span
+                            >
                           </p>
                         </div>
                         <div class="cv-stat px-3 py-2">
@@ -5180,7 +5366,9 @@ class="text-n-slate-9"
                                 ? voiceCallsToday()
                                 : voiceShadowItems().length
                             }}
-                            <span class="text-[10px] font-normal text-n-slate-9">/ {{ agent.daily_cap || 20 }} por dia</span>
+                            <span class="text-[10px] font-normal text-n-slate-9"
+                              >/ {{ agent.daily_cap || 20 }} por dia</span
+                            >
                           </p>
                         </div>
                         <div
@@ -5298,8 +5486,10 @@ class="text-n-slate-9"
                       >
                         <p class="text-xs font-bold text-n-slate-12">
                           🟢 Janela ao vivo
-                          <span class="text-n-slate-9 font-normal">(nenhum dia marcado = todos os dias; as horas ficam
-                            no campo "Horário em que liga" abaixo)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(nenhum dia marcado = todos os dias; as horas ficam
+                            no campo "Horário em que liga" abaixo)</span
+                          >
                         </p>
                         <div class="flex flex-wrap gap-1.5">
                           <button
@@ -5346,8 +5536,10 @@ class="text-n-slate-9"
                       <div>
                         <p class="text-xs font-medium text-n-slate-11 mb-1.5">
                           Colunas que ele vigia
-                          <span class="text-n-slate-9 font-normal">(lead parado nessas colunas, sem responder =
-                            candidato à ligação)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(lead parado nessas colunas, sem responder =
+                            candidato à ligação)</span
+                          >
                         </p>
                         <div
                           v-if="!allStages.length"
@@ -5389,7 +5581,10 @@ class="text-n-slate-9"
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Liga depois de
-                            <span class="text-n-slate-9 font-normal">(horas sem resposta do lead)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(horas sem resposta do lead)</span
+                            ></label
+                          >
                           <div class="flex items-center gap-2">
                             <input
                               v-model.number="agent.silence_hours"
@@ -5399,14 +5594,19 @@ class="text-n-slate-9"
                               :disabled="!editingAgent[key]"
                               class="cv-input w-full text-sm disabled:cursor-not-allowed"
                             />
-                            <span class="text-xs text-n-slate-10 flex-shrink-0">horas</span>
+                            <span class="text-xs text-n-slate-10 flex-shrink-0"
+                              >horas</span
+                            >
                           </div>
                         </div>
                         <div>
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Olha leads dos últimos
-                            <span class="text-n-slate-9 font-normal">(mais antigo que isso, deixa quieto)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(mais antigo que isso, deixa quieto)</span
+                            ></label
+                          >
                           <div class="flex items-center gap-2">
                             <input
                               v-model.number="agent.lookback_days"
@@ -5416,14 +5616,19 @@ class="text-n-slate-9"
                               :disabled="!editingAgent[key]"
                               class="cv-input w-full text-sm disabled:cursor-not-allowed"
                             />
-                            <span class="text-xs text-n-slate-10 flex-shrink-0">dias</span>
+                            <span class="text-xs text-n-slate-10 flex-shrink-0"
+                              >dias</span
+                            >
                           </div>
                         </div>
                         <div>
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >No máximo
-                            <span class="text-n-slate-9 font-normal">(ligações por dia)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(ligações por dia)</span
+                            ></label
+                          >
                           <div class="flex items-center gap-2">
                             <input
                               v-model.number="agent.daily_cap"
@@ -5433,14 +5638,19 @@ class="text-n-slate-9"
                               :disabled="!editingAgent[key]"
                               class="cv-input w-full text-sm disabled:cursor-not-allowed"
                             />
-                            <span class="text-xs text-n-slate-10 flex-shrink-0">ligações por dia</span>
+                            <span class="text-xs text-n-slate-10 flex-shrink-0"
+                              >ligações por dia</span
+                            >
                           </div>
                         </div>
                         <div>
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Tentativas por lead
-                            <span class="text-n-slate-9 font-normal">(em 14 dias, com 48 h entre elas)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(em 14 dias, com 48 h entre elas)</span
+                            ></label
+                          >
                           <div class="flex items-center gap-2">
                             <input
                               v-model.number="agent.max_attempts"
@@ -5450,7 +5660,9 @@ class="text-n-slate-9"
                               :disabled="!editingAgent[key]"
                               class="cv-input w-full text-sm disabled:cursor-not-allowed"
                             />
-                            <span class="text-xs text-n-slate-10 flex-shrink-0">tentativas</span>
+                            <span class="text-xs text-n-slate-10 flex-shrink-0"
+                              >tentativas</span
+                            >
                           </div>
                         </div>
                       </div>
@@ -5461,7 +5673,10 @@ class="text-n-slate-9"
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Horário em que liga
-                            <span class="text-n-slate-9 font-normal">(janela ao vivo; vazio = o dia inteiro)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(janela ao vivo; vazio = o dia inteiro)</span
+                            ></label
+                          >
                           <div class="flex items-center gap-1.5">
                             <input
                               v-model="agent.hours_start"
@@ -5482,7 +5697,10 @@ class="text-n-slate-9"
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Caixa do WhatsApp para continuar por escrito
-                            <span class="text-n-slate-9 font-normal">(quem não pode falar recebe por aqui)</span></label>
+                            <span class="text-n-slate-9 font-normal"
+                              >(quem não pode falar recebe por aqui)</span
+                            ></label
+                          >
                           <select
                             v-model="agent.handoff_inbox_id"
                             :disabled="!editingAgent[key]"
@@ -5562,8 +5780,10 @@ class="text-n-slate-9"
                           <span class="i-lucide-scroll-text text-xs" /> Ver o
                           Roteiro CEVICO
                         </button>
-                        <span class="text-[10px] text-n-slate-9">O campo <b>Passos desta ligação</b> abaixo é só o
-                          passo a passo dele ao telefone.</span>
+                        <span class="text-[10px] text-n-slate-9"
+                          >O campo <b>Passos desta ligação</b> abaixo é só o
+                          passo a passo dele ao telefone.</span
+                        >
                       </div>
 
                       <!-- 📋 quem ele ligaria hoje -->
@@ -5579,7 +5799,9 @@ class="text-n-slate-9"
                               : 'Ligaria hoje'
                           }}
                           para {{ voiceShadowItems().length }} pessoa(s)
-                          <span class="font-normal normal-case text-n-slate-9">· nada é discado em sombra</span>
+                          <span class="font-normal normal-case text-n-slate-9"
+                            >· nada é discado em sombra</span
+                          >
                         </p>
                         <div class="max-h-56 overflow-y-auto space-y-1.5">
                           <div
@@ -5595,12 +5817,14 @@ class="text-n-slate-9"
                               <span
                                 v-if="it.phone_final"
                                 class="font-normal text-n-slate-9"
-                                >· …{{ it.phone_final }}</span>
+                                >· …{{ it.phone_final }}</span
+                              >
                             </span>
                             <span
                               v-if="it.stage"
                               class="cv-chip cv-slate flex-shrink-0 self-start"
-                              >{{ it.stage }}</span>
+                              >{{ it.stage }}</span
+                            >
                             <span class="flex-1 min-w-0 leading-relaxed">{{
                               it.motivo || it.objective || ''
                             }}</span>
@@ -5635,15 +5859,16 @@ class="text-n-slate-9"
                                 : ''
                             }}</span>
                             <span v-if="ev.contact || ev.name">
-                              · {{ ev.contact || ev.name }}</span>
+                              · {{ ev.contact || ev.name }}</span
+                            >
                             —
                             {{ VOICE_EVENT_LABELS[ev.type] || ev.type }}
-                            <span v-if="ev.count"
-class="text-n-slate-9"
-                              >({{ ev.count }})</span>
-                            <span v-if="ev.note"
-class="text-n-slate-9"
-                              >({{ ev.note }})</span>
+                            <span v-if="ev.count" class="text-n-slate-9"
+                              >({{ ev.count }})</span
+                            >
+                            <span v-if="ev.note" class="text-n-slate-9"
+                              >({{ ev.note }})</span
+                            >
                           </p>
                         </div>
                       </div>
@@ -5705,7 +5930,8 @@ class="text-n-slate-9"
                             <span
                               v-if="instagramStats().errors"
                               class="text-amber-500"
-                              >· ⚠️ {{ instagramStats().errors }}</span>
+                              >· ⚠️ {{ instagramStats().errors }}</span
+                            >
                           </p>
                         </div>
                       </div>
@@ -5721,7 +5947,9 @@ class="text-n-slate-9"
                       <div>
                         <p class="text-xs font-medium text-n-slate-11 mb-1.5">
                           Caixas de entrada em que ele atende
-                          <span class="text-n-slate-9 font-normal">(nenhuma marcada = desligado na prática)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(nenhuma marcada = desligado na prática)</span
+                          >
                         </p>
                         <div class="flex flex-wrap gap-1.5">
                           <button
@@ -5778,9 +6006,9 @@ class="text-n-slate-9"
                             }}</span>
                             · #{{ ev.conversation_id }} {{ ev.contact }} —
                             {{ INSTAGRAM_EVENT_LABELS[ev.type] || ev.type }}
-                            <span v-if="ev.note"
-class="text-n-slate-9"
-                              >({{ ev.note }})</span>
+                            <span v-if="ev.note" class="text-n-slate-9"
+                              >({{ ev.note }})</span
+                            >
                           </p>
                         </div>
                       </div>
@@ -5833,7 +6061,9 @@ class="text-n-slate-9"
                             class="i-lucide-target text-sm"
                             style="color: #059669"
                           />
-                          <b class="text-n-slate-12">Meta de tempo de atendimento:</b>
+                          <b class="text-n-slate-12"
+                            >Meta de tempo de atendimento:</b
+                          >
                           responder o paciente em até
                           <input
                             v-model.number="agent.response_goal_minutes"
@@ -5857,8 +6087,10 @@ class="text-n-slate-9"
                       <div>
                         <p class="text-xs font-medium text-n-slate-11 mb-1.5">
                           Colunas vigiadas
-                          <span class="text-n-slate-9 font-normal">(cada coluna com seu atendente e janela — sem vigia
-                            o Radar fica desligado)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(cada coluna com seu atendente e janela — sem vigia
+                            o Radar fica desligado)</span
+                          >
                         </p>
                         <div
                           v-if="!allStages.length"
@@ -5910,7 +6142,8 @@ class="text-n-slate-9"
                               <div class="flex-1 min-w-0">
                                 <label
                                   class="text-[10px] font-medium text-n-slate-9 block mb-0.5"
-                                  >Avisar no painel de</label>
+                                  >Avisar no painel de</label
+                                >
                                 <select
                                   v-model="w.user_id"
                                   :disabled="!editingAgent[key]"
@@ -5931,7 +6164,8 @@ class="text-n-slate-9"
                               <div class="flex-1 min-w-0">
                                 <label
                                   class="text-[10px] font-medium text-n-slate-9 block mb-0.5"
-                                  >Olhando o movimento das</label>
+                                  >Olhando o movimento das</label
+                                >
                                 <select
                                   v-model.number="w.lookback_hours"
                                   :disabled="!editingAgent[key]"
@@ -6012,7 +6246,9 @@ class="text-n-slate-9"
                       </div>
                       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <label class="block">
-                          <span class="text-[10px] font-medium text-n-slate-9">ID da Página do Facebook (opcional)</span>
+                          <span class="text-[10px] font-medium text-n-slate-9"
+                            >ID da Página do Facebook (opcional)</span
+                          >
                           <input
                             v-model="agent.fb_page_id"
                             type="text"
@@ -6022,7 +6258,9 @@ class="text-n-slate-9"
                           />
                         </label>
                         <label class="block">
-                          <span class="text-[10px] font-medium text-n-slate-9">ID da conta Instagram Business (opcional)</span>
+                          <span class="text-[10px] font-medium text-n-slate-9"
+                            >ID da conta Instagram Business (opcional)</span
+                          >
                           <input
                             v-model="agent.ig_user_id"
                             type="text"
@@ -6101,6 +6339,67 @@ class="text-n-slate-9"
                       </div>
                     </div>
 
+                    <!-- 27/09: papel e responsabilidades — o Mentor julga cada pessoa pelo papel dela -->
+                    <div
+                      v-if="key === 'mentor'"
+                      class="cv-sub p-4 mb-4 space-y-2"
+                    >
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <p class="text-xs font-bold text-n-slate-12">
+                          Papéis e responsabilidades
+                        </p>
+                        <span class="text-[11px] text-n-slate-9"
+                          >quem cuida do quê — o Mentor não cobra chat de quem
+                          fecha cirurgia</span
+                        >
+                        <button
+                          class="cv-btn cv-btn-sm ml-auto"
+                          :disabled="!teamRolesDirty || savingTeamRoles"
+                          @click="saveTeamRoles"
+                        >
+                          <Spinner v-if="savingTeamRoles" :size="12" />
+                          <span v-else class="i-lucide-save text-xs" /> Salvar
+                          papéis
+                        </button>
+                      </div>
+                      <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                        <div
+                          v-for="ag in humanTeam"
+                          :key="'role' + ag.id"
+                          class="cv-sub p-3 space-y-1.5"
+                        >
+                          <div class="flex items-center gap-2">
+                            <span
+                              class="text-xs font-semibold text-n-slate-12 flex-1 truncate"
+                              >{{ ag.available_name || ag.name }}</span
+                            >
+                            <input
+                              v-model="roleOf(ag.id).papel"
+                              class="cv-input !h-7 text-xs w-44"
+                              style="margin-bottom: 0"
+                              placeholder="Papel (ex.: Fechamento)"
+                              @input="touchTeamRoles"
+                            />
+                          </div>
+                          <textarea
+                            v-model="roleOf(ag.id).responsabilidades"
+                            rows="2"
+                            class="cv-input w-full text-xs"
+                            style="margin-bottom: 0"
+                            placeholder="Responsabilidades: o que só esta pessoa faz (ex.: fecha cirurgias, confere a agenda do dia, assume conversas que a IA pausou…)"
+                            @input="touchTeamRoles"
+                          />
+                        </div>
+                      </div>
+                      <p class="text-[10px] text-n-slate-9">
+                        Sem texto, o Mentor usa o que o sistema já sabe (painel
+                        da pessoa, responsável pela conferência, médico,
+                        administrador). Ele também recebe a lista do que o
+                        sistema faz sozinho (atendentes de IA, follow-up,
+                        confirmação, NPS, Radar) e não cobra isso de ninguém.
+                      </p>
+                    </div>
+
                     <!-- Mentor do Time: como funciona + gerar agora -->
                     <div
                       v-if="key === 'mentor'"
@@ -6120,8 +6419,10 @@ class="text-n-slate-9"
                       <div class="flex items-center gap-2 flex-wrap">
                         <p class="text-xs font-medium text-n-slate-11 flex-1">
                           Primeira rodada ou teste
-                          <span class="text-n-slate-9 font-normal">(analisa os últimos 7 dias agora, sem esperar
-                            segunda)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(analisa os últimos 7 dias agora, sem esperar
+                            segunda)</span
+                          >
                         </p>
                         <button
                           class="cv-btn cv-btn-sm"
@@ -6151,8 +6452,10 @@ class="text-n-slate-9"
                       <div class="flex items-center gap-2 flex-wrap">
                         <p class="text-xs font-medium text-n-slate-11 flex-1">
                           💡 Insights comerciais
-                          <span class="text-n-slate-9 font-normal">(analisa as conversas que FECHARAM cirurgia —
-                            alimentadas pelo Monitor de Fechamento)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(analisa as conversas que FECHARAM cirurgia —
+                            alimentadas pelo Monitor de Fechamento)</span
+                          >
                         </p>
                         <button
                           class="cv-btn cv-btn-sm"
@@ -6178,7 +6481,8 @@ class="text-n-slate-9"
                         </p>
                         <pre
                           class="text-[11px] text-n-slate-11 whitespace-pre-wrap font-sans leading-relaxed"
-                          >{{ salesInsights().text }}</pre>
+                          >{{ salesInsights().text }}</pre
+                        >
                       </div>
                       <p
                         v-else-if="salesInsights()?.error"
@@ -6201,15 +6505,19 @@ class="text-n-slate-9"
                           style="color: #d4af37"
                         />
                         Construtor PRO
-                        <span class="font-normal text-n-slate-9">— rédeas da montagem: estilo e tamanho da
-                          resposta</span>
+                        <span class="font-normal text-n-slate-9"
+                          >— rédeas da montagem: estilo e tamanho da
+                          resposta</span
+                        >
                       </p>
                       <div>
                         <p class="text-[11px] font-medium text-n-slate-11 mb-1">
                           Referências de estilo
-                          <span class="text-n-slate-9 font-normal">(cole exemplos de páginas que você admira,
+                          <span class="text-n-slate-9 font-normal"
+                            >(cole exemplos de páginas que você admira,
                             diretrizes de marca, o que nunca pode faltar — o
-                            Construtor se inspira nelas em TODA montagem)</span>
+                            Construtor se inspira nelas em TODA montagem)</span
+                          >
                         </p>
                         <textarea
                           v-model="aiAgents.pagebuilder.references"
@@ -6219,7 +6527,9 @@ class="text-n-slate-9"
                         />
                       </div>
                       <div class="flex items-center gap-2 flex-wrap">
-                        <span class="text-[11px] text-n-slate-10">Teto de resposta (tokens):</span>
+                        <span class="text-[11px] text-n-slate-10"
+                          >Teto de resposta (tokens):</span
+                        >
                         <input
                           v-model="aiAgents.pagebuilder.max_tokens"
                           type="number"
@@ -6230,8 +6540,10 @@ class="text-n-slate-9"
                           class="cv-input !h-8 text-xs"
                           style="width: 6.5rem"
                         />
-                        <span class="text-[10px] text-n-slate-9">vazio = padrão (30.000). Página grande truncada?
-                          Aumente. Custo alto? Diminua.</span>
+                        <span class="text-[10px] text-n-slate-9"
+                          >vazio = padrão (30.000). Página grande truncada?
+                          Aumente. Custo alto? Diminua.</span
+                        >
                       </div>
                       <button
                         class="cv-btn cv-btn-sm"
@@ -6263,17 +6575,21 @@ class="text-n-slate-9"
                           style="color: #7c3aed"
                         />
                         Estúdio de conteúdo
-                        <span class="font-normal text-n-slate-9">— escolha o formato e a estrutura; o resultado é seu
-                          para copiar</span>
+                        <span class="font-normal text-n-slate-9"
+                          >— escolha o formato e a estrutura; o resultado é seu
+                          para copiar</span
+                        >
                       </p>
 
                       <!-- referências da casa: o agente segue esse estilo em TUDO -->
                       <div>
                         <p class="text-[11px] font-medium text-n-slate-11 mb-1">
                           Suas estruturas e referências de copywriting
-                          <span class="text-n-slate-9 font-normal">(cole exemplos que você gosta, frases da casa,
+                          <span class="text-n-slate-9 font-normal"
+                            >(cole exemplos que você gosta, frases da casa,
                             regras de estilo — vale para páginas e para o
-                            Estúdio)</span>
+                            Estúdio)</span
+                          >
                         </p>
                         <textarea
                           v-model="aiAgents.copywriter.references"
@@ -6299,7 +6615,9 @@ class="text-n-slate-9"
 
                       <!-- formato: botões em linha -->
                       <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="text-[11px] text-n-slate-10">Formato:</span>
+                        <span class="text-[11px] text-n-slate-10"
+                          >Formato:</span
+                        >
                         <button
                           v-for="m in STUDIO_MODALITIES"
                           :key="m.key"
@@ -6314,12 +6632,16 @@ class="text-n-slate-9"
                         >
                           {{ m.label }}
                         </button>
-                        <span class="text-[10px] text-n-slate-9">· páginas são no editor de Páginas</span>
+                        <span class="text-[10px] text-n-slate-9"
+                          >· páginas são no editor de Páginas</span
+                        >
                       </div>
 
                       <!-- estrutura narrativa: botões em linha -->
                       <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="text-[11px] text-n-slate-10">Estrutura:</span>
+                        <span class="text-[11px] text-n-slate-10"
+                          >Estrutura:</span
+                        >
                         <button
                           v-for="st in STUDIO_STRUCTURES"
                           :key="st.key"
@@ -6429,9 +6751,13 @@ class="text-n-slate-9"
                         Colunas de atuação
                         <span class="text-n-slate-9 font-normal">
                           (card entrou na coluna → o agente lê a conversa
-                          <template v-if="key === 'closing'">; sugestão: as colunas de "Indicação de
-                            Cirurgia"</template>
-                          <template v-else-if="key === 'nps'">; sugestão: a coluna de Pós-Operatório</template>)
+                          <template v-if="key === 'closing'"
+                            >; sugestão: as colunas de "Indicação de
+                            Cirurgia"</template
+                          >
+                          <template v-else-if="key === 'nps'"
+                            >; sugestão: a coluna de Pós-Operatório</template
+                          >)
                         </span>
                       </p>
                       <div
@@ -6489,8 +6815,10 @@ class="text-n-slate-9"
                         <b>e relê a cada mensagem do paciente nessas colunas</b>
                         — a confirmação que chega depois não escapa mais.
                         Reagendamentos atualizam a consulta existente;
-                        <b>cancelamento sem novo horário tira a consulta da
-                          Agenda</b>. Fora das colunas: quem tem tarefa "⚠️ Confirmar
+                        <b
+                          >cancelamento sem novo horário tira a consulta da
+                          Agenda</b
+                        >. Fora das colunas: quem tem tarefa "⚠️ Confirmar
                         consulta" aberta ou fala em remarcar/cancelar também
                         redispara a leitura sozinho.
                       </div>
@@ -6499,9 +6827,11 @@ class="text-n-slate-9"
                       <div>
                         <p class="text-xs font-medium text-n-slate-11 mb-1.5">
                           Colunas onde o Secretário atua
-                          <span class="text-n-slate-9 font-normal">(card entrou + mensagens do paciente na coluna → lê
+                          <span class="text-n-slate-9 font-normal"
+                            >(card entrou + mensagens do paciente na coluna → lê
                             a conversa e anota na Agenda; nenhuma marcada = só
-                            manual)</span>
+                            manual)</span
+                          >
                         </p>
                         <div
                           v-if="!allStages.length"
@@ -6620,10 +6950,11 @@ class="text-n-slate-9"
                             }}</span>
                             <span
                               class="font-medium text-n-slate-12 truncate max-w-[160px]"
-                              >{{ entry.name }}</span>
-                            <span v-if="entry.when"
-class="text-n-slate-10"
-                              >→ consulta {{ fmtLogDate(entry.when) }}</span>
+                              >{{ entry.name }}</span
+                            >
+                            <span v-if="entry.when" class="text-n-slate-10"
+                              >→ consulta {{ fmtLogDate(entry.when) }}</span
+                            >
                             <span
                               class="cv-chip ml-auto"
                               :class="
@@ -6682,7 +7013,9 @@ class="text-n-slate-10"
                           >
                             <p class="text-xs font-bold text-n-slate-12">
                               🗂️ Organizar oportunidades
-                              <span class="font-normal text-n-slate-9">(recomendado)</span>
+                              <span class="font-normal text-n-slate-9"
+                                >(recomendado)</span
+                              >
                             </p>
                             <p
                               class="text-[11px] text-n-slate-10 mt-0.5 leading-relaxed"
@@ -6724,7 +7057,9 @@ class="text-n-slate-10"
 
                       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <label class="block">
-                          <span class="text-[10px] font-medium text-n-slate-9">Quantos leads por mês</span>
+                          <span class="text-[10px] font-medium text-n-slate-9"
+                            >Quantos leads por mês</span
+                          >
                           <input
                             v-model.number="agent.monthly_size"
                             type="number"
@@ -6735,7 +7070,9 @@ class="text-n-slate-10"
                           />
                         </label>
                         <label class="block">
-                          <span class="text-[10px] font-medium text-n-slate-9">Frio há pelo menos (dias)</span>
+                          <span class="text-[10px] font-medium text-n-slate-9"
+                            >Frio há pelo menos (dias)</span
+                          >
                           <input
                             v-model.number="agent.cold_days"
                             type="number"
@@ -6746,7 +7083,9 @@ class="text-n-slate-10"
                           />
                         </label>
                         <label v-if="agent.mode === 'send'" class="block">
-                          <span class="text-[10px] font-medium text-n-slate-9">Teto de envios por dia</span>
+                          <span class="text-[10px] font-medium text-n-slate-9"
+                            >Teto de envios por dia</span
+                          >
                           <input
                             v-model.number="agent.daily_cap"
                             type="number"
@@ -6755,10 +7094,14 @@ class="text-n-slate-10"
                             :disabled="!editingAgent[key]"
                             class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
                           />
-                          <span class="text-[10px] text-n-slate-9 block mt-0.5">anti-bloqueio: menos é mais seguro</span>
+                          <span class="text-[10px] text-n-slate-9 block mt-0.5"
+                            >anti-bloqueio: menos é mais seguro</span
+                          >
                         </label>
                         <label class="block">
-                          <span class="text-[10px] font-medium text-n-slate-9">Dia do mês que a colheita gera a prévia</span>
+                          <span class="text-[10px] font-medium text-n-slate-9"
+                            >Dia do mês que a colheita gera a prévia</span
+                          >
                           <input
                             v-model.number="agent.day_of_month"
                             type="number"
@@ -6774,7 +7117,8 @@ class="text-n-slate-10"
                       <div v-if="agent.mode === 'send'">
                         <label
                           class="text-xs font-medium text-n-slate-11 block mb-1.5"
-                          >Caixa de WhatsApp que envia</label>
+                          >Caixa de WhatsApp que envia</label
+                        >
                         <select
                           v-model="agent.inbox_id"
                           :disabled="!editingAgent[key]"
@@ -6803,8 +7147,10 @@ class="text-n-slate-10"
                       <div v-if="agent.mode === 'send'">
                         <p class="text-xs font-medium text-n-slate-11 mb-1.5">
                           Mensagem modelo
-                          <span class="text-n-slate-9 font-normal">(template aprovado pela Meta — sem ele a colheita
-                            não envia)</span>
+                          <span class="text-n-slate-9 font-normal"
+                            >(template aprovado pela Meta — sem ele a colheita
+                            não envia)</span
+                          >
                         </p>
                         <div class="flex items-center gap-2">
                           <div class="flex-1 min-w-0">
@@ -6818,7 +7164,8 @@ class="text-n-slate-10"
                                 class="text-n-slate-9"
                                 >— "{{
                                   agent.message_preview.slice(0, 60)
-                                }}…"</span>
+                                }}…"</span
+                              >
                             </p>
                             <p v-else class="text-xs text-amber-600">
                               Nenhum modelo escolhido ainda.
@@ -6843,10 +7190,14 @@ class="text-n-slate-10"
                         </div>
                         <p class="text-[10px] text-n-slate-9 mt-1">
                           💡 Use
-                          <code class="bg-n-alpha-2 px-1 rounded">[gancho]</code>
+                          <code class="bg-n-alpha-2 px-1 rounded"
+                            >[gancho]</code
+                          >
                           numa variável do modelo — a IA escreve um gancho
                           pessoal para cada paciente;
-                          <code class="bg-n-alpha-2 px-1 rounded">[procedimento]</code>
+                          <code class="bg-n-alpha-2 px-1 rounded"
+                            >[procedimento]</code
+                          >
                           também funciona.
                         </p>
                       </div>
@@ -6861,7 +7212,9 @@ class="text-n-slate-10"
                           :disabled="!editingAgent[key]"
                         />
                         Exigir minha aprovação antes de enviar
-                        <span class="text-n-slate-9">(recomendado — a prévia espera o seu ok)</span>
+                        <span class="text-n-slate-9"
+                          >(recomendado — a prévia espera o seu ok)</span
+                        >
                       </label>
                     </div>
 
@@ -6891,7 +7244,8 @@ class="text-n-slate-10"
                           class="text-[10px] text-n-slate-9"
                         >
                           aprovada<template v-if="harvest.approved_by">
-                            por {{ harvest.approved_by }}</template>
+                            por {{ harvest.approved_by }}</template
+                          >
                           · {{ fmtLogDate(harvest.approved_at) }}
                         </span>
                       </div>
@@ -7087,36 +7441,46 @@ class="text-n-slate-10"
                             v-if="lead.sent_at"
                             class="text-green-600 font-bold flex-shrink-0"
                             title="Mensagem já enviada"
-                            >✓</span>
+                            >✓</span
+                          >
                           <span
                             class="font-semibold text-n-slate-12 truncate max-w-[150px]"
-                            >{{ lead.name }}</span>
+                            >{{ lead.name }}</span
+                          >
                           <span
                             v-if="lead.stage_name"
                             class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-1 text-n-slate-10 whitespace-nowrap"
-                            >{{ lead.stage_name }}</span>
+                            >{{ lead.stage_name }}</span
+                          >
                           <span
                             v-if="lead.procedure"
                             class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-1 text-n-slate-10 whitespace-nowrap"
-                            >{{ lead.procedure }}</span>
+                            >{{ lead.procedure }}</span
+                          >
                           <span
                             v-if="lead.value"
                             class="text-n-slate-11 whitespace-nowrap"
-                            >{{ fmtBrl(lead.value) }}</span>
-                          <span class="text-n-slate-10 whitespace-nowrap">frio há {{ lead.cold_days }}d</span>
+                            >{{ fmtBrl(lead.value) }}</span
+                          >
+                          <span class="text-n-slate-10 whitespace-nowrap"
+                            >frio há {{ lead.cold_days }}d</span
+                          >
                           <span
                             class="cv-chip flex-shrink-0"
                             :class="scoreClass(lead.score)"
-                            >{{ lead.score }}</span>
+                            >{{ lead.score }}</span
+                          >
                           <span
                             v-if="lead.hook"
                             class="italic text-n-slate-10 basis-full sm:basis-auto sm:flex-1 truncate"
                             :title="lead.hook"
-                            >“{{ lead.hook }}”</span>
+                            >“{{ lead.hook }}”</span
+                          >
                           <span
                             v-if="lead.skipped"
                             class="text-[10px] text-n-slate-9 ml-auto"
-                            >pulado</span>
+                            >pulado</span
+                          >
                           <button
                             v-else-if="!lead.sent_at"
                             class="text-n-slate-9 hover:text-red-500 i-lucide-x text-sm flex-shrink-0 ml-auto"
@@ -7217,7 +7581,9 @@ class="text-n-slate-10"
                               : 'Rodar agora'
                           }}
                         </button>
-                        <span class="text-[11px] text-n-slate-9">lê o funil agora e atualiza o briefing do dia</span>
+                        <span class="text-[11px] text-n-slate-9"
+                          >lê o funil agora e atualiza o briefing do dia</span
+                        >
                       </div>
                     </div>
 
@@ -7237,7 +7603,9 @@ class="text-n-slate-10"
                       </div>
 
                       <label class="block sm:w-64">
-                        <span class="text-[10px] font-medium text-n-slate-9">Teto de conversas auditadas por dia</span>
+                        <span class="text-[10px] font-medium text-n-slate-9"
+                          >Teto de conversas auditadas por dia</span
+                        >
                         <input
                           v-model.number="agent.daily_cap"
                           type="number"
@@ -7246,7 +7614,9 @@ class="text-n-slate-10"
                           :disabled="!editingAgent[key]"
                           class="mt-0.5 w-full h-8 cv-sub px-2 text-xs text-n-slate-12 disabled:opacity-60"
                         />
-                        <span class="text-[10px] text-n-slate-9 block mt-0.5">controla o custo da auditoria diária</span>
+                        <span class="text-[10px] text-n-slate-9 block mt-0.5"
+                          >controla o custo da auditoria diária</span
+                        >
                       </label>
                     </div>
 
@@ -7287,12 +7657,13 @@ class="text-n-slate-10"
                             · rodou
                             {{
                               fmtLogDate(auditorLast().last_run_at)
-                            }}</template>
+                            }}</template
+                          >
                         </span>
-                        <span v-else
-class="text-[11px] text-n-slate-10"
+                        <span v-else class="text-[11px] text-n-slate-10"
                           >nenhuma auditoria ainda — o primeiro ranking sai
-                          depois da primeira rodada</span>
+                          depois da primeira rodada</span
+                        >
                       </div>
 
                       <div
@@ -7358,8 +7729,11 @@ class="text-[11px] text-n-slate-10"
                             >
                               <span
                                 class="font-semibold text-n-slate-12 truncate max-w-[180px]"
-                                >{{ auditorRowName(row) }}</span>
-                              <span class="text-n-slate-10 whitespace-nowrap">{{ row.audited }} auditada(s)</span>
+                                >{{ auditorRowName(row) }}</span
+                              >
+                              <span class="text-n-slate-10 whitespace-nowrap"
+                                >{{ row.audited }} auditada(s)</span
+                              >
                               <span
                                 class="cv-chip ml-auto flex-shrink-0"
                                 :class="auditorAvgClass(row.avg)"
@@ -7400,9 +7774,11 @@ class="text-[11px] text-n-slate-10"
                           >
                             <span
                               class="font-medium text-amber-700 dark:text-amber-400"
-                              >{{ g.gap }}</span>
+                              >{{ g.gap }}</span
+                            >
                             <span class="text-n-slate-9">
-                              · {{ g.count }}×</span>
+                              · {{ g.count }}×</span
+                            >
                           </p>
                         </div>
                       </template>
@@ -7427,7 +7803,9 @@ class="text-[11px] text-n-slate-10"
 
                       <div class="grid grid-cols-2 gap-2 sm:w-96">
                         <label class="block">
-                          <span class="text-[10px] font-medium text-n-slate-9">Vencedores por semana</span>
+                          <span class="text-[10px] font-medium text-n-slate-9"
+                            >Vencedores por semana</span
+                          >
                           <input
                             v-model.number="agent.winners_count"
                             type="number"
@@ -7438,7 +7816,9 @@ class="text-[11px] text-n-slate-10"
                           />
                         </label>
                         <label class="block">
-                          <span class="text-[10px] font-medium text-n-slate-9">Variações por vencedor</span>
+                          <span class="text-[10px] font-medium text-n-slate-9"
+                            >Variações por vencedor</span
+                          >
                           <input
                             v-model.number="agent.variations_count"
                             type="number"
@@ -7555,17 +7935,26 @@ class="text-[11px] text-n-slate-10"
                           <div
                             class="flex items-center gap-1 flex-wrap text-[10px] font-medium"
                           >
-                            <span class="cv-chip">{{ w.stats?.leads ?? 0 }} leads</span>
+                            <span class="cv-chip"
+                              >{{ w.stats?.leads ?? 0 }} leads</span
+                            >
                             <span class="text-n-slate-9">→</span>
-                            <span class="cv-chip">{{ w.stats?.booked ?? 0 }} consultas</span>
+                            <span class="cv-chip"
+                              >{{ w.stats?.booked ?? 0 }} consultas</span
+                            >
                             <span class="text-n-slate-9">→</span>
-                            <span class="cv-chip">{{ w.stats?.attended ?? 0 }} compareceram</span>
+                            <span class="cv-chip"
+                              >{{ w.stats?.attended ?? 0 }} compareceram</span
+                            >
                             <span class="text-n-slate-9">→</span>
-                            <span class="cv-chip cv-green">{{ w.stats?.surgeries ?? 0 }} cirurgias</span>
+                            <span class="cv-chip cv-green"
+                              >{{ w.stats?.surgeries ?? 0 }} cirurgias</span
+                            >
                             <span
                               v-if="w.stats?.revenue"
                               class="text-n-slate-10"
-                              >· {{ fmtBrl(w.stats.revenue) }}</span>
+                              >· {{ fmtBrl(w.stats.revenue) }}</span
+                            >
                           </div>
 
                           <!-- variações: cartõezinhos p/ aprovar/recusar/copiar -->
@@ -7815,7 +8204,9 @@ class="text-[11px] text-n-slate-10"
                   style="color: #7c3aed"
                 />
                 Agentes de IA
-                <span class="text-n-slate-9 font-normal normal-case">({{ Object.keys(aiAgents).length }})</span>
+                <span class="text-n-slate-9 font-normal normal-case"
+                  >({{ Object.keys(aiAgents).length }})</span
+                >
               </p>
               <button
                 class="text-xs font-medium text-n-brand hover:underline"
@@ -7852,7 +8243,8 @@ class="text-[11px] text-n-slate-10"
                           ? 'bg-green-500/15 text-green-600'
                           : 'bg-n-alpha-2 text-n-slate-10'
                       "
-                      >● {{ agent.enabled ? 'Ligado' : 'Desligado' }}</span>
+                      >● {{ agent.enabled ? 'Ligado' : 'Desligado' }}</span
+                    >
                   </div>
                   <p class="text-[11px] text-n-slate-10 truncate">
                     {{ resolvedModel(key, agent)
@@ -7873,7 +8265,9 @@ class="text-[11px] text-n-slate-10"
               >
                 <span class="i-lucide-bot text-sm" style="color: #0f5fa6" />
                 Robôs de follow-up
-                <span class="text-n-slate-9 font-normal normal-case">({{ bots.length }})</span>
+                <span class="text-n-slate-9 font-normal normal-case"
+                  >({{ bots.length }})</span
+                >
               </p>
               <button
                 class="text-xs font-medium text-n-brand hover:underline"
@@ -7899,7 +8293,9 @@ class="text-[11px] text-n-slate-10"
                 <p class="text-sm font-medium text-n-slate-12 flex-1 truncate">
                   {{ bot.name }}
                 </p>
-                <span class="text-[11px] text-n-slate-10 flex-shrink-0">{{ (bot.steps || []).length }} cutucada(s)</span>
+                <span class="text-[11px] text-n-slate-10 flex-shrink-0"
+                  >{{ (bot.steps || []).length }} cutucada(s)</span
+                >
                 <span
                   class="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
                   :class="
@@ -7907,7 +8303,8 @@ class="text-[11px] text-n-slate-10"
                       ? 'bg-green-500/15 text-green-600'
                       : 'bg-n-alpha-2 text-n-slate-9'
                   "
-                  >{{ bot.active ? 'Ativo' : 'Pausado' }}</span>
+                  >{{ bot.active ? 'Ativo' : 'Pausado' }}</span
+                >
               </button>
             </div>
           </div>
@@ -7923,7 +8320,9 @@ class="text-[11px] text-n-slate-10"
                   style="color: #b8860b"
                 />
                 Réguas de mensagem
-                <span class="text-n-slate-9 font-normal normal-case">({{ automations.length }})</span>
+                <span class="text-n-slate-9 font-normal normal-case"
+                  >({{ automations.length }})</span
+                >
               </p>
               <button
                 class="text-xs font-medium text-n-brand hover:underline"
@@ -7958,7 +8357,8 @@ class="text-[11px] text-n-slate-10"
                 <span
                   v-if="a.trigger_label"
                   class="text-[11px] text-n-slate-10 flex-shrink-0 truncate max-w-32"
-                  >🏷 {{ a.trigger_label }}</span>
+                  >🏷 {{ a.trigger_label }}</span
+                >
                 <span
                   class="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
                   :class="
@@ -7966,7 +8366,8 @@ class="text-[11px] text-n-slate-10"
                       ? 'bg-green-500/15 text-green-600'
                       : 'bg-n-alpha-2 text-n-slate-9'
                   "
-                  >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
+                  >{{ a.active ? 'Ativa' : 'Pausada' }}</span
+                >
               </button>
             </div>
           </div>
@@ -7979,7 +8380,9 @@ class="text-[11px] text-n-slate-10"
               >
                 <span class="i-lucide-zap text-sm" style="color: #eab308" />
                 Automações de coluna
-                <span class="text-n-slate-9 font-normal normal-case">({{ columnAutomations.length }})</span>
+                <span class="text-n-slate-9 font-normal normal-case"
+                  >({{ columnAutomations.length }})</span
+                >
               </p>
               <button
                 class="text-xs font-medium text-n-brand hover:underline"
@@ -8026,7 +8429,8 @@ class="text-[11px] text-n-slate-10"
                       ? 'bg-green-500/15 text-green-600'
                       : 'bg-n-alpha-2 text-n-slate-9'
                   "
-                  >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
+                  >{{ a.active ? 'Ativa' : 'Pausada' }}</span
+                >
               </div>
             </div>
           </div>
@@ -8150,7 +8554,8 @@ class="text-[11px] text-n-slate-10"
                   />
                   <span
                     class="text-[8px] text-n-slate-9 leading-none whitespace-nowrap"
-                    >{{ fmtDay(d.date) }}</span>
+                    >{{ fmtDay(d.date) }}</span
+                  >
                 </div>
               </div>
             </div>
@@ -8189,23 +8594,29 @@ class="text-[11px] text-n-slate-10"
                           ? 'bg-green-500/15 text-green-600'
                           : 'bg-n-alpha-2 text-n-slate-10'
                       "
-                      >{{ a.active ? 'Ativa' : 'Pausada' }}</span>
+                      >{{ a.active ? 'Ativa' : 'Pausada' }}</span
+                    >
                     <span
                       class="ml-auto text-sm font-bold text-n-slate-12 flex-shrink-0"
-                      >{{ a.fired }}×</span>
+                      >{{ a.fired }}×</span
+                    >
                   </div>
                   <div
                     class="flex items-center gap-2 flex-wrap text-[11px] text-n-slate-10 mt-1"
                   >
                     <span>{{ a.stage_name }}</span>
-                    <span>·
+                    <span
+                      >·
                       {{ TRIGGER_LABELS[a.trigger_type] || a.trigger_type }} →
-                      {{ ACTION_LABELS[a.action_type] || a.action_type }}</span>
+                      {{ ACTION_LABELS[a.action_type] || a.action_type }}</span
+                    >
                     <span>· {{ a.contacts }} paciente(s)</span>
-                    <span v-if="a.failed"
-class="text-red-500 font-medium"
-                      >· {{ a.failed }} falha(s)</span>
-                    <span class="ml-auto">último: {{ fmtLastFired(a.last_fired_at) }}</span>
+                    <span v-if="a.failed" class="text-red-500 font-medium"
+                      >· {{ a.failed }} falha(s)</span
+                    >
+                    <span class="ml-auto"
+                      >último: {{ fmtLastFired(a.last_fired_at) }}</span
+                    >
                   </div>
                 </div>
               </div>
@@ -8306,7 +8717,8 @@ class="text-red-500 font-medium"
               Radar pontual
               <span
                 class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-n-alpha-2 text-n-slate-11"
-                >roda uma vez</span>
+                >roda uma vez</span
+              >
             </h2>
             <button
               class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl"
@@ -8321,7 +8733,9 @@ class="text-red-500 font-medium"
               é uma auditoria única. Nada é enviado ao paciente.
             </p>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Coluna</label>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                >Coluna</label
+              >
               <select
                 v-model="sweep.stage_id"
                 class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -8333,7 +8747,9 @@ class="text-red-500 font-medium"
               </select>
             </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Enviar os avisos para o painel de</label>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                >Enviar os avisos para o painel de</label
+              >
               <select
                 v-model="sweep.user_id"
                 class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -8345,8 +8761,12 @@ class="text-red-500 font-medium"
               </select>
             </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Etiqueta
-                <span class="text-n-slate-9 font-normal">(opcional)</span></label>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                >Etiqueta
+                <span class="text-n-slate-9 font-normal"
+                  >(opcional)</span
+                ></label
+              >
               <select
                 v-model="sweep.label"
                 class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -8358,7 +8778,9 @@ class="text-red-500 font-medium"
               </select>
             </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Período (mensagens aguardando das…)</label>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                >Período (mensagens aguardando das…)</label
+              >
               <select
                 v-model.number="sweep.since_hours"
                 class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -8511,7 +8933,9 @@ class="text-red-500 font-medium"
             </p>
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Olhar as conversas dos últimos</label>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                  >Olhar as conversas dos últimos</label
+                >
                 <select
                   v-model.number="backfill.since_days"
                   class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -8523,7 +8947,9 @@ class="text-red-500 font-medium"
                 </select>
               </div>
               <div>
-                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Teto de conversas</label>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5"
+                  >Teto de conversas</label
+                >
                 <select
                   v-model.number="backfill.limit"
                   class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"

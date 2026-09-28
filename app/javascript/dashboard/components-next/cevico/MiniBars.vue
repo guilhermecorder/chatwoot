@@ -10,6 +10,7 @@
 // anterior com pontinhos e rótulo na linha de meta. API compatível com a
 // v2 — as props novas são opcionais.
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
+import { trendOf, trendText } from './trend';
 
 const props = defineProps({
   values: { type: Array, default: () => [] },
@@ -33,6 +34,11 @@ const props = defineProps({
   // item 239 (pedido 25/09): LINHA com área em vez de barras — para períodos
   // longos (muitos baldes), onde as barras viram palitinhos
   line: { type: Boolean, default: false },
+  // 27/09 (pedido dele): LINHA DE MÉDIA do período — o parâmetro a seguir
+  average: { type: Boolean, default: true },
+  // 28/09 (item 266): LINHA DE TENDÊNCIA (regressão sobre os baldes com valor)
+  trend: { type: Boolean, default: false },
+  granularity: { type: String, default: 'day' },
 });
 
 // ── medidas: o SVG tem a largura REAL do contêiner (1 unidade = 1px), então
@@ -42,7 +48,8 @@ const wrap = ref(null);
 const W = ref(320);
 let observer = null;
 onMounted(() => {
-  if (wrap.value?.clientWidth) W.value = Math.max(120, Math.round(wrap.value.clientWidth));
+  if (wrap.value?.clientWidth)
+    W.value = Math.max(120, Math.round(wrap.value.clientWidth));
   if (typeof ResizeObserver !== 'undefined' && wrap.value) {
     observer = new ResizeObserver(entries => {
       const w = entries[0]?.contentRect?.width;
@@ -56,7 +63,9 @@ onBeforeUnmount(() => observer?.disconnect());
 const PAD = 4;
 const chartTop = 12; // folga p/ valores e marcadores 📌
 const bottom = 14; // rótulos de baixo
-const hasAxis = computed(() => (props.axis === null ? props.height >= 70 : props.axis));
+const hasAxis = computed(() =>
+  props.axis === null ? props.height >= 70 : props.axis
+);
 const L = computed(() => (hasAxis.value ? 30 : 0)); // calha do eixo
 const plotH = computed(() => props.height - bottom - chartTop);
 const baseY = computed(() => props.height - bottom);
@@ -69,7 +78,9 @@ const centerX = i => xFor(i) + barW.value / 2;
 
 const nums = computed(() => props.values.map(v => Number(v) || 0));
 const prevSlice = computed(() =>
-  props.prevValues ? props.prevValues.slice(0, Math.max(1, props.values.length)) : null
+  props.prevValues
+    ? props.prevValues.slice(0, Math.max(1, props.values.length))
+    : null
 );
 const dataMax = computed(() => Math.max(0, ...nums.value));
 const rawMax = computed(() =>
@@ -106,24 +117,58 @@ const bars = computed(() =>
   })
 );
 // modo LINHA: a série do período como linha + área em degradê
-const linePts = computed(() => nums.value.map((v, i) => ({ x: centerX(i), y: yFor(v) })));
-const linePath = computed(() => linePts.value.map(p => `${p.x},${p.y}`).join(' '));
+const linePts = computed(() =>
+  nums.value.map((v, i) => ({ x: centerX(i), y: yFor(v) }))
+);
+const linePath = computed(() =>
+  linePts.value.map(p => `${p.x},${p.y}`).join(' ')
+);
 const areaPath = computed(() => {
   const pts = linePts.value;
   if (!pts.length) return '';
   return `${pts[0].x},${baseY.value} ${linePath.value} ${pts[pts.length - 1].x},${baseY.value}`;
 });
-const maxIdx = computed(() => (dataMax.value > 0 ? nums.value.indexOf(dataMax.value) : -1));
+const maxIdx = computed(() =>
+  dataMax.value > 0 ? nums.value.indexOf(dataMax.value) : -1
+);
 // período anterior como LINHA tracejada com pontinhos (fantasma)
-const prevPts = computed(() => (prevSlice.value || []).map((v, i) => ({ x: centerX(i), y: yFor(v) })));
+const prevPts = computed(() =>
+  (prevSlice.value || []).map((v, i) => ({ x: centerX(i), y: yFor(v) }))
+);
 const prevLine = computed(() =>
-  prevPts.value.length ? prevPts.value.map(p => `${p.x},${p.y}`).join(' ') : null
+  prevPts.value.length
+    ? prevPts.value.map(p => `${p.x},${p.y}`).join(' ')
+    : null
 );
 const refY = computed(() =>
   props.reference === null || prevLine.value ? null : yFor(props.reference)
 );
 const goalY = computed(() => (props.goal === null ? null : yFor(props.goal)));
+// média dos baldes com valor (o período inteiro puxaria a média para baixo nos dias que ainda não chegaram)
+const avgValue = computed(() => {
+  const filled = nums.value.filter(v => v > 0);
+  return filled.length >= 2
+    ? filled.reduce((s, v) => s + v, 0) / filled.length
+    : null;
+});
+const avgY = computed(() =>
+  props.average && avgValue.value !== null ? yFor(avgValue.value) : null
+);
 const markerAt = i => props.markers.find(m => m.index === i) || null;
+const trendLine = computed(() => {
+  if (!props.trend) return null;
+  const t = trendOf(nums.value);
+  if (!t) return null;
+  const clampY = v => yFor(Math.min(max.value, v));
+  return {
+    x1: centerX(t.first),
+    y1: clampY(t.y0),
+    x2: centerX(t.last),
+    y2: clampY(t.y1),
+    words: trendText(nums.value, props.granularity),
+  };
+});
+const TREND_COLOR = '#FF375F';
 // valores-guia do eixo: o teto e a metade
 const gridTicks = computed(() => {
   if (!hasAxis.value) return [];
@@ -142,20 +187,22 @@ const tickIdx = computed(() => {
   for (let i = 0; i < n; i += step) idx.push(i);
   const last = n - 1;
   const gapToLast = last - idx[idx.length - 1];
-  if (gapToLast > 0 && gapToLast >= Math.max(1, Math.floor(step / 2))) idx.push(last);
+  if (gapToLast > 0 && gapToLast >= Math.max(1, Math.floor(step / 2)))
+    idx.push(last);
   return idx;
 });
 const showVals = computed(() =>
   props.line
     ? false
     : props.showValues === null
-    ? props.values.length <= 16 && props.height >= 70 && barW.value >= 14
-    : props.showValues
+      ? props.values.length <= 16 && props.height >= 70 && barW.value >= 14
+      : props.showValues
 );
 // texto curto p/ eixo e topo das barras: 1234 → 1,2k · 16,3 → 16,3
 const compact = v => {
   const num = Number(v) || 0;
-  if (Math.abs(num) >= 1000) return `${(num / 1000).toFixed(num % 1000 === 0 ? 0 : 1).replace('.', ',')}k`;
+  if (Math.abs(num) >= 1000)
+    return `${(num / 1000).toFixed(num % 1000 === 0 ? 0 : 1).replace('.', ',')}k`;
   return Number.isInteger(num) ? String(num) : num.toFixed(1).replace('.', ',');
 };
 const barLabel = v => {
@@ -217,75 +264,236 @@ const tooltip = computed(() => {
       <!-- linhas-guia + valores do eixo (teto e metade) -->
       <g v-for="(t, ti) in gridTicks" :key="'g' + ti">
         <line
-          :x1="L" :x2="W - PAD" :y1="t.y" :y2="t.y"
-          stroke="currentColor" stroke-dasharray="2 4" stroke-width="1" class="text-n-slate-9" opacity="0.35"
+          :x1="L"
+          :x2="W - PAD"
+          :y1="t.y"
+          :y2="t.y"
+          stroke="currentColor"
+          stroke-dasharray="2 4"
+          stroke-width="1"
+          class="text-n-slate-9"
+          opacity="0.35"
         />
-        <text :x="L - 5" :y="t.y + 3" text-anchor="end" font-size="8.5" fill="currentColor" class="text-n-slate-9">
+        <text
+          :x="L - 5"
+          :y="t.y + 3"
+          text-anchor="end"
+          font-size="8.5"
+          fill="currentColor"
+          class="text-n-slate-9"
+        >
           {{ compact(t.v) }}
         </text>
       </g>
       <!-- linha de base -->
       <line
-        :x1="L" :x2="W - PAD" :y1="baseY" :y2="baseY"
-        stroke="currentColor" stroke-width="1" class="text-n-slate-9" opacity="0.45"
+        :x1="L"
+        :x2="W - PAD"
+        :y1="baseY"
+        :y2="baseY"
+        stroke="currentColor"
+        stroke-width="1"
+        class="text-n-slate-9"
+        opacity="0.45"
       />
       <!-- linha de META (pontilhada ouro) com rótulo -->
       <g v-if="goalY !== null">
         <line
-          :x1="L" :x2="W - PAD" :y1="goalY" :y2="goalY"
-          stroke="#D4A017" stroke-dasharray="2 3" stroke-width="1.4" opacity="0.9"
+          :x1="L"
+          :x2="W - PAD"
+          :y1="goalY"
+          :y2="goalY"
+          stroke="#D4A017"
+          stroke-dasharray="2 3"
+          stroke-width="1.4"
+          opacity="0.9"
         />
-        <text :x="W - PAD" :y="goalY - 2.5" text-anchor="end" font-size="8" font-weight="700" fill="#B8860B">
+        <text
+          :x="W - PAD"
+          :y="goalY - 2.5"
+          text-anchor="end"
+          font-size="8"
+          font-weight="700"
+          fill="#B8860B"
+        >
           meta {{ compact(goal) }}
+        </text>
+      </g>
+      <!-- MÉDIA do período (27/09): tracejada na cor do gráfico, com o valor na ponta -->
+      <g v-if="avgY !== null" style="pointer-events: none">
+        <line
+          :x1="L"
+          :x2="W - PAD"
+          :y1="avgY"
+          :y2="avgY"
+          :stroke="color"
+          stroke-dasharray="5 4"
+          stroke-width="1.2"
+          opacity="0.75"
+        />
+        <text
+          :x="W - PAD"
+          :y="avgY - 3"
+          text-anchor="end"
+          font-size="8"
+          font-weight="700"
+          :fill="color"
+          opacity="0.9"
+        >
+          média {{ barLabel(avgValue) }}
+        </text>
+      </g>
+      <!-- TENDÊNCIA (28/09): reta sólida rosa, com a leitura em palavras -->
+      <g v-if="trendLine" style="pointer-events: none">
+        <line
+          :x1="trendLine.x1"
+          :y1="trendLine.y1"
+          :x2="trendLine.x2"
+          :y2="trendLine.y2"
+          stroke="#fff"
+          stroke-width="3.5"
+          stroke-linecap="round"
+          opacity="0.7"
+        />
+        <line
+          :x1="trendLine.x1"
+          :y1="trendLine.y1"
+          :x2="trendLine.x2"
+          :y2="trendLine.y2"
+          :stroke="TREND_COLOR"
+          stroke-width="1.8"
+          stroke-linecap="round"
+        />
+        <circle
+          :cx="trendLine.x2"
+          :cy="trendLine.y2"
+          r="2.6"
+          :fill="TREND_COLOR"
+          stroke="#fff"
+          stroke-width="1"
+        />
+        <text
+          v-if="trendLine.words && hasAxis"
+          :x="L + PAD"
+          :y="chartTop - 3"
+          text-anchor="start"
+          font-size="8"
+          font-weight="700"
+          :fill="TREND_COLOR"
+        >
+          tendência
+          {{
+            trendLine.words.dir > 0
+              ? '↗'
+              : trendLine.words.dir < 0
+                ? '↘'
+                : '→'
+          }}
+          {{ trendLine.words.text }}
         </text>
       </g>
       <!-- média do anterior (só quando não temos a série inteira) -->
       <line
         v-if="refY !== null"
-        :x1="L" :x2="W - PAD" :y1="refY" :y2="refY"
-        stroke="currentColor" stroke-dasharray="4 3" stroke-width="1" class="text-n-slate-9" opacity="0.7"
+        :x1="L"
+        :x2="W - PAD"
+        :y1="refY"
+        :y2="refY"
+        stroke="currentColor"
+        stroke-dasharray="4 3"
+        stroke-width="1"
+        class="text-n-slate-9"
+        opacity="0.7"
       />
       <!-- modo LINHA: área + linha + ponto no pico e no balde ativo -->
       <g v-if="line && linePts.length" style="pointer-events: none">
         <polygon :points="areaPath" :fill="`url(#${uid}a)`" />
         <polyline
           :points="linePath"
-          fill="none" :stroke="color" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+          fill="none"
+          :stroke="color"
+          stroke-width="2"
+          stroke-linejoin="round"
+          stroke-linecap="round"
         />
         <circle
           v-if="maxIdx >= 0"
-          :cx="linePts[maxIdx].x" :cy="linePts[maxIdx].y" r="3.2" :fill="color" stroke="#fff" stroke-width="1.2"
+          :cx="linePts[maxIdx].x"
+          :cy="linePts[maxIdx].y"
+          r="3.2"
+          :fill="color"
+          stroke="#fff"
+          stroke-width="1.2"
         />
         <template v-if="active !== null && linePts[active]">
           <line
-            :x1="linePts[active].x" :x2="linePts[active].x" :y1="chartTop" :y2="baseY"
-            :stroke="color" stroke-width="0.8" opacity="0.4"
+            :x1="linePts[active].x"
+            :x2="linePts[active].x"
+            :y1="chartTop"
+            :y2="baseY"
+            :stroke="color"
+            stroke-width="0.8"
+            opacity="0.4"
           />
-          <circle :cx="linePts[active].x" :cy="linePts[active].y" r="3.6" :fill="color" stroke="#fff" stroke-width="1.4" />
+          <circle
+            :cx="linePts[active].x"
+            :cy="linePts[active].y"
+            r="3.6"
+            :fill="color"
+            stroke="#fff"
+            stroke-width="1.4"
+          />
         </template>
       </g>
       <g v-for="b in bars" :key="b.i">
         <rect
           v-if="!line"
-          :x="b.x" :y="b.y" :width="barW" :height="b.h" :rx="Math.min(3, barW / 2)"
-          :fill="`url(#${uid})`" :opacity="active === b.i || b.isMax ? 1 : 0.82"
+          :x="b.x"
+          :y="b.y"
+          :width="barW"
+          :height="b.h"
+          :rx="Math.min(3, barW / 2)"
+          :fill="`url(#${uid})`"
+          :opacity="active === b.i || b.isMax ? 1 : 0.82"
         />
         <!-- valor em cima da barra (quando cabe) -->
         <text
           v-if="showVals && b.val > 0"
-          :x="centerX(b.i)" :y="b.y - 3"
-          text-anchor="middle" font-size="8.5" font-weight="600" fill="currentColor" class="text-n-slate-11"
+          :x="centerX(b.i)"
+          :y="b.y - 3"
+          text-anchor="middle"
+          font-size="8.5"
+          font-weight="600"
+          fill="currentColor"
+          class="text-n-slate-11"
         >
           {{ barLabel(b.val) }}
         </text>
         <!-- 📌 ação da empresa no balde -->
         <g v-if="markerAt(b.i)">
-          <line :x1="centerX(b.i)" :x2="centerX(b.i)" :y1="chartTop - 2" :y2="baseY" stroke="#D4A017" stroke-width="0.8" opacity="0.5" />
-          <circle :cx="centerX(b.i)" :cy="chartTop - 4" r="3.2" fill="#D4A017" />
+          <line
+            :x1="centerX(b.i)"
+            :x2="centerX(b.i)"
+            :y1="chartTop - 2"
+            :y2="baseY"
+            stroke="#D4A017"
+            stroke-width="0.8"
+            opacity="0.5"
+          />
+          <circle
+            :cx="centerX(b.i)"
+            :cy="chartTop - 4"
+            r="3.2"
+            fill="#D4A017"
+          />
         </g>
         <!-- área de toque do balde inteiro (tooltip fácil no dedo) -->
         <rect
-          :x="b.x - 1" :y="0" :width="barW + 2" :height="height" fill="transparent"
+          :x="b.x - 1"
+          :y="0"
+          :width="barW + 2"
+          :height="height"
+          fill="transparent"
           style="cursor: pointer"
           @pointerenter="active = b.i"
           @pointerdown.prevent="setActive(b.i, $event)"
@@ -295,13 +503,22 @@ const tooltip = computed(() => {
       <g v-if="prevLine" style="pointer-events: none">
         <polyline
           :points="prevLine"
-          fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 3"
-          class="text-n-slate-9" opacity="0.85"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-dasharray="3 3"
+          class="text-n-slate-9"
+          opacity="0.85"
         />
         <circle
           v-for="(p, pi) in prevPts"
           :key="'p' + pi"
-          :cx="p.x" :cy="p.y" r="1.7" fill="currentColor" class="text-n-slate-9" opacity="0.85"
+          :cx="p.x"
+          :cy="p.y"
+          r="1.7"
+          fill="currentColor"
+          class="text-n-slate-9"
+          opacity="0.85"
         />
       </g>
       <text
@@ -323,9 +540,16 @@ const tooltip = computed(() => {
       class="absolute top-0 -translate-x-1/2 -translate-y-1 z-10 rounded-lg border border-n-weak bg-n-solid-1 shadow-lg px-2.5 py-1.5 text-[11px] leading-tight whitespace-nowrap pointer-events-none"
       :style="{ left: tooltip.leftPct + '%' }"
     >
-      <p class="font-semibold text-n-slate-12">{{ tooltip.label }} · {{ tooltip.value }}</p>
-      <p v-if="tooltip.prev !== null" class="text-n-slate-10">anterior: {{ tooltip.prev }}<template v-if="tooltip.delta"> · {{ tooltip.delta }}</template></p>
-      <p v-if="tooltip.marker" class="text-amber-600">📌 {{ tooltip.marker }}</p>
+      <p class="font-semibold text-n-slate-12">
+        {{ tooltip.label }} · {{ tooltip.value }}
+      </p>
+      <p v-if="tooltip.prev !== null" class="text-n-slate-10">
+        anterior: {{ tooltip.prev
+        }}<template v-if="tooltip.delta"> · {{ tooltip.delta }}</template>
+      </p>
+      <p v-if="tooltip.marker" class="text-amber-600">
+        📌 {{ tooltip.marker }}
+      </p>
     </div>
   </div>
 </template>

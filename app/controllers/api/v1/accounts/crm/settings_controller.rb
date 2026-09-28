@@ -998,7 +998,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           'spacers' => Array(h['spacers']).map(&:to_s).grep(/\Agap:[a-z0-9]{1,20}\z/).uniq.first(60),
           # item 248: modelo aplicado (para "restaurar o modelo") + julgamento pela média histórica
           'preset' => h['preset'].to_s[/\A[a-z0-9_-]{1,40}\z/],
-          'judge' => ActiveModel::Type::Boolean.new.cast(h['judge']) || false
+          'judge' => ActiveModel::Type::Boolean.new.cast(h['judge']) || false,
+          # item 266: linha de tendência nos gráficos do painel
+          'trend' => ActiveModel::Type::Boolean.new.cast(h['trend']) || false,
+          # item 266b: grade do ímã dos cards ({id,x,y,w,h}); ausente → o painel monta pela ordem
+          'grid' => sanitize_tile_grid(h['grid'])
         }.compact
       end
     end
@@ -1013,8 +1017,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           'top' => Array(h['top']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
           'main' => Array(h['main']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
           # item 248: blocos em MEIA largura (lado a lado) — divide o painel na horizontal
-          'half' => Array(h['half']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20)
-        }
+          'half' => Array(h['half']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
+          # item 266: grade do ímã por área ({id,x,y,w} em colunas/linhas) + trava
+          'grid_top' => sanitize_block_grid(h['grid_top']),
+          'grid_main' => sanitize_block_grid(h['grid_main']),
+          'locked' => ActiveModel::Type::Boolean.new.cast(h['locked']) || false
+        }.compact
       end
     end
     # 🍎🍊 PALETAS do Meu Painel por painel (rodada 162): modo do painel (cor
@@ -1104,6 +1112,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                        .permit(:consulta_user_id, :cirurgia_user_id, :deadline)
                                        .to_h
                                        .transform_values(&:presence)
+    end
+    # 27/09: PAPEL E RESPONSABILIDADES de cada pessoa — o Mentor do Time julga
+    # cada um pelo próprio papel (fechamento de cirurgia ≠ linha de frente)
+    if params.key?(:team_roles) && Current.account_user.administrator?
+      cfg['team_roles'] = sanitize_team_roles(params[:team_roles])
     end
     # conferência do dia → CRM: para onde vai o card em cada caso
     if params.key?(:attendance_stages)
@@ -1208,6 +1221,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_closed_doctors: cfg['closed_doctors'] || [],
       attendance_stages: cfg['attendance_stages'] || {},
       attendance_owners: cfg['attendance_owners'] || {},
+      team_roles: cfg['team_roles'] || {},
       surgery_locations: cfg['surgery_locations'] || [],
       surgery_windows: cfg['surgery_windows'] || [],
       exam_windows: cfg['exam_windows'] || [],
@@ -1288,7 +1302,27 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'min_interval_days' => raw[:min_interval_days].to_i.positive? ? raw[:min_interval_days].to_i.clamp(7, 365) : 60,
       'rules' => rules.presence,
       'updated_at' => Time.current.iso8601
-    }.compact
+    }.merge(sanitize_nps_extras(raw)).compact
+  end
+
+  # 27/09 (NPS v1.1 do N8N): recuperação de atrasados, lembrete para quem não
+  # respondeu (modelo da Meta) e agradecimento com o link do Google (sem IA)
+  def sanitize_nps_extras(raw) # rubocop:disable Metrics/AbcSize
+    rem = raw[:reminder].is_a?(ActionController::Parameters) ? raw[:reminder] : nil
+    reminder = if rem
+                 { 'enabled' => ActiveModel::Type::Boolean.new.cast(rem[:enabled]) == true,
+                   'hours' => rem[:hours].to_i.positive? ? rem[:hours].to_i.clamp(1, 72) : Crm::NpsSurvey::DEFAULT_REMINDER_HOURS,
+                   'inbox_id' => rem[:inbox_id].to_i.positive? ? rem[:inbox_id].to_i : nil,
+                   'template_params' => reminder_template_params(rem[:template_params]),
+                   'message_preview' => rem[:message_preview].to_s[0, 2000].presence }.compact
+               end
+    {
+      'catch_up_days' => raw.key?(:catch_up_days) ? raw[:catch_up_days].to_i.clamp(0, 30) : nil,
+      'reminder' => reminder,
+      'thanks_enabled' => raw.key?(:thanks_enabled) ? ActiveModel::Type::Boolean.new.cast(raw[:thanks_enabled]) == true : nil,
+      'thanks_text' => raw[:thanks_text].to_s[0, 1500].presence,
+      'thanks_bands' => (Array(raw[:thanks_bands]).map(&:to_s) & Crm::NpsSurvey::BANDS.keys).presence
+    }
   end
 
   def safe_url(value)
@@ -1325,6 +1359,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # pacientes do Oftalmofácil (26/09): a caixa escolhida e o modelo dela — só
   # por aqui a cerca dos parceiros libera o lembrete (ver AppointmentReminderSendJob)
+  def sanitize_team_roles(raw)
+    return {} unless raw.is_a?(ActionController::Parameters)
+
+    ids = Current.account.users.pluck(:id).map(&:to_s)
+    raw.to_unsafe_h.slice(*ids).to_h do |uid, r|
+      r = r.is_a?(Hash) ? r : {}
+      [uid, { 'papel' => r['papel'].to_s.strip[0, 60], 'responsabilidades' => r['responsabilidades'].to_s.strip[0, 1200],
+              'updated_at' => Time.current.iso8601 }]
+    end.reject { |_, v| v['papel'].blank? && v['responsabilidades'].blank? }
+  end
+
   def sanitize_reminder_partner(raw)
     return nil unless raw.is_a?(ActionController::Parameters)
 
@@ -1819,6 +1864,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_closed_doctors: (s.agenda_config || {})['closed_doctors'] || [],
       attendance_stages: (s.agenda_config || {})['attendance_stages'] || {},
       attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},
+      team_roles: (s.agenda_config || {})['team_roles'] || {},
       surgery_locations: (s.agenda_config || {})['surgery_locations'] || [],
       surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
       exam_windows: (s.agenda_config || {})['exam_windows'] || [],
@@ -2166,6 +2212,36 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       next unless bid.to_s.match?(/\A[a-z0-9_-]{1,40}\z/) && PALETTE_KEYS.include?(pk.to_s)
 
       acc[bid.to_s] = pk.to_s
+    end
+  end
+
+  # item 266: cada célula da grade do ímã = {id, x, y, w} inteiros dentro das
+  # 12 colunas; lista ausente vira nil (o painel monta a grade pela ordem antiga)
+  def sanitize_block_grid(list)
+    return nil unless list.is_a?(Array)
+
+    list.first(20).filter_map do |raw|
+      g = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+      id = g['id'].to_s[0, 40]
+      next if id.blank?
+
+      w = g['w'].to_i.clamp(2, 12)
+      { 'id' => id, 'x' => g['x'].to_i.clamp(0, 12 - w), 'y' => g['y'].to_i.clamp(0, 9999), 'w' => w }
+    end
+  end
+
+  # item 266b: célula do card na grade de 12 colunas; h em linhas de 16 px
+  def sanitize_tile_grid(list)
+    return nil unless list.is_a?(Array)
+
+    list.first(KPI_LAYOUT_MAX).filter_map do |raw|
+      g = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+      id = g['id'].to_s[0, 40]
+      next if id.blank?
+
+      w = g['w'].to_i.clamp(2, 12)
+      { 'id' => id, 'x' => g['x'].to_i.clamp(0, 12 - w), 'y' => g['y'].to_i.clamp(0, 9999), 'w' => w,
+        'h' => g['h'].to_i.clamp(4, 80) }
     end
   end
 

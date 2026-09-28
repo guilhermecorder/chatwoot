@@ -8,7 +8,7 @@
 # - PERENE: cron semanal (segunda de manhã) via Crm::WeeklyMentorJob,
 #   analisando a semana que acabou (segunda a domingo).
 # - PONTUAL: botão "Gerar feedback agora" (admin) — analisa os últimos 7 dias.
-class Crm::WeeklyMentorService
+class Crm::WeeklyMentorService # rubocop:disable Metrics/ClassLength
   include Crm::AiAgentConfig
 
   AGENT_KEY = 'mentor'.freeze
@@ -60,6 +60,23 @@ class Crm::WeeklyMentorService
     - Se receber "meta_do_mes" (alvos, orientações e marcos do Painel de
       Metas), CONECTE as soluções à meta: mostre como o ajuste da pessoa
       ajuda o time a bater o alvo do mês.
+
+    O PAPEL de cada pessoa manda (27/09):
+    - "papel_e_responsabilidades" diz o que essa pessoa cuida. Julgue-a SÓ
+      pelo papel dela: quem fecha cirurgia ou faz a conferência do dia não
+      é cobrado por volume de chat; quem é linha de frente é cobrado por
+      tempo de resposta. Se um número não faz parte do papel, ignore-o.
+    - "o_sistema_faz_sozinho" lista o que a CEVICO já automatizou (atendentes
+      de IA, robôs de follow-up, confirmação de consulta, pesquisa NPS,
+      Agenda, Tarefas, Radar). NUNCA peça à pessoa o que o sistema já faz
+      sozinho (ex.: "mande lembrete da consulta", "faça follow-up manual").
+      Cobre o que só ela pode fazer: assumir a conversa que a IA pausou,
+      concluir as Tarefas, conferir a Agenda, fechar a cirurgia, tratar os
+      avisos do Radar. Quando fizer sentido, as soluções devem USAR essas
+      ferramentas pelo nome.
+    - Parte das respostas rápidas pode ser do atendente de IA, não da pessoa:
+      "respostas" e "tempo_medio_resposta_min" contam só o que a pessoa
+      mesma escreveu.
   PROMPT
 
   def initialize(account, week_start: nil, rolling: false, cadence: 'weekly')
@@ -93,9 +110,11 @@ class Crm::WeeklyMentorService
     @cadence == 'monthly' ? (@week_start.end_of_month - @week_start).to_i + 1 : 7
   end
 
-  # semana sem uso = sem feedback (quem não trabalhou não é cobrado)
+  # semana sem uso = sem feedback (quem não trabalhou não é cobrado);
+  # o login do atendente de IA não é gente: fora do feedback e da mediana
   def active_team_stats
-    @account.users.to_a
+    ai_user_id = agenda_config['ai_user_id'].to_i
+    @account.users.to_a.reject { |u| u.id == ai_user_id }
             .index_with { |user| collect_stats(user) }
             .select { |_u, s| s[:respostas].positive? || s[:mensagens_enviadas].positive? || s[:tarefas_concluidas].positive? }
   end
@@ -133,7 +152,7 @@ class Crm::WeeklyMentorService
       respostas_dentro_da_meta_pct: reply_count.positive? ? ((replies.where(value: ..goal_minutes * 60).count * 100.0) / reply_count).round : nil,
       meta_minutos: goal_minutes,
       conversas_resolvidas: @account.reporting_events.where(name: 'conversation_resolved', user_id: user.id, created_at: range).count,
-      mensagens_enviadas: @account.messages.where(sender: user, message_type: :outgoing, created_at: range).count,
+      mensagens_enviadas: @account.messages.where(sender: user, message_type: :outgoing, private: false, created_at: range).count,
       tarefas_concluidas: @account.tasks.where(assignee_id: user.id, status: :done, completed_at: range).count
     }
   end
@@ -147,9 +166,11 @@ class Crm::WeeklyMentorService
     end
   end
 
-  def ask_mentor(user, stats, medians)
+  def ask_mentor(user, stats, medians) # rubocop:disable Metrics/MethodLength
     payload = {
       pessoa: stats,
+      papel_e_responsabilidades: role_payload(user),
+      o_sistema_faz_sozinho: automations_payload,
       mediana_do_time: medians,
       periodo: "#{@week_start.strftime('%d/%m')} a #{(@week_start + period_days - 1).strftime('%d/%m/%Y')}",
       ciclo: @cadence == 'monthly' ? 'MENSAL (visão de evolução do mês inteiro — fale do mês, não da semana)' : 'semanal',
@@ -168,6 +189,65 @@ class Crm::WeeklyMentorService
   rescue StandardError => e
     Rails.logger.error "[Crm::WeeklyMentor] #{user.id} #{e.class}: #{e.message}"
     nil
+  end
+
+  def agenda_config
+    @agenda_config ||= CrmSetting.find_by(account: @account)&.agenda_config || {}
+  end
+
+  # 27/09: o papel escrito pelo admin (Agentes de IA → Mentor → Papéis) e, na
+  # falta dele, o que o sistema já sabe: painel atribuído, responsável de
+  # painel, conferência do dia, médico, administrador
+  PANEL_ROLE = { 'agendamento' => 'Agendamento (linha de frente: leads, consultas)',
+                 'conducao' => 'Condução do paciente (consulta → cirurgia)',
+                 'cirurgia' => 'Fechamento e agenda de cirurgias',
+                 'medico' => 'Médico(a)', 'gestor' => 'Gestão' }.freeze
+
+  def role_payload(user) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    written = (agenda_config['team_roles'] || {})[user.id.to_s] || {}
+    hints = []
+    panel = (agenda_config['panel_assignments'] || {})[user.id.to_s].to_s.sub(/\Avariant:.*/, 'variant')
+    hints << PANEL_ROLE[panel] if PANEL_ROLE[panel]
+    (agenda_config['panel_owners'] || {}).each { |key, uid| hints << "responsável pelo painel #{key}" if uid.to_i == user.id }
+    owners = agenda_config['attendance_owners'] || {}
+    hints << 'responsável pela conferência do dia (consultas)' if owners['consulta_user_id'].to_i == user.id
+    hints << 'responsável pela conferência do dia (cirurgias)' if owners['cirurgia_user_id'].to_i == user.id
+    hints << 'médico(a)' if Array(agenda_config.dig('clinical_access', 'doctor_user_ids')).map(&:to_i).include?(user.id)
+    hints << 'administrador(a) do sistema' if @account.account_users.find_by(user_id: user.id)&.administrator?
+    {
+      papel: written['papel'].presence || hints.first || 'não definido (trate como linha de frente)',
+      responsabilidades: written['responsabilidades'].presence,
+      o_sistema_sabe: hints.presence
+    }.compact
+  end
+
+  # o que já roda sozinho hoje — o Mentor não cobra isso da pessoa
+  def automations_payload # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    agents = ai_config['agents'] || {}
+    live = ->(cfg) { cfg['enabled'] == true && Crm::ResponderAgentJob.live_mode?(cfg) }
+    list = []
+    { 'atendente_agendamento' => 'Atendente de Agendamento (IA responde leads no WhatsApp até marcar a consulta)',
+      'atendente_pos' => 'Atendente Pós-agendamento (IA confirma/remarca/cancela consultas)',
+      'atendente_pos_op' => 'Atendente de Pós-operatório (IA tira dúvidas do pós-op e conduz o NPS)',
+      'instagram' => 'Atendente do Instagram (IA responde o direct)' }.each do |key, label|
+      cfg = agents[key] || {}
+      next unless cfg['enabled'] == true
+
+      list << "#{label} — #{live.call(cfg) ? 'AO VIVO' : 'em sombra (só sugere; a pessoa ainda responde)'}"
+    end
+    bots = Crm::FollowupBot.where(account_id: @account.id, active: true).count
+    list << "#{bots} robô(s) de follow-up cutucam sozinhos quem parou de responder" if bots.positive?
+    list << 'Confirmação de consulta: lembretes automáticos por WhatsApp e leitura do "sim/não"' if confirmation_on?
+    list << 'Pesquisa de satisfação (NPS) enviada sozinha depois da cirurgia' if agenda_config.dig('nps_survey', 'enabled') == true
+    list << 'Radar de oportunidades avisa no Meu Painel quem está esperando resposta' if agents.dig('opportunity', 'enabled') == true
+    list << 'Agente de Ligação (IA liga para lead que não responde)' if agents.dig('voice', 'enabled') == true
+    list << 'Agenda unificada com o Oftalmofácil (cirurgias entram sozinhas); Tarefas com dono e prazo; Conferência do dia'
+    list
+  end
+
+  def confirmation_on?
+    agenda_config.dig('appointment_confirmation', 'enabled') != false &&
+      (agenda_config['appointment_reminders'] || {}).values.any? { |r| r['enabled'] == true }
   end
 
   # metas + orientações do mês corrente: o mentor conecta o feedback

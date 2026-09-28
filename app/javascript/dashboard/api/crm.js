@@ -544,6 +544,13 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 27/09: papel e responsabilidades de cada pessoa (Mentor do Time)
+  updateTeamRoles(teamRoles) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      team_roles: teamRoles,
+    });
+  }
+
   // preencher a Agenda com o histórico de confirmações das conversas
   agendaBackfill(params) {
     return axios.post(`${this.url}/settings/agenda_backfill`, params);

@@ -39,24 +39,28 @@ RSpec.describe Crm::NpsSurvey do
     names
   end
 
-  it 'classifica o tipo pelo procedimento (catarata, refrativa, outras)', :aggregate_failures do
+  it 'classifica o tipo pelo procedimento com os dias do N8N (LASIK 1, PRK 29, catarata 15)', :aggregate_failures do
     rules = described_class::DEFAULT_RULES
     c = patient('Ana', '+5511911110001')
-    expect(described_class.rule_for(rules, surgery(c, 1, procedure: 'FACECTOMIA COM LIO IMPORTADA · Olho Direito'))['key']).to eq('catarata')
-    expect(described_class.rule_for(rules, surgery(c, 1, procedure: 'PRK · Ambos'))['key']).to eq('refrativa')
-    expect(described_class.rule_for(rules, surgery(c, 1, procedure: 'Pterígio'))['key']).to eq('outras')
+    kind = ->(proc) { described_class.rule_for(rules, surgery(c, 1, procedure: proc)) }
+    expect(kind.call('FACECTOMIA COM LIO IMPORTADA · Olho Direito')).to include('key' => 'catarata', 'days_after' => 15)
+    expect(kind.call('CIRURGIA REFRATIVA - LASIK (MONOCULAR)')).to include('key' => 'lasik', 'days_after' => 1)
+    expect(kind.call('PRK · Ambos')).to include('key' => 'prk', 'days_after' => 29)
+    expect(kind.call('Cirurgia refrativa')['key']).to eq('refrativa')
+    expect(kind.call('Pterígio')['key']).to eq('outras')
   end
 
   it 'manda no dia certo de cada tipo, só para cirurgia realizada, sem parceiro e sem repetir', :aggregate_failures do
+    settings.update!(agenda_config: { 'nps_survey' => cfg.merge('catch_up_days' => 0) })
     names = sent_names
-    surgery(patient('Catarata Trinta', '+5511911110002'), 30, procedure: 'Facoemulsificação')
-    surgery(patient('Refrativa Quinze', '+5511911110003'), 15, procedure: 'LASIK')
-    surgery(patient('Catarata Quinze', '+5511911110004'), 15, procedure: 'Catarata') # catarata é 30, não 15
-    surgery(patient('Nao Realizada', '+5511911110005'), 30, procedure: 'Catarata', done: false)
-    surgery(patient('Parceiro', '+5511911110006'), 30, procedure: 'Catarata', source: 'oftalmofacil', source_detail: 'CLINICA X', external_ref: 'p1')
+    surgery(patient('Catarata Quinze', '+5511911110002'), 15, procedure: 'Facoemulsificação')
+    surgery(patient('Lasik Ontem', '+5511911110003'), 1, procedure: 'LASIK')
+    surgery(patient('Lasik Quinze', '+5511911110004'), 15, procedure: 'LASIK') # LASIK é 1 dia, não 15
+    surgery(patient('Nao Realizada', '+5511911110005'), 15, procedure: 'Catarata', done: false)
+    surgery(patient('Parceiro', '+5511911110006'), 15, procedure: 'Catarata', source: 'oftalmofacil', source_detail: 'CLINICA X', external_ref: 'p1')
 
     described_class.run_all(now)
-    expect(names).to contain_exactly('Catarata', 'Refrativa')
+    expect(names).to contain_exactly('Catarata', 'Lasik')
     state = settings.reload.agenda_config['nps_survey_state']
     expect(state['skipped'].map { |e| e['why'] }).to include('cirurgia não marcada como realizada na Agenda', 'paciente de parceiro (cerca)')
 
@@ -68,7 +72,7 @@ RSpec.describe Crm::NpsSurvey do
     settings.update!(agenda_config: { 'nps_survey' => cfg.merge('mode' => 'shadow') })
     expect(Crm::SendTemplateService).not_to receive(:new)
     c = patient('Dois Olhos', '+5511911110007')
-    surgery(c, 30, procedure: 'Catarata OD')
+    surgery(c, 15, procedure: 'Catarata OD')
     described_class.run_all(tz.parse('2026-09-26 14:00'))
     expect(settings.reload.agenda_config['nps_survey_state']).to be_nil
     described_class.run_all(now)
@@ -77,6 +81,43 @@ RSpec.describe Crm::NpsSurvey do
     c.update!(additional_attributes: { described_class::MARK_KEY => { 'pending_at' => 10.days.ago.iso8601, 'task_ids' => [] } })
     described_class.run_all(now + 1.minute)
     expect(settings.reload.agenda_config.dig('nps_survey_state', 'skipped').first['why']).to include('menos de 60 dias')
+  end
+
+  it 'quem ficou para trás recebe dentro da janela de recuperação, uma vez só', :aggregate_failures do
+    names = sent_names
+    surgery(patient('Atrasada Cinco', '+5511911110021'), 20, procedure: 'Catarata') # 15 + 5 dias
+    surgery(patient('Atrasada Dez', '+5511911110022'), 25, procedure: 'Catarata')   # fora dos 7 dias
+    described_class.run_all(now)
+    described_class.run_all(now + 1.day)
+    expect(names).to eq(['Atrasada'])
+  end
+
+  describe 'lembrete para quem não respondeu' do
+    let(:rem_tpl) { tpl.merge('name' => 'nps_lembrete') }
+    let(:contact) { patient('Sem Resposta', '+5511911110031') }
+
+    before do
+      settings.update!(agenda_config: { 'nps_survey' => cfg.merge('reminder' => { 'enabled' => true, 'hours' => 6, 'template_params' => rem_tpl }) })
+      contact.update!(additional_attributes: { described_class::MARK_KEY => { 'pending_at' => (now - 7.hours).iso8601, 'task_ids' => [1] } })
+    end
+
+    it 'manda 1 vez depois das N horas, das 8h às 20h', :aggregate_failures do
+      names = sent_names
+      travel_to(now + 12.hours) { described_class.run_all(now + 12.hours) } # 22h: fora da janela
+      expect(names).to be_empty
+      travel_to(now) { described_class.run_all(now) }
+      travel_to(now + 15.minutes) { described_class.run_all(now + 15.minutes) }
+      expect(names).to eq(['Sem'])
+      expect(contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'reminded_at')).to be_present
+    end
+
+    it 'não manda se o paciente já escreveu depois da pesquisa' do
+      conv = create(:conversation, account: account, inbox: inbox, contact: contact)
+      create(:message, account: account, inbox: inbox, conversation: conv, message_type: :incoming, content: 'oi, tudo bem')
+      names = sent_names
+      travel_to(now) { described_class.run_all(now) }
+      expect(names).to be_empty
+    end
   end
 
   describe 'resposta' do
@@ -108,6 +149,21 @@ RSpec.describe Crm::NpsSurvey do
       expect(task.priority).to eq('urgent')
       expect(task.title).to include('NPS 3 a 4')
       expect(contact.reload.label_list).to include('nps-3-4')
+    end
+
+    it 'nota 9–10 ganha agradecimento com o link do Google quando o Pós-operatório não está ao vivo', :aggregate_failures do
+      reply('🟢 9 a 10')
+      out = conversation.messages.where(message_type: :outgoing, private: false).last
+      expect(out.content).to include(described_class::DEFAULT_LINKS['google_review_url'])
+      expect(contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'thanked_at')).to be_present
+    end
+
+    it 'com o Pós-operatório ao vivo, quem agradece é ele (nada automático)' do
+      pos_op = { 'enabled' => true, 'mode' => 'live', 'inbox_ids' => [inbox.id] }
+      CrmSetting.find_by(account: account).update!(ai_config: { 'agents' => { 'atendente_pos_op' => pos_op } })
+      stub_const('Crm::ResponderAgentJob::LIVE_ENABLED', true)
+      reply('🟢 9 a 10')
+      expect(conversation.messages.where(message_type: :outgoing, private: false)).to be_empty
     end
 
     it 'sem pesquisa pendente, um "10" solto não vira nota' do

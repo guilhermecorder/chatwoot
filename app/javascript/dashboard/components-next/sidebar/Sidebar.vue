@@ -475,6 +475,7 @@ const toggleHiddenFeature = key => {
 // ── Ordem dos itens do menu (Personalizar menu, por pessoa/navegador) ──
 // Padrão admin: Relatórios logo abaixo do CRM (pedido 2026-07-15).
 const DEFAULT_MENU_ORDER = [
+  'Business',
   'Inicio',
   'CRM',
   'Reports',
@@ -617,6 +618,7 @@ const menuItemsForRole = computed(() => {
 //   { rest: 'Pai', … }         o que sobrou, como subgrupo fechável
 // Item que não couber em gaveta nenhuma cai em "Mais" — nunca desaparece.
 const MENU_LAYOUT = [
+  { solo: 'Business' }, // 👑 27/09: a mesa do dono, acima de tudo (só admin)
   { solo: 'Inicio' }, // como está meu dia?
   {
     name: 'group:atendimento', // quem eu atendo agora?
@@ -747,6 +749,7 @@ const leafBadge = item => {
 };
 // azulejos coloridos por item (como os ícones dos Ajustes do iPhone)
 const TILE_COLORS = {
+  Business: '#d4af37', // 👑 dourado da marca
   Conversation: '#34c759',
   'Cevico Calls': '#5856d6', // 23/09: índigo — a gaveta Atendimento alterna laranja/verde/índigo/vermelho/azul
   Inbox: '#007aff',
@@ -995,6 +998,17 @@ onUnmounted(() => clearInterval(radarBadgeTimer));
 
 const menuItems = computed(() => {
   return [
+    // 👑 Painel do empresário (27/09): ambiente próprio acima do Meu Painel — só admin
+    ...(isAdmin.value
+      ? [
+          {
+            name: 'Business',
+            label: 'Painel do empresário',
+            icon: 'i-lucide-crown',
+            to: accountScopedRoute('cevico_business'),
+          },
+        ]
+      : []),
     // Meu Painel: boas-vindas + resumo do dia + avisos do Radar
     // (badge = pacientes quentes sem atendimento detectados pelo Radar)
     {
@@ -1944,7 +1958,8 @@ const menuItems = computed(() => {
               <span
                 v-if="item.feature && hiddenFeatures.includes(item.feature)"
                 class="text-[10px] text-n-slate-9"
-                >oculto</span>
+                >oculto</span
+              >
               <input
                 v-if="item.feature"
                 type="checkbox"

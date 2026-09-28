@@ -16,6 +16,7 @@ import agendaRoutes from './agenda/routes';
 import patientRoutes from './patient/routes';
 import cevicoPagesRoutes from './pages/routes';
 import cevicoStrategyRoutes from './strategy/routes';
+import cevicoBusinessRoutes from './business/routes';
 import cevicoPeopleRoutes from './people/routes';
 import cevicoGoalsRoutes from './goals/routes';
 import cevicoBuilderRoutes from './builder/routes';
@@ -51,6 +52,7 @@ export default {
         ...patientRoutes.routes,
         ...cevicoPagesRoutes.routes,
         ...cevicoStrategyRoutes.routes,
+        ...cevicoBusinessRoutes.routes,
         ...cevicoPeopleRoutes.routes,
         ...cevicoGoalsRoutes.routes,
         ...cevicoBuilderRoutes.routes,

@@ -19,22 +19,47 @@
 # formulário para as notas baixas). Cerca dos parceiros e nao_perturbe valem.
 #
 # Config em agenda_config['nps_survey']; última rodada em 'nps_survey_state'.
+#
+# 27/09 (fluxo "NPS v1.1" do N8N trazido para dentro — ele manda que era o último):
+#   · dias padrão iguais à INTENÇÃO do N8N: LASIK/SMILE 1 dia, PRK 29, catarata 15
+#     (lá o Switch tinha uma regra "PRK" que casava com tudo → catarata ia em 29)
+#   · catch_up_days: quem ficou para trás (cron parado, card ligado depois) ainda
+#     recebe até N dias depois do dia certo — a marca por cirurgia não repete
+#     (o N8N reenviava TODA sexta para toda cirurgia com mais de 30 dias)
+#   · lembrete para quem não respondeu (reminder): N horas depois, mensagem
+#     MODELO (a janela de 24h ainda está fechada) — só ao vivo, 8h–20h, 1 vez
+#   · agradecimento com o link do Google (thanks) para 9–10 e 7–8 quando o
+#     Atendente de Pós-operatório NÃO está ao vivo na conversa — texto simples,
+#     sem IA (a janela abriu com a resposta). Com o Pós-op ao vivo, ele conduz.
 class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   CONFIG_KEY = 'nps_survey'.freeze
   STATE_KEY = 'nps_survey_state'.freeze
   MARK_KEY = 'cevico_nps_survey'.freeze
   REPLY_WINDOW = 10.days
+  ALREADY_SENT = 'já recebeu por esta cirurgia'.freeze
   LIST_CAP = 80
   QUIET_LABELS = %w[nao_perturbe].freeze
 
+  # ordem importa: a 1ª que casar vence ("CIRURGIA REFRATIVA - LASIK" é LASIK)
   DEFAULT_RULES = [
-    { 'key' => 'catarata', 'label' => 'Catarata', 'days_after' => 30, 'enabled' => true,
+    { 'key' => 'lasik', 'label' => 'LASIK / SMILE', 'days_after' => 1, 'enabled' => true, 'keywords' => %w[lasik smile] },
+    { 'key' => 'prk', 'label' => 'PRK', 'days_after' => 29, 'enabled' => true, 'keywords' => %w[prk] },
+    { 'key' => 'catarata', 'label' => 'Catarata', 'days_after' => 15, 'enabled' => true,
       'keywords' => %w[catarata faco facectomia lio intraocular trifocal multifocal monofocal] },
-    { 'key' => 'refrativa', 'label' => 'Refrativa', 'days_after' => 15, 'enabled' => true,
-      'keywords' => %w[refrativa lasik prk smile miopia astigmatismo hipermetropia] },
+    { 'key' => 'refrativa', 'label' => 'Outras refrativas', 'days_after' => 15, 'enabled' => true,
+      'keywords' => %w[refrativa miopia astigmatismo hipermetropia] },
     { 'key' => 'outras', 'label' => 'Outras cirurgias', 'days_after' => 15, 'enabled' => true, 'keywords' => [] }
   ].freeze
+  DEFAULT_CATCH_UP_DAYS = 7
+  DEFAULT_REMINDER_HOURS = 6
+  REMINDER_WINDOW_HOURS = (8...20)
+  THANKS_BANDS = %w[9-10 7-8].freeze
+  # texto do follow-up do N8N, com o link no lugar certo
+  DEFAULT_THANKS_TEXT = ('Muito obrigado pela sua resposta! 💙 Saber como foi a sua experiência é fundamental para ' \
+    "continuarmos melhorando o nosso atendimento na CEVICO.\n\nSe puder, deixe também a sua " \
+    "avaliação no Google — é bem rápido, basta clicar neste link:\n{{link}}\n\n" \
+    'Ficamos à disposição e desejamos um ótimo dia!').freeze
 
   BANDS = {
     '9-10' => { label: '9 a 10', score: 10, tag: 'nps-9-10' },
@@ -76,9 +101,11 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     now_sp = (now || TZ.now).in_time_zone(TZ)
     CrmSetting.find_each do |settings|
       cfg = (settings.agenda_config || {})[CONFIG_KEY] || {}
-      next unless cfg['enabled'] == true && now_sp.hour == (cfg['hour'] || 10).to_i
+      next unless cfg['enabled'] == true
 
-      new(settings.account, now_sp).run
+      survey = new(settings.account, now_sp)
+      survey.run if now_sp.hour == (cfg['hour'] || 10).to_i
+      survey.send_reminders
     rescue StandardError => e
       Rails.logger.error "[CEVICO NPS] conta #{settings.account_id}: #{e.message}"
     end
@@ -97,9 +124,10 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     return if !@shadow && (inbox.nil? || @cfg['template_params'].blank?)
 
     rules = Array(@cfg['rules']).reject { |r| r['enabled'] == false }
+    catch_up = (@cfg['catch_up_days'].presence || DEFAULT_CATCH_UP_DAYS).to_i.clamp(0, 30)
     rules.group_by { |r| r['days_after'].to_i }.each do |days, same_day|
-      date = @now.to_date - days
-      surgeries_on(date).each do |task|
+      last = @now.to_date - days
+      surgeries_between(last - catch_up, last).each do |task|
         rule = self.class.rule_for(@cfg['rules'], task)
         next unless same_day.include?(rule)
 
@@ -107,6 +135,37 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
       end
     end
     record_run
+  end
+
+  # ── lembrete para quem não respondeu (a cada rodada do cron, 8h–20h) ──
+  def send_reminders # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
+    rem = @cfg['reminder'] || {}
+    return unless rem['enabled'] == true && !@shadow && rem['template_params'].present?
+    return unless REMINDER_WINDOW_HOURS.cover?(@now.hour)
+
+    inbox = @account.inboxes.find_by(id: rem['inbox_id'].presence || @cfg['inbox_id'])
+    return if inbox.nil?
+
+    hours = (rem['hours'].presence || DEFAULT_REMINDER_HOURS).to_i.clamp(1, 72)
+    sent = []
+    pending_contacts.find_each do |contact|
+      survey = contact.additional_attributes[MARK_KEY] || {}
+      at = Time.zone.parse(survey['pending_at'].to_s)
+      next if at > hours.hours.ago || at < REPLY_WINDOW.ago
+      next if reminder_blocked?(contact, at)
+
+      source = Crm::TemplateSource.new(@account, inbox, nil, reminder_params(rem, contact), rem['message_preview'].presence,
+                                       'Pesquisa de satisfação (lembrete)')
+      next if Crm::SendTemplateService.new(source: source, contact: contact).perform.nil?
+
+      Cevico::AttributeMerge.merge!(contact) do |attrs|
+        attrs.merge(MARK_KEY => (attrs[MARK_KEY] || {}).merge('reminded_at' => Time.current.iso8601))
+      end
+      sent << { 'at' => Time.current.iso8601, 'name' => contact.name.to_s.truncate(40), 'contact_id' => contact.id }
+    rescue StandardError => e
+      Rails.logger.warn "[CEVICO NPS] lembrete contato #{contact.id}: #{e.message}"
+    end
+    record_reminders(sent) if sent.any?
   end
 
   # ── resposta do paciente (CrmListener, a cada mensagem recebida) ───────
@@ -166,6 +225,7 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
       content: "📊 Pesquisa de satisfação respondida: nota #{meta[:label]} (etiqueta #{meta[:tag]})."
     )
     record_answer_state(contact, band)
+    send_thanks(contact, conversation, band)
     return unless %w[5-6 3-4 1-2].include?(band)
 
     Crm::HandoffTask.open!(account: contact.account, contact: contact, conversation: conversation,
@@ -173,6 +233,36 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
                            motivo: "NPS #{meta[:label]} — paciente #{band == '5-6' ? 'pouco satisfeito' : 'insatisfeito'}",
                            detalhes: 'Resposta à pesquisa de satisfação pós-cirurgia. Falar com o paciente antes que vire reclamação pública.',
                            urgencia: band == '5-6' ? 'normal' : 'alta')
+  end
+
+  # 9–10 / 7–8: agradecimento + link do Google, SEM IA, só quando o Atendente de
+  # Pós-operatório não vai responder (desligado, em sombra, fora da janela ou
+  # pausado nesta conversa). A janela de 24h está aberta: a resposta acabou de chegar.
+  def self.send_thanks(contact, conversation, band) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    cfg = config(contact.account)
+    return if cfg['thanks_enabled'] == false || cfg['mode'] != 'live'
+    return unless Array(cfg['thanks_bands'].presence || THANKS_BANDS).include?(band)
+    return if pos_op_answers?(conversation)
+    return if Crm::PartnerGuard.partner_conversation?(conversation)
+
+    text = cfg['thanks_text'].presence || DEFAULT_THANKS_TEXT
+    text = text.gsub('{{link}}', cfg['google_review_url'].to_s).gsub('{{nome}}', contact.name.to_s.split.first.to_s)
+    conversation.messages.create!(account_id: contact.account_id, inbox_id: conversation.inbox_id, message_type: :outgoing,
+                                  content: text.strip, additional_attributes: { 'cevico_nps_thanks' => band })
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      attrs.merge(MARK_KEY => (attrs[MARK_KEY] || {}).merge('thanked_at' => Time.current.iso8601))
+    end
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO NPS] agradecimento: #{e.message}"
+  end
+
+  # o Atendente de Pós-operatório vai responder nesta conversa?
+  def self.pos_op_answers?(conversation) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    agent = (CrmSetting.find_by(account_id: conversation.account_id)&.ai_config || {}).dig('agents', 'atendente_pos_op') || {}
+    return false unless agent['enabled'] == true && Array(agent['inbox_ids']).map(&:to_i).include?(conversation.inbox_id)
+    return false unless Crm::ResponderAgentJob.live_mode?(agent)
+
+    (conversation.additional_attributes || {}).dig(Crm::ResponderAgentJob::STATE_KEY, 'paused') != true
   end
 
   def self.record_answer_state(contact, band)
@@ -213,11 +303,12 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
 
   private
 
-  # cirurgias do dia na Agenda (a CEVICO e as do hub; parceiro sai na cerca)
-  def surgeries_on(date)
-    day = TZ.local(date.year, date.month, date.day)
+  # cirurgias dos dias na Agenda (a CEVICO e as do hub; parceiro sai na cerca)
+  def surgeries_between(first, last)
+    from = TZ.local(first.year, first.month, first.day)
+    to = TZ.local(last.year, last.month, last.day).end_of_day
     @account.tasks.where(task_type: 'cirurgia', canceled_at: nil, archived_at: nil)
-            .where(due_at: day..day.end_of_day)
+            .where(due_at: from..to)
             .where.not(contact_id: nil)
             .includes(:contact)
             .order(:due_at)
@@ -226,6 +317,7 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
   def send_for(inbox, task, rule)
     contact = task.contact
     why = skip_reason(task, contact)
+    return if why == ALREADY_SENT # a janela de recuperação repassa pelos mesmos dias: não polui a lista
     return skip(task, rule, why) if why
 
     if @shadow
@@ -255,7 +347,7 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     return 'pediu para não receber mensagens' if contact.label_list.any? { |l| QUIET_LABELS.include?(l) || l.start_with?('perda_') }
 
     survey = (contact.additional_attributes || {})[MARK_KEY] || {}
-    return 'já recebeu por esta cirurgia' if Array(survey['task_ids']).include?(task.id)
+    return ALREADY_SENT if Array(survey['task_ids']).include?(task.id)
 
     last = survey['pending_at'].present? ? Time.zone.parse(survey['pending_at'].to_s) : nil
     interval = (@cfg['min_interval_days'].presence || 60).to_i
@@ -276,6 +368,44 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     body = params.dig('processed_params', 'body')
     body&.transform_values! { |v| subs.reduce(v.to_s) { |text, (key, val)| text.gsub(key, val) } }
     params
+  end
+
+  def pending_contacts
+    key = MARK_KEY
+    @account.contacts
+            .where("additional_attributes -> '#{key}' ->> 'pending_at' IS NOT NULL")
+            .where("additional_attributes -> '#{key}' ->> 'answered_at' IS NULL")
+            .where("additional_attributes -> '#{key}' ->> 'reminded_at' IS NULL")
+  end
+
+  # o paciente já escreveu algo depois da pesquisa (a conversa seguiu) ou pediu silêncio?
+  def reminder_blocked?(contact, since)
+    return true if contact.phone_number.blank?
+    return true if contact.label_list.any? { |l| QUIET_LABELS.include?(l) || l.start_with?('perda_') }
+    return true if Crm::PartnerGuard.partner_contact?(contact)
+
+    Message.joins(:conversation).where(conversations: { contact_id: contact.id })
+           .where(message_type: :incoming).exists?(['messages.created_at > ?', since])
+  end
+
+  def reminder_params(rem, contact)
+    params = rem['template_params'].deep_dup
+    first = contact.name.to_s.split.first.presence || 'Paciente'
+    params.dig('processed_params', 'body')&.transform_values! { |v| v.to_s.gsub('{{nome}}', first) }
+    params
+  end
+
+  def record_reminders(sent)
+    settings = CrmSetting.find_by(account: @account)
+    return if settings.blank?
+
+    settings.with_lock do
+      agenda = settings.agenda_config || {}
+      state = agenda[STATE_KEY] || {}
+      state['reminders'] = (sent + Array(state['reminders'])).first(LIST_CAP)
+      state['last_reminder_at'] = Time.current.iso8601
+      settings.update!(agenda_config: agenda.merge(STATE_KEY => state))
+    end
   end
 
   def mark_sent!(contact, task)

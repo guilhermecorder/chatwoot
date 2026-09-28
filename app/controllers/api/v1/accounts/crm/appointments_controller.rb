@@ -45,13 +45,14 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     rows = rows.select { |r| units.include?(r[:unit].to_s) } if units.any?
     # empilhamento por caixa: contado ANTES do filtro de caixa, pra mostrar a fatia de cada uma
     by_inbox = stack_by_inbox(rows)
+    by_origin = stack_by_origin(rows)
     inbox_ids = Array(params[:inbox_ids]).map(&:to_i).select(&:positive?).presence || Array(params[:inbox_id].presence).map(&:to_i)
     rows = rows.select { |r| inbox_ids.include?(r.dig(:conversation, :inbox_id).to_i) } if inbox_ids.any?
     rows = filter_query(rows, params[:q])
 
     render json: {
       mode: mode, track: track, since: since, until: until_at, rows: rows, counts: counts(rows),
-      by_inbox: by_inbox, booking: booking_json
+      by_inbox: by_inbox, by_origin: by_origin, booking: booking_json
     }
   end
 
@@ -215,6 +216,22 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
         .map { |(id, name), list| { inbox_id: id, name: name.presence || 'sem conversa', count: list.size,
                                     ia: list.count { |r| r[:source] == 'ia' }, equipe: list.count { |r| r[:source] == 'equipe' } } }
         .sort_by { |h| -h[:count] }
+  end
+
+  # 27/09 (pedido dele: "de quais caixas de entrada vieram os agendamentos"):
+  # das MARCADAS, a caixa de ORIGEM do paciente = a da PRIMEIRA conversa dele
+  # (por onde ele chegou: Google, Instagram…), não a da conversa mais recente —
+  # assim a caixa "Confirmação de consulta" não rouba o crédito
+  def stack_by_origin(rows) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+    marcadas = rows.select { |r| r[:kind] == 'agendada' }
+    ids = marcadas.filter_map { |r| r.dig(:contact, :id) }.uniq
+    first = Conversation.where(account_id: Current.account.id, contact_id: ids)
+                        .select('DISTINCT ON (contact_id) contact_id, inbox_id').order('contact_id, created_at ASC')
+                        .to_h { |c| [c.contact_id, c.inbox_id] }
+    names = Current.account.inboxes.where(id: first.values.uniq).pluck(:id, :name).to_h
+    marcadas.group_by { |r| first[r.dig(:contact, :id)] }
+            .map { |inbox_id, list| { inbox_id: inbox_id, name: inbox_id ? names[inbox_id] : 'sem conversa', count: list.size } }
+            .sort_by { |h| -h[:count] }
   end
 
   def counts(rows) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
