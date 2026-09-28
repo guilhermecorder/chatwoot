@@ -22,7 +22,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   KINDS = %w[agendada lancada reagendada confirmada nao_confirmou cancelada].freeze
   EVENT_GAP = 5.seconds
   # quem marcou: rastro que o Secretário/Atendente deixa na descrição
-  IA_MARKS = /pela IA|pelo Atendente|Atendente de Agendamento|Atendente P[oó]s|Secret[aá]rio da Agenda|Agente de Liga/i
+  IA_MARKS = Crm::BookingSource::IA_MARKS # regra única (item 267)
   TZ = Crm::AgendaSlots::TZ
 
   # 📅 item 210 (23/09): os 4 TRILHOS da Agenda no mesmo painel —
@@ -206,9 +206,9 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     end
   end
 
-  # robô × equipe só entre o que foi MARCADO/REMARCADO/CANCELADO (confirmação
-  # é do paciente; lançamento é sempre da equipe)
-  BOOKING_KINDS_FOR_SOURCE = %w[agendada reagendada cancelada].freeze
+  # item 267 (28/09, "não entendi o 5 × 28"): robô × equipe conta SÓ as
+  # MARCADAS (antes somava remarcadas e canceladas e não batia com o card)
+  BOOKING_KINDS_FOR_SOURCE = %w[agendada].freeze
 
   # item 235: quantos registros vieram de cada caixa (ordem: maior primeiro)
   def stack_by_inbox(rows)

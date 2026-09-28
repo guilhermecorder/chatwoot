@@ -440,8 +440,9 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { blocked });
   }
 
+  // item 267: rota própria, liberada para a equipe inteira (não só admin)
   updateAgendaBlockedDays(blockedDays) {
-    return axios.post(`${this.url}/settings/update_agenda`, {
+    return axios.post(`${this.url}/settings/update_blocked_days`, {
       blocked_days: blockedDays,
     });
   }

@@ -24,6 +24,7 @@ import {
   TYPES, TYPE_BY_KEY, GENERAL_TYPE, typeOf, LEGACY_KIND_TO_TYPES,
   kindFor, kindOf, kindVars, hexToRgbSpaced,
   resolveWindows, resolveBlocked, resolveBlockedDays, resolveExamWindows,
+  wholeBlockedDays, partialBlocksOn, isWindowBlocked, sameBlock,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
 
@@ -319,21 +320,46 @@ const toggleBlock = async (day, win, slot) => {
 };
 
 const isWeekend = day => day.getDay() === 0 || day.getDay() === 6;
-const blockedDays = computed(() => new Set(resolveBlockedDays(crmSettings.value)));
+// item 267: dia INTEIRO fechado (string) × PARTE do dia (unidade / médico)
+const blockedDayList = computed(() => resolveBlockedDays(crmSettings.value));
+const blockedDays = computed(() => wholeBlockedDays(blockedDayList.value));
 const isDayBlocked = day => blockedDays.value.has(dateKey(day));
+const partialBlocksFor = day => partialBlocksOn(blockedDayList.value, dateKey(day));
+const isPartBlocked = (day, part) => partialBlocksFor(day).some(b => sameBlock(b, part));
+// menu "Fechar dia": dia inteiro · só uma unidade · só um médico (dos que atendem no dia)
+const blockMenu = ref(null);
+const blockOptions = day => {
+  const wins = rawWindowsForDay(day).filter(w => w.doctor);
+  const units = [...new Set(wins.map(w => w.unit).filter(Boolean))];
+  const doctors = [...new Set(wins.map(w => w.doctor))];
+  return [
+    { key: 'all', label: 'Dia inteiro', part: dateKey(day), on: isDayBlocked(day), icon: 'i-lucide-calendar-off' },
+    ...units.map(u => ({ key: 'u:' + u, label: `Só ${(UNITS[u]?.label || u)}`, part: { date: dateKey(day), unit: u }, on: isPartBlocked(day, { date: dateKey(day), unit: u }), icon: 'i-lucide-building-2' })),
+    ...doctors.map(d => ({ key: 'd:' + d, label: `Só ${doctorShort(d)}`, part: { date: dateKey(day), doctor: d }, on: isPartBlocked(day, { date: dateKey(day), doctor: d }), icon: 'i-lucide-stethoscope' })),
+  ];
+};
+const dayBlockSummary = day => {
+  if (isDayBlocked(day)) return 'fechado';
+  const parts = partialBlocksFor(day);
+  if (!parts.length) return '';
+  return parts.map(b => (b.unit ? (UNITS[b.unit]?.label || b.unit) : doctorShort(b.doctor))).join(', ') + ' fechado';
+};
 // teleconsulta pode acontecer em qualquer dia útil, mesmo sem janela
 const isDayOff = day => isWeekend(day) || isDayBlocked(day);
 
-const toggleBlockDay = async day => {
+const toggleBlockDay = async (day, part = null) => {
   if (isSavingBlock.value) return;
   isSavingBlock.value = true;
   try {
-    const key = dateKey(day);
+    const key = part || dateKey(day);
     const list = resolveBlockedDays(crmSettings.value);
-    const next = list.includes(key) ? list.filter(d => d !== key) : [...list, key];
+    const exists = list.some(b => sameBlock(b, key));
+    const next = exists ? list.filter(b => !sameBlock(b, key)) : [...list, key];
     await CrmAPI.updateAgendaBlockedDays(next);
     await store.dispatch('crm/fetchSettings');
-    useAlert(list.includes(key) ? 'Dia reaberto' : 'Dia fechado 🔒');
+    blockMenu.value = null;
+    const what = typeof key === 'string' ? 'Dia' : key.unit ? (UNITS[key.unit]?.label || key.unit) : doctorShort(key.doctor);
+    useAlert(exists ? `${what} reaberto ✓` : `${what} fechado 🔒`);
   } catch {
     useAlert('Erro ao atualizar o dia.');
   } finally {
@@ -348,7 +374,7 @@ const slotsFor = sharedSlotsFor;
 // item 234: com várias camadas ligadas, as janelas dos recursos ligados se
 // somam (médicos + sala cirúrgica); a janela de exames (dia inteiro) só
 // aparece quando a camada de exames está sozinha, para não sujar a semana
-const windowsForDay = day => {
+const rawWindowsForDay = day => {
   const out = [];
   if (resources.value.has('doctor')) {
     out.push(...windows.value
@@ -360,6 +386,9 @@ const windowsForDay = day => {
   if (showSurgery.value) out.push(...surgeryWindowsForDay(day));
   return out;
 };
+// item 267: janela de unidade/médico fechada naquele dia some da grade
+const windowsForDay = day =>
+  rawWindowsForDay(day).filter(w => !isWindowBlocked(blockedDayList.value, dateKey(day), w));
 const toMin = hm => {
   const [h, m] = hm.split(':').map(Number);
   return h * 60 + m;
@@ -1667,6 +1696,30 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <span class="hidden 2xl:inline">Sala cirúrgica</span>
                   </button>
               </div>
+              <!-- 28/09 (pedido dele: "precisa ser mais simples e evidente esse botão de fechar dia"):
+                   na visão Dia o botão fica aqui no bloco Período, em qualquer modo do painel -->
+              <div v-if="viewMode === 'day'" class="relative">
+                <button
+                  class="cv-btn"
+                  :class="isDayBlocked(cursor) || partialBlocksFor(cursor).length ? 'cv-ag-dayclosed' : 'cv-btn-ghost cv-btn-danger'"
+                  :disabled="isSavingBlock"
+                  title="Fechar o dia inteiro, só uma unidade ou só um médico (feriado, congresso, folga): some da grade e a IA não oferece"
+                  @click.stop="blockMenu = blockMenu === dateKey(cursor) ? null : dateKey(cursor)"
+                >
+                  <span :class="isDayBlocked(cursor) ? 'i-lucide-lock-open' : 'i-lucide-lock'" class="text-sm" />
+                  {{ isDayBlocked(cursor) ? 'Reabrir dia' : dayBlockSummary(cursor) ? 'Fechado em parte' : 'Fechar dia' }}
+                  <span class="i-lucide-chevron-down text-xs opacity-60" />
+                </button>
+                <Teleport to="body"><div v-if="blockMenu === dateKey(cursor)" class="fixed inset-0 z-10" @click="blockMenu = null" /></Teleport>
+                <div v-if="blockMenu === dateKey(cursor)" class="cv-pop cv-ag-pop cv-ag-blockmenu absolute right-0 top-11 z-40 w-64 p-2">
+                  <p class="cv-ag-blockmenu-title">Fechar / reabrir</p>
+                  <button v-for="o in blockOptions(cursor)" :key="o.key" class="cv-ag-blockmenu-item" :class="{ on: o.on }" :disabled="isSavingBlock" @click="toggleBlockDay(cursor, o.part)">
+                    <span :class="o.on ? 'i-lucide-lock' : o.icon" class="text-sm" />
+                    <span class="flex-1 text-left">{{ o.label }}</span>
+                    <span class="cv-ag-blockmenu-state">{{ o.on ? 'reabrir' : 'fechar' }}</span>
+                  </button>
+                </div>
+              </div>
               <button class="cv-btn" @click="openCreateOnDay(viewMode === 'month' ? new Date() : cursor)">
                 <span class="i-lucide-plus text-sm" />
                 <span class="hidden sm:inline">{{ newLabel }}</span>
@@ -1926,11 +1979,32 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <div class="cv-ag-grid min-w-[720px]">
             <div class="cv-ag-grid-head" :style="{ gridTemplateColumns: weekGridCols }">
               <div />
+              <div v-for="day in weekDays" :key="'h' + day.toISOString()" class="relative min-w-0">
+              <!-- 28/09: cadeado de FECHAR/REABRIR o dia direto na coluna da semana (admin) -->
+              <!-- item 267: fechar/reabrir é da EQUIPE inteira (não só admin) -->
               <button
-                v-for="day in weekDays"
-                :key="'h' + day.toISOString()"
                 type="button"
-                class="cv-ag-dayhead"
+                class="cv-ag-daylock"
+                :class="{ 'cv-ag-daylock-on': isDayBlocked(day) || partialBlocksFor(day).length }"
+                :disabled="isSavingBlock"
+                :title="dayBlockSummary(day) ? `${dayBlockSummary(day)} — clique para reabrir ou fechar mais` : 'Fechar este dia (inteiro, uma unidade ou um médico)'"
+                @click.stop="blockMenu = blockMenu === dateKey(day) ? null : dateKey(day)"
+              >
+                <span class="i-lucide-lock" />
+                <span class="cv-ag-daylock-txt">{{ isDayBlocked(day) ? 'reabrir' : partialBlocksFor(day).length ? 'em parte' : 'fechar' }}</span>
+              </button>
+              <Teleport to="body"><div v-if="blockMenu === dateKey(day)" class="fixed inset-0 z-10" @click="blockMenu = null" /></Teleport>
+              <div v-if="blockMenu === dateKey(day)" class="cv-pop cv-ag-pop cv-ag-blockmenu absolute right-1 top-7 z-40 w-60 p-2" @click.stop>
+                <p class="cv-ag-blockmenu-title">{{ WEEKDAYS[day.getDay()] }} {{ day.getDate() }} · fechar / reabrir</p>
+                <button v-for="o in blockOptions(day)" :key="o.key" class="cv-ag-blockmenu-item" :class="{ on: o.on }" :disabled="isSavingBlock" @click="toggleBlockDay(day, o.part)">
+                  <span :class="o.on ? 'i-lucide-lock' : o.icon" class="text-sm" />
+                  <span class="flex-1 text-left">{{ o.label }}</span>
+                  <span class="cv-ag-blockmenu-state">{{ o.on ? 'reabrir' : 'fechar' }}</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                class="cv-ag-dayhead w-full"
                 :class="{ 'cv-ag-dayhead-today': isToday(day), 'cv-ag-dayhead-off': isDayOff(day) }"
                 :title="isDayOff(day) ? (isDayBlocked(day) ? 'Dia fechado' : 'Fim de semana') : 'Abrir o dia'"
                 @click="goToDay(day)"
@@ -1939,6 +2013,8 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <span class="cv-ag-daynum cv-ag-daynum-lg" :class="isToday(day) ? 'cv-ag-daynum-today' : ''">{{ day.getDate() }}</span>
                 <span v-if="isDayOff(day)" class="text-[9px] text-n-slate-9 flex items-center gap-0.5"><span class="i-lucide-lock text-[9px]" />{{ isDayBlocked(day) ? 'fechado' : 'sem agenda' }}</span>
                 <span v-else class="flex items-center gap-1 flex-wrap justify-center min-h-[16px]">
+                  <!-- item 267: parte do dia fechada (unidade/médico) — as outras janelas continuam -->
+                  <span v-if="dayBlockSummary(day)" class="text-[9px] text-red-500 font-semibold flex items-center gap-0.5 basis-full justify-center"><span class="i-lucide-lock text-[9px]" />{{ dayBlockSummary(day) }}</span>
                   <span v-for="w in windowsForDay(day)" :key="(w.doctor || w.unit) + w.start" class="cv-ag-win" :style="{ '--w': winColor(w) }" :title="`${winTitle(w)} — ${w.start} às ${w.end} (${winUnitLabel(w)})`">
                     {{ w.doctor ? doctorShort(w.doctor) : surgeryLocationLabel(w.unit) }}
                   </span>
@@ -1946,6 +2022,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   <span v-else-if="dayTasks(day).length" class="text-[9px] font-semibold text-n-slate-9">{{ dayTasks(day).length }}</span>
                 </span>
               </button>
+              </div>
             </div>
             <div class="cv-ag-grid-body" :style="{ gridTemplateColumns: weekGridCols }">
               <div class="cv-ag-gutter" :style="{ height: weekHours.length * WEEK_ROW_PX + 'px' }">

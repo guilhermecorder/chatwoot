@@ -180,6 +180,20 @@ export const resolveSurgeryWindows = settings =>
 
 export const resolveBlockedDays = settings =>
   Array.isArray(settings?.agenda_blocked_days) ? settings.agenda_blocked_days : [];
+// item 267: a lista mistura dias INTEIROS ('2026-10-12') e PARTES do dia
+// ({ date, unit } ou { date, doctor })
+export const wholeBlockedDays = list =>
+  new Set(list.filter(b => typeof b === 'string'));
+export const partialBlocksOn = (list, key) =>
+  list.filter(b => b && typeof b === 'object' && b.date === key);
+export const isWindowBlocked = (list, key, win) =>
+  partialBlocksOn(list, key).some(
+    b => (!b.unit || b.unit === win.unit) && (!b.doctor || b.doctor === win.doctor)
+  );
+export const sameBlock = (a, b) => {
+  if (typeof a === 'string' || typeof b === 'string') return a === b;
+  return a.date === b.date && (a.unit || '') === (b.unit || '') && (a.doctor || '') === (b.doctor || '');
+};
 
 // blocos ('08:30', '08:45'…) de uma janela
 export const slotsFor = win => {

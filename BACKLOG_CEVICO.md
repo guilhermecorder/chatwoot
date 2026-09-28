@@ -8301,5 +8301,76 @@ com parâmetros diferentes selecionáveis por chavinhas.
   (4×10) e voltar, botão de detalhes abre o popup; layout do teste devolvido. Abaixo de 600 px de
   largura do bloco vira uma coluna.
 - Testes: trend.spec.js (4), magnetLayout.spec.js (7, intactos), settings_block_layout_spec.rb (2,
-  cobre grid_top/grid_main/locked e kpi_layout.grid). Deploy = WEB só (sem migration). SEM commit —
-  aguarda "pode subir".
+  cobre grid_top/grid_main/locked e kpi_layout.grid). Deploy = WEB+SIDEKIQ (260 usa o cron), sem
+  migration.
+
+> 28/09: 260–266 SUBIRAM no commit 82f289d (develop) → imagem ghcr.io/guilhermecorder/chatwoot:82f289d
+> · Implantar WEB+SIDEKIQ juntos, sem migration · reversão :d3b37d5 (build #156 acompanhado).
+
+## 268. ✅ 🔒 "Fechar dia" evidente na Agenda (28/09 madrugada; pedido: "precisa ser mais simples e evidente esse botão, tanto na visão semanal quanto na do dia")
+- Antes: o botão só existia dentro do bloco do médico, no modo "Bloco do médico · Conferência" da
+  visão Dia — no modo padrão "Itens do dia" (item 252) ninguém achava.
+- Agora: (1) visão DIA → botão "Fechar dia" (vermelho, cadeado) no bloco Período, ao lado de
+  "Novo agendamento", em qualquer modo do painel; dia fechado vira "Reabrir dia" (fundo vermelho);
+  (2) visão SEMANA → cadeado "fechar" no canto de cada coluna de dia (aparece no hover; no toque fica
+  à vista); dia fechado mostra a pílula vermelha "reabrir" sempre. Só admin. Mesma gravação de antes
+  (agenda_config.blocked_days via CrmAPI.updateAgendaBlockedDays), sem backend novo.
+- Testado local: fechar/reabrir 30/09 pela semana (coluna vira "fechado"), botão presente na visão Dia.
+- Fica para depois, se ele quiser: fechar por UNIDADE ou por MÉDICO (hoje é o dia inteiro).
+- SEM commit — aguarda "pode subir" (WEB só).
+
+## 267. ✅ 📊 INDICADORES FIDEDIGNOS — nomenclatura, quebras e funil (28/09 madrugada; prints de produção: "problemas seríssimos… não podemos chamar tudo de agendamento")
+- DECISÕES (assumidas como sugerido): LEAD NOVO = chegou há até 30 dias quando marcou (taxas);
+  volumes seguem a régua; FECHAMENTO só conta cirurgia marcada de quem teve indicação em consulta.
+- Cesto (KpiBagService): rótulos dizem de quem é o número — "Consultas marcadas (leads novos + base)",
+  "Entrou em Agendamento de Consulta (mudou de coluna no CRM)", "Cirurgias marcadas (todas: clínica +
+  Oftalmofácil)"; métricas NOVAS `appointments_booked_new` (leads novos), `appointments_booked_base`
+  (base), `surgeries_booked_indicated` (após indicação). Fórmulas dos modelos apontam para elas.
+- Meu Painel (Agendamento): "% de agendamento" → "Taxa de agendamento · leads novos (30 dias)" com
+  numerador e denominador na mesma régua (antes o numerador contava qualquer card que entrou na coluna);
+  popup com FUNIL EM 3 COLUNAS (FunnelSteps.vue: Novos contatos → Envio de orçamento → Agendamento,
+  % entre etapas e desde o início) + por caixa de entrada. "Marcadas na Agenda" → "Consultas
+  marcadas" (sub: N de leads novos · N da base); "Agendamentos hoje" → "Consultas marcadas hoje";
+  "Cirurgias fechadas" → "Cirurgias marcadas · leads do período". Gestor: "Fechamento de cirurgias
+  (indicação → marcada)" com "N marcadas no total" ao lado; "Taxa de agendamento · leads novos".
+- POPUPS com o que importa (home#booked_breakdown_json / surgery_breakdown_json): quem é o paciente
+  (lead novo × base), de qual CAIXA o paciente chegou (primeira conversa), unidade, procedimento,
+  médico, Atendente de IA × equipe; cirurgias: realizadas/faltaram/canceladas/sem conferência, origem
+  (Oftalmofácil × clínica), procedimentos, unidade, médico. Cards do "+" sobre colunas do CRM
+  (Cirurgia…/Agendamento…) herdam as mesmas seções. Média do popup = a mesma da linha do gráfico.
+- Agendamentos: "Pelo robô × pela equipe" → "Marcadas pelo Atendente de IA × pela equipe", contando SÓ
+  as marcadas (antes somava remarcadas e canceladas: 5 × 28 ≠ 31); card "Marcadas" diz leads novos ×
+  base. Regra do robô unificada em Crm::BookingSource.
+- FECHAR DIA por UNIDADE ou por MÉDICO (menu no botão "Fechar dia" da visão Dia e no cadeado de cada
+  coluna da Semana: Dia inteiro · Só Av. Paulista · Só Tatuapé · Só Dr. X); a janela fechada some da
+  grade e o Atendente de IA não oferece (AgendaSlots#window_blocked?). "As meninas devem poder fechar
+  as agendas": rota própria `settings/update_blocked_days` liberada para a EQUIPE inteira (não é mais
+  admin). blocked_days aceita 'AAAA-MM-DD' (dia inteiro) ou {date, unit} / {date, doctor}.
+- Cards do "+" que ELE criou em produção ("Taxa de agendamento 258%" = marcadas ÷ leads do dia; "Ticket
+  médio por cirurgia" apontando para a coluna errada) não mudam por código: apagar ou refazer a fórmula
+  com `appointments_booked_new / new_leads * 100` e `revenue / {stage:cirurgia realizada}`.
+- Testes: settings_block_layout_spec (3), agenda_slots_blocked_parts_spec (1), agenda_slots_future (6),
+  trend/magnet verdes. Testado local: popups (seções + funil), menu da Agenda (fechar Só Av. Paulista →
+  coluna "Av. Paulista fechado", médicos continuam; reabrir), Agendamentos.
+- Deploy = WEB só (sem migration). SEM commit — aguarda "pode subir" junto com o 268.
+- 28/09 (prints de produção, "Hoje"): 44 marcadas × 11 "Entrou em Agendamento" × 10 na taxa do Gestor —
+  o 11 eram PASSAGENS (um paciente entrou 2x); o cesto agora conta pacientes distintos por balde
+  (`distinct:` no bucketize), igual ao Gestor. 36 das 44 "pela caixa Confirmação" = consultas marcadas
+  pela equipe DENTRO do Oftalmofácil (Agenda unificada) → nova seção "Onde foi marcada: sistema CEVICO
+  × Oftalmofácil" no popup (by_channel = external_ref). "Conversão de Agendamento 44,0%" / "Taxa de
+  Agendamento 44,0%" / "Entrou em Cirurgia Realizada 9,0%" = cards do "+" dele com formato PERCENT em
+  cima de uma CONTAGEM (44 consultas viram "44,0%") — refazer os cards.
+
+## 269. ✅ 🎨 PALETA DOS INDICADORES por família e nível + card que ENCHE ao longo do dia (28/09; pedido: "não fica legal eu escolhendo entre infinitas cores… cores relacionadas para indicadores relacionados… primários, secundários e terciários… mais transparente no início do dia e mais cheio conforme o dia anda, finalizando às 19h")
+- helper/cevicoKpiPalette.js: FAMÍLIAS por regra de texto (financeiro ouro · cirurgia roxo · satisfação
+  rosa · presença laranja · agendamento verde · captação azul · outros grafite; a 1ª regra que casa
+  vence) e NÍVEIS (primário = taxas/fechamento/faturamento/consultas marcadas/comparecimento em cor
+  cheia; secundário = volumes em cor média; terciário = confirmadas/lançadas/faltas/"pela data" em cor
+  clara com texto escuro no tema claro). `classifyKpi(tile)` usa label + gk + id + chartKey + fórmula.
+- Meu Painel: `kpi_layout.auto_palette` (padrão LIGADA; chavinha "cores por indicador" na barra do modo
+  edição, ao lado de Paleta; legenda das famílias embaixo). Ordem de prioridade da cor: alerta de meta
+  (vermelho/âmbar/verde) > paleta automática > cor escolhida por card > chip "Muito bom" > cor do dia.
+- ENCHIMENTO: o card nasce na versão "vazia" da cor (bem mais leve) e uma camada `.cv-tile-fill` sobe
+  do fundo conforme a hora de SÃO PAULO (07h = 6% · 19h = 100%; relógio a cada minuto), com uma linha
+  de luz na superfície; o popup usa a cor cheia. Título do card: "Agendamento · resultado principal ·
+  57% do dia". Servidor: sanitize `auto_palette` (ausente = ligada). Deploy WEB só. SEM commit.

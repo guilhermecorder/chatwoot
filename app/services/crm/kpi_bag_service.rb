@@ -7,7 +7,7 @@
 # Fontes: LeadsUniverse (leads), conversas, tarefas da Agenda (consultas e
 # cirurgias) e o histórico de passagem pelas colunas (stage_logs), que é o
 # mesmo que alimenta o PRO MAX — os números batem entre telas.
-class Crm::KpiBagService
+class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   MESES_PT = %w[jan fev mar abr mai jun jul ago set out nov dez].freeze
 
@@ -49,11 +49,11 @@ class Crm::KpiBagService
   private
 
   # ── catálogo ──────────────────────────────────────────────────────────
-  def base_metrics(since, until_at, prev_since, prev_until, keys, prev_keys) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
+  def base_metrics(since, until_at, prev_since, prev_until, keys, prev_keys) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists, Metrics/CyclomaticComplexity
     metrics = {}
-    add = lambda do |key, label, unit, cur_scope, prev_scope, column, sum: nil|
-      series = bucketize(cur_scope, column, sum: sum)
-      prev_series = bucketize(prev_scope, column, sum: sum)
+    add = lambda do |key, label, unit, cur_scope, prev_scope, column, sum: nil, distinct: nil|
+      series = bucketize(cur_scope, column, sum: sum, distinct: distinct)
+      prev_series = bucketize(prev_scope, column, sum: sum, distinct: distinct)
       metrics[key] = {
         label: label,
         unit: unit,
@@ -71,12 +71,21 @@ class Crm::KpiBagService
     add.call('new_conversations', 'Novas conversas', 'n',
              @account.conversations.where(created_at: since..until_at),
              @account.conversations.where(created_at: prev_since..prev_until), 'conversations.created_at')
-    add.call('appointments_booked', 'Marcadas na Agenda (consultas novas, sem exame/tele)', 'n',
+    # item 267 (28/09): NUNCA "chamar tudo de agendamento" — cada número diz de
+    # quem é: consulta marcada de LEAD NOVO (chegou há até 30 dias) × de
+    # paciente da BASE (mais antigo ou sem cadastro). "Entrou em Agendamento"
+    # continua sendo a mudança de coluna no CRM (taxa oficial do item 233).
+    add.call('appointments_booked', 'Consultas marcadas (leads novos + base; sem exame/tele)', 'n',
              booked(since, until_at), booked(prev_since, prev_until), 'tasks.created_at')
+    add.call('appointments_booked_new', 'Consultas marcadas de LEADS NOVOS (chegaram há até 30 dias)', 'n',
+             booked_new_leads(since, until_at), booked_new_leads(prev_since, prev_until), 'tasks.created_at')
+    add.call('appointments_booked_base', 'Consultas marcadas de PACIENTES DA BASE (há mais de 30 dias)', 'n',
+             booked_base(since, until_at), booked_base(prev_since, prev_until), 'tasks.created_at')
     # 📊 item 233: a TAXA oficial usa a ENTRADA na coluna de agendamento do CRM
-    add.call('appointments_created', 'Entrou em Agendamento de Consulta (taxa oficial)', 'n',
+    # item 267: PACIENTES distintos (quem entrou 2x no mesmo dia conta 1) — igual ao Gestor
+    add.call('appointments_created', 'Entrou em Agendamento de Consulta (mudou de coluna no CRM)', 'n',
              Crm::BookingRate.entries(@account, since, until_at), Crm::BookingRate.entries(@account, prev_since, prev_until),
-             'crm_contact_stage_logs.entered_at')
+             'crm_contact_stage_logs.entered_at', distinct: 'crm_contact_stage_logs.crm_contact_id')
     # 📅 item 217: confirmou (SIM ao lembrete) e lançadas (já estavam marcadas fora do sistema)
     add.call('appointments_confirmed', 'Consultas confirmadas (SIM ao lembrete)', 'n',
              confirmed(since, until_at), confirmed(prev_since, prev_until), 'tasks.confirmed_at')
@@ -106,8 +115,11 @@ class Crm::KpiBagService
                attendance('consulta', 'missed', since, until_at).where(unit: unit),
                attendance('consulta', 'missed', prev_since, prev_until).where(unit: unit), 'tasks.due_at')
     end
-    add.call('surgeries_booked', 'Cirurgias agendadas (registradas)', 'n',
+    add.call('surgeries_booked', 'Cirurgias marcadas (todas: clínica + Oftalmofácil)', 'n',
              created_tasks('cirurgia', since, until_at), created_tasks('cirurgia', prev_since, prev_until), 'tasks.created_at')
+    # item 267: fechamento honesto = cirurgia marcada de quem teve INDICAÇÃO em consulta
+    add.call('surgeries_booked_indicated', 'Cirurgias marcadas após indicação (fechamento)', 'n',
+             surgeries_after_indication(since, until_at), surgeries_after_indication(prev_since, prev_until), 'tasks.created_at')
     add.call('surgeries_done', 'Cirurgias realizadas (Agenda)', 'n',
              attendance('cirurgia', 'attended', since, until_at), attendance('cirurgia', 'attended', prev_since, prev_until), 'tasks.due_at')
     add.call('surgeries_missed', 'Cirurgias — não vieram', 'n',
@@ -137,6 +149,26 @@ class Crm::KpiBagService
             .where(canceled_at: nil) # item 233: sem exame, tele, cancelada ou parceiro
             .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
             .where(source_detail: nil)
+  end
+
+  NEW_LEAD_DAYS = 30
+
+  # consulta marcada por quem CHEGOU há até 30 dias (lead novo) × mais antigo
+  def booked_new_leads(since, until_at)
+    booked(since, until_at).joins(:contact)
+                           .where("tasks.created_at - contacts.created_at <= interval '#{NEW_LEAD_DAYS} days'")
+  end
+
+  def booked_base(since, until_at)
+    booked(since, until_at).left_joins(:contact)
+                           .where("contacts.id IS NULL OR tasks.created_at - contacts.created_at > interval '#{NEW_LEAD_DAYS} days'")
+  end
+
+  # cirurgia marcada de paciente que teve consulta com indicação ANTES dela
+  def surgeries_after_indication(since, until_at)
+    created_tasks('cirurgia', since, until_at)
+      .where('EXISTS (SELECT 1 FROM tasks i WHERE i.account_id = tasks.account_id AND i.contact_id = tasks.contact_id ' \
+             "AND i.task_type = 'consulta' AND i.surgery_indication = 'indicated' AND i.due_at <= tasks.created_at)")
   end
 
   def confirmed(since, until_at)
@@ -213,9 +245,12 @@ class Crm::KpiBagService
     keys
   end
 
-  def bucketize(scope, column, sum: nil)
+  def bucketize(scope, column, sum: nil, distinct: nil)
     grouped = scope.reorder(nil).group(Arel.sql(bucket_sql(column)))
-    sum ? grouped.sum(Arel.sql(sum)) : grouped.count
+    return grouped.sum(Arel.sql(sum)) if sum
+    return grouped.distinct.count(Arel.sql(distinct)) if distinct
+
+    grouped.count
   end
 
   def total_of(scope, sum: nil)

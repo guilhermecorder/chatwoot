@@ -22,7 +22,7 @@ export const PANEL_PRESETS = [
     tiles: [
       { fixed: 'new_leads', size: 'lg', color: ['bondi', 1] },
       { kpi: { id: 'orc', label: 'Entrou em Envio de Orçamento', expr: '{stage:or[cç]amento}', format: 'number', icon: 'i-lucide-receipt' }, color: ['blueberry', 1] },
-      { kpi: { id: 'agend', label: 'Entrou em Agendamento', expr: 'appointments_created', format: 'number', icon: 'i-lucide-calendar-check' }, color: ['grape', 1] },
+      { kpi: { id: 'agend', label: 'Entrou em Agendamento (coluna do CRM)', expr: 'appointments_created', format: 'number', icon: 'i-lucide-calendar-check' }, color: ['grape', 1] },
       { kpi: { id: 'tx_orc', label: 'Taxa de orçamento', expr: '{stage:or[cç]amento} / new_leads * 100', format: 'percent', icon: 'i-lucide-receipt', note: 'Entraram em Envio de Orçamento ÷ novos contatos do período.' }, color: ['lime', 1] },
       { fixed: 'booking_rate_30', color: ['tangerine', 1] },
       { fixed: 'appointments_booked', color: ['kiwi', 1] },
@@ -40,7 +40,7 @@ export const PANEL_PRESETS = [
     desc: 'Só o essencial do dia: leads, agendamentos, marcadas e a taxa oficial — um card grande e três pequenos.',
     tiles: [
       { fixed: 'new_leads', size: 'lg', color: ['blueberry', 1] },
-      { kpi: { id: 'agend', label: 'Entrou em Agendamento', expr: 'appointments_created', format: 'number', icon: 'i-lucide-calendar-check' }, color: ['grape', 1] },
+      { kpi: { id: 'agend', label: 'Entrou em Agendamento (coluna do CRM)', expr: 'appointments_created', format: 'number', icon: 'i-lucide-calendar-check' }, color: ['grape', 1] },
       { fixed: 'appointments_booked', color: ['kiwi', 1] },
       { fixed: 'booking_rate_30', color: ['tangerine', 1] },
       { spacer: true },
@@ -54,13 +54,13 @@ export const PANEL_PRESETS = [
     desc: 'Chegada, conversão, comparecimento, cirurgias e dinheiro — dois cards grandes e o funil nos pequenos.',
     tiles: [
       { fixed: 'new_leads', size: 'lg', color: ['bondi', 1] },
-      { kpi: { id: 'agend', label: 'Entrou em Agendamento', expr: 'appointments_created', format: 'number', icon: 'i-lucide-calendar-check' }, color: ['grape', 1] },
+      { kpi: { id: 'agend', label: 'Entrou em Agendamento (coluna do CRM)', expr: 'appointments_created', format: 'number', icon: 'i-lucide-calendar-check' }, color: ['grape', 1] },
       { kpi: { id: 'comp', label: 'Comparecimento', expr: 'appointments_attended / (appointments_attended + appointments_missed) * 100', format: 'percent', icon: 'i-lucide-user-check' }, color: ['cereja', 1] },
       { kpi: { id: 'indic', label: 'Indicações de cirurgia', expr: 'indications', format: 'number', icon: 'i-lucide-target' }, color: ['uva', 1] },
       { kpi: { id: 'cir', label: 'Cirurgias realizadas', expr: 'surgeries_done', format: 'number', icon: 'i-lucide-heart-pulse' }, color: ['strawberry', 1] },
       { kpi: { id: 'fat', label: 'Faturamento fechado', expr: 'revenue', format: 'currency', icon: 'i-lucide-banknote' }, size: 'lg', color: ['laranja', 1] },
-      { kpi: { id: 'tx_cir', label: 'Indicação → cirurgia', expr: 'surgeries_booked / indications * 100', format: 'percent', icon: 'i-lucide-handshake' }, color: ['lime', 1] },
-      { kpi: { id: 'marc', label: 'Marcadas na Agenda', expr: 'appointments_booked', format: 'number', icon: 'i-lucide-calendar-check' }, color: ['kiwi', 1] },
+      { kpi: { id: 'tx_cir', label: 'Indicação → cirurgia marcada', expr: 'surgeries_booked_indicated / indications * 100', format: 'percent', icon: 'i-lucide-handshake' }, color: ['lime', 1] },
+      { kpi: { id: 'marc', label: 'Consultas marcadas (leads + base)', expr: 'appointments_booked', format: 'number', icon: 'i-lucide-calendar-check' }, color: ['kiwi', 1] },
     ],
   },
 ];

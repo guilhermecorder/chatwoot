@@ -153,6 +153,7 @@ namespace :crm do
     get :voice_voices
     get :voice_state
     post :update_agenda
+    post :update_blocked_days # item 267: qualquer pessoa da equipe fecha/reabre dias
     post :agenda_backfill
     # Configurações → Domínio (público das páginas/formulários)
     get :public_domain

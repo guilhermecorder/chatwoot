@@ -294,6 +294,47 @@
   transition: background 0.15s ease;
 }
 .cv-page .cv-ag-dayhead:hover { background: rgb(var(--cv-rgb) / 0.06); }
+/* 28/09: cadeado de fechar/reabrir o dia na coluna da semana — aparece ao passar
+   o mouse; dia fechado fica com o cadeado vermelho sempre à vista */
+.cv-page .cv-ag-daylock {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #b91c1c;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.cv-page .relative:hover > .cv-ag-daylock,
+.cv-page .cv-ag-daylock:focus-visible,
+.cv-page .cv-ag-daylock-on { opacity: 1; }
+.cv-page .cv-ag-daylock:hover { background: rgba(220, 38, 38, 0.12); }
+.cv-page .cv-ag-daylock-on { color: #fff; background: #dc2626; border-color: #dc2626; }
+.cv-page .cv-ag-daylock-on:hover { background: #b91c1c; }
+.dark .cv-page .cv-ag-daylock { background: rgba(20, 21, 23, 0.9); color: #fca5a5; }
+.dark .cv-page .cv-ag-daylock-on { background: #dc2626; color: #fff; }
+@media (hover: none) { .cv-page .cv-ag-daylock { opacity: 0.85; } }
+/* item 267: menu fechar/reabrir (dia inteiro · unidade · médico) */
+.cv-page .cv-ag-blockmenu-title { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; padding: 4px 8px 6px; }
+.cv-page .cv-ag-blockmenu-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; color: var(--cv-deep, #0f172a); }
+.cv-page .cv-ag-blockmenu-item:hover { background: rgb(var(--cv-rgb) / 0.08); }
+.cv-page .cv-ag-blockmenu-item.on { color: #b91c1c; background: rgba(220, 38, 38, 0.08); }
+.cv-page .cv-ag-blockmenu-state { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.7; }
+.dark .cv-page .cv-ag-blockmenu-item { color: #fff; }
+.dark .cv-page .cv-ag-blockmenu-item.on { color: #fca5a5; }
+/* botão "Reabrir dia" do bloco Período quando o dia está fechado */
+.cv-page .cv-ag-dayclosed { background: #dc2626; border-color: #dc2626; color: #fff; }
+.cv-page .cv-ag-dayclosed:hover { background: #b91c1c; }
 .cv-page .cv-ag-dayhead-wd {
   font-size: 10.5px;
   font-weight: 700;

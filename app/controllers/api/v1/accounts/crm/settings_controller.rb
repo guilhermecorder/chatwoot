@@ -874,6 +874,18 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ── Agenda: janelas de avaliação dos médicos ────────────────────────────────
 
+  # item 267 (28/09, "as meninas devem poder fechar as agendas de médicos"):
+  # fechar/reabrir um dia (inteiro, uma unidade ou um médico) é da EQUIPE,
+  # não só do admin — por isso fica fora de ADMIN_SETTINGS_ACTIONS
+  def update_blocked_days
+    s = CrmSetting.find_or_initialize_by(account: Current.account)
+    cfg = (s.agenda_config || {}).dup
+    cfg['blocked_days'] = sanitize_blocked_days(params[:blocked_days])
+    s.agenda_config = cfg
+    s.save!
+    render json: { agenda_blocked_days: cfg['blocked_days'] }
+  end
+
   def update_agenda
     cfg = crm_settings.agenda_config || {}
     if params.key?(:windows)
@@ -887,8 +899,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         b.permit(:date, :time, :unit, :doctor).to_h
       end
     end
-    # dias inteiros fechados (feriado, congresso, folga...)
-    cfg['blocked_days'] = Array(params[:blocked_days]).map(&:to_s) if params.key?(:blocked_days)
+    # dias fechados (feriado, congresso, folga...): string = dia INTEIRO;
+    # item 267: {date, unit} ou {date, doctor} = só aquela unidade / aquele médico
+    cfg['blocked_days'] = sanitize_blocked_days(params[:blocked_days]) if params.key?(:blocked_days)
     # médicos com a agenda FECHADA (item 76): janelas deles somem de toda
     # parte (agenda, ocupação, saúde) até reabrir
     cfg['closed_doctors'] = Array(params[:closed_doctors]).map(&:to_s) if params.key?(:closed_doctors)
@@ -1002,7 +1015,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           # item 266: linha de tendência nos gráficos do painel
           'trend' => ActiveModel::Type::Boolean.new.cast(h['trend']) || false,
           # item 266b: grade do ímã dos cards ({id,x,y,w,h}); ausente → o painel monta pela ordem
-          'grid' => sanitize_tile_grid(h['grid'])
+          'grid' => sanitize_tile_grid(h['grid']),
+          # item 269: paleta automática dos indicadores (família + nível); ausente = ligada
+          'auto_palette' => h.key?('auto_palette') ? ActiveModel::Type::Boolean.new.cast(h['auto_palette']) == true : nil
         }.compact
       end
     end
@@ -2217,6 +2232,19 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # item 266: cada célula da grade do ímã = {id, x, y, w} inteiros dentro das
   # 12 colunas; lista ausente vira nil (o painel monta a grade pela ordem antiga)
+  def sanitize_blocked_days(list)
+    Array(list).filter_map do |b|
+      next b.to_s if b.is_a?(String)
+
+      h = b.respond_to?(:permit) ? b.permit(:date, :unit, :doctor).to_h : b.to_h
+      date = h['date'].to_s[/\A\d{4}-\d{2}-\d{2}\z/]
+      next if date.blank?
+
+      part = { 'date' => date, 'unit' => h['unit'].to_s[0, 40].presence, 'doctor' => h['doctor'].to_s[0, 80].presence }.compact
+      part.size == 1 ? date : part
+    end.uniq
+  end
+
   def sanitize_block_grid(list)
     return nil unless list.is_a?(Array)
 

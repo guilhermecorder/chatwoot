@@ -91,7 +91,9 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       now: TZ.now,
       wins: windows(account),
       blocked: Array(cfg['blocked']).to_set { |b| "#{b['date']}|#{b['time']}|#{b['unit']}" },
-      blocked_days: Array(cfg['blocked_days']).to_set,
+      blocked_days: Array(cfg['blocked_days']).select { |b| b.is_a?(String) }.to_set,
+      # item 267: fechamentos de PARTE do dia (uma unidade ou um médico)
+      blocked_parts: Array(cfg['blocked_days']).select { |b| b.is_a?(Hash) },
       occupied: account.tasks
                        .where(task_type: 'consulta', canceled_at: nil)
                        .where(due_at: TZ.parse(from_date.to_s).beginning_of_day..TZ.parse(to_date.to_s).end_of_day)
@@ -106,6 +108,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
 
     slots = []
     ctx[:wins].select { |w| w['dow'] == day.wday }.each do |win|
+      next if window_blocked?(ctx, day, win)
+
       taken = 0
       each_slot(win) do |hm|
         break if taken >= per_window
@@ -121,6 +125,15 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       end
     end
     slots
+  end
+
+  # item 267: a janela deste médico/unidade está fechada neste dia?
+  def window_blocked?(ctx, day, win)
+    Array(ctx[:blocked_parts]).any? do |b|
+      b['date'] == day.to_s &&
+        (b['unit'].blank? || b['unit'] == win['unit']) &&
+        (b['doctor'].blank? || b['doctor'] == win['doctor'])
+    end
   end
 
   # texto compacto p/ entrar no prompt do agente:

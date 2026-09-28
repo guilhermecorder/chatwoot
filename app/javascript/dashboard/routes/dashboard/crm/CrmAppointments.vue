@@ -464,6 +464,14 @@ const busy = computed(() => isLoading.value || isRefreshing.value);
 const rows = computed(() => feed.value?.rows || []);
 const counts = computed(() => feed.value?.counts || {});
 const booking = computed(() => feed.value?.booking || null);
+// item 267: quantas das marcadas são de LEAD NOVO (chegou há até 30 dias) × da BASE
+const marcadasSub = computed(() => {
+  const c = counts.value?.cohorts || {};
+  const novos = (c.mesmo_dia || 0) + (c.semana || 0) + (c.mes || 0);
+  const base = (c.antes || 0) + (c.sem_cadastro || 0);
+  if (!novos && !base) return `${nounPlural.value} novas`;
+  return `${novos} de leads novos · ${base} de pacientes da base`;
+});
 const iaShare = computed(() => {
   const ia = Number(counts.value.ia || 0);
   const equipe = Number(counts.value.equipe || 0);
@@ -755,7 +763,7 @@ onBeforeUnmount(() => {
             <DashKpi
               label="Marcadas"
               :value="Number(counts.agendada || 0)"
-              :sub="`${nounPlural} novas`"
+              :sub="marcadasSub"
               :from="KIND_META.agendada.color"
               :to="KIND_META.agendada.light"
               glass
@@ -807,9 +815,9 @@ onBeforeUnmount(() => {
               compact
             />
             <DashKpi
-              label="Pelo robô × pela equipe"
+              label="Marcadas pelo Atendente de IA × pela equipe"
               :value="`${Number(counts.ia || 0)} × ${Number(counts.equipe || 0)}`"
-              :sub="`${iaShare}% das marcações pelo robô`"
+              :sub="`das ${Number(counts.agendada || 0)} marcadas, ${iaShare}% foram pelo Atendente de IA`"
               :grad="kpiGrad()"
               glass
               compact

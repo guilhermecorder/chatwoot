@@ -30,6 +30,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
                    my_performance: my_performance_json(since, until_at) }.to_json)
     end
 
+    funnel_30d = funnel_30d_json
     render json: {
       period: params[:preset].presence || 'today',
       panel: panel_key,
@@ -39,7 +40,11 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       unanswered: account.conversations.open.where.not(waiting_since: nil).count,
       appointments_today: active_consultas.where(due_at: TZ.now.all_day).count,
       new_contacts_30d: leads_count(30.days.ago, Time.current),
-      appointments_30d: Crm::BookingRate.count(account, 30.days.ago, Time.current), # item 233
+      # item 267: numerador e denominador na MESMA régua — só leads novos dos
+      # 30 dias que entraram em Agendamento (antes: qualquer card que entrou na coluna)
+      appointments_30d: funnel_30d[:booked],
+      # as 3 colunas do funil de leads novos (30 dias) + caixa de entrada
+      funnel_30d: funnel_30d,
       next_appointments: next_appointments_json,
       opportunity_alerts: opportunity_alerts_json,
       # meta de tempo de atendimento (relatório pessoal por atendente)
@@ -292,14 +297,20 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     compareceu = periodo.where(attendance: 'attended').count
     faltou = periodo.where(attendance: 'missed').count
     indicacoes = periodo.where(surgery_indication: 'indicated').count
-    agendadas = cirurgias.where(created_at: since..until_at).count
+    # item 267: fechamento = cirurgias marcadas de quem teve INDICAÇÃO (não todas
+    # as cirurgias: as da base e do Oftalmofácil inflavam para mais de 100%)
+    agendadas = surgeries_after_indication(since, until_at).count
+    agendadas_todas = cirurgias.where(created_at: since..until_at).count
     realizadas_scope = cirurgias.where(due_at: since..full_until)
     ag.merge(
       show_rate: pct(compareceu, compareceu + faltou),
       indications: indicacoes,
       surgeries_booked: agendadas,
+      surgeries_booked_all: agendadas_todas,
       closing_rate: pct(agendadas, indicacoes),
       surgeries_done: realizadas_scope.where(attendance: 'attended').or(realizadas_scope.where(status: :done)).count,
+      surgery_breakdown: surgery_breakdown_json(since, full_until),
+      booked_breakdown: booked_breakdown_json(booked_scope(account, since, until_at)),
       nps: nps_summary,
       # item 146: comparecimento por unidade também no painel do gestor
       by_unit: unit_breakdown(periodo)
@@ -364,6 +375,12 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       decision_time: decision_time_json(since, until_at),
       booked_today: booked_scope(account, TZ.now.beginning_of_day, TZ.now.end_of_day).count,
       booking_cohorts: booking_cohorts_json,
+      # item 267: o que importa em cada consulta marcada — de qual caixa o
+      # paciente chegou, unidade, procedimento, robô × equipe, lead novo × base
+      booked_breakdown: booked_breakdown_json(booked_scope(account, since, until_at)),
+      booked_today_breakdown: booked_breakdown_json(booked_scope(account, TZ.now.beginning_of_day, TZ.now.end_of_day)),
+      # item 267: cirurgias do período — procedimentos, unidades, faltas, origem
+      surgery_breakdown: surgery_breakdown_json(since, until_at),
       surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i, universe: universe),
       surgery_indications: reached_stage_count(/indica/i, since, until_at, universe: universe)
     }
@@ -412,7 +429,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # ── Painel Cirurgias — fechamento e pós-operatório ──
   def cirurgia_metrics(since, until_at)
     indicacoes = consultas.where(canceled_at: nil, due_at: since..until_at, surgery_indication: 'indicated').count
-    agendadas = cirurgias.where(created_at: since..until_at).count
+    agendadas = surgeries_after_indication(since, until_at).count # item 267
     realizadas_scope = cirurgias.where(due_at: since..until_at)
     {
       indications: indicacoes,
@@ -1008,5 +1025,101 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
 
   def pct(part, total)
     total.positive? ? (part.to_f / total * 100).round(1) : 0.0
+  end
+
+  # ── item 267: o que importa em cada consulta marcada ────────────────────
+  NEW_LEAD_DAYS = 30
+
+  def surgeries_after_indication(since, until_at)
+    cirurgias.where(created_at: since..until_at)
+             .where('EXISTS (SELECT 1 FROM tasks i WHERE i.account_id = tasks.account_id AND i.contact_id = tasks.contact_id ' \
+                    "AND i.task_type = 'consulta' AND i.surgery_indication = 'indicated' AND i.due_at <= tasks.created_at)")
+  end
+
+  # caixa de ORIGEM do paciente = a da PRIMEIRA conversa dele (por onde chegou),
+  # não a da conversa mais recente — a caixa de confirmação não rouba o crédito
+  def origin_inbox_by_contact(contact_ids)
+    return {} if contact_ids.empty?
+
+    first = Conversation.where(account_id: account.id, contact_id: contact_ids)
+                        .select('DISTINCT ON (contact_id) contact_id, inbox_id').order('contact_id, created_at ASC')
+                        .to_h { |c| [c.contact_id, c.inbox_id] }
+    names = account.inboxes.where(id: first.values.uniq).pluck(:id, :name).to_h
+    first.transform_values { |id| names[id] || 'sem conversa' }
+  end
+
+  def rows_json(counts)
+    counts.map { |label, n| { label: label.to_s, count: n } }.sort_by { |h| -h[:count] }
+  end
+
+  def booked_breakdown_json(scope) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    tasks = scope.includes(:contact).to_a
+    return nil if tasks.empty?
+
+    origin = origin_inbox_by_contact(tasks.filter_map(&:contact_id).uniq)
+    cohort = tasks.map { |t| Crm::LeadCohort.of(t.contact, t) }
+    new_leads = cohort.count { |c| %w[mesmo_dia semana mes].include?(c) }
+    {
+      total: tasks.size,
+      new_leads: new_leads,
+      base: tasks.size - new_leads,
+      by_origin_inbox: rows_json(tasks.group_by { |t| t.contact_id ? origin[t.contact_id] || 'sem conversa' : 'sem cadastro' }.transform_values(&:size)),
+      by_unit: rows_json(tasks.group_by { |t| Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit.presence || 'sem unidade' }.transform_values(&:size)),
+      by_procedure: rows_json(tasks.group_by { |t| t.procedure.presence || t.indicated_procedure.presence || (t.modality.presence && t.modality.humanize) || 'Consulta' }.transform_values(&:size)),
+      by_doctor: rows_json(tasks.group_by { |t| t.doctor.presence || 'sem médico' }.transform_values(&:size)),
+      by_source: { ia: tasks.count { |t| Crm::BookingSource.of(t) == 'ia' }, equipe: tasks.count { |t| Crm::BookingSource.of(t) == 'equipe' } },
+      # 28/09 (prints dele: 44 marcadas, 36 "pela caixa de confirmação"): a maioria é marcada pela
+      # equipe DENTRO do Oftalmofácil e chega pela Agenda unificada — vale mostrar onde foi marcada
+      by_channel: { oftalmofacil: tasks.count { |t| t.external_ref.present? }, cevico: tasks.count { |t| t.external_ref.blank? } },
+      cohorts: (Crm::LeadCohort::KEYS + ['sem_cadastro']).index_with { |k| cohort.count(k) }
+    }
+  end
+
+  # cirurgias do período (pela data): procedimentos, unidades, faltas, origem
+  def surgery_breakdown_json(since, until_at) # rubocop:disable Metrics/AbcSize
+    tasks = account.tasks.where(task_type: 'cirurgia', due_at: since..until_at).to_a
+    return nil if tasks.empty?
+
+    active = tasks.reject(&:canceled_at)
+    done = active.select { |t| t.attendance == 'attended' || t.status.to_s == 'done' }
+    {
+      total: active.size,
+      done: done.size,
+      missed: active.count { |t| t.attendance == 'missed' },
+      canceled: tasks.size - active.size,
+      pending: active.count { |t| t.attendance.blank? && t.status.to_s != 'done' && t.due_at < Time.current },
+      from_oftalmofacil: active.count { |t| t.source_detail.present? || t.external_ref.present? },
+      by_procedure: rows_json(done.group_by { |t| t.procedure.presence || t.title.to_s.sub(/\ACirurgia:\s*/i, '').split(' - ').first.presence || 'sem procedimento' }.transform_values(&:size)),
+      by_unit: rows_json(done.group_by { |t| Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit.presence || 'sem unidade' }.transform_values(&:size)),
+      by_doctor: rows_json(done.group_by { |t| t.doctor.presence || 'sem médico' }.transform_values(&:size))
+    }
+  end
+
+  # funil dos LEADS NOVOS dos últimos 30 dias: chegaram → receberam orçamento →
+  # entraram em Agendamento (mudança de coluna), com a caixa por onde chegaram
+  def funnel_30d_json
+    since = 30.days.ago
+    now = Time.current
+    universe = leads_scope(since, now)
+    quote_stage = quote_stage_for(account)
+    quotes = if quote_stage
+               Crm::StageLog.joins(:crm_contact).where(stage_id: quote_stage.id, event_type: 'entered', entered_at: since..now)
+                            .where(crm_contacts: { contact_id: universe.select(:id) }).distinct.count(:crm_contact_id)
+             end
+    booked = Crm::BookingRate.entries(account, since, now).joins(:crm_contact)
+                             .where(crm_contacts: { contact_id: universe.select(:id) }).distinct.count(:crm_contact_id)
+    {
+      leads: universe.count,
+      quotes: quotes,
+      quote_stage: quote_stage&.name,
+      booked: booked,
+      booking_stage: Crm::BookingRate.stage(account)&.name,
+      by_inbox: leads_by_inbox_json(since, now)
+    }
+  end
+
+  def quote_stage_for(account)
+    pipeline = account.crm_pipelines.order(:position).first
+    pipeline&.stages&.order(:position)&.detect { |st| st.name.match?(/or[cç]amento/i) }
   end
 end

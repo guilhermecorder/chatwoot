@@ -20,7 +20,8 @@ RSpec.describe 'CRM settings — grade do ímã e tendência do Meu Painel', typ
              intruso: { top: [], main: [], grid_top: [] }
            },
            kpi_layout: { agendamento: { order: ['leads'], trend: true, judge: false,
-                                        grid: [{ id: 'leads', x: 0, y: 0, w: 3, h: 6 }, { id: 'big', x: 9, y: 0, w: 6, h: 99 }, { id: '' }] } }
+                                        grid: [{ id: 'leads', x: 0, y: 0, w: 3, h: 6 }, { id: 'big', x: 9, y: 0, w: 6, h: 99 }, { id: '' }],
+                                        auto_palette: false } }
          },
          headers: admin.create_new_auth_token, as: :json
     expect(response).to have_http_status(:ok)
@@ -39,6 +40,7 @@ RSpec.describe 'CRM settings — grade do ímã e tendência do Meu Painel', typ
     expect(cfg.dig('kpi_layout', 'agendamento', 'grid')).to eq([{ 'id' => 'leads', 'x' => 0, 'y' => 0, 'w' => 3, 'h' => 6 },
                                                                 { 'id' => 'big', 'x' => 6, 'y' => 0, 'w' => 6, 'h' => 80 }])
     expect(cfg.dig('kpi_layout', 'agendamento', 'judge')).to be(false)
+    expect(cfg.dig('kpi_layout', 'agendamento', 'auto_palette')).to be(false)
   end
 
   it 'sem grade enviada, a entrada fica só com a ordem antiga (o painel monta a grade)' do
@@ -46,5 +48,17 @@ RSpec.describe 'CRM settings — grade do ímã e tendência do Meu Painel', typ
               headers: admin.create_new_auth_token, as: :json
     bl = CrmSetting.find_by(account: account).agenda_config.dig('block_layout', 'gestor')
     expect(bl.keys).to contain_exactly('top', 'main', 'half', 'locked')
+  end
+
+  it 'a EQUIPE (não só admin) fecha um dia inteiro, uma unidade ou um médico — e o lixo cai fora' do
+    agent_user = create(:user, account: account, role: :agent)
+    post "/api/v1/accounts/#{account.id}/crm/settings/update_blocked_days",
+         params: { blocked_days: ['2026-10-12', { date: '2026-10-13', unit: 'tatuape' }, { date: '2026-10-14', doctor: 'Dr. Gustavo Bittar' },
+                                  { date: '2026-10-15' }, { date: 'x' }, { date: '2026-10-12' }] },
+         headers: agent_user.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:ok)
+    days = CrmSetting.find_by(account: account).agenda_config['blocked_days']
+    expect(days).to eq(['2026-10-12', { 'date' => '2026-10-13', 'unit' => 'tatuape' },
+                        { 'date' => '2026-10-14', 'doctor' => 'Dr. Gustavo Bittar' }, '2026-10-15'])
   end
 end

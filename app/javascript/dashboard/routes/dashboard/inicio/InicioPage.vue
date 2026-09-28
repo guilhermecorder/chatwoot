@@ -34,6 +34,16 @@ import { trendOf, trendText } from 'dashboard/components-next/cevico/trend';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import CevicoPalettePicker from 'dashboard/components-next/cevico/CevicoPalettePicker.vue';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
+import FunnelSteps from 'dashboard/components-next/cevico/FunnelSteps.vue';
+import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
+import {
+  classifyKpi,
+  kpiGrad,
+  kpiGradSoft,
+  dayFill,
+  KPI_LEGEND,
+  KPI_FAMILIES,
+} from 'dashboard/helper/cevicoKpiPalette';
 import MagnetBoard from 'dashboard/routes/dashboard/business/MagnetBoard.vue';
 import {
   mergeLayout,
@@ -593,12 +603,16 @@ const rawPanelTiles = computed(() => {
           'Contatos novos do período pelas caixas de captação. A conversão por caixa mostra qual porta de entrada traz lead que decide.',
       },
       {
-        label: 'Taxa de agendamento',
+        label: 'Taxa de agendamento · leads novos',
         icon: 'i-lucide-percent',
         value: `${d.booking_conversion ?? 0}%`,
         gk: 'booking_conversion',
         pct: true,
-        sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`,
+        sub: `${d.appointments_created ?? 0} entraram na coluna Agendamento ÷ ${d.new_leads ?? 0} leads novos`,
+        breakdowns: bdSections(
+          d.booked_breakdown,
+          'Consultas marcadas no período'
+        ),
         components: ['new_leads', 'appointments_created'],
         compare: [
           { label: 'leads', value: d.new_leads ?? 0 },
@@ -629,21 +643,22 @@ const rawPanelTiles = computed(() => {
           'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.',
       },
       {
-        label: 'Fechamento de cirurgias',
+        label: 'Fechamento de cirurgias (indicação → marcada)',
         icon: 'i-lucide-heart-pulse',
         value: `${d.closing_rate ?? 0}%`,
         gk: 'closing_rate',
         pct: true,
         chartKey: 'surgeries_done',
-        sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`,
-        components: ['indications', 'surgeries_booked'],
+        sub: `${d.surgeries_booked ?? 0} marcadas após indicação ÷ ${d.indications ?? 0} indicações · ${d.surgeries_booked_all ?? 0} marcadas no total`,
+        components: ['indications', 'surgeries_booked_indicated'],
         compare: [
           { label: 'indicações', value: d.indications ?? 0 },
-          { label: 'agendadas', value: d.surgeries_booked ?? 0 },
+          { label: 'marcadas após indicação', value: d.surgeries_booked ?? 0 },
           { label: 'realizadas', value: d.surgeries_done ?? 0 },
         ],
+        breakdowns: surgerySections(d.surgery_breakdown),
         about:
-          'Agendadas ÷ indicações: a eficiência do fechamento. O gráfico mostra as cirurgias realizadas ao longo do período.',
+          'Item 267: só conta cirurgia marcada de paciente que teve INDICAÇÃO em consulta (antes entravam todas as cirurgias, inclusive da base e do Oftalmofácil, e a taxa passava de 100%). "Marcadas no total" mostra o número cheio, para comparar.',
       },
     ];
   }
@@ -674,7 +689,7 @@ const rawPanelTiles = computed(() => {
     {
       // 🌟 % de agendamento em EVIDÊNCIA (item 143): o indicador da linha
       // compacta da Saúde da Agenda promovido pra fileira principal
-      label: '% de agendamento',
+      label: 'Taxa de agendamento · leads novos (30 dias)',
       icon: 'i-lucide-percent',
       id: 'booking_rate_30',
       value:
@@ -684,42 +699,37 @@ const rawPanelTiles = computed(() => {
       judged: true,
       chip: booking30Chip.value,
       grad: booking30Chip.value.grad,
-      sub: `${data.value?.appointments_30d ?? 0} entraram em Agendamento ÷ ${data.value?.new_contacts_30d ?? 0} leads · 30 dias`,
-      compare: [
-        { label: 'leads (30d)', value: data.value?.new_contacts_30d ?? 0 },
-        {
-          label: 'entraram em Agendamento (30d)',
-          value: data.value?.appointments_30d ?? 0,
-        },
-      ],
+      sub: `${data.value?.appointments_30d ?? 0} leads novos entraram em Agendamento ÷ ${data.value?.new_contacts_30d ?? 0} que chegaram · 30 dias`,
+      // item 267: o funil em 3 colunas (chegaram → orçamento → agendamento) no popup
+      funnel: funnel30Steps.value,
+      breakdowns: funnel30Sections.value,
       details: [
         {
-          label: 'Entradas em Agendamento de Consulta ÷ leads',
+          label: 'Leads novos que entraram em Agendamento ÷ leads novos',
           value: `${data.value?.appointments_30d ?? 0} ÷ ${data.value?.new_contacts_30d ?? 0} = ${bookingRate30.value ?? '—'}%`,
         },
         { label: 'Referência', value: '15% muito bom · 10% bom · 5% fraco' },
       ],
       about:
-        'Dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos mudaram de coluna para "Agendamento de Consulta" no CRM (taxa oficial: só a mudança de coluna conta — exame, pós-op, tele e Oftalmofácil ficam fora). É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência.',
+        'SÓ LEADS NOVOS: dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos mudaram de coluna para "Agendamento de Consulta" no CRM (só a mudança de coluna conta — pacientes da base, exame, pós-op, tele e Oftalmofácil ficam fora). É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência.',
     },
     {
-      label: 'Marcadas na Agenda',
+      // item 267: "não podemos chamar tudo de agendamento" — o card diz quantas
+      // são de LEAD NOVO e quantas de PACIENTE DA BASE; o popup abre caixa de
+      // origem, unidade, procedimento, médico e robô × equipe
+      label: 'Consultas marcadas',
       icon: 'i-lucide-calendar-check',
       value: d.appointments_booked ?? 0,
       gk: 'appointments_booked',
       chartKey: 'appointments_booked',
-      // item 238: de quais caixas vieram (mesma regra do ambiente Agendamentos)
-      sub: bookedInboxSub.value,
-      compareInboxes: bookedInboxes.map(i => ({
-        label: shortInboxName(i.name),
-        value: i.count,
-      })),
-      compareInboxesTitle: '📥 Marcadas por caixa de entrada',
+      sub: d.booked_breakdown
+        ? `${d.booked_breakdown.new_leads} de leads novos · ${d.booked_breakdown.base} de pacientes da base`
+        : bookedInboxSub.value,
+      breakdowns: bdSections(
+        d.booked_breakdown,
+        'Consultas marcadas no período'
+      ),
       details: [
-        ...bookedInboxes.map(i => ({
-          label: `📥 ${i.name}`,
-          value: `${i.count} · ${pctOf(i.count, d.appointments_booked)}%`,
-        })),
         {
           label: '⚡ Chegaram e agendaram no mesmo período',
           value: `${d.appointments_same_day ?? 0}`,
@@ -738,16 +748,21 @@ const rawPanelTiles = computed(() => {
           : []),
       ],
       about:
-        'Consultas registradas na Agenda no período (consulta marcada para o passado = preenchimento de histórico, fica fora; exame, tele, cancelada e Oftalmofácil também ficam fora). A caixa de cada consulta é a da conversa de onde ela saiu (ou a conversa mais recente do paciente) — a mesma regra do ambiente Agendamentos. O tempo de decisão mede quantos dias o paciente levou entre chegar e marcar — mostra se o funil converte por impulso ou por insistência.',
+        'Consultas novas registradas na Agenda no período, de QUALQUER paciente: lead novo (chegou há até 30 dias) ou paciente da base (retorno, pós-op, quem já estava no funil). Consulta para o passado, exame, tele, cancelada e Oftalmofácil ficam fora. A caixa mostrada é a por onde o paciente CHEGOU (primeira conversa), não a da conversa mais recente. Não é taxa de conversão: para isso, veja "Taxa de agendamento · leads novos".',
     },
     {
-      label: 'Agendamentos hoje',
+      label: 'Consultas marcadas hoje',
       icon: 'i-lucide-calendar-plus',
       value: d.booked_today ?? 0,
       chip: bookingDayVerdict.value,
       judged: true,
       grad: bookingDayVerdict.value.grad,
       pct: true,
+      // item 267: primeiro o que importa (caixa, unidade, procedimento, robô × equipe)
+      breakdowns: bdSections(
+        d.booked_today_breakdown,
+        'Consultas marcadas hoje'
+      ),
       compare: [
         {
           label: `hoje (${ch.today?.booked ?? 0}/${ch.today?.leads ?? 0})`,
@@ -759,7 +774,9 @@ const rawPanelTiles = computed(() => {
         },
         { label: 'período', value: d.booking_conversion ?? 0 },
       ],
-      sub: `hoje ${ch.today?.rate ?? 0}% · ontem ${ch.yesterday?.rate ?? 0}% agendaram`,
+      sub: d.booked_today_breakdown
+        ? `${d.booked_today_breakdown.new_leads} de leads novos · ${d.booked_today_breakdown.base} da base · ${d.booked_today_breakdown.by_source?.ia ?? 0} pelo Atendente de IA`
+        : `hoje ${ch.today?.rate ?? 0}% · ontem ${ch.yesterday?.rate ?? 0}% agendaram`,
       details: [
         {
           label: 'Chegaram HOJE e já agendaram',
@@ -775,20 +792,142 @@ const rawPanelTiles = computed(() => {
         },
       ],
       about:
-        'O número grande é quantas consultas foram registradas HOJE, julgado contra a fatia diária da meta do mês (Painel de Metas ÷ dias do mês). As taxas abaixo dizem quem decidiu: a de hoje ainda amadurece; a de ontem é a taxa justa pra avaliar o atendimento.',
+        'Consultas registradas HOJE na Agenda (leads novos + pacientes da base), julgado contra a fatia diária da meta do mês. Em cima, de onde vieram e quem marcou; embaixo, as taxas de quem chegou hoje/ontem (a de ontem é a justa para avaliar o atendimento).',
     },
     {
-      label: 'Cirurgias fechadas',
+      label: 'Cirurgias marcadas · leads do período',
       icon: 'i-lucide-heart-pulse',
       value: d.surgeries_closed ?? 0,
       gk: 'surgeries_closed',
       chartKey: 'auto',
       chartMatch: /cirurgia agendada/i,
-      sub: 'coluna Cirurgia Agendada (CRM)',
+      sub: 'leads que chegaram no período e já estão em Cirurgia Agendada',
+      breakdowns: surgerySections(d.surgery_breakdown),
       about:
-        'Leads do período que chegaram à coluna "Cirurgia Agendada" no CRM — o fechamento que nasceu dos contatos deste período.',
+        'Só LEADS DO PERÍODO: contatos que chegaram neste período e já alcançaram a coluna "Cirurgia Agendada" no CRM. Pacientes da base e do Oftalmofácil não entram aqui (estão em "Cirurgias marcadas (todas)").',
     },
   ];
+});
+
+// ── item 267 (28/09): o que importa em cada indicador, em seções ──────────
+const bdRows = list =>
+  (list || []).map(r => ({ label: r.label, value: r.count }));
+const bdSections = (bd, title = 'Consultas marcadas') => {
+  if (!bd || !bd.total) return [];
+  return [
+    {
+      title: `${title}: quem é o paciente`,
+      items: [
+        { label: 'Leads novos (chegaram há até 30 dias)', value: bd.new_leads },
+        {
+          label: 'Pacientes da base (há mais de 30 dias ou sem cadastro)',
+          value: bd.base,
+        },
+      ],
+    },
+    {
+      title: 'De qual caixa de entrada o paciente chegou',
+      items: bdRows(bd.by_origin_inbox),
+    },
+    { title: 'Unidade', items: bdRows(bd.by_unit) },
+    {
+      title: 'Procedimento / tipo de consulta',
+      items: bdRows(bd.by_procedure),
+    },
+    { title: 'Médico', items: bdRows(bd.by_doctor) },
+    {
+      title: 'Quem marcou',
+      items: [
+        { label: 'Atendente de IA', value: bd.by_source?.ia ?? 0 },
+        { label: 'Equipe', value: bd.by_source?.equipe ?? 0 },
+      ],
+    },
+    {
+      title: 'Onde foi marcada',
+      items: [
+        {
+          label: 'No sistema CEVICO (Agenda / Atendente)',
+          value: bd.by_channel?.cevico ?? 0,
+        },
+        {
+          label: 'No Oftalmofácil (equipe, via Agenda unificada)',
+          value: bd.by_channel?.oftalmofacil ?? 0,
+        },
+      ],
+    },
+  ].filter(sec => sec.items.some(i => Number(i.value) > 0));
+};
+const surgerySections = sb => {
+  if (!sb || !sb.total) return [];
+  return [
+    {
+      title: 'Cirurgias do período: como terminaram',
+      items: [
+        { label: 'Realizadas', value: sb.done },
+        { label: 'Faltaram', value: sb.missed },
+        { label: 'Canceladas', value: sb.canceled },
+        { label: 'Já passaram, sem conferência', value: sb.pending },
+      ],
+    },
+    {
+      title: 'De onde vêm',
+      items: [
+        { label: 'Oftalmofácil (parceiros)', value: sb.from_oftalmofacil },
+        { label: 'Agenda da clínica', value: sb.total - sb.from_oftalmofacil },
+      ],
+    },
+    { title: 'Procedimentos realizados', items: bdRows(sb.by_procedure) },
+    { title: 'Unidade (realizadas)', items: bdRows(sb.by_unit) },
+    { title: 'Médico (realizadas)', items: bdRows(sb.by_doctor) },
+  ].filter(sec => sec.items.some(i => Number(i.value) > 0));
+};
+// funil de leads novos (30 dias): chegaram → orçamento → agendamento
+const funnel30Steps = computed(() => {
+  const f = data.value?.funnel_30d;
+  if (!f) return null;
+  return [
+    {
+      label: 'Novos contatos',
+      value: f.leads,
+      color: '#2563eb',
+      hint: 'chegaram nos últimos 30 dias',
+    },
+    {
+      label: f.quote_stage || 'Envio de orçamento',
+      value: f.quotes ?? 0,
+      color: '#7c3aed',
+    },
+    {
+      label: f.booking_stage || 'Agendamento de consulta',
+      value: f.booked ?? 0,
+      color: '#059669',
+    },
+  ];
+});
+const funnel30Sections = computed(() => {
+  const f = data.value?.funnel_30d;
+  if (!f?.by_inbox?.length) return [];
+  return [
+    {
+      title: 'Por caixa de entrada: leads novos → entraram em Agendamento',
+      items: f.by_inbox.map(i => ({
+        label: `${i.name} · ${i.booked} de ${i.count} (${i.rate}%)`,
+        value: i.count,
+      })),
+    },
+  ];
+});
+// quebras do popup: as do card ou, para cards do "+" (colunas do CRM), as do painel
+const modalBreakdowns = computed(() => {
+  const m = kpiModal.value;
+  if (!m) return [];
+  if (m.breakdowns?.length) return m.breakdowns;
+  const pd = data.value?.panel_data || {};
+  const label = String(m.label || '');
+  if (/cirurgia/i.test(label)) return surgerySections(pd.surgery_breakdown);
+  if (/agendamento|consultas marcadas/i.test(label))
+    return bdSections(pd.booked_breakdown, 'Consultas marcadas no período');
+  return [];
 });
 
 // ── item 241: fórmula com os SEUS indicadores — cada card do "+" vira uma
@@ -1323,14 +1462,16 @@ const modalInsight = computed(() => {
     BUCKET_WORD[modalBag.value?.granularity] || BUCKET_WORD.day;
   const maxV = Math.max(...vals);
   const maxI = vals.indexOf(maxV);
+  // item 267: a MESMA média da linha do gráfico (só os baldes com valor)
+  const filled = vals.filter(v => v > 0);
   const avg =
-    Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+    Math.round((filled.reduce((a, b) => a + b, 0) / filled.length) * 10) / 10;
   const parts = [
     `pico ${c.labels?.[maxI] ? `em ${c.labels[maxI]}` : ''}: ${fmt(maxV)}`.replace(
       'pico : ',
       'pico: '
     ),
-    `média ${fmt(avg)} por ${one}`,
+    `média ${fmt(avg)} por ${one} com movimento`,
   ];
   if (!c.isFormula && c.total !== undefined && c.total !== null)
     parts.push(`total ${fmt(c.total)}`);
@@ -2017,6 +2158,7 @@ const saveKpiLayout = async patch => {
     judge: patch.judge ?? cur.judge ?? false,
     trend: patch.trend ?? cur.trend ?? false,
     grid: patch.grid ?? cur.grid ?? [],
+    auto_palette: patch.auto_palette ?? cur.auto_palette ?? true,
   };
   isSavingLayout.value = true;
   try {
@@ -2625,18 +2767,63 @@ const tileState = tile => {
   };
 };
 
+// ── 🎨 item 269: PALETA DOS INDICADORES — cor por família (o que mede) e por
+// nível (primário / secundário / terciário), sem escolher cor a cor; o card
+// ENCHE do fundo para cima ao longo do dia (07h → 19h). Ligada por padrão;
+// a chavinha do modo edição desliga (voltam as cores do dia / escolhidas). ──
+const autoPalette = computed(() => kpiLayout.value?.auto_palette !== false);
+const toggleAutoPalette = () =>
+  saveKpiLayout({ auto_palette: !autoPalette.value });
+const clock = ref(new Date());
+let clockTimer = null;
+onMounted(() => {
+  clockTimer = setInterval(() => {
+    clock.value = new Date();
+  }, 60000);
+});
+onUnmounted(() => clearInterval(clockTimer));
+const fillPct = computed(() => Math.round(dayFill(clock.value) * 100));
+const isDarkUi = computed(() =>
+  typeof document !== 'undefined'
+    ? document.documentElement.classList.contains('dark')
+    : false
+);
+const tierWord = tier => {
+  if (tier === 'primary') return 'resultado principal';
+  if (tier === 'secondary') return 'volume';
+  return 'apoio';
+};
+const tilePalette = tile => {
+  if (!autoPalette.value || tile?.spacer) return null;
+  const { family, tier } = classifyKpi(tile);
+  return {
+    family,
+    tier,
+    label: `${KPI_FAMILIES[family]?.label || 'Outros'} · ${tierWord(tier)}`,
+    grad: kpiGrad(family, tier, isDarkUi.value),
+    soft: kpiGradSoft(family, tier, isDarkUi.value),
+    darkText: tier === 'tertiary' && !isDarkUi.value,
+  };
+};
+
 const tileVisual = tile => {
   const st = tileState(tile);
   const grads = STATUS_GRADS[panelBase.value] || STATUS_GRADS.agendamento;
+  const pal = tilePalette(tile);
+  const alert = ['bad', 'warn', 'meta'].includes(st.status);
+  let grad = tile.customGrad || tile.chip?.grad || tile.grad;
+  if (alert) grad = grads[st.status];
+  else if (pal) grad = pal.grad;
   return {
     ...st,
-    // sem status de meta mandando, um chip "Muito bom" pinta o card de
-    // verde (pedido 22/07 — o dourado confundia com "neutro"); a cor
-    // ESCOLHIDA pelo admin (item 143) vence o chip e a família, mas o
-    // alerta de meta (vermelho/âmbar/verde-meta) continua por cima
-    grad: ['bad', 'warn', 'meta'].includes(st.status)
-      ? grads[st.status]
-      : tile.customGrad || tile.chip?.grad || tile.grad,
+    // alerta de meta (vermelho/âmbar/verde-meta) por cima de tudo; depois a
+    // paleta automática (item 269); desligada, a cor escolhida (item 143),
+    // o chip "Muito bom" e a família do dia
+    grad,
+    // fundo "vazio" (o card enche ao longo do dia); no alerta, sem enchimento
+    soft: alert ? null : pal?.soft || null,
+    darkText: !alert && !!pal?.darkText,
+    palette: pal,
     aura: st.isRecord,
     auraIntensity: Math.max(0.5, Math.min(1.2, st.ratio ?? 0.7)),
     pulse: st.status === 'meta' || st.isRecord,
@@ -4210,6 +4397,15 @@ onUnmounted(() => {
             <span class="i-lucide-palette text-xs" />
             Paleta
           </button>
+          <button
+            class="cv-btn cv-btn-sm"
+            :class="autoPalette ? '' : 'cv-btn-ghost'"
+            title="Paleta dos indicadores: cada família (captação, agendamento, presença, cirurgia, financeiro, satisfação) tem a sua cor; resultado principal em cor cheia, volume em cor média, apoio em cor clara; o card enche ao longo do dia (07h → 19h). Desligada, valem as cores do dia e as escolhidas por card."
+            @click="toggleAutoPalette"
+          >
+            <span class="i-lucide-swatch-book text-xs" />
+            cores por indicador {{ autoPalette ? 'ligadas' : 'desligadas' }}
+          </button>
           <!-- item 248: modelos prontos · média histórica · recolher blocos -->
           <button
             v-if="isAdmin"
@@ -4280,6 +4476,29 @@ onUnmounted(() => {
             <span class="i-lucide-check text-xs" />
             Concluir
           </button>
+        </div>
+        <!-- item 269: legenda das famílias de cor -->
+        <div
+          v-if="autoPalette"
+          class="flex items-center gap-x-3 gap-y-1 flex-wrap mt-2 text-[11px] text-n-slate-10"
+        >
+          <span
+            v-for="f in KPI_LEGEND"
+            :key="f.key"
+            class="inline-flex items-center gap-1"
+          >
+            <span
+              class="w-3 h-3 rounded-full"
+              :style="{
+                background: `linear-gradient(135deg, ${f.c1}, ${f.c2})`,
+              }"
+            />
+            {{ f.label }}
+          </span>
+          <span class="text-n-slate-9"
+            >· cor cheia = resultado principal · média = volume · clara = apoio
+            · o card enche até as 19h ({{ fillPct }}% agora)</span
+          >
         </div>
         <div
           v-if="hiddenTiles.length"
@@ -5539,8 +5758,32 @@ onUnmounted(() => {
                                 ? 'cursor-grab active:cursor-grabbing ring-2 ring-dashed ring-white/60'
                                 : '',
                             ]"
-                            :style="{ background: tileVisual(tile).grad }"
+                            :style="{
+                              background:
+                                tileVisual(tile).soft || tileVisual(tile).grad,
+                              color: tileVisual(tile).darkText
+                                ? '#0f172a'
+                                : undefined,
+                            }"
+                            :title="
+                              tileVisual(tile).palette
+                                ? `${tileVisual(tile).palette.label} · ${fillPct}% do dia`
+                                : undefined
+                            "
                           >
+                            <!-- item 269: o card ENCHE do fundo para cima ao longo do dia (07h → 19h) -->
+                            <div
+                              v-if="tileVisual(tile).soft"
+                              class="cv-tile-fill"
+                              :class="{
+                                'cv-tile-fill-dark': tileVisual(tile).darkText,
+                              }"
+                              :style="{
+                                height: fillPct + '%',
+                                background: tileVisual(tile).grad,
+                              }"
+                              aria-hidden="true"
+                            />
                             <!-- 🏆 recorde: átomos orbitando o card em sentido horário -->
                             <TileAura
                               v-if="tileVisual(tile).aura"
@@ -7223,6 +7466,24 @@ onUnmounted(() => {
                 color="#7C3AED"
                 :height="80"
               />
+            </div>
+            <!-- item 267: FUNIL em 3 colunas (taxa de agendamento de leads novos) -->
+            <div v-if="kpiModal.funnel" class="cv-sub px-3 py-3">
+              <p class="text-[11px] font-medium text-n-slate-11 mb-2">
+                🪜 Leads novos dos últimos 30 dias, passo a passo
+              </p>
+              <FunnelSteps :steps="kpiModal.funnel" :height="140" />
+            </div>
+            <!-- item 267: o que importa neste indicador, em seções -->
+            <div
+              v-for="sec in modalBreakdowns"
+              :key="sec.title"
+              class="cv-sub px-3 py-2.5"
+            >
+              <p class="text-[11px] font-medium text-n-slate-11 mb-1.5">
+                {{ sec.title }}
+              </p>
+              <ShareBar :items="sec.items" :max="6" :height="10" />
             </div>
             <div v-if="kpiModal.details?.length" class="space-y-1.5">
               <div
