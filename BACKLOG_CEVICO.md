@@ -8715,3 +8715,14 @@ com parâmetros diferentes selecionáveis por chavinhas.
 - Testes: cevico_script_spec 11 verdes. SIDEKIQ+WEB, sem migration. Roteiro entra em até 1 h (cache). Sobe SOZINHO (hotfix).
 
 ## 296. 💡 AGENDA: permissão de GESTÃO DA AGENDA para alguns agentes (29/09; "preciso conceder permissões de gestão de agenda, para alguns agentes") — A FAZER
+
+- **29/09 — 292–294 + 287 (rodadas 2–4) SUBIRAM** no commit c456694 (develop) → imagem ghcr.io/guilhermecorder/chatwoot:c456694; WEB+SIDEKIQ, sem migration; reversão :93fec4d.
+
+## 297. ✅ 🩺 AGENDA: "pacientes duplicados" no bloco da janela do médico (30/09 08h13, equipe: "este bloco da janela dos médicos está aparecendo diversos pacientes duplicados ocupando agendamentos disponíveis… quando apagamos um duplicado todos somem")
+- Não eram duplicados: o MESMO agendamento aparecia em 2 ou 3 blocos seguidos. A ocupação era por sobreposição da duração
+  presumida (consulta 15 min, exame 30, cirurgia 60 — item 255) e a janela do Dr. Henrique tem blocos de 10 min.
+- Regra nova: na janela do MÉDICO cada agendamento ocupa SÓ o bloco em que começa (tela: helper `occupiesSlot`; servidor:
+  `Crm::AgendaSlots.hub_overlap?`, para a IA voltar a oferecer os horários que estavam livres). Sala cirúrgica e agenda de
+  exames continuam por sobreposição. Encaixe ("+2") continua igual.
+- Testes: agenda_slots_future_spec ajustado, cevicoAgendaOccupies.spec.js (4) verdes. WEB+SIDEKIQ, sem migration.
+- OBS: responder_tools_spec.rb:124 falha também na versão anterior (depende do dia da semana) — não é desta mudança.

@@ -72,10 +72,19 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
            end
   end
 
+  # item 297 (30/09): na janela do MÉDICO o agendamento ocupa SÓ o bloco em que
+  # começa — a mesma regra da tela. Antes a duração presumida (cirurgia 60,
+  # exame 30, consulta 15) tomava 2 ou 3 blocos de 10 min e a IA deixava de
+  # oferecer horário que estava livre.
   def hub_overlap?(ctx, day, hhmm, win)
     start = hm_to_min(hhmm)
     finish = start + win['block'].to_i
-    ctx[:hub_busy].any? { |b| b[:date] == day && b[:unit] == win['unit'] && b[:from] < finish && b[:to] > start }
+    ctx[:hub_busy].any? do |b|
+      next false unless b[:date] == day && b[:unit] == win['unit']
+      next b[:from] >= start && b[:from] < finish if win['doctor'].present?
+
+      b[:from] < finish && b[:to] > start
+    end
   end
 
   def hm_to_min(hhmm)

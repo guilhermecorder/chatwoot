@@ -213,6 +213,20 @@ export const dateKey = d => {
 
 export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 
+// 🩺 item 297 (30/09, equipe: "este bloco da janela dos médicos está aparecendo
+// diversos pacientes duplicados ocupando agendamentos disponíveis… quando
+// apagamos um duplicado todos somem"): na janela do MÉDICO cada agendamento
+// ocupa SÓ o bloco em que começa. Antes valia a sobreposição pela duração
+// presumida (consulta 15 min, exame 30 min): numa janela de blocos de 10 min a
+// mesma consulta aparecia em 2 ou 3 horários e roubava vaga livre.
+// Sala cirúrgica e agenda de exames continuam por sobreposição (lá o
+// procedimento pode mesmo durar mais que um bloco).
+export const occupiesSlot = ({ taskStart, duration, slotStart, block, win }) => {
+  const slotEnd = slotStart + (Number(block) || 15);
+  if (win && win.doctor) return taskStart >= slotStart && taskStart < slotEnd;
+  return taskStart < slotEnd && taskStart + duration > slotStart;
+};
+
 // modalidades de consulta — alimentam a ocupação por tipo e o formulário.
 // item 210: entra 'teleconsulta' (trilho próprio na Agenda, cor violeta).
 export const MODALITIES = [

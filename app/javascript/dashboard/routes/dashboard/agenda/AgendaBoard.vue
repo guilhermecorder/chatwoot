@@ -29,6 +29,7 @@ import {
   wholeBlockedDays, partialBlocksOn, isWindowBlocked, sameBlock,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
   TASK_COLORS, taskColorOf, attendanceMarkOf,
+  occupiesSlot,
 } from 'dashboard/helper/cevicoAgenda';
 
 const store = useStore();
@@ -414,9 +415,9 @@ const bandsForDay = day =>
 // item 255 (26/09, regra dele: "os pacientes do Oftalmofácil concorrem pelos
 // mesmos horários — evitar agendamento duplo"): quem OCUPA um bloco vem de
 // TODOS os agendamentos do dia (não só das camadas/filtros ligados) e conta
-// por SOBREPOSIÇÃO de tempo (um exame às 08:10 de 30 min ocupa os blocos
-// das 08:00, 08:15 e 08:30). Agendamento do Oftalmofácil ocupa qualquer
-// janela da unidade dele (consulta, exame ou sala cirúrgica).
+// na sala cirúrgica e na agenda de exames, por SOBREPOSIÇÃO de tempo; na janela
+// do MÉDICO, só o bloco em que começa (item 297). Agendamento do Oftalmofácil
+// ocupa qualquer janela da unidade dele (consulta, exame ou sala cirúrgica).
 const liveTasksByDay = computed(() => {
   const map = {};
   liveTasks.value.forEach(task => {
@@ -440,12 +441,17 @@ const occupiesWindow = (t, win) => {
 };
 // agendamentos ocupando um bloco (pode haver ENCAIXE: 2+ no mesmo horário)
 const tasksAtSlotAll = (day, win, slot) => {
-  const start = toMin(slot);
-  const end = start + (Number(win.block) || 15);
+  const slotStart = toMin(slot);
   return (liveTasksByDay.value[format(day, 'yyyy-MM-dd')] || []).filter(t => {
     if (!occupiesWindow(t, win)) return false;
-    const tStart = taskStartMin(t);
-    return tStart < end && tStart + taskDuration(t) > start;
+    // item 297: na janela do médico, só o bloco em que o agendamento começa
+    return occupiesSlot({
+      taskStart: taskStartMin(t),
+      duration: taskDuration(t),
+      slotStart,
+      block: win.block,
+      win,
+    });
   });
 };
 const taskAtSlot = (day, win, slot) => tasksAtSlotAll(day, win, slot)[0];
