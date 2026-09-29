@@ -1020,7 +1020,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
            # teleconsulta, cancelada ou item de parceiro do Oftalmofácil
            .where(canceled_at: nil)
            .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
-           .where(source_detail: nil)
+           .where(source_detail: nil).not_partner_origin
   end
 
   def pct(part, total)

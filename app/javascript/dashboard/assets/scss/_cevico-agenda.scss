@@ -1018,3 +1018,88 @@
 .cv-page .cv-ag-ev-block > * { flex-shrink: 0; max-width: 100%; }
 .cv-page .cv-ag-ev-block.cv-ag-ev-tight .cv-ag-ev-src,
 .cv-page .cv-ag-ev-block.cv-ag-ev-tight .cv-ag-ev-tag { display: none; }
+
+/* ── item 300 (30/09): selo "paciente confirmou" + origem CEVICO × Oftalmofácil ── */
+.cv-page .cv-ag-conf {
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 3px;
+  vertical-align: -0.2em;
+  flex-shrink: 0;
+  color: #16a34a;
+}
+.cv-page .cv-ag-conf-no { color: #dc2626; }
+.dark .cv-page .cv-ag-conf { color: #4ade80; }
+.dark .cv-page .cv-ag-conf-no { color: #f87171; }
+/* no bloco cheio do médico o fundo já é a cor: selo branco */
+.cv-page .cv-ag-slot-taken .cv-ag-conf,
+.dark .cv-page .cv-ag-slot-taken .cv-ag-conf { color: #fff; margin-right: 0; }
+.cv-page .cv-ag-slot-taken .cv-ag-conf-no { opacity: 0.85; }
+
+/* formulário: os 6 tipos em grade (nada cortado) */
+.cv-page .cv-ag-kind-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.cv-page .cv-ag-kind-grid .cv-ag-kind {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  justify-content: flex-start;
+  font-size: 12px;
+  border: 1px solid rgb(var(--k-rgb) / 0.16);
+}
+.cv-page .cv-ag-kind-grid .cv-ag-kind:not(.cv-ag-kind-on) { background: rgb(var(--k-rgb) / 0.07); }
+.cv-page .cv-ag-kind-grid .cv-ag-kind:not(.cv-ag-kind-on):hover { background: rgb(var(--k-rgb) / 0.14); }
+.cv-page .cv-ag-kind-grid .cv-ag-kind-on { border-color: rgb(var(--k-rgb) / 0.6); box-shadow: 0 0 0 1.5px rgb(var(--k-rgb) / 0.55); }
+@media (max-width: 420px) {
+  .cv-page .cv-ag-kind-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* formulário: CEVICO × Oftalmofácil */
+.cv-page .cv-ag-origin {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.cv-page .cv-ag-origin-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 40px;
+  min-width: 0;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--o);
+  background: rgb(var(--o-rgb) / 0.06);
+  border: 1.5px solid rgb(var(--o-rgb) / 0.22);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.cv-page .cv-ag-origin-opt:hover { background: rgb(var(--o-rgb) / 0.13); }
+.cv-page .cv-ag-origin-need .cv-ag-origin-opt { border-style: dashed; border-color: rgb(217 119 6 / 0.7); }
+.cv-page .cv-ag-origin-on,
+.cv-page .cv-ag-origin-on:hover {
+  color: #fff;
+  background: var(--o);
+  border-color: var(--o);
+  box-shadow: 0 6px 14px -8px rgb(var(--o-rgb) / 0.9);
+}
+.dark .cv-page .cv-ag-origin-opt:not(.cv-ag-origin-on) { color: #fff; background: rgb(var(--o-rgb) / 0.22); }
+.cv-page .cv-ag-head-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}

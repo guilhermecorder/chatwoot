@@ -289,13 +289,17 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     # item 217: a confirmação fica NA CONSULTA (painel Agendamentos "Confirmada",
     # indicador "Consultas confirmadas"); um NÃO anterior é desfeito
     task.update!(confirmed_at: Time.current, declined_at: nil)
+    # item 300: o card anda para "Consulta Confirmada" — no funil do Oftalmofácil
+    # quando o paciente é de lá (sem automação), senão no da CEVICO
+    moved_to = Crm::ConfirmationReflector.call(account: contact.account, task: task)
     dia = task.due_at.in_time_zone(ActiveSupport::TimeZone['America/Sao_Paulo'])
     message.conversation.messages.create!(
       account_id: contact.account_id,
       inbox_id: message.conversation.inbox_id,
       message_type: :outgoing,
       private: true,
-      content: "✅ Paciente CONFIRMOU a consulta de #{dia.strftime('%d/%m às %H:%M')} respondendo ao lembrete."
+      content: "✅ Paciente CONFIRMOU a consulta de #{dia.strftime('%d/%m às %H:%M')} respondendo ao lembrete." \
+               "#{" Card → #{moved_to}." if moved_to.present?}"
     )
   end
 

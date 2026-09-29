@@ -8,6 +8,9 @@ import { computed } from 'vue';
 import {
   hexToRgbSpaced,
   attendanceMarkOf,
+  isConfirmed,
+  isDeclined,
+  confirmationTitle,
 } from 'dashboard/helper/cevicoAgenda';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 
@@ -221,7 +224,10 @@ const evClass = ev => ({
       @click.stop="emit('open', ev.task)"
     >
       <span class="cv-ag-ev-time">{{ ev.time }}</span>
-      <span class="cv-ag-ev-name">{{ ev.name }}</span>
+      <span class="cv-ag-ev-name">
+        <span v-if="isConfirmed(ev.task)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(ev.task)" />
+        <span v-else-if="isDeclined(ev.task)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />{{ ev.name }}
+      </span>
       <!-- 🏥 item 228: selo de origem (veio de outro sistema) -->
       <span v-if="ev.task.source" class="cv-ag-ev-src" :title="`Veio do Oftalmofácil${ev.task.source_detail ? ' · ' + ev.task.source_detail : ''}`">{{ compact ? 'OF' : (ev.task.source_detail || 'Oftalmofácil') }}</span>
       <span v-if="tagOf && tagOf(ev.task)" class="cv-ag-ev-tag" :title="tagOf(ev.task).label">{{ compact ? tagOf(ev.task).short : tagOf(ev.task).label }}</span>

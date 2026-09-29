@@ -70,6 +70,9 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
         assignee_id: params[:assignee_id].presence || Current.user.id
       )
     )
+    # item 300: origem escolhida → contato criado, etiqueta e card no funil certo
+    Crm::AppointmentOrigin.apply(account: Current.account, task: new_task)
+    new_task.reload
     render json: task_json(new_task), status: :created
   end
 
@@ -81,6 +84,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
     end
     # cancelar/reativar consulta
     task.canceled_at = params[:canceled] ? Time.current : nil if params.key?(:canceled)
+    # ✅ item 300: a equipe marca/desmarca "confirmou" à mão (paciente confirmou por telefone)
+    apply_manual_confirmation if params.key?(:confirmed)
 
     # conferência do dia: compareceu = consulta concluída
     params[:status] = 'done' if params[:attendance] == 'attended' && params[:status].blank?
@@ -89,6 +94,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
 
     # comparecimento/indicação refletem no CRM (move o card + automações)
     reflect_attendance_in_crm if task.saved_change_to_attendance? || task.saved_change_to_surgery_indication?
+    Crm::ConfirmationReflector.call(account: Current.account, task: task) if task.saved_change_to_confirmed_at? && task.confirmed_at.present?
+    Crm::AppointmentOrigin.apply(account: Current.account, task: task) if task.saved_change_to_origin?
 
     render json: task_json(task)
   end
@@ -121,6 +128,16 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
     @task ||= Current.account.tasks.find(params[:id])
   end
 
+  def apply_manual_confirmation
+    confirmed = ActiveModel::Type::Boolean.new.cast(params[:confirmed])
+    if confirmed
+      task.confirmed_at ||= Time.current
+      task.declined_at = nil
+    else
+      task.confirmed_at = nil
+    end
+  end
+
   def can_collaborate?
     Current.account_user.administrator? ||
       [task.creator_id, task.assignee_id].include?(Current.user.id)
@@ -129,7 +146,9 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
   def task_params
     attrs = params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id, :unit,
                           :phone, :procedure, :doctor, :modality, :attendance, :surgery_indication, :indicated_procedure,
-                          :contact_id, :booking_kind, :color)
+                          :contact_id, :booking_kind, :color, :origin)
+    # item 300: origem vazia = não mexe (agendamento antigo segue sem origem)
+    attrs.delete(:origin) if attrs.key?(:origin) && attrs[:origin].blank?
     # item 217: vazio = agendamento (padrão); só 'registro' muda a contagem
     attrs[:booking_kind] = nil if attrs.key?(:booking_kind) && attrs[:booking_kind].blank?
     # item 290: cor vazia = volta à cor padrão do tipo; maiúsculas como na lista
@@ -172,6 +191,10 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
       surgery_indication: t.surgery_indication,
       indicated_procedure: t.indicated_procedure,
       booking_kind: t.booking_kind,
+      # item 300: confirmou/disse não ao lembrete + de quem é o paciente
+      confirmed_at: t.confirmed_at,
+      declined_at: t.declined_at,
+      origin: t.origin,
       color: t.color, # item 290: cor escolhida pela equipe (nil = cor do tipo)
       # item 228: origem do agendamento (nil = nasceu aqui)
       source: t.source,

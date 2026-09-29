@@ -18,6 +18,7 @@
 #  external_ref        :string
 #  indicated_procedure :string
 #  modality            :string
+#  origin              :string
 #  phone               :string
 #  priority            :integer          default("medium"), not null
 #  procedure           :string
@@ -90,6 +91,19 @@ class Task < ApplicationRecord
     #0D9488 #0891B2 #2563EB #7C3AED #86198F #475569
   ].freeze
   validates :color, inclusion: { in: COLORS }, allow_nil: true
+
+  # 🏥 item 300 (30/09): de quem é o paciente — a equipe escolhe no formulário
+  # da Agenda. 'oftalmofacil' = fala só pela caixa do Oftalmofácil, card no
+  # funil do Oftalmofácil e fora dos números da CEVICO. nil = agendamento
+  # antigo ou criado pelos agentes (vale a etiqueta/funil do paciente).
+  ORIGINS = %w[cevico oftalmofacil].freeze
+  validates :origin, inclusion: { in: ORIGINS }, allow_nil: true
+  scope :not_partner_origin, -> { where("tasks.origin IS NULL OR tasks.origin <> 'oftalmofacil'") }
+
+  def partner_origin?
+    origin == 'oftalmofacil'
+  end
+
   validate :contact_belongs_to_account
 
   enum status: { todo: 0, doing: 1, done: 2 }

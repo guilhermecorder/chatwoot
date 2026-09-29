@@ -84,7 +84,7 @@ class Crm::GoalPeriodHistoryService
                                  .where(contacts: { created_at: from..to })
                                  .group(trunc.call('contacts.created_at')).count,
       'appointments_booked' => @account.tasks.bookings.where(task_type: 'consulta', created_at: from..to)
-                                       .where(canceled_at: nil).where(source_detail: nil)
+                                       .where(canceled_at: nil).where(source_detail: nil).not_partner_origin
                                        .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
                                        .group(trunc.call('tasks.created_at')).count,
       # 📊 item 233: entradas na coluna de agendamento (a taxa oficial)

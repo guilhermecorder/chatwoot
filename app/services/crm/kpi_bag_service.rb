@@ -148,7 +148,7 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
             .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
             .where(canceled_at: nil) # item 233: sem exame, tele, cancelada ou parceiro
             .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
-            .where(source_detail: nil)
+            .where(source_detail: nil).not_partner_origin
   end
 
   NEW_LEAD_DAYS = 30

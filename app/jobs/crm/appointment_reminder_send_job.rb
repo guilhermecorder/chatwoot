@@ -146,6 +146,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
     return skip(run, task, 'envio não saiu (contato/caixa)') if conversation.nil?
 
     mark_sent(contact, task, regua)
+    # item 300: paciente do Oftalmofácil ganha o card no funil DELE (nunca no da CEVICO)
+    Crm::PartnerFunnel.place!(account, contact, :booked) if partner
     run['sent'] << entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner)
   rescue StandardError => e
     Rails.logger.error "[CEVICO lembretes] task #{task.id}: #{e.message}"
@@ -228,7 +230,7 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
   end
 
   def patient_name(task)
-    task.title.to_s.sub(/\A(Consulta|Exame|Retorno|Pós-operatório|Teleconsulta):\s*/i, '').strip.presence ||
+    task.title.to_s.sub(/\A(Consulta|Exame|Retorno|Pós-operatório|Teleconsulta):\s*/i, '').delete('✅').strip.presence ||
       task.contact&.name.to_s.presence || 'Paciente'
   end
 

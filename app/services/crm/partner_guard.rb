@@ -64,8 +64,12 @@ module Crm::PartnerGuard
 
   # agendamento da Agenda criado pelo sync para um item de PARCEIRO
   # (source_detail = nome do parceiro; o sync deixa em branco para a CEVICO)
+  # item 300: ou agendamento que a equipe marcou como "Oftalmofácil" no
+  # formulário da Agenda (tasks.origin)
   def partner_task?(task)
-    task.present? && task.source == 'oftalmofacil' && task.source_detail.present?
+    return false if task.blank?
+
+    task.partner_origin? || (task.source == 'oftalmofacil' && task.source_detail.present?)
   end
 
   def partner_contact?(contact)

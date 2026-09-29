@@ -31,6 +31,8 @@ import {
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
   TASK_COLORS, taskColorOf, attendanceMarkOf,
   occupiesSlot,
+  patientNameOf, handConfirmed, isConfirmed, isDeclined, confirmationTitle,
+  ORIGINS, ORIGIN_BY_KEY, originOf,
 } from 'dashboard/helper/cevicoAgenda';
 
 const store = useStore();
@@ -797,7 +799,8 @@ const nowMinutes = ref(new Date().getHours() * 60 + new Date().getMinutes());
 let nowTimer = null;
 
 // ── Helpers de exibição ──
-const displayName = task => (task.title || '').replace(/^(Consulta|Teleconsulta|Exame|Cirurgia|P[oó]s-operat[oó]rio):\s*/i, '');
+// item 300: sem o prefixo do tipo e sem o ✅ digitado à mão (virou selo)
+const displayName = task => patientNameOf(task);
 const chipTime = task =>
   new Date(task.due_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const unitOf = task => {
@@ -1004,6 +1007,8 @@ const emptyForm = (day, prefill = {}) => {
     // 📅 item 217: consulta NOVA (conta como agendamento) × JÁ ESTAVA MARCADA
     // fora do sistema (só lançando na Agenda — vira "Lançada", fora dos números)
     booking_kind: prefill.booking_kind || 'agendamento',
+    // 🏥 item 300: CEVICO × Oftalmofácil — obrigatório ao criar (nasce em branco de propósito)
+    origin: prefill.origin || '',
   };
 };
 const form = ref(emptyForm());
@@ -1112,6 +1117,7 @@ const openEdit = task => {
     canceled: !!task.canceled_at,
     description: task.description ?? '',
     booking_kind: task.booking_kind || 'agendamento',
+    origin: task.origin || '',
   };
   showDeleteConfirm.value = false;
   showModal.value = true;
@@ -1136,8 +1142,15 @@ const formConflicts = computed(() => {
 const hubConflicts = computed(() => formConflicts.value.filter(t => t.source === 'oftalmofacil'));
 const hmOf = t => format(new Date(t.due_at), 'HH:mm');
 
+// item 300: ao CRIAR, a origem é obrigatória; ao editar agendamento antigo (sem
+// origem) continua opcional — o que veio do hub já tem dono e não muda aqui
+const originLocked = computed(() => Boolean(editingTask.value?.source));
+const originMissing = computed(() => !editingTask.value && !form.value.origin);
+const originHint = computed(() => ORIGIN_BY_KEY[form.value.origin]?.hint || 'Escolha de quem é o paciente — define a etiqueta, o CRM e a caixa do lembrete de confirmação.');
+const canSave = computed(() => Boolean(form.value.name.trim() && form.value.date && !originMissing.value));
+
 const save = async () => {
-  if (!form.value.name.trim() || !form.value.date || isSaving.value) return;
+  if (!canSave.value || isSaving.value) return;
   // item 255: horário tomado por paciente do Oftalmofácil = confirmação explícita
   const timeChanged = !editingTask.value ||
     format(new Date(editingTask.value.due_at), "yyyy-MM-dd'T'HH:mm") !== `${form.value.date}T${form.value.time}` ||
@@ -1166,6 +1179,9 @@ const save = async () => {
       priority: 'medium',
       booking_kind: fk === 'cirurgias' ? null : form.value.booking_kind,
     };
+    if (form.value.origin && !originLocked.value) payload.origin = form.value.origin;
+    // o ✅ digitado no nome sai do nome e vira o confirmado de verdade
+    if (editingTask.value && handConfirmed(editingTask.value) && !editingTask.value.confirmed_at) payload.confirmed = true;
     const noun = kindFor(fk).noun;
     if (editingTask.value) {
       await store.dispatch('tasks/update', { id: editingTask.value.id, ...payload });
@@ -1556,6 +1572,23 @@ const setTaskColor = async (task, color) => {
   }
 };
 
+// ✅ item 300: a equipe marca o "confirmou" à mão (paciente confirmou por telefone)
+const setConfirmed = async (task, value) => {
+  if (savingAttendanceId.value) return;
+  savingAttendanceId.value = task.id;
+  try {
+    const payload = { id: task.id, confirmed: value };
+    // desfazer um ✅ digitado no nome = tirar o ✅ do nome
+    if (!value && handConfirmed(task)) payload.title = displayName(task);
+    await store.dispatch('tasks/update', payload);
+    useAlert(value ? '✓ Consulta confirmada — card movido no CRM (se a coluna existir).' : 'Confirmação desfeita.');
+  } catch {
+    useAlert('Erro ao salvar a confirmação.');
+  } finally {
+    savingAttendanceId.value = 0;
+  }
+};
+
 // consulta / exame / teleconsulta / cirurgia
 const taskMenu = (task, extra = []) => {
   if (!task) return null;
@@ -1574,6 +1607,13 @@ const taskMenu = (task, extra = []) => {
       { label: 'Abrir detalhes', icon: 'i-lucide-square-pen', action: () => openEdit(task) },
       { label: 'Remarcar', icon: 'i-lucide-calendar-clock', hint: 'dia e horário', action: () => openEdit(task) },
       { separator: true },
+      !task.attendance && !task.canceled_at && {
+        label: isConfirmed(task) ? 'Desfazer "Confirmou"' : 'Marcar: paciente confirmou',
+        icon: 'i-lucide-badge-check',
+        hint: isDeclined(task) ? 'respondeu NÃO ao lembrete' : '',
+        disabled: busy,
+        action: () => setConfirmed(task, !isConfirmed(task)),
+      },
       {
         label: attended ? `Desfazer "${cap(okName)}"` : `Marcar: ${okName}`,
         icon: 'i-lucide-check',
@@ -2244,7 +2284,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     @click.stop="openEdit(task)"
                   >
                     <span class="cv-ag-ev-time">{{ chipTime(task) }}</span>
-                    <span class="cv-ag-ev-name">{{ displayName(task) }}</span>
+                    <span class="cv-ag-ev-name"><span v-if="isConfirmed(task)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(task)" /><span v-else-if="isDeclined(task)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />{{ displayName(task) }}</span>
                     <span v-if="attendanceMark(task)" class="cv-ag-ev-mark" :class="attendanceMark(task).cls" :title="attendanceMark(task).title">{{ attendanceMark(task).sign }}</span>
                   </button>
                   <button
@@ -2467,6 +2507,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <span v-if="taskAtSlot(cursor, win, slot)" v-cv-menu="() => slotMenu(cursor, win, slot)" class="relative group min-w-0">
                         <button class="cv-ag-slot cv-ag-slot-taken truncate" :title="tasksAtSlotAll(cursor, win, slot).map(displayName).join(' + ')" @click="openSlot(cursor, win, slot)">
                           <span class="tabular-nums opacity-90">{{ slot }}</span>
+                          <span v-if="isConfirmed(taskAtSlot(cursor, win, slot))" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(taskAtSlot(cursor, win, slot))" /><span v-else-if="isDeclined(taskAtSlot(cursor, win, slot))" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />
                           <span class="truncate">{{ displayName(taskAtSlot(cursor, win, slot)) }}</span>
                           <span v-if="tasksAtSlotAll(cursor, win, slot).length > 1" class="font-extrabold">+{{ tasksAtSlotAll(cursor, win, slot).length - 1 }}</span>
                         </button>
@@ -2514,7 +2555,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <div class="cv-ag-card-grid">
                       <span class="cv-ag-card-time" :style="{ color: accentOf(task) }">{{ chipTime(task) }}</span>
                       <div class="min-w-0">
-                        <p class="text-sm font-semibold text-n-slate-12 truncate" :class="task.attendance === 'missed' ? 'line-through' : ''">{{ displayName(task) }}</p>
+                        <p class="text-sm font-semibold text-n-slate-12 truncate" :class="task.attendance === 'missed' ? 'line-through' : ''"><span v-if="isConfirmed(task)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(task)" /><span v-else-if="isDeclined(task)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />{{ displayName(task) }}</p>
                         <p v-if="task.procedure" class="cv-ag-card-proc"><span class="i-lucide-eye text-[11px] opacity-60" /> {{ task.procedure }}</p>
                         <div class="cv-ag-card-meta">
                           <span v-if="task.phone"><span class="i-lucide-phone text-[10px]" />{{ task.phone }}</span>
@@ -2528,6 +2569,9 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(typeColorOf(task)), '--cv-deep': typeColorOf(task) }" :title="TYPE_BY_KEY[typeOf(task)].hint"><span :class="TYPE_BY_KEY[typeOf(task)].icon" class="text-[10px] shrink-0" /> {{ TYPE_BY_KEY[typeOf(task)].label }}</span>
                         <span v-if="unitOf(task)" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(unitOf(task).color), '--cv-deep': unitOf(task).color }"><span class="i-lucide-map-pin text-[10px] shrink-0" /> <span class="truncate">{{ unitOf(task).label }}</span></span>
                         <span v-if="task.source" class="cv-chip cv-slate" :title="`Veio do ${task.source === 'oftalmofacil' ? 'Oftalmofácil' : task.source}${task.source_detail ? ' · parceiro: ' + task.source_detail : ''}`"><span class="i-lucide-hospital text-[10px] shrink-0" /> <span class="truncate">{{ originLabel(task) }}</span></span>
+                        <span v-if="task.origin && !task.source" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(originOf(task).color), '--cv-deep': originOf(task).color }" :title="originOf(task).hint"><span :class="originOf(task).icon" class="text-[10px] shrink-0" /> {{ originOf(task).label }}</span>
+                        <span v-if="!task.attendance && isConfirmed(task)" class="cv-chip cv-green" :title="confirmationTitle(task)"><span class="i-lucide-badge-check text-[11px] shrink-0" /> Confirmou</span>
+                        <span v-else-if="!task.attendance && isDeclined(task)" class="cv-chip cv-red" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar"><span class="i-lucide-badge-x text-[11px] shrink-0" /> Disse não</span>
                         <span v-if="task.attendance === 'attended'" class="cv-chip cv-green">{{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}</span>
                         <span v-else-if="task.attendance === 'missed'" class="cv-chip cv-red">{{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}</span>
                         <span v-else-if="task.attendance === 'attended_not_done'" class="cv-chip cv-amber">⚠️ Veio e não fez</span>
@@ -2598,7 +2642,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
 
     <!-- ══ Modal criar/editar (a concha veste a cor do TIPO escolhido) ══ -->
     <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" @click.self="showModal = false">
-      <div class="cv-modal cv-ag-pop w-full max-w-md max-h-[92vh] flex flex-col" :style="formVars">
+      <div class="cv-modal cv-ag-pop w-full max-w-lg max-h-[92vh] flex flex-col" :style="formVars">
         <div class="cv-modal-head flex items-center gap-3">
           <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span :class="formKind.icon" class="text-base" /></span>
           <div class="flex-1 min-w-0">
@@ -2607,6 +2651,10 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </p>
             <h2 class="text-base font-bold leading-tight truncate">{{ form.name.trim() || (editingTask ? formKind.noun : 'Paciente') }}</h2>
             <p class="text-[11px] opacity-90 truncate">{{ formSummary || formKind.hint }}</p>
+            <p v-if="ORIGIN_BY_KEY[form.origin] || (editingTask && isConfirmed(editingTask))" class="flex items-center gap-1.5 mt-1 flex-wrap">
+              <span v-if="ORIGIN_BY_KEY[form.origin]" class="cv-ag-head-pill"><span :class="ORIGIN_BY_KEY[form.origin].icon" class="text-[10px]" /> {{ ORIGIN_BY_KEY[form.origin].label }}</span>
+              <span v-if="editingTask && isConfirmed(editingTask)" class="cv-ag-head-pill" :title="confirmationTitle(editingTask)"><span class="i-lucide-badge-check text-[11px]" /> Confirmou</span>
+            </p>
           </div>
           <button v-if="editingTask && (editingTask.contact_id || editingTask.phone)" class="cv-glass-btn" title="Abrir a conversa deste paciente, sem sair da Agenda" @click="openTaskChat(editingTask)">
             <span class="i-lucide-message-circle" /> <span class="hidden sm:inline">Conversa</span>
@@ -2621,19 +2669,20 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <!-- o TIPO (só ao criar) -->
           <div v-if="!editingTask">
             <span class="cv-label block mb-1.5">Tipo</span>
-            <div class="cv-seg cv-seg-sm w-full !flex">
+            <!-- item 300: grade 3×2 — os 6 tipos cabem inteiros, nada cortado -->
+            <div class="cv-ag-kind-grid">
               <button
                 v-for="tt in TYPES"
                 :key="'ft' + tt.key"
                 type="button"
-                class="cv-ag-kind flex-1 justify-center !h-7 !px-1.5 text-[11px]"
+                class="cv-ag-kind"
                 :class="formType.key === tt.key ? 'cv-ag-kind-on' : ''"
                 :style="typeVarsOf(tt.key)"
                 :title="`${tt.label} — ${tt.hint}`"
                 @click="setFormType(tt.key)"
               >
-                <span :class="tt.icon" class="text-xs" />
-                <span class="hidden md:inline">{{ tt.label }}</span>
+                <span :class="tt.icon" class="text-sm shrink-0" />
+                <span class="truncate">{{ tt.label }}</span>
               </button>
             </div>
           </div>
@@ -2651,6 +2700,26 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <span class="cv-label block mb-1">Telefone</span>
                 <input v-model="form.phone" class="cv-input w-full" placeholder="(11) 98888-7777" />
               </div>
+            </div>
+            <!-- 🏥 item 300: de quem é o paciente (obrigatório ao criar) -->
+            <div v-if="!originLocked" class="mt-3">
+              <span class="cv-label block mb-1.5">Paciente de quem? {{ editingTask ? '' : '*' }}</span>
+              <div class="cv-ag-origin" :class="originMissing ? 'cv-ag-origin-need' : ''">
+                <button
+                  v-for="o in ORIGINS"
+                  :key="'or' + o.key"
+                  type="button"
+                  class="cv-ag-origin-opt"
+                  :class="form.origin === o.key ? 'cv-ag-origin-on' : ''"
+                  :style="{ '--o': o.color, '--o-rgb': hexToRgbSpaced(o.color) }"
+                  :title="o.hint"
+                  @click="form.origin = o.key"
+                >
+                  <span :class="form.origin === o.key ? 'i-lucide-circle-check' : o.icon" class="text-sm shrink-0" />
+                  <span class="truncate">{{ o.label }}</span>
+                </button>
+              </div>
+              <p class="text-[11px] mt-1.5" :class="originMissing ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-n-slate-10'">{{ originHint }}</p>
             </div>
           </section>
 
@@ -2761,7 +2830,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </div>
           <button class="cv-btn cv-btn-ghost cv-btn-lg" :class="editingTask ? '' : 'ml-auto'" @click="showModal = false">Cancelar</button>
-          <button class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!form.name.trim() || !form.date || isSaving" @click="save">
+          <button class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : ''" @click="save">
             <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
             {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
           </button>
@@ -2825,7 +2894,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <button v-for="(t, i) in slotPicker.tasks" :key="t.id" class="cv-ag-slotrow" @click="pickFromSlot(t)">
             <span class="cv-ag-num">{{ i + 1 }}</span>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-bold text-n-slate-12 truncate">{{ displayName(t) }}</p>
+              <p class="text-sm font-bold text-n-slate-12 truncate"><span v-if="isConfirmed(t)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(t)" /><span v-else-if="isDeclined(t)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />{{ displayName(t) }}</p>
               <p class="text-xs text-n-slate-11 truncate">{{ t.procedure || 'sem problema informado' }} · {{ t.phone || 'sem telefone' }}<template v-if="t.source"> · {{ originLabel(t) }}</template></p>
             </div>
             <span class="cv-chip" :class="t.status === 'done' ? 'cv-green' : t.canceled_at ? 'cv-red' : ''">{{ slotStatus(t) }}</span>

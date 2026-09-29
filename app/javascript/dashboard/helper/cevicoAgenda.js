@@ -315,6 +315,38 @@ export const attendanceMarkOf = task => {
   }
   return null;
 };
+// ✅ item 300 (30/09): CONFIRMOU a consulta. O dado oficial é `confirmed_at`
+// (SIM ao lembrete, card na coluna "Consulta Confirmada" ou a equipe marcou na
+// Agenda). O ✅ que a equipe digitava no nome também vale — e sai do nome, para
+// o selo ser um só. `declined_at` = respondeu NÃO ao lembrete.
+const TYPE_PREFIX = /^(Consulta|Teleconsulta|Exame|Cirurgia|P[oó]s-operat[oó]rio):\s*/i;
+const HAND_CHECK = /^\s*✅\s*/;
+const bareTitle = task => String(task?.title || '').replace(TYPE_PREFIX, '');
+export const patientNameOf = task => bareTitle(task).replace(HAND_CHECK, '');
+export const handConfirmed = task => HAND_CHECK.test(bareTitle(task));
+export const isConfirmed = task =>
+  !task?.canceled_at && (Boolean(task?.confirmed_at) || handConfirmed(task));
+export const isDeclined = task =>
+  !task?.canceled_at && !isConfirmed(task) && Boolean(task?.declined_at);
+export const confirmationTitle = task => {
+  if (!isConfirmed(task)) return '';
+  if (!task.confirmed_at) return 'Paciente confirmou (marcado pela equipe)';
+  const at = new Date(task.confirmed_at);
+  const when = `${at.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  return `Paciente confirmou a consulta em ${when}`;
+};
+// 🏥 item 300: de quem é o paciente (escolha obrigatória no formulário)
+export const ORIGINS = [
+  { key: 'cevico', label: 'CEVICO', icon: 'i-lucide-eye', color: '#152C61', hint: 'Paciente nosso: etiqueta cevico, card no CRM da CEVICO e lembrete pela caixa da CEVICO.' },
+  { key: 'oftalmofacil', label: 'Oftalmofácil', icon: 'i-lucide-hospital', color: '#0D9488', hint: 'Paciente do Oftalmofácil: etiqueta of_agenda, card no CRM do Oftalmofácil e lembrete só pela caixa do Oftalmofácil — sem IA.' },
+];
+export const ORIGIN_BY_KEY = Object.fromEntries(ORIGINS.map(o => [o.key, o]));
+// origem para MOSTRAR: a escolhida no formulário ou, no que veio do hub, o parceiro
+export const originOf = task => {
+  if (task?.origin && ORIGIN_BY_KEY[task.origin]) return ORIGIN_BY_KEY[task.origin];
+  if (task?.source === 'oftalmofacil' && task.source_detail) return ORIGIN_BY_KEY.oftalmofacil;
+  return null;
+};
 export const taskColorOf = task => {
   const hex = String(task?.color || '').toUpperCase();
   return TASK_COLOR_SET.has(hex) ? hex : null;

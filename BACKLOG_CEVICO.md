@@ -8756,3 +8756,28 @@ com parâmetros diferentes selecionáveis por chavinhas.
   (SIDEKIQ não muda), sem migration. SEM commit.
 - PRÓXIMO PASSO combinado: clicar num ponto da linha do tempo e ver os pacientes daquela semana, cada um abrindo a própria
   jornada no Espaço do Paciente. Depois: linha do tempo da clínica inteira.
+
+## 300. ✅ 🏥 AGENDA: selo "paciente CONFIRMOU" + origem CEVICO × OFTALMOFÁCIL obrigatória + confirmação pelo CRM certo (30/09; "vamos construir um ícone para mostrar quando o paciente confirmou a consulta… quando o paciente tiver uma etiqueta X, ele precisa ser enviado pela caixa de entrada da oftalmofacil, e o card deve ser construído no CRM da oftalmofacil… precisa ser obrigatório ela escolher se a pessoa é da CEVICO ou da OFTALMOFACIL")
+- ACHADOS: (1) o ✅ dos nomes na Agenda era DIGITADO À MÃO pela equipe — nenhuma tela lia o `confirmed_at`; (2) o SIM ao
+  lembrete gravava a confirmação mas NÃO movia o card; (3) o formulário da Agenda nunca criava contato nem etiqueta.
+- SELO: `i-lucide-badge-check` verde antes do nome no balão da grade (mês/semana/dia), no bloco do médico (branco), na lista
+  do dia (+ chip "Confirmou") e no cabeçalho do formulário. "Disse não" = selo vermelho. O ✅ digitado continua valendo e
+  sai do nome (vira o confirmado de verdade ao salvar). Botão direito: "Marcar: paciente confirmou" / desfazer.
+- CONFIRMOU ⇄ COLUNA (`Crm::ConfirmationReflector`): SIM ao lembrete ou marcação da equipe → card vai para "Consulta
+  Confirmada" (CEVICO: com as automações da coluna; Oftalmofácil: funil dele, sem automação). E o contrário: card ENTROU
+  em "Consulta Confirmada" (equipe arrastou ou N8N moveu) → a próxima consulta (8 dias) ganha o selo. Card nunca volta para
+  trás (exceto de "Não foi à consulta"). Coluna: `agenda_config.booking.confirmed_stage_id` ou pelo nome.
+- ORIGEM (`tasks.origin`, MIGRATION; `Crm::AppointmentOrigin`): escolha obrigatória ao criar. Cria o contato (telefone com
+  DDD), etiqueta `cevico` ou `oftalmofacil` + `of_agenda` (o prefixo `of_` liga a cerca: sem IA, sem robô), card em silêncio
+  no funil certo (CEVICO: coluna de agendamento, só se não tem card; Oftalmofácil: "Consulta Agendada").
+- LEMBRETE: `PartnerGuard.partner_task?` reconhece `origin = oftalmofacil` → sai pela caixa e modelo do bloco "Pacientes do
+  Oftalmofácil" do card Confirmação de consulta; ao enviar, o card nasce no funil do Oftalmofácil (`Crm::PartnerFunnel`,
+  que cria as colunas "Consulta Agendada"/"Consulta Confirmada" no começo do funil se não existirem).
+- NÚMEROS: agendamento de origem Oftalmofácil fica fora de "Consultas agendadas"/taxa/metas da CEVICO.
+- FORMULÁRIO: 6 tipos em grade 3×2 (nada cortado), janela mais larga, origem e confirmado no cabeçalho.
+- Testes: 85 no servidor + 13 de tela, verdes; conferido ao vivo no localhost (criar como Oftalmofácil → SIM → selo).
+- DEPLOY: WEB+SIDEKIQ **COM MIGRATION** (backup antes). Reversão: imagem anterior (a coluna nova não atrapalha).
+- DEPOIS DO DEPLOY (ele): conferir em Integrações que o funil dos parceiros está escolhido; no card Confirmação de consulta
+  ligar o bloco "Pacientes do Oftalmofácil" (caixa 12 + modelo aprovado); desligar a confirmação do N8N.
+- PENDENTE DE DECISÃO DELE: nome das etiquetas (`cevico` / `of_agenda`); pacientes do Oftalmofácil que o N8N já pôs no funil
+  da CEVICO (limpeza = mover os cards) — não mexi.

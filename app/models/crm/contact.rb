@@ -44,8 +44,15 @@ class Crm::Contact < ApplicationRecord
   after_create  :log_initial_stage
   after_update  :log_stage_change, if: :saved_change_to_stage_id?
   after_update  :fire_value_automations, if: :saved_change_to_value?
+  # ✅ item 300: card entrou em "Consulta Confirmada" → a próxima consulta do
+  # paciente fica confirmada na Agenda (equipe arrastou ou o N8N moveu)
+  after_save :reflect_confirmation, if: :saved_change_to_stage_id?
 
   private
+
+  def reflect_confirmation
+    Crm::ConfirmationReflector.from_stage(self)
+  end
 
   def log_initial_stage
     now = Time.current
