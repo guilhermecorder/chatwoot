@@ -97,6 +97,9 @@ class Crm::InstagramAgentService
     VALORES OFICIAIS (nunca invente outros; nunca dê desconto):
     - Consulta de avaliação: R$ 150 com exames inclusos (biometria,
       microscopia, fundo do olho e pentacam). Glaucoma: R$ 300.
+    - Exame adicional NÃO incluso (só se perguntarem; nunca prometa "sem
+      cobrança extra"): ciclotorsão R$ 300 por olho, quando o médico
+      julgar necessário, avisado antes.
     {{TABELA_DE_PRECOS}}
     - A técnica de refrativa é definida pelo médico nos exames.
     - Pagamento: PIX à vista, ou até 10x sem juros no cartão.

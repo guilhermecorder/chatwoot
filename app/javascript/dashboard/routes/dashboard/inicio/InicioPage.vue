@@ -1620,6 +1620,7 @@ const newKpiDef = () => ({
 });
 const openKpiBuilder = def => {
   kpiBuilder.value = def ? { ...def } : newKpiDef();
+  kpiMulti.value = [];
   kpiVarQuery.value = '';
   kpiBuilderMode.value =
     def && !Object.keys(bagMetrics.value).includes(def.expr?.trim())
@@ -1664,7 +1665,7 @@ const READY_FORMULAS = [
       },
       {
         label: 'Fechamento de cirurgias',
-        expr: 'surgeries_booked / indications * 100',
+        expr: 'surgeries_booked_indicated / indications * 100',
         format: 'percent',
         icon: 'i-lucide-heart-pulse',
         note: 'dos indicados, quantos fecharam cirurgia — o trabalho de fechamento',
@@ -1763,6 +1764,41 @@ const readyFormulaSections = computed(() =>
     })),
   }))
 );
+// ── item 279 (28/09): "criar mais de um indicador pré-selecionado" — marca
+// vários prontos e salva todos de uma vez (um card por item) ──
+const kpiMulti = ref([]); // [{ key, label, expr, format, icon, note }]
+const kpiMultiHas = key => kpiMulti.value.some(m => m.key === key);
+const toggleKpiMulti = item => {
+  const i = kpiMulti.value.findIndex(m => m.key === item.key);
+  if (i >= 0) kpiMulti.value.splice(i, 1);
+  else kpiMulti.value.push(item);
+};
+const saveKpiMulti = async () => {
+  if (!kpiMulti.value.length || isSavingKpi.value) return;
+  isSavingKpi.value = true;
+  try {
+    const base = kpiBuilder.value || newKpiDef();
+    const list = [...(crmSettings.value?.custom_kpis || [])];
+    kpiMulti.value.forEach((m, i) => {
+      list.push({
+        ...base,
+        id: `k${(Date.now() + i).toString(36)}`,
+        label: m.label,
+        expr: m.expr,
+        format: m.format || 'number',
+        icon: m.icon || 'auto',
+        note: m.note || '',
+        color: base.color || '',
+      });
+    });
+    await CrmAPI.updateCustomKpis(list);
+    await store.dispatch('crm/fetchSettings');
+    kpiMulti.value = [];
+    kpiBuilder.value = null;
+  } finally {
+    isSavingKpi.value = false;
+  }
+};
 const applyReadyFormula = f => {
   kpiBuilder.value.expr = f.expr;
   kpiBuilder.value.format = f.format;
@@ -2269,8 +2305,8 @@ const panelTiles = computed(() => {
       const cell = (kpiLayout.value.grid || []).find(g => g && g.id === t.id);
       const big = cell
         ? kpiLayout.value.grid_units
-          ? isBigCell(cell)
-          : cell.w >= 6 // grade antiga de 12 colunas
+          ? cell.w >= 2 && cell.h >= TILE_BIG_H // fase "quadrados"
+          : isBigCell(cell)
         : sizes[t.id] === 'lg';
       if (big) out.big = true;
       return out;
@@ -2298,8 +2334,9 @@ const saveKpiLayout = async patch => {
     grid: patch.grid ?? cur.grid ?? [],
     auto_palette: patch.auto_palette ?? cur.auto_palette ?? true,
     dividers: patch.dividers ?? cur.dividers ?? {},
-    cols: patch.cols ?? cur.cols ?? 4,
+    cols: patch.cols ?? cur.cols ?? 12,
     grid_units: patch.grid_units ?? cur.grid_units ?? false,
+    grid_free: patch.grid_free ?? cur.grid_free ?? false,
   };
   isSavingLayout.value = true;
   try {
@@ -2315,28 +2352,19 @@ const saveKpiLayout = async patch => {
 // para esticar; card com metade da largura ou mais vira o "grande" (resumo com
 // gráfico). Salvo em kpi_layout.grid ({id,x,y,w,h}); `order`/`sizes` seguem
 // gravados (derivados) para quem lê o formato antigo. ──
-// 28/09 (pedidos dele, em sequência: "tamanho padrão, um 2/3 etc" → "parou
-// de ter a visualização quadrada… precisamos de mais liberdade"): a grade
-// dos indicadores tem N QUADRADOS POR LINHA (2 a 12, por painel) e cada card
-// mede em quadrados: largura 1..N e altura 1..3 quadrados (setinhas − / +
-// ou puxando a borda). 1×1 = um quadrado de verdade; 2×2 = o card grande
-// com o resumo. Nada de fração forçada.
-const TILE_COLS_MIN = 2;
-const TILE_COLS_MAX = 12;
-const TILE_H = 6; // 1 quadrado de altura = 6 linhas = 166 px
-const TILE_H_MAX = 3; // até 3 quadrados de altura
-const TILE_BIG_H = 12; // 2 quadrados de altura
-const TILE_BIG_W = 2; // resumo (card grande) = 2×2 quadrados ou mais
-const tileCols = computed(() => {
-  const n = Number(kpiLayout.value?.cols);
-  return n >= TILE_COLS_MIN && n <= TILE_COLS_MAX ? n : 4;
-});
-const tileSnap = computed(() => ({
-  x: 1,
-  h: TILE_H,
-  cols: tileCols.value,
-  minW: 1,
-}));
+// 28/09 (item 277, depois de ver no ar: "o meu painel deve ter a mesma
+// tecnologia do Painel do empresário, em que eu posso mudar horizontal e
+// verticalmente os cards"): os cards vivem no MESMO quadro do empresário —
+// grade livre de 12 colunas, arrasta para qualquer lado, estica largura E
+// altura pela borda/canto (altura em linhas de 16 px, mínimo 4), sem
+// quadrados nem frações forçadas. Card normal nasce com 3 colunas × 6 linhas;
+// o grande (resumo) com 6 × 12.
+const TILE_W = 3;
+const TILE_H = 6;
+const TILE_BIG_W = 6;
+const TILE_BIG_H = 12;
+const tileCols = computed(() => 12);
+const tileSnap = computed(() => 1);
 const isBigCell = cell =>
   !!cell && cell.w >= TILE_BIG_W && cell.h >= TILE_BIG_H;
 // posição de fábrica = a fileira de hoje: da esquerda para a direita em 4
@@ -2347,7 +2375,7 @@ const tileDefaults = computed(() => {
   let rowH = TILE_H;
   return panelTiles.value.map(t => {
     const cols = tileCols.value;
-    const w = t.divider ? cols : t.big ? TILE_BIG_W : 1;
+    const w = t.divider ? cols : t.big ? TILE_BIG_W : TILE_W;
     const h = t.divider ? 2 : t.big ? TILE_BIG_H : TILE_H;
     if (x + w > cols) {
       x = 0;
@@ -2370,32 +2398,34 @@ const tileDefaults = computed(() => {
 // (metade da linha ou mais); divisória = 2 linhas. Também conserta grades
 // salvas na fase "altura pelo conteúdo" (270), que guardavam alturas em
 // linhas de 4 px
-// grade salva ANTES dos quadrados (12 colunas; card = 3, grande = 6; alturas
-// da fase "pelo conteúdo" em linhas de 4 px) → converte para quadrados uma
-// vez; a partir daí `grid_units` marca que a grade já é em quadrados
-const legacyToSquares = (cell, cols) => {
-  const unit = 12 / cols;
+// grades salvas em outras épocas → a grade livre de 12 colunas de hoje:
+//   grid_free  = já é a livre (x/w em 12 colunas, h livre em linhas)
+//   grid_units = fase "quadrados" (cols N): multiplica por 12/N
+//   nenhuma    = fase antiga (12 colunas; alturas podem estar em linhas de
+//                4 px da fase "pelo conteúdo") → 1 ou 2 alturas
+const toFreeGrid = (cell, layout) => {
   const isDiv = String(cell.id).startsWith('div:');
-  const w = isDiv ? cols : Math.max(1, Math.round(cell.w / unit));
-  const x = Math.max(0, Math.min(cols - w, Math.round(cell.x / unit)));
-  const h = isDiv ? 2 : cell.h >= TILE_BIG_H && w >= 2 ? TILE_BIG_H : TILE_H;
-  return { ...cell, x, w, h };
-};
-const standardH = cell => {
-  if (String(cell.id).startsWith('div:')) return 2;
-  const units = Math.round(cell.h / TILE_H);
-  return Math.max(1, Math.min(TILE_H_MAX, units || 1)) * TILE_H;
+  if (layout.grid_free) return { ...cell, h: isDiv ? 2 : Math.max(4, cell.h) };
+  if (layout.grid_units) {
+    const cols = Number(layout.cols) || 4;
+    const f = 12 / cols;
+    const w = isDiv ? 12 : Math.max(2, Math.round(cell.w * f));
+    const x = Math.max(0, Math.min(12 - w, Math.round(cell.x * f)));
+    return { ...cell, x, w, h: isDiv ? 2 : Math.max(4, cell.h) };
+  }
+  const h = isDiv
+    ? 2
+    : cell.h >= TILE_BIG_H && cell.w >= 6
+      ? TILE_BIG_H
+      : TILE_H;
+  return { ...cell, h };
 };
 const tileGridComputed = computed(() => {
-  const cols = tileCols.value;
-  const inSquares = !!kpiLayout.value.grid_units;
-  const saved = (kpiLayout.value.grid || [])
+  const layout = kpiLayout.value || {};
+  const saved = (layout.grid || [])
     .filter(g => g && g.id)
-    .map(g =>
-      inSquares ? { ...g, h: standardH(g) } : legacyToSquares(g, cols)
-    )
     .map(g => ({
-      ...g,
+      ...toFreeGrid(g, layout),
       hidden: false,
       free: String(g.id).startsWith('div:'),
     }));
@@ -2423,7 +2453,9 @@ const saveTileGrid = () => {
   });
   return saveKpiLayout({
     grid: stripCells(ordered),
-    grid_units: true,
+    grid_free: true,
+    grid_units: false,
+    cols: 12,
     order: ordered.map(c => c.id),
     sizes,
   });
@@ -2446,8 +2478,9 @@ const resetKpiLayout = () => {
     spacers: [],
     grid: [],
     dividers: {},
-    cols: 4,
-    grid_units: true,
+    cols: 12,
+    grid_units: false,
+    grid_free: true,
   });
   resetBlockLayout();
 };
@@ -2460,48 +2493,10 @@ const toggleTileSize = tile => {
   tileGrid.value = placeBlock(
     tileGrid.value,
     tile.id,
-    big ? { w: 1, h: TILE_H } : { w: TILE_BIG_W, h: TILE_BIG_H },
+    big ? { w: TILE_W, h: TILE_H } : { w: TILE_BIG_W, h: TILE_BIG_H },
     tileSnap.value
   );
   saveTileGrid();
-};
-// largura e altura em QUADRADOS, com setinhas (− / +)
-const stepTileSize = (tile, dw, dh) => {
-  const cell = tileGrid.value.find(c => c.id === tile.id);
-  if (!cell) return;
-  const w = Math.max(1, Math.min(tileCols.value, cell.w + dw));
-  const hUnits = Math.max(
-    1,
-    Math.min(TILE_H_MAX, Math.round(cell.h / TILE_H) + dh)
-  );
-  const h = hUnits * TILE_H;
-  if (w === cell.w && h === cell.h) return;
-  tileGrid.value = placeBlock(
-    tileGrid.value,
-    tile.id,
-    { w, h },
-    tileSnap.value
-  );
-  saveTileGrid();
-};
-const tileSizeOf = tile => {
-  const cell = tileGrid.value.find(c => c.id === tile.id) || {};
-  return {
-    w: cell.w || 1,
-    h: Math.max(1, Math.round((cell.h || TILE_H) / TILE_H)),
-  };
-};
-// quantos quadrados por linha (2 a 12): cada card guarda o tamanho em
-// quadrados; só o que não cabe mais é apertado
-const setTileCols = cols => {
-  if (cols < TILE_COLS_MIN || cols > TILE_COLS_MAX || cols === tileCols.value)
-    return;
-  const grid = tileGrid.value.map(c => {
-    const isDiv = String(c.id).startsWith('div:');
-    const w = isDiv ? cols : Math.min(cols, c.w);
-    return { ...c, w, x: Math.max(0, Math.min(cols - w, c.x)) };
-  });
-  saveKpiLayout({ cols, grid: stripCells(grid), grid_units: true });
 };
 const addSpacer = () => {
   const id = `gap:${Date.now().toString(36)}`;
@@ -2524,9 +2519,9 @@ const addDivider = () => {
     order: [...ordered.map(c => c.id), id],
     grid: [
       ...stripCells(ordered),
-      { id, x: 0, y: bottom, w: tileCols.value, h: 2, free: true },
+      { id, x: 0, y: bottom, w: 12, h: 2, free: true },
     ],
-    grid_units: true,
+    grid_free: true,
   });
 };
 const renameDivider = (tile, label) => {
@@ -4721,32 +4716,6 @@ onUnmounted(() => {
             <span class="i-lucide-trending-up text-xs" />
             tendência {{ trendOn ? 'ligada' : 'desligada' }}
           </button>
-          <!-- item 276: quantos QUADRADOS por linha (2 a 12) -->
-          <span
-            class="cv-seg cv-seg-sm items-center"
-            title="Quantos quadrados cabem numa linha dos indicadores — cada card mede em quadrados (largura × altura)"
-          >
-            <span class="text-[10px] text-n-slate-10 px-2"
-              >quadrados por linha</span
-            >
-            <button
-              class="cv-seg-item"
-              :disabled="tileCols <= TILE_COLS_MIN"
-              @click="setTileCols(tileCols - 1)"
-            >
-              <span class="i-lucide-minus text-xs" />
-            </button>
-            <span class="cv-seg-item cv-seg-on tabular-nums">{{
-              tileCols
-            }}</span>
-            <button
-              class="cv-seg-item"
-              :disabled="tileCols >= TILE_COLS_MAX"
-              @click="setTileCols(tileCols + 1)"
-            >
-              <span class="i-lucide-plus text-xs" />
-            </button>
-          </span>
           <button
             class="cv-btn cv-btn-ghost cv-btn-sm"
             title="Recolhe os blocos em barrinhas (mais fácil pra reordenar)"
@@ -6013,8 +5982,6 @@ onUnmounted(() => {
                     </div>
                     <MagnetBoard
                       v-model:layout="tileGrid"
-                      :snap="tileSnap"
-                      :cols="tileCols"
                       :locked="blocksLocked"
                       :stack-below="600"
                       handle=".cv-tile, .cv-tile-gap, .cv-tile-div"
@@ -6151,59 +6118,12 @@ onUnmounted(() => {
                                 v-if="organizeMode"
                                 class="flex items-center justify-end gap-1 mb-1.5"
                               >
-                                <!-- item 276: tamanho em QUADRADOS — largura e altura com − / + -->
-                                <span
-                                  class="flex items-center rounded-md bg-white/15 overflow-hidden mr-1 text-[10px] font-bold"
-                                  :title="`largura ${tileSizeOf(tile).w} × altura ${tileSizeOf(tile).h} quadrado(s)`"
-                                >
-                                  <button
-                                    class="h-6 w-5 hover:bg-white/35"
-                                    title="Mais estreito"
-                                    @click.stop="stepTileSize(tile, -1, 0)"
-                                  >
-                                    <span
-                                      class="i-lucide-chevron-left text-[11px]"
-                                    />
-                                  </button>
-                                  <span class="px-0.5 tabular-nums"
-                                    >{{ tileSizeOf(tile).w }}×{{
-                                      tileSizeOf(tile).h
-                                    }}</span
-                                  >
-                                  <button
-                                    class="h-6 w-5 hover:bg-white/35"
-                                    title="Mais largo"
-                                    @click.stop="stepTileSize(tile, 1, 0)"
-                                  >
-                                    <span
-                                      class="i-lucide-chevron-right text-[11px]"
-                                    />
-                                  </button>
-                                  <button
-                                    class="h-6 w-5 hover:bg-white/35 border-l border-white/20"
-                                    title="Mais baixo"
-                                    @click.stop="stepTileSize(tile, 0, -1)"
-                                  >
-                                    <span
-                                      class="i-lucide-chevron-up text-[11px]"
-                                    />
-                                  </button>
-                                  <button
-                                    class="h-6 w-5 hover:bg-white/35"
-                                    title="Mais alto"
-                                    @click.stop="stepTileSize(tile, 0, 1)"
-                                  >
-                                    <span
-                                      class="i-lucide-chevron-down text-[11px]"
-                                    />
-                                  </button>
-                                </span>
                                 <button
                                   class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
                                   :title="
                                     tile.big
                                       ? 'Voltar ao tamanho normal (1 quadrado) — ou puxe a borda/canto do card'
-                                      : 'Card grande: 2×2 quadrados, com o resumo do indicador — ou puxe a borda/canto do card'
+                                      : 'Card grande (metade da linha, 2 alturas) com o resumo do indicador — ou puxe a borda/canto do card'
                                   "
                                   @click.stop="toggleTileSize(tile)"
                                 >
@@ -8392,7 +8312,10 @@ onUnmounted(() => {
               </button>
             </span>
             <span class="text-[10px] text-n-slate-9 ml-1"
-              >os números abaixo são do período da régua</span
+              >os números abaixo são do período da régua · marque vários para
+              criar todos de uma vez<template v-if="kpiMulti.length">
+                · <b>{{ kpiMulti.length }} marcado(s)</b></template
+              ></span
             >
           </div>
 
@@ -8440,9 +8363,27 @@ onUnmounted(() => {
                     kpiBuilder.expr.trim() === f.expr ? '' : 'cv-btn-ghost'
                   "
                   :title="f.note"
-                  @click="applyReadyFormula(f)"
+                  @click="
+                    applyReadyFormula(f);
+                    toggleKpiMulti({
+                      key: 'f:' + f.expr,
+                      label: f.label,
+                      expr: f.expr,
+                      format: f.format,
+                      icon: f.icon,
+                      note: f.note,
+                    });
+                  "
                 >
-                  <span class="truncate">{{ f.label }}</span
+                  <span class="truncate flex items-center gap-1.5"
+                    ><span
+                      :class="
+                        kpiMultiHas('f:' + f.expr)
+                          ? 'i-lucide-square-check'
+                          : 'i-lucide-square'
+                      "
+                      class="text-xs shrink-0"
+                    />{{ f.label }}</span
                   ><b class="whitespace-nowrap">{{ f.value }}</b>
                 </button>
               </div>
@@ -8460,9 +8401,23 @@ onUnmounted(() => {
                   @click="
                     kpiBuilder.expr = m.key;
                     if (!kpiBuilder.label) kpiBuilder.label = m.label;
+                    toggleKpiMulti({
+                      key: 'm:' + m.key,
+                      label: m.label,
+                      expr: m.key,
+                      format: m.key === 'revenue' ? 'currency' : 'number',
+                    });
                   "
                 >
-                  <span class="truncate">{{ m.label }}</span
+                  <span class="truncate flex items-center gap-1.5"
+                    ><span
+                      :class="
+                        kpiMultiHas('m:' + m.key)
+                          ? 'i-lucide-square-check'
+                          : 'i-lucide-square'
+                      "
+                      class="text-xs shrink-0"
+                    />{{ m.label }}</span
                   ><b class="whitespace-nowrap">{{ m.value }}</b>
                 </button>
               </div>
@@ -8655,6 +8610,17 @@ onUnmounted(() => {
             Cancelar
           </button>
           <button
+            v-if="kpiMulti.length > 1"
+            class="cv-btn"
+            :disabled="isSavingKpi"
+            title="Cria um card para cada indicador marcado, com o formato, painel e cor escolhidos aqui"
+            @click="saveKpiMulti"
+          >
+            <span class="i-lucide-layers text-xs" />
+            {{ isSavingKpi ? 'Salvando…' : `Salvar ${kpiMulti.length} cards` }}
+          </button>
+          <button
+            v-else
             class="cv-btn"
             :disabled="
               isSavingKpi || !kpiPreview.ok || !kpiBuilder.label.trim()

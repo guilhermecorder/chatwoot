@@ -316,6 +316,7 @@ namespace :crm do
   resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
   # 📅 Painel de Agendamentos (item 200): marcadas/remarcadas/canceladas no período
   get 'appointments/feed', to: 'appointments#feed'
+  get 'appointments/stage_entries', to: 'appointments#stage_entries'
   # 🌪️ item 271: funil de aquisição por turma + da porta pra dentro (Gestor)
   get 'funnels/acquisition', to: 'funnels#acquisition'
   get 'funnels/clinic', to: 'funnels#clinic'

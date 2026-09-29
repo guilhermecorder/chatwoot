@@ -94,6 +94,9 @@ class Crm::ConversationInsightService
     Dados oficiais da CEVICO para usar nas frases (nunca invente outros):
     - Consulta de avaliação: R$ 150 com exames inclusos (biometria,
       microscopia, fundo de olho e pentacam); avaliação de glaucoma R$ 300
+    - Exame adicional NÃO incluso (só se perguntarem): ciclotorsão R$ 300
+      por olho, quando o médico julgar necessário; nunca prometer "sem
+      cobrança extra"
     {{TABELA_DE_PRECOS}}
     - A técnica de refrativa é definida pelo médico com base nos exames
     - Pagamento: à vista no PIX ou em até 10x sem juros no cartão; não

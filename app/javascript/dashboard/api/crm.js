@@ -314,7 +314,9 @@ class CrmAPI extends ApiClient {
 
   // 📊 item 256: pesquisa de satisfação pós-cirurgia (NPS)
   saveNpsSurvey(survey) {
-    return axios.post(`${this.url}/settings/update_agenda`, { nps_survey: survey });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      nps_survey: survey,
+    });
   }
 
   // 📅 item 253: agente "Confirmação de consulta" (Agentes de IA) — lembretes
@@ -356,6 +358,11 @@ class CrmAPI extends ApiClient {
 
   appointmentsFeed(params) {
     return axios.get(`${this.url}/appointments/feed`, { params });
+  }
+
+  // item 277: quem entrou na coluna Agendamento de Consulta (caixa de origem, como foi, lista)
+  appointmentsStageEntries(params) {
+    return axios.get(`${this.url}/appointments/stage_entries`, { params });
   }
 
   // ajustes do que acontece ao confirmar uma consulta (etiquetas + coluna

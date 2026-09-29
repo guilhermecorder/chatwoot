@@ -8489,3 +8489,50 @@ com parâmetros diferentes selecionáveis por chavinhas.
   virava coluna única). Espaços vazios e divisórias seguem (divisória = linha inteira × 2 linhas).
 - Testado local via console (painel do navegador escondido): 8 specs do motor verdes. Deploy WEB só, sem
   migration. SEM commit — aguarda "pode subir" (com 274 + 275).
+
+> 28/09 ~18h30: 274 + 275 + 276 SUBIRAM no commit d16c238 (develop, --no-verify dele; push dele) → build
+> "Build & Push Docker Image" VERDE 18h10 → imagem ghcr.io/guilhermecorder/chatwoot:d16c238 p/ Implantar WEB,
+> sem migration · reversão :7f0521a.
+
+## 277. ✅ 🧲📊 Depois do deploy :d16c238 ("ficou uma porcaria o Meu Painel, Agendamentos também, nenhum número me diz muita coisa") — Meu Painel com a tecnologia do Painel do empresário + Agendamentos pelo NÚMERO dele (28/09 noite)
+- MEU PAINEL: os cards passam a viver no MESMO quadro do Painel do empresário — grade livre de 12 colunas,
+  arrasta para qualquer lado, estica largura E altura pela borda/canto (linhas de 16 px, mín. 4), sem
+  quadrados nem frações (saem "quadrados por linha" e as setinhas do 276). Card normal 3×6, grande 6×12.
+  `kpi_layout.grid_free` marca a grade livre; grades das fases anteriores convertem ao abrir (toFreeGrid).
+- AGENDAMENTOS: bloco novo no topo do Resumo "Entraram em Agendamento de Consulta" = card que CHEGOU na
+  coluna do CRM no período (Crm::BookingRate, regra oficial 233), um por paciente: número grande, "de
+  quais caixas vieram" (1ª conversa, ShareBar + chips), "como foi depois" (compareceu / faltou / cancelou /
+  confirmou / consulta marcada / passou sem registro / SEM consulta na Agenda) e robô × equipe; tudo abre a
+  lista (PatientListPopup → conversa). `Crm::StageEntriesReport` + GET crm/appointments/stage_entries.
+  Abaixo fica a régua da Agenda (marcadas etc.) com aviso de que são réguas diferentes.
+- Deploy WEB só, sem migration. SEM commit — aguarda "pode subir".
+
+## 278. ✅ 🧹 VARREDURA dos indicadores do "+" (28/09 noite; print: "tem indicadores errados aqui… elimine o que está errado, corrija o necessário")
+- `Crm::KpiSweep` + `rake cevico:kpi_sweep ACCOUNT_ID=1 DRY=1|0`: regras da régua oficial — taxa/conversão de
+  agendamento = entrou na coluna ÷ leads; ticket médio = faturamento ÷ cirurgias realizadas; fechamento =
+  cirurgias marcadas após indicação ÷ indicações; comparecimento = presenças ÷ (presenças + faltas); "Entrou
+  em X" = stage da coluna X desta conta (pelo nome); % em contagem simples vira número; nome enganoso
+  ("Consultas agendadas (registradas)") renomeado; duplicados apagados; fórmula com variável inexistente apagada.
+- Na cópia de produção (21/09) os errados: "Conversão de Agendamento" e "Taxa de Agendamento" = contagem
+  em %, "Taxa de agendamento" = marcadas ÷ leads (167%), "Ticket médio" = stage_12, "Fechamento" = contagem,
+  "Entrou em Cirurgia Realizada" duplicado em %. Local DRY: 4 correções.
+- Também corrigidos os PRONTOS: fórmula pronta "Fechamento de cirurgias" (→ após indicação) e o modelo
+  Jornada completa (taxa de agendamento → entrou na coluna ÷ leads).
+- Rodar em produção DEPOIS do deploy: DRY=1 (lista) → DRY=0 (aplica). Sem migration.
+
+## 279. ✅ ➕ "Novo indicador": marcar VÁRIOS prontos e salvar todos de uma vez (28/09 noite; "criar mais de um indicador pré selecionado")
+- Nos indicadores prontos (taxas prontas e números do cesto) cada item tem caixinha ☐/☑; o rodapé vira
+  "Salvar N cards" (um card por item, com formato/painel/cor escolhidos no modal). 1 marcado = fluxo antigo.
+
+## 280. ✅ 🩺 ROTEIRO: exames NÃO inclusos (ciclotorsão R$ 300/olho) — só quando o paciente perguntar (29/09 manhã; print de produção: o Atendente disse "valor fixo, sem cobrança extra por ciclotorsão… já tem esse rastreamento incluso")
+- Causa: o roteiro dizia "Na cirurgia está tudo incluso" e a objeção "O que está incluso?" terminava em "Sem
+  surpresas" → o modelo garantiu que não havia custo extra.
+- Correção nos 4 roteiros (Crm::CevicoScript v1 e v2 — a fonte única do WhatsApp/voz —, ConversationInsight e
+  Instagram): bloco "EXAMES ADICIONAIS (NÃO inclusos)": avaliação inclui biometria, microscopia, fundo de olho e
+  pentacam; exame que o médico julgar necessário é à parte e avisado antes — hoje CICLOTORSÃO R$ 300 por olho;
+  só falar quando perguntarem; nunca oferecer; nunca prometer "sem cobrança extra"/"tudo incluso"/"não altera o
+  valor"; resposta modelo educada; se o paciente relatar surpresa em outra clínica, acolher e ser transparente.
+  Objeções "O que está incluso?" e "Quais exames estão inclusos?" reescritas sem o "Sem surpresas".
+- Deploy WEB + SIDEKIQ (o Atendente roda no Sidekiq); o cache do roteiro (item 213) renova em até 1 h. SEM
+  commit — aguarda "pode subir". Para acrescentar outros exames extras: mesma linha do bloco EXAMES ADICIONAIS.
+

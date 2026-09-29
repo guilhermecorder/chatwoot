@@ -1010,9 +1010,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           end,
           'spacers' => Array(h['spacers']).map(&:to_s).grep(/\Agap:[a-z0-9]{1,20}\z/).uniq.first(60),
           # item 276: cards por linha (3 · 4 · 6); ausente = 4
-          'cols' => h['cols'].to_i.between?(2, 12) ? h['cols'].to_i : nil,
+          'cols' => h['cols'].to_i.between?(2, 12) ? h['cols'].to_i : nil, # 2–12 (fase quadrados); 12 = livre
           # item 276: grade já em quadrados (senão é a antiga de 12 colunas e o painel converte)
           'grid_units' => ActiveModel::Type::Boolean.new.cast(h['grid_units']) ? true : nil,
+          # item 277: grade LIVRE de 12 colunas (a do Painel do empresário)
+          'grid_free' => ActiveModel::Type::Boolean.new.cast(h['grid_free']) ? true : nil,
           # item 275: divisórias com título ({"div:abc" => "Início da jornada"})
           'dividers' => (h['dividers'] || {}).to_h.to_a.first(30).each_with_object({}) do |(k, label), acc|
             acc[k.to_s] = label.to_s.strip[0, 60] if k.to_s.match?(/\Adiv:[a-z0-9]{1,20}\z/) && label.to_s.strip.present?

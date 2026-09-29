@@ -434,7 +434,59 @@ const isLoading = ref(true);
 const isRefreshing = ref(false);
 const loadError = ref('');
 let fetchSeq = 0;
+// ── item 277: quem ENTROU na coluna "Agendamento de Consulta" (a regra dele) ──
+const stageEntries = ref(null);
+const fetchStageEntries = async () => {
+  const p = period.value || {};
+  const params = { preset: p.preset };
+  if (p.preset === 'custom') Object.assign(params, { from: p.from, to: p.to });
+  try {
+    const { data } = await CrmAPI.appointmentsStageEntries(params);
+    stageEntries.value = data;
+  } catch {
+    stageEntries.value = stageEntries.value || null;
+  }
+};
+const entryPerson = r => ({
+  id: r.contact_id,
+  contact_id: r.contact_id,
+  name: r.name,
+  phone: r.phone,
+  origin: r.origin,
+  when: r.entered_at,
+  meta: [
+    r.stage_now ? `hoje em ${r.stage_now}` : null,
+    r.consult
+      ? `${r.consult.source === 'ia' ? 'robô' : 'equipe'} · ${r.consult.unit || ''}`
+      : 'sem consulta na Agenda',
+  ]
+    .filter(Boolean)
+    .join(' · '),
+  conversation_id: r.conversation_id,
+});
+const openEntries = (title, subtitle, filter) => {
+  const rows = (stageEntries.value?.rows || []).filter(filter);
+  listPopup.value = {
+    title,
+    subtitle,
+    people: rows.map(entryPerson),
+    grad: 'linear-gradient(135deg, #6d28d9, #a78bfa)',
+    icon: 'i-lucide-columns-3',
+  };
+};
+const entriesOriginItems = computed(() =>
+  (stageEntries.value?.by_origin || []).map((b, i) => ({
+    key: `eo${b.inbox_id || 'none'}`,
+    label: b.name || 'sem conversa',
+    value: b.count,
+    color: b.inbox_id ? inboxSolidFor(inboxes.value, b.inbox_id) : '#94a3b8',
+    hint: `${b.count} entraram na coluna vindo de ${b.name || 'fora do sistema'}`,
+    i,
+  }))
+);
+
 const fetchFeed = async ({ quiet = false } = {}) => {
+  fetchStageEntries();
   fetchSeq += 1;
   const seq = fetchSeq;
   if (quiet) isRefreshing.value = true;
@@ -873,6 +925,130 @@ onBeforeUnmount(() => {
                 ? `${nounPlural} cuja data cai no período escolhido`
                 : `o que aconteceu no período com as ${nounPlural}: marcações, remarcações, confirmações, cancelamentos e lançamentos (consulta que já estava marcada fora do sistema)`
             }}
+          </p>
+          <!-- item 277: o NÚMERO dele — entrou na coluna "Agendamento de Consulta" -->
+          <div
+            v-if="stageEntries"
+            class="cv-ag-block p-5 sm:p-6 mb-6"
+            :style="{ '--cv': stageEntries.stage?.color || '#6d28d9' }"
+          >
+            <div class="flex items-start gap-4 flex-wrap">
+              <button
+                class="text-left flex-shrink-0 cursor-pointer transition-transform hover:-translate-y-0.5"
+                title="ver a lista: quem são, de onde vieram, como foi"
+                @click="
+                  openEntries(
+                    `Entraram em ${stageEntries.stage?.name || 'Agendamento de Consulta'}`,
+                    'um por paciente · clique para abrir a conversa',
+                    () => true
+                  )
+                "
+              >
+                <p class="cv-ag-block-title">
+                  Entraram em
+                  {{ stageEntries.stage?.name || 'Agendamento de Consulta' }}
+                </p>
+                <p
+                  class="text-5xl font-bold tabular-nums tracking-tight text-n-slate-12 leading-none mt-1"
+                >
+                  {{ stageEntries.total }}
+                </p>
+                <p class="cv-ag-block-sub mt-1">
+                  pacientes cujo card CHEGOU nessa coluna do CRM no período (a
+                  regra oficial de agendamento)
+                  <template v-if="stageEntries.passages > stageEntries.total">
+                    · {{ stageEntries.passages }} passagens</template
+                  >
+                  · clique para ver os nomes
+                </p>
+              </button>
+              <div class="flex-1 min-w-[16rem]">
+                <p class="text-[11px] font-bold text-n-slate-11 mb-1.5">
+                  de quais caixas vieram (primeira conversa)
+                </p>
+                <ShareBar
+                  v-if="entriesOriginItems.length"
+                  :items="entriesOriginItems"
+                  :max="8"
+                />
+                <p v-else class="text-[11px] text-n-slate-9">
+                  ninguém no período
+                </p>
+                <div class="flex items-center gap-1.5 flex-wrap mt-2">
+                  <button
+                    v-for="o in stageEntries.by_origin"
+                    :key="'eo' + (o.inbox_id || 'none')"
+                    class="cv-chip"
+                    :title="`ver quem chegou por ${o.name || 'fora do sistema'}`"
+                    @click="
+                      openEntries(
+                        `Chegaram por ${o.name || 'fora do sistema'}`,
+                        'e entraram em Agendamento de Consulta no período',
+                        r => (r.origin_id || null) === (o.inbox_id || null)
+                      )
+                    "
+                  >
+                    <span
+                      class="w-2 h-2 rounded-full"
+                      :style="{
+                        background: o.inbox_id
+                          ? inboxSolidFor(inboxes, o.inbox_id)
+                          : '#94a3b8',
+                      }"
+                    />
+                    {{ o.name || 'sem conversa' }}
+                    <b class="tabular-nums">{{ o.count }}</b>
+                  </button>
+                </div>
+                <p class="text-[11px] font-bold text-n-slate-11 mt-4 mb-1.5">
+                  como foi depois
+                </p>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    v-for="oc in stageEntries.by_outcome"
+                    :key="'oc' + oc.key"
+                    class="cv-chip"
+                    :class="
+                      oc.key === 'attended'
+                        ? 'cv-green'
+                        : oc.key === 'missed' || oc.key === 'canceled'
+                          ? 'cv-red'
+                          : oc.key === 'no_consult' || oc.key === 'past_unknown'
+                            ? 'cv-amber'
+                            : ''
+                    "
+                    :title="`ver quem: ${oc.label}`"
+                    @click="
+                      openEntries(
+                        `Entraram em Agendamento · ${oc.label}`,
+                        'no período',
+                        r => r.outcome === oc.key
+                      )
+                    "
+                  >
+                    {{ oc.label }} <b class="tabular-nums">{{ oc.count }}</b>
+                  </button>
+                  <span
+                    v-if="stageEntries.by_source"
+                    class="cv-chip ml-auto"
+                    title="das consultas ligadas a essas entradas, quem marcou"
+                  >
+                    <span class="i-lucide-bot text-xs" /> robô
+                    <b class="tabular-nums">{{ stageEntries.by_source.ia }}</b>
+                    × equipe
+                    <b class="tabular-nums">{{
+                      stageEntries.by_source.equipe
+                    }}</b>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-[11px] text-n-slate-10 mb-3">
+            abaixo, o que a <b>Agenda</b> registrou (consultas marcadas,
+            remarcadas, confirmadas…) — outra régua, por isso os números não
+            precisam bater com o de cima
           </p>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div

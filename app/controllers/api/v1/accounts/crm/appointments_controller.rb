@@ -56,6 +56,13 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     }
   end
 
+  # 📊 item 277: quem ENTROU na coluna "Agendamento de Consulta" no período
+  # GET /crm/appointments/stage_entries?preset=…&from&to
+  def stage_entries
+    since, until_at = standard_period_range || custom_period_range
+    render json: Crm::StageEntriesReport.new(Current.account).call(since, until_at).merge(since: since, until: until_at)
+  end
+
   private
 
   # registradas = ACONTECEU no período (marcou/remarcou/cancelou);

@@ -66,11 +66,11 @@ export const PANEL_PRESETS = [
       {
         kpi: {
           id: 'tx_ag',
-          label: 'Taxa de agendamento · leads novos',
-          expr: 'appointments_booked_new / new_leads * 100',
+          label: 'Taxa de agendamento (entrou na coluna ÷ leads)',
+          expr: 'appointments_created / new_leads * 100',
           format: 'percent',
           icon: 'i-lucide-percent',
-          note: 'Consultas marcadas de leads novos ÷ novos contatos do período.',
+          note: 'Regra oficial: pacientes que ENTRARAM na coluna Agendamento de Consulta ÷ novos contatos do período.',
         },
         color: ['tangerine', 1],
       },
