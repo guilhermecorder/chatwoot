@@ -116,7 +116,8 @@ class Crm::BreakdownHighlights
 
     front = values.count(values.max)
     back = values.count(values.min)
-    "Não há um destaque único: #{front} linhas empatam na frente (#{values.max} conversas cada) e #{back} atrás (#{values.min} cada)."
+    "Não há um destaque único: #{front} linhas empatam na frente (#{thousands(values.max)} conversas cada) " \
+      "e #{back} atrás (#{thousands(values.min)} cada)."
   end
 
   def yield_sentence(best, worst)
@@ -129,7 +130,11 @@ class Crm::BreakdownHighlights
   end
 
   def count(row)
-    "#{row[:conversations]} #{row[:conversations] == 1 ? 'conversa' : 'conversas'}"
+    "#{thousands(row[:conversations])} #{row[:conversations] == 1 ? 'conversa' : 'conversas'}"
+  end
+
+  def thousands(value)
+    value.to_i.to_s.reverse.scan(/\d{1,3}/).join('.').reverse
   end
 
   def number(value)

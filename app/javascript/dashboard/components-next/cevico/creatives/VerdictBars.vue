@@ -75,12 +75,12 @@ const holder = computed(() => {
 
 <template>
   <div
-    class="cv-sub rounded-2xl px-4 py-3.5 min-w-0"
+    class="cv-sub rounded-2xl px-5 py-5 min-w-0"
     :class="indicator.is_record ? 'vb-champion' : ''"
     :title="indicator.hint"
   >
-    <div class="flex items-center gap-2 flex-wrap mb-2">
-      <p class="text-sm font-bold text-n-slate-12 leading-tight">
+    <div class="flex items-center gap-2 flex-wrap mb-3">
+      <p class="text-base font-bold text-n-slate-12 leading-tight">
         {{ indicator.label }}
         <span class="font-normal text-n-slate-10">
           · {{ indicator.metric }}
@@ -88,28 +88,28 @@ const holder = computed(() => {
       </p>
       <span
         v-if="indicator.verdict_label"
-        class="ml-auto inline-flex items-center gap-1 text-xs font-bold"
+        class="ml-auto inline-flex items-center gap-1 text-sm font-bold"
         :style="{ color: tone.color }"
       >
         <span :class="tone.icon" class="text-sm" />{{ indicator.verdict_label }}
       </span>
     </div>
 
-    <ul v-if="view === 'bars'" class="flex flex-col gap-1.5 list-none p-0 m-0">
+    <ul v-if="view === 'bars'" class="flex flex-col gap-2.5 list-none p-0 m-0">
       <li
         v-for="r in rows"
         :key="r.key"
-        class="grid grid-cols-[8.75rem_minmax(0,1fr)_4.5rem] items-center gap-2"
+        class="grid grid-cols-[9.5rem_minmax(0,1fr)_5rem] items-center gap-2"
       >
         <span
-          class="text-[11px] leading-tight inline-flex items-center gap-1"
+          class="text-[13px] leading-tight inline-flex items-center gap-1"
           :class="r.strong ? 'font-bold text-n-slate-12' : 'text-n-slate-10'"
         >
           <span v-if="r.record" class="i-lucide-trophy text-amber-500" />{{
             r.name
           }}
         </span>
-        <span class="h-3.5 rounded-full bg-n-alpha-2 overflow-hidden">
+        <span class="h-4 rounded-full bg-n-alpha-2 overflow-hidden">
           <span
             class="vb-bar block h-full rounded-full"
             :style="{ width: r.width, background: r.color }"
@@ -119,8 +119,8 @@ const holder = computed(() => {
           class="text-right tabular-nums"
           :class="
             r.strong
-              ? 'text-base font-extrabold text-n-slate-12'
-              : 'text-xs font-semibold text-n-slate-11'
+              ? 'text-xl font-extrabold text-n-slate-12'
+              : 'text-sm font-semibold text-n-slate-11'
           "
         >
           {{ r.text }}
@@ -137,16 +137,16 @@ const holder = computed(() => {
       :format="fmt"
     />
 
-    <p class="text-xs mt-2 font-semibold" :style="{ color: tone.color }">
+    <p class="text-sm mt-2 font-semibold" :style="{ color: tone.color }">
       {{ indicator.phrase }}
     </p>
-    <p class="text-xs font-semibold vb-record">
+    <p class="text-sm font-semibold vb-record">
       {{ indicator.record_phrase }}
     </p>
-    <p v-if="holder" class="text-[11px] text-n-slate-10 leading-snug">
+    <p v-if="holder" class="text-[13px] text-n-slate-10 leading-snug">
       recorde: {{ holder }}
     </p>
-    <p class="text-[11px] text-n-slate-9 leading-snug mt-1">
+    <p class="text-[13px] text-n-slate-9 leading-snug mt-1">
       {{ indicator.hint }}
     </p>
   </div>

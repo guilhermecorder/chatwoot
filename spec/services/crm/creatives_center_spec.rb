@@ -232,6 +232,98 @@ RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
       expect(Crm::AdVideoTranscribeJob.pending_for(account).pluck(:ad_id)).not_to include('2304', '2305')
     end
 
+    describe 'item 293: vídeo enviado pela pessoa ou link colado (Crm::AdVideoInput)' do
+      let(:video) { Crm::AdCreative.find_by!(account: account, ad_id: '2304') }
+      let(:gemini) { instance_double(Crm::GeminiFiles) }
+      let(:input) { Crm::AdVideoInput.new(video, graph: instance_double(Crm::MetaGraph), gemini: gemini) }
+
+      def attach(bytes)
+        video.video_upload.attach(io: StringIO.new(bytes), filename: 'anuncio.mp4', content_type: 'video/mp4')
+      end
+
+      it 'arquivo pequeno vai embutido; depois de transcrever o arquivo é apagado', :aggregate_failures do
+        attach('vídeo de teste')
+        expect(input.origin).to eq('upload')
+        expect(input.part[:inline_data]).to include(mime_type: 'video/mp4', data: Base64.strict_encode64('vídeo de teste'))
+        input.cleanup!
+        expect(video.reload.video_upload).not_to be_attached
+      end
+
+      it 'arquivo grande sobe antes para a gaveta de arquivos do Gemini' do
+        stub_const('Crm::AdVideoInput::INLINE_MAX', 4)
+        attach('maior que o limite')
+        allow(gemini).to receive(:upload).with('maior que o limite', 'video/mp4').and_return('https://gemini/files/abc')
+
+        expect(input.part).to eq(file_data: { mime_type: 'video/mp4', file_uri: 'https://gemini/files/abc' })
+      end
+
+      it 'link do YouTube vai direto para o Gemini assistir' do
+        video.queue_transcript!(link: 'https://youtu.be/abc123')
+
+        expect(input.origin).to eq('link')
+        expect(input.part).to eq(file_data: { mime_type: 'video/*', file_uri: 'https://youtu.be/abc123' })
+      end
+
+      it 'link do Instagram ou Facebook é recusado com a explicação', :aggregate_failures do
+        expect(Crm::AdVideoInput.link_problem('https://www.instagram.com/reel/abc/')).to include('Baixe o vídeo e solte o arquivo')
+        expect(Crm::AdVideoInput.link_problem('https://fb.watch/abc/')).to include('Baixe o vídeo')
+        expect(Crm::AdVideoInput.link_problem('http://exemplo.com/v.mp4')).to include('https://')
+        expect(Crm::AdVideoInput.link_problem('https://exemplo.com/v.mp4')).to be_nil
+      end
+
+      it 'vídeo enviado e parado há mais de 24 horas é apagado na limpeza', :aggregate_failures do
+        attach('ficou parado')
+        video.video_upload.attachment.update_columns(created_at: 2.days.ago) # rubocop:disable Rails/SkipsModelValidations
+        other = Crm::AdCreative.find_by!(account: account, ad_id: '2301')
+        other.video_upload.attach(io: StringIO.new('acabou de chegar'), filename: 'novo.mp4', content_type: 'video/mp4')
+
+        Crm::AdVideoTranscribeJob.purge_stale_uploads
+
+        expect(video.reload.video_upload).not_to be_attached
+        expect(other.reload.video_upload).to be_attached
+      end
+
+      it 'sem arquivo nem link, o caminho é a Meta' do
+        expect(input.origin).to eq('meta')
+      end
+    end
+
+    describe 'item 292: de onde vem o arquivo do vídeo (Crm::AdVideoSource)' do
+      let(:video) { Crm::AdCreative.find_by!(account: account, ad_id: '2304') }
+      let(:graph) { instance_double(Crm::MetaGraph) }
+      let(:vid) { video.creative['video_id'].to_s }
+      let(:ad_json) { { 'creative' => { 'object_story_spec' => { 'page_id' => '777' } } } }
+
+      before { allow(graph).to receive(:fetch_one).with('2304', anything).and_return([ad_json, nil]) }
+
+      it 'usa o vídeo direto quando a Meta entrega' do
+        allow(graph).to receive(:fetch_one).with(vid, 'source,length').and_return([{ 'source' => 'https://meta/direto.mp4' }, nil])
+
+        expect(Crm::AdVideoSource.new(video, graph).url).to eq('https://meta/direto.mp4')
+      end
+
+      it 'cai para a biblioteca da conta e depois para o acesso da página' do
+        allow(graph).to receive(:fetch_one).with(vid, 'source,length').and_return([{ 'id' => vid }, nil])
+        allow(graph).to receive(:fetch_all).with('advideos', anything, max_pages: 1).and_return([])
+        allow(graph).to receive(:page_token).with('777').and_return('token-da-pagina')
+        allow(graph).to receive(:fetch_one).with(vid, 'source,length', token: 'token-da-pagina')
+                                           .and_return([{ 'source' => 'https://meta/pagina.mp4' }, nil])
+
+        expect(Crm::AdVideoSource.new(video, graph).url).to eq('https://meta/pagina.mp4')
+      end
+
+      it 'sem nenhum caminho, explica o que falta e guarda o que a Meta respondeu', :aggregate_failures do
+        allow(graph).to receive(:fetch_one).with(vid, 'source,length').and_return([nil, 'Unsupported get request (código 100/33)'])
+        allow(graph).to receive(:fetch_all).and_raise(Crm::MetaGraph::Error, 'advideos: sem permissão')
+        allow(graph).to receive(:page_token).with('777').and_return(nil)
+
+        expect { Crm::AdVideoSource.new(video, graph).url }.to raise_error(Crm::AdVideoSource::Missing) do |error|
+          expect(error.message).to include('precisa enxergar a página', '777')
+          expect(error.detail).to include('código 100/33', 'advideos: sem permissão', 'não enxerga a página 777')
+        end
+      end
+    end
+
     it 'item 289: agendamento NÃO vira cirurgia; cada degrau cabe no anterior e o CAC nunca fica abaixo do custo da consulta' do
       pipeline = Crm::Pipeline.create!(account: account, name: 'Jornada', position: 0)
       names = ['Novos Contatos', 'Agendamento de Consulta', 'Consulta Realizada', 'Cirurgia Agendada', 'Cirurgia Realizada']
@@ -252,9 +344,30 @@ RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
 
       row = service.overview[:rows].find { |r| r[:ad_id] == '2301' }
 
-      expect(row[:funnel]).to include(leads: 5, booked: 4, attended: 3, surgeries: 1, revenue: 9000.0)
-      expect(row[:funnel][:sources]).to include(booked_crm: 4, booked_agenda: 0, surgeries_crm: 1, surgeries_of: 0)
+      expect(row[:funnel]).to include(leads: 5, booked: 4, attended: 3, closed: 2, surgeries: 1, revenue: 9000.0)
+      expect(row[:funnel][:sources]).to include(booked_crm: 4, booked_agenda: 0, closed_crm: 2, surgeries_crm: 1, surgeries_of: 0)
       expect(row[:rates]['cost_surgery']).to be > row[:rates]['cost_booked']
+    end
+
+    it 'item 294: no Oftalmofácil a cirurgia ATIVA com data passada é a realizada; ativa futura ou aguardando pagamento é fechada' do
+      leads = Array.new(4) do |i|
+        create(:contact, account: account, phone_number: "+55119666000#{i}",
+                         additional_attributes: { 'meta_ads' => { 'source_id' => '2301', 'captured_at' => 20.days.ago.iso8601 } })
+      end
+      surgery = lambda do |contact, kind, date, attrs = {}|
+        Crm::OftalmofacilSurgery.create!({ account: account, contact_id: contact.id, item_token: SecureRandom.hex(6),
+                                           status_kind: kind, surgery_date: date, amount: 8490 }.merge(attrs))
+      end
+      surgery.call(leads[0], 'agendada', 10.days.ago.to_date, paid_amount: 8490)
+      surgery.call(leads[0], 'agendada', 3.days.ago.to_date, paid_amount: 8490) # segundo olho
+      surgery.call(leads[1], 'agendada', 10.days.from_now.to_date)
+      surgery.call(leads[2], 'aguardando_pagamento', 5.days.ago.to_date, paid_amount: 0)
+      surgery.call(leads[3], 'cancelada', 5.days.ago.to_date)
+
+      row = service.overview[:rows].find { |r| r[:ad_id] == '2301' }
+
+      expect(row[:funnel]).to include(leads: 4, booked: 3, attended: 3, closed: 3, surgeries: 1, revenue: 16_980.0)
+      expect(row[:funnel][:sources]).to include(closed_of: 3, surgeries_of: 1)
     end
 
     it 'item 286: pulado por falta de chave, falha e fila travada voltam a ser tentados; dinâmico com vídeo também' do
@@ -475,6 +588,52 @@ RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
       again = described_class.new(account: account, since_date: Date.current - 29, until_date: Date.current).detail('2304')
       expect(again[:retention_detail][:segments]).to eq([])
       expect(again[:transcript]['text']).to be_present
+    end
+
+    it 'rodada 4: só com os marcos, a duração do vídeo transforma os marcos em segundos e as zonas são estimadas' do
+      Crm::AdInsight.where(account: account, ad_id: '2302').find_each do |row|
+        row.update!(metrics: row.metrics.except('play_curve', 'plays', 'p95', 'plays_30s'))
+      end
+      video = Crm::AdCreative.find_by!(account: account, ad_id: '2302')
+      video.update!(creative: video.creative.merge('video_length' => 32.0))
+      curve = service.detail('2302')[:retention_detail]
+      expect(curve).to include(source: 'milestones', axis: 'seconds', duration: 32.0, zones_estimated: true, duration_note: nil)
+      expect(curve[:points].pluck(:axis_label)).to eq(['0 s', '3 s', '25% · 8 s', '50% · 16 s', '75% · 24 s', 'fim · 32 s'])
+      expect(curve[:zones]).to eq([{ key: 'hook', label: 'Gancho', from: 0, to: 3.0 }, { key: 'body', label: 'Corpo', from: 3.0, to: 27.2 },
+                                   { key: 'cta', label: 'CTA', from: 27.2, to: 32.0 }])
+      expect(curve[:zones_note]).to include('estimada')
+      expect(curve[:top_drops].first).to include(zone_label: 'Gancho', from_t: 0, to_t: 3)
+      expect(curve[:drops_summary]).to start_with('A maior perda acontece no gancho, nos 3 primeiros segundos')
+
+      # a duração também pode vir da transcrição
+      video.update!(creative: video.creative.except('video_length').merge('transcript' => { 'status' => 'done', 'text' => 'x', 'duration' => 20 }))
+      fresh = described_class.new(account: account, since_date: Date.current - 29, until_date: Date.current)
+      expect(fresh.detail('2302')[:retention_detail]).to include(axis: 'seconds', duration: 20.0)
+
+      # sem duração nenhuma: avisa e mantém os marcos, com a zona pelo marco
+      video.update!(creative: video.creative.except('transcript'))
+      bare = described_class.new(account: account, since_date: Date.current - 29, until_date: Date.current).detail('2302')[:retention_detail]
+      expect(bare).to include(axis: 'marks', duration: nil, zones: [])
+      expect(bare[:duration_note]).to include('Duração do vídeo ainda não conhecida')
+      expect(bare[:top_drops].first).to include(zone_label: 'Gancho', from_label: 'Impressões', to_label: '3 s')
+      expect(bare[:drops_summary]).to start_with('A maior perda acontece no gancho, nos 3 primeiros segundos')
+    end
+
+    it 'rodada 4: o funil interno mostra de onde vem cada número e compara com a média da conta' do
+      creator = create(:user, account: account)
+      people = Array.new(4) do |i|
+        create(:contact, account: account, phone_number: "+55119555500#{i}0",
+                         additional_attributes: { 'meta_ads' => { 'source_id' => '2301', 'captured_at' => 2.days.ago.iso8601 } })
+      end
+      people.first(2).each { |c| account.tasks.create!(title: 'consulta', task_type: 'consulta', contact_id: c.id, creator: creator) }
+      view = service.detail('2301')[:funnel_view]
+      booked = view[:steps].find { |step| step[:key] == 'booked' }
+      expect(booked).to include(count: 2, rate_text: '50,0%', versus: 'even', average_text: '50,0%')
+      expect(booked[:source_text]).to start_with('de onde vem: ')
+      clicks = view[:steps].find { |step| step[:key] == 'link_clicks' }
+      expect(clicks[:conversion_text]).to match(/\A\d+,\d{2}% das exibições viraram clique\z/)
+      expect(clicks[:versus]).to be_in(%w[above below even])
+      expect(view[:steps].pluck(:width)).to all(be_between(0, 100))
     end
 
     it 'item 287: dados antigos (sem a curva da Meta) caem nos marcos de sempre, sem quebrar' do

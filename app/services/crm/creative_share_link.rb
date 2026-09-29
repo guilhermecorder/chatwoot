@@ -22,6 +22,18 @@ module Crm::CreativeShareLink
       expires_label: expires_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m/%Y') }
   end
 
+  # período do link (rodada 4): "Este ano" é o padrão — a análise é do ano
+  PERIODS = { 'year' => 'Este ano', 'last90' => 'Últimos 90 dias', 'screen' => 'O período da tela' }.freeze
+
+  # → [since, until, chave] — `screen` usa as datas que a tela mandou
+  def period_for(key, screen_since:, screen_until:, today: Date.current)
+    case key.to_s
+    when 'screen' then [screen_since, screen_until, 'screen']
+    when 'last90' then [today - 89, today, 'last90']
+    else [today.beginning_of_year, today, 'year']
+    end
+  end
+
   def finance_label(finance)
     finance ? 'Com dados financeiros' : 'Sem dados financeiros'
   end

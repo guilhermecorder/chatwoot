@@ -8673,3 +8673,45 @@ com parâmetros diferentes selecionáveis por chavinhas.
   selo ✓ verde / ✕ vermelho / ! âmbar no balão da grade. Mesma função de presença de sempre — nenhum indicador mudou.
 - Testes: 28 (servidor) + 53 (tela) verdes. SEM commit. Não conferido: clique real em compareceu/faltou (move card no CRM).
 - ARMADILHA: rodar rspec no contêiner SEM `-e RAILS_ENV=test` usa o banco de desenvolvimento.
+
+- **29/09 — 281–291 SUBIRAM** no commit f3b769b (develop) → imagem ghcr.io/guilhermecorder/chatwoot:f3b769b; WEB+SIDEKIQ COM MIGRATION (backup antes); reversão :aa6acb7.
+
+## 292. ✅ 🎬 CRIATIVOS: "A Meta não devolveu o arquivo do vídeo" (29/09, produção, depois do deploy :f3b769b)
+- O arquivo do vídeo pertence à PÁGINA que publicou; o acesso da conta de anúncios não basta. `Crm::AdVideoSource` tenta 3
+  caminhos: vídeo direto → biblioteca de vídeos da conta → acesso da página dona do anúncio. Sem nenhum, a tela diz o que
+  falta liberar e mostra "o que a Meta respondeu" em cada caminho. NÃO testado contra a Meta real. SEM commit.
+
+## 293. ✅ 🎬 CRIATIVOS: transcrever SEM depender da Meta — soltar o arquivo ou colar o link (29/09; ideia dele: "talvez eu possa usar alguma ferramenta para soltar o link, ler o link e transcrever o vídeo")
+- Detalhe do anúncio: botões "Enviar o vídeo" (ou arrastar o arquivo para o cartão do texto) e "Colar link". Até 200 MB.
+  Vídeo pequeno vai embutido ao Gemini; acima de 18 MB sobe antes pela gaveta de arquivos do Gemini (`Crm::GeminiFiles`).
+  Link: YouTube (o Gemini assiste direto) ou link direto de arquivo (baixado com o SafeFetch do sistema, que barra endereço
+  interno). Link de post do Instagram/Facebook é recusado com a explicação "baixe o vídeo e solte o arquivo".
+- O arquivo enviado fica guardado só até transcrever (`Crm::AdCreative#video_upload`, apagado depois). Sem migration.
+- Testes: creatives_center_spec verdes. NÃO testado contra o Gemini real com vídeo grande. WEB+SIDEKIQ. SEM commit.
+
+## 294. ✅ 🩺 CRIATIVOS: jornada do anúncio campeão aparecia com ZERO cirurgias (29/09; "essa informação da jornada de atendimento parece errada, porque esse criativo é campeão… nesta análise vamos fazer análise do ano")
+- ACHADO GRANDE: no Oftalmofácil NENHUMA cirurgia recebe a situação "realizada" (backup 21/09: 935 Ativa, 280 Aguardando
+  pagamento, 134 Cancelada; 934 das ativas com data já passada). Esperar "realizada" dava sempre zero.
+- Régua (`Crm::AdFunnelSteps`): realizada do Oftalmofácil = situação ATIVA com data já passada; etapa nova "cirurgias
+  FECHADAS" (a venda) = card em Cirurgia Agendada ou além, cirurgia na Agenda, ou ativa/aguardando pagamento no
+  Oftalmofácil; receita das realizadas = valor pago no Oftalmofácil (senão o cobrado), senão o valor do card.
+  Taxas novas: cost_closed e closed_rate.
+- Conferência no backup para "[a.i]/[v.v] Isso aqui consegue corrigir Miopia" (3 anúncios, leads desde 13/07, quando a
+  origem por anúncio começou a ser gravada): 1.046 leads → 77 consultas → 14 compareceram → 3 cirurgias fechadas → 1
+  realizada. A tela antiga dizia 81 cirurgias (contava agendamento de consulta).
+- OUTROS LUGARES que usam `OftalmofacilSurgery.realizadas` (Hub, lucratividade, indicadores) podem ter o mesmo zero —
+  REVISAR com ele.
+- Rodada 4 da tela PRONTA (55 testes verdes): quedas com TEMPO em segundos e ZONA (gancho/corpo/CTA), funil visual com %
+  de conversão entre etapas (Exibições → … → Cirurgias fechadas → realizadas) e "de onde vem" na tela interna, cliques em %
+  de conversão, mais respiro e fontes ≥ 13 px, período "Este ano" como padrão do link. Pendente: o resto do modal interno
+  (cartões do topo, Números da Meta, Ritmo) ainda com letra pequena.
+
+## 295. ✅ (SUBIU 29/09 commit 93fec4d → imagem :93fec4d, build verde, reversão :f3b769b) 🚨 ROTEIRO: lente fácica (Artisan) é POR OLHO (29/09 14h25, produção; print: o Atendente respondeu "O valor de R$ 11.900,00 é para os dois olhos"; recado da equipe: "Gui ajusta esse, esse valor da lente fácica é por olho")
+- Causa: na tabela de preços o grupo "Fácica" era o único sem dizer "por olho" (refrativa diz "2 olhos", catarata diz "por
+  olho") e o passo do orçamento não citava a lente fácica — a IA completou por conta própria.
+- Correção: `Cevico::PriceList` escreve "Fácica (por olho)" mesmo quando a tabela salva pela clínica não diz; regra fixa
+  (PER_EYE_RULE) acompanha a tabela e o roteiro inteiro (v1 e v2), mesmo com texto editado na tela; passo do orçamento
+  ganhou a frase da Artisan; fechamento e redator também dizem "por olho".
+- Testes: cevico_script_spec 11 verdes. SIDEKIQ+WEB, sem migration. Roteiro entra em até 1 h (cache). Sobe SOZINHO (hotfix).
+
+## 296. 💡 AGENDA: permissão de GESTÃO DA AGENDA para alguns agentes (29/09; "preciso conceder permissões de gestão de agenda, para alguns agentes") — A FAZER

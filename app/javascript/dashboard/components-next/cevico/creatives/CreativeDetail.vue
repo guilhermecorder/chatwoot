@@ -19,6 +19,7 @@ import AssetTable from './AssetTable.vue';
 import CreativeRadar from './CreativeRadar.vue';
 import RadarAxesPicker from './RadarAxesPicker.vue';
 import RetentionArea from './RetentionArea.vue';
+import FunnelSteps from './FunnelSteps.vue';
 import ClicksByMark from './ClicksByMark.vue';
 import { useAlert } from 'dashboard/composables';
 import { useTranscribe, copyPlain } from './useTranscribe';
@@ -104,18 +105,35 @@ const pollTranscript = () => {
   }, POLL_MS);
 };
 onBeforeUnmount(stopPolling);
-const transcribeVideo = async () => {
+// item 293: outras portas para o vídeo — arquivo solto na tela ou link colado
+const canSendVideo = computed(
+  () =>
+    data.value &&
+    (data.value.transcribable || data.value.format === 'video') &&
+    !isWaitingTranscript.value
+);
+const videoInput = ref(null);
+const showLink = ref(false);
+const videoLink = ref('');
+const isDropping = ref(false);
+const sendError = ref('');
+const MAX_VIDEO_MB = 200;
+const transcribeVideo = async (source = {}) => {
   if (!data.value) return;
   isTranscribing.value = true;
+  sendError.value = '';
   try {
     const { data: r } = await CevicoCreativesAPI.transcribeVideo(
-      data.value.ad_id
+      data.value.ad_id,
+      source && (source.file || source.link) ? source : {}
     );
+    showLink.value = false;
+    videoLink.value = '';
     data.value = { ...data.value, transcript: r.transcript };
     pollCount = 0;
     pollTranscript();
   } catch (e) {
-    error.value =
+    sendError.value =
       (e.response && e.response.data && e.response.data.error) ||
       'Não consegui pedir a transcrição.';
   } finally {
@@ -129,6 +147,17 @@ const shareLink = ref(null);
 const isSharing = ref(false);
 const showShareOptions = ref(false);
 const shareFinance = ref(false);
+// rodada 4: período do link — "Este ano" é o padrão (a análise é do ano)
+const sharePeriod = ref('year');
+const SHARE_PERIODS = [
+  { value: 'year', label: 'Este ano', hint: 'de 1º de janeiro até hoje' },
+  { value: 'last90', label: 'Últimos 90 dias', hint: 'os 90 dias até hoje' },
+  {
+    value: 'screen',
+    label: 'O período da tela',
+    hint: 'o que está aberto agora',
+  },
+];
 const SHARE_OPTIONS = [
   {
     value: false,
@@ -158,6 +187,7 @@ const share = async () => {
   try {
     const { data: link } = await CevicoCreativesAPI.share(data.value.ad_id, {
       ...props.periodParams,
+      share_period: sharePeriod.value,
       finance: shareFinance.value ? 1 : 0,
     });
     shareLink.value = link;
@@ -184,6 +214,31 @@ const copyAnalysis = async () => {
 const fmtDay = iso =>
   iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '';
 
+const sendFile = file => {
+  if (!file) return;
+  if (!String(file.type).startsWith('video/')) {
+    sendError.value = 'Envie um arquivo de vídeo (mp4, mov, webm…).';
+    return;
+  }
+  if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
+    sendError.value = `Vídeo acima de ${MAX_VIDEO_MB} MB.`;
+    return;
+  }
+  transcribeVideo({ file });
+};
+const onPickFile = event => {
+  sendFile(event.target.files && event.target.files[0]);
+  event.target.value = '';
+};
+const onDropFile = event => {
+  isDropping.value = false;
+  if (!canSendVideo.value || isTranscribing.value) return;
+  sendFile(event.dataTransfer?.files && event.dataTransfer.files[0]);
+};
+const sendLink = () => {
+  const link = videoLink.value.trim();
+  if (link) transcribeVideo({ link });
+};
 const load = async () => {
   isLoading.value = true;
   shareLink.value = null;
@@ -528,7 +583,7 @@ const metaTiles = computed(() => {
           </button>
         </div>
 
-        <div class="overflow-y-auto min-h-0 p-4 sm:p-8 space-y-8">
+        <div class="overflow-y-auto min-h-0 p-4 sm:p-10 space-y-10">
           <SkeletonScreen v-if="isLoading && !data" variant="dashboard" />
           <div
             v-else-if="error"
@@ -630,7 +685,13 @@ v-if="data.simulated" class="cv-chip cv-slate"
                     }}
                   </span>
                 </div>
-                <div class="rounded-3xl bg-n-alpha-1 p-6 space-y-3">
+                <div
+                  class="rounded-3xl bg-n-alpha-1 p-6 space-y-3"
+                  :class="isDropping ? 'ring-2 ring-n-brand' : ''"
+                  @dragover.prevent="isDropping = canSendVideo"
+                  @dragleave.prevent="isDropping = false"
+                  @drop.prevent="onDropFile"
+                >
                   <p
                     class="text-[10px] uppercase tracking-wide text-n-slate-9 font-semibold flex items-center gap-2 flex-wrap"
                   >
@@ -652,7 +713,7 @@ v-if="data.simulated" class="cv-chip cv-slate"
                       v-if="canTranscribe"
                       class="cv-btn cv-btn-sm cv-btn-ghost normal-case tracking-normal"
                       :disabled="isTranscribing"
-                      @click="transcribeVideo"
+                      @click="transcribeVideo()"
                     >
                       <span class="i-lucide-sparkles text-xs" />
                       {{
@@ -668,11 +729,83 @@ v-if="data.simulated" class="cv-chip cv-slate"
                       <span class="i-lucide-loader-circle animate-spin" />
                       transcrevendo… a tela atualiza sozinha
                     </span>
+                    <button
+                      v-if="canSendVideo"
+                      class="cv-btn cv-btn-sm cv-btn-ghost normal-case tracking-normal"
+                      :disabled="isTranscribing"
+                      title="Escolha o arquivo do vídeo no seu computador (ou arraste para este cartão)"
+                      @click="videoInput && videoInput.click()"
+                    >
+                      <span class="i-lucide-upload text-xs" />
+                      {{ isTranscribing ? 'Enviando…' : 'Enviar o vídeo' }}
+                    </button>
+                    <button
+                      v-if="canSendVideo"
+                      class="cv-btn cv-btn-sm cv-btn-ghost normal-case tracking-normal"
+                      :disabled="isTranscribing"
+                      @click="showLink = !showLink"
+                    >
+                      <span class="i-lucide-link text-xs" />Colar link
+                    </button>
+                    <input
+                      ref="videoInput"
+                      type="file"
+                      accept="video/*"
+                      class="hidden"
+                      @change="onPickFile"
+                    />
+                    <span
+                      v-if="showLink && canSendVideo"
+                      class="basis-full flex flex-wrap items-center gap-2 normal-case tracking-normal"
+                    >
+                      <input
+                        v-model="videoLink"
+                        type="url"
+                        class="cv-input flex-1 min-w-[14rem] !h-8 !text-xs"
+                        placeholder="https://youtu.be/… ou link direto do arquivo"
+                        @keydown.enter.prevent="sendLink"
+                      />
+                      <button
+                        class="cv-btn cv-btn-sm"
+                        :disabled="isTranscribing || !videoLink.trim()"
+                        @click="sendLink"
+                      >
+                        Transcrever
+                      </button>
+                      <span class="basis-full text-n-slate-9">
+                        funciona com YouTube e com link direto de arquivo. Link
+                        de post do Instagram ou Facebook não dá: baixe o vídeo e
+                        use "Enviar o vídeo".
+                      </span>
+                    </span>
+                    <span
+                      v-if="isDropping"
+                      class="basis-full normal-case tracking-normal text-n-brand font-semibold"
+                    >
+                      solte o vídeo aqui para transcrever
+                    </span>
+                    <span
+                      v-if="sendError"
+                      class="basis-full normal-case tracking-normal text-red-600"
+                    >
+                      {{ sendError }}
+                    </span>
                     <span
                       v-if="transcriptProblem && !isWaitingTranscript"
                       class="normal-case tracking-normal text-red-600 basis-full"
                     >
                       não transcreveu: {{ transcriptProblem }}
+                    </span>
+                    <span
+                      v-if="
+                        transcriptProblem &&
+                        !isWaitingTranscript &&
+                        data.transcript.error_detail
+                      "
+                      class="normal-case tracking-normal text-n-slate-9 basis-full"
+                    >
+                      o que a Meta respondeu:
+                      {{ data.transcript.error_detail }}
                     </span>
                   </p>
                   <p
@@ -781,6 +914,36 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                   class="cv-sub rounded-2xl px-4 py-3.5 flex flex-col gap-3"
                 >
                   <p class="text-sm font-bold text-n-slate-12">
+                    Qual período o link vai mostrar?
+                  </p>
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <button
+                      v-for="o in SHARE_PERIODS"
+                      :key="o.value"
+                      type="button"
+                      class="cd-share-option text-left"
+                      :class="sharePeriod === o.value ? 'cd-share-on' : ''"
+                      :aria-pressed="sharePeriod === o.value"
+                      @click="sharePeriod = o.value"
+                    >
+                      <span
+                        class="flex items-center gap-2 text-sm font-bold text-n-slate-12"
+                      >
+                        <span class="i-lucide-calendar-range text-base" />{{
+                          o.label
+                        }}
+                        <span
+                          v-if="sharePeriod === o.value"
+                          class="i-lucide-circle-check ml-auto text-base"
+                        />
+                      </span>
+                      <span
+                        class="block text-[13px] text-n-slate-10 mt-1 leading-snug"
+                        >{{ o.hint }}</span
+                      >
+                    </button>
+                  </div>
+                  <p class="text-sm font-bold text-n-slate-12">
                     Qual versão você quer compartilhar?
                   </p>
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -803,7 +966,7 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                         />
                       </span>
                       <span
-                        class="block text-xs text-n-slate-10 mt-1 leading-snug"
+                        class="block text-[13px] text-n-slate-10 mt-1 leading-snug"
                         >{{ o.hint }}</span
                       >
                     </button>
@@ -816,9 +979,9 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                     >
                       <span class="i-lucide-link text-sm" />Gerar link e copiar
                     </button>
-                    <span class="text-[11px] text-n-slate-9">
+                    <span class="text-[13px] text-n-slate-9">
                       A escolha fica gravada dentro do link: não dá para trocar
-                      a versão mexendo no endereço.
+                      a versão nem o período mexendo no endereço.
                     </span>
                   </div>
                 </div>
@@ -828,6 +991,9 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                 >
                   <p class="text-sm text-n-slate-12 leading-snug">
                     <span class="font-bold">Link só de leitura pronto.</span>
+                    <span v-if="shareLink.period_label" class="cv-chip mx-1">
+                      {{ shareLink.period_label }}
+                    </span>
                     <span
                       class="cv-chip mx-1"
                       :class="shareLink.finance ? 'cv-amber' : 'cv-green'"
@@ -887,10 +1053,34 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
               />
             </section>
 
+            <!-- 2a. funil com a % de conversão de cada etapa (rodada 4) -->
+            <section
+              v-if="data.funnel_view && data.funnel_view.steps.length"
+              class="cv-block p-6 sm:p-10"
+              :style="{ '--cv-grad': family[1] }"
+            >
+              <div class="flex items-center gap-3 mb-2">
+                <span class="cv-icon"
+                  ><span class="i-lucide-filter text-base"
+                /></span>
+                <h3
+                  class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight"
+                >
+                  Funil: % de conversão
+                </h3>
+              </div>
+              <p class="text-sm text-n-slate-10 mb-6 leading-relaxed">
+                De onde vem: exibições, cliques e conversas são da Meta; de
+                leads em diante é a jornada no atendimento. Entre uma etapa e
+                outra, quantos por cento passaram adiante.
+              </p>
+              <FunnelSteps :view="data.funnel_view" />
+            </section>
+
             <!-- 2b. curva de retenção detalhada + cliques por marco (item 287) -->
             <section
               v-if="data.retention_detail"
-              class="cv-block p-6 sm:p-8"
+              class="cv-block p-6 sm:p-10"
               :style="{ '--cv-grad': family[0] }"
             >
               <div class="flex items-center gap-2.5 mb-1">
@@ -898,7 +1088,7 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                   ><span class="i-lucide-film text-base"
                 /></span>
                 <h3
-                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                  class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight"
                 >
                   Curva de retenção
                 </h3>
@@ -910,7 +1100,7 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
             </section>
             <section
               v-if="data.retention_detail && data.retention_detail.clicks"
-              class="cv-block p-6 sm:p-8"
+              class="cv-block p-6 sm:p-10"
               :style="{ '--cv-grad': family[2] }"
             >
               <div class="flex items-center gap-2.5 mb-1">
@@ -918,7 +1108,7 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                   ><span class="i-lucide-mouse-pointer-click text-base"
                 /></span>
                 <h3
-                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                  class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight"
                 >
                   Cliques por quem chegou até aqui
                 </h3>
@@ -1079,7 +1269,7 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                   </button>
                 </div>
               </div>
-              <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                 <VerdictBars
                   v-for="i in scorecard.indicators"
                   :key="i.key"
@@ -1302,7 +1492,7 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
             </section>
 
             <!-- 6. onde apareceu / quem viu -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="flex flex-col gap-10">
               <section
                 class="cv-block p-6 sm:p-8"
                 :style="{ '--cv-grad': family[3] }"

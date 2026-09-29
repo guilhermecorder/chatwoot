@@ -23,7 +23,19 @@ class Crm::AdVideoTranscribeJob < ApplicationJob
                    .order(synced_at: :desc).limit(limit)
   end
 
+  # item 293: vídeo enviado pela pessoa que ficou parado (transcrição falhou no
+  # meio) não fica ocupando espaço — some depois de 24 horas
+  STALE_UPLOAD = 24.hours
+
+  def self.purge_stale_uploads
+    ActiveStorage::Attachment.where(record_type: 'Crm::AdCreative', name: 'video_upload')
+                             .where(created_at: ...STALE_UPLOAD.ago).find_each(&:purge)
+  rescue StandardError => e
+    Rails.logger.warn("[CEVICO criativos] limpeza dos vídeos enviados falhou: #{e.message}")
+  end
+
   def self.enqueue_pending(account, limit: LIMIT)
+    purge_stale_uploads
     ids = pending_for(account, limit: limit).pluck(:id)
     ids.each { |id| perform_later(id) }
     ids.size

@@ -43,8 +43,17 @@ class CevicoCreativesAPI extends ApiClient {
     return axios.post(`${this.url}/transcribe_videos`);
   }
 
-  transcribeVideo(adId) {
-    return axios.post(`${this.url}/${adId}/transcribe`);
+  // item 293: sem nada = vídeo da Meta; { file } = arquivo enviado pela pessoa;
+  // { link } = link do YouTube ou link direto de arquivo
+  transcribeVideo(adId, { file, link } = {}) {
+    if (!file && !link) return axios.post(`${this.url}/${adId}/transcribe`);
+    const form = new FormData();
+    if (file) form.append('video', file);
+    if (link) form.append('video_link', link);
+    return axios.post(`${this.url}/${adId}/transcribe`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 0,
+    });
   }
 
   // 🔗 item 287: link só de leitura da análise (vale 30 dias)

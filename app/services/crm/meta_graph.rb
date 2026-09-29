@@ -62,6 +62,26 @@ class Crm::MetaGraph
     end
   end
 
+  # 🎬 item 292: um objeto só, com o erro da Meta na mão e, se preciso, com o
+  # acesso de uma PÁGINA (o arquivo do vídeo pertence à página, não à conta de
+  # anúncios). Devolve [objeto ou nil, texto do erro ou nil].
+  def fetch_one(path, fields, token: nil)
+    response = HTTParty.get("#{BASE_URI}/#{api_version}/#{path}",
+                            query: { fields: fields, access_token: token || access_token }, timeout: 30)
+    return [response.parsed_response, nil] if response.success? && response.parsed_response.is_a?(Hash)
+
+    [nil, extract_error(response)]
+  rescue StandardError => e
+    [nil, e.message]
+  end
+
+  # acesso da página, quando o acesso configurado enxerga a página
+  def page_token(page_id)
+    return nil if page_id.blank?
+
+    fetch_one(page_id, 'access_token').first&.dig('access_token').presence
+  end
+
   private
 
   # lote recusado (um id inexistente derruba o lote): tenta um a um

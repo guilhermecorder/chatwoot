@@ -32,7 +32,8 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
 
   def call
     { finance: @finance, finance_label: Crm::CreativeShareLink.finance_label(@finance),
-      ad: ad, period: period, reading: reading, numbers: numbers, journey: journey_numbers, journey_title: journey_title,
+      ad: ad, period: period, reading: reading, numbers: numbers, funnel: funnel_steps, funnel_note: @d.dig('funnel_view', 'note'),
+      journey: journey_numbers, journey_title: journey_title,
       indicators: indicators, radar: radar, daily: daily, placements: ranking('placement_ranking'), audience: ranking('audience_ranking'),
       texts: texts, transcript: transcript, retention: @d['retention_detail'], blocks: blocks, text: text }
   end
@@ -47,7 +48,7 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
       block('leitura', 'Leitura', reading),
       block('numeros', 'Números do anúncio', lines(numbers)),
       block('indicadores', 'Indicadores contra a média e o recorde da conta', indicators_text),
-      block('jornada', journey_title, lines(journey_numbers)),
+      block('jornada', journey_title, journey_text),
       block('retencao', 'Curva de retenção', retention_text),
       block('quedas', 'Maiores quedas do vídeo', drops_text),
       block('cliques', 'Cliques por quem chegou até aqui', clicks_text),
@@ -91,6 +92,22 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
 
   def journey_title
     @finance ? 'O que vale dinheiro' : 'Jornada no atendimento'
+  end
+
+  # 🔻 funil com a % de conversão de cada etapa (rodada 4). Lista FECHADA de campos:
+  # a origem de cada número (`source_text`) é só da tela interna e fica de fora daqui.
+  FUNNEL_KEYS = %w[key label hint count width rate rate_text conversion_text over of_leads_text average average_text versus].freeze
+
+  def funnel_steps
+    @funnel_steps ||= Array(@d.dig('funnel_view', 'steps')).map { |step| step.slice(*FUNNEL_KEYS) }
+  end
+
+  def journey_text
+    rows = funnel_steps.map do |step|
+      parts = [step['conversion_text'], step['of_leads_text'], step['average_text'] && "média da conta #{step['average_text']}"].compact
+      "• #{step['label']}: #{int(step['count'])}#{" — #{parts.join(' · ')}" if parts.any?}"
+    end
+    [rows.join("\n"), lines(journey_numbers).presence].compact.join("\n\n")
   end
 
   # ── indicadores, teia e ritmo por dia (rodada 2) ─────────────────────────
@@ -216,20 +233,15 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
      number('Tempo médio assistido', "#{decimal(rates['avg_watch'])} s", 'quanto tempo, em média, cada pessoa ficou no vídeo')]
   end
 
-  def journey_numbers # rubocop:disable Metrics/AbcSize
-    @journey_numbers ||= only_allowed([
-                                        number('Leads', int(funnel['leads']), 'pessoas que chegaram ao atendimento por este anúncio'),
-                                        number('Consultas marcadas', int(funnel['booked']), 'desses leads, quantos marcaram consulta'),
-                                        number('Compareceram', int(funnel['attended']), 'quantos vieram à consulta'),
-                                        number('Cirurgias', int(funnel['surgeries']), 'quantos chegaram à cirurgia'),
-                                        number('% de agendamento', pct(rates['booking_rate'], 0), 'de cada 100 leads, quantos marcaram consulta'),
-                                        number('Custo por consulta', money_or_dash(rates['cost_booked']),
-                                               'investido dividido pelas consultas marcadas', money: true),
-                                        number('Custo por cirurgia', money_or_dash(rates['cost_surgery']), 'investido dividido pelas cirurgias',
-                                               money: true),
-                                        number('Retorno (ROAS)', rates['roas'] ? "#{decimal(rates['roas'])}×" : '—',
-                                               'quanto voltou para cada real investido', money: true)
-                                      ])
+  # o que o dinheiro comprou (só na versão com dados financeiros)
+  def journey_numbers
+    @journey_numbers ||= only_allowed(
+      [number('Custo por consulta', money_or_dash(rates['cost_booked']), 'investido dividido pelas consultas marcadas', money: true),
+       number('Custo por cirurgia fechada', money_or_dash(rates['cost_closed']), 'investido dividido pelas cirurgias fechadas', money: true),
+       number('Custo por cirurgia realizada', money_or_dash(rates['cost_surgery']), 'investido dividido pelas cirurgias realizadas',
+              money: true),
+       number('Retorno (ROAS)', rates['roas'] ? "#{decimal(rates['roas'])}×" : '—', 'quanto voltou para cada real investido', money: true)]
+    )
   end
 
   def number(label, value, hint, money: false)
@@ -290,13 +302,15 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
     @d['retention_detail']
   end
 
-  def retention_text # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  def retention_text # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return nil unless retention
 
     base = retention['base_label']
     out = [retention_source]
     out << "Duração do vídeo: #{seconds(retention['duration'])}#{' (estimada)' if retention['duration_estimated']}" if retention['duration']
     out << "Tempo médio assistido: #{seconds(retention['avg_watch'])}" if retention['avg_watch'].to_f.positive?
+    out << retention['duration_note'] if retention['duration_note'].present?
+    out << zones_line if zones_line
     out << "Marcos:\n#{retention['marks'].map { |m| "• #{mark_label(m)}: #{pct(m['pct'])} #{base} (#{int(m['people'])})" }.join("\n")}"
     out << "Segundo a segundo:\n#{retention['points'].map { |p| "• #{p['label']}: #{pct(p['pct'])} (#{int(p['people'])})" }.join("\n")}"
     out << "Queda por trecho falado:\n#{segment_drops.join("\n")}" if segment_drops.any?
@@ -314,7 +328,14 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
   end
 
   def mark_label(mark)
-    mark['t'] ? "#{mark['label']} (#{seconds(mark['t'])})" : mark['label']
+    mark['axis_label'].presence || mark['label']
+  end
+
+  def zones_line
+    zones = Array(retention['zones'])
+    return nil if zones.empty?
+
+    "Zonas do vídeo: #{zones.map { |z| "#{z['label']} de #{seconds(z['from'])} a #{seconds(z['to'])}" }.join(' · ')}. #{retention['zones_note']}"
   end
 
   # as 3 a 5 maiores quedas, numeradas (rodada 2)
@@ -322,21 +343,28 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
     drops = Array(retention && retention['top_drops'])
     return nil if drops.empty?
 
-    drops.map { |drop| drop_line(drop) }.join("\n")
+    ([retention['drops_summary']].compact + drops.map { |drop| drop_line(drop) }).join("\n")
   end
 
+  # "1. Gancho · do segundo 0 ao 3 · caiu 74,2 pontos (de 100% para 25,8%) · 97.349 exibições se perderam"
   def drop_line(drop)
-    line = "#{drop['rank']}. De #{drop['from_label']} a #{drop['to_label']}: caiu #{points(drop['drop'])} " \
-           "(de #{pct(drop['from_pct'])} para #{pct(drop['to_pct'])}) · #{int(drop['people_lost'])} #{base_word} a menos"
+    line = "#{drop['rank']}. #{drop['zone_label']} · #{drop_span(drop)} · caiu #{points(drop['drop'])} " \
+           "(de #{pct(drop['from_pct'])} para #{pct(drop['to_pct'])}) · #{int(drop['people_lost'])} #{base_word} se perderam"
     drop['speech'].present? ? "#{line} · fala: “#{drop['speech']}”" : line
   end
 
+  def drop_span(drop)
+    return "de #{drop['from_label']} a #{drop['to_label']}" if drop['from_t'].nil? || drop['to_t'].nil?
+
+    "do segundo #{decimal(drop['from_t'])} ao #{decimal(drop['to_t'])}"
+  end
+
   def base_word
-    retention['base'] == 'plays' ? 'reproduções' : 'impressões'
+    retention['base'] == 'plays' ? 'reproduções' : 'exibições'
   end
 
   def points(value)
-    "#{decimal((value.to_f * 100).round(1))} pontos percentuais"
+    "#{decimal((value.to_f * 100).round(1))} pontos"
   end
 
   def segment_drops
@@ -351,7 +379,7 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
     return nil unless clicks
 
     rows = clicks['marks'].map do |m|
-      line = "• #{m['label']}: #{int(m['reached'])} chegaram · #{click_rate(m)}"
+      line = "• #{m['label']}: #{m['conversion_text'] || click_rate(m)} (#{int(m['reached'])} chegaram até aqui)"
       m['before_min'].to_i.positive? ? "#{line} · pelo menos #{int(m['before_min'])} cliques vieram antes deste ponto" : line
     end
     ["#{clicks['note']}\nCliques no link no período: #{int(clicks['link_clicks'])}.", rows.join("\n")].join("\n\n")

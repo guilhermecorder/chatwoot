@@ -40,13 +40,13 @@ const rows = computed(() => {
   <div class="w-full">
     <p
       v-if="ranking.summary"
-      class="br-summary px-4 py-3 mb-3 text-sm text-n-slate-12 leading-relaxed"
+      class="br-summary px-5 py-4 mb-4 text-base text-n-slate-12 leading-relaxed"
       :class="ranking.no_difference ? 'br-even' : ''"
     >
       {{ ranking.summary }}
     </p>
-    <p v-if="!rows.length" class="text-xs text-n-slate-9">{{ emptyText }}</p>
-    <ol class="flex flex-col gap-2 list-none p-0 m-0">
+    <p v-if="!rows.length" class="text-sm text-n-slate-9">{{ emptyText }}</p>
+    <ol class="flex flex-col gap-3 list-none p-0 m-0">
       <li
         v-for="(r, i) in rows"
         :key="r.key || r.label"
@@ -54,10 +54,10 @@ const rows = computed(() => {
         :style="{ '--br-edge': r.edge }"
       >
         <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-[11px] font-bold text-n-slate-9 tabular-nums">
+          <span class="text-[13px] font-bold text-n-slate-9 tabular-nums">
             {{ i + 1 }}º
           </span>
-          <span class="text-sm font-bold text-n-slate-12">{{ r.label }}</span>
+          <span class="text-base font-bold text-n-slate-12">{{ r.label }}</span>
           <span
             v-for="b in r.badges"
             :key="b.key"
@@ -67,22 +67,22 @@ const rows = computed(() => {
             {{ b.label }}
           </span>
           <span
-            class="ml-auto text-base font-extrabold text-n-slate-12 tabular-nums"
+            class="ml-auto text-2xl font-extrabold text-n-slate-12 tabular-nums"
           >
             {{ fmtNum(r.conversations) }}
-            <span class="text-[11px] font-normal text-n-slate-10">
+            <span class="text-[13px] font-normal text-n-slate-10">
               conversas
             </span>
           </span>
         </div>
-        <div class="h-2.5 rounded-full bg-n-alpha-2 overflow-hidden my-1.5">
+        <div class="h-3 rounded-full bg-n-alpha-2 overflow-hidden my-2.5">
           <span
             class="block h-full rounded-full"
             :style="{ width: r.width, background: r.fill, opacity: 0.85 }"
           />
         </div>
         <p
-          class="text-xs text-n-slate-11 flex flex-wrap gap-x-4 gap-y-0.5 leading-snug"
+          class="text-sm text-n-slate-11 flex flex-wrap gap-x-6 gap-y-1 leading-relaxed"
         >
           <span>
             <span class="font-bold tabular-nums text-n-slate-12">{{
@@ -109,7 +109,7 @@ const rows = computed(() => {
         </p>
       </li>
     </ol>
-    <p v-if="rows.length" class="text-[11px] text-n-slate-9 mt-2 leading-snug">
+    <p v-if="rows.length" class="text-[13px] text-n-slate-9 mt-2 leading-snug">
       Aproveitamento = conversas a cada 1.000 exibições (o caminho inteiro: viu
       → clicou → conversou). Linha com menos de
       {{ ranking.min_impressions || 100 }} exibições não disputa, e diferença
@@ -131,16 +131,16 @@ const rows = computed(() => {
   background: rgb(100 116 139 / 0.08);
 }
 .br-row {
-  padding: 10px 14px;
+  padding: 16px 20px;
   border-radius: 14px;
   border: 1px solid rgb(var(--cv-rgb) / 0.16);
   border-left: 4px solid var(--br-edge);
   background: rgb(var(--cv-rgb) / 0.04);
 }
 .br-badge {
-  padding: 1px 9px;
+  padding: 2px 11px;
   border-radius: 9999px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--br-tone);
   border: 1px solid color-mix(in srgb, var(--br-tone) 45%, transparent);

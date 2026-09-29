@@ -66,22 +66,28 @@ class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseContr
 
   def transcribe
     creative = Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
-    return render json: { error: 'Só anúncios em vídeo têm transcrição.' }, status: :unprocessable_entity unless creative.transcribable?
+    problem = manual_video_problem(creative)
+    return render json: { error: problem }, status: :unprocessable_entity if problem
 
-    creative.queue_transcript!
+    creative.video_upload.attach(params[:video]) if params[:video].present?
+    creative.queue_transcript!(link: params[:video_link].to_s.strip)
     Crm::AdVideoTranscribeJob.perform_later(creative.id)
     render json: { enqueued: true, transcript: creative.transcript }
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'anúncio não encontrado' }, status: :not_found
   end
 
-  # POST /crm/creatives/:ad_id/share[?preset=|from=&to=][&finance=1] — item 287: link SÓ DE LEITURA
+  # POST /crm/creatives/:ad_id/share[?share_period=year|last90|screen][&preset=|from=&to=][&finance=1] — item 287: link SÓ DE LEITURA
   # da análise deste anúncio neste período (token assinado, vale 30 dias, sem tabela nova)
   def share
     creative = Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
-    link = Crm::CreativeShareLink.generate(account: Current.account, ad_id: creative.ad_id, since_date: since_date,
-                                           until_date: until_date, finance: ActiveModel::Type::Boolean.new.cast(params[:finance]) == true)
-    render json: link.slice(:url, :expires_at, :expires_label, :finance, :finance_label).merge(since: since_date, until: until_date)
+    since, until_d, period = Crm::CreativeShareLink.period_for(
+      params[:share_period], screen_since: since_date, screen_until: until_date, today: Crm::ResolvesPeriod::PERIOD_TZ.today
+    )
+    link = Crm::CreativeShareLink.generate(account: Current.account, ad_id: creative.ad_id, since_date: since, until_date: until_d,
+                                           finance: ActiveModel::Type::Boolean.new.cast(params[:finance]) == true)
+    render json: link.slice(:url, :expires_at, :expires_label, :finance, :finance_label)
+                     .merge(since: since, until: until_d, period: period, period_label: Crm::CreativeShareLink::PERIODS[period])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'anúncio não encontrado' }, status: :not_found
   end
@@ -98,6 +104,19 @@ class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseContr
   end
 
   private
+
+  # item 293: arquivo enviado ou link colado (sem eles, vale o vídeo da Meta)
+  def manual_video_problem(creative) # rubocop:disable Metrics/CyclomaticComplexity
+    file = params[:video]
+    link = params[:video_link].to_s.strip
+    return Crm::AdVideoInput.link_problem(link) if link.present?
+    return 'Só anúncios em vídeo têm transcrição.' if file.blank? && !creative.transcribable?
+    return nil if file.blank?
+    return 'Envie um arquivo de vídeo (mp4, mov, webm…).' unless file.respond_to?(:content_type) && file.content_type.to_s.start_with?('video/')
+    return 'Vídeo acima de 200 MB.' if file.size > Crm::AdVideoInput::UPLOAD_MAX
+
+    nil
+  end
 
   def analytics
     @analytics ||= Crm::CreativeAnalyticsService.new(account: Current.account, since_date: since_date, until_date: until_date)

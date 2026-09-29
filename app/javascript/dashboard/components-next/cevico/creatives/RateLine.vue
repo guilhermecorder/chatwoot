@@ -102,7 +102,7 @@ const onMove = evt => {
             :y="t.y + 3"
             text-anchor="end"
             class="fill-n-slate-9"
-            font-size="9"
+            font-size="11"
           >
             {{ format(t.label) }}
           </text>
@@ -114,7 +114,7 @@ const onMove = evt => {
           :y="height - 6"
           text-anchor="middle"
           class="fill-n-slate-9"
-          font-size="9"
+          font-size="11"
         >
           {{ l.label }}
         </text>
@@ -169,14 +169,14 @@ const onMove = evt => {
       </svg>
       <div
         v-if="hover"
-        class="cv-sub pointer-events-none px-2.5 py-1.5 text-[11px] text-n-slate-11 z-10 bg-n-surface-1 whitespace-nowrap"
+        class="cv-sub pointer-events-none px-2.5 py-1.5 text-[13px] text-n-slate-11 z-10 bg-n-surface-1 whitespace-nowrap"
         :style="hover.style"
       >
         {{ hover.label }} ·
         <span class="font-extrabold text-n-slate-12">{{ hover.text }}</span>
       </div>
     </div>
-    <div class="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-n-slate-10">
+    <div class="flex flex-wrap gap-x-4 gap-y-0.5 text-[13px] text-n-slate-10">
       <span class="inline-flex items-center gap-1">
         <span class="w-3.5 h-[3px] rounded" :style="{ background: color }" />
         este anúncio, dia a dia

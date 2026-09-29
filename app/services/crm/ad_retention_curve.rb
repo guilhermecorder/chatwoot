@@ -16,9 +16,16 @@
 #
 # Sem a curva da Meta (dados antigos, carga anterior ao item 287), cai para os
 # 6 marcos de sempre (% das impressões), no mesmo formato.
-class Crm::AdRetentionCurve
+#
+# Rodada 4: tudo fala em TEMPO e em ZONA. Os marcos viram segundos pela duração
+# do vídeo ("25% · 8 s") e o vídeo é dividido em Gancho · Corpo · CTA
+# (Crm::AdVideoZones); cada queda diz em que zona aconteceu e `drops_summary`
+# resume onde está a maior perda.
+class Crm::AdRetentionCurve # rubocop:disable Metrics/ClassLength
   SECONDS = ((0..14).to_a + [15, 20, 25, 30, 40, 50, 60]).freeze
   MARKS = [['p25', '25%', 0.25], ['p50', '50%', 0.5], ['p75', '75%', 0.75], ['p100', 'fim', 1.0]].freeze
+  DURATION_UNKNOWN = 'Duração do vídeo ainda não conhecida (aparece depois da próxima carga da Meta ou da transcrição): ' \
+                     'por isso os marcos aparecem em % do vídeo, sem os segundos.'.freeze
   CLICK_NOTE = 'A Meta não informa em que segundo cada clique aconteceu. Esta é uma leitura aproximada: ' \
                'os cliques no link do período divididos por quem chegou a cada ponto do vídeo.'.freeze
 
@@ -30,12 +37,15 @@ class Crm::AdRetentionCurve
     @totals = Crm::AdMetrics.sum(list)
   end
 
-  def call
+  def call # rubocop:disable Metrics/AbcSize
     return nil unless @totals['impressions'].to_f.positive? && @totals['plays_3s'].to_f.positive?
 
     data = curve_days.any? ? detailed : by_marks
+    @zones = Crm::AdVideoZones.new(duration: data[:duration], transcript: @creative.transcript, points: data[:points])
+    drops = top_drops(data[:points])
     data.merge(biggest_drop: drop_for(data[:points]), biggest_drop_after_hook: drop_for(data[:points], from: 3),
-               top_drops: top_drops(data[:points]),
+               top_drops: drops, drops_summary: @zones.summary(drops), zones: @zones.list, zones_estimated: @zones.estimated?,
+               zones_note: @zones.note, duration_note: data[:duration] ? nil : DURATION_UNKNOWN,
                segments: segments_for(data), clicks: clicks, avg_watch: @totals['avg_watch'].to_f,
                period_days: @list.size)
   end
@@ -96,10 +106,14 @@ class Crm::AdRetentionCurve
 
   # duração: a que a Meta informou (`length` do vídeo) → a da transcrição → uma
   # ESTIMATIVA pelo ponto em que a curva cruza o marco de 50 % (avisada na tela)
-  def duration(curve, base)
+  def known_duration
     known = @creative.creative['video_length'].to_f
     known = @creative.transcript['duration'].to_f unless known.positive?
-    return { seconds: known.round(1), estimated: false } if known.positive?
+    known.positive? ? known.round(1) : nil
+  end
+
+  def duration(curve, base)
+    return { seconds: known_duration, estimated: false } if known_duration
 
     half = crossing(SECONDS.zip(curve), share(base['p50'], base['plays']))
     { seconds: half ? (half * 2).round.clamp(3, 120) : nil, estimated: half.present? }
@@ -120,7 +134,7 @@ class Crm::AdRetentionCurve
   # ── sem curva: os 6 marcos de sempre (% das impressões) ──────────────────
   def by_marks
     impressions = @totals['impressions'].to_f
-    length = @creative.creative['video_length'].to_f.then { |v| v.positive? ? v : nil }
+    length = known_duration
     points = mark_points(impressions, length)
     { source: 'milestones', axis: length ? 'seconds' : 'marks', base: 'impressions', base_label: 'das impressões',
       base_total: impressions.to_i, curve_days: 0, duration: length, duration_estimated: false,
@@ -128,11 +142,21 @@ class Crm::AdRetentionCurve
   end
 
   # impressões → 3 s → 25 % → 50 % → 75 % → fim (em segundos quando se sabe a duração)
-  def mark_points(impressions, length)
+  def mark_points(impressions, length) # rubocop:disable Metrics/CyclomaticComplexity
     rows = [['Impressões', 1.0, 0], ['3 s', share(@totals['plays_3s'], impressions), 3]]
     rows += MARKS.map { |key, label, pos| [label, share(@totals[key], impressions), length && (length * pos).round(1)] }
-    points = rows.map { |label, pct, second| point(0, pct, impressions, label: label).merge(t: length && second) }
+    points = rows.map do |label, pct, second|
+      point(0, pct, impressions, label: label).merge(t: length && second, axis_label: axis_label(label, length && second))
+    end
     length ? points.sort_by { |p| p[:t] } : points
+  end
+
+  # no eixo: o marco e o segundo juntos ("25% · 8 s")
+  def axis_label(label, second)
+    return label if second.nil? || label.end_with?(' s')
+    return '0 s' if label == 'Impressões'
+
+    "#{label} · #{format_seconds(second)} s"
   end
 
   # ── marcos (contagem real da Meta em cada um) ────────────────────────────
@@ -145,7 +169,7 @@ class Crm::AdRetentionCurve
   end
 
   def mark(key, label, second, count, denominator)
-    { key: key, label: label, t: second, people: count.to_i, pct: share(count, denominator) }
+    { key: key, label: label, t: second, axis_label: axis_label(label, second), people: count.to_i, pct: share(count, denominator) }
   end
 
   def share(count, total)
@@ -167,6 +191,7 @@ class Crm::AdRetentionCurve
     { from_t: from[:t], to_t: to[:t], from_label: from[:label], to_label: to[:label], from_pct: from[:pct], to_pct: to[:pct],
       drop: (from[:pct] - to[:pct]).round(4), people_lost: [from[:people] - to[:people], 0].max,
       speech: speech_between(from[:t], to[:t]), after_hook: from[:t].present? && from[:t] >= 3 }
+      .merge(@zones ? @zones.for_drop(from, to) : {})
   end
 
   # as 3 a 5 MAIORES QUEDAS, da maior para a menor (rodada 2): trechos distintos
@@ -239,17 +264,26 @@ class Crm::AdRetentionCurve
   # `rate` = cliques ÷ quem chegou ao marco. `before_min` é uma conta certa:
   # se houve MAIS cliques do que pessoas que chegaram ao marco, pelo menos a
   # diferença clicou antes dele.
+  # Rodada 4: cada linha vira % DE CONVERSÃO escrita ("0,7% de quem viu o anúncio clicou").
+  CLICK_ROWS = [['impressions', 'Viu o anúncio', 'impressions', 'de quem viu o anúncio'],
+                ['3s', 'Passou dos 3 s', 'plays_3s', 'de quem passou dos 3 s'],
+                ['p25', 'Chegou a 25%', 'p25', 'de quem chegou a 25% do vídeo'], ['p50', 'Chegou a 50%', 'p50', 'de quem chegou à metade'],
+                ['p75', 'Chegou a 75%', 'p75', 'de quem chegou a 75% do vídeo'],
+                ['p100', 'Viu até o fim', 'p100', 'de quem viu até o fim']].freeze
+
   def clicks
     total = @totals['link_clicks'].to_i
-    rows = [['impressions', 'Viu o anúncio', 'impressions'], ['3s', 'Passou dos 3 s', 'plays_3s'],
-            ['p25', 'Chegou a 25%', 'p25'], ['p50', 'Chegou a 50%', 'p50'],
-            ['p75', 'Chegou a 75%', 'p75'], ['p100', 'Viu até o fim', 'p100']]
     { link_clicks: total, note: CLICK_NOTE, source: 'Meta: cliques no link (inline_link_clicks) e contagem de quem chegou a cada marco do vídeo',
-      marks: rows.map { |key, label, field| click_row(key, label, @totals[field].to_i, total) } }
+      marks: CLICK_ROWS.map { |key, label, field, who| click_row(key, label, who, @totals[field].to_i, total) } }
   end
 
-  def click_row(key, label, reached, total)
-    { key: key, label: label, reached: reached, rate: reached.positive? ? (total / reached.to_f).round(4) : nil,
-      before_min: [total - reached, 0].max }
+  def click_row(key, label, who, reached, total)
+    rate = reached.positive? ? (total / reached.to_f).round(4) : nil
+    { key: key, label: label, who: who, reached: reached, rate: rate, rate_text: rate && percent(rate),
+      conversion_text: rate ? "#{percent(rate)} #{who} clicou" : 'sem dado', before_min: [total - reached, 0].max }
+  end
+
+  def percent(rate)
+    "#{format('%.1f', rate * 100).tr('.', ',')}%"
   end
 end

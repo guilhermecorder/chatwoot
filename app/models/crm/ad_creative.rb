@@ -36,6 +36,8 @@ class Crm::AdCreative < ApplicationRecord
   # miniatura guardada no NOSSO armazenamento (a URL da Meta expira e o
   # anúncio pode ser apagado lá) — Crm::AdCreativeMediaJob preenche
   has_one_attached :thumbnail
+  # 🎬 item 293: vídeo enviado pela pessoa para transcrever (apagado depois de transcrito)
+  has_one_attached :video_upload
 
   FORMATS = %w[video image carousel dynamic other].freeze
   FORMAT_LABELS = {
@@ -61,6 +63,11 @@ class Crm::AdCreative < ApplicationRecord
   # item 286: tem vídeo para transcrever? (anúncio em vídeo OU dinâmico que carrega um vídeo)
   def transcribable?
     video? || creative['video_id'].present?
+  end
+
+  # item 293: veio arquivo ou link pela mão de alguém — transcreve sem depender da Meta
+  def manual_video?
+    video_upload.attached? || transcript['link'].present?
   end
 
   # 🎬 v2.1 (item 181): o gancho/corpo/CTA de um VÍDEO vêm da transcrição
@@ -97,8 +104,9 @@ class Crm::AdCreative < ApplicationRecord
   end
 
   # marca "na fila" antes de enfileirar o job (a tela mostra o estado)
-  def queue_transcript!
-    queued = transcript.merge('status' => 'queued', 'error' => nil, 'retry' => nil, 'status_at' => Time.current.iso8601)
+  def queue_transcript!(link: nil)
+    queued = transcript.merge('status' => 'queued', 'error' => nil, 'error_detail' => nil, 'retry' => nil,
+                              'status_at' => Time.current.iso8601, 'link' => link.presence)
     update!(creative: creative.merge('transcript' => queued))
   end
 

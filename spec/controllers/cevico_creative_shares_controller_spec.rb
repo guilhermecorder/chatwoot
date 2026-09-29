@@ -86,7 +86,7 @@ RSpec.describe 'Link de leitura da análise de criativo', type: :request do
       expect(body).not_to match(/"(ad_id|video_id|campaign_id|account_id|contact_id)"/)
     end
     get "#{path}.json"
-    expect(response.parsed_body['journey'].find { |n| n['label'] == 'Leads' }['value']).to eq('1')
+    expect(response.parsed_body['funnel'].find { |n| n['key'] == 'leads' }['count']).to eq(1)
   end
 
   it 'rodada 2: a versão SEM dados financeiros (padrão) não traz nenhum valor em R$ nem chave financeira' do
@@ -99,8 +99,9 @@ RSpec.describe 'Link de leitura da análise de criativo', type: :request do
     expect(response.body).not_to include('R$')
     expect(response.body).not_to match(finance_keys)
     expect(response.body).not_to match(/ROAS|Investido|Custo por/i)
-    labels = json['numbers'].pluck('label') + json['journey'].pluck('label') + json['indicators'].pluck('label')
-    expect(labels).to include('Impressões', 'CTR de link', 'Leads', 'Cirurgias', '% de agendamento', 'Gancho')
+    labels = json['numbers'].pluck('label') + json['journey'].pluck('label') + json['indicators'].pluck('label') + json['funnel'].pluck('label')
+    expect(json['journey']).to be_empty # os custos são só da versão com financeiro
+    expect(labels).to include('Impressões', 'CTR de link', 'Leads', 'Cirurgias fechadas', 'Cirurgias realizadas', 'Gancho')
     expect(labels).not_to include('Investido', 'Custo por conversa', 'Custo por consulta', 'Custo por cirurgia', 'Retorno (ROAS)')
     expect(json['daily'].first.keys).to include('conversations', 'hook_rate')
     expect(json['text']).to include('JORNADA NO ATENDIMENTO', 'MAIORES QUEDAS DO VÍDEO', 'TRANSCRIÇÃO DO VÍDEO')
@@ -117,12 +118,80 @@ RSpec.describe 'Link de leitura da análise de criativo', type: :request do
     json = response.parsed_body
     expect(json['finance']).to be(true)
     expect(json['numbers'].pluck('label')).to include('Investido', 'Custo por conversa')
-    expect(json['journey'].pluck('label')).to include('Custo por cirurgia', 'Retorno (ROAS)')
+    expect(json['journey'].pluck('label')).to include('Custo por consulta', 'Custo por cirurgia fechada', 'Custo por cirurgia realizada',
+                                                      'Retorno (ROAS)')
     expect(json['placements']['rows'].first).to include('spend_text')
     expect(json['text']).to include('O QUE VALE DINHEIRO', 'R$')
 
     get "/criativos/analise/#{finance_link[:token]}"
-    expect(response.body).to include('Com dados financeiros', 'O que vale dinheiro', 'R$')
+    expect(response.body).to include('Com dados financeiros', 'O que vale dinheiro', 'R$', 'Custo por cirurgia fechada')
+  end
+
+  it 'rodada 4: funil com a % de conversão de cada etapa, sem a origem dos números na página pública' do
+    creator = create(:user, account: account)
+    people = Array.new(4) do |i|
+      create(:contact, account: account, phone_number: "+55119666600#{i}0",
+                       additional_attributes: { 'meta_ads' => { 'source_id' => '2301', 'captured_at' => 2.days.ago.iso8601 } })
+    end
+    people.first(2).each { |c| account.tasks.create!(title: 'consulta', task_type: 'consulta', contact_id: c.id, creator: creator) }
+
+    get "#{path}.json"
+    json = response.parsed_body
+    steps = json['funnel']
+    expect(steps.pluck('key')).to eq(%w[impressions link_clicks conversations leads booked attended closed surgeries])
+    expect(steps.pluck('label')).to include('Exibições', 'Consultas marcadas', 'Compareceram', 'Cirurgias fechadas', 'Cirurgias realizadas')
+    booked = steps.find { |step| step['key'] == 'booked' }
+    expect(booked).to include('count' => 2, 'rate' => 0.5, 'rate_text' => '50,0%', 'conversion_text' => '50,0% dos leads marcaram consulta',
+                              'of_leads_text' => '50,0% do total de leads')
+    expect(steps.first).to include('conversion_text' => nil, 'width' => 100.0)
+    expect(steps.flat_map(&:keys)).not_to include('source_text')
+    expect(response.body).not_to match(/pelo CRM|pela Agenda|Oftalmofácil|de onde vem: \d/)
+    expect(json['text']).to include('• Consultas marcadas: 2 — 50,0% dos leads marcaram consulta')
+
+    get path
+    expect(response.body).to include('Cirurgias fechadas', 'cirurgia agendada — a venda', 'já operou', 'dos leads marcaram consulta')
+    expect(response.body).not_to match(/pelo CRM|pela Agenda/)
+  end
+
+  it 'rodada 4: a curva fala em tempo e em zona, e os cliques viram % de conversão' do
+    get "#{path}.json"
+    retention = response.parsed_body['retention']
+    expect(retention['zones'].pluck('label')).to eq(%w[Gancho Corpo CTA])
+    expect(retention['zones'].first).to include('from' => 0, 'to' => 3.0)
+    expect(retention['zones_estimated']).to be(false) # a transcrição (simulação) tem trechos com tempo
+    expect(retention['top_drops']).to all(include('zone', 'zone_label', 'from_t', 'to_t'))
+    expect(retention['top_drops'].first).to include('zone' => 'hook', 'zone_label' => 'Gancho')
+    expect(retention['drops_summary']).to start_with('A maior perda acontece no gancho, no primeiro segundo; depois disso a maior queda é')
+    expect(retention['marks'].pluck('axis_label')).to eq(['3 s', '25% · 7 s', '50% · 14 s', '75% · 21 s', 'fim · 28 s'])
+    first = retention['clicks']['marks'].first
+    expect(first['conversion_text']).to match(/\A\d+,\d% de quem viu o anúncio clicou\z/)
+    expect(response.parsed_body['text']).to include('Zonas do vídeo: Gancho de 0 s a 3 s', '1. Gancho · do segundo 0 ao 1 · caiu',
+                                                    'de quem viu até o fim clicou')
+
+    get path
+    expect(response.body).to include('A maior perda acontece no gancho', 'de quem viu o anúncio', 'chegaram até aqui', 'Gancho ·')
+  end
+
+  it 'rodada 4: o período do link é "Este ano" por padrão e aparece no topo da página' do
+    year_start = Date.current.beginning_of_year
+    post "/api/v1/accounts/#{account.id}/crm/creatives/2301/share", params: { preset: 'month' }, headers: admin.create_new_auth_token, as: :json
+    json = response.parsed_body
+    expect(json).to include('period' => 'year', 'period_label' => 'Este ano', 'since' => year_start.iso8601)
+    token = json['url'].split('/').last
+    expect(Crm::CreativeShareLink.verify(token)).to include(since_date: year_start)
+
+    get "/criativos/analise/#{token}"
+    expect(response.body).to include("Análise de #{year_start.strftime('%d/%m/%Y')} a ")
+
+    post "/api/v1/accounts/#{account.id}/crm/creatives/2301/share", params: { share_period: 'last90' },
+                                                                    headers: admin.create_new_auth_token, as: :json
+    expect(response.parsed_body).to include('period' => 'last90', 'period_label' => 'Últimos 90 dias')
+    expect(Date.iso8601(response.parsed_body['since'])).to be_between(Date.current - 90, Date.current - 88)
+
+    post "/api/v1/accounts/#{account.id}/crm/creatives/2301/share", params: { share_period: 'screen', preset: 'last7' },
+                                                                    headers: admin.create_new_auth_token, as: :json
+    expect(response.parsed_body).to include('period' => 'screen')
+    expect(Date.iso8601(response.parsed_body['since'])).to be_between(Date.current - 7, Date.current - 5)
   end
 
   it 'rodada 2: mexer no endereço não libera o financeiro (a escolha mora dentro do token)' do

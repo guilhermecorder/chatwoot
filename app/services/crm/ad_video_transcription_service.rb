@@ -45,7 +45,7 @@ class Crm::AdVideoTranscriptionService
     return skip!(reason, retry_later: reason == NO_KEY) if reason
 
     mark!('processing')
-    return save!(simulated_result) if graph.simulate?
+    return save!(simulated_result) if graph.simulate? && !creative.manual_video?
 
     transcribe_with_gemini
   rescue StandardError => e
@@ -54,20 +54,25 @@ class Crm::AdVideoTranscriptionService
 
   private
 
-  def precheck
-    return 'Só vídeos têm transcrição.' unless creative.transcribable?
-    return 'Este anúncio não tem vídeo identificado na Meta.' if video_id.blank? && !graph.simulate?
+  def precheck # rubocop:disable Metrics/CyclomaticComplexity
+    return 'Só vídeos têm transcrição.' unless creative.transcribable? || creative.manual_video?
+    return 'Este anúncio não tem vídeo identificado na Meta.' if video_id.blank? && !creative.manual_video? && !graph.simulate?
     return NO_KEY if api_key.blank? && !graph.simulate?
 
     nil
   end
 
   def transcribe_with_gemini
-    bytes, mime = download_video
-    response = ask_gemini(bytes, mime)
-    save!(parse_json(response.dig('candidates', 0, 'content', 'parts', 0, 'text')))
+    response = ask_gemini(input.part)
+    save!(parse_json(response.dig('candidates', 0, 'content', 'parts', 0, 'text')).merge('origem' => input.origin))
     record_usage(response['usageMetadata'])
+    input.cleanup!
     true
+  end
+
+  # item 293: arquivo enviado → link colado → Meta (Crm::AdVideoInput)
+  def input
+    @input ||= Crm::AdVideoInput.new(creative, graph: graph, gemini: Crm::GeminiFiles.new(api_key))
   end
 
   def graph
@@ -82,32 +87,9 @@ class Crm::AdVideoTranscriptionService
     @api_key ||= CrmSetting.find_by(account: @account)&.ai_config&.dig('gemini_api_key')
   end
 
-  # URL de download do vídeo da própria conta (a Graph devolve `source` para vídeos de anúncio)
-  def download_video
-    file = Down.download(video_url, max_size: MAX_BYTES, open_timeout: 20, read_timeout: 120)
-    [file.read, mime_of(file)]
-  rescue Down::TooLarge
-    raise 'Vídeo acima de 18 MB — grande demais para transcrever por aqui.'
-  ensure
-    file&.close! if file.respond_to?(:close!)
-  end
-
-  def video_url
-    obj = graph.fetch_objects([video_id], 'source,length')[video_id] || {}
-    url = obj['source'].to_s
-    raise 'A Meta não devolveu o arquivo do vídeo (o token precisa de ads_read na conta dona do vídeo).' if url.blank?
-
-    url
-  end
-
-  def mime_of(file)
-    type = file.respond_to?(:content_type) ? file.content_type.to_s : ''
-    type.presence || 'video/mp4'
-  end
-
-  def ask_gemini(bytes, mime)
+  def ask_gemini(video_part)
     body = {
-      contents: [{ parts: [{ text: PROMPT }, { inline_data: { mime_type: mime, data: Base64.strict_encode64(bytes) } }] }],
+      contents: [{ parts: [{ text: PROMPT }, video_part] }],
       generationConfig: { temperature: 0.1, response_mime_type: 'application/json' }
     }
     response = HTTParty.post(GEMINI_URL, query: { key: api_key }, headers: { 'Content-Type' => 'application/json' },
@@ -192,13 +174,14 @@ class Crm::AdVideoTranscriptionService
   end
 
   def mark!(status)
-    write_transcript('status' => status, 'error' => nil, 'retry' => nil, 'status_at' => Time.current.iso8601)
+    write_transcript('status' => status, 'error' => nil, 'error_detail' => nil, 'retry' => nil, 'status_at' => Time.current.iso8601)
   end
 
   def fail!(error)
     Rails.logger.warn("[CEVICO criativos] transcrição do vídeo #{creative.ad_id} falhou: #{error.class}: #{error.message}")
     write_transcript('status' => 'failed', 'status_at' => Time.current.iso8601,
-                     'error' => error.message.to_s.strip.truncate(180).presence || 'A transcrição falhou.')
+                     'error' => error.message.to_s.strip.truncate(180).presence || 'A transcrição falhou.',
+                     'error_detail' => error.respond_to?(:detail) ? error.detail.to_s.truncate(600) : nil)
     false
   rescue StandardError => e
     Rails.logger.error("[CEVICO criativos] não deu nem para marcar a falha do vídeo #{creative.ad_id}: #{e.message}")

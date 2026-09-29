@@ -58,20 +58,20 @@ const datasets = computed(() => {
       <MiniRadar :axes="axes" :datasets="datasets" :size="size" legend />
     </div>
     <div class="min-w-0">
-      <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
+      <ul class="flex flex-col gap-2.5 list-none p-0 m-0">
         <li
           v-for="a in list"
           :key="a.key"
-          class="cv-row px-3.5 py-2 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 items-baseline text-sm"
+          class="cv-row px-5 py-3.5 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 items-baseline text-sm"
         >
           <span class="font-bold text-n-slate-12">{{ a.label }}</span>
-          <span class="tabular-nums font-extrabold text-n-slate-12">
+          <span class="tabular-nums text-lg font-extrabold text-n-slate-12">
             {{ a.value_text }}
           </span>
-          <span class="tabular-nums text-xs text-n-slate-10">
+          <span class="tabular-nums text-sm text-n-slate-10">
             média {{ a.avg_text || '—' }}
           </span>
-          <span class="col-span-3 text-[11px] text-n-slate-9">
+          <span class="col-span-3 text-[13px] text-n-slate-9">
             <template v-if="a.is_record">
               🏆 este anúncio é o recorde da conta
             </template>
@@ -84,7 +84,7 @@ const datasets = computed(() => {
           </span>
         </li>
       </ul>
-      <p class="text-[11px] text-n-slate-9 mt-2 leading-snug">
+      <p class="text-[13px] text-n-slate-9 mt-2 leading-snug">
         {{ radar.note }}
       </p>
     </div>

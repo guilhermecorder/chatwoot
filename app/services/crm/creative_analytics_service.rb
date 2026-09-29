@@ -79,11 +79,21 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
       scorecard: scorecard.call, average_reading: { full: scorecard.reading, without_money: scorecard.reading(money: false) }
     )
     # 🥇 rodada 3: os "mais" e os "menos" de onde apareceu e de quem viu
+    # 🔻 rodada 4: funil com a % de conversão de cada etapa, contra a média da conta
+    data = data.merge(funnel_view: funnel_view(row))
     data = data.merge(placement_ranking: Crm::BreakdownHighlights.new(data[:placements][:rows], kind: 'placement').call,
                       audience_ranking: Crm::BreakdownHighlights.new(data[:age_gender][:rows], kind: 'audience').call)
     # 📋 item 287: o mesmo texto limpo do link de leitura ("Copiar análise completa")
     # (a tela interna é de quem está logado: o texto sai COM os dados financeiros)
     data.merge(analysis_text: Crm::CreativeSharePayload.new(data, since_date: @since_date, until_date: @until_date, finance: true).text)
+  end
+
+  def funnel_view(row)
+    Crm::CreativeFunnelView.new(totals: row[:totals], funnel: row[:funnel], account_totals: Crm::AdMetrics.sum(all_rows.pluck(:totals)),
+                                account_funnel: Crm::AdFunnel.sum(all_rows.pluck(:funnel))).call
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO criativos] funil do anúncio: #{e.message}"
+    { steps: [], note: nil }
   end
 
   def ad_records
@@ -490,7 +500,7 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
       hook: c.hook, body: c.body, cta: c.cta, cta_label: Crm::AdCreativeParser.cta_label(c.cta),
       # 🎬 item 181: de onde vem o texto (video | ad) + o que o vídeo fala
       text_source: c.text_source, transcribable: c.transcribable?, video_cta: c.video_cta, ad_hook: c.ad_hook, ad_body: c.ad_body,
-      transcript: c.transcript.slice('status', 'error', 'text', 'angle', 'transcribed_at', 'segments', 'duration'),
+      transcript: c.transcript.slice('status', 'error', 'text', 'angle', 'transcribed_at', 'segments', 'duration', 'error_detail'),
       video_length: c.creative['video_length'],
       description: c.creative['description'], thumbnail_url: c.thumbnail_src, thumbnail_stored: c.thumbnail_stored?,
       permalink: c.creative['permalink'], video_id: c.creative['video_id'],
