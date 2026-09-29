@@ -8726,3 +8726,16 @@ com parâmetros diferentes selecionáveis por chavinhas.
   exames continuam por sobreposição. Encaixe ("+2") continua igual.
 - Testes: agenda_slots_future_spec ajustado, cevicoAgendaOccupies.spec.js (4) verdes. WEB+SIDEKIQ, sem migration.
 - OBS: responder_tools_spec.rb:124 falha também na versão anterior (depende do dia da semana) — não é desta mudança.
+
+- **30/09 — 297 SUBIU** no commit 838f88f (develop) → imagem ghcr.io/guilhermecorder/chatwoot:838f88f; WEB+SIDEKIQ, sem migration; reversão :c456694.
+
+## 298. ✅ 💬 ABRIR CONVERSA da Agenda, do Espaço do Paciente e do botão direito (30/09; "do espaço do paciente precisa ter um ambiente pra abrir a conversa · da agenda também · adicionar opção 'abrir conversa' no botão direito")
+- O "ambiente" é o MESMO popup de conversa do CRM (ConversationChatModal), agora aberto de qualquer tela sem sair dela:
+  `openPatientChat({ contactId, phone })` (composable useCevicoPatientChat + PatientChatHost.vue montado no Dashboard).
+- Servidor: GET /crm/patient_chat (patient_chats_controller.rb) devolve a conversa mais recente do paciente no formato do
+  card do CRM; acha pelo cadastro ou pelo telefone; respeita as caixas que a pessoa logada pode ver.
+- Onde: AGENDA — botão direito "Abrir conversa" (balão, lista do dia, bloco do médico) e botão "Conversa" no topo da ficha
+  do agendamento; ESPAÇO DO PACIENTE — "Abrir conversa" abre o popup ali mesmo e "Tela cheia" leva à tela de Conversas.
+  Paciente sem conversa cai no "Nova conversa" de sempre (item 199).
+- Testes: patient_chats_controller_spec (5) verdes; conferido ao vivo no Espaço do Paciente (popup abriu com a conversa,
+  as colunas e o campo de resposta). WEB só, sem migration. SEM commit.

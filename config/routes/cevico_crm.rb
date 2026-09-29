@@ -66,6 +66,8 @@ namespace :crm do
       get :export
     end
   end
+  # 💬 item 298: conversa mais recente do paciente para o popup (Agenda, Espaço do Paciente, botão direito)
+  resource :patient_chat, only: [:show], controller: 'patient_chats'
   resource :conversation_summary, only: [:show], controller: 'conversation_summaries' do
     post :analyze
     post :sales_help

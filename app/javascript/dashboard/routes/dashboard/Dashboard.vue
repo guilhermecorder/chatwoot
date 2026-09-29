@@ -29,6 +29,7 @@ import CevicoCallPopup from 'dashboard/components-next/cevico/calls/CevicoCallPo
 import NovaConversaModal from 'dashboard/components-next/cevico/conversas/NovaConversaModal.vue';
 import BugReportDrawer from 'dashboard/components-next/radar/BugReportDrawer.vue';
 import CevicoContextMenu from 'dashboard/components-next/cevico/CevicoContextMenu.vue';
+import PatientChatHost from 'dashboard/components-next/cevico/PatientChatHost.vue';
 import { useCallsStore } from 'dashboard/stores/calls';
 
 export default {
@@ -46,6 +47,7 @@ export default {
     NovaConversaModal,
     BugReportDrawer,
     CevicoContextMenu,
+    PatientChatHost,
   },
   setup() {
     const upgradePageRef = ref(null);
@@ -170,6 +172,7 @@ export default {
         <BugReportDrawer />
         <!-- CEVICO 283: menu do botão direito (abre por openMenu / v-cv-menu) -->
         <CevicoContextMenu />
+        <PatientChatHost />
         <MobileSidebarLauncher
           :is-mobile-sidebar-open="isMobileSidebarOpen"
           @toggle="toggleMobileSidebar"

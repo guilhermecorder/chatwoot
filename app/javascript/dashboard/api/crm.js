@@ -220,6 +220,11 @@ class CrmAPI extends ApiClient {
   }
 
   // 🧪 simulador: conversar com o agente como paciente (caixa interna, sem envio)
+  // item 298: conversa mais recente do paciente para o popup ({ contact_id } ou { phone })
+  patientChat(params) {
+    return axios.get(`${this.url}/patient_chat`, { params });
+  }
+
   simulateAgent(payload) {
     return axios.post(`${this.url}/settings/ai_simulate`, payload);
   }

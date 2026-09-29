@@ -3,6 +3,7 @@
 // o ambiente inteiro se veste com a cor do paciente (sexo + idade),
 // a jornada do funil vira uma pilha de estágios com tempos e etiquetas,
 // e o Espaço do Médico é o protagonista (tudo-à-vista + anotações).
+import { openPatientChat } from 'dashboard/composables/useCevicoPatientChat';
 import { ref, computed, onMounted, watch } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -964,13 +965,21 @@ watch(contactId, () => {
                   Ligar
                 </span>
                 <button
-                  v-if="lastConversationId"
                   class="cevico-hero-btn"
-                  :title="`Abrir a conversa mais recente (#${lastConversationId})`"
-                  @click="openConversation(lastConversationId)"
+                  title="Abrir a conversa mais recente aqui mesmo, sem sair do Espaço do Paciente"
+                  @click="openPatientChat({ contactId: Number(contactId) })"
                 >
                   <span class="i-lucide-messages-square text-[13px]" />
                   Abrir conversa
+                </button>
+                <button
+                  v-if="lastConversationId"
+                  class="cevico-hero-btn"
+                  :title="`Ir para a tela de Conversas (#${lastConversationId})`"
+                  @click="openConversation(lastConversationId)"
+                >
+                  <span class="i-lucide-external-link text-[13px]" />
+                  Tela cheia
                 </button>
               </div>
               <div

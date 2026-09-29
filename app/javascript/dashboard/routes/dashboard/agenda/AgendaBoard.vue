@@ -5,6 +5,7 @@
 // problema/exame, dia, horário, médico e unidade (ou local da cirurgia, ou
 // "online" na teleconsulta). Criado à mão aqui ou pelo Atendente de
 // Agendamento (IA). Peças: kit "iMac G3 + vidro" + _cevico-agenda.scss.
+import { openPatientChat } from 'dashboard/composables/useCevicoPatientChat';
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import AgendaTimeColumn from 'dashboard/components-next/cevico/agenda/AgendaTimeColumn.vue';
@@ -38,6 +39,8 @@ const route = useRoute();
 const router = useRouter();
 
 // Espaço do Paciente: consulta amarrada ao contato abre a página única
+// item 298: a conversa do paciente num popup, sem sair da Agenda
+const openTaskChat = task => openPatientChat({ contactId: task.contact_id, phone: task.phone });
 const openPatientSpace = task => {
   if (!task?.contact_id) return;
   router.push(frontendURL(`accounts/${route.params.accountId}/patient/${task.contact_id}`));
@@ -1618,6 +1621,12 @@ const taskMenu = (task, extra = []) => {
         action: () => scheduleSurgeryFrom(task),
       },
       { separator: true },
+      (task.contact_id || task.phone) && {
+        label: 'Abrir conversa',
+        icon: 'i-lucide-message-circle',
+        hint: 'sem sair da Agenda',
+        action: () => openTaskChat(task),
+      },
       task.contact_id && {
         label: 'Abrir o Espaço do Paciente',
         icon: 'i-lucide-user-round',
@@ -2599,6 +2608,9 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <h2 class="text-base font-bold leading-tight truncate">{{ form.name.trim() || (editingTask ? formKind.noun : 'Paciente') }}</h2>
             <p class="text-[11px] opacity-90 truncate">{{ formSummary || formKind.hint }}</p>
           </div>
+          <button v-if="editingTask && (editingTask.contact_id || editingTask.phone)" class="cv-glass-btn" title="Abrir a conversa deste paciente, sem sair da Agenda" @click="openTaskChat(editingTask)">
+            <span class="i-lucide-message-circle" /> <span class="hidden sm:inline">Conversa</span>
+          </button>
           <button v-if="editingTask?.contact_id" class="cv-glass-btn" title="Abrir o Espaço do Paciente" @click="openPatientSpace(editingTask)">
             <PatientSpaceIcon :size="16" /> <span class="hidden sm:inline">Paciente</span>
           </button>
