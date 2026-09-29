@@ -64,7 +64,11 @@ const roas = computed(() => (props.row.rates ? props.row.rates.roas : null));
 const roasVs = computed(() =>
   vsAverage(roas.value, props.averages.roas, false)
 );
+// item 301: o rótulo diz FECHADAS — mostrava as realizadas (número menor)
 const surgeries = computed(() => Number(funnel.value.surgeries || 0));
+const closed = computed(() =>
+  Math.max(Number(funnel.value.closed || 0), surgeries.value)
+);
 const booked = computed(() => Number(funnel.value.booked || 0));
 const leads = computed(() => Number(funnel.value.leads || 0));
 const hasJourney = computed(() => leads.value > 0);
@@ -219,13 +223,14 @@ const open = () => emit('open', props.row);
             class="cc-value font-extrabold tabular-nums tracking-tight leading-none whitespace-nowrap mt-1"
             :class="hasJourney ? 'text-n-slate-12' : 'text-n-slate-8'"
           >
-            {{ fmtNum(surgeries) }}
+            {{ fmtNum(closed) }}
           </p>
           <p
             v-if="hasJourney"
             class="text-[11px] text-n-slate-9 leading-tight mt-1"
           >
-            {{ fmtNum(leads) }} leads · {{ fmtNum(booked) }} consultas
+            {{ fmtNum(surgeries) }} já realizadas · {{ fmtNum(leads) }} leads ·
+            {{ fmtNum(booked) }} consultas
           </p>
           <p v-else class="text-[11px] text-n-slate-8 leading-tight mt-1">
             nenhum lead por este anúncio

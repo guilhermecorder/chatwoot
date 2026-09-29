@@ -192,7 +192,7 @@ RSpec.describe 'Link de leitura da análise de criativo', type: :request do
     post "/api/v1/accounts/#{account.id}/crm/creatives/2301/share", params: { preset: 'month' }, headers: admin.create_new_auth_token, as: :json
     json = response.parsed_body
     expect(json).to include('period' => 'year', 'period_label' => 'Este ano', 'since' => year_start.iso8601)
-    token = json['url'].split('/').last
+    token = Crm::CreativeShareLink.token_for(json['url'].split('/').last)
     expect(Crm::CreativeShareLink.verify(token)).to include(since_date: year_start)
 
     get "/criativos/analise/#{token}"
@@ -285,9 +285,9 @@ RSpec.describe 'Link de leitura da análise de criativo', type: :request do
     post "/api/v1/accounts/#{account.id}/crm/creatives/2301/share", headers: admin.create_new_auth_token, as: :json
     expect(response).to have_http_status(:ok)
     json = response.parsed_body
-    expect(json['url']).to include('/criativos/analise/')
+    expect(json['url']).to match(%r{/c/[A-Za-z0-9]{10}\z}) # item 302: endereço curto
     expect(json['expires_label']).to eq(30.days.from_now.in_time_zone('America/Sao_Paulo').strftime('%d/%m/%Y'))
-    data = Crm::CreativeShareLink.verify(json['url'].split('/').last)
+    data = Crm::CreativeShareLink.verify(Crm::CreativeShareLink.token_for(json['url'].split('/').last))
     expect(data).to include(account_id: account.id, ad_id: '2301')
     expect(json['url'].split('/').last).not_to match(/2301|#{Base64.urlsafe_encode64('2301', padding: false)}/) # ids não aparecem no endereço
 
@@ -297,10 +297,38 @@ RSpec.describe 'Link de leitura da análise de criativo', type: :request do
     post "/api/v1/accounts/#{account.id}/crm/creatives/2301/share", params: { finance: 1 }, headers: admin.create_new_auth_token, as: :json
     paid = response.parsed_body
     expect(paid).to include('finance' => true, 'finance_label' => 'Com dados financeiros')
-    expect(Crm::CreativeShareLink.verify(paid['url'].split('/').last)[:finance]).to be(true)
+    expect(Crm::CreativeShareLink.verify(Crm::CreativeShareLink.token_for(paid['url'].split('/').last))[:finance]).to be(true)
 
     post "/api/v1/accounts/#{account.id}/crm/creatives/nao-existe/share", headers: admin.create_new_auth_token, as: :json
     expect(response).to have_http_status(:not_found)
   end
+
+  describe 'link curto (item 302)' do
+    include ActiveSupport::Testing::TimeHelpers
+
+    it 'abre pelo código de 10 letras e o link comprido antigo continua abrindo' do
+      expect(link[:url]).to match(%r{/c/[A-Za-z0-9]{10}\z})
+      get "/c/#{link[:code]}"
+      expect(response).to have_http_status(:ok)
+      get "/criativos/analise/#{link[:token]}"
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'vale 30 dias: abre no 3º dia e vence depois do prazo' do
+      code = link[:code]
+      travel_to(3.days.from_now) do
+        get "/c/#{code}"
+        expect(response).to have_http_status(:ok)
+      end
+      travel_to(31.days.from_now) do
+        get "/c/#{code}"
+        expect(response).to have_http_status(:gone)
+      end
+    end
+
+    it 'código que não existe = link vencido' do
+      get '/c/abcdefghij'
+      expect(response).to have_http_status(:gone)
+    end
+  end
 end
-# rubocop:enable RSpec/MultipleExpectations

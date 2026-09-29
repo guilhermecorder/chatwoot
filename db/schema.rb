@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_30_100000) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_30_110000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -915,6 +915,19 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_30_100000) do
     t.datetime "updated_at", null: false
     t.index ["account_id", "position"], name: "index_cevico_pillars_on_account_id_and_position"
     t.index ["account_id"], name: "index_cevico_pillars_on_account_id"
+  end
+
+  create_table "cevico_short_links", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "code", null: false
+    t.string "kind", null: false
+    t.text "token", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_cevico_short_links_on_account_id"
+    t.index ["code"], name: "index_cevico_short_links_on_code", unique: true
+    t.index ["expires_at"], name: "index_cevico_short_links_on_expires_at"
   end
 
   create_table "cevico_stock_items", force: :cascade do |t|
@@ -2396,6 +2409,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_30_100000) do
   add_foreign_key "cevico_people_profiles", "accounts"
   add_foreign_key "cevico_people_profiles", "users"
   add_foreign_key "cevico_pillars", "accounts"
+  add_foreign_key "cevico_short_links", "accounts"
   add_foreign_key "cevico_stock_items", "accounts"
   add_foreign_key "cevico_stock_orders", "accounts"
   add_foreign_key "cevico_stock_orders", "cevico_stock_items", column: "stock_item_id"

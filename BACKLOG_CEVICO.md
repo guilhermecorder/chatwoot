@@ -8781,3 +8781,19 @@ com parâmetros diferentes selecionáveis por chavinhas.
   ligar o bloco "Pacientes do Oftalmofácil" (caixa 12 + modelo aprovado); desligar a confirmação do N8N.
 - PENDENTE DE DECISÃO DELE: nome das etiquetas (`cevico` / `of_agenda`); pacientes do Oftalmofácil que o N8N já pôs no funil
   da CEVICO (limpeza = mover os cards) — não mexi.
+
+## 301. ✅ 💰 CRIATIVOS: card "Cirurgias fechadas" mostrava as REALIZADAS (29/09 noite; "o painel do criativo está com as cirurgias desatualizadas… tinha um número totalmente diferente deste ano")
+- ERRO: `CreativeCard.vue` escrevia "Cirurgias fechadas" e lia `funnel.surgeries` (realizadas). Agora lê `funnel.closed` e
+  mostra "N já realizadas" embaixo. Tabela e Comparar: coluna renomeada para "Cirurgias realizadas".
+- CONFERIDO no backup de produção (21/09): a ligação paciente↔anúncio só é gravada desde 13/07; dos 2.299 leads com anúncio,
+  16 fecharam cirurgia. Das 157 pessoas que fecharam cirurgia desde 13/07, só 11 vieram de anúncio da Meta gravado; 102
+  tiveram a 1ª conversa na caixa GOOGLE. Número grande de antes = régua antiga do item 289 ("colunas de conversão").
+- WEB só, sem migration. SEM commit. PENDENTE DELE: dizer qual número via antes e em que tela.
+
+## 302. ✅ 🔗 CRIATIVOS: link de leitura CURTO (30/09; "vamos ajustar isso pra ter links pequenos, e que o link dure pelo menos 3 dias")
+- Antes: /criativos/analise/<token de ~250 letras>. Agora: /c/<código de 10 letras> (ex.: sistema.cevico.com.br/c/y2Q56UyzAA).
+- O token fechado (cifrado + assinado) continua decidindo o que o link mostra; fica guardado na tabela nova
+  `cevico_short_links` (`Crm::ShortLink`) e o código é só o apelido. Vencidos são apagados na criação do próximo.
+- Validade: continua 30 DIAS (já era; atende o "pelo menos 3 dias"). Links compridos antigos continuam abrindo.
+- Limite de 60 aberturas/min por IP também no /c/. Testes: 17 verdes (abre no 3º dia, vence depois do prazo, código
+  inexistente = vencido). TEM MIGRATION (tabela nova) → backup antes. WEB só. SEM commit.

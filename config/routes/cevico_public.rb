@@ -37,6 +37,8 @@ get 'p/:slug', to: 'cevico_pages#show', as: :cevico_page
 # devolve os dados.
 get 'criativos/analise/:token', to: 'cevico_creative_shares#show', as: :cevico_creative_share,
                                 constraints: { token: /[A-Za-z0-9_-]+/ }
+# 🔗 item 302: o mesmo link, curto (código de 10 letras)
+get 'c/:code', to: 'cevico_creative_shares#show', as: :cevico_creative_short, constraints: { code: /[A-Za-z0-9]{10}/ }
 
 # 🔐 CEVICO rodada 171: relatórios de CSP das páginas públicas (só log)
 post 'webhooks/cevico/csp_report', to: 'webhooks/cevico_csp_reports#create'

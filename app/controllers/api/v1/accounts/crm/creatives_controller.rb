@@ -86,7 +86,7 @@ class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseContr
   end
 
   # POST /crm/creatives/:ad_id/share[?share_period=year|last90|screen][&preset=|from=&to=][&finance=1] — item 287: link SÓ DE LEITURA
-  # da análise deste anúncio neste período (token assinado, vale 30 dias, sem tabela nova)
+  # da análise deste anúncio neste período (token assinado, vale 30 dias; endereço curto /c/<código> — item 302)
   def share
     creative = Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
     since, until_d, period = Crm::CreativeShareLink.period_for(

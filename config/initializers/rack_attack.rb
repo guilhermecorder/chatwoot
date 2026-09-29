@@ -268,7 +268,7 @@ class Rack::Attack
 
   ## Link de leitura da análise de criativo (item 287): 60/min por IP
   throttle('cevico/creative_share', limit: 60, period: 1.minute) do |req|
-    req.ip if req.get? && req.path.start_with?('/criativos/analise/')
+    req.ip if req.get? && (req.path.start_with?('/criativos/analise/') || req.path.start_with?('/c/'))
   end
 
   ## Relatórios de CSP (só log): 30/min por IP

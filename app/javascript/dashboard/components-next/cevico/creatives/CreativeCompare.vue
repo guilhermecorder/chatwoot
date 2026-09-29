@@ -155,7 +155,7 @@ const METRICS = [
   },
   {
     key: 'surgeries',
-    label: 'Cirurgias',
+    label: 'Cirurgias realizadas',
     get: r => r.funnel.surgeries,
     fmt: v => fmtNum(v),
     best: 'max',

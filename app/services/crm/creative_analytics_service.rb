@@ -327,7 +327,7 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
 
   # ── Jornada do CRM por anúncio (mesma régua do relatório de anúncios) ─────
   def funnel_for(ad_id)
-    funnels[ad_id] || { leads: 0, booked: 0, attended: 0, surgeries: 0, revenue: 0.0 }
+    funnels[ad_id] || Crm::AdFunnel::EMPTY.dup
   end
 
   def funnels

@@ -1,15 +1,19 @@
 # 🔗 Link SÓ DE LEITURA da análise de um criativo (item 287).
-# Sem tabela nova: o link carrega um token FECHADO pelo sistema (cifrado e
-# assinado com a chave do servidor) com a conta, o anúncio, o período e a
-# validade (30 dias). Quem tem o link lê a análise daquele anúncio naquele
-# período — e nada além disso; nem os números internos (conta, anúncio) dá
-# para ler no endereço. Token adulterado ou vencido não abre.
+# O que o link mostra mora num token FECHADO pelo sistema (cifrado e assinado
+# com a chave do servidor): a conta, o anúncio, o período e a validade (30
+# dias). Quem tem o link lê a análise daquele anúncio naquele período — e nada
+# além disso. Token adulterado ou vencido não abre.
+# 🔗 item 302 (30/09): o endereço ficou CURTO — /c/<código de 10 letras>. O
+# token fica guardado (Crm::ShortLink) e o código é só o apelido dele. Os links
+# compridos antigos (/criativos/analise/<token>) continuam abrindo.
 module Crm::CreativeShareLink
   module_function
 
   TTL = 30.days
   PURPOSE = :creative_share
   PATH = '/criativos/analise'.freeze
+  SHORT_PATH = '/c'.freeze
+  KIND = 'creative_share'.freeze
 
   # finance: true = "com dados financeiros"; false (padrão) = sem nenhum valor em R$.
   # A escolha mora DENTRO do token: mexer no endereço não troca a versão.
@@ -17,7 +21,8 @@ module Crm::CreativeShareLink
     expires_at = TTL.from_now
     payload = [account.id, ad_id.to_s, since_date.iso8601, until_date.iso8601, expires_at.to_i, finance ? 1 : 0]
     token = verifier.encrypt_and_sign(payload, purpose: PURPOSE, expires_at: expires_at)
-    { token: token, url: "#{base_url}#{PATH}/#{token}", expires_at: expires_at.iso8601, finance: finance ? true : false,
+    short = Crm::ShortLink.shorten!(account: account, kind: KIND, token: token, expires_at: expires_at)
+    { token: token, code: short.code, url: "#{base_url}#{SHORT_PATH}/#{short.code}", expires_at: expires_at.iso8601, finance: finance ? true : false,
       finance_label: finance_label(finance),
       expires_label: expires_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m/%Y') }
   end
@@ -36,6 +41,11 @@ module Crm::CreativeShareLink
 
   def finance_label(finance)
     finance ? 'Com dados financeiros' : 'Sem dados financeiros'
+  end
+
+  # código curto do endereço → o token guardado (nil = não existe ou venceu)
+  def token_for(code)
+    Crm::ShortLink.token_for(code, kind: KIND)
   end
 
   # → { account_id:, ad_id:, since_date:, until_date:, expires_at:, finance: } ou nil

@@ -91,7 +91,7 @@ const COLS = [
   },
   {
     key: 'surgeries',
-    label: 'Cirurgias',
+    label: 'Cirurgias realizadas',
     fmt: v => fmtNum(v),
     get: r => r.funnel.surgeries,
     xl: true,

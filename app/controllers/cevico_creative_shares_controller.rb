@@ -1,4 +1,5 @@
 # 🔗 Página PÚBLICA, só de leitura, com a análise de UM criativo (item 287).
+# Endereço curto /c/<código> (item 302) ou o comprido antigo com o token.
 # Abre sem login por um link com token assinado (Crm::CreativeShareLink):
 # o token diz a conta, o anúncio, o período e até quando vale. Mostra só o
 # que Crm::CreativeSharePayload libera — dados do ANÚNCIO, nunca de paciente.
@@ -12,7 +13,8 @@ class CevicoCreativeSharesController < ActionController::Base # rubocop:disable 
   before_action :no_index
 
   def show
-    @link = Crm::CreativeShareLink.verify(params[:token])
+    @token = params[:code].present? ? Crm::CreativeShareLink.token_for(params[:code]) : params[:token]
+    @link = @token && Crm::CreativeShareLink.verify(@token)
     @payload = @link && payload_for(@link)
     return expired if @payload.nil?
 
@@ -43,7 +45,7 @@ class CevicoCreativeSharesController < ActionController::Base # rubocop:disable 
     account = Account.find_by(id: link[:account_id])
     return nil unless account
 
-    Rails.cache.fetch("crm:creative_share:#{Digest::SHA256.hexdigest(params[:token].to_s)}", expires_in: CACHE_TTL) do
+    Rails.cache.fetch("crm:creative_share:#{Digest::SHA256.hexdigest(@token.to_s)}", expires_in: CACHE_TTL) do
       detail = Crm::CreativeAnalyticsService.new(account: account, since_date: link[:since_date], until_date: link[:until_date])
                                             .detail(link[:ad_id])
       Crm::CreativeSharePayload.new(detail, since_date: link[:since_date], until_date: link[:until_date], finance: link[:finance])
