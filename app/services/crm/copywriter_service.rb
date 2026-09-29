@@ -41,7 +41,7 @@ class Crm::CopywriterService
     oficiais: Refrativa PRK/Lasik R$ 5.000 · Catarata (lente Nacional
     R$ 2.800 | Mono Rayner R$ 3.200 | Tórica monofocal R$ 5.600 | Foco
     estendido R$ 5.690 | Trifocal R$ 8.490 | Galaxy R$ 14.990) · Artisan
-    R$ 11.900. Só cite valor se o briefing pedir.
+    R$ 11.900 por olho. Só cite valor se o briefing pedir.
 
     VALORES DA MARCA (a bússola de TODA comunicação CEVICO — definidos
     pelo Guilherme): tecnologia de ponta, acolhimento humano e clareza

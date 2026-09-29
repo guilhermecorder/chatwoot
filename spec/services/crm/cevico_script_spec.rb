@@ -3,6 +3,26 @@ require 'rails_helper'
 RSpec.describe Crm::CevicoScript do
   let(:account) { create(:account) }
 
+  describe 'item 295: lente fácica é sempre POR OLHO' do
+    let(:clinic) { create(:account) }
+
+    it 'a tabela e a regra fixa entram nos dois roteiros', :aggregate_failures do
+      %w[v1 v2].each do |version|
+        text = described_class.text(clinic, version)
+        expect(text).to include('Fácica (por olho): Artisan R$ 11.900')
+        expect(text).to include('NUNCA diga que o valor vale para os dois olhos')
+      end
+    end
+
+    it 'vale mesmo com a tabela salva pela clínica sem o "por olho" e com o roteiro editado na tela', :aggregate_failures do
+      settings = CrmSetting.find_or_create_by!(account: clinic)
+      settings.update!(agenda_config: { 'price_table' => { 'items' => [{ 'group' => 'Fácica', 'name' => 'Artisan', 'price' => 12_500 }] } })
+
+      expect(Cevico::PriceList.prompt_block(clinic)).to include('- Fácica (por olho): Artisan R$ 12.500.')
+      expect(described_class.text(clinic, 'v1')).to include('o valor é POR OLHO')
+    end
+  end
+
   it 'monta o Roteiro padrão com as 6 seções e a tabela de preços oficial' do
     text = described_class.text(account)
     expect(text).to include('ROTEIRO CEVICO')

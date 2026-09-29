@@ -14,7 +14,7 @@ class Cevico::PriceList
     { 'group' => 'Catarata (por olho)', 'name' => 'Foco estendido',        'price' => 5690 },
     { 'group' => 'Catarata (por olho)', 'name' => 'Trifocal',              'price' => 8490 },
     { 'group' => 'Catarata (por olho)', 'name' => 'Galaxy',                'price' => 14_990 },
-    { 'group' => 'Fácica',              'name' => 'Artisan',               'price' => 11_900 }
+    { 'group' => 'Fácica (por olho)',   'name' => 'Artisan',               'price' => 11_900 }
   ].freeze
 
   def self.items(account)
@@ -38,7 +38,7 @@ class Cevico::PriceList
   # bloco de texto para os PROMPTS dos agentes (Atendente IA / Analista):
   # uma linha por grupo, com promoção explícita quando existir
   def self.prompt_block(account)
-    items(account).group_by { |i| i['group'] }.map do |group, group_items|
+    items(account).group_by { |i| group_label(i['group']) }.map do |group, group_items|
       lines = group_items.map do |item|
         price = format_money(item['price'])
         if item['promo_price'].present?
@@ -48,8 +48,28 @@ class Cevico::PriceList
         end
       end
       "- #{group}: #{lines.join(' · ')}."
-    end.join("\n")
+    end.push("- #{PER_EYE_RULE}").join("\n")
   end
+
+  # 🚨 item 295 (29/09, produção: o Atendente disse que os R$ 11.900 da lente
+  # fácica eram "para os dois olhos"): o grupo "Fácica" era o único da tabela
+  # sem dizer se o valor é por olho. Lente fácica é SEMPRE por olho — mesmo que
+  # a tabela salva pela clínica não diga.
+  PER_EYE_GROUPS = /f[áa]cica|artisan/i
+
+  def self.group_label(group)
+    name = group.to_s
+    return name unless name.match?(PER_EYE_GROUPS)
+    return name if name.match?(/por olho/i)
+
+    "#{name.sub(/\s*\(.*\)\s*\z/, '')} (por olho)"
+  end
+
+  # regra fixa que acompanha a tabela em todo roteiro (não depende do texto editado na tela)
+  PER_EYE_RULE = 'ATENÇÃO — LENTE FÁCICA (Artisan): o valor é POR OLHO (cada olho é uma cirurgia). Ao passar o ' \
+                 'orçamento diga sempre "por olho". NUNCA diga que o valor vale para os dois olhos. Se o paciente ' \
+                 'perguntar o total dos dois olhos, é o dobro do valor por olho. Só a refrativa (PRK/Lasik) tem ' \
+                 'valor para os dois olhos; catarata e lente fácica são por olho.'.freeze
 
   def self.format_money(value)
     value.to_i.to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1.')
