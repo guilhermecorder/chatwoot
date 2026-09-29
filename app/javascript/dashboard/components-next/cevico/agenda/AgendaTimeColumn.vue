@@ -5,7 +5,11 @@
 // com altura proporcional à duração, a linha vermelha de AGORA e responde a
 // clique (agendar naquele horário) e a arrastar-e-soltar (reagendar).
 import { computed } from 'vue';
-import { hexToRgbSpaced } from 'dashboard/helper/cevicoAgenda';
+import {
+  hexToRgbSpaced,
+  attendanceMarkOf,
+} from 'dashboard/helper/cevicoAgenda';
+import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 
 const props = defineProps({
   day: { type: Date, required: true },
@@ -25,6 +29,10 @@ const props = defineProps({
   // item 234: etiqueta pequena no balão (ex.: a unidade) — { label, short } ou null
   tagOf: { type: Function, default: null },
   compact: { type: Boolean, default: false },
+  // item 283 (menu do botão direito): quem monta os itens é a tela —
+  // taskMenu(task) para o balão, slotMenu({ day, minutes, band, dayOff }) para o vazio
+  taskMenu: { type: Function, default: null },
+  slotMenu: { type: Function, default: null },
 });
 const emit = defineEmits(['create', 'open', 'dragstart', 'drop', 'dragover', 'dragleave']);
 
@@ -147,11 +155,19 @@ const onDrop = evt => {
   if (props.dayOff) return;
   emit('drop', { day: props.day, ...snap(evt, evt.currentTarget) });
 };
+// item 283: botão direito (ou toque longo) no vazio = o horário debaixo do mouse
+const onSlotMenu = (evt, el) => {
+  if (!props.slotMenu) return null;
+  return props.slotMenu({
+    day: props.day,
+    dayOff: props.dayOff,
+    ...snap(evt, el),
+  });
+};
+const onTaskMenu = task => (props.taskMenu ? props.taskMenu(task) : null);
 const badges = task => {
+  // item 290: a presença virou o selo redondo colorido no canto (cv-ag-ev-mark)
   const out = [];
-  if (task.attendance === 'attended') out.push('✓');
-  else if (task.attendance === 'missed') out.push('✗');
-  else if (task.attendance === 'attended_not_done') out.push('⚠️');
   if (task.surgery_indication === 'indicated') out.push('🎯');
   return out;
 };
@@ -165,6 +181,7 @@ const evClass = ev => ({
 
 <template>
   <div
+    v-cv-menu="onSlotMenu"
     class="cv-ag-col"
     :class="{
       'cv-ag-col-off': dayOff,
@@ -193,6 +210,7 @@ const evClass = ev => ({
     <button
       v-for="ev in events"
       :key="ev.task.id"
+      v-cv-menu="() => onTaskMenu(ev.task)"
       type="button"
       class="cv-ag-ev cv-ag-ev-block"
       :class="evClass(ev)"
@@ -207,6 +225,14 @@ const evClass = ev => ({
       <!-- 🏥 item 228: selo de origem (veio de outro sistema) -->
       <span v-if="ev.task.source" class="cv-ag-ev-src" :title="`Veio do Oftalmofácil${ev.task.source_detail ? ' · ' + ev.task.source_detail : ''}`">{{ compact ? 'OF' : (ev.task.source_detail || 'Oftalmofácil') }}</span>
       <span v-if="tagOf && tagOf(ev.task)" class="cv-ag-ev-tag" :title="tagOf(ev.task).label">{{ compact ? tagOf(ev.task).short : tagOf(ev.task).label }}</span>
+      <span
+        v-if="attendanceMarkOf(ev.task)"
+        class="cv-ag-ev-mark"
+        :class="attendanceMarkOf(ev.task).cls"
+        :title="attendanceMarkOf(ev.task).title"
+      >
+        {{ attendanceMarkOf(ev.task).sign }}
+      </span>
       <span v-if="badges(ev.task).length" class="cv-ag-ev-badges">
         <span v-for="(b, bi) in badges(ev.task)" :key="bi">{{ b }}</span>
       </span>

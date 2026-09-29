@@ -69,6 +69,7 @@ class Crm::JourneyMessage < ApplicationRecord
   validates :approval, inclusion: { in: APPROVALS }
   validate :trigger_is_sane
   validate :content_is_sane
+  validate :followup_is_sane
 
   scope :active, -> { where(active: true) }
   scope :ordered, -> { order(:position, :id) }
@@ -82,6 +83,42 @@ class Crm::JourneyMessage < ApplicationRecord
   def text = content['text'].to_s
 
   def review? = approval == 'review'
+
+  # 🔁 item 288: reforço para quem não respondeu (content['followup'] =
+  # { enabled, hours, max, template_params, message_preview }) — só para as
+  # mensagens do dia da cirurgia/consulta; desligado por padrão
+  FOLLOWUP_KINDS = %w[surgery appointment].freeze
+  FOLLOWUP_DEFAULT_HOURS = 6
+  FOLLOWUP_HOURS_RANGE = (1..48)
+  FOLLOWUP_MAX = 2
+
+  def followup = (content['followup'] || {}).to_h
+  def followup? = followup['enabled'] == true && FOLLOWUP_KINDS.include?(kind) && followup['template_params'].present?
+  def followup_template_params = followup['template_params']
+  def followup_preview = followup['message_preview'].presence
+
+  def followup_hours
+    value = followup['hours'].to_i
+    value.positive? ? value.clamp(FOLLOWUP_HOURS_RANGE.min, FOLLOWUP_HOURS_RANGE.max) : FOLLOWUP_DEFAULT_HOURS
+  end
+
+  def followup_max
+    value = followup['max'].to_i
+    value.positive? ? value.clamp(1, FOLLOWUP_MAX) : 1
+  end
+
+  # limpa o bloco do reforço que vem da tela — sem o bloco = desligado (nil)
+  def self.sanitize_followup(raw) # rubocop:disable Metrics/AbcSize
+    return nil if raw.blank? || !raw.respond_to?(:to_h)
+
+    hash = raw.to_h.with_indifferent_access
+    hours = hash['hours'].to_i
+    { 'enabled' => ActiveModel::Type::Boolean.new.cast(hash['enabled']) == true,
+      'hours' => hours.positive? ? hours.clamp(FOLLOWUP_HOURS_RANGE.min, FOLLOWUP_HOURS_RANGE.max) : FOLLOWUP_DEFAULT_HOURS,
+      'max' => hash['max'].to_i.clamp(1, FOLLOWUP_MAX),
+      'template_params' => hash['template_params'].presence&.to_h,
+      'message_preview' => hash['message_preview'].to_s.strip[0, 2000].presence }.compact
+  end
 
   # o Crm::Campaign resolve o público com as mesmas chaves da Campanha WhatsApp
   def audience_filter?
@@ -127,6 +164,10 @@ class Crm::JourneyMessage < ApplicationRecord
   def trigger_target_is_sane
     errors.add(:trigger, 'escolha a coluna do CRM') if kind == 'stage' && trigger['stage_id'].blank?
     errors.add(:trigger, 'escolha a etiqueta') if kind == 'label' && trigger['label'].blank?
+  end
+
+  def followup_is_sane
+    errors.add(:content, 'escolha a mensagem modelo do reforço') if followup['enabled'] == true && followup['template_params'].blank?
   end
 
   def content_is_sane

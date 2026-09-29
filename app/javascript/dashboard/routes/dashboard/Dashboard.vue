@@ -28,6 +28,7 @@ import RadarPriorityPopup from 'dashboard/components-next/radar/RadarPriorityPop
 import CevicoCallPopup from 'dashboard/components-next/cevico/calls/CevicoCallPopup.vue';
 import NovaConversaModal from 'dashboard/components-next/cevico/conversas/NovaConversaModal.vue';
 import BugReportDrawer from 'dashboard/components-next/radar/BugReportDrawer.vue';
+import CevicoContextMenu from 'dashboard/components-next/cevico/CevicoContextMenu.vue';
 import { useCallsStore } from 'dashboard/stores/calls';
 
 export default {
@@ -44,6 +45,7 @@ export default {
     CevicoCallPopup,
     NovaConversaModal,
     BugReportDrawer,
+    CevicoContextMenu,
   },
   setup() {
     const upgradePageRef = ref(null);
@@ -166,6 +168,8 @@ export default {
         <!-- CEVICO 199: Nova conversa em 3 passos (abre por openNovaConversa) -->
         <NovaConversaModal />
         <BugReportDrawer />
+        <!-- CEVICO 283: menu do botão direito (abre por openMenu / v-cv-menu) -->
+        <CevicoContextMenu />
         <MobileSidebarLauncher
           :is-mobile-sidebar-open="isMobileSidebarOpen"
           @toggle="toggleMobileSidebar"

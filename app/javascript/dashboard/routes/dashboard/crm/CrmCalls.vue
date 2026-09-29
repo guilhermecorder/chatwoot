@@ -27,6 +27,7 @@ import { hexFromGrad } from 'dashboard/helper/cevicoPalettes';
 import { useCevicoCallsStore } from 'dashboard/stores/cevicoCalls';
 import CevicoCallsAPI from 'dashboard/api/cevicoCalls';
 import CallLine from './components/calls/CallLine.vue';
+import CallPatientContext from 'dashboard/components-next/cevico/calls/CallPatientContext.vue';
 import CallDetailModal from './components/calls/CallDetailModal.vue';
 import {
   callIcon,
@@ -692,6 +693,15 @@ onBeforeUnmount(() => {
                 >
                 <template v-else> · em atendimento</template>
               </p>
+              <p
+                v-if="c.inbox_name"
+                class="text-[11px] font-semibold text-n-slate-11 truncate flex items-center gap-1"
+              >
+                <span class="i-lucide-phone-incoming text-xs" />
+                {{ c.direction === 'outbound' ? 'pela caixa' : 'ligando para' }}
+                {{ c.inbox_name }}
+              </p>
+              <CallPatientContext :call="c" mode="chips" class="mt-1" />
             </div>
             <div class="text-right flex-shrink-0">
               <p

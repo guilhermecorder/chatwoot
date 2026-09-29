@@ -15,6 +15,13 @@ class Crm::CreativeRecords
             # v2 (item 177): campeões de dinheiro — vêm da jornada do CRM (Crm::AdFunnel), não da Meta
             roas: 'roas', cac: 'cost_surgery', booking: 'booking_rate' }.freeze
   FUNNEL_PARTS = { roas: [:surgeries, 1], cac: [:surgeries, 1], booking: [:leads, 5] }.freeze
+  # 🏆 rodada 3 do item 287: RECORDE DA CONTA por indicador = o melhor anúncio de todo o
+  # histórico guardado. Volume mínimo para valer (recorde não pode ser acaso de anúncio pequeno).
+  RECORD_METRICS = %w[hook_rate hold_rate link_ctr conv_rate cost_conversation booking_rate].freeze
+  RECORD_MIN_IMPRESSIONS = 1000
+  RECORD_MIN_CLICKS = 30       # conversa por clique
+  RECORD_MIN_CONVERSATIONS = 5 # custo por conversa
+  RECORD_MIN_LEADS = 5         # % de agendamento
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   MONTHS_PT = %w[jan fev mar abr mai jun jul ago set out nov dez].freeze
 
@@ -24,7 +31,12 @@ class Crm::CreativeRecords
 
   def call
     stamp = Crm::AdInsight.where(account_id: @account.id).maximum(:updated_at).to_i
-    Rails.cache.fetch("crm:creative_records:#{@account.id}:#{stamp}", expires_in: 1.hour) { compute }
+    Rails.cache.fetch("crm:creative_records:v2:#{@account.id}:#{stamp}", expires_in: 1.hour) { compute }
+  end
+
+  # { 'hook_rate' => { value:, ad_id:, ad_name:, since:, until:, impressions: }, … }
+  def ad_records
+    call[:ad_records] || {}
   end
 
   private
@@ -34,12 +46,13 @@ class Crm::CreativeRecords
   end
 
   def compute
-    return { records: {}, months: [], all_time: {}, since: nil, until: nil } if rows.empty?
+    return { records: {}, months: [], all_time: {}, ad_records: {}, since: nil, until: nil } if rows.empty?
 
     {
       records: METRICS.index_with { |m| record_for(m) },
       months: months_champions,
       all_time: champions_for(rows),
+      ad_records: ad_records_for(rows),
       since: rows.first[1], until: rows.last[1]
     }
   end
@@ -155,6 +168,37 @@ class Crm::CreativeRecords
                  funnel: funnels[ad_id] || Crm::AdFunnel::EMPTY, rates: rates } # a teia do campeão
       end
       [part, best&.merge(describe(best[:ad_id], part))]
+    end
+  end
+
+  # ── recorde da conta por indicador (rodada 3 do item 287) ────────────────
+  def ad_records_for(list)
+    per_ad = list.group_by(&:first)
+    funnels = funnels_for(list)
+    totals = per_ad.transform_values { |l| Crm::AdMetrics.sum(l.map(&:last)) }
+    RECORD_METRICS.index_with do |metric|
+      best = nil
+      totals.each do |ad_id, total|
+        next unless record_volume?(metric, total, funnels[ad_id])
+
+        value = rates_for(total, funnels[ad_id])[metric]
+        next if value.nil? || !value.to_f.positive?
+
+        best = { ad_id: ad_id, value: value.to_f.round(4), impressions: total['impressions'].to_i } if better?(metric, value, best&.dig(:value))
+      end
+      days = best ? per_ad[best[:ad_id]] : []
+      best&.merge(ad_name: creatives[best[:ad_id]]&.ad_name || "Anúncio #{best[:ad_id]}", since: days.first[1], until: days.last[1])
+    end.compact
+  end
+
+  def record_volume?(metric, total, funnel)
+    return false if total['impressions'].to_f < RECORD_MIN_IMPRESSIONS
+
+    case metric
+    when 'conv_rate' then total['link_clicks'].to_f >= RECORD_MIN_CLICKS
+    when 'cost_conversation' then total['conversations'].to_f >= RECORD_MIN_CONVERSATIONS
+    when 'booking_rate' then (funnel || {})[:leads].to_i >= RECORD_MIN_LEADS
+    else true
     end
   end
 

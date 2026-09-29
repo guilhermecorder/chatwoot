@@ -65,15 +65,37 @@ class Crm::JourneySend < ApplicationRecord
 
   def final? = %w[sent skipped failed expired].include?(status)
 
+  # 🔁 item 288: o reforço é um envio próprio, com a chave do envio original +
+  # ":f1" / ":f2" — o índice único (mensagem × chave) garante que o mesmo
+  # reforço nunca nasce duas vezes
+  FOLLOWUP_SUFFIX = /:f(\d+)\z/
+
+  def self.followup_key(event_key, number) = "#{event_key}:f#{number}"
+  def followup_number = event_key.to_s[FOLLOWUP_SUFFIX, 1]&.to_i
+  def followup? = followup_number.present?
+  def parent_key = event_key.to_s.sub(FOLLOWUP_SUFFIX, '')
+
+  # o envio original deste reforço
+  def parent
+    return nil unless followup?
+
+    self.class.find_by(journey_message_id: journey_message_id, event_key: parent_key)
+  end
+
   def to_payload
     {
-      id: id, journey_message_id: journey_message_id, message_name: journey_message&.name,
+      id: id, journey_message_id: journey_message_id, message_name: display_name,
       contact: contact_payload, conversation_id: conversation&.display_id,
       event_key: event_key, scheduled_for: scheduled_for&.iso8601, status: status,
       status_label: STATUS_LABELS[status], sent_at: sent_at&.iso8601, reply: reply,
       reply_label: reply && REPLY_LABELS[reply], replied_at: replied_at&.iso8601, reply_text: reply_text,
-      error: error, preview: preview, variables: variables
+      error: error, preview: preview, variables: variables, followup_number: followup_number
     }
+  end
+
+  # "Confirmação de cirurgia · Reforço 1" nas filas e no histórico
+  def display_name
+    [journey_message&.name, followup? ? "Reforço #{followup_number}" : nil].compact.join(' · ')
   end
 
   private

@@ -32,6 +32,12 @@ post 'p/rascunho/:token/foto', to: 'cevico_pages#builder_upload'
 get 'p/rascunho/:token', to: 'cevico_pages#preview', as: :cevico_page_preview
 get 'p/:slug', to: 'cevico_pages#show', as: :cevico_page
 
+# 🔗 CEVICO item 287: link SÓ DE LEITURA da análise de um criativo (token
+# assinado, 30 dias). Página para ler/copiar; o mesmo endereço com .json
+# devolve os dados.
+get 'criativos/analise/:token', to: 'cevico_creative_shares#show', as: :cevico_creative_share,
+                                constraints: { token: /[A-Za-z0-9_-]+/ }
+
 # 🔐 CEVICO rodada 171: relatórios de CSP das páginas públicas (só log)
 post 'webhooks/cevico/csp_report', to: 'webhooks/cevico_csp_reports#create'
 

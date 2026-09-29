@@ -36,6 +36,7 @@ class Crm::Journey::ReplyService
     return nil if verdict.nil?
 
     send.update!(reply: verdict, replied_at: Time.current, reply_text: @message.content.to_s.truncate(500))
+    mark_family(send, verdict)
     verdict == 'confirmed' ? confirmed!(send) : declined!(send)
     verdict
   end
@@ -53,6 +54,16 @@ class Crm::Journey::ReplyService
   end
 
   private
+
+  # item 288: a resposta vale para o envio original E para os reforços dele
+  # (quem respondeu ao reforço confirmou a mesma cirurgia/consulta)
+  def mark_family(send, verdict)
+    base = send.parent_key
+    keys = [base] + (1..Crm::JourneyMessage::FOLLOWUP_MAX).map { |n| Crm::JourneySend.followup_key(base, n) }
+    Crm::JourneySend.where(journey_message_id: send.journey_message_id, event_key: keys, status: 'sent', reply: nil)
+                    .where.not(id: send.id)
+                    .find_each { |s| s.update!(reply: verdict, replied_at: send.replied_at, reply_text: send.reply_text) }
+  end
 
   def pending_send
     Crm::JourneySend.joins(:journey_message)

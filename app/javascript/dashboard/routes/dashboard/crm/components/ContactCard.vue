@@ -14,9 +14,12 @@ import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIco
 import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
 import { inboxSolidFor } from 'dashboard/helper/cevicoInboxColors.js';
 import { relativeTime } from '../helpers';
+import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 
 const props = defineProps({
   contact: { type: Object, required: true },
+  // item 283 (menu do botão direito): o quadro monta os itens do cartão
+  menu: { type: Function, default: null },
 });
 
 const emit = defineEmits(['click', 'openChat']);
@@ -27,6 +30,10 @@ const router = useRouter();
 const openPatient = () => {
   router.push(frontendURL(`accounts/${route.params.accountId}/patient/${props.contact.contact_id}`));
 };
+
+// item 283: botão direito (ou toque longo) no cartão
+const cardMenu = () =>
+  props.menu ? props.menu(props.contact, { openPatient }) : null;
 
 const { isAdmin } = useAdmin();
 const accountLabels = useMapGetter('labels/getLabels');
@@ -85,6 +92,7 @@ const channelIcon = (channelType) => {
 
 <template>
   <div
+    v-cv-menu="cardMenu"
     class="cv-crm-card cursor-pointer select-none"
     :class="unreadCount > 0 ? 'cv-crm-card-unread' : ''"
     @click="emit('click', contact)"

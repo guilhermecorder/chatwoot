@@ -1,7 +1,7 @@
 # Dados FICTÍCIOS no formato exato da Marketing API (ads, insights diários e
 # breakdowns) para testar a Central de Criativos sem conta da Meta.
 # Só entra com CEVICO_META_SIMULATE=1. Determinístico (mesmos números sempre).
-class Crm::MetaSimulator
+class Crm::MetaSimulator # rubocop:disable Metrics/ClassLength
   ADS = [
     { id: '2301', name: 'VID · Catarata · Gancho "Enxergar sem óculos"', format: 'video', hook: 0.42, hold: 0.36, ctr: 0.021, conv: 0.55, cpm: 24.0,
       status: 'ACTIVE' },
@@ -50,10 +50,42 @@ class Crm::MetaSimulator
 
   def fetch_objects(ids, _fields)
     wanted = Array(ids).map(&:to_s)
-    ALL_ADS.select { |ad| wanted.include?(ad[:id]) }.to_h { |ad| [ad[:id], ad_object(ad)] }
+    ads = ALL_ADS.select { |ad| wanted.include?(ad[:id]) }.to_h { |ad| [ad[:id], ad_object(ad)] }
+    ads.merge(video_objects(wanted))
+  end
+
+  # item 287: duração (s) fictícia do vídeo de cada anúncio — 20, 28, 36 ou 44 s
+  def self.video_length(ad_id)
+    20 + ((ad_id.to_s.delete('^0-9').to_i % 4) * 8)
+  end
+
+  # curva de retenção no formato da Meta (video_play_curve_actions): 22 valores
+  # em % das reproduções — segundos 0 a 14, depois as faixas que começam em
+  # 15, 20, 25, 30, 40, 50 e 60 s. Passa pelos mesmos marcos dos outros campos.
+  CURVE_SECONDS = ((0..14).to_a + [15, 20, 25, 30, 40, 50, 60]).freeze
+  MARK_SHARES = [[0.25, 0.78], [0.5, 0.52], [0.75, 0.31], [1.0, 0.19]].freeze
+
+  def self.play_curve(ad_id, at_3s)
+    length = video_length(ad_id)
+    anchors = [[0.0, 1.0], [1.0, (1 + at_3s) / 2.0], [3.0, at_3s]] + MARK_SHARES.map { |pos, share| [length * pos, at_3s * share] }
+    CURVE_SECONDS.map { |t| (curve_at(anchors, t, length) * 100).round }
+  end
+
+  def self.curve_at(anchors, second, length)
+    return 0.0 if second > length
+
+    left = anchors.reverse.find { |t, _| t <= second }
+    right = anchors.find { |t, _| t > second } || left
+    return left[1] if right[0] == left[0]
+
+    left[1] + ((right[1] - left[1]) * (second - left[0]) / (right[0] - left[0]))
   end
 
   private
+
+  def video_objects(wanted)
+    wanted.grep(/\Av\d+\z/).index_with { |id| { 'id' => id, 'length' => self.class.video_length(id).to_f } }
+  end
 
   def ads_rows
     ADS.map { |ad| ad_object(ad) }
@@ -183,7 +215,12 @@ class Crm::MetaSimulator
     row['date_start'] = row['date_stop'] = date_str if date_str
     return row unless ad[:hook]
 
+    plays = (impressions * 0.9).round
     row.merge(
+      'video_play_curve_actions' => [{ 'action_type' => 'video_view',
+                                       'value' => self.class.play_curve(ad[:id], (plays3 / [plays, 1].max.to_f).clamp(0, 1)) }],
+      'video_p95_watched_actions' => [{ 'action_type' => 'video_view', 'value' => (plays3 * 0.21).round.to_s }],
+      'video_30_sec_watched_actions' => [{ 'action_type' => 'video_view', 'value' => (plays3 * 0.2).round.to_s }],
       'video_play_actions' => [{ 'action_type' => 'video_view', 'value' => (impressions * 0.9).round.to_s }],
       'video_continuous_2_sec_watched_actions' => [{ 'action_type' => 'video_view', 'value' => (plays3 * 1.3).round.to_s }],
       'video_thruplay_watched_actions' => [{ 'action_type' => 'video_view', 'value' => thru.to_s }],

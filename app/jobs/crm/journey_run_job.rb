@@ -23,6 +23,8 @@ class Crm::JourneyRunJob < ApplicationJob
 
     Crm::Journey::Planner.new(account: account, now: now).perform
     Crm::Journey::Dispatcher.new(account: account, now: now).perform
+    # 🔁 item 288: reforço para quem não respondeu (desligado por padrão em cada mensagem)
+    Crm::Journey::Followup.new(account: account, now: now).perform
   rescue StandardError => e
     Rails.logger.error("[CEVICO jornada] conta #{account.id}: #{e.message}")
   ensure

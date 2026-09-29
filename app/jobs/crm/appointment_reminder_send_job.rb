@@ -35,6 +35,8 @@
 # segue travada pela cerca no CrmListener). Sem o bloco ligado, nada muda:
 # paciente de parceiro é pulado como antes.
 class Crm::AppointmentReminderSendJob < ApplicationJob
+  include Crm::AppointmentReminderFollowup
+
   queue_as :scheduled_jobs
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
@@ -64,6 +66,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
       rescue StandardError => e
         Rails.logger.error "[CEVICO lembretes] conta #{settings.account_id} #{regua}: #{e.message}"
       end
+      # 🔁 item 288: reforço para quem não respondeu ao lembrete (desligado por padrão)
+      run_followups(settings.account, cfg, now_sp)
     end
   end
 
@@ -270,14 +274,16 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
     Rails.logger.warn "[CEVICO lembretes] registro da rodada: #{e.message}"
   end
 
-  def mark_sent(contact, task, regua)
+  def mark_sent(contact, task, regua) # rubocop:disable Metrics/AbcSize
     Cevico::AttributeMerge.merge!(contact) do |attrs|
       marks = attrs['cevico_appt_reminders'] || {}
       entry = marks[task.id.to_s] || {}
       entry[regua] = Time.current.iso8601
+      # item 288: a hora da consulta no momento do lembrete (o reforço não sai se ela foi remarcada)
+      entry[Crm::AppointmentReminderFollowup.due_key(regua)] = task.due_at&.iso8601
       marks[task.id.to_s] = entry
       # poda: marcas de consultas antigas não servem pra mais nada
-      marks = marks.sort_by { |_id, e| e.values.max.to_s }.last(MAX_MARK_ENTRIES).to_h if marks.size > MAX_MARK_ENTRIES
+      marks = marks.sort_by { |_id, e| e.values.compact.max.to_s }.last(MAX_MARK_ENTRIES).to_h if marks.size > MAX_MARK_ENTRIES
       attrs.merge('cevico_appt_reminders' => marks)
     end
   end

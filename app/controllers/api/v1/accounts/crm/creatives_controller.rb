@@ -66,11 +66,22 @@ class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseContr
 
   def transcribe
     creative = Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
-    return render json: { error: 'Só anúncios em vídeo têm transcrição.' }, status: :unprocessable_entity unless creative.video?
+    return render json: { error: 'Só anúncios em vídeo têm transcrição.' }, status: :unprocessable_entity unless creative.transcribable?
 
     creative.queue_transcript!
     Crm::AdVideoTranscribeJob.perform_later(creative.id)
     render json: { enqueued: true, transcript: creative.transcript }
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'anúncio não encontrado' }, status: :not_found
+  end
+
+  # POST /crm/creatives/:ad_id/share[?preset=|from=&to=][&finance=1] — item 287: link SÓ DE LEITURA
+  # da análise deste anúncio neste período (token assinado, vale 30 dias, sem tabela nova)
+  def share
+    creative = Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
+    link = Crm::CreativeShareLink.generate(account: Current.account, ad_id: creative.ad_id, since_date: since_date,
+                                           until_date: until_date, finance: ActiveModel::Type::Boolean.new.cast(params[:finance]) == true)
+    render json: link.slice(:url, :expires_at, :expires_label, :finance, :finance_label).merge(since: since_date, until: until_date)
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'anúncio não encontrado' }, status: :not_found
   end

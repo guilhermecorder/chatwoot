@@ -148,6 +148,15 @@ const loadTemplates = async inboxId => {
 };
 const braces = key => `{{${key}}}`;
 
+// 🔁 item 288: reforço para quem não respondeu (só cirurgia/consulta;
+// desligado por padrão). Sai sempre como mensagem modelo.
+const FOLLOWUP_KINDS = ['surgery', 'appointment'];
+const FOLLOWUP_HOURS = [1, 2, 3, 4, 6, 8, 12, 24, 48];
+const followup = ref({ enabled: false, hours: 6, max: 1 });
+const fuName = ref('');
+const fuVars = ref({});
+const fuSaved = ref(null); // { template_params, message_preview } já gravado
+
 onMounted(() => {
   if (props.message) {
     const m = props.message;
@@ -188,6 +197,20 @@ onMounted(() => {
     tplVars.value = {
       ...(m.content?.template_params?.processed_params?.body || {}),
     };
+    const fu = m.content?.followup || {};
+    followup.value = {
+      enabled: fu.enabled === true,
+      hours: fu.hours || 6,
+      max: fu.max === 2 ? 2 : 1,
+    };
+    fuSaved.value = fu.template_params
+      ? {
+          template_params: fu.template_params,
+          message_preview: fu.message_preview || '',
+        }
+      : null;
+    fuName.value = fu.template_params?.name || '';
+    fuVars.value = { ...(fu.template_params?.processed_params?.body || {}) };
   } else if (props.inboxes.length === 1) {
     form.value.inbox_id = props.inboxes[0].id;
   }
@@ -209,6 +232,9 @@ const pickKind = kind => {
 const onInbox = () => {
   tplName.value = '';
   tplVars.value = {};
+  fuName.value = '';
+  fuVars.value = {};
+  fuSaved.value = null;
   loadTemplates(form.value.inbox_id);
 };
 const currentTpl = computed(
@@ -236,6 +262,83 @@ watch(tplName, name => {
   });
   tplVars.value = next;
 });
+// ── reforço (item 288) ──
+const canFollowup = computed(() =>
+  FOLLOWUP_KINDS.includes(form.value.trigger.kind)
+);
+const fuTpl = computed(
+  () => templates.value.find(t => t.name === fuName.value) || null
+);
+const fuBody = computed(
+  () =>
+    fuTpl.value?.components?.find(c => c.type === 'BODY')?.text ||
+    (fuSaved.value?.template_params?.name === fuName.value
+      ? fuSaved.value.message_preview
+      : '') ||
+    ''
+);
+const fuTokens = computed(() => {
+  const out = [];
+  const re = /\{\{\s*(\d+)\s*\}\}/g;
+  let m = re.exec(fuBody.value);
+  while (m !== null) {
+    if (!out.includes(m[1])) out.push(m[1]);
+    m = re.exec(fuBody.value);
+  }
+  return out;
+});
+const onPickFollowupTpl = () => {
+  const next = {};
+  fuTokens.value.forEach((k, i) => {
+    next[k] = fuVars.value[k] || DEFAULT_MAP[i] || '';
+  });
+  fuVars.value = next;
+};
+const insertFollowupToken = (key, token) => {
+  fuVars.value = { ...fuVars.value, [key]: `{{${token}}}` };
+};
+const followupPreview = computed(() => {
+  let text = fuBody.value;
+  Object.entries(fuVars.value).forEach(([k, v]) => {
+    text = text.replace(
+      new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, 'g'),
+      v || `{{${k}}}`
+    );
+  });
+  return text;
+});
+const followupTemplate = () => {
+  const tpl = fuTpl.value;
+  if (tpl) {
+    return {
+      template_params: {
+        name: tpl.name,
+        namespace: tpl.namespace ?? '',
+        language: tpl.language,
+        category: tpl.category,
+        processed_params: { body: { ...fuVars.value } },
+      },
+      message_preview: fuBody.value,
+    };
+  }
+  if (fuName.value && fuSaved.value?.template_params?.name === fuName.value) {
+    return {
+      template_params: {
+        ...fuSaved.value.template_params,
+        processed_params: { body: { ...fuVars.value } },
+      },
+      message_preview: fuSaved.value.message_preview,
+    };
+  }
+  return null;
+};
+const followupPayload = () => ({
+  enabled: canFollowup.value && followup.value.enabled,
+  hours: followup.value.hours,
+  max: followup.value.max,
+  ...(followupTemplate() || {}),
+});
+
 const insertToken = (key, token) => {
   tplVars.value = { ...tplVars.value, [key]: `{{${token}}}` };
 };
@@ -274,6 +377,7 @@ const buildPayload = () => {
       content.message_preview = tplBody.value;
     }
   }
+  content.followup = followupPayload();
   return {
     ...form.value,
     content,
@@ -313,6 +417,8 @@ const stepError = computed(() => {
       return 'Escolha a mensagem modelo.';
     if (form.value.content.mode === 'text' && !form.value.content.text.trim())
       return 'Escreva o texto.';
+    if (canFollowup.value && followup.value.enabled && !followupTemplate())
+      return 'Escolha a mensagem modelo do reforço.';
   }
   return '';
 });
@@ -828,6 +934,142 @@ const inputClass =
               </template>
               <template v-else>{{ preview.message }}</template>
             </p>
+          </div>
+
+          <!-- 🔁 reforço para quem não respondeu (item 288) -->
+          <div
+            v-if="canFollowup"
+            class="rounded-xl border p-3 space-y-2.5"
+            :class="
+              followup.enabled
+                ? 'border-teal-300 bg-teal-50/60 dark:border-teal-700 dark:bg-teal-900/10'
+                : 'border-n-weak'
+            "
+          >
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                v-model="followup.enabled"
+                type="checkbox"
+                style="margin: 0"
+              />
+              <span
+                class="text-xs font-semibold text-n-slate-12 flex items-center gap-1.5"
+              >
+                <span class="i-lucide-repeat-2" /> Reforço para quem não
+                respondeu
+              </span>
+            </label>
+            <p class="text-[11px] text-n-slate-10">
+              {{
+                followup.enabled
+                  ? 'Se o paciente não escrever nada depois desta mensagem, ele recebe a mensagem modelo abaixo. Quem respondeu, confirmou, cancelou ou mudou de data não recebe.'
+                  : 'Desligado: quem não responde não recebe mais nada.'
+              }}
+            </p>
+            <template v-if="followup.enabled">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs font-medium text-n-slate-11 block mb-1"
+                    >Esperar sem resposta</label
+                  >
+                  <select
+                    v-model.number="followup.hours"
+                    :class="inputClass"
+                    style="margin-bottom: 0"
+                  >
+                    <option v-for="h in FOLLOWUP_HOURS" :key="h" :value="h">
+                      {{ h }} hora{{ h > 1 ? 's' : '' }}
+                    </option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-n-slate-11 block mb-1"
+                    >Quantos reforços</label
+                  >
+                  <select
+                    v-model.number="followup.max"
+                    :class="inputClass"
+                    style="margin-bottom: 0"
+                  >
+                    <option :value="1">1 reforço</option>
+                    <option :value="2">2 reforços</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1"
+                  >Mensagem modelo do reforço</label
+                >
+                <select
+                  v-model="fuName"
+                  :class="inputClass"
+                  :disabled="!form.inbox_id || isLoadingTemplates"
+                  @change="onPickFollowupTpl"
+                >
+                  <option value="">
+                    {{
+                      isLoadingTemplates
+                        ? 'Carregando modelos…'
+                        : 'Escolha o modelo…'
+                    }}
+                  </option>
+                  <option
+                    v-if="fuName && !templates.some(t => t.name === fuName)"
+                    :value="fuName"
+                  >
+                    {{ fuName }} (salva)
+                  </option>
+                  <option
+                    v-for="t in templates"
+                    :key="`fu-${t.name}-${t.language}`"
+                    :value="t.name"
+                  >
+                    {{ t.name }} · {{ t.language }} · {{ t.category }}
+                  </option>
+                </select>
+              </div>
+              <div v-if="fuTokens.length" class="space-y-2">
+                <div
+                  v-for="k in fuTokens"
+                  :key="`fu-${k}`"
+                  class="flex items-center gap-2 flex-wrap"
+                >
+                  <span class="text-xs font-mono text-n-slate-10 w-10">
+                    {{ braces(k) }}
+                  </span>
+                  <input
+                    v-model="fuVars[k]"
+                    :class="inputClass"
+                    class="!w-56 !mb-0"
+                    style="margin-bottom: 0"
+                  />
+                  <div class="flex gap-1 flex-wrap">
+                    <button
+                      v-for="tok in tokens"
+                      :key="`fu-${k}-${tok}`"
+                      type="button"
+                      class="text-[10px] px-1.5 py-0.5 rounded-full border border-n-weak text-n-slate-11 hover:border-teal-600 hover:text-teal-700"
+                      :title="TOKEN_HINTS[tok]"
+                      @click="insertFollowupToken(k, tok)"
+                    >
+                      {{ tok }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div
+                v-if="followupPreview"
+                class="rounded-2xl rounded-tl-sm bg-[#DCF8C6] dark:bg-teal-900/40 text-n-slate-12 text-sm px-3 py-2 whitespace-pre-wrap max-w-md"
+              >
+                {{ followupPreview }}
+              </div>
+              <p class="text-[11px] text-n-slate-10">
+                Só sai entre 07h e 20h: se a hora cair de noite, vai às 07h do
+                dia seguinte. Nunca depois do horário da cirurgia ou consulta.
+                Cada reforço sai uma única vez; o 2º conta as horas a partir do
+                1º. Aparece no histórico como "Reforço".
+              </p>
+            </template>
           </div>
         </template>
       </div>

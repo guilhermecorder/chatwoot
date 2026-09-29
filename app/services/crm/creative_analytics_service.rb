@@ -56,7 +56,7 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
   # rubocop:enable Metrics/AbcSize
 
   # ── Um anúncio a fundo ────────────────────────────────────────────────────
-  def detail(ad_id) # rubocop:disable Metrics/AbcSize
+  def detail(ad_id) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     creative = Crm::AdCreative.with_attached_thumbnail.find_by!(account_id: @account.id, ad_id: ad_id.to_s)
     list = daily_by_ad[creative.ad_id] || []
     row = row_for(creative, list)
@@ -64,15 +64,40 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
     row[:diagnosis] = diagnosis_for(row, averages)
     row[:prev] = prev_for(creative.ad_id)
     row[:spark] = spark_for(creative.ad_id)
-    serialize_row(row).merge(
+    scorecard = Crm::CreativeScorecard.new(rates: row[:rates], averages: averages, records: ad_records, ad_id: creative.ad_id)
+    data = serialize_row(row).merge(
       averages: averages, targets: targets,
       daily: daily_series(list),
       halves: halves_for(list),
       summary: breakdown('summary', creative.ad_id)[:rows]&.first,
       placements: breakdown('placement', creative.ad_id),
       age_gender: breakdown('age_gender', creative.ad_id),
-      assets: creative.dynamic? ? assets_for(creative.ad_id) : nil
+      assets: creative.dynamic? ? assets_for(creative.ad_id) : nil,
+      # 📉 item 287: curva segundo a segundo, maior queda, fala por trecho e cliques por marco
+      retention_detail: retention_detail(creative, list),
+      # 🎯 rodada 3: indicadores e teia contra a MÉDIA e o RECORDE da conta (sem o "bom")
+      scorecard: scorecard.call, average_reading: { full: scorecard.reading, without_money: scorecard.reading(money: false) }
     )
+    # 🥇 rodada 3: os "mais" e os "menos" de onde apareceu e de quem viu
+    data = data.merge(placement_ranking: Crm::BreakdownHighlights.new(data[:placements][:rows], kind: 'placement').call,
+                      audience_ranking: Crm::BreakdownHighlights.new(data[:age_gender][:rows], kind: 'audience').call)
+    # 📋 item 287: o mesmo texto limpo do link de leitura ("Copiar análise completa")
+    # (a tela interna é de quem está logado: o texto sai COM os dados financeiros)
+    data.merge(analysis_text: Crm::CreativeSharePayload.new(data, since_date: @since_date, until_date: @until_date, finance: true).text)
+  end
+
+  def ad_records
+    Crm::CreativeRecords.new(account: @account).ad_records
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO criativos] recordes da conta: #{e.message}"
+    {}
+  end
+
+  def retention_detail(creative, list)
+    Crm::AdRetentionCurve.new(creative: creative, list: list, account_list: all_rows.flat_map { |r| daily_by_ad[r[:creative].ad_id] || [] }).call
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO criativos] curva detalhada do anúncio #{creative.ad_id}: #{e.message}"
+    nil
   end
 
   # campeões do recorte: menor custo por conversa, melhor gancho, corpo, CTA e conversa
@@ -464,12 +489,13 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
       campaign_name: c.campaign_name, status: c.effective_status, format: c.format, format_label: c.format_label,
       hook: c.hook, body: c.body, cta: c.cta, cta_label: Crm::AdCreativeParser.cta_label(c.cta),
       # 🎬 item 181: de onde vem o texto (video | ad) + o que o vídeo fala
-      text_source: c.text_source, video_cta: c.video_cta, ad_hook: c.ad_hook, ad_body: c.ad_body,
-      transcript: c.transcript.slice('status', 'error', 'text', 'angle', 'transcribed_at'),
+      text_source: c.text_source, transcribable: c.transcribable?, video_cta: c.video_cta, ad_hook: c.ad_hook, ad_body: c.ad_body,
+      transcript: c.transcript.slice('status', 'error', 'text', 'angle', 'transcribed_at', 'segments', 'duration'),
+      video_length: c.creative['video_length'],
       description: c.creative['description'], thumbnail_url: c.thumbnail_src, thumbnail_stored: c.thumbnail_stored?,
       permalink: c.creative['permalink'], video_id: c.creative['video_id'],
       titles: c.creative['titles'] || [], bodies: c.creative['bodies'] || [], ctas: c.creative['ctas'] || [],
-      days: row[:days], totals: row[:totals].except('actions'), rates: row[:rates], funnel: row[:funnel],
+      days: row[:days], totals: row[:totals].except('actions', 'play_curve'), rates: row[:rates], funnel: row[:funnel],
       diagnosis: row[:diagnosis], spark: row[:spark], prev: row[:prev], champion_of: row[:champion_of] || []
     }
   end

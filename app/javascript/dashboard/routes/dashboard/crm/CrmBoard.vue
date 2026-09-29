@@ -13,6 +13,7 @@ import ColumnPresetsModal from './components/ColumnPresetsModal.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import SkeletonPiece from 'dashboard/components-next/cevico/SkeletonPiece.vue';
 import ContactAPI from 'dashboard/api/contacts';
+import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import {
   inboxGradientFor,
   inboxSolidFor,
@@ -961,6 +962,65 @@ const onStageDrop = async ({ stageId, contacts }) => {
   });
 };
 
+// ── 🖱️ item 283 (29/09): MENU DO BOTÃO DIREITO do cartão ──
+// Só atalhos para o que o quadro já faz: abrir a ficha (clique), conversa e
+// Espaço do Paciente (botões do cartão), mudar de coluna (o mesmo caminho
+// do arrastar) e copiar nome/telefone.
+const copyToClipboard = async (text, okMessage) => {
+  try {
+    await copyTextToClipboard(text);
+    useAlert(okMessage);
+  } catch {
+    useAlert('Não foi possível copiar.');
+  }
+};
+const cardMenu = (contact, { openPatient } = {}) => {
+  if (!contact) return null;
+  const stages = selectedPipeline.value?.stages ?? [];
+  const current = stages.find(s => s.id === contact.stage_id);
+  return {
+    title: contact.name || 'Paciente',
+    subtitle: current ? `Coluna: ${current.name}` : contact.phone_number || '',
+    items: [
+      { label: 'Abrir a ficha', icon: 'i-lucide-square-pen', action: () => { selectedContact.value = contact; } },
+      {
+        label: contact.last_conversation_id ? 'Abrir a conversa' : 'Iniciar conversa',
+        icon: 'i-lucide-message-circle-more',
+        action: () => openChat(contact),
+      },
+      openPatient && contact.contact_id && {
+        label: 'Abrir o Espaço do Paciente',
+        icon: 'i-lucide-user-round',
+        action: () => openPatient(),
+      },
+      { separator: true },
+      {
+        label: 'Mover para a coluna',
+        icon: 'i-lucide-arrow-right-left',
+        children: stages
+          .filter(s => s.id !== contact.stage_id)
+          .map(s => ({
+            label: s.name,
+            icon: 'i-lucide-columns-3',
+            action: () => onStageDrop({ stageId: s.id, contacts: [contact] }),
+          })),
+      },
+      { separator: true },
+      contact.phone_number && {
+        label: 'Copiar telefone',
+        icon: 'i-lucide-phone',
+        hint: contact.phone_number,
+        action: () => copyToClipboard(contact.phone_number, 'Telefone copiado ✓'),
+      },
+      contact.name && {
+        label: 'Copiar nome',
+        icon: 'i-lucide-copy',
+        action: () => copyToClipboard(contact.name, 'Nome copiado ✓'),
+      },
+    ],
+  };
+};
+
 // --- Add contact modal ---
 
 const openAddContact = (stageId) => {
@@ -1775,6 +1835,7 @@ const createAndAddContact = async () => {
             :edit-mode="isEditMode"
             :programming-mode="isProgrammingMode"
             :all-stages="selectedPipeline.stages"
+            :card-menu="cardMenu"
             @card-click="selectedContact = $event"
             @stage-drop="onStageDrop"
             @add-contact="openAddContact"

@@ -173,7 +173,9 @@ class Crm::Call < ApplicationRecord
 
   # hash usado no JSON da API, no cable e no card da conversa (§4 do contrato);
   # include_events (só no detalhe, item 176) traz a linha do tempo crua
-  def to_payload(include_sdp: false, include_events: false)
+  # crm (item 281): coluna do CRM, caixa de origem e consultas de quem liga —
+  # nas listas vem pronto em lote (Crm::Call.payloads); false = não levar
+  def to_payload(include_sdp: false, include_events: false, crm: nil)
     payload = {
       id: id, meta_call_id: meta_call_id, direction: direction, status: status, end_reason: end_reason,
       started_at: started_at&.iso8601, answered_at: answered_at&.iso8601, ended_at: ended_at&.iso8601,
@@ -181,7 +183,30 @@ class Crm::Call < ApplicationRecord
     }.merge(identity_payload, ai_payload, people_payload, media_payload)
     payload[:sdp_offer] = sdp_offer if include_sdp
     payload[:events] = Array(events) if include_events
-    payload
+    with_crm(payload, crm)
+  end
+
+  # item 281: várias chamadas de uma vez sem repetir consulta no banco
+  def self.payloads(calls, account)
+    calls = calls.to_a
+    context = Crm::Calls::PatientContext.for_contacts(account, calls.map(&:contact_id))
+    calls.map { |call| call.to_payload(crm: context[call.contact_id] || {}) }
+  end
+
+  def with_crm(payload, crm)
+    return payload if crm == false
+
+    payload.merge(crm: crm || crm_payload)
+  end
+
+  # quem liga não pode travar a chamada: se a leitura do CRM falhar, vai sem
+  def crm_payload
+    return {} unless contact_id
+
+    Crm::Calls::PatientContext.for_contact(account, contact_id) || {}
+  rescue StandardError => e
+    Rails.logger.warn("[cevico_calls] contexto do paciente falhou: #{e.message}")
+    {}
   end
 
   # texto humano do card na conversa

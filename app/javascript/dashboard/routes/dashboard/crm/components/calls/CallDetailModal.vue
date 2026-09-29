@@ -3,6 +3,7 @@
 // transcrição/resumo e ações — abrir conversa/paciente, retornar ligação,
 // marcar como retornada, transcrever. Modal do kit (.cv-modal).
 import { computed, ref } from 'vue';
+import CallPatientContext from 'dashboard/components-next/cevico/calls/CallPatientContext.vue';
 import {
   callIcon,
   callTitle,
@@ -117,6 +118,8 @@ const timeline = computed(() =>
         </div>
 
         <div class="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-5">
+          <!-- item 281: quem é o paciente (coluna do CRM, origem, consultas) -->
+          <CallPatientContext :call="c" class="cv-sub p-3" />
           <!-- resumo em números -->
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div class="cv-stat text-center">

@@ -38,7 +38,7 @@ class Crm::Journey::Dispatcher
   def dispatch(send)
     message = send.journey_message
     contact = send.contact
-    blocked = blocker_for(message, contact)
+    blocked = blocker_for(message, contact) || followup_blocker(send)
     return finish(send, blocked[0], blocked[1]) if blocked
 
     inbox = message.inbox || account.inboxes.find_by(id: message.inbox_id)
@@ -51,11 +51,12 @@ class Crm::Journey::Dispatcher
   end
 
   # texto final que o paciente lê (modelo com as variáveis trocadas)
-  def preview_text(message, values)
-    return Crm::Journey::Variables.substitute(message.text, values) if message.mode == 'text'
+  def preview_text(message, values, followup: false) # rubocop:disable Metrics/CyclomaticComplexity
+    return Crm::Journey::Variables.substitute(message.text, values) if message.mode == 'text' && !followup
 
-    body = (message.template_params || {}).dig('processed_params', 'body') || {}
-    base = message.message_preview.presence || message.name
+    params, preview = followup ? [message.followup_template_params, message.followup_preview] : [message.template_params, message.message_preview]
+    body = (params || {}).dig('processed_params', 'body') || {}
+    base = preview.presence || message.name
     text = body.reduce(base) { |acc, (k, v)| acc.gsub("{{#{k}}}", Crm::Journey::Variables.substitute(v, values)) }
     text.gsub('{{contact.name}}', values['nome'].to_s)
   end
@@ -64,12 +65,34 @@ class Crm::Journey::Dispatcher
 
   def deliver(send, message, inbox, contact)
     values = Crm::Journey::Variables.build(send.source, contact, settings)
-    conversation = message.mode == 'text' ? send_text(message, inbox, contact, values) : send_template(message, inbox, contact, values)
+    conversation = deliver_by_kind(send, message, inbox, contact, values)
     return finish(send, 'failed', @last_error || 'O envio não saiu (veja a caixa e o modelo)') if conversation.nil?
 
     send.update!(status: 'sent', sent_at: Time.current, conversation: conversation, variables: values,
-                 preview: preview_text(message, values), error: nil)
+                 preview: preview_text(message, values, followup: send.followup?), error: nil)
     :sent
+  end
+
+  # 🔁 item 288: o reforço sai SEMPRE como mensagem modelo (a do reforço)
+  def deliver_by_kind(send, message, inbox, contact, values)
+    return send_followup(send, message, inbox, contact, values) if send.followup?
+
+    message.mode == 'text' ? send_text(message, inbox, contact, values) : send_template(message, inbox, contact, values)
+  end
+
+  def send_followup(send, message, inbox, contact, values)
+    params = Crm::Journey::Variables.apply(message.followup_template_params, values)
+    source = Crm::TemplateSource.new(account, inbox, nil, params, message.followup_preview,
+                                     "Reforço #{send.followup_number} · #{message.name}")
+    Crm::SendTemplateService.new(source: source, contact: contact).perform
+  end
+
+  # o reforço só sai se AINDA faz sentido (vale também para "reenviar" na tela)
+  def followup_blocker(send)
+    return nil unless send.followup?
+
+    why = Crm::Journey::Followup.new(account: account, now: now).blocker_for(send)
+    why && ['skipped', why]
   end
 
   # [status, motivo] quando o envio não deve sair; nil quando pode

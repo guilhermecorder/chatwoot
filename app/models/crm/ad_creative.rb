@@ -58,6 +58,11 @@ class Crm::AdCreative < ApplicationRecord
     format == 'dynamic'
   end
 
+  # item 286: tem vídeo para transcrever? (anúncio em vídeo OU dinâmico que carrega um vídeo)
+  def transcribable?
+    video? || creative['video_id'].present?
+  end
+
   # 🎬 v2.1 (item 181): o gancho/corpo/CTA de um VÍDEO vêm da transcrição
   # (o que o vídeo fala); o texto do anúncio fica como reserva. `text_source`
   # diz de onde veio ('video' | 'ad').
@@ -93,7 +98,8 @@ class Crm::AdCreative < ApplicationRecord
 
   # marca "na fila" antes de enfileirar o job (a tela mostra o estado)
   def queue_transcript!
-    update!(creative: creative.merge('transcript' => transcript.merge('status' => 'queued', 'error' => nil)))
+    queued = transcript.merge('status' => 'queued', 'error' => nil, 'retry' => nil, 'status_at' => Time.current.iso8601)
+    update!(creative: creative.merge('transcript' => queued))
   end
 
   def ad_hook

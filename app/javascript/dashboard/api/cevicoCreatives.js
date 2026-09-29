@@ -47,6 +47,11 @@ class CevicoCreativesAPI extends ApiClient {
     return axios.post(`${this.url}/${adId}/transcribe`);
   }
 
+  // 🔗 item 287: link só de leitura da análise (vale 30 dias)
+  share(adId, params) {
+    return axios.post(`${this.url}/${adId}/share`, null, { params });
+  }
+
   exportCsv(params) {
     return axios.get(`${this.url}/export`, { params, responseType: 'blob' });
   }

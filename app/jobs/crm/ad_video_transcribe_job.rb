@@ -5,10 +5,21 @@
 class Crm::AdVideoTranscribeJob < ApplicationJob
   queue_as :low
   LIMIT = 25
+  # item 286: "na fila"/"transcrevendo" há mais que isso = travou (deploy no meio, fila caiu) → tenta de novo
+  STUCK_AFTER = 20.minutes
+  # nunca pediu, falhou, travou, ou foi pulado por um motivo passageiro (faltava a chave do Gemini)
+  PENDING_SQL = <<~SQL.squish.freeze
+    coalesce(creative -> 'transcript' ->> 'status', '') IN ('', 'failed')
+    OR (creative -> 'transcript' ->> 'status' IN ('queued', 'processing')
+        AND coalesce(creative -> 'transcript' ->> 'status_at', '1970-01-01') < :stuck)
+    OR (creative -> 'transcript' ->> 'status' = 'skipped'
+        AND (creative -> 'transcript' ->> 'retry' = 'true' OR creative -> 'transcript' ->> 'error' LIKE 'Configure a chave%'))
+  SQL
 
   def self.pending_for(account, limit: LIMIT)
-    Crm::AdCreative.where(account_id: account.id, format: 'video')
-                   .where("coalesce(creative -> 'transcript' ->> 'status', '') NOT IN ('done', 'processing', 'skipped')")
+    Crm::AdCreative.where(account_id: account.id)
+                   .where("format = 'video' OR coalesce(creative ->> 'video_id', '') <> ''")
+                   .where(PENDING_SQL, stuck: STUCK_AFTER.ago.iso8601)
                    .order(synced_at: :desc).limit(limit)
   end
 

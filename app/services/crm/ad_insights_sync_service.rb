@@ -4,7 +4,7 @@
 # Roda de madrugada (Crm::AdInsightsSyncJob) e pelo botão "Atualizar dados".
 # Estado em meta_ads_config['creatives_sync'] (synced_at, running_since, last_error,
 # progress {done,total,since,until} durante a carga longa, recovered, history_days).
-class Crm::AdInsightsSyncService
+class Crm::AdInsightsSyncService # rubocop:disable Metrics/ClassLength
   INSIGHT_FIELDS = %w[
     ad_id ad_name adset_id adset_name campaign_id campaign_name
     spend impressions reach frequency clicks inline_link_clicks actions cost_per_action_type
@@ -12,6 +12,11 @@ class Crm::AdInsightsSyncService
     video_p75_watched_actions video_p100_watched_actions video_avg_time_watched_actions
     video_continuous_2_sec_watched_actions
   ].freeze
+  # item 287: curva de retenção segundo a segundo + quem passou de 95 % e de 30 s.
+  # Pedidos à parte: se a Meta recusar algum, a carga volta para INSIGHT_FIELDS
+  # (as métricas de vídeo de sempre continuam chegando).
+  CURVE_FIELDS = %w[video_play_curve_actions video_p95_watched_actions video_30_sec_watched_actions].freeze
+  DETAILED_FIELDS = (INSIGHT_FIELDS + CURVE_FIELDS).freeze
   BASIC_FIELDS = %w[ad_id ad_name adset_id adset_name campaign_id campaign_name
                     spend impressions reach frequency clicks inline_link_clicks actions cost_per_action_type].freeze
   AD_FIELDS = 'id,name,effective_status,adset{id,name},campaign{id,name},' \
@@ -44,6 +49,7 @@ class Crm::AdInsightsSyncService
     ads = sync_creatives
     rows = load_windows
     recovered = recover_missing_creatives
+    sync_video_lengths
     write_done_state(ads, rows, recovered)
     Crm::AdCreativeMediaJob.perform_later(@account.id)
     Crm::AdVideoTranscribeJob.enqueue_pending(@account) # 🎬 item 181
@@ -113,13 +119,38 @@ class Crm::AdInsightsSyncService
 
   # a transcrição do vídeo (item 181) mora em creative['transcript'] e NÃO vem
   # da Meta: a carga preserva o que já foi transcrito
+  # (item 287: a duração do vídeo, `video_length`, também é guardada à parte e preservada)
+  KEEP_KEYS = %w[transcript video_length].freeze
+
   def keep_transcripts!(rows)
     ids = rows.pluck(:ad_id)
     existing = Crm::AdCreative.where(account_id: @account.id, ad_id: ids).pluck(:ad_id, :creative).to_h
     rows.each do |row|
-      transcript = existing.dig(row[:ad_id], 'transcript')
-      row[:creative] = row[:creative].merge('transcript' => transcript) if transcript.present?
+      kept = (existing[row[:ad_id]] || {}).slice(*KEEP_KEYS).compact_blank
+      row[:creative] = row[:creative].merge(kept) if kept.present?
     end
+  end
+
+  # ── 1b) duração dos vídeos (item 287) ─────────────────────────────────────
+  # o eixo da curva de retenção é em segundos; os marcos 25/50/75/100 % só
+  # viram segundo quando se sabe quanto o vídeo dura (`length` do vídeo na Meta).
+  # Nunca derruba a carga: sem a duração a tela avisa e usa uma estimativa.
+  def sync_video_lengths
+    pending = Crm::AdCreative.where(account_id: @account.id)
+                             .where("coalesce(creative ->> 'video_id', '') <> '' AND coalesce(creative ->> 'video_length', '') = ''")
+                             .limit(300).to_a
+    return 0 if pending.empty?
+
+    found = @graph.fetch_objects(pending.map { |c| c.creative['video_id'] }, 'length')
+    pending.count do |creative|
+      length = found.dig(creative.creative['video_id'].to_s, 'length').to_f
+      next false unless length.positive?
+
+      creative.update_column(:creative, creative.creative.merge('video_length' => length.round(1))) # rubocop:disable Rails/SkipsModelValidations
+    end
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO criativos] duração dos vídeos: #{e.message}"
+    0
   end
 
   def creative_row(ad_row, now)
@@ -144,13 +175,7 @@ class Crm::AdInsightsSyncService
   # se a Meta recusar algum campo de vídeo, refaz só com o básico (a tela
   # fica sem gancho/retenção até acertarmos o campo, mas não fica sem dados)
   def sync_insights(w_since = since_date, w_until = @until_date)
-    raw = begin
-      @graph.fetch_all('insights', insights_query(w_since, w_until), max_pages: 60)
-    rescue Crm::MetaGraph::Error => e
-      Rails.logger.warn "[CEVICO criativos] /insights completo recusado (#{e.message}); refazendo com campos básicos"
-      write_state('last_warning' => "Meta recusou as métricas de vídeo: #{e.message}")
-      @graph.fetch_all('insights', insights_query(w_since, w_until, BASIC_FIELDS), max_pages: 60)
-    end
+    raw = fetch_insights(w_since, w_until)
     now = Time.current
     rows = raw.filter_map { |row| insight_row(row, now) }
     ensure_creatives_for(raw, now)
@@ -158,6 +183,24 @@ class Crm::AdInsightsSyncService
       Crm::AdInsight.upsert_all(slice, unique_by: [:account_id, :ad_id, :date]) # rubocop:disable Rails/SkipsModelValidations
     end
     rows.size
+  end
+
+  # três degraus: com a curva detalhada (item 287) → métricas de vídeo de
+  # sempre → só o básico. Cada recusa da Meta desce um degrau e fica no aviso.
+  def fetch_insights(w_since, w_until)
+    @graph.fetch_all('insights', insights_query(w_since, w_until, DETAILED_FIELDS), max_pages: 60)
+  rescue Crm::MetaGraph::Error => e
+    Rails.logger.warn "[CEVICO criativos] /insights com a curva detalhada recusado (#{e.message}); refazendo sem a curva"
+    write_state('last_warning' => "Meta recusou a curva detalhada do vídeo: #{e.message}")
+    fetch_insights_without_curve(w_since, w_until)
+  end
+
+  def fetch_insights_without_curve(w_since, w_until)
+    @graph.fetch_all('insights', insights_query(w_since, w_until), max_pages: 60)
+  rescue Crm::MetaGraph::Error => e
+    Rails.logger.warn "[CEVICO criativos] /insights completo recusado (#{e.message}); refazendo com campos básicos"
+    write_state('last_warning' => "Meta recusou as métricas de vídeo: #{e.message}")
+    @graph.fetch_all('insights', insights_query(w_since, w_until, BASIC_FIELDS), max_pages: 60)
   end
 
   def insights_query(w_since, w_until, fields = INSIGHT_FIELDS)

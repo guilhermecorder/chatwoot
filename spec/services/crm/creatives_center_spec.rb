@@ -232,6 +232,53 @@ RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
       expect(Crm::AdVideoTranscribeJob.pending_for(account).pluck(:ad_id)).not_to include('2304', '2305')
     end
 
+    it 'item 289: agendamento NÃO vira cirurgia; cada degrau cabe no anterior e o CAC nunca fica abaixo do custo da consulta' do
+      pipeline = Crm::Pipeline.create!(account: account, name: 'Jornada', position: 0)
+      names = ['Novos Contatos', 'Agendamento de Consulta', 'Consulta Realizada', 'Cirurgia Agendada', 'Cirurgia Realizada']
+      stages = names.each_with_index.to_h { |name, i| [name, Crm::Stage.create!(pipeline: pipeline, name: name, position: i)] }
+      # a configuração de produção que causava o erro: agendamento como "conversão"
+      CrmSetting.find_or_create_by!(account: account).update!(
+        meta_ads_config: { 'conversion_stage_ids' => [stages['Agendamento de Consulta'].id, stages['Cirurgia Realizada'].id] }
+      )
+      leads = Array.new(5) do |i|
+        create(:contact, account: account, phone_number: "+55119777000#{i}",
+                         additional_attributes: { 'meta_ads' => { 'source_id' => '2301', 'captured_at' => 3.days.ago.iso8601 } })
+      end
+      put = ->(contact, name, value = nil) { Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stages[name], value: value) }
+      put.call(leads[0], 'Agendamento de Consulta', 8000)
+      put.call(leads[1], 'Consulta Realizada', 8000)
+      put.call(leads[2], 'Cirurgia Agendada', 8000)
+      put.call(leads[3], 'Cirurgia Realizada', 9000)
+
+      row = service.overview[:rows].find { |r| r[:ad_id] == '2301' }
+
+      expect(row[:funnel]).to include(leads: 5, booked: 4, attended: 3, surgeries: 1, revenue: 9000.0)
+      expect(row[:funnel][:sources]).to include(booked_crm: 4, booked_agenda: 0, surgeries_crm: 1, surgeries_of: 0)
+      expect(row[:rates]['cost_surgery']).to be > row[:rates]['cost_booked']
+    end
+
+    it 'item 286: pulado por falta de chave, falha e fila travada voltam a ser tentados; dinâmico com vídeo também' do
+      video = Crm::AdCreative.find_by!(account: account, ad_id: '2304')
+      set = ->(fields) { video.update!(creative: video.creative.merge('transcript' => fields)) }
+      pending = -> { Crm::AdVideoTranscribeJob.pending_for(account).pluck(:ad_id) }
+
+      set.call('status' => 'skipped', 'error' => Crm::AdVideoTranscriptionService::NO_KEY)
+      expect(pending.call).to include('2304')
+      set.call('status' => 'skipped', 'error' => 'Este anúncio não tem vídeo identificado na Meta.')
+      expect(pending.call).not_to include('2304')
+      set.call('status' => 'failed', 'error' => 'Gemini respondeu com erro 503')
+      expect(pending.call).to include('2304')
+      set.call('status' => 'processing', 'status_at' => 2.minutes.ago.iso8601)
+      expect(pending.call).not_to include('2304')
+      set.call('status' => 'processing', 'status_at' => 1.hour.ago.iso8601)
+      expect(pending.call).to include('2304')
+
+      image = Crm::AdCreative.find_by!(account: account, ad_id: '2305')
+      image.update!(format: 'dynamic', creative: image.creative.merge('video_id' => '998877'))
+      expect(image.transcribable?).to be(true)
+      expect(pending.call).to include('2305')
+    end
+
     it 'respeita parâmetros editados pelo admin' do
       settings.update!(meta_ads_config: settings.meta_ads_config.merge('creative_targets' => { 'hook_rate' => { 'good' => 0.6, 'bad' => 0.5 } }))
       row = service.overview[:rows].find { |r| r[:ad_id] == '2304' }
@@ -263,6 +310,200 @@ RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
       expect(targets['hook_rate']['source']).to eq('auto')
       expect(targets['hook_rate']['good']).to be_within(0.0001).of((hook[:best_week][:value] * 1.05).round(4))
       expect(targets['cost_conversation']['good']).to be < targets['cost_conversation']['record']
+    end
+
+    it 'item 287: a curva detalhada (segundo a segundo) entra no detalhe, com marcos, maior queda, média e cliques' do
+      creative = Crm::AdCreative.find_by!(account: account, ad_id: '2301')
+      expect(creative.creative['video_length']).to eq(28.0) # duração veio na carga (simulação)
+      expect(Crm::AdInsight.find_by(account: account, ad_id: '2301').metrics).to include('play_curve', 'plays', 'p95', 'plays_30s')
+
+      curve = service.detail('2301')[:retention_detail]
+      expect(curve).to include(source: 'meta_curve', axis: 'seconds', base: 'plays', duration: 28.0, duration_estimated: false, curve_days: 30)
+      expect(curve[:points].first).to include(t: 0, pct: 1.0)
+      expect(curve[:points].last).to include(t: 28.0, label: 'fim')
+      expect(curve[:points].size).to be > 15
+      expect(curve[:points].pluck(:pct)).to eq(curve[:points].pluck(:pct).sort.reverse) # só desce
+      expect(curve[:points].first[:people]).to eq(curve[:base_total])
+      expect(curve[:average].size).to be > 10
+      expect(curve[:marks].pluck(:key)).to eq(%w[3s p25 p50 p75 p100])
+      expect(curve[:marks].pluck(:t)).to eq([3, 7.0, 14.0, 21.0, 28.0])
+      expect(curve[:biggest_drop]).to include(:from_label, :to_label, :drop, :people_lost)
+      expect(curve[:biggest_drop_after_hook][:from_t]).to be >= 3
+
+      # rodada 2: as 3 a 5 maiores quedas, numeradas, sem trechos vizinhos e só as que contam
+      drops = curve[:top_drops]
+      expect(drops.size).to be_between(3, 5)
+      expect(drops.pluck(:rank)).to eq((1..drops.size).to_a)
+      expect(drops.first.slice(:from_t, :to_t, :drop)).to eq(curve[:biggest_drop].slice(:from_t, :to_t, :drop))
+      expect(drops.pluck(:drop)).to all(be >= 0.01)
+      expect(drops).to all(include(:from_label, :to_label, :from_pct, :to_pct, :people_lost, :after_hook))
+      starts = drops.pluck(:from_t).sort
+      expect(starts.each_cons(2).map { |a, b| b - a }).to all(be > 1)
+
+      clicks = curve[:clicks]
+      expect(clicks[:note]).to include('não informa em que segundo')
+      expect(clicks[:marks].pluck(:key)).to eq(%w[impressions 3s p25 p50 p75 p100])
+      fim = clicks[:marks].last
+      expect(fim[:rate]).to eq((clicks[:link_clicks] / fim[:reached].to_f).round(4))
+      expect(fim[:before_min]).to eq([clicks[:link_clicks] - fim[:reached], 0].max)
+    end
+
+    it 'rodada 3: o veredito dos indicadores vem da MÉDIA da conta (custo invertido) e some o "bom a partir de"' do
+      card = service.detail('2304')[:scorecard]
+      expect(card[:indicators].pluck(:key)).to eq(%w[hook_rate hold_rate link_ctr conv_rate cost_conversation])
+      hook, hold = card[:indicators].first(2)
+      expect(hook).to include(label: 'Gancho', verdict: 'good', verdict_label: 'acima da média', money: false, lower: false)
+      expect(hook[:phrase]).to match(/pontos? acima da média da conta/)
+      expect(hold).to include(verdict: 'bad', verdict_label: 'abaixo da média')
+      cost = card[:indicators].last
+      expect(cost).to include(money: true, lower: true, verdict: 'bad', verdict_label: 'mais caro que a média')
+      expect(card[:indicators].flat_map(&:keys).uniq).not_to include(:good, :bad, :good_text, :band)
+      expect(card.to_json).not_to match(/bom a partir|bom até/i)
+      expect(service.detail('2305')[:scorecard][:indicators].pluck(:key)).not_to include('hook_rate') # imagem não tem gancho
+
+      # dentro de ±5 % da média = "na média"; custo menor que a média = verde
+      near = Crm::CreativeScorecard.new(rates: { 'link_ctr' => 0.0104, 'cost_conversation' => 5.0 },
+                                        averages: { 'link_ctr' => 0.01, 'cost_conversation' => 8.0 }).call[:indicators]
+      expect(near.first).to include(verdict: 'even', verdict_label: 'na média')
+      expect(near.last).to include(verdict: 'good', verdict_label: 'mais barato que a média')
+    end
+
+    it 'rodada 3: recorde da conta por indicador, com o recordista marcado e quanto falta' do
+      records = Crm::CreativeRecords.new(account: account).ad_records
+      expect(records.keys).to include('hook_rate', 'hold_rate', 'link_ctr', 'conv_rate', 'cost_conversation')
+      expect(records['hook_rate']).to include(ad_id: '2304', ad_name: a_string_including('Cansou das lentes'))
+      expect(records['hook_rate'][:since]).to be <= records['hook_rate'][:until]
+      expect(records['cost_conversation'][:ad_id]).to eq('2301') # menor custo = recorde
+
+      champion = service.detail('2304')[:scorecard]
+      hook = champion[:indicators].find { |i| i[:key] == 'hook_rate' }
+      expect(hook).to include(is_record: true, record_phrase: Crm::CreativeScorecard::IS_RECORD)
+      hold = champion[:indicators].find { |i| i[:key] == 'hold_rate' }
+      expect(hold).to include(is_record: false, record_ad: a_string_including('Depoimento Ana'))
+      expect(hold[:record]).to be > hold[:value]
+      expect(hold[:record_phrase]).to match(/\Afaltam \d+(,\d)? pontos para o recorde\z/)
+      expect(hold[:record_when]).to match(%r{\Ade \d{2}/\d{2}/\d{4} a \d{2}/\d{2}/\d{4}\z})
+
+      axes = champion[:radar][:axes]
+      expect(axes.pluck(:label)).to include('Gancho', 'Corpo', 'CTA', 'Conversa')
+      expect(axes.pluck(:score)).to all(be_between(0, 100))
+      expect(axes.pluck(:record_score).compact).to all(eq(100)) # recorde = borda de fora
+      expect(axes.find { |a| a[:key] == 'hook_rate' }).to include(is_record: true)
+      expect(champion[:radar][:note]).to include('recorde da conta')
+    end
+
+    it 'rodada 3: o recorde respeita o volume mínimo (anúncio pequeno não vira recorde por acaso)' do
+      now = Time.current
+      Crm::AdCreative.create!(account: account, ad_id: 'mini', ad_name: 'Anúncio pequeno', format: 'video', creative: {})
+      tiny = { 'impressions' => 400, 'plays_3s' => 380, 'thruplay' => 370, 'link_clicks' => 20, 'conversations' => 20, 'spend' => 1.0 }
+      Crm::AdInsight.create!(account: account, ad_id: 'mini', date: Date.current, metrics: tiny, created_at: now, updated_at: now)
+      records = Crm::CreativeRecords.new(account: account).ad_records
+      expect(records.values.pluck(:ad_id)).not_to include('mini')
+
+      # com impressões de sobra mas poucos cliques, não vale para "conversa por clique"
+      bigger = tiny.merge('impressions' => 5000, 'plays_3s' => 4900, 'thruplay' => 4800)
+      Crm::AdInsight.find_by(account: account, ad_id: 'mini').update!(metrics: bigger)
+      records = Crm::CreativeRecords.new(account: account).ad_records
+      expect(records['hook_rate'][:ad_id]).to eq('mini')
+      expect(records['conv_rate'][:ad_id]).not_to eq('mini')
+      expect(Crm::CreativeRecords::RECORD_MIN_IMPRESSIONS).to eq(1000)
+      expect(Crm::CreativeRecords::RECORD_MIN_CLICKS).to eq(30)
+    end
+
+    it 'rodada 3: "os mais e os menos" aponta vencedor único, ignora pouco volume e não inventa quando tudo é igual' do
+      rows = [
+        { key: 'a', label: 'Instagram · Reels', impressions: 20_000, link_clicks: 400, conversations: 269 },
+        { key: 'b', label: 'Instagram · Feed', impressions: 15_000, link_clicks: 450, conversations: 120 },
+        { key: 'c', label: 'Audience Network', impressions: 9000, link_clicks: 200, conversations: 32 },
+        { key: 'd', label: 'Sorte', impressions: 60, link_clicks: 6, conversations: 6 }
+      ]
+      ranking = Crm::BreakdownHighlights.new(rows).call
+      expect(ranking[:rows].pluck(:key)).to eq(%w[a b c d]) # do melhor para o pior
+      badges = ranking[:rows].to_h { |r| [r[:key], r[:badges].pluck(:label)] }
+      expect(badges['a']).to include('mais conversas', 'melhor aproveitamento')
+      expect(badges['c']).to include('pior aproveitamento')
+      expect(badges['d']).to eq(['menos conversas']) # 60 exibições: não disputa aproveitamento
+      expect(ranking[:rows].first).to include(clicks_per_100: 2.0, conversations_per_100: 67.25, yield_1000: 13.45)
+      expect(ranking[:summary]).to include('rende mais em Instagram · Reels (269 conversas)', 'menos em Sorte (6 conversas)')
+      expect(ranking[:no_difference]).to be(false)
+
+      same = Array.new(4) { |i| { key: "k#{i}", label: "Faixa #{i}", impressions: 5000, link_clicks: 100, conversations: 40 } }
+      tie = Crm::BreakdownHighlights.new(same, kind: 'audience').call
+      expect(tie[:rows].flat_map { |r| r[:badges] }).to be_empty
+      expect(tie[:no_difference]).to be(true)
+      expect(tie[:summary]).to include('Não há diferença relevante')
+
+      # diferença pequena demais para o volume (8 × 9 conversas) não vira selo de aproveitamento
+      noisy = [{ key: 'x', label: 'X', impressions: 3000, link_clicks: 30, conversations: 9 },
+               { key: 'y', label: 'Y', impressions: 3000, link_clicks: 30, conversations: 8 }]
+      expect(Crm::BreakdownHighlights.new(noisy).call[:rows].flat_map { |r| r[:badges].pluck(:key) }).not_to include('best', 'worst')
+
+      detail = service.detail('2301')
+      expect(detail[:placement_ranking][:summary]).to include('rende mais em Instagram · Reels')
+      expect(detail[:audience_ranking][:no_difference]).to be(true) # na simulação os números se repetem
+      expect(detail[:analysis_text]).to include('ONDE APARECEU: OS MAIS E OS MENOS', '[MAIS CONVERSAS]', 'RECORDE DA CONTA'.downcase)
+    end
+
+    it 'rodada 2: poucas quedas relevantes → mostra só as que contam (nunca inventa)' do
+      creative = Crm::AdCreative.find_by!(account: account, ad_id: '2301')
+      flat = [100, 60] + Array.new(20, 59.9)
+      list = [{ 'impressions' => 1000, 'plays_3s' => 500, 'plays' => 900, 'p25' => 400, 'p50' => 300, 'p75' => 200, 'p100' => 100,
+                'play_curve' => flat, 'date' => Date.current }]
+      curve = Crm::AdRetentionCurve.new(creative: creative, list: list).call
+      expect(curve[:top_drops].size).to be < 3
+      expect(curve[:top_drops].first).to include(rank: 1, from_t: 0, to_t: 1)
+    end
+
+    it 'item 287: a transcrição com tempo mostra o que é falado em cada trecho; a antiga (sem tempo) segue funcionando' do
+      creative = Crm::AdCreative.find_by!(account: account, ad_id: '2304')
+      Crm::AdVideoTranscriptionService.new(creative).perform
+      expect(creative.reload.transcript['segments'].first).to include('start' => 0.0, 'end' => 3.0, 'text' => 'Cansou das lentes?')
+      Crm::AdInsightsSyncService.new(account: account).call # a carga preserva trechos e duração
+      expect(creative.reload.transcript['segments'].size).to eq(3)
+      expect(creative.creative['video_length']).to be_present
+
+      detail = service.detail('2304')
+      segments = detail[:retention_detail][:segments]
+      expect(segments.size).to eq(3)
+      expect(segments.first).to include(text: 'Cansou das lentes?', pct_start: 1.0)
+      expect(segments.first[:people_lost]).to be > 0
+      expect(detail[:retention_detail][:biggest_drop][:speech]).to include('Cansou das lentes?')
+      expect(detail[:analysis_text]).to include('TRANSCRIÇÃO DO VÍDEO', 'Fala por trecho', 'CURVA DE RETENÇÃO', 'CLIQUES POR QUEM CHEGOU ATÉ AQUI')
+
+      old = creative.transcript.except('segments', 'duration')
+      creative.update!(creative: creative.creative.merge('transcript' => old))
+      again = described_class.new(account: account, since_date: Date.current - 29, until_date: Date.current).detail('2304')
+      expect(again[:retention_detail][:segments]).to eq([])
+      expect(again[:transcript]['text']).to be_present
+    end
+
+    it 'item 287: dados antigos (sem a curva da Meta) caem nos marcos de sempre, sem quebrar' do
+      Crm::AdInsight.where(account: account, ad_id: '2302').find_each do |row|
+        row.update!(metrics: row.metrics.except('play_curve', 'plays', 'p95', 'plays_30s'))
+      end
+      video = Crm::AdCreative.find_by!(account: account, ad_id: '2302')
+      video.update!(creative: video.creative.except('video_length'))
+      curve = service.detail('2302')[:retention_detail]
+      expect(curve).to include(source: 'milestones', axis: 'marks', base: 'impressions')
+      expect(curve[:points].pluck(:label)).to eq(['Impressões', '3 s', '25%', '50%', '75%', 'fim'])
+      expect(curve[:clicks][:marks].size).to eq(6)
+      expect(service.detail('2305')[:retention_detail]).to be_nil # imagem não tem curva
+    end
+
+    it 'item 287: se a Meta recusar a curva detalhada, a carga desce um degrau e mantém as métricas de vídeo' do
+      simulator = Crm::MetaSimulator.new(account: account)
+      allow(Crm::MetaSimulator).to receive(:new).and_return(simulator)
+      allow(simulator).to receive(:fetch_all).and_wrap_original do |original, edge, query|
+        raise Crm::MetaGraph::Error, 'campo recusado' if edge == 'insights' && query[:fields].to_s.include?('video_play_curve_actions')
+
+        original.call(edge, query)
+      end
+      Crm::AdInsight.where(account: account).delete_all
+      Crm::AdInsightsSyncService.new(account: account, days: 3).call
+      metrics = Crm::AdInsight.find_by(account: account, ad_id: '2301').metrics
+      expect(metrics['plays_3s']).to be > 0
+      expect(metrics['p25']).to be > 0
+      expect(Crm::AdInsightsSyncService.state(account)['last_warning']).to include('curva detalhada')
     end
 
     it 'ranqueia ganchos, corpos e CTAs da conta inteira' do

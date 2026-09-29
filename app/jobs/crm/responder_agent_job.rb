@@ -213,7 +213,10 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
     result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: agent_key, live: true).call
     if result[:error]
-      log_event(account, agent_key, conversation, 'erro', result[:error].to_s.truncate(120))
+      attempt = retry_later(conversation, trigger_message_id, agent_key, result[:error])
+      note = result[:error].to_s.truncate(120)
+      note = "#{note} · vou tentar de novo (#{attempt}/#{RETRY_WAITS.size})" if attempt
+      log_event(account, agent_key, conversation, 'erro', note)
       return
     end
     return if last_incoming_id(conversation) != trigger_message_id
@@ -242,6 +245,32 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     detail = "etapa #{result[:etapa]} · #{Array(result[:mensagens]).size} msg(s)"
     detail += " · 🔧 #{acoes_text(result)}" if Array(result[:acoes]).any?
     log_event(account, agent_key, conversation, booked ? 'agendou' : 'respondeu', detail.truncate(220))
+  end
+
+  # 🛟 item 291 (29/09, "algumas conversas tiveram continuidade, outras não"): a
+  # chamada da IA pode falhar por um instante (serviço cheio, limite por
+  # minuto, rede). Antes o erro era anotado e o paciente ficava SEM resposta.
+  # Agora tenta de novo em 20 s, 1 min e 3 min — sempre conferindo se aquela
+  # ainda é a última mensagem do paciente (o perform já faz isso). Erro de
+  # configuração (agente desligado, sem chave) não adianta repetir.
+  RETRY_WAITS = [20.seconds, 1.minute, 3.minutes].freeze
+  PERMANENT_ERRORS = /Agente desligado|Configure a chave|Conversa vazia/
+  RETRY_KEY = 'cevico:responder:retry:%<id>s'.freeze
+
+  def retry_later(conversation, trigger_message_id, agent_key, error)
+    return nil if error.to_s.match?(PERMANENT_ERRORS)
+
+    key = format(RETRY_KEY, id: trigger_message_id)
+    attempt = Redis::Alfred.incr(key).to_i
+    Redis::Alfred.expire(key, 6.hours.to_i)
+    wait = RETRY_WAITS[attempt - 1]
+    return nil unless wait
+
+    self.class.set(wait: wait).perform_later(conversation.id, trigger_message_id, agent_key)
+    attempt
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgentJob] nova tentativa não agendada: #{e.message}"
+    nil
   end
 
   SLOT_TAKEN_TEXT = 'Poxa, esse horário acabou de ser preenchido. Me diz outro período que você prefere, que eu vejo o mais próximo pra você?'.freeze

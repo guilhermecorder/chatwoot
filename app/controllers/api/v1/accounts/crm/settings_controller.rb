@@ -1378,8 +1378,28 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'weekend_bridge' => ActiveModel::Type::Boolean.new.cast(r[:weekend_bridge]) == true,
       'modalities' => Array(r[:modalities]).map(&:to_s).select { |m| %w[avaliacao retorno teleconsulta exames pos_op].include?(m) }.presence,
       'units' => units.presence,
-      'partner' => sanitize_reminder_partner(r[:partner])
+      'partner' => sanitize_reminder_partner(r[:partner]),
+      'followup' => sanitize_reminder_followup(r[:followup])
     }
+  end
+
+  # 🔁 item 288: reforço para quem não respondeu ao lembrete — liga/desliga,
+  # horas de espera (padrão 6), até 2 reforços, o modelo da Meta e o modelo
+  # próprio dos pacientes do Oftalmofácil. Sem o bloco = desligado.
+  def sanitize_reminder_followup(raw) # rubocop:disable Metrics/AbcSize
+    return nil unless raw.is_a?(ActionController::Parameters)
+
+    fu = Crm::AppointmentReminderFollowup
+    partner = raw[:partner].is_a?(ActionController::Parameters) ? raw[:partner] : ActionController::Parameters.new
+    partner_tp = reminder_template_params(partner[:template_params])
+    {
+      'enabled' => ActiveModel::Type::Boolean.new.cast(raw[:enabled]) == true,
+      'hours' => raw[:hours].to_i.positive? ? raw[:hours].to_i.clamp(fu::HOURS_RANGE.min, fu::HOURS_RANGE.max) : fu::DEFAULT_HOURS,
+      'max' => raw[:max].to_i.clamp(1, fu::MAX_FOLLOWUPS),
+      'template_params' => reminder_template_params(raw[:template_params]),
+      'message_preview' => raw[:message_preview].to_s[0, 2000].presence,
+      'partner' => partner_tp && { 'template_params' => partner_tp, 'message_preview' => partner[:message_preview].to_s[0, 2000].presence }.compact
+    }.compact
   end
 
   # pacientes do Oftalmofácil (26/09): a caixa escolhida e o modelo dela — só

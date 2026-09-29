@@ -27,6 +27,8 @@ const props = defineProps({
   totalCount:      { type: Number, default: null },
   totalValue:      { type: Number, default: null },
   loadingMore:     { type: Boolean, default: false },
+  // item 283: menu do botão direito do cartão (montado pelo quadro)
+  cardMenu:        { type: Function, default: null },
 });
 
 const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat', 'loadMore']);
@@ -709,6 +711,7 @@ const delayLabel = (minutes) => {
         <template #item="{ element }">
           <ContactCard
             :contact="element"
+            :menu="cardMenu"
             @click="emit('cardClick', element)"
             @open-chat="emit('openChat', $event)"
           />

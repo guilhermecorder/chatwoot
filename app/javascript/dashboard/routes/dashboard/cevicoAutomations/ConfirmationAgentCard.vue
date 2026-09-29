@@ -115,6 +115,15 @@ const partnerFrom = c => ({
   slot: slotFrom(c?.template_params ? c : null),
 });
 
+// 🔁 item 288: reforço para quem não respondeu (desligado por padrão)
+const followupFrom = c => ({
+  enabled: c?.enabled === true,
+  hours: c?.hours || 6,
+  max: c?.max === 2 ? 2 : 1,
+  slot: slotFrom(c?.template_params ? c : null),
+  partnerSlot: slotFrom(c?.partner?.template_params ? c.partner : null),
+});
+
 const hydrate = s => {
   const cfg = s?.appointment_reminders || {};
   master.value = s?.appointment_confirmation?.enabled !== false;
@@ -141,6 +150,7 @@ const hydrate = s => {
           geral: slotFrom(c.template_params ? c : null),
         },
         partner: partnerFrom(c.partner),
+        followup: followupFrom(c.followup),
       };
     })
     .sort((a, b) => b.days - a.days);
@@ -274,6 +284,7 @@ const addRule = (days, hour) => {
       inbox_id: partnerInboxIds.value[0] || null,
       slot: blankSlot(),
     },
+    followup: followupFrom(null),
   };
   if (rule.partner.inbox_id) loadTemplates(rule.partner.inbox_id);
   rules.value = [...rules.value, rule].sort((a, b) => b.days - a.days);
@@ -296,6 +307,7 @@ const onInbox = rule => {
   ['paulista', 'tatuape', 'geral'].forEach(k => {
     rule.slots[k] = blankSlot();
   });
+  rule.followup.slot = blankSlot();
   loadTemplates(rule.inbox_id);
   touch();
 };
@@ -310,9 +322,30 @@ const togglePartner = rule => {
 };
 const onPartnerInbox = rule => {
   rule.partner.slot = blankSlot();
+  rule.followup.partnerSlot = blankSlot();
   loadTemplates(rule.partner.inbox_id);
   touch();
 };
+
+// ── reforço para quem não respondeu (item 288) ───────────────────────────
+const FOLLOWUP_HOURS = [1, 2, 3, 4, 6, 8, 12, 24, 48];
+const toggleFollowup = rule => {
+  rule.followup.enabled = !rule.followup.enabled;
+  touch();
+};
+const followupPayload = rule => {
+  const partner = rule.partner.inbox_id
+    ? payloadIn(rule.partner.inbox_id, rule.followup.partnerSlot)
+    : null;
+  return {
+    enabled: rule.followup.enabled,
+    hours: rule.followup.hours,
+    max: rule.followup.max,
+    ...(payloadIn(rule.inbox_id, rule.followup.slot) || {}),
+    ...(partner ? { partner } : {}),
+  };
+};
+const followupsOf = rule => lastRuns.value.followups?.[`d${rule.days}`] || [];
 
 // ── salvar ────────────────────────────────────────────────────────────────
 const buildPayload = () => {
@@ -338,6 +371,7 @@ const buildPayload = () => {
         inbox_id: rule.partner.inbox_id,
         ...(payloadIn(rule.partner.inbox_id, rule.partner.slot) || {}),
       },
+      followup: followupPayload(rule),
       ...(geral || {}),
     };
   });
@@ -351,6 +385,8 @@ const problemOf = rule => {
     return 'escolha a caixa que fala com os pacientes do Oftalmofácil';
   if (rule.partner.enabled && !rule.partner.slot.name)
     return 'escolha o modelo dos pacientes do Oftalmofácil';
+  if (rule.followup.enabled && !rule.followup.slot.name)
+    return 'escolha o modelo do reforço';
   return '';
 };
 const save = async () => {
@@ -436,6 +472,8 @@ const ruleSummary = rule => {
   ).length;
   parts.push(models ? `${models} modelo(s)` : 'sem modelo');
   if (rule.partner.enabled) parts.push('+ Oftalmofácil');
+  if (rule.followup.enabled)
+    parts.push(`reforço após ${rule.followup.hours}h sem resposta`);
   return parts.join(' · ');
 };
 const isOpen = computed(() => props.open);
@@ -1039,6 +1077,245 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                   Hora, sombra/ao vivo e "Quem recebe" são os deste lembrete.
                 </p>
               </template>
+            </div>
+
+            <!-- 🔁 reforço para quem não respondeu (item 288) -->
+            <div
+              class="rounded-xl border p-3 space-y-2"
+              :class="
+                rule.followup.enabled
+                  ? 'border-sky-300 bg-sky-50/60 dark:border-sky-700 dark:bg-sky-900/10'
+                  : 'border-n-weak'
+              "
+            >
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="i-lucide-repeat-2 text-sm text-sky-600" />
+                <p class="text-xs font-bold text-n-slate-12">
+                  Reforço para quem não respondeu
+                </p>
+                <button
+                  class="cv-switch ml-auto"
+                  :class="rule.followup.enabled ? 'cv-switch-on' : ''"
+                  :title="
+                    rule.followup.enabled
+                      ? 'Desligar o reforço'
+                      : 'Ligar o reforço'
+                  "
+                  :aria-pressed="rule.followup.enabled"
+                  @click="toggleFollowup(rule)"
+                />
+              </div>
+              <p class="text-[11px] text-n-slate-10">
+                {{
+                  rule.followup.enabled
+                    ? 'Se o paciente não escrever nada e a consulta continuar sem confirmação, ele recebe a mensagem abaixo. Quem respondeu, confirmou, cancelou ou remarcou não recebe.'
+                    : 'Desligado: quem não responde ao lembrete não recebe mais nada.'
+                }}
+              </p>
+              <template v-if="rule.followup.enabled">
+                <p
+                  v-if="rule.mode !== 'live'"
+                  class="text-[11px] text-amber-700 dark:text-amber-400"
+                >
+                  Este lembrete está em sombra: o reforço só começa a sair
+                  quando o lembrete estiver ao vivo.
+                </p>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <label
+                      class="text-xs font-medium text-n-slate-11 block mb-1"
+                      >Esperar sem resposta</label
+                    >
+                    <select
+                      v-model.number="rule.followup.hours"
+                      class="cv-input w-full text-sm"
+                      style="margin-bottom: 0"
+                      @change="touch"
+                    >
+                      <option
+                        v-for="h in FOLLOWUP_HOURS"
+                        :key="rule.uid + 'fh' + h"
+                        :value="h"
+                      >
+                        {{ h }} hora{{ h > 1 ? 's' : '' }}
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      class="text-xs font-medium text-n-slate-11 block mb-1"
+                      >Quantos reforços</label
+                    >
+                    <div class="cv-seg cv-seg-sm">
+                      <button
+                        v-for="n in [1, 2]"
+                        :key="rule.uid + 'fm' + n"
+                        class="cv-seg-item"
+                        :class="rule.followup.max === n ? 'cv-seg-on' : ''"
+                        @click="
+                          rule.followup.max = n;
+                          touch();
+                        "
+                      >
+                        {{ n === 1 ? '1 reforço' : '2 reforços' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                  <div v-if="rule.inbox_id" class="cv-stat p-3 space-y-1.5">
+                    <p class="text-[11px] font-bold text-n-slate-12">
+                      Modelo do reforço
+                    </p>
+                    <select
+                      v-model="rule.followup.slot.name"
+                      class="cv-input w-full !h-8 text-xs"
+                      style="margin-bottom: 0"
+                      @change="fillVars(rule.inbox_id, rule.followup.slot)"
+                    >
+                      <option value="">— nenhum —</option>
+                      <option
+                        v-if="
+                          rule.followup.slot.name &&
+                          !templatesOf(rule).some(
+                            t => t.name === rule.followup.slot.name
+                          )
+                        "
+                        :value="rule.followup.slot.name"
+                      >
+                        {{ rule.followup.slot.name }} (salva)
+                      </option>
+                      <option
+                        v-for="t in templatesOf(rule)"
+                        :key="rule.uid + 'ft' + t.name + t.language"
+                        :value="t.name"
+                      >
+                        {{ t.name }} ({{ t.language }})
+                      </option>
+                    </select>
+                    <template v-if="rule.followup.slot.name">
+                      <p
+                        class="text-[10px] text-n-slate-10 whitespace-pre-wrap max-h-28 overflow-auto bg-n-alpha-1 rounded-lg px-2 py-1.5"
+                      >
+                        {{
+                          bodyIn(rule.inbox_id, rule.followup.slot) ||
+                          'prévia indisponível'
+                        }}
+                      </p>
+                      <input
+                        v-for="token in tokensIn(
+                          rule.inbox_id,
+                          rule.followup.slot
+                        )"
+                        :key="rule.uid + 'fv' + token"
+                        v-model="rule.followup.slot.vars[token]"
+                        class="cv-input w-full !h-7 text-[11px] font-mono"
+                        style="margin-bottom: 0"
+                        :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                        @input="touch"
+                      />
+                    </template>
+                  </div>
+                  <p v-else class="text-[11px] text-n-slate-9">
+                    Escolha primeiro a caixa do WhatsApp deste lembrete.
+                  </p>
+                  <div
+                    v-if="rule.partner.enabled && rule.partner.inbox_id"
+                    class="cv-stat p-3 space-y-1.5"
+                  >
+                    <p class="text-[11px] font-bold text-n-slate-12">
+                      Modelo do reforço para os pacientes do Oftalmofácil
+                    </p>
+                    <select
+                      v-model="rule.followup.partnerSlot.name"
+                      class="cv-input w-full !h-8 text-xs"
+                      style="margin-bottom: 0"
+                      @change="
+                        fillVars(
+                          rule.partner.inbox_id,
+                          rule.followup.partnerSlot
+                        )
+                      "
+                    >
+                      <option value="">— nenhum (eles não recebem) —</option>
+                      <option
+                        v-if="
+                          rule.followup.partnerSlot.name &&
+                          !templatesIn(rule.partner.inbox_id).some(
+                            t => t.name === rule.followup.partnerSlot.name
+                          )
+                        "
+                        :value="rule.followup.partnerSlot.name"
+                      >
+                        {{ rule.followup.partnerSlot.name }} (salva)
+                      </option>
+                      <option
+                        v-for="t in templatesIn(rule.partner.inbox_id)"
+                        :key="rule.uid + 'fpt' + t.name + t.language"
+                        :value="t.name"
+                      >
+                        {{ t.name }} ({{ t.language }})
+                      </option>
+                    </select>
+                    <template v-if="rule.followup.partnerSlot.name">
+                      <p
+                        class="text-[10px] text-n-slate-10 whitespace-pre-wrap max-h-28 overflow-auto bg-n-alpha-1 rounded-lg px-2 py-1.5"
+                      >
+                        {{
+                          bodyIn(
+                            rule.partner.inbox_id,
+                            rule.followup.partnerSlot
+                          ) || 'prévia indisponível'
+                        }}
+                      </p>
+                      <input
+                        v-for="token in tokensIn(
+                          rule.partner.inbox_id,
+                          rule.followup.partnerSlot
+                        )"
+                        :key="rule.uid + 'fpv' + token"
+                        v-model="rule.followup.partnerSlot.vars[token]"
+                        class="cv-input w-full !h-7 text-[11px] font-mono"
+                        style="margin-bottom: 0"
+                        :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                        @input="touch"
+                      />
+                    </template>
+                  </div>
+                </div>
+                <p class="text-[10px] text-n-slate-9">
+                  Só sai entre 07h e 20h: se a hora cair de noite, vai às 07h do
+                  dia seguinte. Nunca depois do horário da consulta. Cada
+                  reforço sai uma única vez por consulta; o 2º conta as horas a
+                  partir do 1º. Mesmas variáveis do lembrete. Pacientes do
+                  Oftalmofácil recebem só pela caixa deles, com o modelo deles.
+                </p>
+              </template>
+              <div
+                v-if="followupsOf(rule).length"
+                class="rounded-lg bg-n-alpha-1 p-2.5 text-[11px] text-n-slate-11 space-y-0.5"
+              >
+                <p class="font-semibold">
+                  Reforços enviados (últimos {{ followupsOf(rule).length }})
+                </p>
+                <p
+                  v-for="e in followupsOf(rule).slice(0, 40)"
+                  :key="rule.uid + 'fu' + e.task_id + '-' + e.number"
+                >
+                  🔁 {{ fmtRunDate(e.at) }} · {{ e.number }}º reforço ·
+                  {{ e.name }} · consulta {{ e.when }} · {{ e.unit }} · …{{
+                    e.phone_tail
+                  }}
+                  <span
+                    v-if="e.partner"
+                    class="text-amber-700 dark:text-amber-400"
+                    >· Oftalmofácil ({{ e.partner }})</span
+                  >
+                  <span class="text-n-slate-9">{{
+                    e.template ? `(${e.template})` : ''
+                  }}</span>
+                </p>
+              </div>
             </div>
 
             <!-- última rodada -->

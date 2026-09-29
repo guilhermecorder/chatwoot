@@ -162,6 +162,33 @@ RSpec.describe Crm::ResponderAgentJob do
       end
     end
 
+    it 'item 291: erro passageiro da IA agenda nova tentativa (até 3) em vez de deixar o paciente sem resposta', :aggregate_failures do
+      travel_to(now) do
+        live_cfg = { 'mode' => 'live', 'live_days' => [6, 0] }
+        settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => live_cfg }))
+        stub_ai({ error: 'Overloaded' })
+        allow(Redis::Alfred).to receive(:incr).and_return(1, 2, 3, 4)
+        allow(Redis::Alfred).to receive(:expire)
+
+        expect { 3.times { run } }.to have_enqueued_job(described_class)
+          .with(conversation.id, incoming.id, 'atendente_agendamento').exactly(3).times
+        expect { run }.not_to have_enqueued_job(described_class)
+        events = settings.reload.ai_config.dig('atendente_agendamento_state', 'events')
+        expect(events.last['note']).to include('vou tentar de novo (1/3)')
+        expect(events.first['note']).not_to include('vou tentar')
+      end
+    end
+
+    it 'item 291: erro de configuração não é repetido' do
+      travel_to(now) do
+        live_cfg = { 'mode' => 'live', 'live_days' => [6, 0] }
+        settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => live_cfg }))
+        stub_ai({ error: 'Configure a chave da API em Integrações → Claude.' })
+
+        expect { run }.not_to have_enqueued_job(described_class)
+      end
+    end
+
     it 'ao vivo, remarcação feita pela ferramenta não tenta reservar de novo' do
       travel_to(now) do
         settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))

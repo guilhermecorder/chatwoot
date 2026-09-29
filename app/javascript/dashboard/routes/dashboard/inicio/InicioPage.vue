@@ -19,6 +19,8 @@ import CustomPanelGrid from 'dashboard/components-next/cevico/CustomPanelGrid.vu
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import AgendaDashboardCore from 'dashboard/components-next/cevico/AgendaDashboardCore.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { copyTextToClipboard } from 'shared/helpers/clipboard';
+import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
@@ -2896,6 +2898,62 @@ const deleteTileKpi = tile => {
   )
     return;
   deleteKpi(tile.def);
+};
+// ── 🖱️ item 283 (29/09): MENU DO BOTÃO DIREITO do card de indicador ──
+// Os mesmos botões do card: fora da edição, ver detalhes e copiar; no modo
+// edição, tamanho, cor, ocultar e excluir (com a confirmação que já existe).
+const copyTile = async tile => {
+  try {
+    await copyTextToClipboard(`${tile.label}: ${tile.value}`);
+    useAlert('Indicador copiado ✓');
+  } catch {
+    useAlert('Não foi possível copiar.');
+  }
+};
+const tileMenu = tile => {
+  if (!tile) return null;
+  const editing = organizeMode.value;
+  return {
+    title: tile.label,
+    subtitle: editing ? 'modo edição' : String(tile.value ?? ''),
+    items: [
+      !editing &&
+        (tile.details?.length || tile.about) && {
+          label: 'Ver detalhes',
+          icon: 'i-lucide-maximize-2',
+          action: () => openKpi(tile),
+        },
+      {
+        label: 'Copiar o número',
+        icon: 'i-lucide-copy',
+        action: () => copyTile(tile),
+      },
+      { separator: true },
+      editing && {
+        label: tile.big ? 'Voltar ao tamanho normal' : 'Deixar o card grande',
+        icon: tile.big ? 'i-lucide-minimize-2' : 'i-lucide-maximize-2',
+        action: () => toggleTileSize(tile),
+      },
+      editing && {
+        label: 'Trocar a cor',
+        icon: 'i-lucide-paintbrush',
+        action: () => openColorPicker(tile),
+      },
+      editing && {
+        label: 'Ocultar este card',
+        icon: 'i-lucide-eye-off',
+        hint: 'dá pra restaurar',
+        action: () => hideTile(tile),
+      },
+      editing &&
+        tile.def && {
+          label: 'Excluir o indicador…',
+          icon: 'i-lucide-trash-2',
+          danger: true,
+          action: () => deleteTileKpi(tile),
+        },
+    ],
+  };
 };
 const saveBlockLayout = async () => {
   const all = { ...(crmSettings.value?.block_layout || {}) };
@@ -6061,6 +6119,7 @@ onUnmounted(() => {
                           </div>
                           <div
                             v-else-if="tile"
+                            v-cv-menu="() => tileMenu(tile)"
                             class="cv-tile relative rounded-2xl h-full overflow-hidden p-4 sm:p-5 text-white shadow-lg transition-colors duration-700 flex flex-col"
                             :class="[
                               tileHist(tile)?.dir === 'up'

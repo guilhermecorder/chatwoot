@@ -161,7 +161,8 @@ class Api::V1::Accounts::Crm::JourneyMessagesController < Api::V1::Accounts::Bas
     template = hash['template_params']
     template = template.to_h if template.respond_to?(:to_h)
     { 'mode' => hash['mode'].to_s.presence || 'template', 'template_params' => template.presence,
-      'message_preview' => hash['message_preview'].to_s.strip[0, 2000].presence, 'text' => hash['text'].to_s.strip[0, 2000] }.compact
+      'message_preview' => hash['message_preview'].to_s.strip[0, 2000].presence, 'text' => hash['text'].to_s.strip[0, 2000],
+      'followup' => Crm::JourneyMessage.sanitize_followup(hash['followup']) }.compact
   end
 
   def sanitize_places(raw)

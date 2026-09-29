@@ -172,6 +172,13 @@ crm_nps_survey_send_job:
   class: 'Crm::NpsSurveySendJob'
   queue: low
 
+# 🛟 Resgate do Atendente de IA (item 291): a cada 5 min devolve ao agente as
+# conversas em que o paciente ficou sem resposta (3 min a 2 h); 1 vez por mensagem
+crm_responder_rescue_job:
+  cron: '*/5 * * * *'
+  class: 'Crm::ResponderRescueJob'
+  queue: low
+
 # 🗺️ Mensagens da jornada (item 168): a cada 15 min planeja os envios do dia
 # (cirurgia amanhã, consulta hoje, entrou na coluna…) e despacha os que já
 # chegaram na hora — só nas contas com mensagem ativa

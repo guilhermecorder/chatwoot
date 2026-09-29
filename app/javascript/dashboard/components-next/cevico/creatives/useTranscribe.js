@@ -67,6 +67,17 @@ const legacyCopy = text => {
   return ok;
 };
 
+// item 287: copia um texto qualquer (análise completa, link de leitura);
+// devolve true/false para a tela avisar do jeito dela
+export const copyPlain = async text => {
+  try {
+    await copyTextToClipboard(text);
+    return true;
+  } catch {
+    return legacyCopy(text);
+  }
+};
+
 export const useTranscribe = () => {
   const transcribe = async (item, part = 'all') => {
     const { label, text } = transcriptOf(item, part);

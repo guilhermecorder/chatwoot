@@ -297,7 +297,14 @@ export const SALAD = {
   dot: '#F97316',
   swatch:
     'conic-gradient(from 90deg, #F97316, #E5395B, #7C3AED, #7CB518, #F4845F, #F97316)',
-  hero: 'linear-gradient(135deg, #7C2D12 0%, #F97316 28%, #E5395B 52%, #7C3AED 76%, #7CB518 100%)',
+  // item 284 (29/09): base AZUL → VERDE com brilho AMARELO ("o azul deixa mais
+  // suave e agradável"); rosa e roxo só como toque de contraste nos cantos
+  hero: [
+    'radial-gradient(circle at 96% 0%, rgba(250, 204, 21, 0.9) 0%, rgba(250, 204, 21, 0) 34%)',
+    'radial-gradient(circle at 72% 125%, rgba(236, 72, 153, 0.55) 0%, rgba(236, 72, 153, 0) 36%)',
+    'radial-gradient(circle at 0% 115%, rgba(124, 58, 237, 0.55) 0%, rgba(124, 58, 237, 0) 40%)',
+    'linear-gradient(120deg, #1E3A8A 0%, #2563EB 36%, #0EA5A4 66%, #22C55E 100%)',
+  ].join(', '),
   family: PALETTE_BY_KEY.laranja.family,
   alt: PALETTE_BY_KEY.uva.dot,
   altLight: '#C4B5FD',

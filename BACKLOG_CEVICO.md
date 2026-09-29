@@ -8536,3 +8536,140 @@ com parâmetros diferentes selecionáveis por chavinhas.
 - Deploy WEB + SIDEKIQ (o Atendente roda no Sidekiq); o cache do roteiro (item 213) renova em até 1 h. SEM
   commit — aguarda "pode subir". Para acrescentar outros exames extras: mesma linha do bloco EXAMES ADICIONAIS.
 
+> 29/09 manhã: 277 + 278 + 279 + 280 SUBIRAM no commit aa6acb7 (develop, --no-verify dele; push feito) → build
+> "Build & Push Docker Image" VERDE 11h05 → imagem ghcr.io/guilhermecorder/chatwoot:aa6acb7 p/ Implantar
+> WEB + SIDEKIQ, sem migration · reversão :d16c238 · depois: rake cevico:kpi_sweep ACCOUNT_ID=1 DRY=1 → DRY=0.
+> 29/09 ~11h20: :aa6acb7 IMPLANTADA (produção = 277–280; reversão :d16c238). Falta ele rodar o kpi_sweep na VPS (DRY=1 → DRY=0).
+
+## 281. ✅ 📞 Popup da chamada mostra a COLUNA do CRM de quem liga (29/09; print do popup "Chamada de WhatsApp · Alessandra… · Recusar/Atender"; "pra gente entender melhor quem liga")
+- Onde: components-next/cevico/calls/CevicoCallPopup.vue (popup Recusar/Atender) + o JSON da chamada que a
+  store cevicoCalls recebe (backend das chamadas em app/services/crm/calls/). Incluir: coluna atual do card
+  (nome + cor da etapa, Crm::Contact.stage do contato pelo telefone), e de quebra caixa de origem e última
+  consulta. Kit: chip colorido abaixo do telefone. Sem migration.
+- Também vale para o card "ao vivo" da tela Chamadas e para o histórico.
+- **CONSTRUÍDO 29/09 (SEM commit, aguarda "pode subir"; WEB+SIDEKIQ, sem migration, reversão :aa6acb7):**
+  - Servidor: `Crm::Calls::PatientContext` (em lote, 4 consultas no banco): cards do CRM (coluna + cor, um por
+    funil, até 3), caixa de origem (1ª conversa), última e próxima consulta. Entra no JSON da chamada em
+    `crm` (`Crm::Call#to_payload` / `Crm::Call.payloads` nas listas); o card da conversa NÃO leva (`crm: false`).
+    Se a leitura do CRM falhar, a chamada toca do mesmo jeito (sem o bloco).
+  - Tela: `CallPatientContext.vue` — chip na cor da etapa + "próxima consulta / última consulta (compareceu ·
+    faltou) / chegou por <caixa>"; quem não está no CRM aparece "Primeiro contato — ainda não está no CRM".
+    Usado no popup (tocando = completo; em chamada = só o chip), no card "Agora (ao vivo)", nas linhas do
+    Histórico e no topo do detalhe da chamada.
+  - Testes: spec/services/crm/calls/patient_context_spec.rb (3) + webhook_service_spec (7) verdes; conferido ao
+    vivo no localhost com chamada simulada (`cevico:calls_simulate ACCOUNT_ID=3 CONTACT_ID=296`).
+  - Usuário de teste só do ambiente local: dados em tmp/cevico_teste_local.txt (fora do git).
+
+## 282. ✅ 📞 Chamadas: mostrar a CAIXA DE ENTRADA para onde o paciente está ligando (29/09; "acho interessante saber também nas chamadas, a caixa de entrada para onde ele está ligando")
+- Popup da chamada (tocando): primeira linha do bloco "quem liga" = "ligando para <caixa>". Card "Agora (ao vivo)" da tela
+  Chamadas: linha "ligando para <caixa>" (ou "pela caixa <caixa>" quando a clínica ligou). Histórico já mostrava a caixa.
+- Arquivos: CallPatientContext.vue, CrmCalls.vue. Sem servidor novo (inbox_name já vinha no JSON). SEM commit.
+
+## 284. ✅ 🥗 Salada de frutas: cabeçalho com base AZUL, VERDE e AMARELO (29/09; "gosto muito do tema salada de frutas porque ele vai mudando de cor, só não gosto do gradient do cabeçalho… base maior azul, verde e amarelo, e outras cores de contraste pra dar um tcham; o azul deixa mais suave e agradável")
+- helper/cevicoPalettes.js → SALAD.hero: degradê azul-marinho → azul → verde-água → verde, com brilho amarelo no canto de
+  cima e toques de rosa e roxo nos cantos de baixo. Blocos e cards continuam trocando de fruta como antes. SEM commit.
+
+## 285. ✅ 🌉 AGENDAMENTOS: a PONTE "entraram na coluna × marcadas na Agenda" + gráficos de ÁREA no lugar das barras em linha (29/09; "4 entraram em agendamento de consulta, ok, mas teve 13 marcadas. o que é essa diferença?"; FILOSOFIA: "queremos revelar os dados… buscamos suas conexões: de onde veio? ela se ramifica? pra onde ela vai?"; "os gráficos com barra em linha eu não gosto")
+- Servidor: `Crm::BookingBridge` (entra no JSON de /crm/appointments/stage_entries em `bridge`). Cada MARCADA cai em um
+  ramo: entraram na coluna no período (= nos dois números) · já tinham entrado antes · entraram depois · card em outra
+  coluna (nunca passou pela de agendamento) · card só em outro funil · sem card no CRM · sem cadastro. Cada ENTRADA na
+  coluna: com consulta marcada no período · consulta já marcada antes · marcada depois · sem consulta na Agenda.
+  Cada ramo traz os nomes e ONDE os pacientes estão hoje no CRM.
+- Tela (CrmAppointments.vue, só no trilho Consultas): bloco "Por que X entraram na coluna e Y foram marcadas" com a frase
+  pronta e o desenho `BridgeFlow.vue` (raiz → fitas → ramos; o ramo comum em verde "nos dois números"; clique abre os nomes).
+- Gráficos: `AreaChart.vue` (área suave com degradê, uma por fatia, tooltip; hora a hora até 2 dias, dia a dia até 45,
+  depois semana) + helper/cevicoBuckets.js. Trocou o ShareBar em: caixas de quem entrou na coluna, quem são os pacientes
+  das marcadas, de quais caixas vieram, quando os leads chegaram e "De onde" dos filtros. Os chips clicáveis continuam.
+- Testes: booking_bridge_spec.rb (2), cevicoBuckets.spec.js (3), bridgeArea.spec.js (3) verdes. WEB só, sem migration. SEM commit.
+- FALTA (próximas rodadas): trocar o ShareBar nas outras telas (Chamadas, Google, Anúncios, Meu Painel, Oftalmofácil, Agentes).
+
+## 286. ✅ 🎬 Central de Criativos: a TRANSCRIÇÃO dos vídeos não acontecia (29/09; "não estou conseguindo fazer a transcrição dos anúncios")
+- Causa (vista no backup de produção de 21/09): os 31 vídeos ficaram "pulados — Configure a chave do Gemini" de ANTES da
+  chave existir; "pulado" nunca era tentado de novo em lote. E a tela ESCONDIA o motivo (o botão aparecia por cima do erro).
+  Além disso 33 anúncios "Dinâmicos" têm vídeo e eram recusados.
+- Correção: fila tenta de novo quem foi pulado por falta de chave, quem falhou e quem travou "na fila/transcrevendo" há
+  mais de 20 min; dinâmico com vídeo também transcreve; o motivo aparece em vermelho ("não transcreveu: …") com botão
+  "Tentar de novo"; a tela acompanha sozinha (confere a cada 6 s) e mostra a transcrição quando fica pronta.
+- Depois do deploy: Central de Criativos → botão "Transcrever vídeos" (enfileira todos). Se aparecer outro motivo em
+  vermelho (ex.: a Meta não devolveu o arquivo), é esse o próximo ponto a olhar.
+- Testes: creatives_center_spec.rb 21 verdes. WEB+SIDEKIQ, sem migration. SEM commit.
+
+## 288. ✅ 🔁 REFORÇO (follow-up) dos lembretes de consulta e de cirurgia (29/09; "enviamos uma mensagem de confirmação de consulta, ou de cirurgia e ele passa 6 horas e não responde. precisamos poder enviar outra mensagem de lembrete pra ele (ainda que seja mensagem modelo)")
+- DESLIGADO por padrão. Cada lembrete (Confirmação de consulta) e cada mensagem da Jornada de "dia da cirurgia"/"dia da
+  consulta" ganhou o bloco "Reforço para quem não respondeu": ligar, esperar N horas (padrão 6; 1–48), 1 ou 2 reforços,
+  mensagem modelo do reforço.
+- Regra: recebeu o lembrete há N horas, não escreveu NADA desde então e a consulta/cirurgia segue de pé (não confirmou,
+  recusou, cancelou nem remarcou). Só envia 07h–20h (SP; pedido dele: "prefiro que inicie às 07am"); nunca depois do horário; reforço vencido há mais de 24 h não sai
+  (ligar hoje não dispara para lembretes antigos); nunca duas vezes (marca gravada ANTES de enviar, com trava).
+- Oftalmofácil: segue o item 259 — só pela caixa deles e com modelo de reforço PRÓPRIO; sem esse modelo não recebem.
+- Onde: Automações → Agentes → Confirmação de consulta → abrir o lembrete; e CRM → Jornada → editar a mensagem → passo 3.
+- Arquivos: jobs/crm/appointment_reminder_followup.rb, services/crm/journey/followup.rb (+ dispatcher, reply_service,
+  journey_message/send, settings_controller, journey_messages_controller, ConfirmationAgentCard.vue, JourneyWizard.vue,
+  CrmJourney.vue). Guardado em jsonb que já existia (sem migration).
+- Testes: 30 novos verdes; engine_spec segue com as 2 falhas ANTIGAS (ReplyService, data fixa). WEB+SIDEKIQ. SEM commit.
+- ANTES DE LIGAR: os modelos de reforço precisam existir e estar aprovados na Meta. Decisões assumidas a confirmar com ele:
+  "não respondeu" vale para qualquer conversa do paciente; um modelo por lembrete (não por unidade); erro no envio não
+  tenta de novo sozinho (melhor faltar um reforço do que repetir).
+
+## 283. ✅ 🖱️ MENU DO BOTÃO DIREITO no sistema (29/09; "na agenda… no sistema inteiro, na verdade… um recurso para o botão direito do mouse, de interação")
+- Peça única reutilizável: `CevicoContextMenu.vue` (montado uma vez no Dashboard.vue) + `useCevicoContextMenu.js`
+  (`openMenu` e diretiva `v-cv-menu`). Vira perto das bordas, fecha com Esc/clique fora/rolagem, teclado, segundo nível,
+  toque longo no celular. Campos de texto, links e texto selecionado continuam com o menu do navegador; Shift + botão
+  direito sempre abre o do navegador. Só chama ações que JÁ existiam em cada tela.
+- Onde funciona: AGENDA (consulta/cirurgia: abrir, remarcar, compareceu/faltou, indicação, Espaço do Paciente, copiar,
+  cancelar; horário vazio: novo agendamento/outro tipo/fechar horário ou dia/imprimir; cabeçalho do dia); CRM (cartão:
+  abrir, conversa, Espaço do Paciente, mover para coluna, copiar); TAREFAS (mover, copiar; nota do paciente); MEU PAINEL
+  (card: ver detalhes, copiar número; no modo edição: tamanho, cor, ocultar, excluir).
+- Fora desta rodada: confirmar consulta e abrir conversa pela Agenda (a tela não tem essas ações), excluir pelo menu,
+  telas de Agendamentos/Chamadas/Criativos (ligar depois: 5 a 10 linhas por tela).
+- Testes: 40 verdes em components-next/cevico/specs. WEB só. SEM commit.
+- ACHADO: `:global(.dark) .classe` em <style scoped> compila para `.dark { … }` (Vue 3.5.12) — o popup de chamadas
+  pintava a PÁGINA no modo escuro. Corrigido em CevicoCallPopup.vue, CallPatientContext.vue e AreaChart.vue (`.dark .classe`).
+
+## 287. ✅ 🔗 CRIATIVOS: link só de leitura da análise + curva de retenção detalhada + cliques por trecho (29/09)
+- Rodada 1 pronta (30 testes verdes): botões Compartilhar e Copiar análise completa; página pública
+  /criativos/analise/<token> (token assinado, 30 dias, sem dado de paciente, noindex, limite de acessos); curva de
+  retenção em área, segundo a segundo (precisa de NOVA CARGA da Meta para aparecer), média da conta, maior queda, fala do
+  trecho; "cliques para cada 100 que chegaram" por marco, com o aviso de que a Meta não informa o segundo do clique.
+- Rodada 2 PRONTA (37 testes verdes): compartilhar COM × SEM dados financeiros (padrão sem; escolha dentro do token); 3 a 5 maiores quedas; radar, barras verticais e
+  linha; medidores de % em Barras | Linha; título do modal em branco.
+
+- Rodada 3 PRONTA (41 testes verdes; pedido 29/09 noite): "Onde apareceu" e "Quem viu" apontam os MAIS e os MENOS (volume e
+  aproveitamento, sem inventar vencedor em empate); saiu o gráfico de barras por dia; indicadores = este anúncio × MÉDIA da
+  conta × 🏆 RECORDE da conta ("vamos buscar sempre superar a média… e podemos ter recordes"); recorde exige volume mínimo
+  (1.000 impressões). Pendente pequeno: cartões do topo do modal e "Números da Meta" ainda usam bom/atenção/ruim.
+
+## 289. ✅ 💰 CRIATIVOS: o CAC saía MENOR que o custo da consulta (29/09; "precisa confirmar a origem deste dado, se não está invertido")
+- Causa: `Crm::AdFunnel` contava como CIRURGIA quem passou pelas "colunas de conversão" do relatório de Anúncios, que em
+  produção são [Agendamento de Consulta, Cirurgia Realizada]. No backup de 21/09: 197 "cirurgias" pela régua antiga × 9 de
+  verdade. A receita somava o valor do card (orçamento) de todos eles → ROAS inflado. E "consultas" olhava só a Agenda.
+- Régua nova (um degrau sempre cabe no anterior): consultas = card chegou na coluna oficial de agendamento ou além, OU
+  consulta na Agenda; compareceram = "Consulta Realizada" ou além, OU presença na Agenda; cirurgias = "Cirurgia
+  Realizada"/2º olho/pós-operatório, OU cirurgia realizada no Oftalmofácil; receita = valor do Oftalmofácil, senão o do card.
+  Cada anúncio leva `funnel.sources` (quanto veio do CRM, da Agenda e do Oftalmofácil).
+- ATENÇÃO: os números de CAC e ROAS vão MUDAR MUITO (para o valor real). O relatório de Anúncios e o de Páginas ainda
+  usam as "colunas de conversão" como conversão — lá o nome é "conversões", não cirurgia; revisar com ele.
+- Testes: creatives_center_spec 26 verdes. WEB+SIDEKIQ. SEM commit.
+
+## 291. ✅ 🛟 ATENDENTE DE IA: conversas que ficavam SEM resposta (29/09, produção; "algumas conversas tiveram continuidade, outras não"; prints: Luisa 13h22 e Rayane 13h20/13h31 sem resposta, saldo da Anthropic conferido e ok)
+- Causa no código: quando a chamada da IA falhava (serviço cheio, limite por minuto, rede), o job anotava "erro" no card
+  do agente e DESISTIA — o paciente ficava sem resposta até escrever de novo. Job que morre no meio (fila reiniciada)
+  também não voltava. A causa exata de 29/09 só aparece na lista de atividade do agente em produção (linhas "erro").
+- Correção 1 — nova tentativa: erro passageiro → tenta de novo em 20 s, 1 min e 3 min (sempre conferindo se ainda é a
+  última mensagem do paciente). Erro de configuração (desligado, sem chave) não repete. Card mostra "vou tentar de novo (1/3)".
+- Correção 2 — RESGATE (`Crm::ResponderRescueJob`, a cada 5 min): conversa aberta, em caixa de agente AO VIVO, última
+  mensagem do paciente sem resposta entre 3 min e 2 h, não pausada, coluna com agente dono → devolve ao agente. Cada
+  mensagem é resgatada UMA vez (marca no Redis); evento "resgate" no card.
+- Testes: responder_rescue_job_spec (6) + responder_agent_job_spec (+2) = 24 verdes. WEB+SIDEKIQ, sem migration. SEM commit.
+- Pode subir SOZINHO, antes do resto (arquivos: jobs/crm/responder_agent_job.rb, jobs/crm/responder_rescue_job.rb,
+  config/schedule.yml + os 2 specs).
+
+## 290. ✅ 🎨 AGENDA: cor por agendamento (como no Google Agenda) + compareceu/faltou à mão na lista do dia (29/09; "parecido com o google agenda, mudar as cores (e ter um comando de compareceu ou faltou), relacionado com a lista lateral… assim as meninas vão conseguir se organizar melhor")
+- ⚠️ TEM MIGRATION: db/migrate/20260929170000_add_color_to_tasks.rb (`tasks.color`, texto, pode ser vazio) → BACKUP antes;
+  WEB+SIDEKIQ. Só acrescenta coluna. Sobe junto com o 283 (menu do botão direito).
+- Botão direito em qualquer agendamento (Semana, Dia, Mês, lista lateral, bloco do médico): 12 bolinhas de cor + "Padrão".
+  Pinta na hora, vale para a equipe toda. O selo do TIPO continua na cor do tipo.
+- Lista lateral "Itens do dia": botões ✓ Compareceu / ✕ Faltou (cirurgia: Realizada / Não veio), clique de novo desfaz;
+  selo ✓ verde / ✕ vermelho / ! âmbar no balão da grade. Mesma função de presença de sempre — nenhum indicador mudou.
+- Testes: 28 (servidor) + 53 (tela) verdes. SEM commit. Não conferido: clique real em compareceu/faltou (move card no CRM).
+- ARMADILHA: rodar rspec no contêiner SEM `-e RAILS_ENV=test` usa o banco de desenvolvimento.

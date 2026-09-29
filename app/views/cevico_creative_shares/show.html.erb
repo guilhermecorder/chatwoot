@@ -1,0 +1,790 @@
+<%# 🔗 Link SÓ DE LEITURA da análise de um criativo (item 287).
+    Só dados do ANÚNCIO (Crm::CreativeSharePayload). Visual do kit CEVICO:
+    vidro, cantos arredondados, azul royal. Sem login, sem indexação. %>
+<%
+  ad = @payload['ad']
+  blocks = @payload['blocks'].index_by { |b| b['key'] }
+  retention = @payload['retention']
+  clicks = retention && retention['clicks']
+  transcript = @payload['transcript']
+  texts = @payload['texts']
+  finance = @payload['finance'] == true
+  indicators = Array(@payload['indicators'])
+  radar = @payload['radar']
+  daily = Array(@payload['daily'])
+  drops = Array(retention && retention['top_drops'])
+  tones = { 'good' => '#059669', 'even' => '#b45309', 'bad' => '#dc2626' }
+  rankings = [['onde', 'Onde apareceu: os mais e os menos', 'De onde vem: a Meta separa o resultado por lugar onde o anúncio foi mostrado. Do melhor para o pior.', @payload['placements']],
+              ['quem', 'Quem viu: os mais e os menos', 'De onde vem: a Meta separa o resultado por idade e sexo de quem recebeu o anúncio. Do melhor para o pior.', @payload['audience']]]
+  rate = ->(v) { v.nil? ? '—' : (v.to_f.round(1) % 1).zero? ? v.to_f.round.to_s : v.to_f.round(1).to_s.tr('.', ',') }
+  pct = ->(v, d = 1) { v.nil? ? '—' : "#{format("%.#{d}f", v.to_f * 100).tr('.', ',')}%" }
+  int = ->(v) { v.to_i.to_s.reverse.scan(/\d{1,3}/).join('.').reverse }
+  secs = lambda do |v|
+    n = v.to_f.round(1)
+    "#{(n % 1).zero? ? n.to_i : n.to_s.tr('.', ',')} s"
+  end
+%>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="no-referrer">
+  <title>Análise do criativo — <%= ad['name'] %></title>
+  <style>
+    :root {
+      --cv: #2563eb; --cv-deep: #1e40af; --cv-rgb: 37 99 235; --cv-deep-rgb: 30 64 175;
+      --ink: #111827; --ink-2: #4b5870; --ink-3: #7b879c; --line: rgb(var(--cv-rgb) / 0.2);
+      --bad: #dc2626; --bad-rgb: 220 38 38;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      color: var(--ink); background: #f4f7fc; min-height: 100vh; -webkit-font-smoothing: antialiased;
+      background-image: radial-gradient(1100px 420px at 50% -180px, rgb(var(--cv-rgb) / 0.18), rgb(var(--cv-rgb) / 0) 70%);
+      background-repeat: no-repeat;
+    }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 20px 16px 64px; display: flex; flex-direction: column; gap: 20px; }
+    .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .top img { height: 34px; border-radius: 7px; display: block; }
+    .top .grow { flex: 1; min-width: 0; }
+    .eyebrow { font-size: 12px; color: var(--ink-3); }
+    .block {
+      position: relative; border-radius: 24px; padding: 24px;
+      background: linear-gradient(160deg, rgba(255,255,255,.78), rgba(255,255,255,.6) 60%, rgba(255,255,255,.7)), rgb(var(--cv-rgb) / 0.035);
+      border: 1px solid rgb(var(--cv-rgb) / 0.22);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 -18px 40px rgb(var(--cv-rgb) / 0.05), 0 12px 32px -14px rgb(var(--cv-deep-rgb) / 0.3);
+    }
+    .head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+    .head h2 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+    .head .sub { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; line-height: 1.45; }
+    .head .grow { flex: 1; min-width: 0; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+      font: inherit; font-size: 12.5px; font-weight: 600; color: var(--cv-deep); white-space: nowrap;
+      background: rgb(var(--cv-rgb) / 0.1); border: 1px solid rgb(var(--cv-rgb) / 0.28); transition: background .15s ease;
+    }
+    .btn:hover { background: rgb(var(--cv-rgb) / 0.18); }
+    .btn.main { color: #fff; border-color: rgba(255,255,255,.35); background: linear-gradient(135deg, #1d4ed8, #3b82f6); height: 38px; padding: 0 18px; font-size: 13.5px; }
+    .btn.done { color: #065f46; background: rgb(5 150 105 / 0.14); border-color: rgb(5 150 105 / 0.35); }
+    .chip {
+      display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+      color: var(--cv-deep); background: rgb(var(--cv-rgb) / 0.1); border: 1px solid rgb(var(--cv-rgb) / 0.28);
+    }
+    .chip.soft { color: var(--ink-2); background: rgb(100 116 139 / 0.1); border-color: rgb(100 116 139 / 0.25); }
+    .ficha { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 22px; }
+    .thumb { width: 150px; height: 190px; border-radius: 20px; overflow: hidden; background: rgb(var(--cv-rgb) / 0.08); }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; word-break: break-word; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+    .meta { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+    .reading { font-size: 17px; line-height: 1.55; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+    .tile {
+      border-radius: 16px; padding: 14px 16px;
+      background: linear-gradient(180deg, rgba(255,255,255,.8), rgba(255,255,255,.62)), rgb(var(--cv-rgb) / 0.04);
+      border: 1px solid rgb(var(--cv-rgb) / 0.24); box-shadow: inset 0 1px 0 rgba(255,255,255,.9);
+    }
+    .tile .l { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+    .tile .v { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 4px 0; font-variant-numeric: tabular-nums; }
+    .tile .h { font-size: 11.5px; color: var(--ink-3); line-height: 1.4; }
+    .text { font-size: 14.5px; line-height: 1.65; color: #273246; white-space: pre-line; word-break: break-word; }
+    .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; color: var(--ink-3); margin: 16px 0 4px; }
+    .label:first-child { margin-top: 0; }
+    .hook { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.3; }
+    .note {
+      border-radius: 14px; padding: 12px 14px; font-size: 13px; line-height: 1.5; color: #5b4a12;
+      background: rgb(217 119 6 / 0.09); border: 1px solid rgb(217 119 6 / 0.25); margin-bottom: 14px;
+    }
+    .rows { display: flex; flex-direction: column; gap: 8px; }
+    .row {
+      position: relative; overflow: hidden; border-radius: 14px; padding: 12px 14px;
+      background: rgb(var(--cv-rgb) / 0.05); border: 1px solid rgb(var(--cv-rgb) / 0.14);
+      display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; align-items: center; font-size: 13.5px;
+    }
+    .row .fill { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, rgb(var(--cv-rgb) / 0.2), rgb(var(--cv-rgb) / 0.06)); z-index: 0; }
+    .row > span { position: relative; z-index: 1; }
+    .row b { font-weight: 700; }
+    .row .small { font-size: 12px; color: var(--ink-2); }
+    .seg { border-radius: 14px; padding: 10px 14px; background: rgb(var(--cv-rgb) / 0.05); border: 1px solid rgb(var(--cv-rgb) / 0.14); font-size: 13.5px; line-height: 1.5; }
+    .seg .t { font-size: 11.5px; font-weight: 700; color: var(--cv-deep); font-variant-numeric: tabular-nums; }
+    .seg .d { font-size: 12px; color: var(--ink-2); }
+    .drop { border-radius: 14px; padding: 12px 14px; font-size: 14px; line-height: 1.5; background: rgb(var(--bad-rgb) / 0.07); border: 1px solid rgb(var(--bad-rgb) / 0.22); margin-top: 10px; }
+    .chart { position: relative; margin: 6px 0 4px; }
+    .chart svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
+    .tip {
+      position: absolute; pointer-events: none; min-width: 170px; max-width: 280px; padding: 10px 12px; border-radius: 14px; font-size: 12.5px; line-height: 1.45;
+      background: rgba(255,255,255,.96); border: 1px solid rgb(var(--cv-rgb) / 0.3); box-shadow: 0 12px 28px -12px rgb(var(--cv-deep-rgb) / 0.45); display: none;
+    }
+    .tip b { font-size: 15px; }
+    .tip .say { color: var(--ink-2); margin-top: 4px; font-style: italic; }
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+    .legend i { display: inline-block; width: 18px; height: 3px; border-radius: 3px; vertical-align: middle; margin-right: 6px; }
+    .foot { text-align: center; font-size: 12px; color: var(--ink-3); line-height: 1.6; }
+    .src { display: none; }
+    .chip.fin { color: #92400e; background: rgb(217 119 6 / 0.12); border-color: rgb(217 119 6 / 0.35); }
+    .chip.nofin { color: #065f46; background: rgb(5 150 105 / 0.12); border-color: rgb(5 150 105 / 0.35); }
+    .inds { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+    .ind { border-radius: 16px; padding: 14px 16px; background: linear-gradient(180deg, rgba(255,255,255,.8), rgba(255,255,255,.62)); border: 1px solid rgb(var(--cv-rgb) / 0.24); }
+    .ind .t { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; margin-bottom: 8px; }
+    .ind .t small { font-weight: 400; color: var(--ink-2); font-size: 12.5px; }
+    .ind .t .vd { margin-left: auto; font-size: 12px; font-weight: 800; }
+    .bar3 { display: grid; grid-template-columns: 142px minmax(0, 1fr) 70px; gap: 8px; align-items: center; margin: 5px 0; font-size: 12px; color: var(--ink-2); }
+    .bar3 .track { height: 14px; border-radius: 999px; background: rgb(100 116 139 / 0.14); overflow: hidden; }
+    .bar3 .track i { display: block; height: 100%; border-radius: 999px; }
+    .ind.champion { border-color: rgb(212 160 23 / 0.7); box-shadow: 0 0 0 3px rgb(212 160 23 / 0.16); }
+    .ind .rec { font-size: 12.5px; font-weight: 700; color: #a16207; }
+    .ind .who { font-size: 11.5px; color: var(--ink-2); line-height: 1.4; }
+    .sum { border-radius: 14px; padding: 12px 14px; font-size: 14.5px; line-height: 1.5; margin-bottom: 12px;
+      border: 1px solid rgb(var(--cv-rgb) / 0.25); border-left: 4px solid var(--cv); background: rgb(var(--cv-rgb) / 0.08); }
+    .sum.even { border-color: rgb(100 116 139 / 0.3); border-left-color: #64748b; background: rgb(100 116 139 / 0.08); }
+    .rank { padding: 10px 14px; border-radius: 14px; border: 1px solid rgb(var(--cv-rgb) / 0.16); border-left: 4px solid transparent; background: rgb(var(--cv-rgb) / 0.04); }
+    .rank .top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+    .rank .pos { font-size: 11.5px; font-weight: 700; color: var(--ink-3); }
+    .rank .big { margin-left: auto; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .rank .big small { font-size: 11.5px; font-weight: 400; color: var(--ink-2); }
+    .rank .meter { height: 10px; border-radius: 999px; background: rgb(100 116 139 / 0.14); overflow: hidden; margin: 6px 0; }
+    .rank .meter i { display: block; height: 100%; border-radius: 999px; opacity: .85; }
+    .rank .nums { display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: 12.5px; color: #273246; }
+    .rank .nums .soft { color: var(--ink-2); }
+    .badge { padding: 1px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid currentColor; }
+    .bar3 .n { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+    .bar3.me { color: var(--ink); font-weight: 700; }
+    .bar3.me .n { font-size: 16px; font-weight: 800; }
+    .ind .ph { font-size: 12.5px; font-weight: 700; margin-top: 6px; }
+    .ind .hi { font-size: 11.5px; color: var(--ink-3); line-height: 1.4; }
+    .drops { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .dropi { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.45;
+      border: 1px solid rgb(217 119 6 / 0.3); border-left: 4px solid #d97706; background: rgb(217 119 6 / 0.08); }
+    .dropi.first { border-color: rgb(var(--bad-rgb) / 0.3); border-left-color: var(--bad); background: rgb(var(--bad-rgb) / 0.07); }
+    .dropi .rk { width: 24px; height: 24px; border-radius: 999px; background: #d97706; color: #fff; font-size: 12px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
+    .dropi.first .rk { background: var(--bad); }
+    .dropi .s { font-size: 12px; color: var(--ink-2); }
+    .dropi .say { font-size: 12px; font-style: italic; color: #273246; }
+    .radar { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; align-items: center; }
+    .lines { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+    .lines h3 { font-size: 14px; font-weight: 700; }
+    .lines h3 small { font-weight: 400; color: var(--ink-2); }
+    .minitip { top: 0 !important; min-width: 0; white-space: nowrap; }
+    @media (max-width: 640px) {
+      .ficha { grid-template-columns: 1fr; }
+      .radar { grid-template-columns: 1fr; }
+      .row { grid-template-columns: 1fr; gap: 2px; }
+      h1 { font-size: 22px; }
+      .block { padding: 18px; border-radius: 20px; }
+    }
+    @media print { .btn { display: none; } body { background: #fff; } .block { box-shadow: none; break-inside: avoid; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <img src="/brand-assets/cevico-logo.png" alt="CEVICO">
+    <div class="grow">
+      <p class="eyebrow">Análise de criativo · só leitura</p>
+      <p class="eyebrow">Este link vale até <strong><%= @expires_label %></strong></p>
+    </div>
+    <span class="chip <%= finance ? 'fin' : 'nofin' %>"><%= @payload['finance_label'] %></span>
+    <button class="btn main" type="button" data-copy="all">Copiar tudo</button>
+  </header>
+  <pre class="src" id="src-all"><%= @payload['text'] %></pre>
+
+  <section class="block">
+    <div class="ficha">
+      <div class="thumb">
+        <% if ad['thumbnail_url'].present? %>
+          <img src="<%= ad['thumbnail_url'] %>" alt="" referrerpolicy="no-referrer" data-hide-on-error>
+        <% end %>
+      </div>
+      <div>
+        <p class="eyebrow">Anúncio</p>
+        <h1><%= ad['name'] %></h1>
+        <div class="chips">
+          <span class="chip"><%= ad['format_label'] %></span>
+          <span class="chip soft"><%= ad['status'] %></span>
+        </div>
+        <p class="meta">
+          <% if ad['campaign'].present? %>Campanha: <%= ad['campaign'] %><br><% end %>
+          <% if ad['adset'].present? %>Conjunto: <%= ad['adset'] %><br><% end %>
+          Período analisado: <strong><%= @payload.dig('period', 'label') %></strong> (<%= @payload.dig('period', 'days') %> dias)
+        </p>
+        <% if ad['permalink'].to_s.start_with?('https://') %>
+          <p class="meta" style="margin-top:10px"><a class="btn" href="<%= ad['permalink'] %>" target="_blank" rel="noopener noreferrer nofollow">Ver o anúncio no Instagram</a></p>
+        <% end %>
+      </div>
+    </div>
+  </section>
+
+  <% if blocks['leitura'] %>
+    <section class="block">
+      <div class="head">
+        <div class="grow"><h2>Leitura</h2><p class="sub">O que os números deste anúncio dizem, contra a média e o recorde da conta.</p></div>
+        <button class="btn" type="button" data-copy="leitura">Copiar</button>
+      </div>
+      <p class="reading"><%= @payload['reading'] %></p>
+    </section>
+  <% end %>
+
+  <section class="block">
+    <div class="head">
+      <div class="grow"><h2>Números do anúncio</h2><p class="sub">De onde vem: a Meta conta cada vez que o anúncio aparece, é assistido e clicado. Somados no período.</p></div>
+      <button class="btn" type="button" data-copy="numeros">Copiar</button>
+    </div>
+    <div class="tiles">
+      <% @payload['numbers'].each do |n| %>
+        <div class="tile"><p class="l"><%= n['label'] %></p><p class="v"><%= n['value'] %></p><p class="h"><%= n['hint'] %></p></div>
+      <% end %>
+    </div>
+  </section>
+
+  <% if indicators.any? %>
+    <section class="block">
+      <div class="head">
+        <div class="grow"><h2>Indicadores</h2><p class="sub">Este anúncio contra a média da conta no mesmo período (para superar) e contra o recorde da conta em todo o histórico (para ir buscar).</p></div>
+        <button class="btn" type="button" data-copy="indicadores">Copiar</button>
+      </div>
+      <div class="inds">
+        <% indicators.each do |i| %>
+          <% top = [i['value'].to_f, i['avg'].to_f, i['record'].to_f].max * 1.08 %>
+          <% top = 1.0 unless top.positive? %>
+          <% width = ->(v) { [[(v.to_f / top * 100).round(1), 2].max, 100].min } %>
+          <% tone = tones[i['verdict']] || '#64748b' %>
+          <div class="ind <%= 'champion' if i['is_record'] %>">
+            <p class="t"><span><%= i['label'] %> <small>· <%= i['metric'] %></small></span><% if i['verdict_label'] %><span class="vd" style="color:<%= tone %>"><%= i['verdict_label'] %></span><% end %></p>
+            <div class="bar3 me"><span>Este anúncio</span><span class="track"><i style="width:<%= width.call(i['value']) %>%;background:<%= tone %>"></i></span><span class="n"><%= i['value_text'] %></span></div>
+            <% if i['avg'] %>
+              <div class="bar3"><span>Média da conta</span><span class="track"><i style="width:<%= width.call(i['avg']) %>%;background:#94a3b8"></i></span><span class="n"><%= i['avg_text'] %></span></div>
+            <% end %>
+            <% if i['record'] %>
+              <div class="bar3"><span>🏆 Recorde da conta</span><span class="track"><i style="width:<%= width.call(i['record']) %>%;background:#d4a017"></i></span><span class="n"><%= i['record_text'] %></span></div>
+            <% end %>
+            <p class="ph" style="color:<%= tone %>"><%= i['phrase'] %></p>
+            <p class="rec"><%= i['record_phrase'] %></p>
+            <% if i['record'] && !i['is_record'] %><p class="who">recorde: <%= [i['record_ad'], i['record_when']].compact.join(' · ') %></p><% end %>
+            <p class="hi"><%= i['hint'] %></p>
+          </div>
+        <% end %>
+      </div>
+    </section>
+  <% end %>
+
+  <% if radar && radar['axes'].to_a.size >= 3 %>
+    <section class="block">
+      <div class="head">
+        <div class="grow"><h2>Este criativo × média × recorde da conta</h2><p class="sub">Do gancho ao agendamento em uma figura só. A borda de fora é o recorde da conta: a ponta mais curta é onde há mais para buscar.</p></div>
+      </div>
+      <div class="radar">
+        <div id="cv-radar"></div>
+        <div>
+          <div class="rows">
+            <% radar['axes'].each do |a| %>
+              <div class="row">
+                <span><b><%= a['label'] %></b></span>
+                <span><b><%= a['value_text'] %></b> <span class="small">· média <%= a['avg_text'] || '—' %></span></span>
+                <span class="small">
+                  <% if a['is_record'] %>🏆 este anúncio é o recorde da conta
+                  <% elsif a['record_text'] %>recorde <%= a['record_text'] %><%= " (#{a['record_ad']})" if a['record_ad'] %> · está em <%= a['score'] %>% do recorde
+                  <% else %>a conta ainda não tem recorde aqui<% end %>
+                </span>
+              </div>
+            <% end %>
+          </div>
+          <p class="tile h" style="border:0;background:none;padding:8px 0 0;font-size:11.5px;color:var(--ink-3)"><%= radar['note'] %></p>
+        </div>
+      </div>
+    </section>
+  <% end %>
+
+  <section class="block">
+    <div class="head">
+      <div class="grow"><h2><%= @payload['journey_title'] %></h2><p class="sub">Para onde vai: quem clicou vira conversa, consulta e cirurgia. Aqui só as quantidades, sem nenhum dado de paciente.</p></div>
+      <button class="btn" type="button" data-copy="jornada">Copiar</button>
+    </div>
+    <div class="tiles">
+      <% @payload['journey'].each do |n| %>
+        <div class="tile"><p class="l"><%= n['label'] %></p><p class="v"><%= n['value'] %></p><p class="h"><%= n['hint'] %></p></div>
+      <% end %>
+    </div>
+  </section>
+
+  <% if daily.size > 1 %>
+    <section class="block">
+      <div class="head">
+        <div class="grow"><h2>Taxas principais, dia a dia</h2><p class="sub">Linha cheia = este anúncio · tracejada = média da conta · pontilhada dourada = recorde da conta.</p></div>
+      </div>
+      <div class="lines" id="cv-lines"></div>
+    </section>
+  <% end %>
+
+  <% if retention %>
+    <section class="block">
+      <div class="head">
+        <div class="grow">
+          <h2>Curva de retenção</h2>
+          <p class="sub">
+            <% if retention['source'] == 'meta_curve' %>
+              Quantos por cento ainda estavam assistindo em cada segundo do vídeo. Base: <%= int.call(retention['base_total']) %> reproduções
+              (<%= retention['curve_days'] %> de <%= retention['period_days'] %> dias do período têm a curva detalhada).
+            <% else %>
+              Quantos por cento das impressões chegaram a cada marco do vídeo. A curva segundo a segundo aparece depois da próxima carga de dados da Meta.
+            <% end %>
+            <% if retention['duration'] %>
+              Duração do vídeo: <%= secs.call(retention['duration']) %><%= ' (estimada pela curva)' if retention['duration_estimated'] %>.
+            <% end %>
+            <% if retention['avg_watch'].to_f.positive? %>Tempo médio assistido: <%= secs.call(retention['avg_watch']) %>.<% end %>
+          </p>
+        </div>
+        <button class="btn" type="button" data-copy="retencao">Copiar</button>
+      </div>
+      <div class="chart" id="cv-chart"><div class="tip" id="cv-tip"></div></div>
+      <div class="legend">
+        <span><i style="background:var(--cv)"></i>Este criativo</span>
+        <% if retention['average'].present? %><span><i style="background:#94a3b8"></i>Média da conta</span><% end %>
+        <span><i style="background:rgb(var(--bad-rgb) / 0.45)"></i>Maiores quedas (numeradas)</span>
+      </div>
+      <% if drops.any? %>
+        <div class="head" style="margin:18px 0 0">
+          <div class="grow"><p class="label" style="margin:0">As <%= drops.size %> maiores quedas do vídeo</p></div>
+          <button class="btn" type="button" data-copy="quedas">Copiar</button>
+        </div>
+        <div class="drops">
+          <% drops.each do |d| %>
+            <div class="dropi <%= 'first' if d['rank'] == 1 %>">
+              <span class="rk"><%= d['rank'] %></span>
+              <div>
+                <strong><%= d['from_t'] ? "Do segundo #{secs.call(d['from_t']).delete_suffix(' s')} ao #{secs.call(d['to_t']).delete_suffix(' s')}" : "De #{d['from_label']} a #{d['to_label']}" %></strong>
+                · caiu <strong><%= format('%.1f', d['drop'].to_f * 100).tr('.', ',') %> pontos</strong> percentuais
+                (de <%= pct.call(d['from_pct']) %> para <%= pct.call(d['to_pct']) %>)
+                <% if d['after_hook'] %><span class="chip soft">depois do gancho</span><% end %><br>
+                <span class="s"><%= int.call(d['people_lost']) %> <%= retention['base'] == 'plays' ? 'reproduções' : 'impressões' %> se perderam neste trecho</span>
+                <% if d['speech'].present? %><br><span class="say">fala: “<%= d['speech'] %>”</span><% end %>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+      <% if retention['segments'].present? %>
+        <p class="label" style="margin-top:18px">O que está sendo falado em cada trecho</p>
+        <div class="rows">
+          <% retention['segments'].each do |s| %>
+            <div class="seg">
+              <span class="t"><%= secs.call(s['start']) %> a <%= secs.call(s['end']) %></span> · “<%= s['text'] %>”<br>
+              <span class="d">de <%= pct.call(s['pct_start']) %> para <%= pct.call(s['pct_end']) %> assistindo · <%= int.call(s['people_lost']) %> saíram neste trecho</span>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+    </section>
+  <% end %>
+
+  <% if clicks %>
+    <section class="block">
+      <div class="head">
+        <div class="grow"><h2>Cliques por quem chegou até aqui</h2><p class="sub">Cliques no link no período: <strong><%= int.call(clicks['link_clicks']) %></strong>. Fonte: <%= clicks['source'] %>.</p></div>
+        <button class="btn" type="button" data-copy="cliques">Copiar</button>
+      </div>
+      <p class="note"><%= clicks['note'] %></p>
+      <div class="rows">
+        <% top = clicks['marks'].first['reached'].to_f %>
+        <% clicks['marks'].each do |m| %>
+          <div class="row">
+            <span class="fill" style="width:<%= top.positive? ? [(m['reached'] / top * 100).round(1), 100].min : 0 %>%"></span>
+            <span><b><%= m['label'] %></b></span>
+            <span><%= int.call(m['reached']) %> chegaram</span>
+            <span>
+              <% if m['rate'] %><b><%= format('%.1f', m['rate'] * 100).tr('.', ',') %></b> cliques para cada 100<% else %>sem dado<% end %>
+              <% if m['before_min'].to_i.positive? %><br><span class="small">pelo menos <%= int.call(m['before_min']) %> cliques vieram antes deste ponto</span><% end %>
+            </span>
+          </div>
+        <% end %>
+      </div>
+    </section>
+  <% end %>
+
+  <% if transcript %>
+    <section class="block">
+      <div class="head">
+        <div class="grow"><h2>Transcrição do vídeo</h2><p class="sub">O que o vídeo fala, separado em gancho, corpo e pedido final.</p></div>
+        <button class="btn" type="button" data-copy="transcricao">Copiar</button>
+      </div>
+      <p class="label">Gancho (primeiros segundos)<% if transcript['angle'].present? %> · tipo: <%= transcript['angle'] %><% end %></p>
+      <p class="hook"><%= transcript['hook'] %></p>
+      <% if transcript['body'].present? %><p class="label">Corpo</p><p class="text"><%= transcript['body'] %></p><% end %>
+      <% if transcript['cta'].present? %><p class="label">Pedido falado (CTA)</p><p class="text"><%= transcript['cta'] %></p><% end %>
+      <p class="label">Texto completo</p>
+      <p class="text"><%= transcript['text'] %></p>
+    </section>
+  <% end %>
+
+  <% if blocks['textos'] %>
+    <section class="block">
+      <div class="head">
+        <div class="grow"><h2>Textos do anúncio na Meta</h2><p class="sub">O que está escrito no anúncio: título, texto, descrição e botão.</p></div>
+        <button class="btn" type="button" data-copy="textos">Copiar</button>
+      </div>
+      <% if texts['title'].present? %><p class="label">Título</p><p class="hook"><%= texts['title'] %></p><% end %>
+      <% if texts['body'].present? %><p class="label">Texto</p><p class="text"><%= texts['body'] %></p><% end %>
+      <% if texts['description'].present? %><p class="label">Descrição</p><p class="text"><%= texts['description'] %></p><% end %>
+      <% if texts['button'].present? %><p class="label">Botão</p><p class="text"><%= texts['button'] %></p><% end %>
+      <% [['Títulos testados', texts['titles']], ['Textos testados', texts['bodies']], ['Botões testados', texts['buttons']]].each do |title, list| %>
+        <% next unless list.to_a.size > 1 %>
+        <p class="label"><%= title %></p>
+        <p class="text"><%= list.each_with_index.map { |t, i| "#{i + 1}. #{t}" }.join("\n") %></p>
+      <% end %>
+    </section>
+  <% end %>
+
+  <% rankings.each do |key, title, sub, ranking| %>
+    <% next if ranking.nil? || ranking['rows'].blank? %>
+    <% top = [ranking['rows'].map { |r| r['conversations'].to_i }.max, 1].max %>
+    <section class="block">
+      <div class="head">
+        <div class="grow"><h2><%= title %></h2><p class="sub"><%= sub %></p></div>
+        <button class="btn" type="button" data-copy="<%= key %>">Copiar</button>
+      </div>
+      <% if ranking['summary'].present? %><p class="sum <%= 'even' if ranking['no_difference'] %>"><%= ranking['summary'] %></p><% end %>
+      <div class="rows">
+        <% ranking['rows'].each_with_index do |r, index| %>
+          <% lead = Array(r['badges']).first %>
+          <% edge = lead ? tones[lead['tone']] : nil %>
+          <div class="rank" style="<%= "border-left-color:#{edge}" if edge %>">
+            <div class="top">
+              <span class="pos"><%= index + 1 %>º</span>
+              <strong><%= r['label'] %></strong>
+              <% Array(r['badges']).each do |b| %><span class="badge" style="color:<%= tones[b['tone']] %>"><%= b['label'] %></span><% end %>
+              <span class="big"><%= int.call(r['conversations']) %> <small>conversas</small></span>
+            </div>
+            <div class="meter"><i style="width:<%= [(r['conversations'].to_f / top * 100).round(1), 1.5].max %>%;background:<%= edge || 'var(--cv)' %>"></i></div>
+            <div class="nums">
+              <span><b><%= rate.call(r['clicks_per_100']) %></b> cliques a cada 100 exibições</span>
+              <span><b><%= rate.call(r['conversations_per_100']) %></b> conversas a cada 100 cliques</span>
+              <span class="soft"><%= int.call(r['impressions']) %> exibições · <%= int.call(r['link_clicks']) %> cliques</span>
+              <% if r['spend_text'] %><span class="soft"><%= r['spend_text'] %><%= " · #{r['cost_text']} por conversa" if r['cost_text'] %></span><% end %>
+            </div>
+          </div>
+        <% end %>
+      </div>
+      <p class="eyebrow" style="margin-top:8px">Aproveitamento = conversas a cada 1.000 exibições (o caminho inteiro: viu → clicou → conversou). Linha com pouco volume não disputa, e diferença pequena demais para o volume não vira selo.</p>
+    </section>
+  <% end %>
+
+  <% @payload['blocks'].each do |b| %>
+    <pre class="src" id="src-<%= b['key'] %>"><%= "#{b['title'].upcase}\n#{b['text']}" %></pre>
+  <% end %>
+
+  <p class="foot">
+    Página só de leitura, gerada pelo sistema CEVICO. Mostra números do anúncio, sem dados de pacientes.<br>
+    Este link vale até <%= @expires_label %>.
+  </p>
+</div>
+
+<script type="application/json" id="cv-data"><%= raw json_escape((retention || {}).to_json) %></script>
+<script type="application/json" id="cv-more"><%= raw json_escape({ finance: finance, radar: radar, daily: daily, indicators: indicators }.to_json) %></script>
+<script nonce="<%= content_security_policy_nonce %>">
+(function () {
+  // ── copiar (bloco ou tudo) ──
+  function legacyCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.top = '-1000px';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+  function done(btn, ok) {
+    var old = btn.getAttribute('data-label') || btn.textContent;
+    btn.setAttribute('data-label', old);
+    btn.textContent = ok ? 'Copiado' : 'Não consegui copiar';
+    btn.classList.toggle('done', ok);
+    setTimeout(function () { btn.textContent = old; btn.classList.remove('done'); }, 1800);
+  }
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var src = document.getElementById('src-' + btn.getAttribute('data-copy'));
+      var text = src ? src.textContent : '';
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(function () { done(btn, true); }, function () { done(btn, legacyCopy(text)); });
+      } else { done(btn, legacyCopy(text)); }
+    });
+  });
+  document.querySelectorAll('[data-hide-on-error]').forEach(function (img) {
+    img.addEventListener('error', function () { img.style.display = 'none'; });
+  });
+
+  // ── curva de retenção: área suave com degradê ──
+  var box = document.getElementById('cv-chart');
+  var data = {};
+  try { data = JSON.parse(document.getElementById('cv-data').textContent) || {}; } catch (e) { data = {}; }
+  if (!box || !data.points || data.points.length < 2) return;
+
+  var NS = 'http://www.w3.org/2000/svg';
+  var W = 760, H = 320, P = { l: 46, r: 18, t: 30, b: 40 };
+  var seconds = data.axis === 'seconds';
+  var pts = data.points;
+  var xMax = seconds ? pts[pts.length - 1].t : pts.length - 1;
+  var px = function (v) { return P.l + (W - P.l - P.r) * (xMax ? v / xMax : 0); };
+  var py = function (v) { return P.t + (H - P.t - P.b) * (1 - Math.max(0, Math.min(1, v || 0))); };
+  var xy = function (list) { return list.map(function (p, i) { return [px(seconds ? p.t : i), py(p.pct)]; }); };
+  var fmtPct = function (v) { return (v * 100).toFixed(1).replace('.', ',') + '%'; };
+  var fmtInt = function (v) { return Number(v || 0).toLocaleString('pt-BR'); };
+
+  // curva suave que nunca passa do ponto (interpolação monotônica)
+  function smooth(p) {
+    var n = p.length, d = [], m = [], i;
+    for (i = 0; i < n - 1; i++) d.push((p[i + 1][1] - p[i][1]) / ((p[i + 1][0] - p[i][0]) || 1));
+    m[0] = d[0]; m[n - 1] = d[n - 2];
+    for (i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+    for (i = 0; i < n - 1; i++) {
+      if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+      var a = m[i] / d[i], b = m[i + 1] / d[i], s = a * a + b * b;
+      if (s > 9) { var t = 3 / Math.sqrt(s); m[i] = t * a * d[i]; m[i + 1] = t * b * d[i]; }
+    }
+    var out = 'M' + p[0][0].toFixed(1) + ',' + p[0][1].toFixed(1);
+    for (i = 0; i < n - 1; i++) {
+      var h = (p[i + 1][0] - p[i][0]) / 3;
+      out += ' C' + (p[i][0] + h).toFixed(1) + ',' + (p[i][1] + m[i] * h).toFixed(1) + ' ' +
+        (p[i + 1][0] - h).toFixed(1) + ',' + (p[i + 1][1] - m[i + 1] * h).toFixed(1) + ' ' +
+        p[i + 1][0].toFixed(1) + ',' + p[i + 1][1].toFixed(1);
+    }
+    return out;
+  }
+  function el(name, attrs, parent, text) {
+    var node = document.createElementNS(NS, name);
+    Object.keys(attrs || {}).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+    if (text !== undefined) node.textContent = text;
+    (parent || svg).appendChild(node);
+    return node;
+  }
+
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Curva de retenção do vídeo');
+  var defs = el('defs', {});
+  var grad = el('linearGradient', { id: 'cvArea', x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+  el('stop', { offset: '0%', 'stop-color': '#2563eb', 'stop-opacity': 0.5 }, grad);
+  el('stop', { offset: '100%', 'stop-color': '#2563eb', 'stop-opacity': 0.03 }, grad);
+
+  [0, 0.25, 0.5, 0.75, 1].forEach(function (g) {
+    el('line', { x1: P.l, x2: W - P.r, y1: py(g), y2: py(g), stroke: '#cbd5e1', 'stroke-width': 0.7 });
+    el('text', { x: P.l - 8, y: py(g) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#7b879c' }, null, Math.round(g * 100) + '%');
+  });
+
+  // as 3 a 5 maiores quedas: faixas numeradas (1ª vermelha, as outras âmbar)
+  var dropMarks = [];
+  (data.top_drops || []).forEach(function (drop) {
+    var i0 = seconds ? drop.from_t : pts.findIndex(function (p) { return p.label === drop.from_label; });
+    var i1 = seconds ? drop.to_t : pts.findIndex(function (p) { return p.label === drop.to_label; });
+    var tone = drop.rank === 1 ? '#dc2626' : '#d97706';
+    el('rect', { x: px(i0), y: P.t, width: Math.max(px(i1) - px(i0), 3), height: H - P.t - P.b, fill: tone, opacity: drop.rank === 1 ? 0.16 : 0.12, rx: 4 });
+    dropMarks.push({ x: (px(i0) + px(i1)) / 2, tone: tone, rank: drop.rank });
+  });
+
+  // eixo X
+  if (seconds) {
+    var step = xMax <= 20 ? 2 : xMax <= 45 ? 5 : 10;
+    for (var s = 0; s <= xMax; s += step) {
+      el('text', { x: px(s), y: H - 10, 'text-anchor': 'middle', 'font-size': 11, fill: '#7b879c' }, null, s + ' s');
+    }
+  } else {
+    pts.forEach(function (p, i) {
+      el('text', { x: px(i), y: H - 10, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 600, fill: '#4b5870' }, null, p.label);
+    });
+  }
+
+  // marcos (3 s, 25%, 50%, 75%, fim)
+  if (seconds) {
+    (data.marks || []).forEach(function (m) {
+      if (m.t === null || m.t === undefined || m.t > xMax) return;
+      el('line', { x1: px(m.t), x2: px(m.t), y1: P.t, y2: H - P.b, stroke: '#64748b', 'stroke-width': 0.8, 'stroke-dasharray': '3 4' });
+      el('text', { x: px(m.t), y: P.t - 2, 'text-anchor': m.t >= xMax ? 'end' : 'middle', 'font-size': 10.5, 'font-weight': 700, fill: '#4b5870' }, null, m.label);
+    });
+  }
+
+  var line = xy(pts);
+  var path = smooth(line);
+  el('path', { d: path + ' L' + line[line.length - 1][0].toFixed(1) + ',' + py(0) + ' L' + line[0][0].toFixed(1) + ',' + py(0) + ' Z', fill: 'url(#cvArea)' });
+  if (data.average && data.average.length > 1) {
+    el('path', { d: smooth(xy(data.average)), fill: 'none', stroke: '#94a3b8', 'stroke-width': 2, 'stroke-dasharray': '6 5', 'stroke-linecap': 'round' });
+  }
+  el('path', { d: path, fill: 'none', stroke: '#2563eb', 'stroke-width': 2.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+
+  dropMarks.forEach(function (m) {
+    el('circle', { cx: m.x, cy: H - P.b - 12, r: 9, fill: m.tone });
+    el('text', { x: m.x, y: H - P.b - 8.5, 'text-anchor': 'middle', 'font-size': 10.5, 'font-weight': 800, fill: '#fff' }, null, m.rank);
+  });
+
+  var cursor = el('line', { x1: 0, x2: 0, y1: P.t, y2: H - P.b, stroke: '#1e40af', 'stroke-width': 1, opacity: 0 });
+  var dot = el('circle', { r: 5.5, fill: '#2563eb', stroke: '#fff', 'stroke-width': 2, opacity: 0 });
+  box.insertBefore(svg, box.firstChild);
+
+  var tip = document.getElementById('cv-tip');
+  function speechAt(t) {
+    if (!seconds) return '';
+    var seg = (data.segments || []).find(function (g) { return t >= g.start && t <= g.end; });
+    return seg ? seg.text : '';
+  }
+  function avgAt(t) {
+    var found = (data.average || []).find(function (a) { return a.t === t; });
+    return found ? found.pct : null;
+  }
+  function show(evt) {
+    var rect = svg.getBoundingClientRect();
+    var point = evt.touches ? evt.touches[0] : evt;
+    var x = (point.clientX - rect.left) / rect.width * W;
+    var best = 0;
+    line.forEach(function (c, i) { if (Math.abs(c[0] - x) < Math.abs(line[best][0] - x)) best = i; });
+    var p = pts[best];
+    cursor.setAttribute('x1', line[best][0]); cursor.setAttribute('x2', line[best][0]); cursor.setAttribute('opacity', 0.5);
+    dot.setAttribute('cx', line[best][0]); dot.setAttribute('cy', line[best][1]); dot.setAttribute('opacity', 1);
+    tip.textContent = '';
+    var head = document.createElement('div');
+    var strong = document.createElement('b');
+    strong.textContent = fmtPct(p.pct);
+    head.appendChild(document.createTextNode(p.label + ' · '));
+    head.appendChild(strong);
+    head.appendChild(document.createTextNode(' ainda assistindo'));
+    tip.appendChild(head);
+    var who = document.createElement('div');
+    who.textContent = fmtInt(p.people) + (data.base === 'plays' ? ' reproduções' : ' impressões') + ' chegaram até aqui';
+    tip.appendChild(who);
+    var avg = seconds ? avgAt(p.t) : null;
+    if (avg !== null) {
+      var av = document.createElement('div');
+      av.textContent = 'média da conta: ' + fmtPct(avg);
+      tip.appendChild(av);
+    }
+    var say = speechAt(p.t);
+    if (say) {
+      var sp = document.createElement('div');
+      sp.className = 'say';
+      sp.textContent = 'fala: “' + say + '”';
+      tip.appendChild(sp);
+    }
+    tip.style.display = 'block';
+    var left = line[best][0] / W * rect.width;
+    tip.style.left = Math.min(Math.max(left + 14, 0), rect.width - tip.offsetWidth - 4) + 'px';
+    tip.style.top = Math.max(line[best][1] / H * rect.height - tip.offsetHeight - 10, 0) + 'px';
+  }
+  function hide() { tip.style.display = 'none'; cursor.setAttribute('opacity', 0); dot.setAttribute('opacity', 0); }
+  svg.addEventListener('mousemove', show);
+  svg.addEventListener('touchstart', show, { passive: true });
+  svg.addEventListener('touchmove', show, { passive: true });
+  svg.addEventListener('mouseleave', hide);
+})();
+</script>
+<script nonce="<%= content_security_policy_nonce %>">
+(function () {
+  // ── mais análises: teia, barras por dia e linhas das taxas ──
+  var more = {};
+  try { more = JSON.parse(document.getElementById('cv-more').textContent) || {}; } catch (e) { more = {}; }
+  var NS = 'http://www.w3.org/2000/svg';
+  function make(name, attrs, parent, text) {
+    var node = document.createElementNS(NS, name);
+    Object.keys(attrs || {}).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+    if (text !== undefined) node.textContent = text;
+    parent.appendChild(node);
+    return node;
+  }
+  function canvas(w, h, label) {
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', label);
+    return svg;
+  }
+  var fmtInt = function (v) { return Math.round(Number(v || 0)).toLocaleString('pt-BR'); };
+  var fmtRate = function (digits) { return function (v) { return (Number(v || 0) * 100).toFixed(digits).replace('.', ',') + '%'; }; };
+
+  // teia
+  var radarBox = document.getElementById('cv-radar');
+  var axes = (more.radar && more.radar.axes) || [];
+  if (radarBox && axes.length >= 3) {
+    var S = 300, C = S / 2, R = S / 2 - 46;
+    var rsvg = canvas(S, S, 'Teia: este criativo contra a média e o recorde da conta');
+    rsvg.setAttribute('viewBox', '-50 0 ' + (S + 100) + ' ' + S);
+    var at = function (i, v) {
+      var a = Math.PI * 2 * i / axes.length - Math.PI / 2;
+      var r = Math.max(0, Math.min(100, Number(v) || 0)) / 100 * R;
+      return [C + r * Math.cos(a), C + r * Math.sin(a)];
+    };
+    var poly = function (field) { return axes.map(function (a, i) { return at(i, a[field]).map(function (n) { return n.toFixed(1); }).join(','); }).join(' '); };
+    [25, 50, 75, 100].forEach(function (ring) {
+      make('polygon', { points: axes.map(function (a, i) { return at(i, ring).join(','); }).join(' '), fill: 'none', stroke: ring === 100 ? '#d4a017' : '#cbd5e1', 'stroke-width': ring === 100 ? 1.6 : 0.7 }, rsvg);
+    });
+    axes.forEach(function (a, i) {
+      var edge = at(i, 100), tip = at(i, 118);
+      make('line', { x1: C, y1: C, x2: edge[0], y2: edge[1], stroke: '#cbd5e1', 'stroke-width': 0.7 }, rsvg);
+      make('text', { x: tip[0], y: tip[1] + 4, 'text-anchor': tip[0] > C + 10 ? 'start' : tip[0] < C - 10 ? 'end' : 'middle', 'font-size': 12, 'font-weight': 700, fill: '#4b5870' }, rsvg, a.label);
+    });
+    if (axes.some(function (a) { return a.avg_score !== null && a.avg_score !== undefined; })) {
+      make('polygon', { points: poly('avg_score'), fill: '#94a3b8', 'fill-opacity': 0.1, stroke: '#94a3b8', 'stroke-width': 1.4, 'stroke-dasharray': '4 4' }, rsvg);
+    }
+    make('polygon', { points: poly('score'), fill: '#2563eb', 'fill-opacity': 0.26, stroke: '#2563eb', 'stroke-width': 2, 'stroke-linejoin': 'round' }, rsvg);
+    axes.forEach(function (a, i) { var p = at(i, a.score); make('circle', { cx: p[0], cy: p[1], r: 3.2, fill: '#2563eb' }, rsvg); });
+    radarBox.appendChild(rsvg);
+  }
+
+  var daily = more.daily || [];
+  if (daily.length < 2) return;
+  var labels = daily.map(function (d) { return d.label; });
+
+  // linhas das taxas, uma por quadro (escalas muito diferentes não cabem no mesmo eixo)
+  var linesBox = document.getElementById('cv-lines');
+  var COLORS = { hook_rate: '#2563eb', hold_rate: '#7c3aed', link_ctr: '#0891b2' };
+  (more.indicators || []).filter(function (i) { return COLORS[i.key]; }).forEach(function (ind) {
+    var fmt = fmtRate(ind.digits || 1);
+    var values = daily.map(function (d) { var v = d[ind.key]; return v === null || v === undefined ? null : Number(v); });
+    var LW = 380, LH = 160, LP = { l: 44, r: 12, t: 12, b: 22 };
+    var all = values.filter(function (v) { return v !== null; }).concat([ind.avg || 0, ind.record || 0]);
+    var top = Math.max.apply(null, all.concat([0])) * 1.12 || 1;
+    var lx = function (i) { return LP.l + (LW - LP.l - LP.r) * i / (values.length - 1); };
+    var ly = function (v) { return LP.t + (LH - LP.t - LP.b) * (1 - v / top); };
+    var wrap = document.createElement('div');
+    var title = document.createElement('h3');
+    title.textContent = ind.label + ' ';
+    var small = document.createElement('small'); small.textContent = '· ' + ind.metric; title.appendChild(small);
+    var sub = document.createElement('p'); sub.className = 'eyebrow'; sub.textContent = 'no período: ' + ind.value_text + ' · ' + ind.phrase;
+    var holder = document.createElement('div'); holder.className = 'chart';
+    var tip = document.createElement('div'); tip.className = 'tip minitip';
+    var lsvg = canvas(LW, LH, 'Evolução por dia: ' + ind.label);
+    [0, 0.5, 1].forEach(function (f) {
+      make('line', { x1: LP.l, x2: LW - LP.r, y1: ly(top * f), y2: ly(top * f), stroke: '#cbd5e1', 'stroke-width': 0.6 }, lsvg);
+      make('text', { x: LP.l - 6, y: ly(top * f) + 3, 'text-anchor': 'end', 'font-size': 9, fill: '#7b879c' }, lsvg, fmt(top * f));
+    });
+    [0, Math.floor(values.length / 2), values.length - 1].forEach(function (i) {
+      make('text', { x: lx(i), y: LH - 6, 'text-anchor': 'middle', 'font-size': 9, fill: '#7b879c' }, lsvg, labels[i]);
+    });
+    if (ind.record) make('line', { x1: LP.l, x2: LW - LP.r, y1: ly(ind.record), y2: ly(ind.record), stroke: '#d4a017', 'stroke-width': 1.4, 'stroke-dasharray': '1.5 4', 'stroke-linecap': 'round' }, lsvg);
+    if (ind.avg) make('line', { x1: LP.l, x2: LW - LP.r, y1: ly(ind.avg), y2: ly(ind.avg), stroke: '#94a3b8', 'stroke-width': 1.4, 'stroke-dasharray': '6 5' }, lsvg);
+    var pts = [];
+    values.forEach(function (v, i) { if (v !== null) pts.push([lx(i), ly(v), i]); });
+    make('polyline', { points: pts.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' '), fill: 'none', stroke: COLORS[ind.key], 'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, lsvg);
+    var dot = make('circle', { r: 4, fill: COLORS[ind.key], stroke: '#fff', 'stroke-width': 1.5, opacity: 0 }, lsvg);
+    lsvg.addEventListener('mousemove', function (evt) {
+      if (!pts.length) return;
+      var rect = lsvg.getBoundingClientRect();
+      var x = (evt.clientX - rect.left) / rect.width * LW;
+      var best = pts.reduce(function (a, p) { return Math.abs(p[0] - x) < Math.abs(a[0] - x) ? p : a; });
+      dot.setAttribute('cx', best[0]); dot.setAttribute('cy', best[1]); dot.setAttribute('opacity', 1);
+      tip.textContent = labels[best[2]] + ' · ' + fmt(values[best[2]]);
+      tip.style.display = 'block';
+      tip.style.left = Math.min(best[0] / LW * rect.width, rect.width - tip.offsetWidth - 4) + 'px';
+    });
+    lsvg.addEventListener('mouseleave', function () { tip.style.display = 'none'; dot.setAttribute('opacity', 0); });
+    holder.appendChild(lsvg); holder.appendChild(tip);
+    var legend = document.createElement('div'); legend.className = 'legend';
+    [[COLORS[ind.key], 'este anúncio'], ['#94a3b8', ind.avg ? 'média ' + fmt(ind.avg) : null], ['#d4a017', ind.record ? 'recorde ' + fmt(ind.record) : null]].forEach(function (row) {
+      if (!row[1]) return;
+      var item = document.createElement('span'); var mark = document.createElement('i'); mark.style.background = row[0];
+      item.appendChild(mark); item.appendChild(document.createTextNode(row[1])); legend.appendChild(item);
+    });
+    wrap.appendChild(title); wrap.appendChild(sub); wrap.appendChild(holder); wrap.appendChild(legend);
+    linesBox.appendChild(wrap);
+  });
+})();
+</script>
+</body>
+</html>

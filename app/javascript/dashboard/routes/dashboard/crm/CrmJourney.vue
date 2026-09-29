@@ -1553,6 +1553,12 @@ const inputClass =
                   {{ s.contact?.name || 'Paciente' }}
                 </button>
                 <span
+                  v-if="s.followup_number"
+                  class="px-2 py-0.5 rounded-full font-semibold bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200"
+                  title="Reforço enviado porque o paciente não respondeu à mensagem"
+                  >🔁 Reforço {{ s.followup_number }}</span
+                >
+                <span
                   class="px-2 py-0.5 rounded-full font-semibold"
                   :class="SEND_STATUS[s.status]?.cls"
                   >{{ SEND_STATUS[s.status]?.label }}</span

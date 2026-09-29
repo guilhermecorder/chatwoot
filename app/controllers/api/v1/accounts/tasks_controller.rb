@@ -129,9 +129,11 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
   def task_params
     attrs = params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id, :unit,
                           :phone, :procedure, :doctor, :modality, :attendance, :surgery_indication, :indicated_procedure,
-                          :contact_id, :booking_kind)
+                          :contact_id, :booking_kind, :color)
     # item 217: vazio = agendamento (padrão); só 'registro' muda a contagem
     attrs[:booking_kind] = nil if attrs.key?(:booking_kind) && attrs[:booking_kind].blank?
+    # item 290: cor vazia = volta à cor padrão do tipo; maiúsculas como na lista
+    attrs[:color] = attrs[:color].presence&.upcase if attrs.key?(:color)
     attrs
   end
 
@@ -170,6 +172,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
       surgery_indication: t.surgery_indication,
       indicated_procedure: t.indicated_procedure,
       booking_kind: t.booking_kind,
+      color: t.color, # item 290: cor escolhida pela equipe (nil = cor do tipo)
       # item 228: origem do agendamento (nil = nasceu aqui)
       source: t.source,
       source_detail: t.source_detail,

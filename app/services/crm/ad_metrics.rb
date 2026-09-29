@@ -10,7 +10,7 @@ module Crm::AdMetrics
   CONVERSATION = 'onsite_conversion.messaging_conversation_started_7d'.freeze
   FIRST_REPLY = 'onsite_conversion.messaging_first_reply'.freeze
   SUM_KEYS = %w[spend impressions reach clicks link_clicks plays_3s plays_2s thruplay p25 p50 p75 p100
-                conversations first_replies leads post_engagement].freeze
+                conversations first_replies leads post_engagement plays p95 plays_30s].freeze
 
   # rubocop:disable Metrics/AbcSize
   def from_meta(row)
@@ -25,6 +25,11 @@ module Crm::AdMetrics
       'p25' => sum_values(row['video_p25_watched_actions']), 'p50' => sum_values(row['video_p50_watched_actions']),
       'p75' => sum_values(row['video_p75_watched_actions']), 'p100' => sum_values(row['video_p100_watched_actions']),
       'avg_watch' => first_value(row['video_avg_time_watched_actions']).to_f.round(1),
+      # item 287: curva segundo a segundo — vezes que o vídeo começou a tocar, quem passou
+      # de 95 % e de 30 s, e a curva da Meta (% de quem ainda assiste em cada segundo)
+      'plays' => sum_values(row['video_play_actions']), 'p95' => sum_values(row['video_p95_watched_actions']),
+      'plays_30s' => sum_values(row['video_30_sec_watched_actions']),
+      'play_curve' => play_curve(row['video_play_curve_actions']),
       'conversations' => actions[CONVERSATION].to_i, 'first_replies' => actions[FIRST_REPLY].to_i,
       'leads' => (actions['lead'].presence || actions['onsite_conversion.lead_grouped']).to_i,
       'post_engagement' => actions['post_engagement'].to_i,
@@ -39,6 +44,12 @@ module Crm::AdMetrics
 
   def sum_values(list)
     Array(list).sum { |a| a.is_a?(Hash) ? a['value'].to_f : 0 }.round
+  end
+
+  # video_play_curve_actions: [{ action_type, value: [100, 62, 45, …] }] → a lista de %
+  def play_curve(list)
+    values = Array(list).first.is_a?(Hash) ? Array(list).first['value'] : nil
+    values.is_a?(Array) && values.any? ? values.map { |v| v.to_f.round(2) } : nil
   end
 
   def first_value(list)

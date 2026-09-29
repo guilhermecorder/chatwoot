@@ -2,6 +2,7 @@
 // 📞 Popup das CHAMADAS NATIVAS de WhatsApp (item 167) — cards empilhados no
 // canto inferior direito, vidro CEVICO, claro/escuro. Quatro cards:
 //   tocando   → avatar/iniciais, nome, telefone, Atender / Recusar, pulso
+//               + quem está ligando (item 281: coluna do CRM, origem, consultas)
 //   em chamada → timer mm:ss, Mudo, Desligar, "Ir para a conversa", REC
 //   encerrada → resumo por 6 s e some
 //   perdida   → "📵 Chamada perdida de X · há 2 min" + Abrir conversa + fechar
@@ -19,6 +20,7 @@ import {
   initialsOf,
   END_REASON_LABELS,
 } from 'dashboard/helper/cevicoCallsFormat';
+import CallPatientContext from './CallPatientContext.vue';
 
 const router = useRouter();
 const accountId = useMapGetter('getCurrentAccountId');
@@ -199,6 +201,11 @@ const endedTalk = e =>
             </p>
           </div>
         </div>
+        <CallPatientContext
+          :call="calls.activeCall"
+          mode="chips"
+          class="mt-2.5"
+        />
         <div class="grid grid-cols-3 gap-2 mt-3">
           <button
             class="h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
@@ -286,6 +293,7 @@ const endedTalk = e =>
             </button>
           </div>
         </div>
+        <CallPatientContext :call="c" class="cevico-call-who mt-3" />
         <div class="grid grid-cols-2 gap-2 mt-3">
           <button
             class="h-11 rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 text-white shadow disabled:opacity-60"
@@ -323,7 +331,7 @@ const endedTalk = e =>
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
-:global(.dark) .cevico-call-card {
+.dark .cevico-call-card {
   background: rgba(23, 25, 28, 0.92);
   border-color: rgba(255, 255, 255, 0.1);
   box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.7);
@@ -333,6 +341,15 @@ const endedTalk = e =>
 }
 .cevico-call-active {
   border-color: rgba(37, 99, 235, 0.35);
+}
+/* item 281: quem está ligando — faixa discreta entre o nome e os botões */
+.cevico-call-who {
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.04);
+}
+.dark .cevico-call-who {
+  background: rgba(255, 255, 255, 0.05);
 }
 /* entrada suave, de baixo pra cima */
 .cevico-call-in {

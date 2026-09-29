@@ -54,6 +54,7 @@ namespace :crm do
   resources :creatives, only: [:index, :show], param: :ad_id do
     member do
       post :transcribe
+      post :share # item 287: link só de leitura da análise
     end
     collection do
       get :assets

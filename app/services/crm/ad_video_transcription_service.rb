@@ -15,6 +15,8 @@ class Crm::AdVideoTranscriptionService
   AGENT_KEY = 'creatives_video_transcription'.freeze
   PRICE_IN = 1.0
   PRICE_OUT = 2.5
+  # item 286: falta de chave é passageira — quando a chave chegar, tenta de novo sozinho
+  NO_KEY = 'Configure a chave do Gemini em Integrações → IA'.freeze
   PROMPT = <<~TXT.freeze
     Você recebe o vídeo de um anúncio de uma clínica de oftalmologia (português do Brasil).
     1) Transcreva TUDO o que é falado (e o texto na tela, se for o único conteúdo), na ordem.
@@ -23,8 +25,12 @@ class Crm::AdVideoTranscriptionService
        - "corpo": o desenvolvimento (argumento, prova, explicação);
        - "cta": o pedido final (o que a pessoa deve fazer: chamar no WhatsApp, agendar, clicar…).
     3) Classifique o "angulo" do gancho em UMA palavra: pergunta | dor | curiosidade | prova | oferta | autoridade | historia | outro.
+    4) Marque o TEMPO da fala em "trechos": a transcrição inteira dividida em frases curtas, na ordem, cada uma com o
+       segundo em que começa ("inicio") e o segundo em que termina ("fim"), contados desde o começo do vídeo
+       (números, podem ter uma casa decimal). Informe também "duracao": quantos segundos o vídeo dura.
     Responda SOMENTE com um JSON válido, sem comentários:
-    {"transcricao": "...", "gancho": "...", "corpo": "...", "cta": "...", "angulo": "...", "idioma": "pt-BR"}
+    {"transcricao": "...", "gancho": "...", "corpo": "...", "cta": "...", "angulo": "...", "idioma": "pt-BR",
+     "duracao": 0, "trechos": [{"inicio": 0, "fim": 0, "texto": "..."}]}
   TXT
 
   attr_reader :creative
@@ -36,7 +42,7 @@ class Crm::AdVideoTranscriptionService
 
   def perform
     reason = precheck
-    return skip!(reason) if reason
+    return skip!(reason, retry_later: reason == NO_KEY) if reason
 
     mark!('processing')
     return save!(simulated_result) if graph.simulate?
@@ -49,9 +55,9 @@ class Crm::AdVideoTranscriptionService
   private
 
   def precheck
-    return 'Só vídeos têm transcrição.' unless creative.video?
+    return 'Só vídeos têm transcrição.' unless creative.transcribable?
     return 'Este anúncio não tem vídeo identificado na Meta.' if video_id.blank? && !graph.simulate?
-    return 'Configure a chave do Gemini em Integrações → IA' if api_key.blank? && !graph.simulate?
+    return NO_KEY if api_key.blank? && !graph.simulate?
 
     nil
   end
@@ -137,12 +143,25 @@ class Crm::AdVideoTranscriptionService
     true
   end
 
-  def transcript_fields(parsed, text)
+  def transcript_fields(parsed, text) # rubocop:disable Metrics/AbcSize
     part = ->(key, max) { parsed[key].to_s.strip.truncate(max).presence }
     { 'status' => 'done', 'error' => nil, 'text' => text.truncate(6000),
       'hook' => part.call('gancho', 400), 'body' => part.call('corpo', 3000), 'cta' => part.call('cta', 400),
       'angle' => parsed['angulo'].to_s.strip.downcase.presence, 'language' => parsed['idioma'].to_s.presence || 'pt-BR',
-      'transcribed_at' => Time.current.iso8601, 'model' => MODEL }
+      'transcribed_at' => Time.current.iso8601, 'model' => MODEL,
+      # item 287 (opcionais): tempo de cada trecho falado e duração do vídeo
+      'segments' => segments_from(parsed['trechos']), 'duration' => parsed['duracao'].to_f.positive? ? parsed['duracao'].to_f.round(1) : nil }
+  end
+
+  # [{ "inicio", "fim", "texto" }] → [{ 'start', 'end', 'text' }]; o que vier torto é ignorado
+  def segments_from(list)
+    rows = Array(list).filter_map do |row|
+      next unless row.is_a?(Hash) && row['texto'].to_s.strip.present?
+
+      start = row['inicio'].to_f.clamp(0, 3600)
+      { 'start' => start.round(1), 'end' => [row['fim'].to_f, start].max.clamp(0, 3600).round(1), 'text' => row['texto'].to_s.strip.truncate(600) }
+    end
+    rows.sort_by { |row| row['start'] }.first(200).presence
   end
 
   # simulação local: texto coerente com o nome do anúncio, sem Meta nem Gemini
@@ -153,21 +172,33 @@ class Crm::AdVideoTranscriptionService
                        'Chama a gente no WhatsApp e agende a sua avaliação.',
       'gancho' => hook, 'corpo' => 'Na CEVICO a gente avalia o seu caso com tecnologia de ponta e te explica cada passo.',
       'cta' => 'Chama a gente no WhatsApp e agende a sua avaliação.', 'angulo' => hook.include?('?') ? 'pergunta' : 'prova',
-      'idioma' => 'pt-BR' }
+      'idioma' => 'pt-BR' }.merge(simulated_timing(hook))
   end
 
-  def skip!(reason)
-    write_transcript('status' => 'skipped', 'error' => reason)
+  # item 287: tempo fictício dos trechos, coerente com a duração simulada do vídeo
+  def simulated_timing(hook)
+    length = Crm::MetaSimulator.video_length(creative.ad_id).to_f
+    { 'duracao' => length,
+      'trechos' => [{ 'inicio' => 0, 'fim' => 3, 'texto' => hook },
+                    { 'inicio' => 3, 'fim' => (length * 0.75).round(1),
+                      'texto' => 'Na CEVICO a gente avalia o seu caso com tecnologia de ponta e te explica cada passo.' },
+                    { 'inicio' => (length * 0.75).round(1), 'fim' => length,
+                      'texto' => 'Chama a gente no WhatsApp e agende a sua avaliação.' }] }
+  end
+
+  def skip!(reason, retry_later: false)
+    write_transcript('status' => 'skipped', 'error' => reason, 'retry' => retry_later || nil, 'status_at' => Time.current.iso8601)
     false
   end
 
   def mark!(status)
-    write_transcript('status' => status, 'error' => nil)
+    write_transcript('status' => status, 'error' => nil, 'retry' => nil, 'status_at' => Time.current.iso8601)
   end
 
   def fail!(error)
     Rails.logger.warn("[CEVICO criativos] transcrição do vídeo #{creative.ad_id} falhou: #{error.class}: #{error.message}")
-    write_transcript('status' => 'failed', 'error' => error.message.to_s.strip.truncate(180).presence || 'A transcrição falhou.')
+    write_transcript('status' => 'failed', 'status_at' => Time.current.iso8601,
+                     'error' => error.message.to_s.strip.truncate(180).presence || 'A transcrição falhou.')
     false
   rescue StandardError => e
     Rails.logger.error("[CEVICO criativos] não deu nem para marcar a falha do vídeo #{creative.ad_id}: #{e.message}")

@@ -549,6 +549,10 @@
   background: var(--cv-hero, var(--cv-grad));
   flex-shrink: 0;
 }
+/* 29/09: título SEMPRE branco sobre o cabeçalho colorido (a regra geral de
+   h1–h6 do sistema pintava de escuro e vencia as classes de cor) */
+.cv-page .cv-modal-head :is(h1, h2, h3, h4, h5, h6),
+.dark .cv-page .cv-modal-head :is(h1, h2, h3, h4, h5, h6) { color: #fff; }
 .cv-page .cv-modal-head::before {
   content: '';
   position: absolute;

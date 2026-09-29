@@ -30,7 +30,7 @@ class Crm::Calls::DashboardService
       by_reason: by_reason,
       by_handler: by_handler,
       by_outcome: by_outcome,
-      recent: scope.recent_first.with_attached_recording.includes(*LIST_INCLUDES).limit(30).map(&:to_payload)
+      recent: Crm::Call.payloads(scope.recent_first.with_attached_recording.includes(*LIST_INCLUDES).limit(30), @account)
     }
   end
 
@@ -91,7 +91,7 @@ class Crm::Calls::DashboardService
 
   # tocando ou em atendimento agora — independe do período escolhido
   def live_calls
-    Crm::Call.where(account_id: @account.id).live.includes(*LIST_INCLUDES).map(&:to_payload)
+    Crm::Call.payloads(Crm::Call.where(account_id: @account.id).live.includes(*LIST_INCLUDES), @account)
   end
 
   # perdidas de HOJE (fuso de São Paulo) que ninguém retornou: não têm o evento
@@ -102,7 +102,7 @@ class Crm::Calls::DashboardService
     return [] if missed.empty?
 
     later = later_contacts(missed.filter_map(&:contact_id).uniq)
-    missed.reject { |call| call.returned? || contacted_after?(later, call) }.map(&:to_payload)
+    Crm::Call.payloads(missed.reject { |call| call.returned? || contacted_after?(later, call) }, @account)
   end
 
   def today_scope

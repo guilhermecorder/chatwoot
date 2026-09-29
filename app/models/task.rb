@@ -7,6 +7,7 @@
 #  attendance          :string
 #  booking_kind        :string
 #  canceled_at         :datetime
+#  color               :string
 #  comments            :jsonb            not null
 #  completed_at        :datetime
 #  confirmed_at        :datetime
@@ -80,6 +81,15 @@ class Task < ApplicationRecord
   def registered_only?
     booking_kind == 'registro'
   end
+
+  # 🎨 item 290 (29/09): cor do agendamento na Agenda (organização livre da
+  # equipe, vale para todos; nil = cor padrão do tipo). A lista é a MESMA do
+  # front (helper/cevicoAgenda.js → TASK_COLORS). Não entra em indicador.
+  COLORS = %w[
+    #DC2626 #DB2777 #EA580C #EAB308 #84CC16 #16A34A
+    #0D9488 #0891B2 #2563EB #7C3AED #86198F #475569
+  ].freeze
+  validates :color, inclusion: { in: COLORS }, allow_nil: true
   validate :contact_belongs_to_account
 
   enum status: { todo: 0, doing: 1, done: 2 }

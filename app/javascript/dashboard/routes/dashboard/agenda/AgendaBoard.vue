@@ -19,6 +19,8 @@ import {
   addDays, addWeeks, addMonths, isSameDay, isSameMonth, format,
 } from 'date-fns';
 import CrmAPI from 'dashboard/api/crm';
+import { copyTextToClipboard } from 'shared/helpers/clipboard';
+import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 import {
   DOCTORS, MODALITIES, ONLINE_UNIT,
   TYPES, TYPE_BY_KEY, GENERAL_TYPE, typeOf, LEGACY_KIND_TO_TYPES,
@@ -26,6 +28,7 @@ import {
   resolveWindows, resolveBlocked, resolveBlockedDays, resolveExamWindows,
   wholeBlockedDays, partialBlocksOn, isWindowBlocked, sameBlock,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
+  TASK_COLORS, taskColorOf, attendanceMarkOf,
 } from 'dashboard/helper/cevicoAgenda';
 
 const store = useStore();
@@ -405,6 +408,7 @@ const bandsForDay = day =>
     title: `${winTitle(w)} · ${w.start}–${w.end} (${winUnitLabel(w)}) · blocos de ${w.block} min`,
     unit: w.unit,
     doctor: w.doctor || '',
+    exam: Boolean(w.exam), // item 283: o menu do botão direito sabe de quem é a faixa
   }));
 
 // item 255 (26/09, regra dele: "os pacientes do Oftalmofácil concorrem pelos
@@ -798,7 +802,10 @@ const unitOf = task => {
 };
 // item 234: cor do balão = a cor do TIPO (avaliação, retorno, pós-op, exame,
 // tele, cirurgia); a unidade/local vira uma etiqueta pequena no balão
-const accentOf = task => TYPE_BY_KEY[typeOf(task)]?.color || '#2563EB';
+// item 290: a cor que a equipe deu ao agendamento vence a cor do tipo (balão
+// e cartão); o selo do TIPO continua sempre na cor do tipo
+const typeColorOf = task => TYPE_BY_KEY[typeOf(task)]?.color || '#2563EB';
+const accentOf = task => taskColorOf(task) || typeColorOf(task);
 const tagOf = task => {
   const u = unitOf(task);
   return u ? { label: u.label, short: u.short || u.label.slice(0, 3).toUpperCase() } : null;
@@ -1498,6 +1505,270 @@ const onColumnDrop = ({ day, minutes }) => {
   form.value.time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 };
 
+// ══ 🖱️ item 283 (29/09): MENU DO BOTÃO DIREITO da Agenda ══
+// Só ATALHOS para o que a tela já faz — cada item chama a mesma função do
+// botão/clique que já existe (nenhuma regra nova). No celular, toque longo.
+const copyToClipboard = async (text, okMessage) => {
+  try {
+    await copyTextToClipboard(text);
+    useAlert(okMessage);
+  } catch {
+    useAlert('Não foi possível copiar.');
+  }
+};
+const hmFromMinutes = minutes =>
+  `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+const dayLabel = day =>
+  cap(day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' }));
+
+// item 290: sinal de presença no balão (bater o olho e saber quem foi)
+const attendanceMark = task => attendanceMarkOf(task);
+
+// cancelar = a mesma chavinha "Cancelada" da ficha; quem confirma é o Salvar
+const openCancel = task => {
+  openEdit(task);
+  form.value.canceled = true;
+  useAlert('Marcado como cancelada — confira e clique em Salvar para confirmar.');
+};
+
+// 🎨 item 290: COR do agendamento (organização livre da equipe, vale para
+// todos). Pinta na hora e salva; se o servidor recusar, volta como estava.
+// Não mexe em presença, situação nem em nenhum indicador.
+const setTaskColor = async (task, color) => {
+  const next = color || null;
+  if ((taskColorOf(task) || null) === next) return;
+  const previous = task.color ?? null;
+  store.commit('tasks/upsertTask', { ...task, color: next });
+  try {
+    await store.dispatch('tasks/update', { id: task.id, color: next });
+  } catch {
+    store.commit('tasks/upsertTask', { ...task, color: previous });
+    useAlert('Não foi possível salvar a cor.');
+  }
+};
+
+// consulta / exame / teleconsulta / cirurgia
+const taskMenu = (task, extra = []) => {
+  if (!task) return null;
+  const surgery = isSurgeryTask(task);
+  const busy = savingAttendanceId.value === task.id;
+  const attended = task.attendance === 'attended';
+  const canIndicate = attended && !surgery;
+  // os mesmos nomes dos botões da conferência do dia
+  const okName = surgery ? 'realizada' : 'compareceu';
+  const missName = surgery ? 'não veio' : 'faltou';
+  return {
+    title: displayName(task),
+    subtitle: `${format(new Date(task.due_at), 'dd/MM')} · ${chipTime(task)} · ${TYPE_BY_KEY[typeOf(task)]?.label || 'Agendamento'}`,
+    rgb: hexToRgbSpaced(accentOf(task)),
+    items: [
+      { label: 'Abrir detalhes', icon: 'i-lucide-square-pen', action: () => openEdit(task) },
+      { label: 'Remarcar', icon: 'i-lucide-calendar-clock', hint: 'dia e horário', action: () => openEdit(task) },
+      { separator: true },
+      {
+        label: attended ? `Desfazer "${cap(okName)}"` : `Marcar: ${okName}`,
+        icon: 'i-lucide-check',
+        disabled: busy,
+        action: () => setAttendance(task, 'attended'),
+      },
+      {
+        label: task.attendance === 'missed' ? `Desfazer "${cap(missName)}"` : `Marcar: ${missName}`,
+        icon: 'i-lucide-x',
+        disabled: busy,
+        action: () => setAttendance(task, 'missed'),
+      },
+      // o motivo é digitado na conferência do dia (visão Dia → Bloco do médico)
+      surgery && viewMode.value === 'day' && dayPanelMode.value === 'bloco' && {
+        label: task.attendance === 'attended_not_done' ? 'Desfazer "Veio e não fez"' : 'Marcar: veio e não fez',
+        icon: 'i-lucide-triangle-alert',
+        disabled: busy,
+        action: () => toggleNoSurgery(task),
+      },
+      canIndicate && {
+        label: 'Cirurgia indicada',
+        icon: 'i-lucide-target',
+        hint: task.surgery_indication === 'indicated' ? task.indicated_procedure || 'sim' : '',
+        disabled: busy,
+        children: PROCEDURES.map(proc => ({
+          label: proc,
+          icon: task.indicated_procedure === proc ? 'i-lucide-check' : '',
+          action: () => setIndication(task, 'indicated', proc),
+        })),
+      },
+      canIndicate && {
+        label: task.surgery_indication === 'not_indicated' ? 'Desfazer "Sem indicação"' : 'Sem indicação de cirurgia',
+        icon: 'i-lucide-circle-slash',
+        disabled: busy,
+        action: () => setIndication(task, 'not_indicated'),
+      },
+      canIndicate && ['exames', 'teleconsulta'].includes(typeOf(task)) && {
+        label: 'Marcar retorno',
+        icon: 'i-lucide-rotate-ccw',
+        action: () => scheduleFollowUpFrom(task),
+      },
+      !surgery && task.surgery_indication === 'indicated' && {
+        label: 'Agendar cirurgia',
+        icon: 'i-lucide-slice',
+        action: () => scheduleSurgeryFrom(task),
+      },
+      { separator: true },
+      task.contact_id && {
+        label: 'Abrir o Espaço do Paciente',
+        icon: 'i-lucide-user-round',
+        action: () => openPatientSpace(task),
+      },
+      detailOf(task)?.form_response && {
+        label: 'Ler respostas do formulário',
+        icon: 'i-lucide-book-open',
+        action: () => openFormAnswers(task),
+      },
+      task.phone && {
+        label: 'Copiar telefone',
+        icon: 'i-lucide-phone',
+        hint: task.phone,
+        action: () => copyToClipboard(task.phone, 'Telefone copiado ✓'),
+      },
+      {
+        label: 'Copiar nome',
+        icon: 'i-lucide-copy',
+        action: () => copyToClipboard(displayName(task), 'Nome copiado ✓'),
+      },
+      ...extra,
+      { separator: true },
+      {
+        palette: TASK_COLORS,
+        value: taskColorOf(task),
+        label: 'Cor do agendamento',
+        defaultLabel: 'Padrão (cor do tipo)',
+        onPick: color => setTaskColor(task, color),
+      },
+      { separator: true },
+      { label: 'Cancelar agendamento…', icon: 'i-lucide-ban', danger: true, action: () => openCancel(task) },
+    ],
+  };
+};
+
+// fechar / reabrir o dia: as MESMAS opções do cadeado (dia inteiro, unidade, médico)
+const blockDayItem = day => ({
+  label: isDayBlocked(day) ? 'Reabrir o dia' : 'Fechar o dia',
+  icon: isDayBlocked(day) ? 'i-lucide-lock-open' : 'i-lucide-lock',
+  hint: dayBlockSummary(day) && !isDayBlocked(day) ? 'fechado em parte' : '',
+  disabled: isSavingBlock.value,
+  children: blockOptions(day).map(o => ({
+    label: o.label,
+    icon: o.on ? 'i-lucide-lock' : o.icon,
+    hint: o.on ? 'reabrir' : 'fechar',
+    action: () => toggleBlockDay(day, o.part),
+  })),
+});
+const printDayItem = day =>
+  dayTasks(day).length > 0 && {
+    label: 'Imprimir a lista do dia',
+    icon: 'i-lucide-printer',
+    action: () => {
+      goToDay(day);
+      showPrintModal.value = true;
+    },
+  };
+const isDayOpenNow = day => viewMode.value === 'day' && isSameDay(day, cursor.value);
+
+// cabeçalho de um dia (semana/dia) e quadradinho do dia (mês)
+const dayMenu = day => ({
+  title: dayLabel(day),
+  subtitle: isDayBlocked(day) ? 'dia fechado' : dayBlockSummary(day) || `${dayTasks(day).length} agendamento(s)`,
+  items: [
+    !isDayOpenNow(day) && { label: 'Abrir o dia', icon: 'i-lucide-calendar-check', action: () => goToDay(day) },
+    viewMode.value !== 'week' && { label: 'Abrir a semana', icon: 'i-lucide-calendar-range', action: () => goToWeek(day) },
+    !isDayOff(day) && { label: `${newLabel.value} neste dia`, icon: 'i-lucide-plus', action: () => openCreateOnDay(day) },
+    { separator: true },
+    blockDayItem(day),
+    printDayItem(day),
+  ],
+});
+
+// cada tipo da Agenda já nasce com o horário (e o médico/unidade da faixa, quando é dele)
+const bandResource = band => {
+  if (!band) return '';
+  if (band.doctor) return 'doctor';
+  return band.exam ? 'exam' : 'surgery';
+};
+const typeItems = (day, time, band) =>
+  TYPES.map(tt => ({
+    label: tt.label,
+    icon: tt.icon,
+    action: () => {
+      const prefill = { time, kind: tt.kind, modality: tt.modality || '' };
+      if (band && tt.resource === bandResource(band)) {
+        prefill.unit = band.unit;
+        prefill.doctor = band.doctor;
+      }
+      openCreateOnDay(day, prefill);
+    },
+  }));
+// fechar/reabrir UM horário: o mesmo cadeado do bloco do médico (só admin)
+const blockSlotItem = (day, win, slot) =>
+  isAdmin.value && {
+    label: isBlocked(day, win, slot) ? `Reabrir o horário das ${slot}` : `Fechar o horário das ${slot}`,
+    icon: isBlocked(day, win, slot) ? 'i-lucide-lock-open' : 'i-lucide-lock',
+    disabled: isSavingBlock.value,
+    action: () => toggleBlock(day, win, slot),
+  };
+
+// espaço vazio na coluna de horas (semana/dia)
+const columnMenu = ({ day, minutes, band }) => {
+  if (isDayOff(day)) return dayMenu(day);
+  const time = hmFromMinutes(minutes);
+  return {
+    title: `${dayLabel(day)} · ${time}`,
+    subtitle: band ? band.label : 'fora das janelas de atendimento',
+    items: [
+      { label: `${newLabel.value} às ${time}`, icon: 'i-lucide-plus', action: () => onColumnCreate({ day, minutes, band }) },
+      { label: 'Agendar outro tipo', icon: 'i-lucide-layers', children: typeItems(day, time, band) },
+      { separator: true },
+      band && blockSlotItem(day, band, time),
+      blockDayItem(day),
+      { separator: true },
+      !isDayOpenNow(day) && { label: 'Abrir o dia', icon: 'i-lucide-calendar-check', action: () => goToDay(day) },
+      printDayItem(day),
+    ],
+  };
+};
+
+// blocos de horário do médico (visão Dia → Bloco do médico)
+const slotMenu = (day, win, slot) => {
+  const list = tasksAtSlotAll(day, win, slot);
+  const encaixe = {
+    label: 'Encaixar outro paciente neste horário',
+    icon: 'i-lucide-plus',
+    action: () => openCreateSlot(day, win, slot),
+  };
+  if (list.length === 1) return taskMenu(list[0], [{ separator: true }, encaixe]);
+  if (list.length > 1) {
+    return {
+      title: `${slot} · ${list.length} pacientes`,
+      subtitle: winTitle(win),
+      rgb: hexToRgbSpaced(winColor(win)),
+      items: [
+        ...list.map(t => ({ label: displayName(t), icon: 'i-lucide-user-round', hint: hmOf(t), action: () => openEdit(t) })),
+        { separator: true },
+        encaixe,
+      ],
+    };
+  }
+  const locked = isBlocked(day, win, slot);
+  return {
+    title: `${slot} · ${locked ? 'horário fechado' : 'horário livre'}`,
+    subtitle: `${winTitle(win)} · ${winUnitLabel(win)}`,
+    rgb: hexToRgbSpaced(winColor(win)),
+    items: [
+      !locked && { label: `${newLabel.value} às ${slot}`, icon: 'i-lucide-plus', action: () => openCreateSlot(day, win, slot) },
+      !locked && { label: 'Agendar outro tipo', icon: 'i-lucide-layers', children: typeItems(day, slot, { unit: win.unit, doctor: win.doctor || '', exam: Boolean(win.exam) }) },
+      { separator: true },
+      blockSlotItem(day, win, slot),
+    ],
+  };
+};
+
 // contagem de pendentes da conferência
 const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance).length);
 </script>
@@ -1926,6 +2197,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <div
                 v-for="day in week"
                 :key="day.toISOString()"
+                v-cv-menu="() => dayMenu(day)"
                 class="cv-ag-cell"
                 :class="{
                   'cv-ag-cell-out': !inMonth(day),
@@ -1948,6 +2220,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   <button
                     v-for="task in dayTasks(day).slice(0, MONTH_MAX)"
                     :key="task.id"
+                    v-cv-menu="() => taskMenu(task)"
                     type="button"
                     class="cv-ag-ev"
                     :class="{ 'cv-ag-ev-done': task.status === 'done' && task.attendance !== 'missed', 'cv-ag-ev-missed': task.attendance === 'missed' }"
@@ -1957,6 +2230,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   >
                     <span class="cv-ag-ev-time">{{ chipTime(task) }}</span>
                     <span class="cv-ag-ev-name">{{ displayName(task) }}</span>
+                    <span v-if="attendanceMark(task)" class="cv-ag-ev-mark" :class="attendanceMark(task).cls" :title="attendanceMark(task).title">{{ attendanceMark(task).sign }}</span>
                   </button>
                   <button
                     v-if="dayTasks(day).length > MONTH_MAX"
@@ -2003,6 +2277,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 </button>
               </div>
               <button
+                v-cv-menu="() => dayMenu(day)"
                 type="button"
                 class="cv-ag-dayhead w-full"
                 :class="{ 'cv-ag-dayhead-today': isToday(day), 'cv-ag-dayhead-off': isDayOff(day) }"
@@ -2045,6 +2320,8 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 :accent-of="accentOf"
                 :tag-of="tagOf"
                 :name-of="displayName"
+                :task-menu="taskMenu"
+                :slot-menu="columnMenu"
                 compact
                 @create="onColumnCreate"
                 @open="openEdit"
@@ -2079,7 +2356,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <div class="cv-ag-grid">
                 <div class="cv-ag-grid-head" style="grid-template-columns: 56px minmax(0, 1fr)">
                   <div />
-                  <div class="cv-ag-dayhead !items-start px-3 !py-2.5" :class="isToday(cursor) ? 'cv-ag-dayhead-today' : ''">
+                  <div v-cv-menu="() => dayMenu(cursor)" class="cv-ag-dayhead !items-start px-3 !py-2.5" :class="isToday(cursor) ? 'cv-ag-dayhead-today' : ''">
                     <span class="cv-ag-dayhead-wd">{{ WEEKDAY_FULL[cursor.getDay()] }}</span>
                     <span class="flex items-center gap-2">
                       <span class="cv-ag-daynum cv-ag-daynum-lg" :class="isToday(cursor) ? 'cv-ag-daynum-today' : ''">{{ cursor.getDate() }}</span>
@@ -2106,6 +2383,8 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     :accent-of="accentOf"
                     :tag-of="tagOf"
                     :name-of="displayName"
+                    :task-menu="taskMenu"
+                    :slot-menu="columnMenu"
                     @create="onColumnCreate"
                     @open="openEdit"
                     @dragstart="onDragStart"
@@ -2170,7 +2449,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   </div>
                   <div class="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2">
                     <template v-for="slot in slotsFor(win)" :key="slot">
-                      <span v-if="taskAtSlot(cursor, win, slot)" class="relative group min-w-0">
+                      <span v-if="taskAtSlot(cursor, win, slot)" v-cv-menu="() => slotMenu(cursor, win, slot)" class="relative group min-w-0">
                         <button class="cv-ag-slot cv-ag-slot-taken truncate" :title="tasksAtSlotAll(cursor, win, slot).map(displayName).join(' + ')" @click="openSlot(cursor, win, slot)">
                           <span class="tabular-nums opacity-90">{{ slot }}</span>
                           <span class="truncate">{{ displayName(taskAtSlot(cursor, win, slot)) }}</span>
@@ -2178,10 +2457,10 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         </button>
                         <button class="cv-ag-corner" title="Encaixe: agendar OUTRO paciente neste mesmo horário" @click.stop="openCreateSlot(cursor, win, slot)"><span class="i-lucide-plus" /></button>
                       </span>
-                      <button v-else-if="isBlocked(cursor, win, slot)" class="cv-ag-slot cv-ag-slot-locked" :title="isAdmin ? 'Horário fechado — clique para reabrir' : 'Horário fechado'" @click="isAdmin && toggleBlock(cursor, win, slot)">
+                      <button v-else-if="isBlocked(cursor, win, slot)" v-cv-menu="() => slotMenu(cursor, win, slot)" class="cv-ag-slot cv-ag-slot-locked" :title="isAdmin ? 'Horário fechado — clique para reabrir' : 'Horário fechado'" @click="isAdmin && toggleBlock(cursor, win, slot)">
                         <span class="i-lucide-lock text-[10px]" /> {{ slot }}
                       </button>
-                      <span v-else class="relative group">
+                      <span v-else v-cv-menu="() => slotMenu(cursor, win, slot)" class="relative group">
                         <button class="cv-ag-slot cv-ag-slot-free tabular-nums" title="Bloco livre — clique para agendar" @click="openCreateSlot(cursor, win, slot)">{{ slot }}</button>
                         <button v-if="isAdmin" class="cv-ag-corner" title="Fechar este horário 🔒" @click.stop="toggleBlock(cursor, win, slot)"><span class="i-lucide-lock" /></button>
                       </span>
@@ -2210,6 +2489,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   <div
                     v-for="task in dayViewTasks"
                     :key="task.id"
+                    v-cv-menu="() => taskMenu(task)"
                     class="cv-ag-card"
                     :class="task.attendance === 'missed' ? 'opacity-75' : ''"
                     :style="evVars(task)"
@@ -2230,7 +2510,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         </div>
                       </div>
                       <div class="cv-ag-card-pills">
-                        <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }" :title="TYPE_BY_KEY[typeOf(task)].hint"><span :class="TYPE_BY_KEY[typeOf(task)].icon" class="text-[10px] shrink-0" /> {{ TYPE_BY_KEY[typeOf(task)].label }}</span>
+                        <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(typeColorOf(task)), '--cv-deep': typeColorOf(task) }" :title="TYPE_BY_KEY[typeOf(task)].hint"><span :class="TYPE_BY_KEY[typeOf(task)].icon" class="text-[10px] shrink-0" /> {{ TYPE_BY_KEY[typeOf(task)].label }}</span>
                         <span v-if="unitOf(task)" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(unitOf(task).color), '--cv-deep': unitOf(task).color }"><span class="i-lucide-map-pin text-[10px] shrink-0" /> <span class="truncate">{{ unitOf(task).label }}</span></span>
                         <span v-if="task.source" class="cv-chip cv-slate" :title="`Veio do ${task.source === 'oftalmofacil' ? 'Oftalmofácil' : task.source}${task.source_detail ? ' · parceiro: ' + task.source_detail : ''}`"><span class="i-lucide-hospital text-[10px] shrink-0" /> <span class="truncate">{{ originLabel(task) }}</span></span>
                         <span v-if="task.attendance === 'attended'" class="cv-chip cv-green">{{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}</span>
@@ -2248,6 +2528,17 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <span v-for="lbl in detailOf(task).labels" :key="task.id + lbl" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }">🏷 {{ lbl }}</span>
                       <button v-if="detailOf(task).form_response" class="cv-btn cv-btn-sm" style="--cv-grad: linear-gradient(135deg, #5B21B6, #7C3AED); --cv-deep-rgb: 91 33 182" title="Respostas que o paciente deu no formulário — leia antes da consulta" @click.stop="openFormAnswers(task)">
                         📖 Ler respostas do formulário
+                      </button>
+                    </div>
+
+                    <!-- item 290: presença RÁPIDA também no modo Itens — os mesmos botões e a mesma
+                         função da conferência (clicar de novo desfaz; sem confirmação, é reversível) -->
+                    <div v-if="dayPanelMode === 'itens'" class="cv-ag-quick" @click.stop>
+                      <button class="cv-ag-act cv-ag-act-sm" style="--a: #059669" :class="task.attendance === 'attended' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" :title="task.attendance === 'attended' ? 'Clique de novo para desfazer' : 'Marcar presença'" @click="setAttendance(task, 'attended')">
+                        {{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}
+                      </button>
+                      <button class="cv-ag-act cv-ag-act-sm" style="--a: #DC2626" :class="task.attendance === 'missed' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" :title="task.attendance === 'missed' ? 'Clique de novo para desfazer' : 'Marcar falta'" @click="setAttendance(task, 'missed')">
+                        {{ isSurgeryTask(task) ? '✕ Não veio' : '✕ Faltou' }}
                       </button>
                     </div>
 

@@ -28,7 +28,7 @@ class Crm::Calls::CardMessageBuilder
   end
 
   def update_message(message)
-    attrs = (message.content_attributes || {}).to_h.merge('cevico_call' => call.to_payload.deep_stringify_keys)
+    attrs = (message.content_attributes || {}).to_h.merge('cevico_call' => call.to_payload(crm: false).deep_stringify_keys)
     message.update!(content: call.card_content, content_attributes: attrs)
     message
   end
@@ -36,7 +36,7 @@ class Crm::Calls::CardMessageBuilder
   def create_message(conversation)
     message = conversation.messages.create!(
       account_id: call.account_id, inbox_id: call.inbox_id, message_type: :activity, private: false,
-      content: call.card_content, content_attributes: { cevico_call: call.to_payload }
+      content: call.card_content, content_attributes: { cevico_call: call.to_payload(crm: false) }
     )
     call.update_column(:message_id, message.id) # rubocop:disable Rails/SkipsModelValidations
     message

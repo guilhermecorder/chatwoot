@@ -60,7 +60,9 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   # GET /crm/appointments/stage_entries?preset=…&from&to
   def stage_entries
     since, until_at = standard_period_range || custom_period_range
-    render json: Crm::StageEntriesReport.new(Current.account).call(since, until_at).merge(since: since, until: until_at)
+    report = Crm::StageEntriesReport.new(Current.account).call(since, until_at)
+    # item 285: a ponte "entraram na coluna × marcadas na Agenda"
+    render json: report.merge(since: since, until: until_at, bridge: Crm::BookingBridge.new(Current.account).call(since, until_at))
   end
 
   private

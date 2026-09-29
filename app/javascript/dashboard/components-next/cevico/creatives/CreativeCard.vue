@@ -37,7 +37,7 @@ const transcriptStatus = computed(
 );
 const canTranscribe = computed(
   () =>
-    props.row.format === 'video' &&
+    (props.row.transcribable || props.row.format === 'video') &&
     !fromVideo.value &&
     !['queued', 'processing'].includes(transcriptStatus.value)
 );

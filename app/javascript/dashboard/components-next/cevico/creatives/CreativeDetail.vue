@@ -4,18 +4,24 @@
 // réguas, ritmo dia a dia (um eixo por gráfico, linha da média e do
 // parâmetro), 1ª × 2ª metade, curva de retenção contra a média da conta,
 // onde apareceu, quem viu e as peças do criativo dinâmico.
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import CevicoCreativesAPI from 'dashboard/api/cevicoCreatives';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { hexFromGrad } from 'dashboard/helper/cevicoPalettes';
-import BulletMeter from './BulletMeter.vue';
+import VerdictBars from './VerdictBars.vue';
+import BreakdownRanking from './BreakdownRanking.vue';
+import RateLine from './RateLine.vue';
+import ScoreRadar from './ScoreRadar.vue';
 import RetentionCurve from './RetentionCurve.vue';
 import MoneyTiles from './MoneyTiles.vue';
 import AssetTable from './AssetTable.vue';
 import CreativeRadar from './CreativeRadar.vue';
 import RadarAxesPicker from './RadarAxesPicker.vue';
-import { useTranscribe } from './useTranscribe';
+import RetentionArea from './RetentionArea.vue';
+import ClicksByMark from './ClicksByMark.vue';
+import { useAlert } from 'dashboard/composables';
+import { useTranscribe, copyPlain } from './useTranscribe';
 import {
   fmtMoney,
   fmtCompact,
@@ -23,7 +29,6 @@ import {
   fmtNum,
   statusMeta,
   FORMAT_ICON,
-  METRIC_DEFS,
   FOCUS_META,
   BAND_META,
   CHAMPION_META,
@@ -56,6 +61,49 @@ const transcriptStatus = computed(
   () =>
     (data.value && data.value.transcript && data.value.transcript.status) || ''
 );
+const isWaitingTranscript = computed(() =>
+  ['queued', 'processing'].includes(transcriptStatus.value)
+);
+// item 286: o motivo de não ter transcrito fica À VISTA (antes o botão escondia)
+const transcriptProblem = computed(() => {
+  if (!['failed', 'skipped'].includes(transcriptStatus.value)) return '';
+  return data.value.transcript.error || 'a transcrição falhou';
+});
+const canTranscribe = computed(
+  () =>
+    data.value &&
+    (data.value.transcribable || data.value.format === 'video') &&
+    !fromVideo.value &&
+    !isWaitingTranscript.value
+);
+// acompanha a fila: confere a cada 6 s (até 5 min) e a tela se atualiza sozinha
+const POLL_MS = 6000;
+const POLL_MAX = 50;
+let pollTimer = null;
+let pollCount = 0;
+const stopPolling = () => {
+  clearTimeout(pollTimer);
+  pollTimer = null;
+};
+const pollTranscript = () => {
+  stopPolling();
+  if (!isWaitingTranscript.value || pollCount >= POLL_MAX) return;
+  pollTimer = setTimeout(async () => {
+    pollCount += 1;
+    try {
+      const { data: fresh } = await CevicoCreativesAPI.show(
+        props.adId,
+        props.periodParams
+      );
+      data.value = fresh;
+      if (fresh.text_source === 'video') showTranscript.value = true;
+    } catch {
+      // rede oscilou: tenta de novo na próxima volta
+    }
+    pollTranscript();
+  }, POLL_MS);
+};
+onBeforeUnmount(stopPolling);
 const transcribeVideo = async () => {
   if (!data.value) return;
   isTranscribing.value = true;
@@ -64,6 +112,8 @@ const transcribeVideo = async () => {
       data.value.ad_id
     );
     data.value = { ...data.value, transcript: r.transcript };
+    pollCount = 0;
+    pollTranscript();
   } catch (e) {
     error.value =
       (e.response && e.response.data && e.response.data.error) ||
@@ -73,8 +123,71 @@ const transcribeVideo = async () => {
   }
 };
 
+// 🔗 item 287: link só de leitura (vale 30 dias) + copiar a análise completa
+// rodada 2: duas versões — SEM dados financeiros (padrão) ou COM; a escolha vai dentro do link
+const shareLink = ref(null);
+const isSharing = ref(false);
+const showShareOptions = ref(false);
+const shareFinance = ref(false);
+const SHARE_OPTIONS = [
+  {
+    value: false,
+    label: 'Sem dados financeiros',
+    icon: 'i-lucide-eye-off',
+    hint: 'Mostra taxas, retenção, cliques, transcrição, textos e as quantidades da jornada. Nenhum valor em reais.',
+  },
+  {
+    value: true,
+    label: 'Com dados financeiros',
+    icon: 'i-lucide-badge-dollar-sign',
+    hint: 'Mostra também investimento, custo por conversa, por consulta e por cirurgia, e o retorno (ROAS).',
+  },
+];
+const copyShareUrl = async () => {
+  if (!shareLink.value) return;
+  const ok = await copyPlain(shareLink.value.url);
+  useAlert(
+    ok
+      ? `Link copiado. Este link vale até ${shareLink.value.expires_label}.`
+      : 'Não consegui copiar sozinho: selecione o link e copie.'
+  );
+};
+const share = async () => {
+  if (!data.value || isSharing.value) return;
+  isSharing.value = true;
+  try {
+    const { data: link } = await CevicoCreativesAPI.share(data.value.ad_id, {
+      ...props.periodParams,
+      finance: shareFinance.value ? 1 : 0,
+    });
+    shareLink.value = link;
+    showShareOptions.value = false;
+    await copyShareUrl();
+  } catch (e) {
+    useAlert(
+      (e.response && e.response.data && e.response.data.error) ||
+        'Não consegui gerar o link de leitura.'
+    );
+  } finally {
+    isSharing.value = false;
+  }
+};
+const copyAnalysis = async () => {
+  if (!data.value || !data.value.analysis_text) return;
+  const ok = await copyPlain(data.value.analysis_text);
+  useAlert(
+    ok
+      ? 'Análise completa copiada: é só colar onde quiser.'
+      : 'Não consegui copiar. Tente de novo.'
+  );
+};
+const fmtDay = iso =>
+  iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '';
+
 const load = async () => {
   isLoading.value = true;
+  shareLink.value = null;
+  showShareOptions.value = false;
   error.value = '';
   try {
     const { data: response } = await CevicoCreativesAPI.show(
@@ -82,6 +195,8 @@ const load = async () => {
       props.periodParams
     );
     data.value = response;
+    pollCount = 0;
+    pollTranscript();
   } catch (e) {
     error.value =
       (e.response && e.response.data && e.response.data.error) ||
@@ -105,10 +220,48 @@ const isVideo = computed(
 const status = computed(() => statusMeta(data.value && data.value.status));
 const diag = computed(() => (data.value && data.value.diagnosis) || {});
 const bands = computed(() => diag.value.bands || {});
-const vsAvg = computed(() => diag.value.vs_avg || {});
 const prev = computed(() => (data.value && data.value.prev) || null);
-const meters = computed(() =>
-  METRIC_DEFS.filter(m => isVideo.value || !m.video)
+// 🎯 rodada 2: indicadores sem legenda (Barras | Linha), preferência guardada no navegador
+const METERS_VIEW_KEY = 'cevico:creatives:meters-view';
+const readMetersView = () => {
+  try {
+    return localStorage.getItem(METERS_VIEW_KEY) === 'line' ? 'line' : 'bars';
+  } catch {
+    return 'bars';
+  }
+};
+const metersView = ref(readMetersView());
+const setMetersView = view => {
+  metersView.value = view;
+  try {
+    localStorage.setItem(METERS_VIEW_KEY, view);
+  } catch {
+    // navegador sem armazenamento: a escolha vale só nesta tela
+  }
+};
+const scorecard = computed(
+  () => (data.value && data.value.scorecard) || { indicators: [], radar: null }
+);
+const dailyOf = key => {
+  if (!data.value) return [];
+  return data.value.daily.map(d => {
+    if (key === 'conv_rate')
+      return d.link_clicks ? d.conversations / d.link_clicks : null;
+    const v = d[key];
+    return v === null || v === undefined ? null : Number(v);
+  });
+};
+const rateFmt = digits => v =>
+  `${(Number(v || 0) * 100).toFixed(digits).replace('.', ',')}%`;
+const lineCharts = computed(() =>
+  scorecard.value.indicators
+    .filter(i => ['hook_rate', 'hold_rate', 'link_ctr'].includes(i.key))
+    .map((i, n) => ({
+      ...i,
+      values: dailyOf(i.key),
+      format: rateFmt(i.digits || 1),
+      color: color(n),
+    }))
 );
 const labels = computed(() =>
   data.value ? data.value.daily.map(d => d.label) : []
@@ -359,9 +512,9 @@ const metaTiles = computed(() => {
               class="text-lg"
           /></span>
           <div class="min-w-0 flex-1">
-            <p class="text-[11px] opacity-80">Análise científica</p>
+            <p class="cd-head-sub text-[11px]">Análise científica</p>
             <h2
-              class="text-lg sm:text-2xl font-bold leading-tight tracking-tight break-words"
+              class="cd-head-title text-lg sm:text-2xl font-bold leading-tight tracking-tight break-words"
             >
               {{ data ? data.ad_name : 'Carregando…' }}
             </h2>
@@ -496,32 +649,31 @@ v-if="data.simulated" class="cv-chip cv-slate"
                       anúncio</span
                     >
                     <button
-                      v-if="
-                        data.format === 'video' &&
-                        !fromVideo &&
-                        !['queued', 'processing'].includes(transcriptStatus)
-                      "
+                      v-if="canTranscribe"
                       class="cv-btn cv-btn-sm cv-btn-ghost normal-case tracking-normal"
                       :disabled="isTranscribing"
                       @click="transcribeVideo"
                     >
-                      <span class="i-lucide-sparkles text-xs" />Transcrever
-                      vídeo
+                      <span class="i-lucide-sparkles text-xs" />
+                      {{
+                        transcriptProblem
+                          ? 'Tentar de novo'
+                          : 'Transcrever vídeo'
+                      }}
                     </button>
                     <span
-                      v-else-if="
-                        ['queued', 'processing'].includes(transcriptStatus)
-                      "
-                      class="normal-case tracking-normal text-n-slate-9"
-                      >transcrevendo… (volte em alguns minutos)</span
+                      v-else-if="isWaitingTranscript"
+                      class="normal-case tracking-normal text-n-slate-9 inline-flex items-center gap-1"
                     >
+                      <span class="i-lucide-loader-circle animate-spin" />
+                      transcrevendo… a tela atualiza sozinha
+                    </span>
                     <span
-                      v-else-if="transcriptStatus === 'failed'"
-                      class="normal-case tracking-normal text-red-600"
-                      >{{
-                        data.transcript.error || 'a transcrição falhou'
-                      }}</span
+                      v-if="transcriptProblem && !isWaitingTranscript"
+                      class="normal-case tracking-normal text-red-600 basis-full"
                     >
+                      não transcreveu: {{ transcriptProblem }}
+                    </span>
                   </p>
                   <p
                     class="text-xl font-bold text-n-slate-12 leading-snug tracking-tight"
@@ -582,6 +734,29 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                   >
                     <span class="i-lucide-copy text-sm" />Transcrever
                   </button>
+                  <button
+                    class="cv-btn cv-btn-sm"
+                    title="Copia a análise inteira em texto limpo: leitura, números, curva, transcrição e textos do anúncio"
+                    @click="copyAnalysis"
+                  >
+                    <span class="i-lucide-clipboard-list text-sm" />Copiar
+                    análise completa
+                  </button>
+                  <button
+                    class="cv-btn cv-btn-sm"
+                    title="Gera um link só de leitura desta análise para mandar a outras pessoas"
+                    :disabled="isSharing"
+                    @click="showShareOptions = !showShareOptions"
+                  >
+                    <span
+                      :class="
+                        isSharing
+                          ? 'i-lucide-loader-circle animate-spin'
+                          : 'i-lucide-share-2'
+                      "
+                      class="text-sm"
+                    />Compartilhar
+                  </button>
                   <a
                     v-if="managerUrl"
                     :href="managerUrl"
@@ -600,6 +775,87 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                     class="cv-btn cv-btn-sm cv-btn-ghost"
                     ><span class="i-lucide-instagram text-sm" />Instagram</a
                   >
+                </div>
+                <div
+                  v-if="showShareOptions"
+                  class="cv-sub rounded-2xl px-4 py-3.5 flex flex-col gap-3"
+                >
+                  <p class="text-sm font-bold text-n-slate-12">
+                    Qual versão você quer compartilhar?
+                  </p>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button
+                      v-for="o in SHARE_OPTIONS"
+                      :key="o.label"
+                      type="button"
+                      class="cd-share-option text-left"
+                      :class="shareFinance === o.value ? 'cd-share-on' : ''"
+                      :aria-pressed="shareFinance === o.value"
+                      @click="shareFinance = o.value"
+                    >
+                      <span
+                        class="flex items-center gap-2 text-sm font-bold text-n-slate-12"
+                      >
+                        <span :class="o.icon" class="text-base" />{{ o.label }}
+                        <span
+                          v-if="shareFinance === o.value"
+                          class="i-lucide-circle-check ml-auto text-base"
+                        />
+                      </span>
+                      <span
+                        class="block text-xs text-n-slate-10 mt-1 leading-snug"
+                        >{{ o.hint }}</span
+                      >
+                    </button>
+                  </div>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <button
+                      class="cv-btn cv-btn-sm"
+                      :disabled="isSharing"
+                      @click="share"
+                    >
+                      <span class="i-lucide-link text-sm" />Gerar link e copiar
+                    </button>
+                    <span class="text-[11px] text-n-slate-9">
+                      A escolha fica gravada dentro do link: não dá para trocar
+                      a versão mexendo no endereço.
+                    </span>
+                  </div>
+                </div>
+                <div
+                  v-if="shareLink"
+                  class="cd-share-ready px-4 py-3 flex flex-col gap-2"
+                >
+                  <p class="text-sm text-n-slate-12 leading-snug">
+                    <span class="font-bold">Link só de leitura pronto.</span>
+                    <span
+                      class="cv-chip mx-1"
+                      :class="shareLink.finance ? 'cv-amber' : 'cv-green'"
+                      >{{ shareLink.finance_label }}</span
+                    >
+                    Este link vale até {{ shareLink.expires_label }} e mostra a
+                    análise de {{ fmtDay(shareLink.since) }} a
+                    {{ fmtDay(shareLink.until) }}. Quem abrir vê só os dados do
+                    anúncio, sem nenhum dado de paciente.
+                  </p>
+                  <div class="flex gap-2 flex-wrap items-center">
+                    <input
+                      :value="shareLink.url"
+                      readonly
+                      class="cv-input flex-1 min-w-[12rem] text-xs"
+                      @focus="$event.target.select()"
+                    />
+                    <button class="cv-btn cv-btn-sm" @click="copyShareUrl">
+                      <span class="i-lucide-copy text-sm" />Copiar link
+                    </button>
+                    <a
+                      :href="shareLink.url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="cv-btn cv-btn-sm cv-btn-ghost"
+                      ><span class="i-lucide-external-link text-sm" />Abrir</a
+                    >
+                  </div>
                 </div>
               </div>
             </section>
@@ -629,6 +885,45 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                 :averages="averages"
                 :champions="data.champion_of || []"
               />
+            </section>
+
+            <!-- 2b. curva de retenção detalhada + cliques por marco (item 287) -->
+            <section
+              v-if="data.retention_detail"
+              class="cv-block p-6 sm:p-8"
+              :style="{ '--cv-grad': family[0] }"
+            >
+              <div class="flex items-center gap-2.5 mb-1">
+                <span class="cv-icon"
+                  ><span class="i-lucide-film text-base"
+                /></span>
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                >
+                  Curva de retenção
+                </h3>
+              </div>
+              <RetentionArea
+                :detail="data.retention_detail"
+                :color="color(0)"
+              />
+            </section>
+            <section
+              v-if="data.retention_detail && data.retention_detail.clicks"
+              class="cv-block p-6 sm:p-8"
+              :style="{ '--cv-grad': family[2] }"
+            >
+              <div class="flex items-center gap-2.5 mb-1">
+                <span class="cv-icon"
+                  ><span class="i-lucide-mouse-pointer-click text-base"
+                /></span>
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                >
+                  Cliques por quem chegou até aqui
+                </h3>
+              </div>
+              <ClicksByMark :clicks="data.retention_detail.clicks" />
             </section>
 
             <!-- 3. leitura + réguas + retenção -->
@@ -666,29 +961,11 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                   />
                   <RadarAxesPicker env="detalhe" :relative-ok="false" />
                 </div>
-                <div class="grid grid-cols-1 gap-x-8 gap-y-6">
-                  <BulletMeter
-                    v-for="(m, i) in meters"
-                    :key="m.key"
-                    :label="m.label"
-                    :metric="m.metric"
-                    :hint="m.hint"
-                    :value="data.rates[m.key]"
-                    :avg="averages[m.key]"
-                    :prev="prev ? prev[m.key] : null"
-                    :band="bands[m.band]"
-                    :vs-avg="vsAvg[m.band]"
-                    :target="targets[m.key]"
-                    :digits="m.digits"
-                    :money="!!m.money"
-                    :color="color(i % 4)"
-                  />
-                </div>
               </section>
 
               <div class="flex flex-col gap-6">
                 <section
-                  v-if="retentionSeries.length"
+                  v-if="!data.retention_detail && retentionSeries.length"
                   class="cv-block p-6 sm:p-8"
                   :style="{ '--cv-grad': family[0] }"
                 >
@@ -764,6 +1041,56 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
               </div>
             </div>
 
+            <!-- 3b. indicadores sem legenda (rodada 2): Barras | Linha -->
+            <section
+              v-if="scorecard.indicators.length"
+              class="cv-block p-6 sm:p-8"
+              :style="{ '--cv-grad': family[3] }"
+            >
+              <div class="flex items-center gap-2 flex-wrap mb-3">
+                <span class="cv-icon"
+                  ><span class="i-lucide-gauge text-base"
+                /></span>
+                <div class="min-w-0">
+                  <h3
+                    class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                  >
+                    Indicadores
+                  </h3>
+                  <p class="text-xs text-n-slate-10">
+                    este anúncio contra a média da conta (para superar) e o
+                    recorde da conta (para ir buscar)
+                  </p>
+                </div>
+                <div class="cd-seg ml-auto" role="group">
+                  <button
+                    type="button"
+                    :class="metersView === 'bars' ? 'cd-seg-on' : ''"
+                    @click="setMetersView('bars')"
+                  >
+                    <span class="i-lucide-align-left text-xs" />Barras
+                  </button>
+                  <button
+                    type="button"
+                    :class="metersView === 'line' ? 'cd-seg-on' : ''"
+                    @click="setMetersView('line')"
+                  >
+                    <span class="i-lucide-chart-line text-xs" />Linha
+                  </button>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                <VerdictBars
+                  v-for="i in scorecard.indicators"
+                  :key="i.key"
+                  :indicator="i"
+                  :view="metersView"
+                  :values="dailyOf(i.key)"
+                  :labels="labels"
+                />
+              </div>
+            </section>
+
             <!-- 4. números da Meta -->
             <section
               class="cv-block p-6 sm:p-8"
@@ -815,6 +1142,71 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                   <p v-else-if="t.sub" class="text-[10px] text-n-slate-9">
                     {{ t.sub }}
                   </p>
+                </div>
+              </div>
+            </section>
+
+            <!-- 4b. mais análises: teia (este anúncio × média × recorde) e linhas das taxas -->
+            <section
+              v-if="scorecard.radar && scorecard.radar.axes.length >= 3"
+              class="cv-block p-6 sm:p-8"
+              :style="{ '--cv-grad': family[0] }"
+            >
+              <div class="flex items-center gap-2.5 mb-1">
+                <span class="cv-icon"
+                  ><span class="i-lucide-radar text-base"
+                /></span>
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                >
+                  Este criativo × média × recorde da conta
+                </h3>
+              </div>
+              <p class="text-xs text-n-slate-10 mb-4">
+                Do gancho ao agendamento em uma figura só. A borda de fora é o
+                recorde da conta: a ponta mais curta é onde há mais para buscar.
+              </p>
+              <ScoreRadar :radar="scorecard.radar" :color="color(0)" />
+            </section>
+
+            <section
+              v-if="lineCharts.length"
+              class="cv-block p-6 sm:p-8"
+              :style="{ '--cv-grad': family[1] }"
+            >
+              <div class="flex items-center gap-2.5 mb-1">
+                <span class="cv-icon"
+                  ><span class="i-lucide-chart-line text-base"
+                /></span>
+                <h3
+                  class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
+                >
+                  Taxas principais, dia a dia
+                </h3>
+              </div>
+              <p class="text-xs text-n-slate-10 mb-4">
+                Linha cheia = este anúncio · tracejada = média da conta ·
+                pontilhada dourada = recorde da conta.
+              </p>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div v-for="c in lineCharts" :key="c.key" class="min-w-0">
+                  <p class="text-sm font-semibold text-n-slate-12">
+                    {{ c.label }}
+                    <span class="font-normal text-n-slate-10"
+                      >· {{ c.metric }}</span
+                    >
+                  </p>
+                  <p class="text-[11px] text-n-slate-9 mb-1">
+                    no período: {{ c.value_text }} · {{ c.phrase }}
+                  </p>
+                  <RateLine
+                    :values="c.values"
+                    :labels="labels"
+                    :avg="c.avg"
+                    :record="c.record"
+                    :color="c.color"
+                    :format="c.format"
+                  />
                 </div>
               </div>
             </section>
@@ -922,12 +1314,12 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                   <h3
                     class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
                   >
-                    Onde apareceu
+                    Onde apareceu: os mais e os menos
                   </h3>
                 </div>
                 <p class="text-xs text-n-slate-10 mb-3">
-                  Posicionamento na Meta. O melhor e o pior custo por conversa
-                  ficam marcados.
+                  De onde vem: a Meta separa o resultado por lugar onde o
+                  anúncio foi mostrado. Do melhor para o pior.
                 </p>
                 <p
                   v-if="data.placements && data.placements.error"
@@ -935,11 +1327,8 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                 >
                   {{ data.placements.error }}
                 </p>
-                <AssetTable
-                  :rows="bkRows(data.placements)"
-                  :color="color(3)"
-                  label-header="Posicionamento"
-                  :video="isVideo"
+                <BreakdownRanking
+                  :ranking="data.placement_ranking"
                   empty-text="sem quebra por posicionamento no período"
                 />
               </section>
@@ -954,11 +1343,12 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                   <h3
                     class="text-lg sm:text-xl font-bold text-n-slate-12 tracking-tight"
                   >
-                    Quem viu
+                    Quem viu: os mais e os menos
                   </h3>
                 </div>
                 <p class="text-xs text-n-slate-10 mb-3">
-                  Idade e sexo de quem recebeu o anúncio.
+                  De onde vem: a Meta separa o resultado por idade e sexo de
+                  quem recebeu o anúncio. Do melhor para o pior.
                 </p>
                 <p
                   v-if="data.age_gender && data.age_gender.error"
@@ -966,11 +1356,8 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                 >
                   {{ data.age_gender.error }}
                 </p>
-                <AssetTable
-                  :rows="bkRows(data.age_gender)"
-                  :color="color(1)"
-                  label-header="Faixa"
-                  :video="isVideo"
+                <BreakdownRanking
+                  :ranking="data.audience_ranking"
                   empty-text="sem quebra por idade e sexo no período"
                 />
               </section>
@@ -1033,3 +1420,62 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+/* título BRANCO no cabeçalho colorido do modal (pedido 29/09): a regra geral
+   do sistema para h1–h6 (_base.scss) pinta de escuro e vence as classes de
+   cor; aqui a cor é fixada só neste modal */
+.cv-modal-head .cd-head-title {
+  color: #fff;
+}
+.cv-modal-head .cd-head-sub {
+  color: rgb(255 255 255 / 0.82);
+}
+.cd-share-option {
+  border-radius: 16px;
+  padding: 12px 14px;
+  border: 1.5px solid rgb(var(--cv-rgb) / 0.22);
+  background: rgb(var(--cv-rgb) / 0.04);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.cd-share-option:hover {
+  border-color: rgb(var(--cv-rgb) / 0.5);
+}
+.cd-share-on {
+  border-color: rgb(var(--cv-rgb) / 0.85);
+  background: rgb(var(--cv-rgb) / 0.12);
+  box-shadow: 0 0 0 3px rgb(var(--cv-rgb) / 0.12);
+}
+.cd-share-ready {
+  border-radius: 16px;
+  border: 1px solid rgb(5 150 105 / 0.3);
+  border-left: 4px solid #059669;
+  background: rgb(5 150 105 / 0.09);
+}
+.cd-seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 9999px;
+  border: 1px solid rgb(var(--cv-rgb) / 0.25);
+  background: rgb(var(--cv-rgb) / 0.06);
+}
+.cd-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: inherit;
+}
+.cd-seg .cd-seg-on {
+  color: #fff;
+  background: var(--cv);
+}
+</style>

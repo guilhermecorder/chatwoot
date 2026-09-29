@@ -263,6 +263,45 @@
   margin-left: auto;
 }
 
+/* item 290: SELO DE PRESENÇA no canto do balão — ✓ verde (foi), ✕ vermelho
+   (faltou), ! âmbar (veio e não fez). Fica nítido mesmo no balão apagado. */
+.cv-page .cv-ag-ev-mark {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.95);
+}
+.dark .cv-page .cv-ag-ev-mark { box-shadow: 0 0 0 1.5px rgba(23, 25, 28, 0.9); }
+.cv-page .cv-ag-ev-mark-ok { background: #059669; }
+.cv-page .cv-ag-ev-mark-no { background: #dc2626; }
+.cv-page .cv-ag-ev-mark-warn { background: #d97706; }
+/* o balão de quem faltou fica apagado, mas o selo não */
+.cv-page .cv-ag-ev-missed { opacity: 1; background: rgb(var(--ev-rgb) / 0.06); }
+.cv-page .cv-ag-ev-missed > :not(.cv-ag-ev-mark) { opacity: 0.55; }
+/* espaço para o selo não cobrir o nome */
+.cv-page .cv-ag-ev:has(.cv-ag-ev-mark) { padding-right: 19px; }
+
+/* item 290: presença rápida no cartão da lista "Itens do dia" */
+.cv-page .cv-ag-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cv-page .cv-ag-quick .cv-ag-act-sm { height: 26px; padding: 0 9px; }
+
 /* ── GRADE DE HORAS (semana e dia) ── */
 .cv-page .cv-ag-grid {
   border: 1px solid rgb(var(--cv-rgb) / 0.16);

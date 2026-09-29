@@ -16,13 +16,13 @@ class Api::V1::Accounts::Crm::CallsController < Api::V1::Accounts::BaseControlle
 
   # live=1 → só o que está tocando/em atendimento agora (ignora os filtros)
   def index
-    return render json: { calls: live_scope.map(&:to_payload), meta: { live: true } } if params[:live].present?
+    return render json: { calls: Crm::Call.payloads(live_scope, Current.account), meta: { live: true } } if params[:live].present?
 
     scope = filtered_scope
     total = scope.count
     calls = scope.recent_first.with_attached_recording.includes(*LIST_INCLUDES)
                  .offset((page - 1) * per_page).limit(per_page)
-    render json: { calls: calls.map(&:to_payload), meta: { total: total, page: page, per_page: per_page } }
+    render json: { calls: Crm::Call.payloads(calls, Current.account), meta: { total: total, page: page, per_page: per_page } }
   end
 
   # ambiente Chamadas (item 176): números do período com comparação, ao vivo,

@@ -18,6 +18,8 @@ import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { useRouter } from 'vue-router';
+import { copyTextToClipboard } from 'shared/helpers/clipboard';
+import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 
 ChartJS.register(Title, Tooltip, Legend, ArcElement);
 
@@ -672,6 +674,73 @@ const removeTask = async () => {
   }
 };
 
+// ── 🖱️ item 283 (29/09): MENU DO BOTÃO DIREITO ──
+// Atalhos para o que a tela já faz: abrir a tarefa (clique), mudar de coluna
+// (o mesmo caminho do arrastar) e copiar; nas notas, abrir o paciente.
+const STATUS_ICON = {
+  todo: 'i-lucide-circle',
+  doing: 'i-lucide-loader',
+  review: 'i-lucide-eye',
+  done: 'i-lucide-circle-check',
+};
+const copyToClipboard = async (text, okMessage) => {
+  try {
+    await copyTextToClipboard(text);
+    useAlert(okMessage);
+  } catch {
+    useAlert('Não foi possível copiar.');
+  }
+};
+const moveTaskTo = async (task, statusKey) => {
+  await onColumnChange(statusKey, { added: { element: task } });
+  rebuildLists();
+};
+const taskMenu = task => ({
+  title: task.title,
+  subtitle: t(`TASKS.COLUMNS.${task.status.toUpperCase()}`),
+  items: [
+    {
+      label: 'Abrir a tarefa',
+      icon: 'i-lucide-square-pen',
+      action: () => openEdit(task),
+    },
+    { separator: true },
+    ...STATUSES.filter(key => key !== task.status).map(key => ({
+      label: `Mover para "${t(`TASKS.COLUMNS.${key.toUpperCase()}`)}"`,
+      icon: STATUS_ICON[key] || 'i-lucide-arrow-right-left',
+      action: () => moveTaskTo(task, key),
+    })),
+    { separator: true },
+    {
+      label: 'Copiar título',
+      icon: 'i-lucide-copy',
+      action: () => copyToClipboard(task.title, 'Título copiado ✓'),
+    },
+  ],
+});
+const noteMenu = note => ({
+  title: note.contact?.name || 'Paciente',
+  subtitle: 'Nota do paciente',
+  items: [
+    note.contact?.id && {
+      label: 'Abrir o Espaço do Paciente',
+      icon: 'i-lucide-user-round',
+      action: () => openPatient(note),
+    },
+    note.contact?.phone && {
+      label: 'Copiar telefone',
+      icon: 'i-lucide-phone',
+      hint: note.contact.phone,
+      action: () => copyToClipboard(note.contact.phone, 'Telefone copiado ✓'),
+    },
+    {
+      label: 'Copiar a nota',
+      icon: 'i-lucide-copy',
+      action: () => copyToClipboard(note.content || '', 'Nota copiada ✓'),
+    },
+  ],
+});
+
 const formatDue = iso => {
   if (!iso) return null;
   return new Date(iso).toLocaleString('pt-BR', {
@@ -838,6 +907,7 @@ const formatDue = iso => {
           >
             <template #item="{ element: task }">
               <div
+                v-cv-menu="() => taskMenu(task)"
                 class="cv-sub cv-sub-hover rounded-2xl p-4 flex flex-col gap-2 min-w-0 cursor-pointer select-none"
                 @click="openEdit(task)"
               >
@@ -1139,6 +1209,7 @@ const formatDue = iso => {
           <div
             v-for="note in visibleNotes"
             :key="note.id"
+            v-cv-menu="() => noteMenu(note)"
             class="cv-sub cv-sub-hover rounded-2xl p-3.5 flex flex-col gap-1.5 min-w-0"
           >
             <div class="flex items-center gap-2 min-w-0">

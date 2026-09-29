@@ -12,6 +12,7 @@ import {
   initialsOf,
   STATUS_LABELS,
 } from 'dashboard/helper/cevicoCallsFormat';
+import CallPatientContext from 'dashboard/components-next/cevico/calls/CallPatientContext.vue';
 
 const props = defineProps({
   call: { type: Object, required: true },
@@ -98,6 +99,11 @@ const who = computed(() => {
           <template v-if="c.simulated"> · simulação</template>
         </p>
       </div>
+      <CallPatientContext
+        :call="c"
+        mode="chips"
+        class="flex-shrink-0 max-w-[11rem] !hidden sm:!block"
+      />
       <span
         v-if="c.returned_at"
         class="cv-chip flex-shrink-0 !hidden sm:!inline-flex"

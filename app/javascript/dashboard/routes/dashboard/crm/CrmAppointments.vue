@@ -21,7 +21,9 @@ import TasksAPI from 'dashboard/api/tasks';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
-import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
+import AreaChart from 'dashboard/components-next/cevico/AreaChart.vue';
+import BridgeFlow from 'dashboard/components-next/cevico/BridgeFlow.vue';
+import { bucketize } from 'dashboard/helper/cevicoBuckets';
 import PatientListPopup from 'dashboard/components-next/cevico/PatientListPopup.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import Avatar from 'dashboard/components-next/avatar/Avatar.vue';
@@ -474,16 +476,6 @@ const openEntries = (title, subtitle, filter) => {
     icon: 'i-lucide-columns-3',
   };
 };
-const entriesOriginItems = computed(() =>
-  (stageEntries.value?.by_origin || []).map((b, i) => ({
-    key: `eo${b.inbox_id || 'none'}`,
-    label: b.name || 'sem conversa',
-    value: b.count,
-    color: b.inbox_id ? inboxSolidFor(inboxes.value, b.inbox_id) : '#94a3b8',
-    hint: `${b.count} entraram na coluna vindo de ${b.name || 'fora do sistema'}`,
-    i,
-  }))
-);
 
 const fetchFeed = async ({ quiet = false } = {}) => {
   fetchStageEntries();
@@ -646,6 +638,179 @@ const iaShare = computed(() => {
   return Math.round((ia / (ia + equipe)) * 100);
 });
 const kpiGrad = () => trackKind.value.grad2;
+
+// ── item 285 (29/09): gráficos de ÁREA no lugar das barras em linha ──
+// cada bloco mostra COMO o número se formou ao longo do período, uma área
+// por fatia (caixa, tipo de paciente, tempo de chegada)
+const marcadas = computed(() => rows.value.filter(r => r.kind === 'agendada'));
+const areaOf = (items, since, until, at, key, meta) => {
+  if (!items.length || !since || !until) return { labels: [], series: [] };
+  const out = bucketize(items, since, until, at, key);
+  return {
+    labels: out.labels,
+    granularity: out.granularity,
+    series: Object.entries(out.series).map(([k, values]) => ({
+      key: k,
+      values,
+      ...meta(k),
+    })),
+  };
+};
+const granText = g => {
+  if (g === 'hour') return 'hora a hora';
+  if (g === 'week') return 'semana a semana';
+  return 'dia a dia';
+};
+const originMeta = list => k => {
+  const o = (list || []).find(b => String(b.inbox_id || 'none') === k) || {};
+  return {
+    label: o.name || 'sem conversa',
+    color: o.inbox_id ? inboxSolidFor(inboxes.value, o.inbox_id) : '#94a3b8',
+    ref: o,
+  };
+};
+const entriesArea = computed(() =>
+  areaOf(
+    stageEntries.value?.rows || [],
+    stageEntries.value?.since,
+    stageEntries.value?.until,
+    r => r.entered_at,
+    r => String(r.origin_id || 'none'),
+    originMeta(stageEntries.value?.by_origin)
+  )
+);
+const originArea = computed(() =>
+  areaOf(
+    marcadas.value,
+    feed.value?.since,
+    feed.value?.until,
+    r => r.event_at,
+    r => String(r.origin_inbox?.id || 'none'),
+    originMeta(byOrigin.value)
+  )
+);
+const kindArea = computed(() =>
+  areaOf(
+    marcadas.value,
+    feed.value?.since,
+    feed.value?.until,
+    r => r.event_at,
+    r => r.patient_kind || 'sem_cadastro',
+    k => {
+      const pk = PATIENT_KINDS.find(x => x.key === k) || {};
+      return { label: pk.label || k, color: pk.color, hint: pk.hint, ref: pk };
+    }
+  )
+);
+const cohortArea = computed(() =>
+  areaOf(
+    marcadas.value,
+    feed.value?.since,
+    feed.value?.until,
+    r => r.event_at,
+    r => r.lead_cohort || 'sem_cadastro',
+    k => ({
+      label: COHORT_BY_KEY[k]?.label || k,
+      color: COHORT_BY_KEY[k]?.color,
+    })
+  )
+);
+const stackArea = computed(() =>
+  areaOf(
+    rows.value,
+    feed.value?.since,
+    feed.value?.until,
+    r => r.event_at,
+    r => String(r.conversation?.inbox_id || 'none'),
+    k => {
+      const i = (byInbox.value || []).findIndex(
+        b => String(b.inbox_id || 'none') === k
+      );
+      return {
+        label: byInbox.value[i]?.name || 'sem conversa',
+        color: INBOX_STACK_COLORS[Math.max(0, i) % INBOX_STACK_COLORS.length],
+      };
+    }
+  )
+);
+
+// ── item 285: a PONTE "entraram na coluna × marcadas na Agenda" ──
+// de onde veio cada número, como se ramifica e onde os pacientes estão hoje
+const bridge = computed(() =>
+  track.value === 'consultas' ? stageEntries.value?.bridge || null : null
+);
+const bridgeSides = computed(() => {
+  const b = bridge.value;
+  if (!b) return [];
+  return [
+    {
+      key: 'column',
+      title: `Entraram em ${b.stage?.name || 'Agendamento de Consulta'}`,
+      total: b.column_total,
+      unit: b.column_total === 1 ? 'paciente' : 'pacientes',
+      caption: 'o card chegou na coluna do CRM',
+      color: b.stage?.color || '#6d28d9',
+      branches: b.column,
+    },
+    {
+      key: 'agenda',
+      title: 'Marcadas na Agenda',
+      total: b.agenda_total,
+      unit: b.agenda_total === 1 ? 'consulta nova' : 'consultas novas',
+      caption:
+        b.agenda_patients !== b.agenda_total
+          ? `de ${b.agenda_patients} pacientes`
+          : 'criadas no período',
+      color: '#2563eb',
+      branches: b.agenda,
+    },
+  ];
+});
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// a diferença em uma frase, do jeito que se fala
+const bridgeSentence = computed(() => {
+  const b = bridge.value;
+  if (!b) return '';
+  const others = (b.agenda || []).filter(x => x.key !== 'both');
+  const rest = others.reduce((a, x) => a + x.count, 0);
+  const parts = others.map(x => `${x.count} ${x.label}`);
+  const head = `${plural(b.column_total, 'paciente entrou', 'pacientes entraram')} na coluna e ${plural(b.agenda_total, 'consulta foi marcada', 'consultas foram marcadas')} na Agenda. ${plural(b.both_patients, 'paciente está', 'pacientes estão')} nos dois números.`;
+  if (!rest) return head;
+  return `${head} As outras ${rest} marcadas são de quem não passou pela coluna neste período: ${parts.join(' · ')}.`;
+});
+const shortDay = ts =>
+  ts
+    ? new Date(ts).toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+      })
+    : '';
+const bridgePerson = p => ({
+  id: p.id,
+  task_id: p.task_id,
+  contact_id: p.contact_id,
+  name: p.name || 'Paciente',
+  phone: p.phone,
+  when: p.when,
+  meta: [
+    p.stage_now ? `hoje em ${p.stage_now}` : 'sem card no CRM',
+    p.pipeline ? `funil ${p.pipeline}` : null,
+    p.passed_at ? `passou pela coluna em ${shortDay(p.passed_at)}` : null,
+    p.due_at ? `consulta em ${shortDay(p.due_at)}` : null,
+    p.source === 'ia' ? 'marcada pelo Atendente de IA' : null,
+  ]
+    .filter(Boolean)
+    .join(' · '),
+});
+const openBridge = ({ side, branch }) => {
+  listPopup.value = {
+    title: `${side.title} · ${branch.label}`,
+    subtitle: branch.hint,
+    people: (branch.people || []).map(bridgePerson),
+    grad: `linear-gradient(135deg, ${branch.color}, #0f172a)`,
+    icon: 'i-lucide-git-fork',
+  };
+};
 
 // ── datas em pt-BR ──
 const pad = n => String(n).padStart(2, '0');
@@ -957,19 +1122,23 @@ onBeforeUnmount(() => {
                   pacientes cujo card CHEGOU nessa coluna do CRM no período (a
                   regra oficial de agendamento)
                   <template v-if="stageEntries.passages > stageEntries.total">
-                    · {{ stageEntries.passages }} passagens</template
-                  >
+                    · {{ stageEntries.passages }} passagens
+                  </template>
                   · clique para ver os nomes
                 </p>
               </button>
               <div class="flex-1 min-w-[16rem]">
                 <p class="text-[11px] font-bold text-n-slate-11 mb-1.5">
-                  de quais caixas vieram (primeira conversa)
+                  de quais caixas vieram (primeira conversa) ·
+                  {{ granText(entriesArea.granularity) }}
                 </p>
-                <ShareBar
-                  v-if="entriesOriginItems.length"
-                  :items="entriesOriginItems"
-                  :max="8"
+                <AreaChart
+                  v-if="entriesArea.series.length"
+                  :series="entriesArea.series"
+                  :labels="entriesArea.labels"
+                  :height="150"
+                  :legend="false"
+                  unit="entraram na coluna"
                 />
                 <p v-else class="text-[11px] text-n-slate-9">
                   ninguém no período
@@ -1045,10 +1214,27 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <!-- item 285: a PONTE entre os dois números (coluna do CRM × Agenda) -->
+          <div v-if="bridge" class="cv-ag-block p-5 sm:p-6 mb-6">
+            <p class="cv-ag-block-title flex items-center gap-2">
+              <span class="i-lucide-git-fork text-base" />
+              Por que
+              {{ plural(bridge.column_total, 'entrou', 'entraram') }}
+              na coluna e
+              {{ plural(bridge.agenda_total, 'foi marcada', 'foram marcadas') }}
+            </p>
+            <p class="cv-ag-block-sub mb-5">
+              são duas réguas: a <b>coluna do CRM</b> conta o paciente cujo card
+              chegou em {{ bridge.stage?.name }}; a <b>Agenda</b> conta cada
+              consulta nova criada. {{ bridgeSentence }} Clique em um ramo para
+              ver os nomes.
+            </p>
+            <BridgeFlow :sides="bridgeSides" @pick="openBridge" />
+          </div>
+
           <p class="text-[11px] text-n-slate-10 mb-3">
             abaixo, o que a <b>Agenda</b> registrou (consultas marcadas,
-            remarcadas, confirmadas…) — outra régua, por isso os números não
-            precisam bater com o de cima
+            remarcadas, confirmadas…)
           </p>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div
@@ -1171,9 +1357,17 @@ onBeforeUnmount(() => {
               das <b>{{ Number(counts.agendada || 0) }} marcadas</b>, quem é
               cada paciente: lead novo (até 30 dias), lead antigo (chegou há
               mais tempo e nunca tinha consultado — ainda é aquisição), retorno
-              (já consultou), paciente de cirurgia ou sem cadastro · clique para
-              ver os nomes
+              (já consultou), paciente de cirurgia ou sem cadastro ·
+              {{ granText(kindArea.granularity) }} · clique para ver os nomes
             </p>
+            <AreaChart
+              v-if="kindArea.series.length"
+              class="mb-4"
+              :series="kindArea.series"
+              :labels="kindArea.labels"
+              :legend="false"
+              unit="marcadas"
+            />
             <div class="flex items-center gap-2 flex-wrap">
               <button
                 v-for="pk in PATIENT_KINDS"
@@ -1192,7 +1386,8 @@ onBeforeUnmount(() => {
                 <span class="opacity-80 tabular-nums">{{
                   kindCounts[pk.key] || 0
                 }}</span>
-                <span v-if="counts.agendada" class="opacity-60 tabular-nums"
+                <span
+v-if="counts.agendada" class="opacity-60 tabular-nums"
                   >·
                   {{
                     Math.round(
@@ -1214,7 +1409,13 @@ onBeforeUnmount(() => {
               Google, Instagram…), não a da conversa mais recente — por isso a
               caixa de confirmação não rouba o crédito
             </p>
-            <ShareBar v-if="originTotal" :items="originItems" :max="8" />
+            <AreaChart
+              v-if="originTotal && originArea.series.length"
+              :series="originArea.series"
+              :labels="originArea.labels"
+              :legend="false"
+              unit="marcadas"
+            />
             <p v-else class="text-[11px] text-n-slate-9">
               nenhuma marcação no período
             </p>
@@ -1252,7 +1453,15 @@ onBeforeUnmount(() => {
                 dias entre o paciente chegar (cadastro) e a {{ noun }} ser
                 marcada · clique para filtrar a lista
               </p>
-              <ShareBar v-if="cohortTotal" :items="cohortItems" :max="5" />
+              <AreaChart
+                v-if="cohortTotal && cohortArea.series.length"
+                :series="cohortArea.series"
+                :labels="cohortArea.labels"
+                :height="170"
+                :legend="false"
+                :active="cohort"
+                unit="marcadas"
+              />
               <p v-else class="text-[11px] text-n-slate-9">
                 nenhuma marcação no período
               </p>
@@ -1703,7 +1912,12 @@ onBeforeUnmount(() => {
               <div v-if="stackItems.length > 1" class="flex items-start gap-3">
                 <span class="cv-ag-row-label">De onde</span>
                 <div class="min-w-0 flex-1 pt-1.5">
-                  <ShareBar :items="stackItems" :max="8" />
+                  <AreaChart
+                    :series="stackArea.series"
+                    :labels="stackArea.labels"
+                    :height="130"
+                    unit="registros"
+                  />
                   <p class="text-[10px] text-n-slate-9 mt-1">
                     {{ stackTotal }} registros no período, por caixa de entrada
                   </p>
@@ -1782,7 +1996,8 @@ onBeforeUnmount(() => {
                   </div>
                   <!-- situação -->
                   <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="cv-chip" :class="kindMeta(row).tone"
+                    <span
+class="cv-chip" :class="kindMeta(row).tone"
                       ><span :class="kindMeta(row).icon" class="text-xs" />
                       {{ kindLabel(row) }}</span
                     >

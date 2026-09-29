@@ -257,6 +257,54 @@ export const TYPES = [
     resource: 'surgery', hint: 'sala cirúrgica das clínicas parceiras' }),
 ];
 export const TYPE_BY_KEY = Object.fromEntries(TYPES.map(t => [t.key, t]));
+
+// 🎨 item 290 (29/09, pedido dele: "parecido com o Google Agenda, mudar as
+// cores"): as 12 cores que a equipe pode dar a UM agendamento para se
+// organizar. Vale para todos; sem cor = cor padrão do tipo. A lista é a
+// MESMA do servidor (Task::COLORS) — cor fora dela o servidor recusa.
+export const TASK_COLORS = [
+  { value: '#DC2626', label: 'Tomate' },
+  { value: '#DB2777', label: 'Pitaya' },
+  { value: '#EA580C', label: 'Tangerina' },
+  { value: '#EAB308', label: 'Banana' },
+  { value: '#84CC16', label: 'Limão' },
+  { value: '#16A34A', label: 'Kiwi' },
+  { value: '#0D9488', label: 'Hortelã' },
+  { value: '#0891B2', label: 'Piscina' },
+  { value: '#2563EB', label: 'Mirtilo' },
+  { value: '#7C3AED', label: 'Uva' },
+  { value: '#86198F', label: 'Ameixa' },
+  { value: '#475569', label: 'Grafite' },
+];
+const TASK_COLOR_SET = new Set(TASK_COLORS.map(c => c.value));
+// cor escolhida pela equipe (só se for da lista) ou null
+// sinal de presença no balão da grade: ✓ verde (foi) · ✕ vermelho (faltou)
+// · ! âmbar (cirurgia: veio e não fez). Só LÊ o dado oficial `attendance`.
+export const attendanceMarkOf = task => {
+  const surgery = task?.task_type === 'cirurgia';
+  if (task?.attendance === 'attended') {
+    return {
+      sign: '✓',
+      cls: 'cv-ag-ev-mark-ok',
+      title: surgery ? 'Realizada' : 'Compareceu',
+    };
+  }
+  if (task?.attendance === 'missed') {
+    return {
+      sign: '✕',
+      cls: 'cv-ag-ev-mark-no',
+      title: surgery ? 'Não veio' : 'Faltou',
+    };
+  }
+  if (task?.attendance === 'attended_not_done') {
+    return { sign: '!', cls: 'cv-ag-ev-mark-warn', title: 'Veio e não fez' };
+  }
+  return null;
+};
+export const taskColorOf = task => {
+  const hex = String(task?.color || '').toUpperCase();
+  return TASK_COLOR_SET.has(hex) ? hex : null;
+};
 // a "Agenda geral" (todas as camadas ligadas) veste um tom neutro
 export const GENERAL_TYPE = mkType({ key: 'geral', label: 'Agenda geral', noun: 'agendamento', plural: 'agendamentos', article: 'o',
   icon: 'i-lucide-layers', color: '#475569', deep: '#1E293B', light: '#94A3B8', pale: '#CBD5E1', dark: '#0F172A', kind: null,
