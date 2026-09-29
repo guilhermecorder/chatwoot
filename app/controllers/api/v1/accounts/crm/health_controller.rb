@@ -25,6 +25,8 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       cardios: records('cardio', WORKOUTS_LIMIT),
       fight_plans: records('fight_plan', 30),
       athletes: records('athlete', 100),
+      # rodada 41: notas datadas ("coisas importantes que fiz")
+      notes: records('note', 300),
       routine: scope.of_kind('routine').order(:id).first&.data || {}
     }
   end
@@ -43,7 +45,7 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       elsif %w[profile routine].include?(kind)
         # ficha da pessoa e rotina: 1 registro por usuário, independente da data
         scope.of_kind(kind).order(:id).first || scope.new(kind: kind, record_date: date)
-      elsif %w[program fight_plan cardio athlete].include?(kind)
+      elsif %w[program fight_plan cardio athlete note].include?(kind)
         # programa pessoal / plano de luta / cardio: cada criação é um registro novo
         scope.new(kind: kind, record_date: date)
       else
@@ -254,8 +256,21 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
     when 'program' then sanitize_custom_program(data)
     when 'fight_plan' then sanitize_fight_plan(data)
     when 'athlete' then sanitize_athlete(data)
+    when 'note' then sanitize_note(data)
     else data
     end
+  end
+
+  # Nota datada (rodada 41): texto curto + etiqueta + treino (opcional).
+  NOTE_TAGS = %w[treino dieta sono corpo rotina outro].freeze
+
+  def sanitize_note(data)
+    tag = data['tag'].to_s
+    {
+      'text' => data['text'].to_s.strip.first(2000),
+      'tag' => NOTE_TAGS.include?(tag) ? tag : 'outro',
+      'session_key' => data['session_key'].to_s.first(4).presence
+    }.compact
   end
 
   # Plano de luta (rodada 26): rounds × tempo, intenção e sequências por

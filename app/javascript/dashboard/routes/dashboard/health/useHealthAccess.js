@@ -14,6 +14,7 @@ export const HEALTH_MODULES = [
   { key: 'dieta', label: 'Dieta', icon: 'i-lucide-utensils', route: 'hub_health_dieta' },
   { key: 'dash', label: 'Análises', icon: 'i-lucide-area-chart', route: 'hub_health_dash' },
   { key: 'rotina', label: 'Rotina', icon: 'i-lucide-calendar-range', route: 'hub_health_rotina' },
+  { key: 'educacao', label: 'Educação', icon: 'i-lucide-graduation-cap', route: 'hub_health_educacao' },
 ];
 export const ROUTE_MODULE = Object.fromEntries(HEALTH_MODULES.map(m => [m.route, m.key]));
 

@@ -31,7 +31,7 @@ module Crm::AccessControl
 
   # HUB (rodada 34): MÓDULOS do mundo Saúde que o admin libera por pessoa
   # (lista vazia/ausente = todos). Só faz sentido com a área 'health'.
-  HEALTH_MODULES = %w[treino cardio boxe corpo dieta dash rotina].freeze
+  HEALTH_MODULES = %w[treino cardio boxe corpo dieta dash rotina educacao].freeze
 
   private
 

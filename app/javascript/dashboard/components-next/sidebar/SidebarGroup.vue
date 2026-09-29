@@ -15,6 +15,7 @@ const props = defineProps({
   label: { type: String, required: true },
   icon: { type: [String, Object, Function], default: null },
   iconColor: { type: String, default: null },
+  tile: { type: String, default: null },
   to: { type: Object, default: null },
   activeOn: { type: Array, default: () => [] },
   children: { type: Array, default: undefined },
@@ -301,6 +302,7 @@ watch(
       <SidebarGroupHeader
         :icon
         :icon-color="iconColor"
+        :tile="tile"
         :name
         :label
         :to

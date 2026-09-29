@@ -32,7 +32,8 @@ class HubHealthRecord < ApplicationRecord
   # cardio = caminhada/corrida/bike… · fight_plan = plano de luta (rodada 26)
   # routine = construtor de rotina (1 por usuário, como o profile)
   # athlete = mapeador de atletas (alunos, adversários, referências) — rodada 29
-  KINDS = %w[workout boxing diet body profile program cardio fight_plan routine athlete].freeze
+  # note = nota livre datada ("coisas importantes que fiz") — rodada 41
+  KINDS = %w[workout boxing diet body profile program cardio fight_plan routine athlete note].freeze
 
   validates :kind, inclusion: { in: KINDS }
   validates :record_date, presence: true

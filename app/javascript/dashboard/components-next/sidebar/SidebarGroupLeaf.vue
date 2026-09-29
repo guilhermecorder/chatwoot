@@ -14,6 +14,8 @@ const props = defineProps({
   badgeCount: { type: [Number, String], default: 0 },
   hideTreeLine: { type: Boolean, default: false },
   thinTreeLine: { type: Boolean, default: false },
+  // HUB (rodada 39): cor do quadradinho do ícone
+  tile: { type: String, default: null },
 });
 
 const { resolvePermissions, resolveFeatureFlag } = useSidebarContext();
@@ -44,9 +46,11 @@ const TREE_CONNECTOR =
       :is="to ? 'router-link' : 'div'"
       :to="to"
       :title="label"
+      :style="tile ? { '--tile': tile } : {}"
       class="flex h-8 items-center gap-2 px-2 py-1 rounded-lg ltr:hover:bg-gradient-to-r rtl:hover:bg-gradient-to-l from-transparent via-n-slate-3/70 to-n-slate-3/70 group min-w-0"
       :class="{
         'text-n-slate-12 bg-n-alpha-2 active': active,
+        'hub-has-tile': !!tile,
       }"
     >
       <component
@@ -55,7 +59,7 @@ const TREE_CONNECTOR =
         v-bind="{ label, icon, active, badgeCount }"
       />
       <template v-else>
-        <span v-if="icon" class="size-4 grid place-content-center rounded-full">
+        <span v-if="icon" class="size-4 grid place-content-center rounded-full" :class="{ 'hub-tile': !!tile }">
           <Icon :icon="icon" class="size-4 inline-block" />
         </span>
         <div class="flex-1 truncate min-w-0 text-sm">{{ label }}</div>

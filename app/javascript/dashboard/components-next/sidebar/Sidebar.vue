@@ -560,33 +560,54 @@ const healthAllowed = key =>
 // rodada 34: menu da Saúde em GRUPOS (pedido dele: "painel lateral
 // organizado apenas", sem barra inferior) — Treinar (Treino · Cardio ·
 // Boxe) e Corpo & Dieta abrem; Meu Painel, Análises e Rotina são diretos
+// rodada 39: cada item com seu quadradinho colorido (paleta dos Ajustes do
+// iPhone) — pedido dele 29/09: "barra lateral igual do iphone, parecido
+// com a da CEVICO; cores legais e alegres"
+const HUB_TILES = {
+  hub: '#5856D6',
+  painel: '#34C759',
+  treinar: '#FF9500',
+  treino: '#FF9500',
+  cardio: '#FF2D55',
+  boxe: '#FF3B30',
+  corpoDieta: '#AF52DE',
+  corpo: '#AF52DE',
+  dieta: '#00C7BE',
+  dash: '#007AFF',
+  rotina: '#32ADE6',
+  educacao: '#FFB300',
+  acessos: '#8E8E93',
+};
 const hubMenuSaude = () => {
-  const leaf = (name, label, icon, route) => ({ name, label, icon, to: accountScopedRoute(route) });
+  const leaf = (name, label, icon, route, tile) => ({ name, label, icon, tile, to: accountScopedRoute(route) });
   const groups = [
-    hubItem(),
-    leaf('HealthPainel', 'Meu Painel', 'i-lucide-gauge', 'hub_health_painel'),
+    { ...hubItem(), tile: HUB_TILES.hub },
+    leaf('HealthPainel', 'Meu Painel', 'i-lucide-gauge', 'hub_health_painel', HUB_TILES.painel),
     {
       name: 'HealthTreinar',
       label: 'Treinar',
       icon: 'i-lucide-dumbbell',
+      tile: HUB_TILES.treinar,
       children: [
-        ...(healthAllowed('treino') ? [{ ...leaf('HealthTreino', 'Treino', 'i-lucide-dumbbell', 'hub_health'), exact: true }] : []),
-        ...(healthAllowed('cardio') ? [leaf('HealthCardio', 'Cardio', 'i-lucide-heart-pulse', 'hub_health_cardio')] : []),
-        ...(boxingOn.value && healthAllowed('boxe') ? [leaf('HealthBoxe', 'Boxe', 'i-lucide-swords', 'hub_health_boxe')] : []),
+        ...(healthAllowed('treino') ? [{ ...leaf('HealthTreino', 'Treino', 'i-lucide-dumbbell', 'hub_health', HUB_TILES.treino), exact: true }] : []),
+        ...(healthAllowed('cardio') ? [leaf('HealthCardio', 'Cardio', 'i-lucide-heart-pulse', 'hub_health_cardio', HUB_TILES.cardio)] : []),
+        ...(boxingOn.value && healthAllowed('boxe') ? [leaf('HealthBoxe', 'Boxe', 'i-lucide-swords', 'hub_health_boxe', HUB_TILES.boxe)] : []),
       ],
     },
     {
       name: 'HealthCorpoDieta',
       label: 'Corpo & Dieta',
       icon: 'i-lucide-ruler',
+      tile: HUB_TILES.corpoDieta,
       children: [
-        ...(healthAllowed('corpo') ? [leaf('HealthCorpo', 'Corpo', 'i-lucide-ruler', 'hub_health_corpo')] : []),
-        ...(healthAllowed('dieta') ? [leaf('HealthDieta', 'Dieta', 'i-lucide-utensils', 'hub_health_dieta')] : []),
+        ...(healthAllowed('corpo') ? [leaf('HealthCorpo', 'Corpo', 'i-lucide-ruler', 'hub_health_corpo', HUB_TILES.corpo)] : []),
+        ...(healthAllowed('dieta') ? [leaf('HealthDieta', 'Dieta', 'i-lucide-utensils', 'hub_health_dieta', HUB_TILES.dieta)] : []),
       ],
     },
-    ...(healthAllowed('dash') ? [leaf('HealthDash', 'Análises', 'i-lucide-area-chart', 'hub_health_dash')] : []),
-    ...(healthAllowed('rotina') ? [leaf('HealthRotina', 'Rotina', 'i-lucide-calendar-range', 'hub_health_rotina')] : []),
-    ...(isAdmin.value ? [leaf('HealthAcessos', 'Acessos & recursos', 'i-lucide-shield-check', 'hub_settings_index')] : []),
+    ...(healthAllowed('dash') ? [leaf('HealthDash', 'Análises', 'i-lucide-area-chart', 'hub_health_dash', HUB_TILES.dash)] : []),
+    ...(healthAllowed('rotina') ? [leaf('HealthRotina', 'Rotina', 'i-lucide-calendar-range', 'hub_health_rotina', HUB_TILES.rotina)] : []),
+    ...(healthAllowed('educacao') ? [leaf('HealthEducacao', 'Educação', 'i-lucide-graduation-cap', 'hub_health_educacao', HUB_TILES.educacao)] : []),
+    ...(isAdmin.value ? [leaf('HealthAcessos', 'Acessos & recursos', 'i-lucide-shield-check', 'hub_settings_index', HUB_TILES.acessos)] : []),
   ];
   return groups.filter(g => !g.children || g.children.length);
 };

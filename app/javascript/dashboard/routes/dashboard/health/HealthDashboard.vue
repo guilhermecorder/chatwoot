@@ -11,6 +11,7 @@ import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { useHealthAccess } from './useHealthAccess';
 import RadarChart from './HubRadar.vue';
+import LoadProgress from './LoadProgress.vue';
 import {
   Chart as ChartJS,
   Tooltip,
@@ -47,8 +48,17 @@ const workouts = ref([]);
 const boxings = ref([]);
 const diets = ref([]);
 const bodies = ref([]);
-const dashTab = ref('visao');
+const notes = ref([]); // rodada 41: notas datadas
+// rodada 42: Progressão de carga é a 1ª aba e a que abre (pedido dele)
+const dashTab = ref('progressao');
 const { allowed: moduleAllowed } = useHealthAccess();
+const dashTabs = computed(() => [
+  ...(moduleAllowed('treino') ? [{ key: 'progressao', label: 'Progressão de carga', ico: 'i-lucide-trending-up' }] : []),
+  { key: 'visao', label: 'Visão geral', ico: 'i-lucide-layout-dashboard' },
+  ...(moduleAllowed('treino') ? [{ key: 'treino', label: 'Treino', ico: 'i-lucide-dumbbell' }] : []),
+  ...(config.value?.features?.boxing === true && moduleAllowed('boxe') ? [{ key: 'boxe', label: 'Boxe', ico: 'i-lucide-swords' }] : []),
+  ...(moduleAllowed('dieta') ? [{ key: 'dieta', label: 'Dieta', ico: 'i-lucide-utensils' }] : []),
+]);
 
 const pad2 = n => String(n).padStart(2, '0');
 const toISO = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -774,7 +784,7 @@ const insights = computed(() => {
     list.push({
       icon: '🏅',
       tone: ROYAL,
-      text: `Recorde pessoal esta semana: ${recentPRs.value.slice(0, 2).map(r => r.name).join(' e ')}${recentPRs.value.length > 2 ? ` (+${recentPRs.value.length - 2})` : ''}.`,
+      text: `Recorde pessoal esta semana: ${recentPRs.value.map(r => r.name).join(' · ')}.`,
     });
   }
   // estagnação: 3 sessões seguidas sem superar o melhor e-1RM anterior
@@ -930,6 +940,8 @@ onMounted(async () => {
     boxings.value = payload.boxings || [];
     diets.value = payload.diets || [];
     bodies.value = payload.bodies || [];
+    notes.value = payload.notes || [];
+    if (!dashTabs.value.some(t => t.key === dashTab.value)) dashTab.value = 'visao';
     if (exOptions.value.includes('Supino inclinado com barra')) {
       exSelected.value = 'Supino inclinado com barra';
     }
@@ -942,7 +954,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="hub-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
+  <div class="hub-page hub-accent flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
     <div class="max-w-5xl mx-auto w-full p-4 pb-20 sm:p-8 md:pb-8">
       <!-- Header -->
       <div class="flex items-center gap-3 flex-wrap mb-5">
@@ -956,18 +968,14 @@ onMounted(async () => {
           <h1 class="hub-h1">Análises</h1>
           <p class="text-xs text-n-slate-10">seus resultados — semana a semana e acumulado</p>
         </div>
-        <div class="flex gap-2">
-          <button
-            v-for="t in [{ key: 'visao', label: 'Visão geral' }, ...(moduleAllowed('treino') ? [{ key: 'treino', label: 'Treino' }] : []), ...(config?.features?.boxing === true && moduleAllowed('boxe') ? [{ key: 'boxe', label: 'Boxe' }] : []), ...(moduleAllowed('dieta') ? [{ key: 'dieta', label: 'Dieta' }] : [])]"
-            :key="t.key"
-            class="h-9 px-4 rounded-full text-xs font-bold border"
-            :class="dashTab === t.key ? 'text-white border-transparent' : 'text-n-slate-11 border-n-weak hover:bg-n-alpha-1'"
-            :style="dashTab === t.key ? { background: GRAD_ROYAL } : {}"
-            @click="dashTab = t.key"
-          >
-            {{ t.label }}
-          </button>
-        </div>
+      </div>
+
+      <!-- rodada 42: abas do topo em DESTAQUE (pedido dele: "não são muito
+           evidentes ainda") — barra própria, grandes, com ícone, ativa em laranja -->
+      <div class="hub-tabs mb-6">
+        <button v-for="t in dashTabs" :key="t.key" :class="{ 'is-on': dashTab === t.key }" @click="dashTab = t.key">
+          <span :class="t.ico" />{{ t.label }}
+        </button>
       </div>
 
       <div v-if="isLoading" class="flex justify-center py-16"><Spinner /></div>
@@ -1112,7 +1120,7 @@ onMounted(async () => {
               <div class="hub-kpi hub-crystal">
                 <p class="hub-kpi-l"><span class="i-lucide-trophy" />Recordes · 7d</p>
                 <p class="hub-kpi-v" :class="recentPRs.length ? 'is-orange' : ''">{{ recentPRs.length || '—' }}</p>
-                <p class="hub-kpi-s">{{ recentPRs.slice(0, 2).map(r => r.name).join(' · ') || 'supere um e-1RM pra marcar' }}</p>
+                <p class="hub-kpi-s">{{ recentPRs.map(r => r.name).join(' · ') || 'supere um e-1RM pra marcar' }}</p>
               </div>
               <div class="hub-kpi hub-crystal">
                 <p class="hub-kpi-l"><span class="i-lucide-calendar-range" />Programa</p>
@@ -1134,6 +1142,9 @@ onMounted(async () => {
         </template>
 
         <!-- ═══ TREINO ═══ -->
+        <!-- rodada 41: progressão de carga por treino em vários gráficos + notas -->
+        <LoadProgress v-if="dashTab === 'progressao'" :workouts="workouts" :program="mainProgram" :initial-notes="notes" />
+
         <template v-if="dashTab === 'treino'">
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <DashKpi label="Treinos feitos" :value="progRecords.length" sub="registros com séries" :from="ROYAL_NOITE" :to="ROYAL" />
@@ -1204,7 +1215,7 @@ onMounted(async () => {
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <div v-for="name in exercisesWithData" :key="name" class="hub-crystal rounded-xl p-4">
                 <div class="flex items-baseline justify-between gap-2 mb-1">
-                  <p class="text-[11px] font-bold text-n-slate-12 truncate">{{ name }}</p>
+                  <p class="text-[11px] font-bold text-n-slate-12 leading-snug">{{ name }}</p>
                   <p class="text-[11px] font-bold shrink-0" :style="{ color: ROYAL }">{{ fmtNum(lastTop(name)) }} kg</p>
                 </div>
                 <div style="height: 70px">

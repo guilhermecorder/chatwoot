@@ -8,6 +8,8 @@ const props = defineProps({
   label: { type: String, default: '' },
   icon: { type: [String, Object], default: '' },
   iconColor: { type: String, default: null },
+  // HUB (rodada 39): cor do quadradinho do ícone, estilo Ajustes do iPhone
+  tile: { type: String, default: null },
   expandable: { type: Boolean, default: false },
   isExpanded: { type: Boolean, default: false },
   isActive: { type: Boolean, default: false },
@@ -35,14 +37,17 @@ const count = computed(() =>
     draggable="false"
     :to="to"
     :title="label"
+    :style="tile ? { '--tile': tile } : {}"
     :class="{
+      'hub-has-tile': !!tile,
+      'hub-is-active': !!tile && isActive && !hasActiveChild,
       'text-n-slate-12 bg-n-alpha-2 font-medium': isActive && !hasActiveChild,
       'text-n-slate-12 font-medium': hasActiveChild,
       'text-n-slate-11 hover:bg-n-alpha-2': !isActive && !hasActiveChild,
     }"
     @click.stop="emit('toggle')"
   >
-    <div v-if="icon" class="relative flex items-center gap-2">
+    <div v-if="icon" class="relative flex items-center gap-2" :class="{ 'hub-tile': !!tile }">
       <Icon
         v-if="icon"
         :icon="icon"

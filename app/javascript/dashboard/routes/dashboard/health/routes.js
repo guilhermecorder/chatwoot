@@ -3,6 +3,7 @@ import HealthPage from './HealthPage.vue';
 import HealthDashboard from './HealthDashboard.vue';
 import HealthHome from './HealthHome.vue';
 import RoutinePage from './RoutinePage.vue';
+import EducacaoPage from './EducacaoPage.vue';
 
 export default {
   routes: [
@@ -52,6 +53,14 @@ export default {
       name: 'hub_health_rotina',
       meta: { permissions: ['administrator', 'agent'] },
       component: RoutinePage,
+    },
+    {
+      // rodada 36: EDUCAÇÃO — princípios, fundamentos e dúvidas dos 7
+      // pilares do programa (conteúdo estático em educacao.js)
+      path: frontendURL('accounts/:accountId/health/educacao'),
+      name: 'hub_health_educacao',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: EducacaoPage,
     },
     {
       // Dashboard da Saúde: resultados em linha/área (treino + dieta)

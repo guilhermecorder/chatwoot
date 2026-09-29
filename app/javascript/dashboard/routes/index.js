@@ -62,6 +62,7 @@ const HEALTH_ROUTE_MODULE = {
   hub_health_dieta: 'dieta',
   hub_health_dash: 'dash',
   hub_health_rotina: 'rotina',
+  hub_health_educacao: 'educacao',
 };
 const healthRouteAllowed = async (to, isAdminRole) => {
   const key = HEALTH_ROUTE_MODULE[to.name];

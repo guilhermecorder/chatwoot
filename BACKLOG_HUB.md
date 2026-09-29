@@ -12,6 +12,188 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 - Ele vai mandar uma PLANILHA com o treino e a alimentação dele →
   importar como fichas de treino + plano alimentar (seed do config).
 
+## RODADA 42 — 29/09 🔧 ANÁLISES: LARANJA + SEM RETICÊNCIAS + ABAS EM DESTAQUE (working tree, NÃO subida)
+Ele (print da Área/Polar): "ficou bem legal o ambiente de análises; vamos
+trazer mais contraste adicionando o laranja; importante os indicadores
+MOSTRAREM TODA A INFORMAÇÃO — tem vários lugares com '...' que omite".
+No meio: "pode deixar o gráfico de progressão de carga como o PRIMEIRO do
+ambiente; dar mais destaque pros botões do topo, não são muito evidentes".
+- **Progressão de carga = 1ª aba e a que abre** (`dashTab = 'progressao'`;
+  sem o módulo treino cai na Visão geral). Abas viraram `dashTabs`
+  (computed, com ícone).
+- **Abas do topo em destaque**: peça nova `.hub-tabs` no kit — barra
+  própria abaixo do título, botões de 46 px, 14 px/800, ícone laranja,
+  trilho com aro laranja, ATIVA em laranja sólido com sombra; celular =
+  2 por linha.
+- **Laranja como destaque** nos dois temas: classe `.hub-accent` na raiz
+  das Análises + regras `.hub-page.hub-accent …` no fim do kit
+  (segmentados ativos em laranja sólido, quadrados de ícone, ícones de
+  título `.hub-h-ico`, subtítulos, régua dos rótulos, aro e valor dos
+  tiles). Reutilizável: basta pôr `hub-accent` na raiz de outra tela.
+- **Sem reticências**: `.hub-kpi-s` do kit deixou de cortar (quebra
+  linha) — vale pra TODAS as telas da Saúde; LoadProgress usa o nome
+  inteiro do exercício (legendas, pizza, polar, radar, tiles) e os eixos
+  quebram em linhas (`wrapLabel`), ranking cresce com o nº de exercícios;
+  Visão geral: recordes da semana listam todos (saiu o "+N"), nome do
+  exercício nos mini-gráficos sem `truncate`.
+- TESTADO: notebook claro e escuro (Progressão e Visão geral).
+- Resta cortar só o rótulo "Acessos & recursos" do menu quando a barra
+  lateral está muito estreita (painel de teste); na largura normal cabe.
+
+## RODADA 41 — 29/09 🔧 ANÁLISES: PROGRESSÃO DE CARGA EM 8 GRÁFICOS + NOTAS (working tree, NÃO subida)
+Ele: "os gráficos mais interessantes são os de progressão de carga por
+treino; adicione esse tipo de informação em vários tipos de gráficos pra
+gente entender qual o melhor pra analisar (radar, pizza, barras, linhas…);
+também um espacinho de notas pra anotar coisas importantes que fiz".
+- **Aba nova "Progressão de carga"** nas Análises (2ª aba; módulo treino)
+  = componente novo `LoadProgress.vue` (props workouts/program/
+  initial-notes) — o HealthDashboard só ganhou a aba e o repasse.
+- **Seletores**: Ciclo (do programa principal) · Treino A/B/C (com
+  contador de sessões) · Métrica (Carga máxima | Força estimada 1RM |
+  Volume). Abre no ciclo/treino do último registro. 4 tiles: sessões,
+  ganho do treino, mais evoluiu, menos evoluiu.
+- **8 visualizações do MESMO dado**, cada uma com "Responde: …" e ESTRELA
+  de favorito (localStorage `hub_progress_favs`; a lista de favoritos
+  aparece no topo): 1 Linhas (sessão a sessão; botão "% desde o início |
+  kg" — em kg os exercícios leves achatam) · 2 Barras início × agora ·
+  3 Ranking de ganho % (barras horizontais) · 4 Radar (HubRadar, eixo =
+  0 ao recorde) · 5 Pizza/rosca "de onde veio o ganho" (total no centro)
+  · 6 Área empilhada de volume · 7 Polar (pétalas de ganho %) · 8 Tabela
+  (início, agora, recorde, ganho, %, sessões). Chart.js ganhou
+  BarElement/ArcElement/RadialLinearScale; cor fixa por exercício.
+- **Notas**: kind novo `note` (HubHealthRecord::KINDS, sem migration),
+  `sanitize_note` (texto ≤2000, etiqueta treino/dieta/sono/corpo/rotina/
+  outro, session_key), `notes` no show (300). Na tela: data + chips de
+  etiqueta + texto (⌘+Enter salva), lista por mês com quadradinho
+  colorido e lixeira. As notas caem no ponto do gráfico de linhas (dica
+  do ponto mostra "nota: …" e bolinha laranja embaixo da sessão): nota
+  entre a sessão anterior e esta pertence a esta.
+- TESTADO local (dados simulados `_sim`): notebook escuro, celular claro
+  (seletores em linha cheia), nota criada/listada/marcada/apagada.
+- PRÓXIMO: ele escolhe os favoritos → manter só os melhores e levar pro
+  Meu Painel. Minha leitura: linhas em % e ranking são os mais úteis;
+  radar é o mais fraco pra ganho pequeno (início e agora quase se
+  sobrepõem).
+
+## RODADA 40 — 29/09 🔧 EDUCAÇÃO: LARANJA TAMBÉM NO MODO CLARO (working tree, NÃO subida)
+Ele: "no tema claro também precisa ter contraste com laranja".
+- Bloco `.hub-edu …` (sem .dark) no EducacaoPage.vue, antes do bloco da
+  rodada 38: mesma receita do escuro com os tons escuros do laranja pra
+  texto (#b85c00 / #8a4500): aba ativa em laranja sólido, trilho das
+  pílulas com fundo laranja 7%, pílula secundária ativa com aro laranja,
+  busca com aro laranja, quadrados de ícone, subtítulos, valores dos
+  tiles, fio do texto de abertura, número/músculos do exercício, chip do
+  método. Azul segue nas bordas dos blocos e nos rótulos Progressão/
+  Objetivo. TESTADO no claro (Pilares e Treinos).
+
+## RODADA 39 — 29/09 🔧 SIDEBAR "AJUSTES DO IPHONE" NO MUNDO SAÚDE (working tree, NÃO subida)
+Ele (prints da barra do HUB e da CEVICO): "agora a barra lateral vai ser
+igual do iphone, parecido com a da CEVICO; cores legais e alegres".
+- Cada item do menu da Saúde ganhou `tile` (cor do quadradinho) em
+  `HUB_TILES` no Sidebar.vue: HUB índigo #5856D6 · Meu Painel verde
+  #34C759 · Treinar/Treino laranja #FF9500 · Cardio rosa #FF2D55 · Boxe
+  vermelho #FF3B30 · Corpo & Dieta/Corpo roxo #AF52DE · Dieta menta
+  #00C7BE · Análises azul #007AFF · Rotina ciano #32ADE6 · Educação
+  âmbar #FFB300 · Acessos cinza #8E8E93.
+- Prop `tile` em SidebarGroup → SidebarGroupHeader e SidebarGroupLeaf
+  (classe `.hub-tile` no invólucro do ícone, `.hub-has-tile` +
+  `--tile` no item). Sem `tile` nada muda → menu de Negócios/CEVICO
+  intacto.
+- Estilos (fim do _hub-glass.scss, bloco RODADA 39): quadradinho 29 px
+  (filhos 26 px), raio 8, cor sólida + brilho no topo, ícone BRANCO;
+  fundo da barra cinza agrupado do iOS (#f2f2f7 / preto no escuro),
+  cartões brancos (#1c1c1e no escuro); itens 44 px, filhos 40 px com fio
+  separador; hover/ativo TINGIDOS pela cor do próprio item (color-mix)
+  com aro fino — saiu a pílula royal; chevron cinza claro.
+- TESTADO: notebook escuro e claro, gaveta do celular, grupo aberto com
+  filho ativo (Cardio).
+
+## RODADA 38 — 29/09 🔧 EDUCAÇÃO: MAIS LARANJA NO MODO ESCURO (working tree, NÃO subida)
+Ele (print do modo escuro): "legal. no modo escuro, quero mais contraste
+com a cor laranja".
+- Raiz da tela ganhou `.hub-edu`; bloco de estilos `.dark .hub-edu …` no
+  fim do EducacaoPage.vue (só modo escuro, só esta tela): aba ativa das 4
+  áreas em LARANJA SÓLIDO (degradê #ff6b1a→#ff8a00, texto #1a0e00), pílula
+  ativa secundária com fundo laranja 18% + aro laranja + texto #ffc17a,
+  busca com aro laranja (foco com halo), quadrados de ícone e ícones dos
+  rótulos em laranja, régua dos rótulos laranja, subtítulos de seção
+  #ffc17a, tiles com aro e VALOR em laranja (#ffb25e), fio do texto de
+  abertura laranja, número/músculos do exercício e termos do glossário em
+  laranja, chip do método em laranja sólido. Azul fica como estrutura
+  (bordas dos blocos/cards, fio do topo, números do passo a passo).
+- Treinos: spinner enquanto o config carrega (antes piscava "nenhum
+  programa configurado").
+- Modo claro não mudou. Se ele gostar, levar a mesma receita pro kit
+  global (_hub-glass.scss) nas outras telas da Saúde.
+
+## RODADA 37 — 29/09 🔧 EDUCAÇÃO: TREINOS + CIÊNCIA + FILOSOFIA (working tree, NÃO subida)
+Ele (29/09): "está ficando interessante… liberar em algum lugar, organizado,
+os outros treinos das outras semanas; quais serão, e o objetivo e intenção
+de cada exercício; o que acontece nas séries de força; como funciona a
+construção muscular e o emagrecimento; um ambiente com a filosofia do
+programa, bem claro".
+- Tela reorganizada em 4 ÁREAS (segmentado no topo, URL ?v=): **Pilares**
+  (rodada 36 intacta + glossário) · **Treinos** · **Ciência** · **Filosofia**.
+  Busca passou a varrer tudo (princípios, dúvidas, glossário, passos e
+  prática da ciência, ideias da filosofia e exercícios) e leva pro lugar.
+- **Treinos** (?c=c1|c2|c3|bonus): ciclos lidos da PRESCRIÇÃO REAL do
+  config (mainProgramOf → warrior24 + warrior_bonus), pílula por ciclo,
+  bloco de intenção do ciclo (CYCLE_INTENTS), um bloco por sessão
+  (Treino A/B/C · dia · intenção da sessão) e um card `.hub-edu-ex` por
+  exercício: número, nome, músculos, chips (método/faixas/descanso/
+  aquecimento), linhas Progressão · Objetivo e intenção · Execução.
+  EXERCISE_INTENTS = 22 entradas casadas por palavra-chave (sem acento)
+  → cobrem os 33 exercícios do config (checado por script); exercício sem
+  intenção mostra "intenção ainda não descrita". Mapa das 24 semanas do
+  pilar ganhou botão "ver os treinos" por ciclo.
+- **Ciência** (?t=): 5 temas — Série pesada · Músculo · Gordura · Forte e
+  seco (por que dá pra ficar forte secando) · Recuperação — cada um com
+  "em uma frase", passo a passo numerado (5 passos) e "na prática" (cards
+  laranja); botão Próximo.
+- **Filosofia**: bloco sólido com MANIFESTO (6 frases numeradas), 6 ideias
+  em cards (proporção, minimalismo, energia, jeito de viver, números
+  honestos, o guerreiro), "o que o programa não é" (5) e "regras de vida"
+  (6) lado a lado, atalhos.
+- TESTADO local: notebook claro/escuro, celular (treinos e filosofia),
+  Bônus, ciência/gordura, filosofia; 82 ícones lucide válidos.
+- Fonte: planilha + seed + fisiologia geral em palavras próprias; nota
+  "não substitui orientação médica" nas 3 áreas de texto.
+
+## RODADA 36 — 28/09 🔧 EDUCAÇÃO DO PROGRAMA (working tree, NÃO subida)
+Ele (28/09): "implantei [e046151], ficou legal. Construa um ambiente de
+educação com as principais informações e as principais dúvidas sobre
+todos os pilares do programa, bem organizado; fácil entender princípios
+e fundamentos, como funcionam as alimentações, o objetivo, a metodologia
+de 24 semanas". Perguntou do PDF: NÃO existe PDF — a fonte sempre foi a
+planilha Warrior_Shredding_24_Semanas_Ciclos_Separados.xlsx (~/Downloads)
++ seed hub_warrior.rb; os princípios do método foram escritos em palavras
+próprias (nada copiado). Se ele mandar o PDF, revisar o conteúdo.
+- **educacao.js** (conteúdo estático, editável): 7 PILARES — O programa ·
+  As 24 semanas · Treino · Alimentação · Cardio e movimento · Corpo e
+  medidas · Rotina e mente — cada um com resumo "em 1 minuto" (3
+  parágrafos), 3–4 números-chave (tiles), 5–8 princípios (cards com
+  ícone lucide), 5–10 dúvidas (acordeão) e atalhos "onde isso vive no
+  HUB"; + GLOSSÁRIO (10 termos: RPT, Rest-Pause, pirâmide, topo da faixa,
+  independent set, cutting, growth phase, refeed, Massive Meal, 1RM).
+- **EducacaoPage.vue** (/health/educacao, rota `hub_health_educacao`):
+  busca em pílula que varre princípios + dúvidas + glossário de todos os
+  pilares (sem acento, ≥2 letras; clicar num resultado abre o pilar e a
+  dúvida certa); controle segmentado dos pilares (URL guarda ?p=); MAPA
+  DAS 24 SEMANAS no pilar do método (3 cards de ciclo com 8 traços de
+  semana; lê o programa principal via mainProgramOf — Warrior 24 mesmo
+  com a Bônus ativa — e marca a semana atual em laranja ou "concluído"
+  quando passa da 24); botão "Próximo: <pilar>" no fim; nota de fonte
+  ("não substitui orientação médica").
+- **Acesso**: módulo `educacao` em HEALTH_MODULES (JS + Ruby +
+  HEALTH_ROUTE_MODULE do guard) → chip nos Acessos por pessoa; item
+  "Educação" (graduation-cap) no menu da Saúde depois de Rotina.
+- TESTADO local: notebook claro/escuro, celular (pílulas quebram em
+  linhas, tiles 2 col), busca "platô" → 1 resultado no Treino, acordeão,
+  mapa mostrando "programa principal concluído (semana 26)" porque o
+  Warrior no config está com start_date 2026-04-06 e inativo (Bônus
+  ativa). 67 ícones lucide conferidos no icons.json do vite.
+- Ambiente: rails/vite/sidekiq estavam parados 6 dias; subiram normal.
+
 ## SUBIDA 20/09 (noite) — RODADAS 33–35: "subir" → commit e046151f7a na
 feat/hub-saude → push → docker-build por workflow_dispatch (run
 35552093706) VERDE → **etiqueta `e046151`** (sem migration: health_modules
