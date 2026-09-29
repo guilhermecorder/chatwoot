@@ -21,6 +21,21 @@ RSpec.describe 'Link de leitura da análise de criativo', type: :request do
     Rails.cache.clear
   end
 
+  it 'item 299: a linha do tempo vai no link; sem financeiro saem investimento e receita' do
+    get "#{path}.json"
+    keys = response.parsed_body['timeline']['tracks'].pluck('key')
+    expect(keys).to include('impressions', 'leads', 'surgeries')
+    expect(keys).not_to include('spend', 'revenue')
+    expect(response.parsed_body['blocks'].pluck('key')).to include('linha')
+
+    get path
+    expect(response.body).to include('Linha do tempo', 'tl-plot')
+    expect(response.body).not_to include('R$')
+
+    get "/criativos/analise/#{finance_link[:token]}.json"
+    expect(response.parsed_body['timeline']['tracks'].pluck('key')).to include('spend', 'revenue')
+  end
+
   it 'token válido devolve a análise daquele anúncio naquele período (JSON e página)' do
     get "#{path}.json"
     expect(response).to have_http_status(:ok)

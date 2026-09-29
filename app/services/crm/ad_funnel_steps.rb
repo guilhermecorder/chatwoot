@@ -31,6 +31,11 @@ class Crm::AdFunnelSteps
     @booked = crm[:booked] | booked_agenda | attended
   end
 
+  # colunas do CRM de cada degrau (a linha do tempo usa para DATAR cada passo)
+  def self.stage_ids_for(account)
+    new(account, []).send(:stage_ids)
+  end
+
   def revenue_of(contact_id)
     of_done[contact_id].to_f.positive? ? of_done[contact_id].to_f : card_values[contact_id].to_f
   end

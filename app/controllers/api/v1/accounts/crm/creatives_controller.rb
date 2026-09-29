@@ -24,6 +24,14 @@ class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseContr
     render json: { error: 'anúncio não encontrado' }, status: :not_found
   end
 
+  # GET /crm/creatives/:ad_id/timeline[?preset=year] — item 299: todas as fontes no mesmo eixo de tempo
+  def timeline
+    Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
+    render json: analytics.timeline(params[:ad_id]).merge(base_json)
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'anúncio não encontrado' }, status: :not_found
+  end
+
   # GET /crm/creatives/history — recordes (dia/semana/mês), campeões por mês e de todos os tempos
   def history
     records = Crm::CreativeRecords.new(account: Current.account).call

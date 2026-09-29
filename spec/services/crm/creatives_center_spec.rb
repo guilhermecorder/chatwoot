@@ -232,6 +232,64 @@ RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
       expect(Crm::AdVideoTranscribeJob.pending_for(account).pluck(:ad_id)).not_to include('2304', '2305')
     end
 
+    describe 'item 299: linha do tempo convergente do anúncio (Crm::AdTimeline)' do
+      let(:pipeline) { Crm::Pipeline.create!(account: account, name: 'Jornada', position: 0) }
+      let(:stages) do
+        ['Novos Contatos', 'Agendamento de Consulta', 'Consulta Realizada', 'Cirurgia Agendada', 'Cirurgia Realizada']
+          .each_with_index.to_h { |name, i| [name, Crm::Stage.create!(pipeline: pipeline, name: name, position: i)] }
+      end
+      let(:timeline) { service.detail('2301')[:timeline] }
+
+      def lead(days_ago)
+        create(:contact, account: account, phone_number: "+55119555#{rand(100_000..999_999)}",
+                         additional_attributes: { 'meta_ads' => { 'source_id' => '2301', 'captured_at' => days_ago.days.ago.iso8601 } })
+      end
+
+      def walk(contact, steps)
+        card = Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stages['Novos Contatos'])
+        steps.each do |name, days_ago|
+          card.update!(stage: stages[name])
+          card.stage_logs.where(stage_id: stages[name].id).update_all(entered_at: days_ago.days.ago) # rubocop:disable Rails/SkipsModelValidations
+        end
+      end
+
+      it 'alinha Meta, leads, consultas e cirurgias no mesmo eixo e mede o atraso entre os passos', :aggregate_failures do
+        stages
+        walk(lead(25), 'Agendamento de Consulta' => 22, 'Consulta Realizada' => 15, 'Cirurgia Agendada' => 12, 'Cirurgia Realizada' => 2)
+        walk(lead(10), 'Agendamento de Consulta' => 9)
+        lead(3)
+
+        expect(timeline[:granularity]).to eq('day')
+        expect(timeline[:buckets].size).to eq(30)
+        track = ->(key) { timeline[:tracks].find { |t| t[:key] == key } }
+        expect(timeline[:tracks].pluck(:key)).to eq(%w[spend impressions link_clicks conversations leads booked attended closed surgeries revenue])
+        expect(track.call('spend')[:total]).to be_positive
+        expect([track.call('leads')[:total], track.call('booked')[:total], track.call('attended')[:total]]).to eq([3, 2, 1])
+        expect([track.call('closed')[:total], track.call('surgeries')[:total]]).to eq([1, 1])
+        expect(track.call('leads')[:values].size).to eq(30)
+        lags = timeline[:lags].to_h { |l| ["#{l[:from]}>#{l[:to]}", l[:days]] }
+        expect(lags).to include('leads>booked' => 2, 'booked>attended' => 7, 'attended>closed' => 3, 'closed>surgeries' => 10)
+        expect(timeline[:notes].join).to include('data em que aconteceu')
+      end
+
+      it 'a linha do tempo sozinha (sem recarregar o detalhe) traz as mesmas faixas' do
+        lead(4)
+        alone = service.timeline('2301')
+
+        expect(alone[:tracks].find { |t| t[:key] == 'leads' }[:total]).to eq(1)
+      end
+
+      it 'período longo vira semana a semana e não leva nenhum dado de paciente', :aggregate_failures do
+        maria = lead(5)
+        maria.update!(name: 'Maria Paciente Secreta')
+        long = described_class.new(account: account, since_date: Date.current - 200, until_date: Date.current).detail('2301')[:timeline]
+
+        expect(long[:granularity]).to eq('week')
+        expect(long.to_json).not_to include('Maria Paciente Secreta')
+        expect(long.to_json).not_to include(maria.phone_number)
+      end
+    end
+
     describe 'item 293: vídeo enviado pela pessoa ou link colado (Crm::AdVideoInput)' do
       let(:video) { Crm::AdCreative.find_by!(account: account, ad_id: '2304') }
       let(:gemini) { instance_double(Crm::GeminiFiles) }

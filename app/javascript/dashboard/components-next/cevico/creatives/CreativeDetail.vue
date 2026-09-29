@@ -20,6 +20,7 @@ import CreativeRadar from './CreativeRadar.vue';
 import RadarAxesPicker from './RadarAxesPicker.vue';
 import RetentionArea from './RetentionArea.vue';
 import FunnelSteps from './FunnelSteps.vue';
+import ConvergentTimeline from '../ConvergentTimeline.vue';
 import ClicksByMark from './ClicksByMark.vue';
 import { useAlert } from 'dashboard/composables';
 import { useTranscribe, copyPlain } from './useTranscribe';
@@ -239,6 +240,37 @@ const sendLink = () => {
   const link = videoLink.value.trim();
   if (link) transcribeVideo({ link });
 };
+// 🧭 item 299: a linha do tempo abre no ANO ("nesta análise vamos fazer análise do ano")
+const TIMELINE_PERIODS = [
+  { key: 'year', label: 'Este ano' },
+  { key: 'screen', label: 'Período da tela' },
+];
+const timelinePeriod = ref('year');
+const yearTimeline = ref(null);
+const isTimelineLoading = ref(false);
+const shownTimeline = computed(() =>
+  timelinePeriod.value === 'year' && yearTimeline.value
+    ? yearTimeline.value
+    : (data.value && data.value.timeline) || {}
+);
+const loadYearTimeline = async () => {
+  isTimelineLoading.value = true;
+  try {
+    const { data: response } = await CevicoCreativesAPI.timeline(props.adId, {
+      preset: 'year',
+    });
+    yearTimeline.value = response;
+  } catch {
+    yearTimeline.value = null; // cai no período da tela
+  } finally {
+    isTimelineLoading.value = false;
+  }
+};
+const setTimelinePeriod = key => {
+  timelinePeriod.value = key;
+  if (key === 'year' && !yearTimeline.value) loadYearTimeline();
+};
+
 const load = async () => {
   isLoading.value = true;
   shareLink.value = null;
@@ -250,6 +282,8 @@ const load = async () => {
       props.periodParams
     );
     data.value = response;
+    yearTimeline.value = null;
+    if (timelinePeriod.value === 'year') loadYearTimeline();
     pollCount = 0;
     pollTranscript();
   } catch (e) {
@@ -1051,6 +1085,44 @@ v-if="data.video_cta" class="text-xs text-n-slate-11"
                 :averages="averages"
                 :champions="data.champion_of || []"
               />
+            </section>
+
+            <!-- 2·0. LINHA DO TEMPO CONVERGENTE: todas as fontes no mesmo eixo (item 299) -->
+            <section
+              class="cv-block p-6 sm:p-10"
+              :style="{ '--cv-grad': family[1] }"
+            >
+              <div class="flex items-center gap-3 mb-2 flex-wrap">
+                <span class="cv-icon"
+                  ><span class="i-lucide-git-merge text-base"
+                /></span>
+                <h3
+                  class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight flex-1"
+                >
+                  Linha do tempo
+                </h3>
+                <div class="cv-seg">
+                  <button
+                    v-for="opt in TIMELINE_PERIODS"
+                    :key="opt.key"
+                    class="cv-seg-item"
+                    :class="timelinePeriod === opt.key ? 'cv-seg-on' : ''"
+                    @click="setTimelinePeriod(opt.key)"
+                  >
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
+              <p class="text-sm text-n-slate-10 mb-6 leading-relaxed">
+                Tudo o que cada fonte sabe deste anúncio, no mesmo eixo de
+                tempo: o investimento e as exibições (Meta), os leads que
+                chegaram (WhatsApp e CRM), as consultas (CRM e Agenda) e as
+                cirurgias e a receita (CRM, Agenda e Oftalmofácil).
+              </p>
+              <p v-if="isTimelineLoading" class="text-sm text-n-slate-10">
+                carregando a linha do tempo…
+              </p>
+              <ConvergentTimeline v-else :timeline="shownTimeline" />
             </section>
 
             <!-- 2a. funil com a % de conversão de cada etapa (rodada 4) -->

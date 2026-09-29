@@ -35,7 +35,33 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
       ad: ad, period: period, reading: reading, numbers: numbers, funnel: funnel_steps, funnel_note: @d.dig('funnel_view', 'note'),
       journey: journey_numbers, journey_title: journey_title,
       indicators: indicators, radar: radar, daily: daily, placements: ranking('placement_ranking'), audience: ranking('audience_ranking'),
-      texts: texts, transcript: transcript, retention: @d['retention_detail'], blocks: blocks, text: text }
+      texts: texts, transcript: transcript, retention: @d['retention_detail'], timeline: timeline, blocks: blocks, text: text }
+  end
+
+  # 🧭 item 299: linha do tempo convergente; sem financeiro saem investimento e receita
+  def timeline # rubocop:disable Metrics/CyclomaticComplexity
+    @timeline ||= begin
+      data = (@d['timeline'] || {}).deep_dup
+      data['tracks'] = Array(data['tracks']).reject { |t| !@finance && t['unit'] == 'money' }
+      # para fora da clínica a origem é só "Meta" ou "atendimento" (sem citar os sistemas internos)
+      data['tracks'].each { |t| t['source'] = t['source'] == 'Meta' ? 'Meta' : 'atendimento da clínica' }
+      data['tracks'].any? ? data : nil
+    end
+  end
+
+  def timeline_text # rubocop:disable Metrics/AbcSize
+    return nil unless timeline
+
+    names = { 'day' => 'por dia', 'week' => 'por semana', 'month' => 'por mês' }
+    out = ["Todas as fontes no mesmo eixo de tempo (#{names[timeline['granularity']]}). Totais do período:"]
+    out += timeline['tracks'].map do |t|
+      total = t['unit'] == 'money' ? "R$ #{int(t['total'])}" : int(t['total'])
+      "• #{t['label']}: #{total} (fonte: #{t['source']})"
+    end
+    lags = Array(timeline['lags'])
+    out << "O tempo entre um passo e o outro:\n#{lags.map { |l| "• #{l['text']}" }.join("\n")}" if lags.any?
+    out += Array(timeline['notes'])
+    out.join("\n")
   end
 
   def text
@@ -48,6 +74,7 @@ class Crm::CreativeSharePayload # rubocop:disable Metrics/ClassLength
       block('leitura', 'Leitura', reading),
       block('numeros', 'Números do anúncio', lines(numbers)),
       block('indicadores', 'Indicadores contra a média e o recorde da conta', indicators_text),
+      block('linha', 'Linha do tempo: todas as fontes no mesmo eixo', timeline_text),
       block('jornada', journey_title, journey_text),
       block('retencao', 'Curva de retenção', retention_text),
       block('quedas', 'Maiores quedas do vídeo', drops_text),

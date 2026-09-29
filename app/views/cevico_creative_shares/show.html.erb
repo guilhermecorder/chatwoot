@@ -14,6 +14,22 @@
   daily = Array(@payload['daily'])
   drops = Array(retention && retention['top_drops'])
   funnel = Array(@payload['funnel'])
+  timeline = @payload['timeline']
+  track_tint = { 'spend' => '#2563eb', 'impressions' => '#0ea5e9', 'link_clicks' => '#06b6d4', 'conversations' => '#14b8a6',
+                 'leads' => '#22c55e', 'booked' => '#84cc16', 'attended' => '#eab308', 'closed' => '#f97316',
+                 'surgeries' => '#ef4444', 'revenue' => '#a855f7' }
+  gran_name = { 'day' => 'por dia', 'week' => 'por semana', 'month' => 'por mês' }
+  # desenho simples de cada faixa (largura 1000 × altura 70), feito no servidor
+  track_shape = lambda do |values|
+    max = values.map(&:to_f).max.to_f
+    count = values.size
+    pts = values.each_with_index.map do |v, i|
+      x = count <= 1 ? 500.0 : (i.to_f / (count - 1)) * 1000
+      y = 64 - (max.positive? ? (v.to_f / max) * 54 : 0)
+      "#{x.round(1)},#{y.round(1)}"
+    end
+    { line: pts.join(' '), area: "0,70 #{pts.join(' ')} 1000,70", empty: !max.positive? }
+  end
   versus = { 'above' => ['#059669', '▲', 'acima da média da conta'], 'below' => ['#dc2626', '▼', 'abaixo da média da conta'],
              'even' => ['#b45309', '=', 'na média da conta'] }
   zone_tint = { 'hook' => '#7c3aed', 'body' => '#0891b2', 'cta' => '#d97706' }
@@ -285,7 +301,25 @@
       .block { padding: 18px; border-radius: 20px; }
     }
     @media print { .btn { display: none; } body { background: #fff; } .block { box-shadow: none; break-inside: avoid; } }
-  </style>
+      /* 🧭 item 299: linha do tempo convergente */
+    .tl { display: grid; gap: 12px; margin-top: 8px; }
+    .tl-row { display: grid; grid-template-columns: 210px minmax(0, 1fr); column-gap: 20px; align-items: center; }
+    .tl-name { display: flex; flex-direction: column; min-width: 0; }
+    .tl-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+    .tl-label i { width: 10px; height: 10px; border-radius: 999px; flex-shrink: 0; }
+    .tl-total { font-size: 24px; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; }
+    .tl-source { font-size: 13px; opacity: .6; }
+    .tl-plot { width: 100%; height: 70px; border-radius: 14px; background: rgba(100, 116, 139, .07); display: block; }
+    .tl-ends { display: flex; justify-content: space-between; font-size: 13px; opacity: .65; }
+    .tl-lags-title { font-size: 16px; font-weight: 700; margin: 26px 0 10px; }
+    .tl-lags { display: flex; flex-wrap: wrap; gap: 10px; }
+    .tl-lag { padding: 10px 16px; border-radius: 14px; font-size: 14px; background: rgba(37, 99, 235, .08); border: 1px solid rgba(37, 99, 235, .18); }
+    @media (max-width: 640px) {
+      .tl-row { grid-template-columns: 118px minmax(0, 1fr); column-gap: 10px; }
+      .tl-total { font-size: 18px; }
+      .tl-label { font-size: 13px; }
+    }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -404,6 +438,55 @@
           <p class="eyebrow" style="margin-top:14px"><%= radar['note'] %></p>
         </div>
       </div>
+    </section>
+  <% end %>
+
+  <% if timeline %>
+    <section class="block">
+      <div class="head">
+        <div class="grow">
+          <h2>Linha do tempo</h2>
+          <p class="sub">Tudo o que cada fonte sabe deste anúncio, no mesmo eixo de tempo (<%= gran_name[timeline['granularity']] %>): os números da Meta e a jornada no atendimento da clínica. Só quantidades, sem nenhum dado de paciente.</p>
+        </div>
+        <button class="btn" type="button" data-copy="linha">Copiar</button>
+      </div>
+      <div class="tl">
+        <% timeline['tracks'].each do |t| %>
+          <% shape = track_shape.call(Array(t['values'])) %>
+          <% tint = track_tint[t['key']] || '#64748b' %>
+          <div class="tl-row">
+            <div class="tl-name">
+              <span class="tl-label"><i style="background:<%= tint %>"></i><%= t['label'] %></span>
+              <span class="tl-total" style="color:<%= tint %>"><%= t['unit'] == 'money' ? "R$ #{int.call(t['total'])}" : int.call(t['total']) %></span>
+              <span class="tl-source"><%= t['source'] %></span>
+            </div>
+            <svg class="tl-plot" viewBox="0 0 1000 70" preserveAspectRatio="none" aria-hidden="true">
+              <% if shape[:empty] %>
+                <line x1="0" x2="1000" y1="64" y2="64" stroke="<%= tint %>" stroke-opacity="0.35" stroke-width="2" vector-effect="non-scaling-stroke" />
+              <% else %>
+                <polygon points="<%= shape[:area] %>" fill="<%= tint %>" fill-opacity="0.16" />
+                <polyline points="<%= shape[:line] %>" fill="none" stroke="<%= tint %>" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+              <% end %>
+            </svg>
+          </div>
+        <% end %>
+        <div class="tl-row tl-axis">
+          <div class="tl-name"></div>
+          <div class="tl-ends">
+            <span><%= timeline['buckets'].first && timeline['buckets'].first['label'] %></span>
+            <% middle = timeline['buckets'][timeline['buckets'].size / 2] %>
+            <% if timeline['buckets'].size > 2 %><span><%= middle['label'] %></span><% end %>
+            <span><%= timeline['buckets'].last && timeline['buckets'].last['label'] %></span>
+          </div>
+        </div>
+      </div>
+      <% if Array(timeline['lags']).any? %>
+        <p class="tl-lags-title">O tempo entre um passo e o outro</p>
+        <div class="tl-lags">
+          <% timeline['lags'].each do |l| %><span class="tl-lag"><%= l['text'] %></span><% end %>
+        </div>
+      <% end %>
+      <% Array(timeline['notes']).each do |note| %><p class="note calm" style="margin-top:14px"><%= note %></p><% end %>
     </section>
   <% end %>
 

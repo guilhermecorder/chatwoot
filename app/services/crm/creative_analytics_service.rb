@@ -56,6 +56,13 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
   # rubocop:enable Metrics/AbcSize
 
   # ── Um anúncio a fundo ────────────────────────────────────────────────────
+  # 🧭 item 299: a linha do tempo convergente de UM anúncio no período deste serviço
+  # (a tela pede o ano inteiro sem recarregar o detalhe todo)
+  def timeline(ad_id)
+    Crm::AdTimeline.new(account: @account, ad_id: ad_id.to_s, since_date: @since_date, until_date: @until_date,
+                        daily: daily_by_ad[ad_id.to_s] || []).call
+  end
+
   def detail(ad_id) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     creative = Crm::AdCreative.with_attached_thumbnail.find_by!(account_id: @account.id, ad_id: ad_id.to_s)
     list = daily_by_ad[creative.ad_id] || []
@@ -68,6 +75,8 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
     data = serialize_row(row).merge(
       averages: averages, targets: targets,
       daily: daily_series(list),
+      # 🧭 item 299: todas as fontes no mesmo eixo de tempo
+      timeline: timeline(creative.ad_id),
       halves: halves_for(list),
       summary: breakdown('summary', creative.ad_id)[:rows]&.first,
       placements: breakdown('placement', creative.ad_id),

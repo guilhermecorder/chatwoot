@@ -43,6 +43,11 @@ class CevicoCreativesAPI extends ApiClient {
     return axios.post(`${this.url}/transcribe_videos`);
   }
 
+  // 🧭 item 299: linha do tempo convergente do anúncio (padrão da tela: o ano)
+  timeline(adId, params) {
+    return axios.get(`${this.url}/${adId}/timeline`, { params });
+  }
+
   // item 293: sem nada = vídeo da Meta; { file } = arquivo enviado pela pessoa;
   // { link } = link do YouTube ou link direto de arquivo
   transcribeVideo(adId, { file, link } = {}) {

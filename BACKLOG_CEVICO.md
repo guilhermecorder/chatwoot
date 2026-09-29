@@ -8739,3 +8739,20 @@ com parâmetros diferentes selecionáveis por chavinhas.
   Paciente sem conversa cai no "Nova conversa" de sempre (item 199).
 - Testes: patient_chats_controller_spec (5) verdes; conferido ao vivo no Espaço do Paciente (popup abriu com a conversa,
   as colunas e o campo de resposta). WEB só, sem migration. SEM commit.
+
+- **30/09 — :61df3fa IMPLANTADA** (produção = 281–298; reversão :f3b769b).
+
+## 299. ✅ 🧭 LINHA DO TEMPO CONVERGENTE por anúncio (30/09; "gostaria de ter todo o histórico, de todas as fontes, distribuídos em convergência, na linha do tempo, ou seja, tudo sincronizado"; decisão dele: "comece por anúncio, mas também acho importante entender a jornada do paciente")
+- Servidor: `Crm::AdTimeline` — 10 faixas no MESMO eixo: investimento, exibições, cliques, conversas (Meta); leads (chegada
+  pelo anúncio); consultas marcadas, compareceram (CRM + Agenda); cirurgias fechadas, realizadas e receita (CRM + Agenda +
+  Oftalmofácil). Cada passo entra na data em que ACONTECEU. Dia a dia até 45 dias, semana a semana até 1 ano e meio, depois
+  mês a mês. `lags` = mediana de dias entre um passo e o seguinte. Marcos: "entrou no ar", "último dia com investimento".
+  Aviso de desde quando a ligação paciente↔anúncio é gravada. Só contagens, nenhum dado de paciente.
+- Tela: `ConvergentTimeline.vue` (kit) — faixas alinhadas, cursor atravessando todas; bloco "Linha do tempo" no detalhe do
+  anúncio, abrindo em "Este ano" (rota própria GET crm/creatives/:ad_id/timeline) com opção "Período da tela".
+- Link público: bloco "Linha do tempo" desenhado no servidor + texto de copiar; sem financeiro saem investimento e receita;
+  a origem aparece só como "Meta" ou "atendimento da clínica" (não cita os sistemas internos).
+- Testes: 60 no servidor + 3 do componente, verdes. Conferido ao vivo no localhost (10 faixas, ano, atrasos). WEB só
+  (SIDEKIQ não muda), sem migration. SEM commit.
+- PRÓXIMO PASSO combinado: clicar num ponto da linha do tempo e ver os pacientes daquela semana, cada um abrindo a própria
+  jornada no Espaço do Paciente. Depois: linha do tempo da clínica inteira.
