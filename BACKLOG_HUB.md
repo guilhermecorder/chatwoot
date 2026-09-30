@@ -18,6 +18,11 @@ workflow_dispatch (run 36612395723) VERDE em ~30 min → **etiqueta
 `048d6ec`** (sem migration: notas usam hub_health_records, kind `note`).
 IMPLANTADA por ele 30/09 ("está bacana").
 
+## SUBIDA 30/09 — RODADA 43: "e suba" → commit de28b94b69 na feat/hub-saude
+→ push (--no-verify) → docker-build por workflow_dispatch (run
+36780806557) VERDE em 6 min (cache) → **etiqueta `de28b94`** (sem
+migration). Falta ele colar no EasyPanel (web + sidekiq) e Implantar.
+
 ## RODADA 43 — 30/09 ✅ TIMER DE DESCANSO NA SESSÃO + ÍMÃ DEIXA CHEGAR NO CONCLUIR (subida — ver SUBIDA 30/09)
 Ele (30/09, depois de implantar a 048d6ec: "está bacana"): "manda brasa,
 especialmente o timer de descanso — pequeno e ali no ambiente mesmo";
