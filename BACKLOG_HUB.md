@@ -16,8 +16,56 @@ tela-hub. Worktree: ~/hub, branch `feat/hub-saude`.
 feat/hub-saude → push (--no-verify, husky quebrado) → docker-build por
 workflow_dispatch (run 36612395723) VERDE em ~30 min → **etiqueta
 `048d6ec`** (sem migration: notas usam hub_health_records, kind `note`).
-Falta ele colar no EasyPanel (web + sidekiq) e Implantar. Depois, na VPS:
-Configurações → HUB → Acessos por pessoa mostra o módulo novo "Educação".
+IMPLANTADA por ele 30/09 ("está bacana").
+
+## RODADA 43 — 30/09 ✅ TIMER DE DESCANSO NA SESSÃO + ÍMÃ DEIXA CHEGAR NO CONCLUIR (subida — ver SUBIDA 30/09)
+Ele (30/09, depois de implantar a 048d6ec: "está bacana"): "manda brasa,
+especialmente o timer de descanso — pequeno e ali no ambiente mesmo";
+"corrija o ímã do fim das páginas de treino: no mobile não deixa chegar
+no botão Concluir".
+- **Timer de descanso** (só HealthPage.vue, sessão de treino do programa
+  e ficha avulsa — mesmo template):
+  · a linha "descanso 2–4 min" de cada exercício virou CHIPS de tempo
+    (`parseRestSecs`: "2–4 min" → 2:00 · 4:00; "10–20 s" → 0:10 · 0:20;
+    texto sem número ("alguns min") cai no padrão do método
+    `METHOD_REST`: RPT 2:00/3:00, rest-pause 0:15, pirâmide 0:30/1:00,
+    séries 1:00/1:30);
+  · RELÓGIO laranja ao lado do ✕ de cada série = "série feita" → começa
+    o padrão do exercício (`restDefault`: último chip escolhido pra esse
+    MÉTODO, guardado em localStorage `hub_rest_pref`; senão o maior);
+  · BARRA `.hub-rest-bar` grudada (position: sticky) no pé da tela
+    enquanto corre: anel conic-gradient com o tempo, estado
+    (Descansando/Pausado/Descanso feito), −15 · +15 · pausa/continua/de
+    novo · fechar; no fim da página ela volta pro lugar (acima das
+    Observações) — NUNCA cobre o Concluir; no celular fica 78 px acima
+    pra não brigar com o botão flutuante do menu;
+  · conta por timestamp (`restEndAt`) porque o iOS congela setInterval
+    em 2º plano; apita nos 3 últimos segundos e 3× no fim (mesmo `beep`
+    do Boxe, áudio destravado no toque) + `navigator.vibrate`; barra
+    fica VERDE pulsando quando termina; some ao cancelar/concluir a
+    sessão (`watch(session)`), limpa no unmount.
+- **Ímã**: `.hub-snap` (scroll-snap-type y proximity) só tinha os
+  cards de exercício como pontos de parada → no celular o scroll voltava
+  pro último card e o Concluir ficava fora. Agora Observações + Concluir
+  vivem em `.hub-session-end` com `scroll-snap-align: end` (+ scroll-
+  margin-bottom) — o fim da página é um ponto de parada válido.
+- 🐛 no caminho: ícone lucide dentro de botão flex encolhia a 0 px
+  (`flex: none` nos spans); chip ativo no escuro perdia o laranja
+  (`.dark .hub-rest-chip.is-on` com o degradê).
+- Ajuste dele (30/09, 2ª volta): "botão maior; a linha do cronômetro
+  maior, ocupando mais o pé da tela pra manusear fácil" → relógio da
+  série 38 px, chips 32 px, barra com anel 60–64 px e botões de 48–54 px;
+  no CELULAR a barra vira 2 linhas (tempo + estado / 4 botões grandes de
+  ponta a ponta, −15 s · +15 s · pausa · fechar) e ganha 8 px de cada
+  lado. "e suba" = pode subir.
+- TESTADO local: celular escuro (chips, relógio da série, barra acima do
+  menu, −15 até acabar → verde "Descanso feito", fim da página com
+  Concluir visível), notebook escuro e claro. Sem erro no console.
+- Sugestões dadas pra sequência (ele escolhe): observação POR exercício
+  na hora de registrar; fechar os favoritos da Progressão de carga;
+  teias que abrem (item 3); lembretes/PWA da Rotina; dividir HealthPage
+  (item 5); gráfico padrão (item 4); presets de programas; importar por
+  foto/IA; fase 2 (KPIs CEVICO/LIFE, Hotmart/Kiwify).
 
 ## RODADA 42 — 29/09 🔧 ANÁLISES: LARANJA + SEM RETICÊNCIAS + ABAS EM DESTAQUE (working tree, NÃO subida)
 Ele (print da Área/Polar): "ficou bem legal o ambiente de análises; vamos

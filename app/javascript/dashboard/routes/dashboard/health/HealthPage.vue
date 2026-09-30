@@ -552,6 +552,125 @@ const lastSetsForTag = (name, tag, baseTag) => {
 const session = ref(null);
 const savingSession = ref(false);
 
+// ═══ TIMER DE DESCANSO (rodada 43): pequeno, dentro da própria sessão ═══
+// Cada exercício conhece o seu descanso ("2–4 min", "10–20 s"…) → vira
+// chips de tempo; o relógio da série (ao lado do ✕) começa o padrão do
+// exercício. A barra fica GRUDADA embaixo enquanto corre, apita nos 3
+// últimos segundos e no fim (mesmo apito do Boxe) e vibra no celular.
+// Conta por timestamp (endAt) — o iOS congela setInterval em 2º plano.
+const METHOD_REST = { rpt: [120, 180], rest_pause: [15], pyramid: [30, 60], sets: [60, 90] };
+const parseRestSecs = str => {
+  if (!str) return [];
+  const t = String(str).toLowerCase();
+  const nums = (t.match(/\d+(?:[.,]\d+)?/g) || []).map(n => Number(n.replace(',', '.')));
+  const mult = /min/.test(t) ? 60 : 1;
+  const uniq = [...new Set(nums.map(n => Math.round(n * mult)))].filter(n => n > 0 && n <= 900);
+  return uniq.sort((a, b) => a - b).slice(0, 2);
+};
+const restPresets = ex => {
+  const p = parseRestSecs(ex?.rest);
+  return p.length ? p : METHOD_REST[ex?.method] || METHOD_REST.sets;
+};
+let restPref = {};
+try { restPref = JSON.parse(localStorage.getItem('hub_rest_pref') || '{}') || {}; } catch { restPref = {}; }
+// padrão do exercício = último chip escolhido pra esse método; senão o maior
+const restDefault = ex => {
+  const p = restPresets(ex);
+  const pref = restPref[ex?.method || 'sets'];
+  return p.includes(pref) ? pref : p[p.length - 1];
+};
+const fmtRest = secs => {
+  const s = Math.max(0, Math.round(secs));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+const rest = ref({ total: 0, remaining: 0, running: false, done: false, label: '', exKey: '' });
+let restTick = null;
+let restEndAt = 0;
+let restLastBeep = -1;
+const restPct = computed(() =>
+  rest.value.total ? Math.round(((rest.value.total - rest.value.remaining) / rest.value.total) * 100) : 0
+);
+const clearRestTick = () => {
+  if (restTick) clearInterval(restTick);
+  restTick = null;
+};
+const tickRest = () => {
+  const r = rest.value;
+  if (!r.running) return;
+  const left = Math.ceil((restEndAt - Date.now()) / 1000);
+  r.remaining = Math.max(0, left);
+  if (left <= 3 && left >= 1 && restLastBeep !== left) {
+    restLastBeep = left;
+    beep(720, 90);
+  }
+  if (left <= 0) {
+    r.running = false;
+    r.done = true;
+    clearRestTick();
+    beep(990, 140, 3);
+    try { navigator.vibrate?.([220, 90, 220, 90, 320]); } catch { /* sem vibração */ }
+  }
+};
+const runRest = () => {
+  clearRestTick();
+  restTick = setInterval(tickRest, 250);
+  tickRest();
+};
+const startRest = (ex, secs) => {
+  const total = secs || restDefault(ex);
+  if (secs && ex?.method !== undefined) {
+    restPref[ex.method || 'sets'] = secs;
+    try { localStorage.setItem('hub_rest_pref', JSON.stringify(restPref)); } catch { /* ok */ }
+  }
+  beep(880, 60); // destrava o áudio no gesto (regra do iOS)
+  restLastBeep = -1;
+  restEndAt = Date.now() + total * 1000;
+  rest.value = {
+    total,
+    remaining: total,
+    running: true,
+    done: false,
+    label: ex?.displayName || ex?.name || '',
+    exKey: ex?.name || '',
+  };
+  runRest();
+};
+const toggleRest = () => {
+  const r = rest.value;
+  if (!r.total) return;
+  if (r.running) {
+    r.running = false;
+    clearRestTick();
+    return;
+  }
+  if (r.done || r.remaining <= 0) {
+    r.remaining = r.total;
+    r.done = false;
+  }
+  restLastBeep = -1;
+  restEndAt = Date.now() + r.remaining * 1000;
+  r.running = true;
+  runRest();
+};
+const adjustRest = delta => {
+  const r = rest.value;
+  if (!r.total) return;
+  r.total = Math.max(5, r.total + delta);
+  if (r.running) {
+    restEndAt = Math.max(Date.now() + 1000, restEndAt + delta * 1000);
+    tickRest();
+  } else {
+    r.remaining = Math.max(1, r.remaining + delta);
+    r.done = false;
+  }
+};
+const stopRest = () => {
+  clearRestTick();
+  rest.value = { total: 0, remaining: 0, running: false, done: false, label: '', exKey: '' };
+};
+watch(session, v => { if (!v) stopRest(); });
+onUnmounted(clearRestTick);
+
 const startProgramSession = sessionDef => {
   const prog = program.value;
   const cycle = programCycle.value;
@@ -2698,11 +2817,20 @@ onMounted(async () => {
               <p v-if="ex.options?.length > 1 && commonNote(ex)" class="text-[10px] mb-2" :style="{ color: ROYAL }" title="Peso comum: todas as variações na mesma escala (halteres ×2 = cada lado vira total)">
                 ⚖ {{ commonNote(ex) }}
               </p>
-              <p v-if="ex.rest || ex.warmup" class="text-[11px] text-n-slate-10 mb-2.5">
-                <template v-if="ex.rest">⏱ descanso {{ ex.rest }}</template>
-                <template v-if="ex.rest && ex.warmup"> · </template>
-                <template v-if="ex.warmup">🔥 aquecimento: {{ ex.warmup }}</template>
-              </p>
+              <div class="hub-rest-line">
+                <span class="hub-rest-lbl"><span class="i-lucide-timer" />descanso{{ ex.rest ? ` ${ex.rest}` : '' }}</span>
+                <button
+                  v-for="secs in restPresets(ex)"
+                  :key="secs"
+                  class="hub-rest-chip"
+                  :class="{ 'is-on': rest.total && rest.exKey === ex.name && rest.total === secs }"
+                  :title="'Começar ' + fmtRest(secs) + ' de descanso'"
+                  @click="startRest(ex, secs)"
+                >
+                  {{ fmtRest(secs) }}
+                </button>
+                <span v-if="ex.warmup" class="hub-rest-warm">🔥 aquecimento: {{ ex.warmup }}</span>
+              </div>
               <!-- cartão de vidro: a meta de hoje + alvo POR SÉRIE
                    (tocar num alvo posiciona as roletas da série) -->
               <div
@@ -2746,6 +2874,13 @@ onMounted(async () => {
                         @click="removeSet(ex, i)"
                       >
                         ✕
+                      </button>
+                      <button
+                        class="hub-set-rest"
+                        :title="'Série feita: descansar ' + fmtRest(restDefault(ex))"
+                        @click="startRest(ex)"
+                      >
+                        <span class="i-lucide-timer" />
                       </button>
                     </span>
                     <button
@@ -2890,21 +3025,49 @@ onMounted(async () => {
               </div>
             </div>
 
-            <input
-              v-model="session.notes"
-              type="text"
-              placeholder="Observações (ex.: dor no ombro, treino rápido…)"
-              class="block w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
-              style="margin-bottom: 12px"
-            />
-            <button
-              class="w-full h-11 rounded-xl text-sm font-bold text-white disabled:opacity-60 shadow-lg"
-              :style="{ background: GRAD_LARANJA }"
-              :disabled="savingSession"
-              @click="saveSession"
-            >
-              {{ savingSession ? 'Salvando…' : '✓ Concluir treino' }}
-            </button>
+            <!-- TIMER DE DESCANSO (rodada 43): gruda no pé da tela enquanto
+                 corre; no fim da página volta pro lugar dele, acima do
+                 Concluir — nunca cobre o botão -->
+            <div v-if="rest.total" class="hub-rest-bar" :class="{ 'is-done': rest.done, 'is-paused': !rest.running && !rest.done }">
+              <div class="hub-rest-ring" :style="{ '--p': restPct + '%' }">
+                <b>{{ fmtRest(rest.remaining) }}</b>
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="hub-rest-title">
+                  {{ rest.done ? 'Descanso feito' : rest.running ? 'Descansando' : 'Pausado' }}
+                </p>
+                <p class="hub-rest-sub">{{ rest.done ? 'Bora pra próxima série' : rest.label }}</p>
+              </div>
+              <div class="hub-rest-ctl">
+                <button class="hub-rest-btn" title="Tirar 15 s" @click="adjustRest(-15)">−15 s</button>
+                <button class="hub-rest-btn" title="Pôr 15 s" @click="adjustRest(15)">+15 s</button>
+                <button class="hub-rest-btn is-main" :title="rest.running ? 'Pausar' : rest.done ? 'De novo' : 'Continuar'" @click="toggleRest">
+                  <span :class="rest.running ? 'i-lucide-pause' : rest.done ? 'i-lucide-rotate-ccw' : 'i-lucide-play'" />
+                </button>
+                <button class="hub-rest-btn" title="Fechar" @click="stopRest"><span class="i-lucide-x" /></button>
+              </div>
+            </div>
+
+            <!-- rodapé da sessão = ponto de parada do ímã (rodada 43):
+                 antes o scroll-snap voltava pro último exercício e o
+                 Concluir ficava inalcançável no celular -->
+            <div class="hub-session-end">
+              <input
+                v-model="session.notes"
+                type="text"
+                placeholder="Observações (ex.: dor no ombro, treino rápido…)"
+                class="block w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs text-n-slate-12"
+                style="margin-bottom: 12px"
+              />
+              <button
+                class="w-full h-11 rounded-xl text-sm font-bold text-white disabled:opacity-60 shadow-lg"
+                :style="{ background: GRAD_LARANJA }"
+                :disabled="savingSession"
+                @click="saveSession"
+              >
+                {{ savingSession ? 'Salvando…' : '✓ Concluir treino' }}
+              </button>
+            </div>
           </div>
 
           <!-- Planilha das semanas: A | B | C | Bônus -->
@@ -4850,5 +5013,168 @@ onMounted(async () => {
     scroll-snap-align: start;
     scroll-margin-top: 0.5rem;
   }
+  /* rodada 43: o rodapé (observações + Concluir) também é ponto de
+     parada — o ímã deixa o scroll chegar no fim */
+  .hub-session-end {
+    scroll-snap-align: end;
+    scroll-margin-bottom: 0.75rem;
+  }
+}
+
+/* ── TIMER DE DESCANSO (rodada 43) ───────────────────────────────── */
+.hub-rest-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: #64748b;
+}
+.hub-rest-lbl { display: inline-flex; align-items: center; gap: 4px; }
+.hub-rest-lbl > span { width: 13px; height: 13px; flex: none; color: #ff8a00; }
+.hub-rest-warm { flex-basis: 100%; }
+.hub-rest-chip {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 138, 0, 0.55);
+  background: rgba(255, 138, 0, 0.08);
+  color: #b85c00;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.hub-rest-chip.is-on,
+.hub-rest-chip:active {
+  background: linear-gradient(135deg, #ff6b1a, #ff8a00);
+  border-color: transparent;
+  color: #fff;
+}
+.dark .hub-rest-chip { color: #ffc17a; background: rgba(255, 138, 0, 0.14); }
+.dark .hub-rest-chip.is-on { color: #1a0e00; background: linear-gradient(135deg, #ff6b1a, #ff8a00); }
+.hub-set-rest {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 138, 0, 0.5);
+  background: rgba(255, 138, 0, 0.1);
+  color: #ff8a00;
+}
+.hub-set-rest > span { width: 20px; height: 20px; flex: none; }
+.hub-set-rest:active { background: #ff8a00; color: #fff; }
+
+.hub-rest-bar {
+  position: sticky;
+  bottom: 8px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 76px;
+  padding: 8px 10px 8px 8px;
+  margin: 0 0 14px;
+  border-radius: 20px;
+  border: 1.5px solid rgba(255, 138, 0, 0.6);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+.dark .hub-rest-bar { background: rgba(20, 20, 24, 0.9); }
+.hub-rest-bar.is-done {
+  border-color: #34c759;
+  animation: hub-rest-pop 0.6s ease-out 3;
+}
+@keyframes hub-rest-pop {
+  0%, 100% { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18); }
+  50% { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.35), 0 10px 28px rgba(0, 0, 0, 0.18); }
+}
+.hub-rest-ring {
+  --p: 0%;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(#ff8a00 var(--p), rgba(255, 138, 0, 0.18) 0);
+  position: relative;
+}
+.hub-rest-ring::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: #fff;
+}
+.dark .hub-rest-ring::before { background: #141418; }
+.hub-rest-bar.is-done .hub-rest-ring { background: #34c759; }
+.hub-rest-ring b {
+  position: relative;
+  font-size: 15px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: #b85c00;
+}
+.dark .hub-rest-ring b { color: #ffc17a; }
+.hub-rest-bar.is-done .hub-rest-ring b { color: #1b7a3a; }
+.dark .hub-rest-bar.is-done .hub-rest-ring b { color: #7ee2a0; }
+.hub-rest-title { font-size: 14px; font-weight: 800; line-height: 1.15; color: #1f2937; }
+.dark .hub-rest-title { color: #f5f5f7; }
+.hub-rest-sub {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hub-rest-ctl { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.hub-rest-btn {
+  height: 48px;
+  min-width: 52px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 138, 0, 0.45);
+  background: rgba(255, 138, 0, 0.08);
+  color: #b85c00;
+  font-size: 13px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hub-rest-btn > span { width: 22px; height: 22px; flex: none; }
+.dark .hub-rest-btn { color: #ffc17a; background: rgba(255, 138, 0, 0.14); }
+.hub-rest-btn.is-main {
+  background: linear-gradient(135deg, #ff6b1a, #ff8a00);
+  border-color: transparent;
+  color: #fff;
+  min-width: 64px;
+}
+.hub-rest-bar.is-done .hub-rest-btn.is-main { background: #34c759; }
+@media (max-width: 640px) {
+  /* celular: 2 linhas (tempo + estado / botões grandes de ponta a
+     ponta), ocupando o pé da tela; acima do botão flutuante do menu */
+  .hub-rest-bar {
+    bottom: 78px;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    padding: 10px 10px 10px;
+    margin: 0 -8px 14px;
+  }
+  .hub-rest-ring { width: 64px; height: 64px; }
+  .hub-rest-ring b { font-size: 16px; }
+  .hub-rest-title { font-size: 15px; }
+  .hub-rest-sub { font-size: 12px; }
+  .hub-rest-ctl { flex-basis: 100%; gap: 8px; }
+  .hub-rest-btn { flex: 1; height: 54px; min-width: 0; padding: 0; font-size: 14px; }
+  .hub-rest-btn.is-main { flex: 1.4; }
+  .hub-rest-btn > span { width: 26px; height: 26px; }
 }
 </style>
