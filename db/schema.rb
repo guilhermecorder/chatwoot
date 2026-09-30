@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_09_30_110000) do
+ActiveRecord::Schema[7.2].define(version: 2026_09_30_160000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1663,6 +1663,23 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_30_110000) do
     t.index ["user_id"], name: "index_crm_weekly_feedbacks_on_user_id"
   end
 
+  create_table "crm_whatsapp_charges", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "waba_id", null: false
+    t.string "phone_number", default: "", null: false
+    t.date "day", null: false
+    t.string "category", null: false
+    t.string "pricing_type", null: false
+    t.integer "volume", default: 0, null: false
+    t.decimal "cost", precision: 12, scale: 4, default: "0.0", null: false
+    t.string "currency", default: "USD", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "day"], name: "index_crm_whatsapp_charges_on_account_id_and_day"
+    t.index ["account_id", "waba_id", "phone_number", "day", "category", "pricing_type"], name: "idx_crm_wa_charges_unique", unique: true
+    t.index ["account_id"], name: "index_crm_whatsapp_charges_on_account_id"
+  end
+
   create_table "csat_survey_responses", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.bigint "conversation_id", null: false
@@ -2251,6 +2268,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_30_110000) do
     t.string "external_ref"
     t.string "color"
     t.string "origin"
+    t.bigint "canceled_by_id"
+    t.string "cancel_reason"
     t.index ["account_id", "external_ref"], name: "index_tasks_on_account_and_external_ref", unique: true, where: "(external_ref IS NOT NULL)"
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
     t.index ["account_id", "task_type", "created_at"], name: "index_tasks_on_account_type_created"
@@ -2258,6 +2277,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_30_110000) do
     t.index ["account_id", "unit"], name: "index_tasks_on_account_id_and_unit"
     t.index ["account_id"], name: "index_tasks_on_account_id"
     t.index ["assignee_id"], name: "index_tasks_on_assignee_id"
+    t.index ["canceled_by_id"], name: "index_tasks_on_canceled_by_id"
     t.index ["contact_id"], name: "index_tasks_on_contact_id"
     t.index ["creator_id"], name: "index_tasks_on_creator_id"
   end
@@ -2453,10 +2473,12 @@ ActiveRecord::Schema[7.2].define(version: 2026_09_30_110000) do
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "crm_weekly_feedbacks", "accounts"
   add_foreign_key "crm_weekly_feedbacks", "users"
+  add_foreign_key "crm_whatsapp_charges", "accounts"
   add_foreign_key "inboxes", "portals"
   add_foreign_key "tasks", "accounts"
   add_foreign_key "tasks", "contacts"
   add_foreign_key "tasks", "users", column: "assignee_id"
+  add_foreign_key "tasks", "users", column: "canceled_by_id"
   add_foreign_key "tasks", "users", column: "creator_id"
   add_foreign_key "user_sessions", "users"
   create_trigger("accounts_after_insert_row_tr", :generated => true, :compatibility => 1).

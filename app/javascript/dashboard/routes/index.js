@@ -29,6 +29,7 @@ const CEVICO_GRANTED_ROUTES = {
   creatives_reports: ['reports'],
   google_dashboard_reports: ['reports'],
   whatsapp_health_reports: ['reports'],
+  whatsapp_spend_reports: ['reports'],
   crm_campaigns: ['campaigns'],
   crm_journey: ['campaigns'],
   crm_campaigns_dashboard: ['campaigns', 'reports'],

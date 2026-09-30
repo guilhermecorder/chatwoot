@@ -45,8 +45,15 @@ const actions = {
     commit('upsertTask', data);
     return data;
   },
+  // item 304: agendamento volta cancelado (Lixeira); card comum some de vez
   async remove({ commit }, id) {
-    await TasksAPI.delete(id);
+    const { data } = await TasksAPI.trash(id);
+    if (data && data.id) commit('upsertTask', data);
+    else commit('removeTask', id);
+    return data;
+  },
+  async purge({ commit }, id) {
+    await TasksAPI.purge(id);
     commit('removeTask', id);
   },
 };

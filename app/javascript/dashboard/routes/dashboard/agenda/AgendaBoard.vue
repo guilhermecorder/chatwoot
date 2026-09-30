@@ -983,6 +983,58 @@ const editingTask = ref(null);
 const isSaving = ref(false);
 const showDeleteConfirm = ref(false);
 
+// ── 🗑️ item 304 (30/09): LIXEIRA — "Excluir" não apaga mais; o agendamento
+// fica cancelado com quem/quando e pode voltar. Em 30/09 a equipe apagou os
+// "duplicados" do Tatuapé (item 297) e os retornos sumiram sem rastro.
+const showTrash = ref(false);
+const trashBusyId = ref(0);
+const TRASH_DAYS = 60;
+const trashTasks = computed(() => {
+  const floor = Date.now() - TRASH_DAYS * 24 * 60 * 60 * 1000;
+  return allTasks.value
+    .filter(t => t.canceled_at && t.due_at && new Date(t.canceled_at).getTime() >= floor)
+    .sort((a, b) => new Date(b.canceled_at) - new Date(a.canceled_at));
+});
+const REASON_LABELS = {
+  excluida_agenda: 'excluído na Agenda',
+  cancelada_equipe: 'cancelado pela equipe',
+  paciente_desmarcou: 'paciente desmarcou (Secretário da Agenda)',
+  oftalmofacil: 'cancelado no Oftalmofácil',
+};
+const trashWho = t => {
+  const when = t.canceled_at
+    ? `${new Date(t.canceled_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${new Date(t.canceled_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+    : '';
+  const reason = REASON_LABELS[t.cancel_reason] || (t.source === 'oftalmofacil' ? 'cancelado no Oftalmofácil' : 'cancelado pelo sistema');
+  const by = t.canceled_by?.name ? `por ${t.canceled_by.name}` : '';
+  return [reason, by, when].filter(Boolean).join(' · ');
+};
+const trashWhen = t =>
+  `${new Date(t.due_at).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} ${hmOf(t)}`;
+const restoreTask = async t => {
+  trashBusyId.value = t.id;
+  try {
+    await store.dispatch('tasks/update', { id: t.id, canceled: false });
+    useAlert(`${displayName(t)} voltou para a Agenda (${trashWhen(t)}).`);
+  } catch {
+    useAlert('Não consegui restaurar.');
+  } finally {
+    trashBusyId.value = 0;
+  }
+};
+const purgeTask = async t => {
+  if (!window.confirm(`Apagar DE VEZ ${displayName(t)} (${trashWhen(t)})? Não dá para voltar atrás.`)) return;
+  trashBusyId.value = t.id;
+  try {
+    await store.dispatch('tasks/purge', t.id);
+    useAlert('Apagado de vez.');
+  } catch {
+    useAlert('Não consegui apagar.');
+  } finally {
+    trashBusyId.value = 0;
+  }
+};
+
 const defaultModality = key => ({ consultas: 'avaliacao', teleconsultas: 'teleconsulta', exames: 'exames', cirurgias: '' })[key] || 'avaliacao';
 const defaultUnit = key => {
   if (key === 'teleconsultas') return ONLINE_UNIT;
@@ -1199,12 +1251,15 @@ const save = async () => {
   }
 };
 
+// item 304: vai para a Lixeira (não apaga) — dá para restaurar
 const removeTask = async () => {
   if (!editingTask.value) return;
+  const t = editingTask.value;
   try {
-    await store.dispatch('tasks/remove', editingTask.value.id);
+    await store.dispatch('tasks/remove', t.id);
     showModal.value = false;
-    useAlert('Agendamento removido');
+    showDeleteConfirm.value = false;
+    useAlert(`${displayName(t)} foi para a Lixeira — dá para restaurar pelo botão Lixeira.`);
   } catch {
     useAlert('Erro ao remover.');
   }
@@ -1993,6 +2048,16 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   >
                     <span class="i-lucide-printer text-xs" />
                     <span class="hidden 2xl:inline">Imprimir</span>
+                  </button>
+                  <!-- 🗑️ item 304: Lixeira — o que foi excluído/cancelado nos últimos 60 dias, com quem e quando -->
+                  <button
+                    class="cv-btn cv-btn-ghost cv-btn-sm"
+                    title="Agendamentos excluídos ou cancelados nos últimos 60 dias — quem apagou, quando, e o botão Restaurar"
+                    @click="showTrash = true"
+                  >
+                    <span class="i-lucide-trash-2 text-xs" />
+                    <span class="hidden 2xl:inline">Lixeira</span>
+                    <span v-if="trashTasks.length" class="cv-chip">{{ trashTasks.length }}</span>
                   </button>
                   <button
                     v-if="isExam"
@@ -2823,9 +2888,10 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
         <div class="cv-modal-foot flex items-center gap-2 flex-wrap">
           <div v-if="editingTask" class="mr-auto">
             <button v-if="!showDeleteConfirm" class="text-xs text-n-slate-11 hover:text-red-600 flex items-center gap-1" @click="showDeleteConfirm = true"><span class="i-lucide-trash-2 text-xs" /> Excluir</button>
-            <div v-else class="flex items-center gap-2">
-              <span class="text-xs text-n-slate-11">Excluir este agendamento?</span>
-              <button class="cv-btn cv-btn-sm cv-red" @click="removeTask">Excluir</button>
+            <!-- item 304: confirmação com NOME e HORÁRIO (a mesma consulta pode aparecer em mais de um lugar — não é duplicada) -->
+            <div v-else class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs text-n-slate-11">Mover <b class="text-n-slate-12">{{ displayName(editingTask) }}</b> · {{ trashWhen(editingTask) }} para a Lixeira? Dá para restaurar depois.</span>
+              <button class="cv-btn cv-btn-sm cv-red" @click="removeTask"><span class="i-lucide-trash-2 text-xs" /> Mover para a Lixeira</button>
               <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="showDeleteConfirm = false">Não</button>
             </div>
           </div>
@@ -2834,6 +2900,33 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
             {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ 🗑️ Lixeira (item 304): excluídos/cancelados nos últimos 60 dias ══ -->
+    <div v-if="showTrash" class="fixed inset-0 z-[52] flex items-center justify-center bg-black/55 p-4" @click.self="showTrash = false">
+      <div class="cv-modal cv-ag-pop w-full max-w-2xl max-h-[92vh] flex flex-col" :style="pageVars">
+        <div class="cv-modal-head flex items-center gap-3">
+          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-trash-2 text-base" /></span>
+          <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">Lixeira da Agenda</p>
+            <h2 class="text-base font-bold leading-tight truncate">{{ trashTasks.length }} agendamento(s) nos últimos {{ TRASH_DAYS }} dias</h2>
+            <p class="text-[11px] opacity-90 truncate">excluído ou cancelado não some de verdade: fica aqui com quem e quando, e volta com 1 clique</p>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn" @click="showTrash = false"><span class="i-lucide-x" /></button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 space-y-2">
+          <p v-if="!trashTasks.length" class="text-sm text-n-slate-11 text-center py-8">Nada na Lixeira. 🎉</p>
+          <div v-for="t in trashTasks" :key="'trash' + t.id" class="cv-ag-slotrow items-center">
+            <span class="cv-icon cv-icon-sm flex-shrink-0" :style="{ background: TYPE_BY_KEY[typeOf(t)]?.color || '#64748B' }"><span :class="TYPE_BY_KEY[typeOf(t)]?.icon || 'i-lucide-calendar'" class="text-xs" /></span>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-bold text-n-slate-12 truncate">{{ displayName(t) }} <span class="text-xs font-normal text-n-slate-11">· {{ trashWhen(t) }}<template v-if="t.unit"> · {{ UNITS[t.unit]?.label || t.unit }}</template> · {{ TYPE_BY_KEY[typeOf(t)]?.label || 'Agendamento' }}</span></p>
+              <p class="text-xs text-n-slate-11 truncate">{{ trashWho(t) }}<template v-if="t.phone"> · {{ t.phone }}</template></p>
+            </div>
+            <button class="cv-btn cv-btn-sm" :disabled="trashBusyId === t.id" title="Volta para a Agenda no mesmo dia e horário" @click="restoreTask(t)"><span class="i-lucide-undo-2 text-xs" /> Restaurar</button>
+            <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-red" :disabled="trashBusyId === t.id" title="Apaga de vez (só administrador)" @click="purgeTask(t)"><span class="i-lucide-x text-xs" /></button>
+          </div>
         </div>
       </div>
     </div>

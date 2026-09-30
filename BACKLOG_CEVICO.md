@@ -8797,3 +8797,41 @@ com parâmetros diferentes selecionáveis por chavinhas.
 - Validade: continua 30 DIAS (já era; atende o "pelo menos 3 dias"). Links compridos antigos continuam abrindo.
 - Limite de 60 aberturas/min por IP também no /c/. Testes: 17 verdes (abre no 3º dia, vence depois do prazo, código
   inexistente = vencido). TEM MIGRATION (tabela nova) → backup antes. WEB só. SEM commit.
+
+## 303. ✅ 💸 GASTO DO WHATSAPP: tela em Análises + indicadores no Meu Painel (30/09; "pode construir a tela de gasto de whatsapp")
+- POR QUÊ: em 01/10/2026 a Meta passa a cobrar TODA mensagem enviada (inclusive a resposta do robô/equipe dentro das 24h,
+  categoria "serviço" = preço de utilidade, R$ 0,035). Marketing R$ 0,3217. Cada balão é 1 cobrança (o robô manda até 3).
+  Lead de anúncio Clique-para-WhatsApp respondido em 24h continua com 72h grátis. Contas em BRL até 30/06/2027.
+- WEBHOOK: o status de cada mensagem traz `pricing` (cobrada? categoria? tipo regular/free_customer_service/free_entry_point);
+  agora fica em `messages.additional_attributes.cevico_wa_billing` (merge, sem apagar o carimbo do robô). Antes era descartado.
+- FATURA DA META: tabela nova `crm_whatsapp_charges` (MIGRATION) com o `pricing_analytics` por dia × número × categoria ×
+  tipo, custo na moeda da conta. `Crm::WhatsappPricingSyncJob` 07:40 UTC (35 dias) + botão "Atualizar da Meta" (até 95 dias
+  na hora; 450 vai pra fila). Precisa do `business_account_id` + `api_key` na caixa Cloud API.
+- TELA `Análises → Gasto do WhatsApp` (só admin; rota `reports/whatsapp_spend`): Conta da Meta (valor real, cobradas,
+  grátis na janela, grátis pelo anúncio, por categoria, por número, últimos 12 meses) · Regra de 01/10 (custo estimado ×
+  "se a regra valesse", balões por resposta do robô, economia ao juntar em 1 balão) · Quem gastou (Lista|Cards: Atendentes
+  de IA, follow-up, jornada, campanha, lembretes `cevico_auto`, cada pessoa da equipe, sistema) · Dia a dia (custo /
+  regra de out. / mensagens) · Por caixa e por categoria · Tarifas editáveis (`ai_config.whatsapp_pricing`, padrão lido
+  na Meta em 30/09) · Como ler.
+- MEU PAINEL: 3 indicadores novos no cesto ("+ Novo indicador"): `wa_messages_sent`, `wa_cost` (R$ estimado pelas tarifas),
+  `wa_cost_meta` (R$ pela fatura). `bucketize` aceita coluna de DATA (`date: true`).
+- Testes: 17 novos (serviço, API, webhook) + 98 dos controllers CRM verdes. Demo local em tmp/seed_wa_spend.rb (não vai).
+- DEPLOY: WEB+SIDEKIQ **COM MIGRATION** (backup antes). Reversão: imagem anterior. SEM commit — aguarda "pode subir".
+- DEPOIS DO DEPLOY (ele): abrir a tela e clicar "Atualizar da Meta" → "15 meses" para trazer o histórico; conferir as
+  tarifas no WhatsApp Manager em 01/10; decidir os balões do robô (3 → 1?).
+
+## 304. ✅ 🗑️ AGENDA: "Excluir" vira LIXEIRA (30/09; após os retornos do Tatuapé sumirem — Nat 10h19 — "pode construir")
+- O QUE HOUVE (30/09): 08h13 a equipe viu "duplicados" na janela do Dr. Gustavo no Tatuapé (blocos de 10 min; a consulta
+  presumida de 15 min aparecia em 2 blocos — item 297) e apagou os "duplicados"; o Excluir fazia `task.destroy!` sem
+  confirmação e sem rastro → os retornos reais sumiram; 10h19 a Nat recolocou um por um. Conferir na VPS: `docker logs`
+  do web com `"method":"DELETE"` + `/tasks/` entre 08h e 10h20.
+- AGORA: Excluir um AGENDAMENTO (consulta/cirurgia) = cancelar com rastro (`canceled_at` + `canceled_by_id` + `cancel_reason`;
+  MIGRATION `add_cancel_trace_to_tasks`). Confirmação mostra NOME e HORÁRIO ("Mover X · qua., 30/09 09:30 para a Lixeira?").
+  Cancelar pela ficha também guarda quem. Card de tarefa comum continua apagando de verdade.
+- LIXEIRA (botão no cabeçalho da Agenda, com contador): excluídos/cancelados dos últimos 60 dias — nome, dia/hora, unidade,
+  tipo, "excluído na Agenda · por Fulana · 30/09 às 16:48" (ou "paciente desmarcou", "cancelado no Oftalmofácil") e
+  **Restaurar** (volta no mesmo dia/horário). Apagar de vez: só admin, pela Lixeira (`DELETE ?force=1`); equipe recebe 403.
+- Testes: tasks_trash_spec (6) + tasks_color/origin + appointments_controller = 22 verdes; conferido ao vivo no localhost
+  (Excluir → confirmação → Lixeira → Restaurar → voltou à grade).
+- DEPLOY: WEB+SIDEKIQ **COM MIGRATION** (junto com o 303; backup antes). Reversão: imagem anterior (colunas novas não
+  atrapalham). SEM commit — aguarda "pode subir".

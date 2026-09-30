@@ -51,9 +51,9 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   # ── catálogo ──────────────────────────────────────────────────────────
   def base_metrics(since, until_at, prev_since, prev_until, keys, prev_keys) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists, Metrics/CyclomaticComplexity
     metrics = {}
-    add = lambda do |key, label, unit, cur_scope, prev_scope, column, sum: nil, distinct: nil|
-      series = bucketize(cur_scope, column, sum: sum, distinct: distinct)
-      prev_series = bucketize(prev_scope, column, sum: sum, distinct: distinct)
+    add = lambda do |key, label, unit, cur_scope, prev_scope, column, sum: nil, distinct: nil, date: false|
+      series = bucketize(cur_scope, column, sum: sum, distinct: distinct, date: date)
+      prev_series = bucketize(prev_scope, column, sum: sum, distinct: distinct, date: date)
       metrics[key] = {
         label: label,
         unit: unit,
@@ -137,7 +137,28 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
                revenue_logs(pipeline, since, until_at), revenue_logs(pipeline, prev_since, prev_until),
                'crm_contact_stage_logs.entered_at', sum: 'COALESCE(crm_contacts.value, 0)')
     end
+
+    # 💸 item 303 (30/09): o WhatsApp passou a custar por mensagem — quantas
+    # saíram (robô + equipe + lembretes), o gasto ESTIMADO pelas tarifas
+    # (marca da Meta em cada mensagem) e o gasto pela FATURA da Meta
+    rates = Crm::WhatsappPricing.rates(@account)
+    add.call('wa_messages_sent', 'Mensagens enviadas no WhatsApp (robô + equipe + lembretes)', 'n',
+             wa_messages(since, until_at), wa_messages(prev_since, prev_until), 'messages.created_at')
+    add.call('wa_cost', 'Gasto com WhatsApp (R$, estimado pelas tarifas)', 'brl',
+             wa_messages(since, until_at), wa_messages(prev_since, prev_until), 'messages.created_at',
+             sum: Crm::WhatsappPricing.cost_sql(rates))
+    add.call('wa_cost_meta', 'Gasto com WhatsApp (fatura da Meta)', 'brl',
+             wa_charges(since, until_at), wa_charges(prev_since, prev_until), 'crm_whatsapp_charges.day',
+             sum: 'crm_whatsapp_charges.cost', date: true)
     metrics
+  end
+
+  def wa_messages(since, until_at)
+    Crm::WhatsappSpendService.outgoing_scope(@account, since, until_at)
+  end
+
+  def wa_charges(since, until_at)
+    Crm::WhatsappCharge.where(account_id: @account.id, day: since.to_date..until_at.to_date)
   end
 
   # ── escopos ───────────────────────────────────────────────────────────
@@ -215,8 +236,9 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     :month
   end
 
-  def bucket_sql(column)
-    tz_col = "#{column} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'"
+  # date: true = a coluna já é uma DATA (sem hora/fuso a converter)
+  def bucket_sql(column, date: false)
+    tz_col = date ? column : "#{column} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo'"
     case @granularity
     when :week then "to_char(date_trunc('week', #{tz_col}), 'YYYY-MM-DD')"
     when :month then "to_char(date_trunc('month', #{tz_col}), 'YYYY-MM-DD')"
@@ -245,8 +267,8 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     keys
   end
 
-  def bucketize(scope, column, sum: nil, distinct: nil)
-    grouped = scope.reorder(nil).group(Arel.sql(bucket_sql(column)))
+  def bucketize(scope, column, sum: nil, distinct: nil, date: false)
+    grouped = scope.reorder(nil).group(Arel.sql(bucket_sql(column, date: date)))
     return grouped.sum(Arel.sql(sum)) if sum
     return grouped.distinct.count(Arel.sql(distinct)) if distinct
 

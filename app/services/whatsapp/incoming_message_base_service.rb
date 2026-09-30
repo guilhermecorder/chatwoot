@@ -99,7 +99,21 @@ class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
       error = status[:errors]&.first
       message.external_error = "#{error[:code]}: #{error[:title]}"
     end
+    # 💸 item 303 (30/09): a Meta diz em cada status se a mensagem foi COBRADA
+    # e em qual categoria (service/utility/marketing) — fica na própria
+    # mensagem para a tela Gasto do WhatsApp (merge, nunca substitui o resto)
+    store_billing(message, status[:pricing]) if status[:pricing].present?
     message.save!
+  end
+
+  def store_billing(message, pricing)
+    billing = {
+      'billable' => pricing[:billable].to_s == 'true',
+      'category' => pricing[:category].to_s.downcase,
+      'type' => pricing[:type].to_s.downcase,
+      'model' => pricing[:pricing_model].to_s
+    }
+    message.additional_attributes = (message.additional_attributes || {}).merge('cevico_wa_billing' => billing)
   end
 
   def create_messages

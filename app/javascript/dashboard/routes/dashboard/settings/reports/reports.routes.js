@@ -26,6 +26,7 @@ import SLAReports from './SLAReports.vue';
 import LabelDashboard from './LabelDashboard.vue';
 import CrmDashboardReport from './CrmDashboardReport.vue';
 import WhatsappHealth from './WhatsappHealth.vue';
+import WhatsappSpend from './WhatsappSpend.vue';
 import TrafficFunnel from './TrafficFunnel.vue';
 import DoctorsDashboard from './DoctorsDashboard.vue';
 import AgentsDashboard from './AgentsDashboard.vue';
@@ -186,6 +187,15 @@ export default {
             permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: WhatsappHealth,
+        },
+        {
+          // 💸 item 303: Gasto do WhatsApp — dinheiro, só admin
+          path: 'whatsapp_spend',
+          name: 'whatsapp_spend_reports',
+          meta: {
+            permissions: ['administrator'],
+          },
+          component: WhatsappSpend,
         },
         {
           path: 'traffic_funnel',

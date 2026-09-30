@@ -1353,6 +1353,19 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/ai_dashboard`, { params: query });
   }
 
+  // ── 💸 Gasto do WhatsApp (item 303, só admin) ────────────────────────
+  getWhatsappSpend(params = {}) {
+    return axios.get(`${this.url}/whatsapp_spend`, { params });
+  }
+
+  saveWhatsappRates(payload) {
+    return axios.post(`${this.url}/whatsapp_spend/rates`, payload);
+  }
+
+  syncWhatsappSpend(days = 35) {
+    return axios.post(`${this.url}/whatsapp_spend/sync`, { days });
+  }
+
   // ── Ferramentas da Academia (time lê; admin escreve) ────────────────
   getTeamTools() {
     return axios.get(`${this.url}/team_tools`);

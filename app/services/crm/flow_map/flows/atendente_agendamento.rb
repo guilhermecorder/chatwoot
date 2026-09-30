@@ -9,7 +9,7 @@ class Crm::FlowMap::Flows::AtendenteAgendamento
     what 'conversa com o paciente no WhatsApp da recepção até a consulta agendada (Roteiro CEVICO + agenda viva)'
     config tab: 'agentes', anchor: 'atendente_agendamento'
     trigger :event, 'Mensagem do paciente na caixa e coluna dele (espera 12 s)'
-    jobs 'Crm::ResponderAgentJob'
+    jobs 'Crm::ResponderAgentJob', 'Crm::ResponderRescueJob' # 🛟 item 291: resgate a cada 5 min
 
     node :ligado, 'Agente ligado, caixa e coluna dele?', kind: :decision
     node :ultima, 'Ainda é a última mensagem?', kind: :decision

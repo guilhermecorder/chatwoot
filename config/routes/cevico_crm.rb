@@ -317,6 +317,11 @@ namespace :crm do
   resource :agents_dashboard, only: [:show], controller: 'agents_dashboards'
   # Dashboard dos AGENTES DE IA (item 85, só admin)
   resource :ai_dashboard, only: [:show], controller: 'ai_dashboards'
+  # 💸 Gasto do WhatsApp (item 303, só admin): fatura da Meta + quem gastou
+  resource :whatsapp_spend, only: [:show], controller: 'whatsapp_spends' do
+    post :rates
+    post :sync
+  end
   resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
   # 📅 Painel de Agendamentos (item 200): marcadas/remarcadas/canceladas no período
   get 'appointments/feed', to: 'appointments#feed'

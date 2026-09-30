@@ -103,6 +103,7 @@ class Crm::AppointmentRecorder
 
     future.update!(
       canceled_at: Time.current,
+      cancel_reason: 'paciente_desmarcou', # item 304: aparece assim na Lixeira
       description: [future.description.presence,
                     "Cancelada pela conversa ##{conversation&.display_id} (Secretário da Agenda)"].compact.join("\n\n")
     )

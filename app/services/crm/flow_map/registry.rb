@@ -36,6 +36,7 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::Creative,
     Crm::FlowMap::Flows::Harvest,
     Crm::FlowMap::Flows::CreativesCenter,
+    Crm::FlowMap::Flows::WhatsappSpend, # 💸 item 303
     # Gestão e evolução do time
     Crm::FlowMap::Flows::Manager,
     Crm::FlowMap::Flows::Auditor,

@@ -6,6 +6,7 @@
 #  archived_at         :datetime
 #  attendance          :string
 #  booking_kind        :string
+#  cancel_reason       :string
 #  canceled_at         :datetime
 #  color               :string
 #  comments            :jsonb            not null
@@ -34,6 +35,7 @@
 #  updated_at          :datetime         not null
 #  account_id          :bigint           not null
 #  assignee_id         :bigint
+#  canceled_by_id      :bigint
 #  contact_id          :bigint
 #  creator_id          :bigint           not null
 #
@@ -46,6 +48,7 @@
 #  index_tasks_on_account_type_created      (account_id,task_type,created_at)
 #  index_tasks_on_account_type_due          (account_id,task_type,due_at)
 #  index_tasks_on_assignee_id               (assignee_id)
+#  index_tasks_on_canceled_by_id            (canceled_by_id)
 #  index_tasks_on_contact_id                (contact_id)
 #  index_tasks_on_creator_id                (creator_id)
 #
@@ -53,6 +56,7 @@
 #
 #  fk_rails_...  (account_id => accounts.id)
 #  fk_rails_...  (assignee_id => users.id)
+#  fk_rails_...  (canceled_by_id => users.id)
 #  fk_rails_...  (contact_id => contacts.id)
 #  fk_rails_...  (creator_id => users.id)
 #
@@ -60,9 +64,29 @@ class Task < ApplicationRecord
   belongs_to :account
   belongs_to :creator, class_name: 'User'
   belongs_to :assignee, class_name: 'User', optional: true
+  # 🗑️ item 304: quem mandou o agendamento para a Lixeira (nil = robô/hub)
+  belongs_to :canceled_by, class_name: 'User', optional: true
   # Central do Paciente (Fase 0): consulta amarrada ao CONTATO de verdade;
   # o telefone vira fallback para paciente que ainda não existe no sistema.
   belongs_to :contact, optional: true
+
+  # 🗑️ item 304 (30/09): agendamento (consulta/cirurgia) nunca é apagado pela
+  # tela — vai para a Lixeira (canceled_at + quem + motivo) e pode voltar.
+  # Só card de tarefa comum (sem paciente) continua sendo apagado de verdade.
+  APPOINTMENT_TYPES = %w[consulta cirurgia].freeze
+  CANCEL_REASONS = %w[excluida_agenda cancelada_equipe paciente_desmarcou oftalmofacil].freeze
+
+  def appointment?
+    APPOINTMENT_TYPES.include?(task_type)
+  end
+
+  def to_trash!(by:, reason: 'excluida_agenda')
+    update!(canceled_at: Time.current, canceled_by: by, cancel_reason: reason)
+  end
+
+  def restore!
+    update!(canceled_at: nil, canceled_by: nil, cancel_reason: nil)
+  end
 
   # anexos da tarefa (imagem/PDF/documento — pedido de exame, print, guia):
   # visíveis para criador, responsável e admin (storage entra no backup!)

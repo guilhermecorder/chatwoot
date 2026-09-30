@@ -688,6 +688,7 @@ const MENU_LAYOUT = [
       'Reports > Agents Dashboard', // a equipe no processo
       'Reports > Calls Dashboard',
       'Reports > WhatsApp Health', // o canal está saudável?
+      'Reports > WhatsApp Spend', // 💸 quanto a Meta cobra (item 303, só admin)
       'Reports > Traffic Funnel', // por último (pedido dele 20/09)
       {
         rest: 'Reports',
@@ -794,6 +795,7 @@ const TILE_COLORS = {
   'Agents Dashboard': '#ff2d55',
   'Calls Dashboard': '#30d158',
   'WhatsApp Health': '#64d2ff',
+  'WhatsApp Spend': '#25d366',
   'Chatwoot Reports': '#8e8e93',
   // Configurações (pedido 20/09: cada linha com a sua cor, nada de azulejo cinza)
   'Settings Account Settings': '#0a84ff',
@@ -1259,8 +1261,17 @@ const menuItems = computed(() => {
             label: 'Saúde do WhatsApp',
             route: 'whatsapp_health_reports',
           },
+          {
+            // 💸 item 303: dinheiro — só o admin vê
+            name: 'WhatsApp Spend',
+            icon: 'i-lucide-receipt',
+            key: 'whatsapp_spend',
+            label: 'Gasto do WhatsApp',
+            route: 'whatsapp_spend_reports',
+            adminOnly: true,
+          },
         ]
-          .filter(r => canSeeReport(r.key))
+          .filter(r => canSeeReport(r.key) && (!r.adminOnly || isAdmin.value))
           .map(r => ({
             name: r.name,
             label: r.label,

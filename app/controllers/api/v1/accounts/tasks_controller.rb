@@ -1,4 +1,4 @@
-class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
+class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
   include TaskAttachments
 
   before_action :task, only: [:update, :destroy]
@@ -82,8 +82,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
        Time.zone.parse(params[:due_at].to_s) != task.due_at
       task.rescheduled_count += 1
     end
-    # cancelar/reativar consulta
-    task.canceled_at = params[:canceled] ? Time.current : nil if params.key?(:canceled)
+    # cancelar/reativar consulta — item 304: com quem e por quê (Lixeira)
+    apply_cancel_params if params.key?(:canceled)
     # ✅ item 300: a equipe marca/desmarca "confirmou" à mão (paciente confirmou por telefone)
     apply_manual_confirmation if params.key?(:confirmed)
 
@@ -100,7 +100,19 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
     render json: task_json(task)
   end
 
+  # 🗑️ item 304 (30/09): "Excluir" um AGENDAMENTO manda para a Lixeira (fica no
+  # banco, some da grade, guarda quem apagou) — em 30/09 a equipe apagou os
+  # "duplicados" do Tatuapé e os retornos sumiram sem rastro. Apagar de vez só
+  # o admin, e só pela Lixeira (force=1). Card de tarefa comum continua apagando.
   def destroy
+    if task.appointment? && !force_delete?
+      task.to_trash!(by: Current.user, reason: 'excluida_agenda')
+      return render json: task_json(task)
+    end
+    if task.appointment? && !Current.account_user.administrator?
+      return render json: { error: 'Só o administrador apaga de vez. Use a Lixeira.' }, status: :forbidden
+    end
+
     task.destroy!
     head :no_content
   end
@@ -126,6 +138,23 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
 
   def task
     @task ||= Current.account.tasks.find(params[:id])
+  end
+
+  def force_delete?
+    ActiveModel::Type::Boolean.new.cast(params[:force]) == true
+  end
+
+  # item 304: cancelar guarda quem e por quê; reativar limpa o rastro
+  def apply_cancel_params
+    if params[:canceled]
+      task.canceled_at ||= Time.current
+      task.canceled_by ||= Current.user
+      task.cancel_reason ||= 'cancelada_equipe'
+    else
+      task.canceled_at = nil
+      task.canceled_by = nil
+      task.cancel_reason = nil
+    end
   end
 
   def apply_manual_confirmation
@@ -186,6 +215,9 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController
       doctor: t.doctor,
       modality: t.modality,
       canceled_at: t.canceled_at,
+      # item 304: rastro da Lixeira
+      canceled_by: t.canceled_by ? { id: t.canceled_by.id, name: t.canceled_by.name } : nil,
+      cancel_reason: t.cancel_reason,
       rescheduled_count: t.rescheduled_count,
       attendance: t.attendance,
       surgery_indication: t.surgery_indication,

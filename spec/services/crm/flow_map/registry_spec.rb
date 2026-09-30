@@ -22,6 +22,8 @@ RSpec.describe Crm::FlowMap::Registry do
       'Crm::ConversationAuditorJob' => 'auditor',
       'Crm::CreativeJob' => 'creative',
       'Crm::AdInsightsSyncJob' => 'creatives_center',
+      'Crm::WhatsappPricingSyncJob' => 'whatsapp_spend', # 💸 item 303
+      'Crm::ResponderRescueJob' => 'atendente_agendamento', # 🛟 item 291 (faltava no mapa)
       'Crm::AppointmentReminderSendJob' => 'reminders',
       'Crm::NpsSurveySendJob' => 'nps_survey',
       'Crm::JourneyRunJob' => 'journey',
