@@ -16,39 +16,36 @@ class GoogleAdsConversionsService
     @params     = params
   end
 
-  def call # rubocop:disable Metrics/MethodLength
+  def call
     config = crm_settings&.google_ads_config
     return { success: false, error: 'Google Ads não configurado' } unless configured?(config)
 
-    measurement_id = config['measurement_id']
-    api_secret     = config['api_secret']
+    # item 313: o Google aceita (204) e DESCARTA em silêncio nome com espaço,
+    # acento ou hífen — aqui o nome é conferido antes de sair
+    @event_name = Cevico::ConversionEvents.ga4_name(@event_name)
+    return { success: false, error: 'Nome de evento inválido para o GA4 (só letras, números e _)' } if @event_name.blank?
 
-    url = "#{ENDPOINT}?measurement_id=#{measurement_id}&api_secret=#{api_secret}"
-
-    body = {
-      client_id: client_identity[:client_id],
-      events: [build_event]
-    }
-
-    response = HTTParty.post(
-      url,
-      body: body.to_json,
-      headers: { 'Content-Type' => 'application/json' },
-      timeout: 15
-    )
-
-    # GA4 Measurement Protocol retorna 204 em sucesso (sem corpo)
-    if response.code == 204 || response.success?
-      log_sent! # alimenta o Dashboard Google (conversões enviadas por dia)
-      { success: true }
-    else
-      { success: false, error: "HTTP #{response.code}: #{response.body&.slice(0, 200)}" }
-    end
+    deliver(config)
   rescue StandardError => e
     { success: false, error: e.message }
   end
 
   private
+
+  def deliver(config)
+    response = HTTParty.post(
+      "#{ENDPOINT}?measurement_id=#{config['measurement_id']}&api_secret=#{config['api_secret']}",
+      body: { client_id: client_identity[:client_id], events: [build_event] }.to_json,
+      headers: { 'Content-Type' => 'application/json' },
+      timeout: 15
+    )
+
+    # GA4 Measurement Protocol retorna 204 em sucesso (sem corpo)
+    return { success: false, error: "HTTP #{response.code}: #{response.body&.slice(0, 200)}" } unless response.code == 204 || response.success?
+
+    log_sent! # alimenta o Dashboard Google (conversões enviadas por dia)
+    { success: true, event_name: @event_name, tied: client_identity[:real] }
+  end
 
   def crm_settings
     @crm_settings ||= CrmSetting.find_by(account: @account)
@@ -60,14 +57,21 @@ class GoogleAdsConversionsService
     return if settings.blank?
 
     cfg = settings.google_ads_config || {}
-    log = (cfg['sent_log'] ||= {})
-    day = (log[Date.current.iso8601] ||= {})
-    day[@event_name.to_s] = day[@event_name.to_s].to_i + 1
-    # mantém só ~90 dias
-    cfg['sent_log'] = log.sort.last(90).to_h
+    bump_log(cfg, 'sent_log')
+    # item 313: quantas saíram AMARRADAS à visita que clicou no anúncio — só
+    # essas o Google Ads consegue creditar; o resto aparece no GA4 e para aí
+    bump_log(cfg, 'tied_log') if client_identity[:real]
     settings.update_columns(google_ads_config: cfg) # rubocop:disable Rails/SkipsModelValidations
   rescue StandardError => e
     Rails.logger.warn "[GoogleAdsConversions] log falhou: #{e.message}"
+  end
+
+  # contador por dia/evento; mantém só ~90 dias
+  def bump_log(cfg, key)
+    log = (cfg[key] ||= {})
+    day = (log[Date.current.iso8601] ||= {})
+    day[@event_name.to_s] = day[@event_name.to_s].to_i + 1
+    cfg[key] = log.sort.last(90).to_h
   end
 
   def configured?(config)

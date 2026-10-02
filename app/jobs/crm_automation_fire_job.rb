@@ -293,26 +293,59 @@ class CrmAutomationFireJob < ApplicationJob
 
   def fire_meta_ads(automation, contact, pipeline)
     event_name = automation.action_config['meta_event_name'].presence || 'Lead'
-    MetaAdsConversionsService.new(
+    # para a Meta vai SÓ valor e moeda: o evento sai com o telefone do
+    # paciente (embaralhado), então o procedimento não viaja junto — dado de
+    # saúde ligado a uma pessoa não sai do sistema (LGPD + regra da própria Meta)
+    value = conversion_value(automation, contact, pipeline, closing: Cevico::ConversionEvents.closing_meta?(event_name))
+    custom = value ? { value: value, currency: automation.action_config['currency'].presence || 'BRL' } : {}
+
+    result = MetaAdsConversionsService.new(
       account:     pipeline.account,
       event_name:  event_name,
       contact:     contact,
+      custom_data: custom,
       event_id:    "crm_auto_#{automation.id}_#{contact.id}_#{Time.current.to_i}",
     ).call
+    # item 313: recusa da Meta (token vencido, evento inválido…) aparece como
+    # FALHA no histórico da automação — antes ficava como "disparada"
+    raise "Meta recusou o evento #{event_name}: #{result[:error]}" unless result[:success]
   end
 
   def fire_google_ads(automation, contact, pipeline)
     event_name = automation.action_config['ga4_event_name'].presence || 'generate_lead'
-    extra = {}
-    extra[:value]    = automation.action_config['conversion_value'].to_f if automation.action_config['conversion_value'].present?
+    extra = conversion_details(automation, contact)
+    value = conversion_value(automation, contact, pipeline, closing: Cevico::ConversionEvents.closing_ga4?(event_name))
+    extra[:value]    = value if value
     extra[:currency] = automation.action_config['currency'].presence || 'BRL'
 
-    GoogleAdsConversionsService.new(
+    result = GoogleAdsConversionsService.new(
       account:    pipeline.account,
       event_name: event_name,
       contact:    contact,
       params:     extra,
     ).call
+    raise "Google recusou o evento #{event_name}: #{result[:error]}" unless result[:success]
+  end
+
+  # Item 313 (só Google): o PROCEDIMENTO viaja dentro do evento (não no nome):
+  # a etiqueta exigida pela automação (ex.: "refrativa") e a página de onde o
+  # lead veio. O GA4 recebe só a identidade anônima do navegador.
+  def conversion_details(automation, contact)
+    {
+      procedimento: automation.action_config['required_label'].to_s.strip.downcase.presence,
+      cevico_page: contact.additional_attributes&.dig('page_ads', 'slug').presence
+    }.compact
+  end
+
+  # valor digitado na automação vence; evento de FECHAMENTO sem valor digitado
+  # leva o valor do card (o preço da cirurgia)
+  def conversion_value(automation, contact, pipeline, closing:)
+    typed = automation.action_config['conversion_value']
+    return typed.to_f if typed.present?
+    return unless closing
+
+    card_value = Crm::Contact.find_by(contact_id: contact.id, pipeline_id: pipeline.id)&.value.to_f
+    card_value.positive? ? card_value : nil
   end
 
   # Roda o Analista de Conversas (Claude) na conversa mais recente do

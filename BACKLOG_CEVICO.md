@@ -8972,3 +8972,50 @@ com parâmetros diferentes selecionáveis por chavinhas.
   Paciente do Oftalmofácil segue a regra do bloco dele. Config: `appointment_reminders.dN.stage_ids`.
 - Testes: appointment_reminder_send_job_d2_spec (+2) + settings_reminder_inboxes_spec (+1) verdes.
 - 310 + 311 + 312: WEB+SIDEKIQ, sem migration. Reversão: :3d3646c. SEM commit.
+
+## 313. ✅ 🎯 CONVERSÕES GOOGLE E META: eventos por ETAPA DO FUNIL, envio "amarrado × solto" e Conferência no painel (02/10; "os eventos de conversão não estão bem encaixados com o Google Ads… vamos construir de modo que funcione")
+- DIAGNÓSTICO (lido no código + documentação do Google e da Meta):
+  · o caminho é página → Protocolo → coluna do CRM → GA4 (Measurement Protocol) → Google Ads importa o EVENTO-CHAVE. Só é
+    creditada ao anúncio a conversão enviada com a identidade do navegador que clicou (cookie `_ga`). Quem não veio pela página
+    saía com identidade inventada (`crm.<id>`): aparece no GA4 e para aí;
+  · o nome do evento era texto livre: o Google responde 204 para tudo e DESCARTA em silêncio nome com espaço/acento/hífen;
+  · página MONTADA (botão `/cta`) nunca guardava a identidade do navegador (só a página anexada guardava);
+  · `gbraid`/`wbraid` (o que o Google manda no lugar do gclid em iPhone) não eram capturados; código de clique era cortado em
+    150 letras (o da Meta passa disso); o cookie de sessão novo do GA4 (`GS2.1.s…`, 2025) não era lido;
+  · "Colunas que enviam conversão" do painel lia a chave errada e mostrava `generate_lead` para todas;
+  · Meta: lead de anúncio de WhatsApp ia sem a conta do WhatsApp (obrigatória) e com nome fora da lista de mensagem; o
+    clique da página (fbclid) era guardado e nunca enviado; recusa da Meta ficava como "disparada" no histórico.
+- AGORA:
+  · `Cevico::ConversionEvents` — lista fechada por etapa: `lead_whatsapp`, `orcamento_enviado`, `agendou_consulta`,
+    `compareceu_consulta`, `fechou_cirurgia` (+ "Outro nome (avançado)" conferido na tela). Nome válido passa intacto; nome
+    inválido é corrigido no envio ("Refrativa PRK" → `Refrativa_PRK`). O PROCEDIMENTO viaja dentro do evento
+    (`procedimento` = etiqueta exigida pela automação; `cevico_page` = página de origem).
+  · Evento de fechamento sem valor digitado leva o valor do card (Google `fechou_cirurgia`/`purchase`; Meta `Purchase`).
+  · Google: `tied_log` conta as que saíram amarradas; painel Google ganhou o bloco CONFERÊNCIA (página × envio na mesma
+    propriedade · nome aceito · evento-chave no Analytics, lido pela Admin API com a mesma conta de serviço · enviadas ×
+    amarradas por evento) e o card "Conversões enviadas" mostra as amarradas.
+  · Páginas: `gbraid`/`wbraid` reconhecidos como Google Ads; códigos de clique até 500 letras; identidade do GA4 e do Pixel
+    (`_ga`, `_ga_*`, `_fbp`, `_fbc`) lida dos cookies no servidor em `/cta`, `/ref` e `/hub/ref`.
+  · Meta: anúncio de WhatsApp vai com `ctwa_clid` + `whatsapp_business_account_id` e nome da lista (Lead/Contact/Cadastro →
+    `LeadSubmitted`; Schedule → `QualifiedLead`); sem a conta do WhatsApp cai no caminho comum (telefone). Lead da página
+    leva `fbc`/`fbp`. Opção nova `QualifiedLead` e campo de valor no formulário. Para a Meta vai SÓ valor e moeda — o
+    procedimento NÃO viaja (o evento sai com o telefone embaralhado; dado de saúde ligado a pessoa não sai do sistema).
+  · Recusa do Google ou da Meta vira FALHA no histórico da automação (antes: "disparada").
+  · Integrações: selo "✓ Recebimento (Ads API)" virou "✓ Token do Ads salvo" (nenhum código usa esse token ainda).
+  · ACHADO NO TESTE (02/10 tarde): o contêiner GTM-MWDV8T35 das páginas carrega a propriedade **G-QT6Y7BJ6SB** (evento
+    `clique_whatsapp`), e as Integrações enviam para **G-3EDHXBTSBG**. Se a página não medir também na G-3EDHXBTSBG, ou se o
+    Google Ads importar da outra, NADA amarra. A Conferência agora lê o arquivo público do GTM (`Cevico::Gtm.ga4_ids`) e
+    mostra em quais propriedades a página mede × para qual o CRM envia. Decisão dele: qual das duas é a oficial.
+  · Página com mais de um Analytics: o Protocolo guarda a sessão da propriedade que recebe as conversões.
+- NÃO MUDA sozinho: automação antiga com `generate_lead` continua enviando `generate_lead` (a tela avisa que a página já
+  dispara esse nome no clique). Trocar para a lista nova é decisão dele, coluna a coluna.
+- FORA DO SISTEMA (ele faz): marcar cada evento como evento-chave no GA4; importar no Google Ads (Metas → Conversões);
+  ativar a "Google Analytics Admin API" no Google Cloud para a Conferência ler os eventos-chave; conferir que o Pixel das
+  Integrações é o conjunto de dados ligado à conta do WhatsApp.
+- PRÓXIMA FATIA (não construída): envio direto ao Google Ads pelo código do clique (gclid/gbraid) — precisa de acesso
+  OAuth à conta do Ads + Developer Token aprovado.
+- Testes: 30 exemplos novos (conversion_events 5 · traffic_source 6 · gtm_ga4_ids 2 · google_ads_conversions 5 ·
+  meta_ads_conversions 5 · google_dashboards_check 3 · crm_automation_fire_job +4); bateria com 310–312 e páginas: 112
+  verdes. Clique real testado no localhost (/cta, /ref e o script da página no navegador); telas conferidas. rubocop no
+  nível da base.
+- WEB+SIDEKIQ, sem migration. Reversão: :3d3646c (ou a imagem do commit do 310–312, que sobe no mesmo push).

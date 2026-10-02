@@ -105,6 +105,60 @@ RSpec.describe CrmAutomationFireJob do
       expect(job).to have_received(:nps_score).with(contact)
     end
 
+    # item 313 ---------------------------------------------------------------
+    it 'sends the closing event with the card value and the procedure inside it' do
+      Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stage, value: 5700)
+      contact.update!(additional_attributes: { 'page_ads' => { 'slug' => 'refrativa' } })
+      contact.add_labels(['refrativa'])
+      automation = create_automation('google_ads_conversion',
+                                     action_config: { 'ga4_event_name' => 'fechou_cirurgia', 'required_label' => 'Refrativa' })
+      service = instance_double(GoogleAdsConversionsService, call: { success: true })
+      allow(GoogleAdsConversionsService).to receive(:new).and_return(service)
+
+      job.perform(automation.id, contact.id)
+
+      expect(GoogleAdsConversionsService).to have_received(:new).with(
+        hash_including(event_name: 'fechou_cirurgia',
+                       params: { procedimento: 'refrativa', cevico_page: 'refrativa', value: 5700.0, currency: 'BRL' })
+      )
+    end
+
+    it 'sends only value and currency to Meta on a closing (o procedimento não sai junto com o telefone)' do
+      Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stage, value: 5700)
+      contact.add_labels(['refrativa'])
+      automation = create_automation('meta_ads_event', action_config: { 'meta_event_name' => 'Purchase', 'required_label' => 'refrativa' })
+      service = instance_double(MetaAdsConversionsService, call: { success: true })
+      allow(MetaAdsConversionsService).to receive(:new).and_return(service)
+
+      job.perform(automation.id, contact.id)
+
+      expect(MetaAdsConversionsService).to have_received(:new)
+        .with(hash_including(event_name: 'Purchase', custom_data: { value: 5700.0, currency: 'BRL' }))
+    end
+
+    it 'does not send the card value on events that are not a closing' do
+      Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stage, value: 5700)
+      automation = create_automation('meta_ads_event', action_config: { 'meta_event_name' => 'Lead' })
+      service = instance_double(MetaAdsConversionsService, call: { success: true })
+      allow(MetaAdsConversionsService).to receive(:new).and_return(service)
+
+      job.perform(automation.id, contact.id)
+
+      expect(MetaAdsConversionsService).to have_received(:new).with(hash_including(event_name: 'Lead', custom_data: {}))
+    end
+
+    it 'logs the automation as failed when the platform refuses the event' do
+      automation = create_automation('meta_ads_event', action_config: { 'meta_event_name' => 'Lead' })
+      service = instance_double(MetaAdsConversionsService, call: { success: false, error: 'token vencido' })
+      allow(MetaAdsConversionsService).to receive(:new).and_return(service)
+
+      job.perform(automation.id, contact.id)
+
+      log = Crm::AutomationLog.find_by(automation: automation, contact_id: contact.id)
+      expect(log.status).to eq('failed')
+      expect(log.error_message).to include('token vencido')
+    end
+
     it 'does nothing when the automation is inactive' do
       automation = create_automation('nps_score', active: false)
       allow(job).to receive(:nps_score)

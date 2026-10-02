@@ -194,7 +194,7 @@ const emptyForm = () => ({
     // Meta Ads
     meta_event_name:    'Lead',
     // Google Ads
-    ga4_event_name:     'generate_lead',
+    ga4_event_name:     'lead_whatsapp',
     conversion_value:   '',
     currency:           'BRL',
     // Formulário
@@ -303,8 +303,54 @@ const onWorkflowSelected = () => {
   form.value.action_config.n8n_workflow_name = wf?.name ?? '';
 };
 
+// ── Item 313: evento do Google por ETAPA DO FUNIL (lista fechada) ──
+// Espelho de Cevico::ConversionEvents no servidor. O procedimento não entra
+// no nome: viaja dentro do evento (a etiqueta exigida pela automação).
+const GA4_EVENTS = [
+  { value: 'lead_whatsapp', label: 'Lead chegou no WhatsApp (conversa de verdade)' },
+  { value: 'orcamento_enviado', label: 'Recebeu orçamento' },
+  { value: 'agendou_consulta', label: 'Agendou consulta' },
+  { value: 'compareceu_consulta', label: 'Compareceu à consulta' },
+  { value: 'fechou_cirurgia', label: 'Fechou cirurgia (com valor)' },
+];
+const GA4_NAME = /^[a-zA-Z][a-zA-Z0-9_]{0,39}$/;
+const ga4Custom = ref(false);
+const ga4Choice = computed({
+  get() {
+    const name = form.value.action_config.ga4_event_name;
+    return !ga4Custom.value && GA4_EVENTS.some(e => e.value === name)
+      ? name
+      : '__custom';
+  },
+  set(v) {
+    ga4Custom.value = v === '__custom';
+    if (v !== '__custom') form.value.action_config.ga4_event_name = v;
+  },
+});
+const ga4NameValid = computed(() =>
+  GA4_NAME.test((form.value.action_config.ga4_event_name || '').trim())
+);
+const isClosingEvent = computed(() =>
+  form.value.action_type === 'meta_ads_event'
+    ? form.value.action_config.meta_event_name === 'Purchase'
+    : ['fechou_cirurgia', 'close_convert_lead', 'purchase'].includes(
+        form.value.action_config.ga4_event_name
+      )
+);
+
 const save = async () => {
   if (!form.value.name.trim()) return;
+  if (form.value.action_type === 'google_ads_conversion') {
+    form.value.action_config.ga4_event_name = (
+      form.value.action_config.ga4_event_name || ''
+    ).trim();
+    if (!ga4NameValid.value) {
+      useAlert(
+        'Nome do evento inválido: use só letras, números e _ (sem espaço, acento ou hífen), começando por letra.'
+      );
+      return;
+    }
+  }
   // mensagem modelo: precisa da caixa + template escolhido + variáveis
   if (form.value.action_type === 'send_template') {
     if (!form.value.action_config.inbox_id || !selectedTemplate.value) {
@@ -729,16 +775,47 @@ const save = async () => {
               v-model="form.action_config.meta_event_name"
               class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
             >
-              <option value="Lead">Lead</option>
+              <option value="Lead">Lead (lead novo)</option>
+              <option value="QualifiedLead">QualifiedLead (lead qualificado)</option>
+              <option value="Schedule">Schedule (agendou consulta)</option>
+              <option value="Purchase">Purchase (fechou cirurgia — com valor)</option>
+              <option value="InitiateCheckout">InitiateCheckout (orçamento enviado)</option>
               <option value="CompleteRegistration">CompleteRegistration (Cadastro)</option>
-              <option value="Purchase">Purchase (Compra/Fechamento)</option>
-              <option value="InitiateCheckout">InitiateCheckout (Proposta enviada)</option>
               <option value="ViewContent">ViewContent (Visualização)</option>
               <option value="Contact">Contact (Contato)</option>
-              <option value="Schedule">Schedule (Agendamento)</option>
             </select>
-            <p class="text-xs text-n-slate-9 mt-1">Configure o Pixel e Access Token em Configurações → Integrações → Meta Ads.</p>
+            <p class="text-xs text-n-slate-9 mt-1">
+              Paciente que veio de <b>anúncio de WhatsApp</b> vai com o código do
+              clique e a conta do WhatsApp — a Meta credita direto ao anúncio.
+              Nesse caminho ela só aceita a lista dela: <b>Lead</b>, Contact e
+              Cadastro saem como <code>LeadSubmitted</code>; <b>Schedule</b> sai
+              como <code>QualifiedLead</code>.
+            </p>
           </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Valor <span class="text-n-slate-9 font-normal">(opcional)</span></label>
+              <input
+                v-model="form.action_config.conversion_value"
+                type="number"
+                step="0.01"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+                :placeholder="isClosingEvent ? 'vazio = valor do card' : '0.00'"
+              />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Moeda</label>
+              <select
+                v-model="form.action_config.currency"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+              >
+                <option value="BRL">BRL</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+              </select>
+            </div>
+          </div>
+          <p class="text-xs text-n-slate-9">Configure o Pixel e Access Token em Configurações → Integrações → Meta Ads.</p>
         </div>
 
         <!-- Enviar formulário -->
@@ -928,13 +1005,44 @@ const save = async () => {
         <!-- Google Ads -->
         <div v-else-if="form.action_type === 'google_ads_conversion'" class="space-y-3">
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Evento GA4</label>
-            <input
-              v-model="form.action_config.ga4_event_name"
-              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
-              placeholder="generate_lead"
-            />
-            <p class="text-xs text-n-slate-9 mt-1">Nome do evento no GA4. Ex: <code>generate_lead</code>, <code>purchase</code>, <code>sign_up</code></p>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Etapa do funil (evento enviado ao Google)</label>
+            <select
+              v-model="ga4Choice"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
+            >
+              <option v-for="e in GA4_EVENTS" :key="e.value" :value="e.value">
+                {{ e.label }} — {{ e.value }}
+              </option>
+              <option value="__custom">Outro nome (avançado)</option>
+            </select>
+            <template v-if="ga4Choice === '__custom'">
+              <input
+                v-model="form.action_config.ga4_event_name"
+                class="w-full border rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none font-mono mt-2"
+                :class="ga4NameValid ? 'border-n-weak focus:border-n-brand' : 'border-red-400'"
+                placeholder="nome_do_evento"
+              />
+              <p v-if="!ga4NameValid" class="text-xs text-red-500 mt-1">
+                O Google só aceita letras, números e _ (sem espaço, acento ou
+                hífen), começando por letra, até 40 caracteres. Nome fora disso é
+                descartado sem aviso.
+              </p>
+              <p
+                v-else-if="form.action_config.ga4_event_name === 'generate_lead'"
+                class="text-xs text-amber-600 mt-1"
+              >
+                A página já dispara <code>generate_lead</code> no clique do
+                WhatsApp — o mesmo lead pode contar duas vezes. Para o lead que
+                chegou de verdade, prefira "Lead chegou no WhatsApp".
+              </p>
+            </template>
+            <p class="text-xs text-n-slate-9 mt-1">
+              O <b>procedimento</b> não vai no nome: se esta automação exige uma
+              etiqueta (ex.: refrativa), ela viaja dentro do evento. Para contar
+              no Google Ads, o evento precisa estar marcado como
+              <b>evento-chave</b> no Analytics e <b>importado</b> nas conversões
+              do Ads — o painel Google mostra a conferência.
+            </p>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -944,7 +1052,7 @@ const save = async () => {
                 type="number"
                 step="0.01"
                 class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand"
-                placeholder="0.00"
+                :placeholder="isClosingEvent ? 'vazio = valor do card' : '0.00'"
               />
             </div>
             <div>

@@ -104,6 +104,22 @@ const eventSlices = computed(() =>
     value,
   }))
 );
+// ── Conferência (item 313): o Google está pronto para contar cada evento? ──
+const totalTied = computed(() =>
+  (data.value?.series || []).reduce((s, d) => s + (d.tied || 0), 0)
+);
+const check = computed(() => data.value?.check || null);
+const pageGa4Text = computed(() =>
+  (check.value?.page_ga4_ids || [])
+    .map(p => `${p.id} (${p.via === 'GTM' ? 'pelo GTM' : 'direto na página'})`)
+    .join(' e ')
+);
+// 3 estados por item: true = certo (verde), false = falta (âmbar), null = sem como saber
+const checkTone = ok => {
+  if (ok === true) return { cls: 'cv-green', color: '#047857', icon: 'i-lucide-check' };
+  if (ok === false) return { cls: 'cv-amber', color: '#B45309', icon: 'i-lucide-triangle-alert' };
+  return { cls: '', color: '', icon: 'i-lucide-circle-help' };
+};
 const goIntegrations = () =>
   router.push(
     frontendURL(`accounts/${route.params.accountId}/crm-integrations`)
@@ -309,7 +325,7 @@ const FORMULAS = [
               glass
               label="Conversões enviadas ao Google (período)"
               :value="totalSent"
-              sub="eventos que a CEVICO mandou pelas colunas plugadas"
+              :sub="`${fmtNum(totalTied)} amarrada(s) ao anúncio (${pctOf(totalTied, totalSent)}) — só essas o Google Ads credita`"
               :grad="blockFamily('integracao')[1]"
             />
             <div
@@ -372,6 +388,135 @@ const FORMULAS = [
               eventos que a CEVICO envia.
             </p>
           </div>
+        </div>
+
+        <!-- ═══ CONFERÊNCIA (item 313): cada evento está pronto para contar? ═══ -->
+        <div
+          v-if="check"
+          class="cv-block p-5 sm:p-6 mb-6"
+          :style="blockVars('conversoes')"
+        >
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="cv-icon"><span class="i-lucide-list-checks text-base"/></span>
+            <h2 class="text-sm font-bold text-n-slate-12">
+              Conferência: o Google está pronto para contar?
+            </h2>
+          </div>
+          <p class="text-[11px] text-n-slate-9 mb-4">
+            Para uma conversão valer no Google Ads são 4 passos: a página e o
+            envio usam a mesma propriedade · o nome do evento é aceito · o
+            evento é <b>evento-chave</b> no Analytics · a conversão saiu
+            <b>amarrada</b> à visita que clicou no anúncio. O 5º passo só dá
+            para ver no Google Ads: Metas → Conversões → importar do Analytics.
+          </p>
+
+          <div
+            class="cv-sub px-4 py-3 mb-3"
+            :class="checkTone(check.same_property).cls"
+          >
+            <p class="text-[11px] font-medium text-n-slate-10">
+              Página × envio — mesma propriedade do Analytics?
+            </p>
+            <p
+              class="text-sm font-bold text-n-slate-12"
+              :style="{ color: checkTone(check.same_property).color }"
+            >
+              <template v-if="check.same_property === true">
+                Sim — a página também mede em {{ check.measurement_id }}
+              </template>
+              <template v-else-if="check.same_property === false">
+                Não — a página mede em {{ pageGa4Text }} e o envio vai para
+                {{ check.measurement_id }}: nada amarra
+              </template>
+              <template v-else>
+                Sem como conferir — não achei Analytics nas páginas
+                (Configurações → Domínio → Rastreamento)
+              </template>
+            </p>
+            <p
+              v-if="check.same_property !== null"
+              class="text-[11px] text-n-slate-10 mt-1"
+            >
+              Página: {{ pageGa4Text }} · Envio (Integrações → Google):
+              {{ check.measurement_id }}. O Google Ads precisa estar vinculado
+              e importando as conversões desta mesma propriedade.
+            </p>
+          </div>
+
+          <p
+            v-if="check.key_events_error"
+            class="text-[11px] text-n-slate-10 mb-3"
+          >
+            <span class="i-lucide-info text-xs align-middle" />
+            Não consegui ler os eventos-chave do Analytics:
+            {{ check.key_events_error }}
+          </p>
+
+          <div class="space-y-2">
+            <div
+              v-for="e in check.events"
+              :key="e.name"
+              class="cv-row px-3 py-2.5"
+            >
+              <div class="flex items-center gap-2 flex-wrap">
+                <b class="text-xs text-n-slate-12 font-mono">{{ e.name }}</b>
+                <span v-if="e.label" class="text-[11px] text-n-slate-10">
+                  {{ e.label }}
+                </span>
+                <span
+                  v-if="e.columns.length"
+                  class="text-[10px] text-n-slate-9"
+                >
+                  · coluna(s): {{ e.columns.join(', ') }}
+                </span>
+              </div>
+              <div
+                class="flex items-center gap-x-4 gap-y-1 flex-wrap mt-1.5 text-[11px] text-n-slate-11"
+              >
+                <span
+                  class="inline-flex items-center gap-1"
+                  :style="{ color: checkTone(!!e.sends_as && e.sends_as === e.name).color }"
+                >
+                  <span
+                    class="text-xs"
+                    :class="checkTone(!!e.sends_as && e.sends_as === e.name).icon"
+                  />
+                  <template v-if="!e.sends_as">nome recusado pelo Google</template>
+                  <template v-else-if="e.sends_as !== e.name">
+                    nome corrigido no envio: {{ e.sends_as }}
+                  </template>
+                  <template v-else>nome aceito</template>
+                </span>
+                <span
+                  class="inline-flex items-center gap-1"
+                  :style="{ color: checkTone(e.key_event).color }"
+                >
+                  <span class="text-xs" :class="checkTone(e.key_event).icon" />
+                  <template v-if="e.key_event === true">
+                    evento-chave no Analytics
+                  </template>
+                  <template v-else-if="e.key_event === false">
+                    NÃO é evento-chave no Analytics — não chega ao Ads
+                  </template>
+                  <template v-else>evento-chave: sem leitura</template>
+                </span>
+                <span class="inline-flex items-center gap-1">
+                  <span class="i-lucide-send text-xs" />
+                  {{ fmtNum(e.sent) }} enviada(s) ·
+                  <b class="text-n-slate-12">{{ fmtNum(e.tied) }}</b>
+                  amarrada(s) ao anúncio
+                </span>
+              </div>
+            </div>
+            <p v-if="!check.events.length" class="text-[11px] text-n-slate-9">
+              Nenhum evento plugado nem enviado no período.
+            </p>
+          </div>
+          <p class="text-[10px] text-n-slate-9 mt-3">
+            "Amarrada" = o paciente veio pela página, clicou no WhatsApp e a
+            mensagem chegou com o Protocolo. Quem chega direto no WhatsApp sai
+            "solta": aparece no Analytics, mas o anúncio não leva o crédito.
+          </p>
         </div>
 
         <!-- ═══ PALAVRAS-CHAVE / TERMOS / CAMPANHAS (GA4) ═══ -->

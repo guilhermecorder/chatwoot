@@ -34,7 +34,8 @@ class MetaAdsConversionsService
 
     parsed = response.parsed_response
     if response.success?
-      { success: true, events_received: parsed['events_received'], fbtrace_id: parsed['fbtrace_id'] }
+      { success: true, events_received: parsed['events_received'], fbtrace_id: parsed['fbtrace_id'],
+        event_name: sent_event_name, messaging: messaging? }
     else
       { success: false, error: parsed.dig('error', 'message') || "HTTP #{response.code}" }
     end
@@ -64,17 +65,29 @@ class MetaAdsConversionsService
 
   def event_data
     data = {
-      event_name:       @event_name,
+      event_name:       sent_event_name,
       event_time:       Time.current.to_i,
       event_id:         @event_id,
-      action_source:    ctwa_clid.present? ? 'business_messaging' : 'system_generated',
+      action_source:    messaging? ? 'business_messaging' : 'system_generated',
       user_data:        build_user_data,
     }
     # ctwa_clid = clique no anúncio click-to-WhatsApp: com ele a Meta
     # atribui a conversão DIRETO ao anúncio que trouxe o contato
-    data[:messaging_channel] = 'whatsapp' if ctwa_clid.present?
+    data[:messaging_channel] = 'whatsapp' if messaging?
     data[:custom_data] = @custom_data if @custom_data.present?
     data
+  end
+
+  # Item 313: evento de MENSAGEM (lead de anúncio de WhatsApp) só vale com o
+  # código do clique E o número da conta do WhatsApp (WABA) — a Meta exige
+  # os dois. Sem a conta, o evento segue pelo caminho comum (telefone).
+  def messaging?
+    ctwa_clid.present? && waba_id.present?
+  end
+
+  # no caminho de mensagem a Meta só aceita a lista dela (Lead → LeadSubmitted…)
+  def sent_event_name
+    messaging? ? Cevico::ConversionEvents.meta_messaging_name(@event_name) : @event_name
   end
 
   def build_user_data
@@ -88,9 +101,50 @@ class MetaAdsConversionsService
     ud[:fn] = [hash_value(name_parts&.first&.downcase)] if name_parts&.first.present?
     ud[:ln] = [hash_value(name_parts&.last&.downcase)]  if name_parts&.last.present?
 
-    ud[:ctwa_clid] = ctwa_clid if ctwa_clid.present?
+    ud.merge(ad_identity)
+  end
 
-    ud
+  # o que amarra o evento ao ANÚNCIO: no anúncio de WhatsApp, o código do
+  # clique + a conta do WhatsApp; no anúncio que leva à página, o clique (fbc)
+  # e o navegador (fbp) guardados no Protocolo
+  def ad_identity
+    ids = messaging? ? { ctwa_clid: ctwa_clid, whatsapp_business_account_id: waba_id } : {}
+    ids[:fbc] = page_fbc if page_fbc.present?
+    ids[:fbp] = page_ads['fbp'] if page_ads['fbp'].present?
+    ids
+  end
+
+  def page_ads
+    @page_ads ||= @contact&.additional_attributes&.dig('page_ads') || {}
+  end
+
+  # fbc = cookie _fbc da página; sem ele, montado do fbclid no formato da
+  # Meta (fb.1.<momento do clique em ms>.<fbclid>)
+  def page_fbc
+    return page_ads['fbc'] if page_ads['fbc'].present?
+    return if page_ads['fbclid'].blank?
+
+    clicked_at = Time.zone.parse(page_ads['clicked_at'].to_s) || Time.current
+    "fb.1.#{(clicked_at.to_f * 1000).to_i}.#{page_ads['fbclid']}"
+  rescue ArgumentError
+    nil
+  end
+
+  # número da conta do WhatsApp (WABA) da caixa em que o lead do anúncio
+  # chegou — a conversa carimbada com o anúncio vence; senão, a primeira
+  def waba_id
+    return @waba_id if defined?(@waba_id)
+
+    @waba_id = ad_whatsapp_conversation&.inbox&.channel&.provider_config&.dig('business_account_id').to_s.presence
+  rescue StandardError => e
+    Rails.logger.warn "[MetaAdsConversions] conta do WhatsApp não encontrada: #{e.message}"
+    @waba_id = nil
+  end
+
+  def ad_whatsapp_conversation
+    convs = @contact.conversations.joins(:inbox).where(inboxes: { channel_type: 'Channel::Whatsapp' })
+    convs.where("jsonb_exists(conversations.additional_attributes, 'meta_ads')").reorder(:created_at).first ||
+      convs.reorder(:created_at).first
   end
 
   # gravado pelo Crm::AdAttributionService quando o lead chega por anúncio

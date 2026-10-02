@@ -14,7 +14,9 @@
 <script nonce="<%= content_security_policy_nonce %>">
 (function () {
   var KEY = 'cevico_trk';
-  var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid', 'ref_host'];
+  var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'gbraid', 'wbraid', 'fbclid', 'ref_host'];
+  // código de clique (Google/Meta) é comprido: cortado em 150 ele não serve mais
+  var CLICK_IDS = ['gclid', 'gbraid', 'wbraid', 'fbclid'];
   var qs = new URLSearchParams(location.search);
   var trk = {};
   try { trk = JSON.parse(sessionStorage.getItem(KEY) || '{}'); } catch (e) { trk = {}; }
@@ -22,7 +24,7 @@
   var hasParams = KEEP.some(function (k) { return k !== 'ref_host' && qs.get(k); });
   if (hasParams) {
     trk = {};
-    KEEP.forEach(function (k) { var v = qs.get(k); if (v) trk[k] = String(v).slice(0, 150); });
+    KEEP.forEach(function (k) { var v = qs.get(k); if (v) trk[k] = String(v).slice(0, CLICK_IDS.indexOf(k) >= 0 ? 500 : 150); });
   } else if (!Object.keys(trk).length && document.referrer) {
     try {
       var refHost = new URL(document.referrer).hostname;
@@ -61,8 +63,14 @@
       try {
         var mGa = document.cookie.match(/(?:^|;\s*)_ga=GA\d+\.\d+\.(.+?)(?:;|$)/);
         if (mGa) body.set('ga_client_id', mGa[1].slice(0, 64));
-        var mSess = document.cookie.match(/(?:^|;\s*)_ga_[^=]+=GS\d+\.\d+\.(\d+)/);
+        // formato antigo "GS1.1.<sessão>." e o novo (2025) "GS2.1.s<sessão>$"
+        var mSess = document.cookie.match(/(?:^|;\s*)_ga_[^=]+=GS\d+\.\d+\.s?(\d+)/);
         if (mSess) body.set('ga_session_id', mSess[1].slice(0, 32));
+        // identidade do Pixel da Meta (cookies _fbp/_fbc) — item 313
+        var mFbp = document.cookie.match(/(?:^|;\s*)_fbp=([^;]+)/);
+        if (mFbp) body.set('fbp', mFbp[1].slice(0, 100));
+        var mFbc = document.cookie.match(/(?:^|;\s*)_fbc=([^;]+)/);
+        if (mFbc) body.set('fbc', mFbc[1].slice(0, 540));
       } catch (err) { /* sem cookies GA — segue sem */ }
       fetch('<%= ref_path %>', { method: 'POST', body: body, keepalive: true })
         .then(function (r) { return r.ok ? r.json() : { token: null }; })

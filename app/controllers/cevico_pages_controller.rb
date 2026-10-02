@@ -147,8 +147,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     # viaja no Protocolo — é ela que diz qual headline trouxe o LEAD
     variant = requested_variant(page)
     page.track_hit!('cta', variant: variant)
-    snapshot = Cevico::TrafficSource.snapshot(params, page: page).merge('variant' => variant)
-    ref = CevicoPageRef.mint!(page: page, source_data: snapshot)
+    ref = CevicoPageRef.mint!(page: page, source_data: click_snapshot(params, page).merge('variant' => variant))
     return render json: { token: nil } if ref.nil?
 
     render json: { token: ref.token, line: "Protocolo: #{ref.token}" }
@@ -201,7 +200,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     return head :not_found if account.nil?
 
     ref = CevicoPageRef.mint!(page: nil, account: account,
-                              source_data: Cevico::TrafficSource.snapshot(params, page: nil))
+                              source_data: click_snapshot(params, nil))
     return render json: { token: nil } if ref.nil?
 
     render json: { token: ref.token, line: "Protocolo: #{ref.token}" }
@@ -210,14 +209,14 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   private
 
   WHATSAPP_URL = %r{\A(https?://(wa\.me|api\.whatsapp\.com)|whatsapp:)}i
-  TRACKING_PARAMS = %w[utm_source utm_medium utm_campaign utm_content utm_term gclid fbclid ref_host].freeze
+  TRACKING_PARAMS = %w[utm_source utm_medium utm_campaign utm_content utm_term gclid gbraid wbraid fbclid ref_host].freeze
 
   # destino WhatsApp → gera o Protocolo e o anexa ao texto pré-preenchido;
   # qualquer falha = redireciona pro cta_url original (clique nunca quebra)
   def url_with_protocol(page) # rubocop:disable Metrics/AbcSize
     return nil unless page.cta_url.to_s.match?(WHATSAPP_URL)
 
-    ref = CevicoPageRef.mint!(page: page, source_data: Cevico::TrafficSource.snapshot(request.query_parameters, page: page))
+    ref = CevicoPageRef.mint!(page: page, source_data: click_snapshot(request.query_parameters, page))
     return nil if ref.nil?
 
     uri = URI.parse(page.cta_url)
@@ -229,6 +228,19 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   rescue StandardError => e
     Rails.logger.error "[CevicoPages#cta] protocolo falhou: #{e.message}"
     nil
+  end
+
+  # origem do clique para o Protocolo. Item 313: os cookies do navegador
+  # levam a identidade do Google Analytics e do Pixel — sem ela a conversão
+  # volta "solta" e o anúncio não leva o crédito
+  def click_snapshot(prm, page)
+    Cevico::TrafficSource.snapshot(prm, page: page, cookies: request.cookies, ga4_id: send_measurement_id(page))
+  end
+
+  # propriedade do Analytics que recebe as conversões do CRM (Integrações → Google)
+  def send_measurement_id(page)
+    account_id = page&.account_id || CevicoPage.published.order(:id).pick(:account_id)
+    CrmSetting.find_by(account_id: account_id)&.google_ads_config&.dig('measurement_id')
   end
 
   # &utm_...&gclid=... presentes na URL atual, prontos pra viajar no funil

@@ -766,7 +766,7 @@ const fetchWorkflows = async () => {
                 class="text-[10px] px-2 py-0.5 rounded-full font-medium"
                 :class="googleStatus.insights_configured ? 'bg-green-500/15 text-green-600' : 'bg-amber-500/15 text-amber-600'"
               >
-                {{ googleStatus.insights_configured ? '✓ Recebimento (Ads API)' : 'Recebimento: aguarda token' }}
+                {{ googleStatus.insights_configured ? '✓ Token do Ads salvo' : 'Recebimento: aguarda token' }}
               </span>
             </div>
           </div>
