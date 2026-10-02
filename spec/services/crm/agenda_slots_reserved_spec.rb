@@ -60,6 +60,17 @@ RSpec.describe Crm::AgendaSlots do
     expect(described_class.rules_block(account)).to start_with('REGRAS DA AGENDA').and include('Não oferecer encaixe no mesmo dia.')
   end
 
+  # 🩺 item 311: terça na Av. Paulista — manhã Dr. Henrique, tarde Dra. Roberta
+  it 'doctor_at devolve o médico da faixa do horário, não o primeiro do dia', :aggregate_failures do
+    tuesday = wednesday - 1
+    expect(described_class.doctor_at(account, tuesday, '09:00', 'paulista')).to eq('Dr. Henrique Gemelli')
+    expect(described_class.doctor_at(account, tuesday, '14:30', 'paulista')).to eq('Dra. Roberta Negri')
+    expect(described_class.doctor_at(account, tuesday, '16:15', 'paulista')).to eq('Dra. Roberta Negri')
+    expect(described_class.doctor_at(account, tuesday, '12:30', 'paulista')).to eq('Dr. Henrique Gemelli') # fora de faixa: a 1ª do dia
+    expect(described_class.doctor_at(account, wednesday, '13:15', 'paulista', modality: 'pos_op')).to eq('Dr. Henrique Gemelli')
+    expect(described_class.doctor_at(account, tuesday, '09:00', 'tatuape')).to be_nil
+  end
+
   it 'sem faixa reservada e sem texto, nada entra no prompt' do
     wins = [{ 'dow' => 3, 'unit' => 'paulista', 'doctor' => 'Dr. Henrique Gemelli', 'start' => '13:00', 'end' => '17:00', 'block' => 15 }]
     CrmSetting.create!(account: account, agenda_config: { 'windows' => wins })

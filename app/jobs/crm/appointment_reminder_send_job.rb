@@ -34,7 +34,7 @@
 # + leitura do "sim/não" por palavra; nenhuma IA fala com eles (a conversa
 # segue travada pela cerca no CrmListener). Sem o bloco ligado, nada muda:
 # paciente de parceiro é pulado como antes.
-class Crm::AppointmentReminderSendJob < ApplicationJob
+class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   include Crm::AppointmentReminderFollowup
 
   queue_as :scheduled_jobs
@@ -134,8 +134,16 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
     template = partner ? partner_template(rcfg) : template_for(rcfg, regua, task)
     return skip(run, task, partner ? 'Oftalmofácil: sem modelo' : "sem modelo para #{unit_label(task)}") if template.nil? && !shadow
 
+    # item 310: o lembrete sai pela caixa em que o paciente JÁ conversa — com o
+    # modelo de mesmo nome cadastrado NAQUELE número (idioma/categoria de lá)
+    unless partner
+      default_inbox = inbox
+      inbox = inbox_for(account, rcfg, contact, inbox, template)
+      template = template_of_inbox(inbox, template) if inbox && inbox != default_inbox
+    end
+
     if shadow
-      run['sent'] << entry_for(task, contact, template: template&.dig('template_params', 'name'), partner: partner)
+      run['sent'] << entry_for(task, contact, template: template&.dig('template_params', 'name'), partner: partner, inbox: inbox)
       return
     end
 
@@ -146,17 +154,17 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
     conversation = Crm::SendTemplateService.new(source: source, contact: contact).perform
     return skip(run, task, 'envio não saiu (contato/caixa)') if conversation.nil?
 
-    mark_sent(contact, task, regua)
+    mark_sent(contact, task, regua, inbox: inbox)
     # item 300: paciente do Oftalmofácil ganha o card no funil DELE (nunca no da CEVICO)
     Crm::PartnerFunnel.place!(account, contact, :booked) if partner
-    run['sent'] << entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner)
+    run['sent'] << entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox)
   rescue StandardError => e
     Rails.logger.error "[CEVICO lembretes] task #{task.id}: #{e.message}"
     skip(run, task, "erro: #{e.message.truncate(60)}")
   end
 
   # por que esta consulta NÃO recebe a régua (nil = pode receber)
-  def skip_reason(rcfg, regua, task, contact) # rubocop:disable Metrics/CyclomaticComplexity
+  def skip_reason(rcfg, regua, task, contact) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return (task.phone.present? ? 'telefone sem cadastro de paciente' : 'sem telefone') if contact.nil?
     return 'sem telefone' if contact.phone_number.blank?
 
@@ -166,10 +174,28 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
       Crm::PartnerGuard.block!("lembrete #{regua} (agendamento #{task.id})", contact: contact)
       return 'paciente de parceiro (cerca)'
     end
+    # item 312: só quem está nas colunas escolhidas do CRM (paciente de parceiro tem o bloco dele)
+    by_stage = partner_patient?(task, contact) ? nil : stage_skip_reason(rcfg, contact)
+    return by_stage if by_stage
+
     allowed = Array(rcfg['modalities']).compact_blank
     return nil if allowed.empty? || task.modality.blank? # sem filtro = todas as modalidades
 
     allowed.include?(task.modality) ? nil : "modalidade #{task.modality}"
+  end
+
+  # 🗂️ item 312 (02/10, "preciso poder escolher a coluna em que isso será
+  # enviado"): com colunas marcadas no lembrete, só recebe quem tem o card numa
+  # delas. Nenhuma marcada = todas (como era). O motivo aparece nas "puladas".
+  def stage_skip_reason(rcfg, contact) # rubocop:disable Metrics/CyclomaticComplexity
+    wanted = Array(rcfg['stage_ids']).map(&:to_i)
+    return nil if wanted.empty?
+
+    cards = Crm::Contact.where(contact_id: contact.id).includes(:stage).to_a
+    return 'sem card no CRM' if cards.empty?
+    return nil if cards.any? { |card| wanted.include?(card.stage_id) }
+
+    "card na coluna #{cards.first.stage&.name || '?'}"
   end
 
   def partner_patient?(task, contact)
@@ -185,6 +211,48 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
     return nil if tp.blank?
 
     { 'template_params' => tp, 'message_preview' => rcfg.dig('partner', 'message_preview') }
+  end
+
+  # ── caixa certa para o paciente (item 310, 02/10) ─────────────────────
+  # Pedido dele: "a mensagem modelo será enviada através da caixa de entrada
+  # em que a conversa já existe" (Google ou Instagram). Entre a caixa padrão
+  # do lembrete e as caixas marcadas em "também envia por", vale a da conversa
+  # MAIS RECENTE do paciente. Sem conversa em nenhuma delas — ou quando o
+  # modelo não existe naquela caixa — sai pela caixa padrão.
+  def inbox_for(account, rcfg, contact, default_inbox, template) # rubocop:disable Metrics/CyclomaticComplexity
+    ids = ([default_inbox&.id] + Array(rcfg['inbox_ids']).map(&:to_i)).compact.uniq
+    return default_inbox if ids.size < 2
+
+    inbox_id = account.conversations.where(contact_id: contact.id, inbox_id: ids)
+                      .order(Arel.sql('last_activity_at DESC NULLS LAST, id DESC')).pick(:inbox_id)
+    routed = inbox_id && account.inboxes.find_by(id: inbox_id)
+    return default_inbox if routed.nil? || routed.id == default_inbox&.id
+
+    template_in_inbox?(routed, template) ? routed : default_inbox
+  end
+
+  # o modelo é da conta do WhatsApp (WABA) da caixa: se a outra caixa for de
+  # outra conta e não tiver o modelo aprovado, o envio falharia. Lista de
+  # modelos vazia (caixa ainda não sincronizada) = não dá para saber → deixa passar.
+  def template_in_inbox?(inbox, template)
+    name = template&.dig('template_params', 'name').to_s
+    list = inbox.channel.respond_to?(:message_templates) ? Array(inbox.channel.message_templates) : []
+    return true if name.blank? || list.empty?
+
+    list.any? { |t| t['name'].to_s == name }
+  end
+
+  # o mesmo modelo, como está cadastrado no número da outra caixa: mantém as
+  # variáveis escolhidas no card e troca idioma/categoria/namespace pelos de lá
+  def template_of_inbox(inbox, template) # rubocop:disable Metrics/CyclomaticComplexity
+    name = template&.dig('template_params', 'name').to_s
+    list = inbox.channel.respond_to?(:message_templates) ? Array(inbox.channel.message_templates) : []
+    found = list.find { |t| t['name'].to_s == name }
+    return template if found.nil?
+
+    params = template['template_params'].merge(found.slice('language', 'category', 'namespace').compact)
+    body = Array(found['components']).find { |c| c['type'] == 'BODY' }&.[]('text')
+    template.merge('template_params' => params, 'message_preview' => body.presence || template['message_preview'])
   end
 
   # ── modelo certo para a consulta ──────────────────────────────────────
@@ -246,10 +314,11 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
   end
 
   # ── registro da rodada: quem recebeu / receberia e quem foi pulado ──
-  def entry_for(task, contact, template: nil, partner: false)
+  def entry_for(task, contact, template: nil, partner: false, inbox: nil)
     at = task.due_at&.in_time_zone(TZ)
     { 'task_id' => task.id, 'name' => patient_name(task), 'phone_tail' => contact.phone_number.to_s.last(4),
       'when' => at&.strftime('%d/%m %H:%M'), 'unit' => unit_label(task), 'template' => template, 'contact_id' => contact.id,
+      'inbox' => inbox&.name, # item 310: por qual caixa saiu / sairia
       'partner' => (partner ? partner_name(task).presence || 'Oftalmofácil' : nil) }.compact
   end
 
@@ -278,16 +347,19 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
     Rails.logger.warn "[CEVICO lembretes] registro da rodada: #{e.message}"
   end
 
-  def mark_sent(contact, task, regua) # rubocop:disable Metrics/AbcSize
+  def mark_sent(contact, task, regua, inbox: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     Cevico::AttributeMerge.merge!(contact) do |attrs|
       marks = attrs['cevico_appt_reminders'] || {}
       entry = marks[task.id.to_s] || {}
       entry[regua] = Time.current.iso8601
+      # item 310: o reforço sai pela MESMA caixa do lembrete
+      entry[Crm::AppointmentReminderFollowup.inbox_key(regua)] = inbox.id if inbox
       # item 288: a hora da consulta no momento do lembrete (o reforço não sai se ela foi remarcada)
       entry[Crm::AppointmentReminderFollowup.due_key(regua)] = task.due_at&.iso8601
       marks[task.id.to_s] = entry
       # poda: marcas de consultas antigas não servem pra mais nada
-      marks = marks.sort_by { |_id, e| e.values.compact.max.to_s }.last(MAX_MARK_ENTRIES).to_h if marks.size > MAX_MARK_ENTRIES
+      # (só as datas entram na conta — a marca também guarda o id da caixa, item 310)
+      marks = marks.sort_by { |_id, e| e.values.grep(String).max.to_s }.last(MAX_MARK_ENTRIES).to_h if marks.size > MAX_MARK_ENTRIES
       attrs.merge('cevico_appt_reminders' => marks)
     end
   end

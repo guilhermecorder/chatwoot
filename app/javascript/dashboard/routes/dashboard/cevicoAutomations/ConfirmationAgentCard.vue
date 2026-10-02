@@ -7,7 +7,7 @@
 // valor padrão e a última rodada (quem recebeu / receberia / foi pulado).
 // Grava em agenda_config.appointment_reminders (chaves dN) e o interruptor
 // geral em agenda_config.appointment_confirmation — Crm::AppointmentReminderSendJob.
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
@@ -141,6 +141,10 @@ const hydrate = s => {
         // lembrete antigo sem modo = ao vivo (é como ele roda hoje)
         mode: c.mode === 'shadow' ? 'shadow' : 'live',
         inbox_id: c.inbox_id || null,
+        // item 310: caixas que também enviam (a da conversa do paciente vence)
+        inbox_ids: [...(c.inbox_ids || [])].map(Number),
+        // item 312: colunas do CRM que recebem (vazio = todas)
+        stage_ids: [...(c.stage_ids || [])].map(Number),
         default_value: c.default_value || '150,00',
         weekend_bridge: c.weekend_bridge === true,
         modalities: [...(c.modalities || [])],
@@ -157,6 +161,7 @@ const hydrate = s => {
   rules.value.forEach(r => {
     if (r.inbox_id) loadTemplates(r.inbox_id);
     if (r.partner.inbox_id) loadTemplates(r.partner.inbox_id);
+    (r.inbox_ids || []).forEach(id => loadTemplates(id)); // item 310
   });
   dirty.value = false;
 };
@@ -275,6 +280,8 @@ const addRule = (days, hour) => {
     hour,
     mode: 'shadow',
     inbox_id: fromOther,
+    inbox_ids: [],
+    stage_ids: [],
     default_value: '150,00',
     weekend_bridge: days >= 1 && days <= 2,
     modalities: ['avaliacao', 'retorno'],
@@ -297,6 +304,28 @@ const removeRule = rule => {
   rules.value = rules.value.filter(r => r.uid !== rule.uid);
   touch();
 };
+// item 312 (02/10, pedido dele: "preciso poder escolher a coluna em que isso
+// será enviado"): colunas do CRM — só recebe quem tem o card numa das marcadas
+const pipelines = useMapGetter('crm/getPipelines');
+const stageGroups = computed(() =>
+  (pipelines.value || [])
+    .map(p => ({
+      id: p.id,
+      name: p.name,
+      stages: [...(p.stages || [])].sort((a, b) => a.position - b.position),
+    }))
+    .filter(p => p.stages.length)
+);
+onMounted(() => {
+  if (!(pipelines.value || []).length) store.dispatch('crm/fetchPipelines');
+});
+const toggleStage = (rule, id) => {
+  const list = rule.stage_ids || [];
+  rule.stage_ids = list.includes(id)
+    ? list.filter(x => x !== id)
+    : [...list, id];
+  touch();
+};
 const toggleModality = (rule, key) => {
   rule.modalities = rule.modalities.includes(key)
     ? rule.modalities.filter(m => m !== key)
@@ -308,8 +337,33 @@ const onInbox = rule => {
     rule.slots[k] = blankSlot();
   });
   rule.followup.slot = blankSlot();
+  rule.inbox_ids = (rule.inbox_ids || []).filter(id => id !== rule.inbox_id);
   loadTemplates(rule.inbox_id);
   touch();
+};
+// item 310 (02/10, pedido dele: "a mensagem modelo será enviada através da
+// caixa de entrada em que a conversa já existe"): outras caixas que também
+// enviam — o lembrete sai pela caixa da conversa mais recente do paciente
+const otherInboxes = rule =>
+  whatsappInboxes.value.filter(
+    i => i.id !== rule.inbox_id && !partnerInboxIds.value.includes(i.id)
+  );
+const toggleExtraInbox = (rule, id) => {
+  const list = rule.inbox_ids || [];
+  rule.inbox_ids = list.includes(id)
+    ? list.filter(x => x !== id)
+    : [...list, id];
+  loadTemplates(id);
+  touch();
+};
+// os modelos escolhidos existem (com o mesmo nome) no número da outra caixa?
+// Sem o modelo lá, o paciente daquela caixa recebe pela caixa de cima.
+const chosenNames = rule =>
+  [...new Set(['paulista', 'tatuape', 'geral'].map(k => rule.slots[k].name).filter(Boolean))];
+const missingIn = (rule, inboxId) => {
+  const have = templatesIn(inboxId).map(t => t.name);
+  if (!have.length) return [];
+  return chosenNames(rule).filter(name => !have.includes(name));
 };
 // ── pacientes do Oftalmofácil (cerca dos parceiros liberada só por aqui) ──
 const togglePartner = rule => {
@@ -361,6 +415,8 @@ const buildPayload = () => {
       enabled: rule.enabled,
       hour: rule.hour,
       inbox_id: rule.inbox_id,
+      inbox_ids: (rule.inbox_ids || []).filter(id => id !== rule.inbox_id),
+      stage_ids: rule.stage_ids || [],
       mode: rule.mode,
       default_value: rule.default_value || '150,00',
       weekend_bridge: rule.weekend_bridge,
@@ -871,6 +927,40 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
               </label>
             </div>
 
+            <!-- item 312: colunas do CRM que recebem o lembrete -->
+            <div v-if="stageGroups.length">
+              <p class="text-xs font-medium text-n-slate-11 mb-1">
+                Colunas do CRM que recebem
+                <span class="text-[10px] font-normal text-n-slate-9">{{
+                  (rule.stage_ids || []).length
+                    ? '— só quem tem o card numa das marcadas'
+                    : '(nenhuma marcada = todas)'
+                }}</span>
+              </p>
+              <div
+                v-for="g in stageGroups"
+                :key="rule.uid + 'pg' + g.id"
+                class="flex items-center gap-1.5 flex-wrap mb-1"
+              >
+                <span
+                  v-if="stageGroups.length > 1"
+                  class="text-[10px] text-n-slate-9 w-full"
+                  >{{ g.name }}</span
+                >
+                <button
+                  v-for="s in g.stages"
+                  :key="rule.uid + 'st' + s.id"
+                  class="cv-chip"
+                  :class="
+                    (rule.stage_ids || []).includes(s.id) ? 'cv-chip-on' : ''
+                  "
+                  @click="toggleStage(rule, s.id)"
+                >
+                  {{ s.name }}
+                </button>
+              </div>
+            </div>
+
             <div>
               <label class="text-xs font-medium text-n-slate-11 block mb-1"
                 >Caixa do WhatsApp que envia</label
@@ -890,6 +980,57 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                   {{ i.name }}
                 </option>
               </select>
+              <!-- item 310: a mensagem sai pela caixa em que o paciente já conversa -->
+              <div
+                v-if="rule.inbox_id && otherInboxes(rule).length"
+                class="mt-2"
+              >
+                <p class="text-xs font-medium text-n-slate-11 mb-1">
+                  Também envia pela caixa em que o paciente já conversa
+                </p>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    v-for="i in otherInboxes(rule)"
+                    :key="rule.uid + 'xb' + i.id"
+                    class="cv-chip cv-chip-lg"
+                    :class="
+                      (rule.inbox_ids || []).includes(i.id) ? 'cv-chip-on' : ''
+                    "
+                    @click="toggleExtraInbox(rule, i.id)"
+                  >
+                    {{ i.name }}
+                  </button>
+                </div>
+                <template
+                  v-for="i in otherInboxes(rule).filter(x =>
+                    (rule.inbox_ids || []).includes(x.id)
+                  )"
+                  :key="rule.uid + 'chk' + i.id"
+                >
+                  <p
+                    v-if="chosenNames(rule).length && !missingIn(rule, i.id).length"
+                    class="text-[11px] mt-1 text-emerald-700 dark:text-emerald-400"
+                  >
+                    ✓ {{ i.name }}: os modelos escolhidos existem neste número.
+                  </p>
+                  <p
+                    v-else-if="missingIn(rule, i.id).length"
+                    class="text-[11px] mt-1 text-amber-700 dark:text-amber-400"
+                  >
+                    ⚠ {{ i.name }}: não achei
+                    <b>{{ missingIn(rule, i.id).join(', ') }}</b> neste número
+                    — com nome diferente, quem conversa por aqui recebe pela
+                    caixa de cima.
+                  </p>
+                </template>
+                <p class="text-[10px] text-n-slate-9 mt-1">
+                  Com a caixa marcada, o lembrete sai por onde o paciente
+                  conversou por último (ex.: quem veio pelo Instagram recebe
+                  pelo Instagram). Quem ainda não tem conversa recebe pela
+                  caixa de cima. O modelo precisa existir nas duas caixas —
+                  se não existir na outra, sai pela de cima.
+                </p>
+              </div>
             </div>
 
             <!-- modelos: por unidade + geral -->
@@ -1313,6 +1454,7 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                   >
                   <span class="text-n-slate-9">{{
                     e.template ? `(${e.template})` : ''
+                }}{{ e.inbox ? ` · ${e.inbox}` : ''
                   }}</span>
                 </p>
               </div>
@@ -1348,6 +1490,7 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                 >
                 <span class="text-n-slate-9">{{
                   e.template ? `(${e.template})` : ''
+                }}{{ e.inbox ? ` · ${e.inbox}` : ''
                 }}</span>
               </p>
               <p

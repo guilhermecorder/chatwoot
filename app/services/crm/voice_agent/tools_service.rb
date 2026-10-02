@@ -215,7 +215,7 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
   end
 
   def record_appointment(date, time, unit)
-    doctor = booking_doctor(date, unit)
+    doctor = booking_doctor(date, time, unit)
     name = params['nome'].to_s.strip.presence || contact&.name.presence || 'Paciente'
     result = appointment_result(TZ.parse("#{date} #{time}"), name, unit, doctor)
     outcome = Crm::AppointmentRecorder.record(account: account, result: result, contact: contact, conversation: conversation)
@@ -226,10 +226,9 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
     booking_response(resultado, date, time, unit, doctor)
   end
 
-  # médico pedido (nome oficial) ou o da janela daquele dia/unidade
-  def booking_doctor(date, unit)
-    Crm::DoctorNames.canonical(params['medico']) ||
-      Crm::AgendaSlots.windows(account).find { |w| w['dow'] == date.wday && w['unit'] == unit }&.dig('doctor')
+  # médico pedido (nome oficial) ou o da faixa que cobre aquele horário (item 311)
+  def booking_doctor(date, time, unit)
+    Crm::DoctorNames.canonical(params['medico']) || Crm::AgendaSlots.doctor_at(account, date, time, unit)
   end
 
   # hash no formato que o Crm::AppointmentRecorder espera

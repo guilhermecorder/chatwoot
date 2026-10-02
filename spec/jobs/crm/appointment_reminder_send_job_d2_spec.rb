@@ -45,6 +45,120 @@ RSpec.describe Crm::AppointmentReminderSendJob do
     expect(described_class.target_dates('d2', {}, now)).to eq([Date.new(2026, 9, 28)])
   end
 
+  # item 310 (02/10, pedido dele): "a mensagem modelo será enviada através da caixa de entrada em que a conversa já existe"
+  describe 'caixa do envio = a caixa em que o paciente já conversa' do
+    let(:instagram) { create(:inbox, account: account, name: 'INSTAGRAM') }
+    let(:sent_by) { [] }
+
+    before do
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('inbox_ids' => [instagram.id]) } })
+      allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+        sent_by << [args[1].name, args[3]['processed_params']['body']['1']]
+        m.call(*args)
+      end
+    end
+
+    it 'quem conversa pelo Instagram recebe pelo Instagram; quem não tem conversa recebe pela caixa padrão', :aggregate_failures do
+      insta = contact_named('Veio Do Instagram', '+5511999990061')
+      google = contact_named('Veio Do Google', '+5511999990062')
+      novo = contact_named('Sem Conversa', '+5511999990063')
+      create(:conversation, account: account, inbox: instagram, contact: insta)
+      create(:conversation, account: account, inbox: inbox, contact: google)
+      [insta, google, novo].each_with_index { |c, i| consulta(c, "2026-09-28 09:#{i}0") }
+
+      described_class.perform_now(now)
+
+      expect(sent_by).to contain_exactly(['INSTAGRAM', 'Veio Do Instagram'], [inbox.name, 'Veio Do Google'], [inbox.name, 'Sem Conversa'])
+      state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+      expect(state['sent'].to_h { |e| [e['name'], e['inbox']] }).to include('Veio Do Instagram' => 'INSTAGRAM', 'Sem Conversa' => inbox.name)
+      mark = insta.reload.additional_attributes['cevico_appt_reminders'].values.first
+      expect(mark['d2_inbox']).to eq(instagram.id) # o reforço sai pela mesma caixa
+    end
+
+    it 'com conversa nas duas caixas, vale a mais recente', :aggregate_failures do
+      paciente = contact_named('Duas Caixas', '+5511999990064')
+      create(:conversation, account: account, inbox: instagram, contact: paciente, last_activity_at: 10.days.ago)
+      create(:conversation, account: account, inbox: inbox, contact: paciente, last_activity_at: 1.day.ago)
+      consulta(paciente, '2026-09-28 10:00')
+
+      described_class.perform_now(now)
+      expect(sent_by).to eq([[inbox.name, 'Duas Caixas']])
+    end
+
+    it 'sem a outra caixa marcada, tudo continua saindo pela caixa do lembrete' do
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg } })
+      insta = contact_named('Veio Do Instagram', '+5511999990065')
+      create(:conversation, account: account, inbox: instagram, contact: insta)
+      consulta(insta, '2026-09-28 11:00')
+
+      described_class.perform_now(now)
+      expect(sent_by).to eq([[inbox.name, 'Veio Do Instagram']])
+    end
+
+    it 'modelo que não existe na outra caixa: sai pela caixa padrão', :aggregate_failures do
+      job = described_class.new
+      template = { 'template_params' => { 'name' => 'confirmacao_consulta_paulista' } }
+      com = instance_double(Inbox, channel: instance_double(Channel::Whatsapp,
+                                                            message_templates: [{ 'name' => 'confirmacao_consulta_paulista' }]))
+      sem = instance_double(Inbox, channel: instance_double(Channel::Whatsapp, message_templates: [{ 'name' => 'outro_modelo' }]))
+      nao_sincronizada = instance_double(Inbox, channel: instance_double(Channel::Whatsapp, message_templates: []))
+
+      expect(job.send(:template_in_inbox?, com, template)).to be(true)
+      expect(job.send(:template_in_inbox?, sem, template)).to be(false)
+      expect(job.send(:template_in_inbox?, nao_sincronizada, template)).to be(true)
+    end
+
+    it 'pela outra caixa, usa o modelo de mesmo nome como está cadastrado naquele número', :aggregate_failures do
+      job = described_class.new
+      chosen = { 'template_params' => { 'name' => 'confirmacao_consulta_paulista', 'language' => 'en', 'category' => 'UTILITY',
+                                        'processed_params' => { 'body' => vars } },
+                 'message_preview' => 'Texto do Google {{1}}' }
+      registered = [{ 'name' => 'confirmacao_consulta_paulista', 'language' => 'pt_BR', 'category' => 'MARKETING',
+                      'components' => [{ 'type' => 'BODY', 'text' => 'Texto do Instagram {{1}}' }] }]
+      outra = instance_double(Inbox, channel: instance_double(Channel::Whatsapp, message_templates: registered))
+
+      result = job.send(:template_of_inbox, outra, chosen)
+      expect(result['template_params']).to include('name' => 'confirmacao_consulta_paulista', 'language' => 'pt_BR',
+                                                   'category' => 'MARKETING')
+      expect(result.dig('template_params', 'processed_params', 'body')).to eq(vars) # as variáveis do card continuam
+      expect(result['message_preview']).to eq('Texto do Instagram {{1}}')
+    end
+  end
+
+  # item 312 (02/10, pedido dele): "preciso poder escolher a coluna em que isso será enviado"
+  describe 'colunas do CRM que recebem' do
+    let(:pipeline) { Crm::Pipeline.create!(account: account, name: 'Funil', position: 1) }
+    let(:agendada) { Crm::Stage.create!(pipeline: pipeline, name: 'Agendamento de Consulta', position: 1, color: '#059669') }
+    let(:orcamento) { Crm::Stage.create!(pipeline: pipeline, name: 'Envio de Orçamento', position: 2, color: '#2563EB') }
+
+    it 'com coluna marcada, só recebe quem tem o card nela; os outros vão para as puladas com o motivo', :aggregate_failures do
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('stage_ids' => [agendada.id]) } })
+      na_coluna = contact_named('Na Coluna', '+5511999990071')
+      em_outra = contact_named('Em Outra', '+5511999990072')
+      sem_card = contact_named('Sem Card', '+5511999990073')
+      Crm::Contact.create!(contact: na_coluna, pipeline: pipeline, stage: agendada)
+      Crm::Contact.create!(contact: em_outra, pipeline: pipeline, stage: orcamento)
+      [na_coluna, em_outra, sem_card].each_with_index { |c, i| consulta(c, "2026-09-28 09:#{i}0") }
+
+      described_class.perform_now(now)
+
+      state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+      expect(state['sent'].pluck('name')).to eq(['Na Coluna'])
+      expect(state['skipped'].to_h { |e| [e['name'], e['why']] }).to eq(
+        'Em Outra' => 'card na coluna Envio de Orçamento', 'Sem Card' => 'sem card no CRM'
+      )
+    end
+
+    it 'sem coluna marcada, todos recebem (como era)' do
+      qualquer = contact_named('Qualquer Coluna', '+5511999990074')
+      Crm::Contact.create!(contact: qualquer, pipeline: pipeline, stage: orcamento)
+      consulta(qualquer, '2026-09-28 09:00')
+
+      described_class.perform_now(now)
+      expect(settings.reload.agenda_config.dig('appointment_reminders_state', 'd2', 'sent').pluck('name')).to eq(['Qualquer Coluna'])
+    end
+  end
+
   # item 308: no N8N todo evento do Google Agenda recebia; aqui a consulta sem paciente vinculado
   # sumia sem aviso — agora aparece em "puladas" com o motivo, para a equipe completar o cadastro
   it 'consulta sem paciente vinculado aparece nas puladas com o motivo (não some em silêncio)', :aggregate_failures do

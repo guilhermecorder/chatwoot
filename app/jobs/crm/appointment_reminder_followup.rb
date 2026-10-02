@@ -42,6 +42,11 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     "#{regua}_due"
   end
 
+  # item 310: a caixa pela qual o lembrete saiu (o reforço usa a mesma)
+  def self.inbox_key(regua)
+    "#{regua}_inbox"
+  end
+
   def self.hours_of(rcfg)
     value = rcfg.dig('followup', 'hours').to_i
     value.positive? ? value.clamp(HOURS_RANGE.min, HOURS_RANGE.max) : DEFAULT_HOURS
@@ -93,7 +98,9 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     return nil if followup_replied?(contact, followup_time(entry[regua]))
 
     partner = partner_patient?(task, contact)
-    inbox = account.inboxes.find_by(id: partner ? rcfg.dig('partner', 'inbox_id') : rcfg['inbox_id'])
+    # item 310: o reforço sai pela mesma caixa em que o lembrete saiu
+    sent_by = entry[Crm::AppointmentReminderFollowup.inbox_key(regua)]
+    inbox = account.inboxes.find_by(id: partner ? rcfg.dig('partner', 'inbox_id') : (sent_by || rcfg['inbox_id']))
     template = followup_template(rcfg, partner)
     return nil if inbox.nil? || template.nil?
     return nil unless claim_followup!(contact, task, regua, number, now_sp)

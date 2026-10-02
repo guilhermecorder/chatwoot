@@ -8932,3 +8932,43 @@ com parâmetros diferentes selecionáveis por chavinhas.
   Envio de Orçamento / Novos Contatos — são os robôs (N8N) movendo cartão ao ENVIAR a mensagem, não o paciente agindo;
   (2) o cartão "Novos contatos (leads)" mostrava 104 em "Este ano" enquanto a régua oficial dá ~12 mil — não investigado.
 - DEPLOY: WEB+SIDEKIQ (cron novo), **sem migration**. Depois do deploy: rodar o rake com DRY=1, conferir, DRY=0.
+
+- **02/10 00h45 — 305–309 SUBIRAM** no commit 3d3646c (develop; ele commitou --no-verify, eu dei push) → build VERDE → imagem
+  ghcr.io/guilhermecorder/chatwoot:3d3646c p/ Implantar WEB+SIDEKIQ, sem migration (reversão :9f59a9e). O "Frontend Lint & Test"
+  do GitHub falhou no eslint — falha igual em todos os commits anteriores. Depois do deploy (ele): rake cevico:stage_logs_bulk
+  DRY=1 → DRY=0; anexar refrativa-ANEXAR-titulo-novo.html; Confirmação em Sombra hoje (sexta) e virar Ao vivo + desligar N8N na
+  segunda depois das 10h.
+
+## 310. ✅ 📅 CONFIRMAÇÃO DE CONSULTA: o lembrete sai pela CAIXA EM QUE O PACIENTE JÁ CONVERSA (02/10 madrugada; "preciso enviar a mensagem modelo tanto pela caixa do Google quanto pela caixa do Instagram… será enviada através da caixa de entrada em que a conversa já existe. e você não criou")
+- ANTES: cada lembrete tinha UMA caixa ("Caixa do WhatsApp que envia"). Paciente que conversa pelo número do Instagram
+  recebia a confirmação por outro número, em conversa nova.
+- AGORA: no lembrete, embaixo da caixa, "Também envia pela caixa em que o paciente já conversa" (marcar as outras caixas
+  de WhatsApp). O robô olha a conversa MAIS RECENTE do paciente entre a caixa de cima e as marcadas e manda por ela.
+  Sem conversa em nenhuma → caixa de cima (padrão). Modelo que não existe na outra caixa → sai pela padrão.
+  O reforço sai pela MESMA caixa do lembrete (marca `dN_inbox`). Oftalmofácil continua só pela caixa deles.
+- "Última rodada" (Sombra e Ao vivo) mostra por qual caixa cada paciente recebeu / receberia.
+- Config: `agenda_config.appointment_reminders.dN.inbox_ids` (além de `inbox_id`). Sem a chave, nada muda.
+- Testes: appointment_reminder_send_job_d2_spec (+4) + settings_reminder_inboxes_spec (2) + followup + listener = 40 verdes;
+  card conferido no localhost com 2 caixas de WhatsApp de teste.
+- Pela outra caixa o robô usa o modelo de MESMO NOME como está cadastrado naquele número (idioma/categoria de lá; as
+  variáveis são as do card). O card mostra, para cada caixa marcada, "✓ os modelos escolhidos existem neste número" ou
+  "⚠ não achei <nome>" (aí quem conversa por lá recebe pela caixa de cima). Nome diferente entre os números = precisa de
+  modelo por caixa (não construído; perguntar a ele).
+- DEPLOY: WEB+SIDEKIQ, sem migration. Reversão: :3d3646c. SEM commit.
+
+## 311. ✅ 🩺 IA gravava a consulta com o MÉDICO ERRADO (02/10; "a IA está agendando os pacientes terça-feira o dia todo com o Dr. Henrique; à tarde a agenda é da Dra. Roberta")
+- CAUSA: ao gravar a consulta, os 4 agentes (Atendente de Agendamento, Pós-agendamento/remarcação, Instagram e Ligação)
+  pegavam o médico da PRIMEIRA faixa do dia naquela unidade, sem olhar a hora. Só a terça na Av. Paulista tem dois médicos
+  na mesma unidade (manhã Henrique 08h–11h30, tarde Roberta 14h30–16h30) — por isso só ela errava. O horário oferecido
+  estava certo; o nome gravado na Agenda é que saía errado.
+- AGORA: `Crm::AgendaSlots.doctor_at` — o médico é o da faixa que cobre o horário.
+- CONSERTO DO QUE JÁ FOI GRAVADO: `rake cevico:agenda_fix_doctors ACCOUNT_ID=1` (DRY=1 padrão lista; DRY=0 corrige; ALL=1
+  inclui as passadas). Só mexe quando o nome gravado é exatamente o de um médico das faixas e a faixa do horário é de outro.
+- Testes: agenda_slots_reserved_spec (+1) + rake spec (1) verdes.
+
+## 312. ✅ 📅 CONFIRMAÇÃO DE CONSULTA: escolher as COLUNAS do CRM que recebem (02/10; "eu preciso poder escolher a coluna em que isso será enviado")
+- No lembrete, "Colunas do CRM que recebem": marcar uma ou mais colunas → só recebe quem tem o card numa delas; os outros
+  vão para "puladas" com o motivo ("card na coluna X" / "sem card no CRM"). Nenhuma marcada = todas (como era).
+  Paciente do Oftalmofácil segue a regra do bloco dele. Config: `appointment_reminders.dN.stage_ids`.
+- Testes: appointment_reminder_send_job_d2_spec (+2) + settings_reminder_inboxes_spec (+1) verdes.
+- 310 + 311 + 312: WEB+SIDEKIQ, sem migration. Reversão: :3d3646c. SEM commit.

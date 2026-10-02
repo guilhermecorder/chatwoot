@@ -126,9 +126,7 @@ class Crm::InstagramAgentJob < ApplicationJob
 
     begin
       starts_at = Crm::AgendaSlots::TZ.parse("#{date} #{time}")
-      doctor = Crm::AgendaSlots.windows(account)
-                               .find { |w| w['dow'] == date.wday && w['unit'] == ag[:unidade] }
-                               &.[]('doctor')
+      doctor = Crm::AgendaSlots.doctor_at(account, date, time, ag[:unidade]) # item 311: o médico da faixa do horário
 
       Crm::AppointmentRecorder.record(
         account: account,

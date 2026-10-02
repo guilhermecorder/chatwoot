@@ -301,7 +301,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       return false unless Crm::AgendaSlots.slot_available?(account, date: date, time: time, unit: ag[:unidade])
 
       starts_at = Crm::AgendaSlots::TZ.parse("#{date} #{time}")
-      doctor = Crm::AgendaSlots.windows(account).find { |w| w['dow'] == date.wday && w['unit'] == ag[:unidade] }&.[]('doctor')
+      doctor = Crm::AgendaSlots.doctor_at(account, date, time, ag[:unidade]) # item 311: o médico da faixa do horário
       outcome = Crm::AppointmentRecorder.record(
         account: account,
         result: { found: true, starts_at: starts_at, name: ag[:nome], phone: ag[:telefone].presence || conversation.contact&.phone_number,

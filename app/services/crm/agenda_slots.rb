@@ -209,6 +209,18 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     free_slots_on(account, date, unit: unit.presence, modality: modality).any? { |s| s[:time] == time }
   end
 
+  # 🩺 item 311 (02/10, "a IA está agendando terça o dia todo com o Dr. Henrique;
+  # à tarde a agenda é da Dra. Roberta"): o médico da consulta é o da FAIXA que
+  # cobre o horário. Antes cada agente pegava a 1ª faixa do dia naquela unidade —
+  # na terça (Av. Paulista: manhã Henrique, tarde Roberta) dava sempre Henrique.
+  # Horário fora de qualquer faixa: a 1ª do dia, como era.
+  def doctor_at(account, date, time, unit, modality: AI_MODALITY)
+    minutes = hm_to_min(time.to_s)
+    wins = windows_for(account, modality).select { |w| w['dow'] == date.wday && w['unit'] == unit }
+    covering = wins.find { |w| minutes >= hm_to_min(w['start']) && minutes < hm_to_min(w['end']) }
+    (covering || wins.first)&.[]('doctor')
+  end
+
   # 🗂️ item 307: REGRAS DA AGENDA para o prompt dos agentes — as faixas
   # reservadas (geradas das janelas) + o texto livre que a clínica escreve em
   # Agenda → Configurações → Regras para a IA. Vazio = nada entra no prompt.

@@ -283,7 +283,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
         Crm::AgendaSlots.slot_available?(@account, date: date, time: time, unit: unit, modality: modality)
 
       starts_at = TZ.parse("#{date} #{time}")
-      doctor = Crm::AgendaSlots.windows_for(@account, modality).find { |w| w['dow'] == date.wday && w['unit'] == unit }&.[]('doctor')
+      doctor = Crm::AgendaSlots.doctor_at(@account, date, time, unit, modality: modality) # item 311
       task.update!(
         due_at: starts_at, unit: unit, doctor: doctor.presence || task.doctor,
         rescheduled_count: task.rescheduled_count + 1, status: :todo, canceled_at: nil,

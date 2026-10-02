@@ -1311,6 +1311,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         'enabled' => ActiveModel::Type::Boolean.new.cast(r[:enabled]) == true,
         'hour' => r[:hour].to_i.clamp(0, 23),
         'inbox_id' => r[:inbox_id].to_i,
+        # item 310: caixas que TAMBÉM enviam — o lembrete sai pela caixa em que o
+        # paciente já conversa; a `inbox_id` fica como padrão (paciente sem conversa)
+        'inbox_ids' => (Array(r[:inbox_ids]).map(&:to_i) & (Current.account.inboxes.pluck(:id) - [r[:inbox_id].to_i])).presence,
+        # item 312: colunas do CRM que recebem (vazio = todas)
+        'stage_ids' => (Array(r[:stage_ids]).map(&:to_i) & reminder_stage_ids).presence,
         'template_params' => reminder_template_params(r[:template_params]),
         'message_preview' => r[:message_preview].to_s[0, 2000].presence
       }.merge(sanitize_reminder_extras(r)).compact
@@ -1376,6 +1381,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     return nil unless value.is_a?(ActionController::Parameters)
 
     value.permit(:name, :namespace, :language, :category, processed_params: {}).to_h.presence
+  end
+
+  def reminder_stage_ids
+    @reminder_stage_ids ||= Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: Current.account.id }).pluck(:id)
   end
 
   def sanitize_reminder_extras(r) # rubocop:disable Naming/MethodParameterName, Metrics/AbcSize, Metrics/CyclomaticComplexity
