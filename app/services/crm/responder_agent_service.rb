@@ -189,9 +189,10 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       - Coluna do paciente no CRM: #{card_stage_name || 'sem card (contato novo)'}
       - Consulta futura já marcada: #{future_appointment_text}
       #{"- Motivo da ligação: #{call_objective}\n" if voice?}#{pos_op_context if pos_op?}
-      HORÁRIOS DISPONÍVEIS (vagas LIVRES reais das próximas 4 semanas; ofereça no máximo 2 por vez, só destes; para um dia específico fora desta lista use a ferramenta horarios_do_dia — agendamento futuro é liberado):
-      #{Crm::AgendaSlots.free_slots_text(@account, days: 28, per_window: 3)}
+      HORÁRIOS DISPONÍVEIS (vagas LIVRES reais das próximas 4 semanas; ofereça no máximo 2 por vez, só destes; para um dia específico fora desta lista use a ferramenta horarios_do_dia — agendamento futuro é liberado):#{slots_note}
+      #{Crm::AgendaSlots.free_slots_text(@account, days: 28, per_window: 3, modality: slots_modality)}
 
+      #{Crm::AgendaSlots.rules_block(@account)}
     CTX
   end
 
@@ -260,9 +261,27 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     Crm::Contact.where(contact_id: contact.id).includes(:stage).order(:updated_at).last&.stage&.name
   end
 
-  def future_appointment_text
+  def future_task
+    return @future_task if defined?(@future_task)
+
     contact = @conversation.contact
-    task = Crm::AppointmentRecorder.future_appointment(@account, contact&.phone_number, nil, contact)
+    @future_task = Crm::AppointmentRecorder.future_appointment(@account, contact&.phone_number, nil, contact)
+  end
+
+  # item 307: paciente com RETORNO ou PÓS-OPERATÓRIO marcado recebe os horários
+  # das faixas desse tipo (a remarcação não cai no período das consultas novas)
+  def slots_modality
+    Crm::AgendaSlots.slot_modality(future_task)
+  end
+
+  def slots_note
+    return '' if slots_modality == Crm::AgendaSlots::AI_MODALITY
+
+    "\n(o paciente tem #{Crm::AgendaSlots::MODALITY_LABELS[slots_modality]} marcado — a lista abaixo é das faixas desse tipo de atendimento)"
+  end
+
+  def future_appointment_text
+    task = future_task
     return 'nenhuma' if task.blank?
 
     when_at = task.due_at.in_time_zone(Crm::AgendaSlots::TZ)

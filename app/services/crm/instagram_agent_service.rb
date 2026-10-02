@@ -188,6 +188,7 @@ class Crm::InstagramAgentService
       HORÁRIOS DISPONÍVEIS (próximos dias — ofereça no máx. 2 por vez):
       #{Crm::AgendaSlots.free_slots_text(@account)}
 
+      #{Crm::AgendaSlots.rules_block(@account)}
       CONVERSA ATÉ AGORA (PACIENTE = quem você atende; CLÍNICA = você/equipe):
 
     CTX

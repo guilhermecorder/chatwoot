@@ -1566,6 +1566,12 @@ const BUCKET_WORD = {
   week: ['semana', 'semanas'],
   month: ['mês', 'meses'],
 };
+// item 309: no gráfico por SEMANA a etiqueta é o 1º dia da semana — dizer "pico
+// em 06/07" fazia parecer que tudo aconteceu naquele dia
+const peakWhen = (label, granularity) => {
+  if (!label) return '';
+  return granularity === 'week' ? `na semana de ${label}` : `em ${label}`;
+};
 // item 266: a tendência do gráfico do popup em palavras
 const modalTrendWords = computed(() =>
   modalChart.value && !modalChart.value.compare
@@ -1590,7 +1596,7 @@ const modalInsight = computed(() => {
   const avg =
     Math.round((filled.reduce((a, b) => a + b, 0) / filled.length) * 10) / 10;
   const parts = [
-    `pico ${c.labels?.[maxI] ? `em ${c.labels[maxI]}` : ''}: ${fmt(maxV)}`.replace(
+    `pico ${peakWhen(c.labels?.[maxI], modalBag.value?.granularity)}: ${fmt(maxV)}`.replace(
       'pico : ',
       'pico: '
     ),
@@ -2596,7 +2602,7 @@ const tileBigSummary = tile => {
     trendWords,
     widened: bag !== base,
     peakText: hasData
-      ? `pico ${points[peakAt]?.label ? `em ${points[peakAt].label}` : ''}: ${fmt(peak)} · média ${fmt(avg)}${bag !== base ? ' · últimos 7 dias' : ''}`
+      ? `pico ${peakWhen(points[peakAt]?.label, bag?.granularity)}: ${fmt(peak)} · média ${fmt(avg)}${bag !== base ? ' · últimos 7 dias' : ''}`
       : '',
     details: (tile.details || []).slice(0, 3),
   };

@@ -70,7 +70,9 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     stage_logs = Crm::StageLog.joins(:crm_contact)
                               .where(crm_contacts: { pipeline_id: pipeline.id })
                               .where(entered_at: range)
-    entered = stage_logs.group(:stage_id).group(day.call('crm_contact_stage_logs.entered_at'))
+    # item 309: carga em massa (`bulk`) fica fora do "entrou na coluna"
+    entered = stage_logs.where(event_type: Crm::StageLogBulk::ENTERED)
+                        .group(:stage_id).group(day.call('crm_contact_stage_logs.entered_at'))
                         .distinct.count(:crm_contact_id)
     revenue = stage_logs.where("crm_contact_stage_logs.stage_name ILIKE '%cirurgia realizada%'")
                         .group(day.call('crm_contact_stage_logs.entered_at'))

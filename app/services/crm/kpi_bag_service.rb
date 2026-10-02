@@ -216,9 +216,11 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     @account.tasks.where(task_type: type, attendance: status, canceled_at: nil, due_at: since..until_at)
   end
 
+  # item 309: só entrada de verdade — carga em massa (`bulk`) não é paciente entrando na coluna
   def stage_entries(pipeline, stage_id, since, until_at)
     Crm::StageLog.joins(:crm_contact)
-                 .where(crm_contacts: { pipeline_id: pipeline.id }, stage_id: stage_id, entered_at: since..until_at)
+                 .where(crm_contacts: { pipeline_id: pipeline.id }, stage_id: stage_id, entered_at: since..until_at,
+                        event_type: Crm::StageLogBulk::ENTERED)
   end
 
   def revenue_logs(pipeline, since, until_at)

@@ -14,7 +14,8 @@ RSpec.describe Crm::AgendaSlots do
   it 'free_slots_on devolve as vagas das janelas daquele dia (quarta: Paulista tarde + Tatuapé manhã)' do
     slots = described_class.free_slots_on(account, far_wednesday, per_window: 2)
     expect(slots.map { |s| s[:unit] }.uniq).to contain_exactly('paulista', 'tatuape')
-    expect(slots.find { |s| s[:unit] == 'paulista' }[:time]).to eq('13:00')
+    # item 307: 13h–14h é só pós-operatório — a consulta nova começa às 14h
+    expect(slots.find { |s| s[:unit] == 'paulista' }[:time]).to eq('14:00')
     expect(slots.find { |s| s[:unit] == 'tatuape' }[:time]).to eq('08:30')
   end
 
@@ -27,11 +28,11 @@ RSpec.describe Crm::AgendaSlots do
   end
 
   it 'slot_available? enxerga uma vaga bem no futuro e some quando a consulta é marcada' do
-    expect(described_class.slot_available?(account, date: far_wednesday, time: '13:15', unit: 'paulista')).to be(true)
+    expect(described_class.slot_available?(account, date: far_wednesday, time: '14:15', unit: 'paulista')).to be(true)
     user = create(:user, account: account)
     account.tasks.create!(title: 'Consulta: Ana', task_type: 'consulta', unit: 'paulista', creator: user,
-                          due_at: tz.parse("#{far_wednesday} 13:15"))
-    expect(described_class.slot_available?(account, date: far_wednesday, time: '13:15', unit: 'paulista')).to be(false)
+                          due_at: tz.parse("#{far_wednesday} 14:15"))
+    expect(described_class.slot_available?(account, date: far_wednesday, time: '14:15', unit: 'paulista')).to be(false)
   end
 
   it 'free_slots continua igual para os próximos dias' do
@@ -43,22 +44,21 @@ RSpec.describe Crm::AgendaSlots do
   it 'cirurgia e exame do Oftalmofácil ocupam o bloco em que começam, só na unidade deles', :aggregate_failures do
     user = create(:user, account: account)
     free = ->(time, unit = 'paulista') { described_class.slot_available?(account, date: far_wednesday, time: time, unit: unit) }
-    expect([free.call('13:00'), free.call('13:15'), free.call('14:00'), free.call('14:30')]).to all(be(true))
+    expect([free.call('14:00'), free.call('14:15'), free.call('15:00'), free.call('15:30')]).to all(be(true))
 
     account.tasks.create!(title: 'Cirurgia: Hub', task_type: 'cirurgia', unit: 'paulista', creator: user, source: 'oftalmofacil',
-                          external_ref: 'hub-1', due_at: tz.parse("#{far_wednesday} 13:10"))
+                          external_ref: 'hub-1', due_at: tz.parse("#{far_wednesday} 14:10"))
     account.tasks.create!(title: 'Exame: Hub', task_type: 'consulta', modality: 'exames', unit: 'paulista', creator: user,
-                          source: 'oftalmofacil', external_ref: 'hub-2', due_at: tz.parse("#{far_wednesday} 14:20"))
+                          source: 'oftalmofacil', external_ref: 'hub-2', due_at: tz.parse("#{far_wednesday} 15:20"))
     account.tasks.create!(title: 'Cancelada: Hub', task_type: 'cirurgia', unit: 'paulista', creator: user, source: 'oftalmofacil',
                           external_ref: 'hub-3', due_at: tz.parse("#{far_wednesday} 16:00"), canceled_at: Time.current)
 
-    expect(free.call('13:00')).to be(false) # cirurgia 13:10 começa no bloco 13:00–13:15
-    expect(free.call('13:15')).to be(true)  # os blocos seguintes continuam livres
-    expect(free.call('14:00')).to be(true)
-    expect(free.call('14:15')).to be(false) # exame 14:20 começa no bloco 14:15–14:30
-    expect(free.call('14:30')).to be(true)
-    expect(free.call('14:45')).to be(true)
+    expect(free.call('14:00')).to be(false) # cirurgia 14:10 começa no bloco 14:00–14:15
+    expect(free.call('14:15')).to be(true)  # os blocos seguintes continuam livres
     expect(free.call('15:00')).to be(true)
+    expect(free.call('15:15')).to be(false) # exame 15:20 começa no bloco 15:15–15:30
+    expect(free.call('15:30')).to be(true)
+    expect(free.call('15:45')).to be(true)
     expect(free.call('16:00')).to be(true)  # cancelada não ocupa
     expect(free.call('08:30', 'tatuape')).to be(true) # outra unidade
   end

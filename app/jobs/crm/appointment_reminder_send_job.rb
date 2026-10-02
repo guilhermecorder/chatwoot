@@ -109,7 +109,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
       scope = account.tasks.where(task_type: 'consulta', canceled_at: nil, archived_at: nil)
                      .where(due_at: day_start..day_start.end_of_day)
                      .where(attendance: [nil, ''])
-                     .where.not(contact_id: nil)
+      # item 308 (01/10): consulta SEM paciente vinculado não some mais em silêncio —
+      # entra na lista de "puladas" com o motivo, para a equipe completar o cadastro
       scope = scope.where(confirmed_at: nil) if self.class.days_of(regua).positive? # quem já confirmou não recebe de novo
       scope.includes(:contact).find_each { |task| send_for(account, inbox, rcfg, regua, task, run, shadow: shadow) }
     end
@@ -156,7 +157,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob
 
   # por que esta consulta NÃO recebe a régua (nil = pode receber)
   def skip_reason(rcfg, regua, task, contact) # rubocop:disable Metrics/CyclomaticComplexity
-    return 'sem telefone' if contact.nil? || contact.phone_number.blank?
+    return (task.phone.present? ? 'telefone sem cadastro de paciente' : 'sem telefone') if contact.nil?
+    return 'sem telefone' if contact.phone_number.blank?
 
     # 🚧 item 231 (cerca dos parceiros): consulta/exame de parceiro do hub só recebe
     # o lembrete quando o bloco "Pacientes do Oftalmofácil" deste lembrete está ligado

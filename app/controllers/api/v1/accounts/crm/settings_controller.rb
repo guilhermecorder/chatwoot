@@ -22,7 +22,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   ADMIN_SETTINGS_ACTIONS = %i[
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
-    update_google_ads test_google_ads update_sheets test_sheets update_agenda agenda_backfill
+    update_google_ads test_google_ads update_sheets test_sheets update_agenda agenda_backfill agenda_ai_preview
     update_oftalmofacil
     update_calls enable_calls_at_meta calls_meta_status
     update_voice test_voice sync_voice voice_whatsapp_accounts voice_voices voice_state
@@ -874,6 +874,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ── Agenda: janelas de avaliação dos médicos ────────────────────────────────
 
+  # 🗂️ item 307: o que a IA está recebendo AGORA sobre a agenda — as regras
+  # (faixas reservadas + texto da clínica) e as vagas que ela pode oferecer.
+  # É a prova, na tela de Configurações da Agenda, de que a mudança pegou.
+  def agenda_ai_preview
+    render json: {
+      rules: Crm::AgendaSlots.rules_text(Current.account),
+      slots: Crm::AgendaSlots.free_slots_text(Current.account, days: 14, per_window: 3)
+    }
+  end
+
   # item 267 (28/09, "as meninas devem poder fechar as agendas de médicos"):
   # fechar/reabrir um dia (inteiro, uma unidade ou um médico) é da EQUIPE,
   # não só do admin — por isso fica fora de ADMIN_SETTINGS_ACTIONS
@@ -889,10 +899,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def update_agenda
     cfg = crm_settings.agenda_config || {}
     if params.key?(:windows)
+      # item 307: `only` = tipos que a faixa aceita (vazio = todos)
       cfg['windows'] = Array(params[:windows]).map do |w|
-        w.permit(:dow, :unit, :doctor, :turno, :start, :end, :block).to_h
+        win = w.permit(:dow, :unit, :doctor, :turno, :start, :end, :block, only: []).to_h
+        only = Array(win.delete('only')).map(&:to_s) & Crm::AgendaSlots::RESERVABLE
+        only.any? ? win.merge('only' => only) : win
       end
     end
+    # 🗂️ item 307: regras da agenda escritas pela clínica — entram no prompt dos
+    # agentes num bloco próprio (Agenda → Configurações → Regras para a IA)
+    cfg['ai_rules'] = params[:ai_rules].to_s.strip[0, 2000] if params.key?(:ai_rules)
     # horários fechados com o cadeado (almoço, ausência do médico...)
     if params.key?(:blocked)
       cfg['blocked'] = Array(params[:blocked]).map do |b|
@@ -1244,6 +1260,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_blocked: cfg['blocked'] || [],
       agenda_blocked_days: cfg['blocked_days'] || [],
       agenda_closed_doctors: cfg['closed_doctors'] || [],
+      agenda_ai_rules: cfg['ai_rules'].to_s,
       attendance_stages: cfg['attendance_stages'] || {},
       attendance_owners: cfg['attendance_owners'] || {},
       team_roles: cfg['team_roles'] || {},
@@ -1907,6 +1924,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_blocked: (s.agenda_config || {})['blocked'] || [],
       agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || [],
       agenda_closed_doctors: (s.agenda_config || {})['closed_doctors'] || [],
+      agenda_ai_rules: (s.agenda_config || {})['ai_rules'].to_s, # item 307
       attendance_stages: (s.agenda_config || {})['attendance_stages'] || {},
       attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},
       team_roles: (s.agenda_config || {})['team_roles'] || {},

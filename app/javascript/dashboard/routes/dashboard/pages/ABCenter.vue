@@ -39,6 +39,7 @@ const rowsFor = page => {
       active: key === 'a' || !!variants.find(v => v.key === key)?.active,
       views: t.view || 0,
       clicks,
+      leads: t.lead || 0, // item 306: cliques que viraram conversa na caixa
       rate: t.view ? Math.round((clicks / t.view) * 100) : null,
     };
   });
@@ -100,6 +101,7 @@ onMounted(load);
               <span v-if="!r.active" class="text-[10px] px-1.5 rounded bg-n-alpha-2 text-n-slate-10">pausada</span>
               <span class="text-n-slate-10">{{ r.views }} visitas</span>
               <span class="text-n-slate-10">{{ r.clicks }} cliques</span>
+              <span class="text-n-slate-10">{{ r.leads }} leads</span>
               <b :style="{ color: r.rate >= 10 ? '#047857' : '#64748B' }">{{ fmtPct(r.rate) }}</b>
               <span v-if="leaderOf(p)?.key === r.key" class="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style="background: rgba(16,185,129,0.15); color: #047857">liderando</span>
             </div>

@@ -776,8 +776,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # item 211: a caixa do painel mostra até 40 (antes 5) — organizada para
   # ter mais de 10 tarefas com clareza (lista rolável, duas colunas)
   def my_tasks_json
-    open_tasks = account.tasks.where(assignee_id: Current.user.id, status: %w[todo doing])
-                        .where.not(task_type: %w[consulta cirurgia])
+    open_tasks = account.tasks.board_cards.where(assignee_id: Current.user.id, status: %w[todo doing])
                         .order(Arel.sql('priority DESC, due_at ASC NULLS LAST, created_at DESC'))
     {
       count: open_tasks.count,

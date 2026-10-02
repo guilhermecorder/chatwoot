@@ -9,6 +9,8 @@
     page = nil → modo HUB (raiz do domínio): protocolo sai de /hub/ref. %>
 <% ref_path = page ? "/p/#{page.slug}/ref" : '/hub/ref' %>
 <% default_origin = page ? "a página \"#{page.title}\"" : 'o site da CEVICO' %>
+<%# item 306: letra da variação do teste A/B que este visitante está vendo %>
+<% ab_variant = page&.serving_variant.to_s[/\A[a-z0-9]{1,3}\z/] %>
 <script nonce="<%= content_security_policy_nonce %>">
 (function () {
   var KEY = 'cevico_trk';
@@ -28,6 +30,10 @@
     } catch (e) { /* referrer inválido */ }
   }
   try { sessionStorage.setItem(KEY, JSON.stringify(trk)); } catch (e) { /* sessão cheia */ }
+<% if ab_variant.present? %>
+  // teste A/B (item 306): a gravação do Clarity fica marcada com a headline vista
+  try { if (window.clarity) window.clarity('set', 'headline', '<%= ab_variant %>'); } catch (e) { /* sem Clarity */ }
+<% end %>
 
   function appendTrk(url) {
     Object.keys(trk).forEach(function (k) {
@@ -46,6 +52,9 @@
       if (a.dataset.cevicoRef) return; // já processado — segue o clique
       e.preventDefault();
       var body = new URLSearchParams(trk);
+<% if ab_variant.present? %>
+      body.set('v', '<%= ab_variant %>'); // teste A/B: o clique e o lead contam para esta headline
+<% end %>
       // identidade GA4 da sessão (cookies _ga e _ga_*): viaja no Protocolo
       // para a conversão do CRM voltar AMARRADA à sessão que clicou no
       // anúncio — é o que faz o Google Ads contabilizar

@@ -379,8 +379,11 @@ const abLine = key => {
   if (!t) return null;
   const clicks = (t.cta || 0) + (t.next || 0);
   const rate = t.view ? Math.round((clicks / t.view) * 100) : null;
-  return { views: t.view || 0, clicks, rate };
+  return { views: t.view || 0, clicks, rate, leads: t.lead || 0 };
 };
+// item 306: prévia de cada variação antes de ir ao ar (?v= na prévia do rascunho)
+const variantPreviewUrl = key =>
+  editing.value?.preview_url ? `${editing.value.preview_url}?v=${key}` : '';
 
 // ── 💬 comentários do time (estúdio de copy) ──
 const comments = ref([]);
@@ -1397,7 +1400,8 @@ onMounted(() => {
               }}</span>
               <span v-if="abLine('a')" class="text-n-slate-10">
                 {{ abLine('a').views }} visitas ·
-                {{ abLine('a').clicks }} cliques
+                {{ abLine('a').clicks }} cliques ·
+                {{ abLine('a').leads }} leads
                 <b v-if="abLine('a').rate !== null"
 class="text-emerald-600"
                   >· {{ abLine('a').rate }}%</b>
@@ -1421,7 +1425,8 @@ class="text-emerald-600"
                 />
                 <span v-if="abLine(v.key)" class="text-[11px] text-n-slate-10">
                   {{ abLine(v.key).views }} visitas ·
-                  {{ abLine(v.key).clicks }} cliques
+                  {{ abLine(v.key).clicks }} cliques ·
+                  {{ abLine(v.key).leads }} leads
                   <b v-if="abLine(v.key).rate !== null"
 class="text-emerald-600"
                     >· {{ abLine(v.key).rate }}%</b>
@@ -1438,6 +1443,16 @@ class="text-emerald-600"
                   />
                   {{ v.active ? 'no ar (sorteada)' : 'pausada' }}
                 </label>
+                <a
+                  v-if="variantPreviewUrl(v.key)"
+                  :href="variantPreviewUrl(v.key)"
+                  target="_blank"
+                  rel="noopener"
+                  class="text-[11px] text-n-slate-10 hover:text-n-brand underline decoration-dotted"
+                  title="Abre a página com esta variação (salve antes para ver o texto novo)"
+                >
+                  ver prévia
+                </a>
                 <button
                   class="i-lucide-trash-2 text-n-slate-10 hover:text-red-500 text-sm"
                   title="Excluir variação"
@@ -1475,8 +1490,18 @@ class="text-emerald-600"
             </button>
             <p class="text-[10px] text-n-slate-9 mt-1.5">
               Ative a variação e salve: cada visitante é sorteado entre a
-              original e as ativas. Os resultados aparecem aqui e na Análise de
-              Páginas.
+              original e as ativas, e vê sempre a mesma. Os resultados aparecem
+              aqui e na Análise de Páginas. "Leads" = cliques que viraram
+              conversa na caixa.
+            </p>
+            <p
+              v-if="editing.has_custom_html"
+              class="text-[10px] text-n-slate-9 mt-1"
+            >
+              Página HTML anexada: o título da variação entra no lugar da
+              headline principal (H1). Coloque *asteriscos* em volta do trecho
+              que deve ficar colorido. Subtítulo e botão só trocam em página
+              montada.
             </p>
           </div>
 

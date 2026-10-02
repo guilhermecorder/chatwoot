@@ -246,7 +246,7 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
     card_ids = patient_cards(contact).map(&:id)
     return [] if card_ids.empty?
 
-    Crm::StageLog.where(crm_contact_id: card_ids, event_type: 'entered')
+    Crm::StageLog.where(crm_contact_id: card_ids, event_type: [Crm::StageLogBulk::ENTERED, Crm::StageLogBulk::BULK])
                  .order(entered_at: :asc)
                  .map do |log|
       {

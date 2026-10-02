@@ -269,8 +269,10 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
                                          "e pergunte \"Fica bom pra você #{label}?\". Só remarque depois do sim dele.")
     end
 
+    # item 307: retorno e pós-operatório são remarcados nas faixas DELES
+    modality = Crm::AgendaSlots.slot_modality(task)
     unless @live
-      free = Crm::AgendaSlots.slot_available?(@account, date: date, time: time, unit: unit)
+      free = Crm::AgendaSlots.slot_available?(@account, date: date, time: time, unit: unit, modality: modality)
       log_acao('remarcar_consulta', free, "remarcaria #{patient_name(task)} p/ #{label} (simulado#{free ? '' : ', vaga ocupada'})")
       mensagem = free ? 'Em sombra nada foi alterado; a vaga está livre.' : 'Em sombra nada foi alterado; a vaga NÃO está livre — ofereça outra.'
       return { simulado: true, ok: free, mensagem: mensagem }
@@ -278,10 +280,10 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
 
     with_slot_lock(date, time, unit) do
       next refuse('remarcar_consulta', 'Essa vaga não está mais livre. Ofereça outra de HORÁRIOS DISPONÍVEIS.') unless
-        Crm::AgendaSlots.slot_available?(@account, date: date, time: time, unit: unit)
+        Crm::AgendaSlots.slot_available?(@account, date: date, time: time, unit: unit, modality: modality)
 
       starts_at = TZ.parse("#{date} #{time}")
-      doctor = Crm::AgendaSlots.windows(@account).find { |w| w['dow'] == date.wday && w['unit'] == unit }&.[]('doctor')
+      doctor = Crm::AgendaSlots.windows_for(@account, modality).find { |w| w['dow'] == date.wday && w['unit'] == unit }&.[]('doctor')
       task.update!(
         due_at: starts_at, unit: unit, doctor: doctor.presence || task.doctor,
         rescheduled_count: task.rescheduled_count + 1, status: :todo, canceled_at: nil,
@@ -359,7 +361,10 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     date = parse_date(args['dia'])
     return refuse('horarios_do_dia', 'Informe o dia no formato YYYY-MM-DD.') if date.nil?
 
-    slots = Crm::AgendaSlots.free_slots_on(@account, date, unit: args['unidade'].to_s.strip.presence, per_window: 8)
+    # item 307: quem tem retorno/pós-operatório marcado vê as vagas das faixas desse tipo
+    booked = Crm::AppointmentRecorder.future_appointment(@account, @contact&.phone_number, nil, @contact)
+    modality = Crm::AgendaSlots.slot_modality(booked)
+    slots = Crm::AgendaSlots.free_slots_on(@account, date, unit: args['unidade'].to_s.strip.presence, per_window: 8, modality: modality)
     log_acao('horarios_do_dia', true, "vagas de #{WEEKDAYS_SHORT[date.wday]} #{date.strftime('%d/%m')}: #{slots_count_text(slots)}")
     result = { dia: date.to_s, dia_semana: Crm::AgendaSlots::WEEKDAYS[date.wday], vagas: group_slots(slots) }
     result[:aviso] = 'Nenhuma vaga nesse dia (sem atendimento, fechado ou lotado). Ofereça o dia de atendimento mais próximo.' if slots.empty?

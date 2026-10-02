@@ -121,6 +121,28 @@ RSpec.describe Crm::ResponderTools do
       expect(result[:mensagem]).to include('NÃO está livre')
     end
 
+    # 🗂️ item 307: pós-operatório é remarcado na faixa dele (quarta 13h–14h do Dr. Henrique), não no período das consultas
+    it 'AO VIVO remarca PÓS-OPERATÓRIO só para a faixa reservada', :aggregate_failures do
+      wednesday = tz.now.to_date + 14
+      wednesday += 1 until wednesday.wednesday?
+      posop = consulta('Pós-operatório: Maria Silva', today_14 + 2.days,
+                       contact: contact, phone: '+5511999990000', modality: 'pos_op', doctor: 'Dr. Henrique Gemelli')
+      base = { id: posop.id, dia: wednesday.to_s, unidade: 'paulista' }
+
+      recusa = tools(live: true).call('remarcar_consulta', base.merge(hora: '14:15'))
+      expect(recusa[:ok]).to be(false)
+      expect(posop.reload.rescheduled_count).to eq(0)
+
+      result = tools(live: true).call('remarcar_consulta', base.merge(hora: '13:15'))
+      expect(result[:ok]).to be(true)
+      expect(posop.reload.due_at.in_time_zone(tz).strftime('%Y-%m-%d %H:%M')).to eq("#{wednesday} 13:15")
+      expect(posop.doctor).to eq('Dr. Henrique Gemelli')
+
+      vagas = tools(live: true).call('horarios_do_dia', { 'dia' => wednesday.to_s })[:vagas].to_s
+      expect(vagas).to include('13:00').and include('13:30')
+      expect(vagas).not_to include('14:00')
+    end
+
     it 'AO VIVO move a consulta, deixa rastro e avisa o Meu Painel', :aggregate_failures do
       tools_obj = tools(live: true)
       result = tools_obj.call('remarcar_consulta', input)

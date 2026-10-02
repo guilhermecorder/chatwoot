@@ -26,8 +26,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   # vão pra coluna oculta (a tela nasce limpa pro próximo ciclo)
   def archive_done
     # consultas/cirurgias (Agenda) NUNCA entram aqui — só cards do board
-    scope = Current.account.tasks.where(status: :done, archived_at: nil)
-                   .where("task_type IS NULL OR task_type NOT IN ('consulta', 'cirurgia')")
+    scope = Current.account.tasks.board_cards.where(status: :done, archived_at: nil)
     unless Current.account_user.administrator?
       uid = Current.user.id
       scope = scope.where('assignee_id = :uid OR creator_id = :uid', uid: uid)

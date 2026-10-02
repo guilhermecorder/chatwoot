@@ -153,7 +153,7 @@ class Crm::WeeklyMentorService # rubocop:disable Metrics/ClassLength
       meta_minutos: goal_minutes,
       conversas_resolvidas: @account.reporting_events.where(name: 'conversation_resolved', user_id: user.id, created_at: range).count,
       mensagens_enviadas: @account.messages.where(sender: user, message_type: :outgoing, private: false, created_at: range).count,
-      tarefas_concluidas: @account.tasks.where(assignee_id: user.id, status: :done, completed_at: range).count
+      tarefas_concluidas: @account.tasks.board_cards.where(assignee_id: user.id, status: :done, completed_at: range).count
     }
   end
 

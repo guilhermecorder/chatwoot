@@ -222,10 +222,18 @@ class CevicoPage < ApplicationRecord
     (['a'] + active_variants.pluck('key')).sample
   end
 
+  # item 306: procura entre TODAS as variações — ao vivo só entra variação
+  # ativa (sorteio/?v= validados); a prévia mostra também as pausadas
   def variant_field(field)
     return nil if serving_variant.blank? || serving_variant == 'a'
 
-    active_variants.find { |v| v['key'] == serving_variant }&.dig(field).presence
+    Array(ab_variants).find { |v| v['key'] == serving_variant }&.dig(field).presence
+  end
+
+  # 🧪 item 306: página HTML ANEXADA em teste — o título da variação entra no
+  # lugar do <h1> da primeira dobra (original = HTML como foi anexado)
+  def custom_html_for_serving
+    Cevico::HeadlineSwap.call(custom_html.to_s, variant_field('title'))
   end
 
   def display_title
@@ -238,16 +246,27 @@ class CevicoPage < ApplicationRecord
 
   AB_KINDS = %w[view cta next].freeze
 
-  # placar consolidado do teste (todas as datas do daily_stats)
+  # placar consolidado do teste (todas as datas do daily_stats) + item 306:
+  # 'lead' = cliques que viraram CONVERSA na caixa (Protocolo casado)
   def ab_results
     keys = ['a'] + Array(ab_variants).pluck('key')
-    totals = keys.index_with { { 'view' => 0, 'cta' => 0, 'next' => 0 } }
+    totals = keys.index_with { { 'view' => 0, 'cta' => 0, 'next' => 0, 'lead' => 0 } }
     (daily_stats || {}).each_value do |day|
       keys.each do |key|
         AB_KINDS.each { |kind| totals[key][kind] += day["#{kind}_#{key}"].to_i }
       end
     end
+    ab_leads.each { |key, count| totals[key]['lead'] = count if totals.key?(key) }
     totals
+  end
+
+  # o clique no WhatsApp carrega a letra da variação no Protocolo; quando o
+  # paciente manda a mensagem, o Protocolo casa com o contato = lead
+  def ab_leads
+    return {} if ab_variants.blank?
+
+    refs.where.not(contact_id: nil).where("source_data->>'variant' IS NOT NULL")
+        .group(Arel.sql("source_data->>'variant'")).count
   end
 
   # ── Funil + rastreamento (pedido 17/07) ─────────────────────────────

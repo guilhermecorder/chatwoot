@@ -45,6 +45,25 @@ RSpec.describe Crm::AppointmentReminderSendJob do
     expect(described_class.target_dates('d2', {}, now)).to eq([Date.new(2026, 9, 28)])
   end
 
+  # item 308: no N8N todo evento do Google Agenda recebia; aqui a consulta sem paciente vinculado
+  # sumia sem aviso — agora aparece em "puladas" com o motivo, para a equipe completar o cadastro
+  it 'consulta sem paciente vinculado aparece nas puladas com o motivo (não some em silêncio)', :aggregate_failures do
+    ok = contact_named('Com Cadastro', '+5511999990051')
+    consulta(ok, '2026-09-28 09:00')
+    account.tasks.create!(title: 'Retorno: Sem Telefone', task_type: 'consulta', modality: 'retorno', unit: 'paulista',
+                          due_at: tz.parse('2026-09-28 09:15'), creator: admin)
+    account.tasks.create!(title: 'Retorno: Telefone Solto', task_type: 'consulta', modality: 'retorno', unit: 'tatuape',
+                          due_at: tz.parse('2026-09-28 09:30'), phone: '11 3333-0000', creator: admin)
+
+    described_class.perform_now(now)
+
+    state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+    expect(state['sent'].pluck('name')).to eq(['Com Cadastro'])
+    expect(state['skipped'].to_h { |s| [s['name'], s['why']] }).to eq(
+      'Sem Telefone' => 'sem telefone', 'Telefone Solto' => 'telefone sem cadastro de paciente'
+    )
+  end
+
   it 'vários lembretes ao mesmo tempo: 2 dias antes e no dia, cada um com sua hora; interruptor geral desliga tudo', :aggregate_failures do
     no_dia = { 'enabled' => true, 'hour' => 7, 'inbox_id' => inbox.id, 'mode' => 'live',
                'template_params' => tpl.call('lembrete_d0_hoje'), 'message_preview' => 'Hoje {{1}}' }

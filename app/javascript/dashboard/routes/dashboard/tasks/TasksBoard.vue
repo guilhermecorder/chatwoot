@@ -17,6 +17,7 @@ import CrmAPI from 'dashboard/api/crm';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import { isAppointmentTask } from 'dashboard/helper/cevicoAgenda';
 import { useRouter } from 'vue-router';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
@@ -470,7 +471,9 @@ const fetchTasks = async () => {
   isLoading.value = true;
   try {
     const { data } = await TasksAPI.get();
-    tasks.value = data;
+    // item 305: agendamento feito na Agenda (consulta, retorno, exame,
+    // cirurgia) fica SÓ na Agenda — aqui entram os cartões do quadro
+    tasks.value = data.filter(x => !isAppointmentTask(x));
     store.commit('tasks/setTasks', data); // mantém o badge da sidebar em dia
   } catch {
     useAlert(t('TASKS.ERROR'));

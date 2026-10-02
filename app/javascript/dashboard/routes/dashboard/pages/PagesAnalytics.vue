@@ -118,6 +118,7 @@ const abRows = computed(() => {
       active: key === 'a' || variants.find(v => v.key === key)?.active,
       views: t.view || 0,
       clicks,
+      leads: t.lead || 0, // item 306: cliques que viraram conversa na caixa
       rate: t.view ? Math.round((clicks / t.view) * 100) : null,
     };
   });
@@ -344,6 +345,7 @@ onMounted(load);
                 <span v-if="!r.active" class="text-[10px] px-1.5 py-0.5 rounded bg-n-alpha-2 text-n-slate-10">pausada</span>
                 <span class="text-[11px] text-n-slate-10">{{ r.views }} visitas</span>
                 <span class="text-[11px] text-n-slate-10">{{ r.clicks }} cliques</span>
+                <span class="text-[11px] text-n-slate-10">{{ r.leads }} leads</span>
                 <span class="text-[11px] font-bold" :style="{ color: r.rate >= 10 ? '#047857' : '#64748B' }">{{ fmtPct(r.rate) }}</span>
                 <span v-if="abBest && abBest.key === r.key" class="text-[10px] font-bold px-2 py-0.5 rounded-full" style="background: rgba(16,185,129,0.14); color: #047857">
                   liderando

@@ -296,6 +296,17 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { windows });
   }
 
+  // 🗂️ item 307: regras da agenda para a IA + o que ela recebe agora
+  updateAgendaAiRules(aiRules) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      ai_rules: aiRules,
+    });
+  }
+
+  getAgendaAiPreview() {
+    return axios.get(`${this.url}/settings/agenda_ai_preview`);
+  }
+
   // 🕐 horário de envio dos robôs de follow-up (Automações → Robôs, item 147)
   updateFollowupHours(hours) {
     return axios.post(`${this.url}/settings/update_agenda`, {

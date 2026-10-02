@@ -157,6 +157,7 @@ namespace :crm do
     get :voice_voices
     get :voice_state
     post :update_agenda
+    get :agenda_ai_preview # item 307: regras e vagas que a IA recebe
     post :update_blocked_days # item 267: qualquer pessoa da equipe fecha/reabre dias
     post :agenda_backfill
     # Configurações → Domínio (público das páginas/formulários)

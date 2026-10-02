@@ -10,7 +10,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   layout false
   include Cevico::PublicSecurity # 🔐 CSP só-relatar + sem iframe (rodada 171)
 
-  def show # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  def show # rubocop:disable Metrics/AbcSize
     @page = CevicoPage.published.find_by(slug: params[:slug])
     return render plain: 'Página não encontrada.', status: :not_found if @page.nil?
 
@@ -21,8 +21,9 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
       return redirect_to official, status: :moved_permanently, allow_other_host: true
     end
 
-    # teste A/B: sorteia a variação (ou respeita ?v= de quem já entrou nela)
-    @page.serving_variant = requested_variant(@page) || (@page.ab_test_running? ? @page.pick_variant : nil)
+    # teste A/B: sorteia a variação (ou respeita ?v= de quem já entrou nela);
+    # item 306: quem volta à página vê a MESMA variação
+    @page.serving_variant = requested_variant(@page) || sticky_variant(@page)
 
     # contador simples de visitas por dia (sem cookie, sem rastreio);
     # ?de=slug marca de qual página do funil o visitante veio
@@ -51,7 +52,8 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     @building = @build_status&.dig('status') == 'running'
     @build_error = @build_status&.dig('status') == 'error' ? @build_status['error'] : nil
     @just_built = params[:pronta].present?
-    @page.serving_variant = nil
+    # item 306: ?v=b na prévia mostra a variação (ativa ou pausada) antes de ir ao ar
+    @page.serving_variant = params[:v].to_s[/\A[a-z0-9]{1,3}\z/]
     # página HTML anexada: prévia serve o arquivo como veio, só com a tarja
     # de rascunho por cima (retoque inline/chat são do Construtor)
     return render_custom_page(preview_banner: render_to_string(partial: 'cevico_pages/draft_banner')) if @page.custom_html.present?
@@ -141,8 +143,12 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
 
     trk = Cevico::TrafficSource.classify(params, referer: request.referer)
     CevicoPageTraffic.bump!(page: page, kind: 'cta', source: trk[:source], campaign: trk[:campaign])
-    page.track_hit!('cta')
-    ref = CevicoPageRef.mint!(page: page, source_data: Cevico::TrafficSource.snapshot(params, page: page))
+    # item 306: o clique conta para a variação que o visitante viu, e a letra
+    # viaja no Protocolo — é ela que diz qual headline trouxe o LEAD
+    variant = requested_variant(page)
+    page.track_hit!('cta', variant: variant)
+    snapshot = Cevico::TrafficSource.snapshot(params, page: page).merge('variant' => variant)
+    ref = CevicoPageRef.mint!(page: page, source_data: snapshot)
     return render json: { token: nil } if ref.nil?
 
     render json: { token: ref.token, line: "Protocolo: #{ref.token}" }
@@ -236,7 +242,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # Google Tag Manager NOS LUGARES que o Google pede (script no <head>,
   # noscript logo após o <body>) — é o que o "Testar" do GTM confere
   def render_custom_page(preview_banner: nil)
-    html = @page.custom_html.to_s
+    html = @page.custom_html_for_serving # item 306: headline da variação no lugar do <h1>
     if preview_banner.nil? # ao vivo: injeta o rastreio; prévia fica limpa
       html = Cevico::Gtm.inject(html)
       snippet = render_to_string(partial: 'cevico_pages/analytics_snippet', locals: { page: @page, include_gtm: false }) +
@@ -270,6 +276,19 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # slug da página de origem do funil (?de=...), saneado
   def origin_slug
     params[:de].to_s.gsub(/[^a-z0-9-]/, '')[0, 60].presence
+  end
+
+  # item 306: mesma pessoa, mesma headline — a variação sorteada fica 30 dias
+  # num cookie só desta página; recarregar ou voltar não troca o título (e o
+  # clique é contado na variação que a pessoa realmente leu)
+  def sticky_variant(page)
+    return nil unless page.ab_test_running?
+
+    name = "cv_ab_#{page.id}"
+    saved = cookies[name].to_s
+    variant = saved == 'a' || page.active_variants.any? { |var| var['key'] == saved } ? saved : page.pick_variant
+    cookies[name] = { value: variant, expires: 30.days.from_now, same_site: :lax, httponly: true }
+    variant
   end
 
   # variação pedida no ?v= — só vale se for uma variação REAL da página

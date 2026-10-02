@@ -123,6 +123,13 @@ remove_orphan_conversations_job:
 
 
 # executado a cada 30 minutos para verificar leads parados nas colunas do CRM
+# 🧹 item 309: cargas em massa dos últimos 3 dias saem dos indicadores de
+# "Entrou em…" (07:10 UTC = 04:10 em São Paulo)
+crm_stage_log_bulk_sweep_job:
+  cron: '10 7 * * *'
+  class: 'Crm::StageLogBulkSweepJob'
+  queue: scheduled_jobs
+
 crm_stalled_cards_job:
   cron: '*/30 * * * *'
   class: 'CrmStalledCardsJob'

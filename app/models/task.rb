@@ -80,6 +80,14 @@ class Task < ApplicationRecord
     APPOINTMENT_TYPES.include?(task_type)
   end
 
+  # ✅ item 305 (01/10): cartões do quadro de Tarefas = tudo que NÃO é
+  # agendamento da Agenda (tipo vazio também é cartão — NOT IN sozinho
+  # descartaria o NULL).
+  scope :board_cards, lambda {
+    where('tasks.task_type IS NULL OR tasks.task_type NOT IN (?)', APPOINTMENT_TYPES)
+      .where("tasks.unit IS NULL OR tasks.unit = ''")
+  }
+
   def to_trash!(by:, reason: 'excluida_agenda')
     update!(canceled_at: Time.current, canceled_by: by, cancel_reason: reason)
   end

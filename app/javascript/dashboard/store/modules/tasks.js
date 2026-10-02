@@ -1,4 +1,5 @@
 import TasksAPI from 'dashboard/api/tasks';
+import { isAppointmentTask } from 'dashboard/helper/cevicoAgenda';
 
 const isOverdue = t =>
   t.status !== 'done' && t.due_at && new Date(t.due_at) < new Date();
@@ -18,11 +19,13 @@ const state = {
 const getters = {
   getTasks: s => s.tasks,
   // badge da sidebar: tarefas do usuário atual AGUARDANDO ele (a fazer),
-  // mais as atrasadas/perto do prazo em andamento
+  // mais as atrasadas/perto do prazo em andamento. Item 305: agendamento da
+  // Agenda não conta — quem marcou o retorno não "deve" uma tarefa
   getAlertCount: (s, _g, rootState, rootGetters) => {
     const userId = rootGetters.getCurrentUserID;
     return s.tasks.filter(
       t =>
+        !isAppointmentTask(t) &&
         t.assignee?.id === userId &&
         (t.status === 'todo' || isOverdue(t) || isDueSoon(t))
     ).length;

@@ -25,7 +25,7 @@ import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 import {
   DOCTORS, MODALITIES, ONLINE_UNIT,
   TYPES, TYPE_BY_KEY, GENERAL_TYPE, typeOf, LEGACY_KIND_TO_TYPES,
-  kindFor, kindOf, kindVars, hexToRgbSpaced,
+  kindFor, kindOf, kindVars, hexToRgbSpaced, isAppointmentTask as isAppointment,
   resolveWindows, resolveBlocked, resolveBlockedDays, resolveExamWindows,
   wholeBlockedDays, partialBlocksOn, isWindowBlocked, sameBlock,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
@@ -33,7 +33,9 @@ import {
   occupiesSlot,
   patientNameOf, handConfirmed, isConfirmed, isDeclined, confirmationTitle,
   ORIGINS, ORIGIN_BY_KEY, originOf,
+  reservedFor, windowAccepts, windowAt,
 } from 'dashboard/helper/cevicoAgenda';
+import AgendaSettings from './AgendaSettings.vue';
 
 const store = useStore();
 const { isAdmin } = useAdmin();
@@ -410,10 +412,11 @@ const bandsForDay = day =>
     endMin: toMin(w.end),
     block: Number(w.block) || 15,
     color: winColor(w),
-    label: w.doctor ? doctorShort(w.doctor) : w.exam ? 'Exames' : surgeryLocationLabel(w.unit),
-    title: `${winTitle(w)} · ${w.start}–${w.end} (${winUnitLabel(w)}) · blocos de ${w.block} min`,
+    label: (w.doctor ? doctorShort(w.doctor) : w.exam ? 'Exames' : surgeryLocationLabel(w.unit)) + (reservedFor(w).length ? ` · só ${reservedLabelOf(w)}` : ''),
+    title: `${winTitle(w)} · ${w.start}–${w.end} (${winUnitLabel(w)}) · blocos de ${w.block} min` + (reservedFor(w).length ? ` · faixa reservada para ${reservedLabelOf(w)}` : ''),
     unit: w.unit,
     doctor: w.doctor || '',
+    only: reservedFor(w), // item 307: faixa reservada → o agendamento já nasce do tipo certo
     exam: Boolean(w.exam), // item 283: o menu do botão direito sabe de quem é a faixa
   }));
 
@@ -461,63 +464,19 @@ const tasksAtSlotAll = (day, win, slot) => {
 };
 const taskAtSlot = (day, win, slot) => tasksAtSlotAll(day, win, slot)[0];
 
-const showWindowsModal = ref(false);
-const windowsByDow = computed(() => {
-  const map = {};
-  windows.value.forEach(w => { (map[w.dow] ||= []).push(w); });
-  return map;
-});
-
-// ── Edição das janelas (admin) ──
-const isEditingWindows = ref(false);
-const editWindows = ref([]);
-const isSavingWindows = ref(false);
-const startEditWindows = () => {
-  editWindows.value = windows.value.map(w => ({ ...w }));
-  isEditingWindows.value = true;
-};
-const addWindow = () => {
-  editWindows.value.push({
-    dow: 1, unit: 'paulista', doctor: DOCTORS[0].name,
-    turno: 'Manhã', start: '08:00', end: '11:00', block: 15,
-  });
-};
-const removeWindow = i => editWindows.value.splice(i, 1);
-const saveWindows = async () => {
-  isSavingWindows.value = true;
-  try {
-    const clean = editWindows.value
-      .filter(w => w.start && w.end && w.doctor)
-      .map(w => ({ ...w, dow: Number(w.dow), block: Number(w.block) }));
-    await CrmAPI.updateAgendaWindows(clean);
-    await store.dispatch('crm/fetchSettings');
-    isEditingWindows.value = false;
-    useAlert('Janelas dos médicos salvas!');
-  } catch {
-    useAlert('Erro ao salvar as janelas.');
-  } finally {
-    isSavingWindows.value = false;
-  }
+// 🗂️ item 307 (01/10): CONFIGURAÇÕES DA AGENDA — abrir e fechar, faixas de
+// horário (com o "serve para"), regras para a IA e conferência do dia num
+// lugar só (AgendaSettings.vue). Substitui o popup "Janelas dos médicos".
+const showSettings = ref(false);
+const settingsTab = ref('abrir');
+const openSettings = (tabKey = 'abrir') => {
+  settingsTab.value = tabKey;
+  showSettings.value = true;
 };
 
-// ── FECHAR/reabrir a agenda de um médico (item 76) ──
+// médico com a agenda fechada (item 76) — o abrir/fechar mora nas Configurações
 const closedDoctors = computed(() => crmSettings.value?.agenda_closed_doctors || []);
 const isDoctorClosed = name => closedDoctors.value.includes(name);
-const togglingDoctor = ref('');
-const toggleDoctorClosed = async name => {
-  const wasClosed = isDoctorClosed(name);
-  togglingDoctor.value = name;
-  try {
-    const next = wasClosed ? closedDoctors.value.filter(x => x !== name) : [...closedDoctors.value, name];
-    await CrmAPI.updateClosedDoctors(next);
-    await store.dispatch('crm/fetchSettings');
-    useAlert(wasClosed ? `Agenda de ${name} reaberta!` : `Agenda de ${name} fechada — as janelas somem até reabrir.`);
-  } catch {
-    useAlert('Não consegui atualizar a agenda do médico.');
-  } finally {
-    togglingDoctor.value = '';
-  }
-};
 
 // ── etiquetas + resposta de formulário na lista do dia (item 76) ──
 const dayDetails = ref({});
@@ -548,7 +507,6 @@ const openFormAnswers = task => {
 const activeUnit = computed(() => (view.value.startsWith('unit:') ? view.value.slice(5) : null));
 const activeDoctor = computed(() => (view.value.startsWith('doctor:') ? view.value.slice(7) : null));
 const isPersonalView = computed(() => view.value === 'me' || /^\d+$/.test(view.value));
-const isAppointment = t => t.task_type === 'consulta' || t.task_type === 'cirurgia' || t.unit;
 
 // tudo o que está no calendário (canceladas ficam fora; continuam no banco)
 const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at));
@@ -910,6 +868,8 @@ const winTitle = win => {
 };
 const winUnitLabel = win => (win.doctor || win.exam ? UNITS[win.unit]?.label : surgeryLocationLabel(win.unit));
 const winVars = win => ({ '--w': winColor(win), '--w-rgb': hexToRgbSpaced(winColor(win)), '--w-deep': winColor(win) });
+// item 307: para que serve a faixa ("Pós-operatório", "Retorno + Pós-operatório"; '' = tudo)
+const reservedLabelOf = win => reservedFor(win).map(key => TYPE_BY_KEY[key]?.label).join(' + ');
 const winOccupancy = (day, win) => {
   const slots = slotsFor(win).filter(s => !isBlocked(day, win, s));
   const filled = slots.filter(s => taskAtSlot(day, win, s)).length;
@@ -1101,11 +1061,11 @@ const openCreateOnDay = (day, prefill = {}) => {
 };
 // clique num bloco livre da janela → pré-preenchido com unidade e médico
 const openCreateSlot = (day, win, slot) =>
-  openCreateOnDay(day, { time: slot, unit: win.unit, doctor: win.doctor });
+  openCreateOnDay(day, { time: slot, unit: win.unit, doctor: win.doctor, modality: reservedFor(win)[0] });
 // clique na coluna de horas (semana/dia)
 const onColumnCreate = ({ day, minutes, band }) => {
   const time = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
-  openCreateOnDay(day, { time, unit: band?.unit, doctor: band?.doctor });
+  openCreateOnDay(day, { time, unit: band?.unit, doctor: band?.doctor, modality: band?.only?.[0] });
 };
 // mês: clicar no dia NAVEGA para a semana daquele dia
 const goToWeek = day => {
@@ -1192,6 +1152,20 @@ const formConflicts = computed(() => {
   });
 });
 const hubConflicts = computed(() => formConflicts.value.filter(t => t.source === 'oftalmofacil'));
+// item 307: o horário cai numa faixa RESERVADA para outro tipo de atendimento?
+// (ex.: avaliação na quarta 13h–14h do Dr. Henrique, que é só pós-operatório)
+const reservedMismatch = computed(() => {
+  if (!showModal.value || form.value.kind !== 'consultas' || !form.value.date || !form.value.time) return null;
+  const spot = { dow: new Date(`${form.value.date}T12:00:00`).getDay(), unit: form.value.unit, minutes: toMin(form.value.time) };
+  const win = windowAt(windows.value, { ...spot, doctor: form.value.doctor }) || windowAt(windows.value, spot);
+  return win && !windowAccepts(win, form.value.modality || 'avaliacao') ? win : null;
+});
+// do "Precisa reagendar" das Configurações: abre o agendamento já no dia dele
+const rescheduleFromSettings = task => {
+  showSettings.value = false;
+  cursor.value = new Date(task.due_at);
+  openEdit(task);
+};
 const hmOf = t => format(new Date(t.due_at), 'HH:mm');
 
 // item 300: ao CRIAR, a origem é obrigatória; ao editar agendamento antigo (sem
@@ -1211,6 +1185,13 @@ const save = async () => {
     const who = hubConflicts.value.map(t => `${hmOf(t)} ${displayName(t)}`).join(', ');
     // eslint-disable-next-line no-alert
     if (!window.confirm(`Este horário já está ocupado por paciente do Oftalmofácil (${who}). Agendar mesmo assim?`)) return;
+  }
+  // item 307: faixa reservada para outro tipo = a equipe decide, mas confirma
+  const typeChanged = !editingTask.value || (editingTask.value.modality || 'avaliacao') !== (form.value.modality || 'avaliacao');
+  if (reservedMismatch.value && (timeChanged || typeChanged)) {
+    const win = reservedMismatch.value;
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`A faixa ${win.start}–${win.end} de ${win.doctor} está reservada para ${reservedLabelOf(win)}. Agendar mesmo assim?`)) return;
   }
   isSaving.value = true;
   try {
@@ -2071,11 +2052,11 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   <button
                     v-else-if="isPhysical"
                     class="cv-btn cv-btn-ghost cv-btn-sm"
-                    title="Janelas de avaliação dos médicos"
-                    @click="showWindowsModal = true"
+                    title="Faixas de horário dos médicos: quando cada um atende e para que serve cada faixa"
+                    @click="openSettings('faixas')"
                   >
                     <span class="i-lucide-clock text-xs" />
-                    <span class="hidden 2xl:inline">Janelas dos médicos</span>
+                    <span class="hidden 2xl:inline">Faixas de horário</span>
                   </button>
                   <button
                     v-else-if="isSurgeryMode"
@@ -2111,6 +2092,12 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   </button>
                 </div>
               </div>
+              <!-- 01/10 (item 307, pedido dele: "deixar mais fácil e evidente abrir e fechar agendas"):
+                   um botão só para tudo que muda na agenda -->
+              <button class="cv-btn cv-btn-ghost" title="Abrir e fechar agendas, faixas de horário, regras para a IA e conferência do dia" @click="openSettings('abrir')">
+                <span class="i-lucide-settings-2 text-sm" />
+                Configurações da agenda
+              </button>
               <button class="cv-btn" @click="openCreateOnDay(viewMode === 'month' ? new Date() : cursor)">
                 <span class="i-lucide-plus text-sm" />
                 <span class="hidden sm:inline">{{ newLabel }}</span>
@@ -2560,6 +2547,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <p class="text-sm font-bold text-n-slate-12">{{ winTitle(win) }}</p>
                     <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(winColor(win)), '--cv-deep': winColor(win) }">{{ winUnitLabel(win) }}</span>
                     <span class="text-xs text-n-slate-10"><template v-if="win.turno">{{ win.turno }} · </template>{{ win.start }}–{{ win.end }} · {{ win.block }} min</span>
+                    <span v-if="reservedFor(win).length" class="cv-chip cv-amber" title="Faixa reservada: a IA não oferece consulta nova aqui e a equipe é avisada ao marcar outro tipo">só {{ reservedLabelOf(win) }}</span>
                     <span class="text-[10px] px-2 py-0.5 rounded-full font-bold text-white ml-auto" :style="{ backgroundColor: occColor(winOccupancy(cursor, win).pct) }" :title="`${winOccupancy(cursor, win).filled} de ${winOccupancy(cursor, win).total} blocos ocupados`">
                       {{ winOccupancy(cursor, win).pct }}%
                     </span>
@@ -2880,6 +2868,10 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
         </div>
 
         <!-- item 255: aviso de horário ocupado (qualquer camada, inclusive Oftalmofácil) -->
+        <div v-if="reservedMismatch" class="mx-5 mb-2 p-3 rounded-xl text-xs bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
+          <p class="font-bold flex items-center gap-1.5"><span class="i-lucide-triangle-alert text-sm" /> Faixa reservada para {{ reservedLabelOf(reservedMismatch) }}</p>
+          <p class="mt-0.5">{{ reservedMismatch.doctor }} atende só {{ reservedLabelOf(reservedMismatch) }} das {{ reservedMismatch.start }} às {{ reservedMismatch.end }} neste dia. Para outro tipo de atendimento, escolha um horário fora desta faixa.</p>
+        </div>
         <div v-if="formConflicts.length" class="mx-5 mb-2 p-3 rounded-xl text-xs" :class="hubConflicts.length ? 'bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300'">
           <p class="font-bold flex items-center gap-1.5"><span class="i-lucide-triangle-alert text-sm" /> {{ hubConflicts.length ? 'Horário ocupado por paciente do Oftalmofácil' : 'Já tem agendamento neste horário (encaixe)' }}</p>
           <p v-for="t in formConflicts" :key="'cf' + t.id" class="mt-0.5">• {{ hmOf(t) }} · {{ displayName(t) }} · {{ TYPE_BY_KEY[typeOf(t)]?.label || 'Agendamento' }}<template v-if="t.source === 'oftalmofacil'"> · Oftalmofácil{{ t.source_detail ? ` (${t.source_detail})` : '' }}</template></p>
@@ -3102,133 +3094,68 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
       </div>
     </div>
 
-    <!-- Modal: janelas de avaliação dos médicos + conferência → CRM -->
-    <div v-if="showWindowsModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" @click.self="showWindowsModal = false; isEditingWindows = false">
-      <div class="cv-modal cv-ag-pop w-full max-w-lg max-h-[90vh] flex flex-col">
-        <div class="cv-modal-head flex items-center gap-3">
-          <span class="i-lucide-clock text-xl" />
-          <div class="flex-1">
-            <h2 class="text-base font-bold">Janelas de avaliação dos médicos</h2>
-            <p class="text-[11px] opacity-85">quando cada médico atende, em qual unidade e de quanto em quanto tempo</p>
+    <!-- 🗂️ item 307: Configurações da agenda (abrir e fechar · faixas · regras da IA · conferência) -->
+    <AgendaSettings
+      v-if="showSettings"
+      :units="UNITS"
+      :initial-tab="settingsTab"
+      @close="showSettings = false"
+      @reschedule="rescheduleFromSettings"
+      @open-exam-windows="showSettings = false; openExamWindowsModal()"
+      @open-surgery-windows="showSettings = false; openSurgeryWindowsModal()"
+    >
+      <template #conferencia>
+        <!-- Conferência do dia → colunas do CRM (admin) -->
+        <div v-if="isAdmin" class="cv-sub p-3.5 space-y-2.5 cv-gold">
+          <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
+            <span class="i-lucide-list-checks text-sm" style="color: #B8860B" /> Conferência do dia → CRM
+          </p>
+          <p class="text-[11px] text-n-slate-10 leading-relaxed">
+            Ao marcar <b>Compareceu / Faltou / Cirurgia indicada</b> na lista do dia, o card do paciente move sozinho para a coluna escolhida — e as automações dessa coluna disparam.
+          </p>
+          <div class="cv-row cv-amber p-2.5 space-y-2">
+            <p class="text-[10px] font-semibold text-n-slate-11">⏰ Prazo da conferência — sem conferir até o horário, nasce a tarefa "Concluir a conferência do dia" para a responsável</p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <span class="cv-label block mb-0.5">Consultas — responsável</span>
+                <select v-model="attendanceOwners.consulta_user_id" class="cv-input w-full !h-8 text-xs">
+                  <option value="">Ninguém (desligado)</option>
+                  <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
+                </select>
+              </div>
+              <div>
+                <span class="cv-label block mb-0.5">Cirurgias — responsável</span>
+                <select v-model="attendanceOwners.cirurgia_user_id" class="cv-input w-full !h-8 text-xs">
+                  <option value="">Ninguém (desligado)</option>
+                  <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
+                </select>
+              </div>
+              <div>
+                <span class="cv-label block mb-0.5">Horário limite</span>
+                <input v-model="attendanceOwners.deadline" type="time" class="cv-input w-full !h-8 text-xs" />
+              </div>
+            </div>
           </div>
-          <button v-if="isAdmin && !isEditingWindows" class="cv-glass-btn" @click="startEditWindows"><span class="i-lucide-pencil text-xs" /> Editar</button>
-          <button class="cv-glass-btn cv-iconbtn" @click="showWindowsModal = false; isEditingWindows = false"><span class="i-lucide-x" /></button>
-        </div>
-        <div class="flex-1 overflow-y-auto p-5 space-y-4">
-          <!-- médicos + FECHAR/reabrir a agenda -->
-          <div class="space-y-1.5">
-            <div v-for="d in DOCTORS" :key="d.name" class="cv-sub flex items-center gap-2 flex-wrap px-3 py-2" :class="isDoctorClosed(d.name) ? 'opacity-70' : ''">
-              <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: d.color }" />
-              <span class="text-xs font-semibold text-n-slate-12" :class="isDoctorClosed(d.name) ? 'line-through' : ''">{{ d.name }}</span>
-              <span v-if="isDoctorClosed(d.name)" class="cv-chip cv-red">agenda fechada</span>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :class="isDoctorClosed(d.name) ? 'cv-green' : 'cv-btn-danger'" :disabled="togglingDoctor === d.name" @click="toggleDoctorClosed(d.name)">
-                {{ isDoctorClosed(d.name) ? '▶️ Reabrir agenda' : '⏸ Fechar agenda' }}
-              </button>
+          <div class="space-y-2">
+            <div v-for="opt in [
+              { key: 'attended_stage_id', label: '✓ Compareceu → mover card para' },
+              { key: 'missed_stage_id', label: '✗ Faltou → mover card para' },
+              { key: 'indicated_stage_id', label: '🎯 Cirurgia indicada → mover card para' },
+              { key: 'surgery_done_stage_id', label: '🔪 Cirurgia realizada → mover card para' },
+              { key: 'surgery_missed_stage_id', label: '✗ Não veio à cirurgia → mover card para' },
+            ]" :key="opt.key">
+              <span class="cv-label block mb-0.5">{{ opt.label }}</span>
+              <select v-model="attendanceStages[opt.key]" class="cv-input w-full !h-8 text-xs">
+                <option value="">Não mover</option>
+                <option v-for="s in allCrmStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
+              </select>
             </div>
-            <p v-if="isAdmin" class="text-[10px] text-n-slate-9">fechar tira o médico de toda a agenda na hora; para abrir em dias/horários personalizados, use o <b>Editar</b>.</p>
           </div>
-
-          <template v-if="!isEditingWindows">
-            <div v-for="dow in [1, 2, 3, 4, 5]" :key="dow">
-              <p class="cv-label mb-1.5">{{ WEEKDAY_FULL[dow] }}</p>
-              <div class="space-y-1.5">
-                <div v-for="w in windowsByDow[dow] || []" :key="w.doctor + w.start" class="cv-row flex items-center gap-2 px-3 py-2 flex-wrap" :style="{ '--cv-rgb': hexToRgbSpaced(doctorColor(w.doctor)) }">
-                  <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ backgroundColor: doctorColor(w.doctor) }" />
-                  <span class="text-sm font-medium text-n-slate-12">{{ w.doctor }}</span>
-                  <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(UNITS[w.unit]?.color || '#64748B'), '--cv-deep': UNITS[w.unit]?.color }">{{ UNITS[w.unit]?.label || w.unit }}</span>
-                  <span class="text-xs text-n-slate-10 ml-auto">{{ w.turno }} · {{ w.start }}–{{ w.end }} · {{ w.block }} min</span>
-                </div>
-                <p v-if="!(windowsByDow[dow] || []).length" class="text-xs text-n-slate-9 pl-1">— sem janela</p>
-              </div>
-            </div>
-            <div class="cv-sub flex items-center gap-2 px-3 py-2 text-xs text-n-slate-10">
-              <span class="i-lucide-lock text-sm" /> Sábado e domingo: bloqueados — não existe agenda em nenhuma unidade.
-            </div>
-
-            <!-- Conferência do dia → colunas do CRM (admin) -->
-            <div v-if="isAdmin" class="cv-sub p-3.5 space-y-2.5 cv-gold">
-              <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
-                <span class="i-lucide-list-checks text-sm" style="color: #B8860B" /> Conferência do dia → CRM
-              </p>
-              <p class="text-[11px] text-n-slate-10 leading-relaxed">
-                Ao marcar <b>Compareceu / Faltou / Cirurgia indicada</b> na lista do dia, o card do paciente move sozinho para a coluna escolhida — e as automações dessa coluna disparam.
-              </p>
-              <div class="cv-row cv-amber p-2.5 space-y-2">
-                <p class="text-[10px] font-semibold text-n-slate-11">⏰ Prazo da conferência — sem conferir até o horário, nasce a tarefa "Concluir a conferência do dia" para a responsável</p>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div>
-                    <span class="cv-label block mb-0.5">Consultas — responsável</span>
-                    <select v-model="attendanceOwners.consulta_user_id" class="cv-input w-full !h-8 text-xs">
-                      <option value="">Ninguém (desligado)</option>
-                      <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <span class="cv-label block mb-0.5">Cirurgias — responsável</span>
-                    <select v-model="attendanceOwners.cirurgia_user_id" class="cv-input w-full !h-8 text-xs">
-                      <option value="">Ninguém (desligado)</option>
-                      <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <span class="cv-label block mb-0.5">Horário limite</span>
-                    <input v-model="attendanceOwners.deadline" type="time" class="cv-input w-full !h-8 text-xs" />
-                  </div>
-                </div>
-              </div>
-              <div class="space-y-2">
-                <div v-for="opt in [
-                  { key: 'attended_stage_id', label: '✓ Compareceu → mover card para' },
-                  { key: 'missed_stage_id', label: '✗ Faltou → mover card para' },
-                  { key: 'indicated_stage_id', label: '🎯 Cirurgia indicada → mover card para' },
-                  { key: 'surgery_done_stage_id', label: '🔪 Cirurgia realizada → mover card para' },
-                  { key: 'surgery_missed_stage_id', label: '✗ Não veio à cirurgia → mover card para' },
-                ]" :key="opt.key">
-                  <span class="cv-label block mb-0.5">{{ opt.label }}</span>
-                  <select v-model="attendanceStages[opt.key]" class="cv-input w-full !h-8 text-xs">
-                    <option value="">Não mover</option>
-                    <option v-for="s in allCrmStages" :key="s.id" :value="s.id">{{ s.name }} ({{ s.pipeline }})</option>
-                  </select>
-                </div>
-              </div>
-              <button class="cv-btn w-full" :disabled="isSavingAttendanceCfg" @click="saveAttendanceStages">{{ isSavingAttendanceCfg ? 'Salvando…' : 'Salvar conferência do dia' }}</button>
-            </div>
-          </template>
-
-          <!-- edição (admin) -->
-          <template v-else>
-            <div v-for="(w, i) in editWindows" :key="i" class="cv-sub p-3 space-y-2">
-              <div class="flex items-center gap-2 flex-wrap">
-                <select v-model.number="w.dow" class="cv-input !h-8 text-xs !w-auto">
-                  <option v-for="d in [1, 2, 3, 4, 5]" :key="d" :value="d">{{ WEEKDAY_FULL[d] }}</option>
-                </select>
-                <select v-model="w.doctor" class="cv-input !h-8 text-xs !w-auto">
-                  <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
-                </select>
-                <select v-model="w.unit" class="cv-input !h-8 text-xs !w-auto">
-                  <option v-for="(u, key) in UNITS" :key="key" :value="key">{{ u.label }}</option>
-                </select>
-                <button class="ml-auto text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm" title="Remover janela" @click="removeWindow(i)" />
-              </div>
-              <div class="flex items-center gap-2 flex-wrap text-xs text-n-slate-11">
-                <select v-model="w.turno" class="cv-input !h-8 text-xs !w-auto"><option value="Manhã">Manhã</option><option value="Tarde">Tarde</option></select>
-                das <input v-model="w.start" type="time" class="cv-input !h-8 text-xs !w-auto" />
-                às <input v-model="w.end" type="time" class="cv-input !h-8 text-xs !w-auto" />
-                <span class="text-n-slate-9">(fim exclusivo)</span> · blocos de
-                <select v-model.number="w.block" class="cv-input !h-8 text-xs !w-auto">
-                  <option :value="5">5 min</option><option :value="10">10 min</option><option :value="15">15 min</option><option :value="20">20 min</option><option :value="30">30 min</option>
-                </select>
-              </div>
-            </div>
-            <button class="cv-tile-add w-full py-2 text-xs" @click="addWindow">+ Adicionar janela</button>
-            <div class="flex gap-2">
-              <button class="cv-btn flex-1" :disabled="isSavingWindows" @click="saveWindows">{{ isSavingWindows ? 'Salvando…' : 'Salvar janelas' }}</button>
-              <button class="cv-btn cv-btn-ghost" @click="isEditingWindows = false">Cancelar</button>
-            </div>
-          </template>
+          <button class="cv-btn w-full" :disabled="isSavingAttendanceCfg" @click="saveAttendanceStages">{{ isSavingAttendanceCfg ? 'Salvando…' : 'Salvar conferência do dia' }}</button>
         </div>
-      </div>
-    </div>
+        <p v-if="!isAdmin" class="text-xs text-n-slate-9">Só o administrador ajusta a conferência do dia.</p>
+      </template>
+    </AgendaSettings>
 
     <!-- botão + flutuante -->
     <button class="cv-ag-fab" :title="newLabel" @click="openCreateFab">

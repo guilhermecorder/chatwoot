@@ -8816,7 +8816,8 @@ com parâmetros diferentes selecionáveis por chavinhas.
 - MEU PAINEL: 3 indicadores novos no cesto ("+ Novo indicador"): `wa_messages_sent`, `wa_cost` (R$ estimado pelas tarifas),
   `wa_cost_meta` (R$ pela fatura). `bucketize` aceita coluna de DATA (`date: true`).
 - Testes: 17 novos (serviço, API, webhook) + 98 dos controllers CRM verdes. Demo local em tmp/seed_wa_spend.rb (não vai).
-- DEPLOY: WEB+SIDEKIQ **COM MIGRATION** (backup antes). Reversão: imagem anterior. SEM commit — aguarda "pode subir".
+- DEPLOY: WEB+SIDEKIQ **COM MIGRATION** (backup antes). Reversão: imagem anterior.
+- **30/09 — 303+304 SUBIRAM** no commit 9f59a9e (develop, junto com o 304) → imagem ghcr.io/guilhermecorder/chatwoot:9f59a9e; **IMPLANTADA por ele 30/09 noite (produção = :9f59a9e, reversão :1d54aa5)**.
 - DEPOIS DO DEPLOY (ele): abrir a tela e clicar "Atualizar da Meta" → "15 meses" para trazer o histórico; conferir as
   tarifas no WhatsApp Manager em 01/10; decidir os balões do robô (3 → 1?).
 
@@ -8834,4 +8835,100 @@ com parâmetros diferentes selecionáveis por chavinhas.
 - Testes: tasks_trash_spec (6) + tasks_color/origin + appointments_controller = 22 verdes; conferido ao vivo no localhost
   (Excluir → confirmação → Lixeira → Restaurar → voltou à grade).
 - DEPLOY: WEB+SIDEKIQ **COM MIGRATION** (junto com o 303; backup antes). Reversão: imagem anterior (colunas novas não
-  atrapalham). SEM commit — aguarda "pode subir".
+  atrapalham).
+- **30/09 — 304 SUBIU** no commit 9f59a9e (develop, junto com o 303) → imagem :9f59a9e; **IMPLANTADA 30/09 noite (produção = :9f59a9e, reversão :1d54aa5)**.
+
+## 305. ✅ 📋 TAREFAS: retorno marcado na Agenda não vira mais cartão de Tarefas (01/10; "elas fazem pela agenda e aparece nas tarefas")
+- CAUSA: agendamento e tarefa moram na mesma tabela (`tasks`). A Agenda grava a consulta com a atendente como responsável
+  e a tela de Tarefas mostrava TUDO o que era dela — então cada retorno/consulta/cirurgia lançado na Agenda caía em
+  "A fazer" (e no selo do menu), e ao marcar "compareceu" ia para "Feito" e nunca saía (o Renovar já pulava consultas).
+- AGORA: regra única `isAppointmentTask` (helper/cevicoAgenda.js: tipo consulta/cirurgia ou com unidade) usada pela Agenda,
+  por Tarefas e pelo selo do menu; no banco, `Task.board_cards`. Tarefas e o selo mostram só cartões do quadro; a Agenda
+  não muda. De carona: "tarefas concluídas" do Mentor semanal não conta mais consulta comparecida, e a caixa "Minhas
+  tarefas" do Meu Painel volta a mostrar cartão sem tipo (o `NOT IN` sozinho escondia tipo vazio/NULL).
+- Nada é apagado nem movido: os retornos já gravados continuam na Agenda; só deixam de aparecer em Tarefas.
+- Testes: task_board_cards_spec (2) + tasks trash/color/origin = 24 verdes; conferido no localhost (retorno de teste criado
+  como a Agenda cria: Minhas tarefas mostrou só o cartão comum; "Todas" caiu de 107 para 4).
+- DEPLOY: WEB+SIDEKIQ, **sem migration**. Reversão: imagem anterior (:9f59a9e). SEM commit — aguarda "pode subir".
+
+## 306. ✅ 🧪 PÁGINAS: teste A/B de HEADLINE em página HTML anexada (01/10; "essas 3 são as headlines que eu gostaria de usar na primeira dobra, pra testar… exatamente no lugar da H1")
+- ANTES: o Teste A/B só trocava título/subtítulo/botão em página MONTADA; na anexada (refrativa, trifocal, lentes) a
+  variação era sorteada mas a página saía igual, e o clique no WhatsApp não dizia de qual variação veio.
+- AGORA (`Cevico::HeadlineSwap`): o título da variação entra no lugar do primeiro `<h1>` do HTML anexado — etiqueta, texto
+  de apoio e botões ficam como estão. `*asteriscos*` marcam o trecho colorido (vira o `<span>` do degradê). Headline
+  comprida ganha letra menor (35–55 letras / 56+), para o botão não descer da dobra.
+- MESMA PESSOA, MESMA HEADLINE: a variação sorteada fica 30 dias num cookie só da página (`cv_ab_<id>`).
+- PLACAR POR HEADLINE: o clique no WhatsApp leva a letra (`v`) → conta em `cta_<letra>` e vai no Protocolo
+  (`source_data.variant`); Protocolo casado com contato = **lead** da variação (`ab_results[letra]['lead']`). Editor da
+  página, Central de Testes A/B e Análise de Páginas mostram "N leads". Gravação do Clarity marcada com a headline.
+- PRÉVIA: link "ver prévia" em cada variação (`/p/rascunho/<token>?v=b`) — mostra também a pausada, sem contar visita.
+- Testes: headline_swap_spec (6) + cevico_page_ab_custom_html_spec (6) + cevico_security (6) = 18 verdes; conferido no
+  localhost com o HTML real da refrativa (backup) nas 3 headlines, celular e computador: botão na mesma altura (±9 px).
+- DEPLOY: WEB (junto com o 305 = WEB+SIDEKIQ), **sem migration**. Reversão: imagem anterior (:9f59a9e). SEM commit.
+- DEPOIS DO DEPLOY (ele): Marketing → Páginas → refrativa → Teste A/B → criar B, C, D com os títulos, "ver prévia",
+  marcar "no ar" e salvar. Ler o placar por LEADS, não só por cliques. Com ~60 visitas/dia e 4 versões, leitura
+  confiável só depois de ~4–8 semanas; aos 30 dias pausar a pior.
+
+## 307. ✅ 🗂️ AGENDA: ambiente "Configurações da agenda" + FAIXA RESERVADA + regras para a IA (01/10; "todas as quartas, das 13h às 14h, só retornos de pós-operatório… deixar mais fácil e evidente abrir e fechar agendas… um ambiente para ajustar tudo sem eu precisar te pedir")
+- BOTÃO "Configurações da agenda" no cabeçalho da Agenda (ao lado do Novo agendamento) abre um lugar só, em 4 partes
+  (`AgendaSettings.vue`; substitui o popup "Janelas dos médicos"):
+  1. **Abrir e fechar** — cada médico com "agenda aberta/fechada" e o botão Fechar/Reabrir; dias fechados (lista dos
+     próximos + fechar por data: clínica toda, uma unidade ou um médico); horários com cadeado (lista + Reabrir).
+  2. **Faixas de horário** — por dia da semana: médico, unidade, início/fim, intervalo e **"Serve para"** (Tudo | só Avaliação |
+     só Retorno | só Pós-operatório). Botão **Dividir** (13h–17h → 13h–14h + 14h–17h). Cada faixa diz se "a IA oferece
+     consulta nova aqui" ou não. Barra "Salvar faixas / Desfazer"; avisa horário inválido e sobreposição.
+  3. **Regras para a IA** — texto livre da clínica (`agenda_config.ai_rules`, até 2000 letras) que entra no prompt dos
+     atendentes num bloco próprio "REGRAS DA AGENDA", + "O que a IA recebe agora" (regras + horários que ela pode oferecer).
+  4. **Conferência do dia** — o bloco que já existia.
+- **PRECISA REAGENDAR**: enquanto houver paciente já marcado fora da regra (dia fechado, médico fechado, faixa reservada
+  para outro tipo), uma faixa âmbar lista cada um com o botão **Reagendar** (abre o agendamento no dia dele).
+- FAIXA RESERVADA (`only` na janela; `Crm::AgendaSlots::RESERVABLE`): a IA marca consulta nova, então só enxerga faixa que
+  aceita Avaliação (`free_slots`, `free_slots_on`, `slot_available?` com `modality:`). Na grade a faixa mostra "só
+  Pós-operatório"; clicar nela já abre o agendamento do tipo certo; marcar outro tipo ali mostra aviso e pede confirmação.
+- PADRÃO NOVO: quarta do Dr. Henrique (Av. Paulista) = 13h–14h só pós-operatório + 14h–17h geral. Produção usa o padrão
+  (backup de 21/09 sem janelas salvas) → vale no deploy. Se houver janelas salvas, usar Dividir na tela.
+- CORREÇÃO DE CARONA: "Fechar agenda" do médico só valia na tela — a IA continuava oferecendo os horários dele
+  (`Crm::AgendaSlots.windows` não lia `closed_doctors`). Agora respeita.
+- Testes: agenda_slots_reserved_spec (6) + settings_agenda_reserved_spec (3) + agenda_slots_future/blocked_parts ajustados
+  (quarta 13h → 14h) = verdes; 2 falhas antigas do responder_agent_job_spec (adaptador de fila do ambiente) já existiam.
+  Conferido no localhost: dividir 13–17 às 14h, reservar, salvar, prévia da IA (quarta a partir das 14:00) e Reagendar.
+- **REMARCAÇÃO PELA IA** (01/10 noite; "você já ajustou aquela questão do agente de reagendamento, né?"): faltava. Agora o
+  Atendente remarca RETORNO e PÓS-OPERATÓRIO nas faixas do tipo (`slot_modality` + `windows_for`): havendo faixa dedicada
+  (quarta 13h–14h = só pós-op), a IA usa SÓ ela — pós-operatório não cai no período das consultas; sem faixa dedicada,
+  qualquer faixa que aceite. Vale para a lista de HORÁRIOS do contexto, `horarios_do_dia` e `remarcar_consulta`.
+  Sem vaga na faixa dedicada, o agente diz que não há horário e chama a equipe. responder_tools_spec +1 (verde).
+- DEPLOY: WEB+SIDEKIQ, **sem migration**. Reversão: imagem anterior (:9f59a9e). SEM commit — aguarda "pode subir".
+
+## 308. ✅ 📅 CONFIRMAÇÃO DE CONSULTA: consulta sem paciente vinculado não some mais em silêncio (01/10 noite; "vamos precisar concluir a transição do agente de confirmação do N8N para o interno… confirme tudo antes de eu deixar subir")
+- REVISÃO da transição (itens 250, 253, 259, 288, 300 — todos já em produção na :9f59a9e): o que falta é OPERAÇÃO na produção
+  (lembrete em Sombra → comparar com o N8N → Ao vivo e desligar os 2 fluxos do N8N na mesma hora). Não consigo ler a produção.
+- ACHADO: o robô só olhava consulta COM paciente vinculado (`where.not(contact_id: nil)`). Consulta lançada na Agenda sem
+  telefone, ou com telefone que não bate com nenhum paciente, ficava fora do lembrete e fora da lista de "puladas" — no N8N
+  todo evento do Google Agenda recebia. No backup de 21/09 eram 0 de 216, mas desde o fim de setembro a equipe lança
+  retornos direto na Agenda.
+- AGORA: essas consultas entram em "puladas" com o motivo — "sem telefone" ou "telefone sem cadastro de paciente" — e
+  aparecem no card (última rodada), em Sombra e Ao vivo. Nada é enviado a mais.
+- Testes: appointment_reminder_send_job_d2_spec (+1) + followup + listener de confirmação = 34 verdes. SIDEKIQ. Sem migration.
+
+## 309. ✅ 🧹 INDICADORES: o "pico" de julho era CARGA EM MASSA, não paciente (01/10 noite; print do Meu Painel: "Entrou em Envio de Orçamento 16.675 — pico em 06/07: 10.292… nem sequer é verdade que tudo aconteceu no dia 06/07… os dados estão totalmente poluídos")
+- CAUSA (medida no backup de 21/09): o histórico de colunas grava cada mudança com a hora em que ela aconteceu — inclusive
+  importações e reorganizações em massa. 26.745 das 38.299 entradas (70%) são 4 eventos:
+  · 10/07 00:38–03:39 (madrugada da virada): importação da base — 9.140 cartões criados e movidos 2–3 vezes
+    (Envio de Orçamento 10.289 · Novos Contatos 8.183 · Agendamento 2.201 · Pós-op 78 · Cirurgia Agendada 42);
+  · 14/07 14:38–15:24: re-arrumação — Envio de Orçamento 2.627 e Agendamento de Consulta 2.046 (ida e volta);
+  · 21/07 16:55: 606 cartões para Consulta Confirmada no mesmo minuto;
+  · 14/09 15:16–15:18: 1ª carga do Oftalmofácil — 673 em Cirurgia Agendada.
+  O gráfico do ano é SEMANAL e a etiqueta é o 1º dia da semana: "06/07" = semana de 06 a 12/07 (o dia real foi 10/07).
+- REGRA (`Crm::StageLogBulk`): 30+ cartões entrando na MESMA coluna no MESMO minuto = carga em massa (o maior grupo normal
+  medido tem 23, dos robôs das 10h). A entrada muda de `entered` para `bulk`: fica no banco e na linha do tempo do paciente,
+  mas sai de todo indicador de "Entrou em…" (Meu Painel, taxa oficial, ponte de Agendamentos, funil, Dashboard CRM).
+- `rake cevico:stage_logs_bulk ACCOUNT_ID=1` — DRY=1 (padrão) lista por dia/coluna; DRY=0 aplica; UNDO=1 desfaz; MIN=30.
+- Daqui para frente: `Crm::StageLogBulkSweepJob` todo dia 04:10 (SP) varre os últimos 3 dias.
+- Texto do gráfico: em visão semanal passa a dizer "pico na semana de 06/07".
+- Depois de limpar (conferido no backup): Envio de Orçamento ~270–370 entradas por semana; Agendamento 60–90 pacientes
+  por semana; Consulta Confirmada 40–160.
+- Testes: stage_log_bulk_spec (3) + 59 dos indicadores verdes; simulação (DRY) rodada em cima do backup de produção.
+- NÃO RESOLVIDO / A OLHAR: (1) todo dia às 10:00, 10:10 e 10:38 entram 6–23 cartões de uma vez em Consulta Confirmada /
+  Envio de Orçamento / Novos Contatos — são os robôs (N8N) movendo cartão ao ENVIAR a mensagem, não o paciente agindo;
+  (2) o cartão "Novos contatos (leads)" mostrava 104 em "Este ano" enquanto a régua oficial dá ~12 mil — não investigado.
+- DEPLOY: WEB+SIDEKIQ (cron novo), **sem migration**. Depois do deploy: rodar o rake com DRY=1, conferir, DRY=0.

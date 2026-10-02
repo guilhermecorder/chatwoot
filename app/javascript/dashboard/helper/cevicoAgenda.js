@@ -80,6 +80,13 @@ export const KINDS = [
 export const KIND_BY_KEY = Object.fromEntries(KINDS.map(k => [k.key, k]));
 export const kindFor = key => KIND_BY_KEY[key] || KINDS[0];
 
+// 📅 item 305 (01/10): AGENDAMENTO (consulta, retorno, exame, teleconsulta,
+// cirurgia) é da Agenda — nunca cartão do quadro de Tarefas nem do selo do
+// menu. A regra é uma só, usada pela Agenda, por Tarefas e pela store.
+export const isAppointmentTask = task =>
+  !!task &&
+  (task.task_type === 'consulta' || task.task_type === 'cirurgia' || !!task.unit);
+
 // a que tipo uma task pertence
 export const kindOf = task => {
   if (!task) return 'consultas';
@@ -120,7 +127,9 @@ export const DEFAULT_WINDOWS = [
   { dow: 1, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '10:00', block: 15 },
   { dow: 2, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Manhã', start: '08:00', end: '11:30', block: 15 },
   { dow: 2, unit: 'paulista', doctor: 'Dra. Roberta Negri',   turno: 'Tarde', start: '14:30', end: '16:30', block: 15 },
-  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '13:00', end: '17:00', block: 15 },
+  // item 307 (01/10): quarta 13h–14h do Dr. Henrique = só pós-operatório; consulta a partir das 14h
+  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '13:00', end: '14:00', block: 15, only: ['pos_op'] },
+  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '14:00', end: '17:00', block: 15 },
   { dow: 3, unit: 'tatuape',  doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 10 },
   { dow: 4, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 15 },
   { dow: 5, unit: 'tatuape',  doctor: 'Dra. Roberta Negri',   turno: 'Manhã', start: '10:30', end: '13:00', block: 10 },
@@ -131,15 +140,50 @@ export const DEFAULT_WINDOWS = [
 export const resolveClosedDoctors = settings =>
   Array.isArray(settings?.agenda_closed_doctors) ? settings.agenda_closed_doctors : [];
 
-// janelas salvas nas settings (ou o padrão) — sem os médicos fechados
-export const resolveWindows = settings => {
+// TODAS as janelas salvas (ou o padrão), inclusive as de médico com a agenda
+// fechada — é o que a tela de Configurações da Agenda edita (item 307)
+export const resolveAllWindows = settings => {
   const saved = settings?.agenda_windows;
-  const list = Array.isArray(saved) && saved.length
+  return Array.isArray(saved) && saved.length
     ? saved.map(w => ({ ...w, dow: Number(w.dow), block: Number(w.block) }))
     : DEFAULT_WINDOWS;
+};
+
+// janelas em vigor — sem os médicos fechados
+export const resolveWindows = settings => {
+  const list = resolveAllWindows(settings);
   const closed = resolveClosedDoctors(settings);
   return closed.length ? list.filter(w => !closed.includes(w.doctor)) : list;
 };
+
+// 🗂️ item 307 (01/10, "todas as quartas, das 13h às 14h, só retornos de
+// pós-operatório"): FAIXA RESERVADA. Cada janela pode aceitar só alguns tipos
+// de atendimento (`only`); sem `only` aceita tudo. A IA marca consulta nova
+// (avaliação): faixa que não aceita avaliação ela não oferece. Espelho de
+// Crm::AgendaSlots (RESERVABLE / accepts?).
+export const RESERVABLE = ['avaliacao', 'retorno', 'pos_op'];
+export const AI_MODALITY = 'avaliacao';
+export const reservedFor = win =>
+  Array.isArray(win?.only) ? win.only.filter(k => RESERVABLE.includes(k)) : [];
+export const windowAccepts = (win, modality) => {
+  const only = reservedFor(win);
+  return !only.length || only.includes(modality);
+};
+const hmToMin = hm => {
+  const [h, m] = String(hm || '0:0').split(':').map(Number);
+  return h * 60 + (m || 0);
+};
+// a faixa do médico que cobre aquele horário (mesmo dia da semana e unidade)
+export const windowAt = (windows, { dow, unit, minutes, doctor }) =>
+  windows.find(
+    w =>
+      w.doctor &&
+      w.dow === dow &&
+      w.unit === unit &&
+      (!doctor || w.doctor === doctor) &&
+      minutes >= hmToMin(w.start) &&
+      minutes < hmToMin(w.end)
+  );
 
 export const resolveBlocked = settings =>
   Array.isArray(settings?.agenda_blocked) ? settings.agenda_blocked : [];
