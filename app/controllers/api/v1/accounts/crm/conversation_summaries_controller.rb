@@ -167,11 +167,21 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
     card = find_card
     job = Crm::FollowupBotJob.new
     Current.account.crm_followup_bots.order(:id).filter_map do |bot|
-      next unless bot.inbox_id.blank? || bot.inbox_id == @conversation.inbox_id
-      next if bot.stage_scoped? && !(card && bot.stage_id == card.stage_id)
+      next unless bot_reaches?(bot, card)
 
       { id: bot.id, name: bot.name, active: bot.active, forecast: safe_forecast(job, bot) }
     end
+  end
+
+  # item 315: caixas e colunas em que o robô atua (listas; vazio = todas) —
+  # a mesma seleção de Crm::FollowupBotJob#conversations
+  def bot_reaches?(bot, card)
+    inbox_ids = bot.acting_inbox_ids
+    return false unless inbox_ids.empty? || inbox_ids.include?(@conversation.inbox_id)
+    return card.present? && bot.stage_id == card.stage_id if bot.stage_scoped?
+
+    stage_ids = bot.acting_stage_ids
+    stage_ids.empty? || Crm::Contact.exists?(contact_id: @conversation.contact_id, stage_id: stage_ids)
   end
 
   def safe_forecast(job, bot)

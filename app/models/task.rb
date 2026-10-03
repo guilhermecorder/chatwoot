@@ -143,6 +143,7 @@ class Task < ApplicationRecord
 
   before_save :link_contact_by_phone
   before_save :track_completion
+  before_save :reset_confirmation_on_reschedule
   before_create :infer_consulta_modality
 
   # Tudo do paciente em um lugar só: casa por contact_id (unificado) e,
@@ -189,6 +190,16 @@ class Task < ApplicationRecord
     return if contact.account_id == account_id
 
     errors.add(:contact, 'não pertence a esta conta')
+  end
+
+  # consulta REMARCADA (outro dia/hora) volta a "não confirmada": o "sim" era
+  # para a data antiga; os lembretes da nova data saem de novo (varredura 03/10)
+  def reset_confirmation_on_reschedule
+    return if new_record? || task_type != 'consulta' || !will_save_change_to_due_at?
+    return if will_save_change_to_confirmed_at? || will_save_change_to_declined_at?
+
+    self.confirmed_at = nil
+    self.declined_at = nil
   end
 
   def track_completion

@@ -227,8 +227,9 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   def handle_appointment_confirmation(message, contact) # rubocop:disable Metrics/CyclomaticComplexity
     return unless message.message_type == 'incoming'
 
-    confirmed = confirmation_text?(message.content)
-    declined = !confirmed && decline_text?(message.content)
+    # recusa VENCE: "ok, não vou conseguir" / "certo, preciso remarcar" não é um sim (varredura 03/10)
+    declined = decline_text?(message.content)
+    confirmed = !declined && confirmation_text?(message.content)
     return unless confirmed || declined
 
     marks = (contact.additional_attributes || {})['cevico_appt_reminders'] || {}

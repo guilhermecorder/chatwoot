@@ -3643,7 +3643,9 @@ onUnmounted(() => {
                   {{ bot.name }}
                 </p>
                 <span class="text-xs text-n-slate-10">{{
-                  bot.inbox_name || '🔁 Caixa automática'
+                  (bot.inbox_names || []).length
+                    ? bot.inbox_names.join(', ')
+                    : bot.inbox_name || '🔁 Caixa automática'
                 }}</span>
                 <button
                   class="text-xs px-2 py-1 rounded-lg border border-n-weak ml-1"
@@ -3677,9 +3679,11 @@ onUnmounted(() => {
                 >
                   {{ delayLabel(s) }}:
                   {{
-                    s.template_params
-                      ? `📋 ${s.template_params.name}`
-                      : `"${s.message}"`
+                    s.kind === 'ai'
+                      ? '✨ IA escreve pela conversa'
+                      : s.template_params
+                        ? `📋 ${s.template_params.name}`
+                        : `"${s.message}"`
                   }}
                 </span>
               </div>
