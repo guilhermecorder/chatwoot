@@ -106,10 +106,11 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
     inbox = Current.account.inboxes.find(params[:inbox_id])
     return render json: [] unless inbox.channel_type == 'Channel::Whatsapp'
 
-    approved = (inbox.channel.message_templates || []).select do |t|
-      t['status']&.downcase == 'approved'
-    end
-    render json: approved
+    templates = inbox.channel.message_templates || []
+    # item 314: all=1 → também os pendentes/recusados (o card de Confirmação
+    # diz "existe mas não está aprovado" em vez de "não achei")
+    templates = templates.select { |t| t['status']&.downcase == 'approved' } unless params[:all].to_s == '1'
+    render json: templates
   end
 
   private

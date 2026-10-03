@@ -12,6 +12,7 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import InboxesAPI from 'dashboard/api/inboxes';
 
 const props = defineProps({
   view: { type: String, default: 'cards' }, // 'cards' | 'list'
@@ -115,6 +116,27 @@ const partnerFrom = c => ({
   slot: slotFrom(c?.template_params ? c : null),
 });
 
+// item 314 (02/10; "quero ambientes mais separados para cada caixa de
+// entrada… selecionar exatamente a mensagem modelo correta daquela caixa"):
+// cada caixa marcada tem o SEU bloco de modelos (unidade, geral e reforço),
+// escolhidos da lista daquele número. Nada de "mesmo nome" entre caixas.
+const inboxCfgFrom = c => ({
+  slots: {
+    paulista: slotFrom(c?.units?.paulista),
+    tatuape: slotFrom(c?.units?.tatuape),
+    geral: slotFrom(c?.template_params ? c : null),
+  },
+  followup: slotFrom(c?.followup?.template_params ? c.followup : null),
+});
+const byInboxFrom = raw =>
+  Object.fromEntries(
+    Object.entries(raw || {}).map(([id, c]) => [Number(id), inboxCfgFrom(c)])
+  );
+const inboxCfg = (rule, inboxId) => {
+  if (!rule.by_inbox) rule.by_inbox = {};
+  if (!rule.by_inbox[inboxId]) rule.by_inbox[inboxId] = inboxCfgFrom(null);
+  return rule.by_inbox[inboxId];
+};
 // 🔁 item 288: reforço para quem não respondeu (desligado por padrão)
 const followupFrom = c => ({
   enabled: c?.enabled === true,
@@ -155,28 +177,53 @@ const hydrate = s => {
         },
         partner: partnerFrom(c.partner),
         followup: followupFrom(c.followup),
+        // item 314: modelos escolhidos para cada caixa de "também envia por"
+        by_inbox: byInboxFrom(c.by_inbox),
       };
     })
     .sort((a, b) => b.days - a.days);
   rules.value.forEach(r => {
     if (r.inbox_id) loadTemplates(r.inbox_id);
     if (r.partner.inbox_id) loadTemplates(r.partner.inbox_id);
-    (r.inbox_ids || []).forEach(id => loadTemplates(id)); // item 310
+    (r.inbox_ids || []).forEach(id => {
+      loadTemplates(id); // item 310
+      inboxCfg(r, id); // item 314
+    });
   });
   dirty.value = false;
 };
 
-const loadTemplates = async inboxId => {
-  if (!inboxId || templatesByInbox.value[inboxId]) return;
-  templatesByInbox.value = { ...templatesByInbox.value, [inboxId]: [] };
+// guarda TODOS os status (item 314); os seletores mostram só os aprovados
+const loadTemplates = async (inboxId, { force = false } = {}) => {
+  if (!inboxId || (templatesByInbox.value[inboxId] && !force)) return;
+  if (!force) templatesByInbox.value = { ...templatesByInbox.value, [inboxId]: [] };
   try {
-    const data = await store.dispatch('crm/fetchWhatsappTemplates', inboxId);
+    const data = await store.dispatch('crm/fetchWhatsappTemplates', {
+      inboxId,
+      all: true,
+    });
     templatesByInbox.value = {
       ...templatesByInbox.value,
       [inboxId]: Array.isArray(data) ? data : [],
     };
   } catch {
     // sem modelos: a lista fica vazia e o card avisa
+  }
+};
+// item 314: pede à Meta a lista de modelos deste número AGORA (a cópia do
+// sistema é renovada sozinha a cada ~3 h) e recarrega
+const syncingInbox = ref(null);
+const syncTemplates = async inboxId => {
+  syncingInbox.value = inboxId;
+  try {
+    await InboxesAPI.syncTemplates(inboxId);
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    await loadTemplates(inboxId, { force: true });
+    useAlert('Lista de modelos atualizada a partir da Meta.');
+  } catch {
+    useAlert('Não consegui atualizar a lista de modelos desta caixa.');
+  } finally {
+    syncingInbox.value = null;
   }
 };
 
@@ -193,7 +240,9 @@ const touch = () => {
 };
 
 // ── modelos ───────────────────────────────────────────────────────────────
-const templatesIn = inboxId => templatesByInbox.value[inboxId] || [];
+const allTemplatesIn = inboxId => templatesByInbox.value[inboxId] || [];
+const templatesIn = inboxId =>
+  allTemplatesIn(inboxId).filter(t => (t.status || '').toLowerCase() === 'approved');
 const templatesOf = rule => templatesIn(rule.inbox_id);
 const tplIn = (inboxId, slot) =>
   templatesIn(inboxId).find(t => t.name === slot.name) || null;
@@ -353,18 +402,20 @@ const toggleExtraInbox = (rule, id) => {
   rule.inbox_ids = list.includes(id)
     ? list.filter(x => x !== id)
     : [...list, id];
+  if (rule.inbox_ids.includes(id)) inboxCfg(rule, id); // item 314
   loadTemplates(id);
   touch();
 };
-// os modelos escolhidos existem (com o mesmo nome) no número da outra caixa?
-// Sem o modelo lá, o paciente daquela caixa recebe pela caixa de cima.
-const chosenNames = rule =>
-  [...new Set(['paulista', 'tatuape', 'geral'].map(k => rule.slots[k].name).filter(Boolean))];
-const missingIn = (rule, inboxId) => {
-  const have = templatesIn(inboxId).map(t => t.name);
-  if (!have.length) return [];
-  return chosenNames(rule).filter(name => !have.includes(name));
+// a caixa marcada cobre as unidades que a caixa de cima cobre? (consulta de
+// unidade sem modelo nesta caixa sai pela caixa de cima)
+const inboxMissingUnits = (rule, inboxId) => {
+  const c = inboxCfg(rule, inboxId);
+  return ['paulista', 'tatuape', 'geral']
+    .filter(k => rule.slots[k].name && !c.slots[k].name)
+    .map(k => (k === 'geral' ? 'geral' : UNITS.find(u => u.key === k).label));
 };
+const inboxHasTemplate = (rule, inboxId) =>
+  ['paulista', 'tatuape', 'geral'].some(k => inboxCfg(rule, inboxId).slots[k].name);
 // ── pacientes do Oftalmofácil (cerca dos parceiros liberada só por aqui) ──
 const togglePartner = rule => {
   rule.partner.enabled = !rule.partner.enabled;
@@ -428,8 +479,25 @@ const buildPayload = () => {
         ...(payloadIn(rule.partner.inbox_id, rule.partner.slot) || {}),
       },
       followup: followupPayload(rule),
+      by_inbox: byInboxPayload(rule),
       ...(geral || {}),
     };
+  });
+  return out;
+};
+const byInboxPayload = rule => {
+  const out = {};
+  (rule.inbox_ids || []).forEach(id => {
+    const c = rule.by_inbox?.[id];
+    if (!c) return;
+    const units = {};
+    UNITS.forEach(u => {
+      const p = payloadIn(id, c.slots[u.key]);
+      if (p) units[u.key] = p;
+    });
+    const geral = payloadIn(id, c.slots.geral);
+    const fu = payloadIn(id, c.followup);
+    out[id] = { units, ...(geral || {}), ...(fu ? { followup: fu } : {}) };
   });
   return out;
 };
@@ -1001,39 +1069,159 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                     {{ i.name }}
                   </button>
                 </div>
-                <template
+                <div
                   v-for="i in otherInboxes(rule).filter(x =>
                     (rule.inbox_ids || []).includes(x.id)
                   )"
                   :key="rule.uid + 'chk' + i.id"
+                  class="cv-stat p-3 mt-2 space-y-2"
                 >
-                  <p
-                    v-if="chosenNames(rule).length && !missingIn(rule, i.id).length"
-                    class="text-[11px] mt-1 text-emerald-700 dark:text-emerald-400"
-                  >
-                    ✓ {{ i.name }}: os modelos escolhidos existem neste número.
-                  </p>
-                  <p
-                    v-else-if="missingIn(rule, i.id).length"
-                    class="text-[11px] mt-1 text-amber-700 dark:text-amber-400"
-                  >
-                    ⚠ {{ i.name }}: não achei
-                    <b>{{ missingIn(rule, i.id).join(', ') }}</b> neste número
-                    — com nome diferente, quem conversa por aqui recebe pela
-                    caixa de cima.
-                  </p>
-                </template>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <p class="text-[11px] font-bold text-n-slate-12">
+                      Modelos da caixa {{ i.name }}
+                    </p>
+                    <p
+                      v-if="!allTemplatesIn(i.id).length"
+                      class="text-[11px] text-amber-700 dark:text-amber-400"
+                    >
+                      sem lista de modelos deste número — clique em "Atualizar
+                      da Meta".
+                    </p>
+                    <p
+                      v-else-if="inboxMissingUnits(rule, i.id).length"
+                      class="text-[11px] text-amber-700 dark:text-amber-400"
+                    >
+                      ⚠ sem modelo para {{ inboxMissingUnits(rule, i.id).join(', ') }}
+                      nesta caixa — consulta dessa unidade de quem conversa aqui
+                      sai pela caixa de cima.
+                    </p>
+                    <p
+                      v-else-if="inboxHasTemplate(rule, i.id)"
+                      class="text-[11px] text-emerald-700 dark:text-emerald-400"
+                    >
+                      ✓ quem conversa por aqui recebe por aqui, com estes modelos.
+                    </p>
+                    <button
+                      class="cv-chip ml-auto"
+                      :disabled="syncingInbox === i.id"
+                      @click="syncTemplates(i.id)"
+                    >
+                      {{
+                        syncingInbox === i.id
+                          ? 'atualizando…'
+                          : '↻ Atualizar da Meta'
+                      }}
+                    </button>
+                  </div>
+                  <div class="grid grid-cols-1 lg:grid-cols-3 gap-2">
+                    <div
+                      v-for="slotKey in ['paulista', 'tatuape', 'geral']"
+                      :key="rule.uid + 'bi' + i.id + slotKey"
+                      class="space-y-1.5"
+                    >
+                      <p class="text-[11px] font-bold text-n-slate-12">
+                        {{
+                          slotKey === 'geral'
+                            ? 'Modelo geral'
+                            : `Modelo da ${UNITS.find(u => u.key === slotKey).label}`
+                        }}
+                        <span class="font-normal text-n-slate-9">{{
+                          slotKey === 'geral' ? '(outros locais / reserva)' : ''
+                        }}</span>
+                      </p>
+                      <select
+                        v-model="inboxCfg(rule, i.id).slots[slotKey].name"
+                        class="cv-input w-full !h-8 text-xs"
+                        style="margin-bottom: 0"
+                        @change="fillVars(i.id, inboxCfg(rule, i.id).slots[slotKey])"
+                      >
+                        <option value="">— nenhum —</option>
+                        <option
+                          v-if="
+                            inboxCfg(rule, i.id).slots[slotKey].name &&
+                            !templatesIn(i.id).some(
+                              t => t.name === inboxCfg(rule, i.id).slots[slotKey].name
+                            )
+                          "
+                          :value="inboxCfg(rule, i.id).slots[slotKey].name"
+                        >
+                          {{ inboxCfg(rule, i.id).slots[slotKey].name }} (salva)
+                        </option>
+                        <option
+                          v-for="t in templatesIn(i.id)"
+                          :key="rule.uid + 'bi' + i.id + slotKey + t.name + t.language"
+                          :value="t.name"
+                        >
+                          {{ t.name }} ({{ t.language }})
+                        </option>
+                      </select>
+                      <template v-if="inboxCfg(rule, i.id).slots[slotKey].name">
+                        <p
+                          class="text-[10px] text-n-slate-10 whitespace-pre-wrap max-h-28 overflow-auto bg-n-alpha-1 rounded-lg px-2 py-1.5"
+                        >
+                          {{ bodyIn(i.id, inboxCfg(rule, i.id).slots[slotKey]) || 'prévia indisponível' }}
+                        </p>
+                        <input
+                          v-for="token in tokensIn(i.id, inboxCfg(rule, i.id).slots[slotKey])"
+                          :key="rule.uid + 'bi' + i.id + slotKey + 'v' + token"
+                          v-model="inboxCfg(rule, i.id).slots[slotKey].vars[token]"
+                          class="cv-input w-full !h-7 text-[11px] font-mono"
+                          style="margin-bottom: 0"
+                          :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                          @input="touch"
+                        />
+                      </template>
+                    </div>
+                    <div
+                      v-if="rule.followup.enabled"
+                      class="space-y-1.5 lg:col-span-3"
+                    >
+                      <p class="text-[11px] font-bold text-n-slate-12">
+                        Modelo do reforço nesta caixa
+                        <span class="font-normal text-n-slate-9">(sem ele, o reforço de quem conversa aqui sai pela caixa de cima)</span>
+                      </p>
+                      <select
+                        v-model="inboxCfg(rule, i.id).followup.name"
+                        class="cv-input w-full !h-8 text-xs"
+                        style="margin-bottom: 0"
+                        @change="fillVars(i.id, inboxCfg(rule, i.id).followup)"
+                      >
+                        <option value="">— nenhum —</option>
+                        <option
+                          v-for="t in templatesIn(i.id)"
+                          :key="rule.uid + 'bifu' + i.id + t.name + t.language"
+                          :value="t.name"
+                        >
+                          {{ t.name }} ({{ t.language }})
+                        </option>
+                      </select>
+                      <input
+                        v-for="token in tokensIn(i.id, inboxCfg(rule, i.id).followup)"
+                        :key="rule.uid + 'bifu' + i.id + 'v' + token"
+                        v-model="inboxCfg(rule, i.id).followup.vars[token]"
+                        class="cv-input w-full !h-7 text-[11px] font-mono"
+                        style="margin-bottom: 0"
+                        :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                        @input="touch"
+                      />
+                    </div>
+                  </div>
+                </div>
                 <p class="text-[10px] text-n-slate-9 mt-1">
                   Com a caixa marcada, o lembrete sai por onde o paciente
                   conversou por último (ex.: quem veio pelo Instagram recebe
-                  pelo Instagram). Quem ainda não tem conversa recebe pela
-                  caixa de cima. O modelo precisa existir nas duas caixas —
-                  se não existir na outra, sai pela de cima.
+                  pelo Instagram), com os modelos escolhidos para aquela
+                  caixa. Quem ainda não tem conversa recebe pela caixa de
+                  cima.
                 </p>
               </div>
             </div>
 
-            <!-- modelos: por unidade + geral -->
+            <!-- modelos da caixa de cima: por unidade + geral -->
+            <p v-if="rule.inbox_id" class="text-[11px] font-bold text-n-slate-12 mt-3">
+              Modelos da caixa
+              {{ whatsappInboxes.find(x => x.id === rule.inbox_id)?.name || 'escolhida' }}
+            </p>
             <div
               v-if="rule.inbox_id"
               class="grid grid-cols-1 lg:grid-cols-3 gap-2"

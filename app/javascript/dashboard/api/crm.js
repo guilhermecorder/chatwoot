@@ -111,6 +111,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/followup_bots`, { followup_bot: data });
   }
 
+  // item 315: exemplo da cutucada escrita pela IA (nada é enviado)
+  previewFollowupAi(data) {
+    return axios.post(`${this.url}/followup_bots/ai_preview`, data);
+  }
+
   updateFollowupBot(id, data) {
     return axios.put(`${this.url}/followup_bots/${id}`, { followup_bot: data });
   }
@@ -755,9 +760,9 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/campaigns/preview_audience`, { audience });
   }
 
-  getWhatsappTemplates(inboxId) {
+  getWhatsappTemplates(inboxId, all = false) {
     return axios.get(`${this.url}/campaigns/templates`, {
-      params: { inbox_id: inboxId },
+      params: all ? { inbox_id: inboxId, all: 1 } : { inbox_id: inboxId },
     });
   }
 

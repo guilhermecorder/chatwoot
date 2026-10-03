@@ -20,6 +20,24 @@ RSpec.describe 'CRM settings — caixas do lembrete de confirmação', type: :re
     expect(d2['inbox_ids']).to eq([instagram.id])
   end
 
+  # item 314: modelos escolhidos para cada caixa de "também envia por"
+  it 'guarda os modelos próprios de cada caixa marcada (e ignora caixa não marcada)', :aggregate_failures do
+    tp = { name: 'confirma_ig_paulista', language: 'pt_BR', category: 'UTILITY', processed_params: { body: { '1' => '{{nome}}' } } }
+    by_inbox = { instagram.id.to_s => { units: { paulista: { template_params: tp, message_preview: 'IG {{1}}' } },
+                                        followup: { template_params: tp.merge(name: 'reforco_ig'), message_preview: 'R' } },
+                 outra_conta.id.to_s => { template_params: tp } }
+    post "/api/v1/accounts/#{account.id}/crm/settings/update_agenda",
+         params: { appointment_reminders: { d2: { enabled: true, hour: 10, mode: 'shadow', inbox_id: google.id,
+                                                  inbox_ids: [instagram.id], by_inbox: by_inbox } } },
+         headers: admin.create_new_auth_token, as: :json
+
+    expect(response).to have_http_status(:ok)
+    saved = CrmSetting.find_by(account: account).agenda_config.dig('appointment_reminders', 'd2', 'by_inbox')
+    expect(saved.keys).to eq([instagram.id.to_s])
+    expect(saved.dig(instagram.id.to_s, 'units', 'paulista', 'template_params', 'name')).to eq('confirma_ig_paulista')
+    expect(saved.dig(instagram.id.to_s, 'followup', 'template_params', 'name')).to eq('reforco_ig')
+  end
+
   it 'guarda as colunas do CRM que recebem (só as da conta)', :aggregate_failures do
     pipeline = Crm::Pipeline.create!(account: account, name: 'Funil', position: 1)
     stage = Crm::Stage.create!(pipeline: pipeline, name: 'Agendamento de Consulta', position: 1, color: '#059669')

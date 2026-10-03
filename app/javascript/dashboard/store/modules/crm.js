@@ -180,8 +180,12 @@ const actions = {
     const { data } = await CrmAPI.previewAudience(audience);
     return data;
   },
-  async fetchWhatsappTemplates(_, inboxId) {
-    const { data } = await CrmAPI.getWhatsappTemplates(inboxId);
+  // inboxId ou { inboxId, all: true } (item 314: todos os status, para o card
+  // de Confirmação dizer "existe mas não está aprovado")
+  async fetchWhatsappTemplates(_, payload) {
+    const inboxId = typeof payload === 'object' ? payload.inboxId : payload;
+    const all = typeof payload === 'object' && payload.all === true;
+    const { data } = await CrmAPI.getWhatsappTemplates(inboxId, all);
     return data;
   },
 

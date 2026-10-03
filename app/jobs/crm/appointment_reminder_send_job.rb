@@ -61,7 +61,9 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
       next if settings.agenda_config&.dig(MASTER_KEY, 'enabled') == false
 
       cfg = settings.agenda_config&.dig('appointment_reminders') || {}
-      (REGUAS & cfg.keys).each do |regua|
+      # da régua mais distante (d7) para o dia (d0): na sexta com ponte, a
+      # confirmação completa sai antes da véspera (varredura 03/10)
+      (REGUAS & cfg.keys).sort_by { |r| -self.class.days_of(r) }.each do |regua|
         run_regua(settings.account, regua, cfg[regua] || {}, now_sp)
       rescue StandardError => e
         Rails.logger.error "[CEVICO lembretes] conta #{settings.account_id} #{regua}: #{e.message}"
@@ -95,7 +97,11 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
 
   def run_regua(account, regua, rcfg, now_sp) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return unless rcfg['enabled'] == true
-    return unless now_sp.hour == (rcfg['hour'] || self.class.default_hour(regua)).to_i
+
+    hour = (rcfg['hour'] || self.class.default_hour(regua)).to_i
+    # a hora configurada e a seguinte: rodada perdida (deploy, fila parada) não
+    # vira dia perdido — a marca por consulta impede repetição (varredura 03/10)
+    return unless now_sp.hour.between?(hour, hour + 1)
 
     # sombra = só lista quem receberia; regra antiga sem 'mode' segue ao vivo
     shadow = rcfg['mode'] == 'shadow'
@@ -111,7 +117,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
                      .where(attendance: [nil, ''])
       # item 308 (01/10): consulta SEM paciente vinculado não some mais em silêncio —
       # entra na lista de "puladas" com o motivo, para a equipe completar o cadastro
-      scope = scope.where(confirmed_at: nil) if self.class.days_of(regua).positive? # quem já confirmou não recebe de novo
+      # quem já confirmou — ou disse que NÃO vai (a equipe foi avisada) — não recebe as réguas seguintes
+      scope = scope.where(confirmed_at: nil, declined_at: nil) if self.class.days_of(regua).positive?
       scope.includes(:contact).find_each { |task| send_for(account, inbox, rcfg, regua, task, run, shadow: shadow) }
     end
     record_run(account, regua, run, now_sp, shadow: shadow)
@@ -123,7 +130,7 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     return skip(run, task, blocked) if blocked
 
     marks = (contact.additional_attributes || {}).dig('cevico_appt_reminders', task.id.to_s) || {}
-    return if marks[regua].present?
+    return if reminder_spent?(marks, regua, task)
 
     # paciente de parceiro (já liberado no skip_reason) sai pela caixa e modelo do bloco Oftalmofácil
     partner = partner_patient?(task, contact)
@@ -132,29 +139,32 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
       return skip(run, task, 'Oftalmofácil: caixa não encontrada') if inbox.nil? && !shadow
     end
     template = partner ? partner_template(rcfg) : template_for(rcfg, regua, task)
-    return skip(run, task, partner ? 'Oftalmofácil: sem modelo' : "sem modelo para #{unit_label(task)}") if template.nil? && !shadow
 
-    # item 310: o lembrete sai pela caixa em que o paciente JÁ conversa — com o
-    # modelo de mesmo nome cadastrado NAQUELE número (idioma/categoria de lá)
-    unless partner
-      default_inbox = inbox
-      inbox = inbox_for(account, rcfg, contact, inbox, template)
-      template = template_of_inbox(inbox, template) if inbox && inbox != default_inbox
-    end
+    # item 310/314: o lembrete sai pela caixa em que o paciente JÁ conversa,
+    # com o modelo escolhido PARA AQUELA CAIXA no card — por isso a falta de
+    # modelo só é decidida DEPOIS do roteamento (varredura 03/10)
+    inbox, template = inbox_and_template_for(account, rcfg, contact, task, inbox => template) unless partner
+    return skip(run, task, partner ? 'Oftalmofácil: sem modelo' : "sem modelo para #{unit_label(task)}") if template.nil? && !shadow
 
     if shadow
       run['sent'] << entry_for(task, contact, template: template&.dig('template_params', 'name'), partner: partner, inbox: inbox)
       return
     end
 
+    # marca ANTES de enviar, dentro da trava (como o reforço): duas rodadas em
+    # paralelo, ou a marca falhando depois do envio, não mandam duas vezes
+    return unless claim_reminder!(contact, task, regua, inbox: inbox)
+
     source = TemplateSource.new(account, inbox, nil,
                                 personalized_params(template['template_params'], task, rcfg),
                                 template['message_preview'].presence,
                                 "Lembrete de consulta (#{regua.upcase})")
     conversation = Crm::SendTemplateService.new(source: source, contact: contact).perform
-    return skip(run, task, 'envio não saiu (contato/caixa)') if conversation.nil?
+    if conversation.nil?
+      release_reminder!(contact, task, regua)
+      return skip(run, task, 'envio não saiu (contato/caixa)')
+    end
 
-    mark_sent(contact, task, regua, inbox: inbox)
     # item 300: paciente do Oftalmofácil ganha o card no funil DELE (nunca no da CEVICO)
     Crm::PartnerFunnel.place!(account, contact, :booked) if partner
     run['sent'] << entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox)
@@ -217,42 +227,58 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   # Pedido dele: "a mensagem modelo será enviada através da caixa de entrada
   # em que a conversa já existe" (Google ou Instagram). Entre a caixa padrão
   # do lembrete e as caixas marcadas em "também envia por", vale a da conversa
-  # MAIS RECENTE do paciente. Sem conversa em nenhuma delas — ou quando o
-  # modelo não existe naquela caixa — sai pela caixa padrão.
-  def inbox_for(account, rcfg, contact, default_inbox, template) # rubocop:disable Metrics/CyclomaticComplexity
+  # MAIS RECENTE do paciente. Sem conversa em nenhuma delas, sai pela padrão.
+  def routed_inbox(account, rcfg, contact, default_inbox)
     ids = ([default_inbox&.id] + Array(rcfg['inbox_ids']).map(&:to_i)).compact.uniq
     return default_inbox if ids.size < 2
 
-    inbox_id = account.conversations.where(contact_id: contact.id, inbox_id: ids)
-                      .order(Arel.sql('last_activity_at DESC NULLS LAST, id DESC')).pick(:inbox_id)
-    routed = inbox_id && account.inboxes.find_by(id: inbox_id)
-    return default_inbox if routed.nil? || routed.id == default_inbox&.id
-
-    template_in_inbox?(routed, template) ? routed : default_inbox
+    inbox_id = patient_inbox_id(account.conversations.where(contact_id: contact.id, inbox_id: ids))
+    (inbox_id && account.inboxes.find_by(id: inbox_id)) || default_inbox
   end
 
-  # o modelo é da conta do WhatsApp (WABA) da caixa: se a outra caixa for de
-  # outra conta e não tiver o modelo aprovado, o envio falharia. Lista de
-  # modelos vazia (caixa ainda não sincronizada) = não dá para saber → deixa passar.
-  def template_in_inbox?(inbox, template)
-    name = template&.dig('template_params', 'name').to_s
-    list = inbox.channel.respond_to?(:message_templates) ? Array(inbox.channel.message_templates) : []
-    return true if name.blank? || list.empty?
-
-    list.any? { |t| t['name'].to_s == name }
+  # a caixa em que o PACIENTE escreveu por último — mensagem automática
+  # (campanha, lembrete antigo) não "puxa" a caixa (varredura 03/10); sem
+  # mensagem dele, vale a última atividade
+  def patient_inbox_id(convs)
+    last_incoming = Message.where(conversation_id: convs.select(:id), message_type: :incoming)
+                           .joins(:conversation).unscope(:order).group('conversations.inbox_id').maximum('messages.created_at')
+    last_incoming.max_by { |_inbox_id, at| at }&.first ||
+      convs.order(Arel.sql('last_activity_at DESC NULLS LAST, id DESC')).pick(:inbox_id)
   end
 
-  # o mesmo modelo, como está cadastrado no número da outra caixa: mantém as
-  # variáveis escolhidas no card e troca idioma/categoria/namespace pelos de lá
-  def template_of_inbox(inbox, template) # rubocop:disable Metrics/CyclomaticComplexity
-    name = template&.dig('template_params', 'name').to_s
-    list = inbox.channel.respond_to?(:message_templates) ? Array(inbox.channel.message_templates) : []
-    found = list.find { |t| t['name'].to_s == name }
-    return template if found.nil?
+  # Item 314 (02/10; "quero ambientes mais separados para cada caixa de
+  # entrada… selecionar exatamente a mensagem modelo correta daquela caixa"):
+  # cada caixa marcada tem os SEUS modelos (by_inbox.<id>.units /
+  # template_params), escolhidos da lista daquele número. Caixa da conversa
+  # sem modelo para a unidade da consulta → sai pela caixa padrão, com o
+  # modelo padrão (nada de procurar "nome igual" na outra caixa).
+  # chosen = { caixa padrão => modelo padrão }
+  def inbox_and_template_for(account, rcfg, contact, task, chosen)
+    default_inbox, template = chosen.first
+    routed = routed_inbox(account, rcfg, contact, default_inbox)
+    return [default_inbox, template] if routed.nil? || routed.id == default_inbox&.id
 
-    params = template['template_params'].merge(found.slice('language', 'category', 'namespace').compact)
-    body = Array(found['components']).find { |c| c['type'] == 'BODY' }&.[]('text')
-    template.merge('template_params' => params, 'message_preview' => body.presence || template['message_preview'])
+    own = template_for(inbox_config(rcfg, routed), nil, task)
+    own ? [routed, own] : [default_inbox, template]
+  end
+
+  # A marca vale para a consulta COMO ESTAVA quando o lembrete saiu: consulta
+  # remarcada (outro dia/hora) recebe o lembrete de novo (varredura 03/10). Marca
+  # antiga sem a hora guardada (anterior ao item 288) continua valendo como gasta.
+  def reminder_spent?(marks, regua, task)
+    return false if marks[regua].blank?
+
+    stored = marks[Crm::AppointmentReminderFollowup.due_key(regua)]
+    return true if stored.blank?
+
+    Time.zone.parse(stored.to_s).to_i == task.due_at.to_i
+  rescue ArgumentError
+    true
+  end
+
+  def inbox_config(rcfg, inbox)
+    cfg = (rcfg['by_inbox'] || {})[inbox.id.to_s]
+    cfg.is_a?(Hash) ? cfg : {}
   end
 
   # ── modelo certo para a consulta ──────────────────────────────────────
@@ -336,10 +362,10 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
       agenda = settings.agenda_config || {}
       rcfg = agenda.dig('appointment_reminders', regua) || {}
       state = agenda[STATE_KEY] || {}
+      dates = self.class.target_dates(regua, rcfg, now_sp).map(&:iso8601)
       state[regua] = {
-        'last_run_at' => Time.current.iso8601, 'mode' => shadow ? 'shadow' : 'live',
-        'dates' => self.class.target_dates(regua, rcfg, now_sp).map(&:iso8601),
-        'sent' => run['sent'].first(LIST_CAP), 'skipped' => run['skipped'].first(LIST_CAP)
+        'last_run_at' => now_sp.iso8601, 'mode' => shadow ? 'shadow' : 'live', 'dates' => dates,
+        'sent' => kept_sent(run, state[regua], dates, now_sp).first(LIST_CAP), 'skipped' => run['skipped'].first(LIST_CAP)
       }
       settings.update!(agenda_config: agenda.merge(STATE_KEY => state))
     end
@@ -347,20 +373,59 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     Rails.logger.warn "[CEVICO lembretes] registro da rodada: #{e.message}"
   end
 
-  def mark_sent(contact, task, regua, inbox: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  # o cron roda 4x por hora: nas rodadas seguintes todo mundo já tem marca e
+  # "enviadas" viria vazio — mantém a lista da rodada que enviou (varredura 03/10)
+  def kept_sent(run, previous, dates, now_sp)
+    previous ||= {}
+    return run['sent'] if run['sent'].any? || previous['dates'] != dates
+
+    same_hour?(previous['last_run_at'], now_sp) ? Array(previous['sent']) : run['sent']
+  end
+
+  def same_hour?(iso, now_sp)
+    at = Time.zone.parse(iso.to_s)&.in_time_zone(TZ)
+    at.present? && at.to_date == now_sp.to_date && at.hour == now_sp.hour
+  rescue ArgumentError
+    false
+  end
+
+  # grava a marca dentro da trava ANTES do envio; false = outra rodada já pegou
+  # esta consulta. Consulta remarcada = ciclo novo: as marcas antigas (réguas,
+  # reforços, confirmou/recusou) saem para a nova data receber tudo de novo.
+  def claim_reminder!(contact, task, regua, inbox: nil)
+    claimed = false
     Cevico::AttributeMerge.merge!(contact) do |attrs|
       marks = attrs['cevico_appt_reminders'] || {}
       entry = marks[task.id.to_s] || {}
-      entry[regua] = Time.current.iso8601
-      # item 310: o reforço sai pela MESMA caixa do lembrete
-      entry[Crm::AppointmentReminderFollowup.inbox_key(regua)] = inbox.id if inbox
-      # item 288: a hora da consulta no momento do lembrete (o reforço não sai se ela foi remarcada)
-      entry[Crm::AppointmentReminderFollowup.due_key(regua)] = task.due_at&.iso8601
-      marks[task.id.to_s] = entry
-      # poda: marcas de consultas antigas não servem pra mais nada
-      # (só as datas entram na conta — a marca também guarda o id da caixa, item 310)
-      marks = marks.sort_by { |_id, e| e.values.grep(String).max.to_s }.last(MAX_MARK_ENTRIES).to_h if marks.size > MAX_MARK_ENTRIES
-      attrs.merge('cevico_appt_reminders' => marks)
+      next attrs if reminder_spent?(entry, regua, task)
+
+      claimed = true
+      entry = {} if entry[regua].present? # marca antiga de outra data/hora
+      attrs.merge('cevico_appt_reminders' => prune_marks(marks.merge(task.id.to_s => stamped(entry, regua, task, inbox))))
+    end
+    claimed
+  end
+
+  def stamped(entry, regua, task, inbox)
+    entry.merge(regua => Time.current.iso8601,
+                Crm::AppointmentReminderFollowup.inbox_key(regua) => inbox&.id, # item 310: o reforço sai pela MESMA caixa
+                Crm::AppointmentReminderFollowup.due_key(regua) => task.due_at&.iso8601).compact # item 288: remarcou = não é a mesma
+  end
+
+  # poda: marcas de consultas antigas não servem pra mais nada (só as datas
+  # entram na conta — a marca também guarda o id da caixa, item 310)
+  def prune_marks(marks)
+    return marks unless marks.size > MAX_MARK_ENTRIES
+
+    marks.sort_by { |_id, e| e.values.grep(String).max.to_s }.last(MAX_MARK_ENTRIES).to_h
+  end
+
+  def release_reminder!(contact, task, regua)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      marks = attrs['cevico_appt_reminders'] || {}
+      entry = (marks[task.id.to_s] || {}).except(regua, Crm::AppointmentReminderFollowup.due_key(regua),
+                                                 Crm::AppointmentReminderFollowup.inbox_key(regua))
+      attrs.merge('cevico_appt_reminders' => marks.merge(task.id.to_s => entry))
     end
   end
 end

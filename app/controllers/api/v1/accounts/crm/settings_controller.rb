@@ -1404,9 +1404,42 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'weekend_bridge' => ActiveModel::Type::Boolean.new.cast(r[:weekend_bridge]) == true,
       'modalities' => Array(r[:modalities]).map(&:to_s).select { |m| %w[avaliacao retorno teleconsulta exames pos_op].include?(m) }.presence,
       'units' => units.presence,
+      'by_inbox' => sanitize_reminder_by_inbox(r[:by_inbox], r[:inbox_ids]),
       'partner' => sanitize_reminder_partner(r[:partner]),
       'followup' => sanitize_reminder_followup(r[:followup])
     }
+  end
+
+  # item 314: modelos ESCOLHIDOS para cada caixa de "também envia por" —
+  # unidade (Paulista/Tatuapé), geral e o do reforço. Só caixas marcadas.
+  def sanitize_reminder_by_inbox(raw, inbox_ids)
+    return nil unless raw.is_a?(ActionController::Parameters)
+
+    allowed = Array(inbox_ids).map(&:to_i) & Current.account.inboxes.pluck(:id)
+    allowed.index_with { |inbox_id| reminder_inbox_config(raw[inbox_id.to_s]) }.compact.transform_keys(&:to_s).presence
+  end
+
+  def reminder_inbox_config(cfg)
+    return nil unless cfg.is_a?(ActionController::Parameters)
+
+    {
+      'template_params' => reminder_template_params(cfg[:template_params]),
+      'message_preview' => cfg[:message_preview].to_s[0, 2000].presence,
+      'units' => reminder_units(cfg[:units]).presence,
+      'followup' => reminder_slot(cfg[:followup])
+    }.compact.presence
+  end
+
+  # { 'template_params', 'message_preview' } de um bloco de modelo, ou nil
+  def reminder_slot(raw)
+    tp = raw.is_a?(ActionController::Parameters) ? reminder_template_params(raw[:template_params]) : nil
+    tp && { 'template_params' => tp, 'message_preview' => raw[:message_preview].to_s[0, 2000].presence }.compact
+  end
+
+  def reminder_units(raw)
+    return {} unless raw.is_a?(ActionController::Parameters)
+
+    Crm::AgendaSlots::UNIT_LABELS.keys.index_with { |unit| reminder_slot(raw[unit]) }.compact
   end
 
   # 🔁 item 288: reforço para quem não respondeu ao lembrete — liga/desliga,

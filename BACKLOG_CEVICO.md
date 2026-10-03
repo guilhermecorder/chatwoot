@@ -9019,3 +9019,83 @@ com parâmetros diferentes selecionáveis por chavinhas.
   verdes. Clique real testado no localhost (/cta, /ref e o script da página no navegador); telas conferidas. rubocop no
   nível da base.
 - WEB+SIDEKIQ, sem migration. Reversão: :3d3646c (ou a imagem do commit do 310–312, que sobe no mesmo push).
+
+## 314. ✅ 📅 CONFIRMAÇÃO DE CONSULTA: cada caixa com o SEU bloco de modelos + "Atualizar da Meta" (02/10 noite; "quero ambientes mais separados para cada caixa de entrada… selecionar exatamente a mensagem modelo correta daquela caixa. Não quero que use a mensagem modelo com o mesmo nome")
+- O QUE ELE VIU: "⚠ INSTAGRAM: não achei confirmacao_consulta_paulista neste número", com o modelo cadastrado nos dois
+  números. A regra do 310 procurava na outra caixa um modelo de MESMO NOME, na cópia da lista de modelos que o sistema
+  guarda de cada número (renovada a cada ~3 h, só aprovados) — frágil e sem controle dele.
+- AGORA (a regra do "mesmo nome" foi REMOVIDA):
+  · Cada caixa marcada em "também envia por" tem o seu bloco "Modelos da caixa X": Paulista / Tatuapé / geral (+ reforço,
+    se ligado), escolhidos da lista DAQUELE número, com prévia e variáveis. A caixa de cima também ganhou o título
+    "Modelos da caixa X". Config `appointment_reminders.dN.by_inbox.<inbox_id>.{units,template_params,message_preview,followup}`.
+  · Envio (`inbox_and_template_for`): caixa da conversa mais recente → modelo escolhido para ela (unidade, senão geral);
+    sem modelo lá para a unidade da consulta → caixa padrão com o modelo padrão. Reforço idem (`followup_template_in`).
+    O bloco avisa "⚠ sem modelo para Tatuapé nesta caixa — … sai pela caixa de cima".
+  · Botão "↻ Atualizar da Meta" por caixa: pede a lista à Meta agora (`POST inboxes/:id/sync_templates`) e recarrega.
+    (`campaigns/templates?all=1` devolve todos os status; os seletores mostram só os aprovados.)
+- Testes: send_job_d2 (+2, 2 do "mesmo nome" removidos) · settings_reminder_inboxes (+1) · followup; 40 verdes. Tela
+  conferida no localhost.
+- WEB+SIDEKIQ, sem migration. Reversão: :058c7e0.
+
+## 315. ✅ 🤖 ROBÔS DE FOLLOW-UP: etapa "lembrete com a IA, contextualizado com a conversa" + caixas de entrada e colunas do CRM em que o robô atua (03/10; "para o de 24 horas, gostaria de adicionar… lembrete com a IA, contextualizado com a conversa. Além disso, poder escolher as caixas de entrada e colunas do CRM em que ele atua")
+- ETAPA "✨ IA" (terceiro tipo, ao lado de Texto e Modelo): a IA lê a conversa (últimas 24 mensagens, sem notas
+  internas) e escreve UMA cutucada curta retomando o ponto em que o paciente parou — no tom do Roteiro CEVICO, sem
+  oferecer horário, sem preço novo, sem promessa, sem nome de médico, com uma pergunta simples no fim. Campos:
+  "Orientação para a IA" (opcional, ex.: lembrar do orçamento enviado) e "Texto de reserva" (sai se a IA não
+  responder). Botão "✨ Ver exemplo numa conversa real": gera o texto para a conversa recente mais nova das caixas
+  marcadas, sem enviar nada (`POST crm/followup_bots/ai_preview`).
+  · `Crm::FollowupAiNudgeService` (agent_key `followup_ia`; Sonnet esforço baixo; roteiro em cache; gasto no painel
+    "Gasto com os agentes de IA" como "Lembrete com IA (follow-up)"). A chave é a global de Integrações → Claude; quem
+    liga/desliga é a própria etapa do robô (sem interruptor separado em Agentes de IA).
+  · No robô: o texto é escrito ANTES de marcar a etapa; sem texto (IA fora do ar/sem chave) → texto de reserva; sem
+    reserva → etapa tratada sem envio, motivo "ia_sem_texto" no registro. Cutucada da IA sai marcada
+    (`cevico_followup_ai`). Texto simples: continua valendo só dentro da janela de 24h do WhatsApp.
+- CAIXAS E COLUNAS EM QUE ATUA (fichas no formulário do robô): `inbox_ids` (nenhuma = todas, como era) e `stage_ids`
+  (nenhuma = qualquer coluna; robô de coluna continua com a dele). `inbox_id`/`stage_id` antigos continuam valendo,
+  somados às listas (`acting_inbox_ids` / `acting_stage_ids`). MIGRATION: 2 colunas jsonb em crm_followup_bots.
+- Testes: followup_bot_job_item315 (5) · followup_ai_nudge_service (2) · followup_bots_item315 (2) — 9 verdes; bateria
+  jobs/crm + models/crm verde. Tela conferida no localhost (fichas de caixas/colunas, botão IA, orientação, reserva, exemplo).
+- ⚠️ DEPLOY: WEB+SIDEKIQ COM MIGRATION → BACKUP antes (/root/backup_cevico.sh). Reversão: a imagem anterior.
+
+## 316. ✅ 🔎 VARREDURA DE BUGS: Confirmação de consulta + Robôs de follow-up (03/10; "faça uma varredura em busca de bugs nestes dois mecanismos… corrija, melhore e então suba")
+Dois revisores independentes + leitura própria. Tudo abaixo foi CORRIGIDO e coberto por teste.
+- CONFIRMAÇÃO DE CONSULTA
+  · [grave] Consulta REMARCADA nunca mais recebia o lembrete da régua já disparada (marca por consulta+régua, sem olhar a
+    data) e o "sim" da data antiga continuava valendo. Agora: a marca só vale para a mesma data/hora (`reminder_spent?`);
+    remarcou = ciclo novo (marcas antigas, reforços e confirmou/recusou zerados) e o modelo Task zera `confirmed_at`/
+    `declined_at` quando `due_at` de uma consulta muda.
+  · A marca passa a ser gravada ANTES do envio, dentro da trava (`claim_reminder!`, como o reforço): duas rodadas em
+    paralelo ou marca falhando depois do envio não mandam duas vezes; envio que não saiu libera a marca.
+  · "Última rodada" ao vivo mostrava "0 enviadas": o cron roda 4x/hora e as rodadas seguintes sobrescreviam a lista.
+    Agora a lista de quem recebeu é mantida na mesma hora.
+  · "ok, não vou conseguir ir" / "certo, preciso remarcar" eram lidos como SIM (a confirmação era testada antes da
+    recusa). Agora a recusa vence.
+  · Falta de modelo era decidida ANTES do roteamento por caixa: consulta de unidade sem modelo na caixa padrão, mas com
+    modelo na caixa do paciente, era pulada ao vivo. Agora decide depois.
+  · A caixa "em que o paciente conversa" era a de última atividade — campanha/lembrete antigo puxava a caixa. Agora é a
+    caixa em que o PACIENTE escreveu por último (última atividade só como reserva).
+  · Rodada da hora perdida (deploy, fila parada) virava dia perdido: agora a régua também sai na hora seguinte (a marca
+    por consulta impede repetição). Quem disse que NÃO vai não recebe as réguas seguintes (a equipe já tem o
+    confirmar_urgente). Reforço de uma régua não sai se uma régua mais próxima já saiu; histórico do reforço mostra a caixa.
+    Réguas rodam da mais distante (d7) para o dia (d0): na sexta com ponte, a confirmação completa sai antes da véspera.
+- ROBÔS DE FOLLOW-UP
+  · [grave] Etapa de IA: o texto era gerado ANTES de marcar a etapa; com muitas conversas a rodada passava dos 10 min da
+    trava e a seguinte cutucava a mesma conversa. Agora marca primeiro; teto de 15 chamadas à IA por rodada (o resto sai
+    na seguinte, sem marcar); cliente da IA com 30 s de limite; erro passageiro desmarca e tenta de novo até 3 vezes;
+    erro de chave não repete. `ai_tries` no estado da conversa.
+  · Nota interna (outgoing + private) contava como "atendimento falou por último": o robô cutucava quem esperava
+    resposta — e a IA tendia a RESPONDER a pergunta em vez de reabrir. Âncora agora ignora notas internas.
+  · Trava "cadência completa" contava cutucadas de QUALQUER robô contra o total DESTE: segundo robô nunca enviava.
+  · Painel lateral (previsão) ignorava caixas/colunas do 315 — mostrava "próxima cutucada" que nunca sairia.
+  · Caixa única antiga (`inbox_id`) seguia valendo escondida ao usar as fichas; zerada ao salvar com fichas (tela e
+    servidor). Robô de coluna editado pelo hub perdia a opção "desde a entrada na coluna".
+  · Prévia da IA respeita a cerca dos parceiros (paciente do Oftalmofácil nunca passa por IA) e só olha caixas de
+    WhatsApp. Transcrição lê áudio transcrito/imagem lida (como o Atendente). Prompt leva só persona + regras de forma
+    do Roteiro (tabela de preços fora; custo de cache menor). Erro específico da IA não se perde.
+  · Lista do hub mostra as caixas marcadas e a etapa "✨ IA"; a coluna do CRM lista o robô global que a marcou.
+    Previsão avisa quando a etapa de IA não tem chave nem reserva.
+- DECISÕES DELE (não mexidas): ponte de fim de semana ligada por padrão na D-1 e na D-2 (sexta manda as duas para a
+  segunda, agora na ordem certa); paciente com 2 consultas no mesmo dia recebe 2 modelos e o "sim" confirma só a 1ª;
+  "enviada" = mensagem criada (rejeição da Meta chega depois pelo webhook e não reenvia).
+- Testes: send_job_d2 (+5), listener_confirmation (2, novo), followup_bot_job_item315 (+4), followup_bots_item315 (+3),
+  followup_ai_nudge (ajustados) — bateria dos dois mecanismos 63 verdes. Sem migration nova.

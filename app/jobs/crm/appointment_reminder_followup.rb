@@ -94,6 +94,8 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     number = followup_number(entry, regua, rcfg, now_sp)
     return nil if number.nil?
     return nil if followup_rescheduled?(regua, rcfg, entry, task)
+    # a régua seguinte (mais perto da consulta) já saiu: o reforço desta perde o sentido (varredura 03/10)
+    return nil if closer_reminder_sent?(entry, regua)
     return nil if skip_reason(rcfg, regua, task, contact)
     return nil if followup_replied?(contact, followup_time(entry[regua]))
 
@@ -102,6 +104,7 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     sent_by = entry[Crm::AppointmentReminderFollowup.inbox_key(regua)]
     inbox = account.inboxes.find_by(id: partner ? rcfg.dig('partner', 'inbox_id') : (sent_by || rcfg['inbox_id']))
     template = followup_template(rcfg, partner)
+    inbox, template = followup_route(account, rcfg, inbox, template) if !partner && inbox && template
     return nil if inbox.nil? || template.nil?
     return nil unless claim_followup!(contact, task, regua, number, now_sp)
 
@@ -122,7 +125,7 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
       return nil
     end
 
-    entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner)
+    entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox)
       .merge('number' => number, 'at' => now_sp.iso8601)
   end
 
@@ -139,6 +142,11 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
 
     due_at = last_at + Crm::AppointmentReminderFollowup.hours_of(rcfg).hours
     due_at.between?(now_sp - STALE_AFTER, now_sp) ? number : nil
+  end
+
+  def closer_reminder_sent?(entry, regua)
+    days = self.class.days_of(regua)
+    self.class::REGUAS.any? { |r| self.class.days_of(r) < days && entry[r].present? }
   end
 
   def followup_time(value)
@@ -170,6 +178,23 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     return nil if base.blank? || base['template_params'].blank?
 
     { 'template_params' => base['template_params'], 'message_preview' => base['message_preview'] }
+  end
+
+  # item 314: reforço pela outra caixa usa o modelo do reforço escolhido
+  # para ela; sem ele, o reforço sai pela caixa padrão com o modelo padrão
+  def followup_route(account, rcfg, inbox, template)
+    return [inbox, template] if inbox.id == rcfg['inbox_id'].to_i
+
+    own = followup_template_in(rcfg, inbox)
+    own ? [inbox, own] : [account.inboxes.find_by(id: rcfg['inbox_id']), template]
+  end
+
+  # modelo do reforço escolhido para ESTA caixa (nil = não escolhido)
+  def followup_template_in(rcfg, inbox)
+    own = inbox_config(rcfg, inbox)['followup']
+    return nil unless own.is_a?(Hash) && own['template_params'].present?
+
+    { 'template_params' => own['template_params'], 'message_preview' => own['message_preview'] }
   end
 
   # grava a marca ANTES de enviar, dentro da trava; false = outro já pegou

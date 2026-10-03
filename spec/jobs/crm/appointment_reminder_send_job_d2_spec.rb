@@ -50,8 +50,15 @@ RSpec.describe Crm::AppointmentReminderSendJob do
     let(:instagram) { create(:inbox, account: account, name: 'INSTAGRAM') }
     let(:sent_by) { [] }
 
+    # item 314: a outra caixa tem os SEUS modelos escolhidos (lista daquele número)
+    let(:ig_templates) do
+      { 'units' => { 'paulista' => { 'template_params' => tpl.call('confirma_ig_paulista'), 'message_preview' => 'IG Paulista {{1}}' },
+                     'tatuape' => { 'template_params' => tpl.call('confirma_ig_tatuape'), 'message_preview' => 'IG Tatuapé {{1}}' } } }
+    end
+    let(:d2_two_inboxes) { d2_cfg.merge('inbox_ids' => [instagram.id], 'by_inbox' => { instagram.id.to_s => ig_templates }) }
+
     before do
-      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('inbox_ids' => [instagram.id]) } })
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_two_inboxes } })
       allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
         sent_by << [args[1].name, args[3]['processed_params']['body']['1']]
         m.call(*args)
@@ -95,33 +102,121 @@ RSpec.describe Crm::AppointmentReminderSendJob do
       expect(sent_by).to eq([[inbox.name, 'Veio Do Instagram']])
     end
 
-    it 'modelo que não existe na outra caixa: sai pela caixa padrão', :aggregate_failures do
-      job = described_class.new
-      template = { 'template_params' => { 'name' => 'confirmacao_consulta_paulista' } }
-      com = instance_double(Inbox, channel: instance_double(Channel::Whatsapp,
-                                                            message_templates: [{ 'name' => 'confirmacao_consulta_paulista' }]))
-      sem = instance_double(Inbox, channel: instance_double(Channel::Whatsapp, message_templates: [{ 'name' => 'outro_modelo' }]))
-      nao_sincronizada = instance_double(Inbox, channel: instance_double(Channel::Whatsapp, message_templates: []))
+    # item 314 (02/10; "quero selecionar exatamente a mensagem modelo correta daquela caixa de entrada")
+    it 'pela outra caixa sai o modelo escolhido PARA ELA; sem modelo da unidade lá, sai pela caixa padrão', :aggregate_failures do
+      names = []
+      allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+        names << [args[1].name, args[3]['name']]
+        m.call(*args)
+      end
+      ig_only_paulista = { 'units' => { 'paulista' => ig_templates['units']['paulista'] } }
+      d2 = d2_cfg.merge('inbox_ids' => [instagram.id], 'by_inbox' => { instagram.id.to_s => ig_only_paulista })
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2 } })
+      insta_paulista = contact_named('Insta Paulista', '+5511999990071')
+      insta_tatuape = contact_named('Insta Tatuape', '+5511999990072')
+      google = contact_named('Google Paulista', '+5511999990073')
+      create(:conversation, account: account, inbox: instagram, contact: insta_paulista)
+      create(:conversation, account: account, inbox: instagram, contact: insta_tatuape)
+      create(:conversation, account: account, inbox: inbox, contact: google)
+      consulta(insta_paulista, '2026-09-28 09:00')
+      consulta(insta_tatuape, '2026-09-28 09:30', unit: 'tatuape')
+      consulta(google, '2026-09-28 10:00')
 
-      expect(job.send(:template_in_inbox?, com, template)).to be(true)
-      expect(job.send(:template_in_inbox?, sem, template)).to be(false)
-      expect(job.send(:template_in_inbox?, nao_sincronizada, template)).to be(true)
+      described_class.perform_now(now)
+
+      expect(names).to contain_exactly(%w[INSTAGRAM confirma_ig_paulista],       # modelo escolhido para a caixa
+                                       [inbox.name, 'confirmao_consulta_tatuape'], # Instagram sem modelo da Tatuapé → caixa padrão
+                                       [inbox.name, 'confirmacao_consulta_paulista'])
     end
 
-    it 'pela outra caixa, usa o modelo de mesmo nome como está cadastrado naquele número', :aggregate_failures do
+    it 'reforço pela outra caixa: só o modelo do reforço escolhido para ela (sem ele, nil)', :aggregate_failures do
       job = described_class.new
-      chosen = { 'template_params' => { 'name' => 'confirmacao_consulta_paulista', 'language' => 'en', 'category' => 'UTILITY',
-                                        'processed_params' => { 'body' => vars } },
-                 'message_preview' => 'Texto do Google {{1}}' }
-      registered = [{ 'name' => 'confirmacao_consulta_paulista', 'language' => 'pt_BR', 'category' => 'MARKETING',
-                      'components' => [{ 'type' => 'BODY', 'text' => 'Texto do Instagram {{1}}' }] }]
-      outra = instance_double(Inbox, channel: instance_double(Channel::Whatsapp, message_templates: registered))
+      outra = instance_double(Inbox, id: 77)
+      proprio = { 'template_params' => { 'name' => 'reforco_ig' }, 'message_preview' => 'IG' }
 
-      result = job.send(:template_of_inbox, outra, chosen)
-      expect(result['template_params']).to include('name' => 'confirmacao_consulta_paulista', 'language' => 'pt_BR',
-                                                   'category' => 'MARKETING')
-      expect(result.dig('template_params', 'processed_params', 'body')).to eq(vars) # as variáveis do card continuam
-      expect(result['message_preview']).to eq('Texto do Instagram {{1}}')
+      expect(job.send(:followup_template_in, { 'by_inbox' => {} }, outra)).to be_nil
+      expect(job.send(:followup_template_in, { 'by_inbox' => { '77' => { 'followup' => proprio } } }, outra)).to eq(proprio)
+    end
+  end
+
+  # varredura 03/10: bugs achados na revisão
+  describe 'varredura 03/10' do
+    let(:sources) { [] }
+
+    before do
+      allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+        sources << args
+        m.call(*args)
+      end
+    end
+
+    it 'consulta REMARCADA recebe o lembrete de novo (e as marcas antigas, inclusive o "sim", são zeradas)', :aggregate_failures do
+      maria = contact_named('Maria Remarcada', '+5511999990081')
+      task = consulta(maria, '2026-09-28 09:00')
+      described_class.perform_now(now)
+      expect(sources.size).to eq(1)
+
+      # confirmou a data antiga; a equipe remarcou para a semana seguinte
+      task.update!(confirmed_at: Time.current)
+      task.update!(due_at: tz.parse('2026-10-05 09:00'))
+      expect(task.reload.confirmed_at).to be_nil # modelo: remarcar zera a confirmação
+
+      described_class.perform_now(tz.parse('2026-10-03 10:05')) # D-2 da nova data
+      expect(sources.size).to eq(2)
+      marks = maria.reload.additional_attributes.dig('cevico_appt_reminders', task.id.to_s)
+      expect(marks['d2_due']).to eq(task.due_at.iso8601)
+
+      described_class.perform_now(tz.parse('2026-10-03 10:20')) # mesma hora: não repete
+      expect(sources.size).to eq(2)
+    end
+
+    it 'rodadas seguintes da mesma hora não apagam a lista de quem recebeu', :aggregate_failures do
+      consulta(contact_named('Primeira Rodada', '+5511999990082'), '2026-09-28 09:00')
+      described_class.perform_now(now)
+      described_class.perform_now(tz.parse('2026-09-26 10:35'))
+
+      state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+      expect(state['sent'].map { |e| e['name'] }).to eq(['Primeira Rodada'])
+      expect(sources.size).to eq(1)
+    end
+
+    it 'sai na hora seguinte se a rodada da hora certa foi perdida; quem recusou não recebe', :aggregate_failures do
+      consulta(contact_named('Hora Perdida', '+5511999990083'), '2026-09-28 09:00')
+      consulta(contact_named('Recusou', '+5511999990084'), '2026-09-28 11:00', declined_at: Time.current)
+      described_class.perform_now(tz.parse('2026-09-26 11:40'))
+
+      expect(sources.map { |a| a[3].dig('processed_params', 'body', '1') }).to eq(['Hora Perdida'])
+    end
+
+    it 'falta de modelo é decidida DEPOIS do roteamento: a caixa do paciente tem o modelo da unidade, a padrão não' do
+      instagram = create(:inbox, account: account, name: 'INSTAGRAM')
+      ig = { 'units' => { 'tatuape' => { 'template_params' => tpl.call('confirma_ig_tatuape'), 'message_preview' => 'IG {{1}}' } } }
+      so_paulista = d2_cfg.merge('units' => d2_cfg['units'].slice('paulista'), 'inbox_ids' => [instagram.id],
+                                 'by_inbox' => { instagram.id.to_s => ig })
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => so_paulista } })
+      paciente = contact_named('Insta Tatuape', '+5511999990085')
+      create(:conversation, account: account, inbox: instagram, contact: paciente)
+      consulta(paciente, '2026-09-28 09:00', unit: 'tatuape')
+
+      described_class.perform_now(now)
+      expect(sources.map { |a| [a[1].name, a[3]['name']] }).to eq([%w[INSTAGRAM confirma_ig_tatuape]])
+    end
+
+    it 'a caixa do paciente é a em que ELE escreveu por último — mensagem automática não puxa a caixa' do
+      instagram = create(:inbox, account: account, name: 'INSTAGRAM')
+      ig = { 'units' => { 'paulista' => { 'template_params' => tpl.call('confirma_ig_paulista'), 'message_preview' => 'IG {{1}}' } } }
+      d2 = d2_cfg.merge('inbox_ids' => [instagram.id], 'by_inbox' => { instagram.id.to_s => ig })
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2 } })
+      paciente = contact_named('Fala No Insta', '+5511999990086')
+      no_insta = create(:conversation, account: account, inbox: instagram, contact: paciente, last_activity_at: 3.days.ago)
+      no_google = create(:conversation, account: account, inbox: inbox, contact: paciente, last_activity_at: 1.hour.ago) # campanha ontem
+      create(:message, account: account, inbox: instagram, conversation: no_insta, message_type: :incoming, content: 'oi', created_at: 3.days.ago)
+      create(:message, account: account, inbox: inbox, conversation: no_google, message_type: :outgoing, content: 'campanha',
+                       created_at: 1.hour.ago, sender: admin)
+      consulta(paciente, '2026-09-28 09:00')
+
+      described_class.perform_now(now)
+      expect(sources.map { |a| [a[1].name, a[3]['name']] }).to eq([%w[INSTAGRAM confirma_ig_paulista]])
     end
   end
 
