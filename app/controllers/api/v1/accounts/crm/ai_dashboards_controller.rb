@@ -53,6 +53,9 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
     # 🩺 item 251: pós-operatório 24h com as orientações oficiais; o resto vira tarefa
     'atendente_pos_op' => { name: 'Atendente de Pós-operatório', icon: 'i-lucide-heart-pulse', color: '#BE123C',
                             what: 'responde 24h as dúvidas simples de quem operou (colírio, ardência, banho) e abre tarefa para a equipe no resto' },
+    # 🤖 item 315: etapa "IA" dos robôs de follow-up — a cutucada escrita a partir da conversa
+    'followup_ia' => { name: 'Lembrete com IA (follow-up)', icon: 'i-lucide-bot-message-square', color: '#0F5FA6',
+                       what: 'escreve a cutucada do robô de follow-up retomando o ponto em que a conversa parou' },
     # 🤖📞 item 169: roda na ElevenLabs; cada ligação vira 1 linha em crm_ai_usages (custo em US$)
     'voice' => { name: 'Agente de Ligação', icon: 'i-lucide-phone-call', color: '#7C3AED',
                  what: 'assistente virtual que atende as ligações no número da clínica e liga para pacientes nas campanhas' }

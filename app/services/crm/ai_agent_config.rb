@@ -33,7 +33,8 @@ module Crm::AiAgentConfig
     'harvest'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # pontuar leads em lote: volume alto, tarefa simples
     'manager'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # briefing diário curto (a matemática é do Ruby)
     'auditor'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # nota diária em volume — barato por desenho
-    'creative'     => { 'model' => 'claude-sonnet-5', 'effort' => 'high' }    # copy que vai pro anúncio — qualidade importa
+    'creative'     => { 'model' => 'claude-sonnet-5', 'effort' => 'high' },   # copy que vai pro anúncio — qualidade importa
+    'followup_ia'  => { 'model' => 'claude-sonnet-5', 'effort' => 'low' }     # item 315: cutucada do follow-up escrita pela IA
   }.merge(
     # 🗣️ rodada 188: respondedores do WhatsApp (Roteiro CEVICO + bloco da etapa)
     # 💸 item 214 (23/09): HAIKU no pós-agendamento (conversa simples, 3x mais

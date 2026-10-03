@@ -4,6 +4,7 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import TemplatesPicker from 'dashboard/components/widgets/conversation/WhatsappTemplates/TemplatesPicker.vue';
 import WhatsAppTemplateParser from 'dashboard/components-next/whatsapp/WhatsAppTemplateParser.vue';
+import CrmAPI from 'dashboard/api/crm';
 
 const props = defineProps({
   bot: { type: Object, default: null },       // editar
@@ -16,11 +17,26 @@ const emit = defineEmits(['close', 'saved']);
 const store = useStore();
 const inboxes = useMapGetter('inboxes/getInboxes');
 const accountLabels = useMapGetter('labels/getLabels');
+// item 315: colunas do CRM em que o robô atua (fichas por funil)
+const pipelines = useMapGetter('crm/getPipelines');
+const stageGroups = computed(() =>
+  (pipelines.value || [])
+    .map(p => ({
+      id: p.id,
+      name: p.name,
+      stages: [...(p.stages || [])].sort((a, b) => a.position - b.position),
+    }))
+    .filter(p => p.stages.length)
+);
 const whatsappInboxes = computed(() =>
   inboxes.value.filter(i => i.channel_type === 'Channel::Whatsapp')
 );
 
-const isStageBot = computed(() => !!props.stageId);
+// robô de coluna: aberto pela coluna (stageId) OU robô salvo com coluna
+// (editado pelo hub, que não passa stageId) — varredura 03/10
+const isStageBot = computed(() => !!(props.stageId || props.bot?.stage_id));
+const stageIdOf = computed(() => props.stageId || props.bot?.stage_id || null);
+const pipelineIdOf = computed(() => props.pipelineId || props.bot?.pipeline_id || null);
 const isSaving = ref(false);
 
 const newStep = () => ({
@@ -30,6 +46,7 @@ const newStep = () => ({
   kind: 'text',
   message: 'Oi, pode falar?',
   template_params: null,
+  ai_instructions: '',
   skip_labels: [],
   only_labels: [],
 });
@@ -39,9 +56,10 @@ const normalizeStep = s => ({
   delay_value: s.delay_value ?? s.delay_hours ?? 3,
   delay_unit: s.delay_unit ?? 'hours',
   delay_from: s.delay_from ?? 'silence',
-  kind: s.template_params ? 'template' : 'text',
+  kind: s.kind === 'ai' ? 'ai' : s.template_params ? 'template' : 'text',
   message: s.message ?? '',
   template_params: s.template_params ?? null,
+  ai_instructions: s.ai_instructions ?? '',
   skip_labels: [...(s.skip_labels ?? [])],
   only_labels: [...(s.only_labels ?? [])],
 });
@@ -64,6 +82,8 @@ const toLocalInput = iso => {
 const form = ref({
   name: '',
   inbox_id: null,
+  inbox_ids: [],
+  stage_ids: [],
   active: true,
   steps: [newStep()],
   required_labels: [],
@@ -75,10 +95,13 @@ const form = ref({
 onMounted(() => {
   if (!inboxes.value.length) store.dispatch('inboxes/get');
   if (!accountLabels.value.length) store.dispatch('labels/get').catch(() => {});
+  if (!(pipelines.value || []).length) store.dispatch('crm/fetchPipelines').catch(() => {});
   if (props.bot) {
     form.value = {
       name: props.bot.name,
       inbox_id: props.bot.inbox_id,
+      inbox_ids: [...(props.bot.inbox_ids ?? [])].map(Number),
+      stage_ids: [...(props.bot.stage_ids ?? [])].map(Number),
       active: props.bot.active,
       steps: props.bot.steps.length ? props.bot.steps.map(normalizeStep) : [newStep()],
       required_labels: [...(props.bot.required_labels ?? [])],
@@ -109,7 +132,28 @@ const removeStep = i => form.value.steps.splice(i, 1);
 
 const setStepKind = (step, kind) => {
   step.kind = kind;
-  if (kind === 'text') step.template_params = null;
+  if (kind !== 'template') step.template_params = null;
+};
+
+// item 315: exemplo da cutucada escrita pela IA numa conversa real recente
+// (nada é enviado) — para ver o tom antes de ligar
+const aiPreview = ref({});
+const previewAi = async (step, i) => {
+  aiPreview.value = { ...aiPreview.value, [i]: { loading: true } };
+  try {
+    const { data } = await CrmAPI.previewFollowupAi({
+      inbox_ids: form.value.inbox_ids,
+      ai_instructions: step.ai_instructions,
+      delay_value: step.delay_value,
+      delay_unit: step.delay_unit,
+    });
+    aiPreview.value = { ...aiPreview.value, [i]: data };
+  } catch (e) {
+    aiPreview.value = {
+      ...aiPreview.value,
+      [i]: { error: e?.response?.data?.error || 'Não consegui gerar o exemplo.' },
+    };
+  }
 };
 
 // ── Escolha de mensagem modelo para uma etapa ──
@@ -142,7 +186,8 @@ const useTemplate = payload => {
 
 const stepValid = s =>
   Number(s.delay_value) >= 0 &&
-  (s.kind === 'template' ? !!s.template_params : !!s.message?.trim());
+  (s.kind === 'ai' ||
+    (s.kind === 'template' ? !!s.template_params : !!s.message?.trim()));
 
 const canSave = computed(
   () =>
@@ -163,20 +208,25 @@ const save = async () => {
         delay_unit: s.delay_unit,
         delay_from: s.delay_from || 'silence',
         kind: s.kind,
-        message: s.kind === 'template' ? s.message : s.message.trim(),
+        message: s.kind === 'template' ? s.message : (s.message || '').trim(),
         template_params: s.kind === 'template' ? s.template_params : null,
+        ai_instructions: s.kind === 'ai' ? (s.ai_instructions || '').trim() : '',
         skip_labels: s.skip_labels ?? [],
         only_labels: s.only_labels ?? [],
       })),
       required_labels: form.value.required_labels,
       exclude_labels: form.value.exclude_labels,
+      inbox_ids: form.value.inbox_ids,
+      stage_ids: isStageBot.value ? [] : form.value.stage_ids,
       starts_at: form.value.starts_at ? new Date(form.value.starts_at).toISOString() : null,
       ends_at: form.value.ends_at ? new Date(form.value.ends_at).toISOString() : null,
     };
-    payload.inbox_id = form.value.inbox_id; // no robô de coluna é opcional
+    // item 315: as fichas de caixas substituem a caixa única antiga — zera para
+    // ela não seguir valendo escondida (robô antigo com inbox_id)
+    payload.inbox_id = null;
     if (isStageBot.value) {
-      payload.stage_id = props.stageId;
-      payload.pipeline_id = props.pipelineId;
+      payload.stage_id = stageIdOf.value;
+      payload.pipeline_id = pipelineIdOf.value;
     }
     if (props.bot) {
       await store.dispatch('crm/updateFollowupBot', { id: props.bot.id, ...payload });
@@ -258,20 +308,55 @@ const save = async () => {
           <span class="i-lucide-info text-n-brand" />
           Este robô roda para os cards <strong>desta coluna</strong>.
         </div>
+        <!-- item 315: caixas de entrada em que o robô atua -->
         <div>
           <label class="text-xs font-medium text-n-slate-11 block mb-1">
-            Caixa de entrada
+            Caixas de entrada em que atua
+            <span class="text-n-slate-9 font-normal">(nenhuma marcada = todas)</span>
           </label>
-          <select
-            v-model="form.inbox_id"
-            class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
-          >
-            <option :value="null">🔁 Automática — número da conversa do card (recomendado)</option>
-            <option v-for="i in whatsappInboxes" :key="i.id" :value="i.id">Somente {{ i.name }}</option>
-          </select>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="i in whatsappInboxes"
+              :key="`ib-${i.id}`"
+              class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+              :class="form.inbox_ids.includes(i.id)
+                ? 'bg-n-brand/15 border-n-brand text-n-brand font-medium'
+                : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+              @click="toggleListItem(form.inbox_ids, i.id)"
+            >
+              {{ i.name }}
+            </button>
+          </div>
           <p class="text-[11px] text-n-slate-9 mt-1">
-            No modo automático, cada paciente recebe o follow-up pelo mesmo número em que já conversa.
-            Escolha uma caixa específica só se quiser limitar o robô a um número.
+            Cada paciente recebe o follow-up pelo mesmo número em que já conversa. Marque caixas só para
+            limitar o robô a elas.
+          </p>
+        </div>
+
+        <!-- item 315: colunas do CRM em que o robô atua -->
+        <div v-if="!isStageBot && stageGroups.length">
+          <label class="text-xs font-medium text-n-slate-11 block mb-1">
+            Colunas do CRM em que atua
+            <span class="text-n-slate-9 font-normal">(nenhuma marcada = qualquer coluna)</span>
+          </label>
+          <div v-for="g in stageGroups" :key="`pl-${g.id}`" class="mb-1.5">
+            <p class="text-[10px] uppercase tracking-wide text-n-slate-9 mb-1">{{ g.name }}</p>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="st in g.stages"
+                :key="`st-${st.id}`"
+                class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+                :class="form.stage_ids.includes(st.id)
+                  ? 'bg-n-brand/15 border-n-brand text-n-brand font-medium'
+                  : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
+                @click="toggleListItem(form.stage_ids, st.id)"
+              >
+                {{ st.name }}
+              </button>
+            </div>
+          </div>
+          <p class="text-[11px] text-n-slate-9 mt-1">
+            Só recebe quem tem o card numa das colunas marcadas.
           </p>
         </div>
 
@@ -330,6 +415,12 @@ const save = async () => {
                     :class="step.kind === 'template' ? 'bg-n-brand text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
                     @click="setStepKind(step, 'template')"
                   >Modelo</button>
+                  <button
+                    class="px-2.5 py-1 text-xs"
+                    :class="step.kind === 'ai' ? 'bg-n-brand text-white' : 'text-n-slate-10 hover:bg-n-alpha-1'"
+                    title="A IA escreve a cutucada a partir da conversa"
+                    @click="setStepKind(step, 'ai')"
+                  >✨ IA</button>
                 </div>
 
                 <button
@@ -346,6 +437,44 @@ const save = async () => {
                 class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
                 placeholder='Ex.: [nome], no seu tempo ok?'
               />
+
+              <!-- item 315: lembrete com a IA, contextualizado com a conversa -->
+              <div v-else-if="step.kind === 'ai'" class="space-y-2">
+                <p class="text-[11px] text-n-slate-10">
+                  A IA lê a conversa e escreve uma cutucada curta retomando o ponto em que o paciente parou
+                  (no tom do Roteiro CEVICO; sem oferecer horário nem preço novo). Texto simples: só dentro da
+                  janela de 24h do WhatsApp.
+                </p>
+                <textarea
+                  v-model="step.ai_instructions"
+                  rows="2"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                  placeholder="Orientação para a IA (opcional). Ex.: lembrar do orçamento enviado e perguntar se ficou alguma dúvida."
+                />
+                <input
+                  v-model="step.message"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                  placeholder="Texto de reserva (opcional) — sai se a IA não responder. Ex.: [nome], ficou alguma dúvida?"
+                />
+                <div class="flex items-center gap-2 flex-wrap">
+                  <button
+                    class="text-xs px-2.5 py-1.5 rounded-lg border border-n-brand text-n-brand hover:bg-n-brand/10"
+                    :disabled="aiPreview[i]?.loading"
+                    @click="previewAi(step, i)"
+                  >
+                    {{ aiPreview[i]?.loading ? 'gerando…' : '✨ Ver exemplo numa conversa real' }}
+                  </button>
+                  <span class="text-[10px] text-n-slate-9">usa a conversa recente mais nova das caixas marcadas; nada é enviado</span>
+                </div>
+                <div v-if="aiPreview[i]?.text" class="bg-n-alpha-1 rounded-lg p-2.5 text-xs space-y-1">
+                  <p class="text-n-slate-9">
+                    {{ aiPreview[i].contact_name || 'paciente' }} · {{ aiPreview[i].inbox_name }}
+                  </p>
+                  <p class="text-n-slate-12 whitespace-pre-wrap">{{ aiPreview[i].text }}</p>
+                  <p v-if="aiPreview[i].reason" class="text-[10px] text-n-slate-9">por quê: {{ aiPreview[i].reason }}</p>
+                </div>
+                <p v-else-if="aiPreview[i]?.error" class="text-xs text-amber-600">{{ aiPreview[i].error }}</p>
+              </div>
 
               <!-- Mensagem modelo -->
               <div v-else class="flex items-center gap-2">

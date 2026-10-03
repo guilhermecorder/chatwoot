@@ -44,6 +44,7 @@ namespace :crm do
     end
   end
   resources :followup_bots, only: [:index, :create, :update, :destroy] do
+    post :ai_preview, on: :collection # item 315: exemplo da cutucada escrita pela IA
     member { post :toggle } # chave de emergência — aberta às atendentes
   end
   resource :traffic_report, only: [:show]

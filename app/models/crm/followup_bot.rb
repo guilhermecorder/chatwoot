@@ -7,9 +7,11 @@
 #  activity_log    :jsonb            not null
 #  ends_at         :datetime
 #  exclude_labels  :jsonb            not null
+#  inbox_ids       :jsonb            not null
 #  last_run_at     :datetime
 #  name            :string           not null
 #  required_labels :jsonb            not null
+#  stage_ids       :jsonb            not null
 #  starts_at       :datetime
 #  steps           :jsonb            not null
 #  created_at      :datetime         not null
@@ -85,6 +87,21 @@ class Crm::FollowupBot < ApplicationRecord
     true
   end
 
+  # item 315: etapa em que a IA escreve a cutucada a partir da conversa
+  def self.ai_step?(step)
+    step['kind'].to_s == 'ai'
+  end
+
+  # Item 315: caixas e colunas em que o robô atua (listas; vazio = todas).
+  # inbox_id/stage_id antigos continuam valendo, somados às listas.
+  def acting_inbox_ids
+    (Array(inbox_ids).map(&:to_i) + [inbox_id].compact).uniq.reject(&:zero?)
+  end
+
+  def acting_stage_ids
+    (Array(stage_ids).map(&:to_i) + [stage_id].compact).uniq.reject(&:zero?)
+  end
+
   private
 
   # caixa é OPCIONAL: sem caixa (modo automático) o follow-up sai pelo
@@ -96,8 +113,12 @@ class Crm::FollowupBot < ApplicationRecord
 
     Array(steps).each do |s|
       delay_missing = s['delay_hours'].blank? && s['delay_value'].blank?
-      content_missing = s['message'].blank? && s['template_params'].blank?
-      errors.add(:steps, 'cada etapa precisa de tempo e mensagem (texto ou modelo)') if delay_missing || content_missing
+      errors.add(:steps, 'cada etapa precisa de tempo e mensagem (texto, modelo ou IA)') if delay_missing || step_content_missing?(s)
     end
+  end
+
+  # item 315: etapa de IA não precisa de texto (a IA escreve na hora)
+  def step_content_missing?(step)
+    step['message'].blank? && step['template_params'].blank? && !self.class.ai_step?(step)
   end
 end

@@ -43,6 +43,13 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # o robô NUNCA passa destes limites por conversa:
   MIN_GAP_MINUTES = 30 # piso entre cutucadas (qualquer robô) na mesma conversa
   DAILY_CAP = 4        # teto diário de cutucadas (qualquer robô) na mesma conversa
+  # ── ETAPA DE IA (item 315) ──
+  # teto de chamadas à IA por rodada: a rodada tem a trava de 10 min e cada
+  # chamada leva segundos — o que sobrar sai na rodada seguinte (2 min), sem
+  # marcar nada. Erro passageiro da IA (timeout, 529) tenta de novo até
+  # AI_MAX_TRIES vezes; erro de configuração (sem chave) não repete.
+  AI_PER_ROUND = 15
+  AI_MAX_TRIES = 3
   # ── ETIQUETAS DE ENCERRAMENTO (rodada 158) ──
   # Convenção da base (a mesma da Colheitadeira): quem tem nao_perturbe ou
   # perda_* nunca recebe cutucada, de robô nenhum. O admin acrescenta as
@@ -65,7 +72,9 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     'aguardando_prazo' => 'aguardando o prazo da etapa',
     'trava_cadencia_completa' => 'todas as cutucadas já saíram (mensagens reais)',
     'trava_intervalo_minimo' => 'intervalo mínimo de 30 min entre cutucadas',
-    'trava_teto_diario' => 'teto diário de 4 cutucadas atingido'
+    'trava_teto_diario' => 'teto diário de 4 cutucadas atingido',
+    'ia_sem_texto' => 'a IA não escreveu o texto (chave/serviço) — etapa tratada sem envio',
+    'ia_fila' => 'teto de chamadas à IA nesta rodada — sai na próxima'
   }.freeze
 
   def perform
@@ -98,6 +107,10 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     sent = own_nudges(bot, conversation, plan[:anchor])
     timeline = forecast_timeline(steps, plan, sent, now)
     status, text = forecast_text(bot, plan, sent.size, steps.size, now)
+    if ai_without_key?(bot, plan) # item 315: etapa de IA sem chave e sem reserva não sai
+      status = 'parado'
+      text = "#{REASON_TEXT['ia_sem_texto']} · #{sent.size} de #{steps.size} enviadas"
+    end
     {
       status: status, text: text, sent: sent.size, total: steps.size,
       next_at: timeline.find { |t| NEXT_STATUSES.include?(t[:status]) }&.dig(:at),
@@ -105,7 +118,20 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     }
   end
 
+  # conversas em que ESTE robô atua (caixas, colunas, cerca dos parceiros) —
+  # usado também pela prévia da etapa de IA (controlador)
+  def candidates(bot)
+    conversations(bot)
+  end
+
   private
+
+  def ai_without_key?(bot, plan)
+    step = plan[:chosen]&.dig(:step)
+    return false unless step && Crm::FollowupBot.ai_step?(step) && step['message'].blank?
+
+    CrmSetting.find_by(account: bot.account)&.ai_config&.dig('api_key').blank?
+  end
 
   def process_bot(bot)
     unless bot.within_window? # janela "começa em / para em"
@@ -131,6 +157,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
     run = { status: 'ok', candidates: ids.size, sent: 0, reasons: Hash.new(0) }
     events = []
+    @ai_calls = 0 # item 315: chamadas à IA nesta rodada (teto AI_PER_ROUND)
 
     # eager-load do contato + inbox: evita 1 query por conversa só pra achar o
     # contato/etiquetas na hora de decidir a cutucada
@@ -150,17 +177,17 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
                .where(status: :open)
                .where('conversations.last_activity_at >= ?', LOOKBACK.ago)
 
-    if bot.stage_scoped?
-      # cards que estão na coluna → conversas desses contatos
-      contact_ids = Crm::Contact.where(stage_id: bot.stage_id).select(:contact_id)
+    # item 315: colunas do CRM em que o robô atua (robô de coluna = a dele;
+    # robô global = as marcadas; nenhuma = qualquer coluna, com ou sem card)
+    stage_ids = bot.acting_stage_ids
+    if stage_ids.any?
+      contact_ids = Crm::Contact.where(stage_id: stage_ids).select(:contact_id)
       scope = scope.where(contact_id: contact_ids)
-      # caixa escolhida no robô de coluna → restringe a esse número
-      scope = scope.where(inbox_id: bot.inbox_id) if bot.inbox_id.present?
-    else
-      # caixa automática: sem inbox definida, roda em todas as conversas
-      # abertas — a mensagem sai pelo número da própria conversa
-      scope = scope.where(inbox_id: bot.inbox_id) if bot.inbox_id.present?
     end
+    # caixas em que atua: nenhuma marcada = todas as conversas abertas — a
+    # mensagem sai pelo número da própria conversa
+    inbox_ids = bot.acting_inbox_ids
+    scope = scope.where(inbox_id: inbox_ids) if inbox_ids.any?
     # 🚧 item 231 (cerca dos parceiros): caixas dos parceiros e pacientes de
     # parceiro do hub ficam fora de qualquer robô
     partner_inboxes = Crm::PartnerGuard.partner_inbox_ids(bot.account)
@@ -179,15 +206,78 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     chosen = plan[:chosen]
     return run[:reasons][plan[:reason]] += 1 if chosen.nil?
 
-    # marca ANTES de enviar (falha segura): se o envio quebrar no meio, o
-    # pior caso é PERDER uma cutucada — nunca duplicar para o paciente.
+    # item 315: etapa de IA além do teto da rodada fica para a próxima (sem marcar)
+    return run[:reasons]['ia_fila'] += 1 if ai_queue_full?(chosen)
+
+    # marca ANTES de qualquer coisa (falha segura): se o envio — ou a IA —
+    # quebrar no meio, o pior caso é PERDER uma cutucada, nunca duplicar para o
+    # paciente (duas rodadas sobrepostas não cutucam a mesma conversa).
     # Só a etapa ESCOLHIDA é marcada: as outras vencidas saem nas próximas
     # rodadas, respeitando o espaçamento da cadência.
     mark_steps(plan[:state], [chosen])
     persist_state(conversation, bot, plan[:anchor], plan[:state])
-    send_nudge(bot, conversation, chosen)
+
+    outcome = nudge_content(bot, conversation, chosen)
+    if outcome[:text].nil?
+      note = settle_ai_failure(bot, conversation, plan, chosen, outcome)
+      return record_skip(run, events, conversation, 'ia_sem_texto', note)
+    end
+
+    send_nudge(bot, conversation, chosen, outcome[:text])
     run[:sent] += 1
     events << event_for(conversation, 'sent', note: step_label(chosen[:step]))
+  end
+
+  def record_skip(run, events, conversation, reason, note)
+    run[:reasons][reason] += 1
+    events << event_for(conversation, 'skipped', note: note)
+    nil
+  end
+
+  def ai_queue_full?(chosen)
+    Crm::FollowupBot.ai_step?(chosen[:step]) && @ai_calls.to_i >= AI_PER_ROUND
+  end
+
+  # texto da cutucada: etapa de IA → a IA escreve a partir da conversa (cai
+  # no texto de reserva da etapa, se houver); as demais → o texto/modelo fixo.
+  # Devolve { text:, config_error: } — text nil = nada para enviar.
+  def nudge_content(bot, conversation, chosen)
+    step = chosen[:step]
+    return { text: render_message(step['message'], conversation) } unless Crm::FollowupBot.ai_step?(step)
+
+    @ai_calls = @ai_calls.to_i + 1
+    result = Crm::FollowupAiNudgeService.new(conversation: conversation, bot: bot, step: step).call
+    return { text: result[:text] } if result[:text].present?
+
+    Rails.logger.warn("[CEVICO followup] IA não escreveu (conversa #{conversation.id}): #{result[:error]}")
+    reserve = step['message'].presence && render_message(step['message'], conversation)
+    { text: reserve, config_error: result[:config_error] == true }
+  end
+
+  # IA sem texto e sem reserva: erro passageiro (timeout, serviço fora) desmarca
+  # a etapa para tentar de novo na próxima rodada, até AI_MAX_TRIES vezes;
+  # erro de configuração (sem chave) ou tentativas esgotadas = tratada sem envio
+  # devolve a nota do registro
+  def settle_ai_failure(bot, conversation, plan, chosen, outcome)
+    tries = bump_ai_tries(plan[:state], chosen)
+    retry_later = !outcome[:config_error] && tries < AI_MAX_TRIES
+    unmark_steps(plan[:state], [chosen]) if retry_later
+    persist_state(conversation, bot, plan[:anchor], plan[:state])
+    return "#{step_label(chosen[:step])} não enviada — a IA não escreveu o texto" unless retry_later
+
+    "#{step_label(chosen[:step])} — a IA não respondeu (tentativa #{tries}); tenta de novo na próxima rodada"
+  end
+
+  def bump_ai_tries(state, chosen)
+    tries = (state['ai_tries'] ||= {})
+    tries[chosen[:index].to_s] = tries[chosen[:index].to_s].to_i + 1
+  end
+
+  def unmark_steps(state, due)
+    due.each do |d|
+      list = d[:from_stage] ? state['stage_sent'] : state['sent']
+      list.delete(d[:index])
+    end
   end
 
   # etapas tratadas SEM envio (protegida por etiqueta, fora da janela do
@@ -257,7 +347,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     # antiga da cadência entre as vencidas (ordem das mensagens preservada)
     chosen = fresh.min_by { |d| Crm::FollowupBot.step_delay_hours(d[:step]) }
     plan[:total] = steps.size
-    apply_physical_locks(plan, conversation, chosen, fresh, now)
+    apply_physical_locks(bot, plan, conversation, chosen, fresh, now)
   end
 
   # por que nada sai nesta rodada (na ordem do que aconteceu)
@@ -274,9 +364,12 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # ── TRAVA FÍSICA: consulta as cutucadas REALMENTE enviadas (tabela de
   # mensagens) antes de qualquer envio. Protege o paciente mesmo que o
   # marcador tenha sido apagado/corrompido por outro processo.
-  def apply_physical_locks(plan, conversation, chosen, fresh, now) # rubocop:disable Metrics/AbcSize
+  def apply_physical_locks(bot, plan, conversation, chosen, fresh, now) # rubocop:disable Metrics/AbcSize, Metrics/ParameterLists
     nudges = bot_nudges(conversation)
-    if nudges.where('created_at >= ?', plan[:anchor]).count >= plan[:total]
+    # cadência completa = as cutucadas DESTE robô (as de outro robô não contam
+    # contra o total deste — varredura 03/10); intervalo e teto diário seguem
+    # valendo para qualquer robô
+    if own_nudges_scope(bot, conversation).where('created_at >= ?', plan[:anchor]).count >= plan[:total]
       # cadência já saiu inteira nas mensagens → ressincroniza o marcador (sem evento)
       fresh.each { |d| plan[:handled] << d.merge(note: nil) }
       return plan.merge(reason: 'trava_cadencia_completa')
@@ -503,8 +596,10 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # vinha a PRIMEIRA da conversa. O robô só funcionava quando a conversa
   # começava com mensagem do atendimento (caso do teste) e nunca nas conversas
   # reais (paciente fala primeiro). Comparação por maximum() não sofre disso.
+  # Nota interna (outgoing + private) NÃO conta: o paciente não a viu — se a
+  # última coisa visível é a pergunta dele, a vez é do atendimento (varredura 03/10).
   def silence_anchor(conversation)
-    msgs = conversation.messages.where(message_type: [:incoming, :outgoing])
+    msgs = conversation.messages.where(message_type: [:incoming, :outgoing], private: false)
     last_incoming_at = msgs.incoming.maximum(:created_at)
     last_outgoing_at = msgs.outgoing.maximum(:created_at)
     return nil if last_outgoing_at.nil? # atendimento nunca falou
@@ -526,6 +621,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     stored = { 'bots' => { stored['bot_id'].to_s => stored } } if stored['bot_id'].present? # legado
     mine = stored.dig('bots', bot.id.to_s) || {}
     stage_key = stage_entered&.iso8601
+    same_anchor = mine['anchor'] == anchor.iso8601
 
     # 🔴 o .dup é OBRIGATÓRIO — sem ele, o << do mark_steps mutava o MESMO
     # array que vive no additional_attributes carregado, o with_lock do
@@ -533,9 +629,10 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     # VEZ após a 1ª cutucada (só o primeiro follow-up saía — bug de produção
     # 03/08; mesma lição do item 98: deep_dup antes do lock)
     {
-      'sent' => mine['anchor'] == anchor.iso8601 ? Array(mine['sent']).dup : [],
+      'sent' => same_anchor ? Array(mine['sent']).dup : [],
       'stage_sent' => mine['stage_key'] == stage_key ? Array(mine['stage_sent']).dup : [],
-      'stage_key' => stage_key
+      'stage_key' => stage_key,
+      'ai_tries' => same_anchor ? (mine['ai_tries'] || {}).dup : {} # item 315
     }
   end
 
@@ -548,16 +645,18 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       stored['bots'] ||= {}
       stored['bots'][bot.id.to_s] = {
         'anchor' => anchor.iso8601, 'sent' => state['sent'],
-        'stage_key' => state['stage_key'], 'stage_sent' => state['stage_sent']
-      }
+        'stage_key' => state['stage_key'], 'stage_sent' => state['stage_sent'],
+        'ai_tries' => state['ai_tries'].presence
+      }.compact
       attrs.merge('cevico_followup' => stored)
     end
   end
 
-  def send_nudge(bot, conversation, chosen)
+  def send_nudge(bot, conversation, chosen, content)
     step = chosen[:step]
     # cada cutucada carrega o robô E o nº da etapa (linha do tempo da previsão)
     attrs = { cevico_followup_bot_id: bot.id, cevico_followup_step: chosen[:index] }
+    attrs[:cevico_followup_ai] = true if Crm::FollowupBot.ai_step?(step) # item 315: escrita pela IA
     # etapa de MENSAGEM MODELO: envia o template oficial (funciona fora da
     # janela de 24h do WhatsApp — ideal para cadências em dias)
     attrs[:template_params] = render_template_params(step['template_params'], conversation) if step['template_params'].present?
@@ -566,7 +665,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       account_id: bot.account_id,
       inbox_id: conversation.inbox_id, # robô por coluna envia na caixa da própria conversa
       message_type: :outgoing,
-      content: render_message(step['message'], conversation),
+      content: content,
       sender: bot.sender,
       additional_attributes: attrs
     )
@@ -667,7 +766,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   def step_label(step)
     value = step['delay_value'].presence || step['delay_hours']
     unit = { 'minutes' => 'min', 'days' => 'd' }.fetch(step['delay_unit'], 'h')
-    "cutucada de #{value}#{unit}"
+    Crm::FollowupBot.ai_step?(step) ? "cutucada de #{value}#{unit} (IA)" : "cutucada de #{value}#{unit}"
   end
 
   def event_for(conversation, type, note: nil)
