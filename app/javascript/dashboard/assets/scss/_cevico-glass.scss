@@ -1302,8 +1302,14 @@
 
 /* ── 21/09 (rodada 189, Agentes de IA no kit): chip LIGADO dos "botões em
    linha" de múltipla escolha e o interruptor GRANDE dos cards de agente ── */
+/* 03/10: o .dark .cv-page .cv-chip e o button.cv-chip:hover pesam mais que
+   .cv-page .cv-chip-on — sem as linhas extras o chip ligado não mudava de
+   cor no escuro (Confirmação, Robôs, Agentes…) */
 .cv-page .cv-chip-on,
-.cv-page .cv-chip-on:hover {
+.cv-page .cv-chip-on:hover,
+.cv-page button.cv-chip.cv-chip-on:hover,
+.dark .cv-page .cv-chip.cv-chip-on,
+.dark .cv-page button.cv-chip.cv-chip-on:hover {
   color: #fff;
   background: var(--cv-grad);
   border-color: transparent;

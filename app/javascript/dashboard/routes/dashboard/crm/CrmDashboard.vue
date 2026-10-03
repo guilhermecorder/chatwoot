@@ -1842,6 +1842,7 @@ const agentView = computed(() => {
       :pipeline-id="props.pipeline.id"
       :initial-from="period.from"
       :initial-to="period.to"
+      :initial-preset="period.preset"
       :focus="proMaxFocus"
       @close="proMaxFocus = null"
     />

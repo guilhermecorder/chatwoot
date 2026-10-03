@@ -116,8 +116,8 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
 
   def deliver_followup(account, inbox, rcfg, regua, task, template, number, now_sp, partner:) # rubocop:disable Metrics/ParameterLists
     contact = task.contact
-    source = self.class::TemplateSource.new(account, inbox, nil, personalized_params(template['template_params'], task, rcfg),
-                                            template['message_preview'].presence,
+    params = personalized_params(template['template_params'], task, rcfg, template['message_preview'])
+    source = self.class::TemplateSource.new(account, inbox, nil, params, template['message_preview'].presence,
                                             "Reforço #{number} do lembrete de consulta (#{regua.upcase})")
     conversation = Crm::SendTemplateService.new(source: source, contact: contact).perform
     if conversation.nil? # nada foi criado: devolve a marca para tentar de novo

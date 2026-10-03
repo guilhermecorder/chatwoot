@@ -41,7 +41,7 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     rows = rows.select { |s| Crm::PartnerGuard.partner_surgery?(s, own: own) } if side == 'partners'
     rows = rows.reject { |s| Crm::PartnerGuard.partner_surgery?(s, own: own) } if side == 'own'
     doctors = (CrmSetting.find_by(account: Current.account)&.agenda_config || {}).dig('oftalmofacil', 'doctors') || {}
-    marketing = marketing_spend(from, to)
+    marketing, marketing_source = period_marketing(from, to)
     sums = lambda do |list|
       receita = list.sum { |s| s.amount.to_f }
       custo = list.sum { |s| s.clinic_price.to_f }
@@ -52,12 +52,16 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
         ticket: list.any? ? (receita / list.size).round(2) : 0.0,
         resultado_por_cirurgia: list.any? ? ((receita - custo - taxa) / list.size).round(2) : 0.0 }
     end
-    realizadas = rows.select { |s| s.status_kind == 'realizada' }
+    # item 318: lá NUNCA marcam "realizada" — realizada = ativa/realizada com a
+    # data já passada (mesma régua do Financeiro & CAC e do funil por anúncio)
+    done = ->(s) { Crm::AdFunnelSteps::OF_DONE.include?(s.status_kind) && s.surgery_date.present? && s.surgery_date < Date.current }
+    realizadas = rows.select(&done)
     summary = sums.call(realizadas)
     summary[:pago] = realizadas.sum { |s| s.paid_amount.to_f }.round(2)
-    summary[:agendadas] = rows.count { |s| s.status_kind != 'realizada' }
-    summary[:agendadas_receita] = rows.reject { |s| s.status_kind == 'realizada' }.sum { |s| s.amount.to_f }.round(2)
+    summary[:agendadas] = rows.count { |s| !done.call(s) }
+    summary[:agendadas_receita] = rows.reject(&done).sum { |s| s.amount.to_f }.round(2)
     summary[:marketing] = marketing.round(2)
+    summary[:marketing_source] = marketing_source
     summary[:resultado_liquido] = (summary[:resultado] - marketing).round(2)
     summary[:custo_aquisicao_por_cirurgia] = realizadas.any? ? (marketing / realizadas.size).round(2) : nil
     group = lambda do |key_fn, label_fn|
@@ -73,7 +77,7 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
       by_clinic: group.call(->(s) { s.clinic_name.to_s.presence || 'Sem prestador' }, ->(k) { k }),
       by_doctor: group.call(->(s) { s.doctor_crm.to_s.presence || '—' }, ->(k) { doctors[k].presence || (k == '—' ? 'Sem médico' : "CRM #{k}") }),
       monthly: realizadas.group_by { |s| s.surgery_date.strftime('%Y-%m') }.sort.map { |m, list| sums.call(list).merge(month: m) },
-      note: 'Receita = valor cobrado no OftalmoFácil · Custo = repasse ao prestador · Taxa = margem da plataforma · Resultado = o que fica na CEVICO. Marketing = investimento por caixa configurado, rateado pelo período.'
+      note: 'Receita = valor cobrado no OftalmoFácil · Custo = repasse ao prestador · Taxa = margem da plataforma · Resultado = o que fica na CEVICO. Marketing = gasto real do Google + Meta no período (o mesmo do Financeiro & CAC); sem leitura deles, o investimento por caixa rateado.'
     }
   end
 
@@ -140,6 +144,19 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     when 'last_month' then [(today << 1).beginning_of_month, (today << 1).end_of_month]
     else [today.beginning_of_month, today] # 'month' (padrão)
     end
+  end
+
+  # item 318: marketing = gasto REAL do Google + Meta (Financeiro & CAC);
+  # sem leitura deles, o investimento manual por caixa rateado (o de antes)
+  def period_marketing(from, to)
+    real = Crm::AcquisitionCostService.new(account: Current.account, since: from.in_time_zone(TZ).beginning_of_day,
+                                           until_at: to.in_time_zone(TZ).end_of_day).ads_spend
+    return [real, 'anuncios'] if real.positive?
+
+    [marketing_spend(from, to), 'manual']
+  rescue StandardError => e
+    Rails.logger.warn "[finance#profitability] gasto real indisponível: #{e.message}"
+    [marketing_spend(from, to), 'manual']
   end
 
   # investimento em anúncios do período: soma do "investimento mensal" de

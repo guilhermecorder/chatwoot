@@ -504,6 +504,8 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 10px -6px rgb(var(--w-rgb) / 0.9);
 }
 .cv-page .cv-ag-slot-taken:hover { filter: brightness(1.06); }
+/* item 319: paciente marcado FORA da faixa do médico — mesmo balão, contorno tracejado */
+.cv-page .cv-ag-slot-out { outline: 2px dashed rgb(var(--w-rgb) / 0.55); outline-offset: 1px; opacity: 0.92; }
 .cv-page .cv-ag-slot-locked {
   color: #9ca3af;
   background: rgba(15, 23, 42, 0.05);

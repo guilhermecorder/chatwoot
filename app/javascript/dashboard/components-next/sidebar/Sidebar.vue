@@ -689,6 +689,7 @@ const MENU_LAYOUT = [
       'Reports > Calls Dashboard',
       'Reports > WhatsApp Health', // o canal está saudável?
       'Reports > WhatsApp Spend', // 💸 quanto a Meta cobra (item 303, só admin)
+      'Reports > Acquisition Cost', // 💰 quanto custa cada paciente operado (item 318)
       'Reports > Traffic Funnel', // por último (pedido dele 20/09)
       {
         rest: 'Reports',
@@ -1270,8 +1271,21 @@ const menuItems = computed(() => {
             route: 'whatsapp_spend_reports',
             adminOnly: true,
           },
+          {
+            // 💰 item 318: CAC e retorno — mesma concessão do Financeiro
+            name: 'Acquisition Cost',
+            icon: 'i-lucide-piggy-bank',
+            key: 'acquisition_cost',
+            label: 'Financeiro & CAC',
+            route: 'acquisition_cost_reports',
+            capability: 'finance',
+          },
         ]
-          .filter(r => canSeeReport(r.key) && (!r.adminOnly || isAdmin.value))
+          .filter(r =>
+            r.capability
+              ? canSee(r.capability)
+              : canSeeReport(r.key) && (!r.adminOnly || isAdmin.value)
+          )
           .map(r => ({
             name: r.name,
             label: r.label,

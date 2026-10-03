@@ -93,21 +93,47 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     dates
   end
 
+  # 🖐️ ENVIO MANUAL pelo card (item 320, 03/10; "a possibilidade de um envio
+  # manual, como esses casos, seria ótimo eu fazer um reenvio"):
+  #   sem task_id = o lembrete INTEIRO agora, fora da hora — mesmas regras, só
+  #                 para quem ainda não recebeu (a marca por consulta impede repetir);
+  #   com task_id = ESTE paciente: sai mesmo com a coluna/tipo fora do filtro e
+  #                 mesmo que já tenha recebido (reenvio). Telefone e a cerca dos
+  #                 parceiros continuam valendo. Só com o lembrete AO VIVO.
+  # Devolve { ok:, sent:, skipped:, why: } ou { ok: false, error: }.
+  def run_manual(account, regua, task_id: nil, now: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    now_sp = (now || Time.current).in_time_zone(TZ)
+    agenda = CrmSetting.find_by(account: account)&.agenda_config || {}
+    rcfg = agenda.dig('appointment_reminders', regua)
+    return { ok: false, error: 'Lembrete não encontrado — salve o card antes.' } unless REGUAS.include?(regua) && rcfg.is_a?(Hash)
+    return { ok: false, error: 'A Confirmação de consulta está desligada.' } if agenda.dig(MASTER_KEY, 'enabled') == false
+    return { ok: false, error: 'Ligue este lembrete antes de enviar.' } unless rcfg['enabled'] == true
+    return { ok: false, error: 'Em sombra o lembrete não envia — mude para Ao vivo.' } if task_id && rcfg['mode'] == 'shadow'
+
+    run = run_regua(account, regua, rcfg, now_sp, manual: true, task_id: task_id)
+    return { ok: false, error: 'Falta a caixa do WhatsApp ou o modelo deste lembrete.' } if run.nil?
+    return { ok: false, error: 'Consulta não encontrada (cancelada ou já passou).' } if task_id && run.values.all?(&:empty?)
+
+    { ok: true, sent: run['sent'].size, skipped: run['skipped'].size, why: run['skipped'].first&.dig('why') }
+  end
+
   private
 
-  def run_regua(account, regua, rcfg, now_sp) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  # manual: true = pedido pelo card (não olha a hora); task_id = só este paciente (força)
+  def run_regua(account, regua, rcfg, now_sp, manual: false, task_id: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ParameterLists
     return unless rcfg['enabled'] == true
 
     hour = (rcfg['hour'] || self.class.default_hour(regua)).to_i
     # a hora configurada e a seguinte: rodada perdida (deploy, fila parada) não
     # vira dia perdido — a marca por consulta impede repetição (varredura 03/10)
-    return unless now_sp.hour.between?(hour, hour + 1)
+    return unless manual || now_sp.hour.between?(hour, hour + 1)
 
     # sombra = só lista quem receberia; regra antiga sem 'mode' segue ao vivo
     shadow = rcfg['mode'] == 'shadow'
     inbox = account.inboxes.find_by(id: rcfg['inbox_id'])
     return if inbox.nil? && !shadow
     return if rcfg['template_params'].blank? && templates_by_unit(rcfg).none? && !shadow
+    return run_one(account, inbox, rcfg, regua, task_id, now_sp) if task_id
 
     run = { 'sent' => [], 'skipped' => [] }
     self.class.target_dates(regua, rcfg, now_sp).each do |date|
@@ -122,15 +148,31 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
       scope.includes(:contact).find_each { |task| send_for(account, inbox, rcfg, regua, task, run, shadow: shadow) }
     end
     record_run(account, regua, run, now_sp, shadow: shadow)
+    run
   end
 
-  def send_for(account, inbox, rcfg, regua, task, run, shadow: false) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/ParameterLists, Metrics/PerceivedComplexity
-    contact = task.contact
-    blocked = skip_reason(rcfg, regua, task, contact)
+  # item 320: envio manual para UM paciente (consulta de hoje em diante, não cancelada)
+  def run_one(account, inbox, rcfg, regua, task_id, now_sp) # rubocop:disable Metrics/ParameterLists
+    run = { 'sent' => [], 'skipped' => [] }
+    task = account.tasks.where(task_type: 'consulta', canceled_at: nil, archived_at: nil)
+                  .where(due_at: now_sp.beginning_of_day..).find_by(id: task_id)
+    return run if task.nil?
+
+    send_for(account, inbox, rcfg, regua, task, run, force: true)
+    record_manual(account, regua, run, task.id, now_sp)
+    run
+  end
+
+  # force (envio manual de um paciente): passa pelo filtro de coluna/tipo e pela marca de "já recebeu"
+  def send_for(account, inbox, rcfg, regua, task, run, shadow: false, force: false) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/ParameterLists, Metrics/PerceivedComplexity
+    # item 319: agendamento com telefone e sem cadastro → acha ou cria o paciente
+    # (em sombra só procura; nada é criado)
+    contact = task.contact || Crm::AppointmentOrigin.ensure_contact(account: account, task: task, create: !shadow)
+    blocked = skip_reason(rcfg, regua, task, contact, force: force)
     return skip(run, task, blocked) if blocked
 
     marks = (contact.additional_attributes || {}).dig('cevico_appt_reminders', task.id.to_s) || {}
-    return if reminder_spent?(marks, regua, task)
+    return if reminder_spent?(marks, regua, task) && !force
 
     # paciente de parceiro (já liberado no skip_reason) sai pela caixa e modelo do bloco Oftalmofácil
     partner = partner_patient?(task, contact)
@@ -153,10 +195,10 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
 
     # marca ANTES de enviar, dentro da trava (como o reforço): duas rodadas em
     # paralelo, ou a marca falhando depois do envio, não mandam duas vezes
-    return unless claim_reminder!(contact, task, regua, inbox: inbox)
+    return unless claim_reminder!(contact, task, regua, inbox: inbox, force: force)
 
     source = TemplateSource.new(account, inbox, nil,
-                                personalized_params(template['template_params'], task, rcfg),
+                                personalized_params(template['template_params'], task, rcfg, template['message_preview']),
                                 template['message_preview'].presence,
                                 "Lembrete de consulta (#{regua.upcase})")
     conversation = Crm::SendTemplateService.new(source: source, contact: contact).perform
@@ -174,7 +216,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   end
 
   # por que esta consulta NÃO recebe a régua (nil = pode receber)
-  def skip_reason(rcfg, regua, task, contact) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def skip_reason(rcfg, regua, task, contact, force: false) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    # com telefone e ainda sem paciente: em sombra o cadastro não é criado; ao vivo o número não deu para entender
     return (task.phone.present? ? 'telefone sem cadastro de paciente' : 'sem telefone') if contact.nil?
     return 'sem telefone' if contact.phone_number.blank?
 
@@ -184,6 +227,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
       Crm::PartnerGuard.block!("lembrete #{regua} (agendamento #{task.id})", contact: contact)
       return 'paciente de parceiro (cerca)'
     end
+    return nil if force # envio manual: a equipe escolheu este paciente (coluna e tipo não barram)
+
     # item 312: só quem está nas colunas escolhidas do CRM (paciente de parceiro tem o bloco dele)
     by_stage = partner_patient?(task, contact) ? nil : stage_skip_reason(rcfg, contact)
     return by_stage if by_stage
@@ -296,9 +341,26 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     (rcfg['units'] || {}).select { |_u, t| t.is_a?(Hash) && t['template_params'].present? }
   end
 
+  # item 319 ("devo deixar sem nenhum preenchimento, para que pegue os contatos
+  # da agenda, correto?"): variável deixada EM BRANCO no card ia vazia para a
+  # Meta, que recusa o modelo. Agora o branco vale o dado da Agenda, na ordem
+  # dos modelos de confirmação: {{1}} nome, {{2}} data, {{3}} hora, {{4}} valor.
+  BLANK_VARS = { '1' => '{{nome}}', '2' => '{{data}}', '3' => '{{hora}}', '4' => '{{valor}}' }.freeze
+
+  def fill_blank_vars!(params, preview) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    tokens = preview.to_s.scan(/\{\{\s*(\d+)\s*\}\}/).flatten.uniq
+    return if tokens.empty? && params.dig('processed_params', 'body').blank?
+
+    body = ((params['processed_params'] ||= {})['body'] ||= {})
+    (tokens | body.keys.map(&:to_s)).each do |token|
+      body[token] = BLANK_VARS[token] if body[token].to_s.strip.empty? && BLANK_VARS.key?(token)
+    end
+  end
+
   # {{hora}}/{{unidade}}/{{data}}/{{nome}}/{{valor}} nos VALORES das variáveis viram o dado da consulta
-  def personalized_params(template_params, task, rcfg = {})
+  def personalized_params(template_params, task, rcfg = {}, preview = nil)
     params = template_params.deep_dup
+    fill_blank_vars!(params, preview)
     at = task.due_at&.in_time_zone(TZ)
     subs = {
       '{{hora}}' => at&.strftime('%H:%M').to_s,
@@ -365,7 +427,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
       dates = self.class.target_dates(regua, rcfg, now_sp).map(&:iso8601)
       state[regua] = {
         'last_run_at' => now_sp.iso8601, 'mode' => shadow ? 'shadow' : 'live', 'dates' => dates,
-        'sent' => kept_sent(run, state[regua], dates, now_sp).first(LIST_CAP), 'skipped' => run['skipped'].first(LIST_CAP)
+        'sent' => kept_sent(run, state[regua], dates, now_sp, shadow: shadow).first(LIST_CAP),
+        'skipped' => run['skipped'].first(LIST_CAP)
       }
       settings.update!(agenda_config: agenda.merge(STATE_KEY => state))
     end
@@ -373,18 +436,45 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     Rails.logger.warn "[CEVICO lembretes] registro da rodada: #{e.message}"
   end
 
-  # o cron roda 4x por hora: nas rodadas seguintes todo mundo já tem marca e
-  # "enviadas" viria vazio — mantém a lista da rodada que enviou (varredura 03/10)
-  def kept_sent(run, previous, dates, now_sp)
-    previous ||= {}
-    return run['sent'] if run['sent'].any? || previous['dates'] != dates
+  # item 320: o envio manual de UM paciente só mexe na linha dele — sai das
+  # puladas e entra nas enviadas (ou troca o motivo); o resto da lista fica
+  def record_manual(account, regua, run, task_id, now_sp) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+    settings = CrmSetting.find_by(account: account)
+    return if settings.blank?
 
-    same_hour?(previous['last_run_at'], now_sp) ? Array(previous['sent']) : run['sent']
+    settings.with_lock do
+      agenda = settings.agenda_config || {}
+      state = agenda[STATE_KEY] || {}
+      prev = state[regua] || { 'mode' => 'live', 'dates' => [] }
+      others = ->(list) { Array(list).reject { |entry| entry['task_id'] == task_id } }
+      state[regua] = prev.merge(
+        'last_manual_at' => now_sp.iso8601,
+        'sent' => (others.call(prev['sent']) + run['sent'].map { |e| e.merge('manual' => true) }).first(LIST_CAP),
+        'skipped' => (others.call(prev['skipped']) + run['skipped']).first(LIST_CAP)
+      )
+      settings.update!(agenda_config: agenda.merge(STATE_KEY => state))
+    end
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO lembretes] registro do envio manual: #{e.message}"
   end
 
-  def same_hour?(iso, now_sp)
+  # o cron roda 4x por hora, na hora do lembrete e na seguinte: nas rodadas
+  # depois da primeira todo mundo já tem marca e "enviadas" viria vazio (em
+  # 03/10 ele viu "0 enviada(s)" às 11:45 com os envios feitos às 10h). A lista
+  # do DIA vai somando: quem recebeu numa rodada continua nela (item 319).
+  def kept_sent(run, previous, dates, now_sp, shadow:) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    previous ||= {}
+    same_round = previous['dates'] == dates && previous['mode'] == (shadow ? 'shadow' : 'live') &&
+                 same_day?(previous['last_run_at'], now_sp)
+    return run['sent'] unless same_round
+    return run['sent'] if shadow && run['sent'].any? # sombra lista todos de novo a cada rodada
+
+    (Array(previous['sent']) + run['sent']).uniq { |entry| entry['task_id'] }
+  end
+
+  def same_day?(iso, now_sp)
     at = Time.zone.parse(iso.to_s)&.in_time_zone(TZ)
-    at.present? && at.to_date == now_sp.to_date && at.hour == now_sp.hour
+    at.present? && at.to_date == now_sp.to_date
   rescue ArgumentError
     false
   end
@@ -392,12 +482,12 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   # grava a marca dentro da trava ANTES do envio; false = outra rodada já pegou
   # esta consulta. Consulta remarcada = ciclo novo: as marcas antigas (réguas,
   # reforços, confirmou/recusou) saem para a nova data receber tudo de novo.
-  def claim_reminder!(contact, task, regua, inbox: nil)
+  def claim_reminder!(contact, task, regua, inbox: nil, force: false)
     claimed = false
     Cevico::AttributeMerge.merge!(contact) do |attrs|
       marks = attrs['cevico_appt_reminders'] || {}
       entry = marks[task.id.to_s] || {}
-      next attrs if reminder_spent?(entry, regua, task)
+      next attrs if reminder_spent?(entry, regua, task) && !force
 
       claimed = true
       entry = {} if entry[regua].present? # marca antiga de outra data/hora

@@ -66,7 +66,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }.merge(panel_key == 'agendamento' ? heavy['panel_data'] : {}) # compat: campos antigos no topo
   end
 
-  HEAVY_PRESETS = %w[month last_month year custom].freeze
+  HEAVY_PRESETS = %w[month last_month last90 year custom].freeze
 
   def heavy_cache_key(since, until_at)
     ['cevico:home', account.id, Current.user.id, panel_key, params[:doctor].to_s, params[:preset].to_s, since.to_i, until_at.to_i].join(':')
@@ -942,6 +942,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     when 'week', 'last7', 'last_week' then 7 / days_in_month
     when 'month' then now.day / days_in_month
     when 'last_month' then 1.0
+    when 'last90' then 90 / days_in_month # item 321: 90 dias corridos ≈ 3 metas mensais
     when 'year' then (now.month - 1) + (now.day / days_in_month)
     when 'custom'
       from, to = custom_period_range
@@ -969,7 +970,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   end
 
   def records_json # rubocop:disable Metrics/AbcSize
-    return {} if params[:preset] == 'custom' # intervalo livre não compete com recorde
+    # intervalo livre e os 90 dias corridos não competem com recorde (item 321:
+    # sem isto o total de 90 dias era gravado como "recorde do dia")
+    return {} if %w[custom last90].include?(params[:preset])
 
     keys = RECORD_KEYS[panel_key] || []
     return {} if keys.empty?

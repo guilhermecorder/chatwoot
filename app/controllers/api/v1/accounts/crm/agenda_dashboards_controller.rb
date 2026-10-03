@@ -16,7 +16,7 @@ class Api::V1::Accounts::Crm::AgendaDashboardsController < Api::V1::Accounts::Ba
     since, until_at = resolve_range
     preset = params[:preset].presence || 'month'
     # ⚡ item 237: guardado por conta+período (3 min; 10 min em ano/mês passado/personalizado)
-    ttl = %w[year last_month custom].include?(preset) ? 10.minutes : 3.minutes
+    ttl = %w[year last_month last90 custom].include?(preset) ? 10.minutes : 3.minutes
     payload = Rails.cache.fetch("cevico:agenda_dash:#{account.id}:#{preset}:#{since.to_i}:#{until_at.to_i}", expires_in: ttl) do
       JSON.parse({
         period: preset,

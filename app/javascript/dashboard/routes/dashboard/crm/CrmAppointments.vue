@@ -1059,6 +1059,16 @@ onBeforeUnmount(() => {
 
       <SkeletonScreen v-if="isLoading && !feed" variant="dashboard" />
 
+      <!-- item 321: período longo passou do teto de registros lidos -->
+      <div
+        v-if="feed?.truncated"
+        class="cv-sub cv-amber px-4 py-2.5 mb-4 text-xs text-n-slate-11"
+      >
+        ⚠️ Este período tem mais de {{ feed.limit }} agendamentos — a tela leu
+        só os {{ feed.limit }} primeiros, então os totais estão incompletos.
+        Escolha um período menor para o número exato.
+      </div>
+
       <template v-else>
         <!-- erro -->
         <div

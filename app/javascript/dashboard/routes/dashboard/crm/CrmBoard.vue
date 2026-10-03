@@ -20,6 +20,7 @@ import {
   ALL_INBOXES_GRADIENT,
 } from 'dashboard/helper/cevicoInboxColors.js';
 import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
+import { PERIOD_PRESETS, periodRangeFor } from 'dashboard/helper/cevicoPeriod';
 
 const store = useStore();
 const { isAdmin } = useAdmin();
@@ -103,44 +104,8 @@ const localDateStr = d => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-// De/Até (YYYY-MM-DD) de cada pílula da régua
-const presetRange = key => {
-  const now = new Date();
-  const today = localDateStr(now);
-  if (key === 'yesterday') {
-    const y = new Date(now);
-    y.setDate(y.getDate() - 1);
-    const d = localDateStr(y);
-    return { from: d, to: d };
-  }
-  if (key === 'last7') {
-    const s = new Date(now);
-    s.setDate(s.getDate() - 6);
-    return { from: localDateStr(s), to: today };
-  }
-  if (key === 'last_week') {
-    // semana passada = segunda a domingo anteriores
-    const dow = (now.getDay() + 6) % 7;
-    const end = new Date(now);
-    end.setDate(now.getDate() - dow - 1);
-    const start = new Date(end);
-    start.setDate(end.getDate() - 6);
-    return { from: localDateStr(start), to: localDateStr(end) };
-  }
-  if (key === 'month') {
-    return { from: localDateStr(new Date(now.getFullYear(), now.getMonth(), 1)), to: today };
-  }
-  if (key === 'last_month') {
-    return {
-      from: localDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
-      to: localDateStr(new Date(now.getFullYear(), now.getMonth(), 0)),
-    };
-  }
-  if (key === 'year') {
-    return { from: localDateStr(new Date(now.getFullYear(), 0, 1)), to: today };
-  }
-  return { from: today, to: today }; // today
-};
+// De/Até (YYYY-MM-DD) de cada pílula da régua — a mesma do sistema (item 321)
+const presetRange = periodRangeFor;
 
 // período em jogo agora (pílula ativa ou De/Até personalizado)
 const currentRange = () => {
@@ -493,18 +458,11 @@ const clearFilters = () => {
   fetchPeriod();
 };
 
-// ── Régua de período PADRÃO (06/08): Hoje | Ontem | Últimos 7 dias |
-// Este mês | Este ano | Personalizado. Sempre há um período ativo (padrão:
+// ── Régua de período PADRÃO (06/08; item 321: a lista única do sistema,
+// helper/cevicoPeriod.js): Hoje | Ontem | Últimos 7 dias | Semana passada |
+// Este mês | Mês passado | 90 dias | Este ano | Personalizado. Sempre há um período ativo (padrão:
 // Últimos 7 dias) e o filtro roda NO SERVIDOR (scope=period).
-const DATE_PRESETS = [
-  { key: 'today', label: 'Hoje' },
-  { key: 'yesterday', label: 'Ontem' },
-  { key: 'last7', label: 'Últimos 7 dias' },
-  { key: 'last_week', label: 'Semana passada' },
-  { key: 'month', label: 'Este mês' },
-  { key: 'last_month', label: 'Mês passado' },
-  { key: 'year', label: 'Este ano' },
-];
+const DATE_PRESETS = PERIOD_PRESETS; // item 321: inclui "90 dias"
 const DEFAULT_PERIOD = 'last7';
 const savedPeriod = sessionStorage.getItem('cevico_crm_period');
 const activeDatePreset = ref(

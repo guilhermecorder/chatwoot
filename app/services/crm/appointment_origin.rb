@@ -20,6 +20,8 @@
 class Crm::AppointmentOrigin
   LABELS = { 'cevico' => %w[cevico], 'oftalmofacil' => %w[oftalmofacil of_agenda] }.freeze
   LABEL_COLORS = { 'cevico' => '#152C61', 'oftalmofacil' => '#0D9488', 'of_agenda' => '#0D9488' }.freeze
+  # item 319: telefone digitado SEM DDD (8 ou 9 dígitos) ganha o DDD da clínica
+  DEFAULT_DDD = '11'.freeze
 
   class << self
     def apply(account:, task:)
@@ -37,14 +39,48 @@ class Crm::AppointmentOrigin
       nil
     end
 
+    # 📞 Item 319 (03/10; "precisamos normalizar a forma como o telefone é
+    # compreendido… precisa poder sem o +55"): agendamento COM telefone e SEM
+    # paciente vinculado. Acha o cadastro pelo telefone (últimos 8 dígitos) —
+    # ele pode ter nascido DEPOIS do agendamento — ou cria (nome + telefone do
+    # agendamento), amarra ao agendamento e põe o card no funil certo. É o que
+    # o lembrete de confirmação chama antes de desistir ("telefone sem cadastro").
+    # create: false = só procura (modo sombra não cria nada).
+    def ensure_contact(account:, task:, create: true) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      return task.contact if task.contact.present?
+      return nil if task.phone.blank?
+
+      contact = Task.match_contact(account, task.phone) || (create ? create_contact(account, task) : nil)
+      return nil if contact.blank?
+
+      task.update_column(:contact_id, contact.id) # rubocop:disable Rails/SkipsModelValidations
+      task.contact = contact
+      apply_labels(account, contact, task.origin) if Task::ORIGINS.include?(task.origin)
+      place_card(account, contact, task)
+      contact
+    rescue StandardError => e
+      Rails.logger.error "[Crm::AppointmentOrigin] cadastro do agendamento #{task&.id}: #{e.class}: #{e.message}"
+      nil
+    end
+
+    # telefone como a equipe digita → +55DDDnúmero. Aceita com ou sem +55, com
+    # zero na frente, com máscara; 8 ou 9 dígitos (sem DDD) ganham o DDD da
+    # clínica. Não dá para entender = nil.
+    def normalize_phone(raw)
+      digits = raw.to_s.gsub(/\D/, '').sub(/\A0+/, '')
+      digits = digits[2..] if digits.start_with?('55') && digits.length >= 12
+      digits = "#{DEFAULT_DDD}#{digits}" if digits.length.between?(8, 9)
+      digits.length.between?(10, 11) ? "+55#{digits}" : nil
+    end
+
     private
 
     def create_contact(account, task)
-      digits = task.phone.to_s.gsub(/\D/, '')
-      return nil if digits.length < 10
+      phone = normalize_phone(task.phone)
+      return nil if phone.nil?
 
       attrs = { 'origem' => task.partner_origin? ? 'oftalmofacil' : 'agenda' }
-      account.contacts.create!(name: patient_name(task), phone_number: e164(digits), additional_attributes: attrs)
+      account.contacts.create!(name: patient_name(task), phone_number: phone, additional_attributes: attrs)
     rescue ActiveRecord::RecordInvalid
       # telefone já existe com outra máscara — acha de novo antes de desistir
       Task.match_contact(account, task.phone)
@@ -53,10 +89,6 @@ class Crm::AppointmentOrigin
     def patient_name(task)
       task.title.to_s.sub(/\A(Consulta|Teleconsulta|Exame|Cirurgia|Retorno|P[oó]s-operat[oó]rio):\s*/i, '')
           .delete('✅').strip.presence || 'Paciente'
-    end
-
-    def e164(digits)
-      digits.start_with?('55') && digits.length >= 12 ? "+#{digits}" : "+55#{digits}"
     end
 
     def apply_labels(account, contact, origin)
@@ -83,7 +115,8 @@ class Crm::AppointmentOrigin
 
     def place_card(account, contact, task)
       return unless task.task_type == 'consulta' && task.canceled_at.nil?
-      return Crm::PartnerFunnel.place!(account, contact, :booked) if task.partner_origin?
+      # agendamento de parceiro (origem escolhida ou vindo do sync do hub) → funil do Oftalmofácil
+      return Crm::PartnerFunnel.place!(account, contact, :booked) if Crm::PartnerGuard.partner_task?(task)
 
       place_own_card(account, contact)
     end

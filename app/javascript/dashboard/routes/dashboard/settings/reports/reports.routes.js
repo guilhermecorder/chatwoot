@@ -27,6 +27,7 @@ import LabelDashboard from './LabelDashboard.vue';
 import CrmDashboardReport from './CrmDashboardReport.vue';
 import WhatsappHealth from './WhatsappHealth.vue';
 import WhatsappSpend from './WhatsappSpend.vue';
+import AcquisitionCost from './AcquisitionCost.vue';
 import TrafficFunnel from './TrafficFunnel.vue';
 import DoctorsDashboard from './DoctorsDashboard.vue';
 import AgentsDashboard from './AgentsDashboard.vue';
@@ -196,6 +197,15 @@ export default {
             permissions: ['administrator'],
           },
           component: WhatsappSpend,
+        },
+        {
+          // 💰 item 318: Financeiro & CAC — admin ou concessão "Financeiro"
+          path: 'acquisition_cost',
+          name: 'acquisition_cost_reports',
+          meta: {
+            permissions: ['administrator', 'agent'],
+          },
+          component: AcquisitionCost,
         },
         {
           path: 'traffic_funnel',

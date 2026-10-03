@@ -95,6 +95,10 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
     reflect_attendance_in_crm if task.saved_change_to_attendance? || task.saved_change_to_surgery_indication?
     Crm::ConfirmationReflector.call(account: Current.account, task: task) if task.saved_change_to_confirmed_at? && task.confirmed_at.present?
     Crm::AppointmentOrigin.apply(account: Current.account, task: task) if task.saved_change_to_origin?
+    # item 319: telefone corrigido num agendamento sem paciente → acha ou cria o cadastro
+    if task.saved_change_to_phone? && task.contact_id.blank? && %w[consulta cirurgia].include?(task.task_type)
+      Crm::AppointmentOrigin.ensure_contact(account: Current.account, task: task)
+    end
 
     render json: task_json(task)
   end

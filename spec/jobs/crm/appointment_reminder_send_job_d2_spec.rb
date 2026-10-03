@@ -267,10 +267,151 @@ RSpec.describe Crm::AppointmentReminderSendJob do
     described_class.perform_now(now)
 
     state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
-    expect(state['sent'].pluck('name')).to eq(['Com Cadastro'])
-    expect(state['skipped'].to_h { |s| [s['name'], s['why']] }).to eq(
-      'Sem Telefone' => 'sem telefone', 'Telefone Solto' => 'telefone sem cadastro de paciente'
-    )
+    # item 319: com telefone, o cadastro é criado e o lembrete sai; só quem não tem telefone fica de fora
+    expect(state['sent'].pluck('name')).to contain_exactly('Com Cadastro', 'Telefone Solto')
+    expect(state['skipped'].to_h { |s| [s['name'], s['why']] }).to eq('Sem Telefone' => 'sem telefone')
+  end
+
+  # item 319 (03/10): "precisamos normalizar a forma como o telefone é compreendido… precisa poder sem o +55"
+  describe 'consulta com telefone e sem paciente vinculado' do
+    def solta(name, phone, at: '2026-09-28 09:30')
+      account.tasks.create!(title: "Consulta: #{name}", task_type: 'consulta', modality: 'avaliacao', unit: 'paulista',
+                            due_at: tz.parse(at), phone: phone, creator: admin)
+    end
+
+    it 'cria o paciente com o telefone normalizado (sem +55, sem DDD, com zero) e envia', :aggregate_failures do
+      a = solta('Sem Mais 55', '(11) 98888-0001')
+      b = solta('Sem DDD', '98888-0002', at: '2026-09-28 09:45')
+      c = solta('Com Zero', '011 98888-0003', at: '2026-09-28 10:00')
+
+      described_class.perform_now(now)
+
+      expect([a, b, c].map { |t| t.reload.contact&.phone_number }).to eq(%w[+5511988880001 +5511988880002 +5511988880003])
+      state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+      expect(state['sent'].pluck('name')).to contain_exactly('Sem Mais 55', 'Sem DDD', 'Com Zero')
+      expect(state['skipped']).to be_empty
+    end
+
+    it 'acha o cadastro que nasceu DEPOIS do agendamento, em vez de criar outro' do
+      task = solta('Chegou Depois', '11 97777-0001')
+      later = contact_named('Chegou Depois', '+5511977770001')
+
+      expect { described_class.perform_now(now) }.not_to(change { account.contacts.count })
+      expect(task.reload.contact_id).to eq(later.id)
+    end
+
+    it 'em sombra não cria nada: aparece nas puladas com o motivo', :aggregate_failures do
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('mode' => 'shadow') } })
+      solta('Só Sombra', '11 96666-0001')
+
+      expect { described_class.perform_now(now) }.not_to(change { account.contacts.count })
+      state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+      expect(state['skipped'].to_h { |s| [s['name'], s['why']] }).to eq('Só Sombra' => 'telefone sem cadastro de paciente')
+    end
+
+    it 'telefone que não dá para entender continua nas puladas' do
+      solta('Número Torto', '12345')
+      described_class.perform_now(now)
+      state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+      expect(state['skipped'].to_h { |s| [s['name'], s['why']] }).to eq('Número Torto' => 'telefone sem cadastro de paciente')
+    end
+  end
+
+  # item 319: "nos espaços {{1}} etc, devo deixar sem nenhum preenchimento, para que pegue os contatos da agenda, correto?"
+  it 'variável em branco no card vale o dado da Agenda (nome, data, hora, valor)' do
+    bodies = []
+    allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+      bodies << args[3]['processed_params']['body']
+      m.call(*args)
+    end
+    blank = { 'name' => 'confirmacao_consulta_paulista', 'language' => 'pt_BR',
+              'processed_params' => { 'body' => { '1' => '', '2' => ' ' } } }
+    cfg = d2_cfg.merge('units' => { 'paulista' => { 'template_params' => blank,
+                                                    'message_preview' => 'Paciente:{{1}} Data:{{2}} Horário:{{3}} Valor:{{4}}' } })
+    settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => cfg } })
+    consulta(contact_named('Julia Adania', '+5511999990071'), '2026-09-28 08:45')
+
+    described_class.perform_now(now)
+
+    expect(bodies).to eq([{ '1' => 'Julia Adania', '2' => '28/09/2026', '3' => '08:45', '4' => '150,00' }])
+  end
+
+  # item 320 (03/10): "a possibilidade de um envio manual, como esses casos, seria ótimo eu fazer um reenvio"
+  describe 'envio manual pelo card' do
+    let(:pipeline) { Crm::Pipeline.create!(account: account, name: 'Funil', position: 1) }
+    let(:orcamento) { Crm::Stage.create!(pipeline: pipeline, name: 'Envio de Orçamento', position: 1, color: '#059669') }
+    let(:agendado) { Crm::Stage.create!(pipeline: pipeline, name: 'Agendamento de Consulta', position: 2, color: '#0F5FA6') }
+    let(:afternoon) { tz.parse('2026-09-26 16:20') } # fora da hora do lembrete (10h)
+    let(:state) { -> { settings.reload.agenda_config.dig('appointment_reminders_state', 'd2') } }
+
+    def in_stage(name, phone, stage, at)
+      person = contact_named(name, phone)
+      Crm::Contact.create!(contact: person, pipeline: pipeline, stage: stage)
+      consulta(person, at)
+    end
+
+    before do
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('stage_ids' => [agendado.id]) } })
+    end
+
+    it 'o lembrete inteiro fora da hora: manda para quem falta, sem repetir quem já recebeu', :aggregate_failures do
+      in_stage('Já Recebeu', '+5511999990091', agendado, '2026-09-28 09:00')
+      described_class.perform_now(now)
+      in_stage('Marcou Depois', '+5511999990092', agendado, '2026-09-28 09:15')
+
+      result = described_class.new.run_manual(account, 'd2', now: afternoon)
+
+      expect(result).to include(ok: true, sent: 1, skipped: 0)
+      expect(state.call['sent'].pluck('name')).to eq(['Já Recebeu', 'Marcou Depois'])
+    end
+
+    it 'um paciente: sai mesmo com o card fora das colunas marcadas, e sai das puladas', :aggregate_failures do
+      fora = in_stage('Card No Orçamento', '+5511999990093', orcamento, '2026-09-28 09:30')
+      described_class.perform_now(now)
+      expect(state.call['skipped'].pluck('why')).to eq(['card na coluna Envio de Orçamento'])
+
+      result = described_class.new.run_manual(account, 'd2', task_id: fora.id, now: afternoon)
+
+      expect(result).to include(ok: true, sent: 1)
+      expect(state.call['skipped']).to be_empty
+      expect(state.call['sent'].last).to include('name' => 'Card No Orçamento', 'manual' => true)
+    end
+
+    it 'reenvio: quem já recebeu recebe de novo quando a equipe pede', :aggregate_failures do
+      task = in_stage('Mensagem Falhou', '+5511999990094', agendado, '2026-09-28 09:45')
+      described_class.perform_now(now)
+      expect(Crm::SendTemplateService).to have_received(:new).once
+
+      result = described_class.new.run_manual(account, 'd2', task_id: task.id, now: afternoon)
+
+      expect(result).to include(ok: true, sent: 1)
+      expect(Crm::SendTemplateService).to have_received(:new).twice
+      expect(state.call['sent'].pluck('name')).to eq(['Mensagem Falhou'])
+    end
+
+    it 'não envia com o lembrete desligado, em sombra (um paciente) ou para consulta cancelada', :aggregate_failures do
+      task = in_stage('Cancelada', '+5511999990095', agendado, '2026-09-28 10:00')
+      task.update!(canceled_at: Time.current)
+      expect(described_class.new.run_manual(account, 'd2', task_id: task.id, now: afternoon)).to include(ok: false)
+      expect(described_class.new.run_manual(account, 'd9', now: afternoon)).to include(ok: false)
+
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('mode' => 'shadow') } })
+      expect(described_class.new.run_manual(account, 'd2', task_id: task.id, now: afternoon)[:error]).to match(/sombra/)
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('enabled' => false) } })
+      expect(described_class.new.run_manual(account, 'd2', now: afternoon)[:error]).to match(/Ligue/)
+      expect(Crm::SendTemplateService).not_to have_received(:new)
+    end
+  end
+
+  # item 319: às 11:45 ele viu "0 enviada(s)" — os envios tinham saído às 10h
+  it 'a lista de enviadas do dia vai somando entre as rodadas (não zera na hora seguinte)', :aggregate_failures do
+    consulta(contact_named('Primeira Rodada', '+5511999990081'), '2026-09-28 09:00')
+    described_class.perform_now(now)
+    consulta(contact_named('Segunda Rodada', '+5511999990082'), '2026-09-28 09:15')
+    described_class.perform_now(tz.parse('2026-09-26 11:45'))
+
+    state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+    expect(state['sent'].pluck('name')).to eq(['Primeira Rodada', 'Segunda Rodada'])
   end
 
   it 'vários lembretes ao mesmo tempo: 2 dias antes e no dia, cada um com sua hora; interruptor geral desliga tudo', :aggregate_failures do

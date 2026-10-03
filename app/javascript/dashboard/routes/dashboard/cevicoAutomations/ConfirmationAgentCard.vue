@@ -196,7 +196,8 @@ const hydrate = s => {
 // guarda TODOS os status (item 314); os seletores mostram só os aprovados
 const loadTemplates = async (inboxId, { force = false } = {}) => {
   if (!inboxId || (templatesByInbox.value[inboxId] && !force)) return;
-  if (!force) templatesByInbox.value = { ...templatesByInbox.value, [inboxId]: [] };
+  if (!force)
+    templatesByInbox.value = { ...templatesByInbox.value, [inboxId]: [] };
   try {
     const data = await store.dispatch('crm/fetchWhatsappTemplates', {
       inboxId,
@@ -242,7 +243,9 @@ const touch = () => {
 // ── modelos ───────────────────────────────────────────────────────────────
 const allTemplatesIn = inboxId => templatesByInbox.value[inboxId] || [];
 const templatesIn = inboxId =>
-  allTemplatesIn(inboxId).filter(t => (t.status || '').toLowerCase() === 'approved');
+  allTemplatesIn(inboxId).filter(
+    t => (t.status || '').toLowerCase() === 'approved'
+  );
 const templatesOf = rule => templatesIn(rule.inbox_id);
 const tplIn = (inboxId, slot) =>
   templatesIn(inboxId).find(t => t.name === slot.name) || null;
@@ -271,6 +274,12 @@ const SUGGESTED_VARS = {
   3: '{{hora}}',
   4: '{{valor}}',
 };
+// item 319: variável em branco vale o dado da Agenda (o servidor preenche na
+// mesma ordem) — o campo mostra o que vai sair
+const varHint = token =>
+  SUGGESTED_VARS[token]
+    ? `{{${token}}} — em branco = ${SUGGESTED_VARS[token]} (da Agenda)`
+    : `{{${token}}} — escreva o texto ou uma variável`;
 const fillVars = (inboxId, slot) => {
   slot.vars = {};
   tokensIn(inboxId, slot).forEach(t => {
@@ -415,7 +424,9 @@ const inboxMissingUnits = (rule, inboxId) => {
     .map(k => (k === 'geral' ? 'geral' : UNITS.find(u => u.key === k).label));
 };
 const inboxHasTemplate = (rule, inboxId) =>
-  ['paulista', 'tatuape', 'geral'].some(k => inboxCfg(rule, inboxId).slots[k].name);
+  ['paulista', 'tatuape', 'geral'].some(
+    k => inboxCfg(rule, inboxId).slots[k].name
+  );
 // ── pacientes do Oftalmofácil (cerca dos parceiros liberada só por aqui) ──
 const togglePartner = rule => {
   rule.partner.enabled = !rule.partner.enabled;
@@ -569,6 +580,51 @@ const statusChip = computed(() => {
   return { label: 'Em sombra', tone: 'cv-slate' };
 });
 const runOf = rule => lastRuns.value[`d${rule.days}`] || null;
+// 🖐️ item 320 (03/10; "a possibilidade de um envio manual… seria ótimo eu
+// fazer um reenvio"): o lembrete inteiro agora (só para quem falta) ou UM
+// paciente da lista (envia mesmo fora do filtro; reenvia quem já recebeu)
+const manualBusy = ref('');
+const manualKey = (rule, entry) => `${rule.uid}:${entry?.task_id || 'all'}`;
+const manualQuestion = (rule, entry, resend) => {
+  if (entry)
+    return resend
+      ? `Reenviar o lembrete agora para ${entry.name}? Ele recebe a mensagem de novo.`
+      : `Enviar o lembrete agora para ${entry.name}, mesmo fora do filtro?`;
+  return rule.mode === 'live'
+    ? `Enviar agora "${daysLabel(rule.days)}" para quem ainda não recebeu? Quem já recebeu não recebe de novo.`
+    : `Simular agora "${daysLabel(rule.days)}"? Em sombra nada é enviado.`;
+};
+const runManual = async (rule, entry = null, resend = false) => {
+  if (manualBusy.value) return;
+  if (dirty.value) {
+    useAlert('Salve os lembretes antes de enviar.');
+    return;
+  }
+  // eslint-disable-next-line no-alert
+  if (!window.confirm(manualQuestion(rule, entry, resend))) return;
+  manualBusy.value = manualKey(rule, entry);
+  try {
+    const { data } = await CrmAPI.runAppointmentReminder(
+      `d${rule.days}`,
+      entry?.task_id
+    );
+    await store.dispatch('crm/fetchSettings');
+    if (entry) {
+      useAlert(
+        data.sent
+          ? `Lembrete enviado para ${entry.name} ✓`
+          : `Não saiu para ${entry.name}: ${data.why || 'veja o motivo na lista'}`
+      );
+    } else {
+      const verb = rule.mode === 'live' ? 'enviada(s) agora' : 'receberia(m)';
+      useAlert(`${data.sent} ${verb} · ${data.skipped} pulada(s)`);
+    }
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui enviar agora.');
+  } finally {
+    manualBusy.value = '';
+  }
+};
 const fmtRunDate = iso =>
   iso
     ? new Date(iso).toLocaleString('pt-BR', {
@@ -653,7 +709,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
           </p>
           <div class="flex items-center gap-1.5 flex-wrap mt-1.5">
             <span class="cv-chip">{{ META.tag }}</span>
-            <span class="cv-chip" :class="statusChip.tone"
+            <span
+class="cv-chip" :class="statusChip.tone"
               >● {{ statusChip.label }}</span
             >
           </div>
@@ -687,10 +744,12 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
               {{ META.title }}
             </p>
             <span class="cv-chip">{{ META.tag }}</span>
-            <span class="cv-chip" :class="statusChip.tone"
+            <span
+class="cv-chip" :class="statusChip.tone"
               >● {{ statusChip.label }}</span
             >
-            <span v-if="dirty" class="cv-chip cv-amber"
+            <span
+v-if="dirty" class="cv-chip cv-amber"
               >📝 alterações não salvas</span
             >
           </div>
@@ -865,7 +924,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
             <span class="text-[11px] text-n-slate-10">{{
               ruleSummary(rule)
             }}</span>
-            <span v-if="problemOf(rule)" class="cv-chip cv-amber"
+            <span
+v-if="problemOf(rule)" class="cv-chip cv-amber"
               >⚠️ {{ problemOf(rule) }}</span
             >
             <span
@@ -1091,7 +1151,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                       v-else-if="inboxMissingUnits(rule, i.id).length"
                       class="text-[11px] text-amber-700 dark:text-amber-400"
                     >
-                      ⚠ sem modelo para {{ inboxMissingUnits(rule, i.id).join(', ') }}
+                      ⚠ sem modelo para
+                      {{ inboxMissingUnits(rule, i.id).join(', ') }}
                       nesta caixa — consulta dessa unidade de quem conversa aqui
                       sai pela caixa de cima.
                     </p>
@@ -1099,7 +1160,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                       v-else-if="inboxHasTemplate(rule, i.id)"
                       class="text-[11px] text-emerald-700 dark:text-emerald-400"
                     >
-                      ✓ quem conversa por aqui recebe por aqui, com estes modelos.
+                      ✓ quem conversa por aqui recebe por aqui, com estes
+                      modelos.
                     </p>
                     <button
                       class="cv-chip ml-auto"
@@ -1133,14 +1195,18 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                         v-model="inboxCfg(rule, i.id).slots[slotKey].name"
                         class="cv-input w-full !h-8 text-xs"
                         style="margin-bottom: 0"
-                        @change="fillVars(i.id, inboxCfg(rule, i.id).slots[slotKey])"
+                        @change="
+                          fillVars(i.id, inboxCfg(rule, i.id).slots[slotKey])
+                        "
                       >
                         <option value="">— nenhum —</option>
                         <option
                           v-if="
                             inboxCfg(rule, i.id).slots[slotKey].name &&
                             !templatesIn(i.id).some(
-                              t => t.name === inboxCfg(rule, i.id).slots[slotKey].name
+                              t =>
+                                t.name ===
+                                inboxCfg(rule, i.id).slots[slotKey].name
                             )
                           "
                           :value="inboxCfg(rule, i.id).slots[slotKey].name"
@@ -1149,7 +1215,14 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                         </option>
                         <option
                           v-for="t in templatesIn(i.id)"
-                          :key="rule.uid + 'bi' + i.id + slotKey + t.name + t.language"
+                          :key="
+                            rule.uid +
+                            'bi' +
+                            i.id +
+                            slotKey +
+                            t.name +
+                            t.language
+                          "
                           :value="t.name"
                         >
                           {{ t.name }} ({{ t.language }})
@@ -1159,15 +1232,23 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                         <p
                           class="text-[10px] text-n-slate-10 whitespace-pre-wrap max-h-28 overflow-auto bg-n-alpha-1 rounded-lg px-2 py-1.5"
                         >
-                          {{ bodyIn(i.id, inboxCfg(rule, i.id).slots[slotKey]) || 'prévia indisponível' }}
+                          {{
+                            bodyIn(i.id, inboxCfg(rule, i.id).slots[slotKey]) ||
+                            'prévia indisponível'
+                          }}
                         </p>
                         <input
-                          v-for="token in tokensIn(i.id, inboxCfg(rule, i.id).slots[slotKey])"
+                          v-for="token in tokensIn(
+                            i.id,
+                            inboxCfg(rule, i.id).slots[slotKey]
+                          )"
                           :key="rule.uid + 'bi' + i.id + slotKey + 'v' + token"
-                          v-model="inboxCfg(rule, i.id).slots[slotKey].vars[token]"
+                          v-model="
+                            inboxCfg(rule, i.id).slots[slotKey].vars[token]
+                          "
                           class="cv-input w-full !h-7 text-[11px] font-mono"
                           style="margin-bottom: 0"
-                          :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                          :placeholder="varHint(token)"
                           @input="touch"
                         />
                       </template>
@@ -1178,7 +1259,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                     >
                       <p class="text-[11px] font-bold text-n-slate-12">
                         Modelo do reforço nesta caixa
-                        <span class="font-normal text-n-slate-9">(sem ele, o reforço de quem conversa aqui sai pela caixa de cima)</span>
+                        <span class="font-normal text-n-slate-9">(sem ele, o reforço de quem conversa aqui sai pela
+                          caixa de cima)</span>
                       </p>
                       <select
                         v-model="inboxCfg(rule, i.id).followup.name"
@@ -1196,12 +1278,15 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                         </option>
                       </select>
                       <input
-                        v-for="token in tokensIn(i.id, inboxCfg(rule, i.id).followup)"
+                        v-for="token in tokensIn(
+                          i.id,
+                          inboxCfg(rule, i.id).followup
+                        )"
                         :key="rule.uid + 'bifu' + i.id + 'v' + token"
                         v-model="inboxCfg(rule, i.id).followup.vars[token]"
                         class="cv-input w-full !h-7 text-[11px] font-mono"
                         style="margin-bottom: 0"
-                        :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                        :placeholder="varHint(token)"
                         @input="touch"
                       />
                     </div>
@@ -1210,17 +1295,22 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                 <p class="text-[10px] text-n-slate-9 mt-1">
                   Com a caixa marcada, o lembrete sai por onde o paciente
                   conversou por último (ex.: quem veio pelo Instagram recebe
-                  pelo Instagram), com os modelos escolhidos para aquela
-                  caixa. Quem ainda não tem conversa recebe pela caixa de
-                  cima.
+                  pelo Instagram), com os modelos escolhidos para aquela caixa.
+                  Quem ainda não tem conversa recebe pela caixa de cima.
                 </p>
               </div>
             </div>
 
             <!-- modelos da caixa de cima: por unidade + geral -->
-            <p v-if="rule.inbox_id" class="text-[11px] font-bold text-n-slate-12 mt-3">
+            <p
+              v-if="rule.inbox_id"
+              class="text-[11px] font-bold text-n-slate-12 mt-3"
+            >
               Modelos da caixa
-              {{ whatsappInboxes.find(x => x.id === rule.inbox_id)?.name || 'escolhida' }}
+              {{
+                whatsappInboxes.find(x => x.id === rule.inbox_id)?.name ||
+                'escolhida'
+              }}
             </p>
             <div
               v-if="rule.inbox_id"
@@ -1279,7 +1369,7 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                     v-model="rule.slots[slotKey].vars[token]"
                     class="cv-input w-full !h-7 text-[11px] font-mono"
                     style="margin-bottom: 0"
-                    :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                    :placeholder="varHint(token)"
                     @input="touch"
                   />
                 </template>
@@ -1293,6 +1383,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
               padrão · <code v-pre>{{ unidade }}</code> Av. Paulista/Tatuapé ·
               <code v-pre>{{ contact.name }}</code> nome do cadastro. A consulta
               usa o modelo da unidade dela; sem modelo da unidade, o geral.
+              <b>Campo em branco</b> = dado da Agenda, nesta ordem: 1 nome, 2
+              data, 3 horário, 4 valor.
             </p>
 
             <!-- pacientes do Oftalmofácil: só a caixa escolhida fala com eles -->
@@ -1395,7 +1487,7 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                       v-model="rule.partner.slot.vars[token]"
                       class="cv-input w-full !h-7 text-[11px] font-mono"
                       style="margin-bottom: 0"
-                      :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                      :placeholder="varHint(token)"
                       @input="touch"
                     />
                   </template>
@@ -1540,7 +1632,7 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                         v-model="rule.followup.slot.vars[token]"
                         class="cv-input w-full !h-7 text-[11px] font-mono"
                         style="margin-bottom: 0"
-                        :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                        :placeholder="varHint(token)"
                         @input="touch"
                       />
                     </template>
@@ -1606,7 +1698,7 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                         v-model="rule.followup.partnerSlot.vars[token]"
                         class="cv-input w-full !h-7 text-[11px] font-mono"
                         style="margin-bottom: 0"
-                        :placeholder="`{{${token}}} — ex.: {{nome}}`"
+                        :placeholder="varHint(token)"
                         @input="touch"
                       />
                     </template>
@@ -1640,10 +1732,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                     class="text-amber-700 dark:text-amber-400"
                     >· Oftalmofácil ({{ e.partner }})</span
                   >
-                  <span class="text-n-slate-9">{{
-                    e.template ? `(${e.template})` : ''
-                }}{{ e.inbox ? ` · ${e.inbox}` : ''
-                  }}</span>
+                  <span class="text-n-slate-9">{{ e.template ? `(${e.template})` : ''
+                    }}{{ e.inbox ? ` · ${e.inbox}` : '' }}</span>
                 </p>
               </div>
             </div>
@@ -1671,15 +1761,27 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                 ✓ {{ e.when }} · {{ e.name }} · {{ e.unit }} · …{{
                   e.phone_tail
                 }}
+                <span v-if="e.manual"
+class="font-semibold"
+                  >· envio manual</span>
                 <span
                   v-if="e.partner"
                   class="text-amber-700 dark:text-amber-400"
                   >· Oftalmofácil ({{ e.partner }})</span
                 >
-                <span class="text-n-slate-9">{{
-                  e.template ? `(${e.template})` : ''
-                }}{{ e.inbox ? ` · ${e.inbox}` : ''
-                }}</span>
+                <span class="text-n-slate-9">{{ e.template ? `(${e.template})` : ''
+                  }}{{ e.inbox ? ` · ${e.inbox}` : '' }}</span>
+                <button
+                  v-if="isAdmin && rule.enabled && runOf(rule).mode === 'live'"
+                  class="underline font-semibold ml-1"
+                  :disabled="!!manualBusy"
+                  title="Manda o lembrete de novo para este paciente (ex.: a mensagem falhou na Meta)"
+                  @click="runManual(rule, e, true)"
+                >
+                  {{
+                    manualBusy === manualKey(rule, e) ? 'enviando…' : 'Reenviar'
+                  }}
+                </button>
               </p>
               <p
                 v-for="e in (runOf(rule).skipped || []).slice(0, 40)"
@@ -1687,12 +1789,61 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                 class="text-amber-700 dark:text-amber-400"
               >
                 ↷ {{ e.when }} · {{ e.name }} · {{ e.unit }} — {{ e.why }}
+                <button
+                  v-if="
+                    isAdmin &&
+                    rule.enabled &&
+                    rule.mode === 'live' &&
+                    e.why !== 'sem telefone'
+                  "
+                  class="underline font-semibold ml-1"
+                  :disabled="!!manualBusy"
+                  title="Envio manual: manda para este paciente mesmo com a coluna ou o tipo fora do filtro"
+                  @click="runManual(rule, e)"
+                >
+                  {{
+                    manualBusy === manualKey(rule, e)
+                      ? 'enviando…'
+                      : 'Enviar mesmo assim'
+                  }}
+                </button>
               </p>
             </div>
             <p v-else class="text-[11px] text-n-slate-9">
               Ainda não rodou: a primeira rodada acontece na hora escolhida, com
               o lembrete ligado.
             </p>
+
+            <!-- 🖐️ item 320: envio manual do lembrete inteiro, fora da hora -->
+            <div
+              v-if="isAdmin && rule.enabled"
+              class="flex items-center gap-2 flex-wrap"
+            >
+              <button
+                class="cv-btn cv-btn-sm"
+                :disabled="!!manualBusy"
+                @click="runManual(rule)"
+              >
+                <span
+                  :class="
+                    manualBusy === manualKey(rule, null)
+                      ? 'i-lucide-loader-circle animate-spin'
+                      : 'i-lucide-send'
+                  "
+                  class="text-xs"
+                />
+                {{
+                  rule.mode === 'live'
+                    ? 'Enviar agora para quem falta'
+                    : 'Simular agora'
+                }}
+              </button>
+              <span class="text-[11px] text-n-slate-9">
+                roda este lembrete agora, fora da hora — quem já recebeu não
+                recebe de novo. Na lista, <b>Enviar mesmo assim</b> e
+                <b>Reenviar</b> mandam para um paciente só.
+              </span>
+            </div>
 
             <div v-if="isAdmin" class="flex justify-end">
               <button

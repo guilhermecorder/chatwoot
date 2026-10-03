@@ -19,6 +19,7 @@ import CustomPanelGrid from 'dashboard/components-next/cevico/CustomPanelGrid.vu
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import AgendaDashboardCore from 'dashboard/components-next/cevico/AgendaDashboardCore.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { PERIOD_PRESETS } from 'dashboard/helper/cevicoPeriod';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vue';
@@ -1398,11 +1399,10 @@ const setModalGranularity = g => {
   kpiModalGranularity.value = g;
   fetchKpiModalBag();
 };
+// item 321: a mesma lista de períodos do sistema inteiro (helper/cevicoPeriod.js)
 const MODAL_PRESETS = [
   [null, 'Régua de cima'],
-  ['last7', '7 dias'],
-  ['month', 'Este mês'],
-  ['year', 'Este ano'],
+  ...PERIOD_PRESETS.map(p => [p.key, p.label]),
 ];
 const MODAL_GRAINS = [
   [null, 'Auto'],

@@ -324,6 +324,10 @@ namespace :crm do
     post :rates
     post :sync
   end
+  # 🖐️ item 320: envio manual do lembrete de confirmação (o lembrete inteiro ou um paciente)
+  post 'appointment_reminders/run', to: 'appointment_reminders#run'
+  # 💰 Financeiro & CAC (item 318): CAC de anúncios × total, canais, campanhas
+  resource :acquisition_cost, only: [:show], controller: 'acquisition_costs'
   resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
   # 📅 Painel de Agendamentos (item 200): marcadas/remarcadas/canceladas no período
   get 'appointments/feed', to: 'appointments#feed'

@@ -25,6 +25,12 @@ import GuidancesPanel from './GuidancesPanel.vue';
 import ConfirmationAgentCard from './ConfirmationAgentCard.vue';
 import NpsSurveyCard from './NpsSurveyCard.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import {
+  PERIOD_PRESETS,
+  periodDateStr,
+  periodParams,
+  periodRangeFor,
+} from 'dashboard/helper/cevicoPeriod';
 import CrmAPI from 'dashboard/api/crm';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
@@ -65,12 +71,6 @@ watch(agentsView, v => {
     // idem
   }
 });
-const USAGE_PERIODS = [
-  { key: 'today', label: 'Hoje' },
-  { key: 'last7', label: '7 dias' },
-  { key: 'last30', label: '30 dias' },
-  { key: 'all', label: 'Desde o início' },
-];
 
 // 🗺️ item 170: a aba Fluxos traz o Mermaid (pesado) — carrega só quando abre
 const FlowsMap = defineAsyncComponent(() => import('./FlowsMap.vue'));
@@ -1211,7 +1211,8 @@ const runManagerNow = async () => {
 // pela primeira vez. "Auditar agora" re-audita ontem em segundo plano
 // (~1-2 min) — a tela repolla o resumo a cada 20s por até 5 minutos.
 const auditorSummary = ref(null);
-const auditorDays = ref(7);
+// item 321: a régua padrão do sistema no lugar da janela 7/14/30
+const auditorPeriod = ref({ preset: 'last7', ...periodRangeFor('last7') });
 const loadingAuditorSummary = ref(false);
 const isRunningAuditor = ref(false);
 let auditorPollTimer = null;
@@ -1223,7 +1224,9 @@ const auditorLast = () => settings.value?.ai?.auditor_last || null;
 const loadAuditorSummary = async () => {
   loadingAuditorSummary.value = true;
   try {
-    const { data } = await CrmAPI.getAuditorSummary(auditorDays.value);
+    const { data } = await CrmAPI.getAuditorSummary(
+      periodParams(auditorPeriod.value)
+    );
     auditorSummary.value = data;
   } catch {
     // silencioso — a seção mostra "nenhuma auditoria ainda"
@@ -1270,11 +1273,7 @@ const runAuditorNow = async () => {
   }
 };
 
-const setAuditorDays = d => {
-  if (auditorDays.value === d) return;
-  auditorDays.value = d;
-  loadAuditorSummary();
-};
+watch(auditorPeriod, () => loadAuditorSummary(), { deep: true });
 
 // pílula da média: verde ≥8, âmbar ≥6, vermelho <6 (uma casa decimal)
 const auditorAvgClass = avg => {
@@ -2003,38 +2002,28 @@ const toggleAgent = async key => {
 const aiUsage = ref(null);
 const usageByAgent = key =>
   (aiUsage.value?.by_agent || []).find(r => r.key === key) || null;
-// 📅 23/09: caixa de seleção do DIA para análise — escolhido um dia, a lista
-// "por agente" e os totais passam a ser daquele dia (sem dia = 30 dias)
-const usageDay = ref('');
+// 📅 item 321 (03/10, pedido dele: a MESMA régua de período em todos os
+// ambientes): o gasto da IA usa a régua padrão — hoje, ontem, 7 dias, semana
+// passada, mês, mês passado, 90 dias, ano, personalizado. As setas ◀ ▶
+// continuam analisando UM dia (viram um Personalizado de um dia só).
+const usagePeriod = ref({ preset: 'last7', ...periodRangeFor('last7') });
 const isLoadingUsageDay = ref(false);
-const pad2 = n => String(n).padStart(2, '0');
-const dayKey = d =>
-  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const usageDayLabel = computed(() => {
-  if (!usageDay.value) return '';
-  const [y, m, d] = usageDay.value.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  const label = dt.toLocaleDateString('pt-BR', {
-    weekday: 'short',
-    day: '2-digit',
-    month: '2-digit',
-  });
-  return label.charAt(0).toUpperCase() + label.slice(1);
+const usageRows = computed(() => aiUsage.value?.period?.by_agent || []);
+const usageTotals = computed(() => aiUsage.value?.period?.totals || null);
+const brDay = iso => {
+  const [y, m, d] = String(iso || '').split('-');
+  return d ? `${d}/${m}/${y}` : '';
+};
+const usagePeriodLabel = computed(() => {
+  const p = usagePeriod.value;
+  const known = PERIOD_PRESETS.find(x => x.key === p.preset);
+  if (known) return known.label.toLowerCase();
+  return p.from === p.to ? brDay(p.from) : `${brDay(p.from)} a ${brDay(p.to)}`;
 });
-const usageRows = computed(() =>
-  usageDay.value && aiUsage.value?.day
-    ? aiUsage.value.day.by_agent || []
-    : aiUsage.value?.by_agent || []
-);
-const usageDayTotals = computed(() =>
-  usageDay.value ? aiUsage.value?.day?.totals || null : null
-);
 const loadUsage = async () => {
   isLoadingUsageDay.value = true;
   try {
-    const { data } = await CrmAPI.getAiUsage(
-      usageDay.value ? { date: usageDay.value } : {}
-    );
+    const { data } = await CrmAPI.getAiUsage(periodParams(usagePeriod.value));
     aiUsage.value = data;
   } catch {
     // mantém o que já estava na tela
@@ -2042,22 +2031,22 @@ const loadUsage = async () => {
     isLoadingUsageDay.value = false;
   }
 };
-const setUsageDay = value => {
-  usageDay.value = value || '';
-  loadUsage();
-};
-const yesterdayKey = computed(() => {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return dayKey(d);
+watch(usagePeriod, loadUsage, { deep: true });
+const usageSingleDay = computed(() => {
+  const p = usagePeriod.value;
+  if (p.preset === 'custom' && p.from && p.from === p.to) return p.from;
+  if (p.preset === 'yesterday') return periodRangeFor('yesterday').from;
+  return periodDateStr(new Date());
 });
+const usageAtToday = computed(
+  () => usageSingleDay.value >= periodDateStr(new Date())
+);
 const shiftUsageDay = delta => {
-  const base = usageDay.value
-    ? new Date(`${usageDay.value}T12:00:00`)
-    : new Date();
+  const base = new Date(`${usageSingleDay.value}T12:00:00`);
   base.setDate(base.getDate() + delta);
   if (base > new Date()) return;
-  setUsageDay(dayKey(base));
+  const day = periodDateStr(base);
+  usagePeriod.value = { preset: 'custom', from: day, to: day };
 };
 // gastos que não são de um card de agente (Gemini): nome legível na lista
 const EXTRA_USAGE_TITLES = {
@@ -2928,11 +2917,7 @@ const loadAgents = async () => {
   // relatório de gastos + colunas para o Radar + colheita do mês (em paralelo)
   loadStages().catch(() => {});
   loadHarvestStatus();
-  CrmAPI.getAiUsage()
-    .then(({ data }) => {
-      aiUsage.value = data;
-    })
-    .catch(() => {});
+  loadUsage();
 };
 
 const aiConfigured = ref(false);
@@ -3895,99 +3880,86 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- 📅 caixa de seleção do dia (23/09): análise de um dia específico -->
+            <!-- 📅 item 321: a régua padrão do sistema + setas para analisar um dia -->
             <div class="flex items-center gap-2 flex-wrap mb-4">
-              <span class="cv-label">Analisar o dia</span>
-              <button
-                class="cv-btn cv-btn-ghost cv-iconbtn"
-                title="Dia anterior"
-                @click="shiftUsageDay(-1)"
-              >
-                <span class="i-lucide-chevron-left text-sm" />
-              </button>
-              <input
-                :value="usageDay"
-                type="date"
-                :max="dayKey(new Date())"
-                class="cv-input !h-8 text-xs !w-auto"
-                title="Escolha um dia para ver o gasto e a lista por agente daquele dia"
-                @change="setUsageDay($event.target.value)"
-              />
-              <button
-                class="cv-btn cv-btn-ghost cv-iconbtn"
-                title="Dia seguinte"
-                :disabled="!usageDay || usageDay >= dayKey(new Date())"
-                @click="shiftUsageDay(1)"
-              >
-                <span class="i-lucide-chevron-right text-sm" />
-              </button>
-              <button
-                class="cv-chip"
-                :class="usageDay === dayKey(new Date()) ? 'cv-chip-on' : ''"
-                @click="setUsageDay(dayKey(new Date()))"
-              >
-                Hoje
-              </button>
-              <button
-                class="cv-chip"
-                :class="usageDay === yesterdayKey ? 'cv-chip-on' : ''"
-                @click="setUsageDay(yesterdayKey)"
-              >
-                Ontem
-              </button>
-              <button v-if="usageDay" class="cv-chip" @click="setUsageDay('')">
-                <span class="i-lucide-x text-[10px]" /> Voltar aos 30 dias
-              </button>
+              <PeriodRuler v-model="usagePeriod" glass class="min-w-0" />
+              <div class="flex items-center gap-1 flex-shrink-0">
+                <button
+                  class="cv-btn cv-btn-ghost cv-iconbtn"
+                  title="Analisar o dia anterior"
+                  @click="shiftUsageDay(-1)"
+                >
+                  <span class="i-lucide-chevron-left text-sm" />
+                </button>
+                <span class="text-[11px] text-n-slate-10">dia a dia</span>
+                <button
+                  class="cv-btn cv-btn-ghost cv-iconbtn"
+                  title="Analisar o dia seguinte"
+                  :disabled="usageAtToday"
+                  @click="shiftUsageDay(1)"
+                >
+                  <span class="i-lucide-chevron-right text-sm" />
+                </button>
+              </div>
               <span
                 v-if="isLoadingUsageDay"
                 class="i-lucide-loader-2 animate-spin text-xs text-n-slate-9"
               />
-              <span
-                v-if="usageDayTotals"
-                class="ml-auto text-xs text-n-slate-11"
-              >
-                <b class="text-n-slate-12 tabular-nums">{{
-                  fmtUsd(usageDayTotals.cost_usd)
-                }}</b>
-                em {{ usageDayLabel }} ·
-                {{ usageDayTotals.calls || 0 }} chamada(s) ·
-                {{ fmtTokens(usageDayTotals.input_tokens) }} entrada ·
-                {{ fmtTokens(usageDayTotals.output_tokens) }} saída
-                <span
-                  v-if="usageDayTotals.cache_pct !== undefined"
-                  :title="'Fatia da entrada que veio do cache (custa 10%). Baixo = o roteiro está sendo pago cheio.'"
-                  class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
-                  :class="
-                    usageDayTotals.cache_pct >= 50
-                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200'
-                      : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'
-                  "
-                  >{{ usageDayTotals.cache_pct }}% do cache</span
-                >
-              </span>
             </div>
 
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              <div
-                v-for="p in USAGE_PERIODS"
-                :key="p.key"
-                class="cv-stat px-4 py-3"
-              >
-                <p class="cv-label">{{ p.label }}</p>
+              <div class="cv-stat px-4 py-3">
+                <p class="cv-label">Gasto · {{ usagePeriodLabel }}</p>
                 <p
                   class="text-2xl font-bold text-n-slate-12 leading-tight mt-1 tabular-nums"
                 >
-                  {{ fmtUsd(aiUsage.periods?.[p.key]?.cost_usd) }}
+                  {{ fmtUsd(usageTotals?.cost_usd) }}
                 </p>
                 <p class="text-[11px] text-n-slate-10 mt-0.5">
-                  {{ aiUsage.periods?.[p.key]?.calls || 0 }} chamada(s) à IA
+                  {{ brDay(aiUsage.period?.from) }} a
+                  {{ brDay(aiUsage.period?.to) }}
+                </p>
+              </div>
+              <div class="cv-stat px-4 py-3">
+                <p class="cv-label">Chamadas à IA</p>
+                <p
+                  class="text-2xl font-bold text-n-slate-12 leading-tight mt-1 tabular-nums"
+                >
+                  {{ usageTotals?.calls || 0 }}
+                </p>
+                <p class="text-[11px] text-n-slate-10 mt-0.5">no período</p>
+              </div>
+              <div class="cv-stat px-4 py-3">
+                <p class="cv-label">Tokens</p>
+                <p
+                  class="text-2xl font-bold text-n-slate-12 leading-tight mt-1 tabular-nums"
+                >
+                  {{ fmtTokens(usageTotals?.input_tokens) }}
+                </p>
+                <p
+                  class="text-[11px] text-n-slate-10 mt-0.5"
+                  title="Fatia da entrada que veio do cache (custa 10%). Baixo = o roteiro está sendo pago cheio."
+                >
+                  entrada · {{ fmtTokens(usageTotals?.output_tokens) }} saída ·
+                  {{ usageTotals?.cache_pct ?? 0 }}% do cache
+                </p>
+              </div>
+              <div class="cv-stat px-4 py-3">
+                <p class="cv-label">Desde o início</p>
+                <p
+                  class="text-2xl font-bold text-n-slate-12 leading-tight mt-1 tabular-nums"
+                >
+                  {{ fmtUsd(aiUsage.periods?.all?.cost_usd) }}
+                </p>
+                <p class="text-[11px] text-n-slate-10 mt-0.5">
+                  {{ aiUsage.periods?.all?.calls || 0 }} chamada(s) à IA
                 </p>
               </div>
             </div>
 
             <div v-if="usageRows.length" class="space-y-1.5">
               <p class="cv-label mb-1">
-                Por agente ({{ usageDay ? usageDayLabel : '30 dias' }})
+                Por agente ({{ usagePeriodLabel }})
               </p>
               <div
                 v-for="row in usageRows"
@@ -4027,11 +3999,7 @@ onUnmounted(() => {
               </div>
             </div>
             <p v-else class="text-xs text-n-slate-10">
-              {{
-                usageDay
-                  ? `Nenhuma chamada à IA em ${usageDayLabel}.`
-                  : 'Nenhuma análise registrada ainda — os custos aparecem aqui conforme os agentes rodarem.'
-              }}
+              Nenhuma chamada à IA neste período ({{ usagePeriodLabel }}).
             </p>
           </div>
 
@@ -7678,27 +7646,14 @@ onUnmounted(() => {
                         atualiza aqui sozinho a cada 20 segundos.
                       </div>
 
-                      <!-- janela de análise: 7 / 14 / 30 dias -->
+                      <!-- período da análise: a régua padrão do sistema (item 321) -->
                       <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="text-[11px] text-n-slate-10">Janela:</span>
-                        <button
-                          v-for="d in [7, 14, 30]"
-                          :key="d"
-                          class="cv-chip cv-chip-lg"
-                          :class="
-                            auditorDays === d
-                              ? 'text-white border-transparent shadow-sm'
-                              : ''
-                          "
-                          :style="
-                            auditorDays === d
-                              ? { background: AGENT_META.auditor.gradient }
-                              : {}
-                          "
-                          @click="setAuditorDays(d)"
+                        <PeriodRuler v-model="auditorPeriod" glass class="min-w-0" />
+                        <span
+                          class="text-[10px] text-n-slate-9"
+                          title="O Auditor guarda a nota de cada dia por 100 dias (antes de 03/10/2026 guardava 30)."
+                          >guarda 100 dias</span
                         >
-                          {{ d }} dias
-                        </button>
                         <span
                           v-if="auditorSummary"
                           class="text-[11px] text-n-slate-9 ml-auto"

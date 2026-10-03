@@ -2,6 +2,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   include Crm::AccessControl
   # 🤖📞 item 169: ações do Agente de Ligação (ElevenLabs) vivem no concern
   include Crm::VoiceAgentSettings
+  include Crm::ResolvesPeriod # item 321: régua padrão no gasto da IA
 
   # 🍎🍊 paletas do Meu Painel (rodada 162): iMac G3 + frutas da Apple; e os
   # blocos da tela que aceitam paleta própria — só chaves conhecidas entram
@@ -298,10 +299,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   # ranking dos atendentes + falhas mais comuns do time (últimos N dias)
+  # item 321: ?preset=… (régua padrão) vence o ?days= antigo
   def auditor_summary
+    auditor = Crm::ConversationAuditorService.new(account: Current.account)
+    if (range = standard_period_range)
+      return render json: auditor.summary(from: range.first.to_date, to: range.last.to_date)
+    end
+
     days = params[:days].to_i.clamp(1, 30)
     days = 7 if days.zero?
-    render json: Crm::ConversationAuditorService.new(account: Current.account).summary(days: days)
+    render json: auditor.summary(days: days)
   end
 
   # ── 🎨 Criativo Perpétuo (item 131) ──────────────────────────────────────────
@@ -1636,9 +1643,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ?date=AAAA-MM-DD (23/09): análise de UM dia — totais e quebra por agente
   # daquele dia (fuso da clínica), além dos períodos de sempre
+  # ?preset=… (item 321, 03/10): a régua padrão do sistema (hoje, ontem, 7 dias,
+  # semana passada, mês, mês passado, 90 dias, ano, personalizado) → `period`
   def ai_usage
     scope = Crm::AiUsage.where(account: Current.account)
     render json: {
+      period: usage_period(scope),
       by_agent: usage_breakdown(scope, :agent_key),
       by_model: usage_breakdown(scope, :model),
       periods: {
@@ -1648,6 +1658,19 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         all: usage_totals(scope)
       },
       day: usage_day(scope, params[:date])
+    }
+  end
+
+  def usage_period(scope)
+    range = standard_period_range
+    return nil if range.nil?
+
+    in_range = scope.where(created_at: range.first..range.last)
+    {
+      preset: params[:preset], from: range.first.to_date.iso8601, to: range.last.to_date.iso8601,
+      totals: usage_totals(in_range),
+      by_agent: usage_breakdown(in_range, :agent_key, period: false),
+      by_model: usage_breakdown(in_range, :model, period: false)
     }
   end
 

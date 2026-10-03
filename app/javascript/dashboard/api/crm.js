@@ -349,6 +349,15 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, body);
   }
 
+  // 🖐️ item 320: envio manual do lembrete — sem taskId = o lembrete inteiro
+  // para quem falta; com taskId = este paciente (envia/reenvia)
+  runAppointmentReminder(regua, taskId = null) {
+    return axios.post(`${this.url}/appointment_reminders/run`, {
+      regua,
+      task_id: taskId,
+    });
+  }
+
   // 📅 ambiente Agendamentos (item 200): cada consulta marcada, remarcada ou
   // cancelada no período (preset/from/to, mode, kind, unit, inbox_id, q)
   // 🏥 item 229: ambiente Oftalmofácil (espelho do hub, só leitura)
@@ -1146,10 +1155,9 @@ class CrmAPI extends ApiClient {
   }
 
   // ranking por atendente + falhas mais comuns do time (janela em dias)
-  getAuditorSummary(days = 7) {
-    return axios.get(`${this.url}/settings/auditor_summary`, {
-      params: { days },
-    });
+  // item 321: params = { preset, from, to } da régua padrão
+  getAuditorSummary(params = { preset: 'last7' }) {
+    return axios.get(`${this.url}/settings/auditor_summary`, { params });
   }
 
   // 🎨 Criativo Perpétuo: gera as variações da semana agora (~1-2 min)
@@ -1380,6 +1388,11 @@ class CrmAPI extends ApiClient {
 
   syncWhatsappSpend(days = 35) {
     return axios.post(`${this.url}/whatsapp_spend/sync`, { days });
+  }
+
+  // ── 💰 Financeiro & CAC (item 318; admin ou concessão Financeiro) ───
+  getAcquisitionCost(params = {}) {
+    return axios.get(`${this.url}/acquisition_cost`, { params });
   }
 
   // ── Ferramentas da Academia (time lê; admin escreve) ────────────────

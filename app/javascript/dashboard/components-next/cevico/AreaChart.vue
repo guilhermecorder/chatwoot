@@ -21,6 +21,10 @@ const props = defineProps({
   unit: { type: String, default: '' },
   active: { type: String, default: '' },
   legend: { type: Boolean, default: true },
+  // rótulo CURTO do eixo (item 318: "R$ 15.000" não cabe nos 30 px)
+  axisFormat: { type: Function, default: null },
+  // largura da coluna do eixo (px) — números maiores pedem mais espaço
+  axisWidth: { type: Number, default: 30 },
 });
 const emit = defineEmits(['pick']);
 
@@ -41,12 +45,12 @@ onMounted(() => {
 });
 onBeforeUnmount(() => observer?.disconnect());
 
-const LEFT = 30;
+const LEFT = computed(() => props.axisWidth);
 const RIGHT = 22;
 const TOP = 12;
 const BOTTOM = 24;
 const n = computed(() => props.labels.length);
-const plotW = computed(() => W.value - LEFT - RIGHT);
+const plotW = computed(() => W.value - LEFT.value - RIGHT);
 const plotH = computed(() => props.height - TOP - BOTTOM);
 const list = computed(() =>
   props.series
@@ -76,8 +80,8 @@ const ticks = computed(() =>
 );
 const xAt = i =>
   n.value <= 1
-    ? LEFT + plotW.value / 2
-    : LEFT + (i / (n.value - 1)) * plotW.value;
+    ? LEFT.value + plotW.value / 2
+    : LEFT.value + (i / (n.value - 1)) * plotW.value;
 const yAt = v => TOP + plotH.value * (1 - v / ceil.value);
 const base = computed(() => TOP + plotH.value);
 
@@ -86,7 +90,7 @@ const shapes = computed(() =>
     // um balde só: desenha um "morro" para a área existir
     const values = n.value === 1 ? [0, s.values[0], 0] : s.values;
     const pts = values.map((v, i) => [
-      n.value === 1 ? LEFT + (i / 2) * plotW.value : xAt(i),
+      n.value === 1 ? LEFT.value + (i / 2) * plotW.value : xAt(i),
       yAt(v),
     ]);
     const line = smoothPath(pts);
@@ -116,7 +120,7 @@ const onMove = event => {
   const rect = wrap.value?.getBoundingClientRect();
   if (!rect || !n.value) return;
   const x = (event.touches?.[0]?.clientX ?? event.clientX) - rect.left;
-  const ratio = (x - LEFT) / Math.max(1, plotW.value);
+  const ratio = (x - LEFT.value) / Math.max(1, plotW.value);
   hover.value = Math.min(
     n.value - 1,
     Math.max(0, Math.round(ratio * (n.value - 1)))
@@ -194,7 +198,7 @@ const pct = v => {
             :y="t.y + 3"
             text-anchor="end"
           >
-            {{ Number.isInteger(t.value) ? format(t.value) : '' }}
+            {{ Number.isInteger(t.value) ? (axisFormat || format)(t.value) : '' }}
           </text>
           <text
             v-for="l in xLabels"

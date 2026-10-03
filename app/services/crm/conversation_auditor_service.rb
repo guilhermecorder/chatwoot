@@ -6,7 +6,7 @@
 # Por conversa: nota + etapa do script alcançada + acertos + falhas (1-2) +
 # próxima ação — gravado em conversation.additional_attributes['audit'].
 # Por atendente: agregado diário (n, soma, falhas frequentes) nos últimos
-# 30 dias em ai_config['auditor_state'] — ranking e evolução saem de lá.
+# 100 dias em ai_config['auditor_state'] — ranking e evolução saem de lá.
 class Crm::ConversationAuditorService
   include Crm::AiAgentConfig
 
@@ -16,7 +16,7 @@ class Crm::ConversationAuditorService
   BATCH_SIZE = 5            # conversas por chamada (transcrições são longas)
   DEFAULT_DAILY_CAP = 150   # teto de conversas auditadas por dia
   MAX_MESSAGES = 30         # últimas N mensagens de cada conversa
-  KEEP_DAYS = 30            # janela de agregados por atendente
+  KEEP_DAYS = 100           # janela de agregados por atendente (item 321: cobre a régua de 90 dias)
 
   SCRIPT_STAGES = %w[
     abertura acolhimento investigacao orcamento quebra_objecao
@@ -92,14 +92,16 @@ class Crm::ConversationAuditorService
 
   # ── leitura agregada (tela) ───────────────────────────────────────────
   # ranking por atendente nos últimos N dias + falhas mais comuns do time
-  def summary(days: 7)
-    cutoff = (TZ.today - days).iso8601
+  # item 321: from/to (régua padrão do sistema) vencem os N dias
+  def summary(days: 7, from: nil, to: nil)
+    cutoff = (from || (TZ.today - days)).to_date.iso8601
+    limit = to&.to_date&.iso8601
     per_agent = Hash.new { |h, k| h[k] = { 'n' => 0, 'sum' => 0.0, 'gaps' => Hash.new(0) } }
     team_gaps = Hash.new(0)
 
     (state['agents'] || {}).each do |user_id, by_day|
       by_day.each do |date, row|
-        next if date < cutoff
+        next if date < cutoff || (limit && date > limit)
 
         agg = per_agent[user_id]
         agg['n'] += row['n'].to_i

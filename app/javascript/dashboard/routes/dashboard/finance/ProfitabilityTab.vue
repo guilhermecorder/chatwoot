@@ -66,7 +66,7 @@ const kpiCards = computed(() => [
 const secondCards = computed(() => [
   { key: 'ticket', label: 'Ticket médio', hint: 'receita ÷ cirurgias', value: s.value.ticket, grad: 'linear-gradient(135deg, #1E3A8A, #2563EB)', icon: 'i-lucide-receipt' },
   { key: 'por_cirurgia', label: 'Resultado por cirurgia', hint: 'o que cada cirurgia deixa', value: s.value.resultado_por_cirurgia, grad: 'linear-gradient(135deg, #047857, #34D399)', icon: 'i-lucide-coins' },
-  { key: 'marketing', label: 'Marketing no período', hint: 'investimento por caixa, rateado', value: s.value.marketing, grad: 'linear-gradient(135deg, #9D174D, #EC4899)', icon: 'i-lucide-megaphone' },
+  { key: 'marketing', label: 'Marketing no período', hint: s.value.marketing_source === 'anuncios' ? 'Google + Meta (real)' : 'investimento por caixa, rateado', value: s.value.marketing, grad: 'linear-gradient(135deg, #9D174D, #EC4899)', icon: 'i-lucide-megaphone' },
   { key: 'liquido', label: 'Resultado líquido', hint: 'resultado − marketing', value: s.value.resultado_liquido, grad: 'linear-gradient(135deg, #7C2D12, #EA580C)', icon: 'i-lucide-badge-dollar-sign' },
 ]);
 const rows = computed(() => data.value?.[cut.value] || []);

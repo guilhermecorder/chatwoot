@@ -463,6 +463,28 @@ const tasksAtSlotAll = (day, win, slot) => {
   });
 };
 const taskAtSlot = (day, win, slot) => tasksAtSlotAll(day, win, slot)[0];
+// item 319 (03/10, pedido dele: "no espaço do médico, precisamos que apareçam
+// todos os contatos, independente do horário"): agendamento do dia que NÃO cai
+// em nenhum bloco de nenhuma faixa (ex.: 10:30 numa faixa 08:30–10:00) aparece
+// no fim do bloco do médico dele — ou, sem médico igual, na faixa mais próxima.
+const outsideTasksByWin = day => {
+  const wins = windowsForDay(day);
+  const placed = new Set();
+  wins.forEach(w => slotsFor(w).forEach(slot => tasksAtSlotAll(day, w, slot).forEach(t => placed.add(t.id))));
+  const map = new Map();
+  (liveTasksByDay.value[format(day, 'yyyy-MM-dd')] || []).forEach(t => {
+    if (placed.has(t.id)) return;
+    const homes = wins.filter(w => occupiesWindow(t, w));
+    if (!homes.length) return;
+    const start = taskStartMin(t);
+    const gap = w => Math.min(Math.abs(start - toMin(w.start)), Math.abs(start - toMin(w.end)));
+    const sameDoctor = homes.filter(w => w.doctor && t.doctor && w.doctor === t.doctor);
+    const home = (sameDoctor.length ? sameDoctor : homes).reduce((a, b) => (gap(b) < gap(a) ? b : a));
+    map.set(home, [...(map.get(home) || []), t]);
+  });
+  return map;
+};
+const outsideTasks = (day, win) => outsideTasksByWin(day).get(win) || [];
 
 // 🗂️ item 307 (01/10): CONFIGURAÇÕES DA AGENDA — abrir e fechar, faixas de
 // horário (com o "serve para"), regras para a IA e conferência do dia num
@@ -1081,20 +1103,6 @@ const openCreateFab = () => {
   openCreateOnDay(base);
 };
 
-// ── 24/09 (bug dele): o "+N" no bloco do médico abria só o primeiro
-// paciente. Agora abre a LISTA de quem está no horário; um clique = editar.
-const slotPicker = ref(null);
-const openSlot = (day, win, slot) => {
-  const list = tasksAtSlotAll(day, win, slot);
-  if (list.length <= 1) { if (list[0]) openEdit(list[0]); return; }
-  slotPicker.value = { day, win, slot, tasks: list };
-};
-const pickFromSlot = task => { slotPicker.value = null; openEdit(task); };
-const slotStatus = t => (t.canceled_at ? 'Cancelada' : t.status === 'done' ? 'Concluída' : 'Agendada');
-const encaixeFromSlot = () => {
-  const p = slotPicker.value; slotPicker.value = null;
-  if (p) openCreateSlot(p.day, p.win, p.slot);
-};
 // resumo no topo do modal (quando · médico · onde), para a leitura em F:
 // quem e quando ficam no canto superior esquerdo, a ação no inferior direito
 const formSummary = computed(() => {
@@ -2557,15 +2565,17 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   </div>
                   <div class="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2">
                     <template v-for="slot in slotsFor(win)" :key="slot">
-                      <span v-if="taskAtSlot(cursor, win, slot)" v-cv-menu="() => slotMenu(cursor, win, slot)" class="relative group min-w-0">
-                        <button class="cv-ag-slot cv-ag-slot-taken truncate" :title="tasksAtSlotAll(cursor, win, slot).map(displayName).join(' + ')" @click="openSlot(cursor, win, slot)">
-                          <span class="tabular-nums opacity-90">{{ slot }}</span>
-                          <span v-if="isConfirmed(taskAtSlot(cursor, win, slot))" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(taskAtSlot(cursor, win, slot))" /><span v-else-if="isDeclined(taskAtSlot(cursor, win, slot))" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />
-                          <span class="truncate">{{ displayName(taskAtSlot(cursor, win, slot)) }}</span>
-                          <span v-if="tasksAtSlotAll(cursor, win, slot).length > 1" class="font-extrabold">+{{ tasksAtSlotAll(cursor, win, slot).length - 1 }}</span>
-                        </button>
-                        <button class="cv-ag-corner" title="Encaixe: agendar OUTRO paciente neste mesmo horário" @click.stop="openCreateSlot(cursor, win, slot)"><span class="i-lucide-plus" /></button>
-                      </span>
+                      <!-- item 319: um balão POR PACIENTE (antes o encaixe virava "+2" escondido) -->
+                      <template v-if="taskAtSlot(cursor, win, slot)">
+                        <span v-for="(st, si) in tasksAtSlotAll(cursor, win, slot)" :key="slot + '-' + st.id" v-cv-menu="() => taskMenu(st)" class="relative group min-w-0">
+                          <button class="cv-ag-slot cv-ag-slot-taken truncate" :title="`${slot} · ${displayName(st)}`" @click="openEdit(st)">
+                            <span class="tabular-nums opacity-90">{{ slot }}</span>
+                            <span v-if="isConfirmed(st)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(st)" /><span v-else-if="isDeclined(st)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />
+                            <span class="truncate">{{ displayName(st) }}</span>
+                          </button>
+                          <button v-if="si === 0" class="cv-ag-corner" title="Encaixe: agendar OUTRO paciente neste mesmo horário" @click.stop="openCreateSlot(cursor, win, slot)"><span class="i-lucide-plus" /></button>
+                        </span>
+                      </template>
                       <button v-else-if="isBlocked(cursor, win, slot)" v-cv-menu="() => slotMenu(cursor, win, slot)" class="cv-ag-slot cv-ag-slot-locked" :title="isAdmin ? 'Horário fechado — clique para reabrir' : 'Horário fechado'" @click="isAdmin && toggleBlock(cursor, win, slot)">
                         <span class="i-lucide-lock text-[10px]" /> {{ slot }}
                       </button>
@@ -2574,6 +2584,14 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         <button v-if="isAdmin" class="cv-ag-corner" title="Fechar este horário 🔒" @click.stop="toggleBlock(cursor, win, slot)"><span class="i-lucide-lock" /></button>
                       </span>
                     </template>
+                    <!-- item 319: quem está marcado FORA da faixa (antes ou depois) também aparece -->
+                    <span v-for="ot in outsideTasks(cursor, win)" :key="'out-' + ot.id" v-cv-menu="() => taskMenu(ot)" class="relative group min-w-0">
+                      <button class="cv-ag-slot cv-ag-slot-taken cv-ag-slot-out truncate" :title="`${hmOf(ot)} · ${displayName(ot)} — fora da faixa ${win.start}–${win.end}`" @click="openEdit(ot)">
+                        <span class="tabular-nums opacity-90">{{ hmOf(ot) }}</span>
+                        <span v-if="isConfirmed(ot)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(ot)" /><span v-else-if="isDeclined(ot)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />
+                        <span class="truncate">{{ displayName(ot) }}</span>
+                      </button>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -2959,33 +2977,6 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <button class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!printColsOn.length" @click="printDayList">
             <span class="i-lucide-printer text-sm" /> Imprimir
           </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ Quem está neste horário (o "+N" do bloco do médico) ══ -->
-    <div v-if="slotPicker" class="fixed inset-0 z-[52] flex items-center justify-center bg-black/55 p-4" @click.self="slotPicker = null">
-      <div class="cv-modal cv-ag-pop w-full max-w-sm flex flex-col" :style="pageVars">
-        <div class="cv-modal-head flex items-center gap-3">
-          <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-users text-base" /></span>
-          <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">{{ slotPicker.tasks.length }} pacientes no mesmo horário</p>
-            <h2 class="text-base font-bold leading-tight">{{ slotPicker.slot }} · {{ winTitle(slotPicker.win) }}</h2>
-            <p class="text-[11px] opacity-90 truncate">{{ slotPicker.day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' }) }} · clique para abrir</p>
-          </div>
-          <button class="cv-glass-btn cv-iconbtn" @click="slotPicker = null"><span class="i-lucide-x" /></button>
-        </div>
-        <div class="p-4 space-y-2">
-          <button v-for="(t, i) in slotPicker.tasks" :key="t.id" class="cv-ag-slotrow" @click="pickFromSlot(t)">
-            <span class="cv-ag-num">{{ i + 1 }}</span>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-bold text-n-slate-12 truncate"><span v-if="isConfirmed(t)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(t)" /><span v-else-if="isDeclined(t)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />{{ displayName(t) }}</p>
-              <p class="text-xs text-n-slate-11 truncate">{{ t.procedure || 'sem problema informado' }} · {{ t.phone || 'sem telefone' }}<template v-if="t.source"> · {{ originLabel(t) }}</template></p>
-            </div>
-            <span class="cv-chip" :class="t.status === 'done' ? 'cv-green' : t.canceled_at ? 'cv-red' : ''">{{ slotStatus(t) }}</span>
-            <span class="i-lucide-chevron-right text-n-slate-10" />
-          </button>
-          <button class="cv-btn cv-btn-ghost w-full mt-1" @click="encaixeFromSlot"><span class="i-lucide-plus text-sm" /> Encaixar outro paciente neste horário</button>
         </div>
       </div>
     </div>

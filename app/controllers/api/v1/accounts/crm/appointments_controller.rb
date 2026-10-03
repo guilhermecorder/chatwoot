@@ -52,7 +52,9 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
 
     render json: {
       mode: mode, track: track, since: since, until: until_at, rows: rows, counts: counts(rows),
-      by_inbox: by_inbox, by_origin: by_origin, booking: booking_json
+      by_inbox: by_inbox, by_origin: by_origin, booking: booking_json,
+      # item 321: período longo (90 dias, ano) pode passar do teto — a tela avisa em vez de contar a menos em silêncio
+      truncated: tasks.size >= LIMIT, limit: LIMIT
     }
   end
 
