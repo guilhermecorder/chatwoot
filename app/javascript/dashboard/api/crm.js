@@ -301,6 +301,13 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agenda`, { windows });
   }
 
+  // 💰 item 324: valores pré-configurados por tipo de atendimento (só admin)
+  updateAppointmentPrices(prices) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      appointment_prices: prices,
+    });
+  }
+
   // 🗂️ item 307: regras da agenda para a IA + o que ela recebe agora
   updateAgendaAiRules(aiRules) {
     return axios.post(`${this.url}/settings/update_agenda`, {

@@ -43,10 +43,8 @@ import PatientListPopup from 'dashboard/components-next/cevico/PatientListPopup.
 import {
   classifyKpi,
   kpiGrad,
-  kpiGlass,
-  kpiEdge,
   kpiInkDark,
-  dayFill,
+  kpiInk,
   KPI_LEGEND,
   KPI_FAMILIES,
 } from 'dashboard/helper/cevicoKpiPalette';
@@ -3102,15 +3100,6 @@ const tileState = tile => {
 const autoPalette = computed(() => kpiLayout.value?.auto_palette !== false);
 const toggleAutoPalette = () =>
   saveKpiLayout({ auto_palette: !autoPalette.value });
-const clock = ref(new Date());
-let clockTimer = null;
-onMounted(() => {
-  clockTimer = setInterval(() => {
-    clock.value = new Date();
-  }, 60000);
-});
-onUnmounted(() => clearInterval(clockTimer));
-const fillPct = computed(() => Math.round(dayFill(clock.value) * 100));
 const isDarkUi = computed(() =>
   typeof document !== 'undefined'
     ? document.documentElement.classList.contains('dark')
@@ -3124,17 +3113,14 @@ const tierWord = tier => {
 const tilePalette = tile => {
   if (!autoPalette.value || tile?.spacer || tile?.divider) return null;
   const { family, tier } = classifyKpi(tile);
-  const fill = dayFill(clock.value);
+  // item 326: cor CHEIA o dia inteiro (sem vidro/transparência)
   return {
     family,
     tier,
     label: `${KPI_FAMILIES[family]?.label || 'Outros'} · ${tierWord(tier)}`,
     grad: kpiGrad(family, tier, isDarkUi.value),
-    // vidro 100% transparente de manhã; a cor entra por cima (opacidade = hora)
-    soft: kpiGlass(isDarkUi.value),
-    edge: kpiEdge(family, isDarkUi.value),
-    fill,
-    darkText: kpiInkDark(tier, fill, isDarkUi.value),
+    darkText: kpiInkDark(tier, isDarkUi.value),
+    ink: kpiInk(family),
   };
 };
 
@@ -3152,12 +3138,10 @@ const tileVisual = tile => {
     // paleta automática (item 269); desligada, a cor escolhida (item 143),
     // o chip "Muito bom" e a família do dia
     grad,
-    // fundo de VIDRO (a cor vai ficando densa ao longo do dia); no alerta,
-    // cor cheia direto
-    soft: alert ? null : pal?.soft || null,
-    edge: alert ? null : pal?.edge || null,
-    fill: pal?.fill ?? 1,
+    // item 326: sem vidro — o card é sempre cor cheia; no card claro (apoio)
+    // o número usa o tom mais intenso da família
     darkText: !alert && !!pal?.darkText,
+    ink: pal?.ink || '#0f172a',
     palette: pal,
     aura: st.isRecord,
     auraIntensity: Math.max(0.5, Math.min(1.2, st.ratio ?? 0.7)),
@@ -4833,8 +4817,8 @@ onUnmounted(() => {
             {{ f.label }}
           </span>
           <span class="text-n-slate-9"
-            >· cor cheia = resultado principal · média = volume · clara = apoio
-            · a cor vai ficando densa até as 19h ({{ fillPct }}% agora)</span
+            >· tom intenso = resultado principal · tom vivo = volume · tom claro
+            = apoio</span
           >
         </div>
         <div
@@ -6146,30 +6130,17 @@ onUnmounted(() => {
                                 : '',
                             ]"
                             :style="{
-                              background:
-                                tileVisual(tile).soft || tileVisual(tile).grad,
-                              borderColor: tileVisual(tile).edge || undefined,
+                              background: tileVisual(tile).grad,
                               color: tileVisual(tile).darkText
-                                ? '#0f172a'
+                                ? tileVisual(tile).ink
                                 : undefined,
                             }"
                             :title="
                               tileVisual(tile).palette
-                                ? `${tileVisual(tile).palette.label} · ${fillPct}% do dia`
+                                ? tileVisual(tile).palette.label
                                 : undefined
                             "
                           >
-                            <!-- item 269 v2: o card nasce 100% TRANSPARENTE e a cor vai ficando
-                                 DENSA ao longo do dia (07h vidro → 19h cor cheia) -->
-                            <div
-                              v-if="tileVisual(tile).soft"
-                              class="cv-tile-fill"
-                              :style="{
-                                opacity: tileVisual(tile).fill,
-                                background: tileVisual(tile).grad,
-                              }"
-                              aria-hidden="true"
-                            />
                             <!-- 🏆 recorde: átomos orbitando o card em sentido horário -->
                             <TileAura
                               v-if="tileVisual(tile).aura"

@@ -63,12 +63,14 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   end
 
   def create
-    new_task = Current.account.tasks.create!(
+    new_task = Current.account.tasks.new(
       task_params.merge(
         creator: Current.user,
         assignee_id: params[:assignee_id].presence || Current.user.id
       )
     )
+    new_task.assign_charges(charges_param, Current.user) if params.key?(:charges) # 💰 item 324
+    new_task.save!
     # item 300: origem escolhida → contato criado, etiqueta e card no funil certo
     Crm::AppointmentOrigin.apply(account: Current.account, task: new_task)
     new_task.reload
@@ -89,6 +91,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
     # conferência do dia: compareceu = consulta concluída
     params[:status] = 'done' if params[:attendance] == 'attended' && params[:status].blank?
 
+    task.assign_charges(charges_param, Current.user) if params.key?(:charges) # 💰 item 324
     task.update!(task_params)
 
     # comparecimento/indicação refletem no CRM (move o card + automações)
@@ -178,7 +181,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   def task_params
     attrs = params.permit(:title, :description, :task_type, :priority, :status, :due_at, :assignee_id, :unit,
                           :phone, :procedure, :doctor, :modality, :attendance, :surgery_indication, :indicated_procedure,
-                          :contact_id, :booking_kind, :color, :origin)
+                          :contact_id, :booking_kind, :color, :origin, :particular)
     # item 300: origem vazia = não mexe (agendamento antigo segue sem origem)
     attrs.delete(:origin) if attrs.key?(:origin) && attrs[:origin].blank?
     # item 217: vazio = agendamento (padrão); só 'registro' muda a contagem
@@ -186,6 +189,15 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
     # item 290: cor vazia = volta à cor padrão do tipo; maiúsculas como na lista
     attrs[:color] = attrs[:color].presence&.upcase if attrs.key?(:color)
     attrs
+  end
+
+  # 💰 item 324: valores lançados à mão no card — [{ label, amount }]
+  def charges_param
+    Array(params[:charges]).map { |row| row.respond_to?(:permit) ? row.permit(:label, :amount).to_h : {} }
+  end
+
+  def price_config
+    @price_config ||= Crm::AppointmentPrice.config(Current.account)
   end
 
   # Conferência do dia → CRM: compareceu/faltou/cirurgia indicada movem o
@@ -231,6 +243,10 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
       declined_at: t.declined_at,
       origin: t.origin,
       color: t.color, # item 290: cor escolhida pela equipe (nil = cor do tipo)
+      # 💰 item 324: particular, valores lançados à mão e o valor que vale (com a origem)
+      particular: t.particular,
+      charges: Array(t.charges),
+      price: Crm::AppointmentPrice.resolve(price_config, t),
       # item 228: origem do agendamento (nil = nasceu aqui)
       source: t.source,
       source_detail: t.source_detail,

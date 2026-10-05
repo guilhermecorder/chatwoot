@@ -82,15 +82,18 @@ class Crm::Calls::WebhookService # rubocop:disable Metrics/ClassLength
     call.update!(status: :rejected, end_reason: 'outside_hours', ended_at: Time.current, sdp_offer: nil)
     Crm::Calls::CardMessageBuilder.new(call).perform
     reopen_conversation(call)
+    Crm::Calls::CallbackLock.arm!(call) # 🔒 item 325: trava a tela do responsável até retornar
     Crm::Calls::RadarAlert.push(call)
     broadcast('cevico_call.missed', call: call.to_payload, reason: 'outside_hours')
   end
 
   def broadcast_ringing(call)
-    broadcast('cevico_call.ringing', call: call.to_payload(include_sdp: true),
-                                     ring_user_ids: settings.resolved_ring_user_ids(inbox),
-                                     ring_first_user_ids: settings.resolved_ring_first_user_ids(inbox),
-                                     ring_cascade_seconds: settings.ring_cascade_seconds(inbox))
+    # 🔒 item 325: com a trava ligada, o RESPONSÁVEL pela coluna do paciente toca
+    # primeiro e a tela dele trava depois de alguns segundos chamando
+    targets = Crm::Calls::CallbackLock.ringing(call.account, call, settings.resolved_ring_user_ids(inbox),
+                                               settings.resolved_ring_first_user_ids(inbox))
+    broadcast('cevico_call.ringing', **targets, call: call.to_payload(include_sdp: true),
+                                                ring_cascade_seconds: settings.ring_cascade_seconds(inbox))
   end
 
   # ── clínica ligou e a Meta devolveu a resposta SDP ────────────────────────
@@ -115,6 +118,7 @@ class Crm::Calls::WebhookService # rubocop:disable Metrics/ClassLength
     Crm::Calls::CardMessageBuilder.new(call).perform
     if call.missed? && call.inbound?
       reopen_conversation(call)
+      Crm::Calls::CallbackLock.arm!(call) # 🔒 item 325: trava a tela do responsável até retornar
       Crm::Calls::RadarAlert.push(call)
       broadcast('cevico_call.missed', call: call.to_payload, reason: call.end_reason)
     end

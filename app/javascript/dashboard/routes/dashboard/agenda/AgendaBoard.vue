@@ -34,6 +34,9 @@ import {
   patientNameOf, handConfirmed, isConfirmed, isDeclined, confirmationTitle,
   ORIGINS, ORIGIN_BY_KEY, originOf,
   reservedFor, windowAccepts, windowAt,
+  effectiveAppointmentPrice,
+  presetAppointmentPrice,
+  priceLabel,
 } from 'dashboard/helper/cevicoAgenda';
 import AgendaSettings from './AgendaSettings.vue';
 
@@ -290,7 +293,8 @@ const PROCEDURES = [
   'Capsulotomia YAG', 'Outro',
 ];
 const procedureOptions = computed(() => {
-  if (form.value.kind === 'exames') return EXAMES;
+  // 💰 item 324: os exames com valor pré-configurado entram na lista de sugestões
+  if (form.value.kind === 'exames') return [...new Set([...(appointmentPrices.value?.exames || []).map(e => e.name), ...EXAMES])];
   if (form.value.kind === 'cirurgias') return PROCEDURES;
   return PROBLEMAS;
 });
@@ -1043,9 +1047,24 @@ const emptyForm = (day, prefill = {}) => {
     booking_kind: prefill.booking_kind || 'agendamento',
     // 🏥 item 300: CEVICO × Oftalmofácil — obrigatório ao criar (nasce em branco de propósito)
     origin: prefill.origin || '',
+    // 💰 item 324: consulta particular + valores lançados à mão neste card
+    particular: false,
+    charges: [],
   };
 };
 const form = ref(emptyForm());
+// 💰 item 324 — VALOR: o pré-configurado do tipo (Ajustes da Agenda → Valores),
+// os valores lançados à mão (com quem lançou) e o que vai na confirmação
+const appointmentPrices = computed(() => crmSettings.value?.appointment_prices || null);
+const pricePreset = computed(() => presetAppointmentPrice(appointmentPrices.value, form.value));
+const priceEffective = computed(() => effectiveAppointmentPrice(appointmentPrices.value, form.value));
+const addCharge = () => {
+  if (form.value.charges.length < 8) form.value.charges.push({ label: '', amount: '' });
+};
+const removeCharge = idx => form.value.charges.splice(idx, 1);
+const chargeBy = c => (c.by_name ? `lançado por ${c.by_name}${c.at ? ` · ${format(new Date(c.at), 'dd/MM HH:mm')}` : ''}` : 'novo — fica no seu nome ao salvar');
+// avisos de horário (faixa reservada / encaixe / Oftalmofácil) ficam recolhidos dentro de "Quando e onde"
+const conflictsOpen = ref(false);
 const BOOKING_KINDS = [
   { key: 'agendamento', label: 'Nova (agendamento)', hint: 'Foi marcada agora, pelo robô ou pela equipe — conta em "Consultas agendadas".' },
   { key: 'registro', label: 'Já estava marcada', hint: 'Veio do Oftalmofácil/telefone e só está sendo lançada na Agenda — aparece como "Lançada" e fica fora dos números de agendamento.' },
@@ -1138,8 +1157,11 @@ const openEdit = task => {
     description: task.description ?? '',
     booking_kind: task.booking_kind || 'agendamento',
     origin: task.origin || '',
+    particular: !!task.particular,
+    charges: (task.charges || []).map(c => ({ ...c })),
   };
   showDeleteConfirm.value = false;
+  conflictsOpen.value = false;
   showModal.value = true;
 };
 
@@ -1219,6 +1241,11 @@ const save = async () => {
       task_type: fk === 'cirurgias' ? 'cirurgia' : 'consulta',
       priority: 'medium',
       booking_kind: fk === 'cirurgias' ? null : form.value.booking_kind,
+      // 💰 item 324: particular + valores lançados à mão (o servidor grava quem lançou)
+      particular: fk === 'consultas' && !!form.value.particular,
+      charges: form.value.charges
+        .filter(c => String(c.amount || '').trim())
+        .map(c => ({ label: String(c.label || '').trim(), amount: String(c.amount).trim() })),
     };
     if (form.value.origin && !originLocked.value) payload.origin = form.value.origin;
     // o ✅ digitado no nome sai do nome e vira o confirmado de verdade
@@ -2713,7 +2740,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
 
     <!-- ══ Modal criar/editar (a concha veste a cor do TIPO escolhido) ══ -->
     <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" @click.self="showModal = false">
-      <div class="cv-modal cv-ag-pop w-full max-w-lg max-h-[92vh] flex flex-col" :style="formVars">
+      <div class="cv-modal cv-ag-pop cv-ag-pop-wide w-full max-w-lg max-h-[92vh] flex flex-col" :style="formVars">
         <div class="cv-modal-head flex items-center gap-3">
           <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span :class="formKind.icon" class="text-base" /></span>
           <div class="flex-1 min-w-0">
@@ -2736,7 +2763,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <button class="cv-glass-btn cv-iconbtn" @click="showModal = false"><span class="i-lucide-x" /></button>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-5 space-y-4 cv-ag-form">
+        <div class="flex-1 overflow-y-auto p-5 lg:p-7 space-y-4 lg:space-y-5 cv-ag-form">
           <!-- o TIPO (só ao criar) -->
           <div v-if="!editingTask">
             <span class="cv-label block mb-1.5">Tipo</span>
@@ -2758,7 +2785,9 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </div>
 
-
+          <!-- item 324: no computador o card abre em DUAS colunas (quem/quando · motivo/valor/situação) -->
+          <div class="cv-ag-cols">
+            <div class="space-y-4 lg:space-y-5 min-w-0">
           <!-- 1 · quem -->
           <section class="cv-ag-sec">
             <header class="cv-ag-sec-head"><span class="cv-ag-num">1</span><div><h3>Paciente</h3><p>quem vem</p></div></header>
@@ -2835,8 +2864,25 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 </select>
               </div>
             </div>
+            <!-- item 324: avisos de horário saem de cima do botão de salvar — ficam aqui, recolhidos (sanfona) -->
+            <div v-if="reservedMismatch" class="cv-ag-note cv-ag-note-amber mt-3">
+              <p class="cv-ag-note-head"><span class="i-lucide-triangle-alert text-sm shrink-0" /> Faixa reservada para {{ reservedLabelOf(reservedMismatch) }}</p>
+              <p class="mt-0.5">{{ reservedMismatch.doctor }} atende só {{ reservedLabelOf(reservedMismatch) }} das {{ reservedMismatch.start }} às {{ reservedMismatch.end }} neste dia. Para outro tipo de atendimento, escolha um horário fora desta faixa.</p>
+            </div>
+            <div v-if="formConflicts.length" class="cv-ag-note mt-3" :class="hubConflicts.length ? 'cv-ag-note-red' : 'cv-ag-note-amber'">
+              <button type="button" class="cv-ag-note-head w-full text-left" :title="conflictsOpen ? 'Recolher' : 'Ver quem está neste horário'" @click="conflictsOpen = !conflictsOpen">
+                <span class="i-lucide-triangle-alert text-sm shrink-0" />
+                <span class="flex-1 min-w-0">{{ hubConflicts.length ? 'Horário ocupado por paciente do Oftalmofácil' : 'Já tem agendamento neste horário (encaixe)' }}</span>
+                <span class="cv-ag-note-count">{{ formConflicts.length }}</span>
+                <span :class="conflictsOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="text-sm shrink-0" />
+              </button>
+              <div v-if="conflictsOpen" class="mt-1.5 space-y-0.5">
+                <p v-for="t in formConflicts" :key="'cf' + t.id">• {{ hmOf(t) }} · {{ displayName(t) }} · {{ TYPE_BY_KEY[typeOf(t)]?.label || 'Agendamento' }}<template v-if="t.source === 'oftalmofacil'"> · Oftalmofácil{{ t.source_detail ? ` (${t.source_detail})` : '' }}</template></p>
+              </div>
+            </div>
           </section>
-
+            </div>
+            <div class="space-y-4 lg:space-y-5 min-w-0">
           <!-- 3 · motivo -->
           <section class="cv-ag-sec">
             <header class="cv-ag-sec-head"><span class="cv-ag-num">3</span><div><h3>Motivo</h3><p>{{ form.kind === 'cirurgias' ? 'procedimento' : form.kind === 'exames' ? 'exame e origem do agendamento' : 'tipo, problema e origem do agendamento' }}</p></div></header>
@@ -2865,9 +2911,41 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </section>
 
-          <!-- 4 · situação -->
+          <!-- 4 · valor (item 324): pré-configurado do tipo + valores lançados à mão -->
+          <section class="cv-ag-sec cv-ag-sec-value">
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">4</span><div><h3>Valor</h3><p>o que vai na mensagem de confirmação</p></div></header>
+            <div class="space-y-3">
+              <div v-if="form.kind === 'consultas'">
+                <span class="cv-label block mb-1.5">Esta consulta é</span>
+                <div class="cv-seg cv-seg-sm">
+                  <button type="button" class="cv-seg-item" :class="!form.particular ? 'cv-seg-on' : ''" @click="form.particular = false">Padrão</button>
+                  <button type="button" class="cv-seg-item" :class="form.particular ? 'cv-seg-on' : ''" title="Consulta particular: vale o valor pré-configurado do médico" @click="form.particular = true">Particular</button>
+                </div>
+                <p v-if="form.particular && !form.doctor" class="text-[11px] text-amber-700 dark:text-amber-400 font-semibold mt-1.5">Escolha o médico em "Quando e onde" para puxar o valor particular dele.</p>
+              </div>
+              <div class="cv-ag-price">
+                <span class="cv-ag-price-label">Vai na confirmação</span>
+                <span class="cv-ag-price-value">{{ priceEffective?.text ? priceLabel(priceEffective.text) : (priceEffective ? 'valor padrão' : '—') }}</span>
+                <span class="cv-ag-price-source">{{ priceEffective ? priceEffective.label : 'cirurgia: só valor lançado à mão' }}</span>
+              </div>
+              <p v-if="pricePreset && priceEffective?.source !== 'preset'" class="text-[11px] text-n-slate-11">Pré-configurado para este tipo: <b class="text-n-slate-12">{{ priceLabel(pricePreset.text) }}</b> ({{ pricePreset.label }}) — o valor lançado à mão tem prioridade.</p>
+              <div>
+                <span class="cv-label block mb-1.5">Valores lançados à mão</span>
+                <div v-for="(c, idx) in form.charges" :key="'ch' + idx" class="cv-ag-charge">
+                  <input v-model="c.label" class="cv-input flex-1 min-w-0" maxlength="60" placeholder="Descrição (consulta, exame…)" />
+                  <input v-model="c.amount" class="cv-input cv-ag-charge-amount" maxlength="20" inputmode="decimal" placeholder="R$ 0,00" />
+                  <button type="button" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar este valor" @click="removeCharge(idx)"><span class="i-lucide-x" /></button>
+                  <p class="cv-ag-charge-by">{{ chargeBy(c) }}</p>
+                </div>
+                <button v-if="form.charges.length < 8" type="button" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addCharge"><span class="i-lucide-plus text-xs" /> {{ form.charges.length ? 'Adicionar outro valor' : 'Adicionar valor' }}</button>
+                <p class="text-[11px] text-n-slate-10 mt-1.5">Mais de um valor: a mensagem leva a soma. Sem valor à mão, vale o pré-configurado do tipo.</p>
+              </div>
+            </div>
+          </section>
+
+          <!-- 5 · situação -->
           <section class="cv-ag-sec">
-            <header class="cv-ag-sec-head"><span class="cv-ag-num">4</span><div><h3>Situação</h3><p>como está e o que anotar</p></div></header>
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">5</span><div><h3>Situação</h3><p>como está e o que anotar</p></div></header>
             <div class="space-y-3">
               <div>
                 <div class="cv-seg cv-seg-sm">
@@ -2883,17 +2961,10 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
             </div>
           </section>
+            </div>
+          </div>
         </div>
 
-        <!-- item 255: aviso de horário ocupado (qualquer camada, inclusive Oftalmofácil) -->
-        <div v-if="reservedMismatch" class="mx-5 mb-2 p-3 rounded-xl text-xs bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-          <p class="font-bold flex items-center gap-1.5"><span class="i-lucide-triangle-alert text-sm" /> Faixa reservada para {{ reservedLabelOf(reservedMismatch) }}</p>
-          <p class="mt-0.5">{{ reservedMismatch.doctor }} atende só {{ reservedLabelOf(reservedMismatch) }} das {{ reservedMismatch.start }} às {{ reservedMismatch.end }} neste dia. Para outro tipo de atendimento, escolha um horário fora desta faixa.</p>
-        </div>
-        <div v-if="formConflicts.length" class="mx-5 mb-2 p-3 rounded-xl text-xs" :class="hubConflicts.length ? 'bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300'">
-          <p class="font-bold flex items-center gap-1.5"><span class="i-lucide-triangle-alert text-sm" /> {{ hubConflicts.length ? 'Horário ocupado por paciente do Oftalmofácil' : 'Já tem agendamento neste horário (encaixe)' }}</p>
-          <p v-for="t in formConflicts" :key="'cf' + t.id" class="mt-0.5">• {{ hmOf(t) }} · {{ displayName(t) }} · {{ TYPE_BY_KEY[typeOf(t)]?.label || 'Agendamento' }}<template v-if="t.source === 'oftalmofacil'"> · Oftalmofácil{{ t.source_detail ? ` (${t.source_detail})` : '' }}</template></p>
-        </div>
         <!-- rodapé: excluir discreto à esquerda, ação principal no canto inferior DIREITO (área terminal da leitura) -->
         <div class="cv-modal-foot flex items-center gap-2 flex-wrap">
           <div v-if="editingTask" class="mr-auto">

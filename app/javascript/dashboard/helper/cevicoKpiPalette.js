@@ -9,47 +9,74 @@
 // faturamento, consultas marcadas) em cor cheia; secundário = volume que
 // explica (novos contatos, entrou em…, indicações) em cor média; terciário =
 // apoio (confirmadas, lançadas, faltas, "pela data") em cor clara.
-// O card nasce TRANSPARENTE e a cor vai ficando DENSA ao longo do dia
-// (07h vidro → 19h cor cheia) — ver dayFill().
+// (item 326: a cor é CHEIA o dia inteiro — o vidro que enchia até as 19h saiu)
 
+// 🎨 item 326 (05/10 — pedido dele: "tire aquelas cores transparentes do meu
+// painel; deixe os temas dos indicadores mais organizados; combinações legais
+// com dopamine colors, contraste"): cada família tem 5 tons VIVOS e o card
+// tem cor cheia o dia inteiro (acabou o vidro que enchia até as 19h).
+//   deep → c1  resultado principal: o tom mais intenso, número branco
+//   c1 → c2    volume: o tom vivo da família, número branco
+//   light→pale apoio: o tom claro e alegre da família, número ESCURO (deep)
+// Todos os pares foram escolhidos para o número ler de longe: branco só
+// sobre tom escuro o bastante, escuro só sobre tom claro.
 export const KPI_FAMILIES = {
   financeiro: {
     label: 'Financeiro',
-    c1: '#a16207',
-    c2: '#d4af37',
     deep: '#713f12',
+    c1: '#a16207',
+    c2: '#ca8a04',
+    light: '#fde047',
+    pale: '#fef08a',
   },
   cirurgia: {
     label: 'Cirurgia',
-    c1: '#6d28d9',
-    c2: '#a78bfa',
     deep: '#4c1d95',
+    c1: '#6d28d9',
+    c2: '#8b5cf6',
+    light: '#c4b5fd',
+    pale: '#ddd6fe',
   },
   satisfacao: {
     label: 'Satisfação',
-    c1: '#be123c',
-    c2: '#fb7185',
-    deep: '#881337',
+    deep: '#9d174d',
+    c1: '#be185d',
+    c2: '#ec4899',
+    light: '#f9a8d4',
+    pale: '#fbcfe8',
   },
   presenca: {
     label: 'Presença',
+    deep: '#9a3412',
     c1: '#c2410c',
-    c2: '#fb923c',
-    deep: '#7c2d12',
+    c2: '#f97316',
+    light: '#fdba74',
+    pale: '#fed7aa',
   },
   agendamento: {
     label: 'Agendamento',
+    deep: '#065f46',
     c1: '#047857',
-    c2: '#34d399',
-    deep: '#064e3b',
+    c2: '#10b981',
+    light: '#6ee7b7',
+    pale: '#a7f3d0',
   },
   captacao: {
     label: 'Captação',
-    c1: '#1d4ed8',
-    c2: '#60a5fa',
     deep: '#1e3a8a',
+    c1: '#1d4ed8',
+    c2: '#3b82f6',
+    light: '#93c5fd',
+    pale: '#bfdbfe',
   },
-  outros: { label: 'Outros', c1: '#334155', c2: '#64748b', deep: '#0f172a' },
+  outros: {
+    label: 'Outros',
+    deep: '#0f172a',
+    c1: '#334155',
+    c2: '#64748b',
+    light: '#cbd5e1',
+    pale: '#e2e8f0',
+  },
 };
 
 // ordem importa: a 1ª regra que casar vence
@@ -94,49 +121,23 @@ export const classifyKpi = tile => {
 const mix = (hex, other, pct) =>
   `color-mix(in srgb, ${hex} ${100 - pct}%, ${other})`;
 
-// degradê do card por família e nível
+// degradê do card por família e nível — sempre cor CHEIA (item 326)
 export const kpiGrad = (family, tier, dark = false) => {
   const f = KPI_FAMILIES[family] || KPI_FAMILIES.outros;
-  if (tier === 'primary') return `linear-gradient(135deg, ${f.c1}, ${f.c2})`;
-  if (tier === 'secondary')
-    return `linear-gradient(135deg, ${mix(f.c1, dark ? '#0b0d12' : '#fff', 22)}, ${mix(f.c2, dark ? '#0b0d12' : '#fff', 22)})`;
-  // terciário: cor clara, texto escuro (no escuro: cor apagada, texto claro)
+  if (tier === 'primary') return `linear-gradient(135deg, ${f.deep}, ${f.c1})`;
+  if (tier === 'secondary') return `linear-gradient(135deg, ${f.c1}, ${f.c2})`;
+  // apoio: tom claro e alegre com número escuro; no tema escuro, o tom
+  // intenso apagado (número claro) para não ofuscar
   return dark
-    ? `linear-gradient(135deg, ${mix(f.c1, '#0b0d12', 55)}, ${mix(f.c2, '#0b0d12', 55)})`
-    : `linear-gradient(135deg, ${mix(f.c1, '#fff', 62)}, ${mix(f.c2, '#fff', 62)})`;
+    ? `linear-gradient(135deg, ${mix(f.deep, '#0b0d12', 30)}, ${mix(f.c1, '#0b0d12', 45)})`
+    : `linear-gradient(135deg, ${f.light}, ${f.pale})`;
 };
 
-// o card NASCE 100% transparente (vidro) e a cor da família vai ficando
-// mais DENSA ao longo do dia — o vidro é o mesmo para todas as famílias
-export const kpiGlass = (dark = false) =>
-  dark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.34)';
-
-// borda fina na cor da família, para o card ainda ter identidade de manhã
-export const kpiEdge = (family, dark = false) => {
-  const f = KPI_FAMILIES[family] || KPI_FAMILIES.outros;
-  return mix(dark ? f.c2 : f.c1, 'transparent', dark ? 55 : 60);
-};
-
-// texto escuro enquanto a cor ainda está rala (tema claro); no escuro, sempre
-// claro. Terciário é cor clara mesmo cheio → texto escuro o dia todo.
-export const kpiInkDark = (tier, fill, dark = false) => {
-  if (dark) return false;
-  if (tier === 'tertiary') return true;
-  return fill < 0.5;
-};
-
-// 0 → 1 ao longo do dia útil: 07h 100% transparente, 19h cor cheia (fora
-// disso, cheio à noite e transparente de madrugada até as 07h)
-export const dayFill = (now = new Date(), start = 7, end = 19) => {
-  // hora de SÃO PAULO, seja qual for o fuso do computador
-  const sp = new Date(
-    now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
-  );
-  const h = sp.getHours() + sp.getMinutes() / 60;
-  if (h < start) return 0;
-  if (h >= end) return 1;
-  return Math.max(0, Math.min(1, (h - start) / (end - start)));
-};
+// tinta do número: escura (o tom mais intenso da família) só no card de
+// apoio do tema claro; nos outros, branco
+export const kpiInkDark = (tier, dark = false) => !dark && tier === 'tertiary';
+export const kpiInk = family =>
+  (KPI_FAMILIES[family] || KPI_FAMILIES.outros).deep;
 
 export const KPI_LEGEND = [
   ['captacao', 'captação'],

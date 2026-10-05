@@ -57,4 +57,29 @@ RSpec.describe 'CRM settings — caixas do lembrete de confirmação', type: :re
 
     expect(CrmSetting.find_by(account: account).agenda_config.dig('appointment_reminders', 'd2')).not_to have_key('inbox_ids')
   end
+
+  # 🎯 item 327: modelos personalizados por tipo de atendimento e por médico — no lembrete e em cada caixa
+  it 'guarda os modelos personalizados; sem tipo nem médico, ou sem modelo, não entra', :aggregate_failures do
+    tp = ->(name) { { name: name, language: 'pt_BR', category: 'UTILITY', processed_params: { body: { '1' => '{{nome}}' } } } }
+    variants = [
+      { id: 'ret', modality: 'retorno', units: { tatuape: { template_params: tp.call('retorno_tatuape'), message_preview: 'R {{1}}' } },
+        followup: { template_params: tp.call('reforco_retorno') } },
+      { id: 'rob', doctor: ' Dra. Roberta Negri ', modality: 'inventado', template_params: tp.call('roberta_geral') },
+      { id: 'ninguem', units: { paulista: { template_params: tp.call('sem_dono') } } },
+      { id: 'vazio', modality: 'exames' }
+    ]
+    by_inbox = { instagram.id.to_s => { variants: [{ modality: 'pos_op', template_params: tp.call('ig_pos_op') }] } }
+    post "/api/v1/accounts/#{account.id}/crm/settings/update_agenda",
+         params: { appointment_reminders: { d2: { enabled: true, hour: 10, mode: 'shadow', inbox_id: google.id, inbox_ids: [instagram.id],
+                                                  variants: variants, by_inbox: by_inbox } } },
+         headers: admin.create_new_auth_token, as: :json
+
+    expect(response).to have_http_status(:ok)
+    d2 = CrmSetting.find_by(account: account).agenda_config.dig('appointment_reminders', 'd2')
+    expect(d2['variants'].pluck('id')).to eq(%w[ret rob])
+    expect(d2['variants'].first).to include('modality' => 'retorno')
+    expect(d2['variants'].first.dig('followup', 'template_params', 'name')).to eq('reforco_retorno')
+    expect(d2['variants'].last).to include('doctor' => 'Dra. Roberta Negri').and(satisfy { |v| !v.key?('modality') })
+    expect(d2.dig('by_inbox', instagram.id.to_s, 'variants').first).to include('modality' => 'pos_op')
+  end
 end

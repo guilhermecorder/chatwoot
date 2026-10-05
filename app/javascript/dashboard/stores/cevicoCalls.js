@@ -24,6 +24,7 @@ const currentUserId = () => Number(vuexStore.getters.getCurrentUserID);
 const availability = () => vuexStore.getters.getCurrentUserAvailability;
 // chamada → timer da cascata "quem toca primeiro" (rodada 2)
 const cascadeTimers = {};
+const lockTimers = {}; // 🔒 item 325: espera até a tela do responsável travar
 const callsSettings = () => vuexStore.getters['crm/getSettings']?.calls || {};
 
 export const useCevicoCallsStore = defineStore('cevicoCalls', {
@@ -42,6 +43,10 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
     // item 176: sobe em TODO evento cevico_call.* (mesmo os que não tocam
     // para mim) — o ambiente Chamadas usa para atualizar a faixa "Agora"
     liveTick: 0,
+    // 🔒 item 325: ligações tocando há mais de N segundos para o RESPONSÁVEL
+    // (trava a tela dele) + contador que manda reconferir a trava das perdidas
+    lockRinging: [],
+    lockTick: 0,
   }),
 
   getters: {
@@ -73,7 +78,25 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
       clearTimeout(cascadeTimers[id]);
       delete cascadeTimers[id];
       this.ringing = this.ringing.filter(x => x !== id);
+      clearTimeout(lockTimers[id]);
+      delete lockTimers[id];
+      this.lockRinging = this.lockRinging.filter(x => x !== id);
       if (!this.ringing.length) session.stopRingtone();
+    },
+
+    // 🔒 item 325: sou o responsável por esta ligação → passados N segundos
+    // tocando, a minha tela trava até eu atender ou recusar
+    armRingLock(data) {
+      const id = data?.call?.id;
+      const lockIds = (data?.lock_user_ids || []).map(Number);
+      if (!id || !lockIds.includes(currentUserId())) return;
+      clearTimeout(lockTimers[id]);
+      const wait = Number(data.lock_after_seconds || 5) * 1000;
+      lockTimers[id] = setTimeout(() => {
+        delete lockTimers[id];
+        if (!this.ringing.includes(id) || this.lockRinging.includes(id)) return;
+        this.lockRinging = [...this.lockRinging, id];
+      }, wait);
     },
 
     pushEnded(id) {
@@ -120,6 +143,7 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
         return;
       }
       this.ringNow(call);
+      this.armRingLock(data);
     },
 
     ringNow(call) {
@@ -155,6 +179,7 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
       const call = data?.call;
       if (!call?.id) return;
       this.liveTick += 1;
+      this.lockTick += 1; // 🔒 a trava das perdidas reconfere (ligação de volta terminou)
       this.upsert(call);
       this.dropRinging(call.id);
       if (this.active === call.id) this.finishActive(call.id);
@@ -165,6 +190,7 @@ export const useCevicoCallsStore = defineStore('cevicoCalls', {
       const call = data?.call;
       if (!call?.id) return;
       this.liveTick += 1;
+      this.lockTick += 1; // 🔒 item 325: perdida → a trava do responsável aparece na hora
       this.upsert(call);
       this.dropRinging(call.id);
       if (availability() === 'offline') return;

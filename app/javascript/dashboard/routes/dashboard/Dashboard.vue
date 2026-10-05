@@ -26,6 +26,7 @@ import CopilotContainer from 'dashboard/components/copilot/CopilotContainer.vue'
 import MobileSidebarLauncher from 'dashboard/components-next/sidebar/MobileSidebarLauncher.vue';
 import RadarPriorityPopup from 'dashboard/components-next/radar/RadarPriorityPopup.vue';
 import CevicoCallPopup from 'dashboard/components-next/cevico/calls/CevicoCallPopup.vue';
+import CevicoCallLock from 'dashboard/components-next/cevico/calls/CevicoCallLock.vue';
 import NovaConversaModal from 'dashboard/components-next/cevico/conversas/NovaConversaModal.vue';
 import BugReportDrawer from 'dashboard/components-next/radar/BugReportDrawer.vue';
 import CevicoContextMenu from 'dashboard/components-next/cevico/CevicoContextMenu.vue';
@@ -44,6 +45,7 @@ export default {
     MobileSidebarLauncher,
     RadarPriorityPopup,
     CevicoCallPopup,
+    CevicoCallLock,
     NovaConversaModal,
     BugReportDrawer,
     CevicoContextMenu,
@@ -167,6 +169,8 @@ export default {
         <CommandBar :is-paywalled="isAccountPaywalled" />
         <RadarPriorityPopup />
         <CevicoCallPopup />
+        <!-- 🔒 item 325: trava da ligação (tocando há N s / perdida até retornar) -->
+        <CevicoCallLock />
         <!-- CEVICO 199: Nova conversa em 3 passos (abre por openNovaConversa) -->
         <NovaConversaModal />
         <BugReportDrawer />

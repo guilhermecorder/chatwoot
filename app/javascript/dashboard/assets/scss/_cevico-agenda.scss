@@ -1105,3 +1105,61 @@
   background: rgba(255, 255, 255, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
+
+/* ── 💰 item 324 (05/10): card de agendamento ABERTO no computador — duas
+   colunas (quem/quando · motivo/valor/situação), títulos maiores, mais
+   contraste no que importa, avisos de horário recolhidos dentro de
+   "Quando e onde" e a seção VALOR ── */
+.cv-page .cv-ag-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 1024px) {
+  .cv-page .cv-ag-pop-wide { max-width: 68rem; }
+  .cv-page .cv-ag-pop-wide .cv-ag-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+  .cv-page .cv-ag-pop-wide .cv-ag-kind-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-sec { padding: 18px 20px 20px; border-radius: 20px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-sec-head { margin-bottom: 14px; gap: 12px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-sec-head h3 { font-size: 17px; letter-spacing: -0.01em; }
+  .cv-page .cv-ag-pop-wide .cv-ag-sec-head p { font-size: 12px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-num { width: 28px; height: 28px; font-size: 13px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-form .cv-label { font-size: 11.5px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-form .cv-input { font-size: 14.5px; padding-top: 9px; padding-bottom: 9px; }
+  .cv-page .cv-ag-pop-wide .cv-modal-head h2 { font-size: 1.3rem; }
+}
+/* o que mais importa lê mais forte: nome, dia e horário */
+.cv-page .cv-ag-form .cv-input { color: #0f172a; font-weight: 600; }
+.dark .cv-page .cv-ag-form .cv-input { color: #fff; }
+.cv-page .cv-ag-form .cv-input::placeholder { font-weight: 400; }
+.cv-page .cv-ag-sec { transition: box-shadow 0.18s ease, border-color 0.18s ease; }
+.cv-page .cv-ag-sec:focus-within { border-color: rgb(var(--cv-rgb) / 0.55); box-shadow: 0 10px 28px -18px rgb(var(--cv-deep-rgb) / 0.7); }
+
+/* avisos de horário: uma linha discreta, abre ao clicar */
+.cv-page .cv-ag-note { border-radius: 12px; padding: 8px 10px; font-size: 12px; line-height: 1.35; }
+.cv-page .cv-ag-note-head { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.cv-page .cv-ag-note-count { min-width: 20px; padding: 0 6px; border-radius: 9999px; font-size: 11px; font-weight: 800; text-align: center; background: rgba(0, 0, 0, 0.1); }
+.cv-page .cv-ag-note-amber { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+.cv-page .cv-ag-note-red { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.dark .cv-page .cv-ag-note-amber { background: rgba(217, 119, 6, 0.14); color: #fcd34d; border-color: rgba(217, 119, 6, 0.4); }
+.dark .cv-page .cv-ag-note-red { background: rgba(220, 38, 38, 0.14); color: #fca5a5; border-color: rgba(220, 38, 38, 0.4); }
+.dark .cv-page .cv-ag-note-count { background: rgba(255, 255, 255, 0.16); }
+
+/* VALOR: o número que vai na confirmação em destaque + linhas lançadas à mão */
+.cv-page .cv-ag-price {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgb(var(--cv-rgb) / 0.3);
+}
+.dark .cv-page .cv-ag-price { background: rgba(255, 255, 255, 0.06); }
+.cv-page .cv-ag-price-label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #475569; }
+.dark .cv-page .cv-ag-price-label { color: rgba(255, 255, 255, 0.7); }
+.cv-page .cv-ag-price-value { font-size: 22px; font-weight: 800; line-height: 1; color: var(--cv-deep); white-space: nowrap; }
+.dark .cv-page .cv-ag-price-value { color: #fff; }
+.cv-page .cv-ag-price-source { grid-column: 1 / -1; font-size: 11px; color: #64748b; }
+.dark .cv-page .cv-ag-price-source { color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-ag-charge { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.cv-page .cv-ag-charge-amount { width: 8.5rem; flex: none; text-align: right; }
+.cv-page .cv-ag-charge-by { flex-basis: 100%; font-size: 10.5px; color: #64748b; margin-top: -2px; }
+.dark .cv-page .cv-ag-charge-by { color: rgba(255, 255, 255, 0.55); }

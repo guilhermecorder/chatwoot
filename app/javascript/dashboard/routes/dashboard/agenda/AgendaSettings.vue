@@ -7,7 +7,9 @@
 //      faixa (ex.: quarta 13h–14h = só pós-operatório)
 //   3. Regras para a IA — texto da clínica que entra no prompt dos agentes +
 //      a prova do que a IA está recebendo agora
-//   4. Conferência do dia — o bloco que já existia (vem pelo slot)
+//   4. Valores — pré-configuração do valor de cada tipo de atendimento
+//      (item 324): avaliação, retorno, pós-op, particular por médico, exames
+//   5. Conferência do dia — o bloco que já existia (vem pelo slot)
 // Sempre que uma mudança deixa paciente marcado fora da regra, a faixa
 // "Precisa reagendar" lista cada um com o botão Reagendar.
 import { ref, computed, watch, onMounted } from 'vue';
@@ -19,6 +21,7 @@ import {
   DOCTORS, TYPE_BY_KEY, RESERVABLE, AI_MODALITY,
   resolveAllWindows, resolveClosedDoctors, resolveBlocked, resolveBlockedDays,
   reservedFor, windowAccepts, windowAt, sameBlock, dateKey, patientNameOf, hexToRgbSpaced,
+  PRICE_TYPE_LABELS, priceLabel,
 } from 'dashboard/helper/cevicoAgenda';
 
 const props = defineProps({
@@ -36,6 +39,7 @@ const TABS = [
   { key: 'abrir', label: 'Abrir e fechar', icon: 'i-lucide-lock-open' },
   { key: 'faixas', label: 'Faixas de horário', icon: 'i-lucide-clock' },
   { key: 'ia', label: 'Regras para a IA', icon: 'i-lucide-sparkles' },
+  { key: 'valores', label: 'Valores', icon: 'i-lucide-badge-dollar-sign' },
   { key: 'conferencia', label: 'Conferência do dia', icon: 'i-lucide-list-checks' },
 ];
 const tab = ref(props.initialTab);
@@ -275,6 +279,44 @@ const loadPreview = async () => {
     previewError.value = 'Só quem tem acesso às configurações vê o que a IA recebe.';
   }
 };
+// ── 4. VALORES (item 324): pré-configuração por tipo de atendimento ──
+// "avaliação geralmente é 150; retorno e 1º pós-operatório não têm custo;
+// exames, cada um tem o seu valor; particulares, cada médico tem o seu"
+const blankPrices = () => ({ avaliacao: '', retorno: '', pos_op: '', teleconsulta: '', particular: {}, exames: [] });
+const pricesFrom = raw => ({
+  ...blankPrices(),
+  ...(raw || {}),
+  particular: { ...(raw?.particular || {}) },
+  exames: (raw?.exames || []).map(e => ({ name: e.name || '', price: e.price || '' })),
+});
+const prices = ref(pricesFrom(settings.value?.appointment_prices));
+const pricesSaved = ref(JSON.stringify(prices.value));
+const pricesDirty = computed(() => JSON.stringify(prices.value) !== pricesSaved.value);
+watch(
+  () => settings.value?.appointment_prices,
+  raw => {
+    if (pricesDirty.value) return;
+    prices.value = pricesFrom(raw);
+    pricesSaved.value = JSON.stringify(prices.value);
+  }
+);
+const addExamPrice = () => prices.value.exames.push({ name: '', price: '' });
+const removeExamPrice = idx => prices.value.exames.splice(idx, 1);
+const savePrices = async () => {
+  busy.value = 'prices';
+  try {
+    await CrmAPI.updateAppointmentPrices(prices.value);
+    await store.dispatch('crm/fetchSettings');
+    prices.value = pricesFrom(settings.value?.appointment_prices);
+    pricesSaved.value = JSON.stringify(prices.value);
+    useAlert('Valores salvos ✓');
+  } catch {
+    useAlert('Não consegui salvar os valores.');
+  } finally {
+    busy.value = '';
+  }
+};
+
 const saveRules = async () => {
   busy.value = 'rules';
   try {
@@ -330,7 +372,7 @@ onMounted(loadPreview);
       </div>
 
       <div class="px-4 sm:px-5 pt-4">
-        <div class="cv-seg cv-seg-sm grid grid-cols-2 sm:grid-cols-4 gap-1 w-full">
+        <div class="cv-seg cv-seg-sm grid grid-cols-2 sm:grid-cols-5 gap-1 w-full">
           <button v-for="t in TABS" :key="t.key" class="cv-seg-item justify-center" :class="tab === t.key ? 'cv-seg-on' : ''" @click="tab = t.key">
             <span :class="t.icon" class="text-xs" /> {{ t.label }}
           </button>
@@ -540,12 +582,62 @@ onMounted(loadPreview);
           </section>
         </template>
 
-        <!-- 4. CONFERÊNCIA DO DIA (bloco que já existia) -->
+        <!-- 4. VALORES (item 324) -->
+        <template v-else-if="tab === 'valores'">
+          <section class="space-y-2">
+            <p class="cv-ag-block-title">Por tipo de atendimento</p>
+            <p class="text-[11px] text-n-slate-10 leading-relaxed">
+              É o valor que vai na mensagem de confirmação quando ninguém lançou um valor à mão no card do agendamento. Pode ser um número
+              (150,00) ou um texto (sem custo). Em branco: a avaliação usa o valor padrão do lembrete; retorno e pós-operatório saem "sem custo".
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div v-for="(label, key) in PRICE_TYPE_LABELS" :key="key" class="cv-sub p-3">
+                <span class="cv-label block mb-1">{{ label }}</span>
+                <input v-model="prices[key]" class="cv-input w-full" maxlength="30" :disabled="!isAdmin" :placeholder="key === 'avaliacao' ? '150,00' : key === 'teleconsulta' ? 'igual à avaliação' : 'sem custo'" />
+              </div>
+            </div>
+          </section>
+          <section class="space-y-2">
+            <p class="cv-ag-block-title">Consulta particular, por médico</p>
+            <p class="text-[11px] text-n-slate-10">Vale quando o card do agendamento está marcado como "Particular". Médico sem valor aqui usa o valor do tipo.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div v-for="d in DOCTORS" :key="d.name" class="cv-sub p-3" :style="{ borderColor: d.color }">
+                <span class="cv-label block mb-1">{{ d.name }}</span>
+                <input v-model="prices.particular[d.name]" class="cv-input w-full" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
+              </div>
+            </div>
+          </section>
+          <section class="space-y-2">
+            <div class="flex items-center gap-2">
+              <p class="cv-ag-block-title flex-1">Exames</p>
+              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addExamPrice"><span class="i-lucide-plus text-xs" /> Exame</button>
+            </div>
+            <p class="text-[11px] text-n-slate-10">Cada exame com o seu valor. No agendamento de exame, o sistema soma os que estiverem escritos no campo "Exame" (ex.: Pentacam + Topografia).</p>
+            <p v-if="!prices.exames.length" class="text-xs text-n-slate-9">Nenhum exame com valor ainda.</p>
+            <div v-for="(e, idx) in prices.exames" :key="'ex' + idx" class="cv-row flex items-center gap-2 px-3 py-2">
+              <input v-model="e.name" class="cv-input flex-1 min-w-0" maxlength="60" :disabled="!isAdmin" placeholder="Nome do exame (Pentacam, OCT…)" />
+              <input v-model="e.price" class="cv-input w-32 text-right" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
+              <span class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline">{{ e.price ? priceLabel(e.price) : '' }}</span>
+              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar" @click="removeExamPrice(idx)"><span class="i-lucide-x" /></button>
+            </div>
+          </section>
+          <section class="cv-sub p-3">
+            <p class="cv-label mb-1">Como o valor é escolhido</p>
+            <p class="text-[11px] text-n-slate-11 leading-relaxed">1º o valor lançado à mão no card (fica registrado quem lançou) · 2º "Valor: X" escrito na observação · 3º o pré-configurado desta tela · 4º o valor padrão do lembrete. Cirurgia usa só o valor lançado à mão (a tabela de preços das cirurgias continua em Preços).</p>
+          </section>
+        </template>
+
+        <!-- 5. CONFERÊNCIA DO DIA (bloco que já existia) -->
         <template v-else>
           <slot name="conferencia" />
         </template>
       </div>
 
+      <!-- barra de salvar dos valores -->
+      <div v-if="tab === 'valores' && isAdmin" class="px-4 sm:px-5 py-3 border-t border-n-weak flex items-center gap-2">
+        <span class="text-[11px] flex-1" :class="pricesDirty ? 'text-n-slate-12 font-semibold' : 'text-n-slate-9'">{{ pricesDirty ? 'Mudanças ainda não salvas' : 'Tudo salvo' }}</span>
+        <button class="cv-btn" :disabled="!pricesDirty || busy === 'prices'" @click="savePrices">{{ busy === 'prices' ? 'Salvando…' : 'Salvar valores' }}</button>
+      </div>
       <!-- barra de salvar das faixas -->
       <div v-if="tab === 'faixas' && isAdmin" class="px-4 sm:px-5 py-3 border-t border-n-weak flex items-center gap-2">
         <span class="text-[11px] flex-1" :class="isDirty ? 'text-n-slate-12 font-semibold' : 'text-n-slate-9'">{{ isDirty ? 'Mudanças ainda não salvas' : 'Tudo salvo' }}</span>

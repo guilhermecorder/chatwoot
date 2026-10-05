@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_10_04_010000) do
+ActiveRecord::Schema[7.2].define(version: 2026_10_05_010000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -2296,6 +2296,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_04_010000) do
     t.string "cancel_reason"
     t.bigint "cevico_source_id"
     t.string "cevico_born_via"
+    t.jsonb "charges", default: [], null: false
+    t.boolean "particular", default: false, null: false
     t.index ["account_id", "external_ref"], name: "index_tasks_on_account_and_external_ref", unique: true, where: "(external_ref IS NOT NULL)"
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
     t.index ["account_id", "task_type", "created_at"], name: "index_tasks_on_account_type_created"

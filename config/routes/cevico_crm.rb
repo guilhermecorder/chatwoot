@@ -362,6 +362,7 @@ namespace :crm do
       get :dashboard
       get :overview
       get :export
+      get :lock # 🔒 item 325: ligação perdida travando a tela de quem responde por ela
       post :initiate
       post :request_permission
       get :permission_status

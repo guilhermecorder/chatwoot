@@ -60,6 +60,11 @@ class CevicoCallsAPI extends ApiClient {
     return axios.post(`${this.url}/${id}/returned`, { note });
   }
 
+  // 🔒 item 325: a ligação perdida que está travando a minha tela (lock: null = livre)
+  lock() {
+    return axios.get(`${this.url}/lock`);
+  }
+
   // CSV do histórico com os mesmos filtros da lista (blob para download)
   exportCsv(params = {}) {
     return axios.get(`${this.url}/export`, { params, responseType: 'blob' });

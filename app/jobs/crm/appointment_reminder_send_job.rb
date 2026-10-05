@@ -132,7 +132,7 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     shadow = rcfg['mode'] == 'shadow'
     inbox = account.inboxes.find_by(id: rcfg['inbox_id'])
     return if inbox.nil? && !shadow
-    return if rcfg['template_params'].blank? && templates_by_unit(rcfg).none? && !shadow
+    return unless shadow || Crm::ReminderModels.any?(rcfg)
     return run_one(account, inbox, rcfg, regua, task_id, now_sp) if task_id
 
     run = { 'sent' => [], 'skipped' => [] }
@@ -180,7 +180,7 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
       inbox = account.inboxes.find_by(id: rcfg.dig('partner', 'inbox_id'))
       return skip(run, task, 'Oftalmofácil: caixa não encontrada') if inbox.nil? && !shadow
     end
-    template = partner ? partner_template(rcfg) : template_for(rcfg, regua, task)
+    template = partner ? partner_template(rcfg) : Crm::ReminderModels.pick(rcfg, task)
 
     # item 310/314: o lembrete sai pela caixa em que o paciente JÁ conversa,
     # com o modelo escolhido PARA AQUELA CAIXA no card — por isso a falta de
@@ -190,7 +190,7 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
 
     if shadow
       run['sent'] << entry_for(task, contact, template: template&.dig('template_params', 'name'), partner: partner, inbox: inbox,
-                                              general: template&.dig('general'))
+                                              general: template&.dig('general'), model: template&.dig('model'))
       return
     end
 
@@ -211,7 +211,7 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     # item 300: paciente do Oftalmofácil ganha o card no funil DELE (nunca no da CEVICO)
     Crm::PartnerFunnel.place!(account, contact, :booked) if partner
     run['sent'] << entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox,
-                                            general: template['general'])
+                                            general: template['general'], model: template['model'])
   rescue StandardError => e
     Rails.logger.error "[CEVICO lembretes] task #{task.id}: #{e.message}"
     skip(run, task, "erro: #{e.message.truncate(60)}")
@@ -295,26 +295,21 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
 
   # Item 314 (02/10; "quero ambientes mais separados para cada caixa de
   # entrada… selecionar exatamente a mensagem modelo correta daquela caixa"):
-  # cada caixa marcada tem os SEUS modelos (by_inbox.<id>.units /
-  # template_params), escolhidos da lista daquele número. Caixa da conversa
-  # sem modelo para a unidade da consulta → sai pela caixa padrão, com o
-  # modelo padrão (nada de procurar "nome igual" na outra caixa).
+  # cada caixa marcada tem os SEUS modelos (by_inbox.<id>), escolhidos da lista
+  # daquele número — nada de procurar "nome igual" na outra caixa.
+  # 🎯 item 327: entre a caixa da conversa e a padrão ganha o modelo MAIS
+  # ESPECÍFICO (médico/tipo de atendimento, depois unidade × geral — item 323);
+  # empate = a caixa em que o paciente já conversa.
   # chosen = { caixa padrão => modelo padrão }
   def inbox_and_template_for(account, rcfg, contact, task, chosen)
     default_inbox, template = chosen.first
     routed = routed_inbox(account, rcfg, contact, default_inbox)
     return [default_inbox, template] if routed.nil? || routed.id == default_inbox&.id
 
-    routed_cfg = inbox_config(rcfg, routed)
-    own_unit = unit_template(routed_cfg, task)
-    return [routed, own_unit] if own_unit
-    # 📍 item 323: o modelo da UNIDADE vence o "geral" — se a caixa da conversa
-    # só tem o geral e a caixa padrão tem o modelo da unidade da consulta, sai
-    # pela padrão (antes saía o geral da outra caixa, sem o endereço certo)
-    return [default_inbox, template] if unit_template(rcfg, task)
+    own = Crm::ReminderModels.pick(inbox_config(rcfg, routed), task)
+    return [default_inbox, template] if own.nil? || Crm::ReminderModels.better?(template, own)
 
-    own = template_for(routed_cfg, nil, task)
-    own ? [routed, own] : [default_inbox, template]
+    [routed, own]
   end
 
   # A marca vale para a consulta COMO ESTAVA quando o lembrete saiu: consulta
@@ -337,35 +332,11 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   end
 
   # ── modelo certo para a consulta ──────────────────────────────────────
-  # modelo da UNIDADE da consulta (units.paulista / units.tatuape), senão o
-  # geral do lembrete. Devolve { 'template_params', 'message_preview' } ou nil.
-  def template_for(rcfg, _regua, task)
-    by_unit = unit_template(rcfg, task)
-    return by_unit if by_unit
-    return nil if rcfg['template_params'].blank?
-
-    { 'template_params' => rcfg['template_params'], 'message_preview' => rcfg['message_preview'], 'general' => true }
-  end
-
-  # o modelo da unidade DA CONSULTA neste bloco de modelos (nil = não tem)
-  def unit_template(rcfg, task)
-    by_unit = templates_by_unit(rcfg)[unit_key(task)]
-    by_unit if by_unit&.dig('template_params').present?
-  end
-
-  # 📍 item 323 (04/10, Guilherme: "consulta sem unidade é na Av. Paulista
-  # hoje"): agendamento sem unidade na Agenda vale Av. Paulista — no modelo
-  # escolhido e no {{unidade}} da mensagem. PROVISÓRIO, palavra dele: "por
-  # enquanto fica como padrão, mas isso pode (e deve) mudar no futuro" — a
-  # regra mora só aqui (DEFAULT_UNIT + unit_key), para trocar num lugar só.
-  DEFAULT_UNIT = 'paulista'.freeze
-
+  # 🎯 item 327: quem escolhe é Crm::ReminderModels — modelos personalizados
+  # por médico e por tipo de atendimento primeiro, depois o padrão; dentro de
+  # cada um, o modelo da UNIDADE da consulta antes do geral.
   def unit_key(task)
-    task.unit.to_s.strip.presence || DEFAULT_UNIT
-  end
-
-  def templates_by_unit(rcfg)
-    (rcfg['units'] || {}).select { |_u, t| t.is_a?(Hash) && t['template_params'].present? }
+    Crm::ReminderModels.unit_key(task)
   end
 
   # item 319 ("devo deixar sem nenhum preenchimento, para que pegue os contatos
@@ -404,16 +375,14 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     params
   end
 
-  # valor da avaliação: "Valor: 250,00" ou "R$ 250" na observação da consulta;
-  # senão o padrão da régua (150,00) — igual ao N8N fazia com a descrição do evento
-  VALUE_PATTERNS = [/valor\s*:\s*(?:R\$\s*)?([\d.]+(?:,\d{1,2})?)/i, /R\$\s*([\d.]+(?:,\d{1,2})?)/i].freeze
-
+  # 💰 item 324: o valor sai de Crm::AppointmentPrice — lançado à mão no card
+  # → escrito na observação → pré-configurado do tipo (particular por médico,
+  # exames, avaliação, retorno, pós-op) → valor padrão deste lembrete
   def appointment_value(task, rcfg)
-    text = task.description.to_s
-    raw = VALUE_PATTERNS.lazy.filter_map { |re| text.match(re)&.[](1) }.first.to_s.strip
-    return rcfg['default_value'].presence || DEFAULT_VALUE if raw.blank?
-
-    raw.include?(',') ? raw : "#{raw},00"
+    @price_cfg ||= {}
+    cfg = (@price_cfg[task.account_id] ||= Crm::AppointmentPrice.config(task.account))
+    Crm::AppointmentPrice.resolve(cfg, task, fallback: rcfg['default_value'].presence || DEFAULT_VALUE)&.dig(:text) ||
+      rcfg['default_value'].presence || DEFAULT_VALUE
   end
 
   def patient_name(task)
@@ -455,11 +424,12 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
 
   # ── registro da rodada: quem recebeu / receberia e quem foi pulado ──
   # general: saiu o modelo "geral" (não o da unidade) — a lista avisa
-  def entry_for(task, contact, template: nil, partner: false, inbox: nil, general: nil) # rubocop:disable Metrics/ParameterLists
+  # model: saiu um modelo PERSONALIZADO (item 327) — "Retorno · Dra. Roberta Negri"
+  def entry_for(task, contact, template: nil, partner: false, inbox: nil, general: nil, model: nil) # rubocop:disable Metrics/ParameterLists
     at = task.due_at&.in_time_zone(TZ)
     { 'task_id' => task.id, 'name' => patient_name(task), 'phone_tail' => contact.phone_number.to_s.last(4),
       'when' => at&.strftime('%d/%m %H:%M'), 'unit' => unit_label(task), 'template' => template, 'contact_id' => contact.id,
-      'general' => (general ? true : nil),
+      'general' => (general ? true : nil), 'model' => model.presence,
       'inbox' => inbox&.name, # item 310: por qual caixa saiu / sairia
       'partner' => (partner ? partner_name(task).presence || 'Oftalmofácil' : nil) }.compact
   end

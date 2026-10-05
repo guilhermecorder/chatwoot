@@ -150,6 +150,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     alerts = alerts.select do |a|
       a['user_id'].present? ? a['user_id'].to_i == Current.user.id : !Current.account_user.administrator?
     end
+    # 🔒 item 325: ligação travada tem a sua própria janela (CevicoCallLock) — aqui não repete
+    alerts = alerts.reject { |a| a['lock'] == true }
 
     live = alerts.lazy.filter_map do |a|
       next extra_alert(a) if Crm::RadarExtraAlerts.extra?(a)

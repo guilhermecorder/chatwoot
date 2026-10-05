@@ -103,8 +103,8 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     # item 310: o reforço sai pela mesma caixa em que o lembrete saiu
     sent_by = entry[Crm::AppointmentReminderFollowup.inbox_key(regua)]
     inbox = account.inboxes.find_by(id: partner ? rcfg.dig('partner', 'inbox_id') : (sent_by || rcfg['inbox_id']))
-    template = followup_template(rcfg, partner)
-    inbox, template = followup_route(account, rcfg, inbox, template) if !partner && inbox && template
+    # 🎯 item 327: o reforço também tem modelo personalizado por médico / tipo de atendimento
+    inbox, template = partner ? [inbox, followup_template(rcfg, true)] : followup_route(account, rcfg, inbox, task)
     return nil if inbox.nil? || template.nil?
     return nil unless claim_followup!(contact, task, regua, number, now_sp)
 
@@ -125,7 +125,7 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
       return nil
     end
 
-    entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox)
+    entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox, model: template['model'])
       .merge('number' => number, 'at' => now_sp.iso8601)
   end
 
@@ -181,20 +181,18 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
   end
 
   # item 314: reforço pela outra caixa usa o modelo do reforço escolhido
-  # para ela; sem ele, o reforço sai pela caixa padrão com o modelo padrão
-  def followup_route(account, rcfg, inbox, template)
-    return [inbox, template] if inbox.id == rcfg['inbox_id'].to_i
+  # para ela; sem ele, o reforço sai pela caixa padrão com o modelo padrão.
+  # 🎯 item 327: em cada caixa, o modelo personalizado (médico / tipo de
+  # atendimento) do reforço vem antes do padrão dela.
+  def followup_route(account, rcfg, inbox, task)
+    return [nil, nil] if inbox.nil?
 
-    own = followup_template_in(rcfg, inbox)
-    own ? [inbox, own] : [account.inboxes.find_by(id: rcfg['inbox_id']), template]
-  end
-
-  # modelo do reforço escolhido para ESTA caixa (nil = não escolhido)
-  def followup_template_in(rcfg, inbox)
-    own = inbox_config(rcfg, inbox)['followup']
-    return nil unless own.is_a?(Hash) && own['template_params'].present?
-
-    { 'template_params' => own['template_params'], 'message_preview' => own['message_preview'] }
+    unless inbox.id == rcfg['inbox_id'].to_i
+      own = Crm::ReminderModels.followup(inbox_config(rcfg, inbox), task)
+      return [inbox, own] if own
+    end
+    base = Crm::ReminderModels.followup(rcfg, task)
+    [base && account.inboxes.find_by(id: rcfg['inbox_id']), base]
   end
 
   # grava a marca ANTES de enviar, dentro da trava; false = outro já pegou

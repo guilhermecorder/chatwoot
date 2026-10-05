@@ -9,6 +9,7 @@
 #  cancel_reason       :string
 #  canceled_at         :datetime
 #  cevico_born_via     :string
+#  charges             :jsonb            not null
 #  color               :string
 #  comments            :jsonb            not null
 #  completed_at        :datetime
@@ -21,6 +22,7 @@
 #  indicated_procedure :string
 #  modality            :string
 #  origin              :string
+#  particular          :boolean          default(FALSE), not null
 #  phone               :string
 #  priority            :integer          default("medium"), not null
 #  procedure           :string
@@ -136,6 +138,11 @@ class Task < ApplicationRecord
 
   def partner_origin?
     origin == 'oftalmofacil'
+  end
+
+  # 💰 item 324 (05/10): valores lançados à mão no card (com quem lançou)
+  def assign_charges(list, user)
+    self.charges = Crm::AppointmentPrice.stamp_charges(charges, list, user)
   end
 
   # 🏷️ item 322 (04/10): o agendamento nasce carimbado com a FONTE (de quem é o

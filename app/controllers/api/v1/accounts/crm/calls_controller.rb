@@ -33,6 +33,12 @@ class Api::V1::Accounts::Crm::CallsController < Api::V1::Accounts::BaseControlle
                                                   period: params[:preset].presence || 'month').overview
   end
 
+  # 🔒 item 325: a ligação perdida que está travando a MINHA tela (nil = livre)
+  def lock
+    call = Crm::Calls::CallbackLock.pending_for(Current.account, Current.user)
+    render json: { lock: call && Crm::Calls::CallbackLock.payload(call) }
+  end
+
   # marca uma perdida como retornada (ligou de volta por fora / mandou mensagem)
   def returned
     return render json: { error: 'Só ligações já encerradas podem ser marcadas.' }, status: :unprocessable_entity unless @call.final?

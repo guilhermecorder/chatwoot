@@ -26,12 +26,14 @@ class Crm::Calls::RadarAlert
   # o aviso continua valendo? (usado pelo radar_ping e pela limpeza do Radar)
   def self.still_open?(account, alert)
     created = Time.zone.parse(alert['created_at'].to_s)
-    return false if created.nil? || created < TTL.ago
+    return false if created.nil? || created < (alert['lock'] == true ? Crm::Calls::CallbackLock::TTL : TTL).ago
 
     call = Crm::Call.find_by(account_id: account.id, id: alert['call_id'])
-    return false if call.nil? || returned?(call)
+    return false if call.nil?
+    # 🔒 item 325: ligação travada só sai da lista quando foi RETORNADA por ligação
+    return !Crm::Calls::CallbackLock.done?(call) if alert['lock'] == true
 
-    true
+    !returned?(call)
   rescue ArgumentError
     false
   end
@@ -70,7 +72,7 @@ class Crm::Calls::RadarAlert
 
   private
 
-  def build
+  def build # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     contact = @call.contact
     {
       'kind' => KIND, 'call_id' => @call.id,
@@ -80,9 +82,15 @@ class Crm::Calls::RadarAlert
       'phone' => contact&.phone_number || "+#{@call.wa_id}",
       'stage_name' => 'Ligação perdida',
       'motivo' => motivo, 'acao' => acao,
-      'user_id' => nil, 'user_name' => nil,
+      # 🔒 item 325: com a trava, o aviso é do RESPONSÁVEL pela coluna do paciente
+      'user_id' => owner_id, 'user_name' => owner_id && @call.account.users.find_by(id: owner_id)&.available_name,
+      'lock' => (true if owner_id.present?),
       'created_at' => Time.current.iso8601
-    }
+    }.compact
+  end
+
+  def owner_id
+    Crm::Calls::CallbackLock.locked_user_id(@call)
   end
 
   def motivo
@@ -92,6 +100,8 @@ class Crm::Calls::RadarAlert
   end
 
   def acao
+    return 'Ligue de volta para o paciente — a tela de quem responde por esta etapa fica travada até o retorno.' if owner_id.present?
+
     'Vale retornar logo: abra a conversa e use o botão Ligar (ou mande uma mensagem). ' \
       'Quem liga costuma estar pronto para decidir — o retorno rápido evita perder o agendamento.'
   end

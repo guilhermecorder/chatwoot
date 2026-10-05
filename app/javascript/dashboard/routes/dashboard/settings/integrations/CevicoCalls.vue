@@ -35,6 +35,10 @@ const form = ref({
   record: true,
   transcribe: true,
   permission_message: DEFAULT_PERMISSION_MESSAGE,
+  // 🔒 item 325: trava da ligação + quem responde por cada coluna do CRM
+  lock: { enabled: false, after_seconds: 5, attempts: 2, exclusive: false },
+  stage_owners: {},
+  default_owner: null,
 });
 
 const callsConfig = computed(() => settings.value?.calls ?? {});
@@ -72,8 +76,42 @@ const fillForm = () => {
     record: c.record !== false,
     transcribe: c.transcribe !== false,
     permission_message: c.permission_message || DEFAULT_PERMISSION_MESSAGE,
+    lock: {
+      enabled: Boolean(c.lock?.enabled),
+      after_seconds: Number(c.lock?.after_seconds) || 5,
+      attempts: Number(c.lock?.attempts) || 2,
+      exclusive: Boolean(c.lock?.exclusive),
+    },
+    stage_owners: { ...(c.stage_owners || {}) },
+    default_owner: c.default_owner || null,
   };
 };
+
+// 🔒 item 325: colunas do CRM (por funil) para escolher o responsável de cada uma
+const pipelines = useMapGetter('crm/getPipelines');
+const stageGroups = computed(() =>
+  (pipelines.value || []).map(p => ({
+    id: p.id,
+    name: p.name,
+    stages: [...(p.stages || [])].sort((a, b) => a.position - b.position),
+  }))
+);
+// coluna ainda sem escolha aparece como "— ninguém —" (e não em branco)
+watch(
+  stageGroups,
+  groups => {
+    groups.forEach(g =>
+      g.stages.forEach(st => {
+        if (form.value.stage_owners[st.id] === undefined)
+          form.value.stage_owners[st.id] = null;
+      })
+    );
+  },
+  { immediate: true }
+);
+const ownersCount = computed(
+  () => Object.values(form.value.stage_owners).filter(Boolean).length
+);
 
 const whatsappInboxes = computed(() =>
   (inboxes.value || []).filter(
@@ -166,6 +204,7 @@ onMounted(async () => {
       store.dispatch('crm/fetchSettings'),
       store.dispatch('agents/get'),
       store.dispatch('inboxes/get'),
+      store.dispatch('crm/fetchPipelines'),
     ]);
   } catch {
     // a tela abre mesmo assim, com o que tiver
@@ -196,6 +235,19 @@ const payload = () => ({
   record: form.value.record,
   transcribe: form.value.transcribe,
   permission_message: form.value.permission_message.trim(),
+  lock: {
+    enabled: form.value.lock.enabled,
+    after_seconds: Math.min(
+      30,
+      Math.max(3, Number(form.value.lock.after_seconds) || 5)
+    ),
+    attempts: Math.min(3, Math.max(1, Number(form.value.lock.attempts) || 2)),
+    exclusive: form.value.lock.exclusive,
+  },
+  stage_owners: Object.fromEntries(
+    Object.entries(form.value.stage_owners).filter(([, userId]) => userId)
+  ),
+  default_owner: form.value.default_owner || null,
 });
 
 const hasInbox = computed(() => form.value.inboxes.some(e => e.inbox_id));
@@ -571,6 +623,151 @@ const inputClass =
                   {{ metaErrorFor(entry) || metaFor(entry).error }}
                 </span>
               </div>
+            </div>
+          </div>
+
+          <!-- 🔒 item 325: Trava e responsáveis -->
+          <div
+            class="rounded-xl border border-n-weak bg-n-solid-1 p-4 space-y-4"
+          >
+            <div>
+              <h3 class="text-base font-bold text-n-slate-12">
+                Trava e responsáveis
+              </h3>
+              <p class="text-xs text-n-slate-10 mt-0.5">
+                Cada etapa do CRM tem uma pessoa que responde pelas ligações dos
+                pacientes que estão nela. Com a trava ligada, a tela dessa
+                pessoa só libera quando a ligação for atendida ou retornada.
+              </p>
+            </div>
+            <label class="flex items-start gap-3 cursor-pointer">
+              <input v-model="form.lock.enabled" type="checkbox" class="mt-1" />
+              <span>
+                <span class="text-sm font-medium text-n-slate-12 block">
+                  Travar a tela do responsável
+                </span>
+                <span class="text-xs text-n-slate-10">
+                  Tocando: trava depois de alguns segundos chamando, até atender
+                  ou recusar. Perdida: trava até ligar de volta.
+                </span>
+              </span>
+            </label>
+            <div
+              v-if="form.lock.enabled"
+              class="grid grid-cols-1 sm:grid-cols-2 gap-3"
+            >
+              <label class="block">
+                <span class="text-xs font-semibold text-n-slate-11 block mb-1">
+                  Trava depois de quantos segundos chamando
+                </span>
+                <input
+                  v-model.number="form.lock.after_seconds"
+                  type="number"
+                  min="3"
+                  max="30"
+                  class="w-full rounded-lg border border-n-weak bg-n-solid-2 px-3 py-2 text-sm text-n-slate-12"
+                />
+              </label>
+              <label class="block">
+                <span class="text-xs font-semibold text-n-slate-11 block mb-1">
+                  Ligações de volta até liberar (paciente não atendeu)
+                </span>
+                <input
+                  v-model.number="form.lock.attempts"
+                  type="number"
+                  min="1"
+                  max="3"
+                  class="w-full rounded-lg border border-n-weak bg-n-solid-2 px-3 py-2 text-sm text-n-slate-12"
+                />
+              </label>
+              <label
+                class="flex items-start gap-3 cursor-pointer sm:col-span-2"
+              >
+                <input
+                  v-model="form.lock.exclusive"
+                  type="checkbox"
+                  class="mt-1"
+                />
+                <span>
+                  <span class="text-sm font-medium text-n-slate-12 block">
+                    Tocar só para o responsável
+                  </span>
+                  <span class="text-xs text-n-slate-10">
+                    Desligado (recomendado): o responsável toca primeiro e, se
+                    não atender, os outros da caixa tocam depois da espera de
+                    sempre. Ligado: ninguém mais ouve — se ele estiver fora, a
+                    ligação cai como perdida e fica travada para ele.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div>
+              <p class="text-sm font-semibold text-n-slate-12">
+                Quem responde por cada etapa
+                <span class="text-xs font-normal text-n-slate-10">
+                  · {{ ownersCount }} definida(s)
+                </span>
+              </p>
+              <p class="text-xs text-n-slate-10 mb-2">
+                Vale a etapa em que o card do paciente está na hora da ligação.
+                Paciente ainda sem card conta como a primeira etapa do funil
+                principal.
+              </p>
+              <div
+                v-for="group in stageGroups"
+                :key="group.id"
+                class="mb-3 last:mb-0"
+              >
+                <p
+                  class="text-[11px] font-bold uppercase tracking-wide text-n-slate-10 mb-1"
+                >
+                  {{ group.name }}
+                </p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label
+                    v-for="stage in group.stages"
+                    :key="stage.id"
+                    class="flex items-center gap-2 rounded-lg border border-n-weak bg-n-solid-2 px-3 py-2"
+                  >
+                    <span
+                      class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      :style="{ background: stage.color || '#94A3B8' }"
+                    />
+                    <span
+                      class="text-sm text-n-slate-12 flex-1 min-w-0 truncate"
+                      :title="stage.name"
+                    >
+                      {{ stage.name }}
+                    </span>
+                    <select
+                      v-model="form.stage_owners[stage.id]"
+                      class="rounded-md border border-n-weak bg-n-solid-1 px-2 py-1 text-xs text-n-slate-12 max-w-[9.5rem]"
+                    >
+                      <option :value="null">— ninguém —</option>
+                      <option v-for="a in agentList" :key="a.id" :value="a.id">
+                        {{ a.name }}
+                      </option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <label class="block mt-3">
+                <span class="text-xs font-semibold text-n-slate-11 block mb-1">
+                  Responsável padrão (etapa sem ninguém definido)
+                </span>
+                <select
+                  v-model="form.default_owner"
+                  class="w-full sm:w-72 rounded-lg border border-n-weak bg-n-solid-2 px-3 py-2 text-sm text-n-slate-12"
+                >
+                  <option :value="null">
+                    — ninguém (sem trava nessas etapas) —
+                  </option>
+                  <option v-for="a in agentList" :key="a.id" :value="a.id">
+                    {{ a.name }}
+                  </option>
+                </select>
+              </label>
             </div>
           </div>
 

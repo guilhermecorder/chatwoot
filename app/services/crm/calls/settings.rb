@@ -146,6 +146,9 @@ class Crm::Calls::Settings
       ring_first_user_ids: ring_first_user_ids, ring_cascade_seconds: ring_cascade_seconds,
       business_hours_only: business_hours_only?, hours: hours,
       permission_message: permission_message, record: record?, transcribe: transcribe?,
+      # 🔒 item 325: trava + responsável por coluna
+      lock: Crm::Calls::CallbackLock.config(account, raw), stage_owners: raw['stage_owners'] || {},
+      default_owner: raw['default_owner'],
       meta: meta, updated_at: raw['updated_at']
     }
   end

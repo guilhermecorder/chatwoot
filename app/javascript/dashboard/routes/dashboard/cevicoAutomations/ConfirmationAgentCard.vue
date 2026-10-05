@@ -13,6 +13,7 @@ import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import InboxesAPI from 'dashboard/api/inboxes';
+import ReminderVariants from './ReminderVariants.vue';
 
 const props = defineProps({
   view: { type: String, default: 'cards' }, // 'cards' | 'list'
@@ -120,6 +121,22 @@ const partnerFrom = c => ({
 // entrada… selecionar exatamente a mensagem modelo correta daquela caixa"):
 // cada caixa marcada tem o SEU bloco de modelos (unidade, geral e reforço),
 // escolhidos da lista daquele número. Nada de "mesmo nome" entre caixas.
+// 🎯 item 327 (05/10): MODELOS PERSONALIZADOS por tipo de atendimento e por
+// médico — cada bloco de modelos (o do lembrete e o de cada caixa) tem a sua
+// lista; a edição fica no ReminderVariants.vue
+const variantsFrom = list =>
+  (list || []).map((v, i) => ({
+    id: v.id || `v${i}`,
+    modality: v.modality || '',
+    doctor: v.doctor || '',
+    slots: {
+      paulista: slotFrom(v.units?.paulista),
+      tatuape: slotFrom(v.units?.tatuape),
+      geral: slotFrom(v.template_params ? v : null),
+    },
+    followup: slotFrom(v.followup?.template_params ? v.followup : null),
+    open: false,
+  }));
 const inboxCfgFrom = c => ({
   slots: {
     paulista: slotFrom(c?.units?.paulista),
@@ -127,6 +144,7 @@ const inboxCfgFrom = c => ({
     geral: slotFrom(c?.template_params ? c : null),
   },
   followup: slotFrom(c?.followup?.template_params ? c.followup : null),
+  variants: variantsFrom(c?.variants),
 });
 const byInboxFrom = raw =>
   Object.fromEntries(
@@ -177,6 +195,7 @@ const hydrate = s => {
         },
         partner: partnerFrom(c.partner),
         followup: followupFrom(c.followup),
+        variants: variantsFrom(c.variants), // 🎯 item 327
         // item 314: modelos escolhidos para cada caixa de "também envia por"
         by_inbox: byInboxFrom(c.by_inbox),
       };
@@ -318,7 +337,33 @@ const payloadIn = (inboxId, slot) => {
 const slotPayload = (rule, slotKey) =>
   payloadIn(rule.inbox_id, rule.slots[slotKey]);
 const hasTemplate = rule =>
-  ['paulista', 'tatuape', 'geral'].some(k => rule.slots[k].name);
+  ['paulista', 'tatuape', 'geral'].some(k => rule.slots[k].name) ||
+  (rule.variants || []).some(v =>
+    ['paulista', 'tatuape', 'geral'].some(k => v.slots[k].name)
+  );
+// 🎯 item 327: os modelos personalizados de um bloco, do jeito que o servidor guarda
+const variantsPayload = (inboxId, variants) =>
+  (variants || [])
+    .filter(v => v.modality || v.doctor)
+    .map(v => {
+      const units = {};
+      UNITS.forEach(u => {
+        const p = payloadIn(inboxId, v.slots[u.key]);
+        if (p) units[u.key] = p;
+      });
+      const fu = payloadIn(inboxId, v.followup);
+      return {
+        id: v.id,
+        modality: v.modality || null,
+        doctor: v.doctor || null,
+        units,
+        ...(payloadIn(inboxId, v.slots.geral) || {}),
+        ...(fu ? { followup: fu } : {}),
+      };
+    })
+    .filter(
+      v => Object.keys(v.units).length || v.template_params || v.followup
+    );
 
 // ── lembretes ─────────────────────────────────────────────────────────────
 const usedDays = computed(() => rules.value.map(r => r.days));
@@ -490,6 +535,7 @@ const buildPayload = () => {
         ...(payloadIn(rule.partner.inbox_id, rule.partner.slot) || {}),
       },
       followup: followupPayload(rule),
+      variants: variantsPayload(rule.inbox_id, rule.variants),
       by_inbox: byInboxPayload(rule),
       ...(geral || {}),
     };
@@ -508,7 +554,12 @@ const byInboxPayload = rule => {
     });
     const geral = payloadIn(id, c.slots.geral);
     const fu = payloadIn(id, c.followup);
-    out[id] = { units, ...(geral || {}), ...(fu ? { followup: fu } : {}) };
+    out[id] = {
+      units,
+      ...(geral || {}),
+      ...(fu ? { followup: fu } : {}),
+      variants: variantsPayload(id, c.variants),
+    };
   });
   return out;
 };
@@ -1289,6 +1340,16 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                       />
                     </div>
                   </div>
+                  <!-- 🎯 item 327: modelos personalizados DESTA caixa -->
+                  <ReminderVariants
+                    :variants="inboxCfg(rule, i.id).variants"
+                    :templates="templatesIn(i.id)"
+                    :suggested-vars="SUGGESTED_VARS"
+                    :uid="rule.uid + 'in' + i.id"
+                    :with-followup="rule.followup.enabled"
+                    :box-name="i.name"
+                    @touch="touch"
+                  />
                 </div>
                 <p class="text-[10px] text-n-slate-9 mt-1">
                   Com a caixa marcada, o lembrete sai por onde o paciente
@@ -1373,6 +1434,16 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                 </template>
               </div>
             </div>
+            <!-- 🎯 item 327: modelos personalizados (tipo de atendimento / médico) da caixa de cima -->
+            <ReminderVariants
+              v-if="rule.inbox_id"
+              :variants="rule.variants"
+              :templates="templatesOf(rule)"
+              :suggested-vars="SUGGESTED_VARS"
+              :uid="rule.uid + 'top'"
+              :with-followup="rule.followup.enabled"
+              @touch="touch"
+            />
             <p v-if="rule.inbox_id" class="text-[10px] text-n-slate-9">
               Variáveis: <code v-pre>{{ nome }}</code> só o primeiro nome do
               paciente · <code v-pre>{{ nome_completo }}</code> nome inteiro da
@@ -1382,7 +1453,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
               padrão · <code v-pre>{{ unidade }}</code> Av. Paulista/Tatuapé ·
               <code v-pre>{{ contact.name }}</code> nome do cadastro. A consulta
               usa o modelo da unidade dela (consulta sem unidade na Agenda = Av.
-              Paulista); sem modelo da unidade, o geral.
+              Paulista); sem modelo da unidade, o geral. Modelo personalizado
+              (tipo de atendimento ou médico) vem antes do padrão.
               <b>Campo em branco</b> = dado da Agenda, nesta ordem: 1 primeiro
               nome, 2 data, 3 horário, 4 valor.
             </p>
@@ -1774,6 +1846,13 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                 <span class="text-n-slate-9"
                   >{{ e.template ? `(${e.template})` : ''
                   }}{{ e.inbox ? ` · ${e.inbox}` : '' }}</span
+                >
+                <span
+                  v-if="e.model"
+                  class="font-semibold"
+                  style="color: #7c3aed"
+                  title="Saiu um modelo personalizado (tipo de atendimento / médico)"
+                  >· personalizado: {{ e.model }}</span
                 >
                 <span
                   v-if="e.general"

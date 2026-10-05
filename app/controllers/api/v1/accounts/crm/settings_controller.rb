@@ -717,6 +717,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     apply_call_flags(calls)
     apply_call_targets(calls)
     apply_call_texts(calls)
+    # 🔒 item 325: trava da ligação + responsável por coluna do CRM
+    calls.merge!(Crm::Calls::CallbackLock.sanitize(Current.account, params)) if params.key?(:lock)
     calls['updated_at'] = Time.current.iso8601
     cfg['calls'] = calls
     crm_settings.update!(agenda_config: cfg)
@@ -934,6 +936,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['surgery_locations'] = Array(params[:surgery_locations]).map do |l|
         l.permit(:key, :label).to_h
       end.select { |l| l['label'].present? }
+    end
+    # 💰 item 324: valores pré-configurados por tipo de atendimento (só admin)
+    if params.key?(:appointment_prices) && Current.account_user.administrator?
+      cfg[Crm::AppointmentPrice::KEY] = Crm::AppointmentPrice.sanitize(params[:appointment_prices])
     end
     # 🔬 janela de EXAMES (unidade + dia + horário + bloco) — 23/09
     if params.key?(:exam_windows)
@@ -1275,6 +1281,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       surgery_locations: cfg['surgery_locations'] || [],
       surgery_windows: cfg['surgery_windows'] || [],
       exam_windows: cfg['exam_windows'] || [],
+      appointment_prices: Crm::AppointmentPrice::DEFAULTS.merge(cfg[Crm::AppointmentPrice::KEY] || {}), # 💰 item 324
       agenda_theme: cfg['theme'],
       panel_assignments: cfg['panel_assignments'] || {},
       panel_owners: panel_owners_json(cfg),
@@ -1412,6 +1419,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'weekend_bridge' => ActiveModel::Type::Boolean.new.cast(r[:weekend_bridge]) == true,
       'modalities' => Array(r[:modalities]).map(&:to_s).select { |m| %w[avaliacao retorno teleconsulta exames pos_op].include?(m) }.presence,
       'units' => units.presence,
+      'variants' => reminder_variants(r[:variants]).presence, # 🎯 item 327
       'by_inbox' => sanitize_reminder_by_inbox(r[:by_inbox], r[:inbox_ids]),
       'partner' => sanitize_reminder_partner(r[:partner]),
       'followup' => sanitize_reminder_followup(r[:followup])
@@ -1434,8 +1442,31 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'template_params' => reminder_template_params(cfg[:template_params]),
       'message_preview' => cfg[:message_preview].to_s[0, 2000].presence,
       'units' => reminder_units(cfg[:units]).presence,
+      'variants' => reminder_variants(cfg[:variants]).presence, # 🎯 item 327
       'followup' => reminder_slot(cfg[:followup])
     }.compact.presence
+  end
+
+  # 🎯 item 327: MODELOS PERSONALIZADOS de um bloco — por tipo de atendimento,
+  # por médico, ou os dois. Sem tipo nem médico, ou sem nenhum modelo, não entra.
+  def reminder_variants(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    Array(raw).first(Crm::ReminderModels::MAX_VARIANTS).filter_map do |v|
+      next unless v.is_a?(ActionController::Parameters)
+
+      variant = {
+        'id' => v[:id].to_s.gsub(/[^a-z0-9_-]/i, '')[0, 24].presence || SecureRandom.hex(4),
+        'modality' => (Crm::ReminderModels::MODALITIES.include?(v[:modality].to_s) ? v[:modality].to_s : nil),
+        'doctor' => v[:doctor].to_s.strip[0, 80].presence,
+        'template_params' => reminder_template_params(v[:template_params]),
+        'message_preview' => v[:message_preview].to_s[0, 2000].presence,
+        'units' => reminder_units(v[:units]).presence,
+        'followup' => reminder_slot(v[:followup])
+      }.compact
+      next if variant['modality'].nil? && variant['doctor'].nil?
+      next unless Crm::ReminderModels.any?(variant) || variant['followup']
+
+      variant
+    end
   end
 
   # { 'template_params', 'message_preview' } de um bloco de modelo, ou nil
@@ -1997,6 +2028,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       surgery_locations: (s.agenda_config || {})['surgery_locations'] || [],
       surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
       exam_windows: (s.agenda_config || {})['exam_windows'] || [],
+      appointment_prices: Crm::AppointmentPrice::DEFAULTS.merge((s.agenda_config || {})[Crm::AppointmentPrice::KEY] || {}), # 💰 item 324
       agenda_theme: (s.agenda_config || {})['theme'],
       # 🕐 janela de envio dos robôs de follow-up (item 147; padrão 08h–20h)
       followup_hours: (s.agenda_config || {})['followup_hours'] || { 'start' => 8, 'end' => 20 },

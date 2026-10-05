@@ -474,3 +474,107 @@ export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set()
 
   return { total, filled, freeSlots, byModality, pct: total ? Math.round((filled / total) * 100) : 0 };
 };
+
+// ── 💰 item 324 (05/10): VALOR do agendamento ─────────────────────────
+// O servidor (Crm::AppointmentPrice) é quem decide o valor que vai na
+// mensagem; aqui é a MESMA regra para o card mostrar antes de salvar:
+// lançado à mão → escrito na observação → pré-configurado do tipo
+// (particular por médico, exames, avaliação, retorno, pós-op) → valor padrão.
+export const moneyToNumber = text => {
+  const t = String(text ?? '')
+    .trim()
+    .replace(/^R\$\s*/i, '');
+  if (/^\d+\.\d{1,2}$/.test(t)) return Number(t);
+  if (!/^\d[\d.]*(,\d{1,2})?$/.test(t)) return null;
+  return Number(t.replace(/\./g, '').replace(',', '.'));
+};
+export const formatMoney = n =>
+  Number(n).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+// "150" → "R$ 150,00" · "sem custo" → "sem custo"
+export const priceLabel = text => {
+  const n = moneyToNumber(text);
+  return n === null ? String(text ?? '') : `R$ ${formatMoney(n)}`;
+};
+const foldText = s =>
+  String(s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
+const sumPrices = values => {
+  const numbers = values.map(moneyToNumber).filter(n => n !== null);
+  if (!numbers.length) return String(values[0] ?? '');
+  return formatMoney(numbers.reduce((a, b) => a + b, 0));
+};
+const PRICE_TYPES = ['avaliacao', 'retorno', 'pos_op', 'teleconsulta'];
+export const PRICE_TYPE_LABELS = {
+  avaliacao: 'Avaliação',
+  retorno: 'Retorno',
+  pos_op: 'Pós-operatório (1º)',
+  teleconsulta: 'Teleconsulta',
+};
+// o pré-configurado do tipo: { text, label } ou null
+export const presetAppointmentPrice = (prices, appt) => {
+  if (!prices || appt.kind === 'cirurgias') return null;
+  if (appt.particular && appt.doctor) {
+    const hit = Object.entries(prices.particular || {}).find(
+      ([doctor]) => foldText(doctor) === foldText(appt.doctor)
+    );
+    if (hit && hit[1])
+      return { text: hit[1], label: `particular · ${appt.doctor}` };
+  }
+  if (appt.kind === 'exames' || appt.modality === 'exames') {
+    const wanted = foldText(appt.procedure);
+    const hits = (prices.exames || []).filter(
+      e => e.price && e.name && wanted.includes(foldText(e.name))
+    );
+    if (!hits.length) return null;
+    return {
+      text: sumPrices(hits.map(e => e.price)),
+      label: hits.map(e => e.name).join(' + '),
+    };
+  }
+  const type = PRICE_TYPES.includes(appt.modality)
+    ? appt.modality
+    : 'avaliacao';
+  const text = prices[type];
+  return text ? { text, label: PRICE_TYPE_LABELS[type].toLowerCase() } : null;
+};
+// o valor que VALE para o agendamento: { text, source, label }
+export const effectiveAppointmentPrice = (prices, appt) => {
+  const manual = (appt.charges || []).filter(c =>
+    String(c.amount || '').trim()
+  );
+  if (manual.length)
+    return {
+      text: sumPrices(manual.map(c => c.amount)),
+      source: 'manual',
+      label: 'lançado à mão neste card',
+    };
+  const note =
+    /valor\s*:\s*(?:R\$\s*)?([\d.]+(?:,\d{1,2})?)/i.exec(
+      appt.description || ''
+    ) || /R\$\s*([\d.]+(?:,\d{1,2})?)/i.exec(appt.description || '');
+  if (note)
+    return {
+      text: sumPrices([note[1]]),
+      source: 'observacao',
+      label: 'escrito na observação',
+    };
+  if (appt.kind === 'cirurgias') return null;
+  const preset = presetAppointmentPrice(prices, appt);
+  if (preset)
+    return {
+      ...preset,
+      source: 'preset',
+      label: `pré-configurado · ${preset.label}`,
+    };
+  return {
+    text: '',
+    source: 'padrao',
+    label: 'valor padrão do lembrete de confirmação',
+  };
+};

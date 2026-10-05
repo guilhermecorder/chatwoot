@@ -135,8 +135,15 @@ RSpec.describe Crm::AppointmentReminderSendJob do
       outra = instance_double(Inbox, id: 77)
       proprio = { 'template_params' => { 'name' => 'reforco_ig' }, 'message_preview' => 'IG' }
 
-      expect(job.send(:followup_template_in, { 'by_inbox' => {} }, outra)).to be_nil
-      expect(job.send(:followup_template_in, { 'by_inbox' => { '77' => { 'followup' => proprio } } }, outra)).to eq(proprio)
+      retorno = Task.new(task_type: 'consulta', modality: 'retorno', unit: 'paulista')
+      # item 327: quem escolhe é Crm::ReminderModels, no bloco de modelos DAQUELA caixa
+      expect(Crm::ReminderModels.followup(job.send(:inbox_config, { 'by_inbox' => {} }, outra), retorno)).to be_nil
+      expect(Crm::ReminderModels.followup(job.send(:inbox_config, { 'by_inbox' => { '77' => { 'followup' => proprio } } }, outra), retorno))
+        .to eq(proprio)
+      do_retorno = proprio.merge('template_params' => { 'name' => 'reforco_ig_retorno' })
+      bloco = { 'by_inbox' => { '77' => { 'followup' => proprio, 'variants' => [{ 'modality' => 'retorno', 'followup' => do_retorno }] } } }
+      expect(Crm::ReminderModels.followup(job.send(:inbox_config, bloco, outra), retorno))
+        .to include('template_params' => { 'name' => 'reforco_ig_retorno' }, 'model' => 'Retorno')
     end
   end
 
@@ -407,6 +414,79 @@ RSpec.describe Crm::AppointmentReminderSendJob do
 
     expect(sources).to eq([%w[INSTAGRAM confirma_ig_geral]])
     expect(settings.reload.agenda_config.dig('appointment_reminders_state', 'd2', 'sent').last['general']).to be(true)
+  end
+
+  # item 327 (05/10): "vamos precisar de modelos de mensagens específicos para quando for RETORNO…
+  # e também quero poder personalizar POR MÉDICO"
+  describe 'modelos personalizados por tipo de atendimento e por médico' do
+    let(:slot) { ->(name) { { 'template_params' => tpl.call(name), 'message_preview' => "#{name} {{1}}" } } }
+    let(:sources) { [] }
+    let(:variants) do
+      [{ 'id' => 'ret', 'modality' => 'retorno', 'units' => { 'paulista' => slot.call('retorno_paulista'), 'tatuape' => slot.call('retorno_tatuape') } },
+       { 'id' => 'rob', 'doctor' => 'Dra. Roberta Negri', 'units' => { 'tatuape' => slot.call('roberta_tatuape') } },
+       { 'id' => 'robret', 'modality' => 'retorno', 'doctor' => 'dra. roberta negri' }.merge(slot.call('roberta_retorno_geral'))]
+    end
+
+    before do
+      allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+        sources << [args[4].to_s[/\A\S+/], args[1].name]
+        m.call(*args)
+      end
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('variants' => variants) } })
+    end
+
+    def sent_models
+      settings.reload.agenda_config.dig('appointment_reminders_state', 'd2', 'sent').to_h { |e| [e['name'], [e['template'], e['model']]] }
+    end
+
+    it 'médico + tipo vence médico, que vence tipo, que vence o padrão; a unidade continua valendo dentro de cada um', :aggregate_failures do
+      consulta(contact_named('Avaliacao Paulista', '+5511999990101'), '2026-09-28 08:00')
+      consulta(contact_named('Retorno Tatuape', '+5511999990102'), '2026-09-28 08:10', unit: 'tatuape', modality: 'retorno')
+      consulta(contact_named('Roberta Avaliacao', '+5511999990103'), '2026-09-28 08:20', unit: 'tatuape', doctor: 'Dra. Roberta Negri')
+      consulta(contact_named('Roberta Retorno', '+5511999990104'), '2026-09-28 08:30', unit: 'tatuape', modality: 'retorno',
+                                                                                       doctor: 'Dra. Roberta Negri')
+      # médico personalizado só no Tatuapé: na Paulista ela cai no padrão da Paulista
+      consulta(contact_named('Roberta Paulista', '+5511999990105'), '2026-09-28 08:40', doctor: 'Dra. Roberta Negri')
+
+      described_class.perform_now(now)
+
+      expect(sent_models).to eq(
+        'Avaliacao Paulista' => ['confirmacao_consulta_paulista', nil],
+        'Retorno Tatuape' => %w[retorno_tatuape Retorno],
+        'Roberta Avaliacao' => ['roberta_tatuape', 'Dra. Roberta Negri'],
+        'Roberta Retorno' => ['roberta_retorno_geral', 'Retorno · dra. roberta negri'],
+        'Roberta Paulista' => ['confirmacao_consulta_paulista', nil]
+      )
+    end
+
+    it 'entre duas caixas ganha o modelo mais específico; empate fica na caixa da conversa', :aggregate_failures do
+      instagram = create(:inbox, account: account, name: 'INSTAGRAM')
+      ig = { 'units' => { 'paulista' => slot.call('ig_paulista'), 'tatuape' => slot.call('ig_tatuape') } }
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('variants' => variants, 'inbox_ids' => [instagram.id],
+                                                                                          'by_inbox' => { instagram.id.to_s => ig }) } })
+      retorno = contact_named('Insta Retorno', '+5511999990111')
+      avaliacao = contact_named('Insta Avaliacao', '+5511999990112')
+      [retorno, avaliacao].each { |c| create(:conversation, account: account, inbox: instagram, contact: c) }
+      consulta(retorno, '2026-09-28 09:00', unit: 'tatuape', modality: 'retorno')
+      consulta(avaliacao, '2026-09-28 09:10', unit: 'tatuape')
+
+      described_class.perform_now(now)
+
+      # o Instagram não tem modelo de retorno: o retorno sai pela caixa padrão, com o modelo de retorno
+      expect(sources).to contain_exactly(['retorno_tatuape', inbox.name], %w[ig_tatuape INSTAGRAM])
+    end
+
+    it 'um lembrete só com modelos personalizados funciona; quem não se encaixa é pulado com o motivo', :aggregate_failures do
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.except('units').merge('variants' => variants.first(1)) } })
+      consulta(contact_named('So Retorno', '+5511999990121'), '2026-09-28 08:00', modality: 'retorno')
+      consulta(contact_named('Avaliacao Sem Modelo', '+5511999990122'), '2026-09-28 08:10')
+
+      described_class.perform_now(now)
+
+      state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+      expect(state['sent'].pluck('name', 'template')).to eq([['So Retorno', 'retorno_paulista']])
+      expect(state['skipped'].pluck('name', 'why')).to eq([['Avaliacao Sem Modelo', 'sem modelo para Av. Paulista']])
+    end
   end
 
   # item 320 (03/10): "a possibilidade de um envio manual, como esses casos, seria ótimo eu fazer um reenvio"
