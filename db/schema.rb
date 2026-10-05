@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_10_03_010000) do
+ActiveRecord::Schema[7.2].define(version: 2026_10_04_010000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -821,6 +821,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_03_010000) do
     t.jsonb "raw", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "cevico_source_id"
+    t.string "cevico_born_via"
     t.index ["account_id", "item_token"], name: "index_of_surgeries_unique_token", unique: true
     t.index ["account_id", "status_kind"], name: "idx_on_account_id_status_kind_028c0b09a6"
     t.index ["account_id", "surgery_date"], name: "idx_on_account_id_surgery_date_a7392a9e19"
@@ -928,6 +930,20 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_03_010000) do
     t.index ["account_id"], name: "index_cevico_short_links_on_account_id"
     t.index ["code"], name: "index_cevico_short_links_on_code", unique: true
     t.index ["expires_at"], name: "index_cevico_short_links_on_expires_at"
+  end
+
+  create_table "cevico_sources", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "key", null: false
+    t.string "name", null: false
+    t.string "kind", default: "partner", null: false
+    t.string "color"
+    t.integer "position", default: 0, null: false
+    t.boolean "active", default: true, null: false
+    t.jsonb "config", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "key"], name: "index_cevico_sources_on_account_id_and_key", unique: true
   end
 
   create_table "cevico_stock_items", force: :cascade do |t|
@@ -1223,6 +1239,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_03_010000) do
     t.string "country_code", default: ""
     t.boolean "blocked", default: false, null: false
     t.bigint "company_id"
+    t.bigint "cevico_source_id"
+    t.string "cevico_born_via"
     t.index "lower((email)::text), account_id", name: "index_contacts_on_lower_email_account_id"
     t.index ["account_id", "contact_type"], name: "index_contacts_on_account_id_and_contact_type"
     t.index ["account_id", "created_at"], name: "index_contacts_on_account_and_created_at"
@@ -1489,6 +1507,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_03_010000) do
     t.integer "duration_minutes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "cevico_source_id"
+    t.string "cevico_born_via"
     t.index ["crm_contact_id", "entered_at"], name: "index_crm_contact_stage_logs_on_crm_contact_id_and_entered_at"
     t.index ["crm_contact_id"], name: "index_crm_contact_stage_logs_on_crm_contact_id"
     t.index ["stage_id", "entered_at"], name: "index_crm_stage_logs_on_stage_and_entered_at"
@@ -1506,6 +1526,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_03_010000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.datetime "stage_moved_at"
+    t.bigint "cevico_source_id"
+    t.string "cevico_born_via"
     t.index ["assignee_id"], name: "index_crm_contacts_on_assignee_id"
     t.index ["contact_id", "pipeline_id"], name: "index_crm_contacts_on_contact_id_and_pipeline_id", unique: true
     t.index ["contact_id"], name: "index_crm_contacts_on_contact_id"
@@ -2272,6 +2294,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_03_010000) do
     t.string "origin"
     t.bigint "canceled_by_id"
     t.string "cancel_reason"
+    t.bigint "cevico_source_id"
+    t.string "cevico_born_via"
     t.index ["account_id", "external_ref"], name: "index_tasks_on_account_and_external_ref", unique: true, where: "(external_ref IS NOT NULL)"
     t.index ["account_id", "status"], name: "index_tasks_on_account_id_and_status"
     t.index ["account_id", "task_type", "created_at"], name: "index_tasks_on_account_type_created"
@@ -2432,6 +2456,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_03_010000) do
   add_foreign_key "cevico_people_profiles", "users"
   add_foreign_key "cevico_pillars", "accounts"
   add_foreign_key "cevico_short_links", "accounts"
+  add_foreign_key "cevico_sources", "accounts"
   add_foreign_key "cevico_stock_items", "accounts"
   add_foreign_key "cevico_stock_orders", "accounts"
   add_foreign_key "cevico_stock_orders", "cevico_stock_items", column: "stock_item_id"

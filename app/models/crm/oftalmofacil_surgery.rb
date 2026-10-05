@@ -5,41 +5,43 @@
 #
 # Table name: cevico_oftalmofacil_surgeries
 #
-#  id             :bigint           not null, primary key
-#  amount         :decimal(12, 2)
-#  applied_action :string
-#  applied_at     :datetime
-#  clinic_name    :string
-#  clinic_price   :decimal(12, 2)
-#  doctor_crm     :string
-#  eye            :string
-#  item_token     :string           not null
-#  match_via      :string
-#  of_created_at  :datetime
-#  of_modified_at :datetime
-#  paid_amount    :decimal(12, 2)
-#  patient_cpf    :string
-#  patient_email  :string
-#  patient_name   :string
-#  patient_phone  :string
-#  procedure_name :string
-#  procedure_type :string
-#  profit         :decimal(12, 2)
-#  provider_name  :string
-#  raw            :jsonb            not null
-#  rebate         :decimal(12, 2)
-#  status_kind    :string           default("outro"), not null
-#  status_label   :string
-#  surgery_date   :date
-#  surgery_hour   :string
-#  created_at     :datetime         not null
-#  updated_at     :datetime         not null
-#  account_id     :bigint           not null
-#  clinic_id      :integer
-#  contact_id     :bigint
-#  item_id        :integer
-#  scheduling_id  :integer
-#  status_id      :string
+#  id               :bigint           not null, primary key
+#  amount           :decimal(12, 2)
+#  applied_action   :string
+#  applied_at       :datetime
+#  cevico_born_via  :string
+#  clinic_name      :string
+#  clinic_price     :decimal(12, 2)
+#  doctor_crm       :string
+#  eye              :string
+#  item_token       :string           not null
+#  match_via        :string
+#  of_created_at    :datetime
+#  of_modified_at   :datetime
+#  paid_amount      :decimal(12, 2)
+#  patient_cpf      :string
+#  patient_email    :string
+#  patient_name     :string
+#  patient_phone    :string
+#  procedure_name   :string
+#  procedure_type   :string
+#  profit           :decimal(12, 2)
+#  provider_name    :string
+#  raw              :jsonb            not null
+#  rebate           :decimal(12, 2)
+#  status_kind      :string           default("outro"), not null
+#  status_label     :string
+#  surgery_date     :date
+#  surgery_hour     :string
+#  created_at       :datetime         not null
+#  updated_at       :datetime         not null
+#  account_id       :bigint           not null
+#  cevico_source_id :bigint
+#  clinic_id        :integer
+#  contact_id       :bigint
+#  item_id          :integer
+#  scheduling_id    :integer
+#  status_id        :string
 #
 # Indexes
 #
@@ -55,6 +57,10 @@
 #
 class Crm::OftalmofacilSurgery < ApplicationRecord
   self.table_name = 'cevico_oftalmofacil_surgeries'
+
+  # 🏷️ item 322: fornecedor da casa × parceiro vira fonte gravada (refaz se o fornecedor mudar)
+  include CevicoSourceStamped
+  before_update :cevico_stamp!, if: -> { will_save_change_to_provider_name? || cevico_source_id.nil? }
 
   belongs_to :account
   belongs_to :contact, class_name: '::Contact', optional: true

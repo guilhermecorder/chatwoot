@@ -14,9 +14,9 @@
 # O envio é MENSAGEM MODELO (Crm::SendTemplateService, o mesmo das
 # Campanhas) — chega mesmo com a janela de 24h fechada. Nos valores das
 # variáveis, {{hora}} vira o horário da consulta, {{unidade}} vira a casa
-# (Av. Paulista/Tatuapé), {{data}} a data dd/mm/aaaa, {{nome}} o nome do
-# paciente e {{valor}} o valor da avaliação; {{contact.name}} segue com o
-# Liquid do serviço.
+# (Av. Paulista/Tatuapé), {{data}} a data dd/mm/aaaa, {{nome}} o PRIMEIRO nome
+# do paciente (item 323), {{nome_completo}} o nome inteiro da Agenda e
+# {{valor}} o valor da avaliação; {{contact.name}} segue com o Liquid do serviço.
 #
 # A régua D-2 tem MODELO POR UNIDADE (a mensagem da Paulista tem endereço e
 # estacionamento; a do Tatuapé, outro endereço), pode rodar em SOMBRA (só
@@ -189,7 +189,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     return skip(run, task, partner ? 'Oftalmofácil: sem modelo' : "sem modelo para #{unit_label(task)}") if template.nil? && !shadow
 
     if shadow
-      run['sent'] << entry_for(task, contact, template: template&.dig('template_params', 'name'), partner: partner, inbox: inbox)
+      run['sent'] << entry_for(task, contact, template: template&.dig('template_params', 'name'), partner: partner, inbox: inbox,
+                                              general: template&.dig('general'))
       return
     end
 
@@ -209,7 +210,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
 
     # item 300: paciente do Oftalmofácil ganha o card no funil DELE (nunca no da CEVICO)
     Crm::PartnerFunnel.place!(account, contact, :booked) if partner
-    run['sent'] << entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox)
+    run['sent'] << entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox,
+                                            general: template['general'])
   rescue StandardError => e
     Rails.logger.error "[CEVICO lembretes] task #{task.id}: #{e.message}"
     skip(run, task, "erro: #{e.message.truncate(60)}")
@@ -303,7 +305,15 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     routed = routed_inbox(account, rcfg, contact, default_inbox)
     return [default_inbox, template] if routed.nil? || routed.id == default_inbox&.id
 
-    own = template_for(inbox_config(rcfg, routed), nil, task)
+    routed_cfg = inbox_config(rcfg, routed)
+    own_unit = unit_template(routed_cfg, task)
+    return [routed, own_unit] if own_unit
+    # 📍 item 323: o modelo da UNIDADE vence o "geral" — se a caixa da conversa
+    # só tem o geral e a caixa padrão tem o modelo da unidade da consulta, sai
+    # pela padrão (antes saía o geral da outra caixa, sem o endereço certo)
+    return [default_inbox, template] if unit_template(rcfg, task)
+
+    own = template_for(routed_cfg, nil, task)
     own ? [routed, own] : [default_inbox, template]
   end
 
@@ -330,11 +340,28 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   # modelo da UNIDADE da consulta (units.paulista / units.tatuape), senão o
   # geral do lembrete. Devolve { 'template_params', 'message_preview' } ou nil.
   def template_for(rcfg, _regua, task)
-    by_unit = templates_by_unit(rcfg)[task.unit.to_s]
-    return by_unit if by_unit&.dig('template_params').present?
+    by_unit = unit_template(rcfg, task)
+    return by_unit if by_unit
     return nil if rcfg['template_params'].blank?
 
-    { 'template_params' => rcfg['template_params'], 'message_preview' => rcfg['message_preview'] }
+    { 'template_params' => rcfg['template_params'], 'message_preview' => rcfg['message_preview'], 'general' => true }
+  end
+
+  # o modelo da unidade DA CONSULTA neste bloco de modelos (nil = não tem)
+  def unit_template(rcfg, task)
+    by_unit = templates_by_unit(rcfg)[unit_key(task)]
+    by_unit if by_unit&.dig('template_params').present?
+  end
+
+  # 📍 item 323 (04/10, Guilherme: "consulta sem unidade é na Av. Paulista
+  # hoje"): agendamento sem unidade na Agenda vale Av. Paulista — no modelo
+  # escolhido e no {{unidade}} da mensagem. PROVISÓRIO, palavra dele: "por
+  # enquanto fica como padrão, mas isso pode (e deve) mudar no futuro" — a
+  # regra mora só aqui (DEFAULT_UNIT + unit_key), para trocar num lugar só.
+  DEFAULT_UNIT = 'paulista'.freeze
+
+  def unit_key(task)
+    task.unit.to_s.strip.presence || DEFAULT_UNIT
   end
 
   def templates_by_unit(rcfg)
@@ -365,8 +392,10 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     subs = {
       '{{hora}}' => at&.strftime('%H:%M').to_s,
       '{{data}}' => at&.strftime('%d/%m/%Y').to_s,
-      '{{unidade}}' => unit_label(task),
-      '{{nome}}' => patient_name(task),
+      '{{unidade}}' => unit_name(task),
+      '{{nome_completo}}' => patient_name(task),
+      '{{nome}}' => first_name(task),
+      '{{primeiro_nome}}' => first_name(task),
       '{{parceiro}}' => partner_name(task),
       '{{valor}}' => appointment_value(task, rcfg)
     }
@@ -392,20 +421,45 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
       task.contact&.name.to_s.presence || 'Paciente'
   end
 
+  # 🙋 item 323 (04/10; "é possível usar apenas o primeiro nome na hora de
+  # chamar a pessoa?… primeiro nome só vai pra mensagem mesmo; o nome completo
+  # é o que vai para ficha, agenda etc."): NA MENSAGEM, {{nome}} (e o campo em
+  # branco) é só o primeiro nome — a primeira palavra do nome da Agenda, sem
+  # tratamento na frente (Sr., Dra., Dona) e com a letra arrumada quando veio
+  # tudo em maiúsculas ou minúsculas ("MARIA DA SILVA" → "Maria"). Quem
+  # precisar do nome inteiro no texto escreve {{nome_completo}}. Ficha,
+  # Agenda e as listas da rodada continuam com o nome completo.
+  HONORIFICS = /\A(sr|sra|srta|dr|dra|dona|seu)\.?\z/i
+
+  def first_name(task)
+    first = patient_name(task).split(/\s+/).grep_v(HONORIFICS).first.to_s
+    return patient_name(task) if first.blank?
+
+    [first.upcase, first.downcase].include?(first) ? first.mb_chars.capitalize.to_s : first
+  end
+
   # nome do parceiro do hub (o sync grava em source_detail) — vazio para a CEVICO
   def partner_name(task)
     task.source_detail.to_s.presence || (task.contact&.additional_attributes || {})['parceiro'].to_s
   end
 
+  # o nome da unidade como vai NA MENSAGEM ({{unidade}})
+  def unit_name(task)
+    Crm::AgendaSlots::UNIT_LABELS[unit_key(task)] || unit_key(task)
+  end
+
+  # o mesmo para as listas da rodada, avisando quando a unidade foi presumida
   def unit_label(task)
-    Crm::AgendaSlots::UNIT_LABELS[task.unit.to_s] || task.unit.to_s
+    task.unit.to_s.strip.present? ? unit_name(task) : "#{unit_name(task)} (sem unidade na Agenda)"
   end
 
   # ── registro da rodada: quem recebeu / receberia e quem foi pulado ──
-  def entry_for(task, contact, template: nil, partner: false, inbox: nil)
+  # general: saiu o modelo "geral" (não o da unidade) — a lista avisa
+  def entry_for(task, contact, template: nil, partner: false, inbox: nil, general: nil) # rubocop:disable Metrics/ParameterLists
     at = task.due_at&.in_time_zone(TZ)
     { 'task_id' => task.id, 'name' => patient_name(task), 'phone_tail' => contact.phone_number.to_s.last(4),
       'when' => at&.strftime('%d/%m %H:%M'), 'unit' => unit_label(task), 'template' => template, 'contact_id' => contact.id,
+      'general' => (general ? true : nil),
       'inbox' => inbox&.name, # item 310: por qual caixa saiu / sairia
       'partner' => (partner ? partner_name(task).presence || 'Oftalmofácil' : nil) }.compact
   end

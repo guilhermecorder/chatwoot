@@ -709,8 +709,7 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
           </p>
           <div class="flex items-center gap-1.5 flex-wrap mt-1.5">
             <span class="cv-chip">{{ META.tag }}</span>
-            <span
-class="cv-chip" :class="statusChip.tone"
+            <span class="cv-chip" :class="statusChip.tone"
               >● {{ statusChip.label }}</span
             >
           </div>
@@ -744,12 +743,10 @@ class="cv-chip" :class="statusChip.tone"
               {{ META.title }}
             </p>
             <span class="cv-chip">{{ META.tag }}</span>
-            <span
-class="cv-chip" :class="statusChip.tone"
+            <span class="cv-chip" :class="statusChip.tone"
               >● {{ statusChip.label }}</span
             >
-            <span
-v-if="dirty" class="cv-chip cv-amber"
+            <span v-if="dirty" class="cv-chip cv-amber"
               >📝 alterações não salvas</span
             >
           </div>
@@ -924,8 +921,7 @@ v-if="dirty" class="cv-chip cv-amber"
             <span class="text-[11px] text-n-slate-10">{{
               ruleSummary(rule)
             }}</span>
-            <span
-v-if="problemOf(rule)" class="cv-chip cv-amber"
+            <span v-if="problemOf(rule)" class="cv-chip cv-amber"
               >⚠️ {{ problemOf(rule) }}</span
             >
             <span
@@ -1259,8 +1255,10 @@ v-if="problemOf(rule)" class="cv-chip cv-amber"
                     >
                       <p class="text-[11px] font-bold text-n-slate-12">
                         Modelo do reforço nesta caixa
-                        <span class="font-normal text-n-slate-9">(sem ele, o reforço de quem conversa aqui sai pela
-                          caixa de cima)</span>
+                        <span class="font-normal text-n-slate-9"
+                          >(sem ele, o reforço de quem conversa aqui sai pela
+                          caixa de cima)</span
+                        >
                       </p>
                       <select
                         v-model="inboxCfg(rule, i.id).followup.name"
@@ -1376,15 +1374,17 @@ v-if="problemOf(rule)" class="cv-chip cv-amber"
               </div>
             </div>
             <p v-if="rule.inbox_id" class="text-[10px] text-n-slate-9">
-              Variáveis: <code v-pre>{{ nome }}</code> paciente ·
-              <code v-pre>{{ data }}</code> dd/mm/aaaa ·
+              Variáveis: <code v-pre>{{ nome }}</code> só o primeiro nome do
+              paciente · <code v-pre>{{ nome_completo }}</code> nome inteiro da
+              Agenda · <code v-pre>{{ data }}</code> dd/mm/aaaa ·
               <code v-pre>{{ hora }}</code> horário ·
               <code v-pre>{{ valor }}</code> "Valor: X" da observação ou o
               padrão · <code v-pre>{{ unidade }}</code> Av. Paulista/Tatuapé ·
               <code v-pre>{{ contact.name }}</code> nome do cadastro. A consulta
-              usa o modelo da unidade dela; sem modelo da unidade, o geral.
-              <b>Campo em branco</b> = dado da Agenda, nesta ordem: 1 nome, 2
-              data, 3 horário, 4 valor.
+              usa o modelo da unidade dela (consulta sem unidade na Agenda = Av.
+              Paulista); sem modelo da unidade, o geral.
+              <b>Campo em branco</b> = dado da Agenda, nesta ordem: 1 primeiro
+              nome, 2 data, 3 horário, 4 valor.
             </p>
 
             <!-- pacientes do Oftalmofácil: só a caixa escolhida fala com eles -->
@@ -1732,8 +1732,10 @@ v-if="problemOf(rule)" class="cv-chip cv-amber"
                     class="text-amber-700 dark:text-amber-400"
                     >· Oftalmofácil ({{ e.partner }})</span
                   >
-                  <span class="text-n-slate-9">{{ e.template ? `(${e.template})` : ''
-                    }}{{ e.inbox ? ` · ${e.inbox}` : '' }}</span>
+                  <span class="text-n-slate-9"
+                    >{{ e.template ? `(${e.template})` : ''
+                    }}{{ e.inbox ? ` · ${e.inbox}` : '' }}</span
+                  >
                 </p>
               </div>
             </div>
@@ -1761,16 +1763,24 @@ v-if="problemOf(rule)" class="cv-chip cv-amber"
                 ✓ {{ e.when }} · {{ e.name }} · {{ e.unit }} · …{{
                   e.phone_tail
                 }}
-                <span v-if="e.manual"
-class="font-semibold"
-                  >· envio manual</span>
+                <span v-if="e.manual" class="font-semibold"
+                  >· envio manual</span
+                >
                 <span
                   v-if="e.partner"
                   class="text-amber-700 dark:text-amber-400"
                   >· Oftalmofácil ({{ e.partner }})</span
                 >
-                <span class="text-n-slate-9">{{ e.template ? `(${e.template})` : ''
-                  }}{{ e.inbox ? ` · ${e.inbox}` : '' }}</span>
+                <span class="text-n-slate-9"
+                  >{{ e.template ? `(${e.template})` : ''
+                  }}{{ e.inbox ? ` · ${e.inbox}` : '' }}</span
+                >
+                <span
+                  v-if="e.general"
+                  class="text-amber-700 dark:text-amber-400"
+                  title="Esta consulta saiu com o modelo geral, não com o da unidade dela"
+                  >· modelo geral</span
+                >
                 <button
                   v-if="isAdmin && rule.enabled && runOf(rule).mode === 'live'"
                   class="underline font-semibold ml-1"

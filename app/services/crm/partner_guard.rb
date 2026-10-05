@@ -153,6 +153,7 @@ module Crm::PartnerGuard
   # apaga o cache (o sync chama depois de rodar)
   def forget!(account)
     Rails.cache.delete("cevico:partner_guard:ids:#{account.id}") if account.present?
+    Crm::Sources.forget!(account) # item 322: funil/caixas dos parceiros alimentam o mapa das fontes
   end
 
   # registra o bloqueio (uma linha no log) e devolve true

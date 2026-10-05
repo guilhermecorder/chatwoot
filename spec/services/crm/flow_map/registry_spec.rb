@@ -28,6 +28,8 @@ RSpec.describe Crm::FlowMap::Registry do
       'Crm::NpsSurveySendJob' => 'nps_survey',
       'Crm::JourneyRunJob' => 'journey',
       'Crm::OftalmofacilSyncJob' => 'oftalmofacil',
+      'Crm::StageLogBulkSweepJob' => 'data_hygiene', # 🧹 item 309 (faltava no mapa)
+      'Crm::SourceStampSweepJob' => 'data_hygiene', # 🏷️ item 322
       'Crm::VoiceAgent::CampaignDialerJob' => 'voice',
       'Crm::VoiceAgent::UnresponsiveLeadsJob' => 'voice' # 📞 rodada 195
     }

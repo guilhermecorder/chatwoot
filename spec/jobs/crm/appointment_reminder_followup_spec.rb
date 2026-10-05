@@ -73,7 +73,7 @@ RSpec.describe Crm::AppointmentReminderFollowup do
     expect(sent_names).to eq(%w[confirmacao_consulta reforco_confirmacao])
     reforco = sources.last
     expect(reforco[1]).to eq(inbox)
-    expect(reforco[3].dig('processed_params', 'body')).to eq('1' => 'Maria Silva', '2' => '30/09/2026', '3' => '15:00')
+    expect(reforco[3].dig('processed_params', 'body')).to eq('1' => 'Maria', '2' => '30/09/2026', '3' => '15:00') # item 323: primeiro nome
     expect(reforco[5]).to eq('Reforço 1 do lembrete de consulta (D2)')
     expect(marks['d2_f1']).to be_present
 

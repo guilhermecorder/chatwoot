@@ -3,6 +3,7 @@
 # Table name: crm_contact_stage_logs
 #
 #  id               :bigint           not null, primary key
+#  cevico_born_via  :string
 #  duration_minutes :integer
 #  entered_at       :datetime         not null
 #  event_type       :string           default("entered"), not null
@@ -11,6 +12,7 @@
 #  stage_name       :string           not null
 #  created_at       :datetime         not null
 #  updated_at       :datetime         not null
+#  cevico_source_id :bigint
 #  crm_contact_id   :bigint           not null
 #  stage_id         :bigint           not null
 #
@@ -22,6 +24,8 @@
 #
 class Crm::StageLog < ApplicationRecord
   self.table_name = 'crm_contact_stage_logs'
+
+  include CevicoSourceStamped # 🏷️ item 322: fonte do card + como ESTA entrada aconteceu
 
   belongs_to :crm_contact, class_name: 'Crm::Contact', foreign_key: :crm_contact_id
 

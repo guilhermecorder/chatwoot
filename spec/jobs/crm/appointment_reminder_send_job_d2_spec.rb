@@ -7,7 +7,8 @@ RSpec.describe Crm::AppointmentReminderSendJob do
   let(:inbox) { create(:inbox, account: account) }
   let(:tz) { ActiveSupport::TimeZone['America/Sao_Paulo'] }
   let(:now) { tz.parse('2026-09-26 10:05') } # sábado
-  let(:vars) { { '1' => '{{nome}}', '2' => '{{data}}', '3' => '{{hora}}', '4' => '{{valor}}' } }
+  # item 323: {{nome}} virou só o primeiro nome; os testes identificam quem recebeu pelo nome inteiro
+  let(:vars) { { '1' => '{{nome_completo}}', '2' => '{{data}}', '3' => '{{hora}}', '4' => '{{valor}}' } }
   let(:tpl) { ->(name) { { 'name' => name, 'language' => 'en', 'category' => 'UTILITY', 'processed_params' => { 'body' => vars } } } }
   let(:d2_cfg) do
     { 'enabled' => true, 'hour' => 10, 'inbox_id' => inbox.id, 'mode' => 'live', 'default_value' => '150,00',
@@ -333,7 +334,79 @@ RSpec.describe Crm::AppointmentReminderSendJob do
 
     described_class.perform_now(now)
 
-    expect(bodies).to eq([{ '1' => 'Julia Adania', '2' => '28/09/2026', '3' => '08:45', '4' => '150,00' }])
+    expect(bodies).to eq([{ '1' => 'Julia', '2' => '28/09/2026', '3' => '08:45', '4' => '150,00' }]) # item 323: primeiro nome
+  end
+
+  # item 323 (04/10): "primeiro nome só vai pra mensagem mesmo; o nome completo é o que vai para ficha, agenda etc."
+  it 'na mensagem o nome é só o PRIMEIRO nome (campo em branco e {{nome}}); {{nome_completo}} traz o inteiro', :aggregate_failures do
+    bodies = []
+    allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+      bodies << args[3]['processed_params']['body'].values_at('1', '2')
+      m.call(*args)
+    end
+    model = { 'name' => 'confirmacao_consulta_paulista', 'language' => 'pt_BR',
+              'processed_params' => { 'body' => { '1' => '', '2' => '{{nome}} / {{nome_completo}}' } } }
+    cfg = d2_cfg.merge('units' => { 'paulista' => { 'template_params' => model, 'message_preview' => 'Olá {{1}} — {{2}}' } })
+    settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => cfg } })
+    consulta(contact_named('MARIA DA SILVA', '+5511999990081'), '2026-09-28 08:00')
+    consulta(contact_named('Dra. ana paula souza', '+5511999990082'), '2026-09-28 08:30')
+    consulta(contact_named('José Carlos', '+5511999990083'), '2026-09-28 09:00')
+
+    described_class.perform_now(now)
+
+    expect(bodies).to contain_exactly(['Maria', 'Maria / MARIA DA SILVA'], ['Ana', 'Ana / Dra. ana paula souza'],
+                                      ['José', 'José / José Carlos'])
+    # a lista da rodada (para a equipe) continua com o nome completo
+    sent = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2', 'sent')
+    expect(sent.pluck('name')).to include('MARIA DA SILVA')
+  end
+
+  # item 323 (04/10): "precisa diferenciar o local… consulta sem unidade é na av. paulista hoje"
+  it 'consulta SEM unidade vale Av. Paulista: modelo da Paulista e {{unidade}} = Av. Paulista', :aggregate_failures do
+    sources = []
+    allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+      sources << [args[3]['name'], args[3]['processed_params']['body']['1']]
+      m.call(*args)
+    end
+    cfg = d2_cfg.deep_dup
+    cfg['units'].each_value { |u| u['template_params']['processed_params'] = { 'body' => { '1' => '{{unidade}}' } } }
+    settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => cfg } })
+    consulta(contact_named('Sem Unidade', '+5511999990091'), '2026-09-28 08:00', unit: nil)
+    consulta(contact_named('Do Tatuape', '+5511999990092'), '2026-09-28 08:30', unit: 'tatuape')
+
+    described_class.perform_now(now)
+
+    expect(sources).to contain_exactly(['confirmacao_consulta_paulista', 'Av. Paulista'], %w[confirmao_consulta_tatuape Tatuapé])
+    sent = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2', 'sent')
+    expect(sent.find { |e| e['name'] == 'Sem Unidade' }['unit']).to eq('Av. Paulista (sem unidade na Agenda)')
+  end
+
+  # item 323: paciente do Tatuapé que conversa por outra caixa nunca recebe o "geral" de lá se existe o modelo do Tatuapé
+  it 'o modelo da UNIDADE vence o geral da outra caixa; sem modelo da unidade em lugar nenhum sai o geral, com aviso', :aggregate_failures do
+    instagram = create(:inbox, account: account, name: 'INSTAGRAM')
+    sources = []
+    allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+      sources << [args[1].name, args[3]['name']]
+      m.call(*args)
+    end
+    ig_geral = { 'template_params' => tpl.call('confirma_ig_geral'), 'message_preview' => 'IG geral {{1}}' }
+    cfg = d2_cfg.merge('inbox_ids' => [instagram.id], 'by_inbox' => { instagram.id.to_s => ig_geral })
+    settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => cfg } })
+    tatuape = contact_named('Insta Tatuape', '+5511999990095')
+    create(:conversation, account: account, inbox: instagram, contact: tatuape)
+    consulta(tatuape, '2026-09-28 09:30', unit: 'tatuape')
+
+    described_class.perform_now(now)
+    expect(sources).to eq([[inbox.name, 'confirmao_consulta_tatuape']])
+
+    # agora sem modelo do Tatuapé em nenhuma caixa: sai o geral da caixa da conversa e a lista avisa
+    sources.clear
+    tatuape.reload.update!(additional_attributes: {})
+    settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => cfg.merge('units' => cfg['units'].slice('paulista')) } })
+    described_class.perform_now(now)
+
+    expect(sources).to eq([%w[INSTAGRAM confirma_ig_geral]])
+    expect(settings.reload.agenda_config.dig('appointment_reminders_state', 'd2', 'sent').last['general']).to be(true)
   end
 
   # item 320 (03/10): "a possibilidade de um envio manual, como esses casos, seria ótimo eu fazer um reenvio"
@@ -538,7 +611,7 @@ RSpec.describe Crm::AppointmentReminderSendJob do
 
       of = sources.find { |s| s[3]['name'] == 'confirmacao_oftalmofacil' }
       expect(of[1]).to eq(of_inbox)
-      expect(of[3].dig('processed_params', 'body')).to eq('1' => 'Paciente Parceiro', '2' => 'CLINICA X')
+      expect(of[3].dig('processed_params', 'body')).to eq('1' => 'Paciente', '2' => 'CLINICA X') # item 323: primeiro nome
       cevico = sources.find { |s| s[3]['name'] == 'confirmacao_consulta_paulista' }
       expect(cevico[1]).to eq(inbox)
       state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')

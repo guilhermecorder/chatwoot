@@ -113,7 +113,7 @@ class CevicoFormsController < ActionController::Base # rubocop:disable Rails/App
       return contact
     end
 
-    create_contact_with_card(name, digits)
+    Crm::Stamp.with(via: 'paciente') { create_contact_with_card(name, digits) } # 🏷️ item 322
   end
 
   def find_contact_by_phone(digits)

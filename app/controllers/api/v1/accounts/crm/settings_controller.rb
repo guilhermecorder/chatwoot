@@ -685,6 +685,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     of['updated_at'] = Time.current.iso8601
     cfg['oftalmofacil'] = of
     crm_settings.update!(agenda_config: cfg)
+    Crm::PartnerGuard.forget!(Current.account) # item 322: funil/caixas dos parceiros mudaram → cerca e mapa das fontes releem
     render json: { oftalmofacil: oftalmofacil_json(crm_settings) }
   end
 

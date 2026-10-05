@@ -31,6 +31,7 @@ class Crm::AppointmentOrigin
       return nil if contact.blank?
 
       task.update_column(:contact_id, contact.id) if task.contact_id != contact.id # rubocop:disable Rails/SkipsModelValidations
+      Crm::Stamp.claim_contact!(contact, task.cevico_source_id) # 🏷️ item 322: o agendamento é evidência de quem é o paciente
       apply_labels(account, contact, task.origin)
       place_card(account, contact, task)
       contact
@@ -55,6 +56,7 @@ class Crm::AppointmentOrigin
 
       task.update_column(:contact_id, contact.id) # rubocop:disable Rails/SkipsModelValidations
       task.contact = contact
+      Crm::Stamp.claim_contact!(contact, task.cevico_source_id) # 🏷️ item 322
       apply_labels(account, contact, task.origin) if Task::ORIGINS.include?(task.origin)
       place_card(account, contact, task)
       contact
@@ -80,7 +82,10 @@ class Crm::AppointmentOrigin
       return nil if phone.nil?
 
       attrs = { 'origem' => task.partner_origin? ? 'oftalmofacil' : 'agenda' }
-      account.contacts.create!(name: patient_name(task), phone_number: phone, additional_attributes: attrs)
+      # 🏷️ item 322: paciente que nasce de um agendamento já nasce com a fonte do agendamento
+      Crm::Stamp.with(via: Crm::Stamp.via, source: task.cevico_source_id) do
+        account.contacts.create!(name: patient_name(task), phone_number: phone, additional_attributes: attrs)
+      end
     rescue ActiveRecord::RecordInvalid
       # telefone já existe com outra máscara — acha de novo antes de desistir
       Task.match_contact(account, task.phone)

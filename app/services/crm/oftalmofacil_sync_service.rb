@@ -322,7 +322,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     contact = surgery.contact_id && @account.contacts.find_by(id: surgery.contact_id)
     before = @result.tasks_created + @result.tasks_updated
     if contact
-      sync_task!(contact, surgery, !own_provider?(surgery.provider_name))
+      Crm::Stamp.with(via: 'sync') { sync_task!(contact, surgery, !own_provider?(surgery.provider_name)) }
     else
       apply(surgery)
     end
@@ -429,7 +429,12 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   end
 
   # ── tratamento: paciente + card ────────────────────────────────────────
-  def apply(surgery) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  # 🏷️ item 322: tudo o que o sync cria ou move nasce carimbado como "sync"
+  def apply(surgery)
+    Crm::Stamp.with(via: 'sync') { apply_surgery(surgery) }
+  end
+
+  def apply_surgery(surgery) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     partner = !own_provider?(surgery.provider_name)
     @result.partners += 1 if partner
     # parceiro com data ANTES da janela (pedido dele: "desta semana em diante"):

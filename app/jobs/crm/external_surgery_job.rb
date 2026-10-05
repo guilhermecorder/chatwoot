@@ -14,6 +14,8 @@
 # Etiqueta no contato: modo LEVE, direto em taggings (como o RetroLabelJob).
 class Crm::ExternalSurgeryJob < ApplicationJob
   queue_as :low
+  # 🏷️ item 322: cirurgias trazidas de fora (planilha) = sincronização, não paciente entrando na coluna agora
+  around_perform { |_job, block| Crm::Stamp.with(via: 'sync', &block) }
 
   def perform(account_id, matched_pairs, stage_id, label_title, options = {})
     account = Account.find_by(id: account_id)

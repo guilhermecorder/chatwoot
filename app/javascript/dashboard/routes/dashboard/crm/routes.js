@@ -8,6 +8,7 @@ import OftalmofacilHub from './OftalmofacilHub.vue';
 import CrmCampaignsDashboard from './CrmCampaignsDashboard.vue';
 import CrmForms from './CrmForms.vue';
 import CrmIntegrationsPage from './CrmIntegrationsPage.vue';
+import PatientSources from './PatientSources.vue';
 
 export default {
   routes: [
@@ -62,6 +63,13 @@ export default {
       name: 'crm_forms',
       meta: { permissions: ['administrator'] },
       component: CrmForms,
+    },
+    // 🏷️ item 322: Fontes de pacientes (cadastro + carimbo de origem) — só admin
+    {
+      path: frontendURL('accounts/:accountId/crm/fontes'),
+      name: 'crm_sources',
+      meta: { permissions: ['administrator'] },
+      component: PatientSources,
     },
     {
       path: frontendURL('accounts/:accountId/crm/integrations'),

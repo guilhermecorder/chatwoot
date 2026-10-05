@@ -326,6 +326,10 @@ namespace :crm do
   end
   # 🖐️ item 320: envio manual do lembrete de confirmação (o lembrete inteiro ou um paciente)
   post 'appointment_reminders/run', to: 'appointment_reminders#run'
+  # 🏷️ Fontes de pacientes (item 322, só admin): cadastro + retrato do carimbo + carimbar o passado
+  resources :sources, only: [:index, :create, :update] do
+    collection { post :backfill }
+  end
   # 💰 Financeiro & CAC (item 318): CAC de anúncios × total, canais, campanhas
   resource :acquisition_cost, only: [:show], controller: 'acquisition_costs'
   resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'

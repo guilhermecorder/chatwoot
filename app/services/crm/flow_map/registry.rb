@@ -43,7 +43,8 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::Mentor,
     Crm::FlowMap::Flows::StalledCards,
     # Infraestrutura
-    Crm::FlowMap::Flows::Oftalmofacil
+    Crm::FlowMap::Flows::Oftalmofacil,
+    Crm::FlowMap::Flows::DataHygiene # 🏷️ itens 309 + 322
   ].freeze
 
   module_function

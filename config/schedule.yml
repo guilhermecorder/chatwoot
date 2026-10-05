@@ -130,6 +130,13 @@ crm_stage_log_bulk_sweep_job:
   class: 'Crm::StageLogBulkSweepJob'
   queue: scheduled_jobs
 
+# 🏷️ item 322: o que ainda estiver sem carimbo de fonte é carimbado pelas
+# regras de hoje (07:25 UTC = 04:25 em São Paulo, depois da carga em massa)
+crm_source_stamp_sweep_job:
+  cron: '25 7 * * *'
+  class: 'Crm::SourceStampSweepJob'
+  queue: scheduled_jobs
+
 crm_stalled_cards_job:
   cron: '*/30 * * * *'
   class: 'CrmStalledCardsJob'

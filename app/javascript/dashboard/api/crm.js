@@ -1390,6 +1390,24 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/whatsapp_spend/sync`, { days });
   }
 
+  // ── 🏷️ Fontes de pacientes (item 322; só admin) ───
+  getSources() {
+    return axios.get(`${this.url}/sources`);
+  }
+
+  createSource(payload) {
+    return axios.post(`${this.url}/sources`, payload);
+  }
+
+  updateSource(id, payload) {
+    return axios.patch(`${this.url}/sources/${id}`, payload);
+  }
+
+  // apply: false = prévia do que seria carimbado; true = grava
+  backfillSources(apply = false) {
+    return axios.post(`${this.url}/sources/backfill`, { apply });
+  }
+
   // ── 💰 Financeiro & CAC (item 318; admin ou concessão Financeiro) ───
   getAcquisitionCost(params = {}) {
     return axios.get(`${this.url}/acquisition_cost`, { params });

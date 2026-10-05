@@ -6,6 +6,10 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     conversation, account = extract_conversation_and_account(event)
     contact = conversation.contact
     return if contact.blank?
+
+    # 🏷️ item 322: a 1ª conversa é evidência de quem é o paciente — a caixa em
+    # que ela nasceu diz a fonte (primeira evidência carimba)
+    Crm::Stamp.claim_contact!(contact, Crm::Sources.id_for_inbox(account, conversation.inbox_id))
     # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub / conversa
     # na caixa dos parceiros NÃO ganha card no funil da CEVICO
     return if Crm::PartnerGuard.partner_conversation?(conversation)
@@ -16,13 +20,24 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     entry_stage = entry_stage_for(account, pipeline, contact)
     return if entry_stage.blank?
 
-    Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: pipeline.id) do |card|
-      card.stage_id = entry_stage.id
-      card.origin = conversation.inbox&.name
+    Crm::Stamp.with(via: conversation_via(conversation)) do
+      Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: pipeline.id) do |card|
+        card.stage_id = entry_stage.id
+        card.origin = conversation.inbox&.name
+      end
     end
   rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
     # corrida entre eventos simultâneos do mesmo contato — card já existe
     nil
+  end
+
+  # 🏷️ item 322: como nasceu o card de uma conversa nova — o paciente escreveu
+  # (o normal), a equipe abriu a conversa ou um robô mandou a 1ª mensagem
+  def conversation_via(conversation)
+    first = conversation.messages.where(message_type: %w[incoming outgoing]).order(:id).first
+    return 'paciente' if first.nil? || first.message_type == 'incoming'
+
+    first.sender_type == 'User' ? 'equipe' : 'robo'
   end
 
   # Gatilho "Mensagem criada" das automações de coluna: quando chega uma

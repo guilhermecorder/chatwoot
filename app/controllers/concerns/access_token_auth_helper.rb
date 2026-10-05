@@ -18,6 +18,8 @@ module AccessTokenAuthHelper
     # NOTE: This ensures that current_user is set and available for the rest of the controller actions
     @resource = @access_token.owner
     Current.user = @resource if allowed_current_user_type?(@resource)
+    # 🏷️ item 322: o que nascer nesta chamada é carimbado como integração de fora (N8N), não como equipe
+    Current.cevico_via = 'integracao'
   end
 
   def allowed_current_user_type?(resource)

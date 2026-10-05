@@ -3,6 +3,7 @@
 # Table name: crm_contacts
 #
 #  id                    :bigint           not null, primary key
+#  cevico_born_via       :string
 #  notes                 :text
 #  origin                :string
 #  procedure_of_interest :string
@@ -11,6 +12,7 @@
 #  created_at            :datetime         not null
 #  updated_at            :datetime         not null
 #  assignee_id           :bigint
+#  cevico_source_id      :bigint
 #  contact_id            :bigint           not null
 #  pipeline_id           :bigint           not null
 #  stage_id              :bigint           not null
@@ -33,6 +35,8 @@
 class Crm::Contact < ApplicationRecord
   self.table_name = 'crm_contacts'
 
+  include CevicoSourceStamped # 🏷️ item 322: nasce com a fonte do funil + como nasceu
+
   belongs_to :contact,  class_name: '::Contact'
   belongs_to :pipeline, class_name: 'Crm::Pipeline'
   belongs_to :stage,    class_name: 'Crm::Stage'
@@ -42,6 +46,8 @@ class Crm::Contact < ApplicationRecord
   validates :contact_id, uniqueness: { scope: :pipeline_id, message: 'already exists in this pipeline' }
 
   after_create  :log_initial_stage
+  # 🏷️ item 322: o 1º card é evidência de quem é o paciente (primeira evidência carimba)
+  after_create  -> { Crm::Stamp.claim_contact!(contact, cevico_source_id) }
   after_update  :log_stage_change, if: :saved_change_to_stage_id?
   after_update  :fire_value_automations, if: :saved_change_to_value?
   # ✅ item 300: card entrou em "Consulta Confirmada" → a próxima consulta do

@@ -8,6 +8,7 @@
 #  booking_kind        :string
 #  cancel_reason       :string
 #  canceled_at         :datetime
+#  cevico_born_via     :string
 #  color               :string
 #  comments            :jsonb            not null
 #  completed_at        :datetime
@@ -36,6 +37,7 @@
 #  account_id          :bigint           not null
 #  assignee_id         :bigint
 #  canceled_by_id      :bigint
+#  cevico_source_id    :bigint
 #  contact_id          :bigint
 #  creator_id          :bigint           not null
 #
@@ -135,6 +137,15 @@ class Task < ApplicationRecord
   def partner_origin?
     origin == 'oftalmofacil'
   end
+
+  # 🏷️ item 322 (04/10): o agendamento nasce carimbado com a FONTE (de quem é o
+  # paciente) e com o COMO (equipe, robô, sincronização…). Trocar a origem no
+  # formulário recarimba; o 1º agendamento também é evidência de quem é o paciente.
+  include CevicoSourceStamped
+  before_update -> { cevico_stamp!(refresh: true) },
+                if: -> { will_save_change_to_origin? || will_save_change_to_source? || will_save_change_to_source_detail? }
+  after_save -> { Crm::Stamp.claim_contact!(contact, cevico_source_id) },
+             if: -> { appointment? && contact_id.present? && (saved_change_to_contact_id? || saved_change_to_id?) }
 
   validate :contact_belongs_to_account
 
