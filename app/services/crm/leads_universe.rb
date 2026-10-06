@@ -9,7 +9,11 @@
 module Crm::LeadsUniverse
   module_function
 
-  def scope(account, since, until_at)
+  # lens (item 328): a lente da fonte escolhida no Meu Painel. Sem lente vale a
+  # régua de sempre (da casa, com a cerca dos parceiros tirando os pacientes deles).
+  def scope(account, since, until_at, lens: nil)
+    return lens_scope(account, since, until_at, lens) if lens
+
     base = account.contacts.where(created_at: since..until_at)
     # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub e caixa
     # dos parceiros nunca contam como lead da CEVICO
@@ -19,6 +23,29 @@ module Crm::LeadsUniverse
     return base if inbox_ids.empty?
 
     base.joins(:conversations).where(conversations: { inbox_id: inbox_ids }).distinct
+  end
+
+  # 🔎 item 328: o universo pela LENTE.
+  #   casa         = pacientes novos da casa que chegaram pelas caixas de captação
+  #   outra fonte  = pacientes novos daquela fonte (chegam pelo hub ou pela
+  #                  caixa dela — não há "caixa de captação" para exigir)
+  #   tudo         = a soma das duas coisas
+  def lens_scope(account, since, until_at, lens)
+    base = account.contacts.where(created_at: since..until_at)
+    return own_lens_scope(account, base, lens) if lens.own?
+    return lens.contacts(base) unless lens.all?
+
+    house = Crm::SourceLens.for(account, Crm::Source::OWN_KEY)
+    base.where('contacts.id IN (:own) OR contacts.id NOT IN (:house)',
+               own: own_lens_scope(account, base, house).select(:id), house: house.contacts(base).select(:id))
+  end
+
+  def own_lens_scope(account, base, lens)
+    base = lens.contacts(base)
+    inbox_ids = capture_inbox_ids(account) - lens.foreign_inbox_ids
+    return base if inbox_ids.empty?
+
+    base.where(id: Conversation.where(account_id: account.id, inbox_id: inbox_ids).select(:contact_id))
   end
 
   # ids das portas de entrada: configuração do admin > heurística por nome

@@ -18,7 +18,14 @@ const props = defineProps({
   // item não traz a sua
   family: { type: Array, default: () => [] },
   height: { type: Number, default: 14 },
+  // item 328: fatia clicável ("nenhum número sem nome atrás") — emite `pick`
+  // com a fatia; "Outros" não abre
+  clickable: { type: Boolean, default: false },
 });
+const emit = defineEmits(['pick']);
+const pick = slice => {
+  if (props.clickable && !slice.other) emit('pick', slice);
+};
 
 const FALLBACK = [
   'var(--cv-grad)',
@@ -73,13 +80,17 @@ const pctLabel = p => `${p < 1 ? p.toFixed(1) : Math.round(p)}%`;
           v-for="(s, i) in slices"
           :key="i"
           class="h-full transition-[flex-basis] duration-500"
-          :class="i === 0 ? 'rounded-l-full' : ''"
+          :class="[
+            i === 0 ? 'rounded-l-full' : '',
+            clickable && !s.other ? 'cursor-pointer' : '',
+          ]"
           :style="{
             flex: `0 0 ${s.pct}%`,
             background: s.color,
             minWidth: '3px',
           }"
           :title="`${s.label}: ${format(s.value)} · ${pctLabel(s.pct)}`"
+          @click="pick(s)"
         />
       </div>
       <div class="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5">
@@ -87,7 +98,15 @@ const pctLabel = p => `${p < 1 ? p.toFixed(1) : Math.round(p)}%`;
           v-for="(s, i) in slices"
           :key="'l' + i"
           class="inline-flex items-center gap-1.5 text-[11px] text-n-slate-11 min-w-0"
-          :title="s.label"
+          :class="
+            clickable && !s.other
+              ? 'cursor-pointer rounded-md px-1 -mx-1 hover:bg-n-alpha-2'
+              : ''
+          "
+          :title="
+            clickable && !s.other ? `${s.label} · ver os pacientes` : s.label
+          "
+          @click="pick(s)"
         >
           <span
             class="w-2.5 h-2.5 rounded-sm flex-shrink-0"

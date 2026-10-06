@@ -13,8 +13,11 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
 
   # granularity: opcional (item 144) — a mini-régua do popup pode forçar o
   # balde; sem ela vale o automático pelo tamanho do período
-  def initialize(account:, since:, until_at:, granularity: nil)
+  # lens: opcional (item 328) — a lente da fonte escolhida no Meu Painel
+  # (Crm::SourceLens). Sem lente, tudo continua na régua de sempre.
+  def initialize(account:, since:, until_at:, granularity: nil, lens: nil)
     @account = account
+    @lens = lens
     @since = since
     @until_at = until_at
     forced = granularity.to_s.to_sym
@@ -31,7 +34,7 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     # ⚡ item 237: cesto guardado por conta+período (2 min com o período aberto,
     # 10 min fechado) — a tela atualiza a cada 2 min e refazia ~120 queries
     ttl = @until_at >= Time.current ? 2.minutes : 10.minutes
-    Rails.cache.fetch("cevico:kpibag:#{@account.id}:#{@since.to_i}:#{@until_at.to_i}:#{@granularity}", expires_in: ttl) do
+    Rails.cache.fetch("cevico:kpibag:#{@account.id}:#{@lens&.key || 'padrao'}:#{@since.to_i}:#{@until_at.to_i}:#{@granularity}", expires_in: ttl) do
       build_bag(prev_since, prev_until, keys, prev_keys)
     end
   end
@@ -39,6 +42,7 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   def build_bag(prev_since, prev_until, keys, prev_keys)
     {
       granularity: @granularity,
+      source: @lens&.key,
       points: keys.map { |k, label| { key: k, label: label } },
       prev_points: prev_keys.map { |k, label| { key: k, label: label } },
       previous_label: "#{prev_since.strftime('%d/%m')}–#{prev_until.strftime('%d/%m')}",
@@ -49,7 +53,7 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   private
 
   # ── catálogo ──────────────────────────────────────────────────────────
-  def base_metrics(since, until_at, prev_since, prev_until, keys, prev_keys) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists, Metrics/CyclomaticComplexity
+  def base_metrics(since, until_at, prev_since, prev_until, keys, prev_keys) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     metrics = {}
     add = lambda do |key, label, unit, cur_scope, prev_scope, column, sum: nil, distinct: nil, date: false|
       series = bucketize(cur_scope, column, sum: sum, distinct: distinct, date: date)
@@ -66,11 +70,10 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     end
 
     add.call('new_leads', 'Novos contatos (leads)', 'n',
-             Crm::LeadsUniverse.scope(@account, since, until_at),
-             Crm::LeadsUniverse.scope(@account, prev_since, prev_until), 'contacts.created_at')
+             Crm::LeadsUniverse.scope(@account, since, until_at, lens: @lens),
+             Crm::LeadsUniverse.scope(@account, prev_since, prev_until, lens: @lens), 'contacts.created_at')
     add.call('new_conversations', 'Novas conversas', 'n',
-             @account.conversations.where(created_at: since..until_at),
-             @account.conversations.where(created_at: prev_since..prev_until), 'conversations.created_at')
+             conversations(since, until_at), conversations(prev_since, prev_until), 'conversations.created_at')
     # item 267 (28/09): NUNCA "chamar tudo de agendamento" — cada número diz de
     # quem é: consulta marcada de LEAD NOVO (chegou há até 30 dias) × de
     # paciente da BASE (mais antigo ou sem cadastro). "Entrou em Agendamento"
@@ -84,7 +87,8 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     # 📊 item 233: a TAXA oficial usa a ENTRADA na coluna de agendamento do CRM
     # item 267: PACIENTES distintos (quem entrou 2x no mesmo dia conta 1) — igual ao Gestor
     add.call('appointments_created', 'Entrou em Agendamento de Consulta (mudou de coluna no CRM)', 'n',
-             Crm::BookingRate.entries(@account, since, until_at), Crm::BookingRate.entries(@account, prev_since, prev_until),
+             Crm::BookingRate.entries(@account, since, until_at, lens: @lens),
+             Crm::BookingRate.entries(@account, prev_since, prev_until, lens: @lens),
              'crm_contact_stage_logs.entered_at', distinct: 'crm_contact_stage_logs.crm_contact_id')
     # 📅 item 217: confirmou (SIM ao lembrete) e lançadas (já estavam marcadas fora do sistema)
     add.call('appointments_confirmed', 'Consultas confirmadas (SIM ao lembrete)', 'n',
@@ -115,7 +119,7 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
                attendance('consulta', 'missed', since, until_at).where(unit: unit),
                attendance('consulta', 'missed', prev_since, prev_until).where(unit: unit), 'tasks.due_at')
     end
-    add.call('surgeries_booked', 'Cirurgias marcadas (todas: clínica + Oftalmofácil)', 'n',
+    add.call('surgeries_booked', @lens ? 'Cirurgias marcadas' : 'Cirurgias marcadas (todas: clínica + Oftalmofácil)', 'n',
              created_tasks('cirurgia', since, until_at), created_tasks('cirurgia', prev_since, prev_until), 'tasks.created_at')
     # item 267: fechamento honesto = cirurgia marcada de quem teve INDICAÇÃO em consulta
     add.call('surgeries_booked_indicated', 'Cirurgias marcadas após indicação (fechamento)', 'n',
@@ -126,15 +130,20 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
              attendance('cirurgia', 'missed', since, until_at), attendance('cirurgia', 'missed', prev_since, prev_until), 'tasks.due_at')
 
     # passagem pelas colunas do funil + faturamento (mesma fonte do PRO MAX)
-    pipeline = @account.crm_pipelines.order(:id).first
-    if pipeline
+    # item 328: com a lente, as colunas dos funis das OUTRAS fontes entram
+    # depois das da casa (o nome do funil vai junto, para não confundir colunas iguais)
+    pipelines = funnels
+    pipelines.each_with_index do |pipeline, index|
+      suffix = index.zero? ? '' : " · #{pipeline.name}"
       pipeline.stages.order(:position).each do |stage|
-        add.call("stage_#{stage.id}", "Entrou em #{stage.name}", 'n',
+        add.call("stage_#{stage.id}", "Entrou em #{stage.name}#{suffix}", 'n',
                  stage_entries(pipeline, stage.id, since, until_at),
                  stage_entries(pipeline, stage.id, prev_since, prev_until), 'crm_contact_stage_logs.entered_at')
       end
+    end
+    if pipelines.any?
       add.call('revenue', 'Faturamento fechado (R$)', 'brl',
-               revenue_logs(pipeline, since, until_at), revenue_logs(pipeline, prev_since, prev_until),
+               revenue_logs(pipelines, since, until_at), revenue_logs(pipelines, prev_since, prev_until),
                'crm_contact_stage_logs.entered_at', sum: 'COALESCE(crm_contacts.value, 0)')
     end
 
@@ -154,7 +163,29 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   end
 
   def wa_messages(since, until_at)
-    Crm::WhatsappSpendService.outgoing_scope(@account, since, until_at)
+    scope = Crm::WhatsappSpendService.outgoing_scope(@account, since, until_at)
+    @lens ? @lens.inboxes(scope, 'messages.inbox_id') : scope
+  end
+
+  # ── item 328: a lente da fonte ────────────────────────────────────────
+  # agendamentos da conta pela lente (sem lente = todos, como sempre foi)
+  def tasks
+    @lens ? @lens.tasks(@account.tasks) : @account.tasks
+  end
+
+  def conversations(since, until_at)
+    scope = @account.conversations.where(created_at: since..until_at)
+    @lens ? @lens.inboxes(scope) : scope
+  end
+
+  # funis cujas colunas viram indicador: sem lente, o principal da casa; com
+  # lente, o da casa na frente (as colunas dele zeram sozinhas se a fonte for
+  # outra) + os funis das fontes que a lente enxerga
+  def funnels
+    main = @account.crm_pipelines.order(:id).first
+    return [main].compact if @lens.nil?
+
+    ([main] + @lens.pipelines).compact.uniq
   end
 
   def wa_charges(since, until_at)
@@ -165,11 +196,12 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   # item 217: só consulta NOVA conta como agendamento ('registro' = lançamento
   # de consulta que já existia fora do sistema)
   def booked(since, until_at)
-    @account.tasks.bookings.where(task_type: 'consulta', created_at: since..until_at)
-            .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
-            .where(canceled_at: nil) # item 233: sem exame, tele, cancelada ou parceiro
-            .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
-            .where(source_detail: nil).not_partner_origin
+    scope = tasks.bookings.where(task_type: 'consulta', created_at: since..until_at)
+                 .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
+                 .where(canceled_at: nil) # item 233: sem exame, tele ou cancelada
+                 .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
+    # sem lente: os parceiros ficam fora pela regra antiga; com lente, é ela quem separa
+    @lens ? scope : scope.where(source_detail: nil).not_partner_origin
   end
 
   NEW_LEAD_DAYS = 30
@@ -193,19 +225,19 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   end
 
   def confirmed(since, until_at)
-    @account.tasks.where(task_type: 'consulta', confirmed_at: since..until_at)
+    tasks.where(task_type: 'consulta', confirmed_at: since..until_at)
   end
 
   def registered(since, until_at)
-    @account.tasks.where(task_type: 'consulta', booking_kind: 'registro', created_at: since..until_at)
+    tasks.where(task_type: 'consulta', booking_kind: 'registro', created_at: since..until_at)
   end
 
   def created_tasks(type, since, until_at)
-    @account.tasks.where(task_type: type, created_at: since..until_at)
+    tasks.where(task_type: type, created_at: since..until_at)
   end
 
   def due_tasks(type, since, until_at)
-    @account.tasks.where(task_type: type, canceled_at: nil, due_at: since..until_at)
+    tasks.where(task_type: type, canceled_at: nil, due_at: since..until_at)
   end
 
   def indicated(since, until_at)
@@ -213,20 +245,22 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   end
 
   def attendance(type, status, since, until_at)
-    @account.tasks.where(task_type: type, attendance: status, canceled_at: nil, due_at: since..until_at)
+    tasks.where(task_type: type, attendance: status, canceled_at: nil, due_at: since..until_at)
   end
 
   # item 309: só entrada de verdade — carga em massa (`bulk`) não é paciente entrando na coluna
   def stage_entries(pipeline, stage_id, since, until_at)
-    Crm::StageLog.joins(:crm_contact)
-                 .where(crm_contacts: { pipeline_id: pipeline.id }, stage_id: stage_id, entered_at: since..until_at,
-                        event_type: Crm::StageLogBulk::ENTERED)
+    scope = Crm::StageLog.joins(:crm_contact)
+                         .where(crm_contacts: { pipeline_id: pipeline.id }, stage_id: stage_id, entered_at: since..until_at,
+                                event_type: Crm::StageLogBulk::ENTERED)
+    @lens ? @lens.stage_logs(scope) : scope
   end
 
-  def revenue_logs(pipeline, since, until_at)
-    Crm::StageLog.joins(:crm_contact)
-                 .where(crm_contacts: { pipeline_id: pipeline.id }, entered_at: since..until_at)
-                 .where("crm_contact_stage_logs.stage_name ILIKE '%cirurgia realizada%'")
+  def revenue_logs(pipelines, since, until_at)
+    scope = Crm::StageLog.joins(:crm_contact)
+                         .where(crm_contacts: { pipeline_id: pipelines.map(&:id) }, entered_at: since..until_at)
+                         .where("crm_contact_stage_logs.stage_name ILIKE '%cirurgia realizada%'")
+    @lens ? @lens.stage_logs(scope) : scope
   end
 
   # ── baldes ────────────────────────────────────────────────────────────

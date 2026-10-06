@@ -20,16 +20,44 @@ module Crm::BookingRate
   end
 
   # entradas na coluna de agendamento no período (uma linha por passagem)
-  def entries(account, since, until_at)
+  # lens (item 328): com a lente, vale a coluna de agendamento de CADA fonte
+  # que ela enxerga (a da casa + "Consulta Agendada" do funil do Oftalmofácil)
+  def entries(account, since, until_at, lens: nil)
+    return lens_entries(account, since, until_at, lens) if lens
+
     target = stage(account)
     return Crm::StageLog.none unless target
 
     Crm::StageLog.where(stage_id: target.id, event_type: 'entered', entered_at: since..until_at)
   end
 
+  def lens_entries(account, since, until_at, lens)
+    ids = stage_ids(account, lens)
+    return Crm::StageLog.none if ids.empty?
+
+    lens.stage_logs(Crm::StageLog.where(stage_id: ids, event_type: 'entered', entered_at: since..until_at))
+  end
+
+  PARTNER_BOOKING = /consulta agendada|agendamento/i
+  NOT_BOOKING = /cirurgia|p[oó]s|desmarc|n[aã]o foi/i
+
+  # colunas de agendamento que a lente enxerga: a oficial da casa e, em cada
+  # funil de outra fonte, a primeira "Consulta Agendada" (nunca a de cirurgia)
+  def stage_ids(account, lens)
+    foreign = Crm::Sources.map(account)['pipelines']
+    ids = lens.pipelines.select { |pipeline| foreign.key?(pipeline.id.to_s) }.filter_map { |pipeline| partner_stage_id(pipeline) }
+    house = stage(account)
+    ids.unshift(house.id) if house && (lens.all? || lens.own?)
+    ids.uniq
+  end
+
+  def partner_stage_id(pipeline)
+    pipeline.stages.order(:position).detect { |s| s.name.match?(PARTNER_BOOKING) && !s.name.match?(NOT_BOOKING) }&.id
+  end
+
   # pacientes distintos que entraram na coluna no período
-  def count(account, since, until_at)
-    entries(account, since, until_at).distinct.count(:crm_contact_id)
+  def count(account, since, until_at, lens: nil)
+    entries(account, since, until_at, lens: lens).distinct.count(:crm_contact_id)
   end
 
   def rate(account, since, until_at, leads: nil)

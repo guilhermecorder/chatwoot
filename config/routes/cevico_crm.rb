@@ -227,7 +227,12 @@ namespace :crm do
   end
   # Resultados de tráfego das Páginas: origem (Google/SEO/Meta) →
   # visitas → cliques → leads (Protocolo) → agendou → cirurgia
-  resource :pages_report, only: [:show], controller: 'pages_reports'
+  resource :pages_report, only: [:show], controller: 'pages_reports' do
+    # item 329: coleção de insights + sugestões da IA para otimizar a página
+    post :save_insight
+    post :remove_insight
+    post :ai_suggestions
+  end
   # Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
   resource :pages_dashboard, only: [:show], controller: 'pages_dashboards' do
     # 🌪 Montador de Funis (item 60): fontes de captação
@@ -309,6 +314,8 @@ namespace :crm do
     post :toggle_radar
     # cesto de indicadores c/ série + período anterior (item 141)
     get :kpis
+    # 🎂 item 331: aniversário da pessoa logada
+    post :birthday
   end
   resource :campaigns_dashboard, only: [:show], controller: 'campaigns_dashboards'
   resource :automations_dashboard, only: [:show], controller: 'automations_dashboards'

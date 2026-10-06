@@ -113,19 +113,37 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
              at = due.in_time_zone(TZ)
              start = (at.hour * 60) + at.min
              mins = HUB_DURATION[type] || HUB_DURATION[modality] || 15
-             { date: at.to_date, unit: unit, from: start, to: start + mins }
+             { date: at.to_date, unit: unit, from: start, to: start + mins, kind: hub_kind(type, modality) }
            end
+  end
+
+  # 🪑 item 330b (06/10, regra dele: "deixar a IA agendar consulta de avaliação
+  # encaixada no mesmo horário de retorno, pós-op ou exame — 1 a mais por horário"):
+  # retorno e pós-op são consultas "flexíveis": não travam o horário para a IA.
+  # O horário só fecha quando já tem uma avaliação (ou consulta sem tipo) nele.
+  SOFT_MODALITIES = %w[retorno pos_op].freeze
+
+  # cirurgia × exame × flexível × consulta (de qual agenda o item do hub é e se trava o horário)
+  def hub_kind(type, modality)
+    return 'cirurgia' if type == 'cirurgia'
+    return 'exames' if modality == 'exames'
+
+    SOFT_MODALITIES.include?(modality) ? 'flexivel' : 'consulta'
   end
 
   # item 297 (30/09): na janela do MÉDICO o agendamento ocupa SÓ o bloco em que
   # começa — a mesma regra da tela. Antes a duração presumida (cirurgia 60,
   # exame 30, consulta 15) tomava 2 ou 3 blocos de 10 min e a IA deixava de
   # oferecer horário que estava livre.
-  def hub_overlap?(ctx, day, hhmm, win)
+  # 🔪 item 330 (06/10): cirurgia e exame do hub NÃO ocupam a janela do médico —
+  # cirurgia é agenda independente (sala cirúrgica) e exame tem a agenda própria;
+  # a janela do médico é só de consultas (a tela da Agenda segue a mesma regra).
+  def hub_overlap?(ctx, day, hhmm, win) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     start = hm_to_min(hhmm)
     finish = start + win['block'].to_i
     ctx[:hub_busy].any? do |b|
       next false unless b[:date] == day && b[:unit] == win['unit']
+      next false if win['doctor'].present? && b[:kind] != 'consulta'
       next b[:from] >= start && b[:from] < finish if win['doctor'].present?
 
       b[:from] < finish && b[:to] > start
@@ -149,8 +167,12 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       blocked_days: Array(cfg['blocked_days']).select { |b| b.is_a?(String) }.to_set,
       # item 267: fechamentos de PARTE do dia (uma unidade ou um médico)
       blocked_parts: Array(cfg['blocked_days']).select { |b| b.is_a?(Hash) },
+      # item 330: exame não ocupa horário de consulta (tem agenda própria);
+      # item 330b: retorno e pós-op também não travam — a IA pode encaixar UMA
+      # avaliação no mesmo horário (e só uma: a avaliação, sim, trava)
       occupied: account.tasks
                        .where(task_type: 'consulta', canceled_at: nil)
+                       .where('tasks.modality IS NULL OR tasks.modality NOT IN (?)', ['exames'] + SOFT_MODALITIES)
                        .where(due_at: TZ.parse(from_date.to_s).beginning_of_day..TZ.parse(to_date.to_s).end_of_day)
                        .pluck(:due_at, :unit)
                        .to_set { |due, unit| "#{due.in_time_zone(TZ).strftime('%Y-%m-%d|%H:%M')}|#{unit}" }

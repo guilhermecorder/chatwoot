@@ -444,13 +444,23 @@ const taskStartMin = t => {
   const d = new Date(t.due_at);
   return d.getHours() * 60 + d.getMinutes();
 };
+// 🔪 item 330 (06/10, pedido dele: "as cirurgias não devem ocupar a agenda dos
+// médicos; a agenda cirúrgica é independente"): cada agendamento ocupa SÓ a
+// agenda do seu tipo — cirurgia na sala cirúrgica, exame na agenda de exames,
+// consulta (avaliação, retorno, pós-op) na janela do médico. Vale também para
+// o que vem do Oftalmofácil (antes o item do hub ocupava qualquer janela da unidade).
 const occupiesWindow = (t, win) => {
   const fromHub = t.source === 'oftalmofacil';
   const unitOk = t.unit ? t.unit === win.unit : !fromHub;
   if (!unitOk) return false;
-  if (fromHub) return true;
-  return isSurgeryWin(win) ? isSurgeryTask(t) : !isSurgeryTask(t);
+  if (isSurgeryWin(win)) return isSurgeryTask(t);
+  if (isSurgeryTask(t)) return false;
+  return win.exam ? kindOf(t) === 'exames' : kindOf(t) !== 'exames';
 };
+// item 330: retorno e pós-operatório são consultas "menos prioritárias" — ficam
+// no bloco do médico, mas com balão mais leve, lembrando que podem receber encaixe
+const isSoftTask = t => !isSurgeryTask(t) && ['retorno', 'pos_op'].includes(t.modality);
+const softTitle = t => (isSoftTask(t) ? ' · retorno/pós-op (pode receber encaixe de avaliação)' : '');
 // agendamentos ocupando um bloco (pode haver ENCAIXE: 2+ no mesmo horário)
 const tasksAtSlotAll = (day, win, slot) => {
   const slotStart = toMin(slot);
@@ -2595,7 +2605,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <!-- item 319: um balão POR PACIENTE (antes o encaixe virava "+2" escondido) -->
                       <template v-if="taskAtSlot(cursor, win, slot)">
                         <span v-for="(st, si) in tasksAtSlotAll(cursor, win, slot)" :key="slot + '-' + st.id" v-cv-menu="() => taskMenu(st)" class="relative group min-w-0">
-                          <button class="cv-ag-slot cv-ag-slot-taken truncate" :title="`${slot} · ${displayName(st)}`" @click="openEdit(st)">
+                          <button class="cv-ag-slot cv-ag-slot-taken truncate" :class="isSoftTask(st) ? 'cv-ag-slot-soft' : ''" :title="`${slot} · ${displayName(st)}${softTitle(st)}`" @click="openEdit(st)">
                             <span class="tabular-nums opacity-90">{{ slot }}</span>
                             <span v-if="isConfirmed(st)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(st)" /><span v-else-if="isDeclined(st)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />
                             <span class="truncate">{{ displayName(st) }}</span>
@@ -2613,7 +2623,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     </template>
                     <!-- item 319: quem está marcado FORA da faixa (antes ou depois) também aparece -->
                     <span v-for="ot in outsideTasks(cursor, win)" :key="'out-' + ot.id" v-cv-menu="() => taskMenu(ot)" class="relative group min-w-0">
-                      <button class="cv-ag-slot cv-ag-slot-taken cv-ag-slot-out truncate" :title="`${hmOf(ot)} · ${displayName(ot)} — fora da faixa ${win.start}–${win.end}`" @click="openEdit(ot)">
+                      <button class="cv-ag-slot cv-ag-slot-taken cv-ag-slot-out truncate" :class="isSoftTask(ot) ? 'cv-ag-slot-soft' : ''" :title="`${hmOf(ot)} · ${displayName(ot)} — fora da faixa ${win.start}–${win.end}${softTitle(ot)}`" @click="openEdit(ot)">
                         <span class="tabular-nums opacity-90">{{ hmOf(ot) }}</span>
                         <span v-if="isConfirmed(ot)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(ot)" /><span v-else-if="isDeclined(ot)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />
                         <span class="truncate">{{ displayName(ot) }}</span>

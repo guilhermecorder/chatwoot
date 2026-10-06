@@ -91,6 +91,14 @@ const hojeStr = (() => {
 })();
 const period = ref({ preset: 'today', from: hojeStr, to: hojeStr });
 
+// 🔎 item 328 (Fase 2 das Fontes): a chavinha CEVICO | Oftalmofácil | Tudo.
+// Vale para os indicadores do painel (o servidor filtra pelo carimbo de
+// origem); a escolha fica salva por PESSOA. Listas de trabalho (tarefas,
+// próximas consultas, Radar) e desempenho das pessoas não mudam com ela.
+const { uiSettings, updateUISettings } = useUISettings();
+const sourceLens = ref(uiSettings.value?.cevico_home_source || 'cevico');
+const sourceParams = () => ({ source: sourceLens.value });
+
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
 const BASE_PANELS = [
   {
@@ -280,6 +288,7 @@ const fetchData = async () => {
     const { preset, from, to } = period.value;
     const { data: payload } = await CrmAPI.getHome({
       preset,
+      ...sourceParams(),
       panel: selectedPanel.value,
       doctor:
         panelBase.value === 'medico'
@@ -425,6 +434,7 @@ const fetchKpiBag = async () => {
     const { preset, from, to } = period.value;
     const { data: bag } = await CrmAPI.getKpiBag({
       preset,
+      ...sourceParams(),
       ...(preset === 'custom' ? { from, to } : {}),
     });
     if (seq !== kpiSeq) return;
@@ -446,7 +456,10 @@ const fetchTrendBag = async preset => {
     return;
   }
   try {
-    const { data } = await CrmAPI.getKpiBag({ preset: 'last7' });
+    const { data } = await CrmAPI.getKpiBag({
+      preset: 'last7',
+      ...sourceParams(),
+    });
     trendBag.value = data;
   } catch {
     trendBag.value = null;
@@ -455,7 +468,12 @@ const fetchTrendBag = async preset => {
 const histBag = ref(null);
 let histLoadedAt = 0;
 const fetchHistBag = async () => {
-  if (histBag.value && Date.now() - histLoadedAt < 30 * 60 * 1000) return;
+  if (
+    histBag.value &&
+    histBag.value.source === sourceLens.value &&
+    Date.now() - histLoadedAt < 30 * 60 * 1000
+  )
+    return;
   const d = new Date();
   const ymd = x => x.toLocaleDateString('sv-SE');
   const to = new Date(d);
@@ -465,6 +483,7 @@ const fetchHistBag = async () => {
   try {
     const { data } = await CrmAPI.getKpiBag({
       preset: 'custom',
+      ...sourceParams(),
       from: ymd(from),
       to: ymd(to),
       granularity: 'day',
@@ -478,6 +497,105 @@ const fetchHistBag = async () => {
 
 // régua nova: qualquer mudança (preset ou De/Até) recarrega o painel
 watch(period, fetchData);
+
+// 🔎 item 328: as opções da chavinha vêm do servidor (as fontes cadastradas
+// em Integrações → Fontes de pacientes) + "Tudo"; com uma fonte só, não aparece
+const lensOptions = computed(() => {
+  const sources = data.value?.sources || [];
+  if (sources.length < 2) return [];
+  return [
+    ...sources.map(s => ({ key: s.key, label: s.name, color: s.color })),
+    { key: 'all', label: 'Tudo' },
+  ];
+});
+// a fonte que os números da tela estão mostrando (a que o servidor aplicou)
+const activeLens = computed(() => data.value?.source || sourceLens.value);
+const activeLensLabel = computed(
+  () =>
+    lensOptions.value.find(o => o.key === activeLens.value)?.label || 'CEVICO'
+);
+const setSourceLens = key => {
+  if (key === sourceLens.value) return;
+  sourceLens.value = key;
+  isLoading.value = true;
+  fetchData();
+  updateUISettings({ cevico_home_source: key });
+};
+// 🎂 item 331 (06/10): ANIVERSÁRIOS DA EQUIPE — quem ainda não informou vê o
+// convite no topo (some ao preencher); no dia, o aviso "aniversariante do
+// dia" para todo mundo + a lista do mês. Admin vê quem falta e pode informar por alguém.
+const birthdays = computed(() => data.value?.birthdays || null);
+const MONTHS_PT = [
+  'janeiro',
+  'fevereiro',
+  'março',
+  'abril',
+  'maio',
+  'junho',
+  'julho',
+  'agosto',
+  'setembro',
+  'outubro',
+  'novembro',
+  'dezembro',
+];
+const bdayForm = ref({ day: '', month: '', year: '', user_id: '' });
+const bdaySaving = ref(false);
+const bdayLater = ref(false); // "depois": esconde o convite só nesta visita
+const bdayFx = ref(null);
+const bdayNeeded = computed(
+  () => birthdays.value && !birthdays.value.mine && !bdayLater.value
+);
+const bdayToday = computed(() => birthdays.value?.today || []);
+const bdayMonth = computed(() => birthdays.value?.month || []);
+const bdayMissing = computed(() => birthdays.value?.missing);
+const bdayLabel = e =>
+  `${String(e.day).padStart(2, '0')}/${String(e.month).padStart(2, '0')}`;
+const bdayFirst = name =>
+  String(name || '')
+    .trim()
+    .split(/\s+/)[0];
+const bdayTodayText = computed(() => {
+  const names = bdayToday.value.map(e => e.name);
+  if (!names.length) return '';
+  if (names.length === 1) return `Hoje é aniversário de ${names[0]}!`;
+  return `Hoje é aniversário de ${names.slice(0, -1).join(', ')} e ${names.at(-1)}!`;
+});
+const saveBirthday = async () => {
+  if (!bdayForm.value.day || !bdayForm.value.month || bdaySaving.value) return;
+  bdaySaving.value = true;
+  try {
+    const payload = { day: bdayForm.value.day, month: bdayForm.value.month };
+    if (bdayForm.value.year) payload.year = bdayForm.value.year;
+    if (bdayForm.value.user_id) payload.user_id = bdayForm.value.user_id;
+    const { data: out } = await CrmAPI.saveBirthday(payload);
+    data.value = { ...data.value, birthdays: out.birthdays };
+    bdayForm.value = { day: '', month: '', year: '', user_id: '' };
+    useAlert('Aniversário guardado! 🎂');
+  } catch (error) {
+    useAlert(
+      error?.response?.data?.error || 'Não consegui guardar o aniversário.'
+    );
+  } finally {
+    bdaySaving.value = false;
+  }
+};
+let bdayCelebrated = '';
+watch(bdayTodayText, text => {
+  // confete uma vez por carga quando há aniversariante
+  if (!text || bdayCelebrated === text || !bdayFx.value) return;
+  bdayCelebrated = text;
+  bdayFx.value.rain(['🎂', '🎉', '🎈', '✨'], 26);
+});
+
+// frase que entra no "sobre" dos indicadores: de quem são os números
+const lensScope = computed(() => {
+  if (activeLens.value === 'all')
+    return 'Chavinha de fonte em TUDO: todas as fontes de pacientes juntas.';
+  if (activeLens.value === 'cevico')
+    return 'Só pacientes da CEVICO — as outras fontes (Oftalmofácil) ficam fora; para ver, mude a chavinha de fonte no topo.';
+  return `Só pacientes da fonte ${activeLensLabel.value} (chavinha de fonte no topo).`;
+});
 
 const setPanel = key => {
   selectedPanel.value = key;
@@ -743,9 +861,9 @@ const rawPanelTiles = computed(() => {
             value: d.appointments_created ?? 0,
           },
         ],
-        about:
-          'Taxa oficial (item 233): pacientes que MUDARAM DE COLUNA para "Agendamento de Consulta" no CRM no período ÷ leads do período. Só a mudança de coluna conta — exame, pós-operatório, teleconsulta e Oftalmofácil ficam fora.',
+        about: `Taxa oficial (item 233): pacientes que MUDARAM DE COLUNA para "Agendamento de Consulta" no CRM no período ÷ leads do período. Só a mudança de coluna conta — exame, pós-operatório e teleconsulta ficam fora. ${lensScope.value}`,
       },
+      ...cutsTiles(d.booking_cuts),
       {
         label: 'Comparecimento',
         icon: 'i-lucide-user-check',
@@ -832,8 +950,7 @@ const rawPanelTiles = computed(() => {
         },
         { label: 'Referência', value: '15% muito bom · 10% bom · 5% fraco' },
       ],
-      about:
-        'SÓ LEADS NOVOS: dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos mudaram de coluna para "Agendamento de Consulta" no CRM (só a mudança de coluna conta — pacientes da base, exame, pós-op, tele e Oftalmofácil ficam fora). É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência.',
+      about: `SÓ LEADS NOVOS: dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos mudaram de coluna para "Agendamento de Consulta" no CRM (só a mudança de coluna conta — pacientes da base, exame, pós-op e tele ficam fora). É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência. ${lensScope.value}`,
     },
     {
       // item 267: "não podemos chamar tudo de agendamento" — o card diz quantas
@@ -844,8 +961,9 @@ const rawPanelTiles = computed(() => {
       value: d.appointments_booked ?? 0,
       gk: 'appointments_booked',
       chartKey: 'appointments_booked',
+      // item 332: a linha do card já diz a fonte e por onde chegaram
       sub: d.booked_breakdown
-        ? `${d.booked_breakdown.new_leads} de leads novos · ${d.booked_breakdown.base} de pacientes da base`
+        ? bookedSub(d.booked_breakdown)
         : bookedInboxSub.value,
       breakdowns: bdSections(
         d.booked_breakdown,
@@ -869,9 +987,9 @@ const rawPanelTiles = computed(() => {
             ]
           : []),
       ],
-      about:
-        'Consultas novas registradas na Agenda no período, de QUALQUER paciente: lead novo (chegou há até 30 dias) ou paciente da base (retorno, pós-op, quem já estava no funil). Consulta para o passado, exame, tele, cancelada e Oftalmofácil ficam fora. A caixa mostrada é a por onde o paciente CHEGOU (primeira conversa), não a da conversa mais recente. Não é taxa de conversão: para isso, veja "Taxa de agendamento · leads novos".',
+      about: `Consultas novas registradas na Agenda no período, de QUALQUER paciente: lead novo (chegou há até 30 dias) ou paciente da base (retorno, pós-op, quem já estava no funil). Consulta para o passado, exame, tele e cancelada ficam fora. A caixa mostrada é a por onde o paciente CHEGOU (primeira conversa), não a da conversa mais recente. Não é taxa de conversão: para isso, veja "Taxa de agendamento · leads novos". ${lensScope.value}`,
     },
+    ...cutsTiles(d.booking_cuts),
     {
       label: 'Consultas marcadas hoje',
       icon: 'i-lucide-calendar-plus',
@@ -925,15 +1043,207 @@ const rawPanelTiles = computed(() => {
       chartMatch: /cirurgia agendada/i,
       sub: 'leads que chegaram no período e já estão em Cirurgia Agendada',
       breakdowns: surgerySections(d.surgery_breakdown),
-      about:
-        'Só LEADS DO PERÍODO: contatos que chegaram neste período e já alcançaram a coluna "Cirurgia Agendada" no CRM. Pacientes da base e do Oftalmofácil não entram aqui (estão em "Cirurgias marcadas (todas)").',
+      about: `Só LEADS DO PERÍODO: contatos que chegaram neste período e já alcançaram a coluna "Cirurgia Agendada" no CRM. Pacientes da base não entram aqui (estão em "Cirurgias marcadas"). ${lensScope.value}`,
     },
   ];
 });
 
+// ── 🧭 item 328 (05/10): TUDO O QUE FOI MARCADO, em três cortes — o que foi
+// (avaliação, retorno, pós-op… × só mudança de coluna), de onde veio (fonte,
+// caixa por onde o paciente chegou, particular) e quem fez (paciente, robô,
+// equipe, sincronização). Cada fatia abre a lista de pacientes. ──
+const CUT_WHAT_SHORT = {
+  avaliacao: ['avaliação', 'avaliações'],
+  retorno: ['retorno', 'retornos'],
+  pos_op: ['pós-op', 'pós-op'],
+  exames: ['exame', 'exames'],
+  teleconsulta: ['teleconsulta', 'teleconsultas'],
+  cirurgia: ['cirurgia', 'cirurgias'],
+  consulta: ['consulta sem tipo', 'consultas sem tipo'],
+  coluna: ['só mudança de coluna', 'só mudança de coluna'],
+};
+const cutShort = sl => {
+  const names = CUT_WHAT_SHORT[sl.key];
+  if (!names) return `${sl.count} ${sl.label}`;
+  return `${sl.count} ${sl.count === 1 ? names[0] : names[1]}`;
+};
+// cada fatia com a SUA cor (dopamina): o tipo e o "quem fez" têm cor fixa,
+// as caixas de entrada rodam a paleta e "sem cadastro / sem conversa" é cinza
+const CUT_COLORS = {
+  avaliacao: '#2563EB',
+  retorno: '#0D9488',
+  pos_op: '#7C3AED',
+  exames: '#EAB308',
+  teleconsulta: '#0891B2',
+  cirurgia: '#DB2777',
+  consulta: '#64748B',
+  coluna: '#EA580C',
+  paciente: '#16A34A',
+  robo: '#7C3AED',
+  equipe: '#2563EB',
+  sync: '#0D9488',
+  carga: '#64748B',
+  integracao: '#EA580C',
+  antes: '#94A3B8',
+  sem_cadastro: '#94A3B8',
+  sem_conversa: '#64748B',
+};
+const CUT_WHEEL = [
+  '#2563EB',
+  '#DB2777',
+  '#16A34A',
+  '#EAB308',
+  '#7C3AED',
+  '#0891B2',
+  '#EA580C',
+];
+const cutItems = list =>
+  (list || []).map((sl, i) => ({
+    key: sl.key,
+    label: sl.label,
+    value: sl.count,
+    color: sl.color || CUT_COLORS[sl.key] || CUT_WHEEL[i % CUT_WHEEL.length],
+  }));
+const cutGroups = cuts => {
+  if (!cuts?.total) return [];
+  const particular = cuts.particular?.yes
+    ? [
+        {
+          field: 'particular',
+          title: 'Consulta particular',
+          items: [
+            {
+              key: true,
+              label: 'Particular',
+              value: cuts.particular.yes,
+              color: '#D4AF37',
+            },
+            {
+              key: false,
+              label: 'Demais consultas e cirurgias',
+              value: cuts.particular.no,
+              color: '#94A3B8',
+            },
+          ],
+        },
+      ]
+    : [];
+  return [
+    {
+      n: 1,
+      title: 'O que foi',
+      hint: 'Agendamento novo na Agenda, por tipo. "Só mudança de coluna" = o card entrou na coluna de agendamento do CRM sem consulta na Agenda naqueles dias.',
+      bars: [{ field: 'what', title: '', items: cutItems(cuts.what) }],
+    },
+    {
+      n: 2,
+      title: 'De onde veio',
+      hint: 'A fonte é o carimbo de origem; a caixa é a da PRIMEIRA conversa do paciente (por onde ele chegou).',
+      bars: [
+        {
+          field: 'source',
+          title: 'Fonte de pacientes',
+          items: cutItems(cuts.sources),
+        },
+        {
+          field: 'inbox',
+          title: 'Caixa por onde o paciente chegou',
+          items: cutItems(cuts.inboxes),
+        },
+        ...particular,
+      ],
+    },
+    {
+      n: 3,
+      title: 'Quem fez',
+      hint: cuts.deduced
+        ? `O carimbo de "quem fez" existe desde 05/10/2026. Em ${cuts.deduced} agendamento(s) anteriores, robô × equipe foi deduzido pela marca do Atendente de IA na consulta.`
+        : 'Pelo carimbo gravado na hora em que o agendamento nasceu.',
+      bars: [{ field: 'via', title: '', items: cutItems(cuts.who) }],
+    },
+  ];
+};
+const cutsTiles = cuts => {
+  if (!cuts) return [];
+  const top = (cuts.what || []).slice(0, 3).map(cutShort).join(' · ');
+  const outside = [
+    cuts.outside?.registered
+      ? `${cuts.outside.registered} lançada(s) (já estavam marcadas fora do sistema)`
+      : '',
+    cuts.outside?.history
+      ? `${cuts.outside.history} lançamento(s) de histórico (a data já tinha passado)`
+      : '',
+  ].filter(Boolean);
+  return [
+    {
+      label: 'Tudo o que foi marcado',
+      id: 'booking_cuts',
+      icon: 'i-lucide-layers',
+      value: cuts.total ?? 0,
+      sub: top || 'nada marcado no período',
+      cuts,
+      details: [
+        {
+          label: 'Agendamentos novos na Agenda (consultas e cirurgias)',
+          value: `${cuts.agenda ?? 0}`,
+        },
+        {
+          label: 'Só mudança de coluna no CRM (sem consulta na Agenda)',
+          value: `${cuts.column_only ?? 0}`,
+        },
+        ...(outside.length
+          ? [{ label: 'Fora desta conta', value: outside.join(' · ') }]
+          : []),
+      ],
+      about: `O VOLUME TOTAL do que foi marcado no período, aberto em três cortes: o que foi, de onde veio e quem fez. Soma os agendamentos novos da Agenda (consulta ou cirurgia, marcados para a frente e não cancelados) com os cards que entraram na coluna de agendamento do CRM sem consulta na Agenda naqueles dias. Toque numa fatia para ver os pacientes. Não é a taxa de agendamento: para isso, veja "Taxa de agendamento · leads novos". ${lensScope.value}`,
+    },
+  ];
+};
+const openCutList = (cuts, bar, slice) => {
+  if (!cuts || slice?.other) return;
+  const rows = (cuts.rows || []).filter(r =>
+    bar.field === 'particular'
+      ? r.task_id && r.particular === slice.key
+      : String(r[bar.field]) === String(slice.key)
+  );
+  funnelPopup.value = {
+    title: `${slice.label}`,
+    subtitle: cuts.truncated
+      ? `marcados no período · só os ${cuts.rows.length} mais recentes de ${cuts.rows_total} entram na lista`
+      : 'marcados no período',
+    people: rows.map(r => ({
+      id: r.id,
+      task_id: r.task_id,
+      contact_id: r.contact_id,
+      conversation_id: r.conversation_id,
+      name: r.name,
+      phone: r.phone,
+      origin: r.origin,
+      when: r.when,
+      meta: [r.what_label, r.via_label].filter(Boolean).join(' · '),
+    })),
+    grad: 'linear-gradient(135deg, #0F5FA6 0%, #7C3AED 100%)',
+    icon: 'i-lucide-layers',
+  };
+};
+
 // ── item 267 (28/09): o que importa em cada indicador, em seções ──────────
 const bdRows = list =>
   (list || []).map(r => ({ label: r.label, value: r.count }));
+// item 332 (06/10): a linha de baixo de "Consultas marcadas" com a fonte
+// (carimbo) e as 2 caixas por onde mais chegaram
+const bookedSub = bd => {
+  const parts = [`${bd.new_leads} de leads novos · ${bd.base} da base`];
+  const stamp = (bd.by_stamp || []).filter(r => r.count > 0);
+  if (stamp.length > 1)
+    parts.push(stamp.map(r => `${r.label} ${r.count}`).join(' · '));
+  const inboxes = (bd.by_origin_inbox || [])
+    .filter(r => r.count > 0 && !/^sem /.test(r.label))
+    .slice(0, 2)
+    .map(r => `${shortInboxName(r.label)} ${r.count}`);
+  if (inboxes.length) parts.push(inboxes.join(' · '));
+  return parts.join(' · ');
+};
 const bdSections = (bd, title = 'Consultas marcadas') => {
   if (!bd || !bd.total) return [];
   return [
@@ -948,6 +1258,11 @@ const bdSections = (bd, title = 'Consultas marcadas') => {
       ],
     },
     {
+      // item 332: a FONTE pelo carimbo de origem (CEVICO × Oftalmofácil…)
+      title: 'Fonte de pacientes (carimbo de origem)',
+      items: bdRows(bd.by_stamp),
+    },
+    {
       title: 'De qual caixa de entrada o paciente chegou',
       items: bdRows(bd.by_origin_inbox),
     },
@@ -958,11 +1273,17 @@ const bdSections = (bd, title = 'Consultas marcadas') => {
     },
     { title: 'Médico', items: bdRows(bd.by_doctor) },
     {
-      title: 'Quem marcou',
-      items: [
-        { label: 'Atendente de IA', value: bd.by_source?.ia ?? 0 },
-        { label: 'Equipe', value: bd.by_source?.equipe ?? 0 },
-      ],
+      // item 332: quem fez pelo carimbo (paciente, robô, equipe, sincronização);
+      // sem carimbo (antes de 05/10) cai na regra antiga Atendente de IA × equipe
+      title: bd.via_deduced
+        ? `Quem fez (${bd.via_deduced} anteriores ao carimbo, deduzidos pela marca do Atendente)`
+        : 'Quem fez',
+      items: bd.by_via?.length
+        ? bdRows(bd.by_via)
+        : [
+            { label: 'Atendente de IA', value: bd.by_source?.ia ?? 0 },
+            { label: 'Equipe', value: bd.by_source?.equipe ?? 0 },
+          ],
     },
     {
       title: 'Onde foi marcada',
@@ -1379,6 +1700,7 @@ const fetchKpiModalBag = async () => {
     const params = kpiModalPreset.value
       ? { preset: kpiModalPreset.value }
       : { preset, ...(preset === 'custom' ? { from, to } : {}) };
+    Object.assign(params, sourceParams());
     if (kpiModalGranularity.value)
       params.granularity = kpiModalGranularity.value;
     const { data: bag } = await CrmAPI.getKpiBag(params);
@@ -2126,7 +2448,6 @@ const themePalette = computed(() => {
 // 🌈 nota "Seu painel, as suas cores" — aparece UMA vez por PESSOA (22/09):
 // a dispensa fica em ui_settings (servidor), então some em todo aparelho;
 // o localStorage é só reforço para o caso de a gravação falhar.
-const { uiSettings, updateUISettings } = useUISettings();
 const DOPAMINE_NOTE_KEY = 'cevico_note_dopamine_colors_v1';
 const dopamineDismissedLocally = () => {
   try {
@@ -3771,7 +4092,10 @@ const shortInboxName = n =>
     .split(' ')[0] || n;
 const leadsInboxSub = computed(() => {
   const list = data.value?.leads_by_inbox || [];
-  if (!list.length) return 'caixas Google + Instagram';
+  if (!list.length)
+    return activeLens.value === 'cevico'
+      ? 'caixas Google + Instagram'
+      : `pacientes novos · ${activeLensLabel.value}`;
   return list.map(i => `${shortInboxName(i.name)} ${i.count}`).join(' · ');
 });
 // item 238: "Marcadas na Agenda" por caixa de entrada (linha de baixo do card)
@@ -3780,7 +4104,7 @@ const bookedInboxSub = computed(() => {
     i => i.count > 0
   );
   if (!list.length)
-    return 'consultas novas no período (sem exame, tele, cancelada ou Oftalmofácil)';
+    return 'consultas novas no período (sem exame, tele ou cancelada)';
   return list.map(i => `${shortInboxName(i.name)} ${i.count}`).join(' · ');
 });
 const pctOf = (part, total) =>
@@ -4878,6 +5202,171 @@ onUnmounted(() => {
       <template v-else>
         <!-- 🌈 Novidade: cada pessoa pode escolher as cores do seu painel (nota
              dispensável; some ao clicar e não volta neste navegador) -->
+        <!-- 🎂 item 331: aniversariante do dia (todo mundo vê) -->
+        <EmojiFx ref="bdayFx" />
+        <div
+          v-if="bdayToday.length"
+          class="cv-modal-head w-full rounded-2xl shadow-md mb-4 !px-5 !py-4 flex items-center gap-4 flex-wrap"
+          style="background: linear-gradient(135deg, #db2777, #f59e0b)"
+        >
+          <span class="text-4xl leading-none">🎂</span>
+          <div class="min-w-0 flex-1">
+            <p class="text-base sm:text-lg font-bold">
+              Aniversariante do dia · {{ bdayTodayText }}
+            </p>
+            <p class="text-xs opacity-90">
+              {{
+                bdayToday.some(e => e.age)
+                  ? bdayToday
+                      .filter(e => e.age)
+                      .map(e => `${bdayFirst(e.name)} faz ${e.age}`)
+                      .join(' · ') + ' · '
+                  : ''
+              }}um abraço da equipe CEVICO 🎉
+            </p>
+          </div>
+        </div>
+
+        <!-- 🎂 item 331: convite para informar o próprio aniversário (some ao preencher) -->
+        <div
+          v-if="bdayNeeded"
+          class="cv-sub px-4 py-3 mb-4 flex items-center gap-3 flex-wrap"
+        >
+          <span class="text-2xl leading-none">🎈</span>
+          <div class="min-w-0">
+            <p class="text-sm font-bold text-n-slate-12">
+              Qual é o dia do seu aniversário?
+            </p>
+            <p class="text-[11px] text-n-slate-10">
+              A equipe quer comemorar com você. Só dia e mês; o ano é opcional.
+            </p>
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap ml-auto">
+            <select
+              v-model="bdayForm.day"
+              class="cv-input !h-8 !w-[4.5rem] text-xs"
+            >
+              <option value="">dia</option>
+              <option v-for="d in 31" :key="d" :value="d">{{ d }}</option>
+            </select>
+            <select
+              v-model="bdayForm.month"
+              class="cv-input !h-8 !w-32 text-xs"
+            >
+              <option value="">mês</option>
+              <option v-for="(m, mi) in MONTHS_PT" :key="m" :value="mi + 1">
+                {{ m }}
+              </option>
+            </select>
+            <input
+              v-model="bdayForm.year"
+              class="cv-input !h-8 !w-20 text-xs"
+              placeholder="ano"
+              inputmode="numeric"
+              maxlength="4"
+            />
+            <button
+              class="cv-btn cv-btn-sm cv-blue"
+              :disabled="!bdayForm.day || !bdayForm.month || bdaySaving"
+              @click="saveBirthday"
+            >
+              <span class="i-lucide-cake text-xs" /> Guardar
+            </button>
+            <button
+              class="cv-btn cv-btn-sm cv-btn-ghost"
+              @click="bdayLater = true"
+            >
+              depois
+            </button>
+          </div>
+        </div>
+
+        <!-- 🎂 item 331: aniversariantes do mês -->
+        <div
+          v-if="
+            bdayMonth.length ||
+            (isAdmin && Array.isArray(bdayMissing) && bdayMissing.length)
+          "
+          class="flex items-center gap-2 flex-wrap mb-4 text-xs text-n-slate-11"
+        >
+          <template v-if="bdayMonth.length">
+            <span class="font-semibold text-n-slate-12">
+              <span
+                class="i-lucide-cake text-xs align-middle mr-1"
+              />Aniversariantes do mês
+            </span>
+            <span
+              v-for="e in bdayMonth"
+              :key="e.user_id"
+              class="cv-chip"
+              :class="
+                bdayToday.some(t => t.user_id === e.user_id) ? 'cv-chip-on' : ''
+              "
+            >
+              {{ e.name }} <b>{{ bdayLabel(e) }}</b>
+            </span>
+          </template>
+          <span
+            v-if="isAdmin && Array.isArray(bdayMissing) && bdayMissing.length"
+            class="text-n-slate-10 ml-auto"
+            :title="bdayMissing.join(', ')"
+          >
+            ainda não informaram: {{ bdayMissing.length }}
+            <select
+              v-model="bdayForm.user_id"
+              class="cv-input !h-7 !w-40 text-[11px] ml-1"
+              title="Admin: informar o aniversário de alguém"
+            >
+              <option value="">informar por alguém…</option>
+              <option v-for="p in birthdays.people" :key="p.id" :value="p.id">
+                {{ p.name }}
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          v-if="isAdmin && bdayForm.user_id"
+          class="cv-sub px-4 py-3 mb-4 flex items-center gap-2 flex-wrap text-xs"
+        >
+          <span class="font-semibold text-n-slate-12">
+            Aniversário de
+            {{ birthdays.people.find(p => p.id === bdayForm.user_id)?.name }}:
+          </span>
+          <select
+            v-model="bdayForm.day"
+            class="cv-input !h-8 !w-[4.5rem] text-xs"
+          >
+            <option value="">dia</option>
+            <option v-for="d in 31" :key="d" :value="d">{{ d }}</option>
+          </select>
+          <select v-model="bdayForm.month" class="cv-input !h-8 !w-32 text-xs">
+            <option value="">mês</option>
+            <option v-for="(m, mi) in MONTHS_PT" :key="m" :value="mi + 1">
+              {{ m }}
+            </option>
+          </select>
+          <input
+            v-model="bdayForm.year"
+            class="cv-input !h-8 !w-20 text-xs"
+            placeholder="ano"
+            inputmode="numeric"
+            maxlength="4"
+          />
+          <button
+            class="cv-btn cv-btn-sm cv-blue"
+            :disabled="!bdayForm.day || !bdayForm.month || bdaySaving"
+            @click="saveBirthday"
+          >
+            Guardar
+          </button>
+          <button
+            class="cv-btn cv-btn-sm cv-btn-ghost"
+            @click="bdayForm.user_id = ''"
+          >
+            cancelar
+          </button>
+        </div>
+
         <div v-if="showDopamineNote" class="cv-block cv-notice-dopamine mb-10">
           <div class="p-6 sm:p-8 flex items-start gap-4">
             <span
@@ -5832,9 +6321,44 @@ onUnmounted(() => {
         </div>
 
         <!-- Régua de período PADRÃO (presets + Personalizado De/Até) -->
-        <div class="mb-4 max-w-full">
+        <div class="mb-4 max-w-full flex flex-wrap items-center gap-2">
           <PeriodRuler v-model="period" glass class="max-w-full" />
+          <!-- 🔎 item 328: de qual FONTE de pacientes são os números -->
+          <div
+            v-if="lensOptions.length"
+            class="cv-seg inline-flex items-center gap-0.5 max-w-full flex-nowrap overflow-x-auto"
+            title="De qual fonte de pacientes são os números do painel"
+          >
+            <span
+              class="i-lucide-split text-sm ml-2 mr-0.5 flex-shrink-0"
+              :style="{ color: 'var(--cv)' }"
+            />
+            <button
+              v-for="opt in lensOptions"
+              :key="opt.key"
+              class="cv-seg-item text-xs font-medium whitespace-nowrap flex-shrink-0"
+              :class="activeLens === opt.key ? 'cv-seg-on' : ''"
+              @click="setSourceLens(opt.key)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
         </div>
+        <p
+          v-if="lensOptions.length && activeLens !== 'cevico'"
+          class="cv-sub px-3 py-2 mb-4 text-xs text-n-slate-11 leading-relaxed"
+        >
+          <span class="i-lucide-split text-xs align-middle mr-1" />
+          <b class="text-n-slate-12">Vendo: {{ activeLensLabel }}.</b>
+          {{
+            activeLens === 'all'
+              ? 'Os indicadores somam todas as fontes de pacientes.'
+              : `Os indicadores mostram só o que é da fonte ${activeLensLabel}: pacientes, agendamentos e colunas do funil dela.`
+          }}
+          Metas e recordes são da CEVICO e não julgam os cards nesta visão.
+          Tarefas, próximas consultas, Radar e desempenho das pessoas não mudam
+          com a chavinha.
+        </p>
 
         <!-- ✈️ GESTOR: o indicador de decisão — posso viajar ou é ação imediata? -->
         <!-- item 240: minimizado = barrinha na mesma cor; clique abre de novo -->
@@ -8177,6 +8701,41 @@ onUnmounted(() => {
                 🪜 Leads novos dos últimos 30 dias, passo a passo
               </p>
               <FunnelSteps :steps="kpiModal.funnel" :height="140" />
+            </div>
+            <!-- 🧭 item 328: tudo o que foi marcado, em três cortes -->
+            <div
+              v-for="group in cutGroups(kpiModal.cuts)"
+              :key="group.n"
+              class="cv-sub px-3 py-3"
+            >
+              <p class="text-sm font-bold text-n-slate-12">
+                <span class="mr-1.5" :style="{ color: 'var(--cv)' }">{{
+                  group.n
+                }}</span
+                >{{ group.title }}
+              </p>
+              <p class="text-[11px] text-n-slate-10 leading-relaxed mb-2">
+                {{ group.hint }}
+              </p>
+              <div
+                v-for="bar in group.bars"
+                :key="bar.field"
+                class="mt-2 first:mt-0"
+              >
+                <p
+                  v-if="bar.title"
+                  class="text-[11px] font-medium text-n-slate-11 mb-1.5"
+                >
+                  {{ bar.title }}
+                </p>
+                <ShareBar
+                  :items="bar.items"
+                  :max="8"
+                  :height="12"
+                  clickable
+                  @pick="openCutList(kpiModal.cuts, bar, $event)"
+                />
+              </div>
             </div>
             <!-- item 267: o que importa neste indicador, em seções -->
             <div

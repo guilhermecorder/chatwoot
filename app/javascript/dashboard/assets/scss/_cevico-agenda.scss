@@ -504,6 +504,12 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 10px -6px rgb(var(--w-rgb) / 0.9);
 }
 .cv-page .cv-ag-slot-taken:hover { filter: brightness(1.06); }
+/* item 330: retorno / pós-op — consulta "menos prioritária": balão mais leve, com fio pontilhado por dentro */
+.cv-page .cv-ag-slot-soft {
+  background: linear-gradient(135deg, rgb(var(--w-rgb) / 0.78), rgb(var(--w-rgb) / 0.6));
+  outline: 2px dotted rgba(255, 255, 255, 0.65);
+  outline-offset: -3px;
+}
 /* item 319: paciente marcado FORA da faixa do médico — mesmo balão, contorno tracejado */
 .cv-page .cv-ag-slot-out { outline: 2px dashed rgb(var(--w-rgb) / 0.55); outline-offset: 1px; opacity: 0.92; }
 .cv-page .cv-ag-slot-locked {

@@ -980,6 +980,11 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/home`, { params });
   }
 
+  // 🎂 item 331: informar o aniversário (dia, mês, ano opcional); clear = apagar
+  saveBirthday(payload) {
+    return axios.post(`${this.url}/home/birthday`, payload);
+  }
+
   // ── Dashboard de Campanhas ────────────────────────────────────────
   getCampaignsDashboard(params = {}) {
     return axios.get(`${this.url}/campaigns_dashboard`, { params });
@@ -1194,6 +1199,20 @@ class CrmAPI extends ApiClient {
   // 📈 Resultados de tráfego: origem → visitas → leads → agendou → cirurgia
   getPagesReport(params = {}) {
     return axios.get(`${this.url}/pages_report`, { params });
+  }
+
+  // 💡 item 329: coleção de insights das páginas (guardar / mudar situação /
+  // apagar) e sugestões da IA para uma página no período da régua
+  savePageInsight(payload) {
+    return axios.post(`${this.url}/pages_report/save_insight`, payload);
+  }
+
+  removePageInsight(id) {
+    return axios.post(`${this.url}/pages_report/remove_insight`, { id });
+  }
+
+  getPageAiSuggestions(params = {}) {
+    return axios.post(`${this.url}/pages_report/ai_suggestions`, params);
   }
 
   // 🚪 Porta de entrada (hub) na raiz do domínio dedicado
