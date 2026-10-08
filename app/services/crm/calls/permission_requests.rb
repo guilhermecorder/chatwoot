@@ -18,13 +18,21 @@ module Crm::Calls::PermissionRequests
     nil
   end
 
+  # item 333: grava pelo Cevico::AttributeMerge (trava da linha) — o update!
+  # cru apagava marcas de lembrete/pausa gravadas no mesmo instante (julho)
   def remember!(contact)
-    stamps = (recent(contact).select { |t| t > 7.days.ago } + [Time.current]).map(&:iso8601).last(10)
-    contact.update!(additional_attributes: (contact.additional_attributes || {}).merge(KEY => stamps))
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      stamps = (parse_stamps(attrs[KEY]).select { |t| t > 7.days.ago } + [Time.current]).map(&:iso8601).last(10)
+      attrs.merge(KEY => stamps)
+    end
   end
 
   def recent(contact)
-    Array((contact.additional_attributes || {})[KEY]).filter_map do |value|
+    parse_stamps((contact.additional_attributes || {})[KEY])
+  end
+
+  def parse_stamps(list)
+    Array(list).filter_map do |value|
       Time.zone.parse(value.to_s)
     rescue ArgumentError
       nil

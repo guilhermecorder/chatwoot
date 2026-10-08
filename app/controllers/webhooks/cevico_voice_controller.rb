@@ -23,6 +23,8 @@ class Webhooks::CevicoVoiceController < ActionController::API
   # início da ligação: quem está ligando → nome/próxima consulta + primeira frase com o nome
   def initiation
     caller = body['caller_id'].to_s
+    return render json: partner_initiation(caller) if partner_caller?(caller)
+
     found = Crm::VoiceAgent::ToolsService.new(account: @account, tool: 'buscar_paciente', params: { 'telefone' => caller },
                                               conversation_id: body['conversation_id']).perform
     first_name = found[:primeiro_nome].to_s
@@ -93,6 +95,39 @@ class Webhooks::CevicoVoiceController < ActionController::API
       [key, value] if value.present?
     end.to_h
     [parts['t'], parts['v0'].present? ? "v0=#{parts['v0']}" : nil]
+  end
+
+  # 🛡️ item 333 — regra de ouro: paciente de clínica PARCEIRA nunca conversa
+  # com IA. A assistente diz só a frase fixa e encerra (o roteiro inteiro é
+  # trocado nesta ligação); a equipe ganha uma tarefa para falar com ele pelo
+  # WhatsApp dos parceiros.
+  def partner_caller?(caller)
+    digits = caller.to_s.gsub(/\D/, '')
+    return false if digits.length < 8
+
+    @partner_contact = Task.match_contact(@account, digits)
+    Crm::PartnerGuard.partner_contact?(@partner_contact)
+  end
+
+  def partner_initiation(caller)
+    Crm::PartnerGuard.block!('voz/ligação recebida', contact: @partner_contact)
+    notify_team_partner_call(caller)
+    {
+      type: 'conversation_initiation_client_data',
+      dynamic_variables: { paciente_nome: '', primeiro_nome: '', proxima_consulta: '', telefone: caller.gsub(/\D/, ''),
+                           campanha_objetivo: '' },
+      conversation_config_override: {
+        agent: { first_message: settings.partner_message, prompt: { prompt: Crm::VoiceAgent::Script::PARTNER_PROMPT } }
+      }
+    }
+  end
+
+  def notify_team_partner_call(caller)
+    Crm::HandoffTask.open!(account: @account, contact: @partner_contact, conversation: nil, agent_key: 'voice',
+                           motivo: 'paciente de clínica parceira ligou para a assistente',
+                           detalhes: "Telefone: +#{caller.gsub(/\D/, '')}. Retornar pela caixa dos parceiros (a IA não conversa com ele).")
+  rescue StandardError => e
+    Rails.logger.warn("[CEVICO voice] aviso de ligação de parceiro: #{e.message}")
   end
 
   def personalized_first_message(first_name)

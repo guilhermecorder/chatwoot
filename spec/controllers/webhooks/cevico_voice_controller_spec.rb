@@ -53,6 +53,23 @@ RSpec.describe 'CEVICO Voice webhooks', type: :request do
       expect(body['dynamic_variables']['primeiro_nome']).to eq('Maria')
       expect(body.dig('conversation_config_override', 'agent', 'first_message')).to include('Olá, Maria!')
     end
+
+    # item 333 — regra de ouro: paciente de parceiro nunca conversa com IA
+    it 'paciente de clínica parceira: frase fixa, roteiro trocado para só encerrar e tarefa para a equipe', :aggregate_failures do
+      create(:user, account: account, role: :administrator)
+      partner = create(:contact, account: account, name: 'João Parceiro', phone_number: '+5511999990009')
+      partner.add_labels(['of_clinica_x'])
+      post "#{base}/initiation", params: { caller_id: '+5511999990009', agent_id: 'sim_agent', conversation_id: 'conv_9' }.to_json,
+                                 headers: { 'X-Cevico-Token' => tools_token, 'CONTENT_TYPE' => 'application/json' }
+
+      agent = response.parsed_body.dig('conversation_config_override', 'agent')
+      expect(agent['first_message']).to include('a equipe da clínica vai falar com você')
+      expect(agent['first_message']).not_to include('João')
+      expect(agent.dig('prompt', 'prompt')).to eq(Crm::VoiceAgent::Script::PARTNER_PROMPT)
+      expect(response.parsed_body['dynamic_variables']['primeiro_nome']).to eq('')
+      task = account.tasks.where(contact_id: partner.id).last
+      expect(task.title).to include('Ligação').and include('parceira')
+    end
   end
 
   describe 'POST /post_call' do

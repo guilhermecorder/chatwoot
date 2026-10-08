@@ -22,6 +22,7 @@ import {
 const store = useStore();
 const router = useRouter();
 const settings = useMapGetter('crm/getSettings');
+const pipelines = useMapGetter('crm/getPipelines');
 const inboxes = useMapGetter('inboxes/getInboxes');
 const accountId = useMapGetter('getCurrentAccountId');
 
@@ -38,6 +39,42 @@ const DEFAULT_LLM_OPTIONS = [
 ];
 const DEFAULT_LANGUAGE_OPTIONS = ['pt-br', 'pt'];
 const DEFAULT_TTS_MODEL = 'eleven_flash_v2_5';
+// 🎙️ item 333: motor de voz (como ela soa) — lista da OpenAPI da ElevenLabs
+const DEFAULT_TTS_OPTIONS = [
+  'eleven_flash_v2_5',
+  'eleven_turbo_v2_5',
+  'eleven_v4_turbo',
+  'eleven_v4',
+  'eleven_multilingual_v2',
+  'eleven_v3_conversational',
+];
+const TTS_LABELS = {
+  eleven_flash_v2_5: 'Flash 2.5 — o mais rápido para responder (padrão)',
+  eleven_turbo_v2_5: 'Turbo 2.5 — rápido, um pouco mais natural',
+  eleven_v4_turbo: 'v4 Turbo — natural e rápido (o mais novo)',
+  eleven_v4: 'v4 — o mais natural, demora um pouco mais',
+  eleven_multilingual_v2: 'Multilingual v2 — clássico, bom em português',
+  eleven_v3_conversational: 'v3 Conversacional — mais expressivo',
+};
+// resultados que podem levar o card para uma coluna (marcou/remarcou/confirmou têm regra própria)
+const OUTCOME_ROWS = [
+  { key: 'sem_interesse', label: 'Sem interesse' },
+  { key: 'quer_whatsapp', label: 'Prefere continuar pelo WhatsApp' },
+  { key: 'recado', label: 'Caixa postal / deixou recado' },
+  { key: 'nao_atendeu', label: 'Não atendeu' },
+  { key: 'transferido', label: 'Passou para a equipe' },
+  { key: 'cancelou', label: 'Pediu para desmarcar' },
+  { key: 'outro', label: 'Outro assunto' },
+];
+const WEEKDAYS = [
+  { n: 1, label: 'Seg' },
+  { n: 2, label: 'Ter' },
+  { n: 3, label: 'Qua' },
+  { n: 4, label: 'Qui' },
+  { n: 5, label: 'Sex' },
+  { n: 6, label: 'Sáb' },
+  { n: 0, label: 'Dom' },
+];
 const LLM_LABELS = {
   'gemini-2.5-flash': 'Gemini 2.5 Flash — rápido e econômico (padrão)',
   'gemini-3.5-flash': 'Gemini 3.5 Flash — mais novo',
@@ -51,7 +88,7 @@ const LANGUAGE_LABELS = {
 };
 // chaves literais não podem aparecer dentro de interpolação no template
 const wrapToken = t => '{{' + t + '}}';
-const NAME_TOKEN = wrapToken('paciente_nome');
+const EU_SOU_TOKEN = wrapToken('EU_SOU');
 const CONTACT_TOKEN = wrapToken('contact.first_name');
 
 const voice = computed(() => settings.value?.voice ?? {});
@@ -69,7 +106,14 @@ const blankForm = () => ({
   llm: DEFAULT_LLM,
   language: 'pt-br',
   tts_model: DEFAULT_TTS_MODEL,
-  first_message: '',
+  persona_name: '',
+  persona_gender: 'f',
+  first_message: '', // vazio = a frase padrão (muda com o nome)
+  outbound_first_message: '',
+  partner_message: '',
+  pronunciations: [],
+  call_days: [1, 2, 3, 4, 5],
+  outcome_stages: {},
   transfer_number: '',
   transfer_condition: '',
   handoff_inbox_id: null,
@@ -82,7 +126,8 @@ const blankForm = () => ({
 
 const form = ref(blankForm());
 // o script vive fora do form: null no backend = usa o padrão
-const promptText = ref('');
+const promptText = ref(''); // roteiro ao LIGAR (agents.voice.prompt)
+const inboundPromptText = ref(''); // item 333: roteiro ao ATENDER (agents.voice_inbound.prompt)
 
 const isLoading = ref(true);
 const isSaving = ref(false);
@@ -128,7 +173,17 @@ const fillForm = () => {
     llm: v.llm || DEFAULT_LLM,
     language: v.language || 'pt-br',
     tts_model: v.tts_model || DEFAULT_TTS_MODEL,
-    first_message: v.first_message || '',
+    persona_name: v.persona_name || '',
+    persona_gender: v.persona_gender === 'm' ? 'm' : 'f',
+    // frase padrão não vira texto gravado: o campo fica vazio e o padrão aparece como exemplo
+    first_message: v.first_message_custom ? v.first_message || '' : '',
+    outbound_first_message: v.outbound_first_message_custom
+      ? v.outbound_first_message || ''
+      : '',
+    partner_message: v.partner_message_custom ? v.partner_message || '' : '',
+    pronunciations: (v.pronunciations || []).map(r => ({ ...r })),
+    call_days: Array.isArray(v.call_days) ? [...v.call_days] : [1, 2, 3, 4, 5],
+    outcome_stages: { ...(v.outcome_stages || {}) },
     transfer_number: v.transfer_number || '',
     transfer_condition: v.transfer_condition || '',
     handoff_inbox_id: v.handoff_inbox_id || null,
@@ -148,6 +203,7 @@ const fillForm = () => {
     },
   };
   promptText.value = v.prompt ?? v.default_prompt ?? '';
+  inboundPromptText.value = v.inbound_prompt ?? v.default_inbound_prompt ?? '';
   // modelo de continuidade já salvo → mostra o nome e as variáveis
   const saved = v.handoff_template_params || {};
   handoffTplName.value = saved.name || '';
@@ -186,6 +242,80 @@ const isCustomPrompt = computed(() => {
 const restoreDefaultPrompt = () => {
   promptText.value = defaultPrompt.value;
 };
+// item 333: roteiro ao ATENDER
+const defaultInboundPrompt = computed(
+  () => voice.value.default_inbound_prompt || ''
+);
+const isCustomInboundPrompt = computed(() => {
+  const text = inboundPromptText.value.trim();
+  return Boolean(text) && text !== defaultInboundPrompt.value.trim();
+});
+const restoreDefaultInboundPrompt = () => {
+  inboundPromptText.value = defaultInboundPrompt.value;
+};
+
+// ── item 333: persona, frases, motor de voz, pronúncia, dias e colunas ──
+const ttsOptions = computed(() => {
+  const list =
+    Array.isArray(voice.value.tts_model_options) &&
+    voice.value.tts_model_options.length
+      ? voice.value.tts_model_options
+      : DEFAULT_TTS_OPTIONS;
+  return form.value.tts_model && !list.includes(form.value.tts_model)
+    ? [...list, form.value.tts_model]
+    : list;
+});
+const ttsLabel = key => TTS_LABELS[key] || key;
+// "o Guilherme, assistente virtual da CEVICO" — prévia ao vivo das frases padrão
+const personaIntro = computed(() => {
+  const name = form.value.persona_name.trim();
+  const art = form.value.persona_gender === 'm' ? 'o' : 'a';
+  return name
+    ? `${art} ${name}, assistente virtual da CEVICO`
+    : `${art} assistente virtual da CEVICO`;
+});
+const defaultInboundFirst = computed(
+  () =>
+    `Olá! Aqui é ${personaIntro.value}. Posso te ajudar a marcar, confirmar ou remarcar a sua consulta. Como posso te ajudar?`
+);
+const defaultOutboundFirst = computed(
+  () =>
+    `Olá! Aqui é ${personaIntro.value}. A gente conversou pelo WhatsApp e eu queria saber se ficou alguma dúvida. Você tem um minutinho?`
+);
+const defaultPartnerMessage = computed(
+  () =>
+    `Olá! Aqui é ${personaIntro.value}. Para o seu atendimento, a equipe da clínica vai falar com você pelo WhatsApp. A CEVICO agradece, até logo!`
+);
+const addPronunciation = () => {
+  if (form.value.pronunciations.length >= 30) return;
+  form.value.pronunciations.push({ from: '', to: '' });
+};
+const removePronunciation = index => {
+  form.value.pronunciations.splice(index, 1);
+};
+const toggleDay = n => {
+  const days = form.value.call_days;
+  form.value.call_days = days.includes(n)
+    ? days.filter(d => d !== n)
+    : [...days, n].sort();
+};
+// colunas do CRM por funil (sem o funil dos parceiros: lá a assistente não mexe)
+const stageGroups = computed(() =>
+  (pipelines.value || [])
+    .filter(p => p.id !== voice.value.partner_pipeline_id)
+    .map(p => ({
+      id: p.id,
+      name: p.name,
+      stages: [...(p.stages || [])].sort((a, b) => a.position - b.position),
+    }))
+);
+const stageName = id => {
+  const all = stageGroups.value.flatMap(g => g.stages);
+  return all.find(st => st.id === Number(id))?.name || '';
+};
+const bookingStageName = computed(() =>
+  voice.value.booking_stage_id ? stageName(voice.value.booking_stage_id) : ''
+);
 
 // ── caixa da clínica (só WhatsApp Cloud, como em CevicoCalls.vue) ──
 const whatsappInboxes = computed(() =>
@@ -363,6 +493,7 @@ onMounted(async () => {
     await Promise.all([
       store.dispatch('crm/fetchSettings'),
       store.dispatch('inboxes/get'),
+      store.dispatch('crm/fetchPipelines'),
     ]);
   } catch {
     // a tela abre mesmo assim, com o que tiver
@@ -390,8 +521,22 @@ const payload = () => {
     llm: f.llm,
     language: f.language,
     tts_model: f.tts_model || DEFAULT_TTS_MODEL,
+    persona_name: f.persona_name.trim(),
+    persona_gender: f.persona_gender,
     first_message: f.first_message.trim(),
+    outbound_first_message: f.outbound_first_message.trim(),
+    partner_message: f.partner_message.trim(),
+    pronunciations: f.pronunciations
+      .map(r => ({ from: (r.from || '').trim(), to: (r.to || '').trim() }))
+      .filter(r => r.from && r.to),
+    call_days: [...f.call_days],
+    outcome_stages: Object.fromEntries(
+      Object.entries(f.outcome_stages).filter(([, id]) => Number(id) > 0)
+    ),
     prompt: isCustomPrompt.value ? promptText.value.trim() : null,
+    inbound_prompt: isCustomInboundPrompt.value
+      ? inboundPromptText.value.trim()
+      : null,
     transfer_number: f.transfer_number.trim(),
     transfer_condition: f.transfer_condition.trim(),
     handoff_inbox_id: f.handoff_inbox_id ? Number(f.handoff_inbox_id) : null,
@@ -412,6 +557,10 @@ const payload = () => {
 
 const validate = () => {
   const f = form.value;
+  if (!f.call_days.length) {
+    useAlert('Escolha pelo menos um dia em que as campanhas podem ligar.');
+    return false;
+  }
   if (f.enabled && !f.handoff_inbox_id) {
     useAlert(
       'Escolha a caixa de WhatsApp da clínica antes de ligar a assistente.'
@@ -1042,10 +1191,50 @@ const chipOff = 'bg-n-alpha-1 border-n-weak text-n-slate-10';
               :placeholder="DEFAULT_AGENT_NAME"
             />
             <p class="text-xs text-n-slate-9 mt-1">
-              Aparece no painel da ElevenLabs. Na ligação ela sempre se
-              apresenta como assistente virtual.
+              Aparece só no painel da ElevenLabs. Como ela se apresenta na
+              ligação é o campo abaixo.
             </p>
           </div>
+
+          <!-- item 333: como se apresenta -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label
+                for="voice-persona-name"
+                class="text-xs font-medium text-n-slate-11 block mb-1.5"
+              >
+                Nome que ela fala na ligação
+              </label>
+              <input
+                id="voice-persona-name"
+                v-model="form.persona_name"
+                :class="inputClass"
+                maxlength="40"
+                placeholder="Ex.: Guilherme (vazio = só “assistente virtual”)"
+              />
+            </div>
+            <div>
+              <label
+                for="voice-persona-gender"
+                class="text-xs font-medium text-n-slate-11 block mb-1.5"
+              >
+                Fala como
+              </label>
+              <select
+                id="voice-persona-gender"
+                v-model="form.persona_gender"
+                :class="inputClass"
+              >
+                <option value="f">Feminino — “a assistente virtual”</option>
+                <option value="m">Masculino — “o assistente virtual”</option>
+              </select>
+            </div>
+          </div>
+          <p class="text-xs text-n-slate-9 -mt-3">
+            Ela vai dizer: “Aqui é {{ personaIntro }}”. Se perguntarem, ela
+            sempre diz que é um assistente virtual. Combine com uma voz do mesmo
+            gênero.
+          </p>
 
           <!-- voz -->
           <div>
@@ -1180,29 +1369,116 @@ const chipOff = 'bg-n-alpha-1 border-n-weak text-n-slate-10';
             </div>
           </div>
 
-          <!-- primeira frase -->
+          <!-- item 333: motor de voz -->
           <div>
-            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
-              Primeira frase
+            <label
+              for="voice-tts-model"
+              class="text-xs font-medium text-n-slate-11 block mb-1.5"
+            >
+              Motor de voz
             </label>
-            <textarea
-              v-model="form.first_message"
-              rows="2"
+            <select
+              id="voice-tts-model"
+              v-model="form.tts_model"
               :class="inputClass"
-              placeholder="Vazio = usa a frase padrão (ela se apresenta como assistente virtual da CEVICO e pergunta como pode ajudar)"
-            />
+            >
+              <option v-for="m in ttsOptions" :key="m" :value="m">
+                {{ ttsLabel(m) }}
+              </option>
+            </select>
             <p class="text-xs text-n-slate-9 mt-1">
-              Pode usar
-              <code class="bg-n-alpha-2 px-1 rounded">{{ NAME_TOKEN }}</code>
-              — quando o número já é conhecido, ela chama pelo nome.
+              Achou a voz robótica? Teste o “v4 Turbo” ou o “Multilingual v2”:
+              Salvar → Sincronizar → ouvir no painel da ElevenLabs. Se a
+              ElevenLabs recusar a combinação, o erro aparece no registro do
+              Sincronizar.
             </p>
           </div>
 
-          <!-- script -->
+          <!-- primeiras frases (item 333: uma ao atender, outra ao ligar) -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div class="min-w-0">
+              <label
+                for="voice-first-inbound"
+                class="text-xs font-medium text-n-slate-11 block mb-1.5"
+              >
+                1ª frase ao ATENDER
+                <span class="text-n-slate-9 font-normal">(paciente liga)</span>
+              </label>
+              <textarea
+                id="voice-first-inbound"
+                v-model="form.first_message"
+                rows="3"
+                :class="inputClass"
+                :placeholder="defaultInboundFirst"
+              />
+            </div>
+            <div class="min-w-0">
+              <label
+                for="voice-first-outbound"
+                class="text-xs font-medium text-n-slate-11 block mb-1.5"
+              >
+                1ª frase ao LIGAR (leads parados e campanhas sem frase)
+              </label>
+              <textarea
+                id="voice-first-outbound"
+                v-model="form.outbound_first_message"
+                rows="3"
+                :class="inputClass"
+                :placeholder="defaultOutboundFirst"
+              />
+            </div>
+          </div>
+          <p class="text-xs text-n-slate-9 -mt-3">
+            Vazio = a frase cinza (ela acompanha o nome acima). Comece com
+            “Olá!”: quando o número é conhecido, o sistema troca por “Olá,
+            Maria!”.
+          </p>
+
+          <!-- item 333: roteiro ao ATENDER -->
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <label
+                for="voice-inbound-prompt"
+                class="text-xs font-medium text-n-slate-11"
+              >
+                Passos ao ATENDER (ligação recebida)
+              </label>
+              <span
+                class="text-[11px] px-2 py-0.5 rounded-full border"
+                :class="
+                  isCustomInboundPrompt
+                    ? 'bg-purple-500/10 border-purple-500/30 text-purple-700'
+                    : chipOff
+                "
+              >
+                {{
+                  isCustomInboundPrompt ? 'personalizado' : 'usando o padrão'
+                }}
+              </span>
+              <button
+                :class="smallBtn"
+                class="ml-auto"
+                :disabled="!isCustomInboundPrompt || !defaultInboundPrompt"
+                @click="restoreDefaultInboundPrompt"
+              >
+                <span class="i-lucide-rotate-ccw text-xs" />
+                Restaurar padrão
+              </button>
+            </div>
+            <textarea
+              id="voice-inbound-prompt"
+              v-model="inboundPromptText"
+              rows="8"
+              :class="inputClass"
+              class="font-mono text-xs leading-relaxed"
+            />
+          </div>
+
+          <!-- script (roteiro ao LIGAR) -->
           <div>
             <div class="flex items-center gap-2 mb-1.5">
               <label class="text-xs font-medium text-n-slate-11">
-                Script da conversa
+                Passos ao LIGAR (leads parados e campanhas)
               </label>
               <span
                 class="text-[11px] px-2 py-0.5 rounded-full border"
@@ -1232,10 +1508,65 @@ const chipOff = 'bg-n-alpha-1 border-n-weak text-n-slate-10';
               placeholder="O script padrão aparece aqui depois do primeiro carregamento. Edite à vontade — 'Restaurar padrão' volta ao original."
             />
             <p class="text-xs text-n-slate-9 mt-1">
-              Regras de voz (frases curtas, números por extenso, no máximo 2
-              horários por vez), o fluxo da ligação e quando transferir. A
-              tabela de preços e as unidades entram sozinhas.
+              Os dois blocos acima são só os PASSOS de cada tipo de ligação. O
+              Roteiro CEVICO, as regras de voz (frases curtas, números por
+              extenso, no máximo 2 horários por vez), a tabela de preços e o
+              valor da avaliação da Agenda entram sozinhos. Nos textos,
+              <code class="bg-n-alpha-2 px-1 rounded">{{ EU_SOU_TOKEN }}</code>
+              vira “{{ personaIntro }}”.
             </p>
+          </div>
+
+          <!-- item 333: pronúncia -->
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="text-xs font-medium text-n-slate-11">
+                Pronúncia de nomes
+              </span>
+              <button
+                :class="smallBtn"
+                class="ml-auto"
+                @click="addPronunciation"
+              >
+                <span class="i-lucide-plus text-xs" />
+                Adicionar
+              </button>
+            </div>
+            <p class="text-xs text-n-slate-9 mb-2">
+              Para nomes que a voz fala com sotaque ou errado: escreva o nome e
+              como ele deve soar (ex.: Gemelli → Jeméli).
+            </p>
+            <div
+              v-for="(row, index) in form.pronunciations"
+              :key="index"
+              class="flex items-center gap-2 mb-2"
+            >
+              <input
+                :id="`voice-pron-from-${index}`"
+                v-model="row.from"
+                :class="inputClass"
+                placeholder="Nome escrito"
+                maxlength="60"
+                aria-label="Nome escrito"
+              />
+              <span class="text-n-slate-9 flex-shrink-0">→</span>
+              <input
+                :id="`voice-pron-to-${index}`"
+                v-model="row.to"
+                :class="inputClass"
+                placeholder="Como deve soar"
+                maxlength="80"
+                aria-label="Como deve soar"
+              />
+              <button
+                :class="smallBtn"
+                title="Remover"
+                aria-label="Remover"
+                @click="removePronunciation(index)"
+              >
+                <span class="i-lucide-x text-xs" />
+              </button>
+            </div>
           </div>
 
           <!-- transferência -->
@@ -1452,6 +1783,34 @@ const chipOff = 'bg-n-alpha-1 border-n-weak text-n-slate-10';
             </p>
           </div>
 
+          <!-- item 333: dias da semana das campanhas -->
+          <div>
+            <span class="text-xs font-medium text-n-slate-11 block mb-1.5">
+              Dias em que as campanhas podem ligar
+            </span>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="d in WEEKDAYS"
+                :key="d.n"
+                type="button"
+                class="text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors"
+                :class="
+                  form.call_days.includes(d.n)
+                    ? 'bg-n-brand text-white border-n-brand'
+                    : 'border-n-weak text-n-slate-11 hover:border-n-brand/40'
+                "
+                :aria-pressed="form.call_days.includes(d.n)"
+                @click="toggleDay(d.n)"
+              >
+                {{ d.label }}
+              </button>
+            </div>
+            <p class="text-xs text-n-slate-9 mt-1">
+              Vale para as campanhas de ligação. A ligação automática para leads
+              parados segue a janela do card do agente (Automações).
+            </p>
+          </div>
+
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
@@ -1486,6 +1845,109 @@ const chipOff = 'bg-n-alpha-1 border-n-weak text-n-slate-10';
                 </span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- ══ 6 · Depois da ligação (item 333) ══ -->
+        <div
+          class="bg-n-solid-2 rounded-2xl border border-n-weak p-6 space-y-5"
+        >
+          <div class="flex items-center gap-3 mb-1">
+            <span
+              class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0"
+              style="background: linear-gradient(135deg, #b45309, #f59e0b)"
+            >
+              6
+            </span>
+            <div>
+              <h3 class="text-sm font-semibold text-n-slate-12">
+                Depois da ligação
+              </h3>
+              <p class="text-xs text-n-slate-10">
+                Para onde vai o card do paciente no CRM, conforme o resultado
+              </p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div class="rounded-lg border border-n-weak bg-n-alpha-1 px-3 py-2">
+              <p class="font-semibold text-n-slate-12">Marcou ou remarcou</p>
+              <p class="text-n-slate-10 mt-0.5">
+                {{
+                  bookingStageName
+                    ? `→ ${bookingStageName} (a mesma coluna do WhatsApp, em Agendamentos → Ajustes)`
+                    : 'Sem coluna configurada em Agendamentos → Ajustes: só as etiquetas'
+                }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-n-weak bg-n-alpha-1 px-3 py-2">
+              <p class="font-semibold text-n-slate-12">Confirmou a consulta</p>
+              <p class="text-n-slate-10 mt-0.5">
+                → Consulta Confirmada (o mesmo caminho do “sim” ao lembrete)
+              </p>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <div
+              v-for="row in OUTCOME_ROWS"
+              :key="row.key"
+              class="grid grid-cols-1 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] gap-1 sm:gap-3 sm:items-center"
+            >
+              <label
+                :for="`voice-outcome-${row.key}`"
+                class="text-xs font-medium text-n-slate-11"
+              >
+                {{ row.label }}
+              </label>
+              <select
+                :id="`voice-outcome-${row.key}`"
+                v-model="form.outcome_stages[row.key]"
+                :class="inputClass"
+              >
+                <option :value="undefined">Não mexer no card</option>
+                <optgroup
+                  v-for="group in stageGroups"
+                  :key="group.id"
+                  :label="group.name"
+                >
+                  <option
+                    v-for="stage in group.stages"
+                    :key="stage.id"
+                    :value="stage.id"
+                  >
+                    {{ stage.name }}
+                  </option>
+                </optgroup>
+              </select>
+            </div>
+          </div>
+          <p class="text-xs text-n-slate-9">
+            Quem decide é esta regra, não a IA: ela só informa o resultado. O
+            card só anda para a frente, não sai do lugar se o paciente já tem
+            consulta marcada (exceto “pediu para desmarcar”) e paciente de
+            parceiro nunca é mexido.
+          </p>
+
+          <div>
+            <label
+              for="voice-partner-message"
+              class="text-xs font-medium text-n-slate-11 block mb-1.5"
+            >
+              Se quem liga é paciente de clínica parceira
+            </label>
+            <textarea
+              id="voice-partner-message"
+              v-model="form.partner_message"
+              rows="2"
+              :class="inputClass"
+              :placeholder="defaultPartnerMessage"
+            />
+            <p class="text-xs text-n-slate-9 mt-1">
+              Regra de ouro: a IA não conversa com paciente de parceiro. Ela diz
+              só esta frase e encerra, e a equipe ganha uma tarefa para falar
+              com ele pela caixa dos parceiros.
+            </p>
           </div>
         </div>
 

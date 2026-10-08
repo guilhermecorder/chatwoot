@@ -62,7 +62,20 @@ class Crm::VoiceAgent::UnresponsiveLeads
   def dialable?(contact)
     return false if contact.blank? || contact.phone_number.to_s.gsub(/\D/, '').length < 8
 
-    contact.phone_number != Crm::AgentSimulator::FAKE_PHONE # paciente de teste do simulador nunca entra
+    return false if contact.phone_number == Crm::AgentSimulator::FAKE_PHONE # paciente de teste do simulador nunca entra
+
+    !refused_calls?(contact)
+  end
+
+  # item 333: recusou o pedido de permissão para ligar há menos de 30 dias → fora
+  def refused_calls?(contact)
+    answer = (contact.additional_attributes || {})['cevico_call_permission'] || {}
+    return false unless answer['status'] == 'reject'
+
+    replied = answer['replied_at'].present? ? Time.zone.parse(answer['replied_at'].to_s) : nil
+    replied.nil? || replied > @now - Crm::VoiceAgent::CampaignDialerJob::REFUSAL_COOLDOWN
+  rescue ArgumentError
+    true
   end
 
   # opt-out (nao_perturbe / perda_*) + fila de campanha aberta

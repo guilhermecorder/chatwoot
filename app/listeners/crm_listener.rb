@@ -237,7 +237,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     /\A\s*(nao|n|no|nope)\s*[.!]*\s*\z/i,
     /\b(nao\s+vou|nao\s+posso|nao\s+poderei|nao\s+consigo|nao\s+confirmo|nao\s+da\b|nao\s+vai\s+dar|desmarc|cancel)/i
   )
-  DECLINE_LABEL = 'confirmar_urgente'.freeze
+  DECLINE_LABEL = Crm::AppointmentConfirmation::DECLINE_LABEL
 
   def handle_appointment_confirmation(message, contact) # rubocop:disable Metrics/CyclomaticComplexity
     return unless message.message_type == 'incoming'
@@ -297,17 +297,12 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   end
 
   def record_confirmation(message, contact, task)
-    Cevico::AttributeMerge.merge!(contact) do |attrs|
-      all = attrs['cevico_appt_reminders'] || {}
-      (all[task.id.to_s] ||= {})['confirmed'] = Time.current.iso8601
-      attrs.merge('cevico_appt_reminders' => all)
-    end
     # item 217: a confirmação fica NA CONSULTA (painel Agendamentos "Confirmada",
-    # indicador "Consultas confirmadas"); um NÃO anterior é desfeito
-    task.update!(confirmed_at: Time.current, declined_at: nil)
-    # item 300: o card anda para "Consulta Confirmada" — no funil do Oftalmofácil
-    # quando o paciente é de lá (sem automação), senão no da CEVICO
-    moved_to = Crm::ConfirmationReflector.call(account: contact.account, task: task)
+    # indicador "Consultas confirmadas"); um NÃO anterior é desfeito. Item 300:
+    # o card anda para "Consulta Confirmada" — no funil do Oftalmofácil quando o
+    # paciente é de lá (sem automação), senão no da CEVICO. Item 333: o mesmo
+    # caminho da ligação (Crm::AppointmentConfirmation)
+    moved_to = Crm::AppointmentConfirmation.confirm!(account: contact.account, task: task, contact: contact)
     dia = task.due_at.in_time_zone(ActiveSupport::TimeZone['America/Sao_Paulo'])
     message.conversation.messages.create!(
       account_id: contact.account_id,
@@ -320,17 +315,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   end
 
   def record_decline(message, contact, task)
-    Cevico::AttributeMerge.merge!(contact) do |attrs|
-      all = attrs['cevico_appt_reminders'] || {}
-      (all[task.id.to_s] ||= {})['declined'] = Time.current.iso8601
-      attrs.merge('cevico_appt_reminders' => all)
-    end
-    task.update!(declined_at: Time.current)
-    account = contact.account
-    ensure_decline_label!(account)
-    contact.add_labels([DECLINE_LABEL]) unless contact.label_list.include?(DECLINE_LABEL)
     conversation = message.conversation
-    conversation.add_labels([DECLINE_LABEL]) unless conversation.label_list.include?(DECLINE_LABEL)
     dia = task.due_at.in_time_zone(ActiveSupport::TimeZone['America/Sao_Paulo'])
     conversation.messages.create!(
       account_id: contact.account_id,
@@ -340,13 +325,9 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       content: "❌ Paciente respondeu NÃO ao lembrete da consulta de #{dia.strftime('%d/%m às %H:%M')}. " \
                'A consulta continua na Agenda — ligue para remarcar ou cancelar (etiqueta confirmar_urgente).'
     )
-    Crm::AgentAlert.push(account: account, kind: 'nao_confirmou', task: task, conversation: conversation, agent_key: 'lembrete')
-  end
-
-  def ensure_decline_label!(account)
-    return if account.labels.exists?(title: DECLINE_LABEL)
-
-    account.labels.create!(title: DECLINE_LABEL, color: '#DC2626', show_on_sidebar: true)
+    # item 333: etiqueta, marca e aviso no Meu Painel no mesmo caminho da ligação
+    Crm::AppointmentConfirmation.decline!(account: contact.account, task: task, contact: contact, conversation: conversation,
+                                          agent_key: 'lembrete')
   end
 
   def recheck_recently?(contact)

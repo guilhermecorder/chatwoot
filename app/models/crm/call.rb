@@ -90,7 +90,8 @@ class Crm::Call < ApplicationRecord
   MAX_EVENTS = 60
   # resultado da ligação da assistente virtual → texto humano (chip do card/dashboard)
   OUTCOME_LABELS = {
-    'agendou' => 'agendou consulta', 'remarcou' => 'remarcou consulta', 'cancelou' => 'cancelou consulta',
+    'agendou' => 'agendou consulta', 'remarcou' => 'remarcou consulta', 'confirmou' => 'confirmou a consulta',
+    'cancelou' => 'cancelou consulta',
     'quer_whatsapp' => 'prefere continuar pelo WhatsApp', 'sem_interesse' => 'sem interesse', 'recado' => 'deixou recado',
     'transferido' => 'transferida para a equipe', 'nao_atendeu' => 'não atendeu', 'outro' => 'outro'
   }.freeze

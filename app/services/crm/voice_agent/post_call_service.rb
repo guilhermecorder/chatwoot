@@ -216,7 +216,21 @@ class Crm::VoiceAgent::PostCallService # rubocop:disable Metrics/ClassLength
     broadcast('cevico_call.ended', call: call.to_payload)
     record_usage(call)
     close_campaign_contact(call)
+    move_card_by_outcome(call)
     settings.persist_state!(last_call_at: Time.current.iso8601)
+  end
+
+  # item 333: o card anda para a coluna escolhida para este resultado
+  def move_card_by_outcome(call)
+    stage_name = Crm::VoiceAgent::OutcomeStage.apply!(call, settings)
+    return if stage_name.blank? || call.conversation.blank?
+
+    call.conversation.messages.create!(
+      account_id: account.id, inbox_id: call.conversation.inbox_id, message_type: :activity, private: true,
+      content: "🤖 Ligação: #{Crm::Call::OUTCOME_LABELS[call.outcome.to_s] || call.outcome} · card → #{stage_name}"
+    )
+  rescue StandardError => e
+    Rails.logger.warn("[CEVICO voice] nota do card: #{e.message}")
   end
 
   # uma linha por ligação (o Painel dos agentes lê daqui); custo em US$ da ElevenLabs

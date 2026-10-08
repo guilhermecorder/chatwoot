@@ -9,13 +9,35 @@
 # {{paciente_nome}}, {{primeiro_nome}}, {{proxima_consulta}} e
 # {{campanha_objetivo}} são variáveis dinâmicas preenchidas pelo webhook de
 # início / pelo discador; no simulador por texto o sistema troca pelos valores.
+#
+# 🎙️ item 333 (08/10): DOIS roteiros — ao ATENDER (ligação recebida, etapa
+# 'voice_inbound', é o prompt do agente na ElevenLabs) e ao LIGAR (etapa
+# 'voice', mandado pelo discador em cada ligação). E três marcas trocadas na
+# montagem, para o admin não repetir dado em texto:
+#   {{EU_SOU}}          "o Guilherme, assistente virtual da CEVICO" (com nome) |
+#                       "a assistente virtual da CEVICO" (sem nome)
+#   {{UM_ASSISTENTE}}   "um assistente virtual" | "uma assistente virtual"
+#   {{VALOR_AVALIACAO}} o valor da avaliação pré-configurado na Agenda (item
+#                       324), falado: "cento e cinquenta reais"
 module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
-  FIRST_MESSAGE = 'Olá! Aqui é a assistente virtual da CEVICO. Eu posso marcar, confirmar ou remarcar a sua consulta. ' \
-                  'Com quem eu falo?'.freeze
+  FIRST_MESSAGE = 'Olá! Aqui é {{EU_SOU}}. Posso te ajudar a marcar, confirmar ou remarcar a sua consulta. ' \
+                  'Como posso te ajudar?'.freeze
 
-  # 1ª frase da campanha de leads não responsivos (o discador troca "Olá!" por "Olá, Nome!")
-  UNRESPONSIVE_FIRST_MESSAGE = 'Olá! Aqui é a assistente virtual da CEVICO. A gente conversou pelo WhatsApp e eu queria saber ' \
+  # 1ª frase ao LIGAR (campanhas e leads parados; o discador troca "Olá!" por "Olá, Nome!")
+  UNRESPONSIVE_FIRST_MESSAGE = 'Olá! Aqui é {{EU_SOU}}. A gente conversou pelo WhatsApp e eu queria saber ' \
                                'se ficou alguma dúvida. Você tem um minutinho?'.freeze
+
+  # paciente de PARCEIRO ligou (regra de ouro: nenhuma IA conversa com ele) —
+  # a frase é fixa, a assistente não responde nada e encerra; a equipe é avisada
+  PARTNER_MESSAGE = 'Olá! Aqui é {{EU_SOU}}. Para o seu atendimento, a equipe da clínica vai falar com você ' \
+                    'pelo WhatsApp. A CEVICO agradece, até logo!'.freeze
+
+  # prompt da ligação de PARCEIRO (sobrescreve o roteiro inteiro só nessa ligação)
+  PARTNER_PROMPT = <<~TXT.strip.freeze
+    Esta ligação é de um paciente atendido por uma clínica PARCEIRA. Você NÃO conversa com ele: a equipe da clínica fala com ele pelo WhatsApp.
+    Você já disse a frase de abertura. Não responda perguntas, não ofereça horários e não use nenhuma ferramenta.
+    Se a pessoa disser qualquer coisa, responda apenas: "A equipe da clínica vai falar com você pelo WhatsApp. Até logo!" e encerre com end_call.
+  TXT
 
   # motivo padrão do simulador por texto (a tela pode mandar outro)
   DEFAULT_OBJECTIVE = 'orçamento enviado, sem resposta há dois dias'.freeze
@@ -27,16 +49,17 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
   # sem o que o Roteiro já traz: unidades, médicos, valores, objeções)
   VOICE_RULES = <<~RULES.strip.freeze
     == REGRAS DE VOZ (você está numa LIGAÇÃO; tudo o que escrever será falado em voz alta) ==
-    - Nesta ligação você é a ASSISTENTE VIRTUAL da CEVICO: apresente-se assim, nunca como o Guilherme nem como uma pessoa. A equipe da clínica acompanha e assume quando precisar. O Roteiro acima continua valendo (tom, dados oficiais, objeções, quando passar para humano); o que muda é a forma, abaixo.
+    - Nesta ligação você é {{EU_SOU}}: apresente-se assim. Você é {{UM_ASSISTENTE}}, nunca diga que é uma pessoa; a equipe da clínica acompanha e assume quando precisar. O Roteiro acima continua valendo (tom, dados oficiais, objeções, quando passar para humano); o que muda é a forma, abaixo.
     - Frases curtas. Uma ideia por frase. Nada de listas, marcadores, emojis, links, endereços de site ou markdown. O que só faz sentido por escrito (mapa, Instagram, tabela) você oferece mandar pelo WhatsApp.
     - UMA pergunta por vez, e espere a resposta.
-    - Números, valores, datas e horários SEMPRE por extenso: "cento e cinquenta reais", "em até dez vezes sem juros", "nove e vinte da manhã", "quinta-feira, vinte e cinco de setembro". Nunca leia "09:20", "25/09" nem o símbolo de reais.
+    - Números, valores, datas e horários SEMPRE por extenso: "quatro mil e novecentos reais", "em até dez vezes sem juros", "nove e vinte da manhã", "quinta-feira, vinte e cinco de setembro". Nunca leia "09:20", "25/09" nem o símbolo de reais.
     - Endereços falados devagar, uma informação por frase: "Avenida Paulista, mil quatrocentos e noventa e nove, nono andar, perto do metrô Trianon-MASP" e "Rua Serra de Botucatu, oitocentos e oitenta, quarto andar, perto do metrô Carrão".
     - Médicos por extenso: "Doutor Gustavo Bittar", "Doutora Roberta Negri", "Doutor Henrique Gemelli"; cirurgiões de catarata "Doutor Ricardo" e "Doutor Renato", com a estrutura de alta tecnologia da CEVICO. Só esses; nunca invente números de cirurgias.
     - Ofereça no máximo DOIS horários por vez. Antes de marcar, REPITA em voz alta dia, horário, unidade e telefone e peça confirmação ("Confirmando: quinta-feira, vinte e cinco de setembro, às nove e vinte, na unidade Tatuapé. Está certo?"). Telefone: confirme os dígitos em grupos; se a pessoa está falando do próprio número, use esse.
     - Não repita pergunta já respondida. Não reinicie a apresentação no meio da ligação.
     - Silêncio: pergunte uma vez "Você ainda está aí?"; se continuar em silêncio, despeça-se e encerre.
-    - Se perguntarem se é gravação ou robô: diga que é a assistente virtual da CEVICO e que a equipe acompanha.
+    - Se perguntarem se é gravação ou robô: diga que é {{UM_ASSISTENTE}} da CEVICO e que a equipe acompanha.
+    - Valor da consulta de AVALIAÇÃO: {{VALOR_AVALIACAO}}, com os exames inclusos. Este valor vem da Agenda da clínica e vale sobre qualquer outro valor de avaliação citado no Roteiro.
     - Diga "investimento" ou "valor", nunca "preço" ou "barato". Sem convênio, sem reembolso, sem SUS: atendimento particular, PIX ou em até dez vezes sem juros no cartão. Nunca prometa que o médico vai ligar ou responder em determinado prazo.
   RULES
 
@@ -47,8 +70,11 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
     - horarios_livres: horários realmente livres da agenda (por unidade, período e médico). SÓ ofereça horários que ela devolver; diga o campo "falado".
     - marcar_consulta: marca (ou remarca) a consulta DEPOIS da confirmação em voz alta. Se devolver horário indisponível, peça desculpa e ofereça outros dois.
     - minha_consulta: consulta já marcada do paciente (para confirmar, remarcar ou cancelar).
+    - confirmar_presenca: quando a pessoa CONFIRMA que vai à consulta já marcada ("confirmo", "vou sim"), chame com resposta "confirmou". Se ela disser que NÃO vai, ofereça remarcar primeiro; se mesmo assim não quiser, chame com resposta "nao_vai" (a equipe cuida do resto). Você não cancela consultas.
+    - marcar_consulta para OUTRA pessoa (mãe, filho, esposa): pergunte o nome completo dela e mande para_outra_pessoa = "sim". Assim nasce uma consulta nova e a consulta de quem está ligando não é mexida.
     - enviar_whatsapp: manda mensagem pelo WhatsApp da clínica. Tipo "confirmacao" depois de marcar, "continuar" quando a pessoa preferir seguir por escrito, "resumo" para um texto curto que você montar.
-    - registrar_resultado: SEMPRE antes de encerrar, com o resultado (agendou, remarcou, cancelou, quer_whatsapp, sem_interesse, recado, transferido, outro) e um resumo de uma ou duas frases.
+    - chamar_equipe: abre uma tarefa para a equipe no painel dela (urgencia "alta" = aviso vermelho na hora). Use quando a pessoa precisar de alguém e não houver transferência, em urgência, ou quando prometer que a equipe vai retornar. Só diga "a equipe foi avisada" DEPOIS que esta ferramenta devolver ok.
+    - registrar_resultado: SEMPRE antes de encerrar, com o resultado (agendou, remarcou, confirmou, cancelou, quer_whatsapp, sem_interesse, recado, transferido, outro) e um resumo de uma ou duas frases.
     - transfer_to_number: transfere para a equipe quando a pessoa pedir alguém, relatar urgência (dor forte, perda súbita de visão, trauma) ou quando o assunto fugir do seu alcance. Avise antes: "Vou te transferir para a equipe, um instante".
     - end_call: encerre a ligação depois da despedida, nunca no meio de uma fala do paciente.
 
@@ -82,7 +108,7 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
     - Urgência (dor intensa, perda súbita de visão, trauma): oriente procurar pronto atendimento oftalmológico
       imediatamente e transfira para a equipe.
     - Em dúvida sobre qualquer informação, transfira para a equipe em vez de arriscar uma resposta.
-    - Você é uma assistente virtual e diz isso sempre que perguntarem.
+    - Você é {{UM_ASSISTENTE}} e diz isso sempre que perguntarem.
     - Nunca insista mais de duas vezes para marcar. Se o paciente não quiser, agradeça e registre o resultado.
   GUARD
 
@@ -100,32 +126,146 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
   # etapa + trava, tudo com "R$" falado. `settings` fica na assinatura por
   # compatibilidade (AgentBody); o prompt inteiro custom da Integração não vale
   # mais — o que o admin edita é o bloco da etapa (agents.voice.prompt).
-  def build(account, _settings = nil)
-    body = [Crm::CevicoScript.text(account), VOICE_RULES, VOICE_TOOLS, stage_block(account)].join("\n\n")
-    spoken_money(body) + GUARDRAIL
+  # direction :inbound = ao ATENDER (prompt do agente na ElevenLabs) |
+  # :outbound = ao LIGAR (o discador manda este no lugar, a cada ligação)
+  def build(account, settings = nil, direction: :inbound)
+    settings ||= Crm::VoiceAgent::Settings.new(account)
+    body = [Crm::CevicoScript.text(account), VOICE_RULES, VOICE_TOOLS, pronunciation_block(settings),
+            stage_block(account, direction)].compact.join("\n\n")
+    spoken_money(persona_fill(body, account, settings)) + persona_fill(GUARDRAIL, account, settings)
   end
 
   # 🧪 prompt do simulador por texto (Crm::ResponderAgentService, agent 'voice'):
-  # as variáveis {{…}} viram os valores do contexto e a trava é a dos respondedores
+  # as variáveis {{…}} viram os valores do contexto e a trava é a dos
+  # respondedores. Com motivo = ligação que a CEVICO fez; sem motivo = recebida.
   def simulator_prompt(account, contact:, objective:, next_appointment: '')
-    body = [Crm::CevicoScript.text(account), VOICE_RULES, SIMULATOR_TOOLS, stage_block(account)].join("\n\n")
+    settings = Crm::VoiceAgent::Settings.new(account)
+    direction = objective.present? ? :outbound : :inbound
+    body = [Crm::CevicoScript.text(account), VOICE_RULES, SIMULATOR_TOOLS, pronunciation_block(settings),
+            stage_block(account, direction)].compact.join("\n\n")
     name = contact&.name.to_s.strip
     body = fill_variables(body, 'paciente_nome' => name, 'primeiro_nome' => name.split(/\s+/).first.to_s,
                                 'proxima_consulta' => next_appointment.to_s, 'campanha_objetivo' => objective.to_s)
-    spoken_money(body) + Crm::AiAgentConfig::RESPONDER_GUARDRAIL
+    spoken_money(persona_fill(body, account, settings)) + Crm::AiAgentConfig::RESPONDER_GUARDRAIL
   end
 
-  def stage_block(account)
-    "== SUA ETAPA ==\n#{Crm::CevicoScript.stage_prompt(account, 'voice')}"
+  def stage_block(account, direction = :outbound)
+    key = direction.to_s == 'inbound' ? Crm::VoiceAgent::Settings::INBOUND_AGENT_KEY : 'voice'
+    "== SUA ETAPA ==\n#{Crm::CevicoScript.stage_prompt(account, key)}"
+  end
+
+  # ── persona e valores (item 333) ─────────────────────────────────────────
+  # "o Guilherme, assistente virtual da CEVICO" | "a assistente virtual da CEVICO"
+  def persona_intro(settings)
+    name = settings.persona_name
+    return "#{settings.masculine? ? 'o' : 'a'} #{name}, assistente virtual da CEVICO" if name.present?
+
+    settings.masculine? ? 'o assistente virtual da CEVICO' : 'a assistente virtual da CEVICO'
+  end
+
+  def persona_kind(settings)
+    settings.masculine? ? 'um assistente virtual' : 'uma assistente virtual'
+  end
+
+  def persona_fill(text, account, settings)
+    text.to_s.gsub('{{EU_SOU}}', persona_intro(settings)).gsub('{{UM_ASSISTENTE}}', persona_kind(settings))
+        .gsub('{{VALOR_AVALIACAO}}') { evaluation_price_spoken(account) }
+  end
+
+  # frase padrão de abertura (quando o admin deixa o campo vazio)
+  def default_first_message(settings, kind = :inbound)
+    template = kind.to_s == 'outbound' ? UNRESPONSIVE_FIRST_MESSAGE : FIRST_MESSAGE
+    template.gsub('{{EU_SOU}}', persona_intro(settings))
+  end
+
+  def default_partner_message(settings)
+    PARTNER_MESSAGE.gsub('{{EU_SOU}}', persona_intro(settings))
+  end
+
+  # o valor da avaliação pré-configurado na Agenda (item 324), falado
+  def evaluation_price_spoken(account)
+    value = Crm::AppointmentPrice.config(account)['avaliacao'].to_s.strip.presence || Crm::AppointmentPrice::FALLBACK
+    spoken_price(value)
+  end
+
+  # "150,00" → "cento e cinquenta reais"; "1.250,50" → "mil duzentos e cinquenta reais e cinquenta centavos";
+  # texto ("sem custo") fica como está
+  def spoken_price(value)
+    number = Crm::AppointmentPrice.to_number(value)
+    return value.to_s.strip if number.nil?
+
+    cents = (number * 100).round.to_i
+    reais, centavos = cents.divmod(100)
+    text = reais == 1 ? 'um real' : "#{spoken_integer(reais)} reais"
+    centavos.zero? ? text : "#{text} e #{spoken_integer(centavos)} centavos"
+  end
+
+  # 0..999.999 por extenso ("mil duzentos e cinquenta")
+  def spoken_integer(number)
+    n = number.to_i
+    return 'zero' if n.zero?
+    return n.to_s unless n.between?(1, 999_999)
+
+    thousands, rest = n.divmod(1000)
+    return spoken_hundreds(rest) if thousands.zero?
+
+    head = thousands == 1 ? 'mil' : "#{spoken_hundreds(thousands)} mil"
+    rest.zero? ? head : "#{head}#{thousand_joiner(rest)}#{spoken_hundreds(rest)}"
+  end
+
+  # "mil e cinquenta", "mil e duzentos", mas "mil duzentos e cinquenta"
+  def thousand_joiner(rest)
+    rest < 100 || (rest % 100).zero? ? ' e ' : ' '
+  end
+
+  HUNDREDS_SPOKEN = %w[_ cento duzentos trezentos quatrocentos quinhentos seiscentos setecentos oitocentos novecentos].freeze
+  TENS_FULL = { 2 => 'vinte', 3 => 'trinta', 4 => 'quarenta', 5 => 'cinquenta', 6 => 'sessenta', 7 => 'setenta',
+                8 => 'oitenta', 9 => 'noventa' }.freeze
+
+  # 1..999
+  def spoken_hundreds(number)
+    return 'cem' if number == 100
+
+    hundreds, rest = number.divmod(100)
+    parts = []
+    parts << HUNDREDS_SPOKEN[hundreds] if hundreds.positive?
+    parts << spoken_below_hundred(rest) if rest.positive?
+    parts.join(' e ')
+  end
+
+  def spoken_below_hundred(number)
+    return NUMBERS_SPOKEN[number] if number < 20
+
+    tens, ones = number.divmod(10)
+    ones.zero? ? TENS_FULL[tens] : "#{TENS_FULL[tens]} e #{NUMBERS_SPOKEN[ones]}"
+  end
+
+  # ── pronúncia (item 333): nomes que a voz fala errado ───────────────────
+  def pronunciation_block(settings)
+    pairs = settings.pronunciations
+    return nil if pairs.empty?
+
+    lines = pairs.map { |row| "- #{row['from']} → escreva \"#{row['to']}\"" }
+    "== PRONÚNCIA ==\nA voz lê exatamente o que você escreve. Ao falar estes nomes, escreva do jeito indicado " \
+      "(é assim que soa certo):\n#{lines.join("\n")}"
+  end
+
+  # aplica a pronúncia num texto pronto para falar (campo "falado" das ferramentas)
+  def apply_pronunciation(text, settings)
+    settings.pronunciations.reduce(text.to_s) do |acc, row|
+      acc.gsub(/(?<![[:alpha:]])#{Regexp.escape(row['from'])}(?![[:alpha:]])/i, row['to'])
+    end
   end
 
   def fill_variables(text, values)
     values.reduce(text) { |acc, (key, value)| acc.gsub("{{#{key}}}", value.to_s) }
   end
 
-  # "R$ 4.900" → "4900 reais"; "10x sem juros" → "dez vezes sem juros" — a voz lê melhor
+  # "R$ 4.900" → "4900 reais"; "R$ [valor]" → "[valor] reais"; "10x sem juros" → "dez vezes sem juros" — a voz lê melhor
   def spoken_money(text)
     text.gsub(/R\$\s?([\d.]+)/) { "#{Regexp.last_match(1).delete('.')} reais" }
+        .gsub(/R\$\s?(\[[^\]]+\])/) { "#{Regexp.last_match(1)} reais" }
+        .gsub(/R\$\s?/, 'reais ')
         .gsub(/\b(\d{1,2})x\b/) { "#{spoken_number(Regexp.last_match(1))} vezes" }
   end
 

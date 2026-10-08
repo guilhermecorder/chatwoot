@@ -5,6 +5,8 @@ class Api::V1::Accounts::Crm::CallCampaignsController < Api::V1::Accounts::BaseC
   include Crm::AccessControl
 
   PER_PAGE = 50
+  TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
+  SCHEDULE_ERROR = 'Data de agendamento inválida ou no passado. Escolha um dia e horário à frente.'.freeze
 
   before_action -> { require_capability(:campaigns) }, only: %i[create update destroy start pause resume preview_audience]
   before_action :campaign, only: %i[show update destroy start pause resume]
@@ -20,15 +22,24 @@ class Api::V1::Accounts::Crm::CallCampaignsController < Api::V1::Accounts::BaseC
     render json: campaign_json(@campaign).merge(contacts: rows.map(&:to_payload), meta: { total: scope.count, page: page, per_page: PER_PAGE })
   end
 
+  # item 333: "Agendar para…" agora nasce AGENDADA (antes ficava rascunho e o
+  # discador nunca a achava); a data digitada é hora de São Paulo
   def create
-    @campaign = Crm::CallCampaign.create!(campaign_params.merge(account: Current.account, created_by: Current.user, status: :draft))
+    attrs = campaign_params
+    return render_could_not_create_error(SCHEDULE_ERROR) if attrs.key?(:scheduled_at) && attrs[:scheduled_at] == :invalid
+
+    status = attrs[:scheduled_at].present? ? :scheduled : :draft
+    @campaign = Crm::CallCampaign.create!(attrs.merge(account: Current.account, created_by: Current.user, status: status))
     render json: campaign_json(@campaign), status: :created
   end
 
   def update
     return render_could_not_create_error('Campanha concluída não pode ser editada') if @campaign.completed?
 
-    @campaign.update!(campaign_params)
+    attrs = campaign_params
+    return render_could_not_create_error(SCHEDULE_ERROR) if attrs.key?(:scheduled_at) && attrs[:scheduled_at] == :invalid
+
+    @campaign.update!(attrs)
     render json: campaign_json(@campaign)
   end
 
@@ -44,8 +55,11 @@ class Api::V1::Accounts::Crm::CallCampaignsController < Api::V1::Accounts::BaseC
   def start
     return render_could_not_create_error('Campanha já foi concluída') if @campaign.completed?
 
-    if params[:scheduled_at].present? && Time.zone.parse(params[:scheduled_at].to_s).to_i > Time.current.to_i
-      @campaign.update!(status: :scheduled, scheduled_at: params[:scheduled_at])
+    if params[:scheduled_at].present?
+      when_at = parse_schedule(params[:scheduled_at])
+      return render_could_not_create_error(SCHEDULE_ERROR) if when_at == :invalid
+
+      @campaign.update!(status: :scheduled, scheduled_at: when_at)
     else
       @campaign.start!
     end
@@ -86,7 +100,17 @@ class Api::V1::Accounts::Crm::CallCampaignsController < Api::V1::Accounts::BaseC
     permitted = params.require(:call_campaign).permit(:name, :objective, :first_message, :apply_label, :daily_cap, :concurrency,
                                                       :scheduled_at, audience: {}, hours: [:start, :end])
     permitted[:hours] = sanitize_hours(permitted[:hours]) if permitted.key?(:hours)
+    permitted[:scheduled_at] = permitted[:scheduled_at].present? ? parse_schedule(permitted[:scheduled_at]) : nil if permitted.key?(:scheduled_at)
     permitted
+  end
+
+  # "2026-10-10T09:00" (sem fuso) = hora de São Paulo; com fuso/Z respeita o
+  # fuso. Inválida ou no passado → :invalid
+  def parse_schedule(raw)
+    value = TZ.parse(raw.to_s)
+    value.present? && value.future? ? value : :invalid
+  rescue ArgumentError
+    :invalid
   end
 
   def audience_params

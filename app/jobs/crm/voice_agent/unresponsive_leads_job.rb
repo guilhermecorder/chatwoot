@@ -128,7 +128,8 @@ class Crm::VoiceAgent::UnresponsiveLeadsJob < ApplicationJob
     return existing if existing
 
     Crm::CallCampaign.create!(
-      account: account, name: name, objective: CAMPAIGN_OBJECTIVE, first_message: Crm::VoiceAgent::Script::UNRESPONSIVE_FIRST_MESSAGE,
+      # item 333: sem frase gravada — o discador usa a "1ª frase ao LIGAR" da Integração na hora (editar vale já)
+      account: account, name: name, objective: CAMPAIGN_OBJECTIVE, first_message: nil,
       audience: { 'kind' => 'unresponsive_leads', 'objectives' => {} }, hours: campaign_hours(cfg, settings),
       daily_cap: cap, concurrency: 1, status: :processing, started_at: Time.current, stats: {}
     )

@@ -2582,7 +2582,7 @@ const AGENT_META = {
     color: '#7C3AED',
     tag: 'Atendimento',
     description:
-      'Liga para leads parados nas colunas escolhidas depois de N horas sem resposta; conduz ao agendamento (melhor resultado) ou ao WhatsApp; responde dúvidas com o Roteiro CEVICO. Fala pela ElevenLabs, se apresenta como assistente virtual, consulta a agenda e manda a confirmação pelo WhatsApp da clínica.',
+      'Atende quem liga para o número dela e liga para leads parados nas colunas escolhidas depois de N horas sem resposta; marca, remarca e confirma consultas na Agenda, responde dúvidas com o Roteiro CEVICO e passa para a equipe quando precisa. Fala pela ElevenLabs como assistente virtual. Aqui mora o "quando" e "para quem" da ligação automática; voz, nome, frases e o card depois da ligação ficam em Integrações → Agente de Ligação.',
     triggers: [
       {
         icon: 'i-lucide-clock',

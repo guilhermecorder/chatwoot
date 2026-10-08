@@ -9,9 +9,11 @@ class Crm::AppointmentRecorder
   # booking_kind (item 217): nil = agendamento novo; 'registro' = a consulta já
   # estava marcada fora do sistema (confirmação lida na conversa) — entra na
   # Agenda como "Lançada", fora de "Consultas agendadas"
-  def self.record(account:, result:, contact: nil, conversation: nil, default_unit: nil, booking_kind: nil)
-    outcome = do_record(account: account, result: result, contact: contact,
-                        conversation: conversation, default_unit: default_unit, booking_kind: booking_kind)
+  # new_only (item 333): consulta para OUTRA pessoa pelo mesmo telefone ("marca
+  # para a minha mãe") — nasce uma consulta nova, a de quem ligou não é movida
+  def self.record(account:, result:, contact: nil, conversation: nil, default_unit: nil, booking_kind: nil, new_only: false) # rubocop:disable Metrics/ParameterLists
+    outcome = do_record(account: account, result: result, contact: contact, conversation: conversation,
+                        default_unit: default_unit, booking_kind: booking_kind, new_only: new_only)
     stamp_gender(contact, result[:gender])
     log_activity(account, result, contact, conversation, outcome)
     outcome
@@ -33,7 +35,8 @@ class Crm::AppointmentRecorder
     Rails.logger.warn "[Crm::AppointmentRecorder] sexo: #{e.message}"
   end
 
-  def self.do_record(account:, result:, contact: nil, conversation: nil, default_unit: nil, booking_kind: nil)
+  # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+  def self.do_record(account:, result:, contact: nil, conversation: nil, default_unit: nil, booking_kind: nil, new_only: false)
     return :skipped unless result[:found] && result[:starts_at].present?
 
     name  = result[:name].presence || contact&.name.presence || 'Paciente'
@@ -52,7 +55,7 @@ class Crm::AppointmentRecorder
     return :already if account.tasks.exists?(due_at: result[:starts_at], title: "Consulta: #{name}")
 
     # REAGENDAMENTO: se o paciente já tem consulta FUTURA, ela vira o novo horário
-    future = future_appointment(account, phone, name, contact)
+    future = new_only ? nil : future_appointment(account, phone, name, contact)
     if future
       return :already if future.due_at == result[:starts_at]
 
@@ -91,6 +94,7 @@ class Crm::AppointmentRecorder
     )
     :created
   end
+  # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
   # CANCELAMENTO (rodada 148): o paciente desmarcou sem novo horário → a
   # consulta futura dele sai da agenda (canceled_at), com rastro na descrição.

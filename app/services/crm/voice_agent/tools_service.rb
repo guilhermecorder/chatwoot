@@ -5,10 +5,20 @@
 # conversa na caixa da clínica, deixa uma nota privada curta do que foi
 # feito. Reusa Task.match_contact, Crm::AgendaSlots, Crm::AppointmentRecorder,
 # Crm::Calls::ConversationFinder e Crm::SendTemplateService.
+#
+# Item 333 (08/10): cerca dos parceiros em TODAS as ferramentas (regra de
+# ouro), confirmar_presenca (mesmo caminho do SIM/NÃO do WhatsApp),
+# chamar_equipe (tarefa de verdade no painel), consulta para outra pessoa sem
+# mexer na de quem ligou, card do CRM anda ao marcar (Crm::BookingSideEffects)
+# e o WhatsApp sai pela caixa em que o paciente já conversa (regra 2).
 class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
   TZ = Crm::AgendaSlots::TZ
   MAX_SLOTS = 6
   RESULTS = { created: 'marcada', rescheduled: 'remarcada', already: 'ja_existia', skipped: 'nao_foi_possivel' }.freeze
+  # o que a IA ouve quando o paciente é de clínica parceira (só registrar_resultado passa)
+  PARTNER_REFUSAL = 'Paciente de clínica parceira: você não atende esta pessoa. Diga apenas que a equipe da clínica vai ' \
+                    'falar com ela pelo WhatsApp e encerre a ligação.'.freeze
+  PARTNER_ALLOWED_TOOLS = %w[registrar_resultado].freeze
   ADDRESSES = {
     'paulista' => 'Av. Paulista, 1499 – 9º andar (melhor acesso: Alameda Casa Branca, 35), próximo à estação Trianon-MASP',
     'tatuape' => 'R. Serra de Botucatu, 880 – 4º andar, próximo à estação Carrão'
@@ -27,6 +37,8 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
     return { ok: false, erro: "Ferramenta desconhecida: #{tool}" } unless Crm::VoiceAgent::Settings::TOOL_NAMES.include?(tool)
 
     upsert_call
+    return partner_refusal if partner_patient? && PARTNER_ALLOWED_TOOLS.exclude?(tool)
+
     send(:"tool_#{tool}")
   rescue StandardError => e
     Rails.logger.error("[CEVICO voice] ferramenta #{tool} (conta #{account.id}): #{e.class}: #{e.message}")
@@ -106,6 +118,24 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
 
   def conversation
     call&.conversation
+  end
+
+  # o paciente da ligação: o da campanha / casado pelo telefone; senão o que a
+  # Crm::Call criou para o número novo (ConversationFinder)
+  def patient
+    contact || call&.contact
+  end
+
+  # ── cerca dos parceiros (regra de ouro: nenhuma IA conversa com eles) ────
+  def partner_patient?
+    return @partner_patient if defined?(@partner_patient)
+
+    @partner_patient = Crm::PartnerGuard.partner_contact?(patient)
+  end
+
+  def partner_refusal
+    Crm::PartnerGuard.block!("voz/#{tool}", contact: patient, conversation: conversation)
+    { ok: false, erro: PARTNER_REFUSAL }
   end
 
   def note(text)
@@ -214,16 +244,34 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
     { ok: false, resultado: 'horario_indisponivel', mensagem: 'Esse horário acabou de ser ocupado. Ofereça outros dois horários.' }
   end
 
-  def record_appointment(date, time, unit)
+  def record_appointment(date, time, unit) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     doctor = booking_doctor(date, time, unit)
-    name = params['nome'].to_s.strip.presence || contact&.name.presence || 'Paciente'
+    other = other_person?
+    name = params['nome'].to_s.strip.presence || (other ? nil : patient&.name.presence) || 'Paciente'
     result = appointment_result(TZ.parse("#{date} #{time}"), name, unit, doctor)
-    outcome = Crm::AppointmentRecorder.record(account: account, result: result, contact: contact, conversation: conversation)
+    # consulta de outra pessoa: nasce nova e sem o contato de quem ligou (a
+    # dele não anda, o card dele não mexe)
+    outcome = Crm::AppointmentRecorder.record(account: account, result: result, contact: other ? nil : patient,
+                                              conversation: conversation, new_only: other)
     resultado = RESULTS[outcome] || outcome.to_s
     @appointment = { date: date, time: time, unit: unit, doctor: doctor, name: name }
-    note("Assistente virtual #{resultado == 'remarcada' ? 'remarcou' : 'marcou'} consulta: #{name} — " \
-         "#{result[:starts_at].strftime('%d/%m/%Y às %H:%M')} (#{unit_label(unit)})#{doctor && " · #{doctor}"}")
+    effects = other ? {} : booking_effects(outcome)
+    note("Assistente virtual #{resultado == 'remarcada' ? 'remarcou' : 'marcou'} consulta: #{name}#{' (outra pessoa)' if other} — " \
+         "#{result[:starts_at].strftime('%d/%m/%Y às %H:%M')} (#{unit_label(unit)})#{doctor && " · #{doctor}"}" \
+         "#{" · #{Crm::BookingSideEffects.summary(effects)}" if effects.present?}")
     booking_response(resultado, date, time, unit, doctor)
+  end
+
+  def other_person?
+    %w[sim true 1 yes].include?(params['para_outra_pessoa'].to_s.strip.downcase)
+  end
+
+  # item 333: marcou/remarcou pela ligação → etiqueta + card na coluna, igual
+  # ao Atendente do WhatsApp (a coluna de Agendamentos → Ajustes)
+  def booking_effects(outcome)
+    return {} unless %i[created rescheduled].include?(outcome) && patient
+
+    Crm::BookingSideEffects.apply(account: account, contact: patient, conversation: conversation, outcome: outcome)
   end
 
   # médico pedido (nome oficial) ou o da faixa que cobre aquele horário (item 311)
@@ -233,7 +281,7 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
 
   # hash no formato que o Crm::AppointmentRecorder espera
   def appointment_result(starts_at, name, unit, doctor)
-    phone = params['telefone_informado'].to_s.gsub(/\D/, '').presence || wa_id
+    phone = params['telefone_informado'].to_s.gsub(/\D/, '').presence || wa_id.presence || patient&.phone_number.to_s.gsub(/\D/, '')
     { found: true, starts_at: starts_at, name: name, phone: phone.present? ? "+#{phone}" : nil, unit: unit, doctor: doctor,
       procedure: params['procedimento'].to_s.strip.presence,
       notes: ['Marcada pela assistente virtual (ligação)', params['observacoes'].to_s.strip.presence].compact.join("\n") }
@@ -255,18 +303,30 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
   # mensagem pelo WhatsApp da clínica: texto livre na janela de 24h; senão o
   # modelo configurado; senão explica para a IA
   def tool_enviar_whatsapp
-    inbox = settings.handoff_inbox
+    inbox = whatsapp_inbox
     return { ok: false, motivo: 'caixa não configurada' } unless inbox
     return { ok: false, motivo: 'paciente sem telefone' } if wa_id.length < 8
 
     text = whatsapp_text(params['tipo'].to_s)
     return { ok: false, motivo: 'tipo desconhecido' } if text.blank?
 
-    finder = Crm::Calls::ConversationFinder.new(inbox: inbox, wa_id: wa_id, name: contact&.name, contact: contact)
+    finder = Crm::Calls::ConversationFinder.new(inbox: inbox, wa_id: wa_id, name: patient&.name, contact: patient)
     return send_text(inbox, finder.conversation, text) if finder.conversation.can_reply?
     return send_template(inbox, finder.contact, text) if settings.handoff_template_params.present?
 
     { ok: false, motivo: 'janela de 24h fechada e sem modelo configurado' }
+  end
+
+  # regra 2 (item 310): a caixa em que o paciente JÁ conversa (a conversa mais
+  # recente numa caixa de WhatsApp que não é dos parceiros); sem conversa, a
+  # caixa da assistente (Integrações → bloco 4)
+  def whatsapp_inbox
+    return settings.handoff_inbox if patient.blank?
+
+    partner_ids = Crm::PartnerGuard.partner_inbox_ids(account).map(&:to_i)
+    last = account.conversations.joins(:inbox).where(contact_id: patient.id, inboxes: { channel_type: 'Channel::Whatsapp' })
+                  .where.not(inbox_id: partner_ids.presence || [0]).order(last_activity_at: :desc).first
+    last&.inbox || settings.handoff_inbox
   end
 
   def send_text(inbox, target, text)
@@ -314,6 +374,48 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
     { date: due.to_date, time: due.strftime('%H:%M'), unit: future.unit.to_s, doctor: future.doctor }
   end
 
+  # ✅/❌ item 333: o paciente confirmou (ou disse que não vai) a consulta já
+  # marcada — o mesmo caminho do SIM/NÃO ao lembrete no WhatsApp
+  def tool_confirmar_presenca
+    task = future_appointment
+    return { ok: false, motivo: 'Nenhuma consulta futura marcada para este telefone.' } unless task
+
+    owner = task.contact || patient
+    case params['resposta'].to_s.strip
+    when 'confirmou' then confirm_presence(task, owner)
+    when 'nao_vai' then decline_presence(task, owner)
+    else { ok: false, erro: 'resposta deve ser "confirmou" ou "nao_vai"' }
+    end
+  end
+
+  def confirm_presence(task, owner)
+    moved = Crm::AppointmentConfirmation.confirm!(account: account, task: task, contact: owner)
+    note("Assistente virtual: paciente CONFIRMOU a consulta de #{appointment_short(task)}#{" · card → #{moved}" if moved.present?}")
+    { ok: true, resultado: 'confirmada', falado: appointment_spoken(task), mensagem: 'Consulta confirmada. Agradeça e reforce o horário.' }
+  end
+
+  def decline_presence(task, owner)
+    Crm::AppointmentConfirmation.decline!(account: account, task: task, contact: owner, conversation: conversation, agent_key: 'voice')
+    note("Assistente virtual: paciente disse que NÃO vai à consulta de #{appointment_short(task)} — a equipe remarca ou cancela")
+    { ok: true, resultado: 'equipe_avisada',
+      mensagem: 'A equipe foi avisada e vai remarcar ou cancelar. Não diga que a consulta foi cancelada; diga que a equipe vai entrar em contato.' }
+  end
+
+  # 🧑‍⚕️ item 333: tarefa de verdade para a equipe (Meu Painel); urgência alta = aviso vermelho
+  def tool_chamar_equipe # rubocop:disable Metrics/AbcSize
+    urgent = params['urgencia'].to_s.strip == 'alta'
+    motivo = params['motivo'].to_s.strip.presence || 'Paciente pediu para falar com a equipe'
+    detalhes = [params['detalhes'].to_s.strip.presence, "Telefone: +#{wa_id}"].compact.join("\n")
+    task = Crm::HandoffTask.open!(account: account, contact: patient, conversation: conversation, agent_key: 'voice',
+                                  motivo: motivo, detalhes: detalhes, urgencia: urgent ? 'alta' : 'normal')[:task]
+    { ok: true, tarefa: task&.id, responsavel: task&.assignee&.name.presence || 'a equipe',
+      mensagem: urgent ? 'A equipe recebeu um aviso urgente agora.' : 'A equipe recebeu a tarefa e vai retornar pelo WhatsApp.' }
+  end
+
+  def appointment_short(task)
+    task.due_at.in_time_zone(TZ).strftime('%d/%m às %H:%M')
+  end
+
   # resultado + resumo na ligação e no contato da campanha
   def tool_registrar_resultado
     resultado = params['resultado'].to_s.strip
@@ -342,7 +444,8 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
     parts = ["#{Crm::VoiceAgent::Script.spoken_date(date)}, às #{Crm::VoiceAgent::Script.spoken_time(time)}"]
     parts << "na unidade #{unit_label(unit)}" if unit.present?
     parts << "com #{Crm::VoiceAgent::Script.spoken_doctor(doctor)}" if doctor.present?
-    parts.join(', ')
+    # item 333: nomes que a voz fala errado ("Gemelli" → "Jeméli")
+    Crm::VoiceAgent::Script.apply_pronunciation(parts.join(', '), settings)
   end
 
   def funnel_stage

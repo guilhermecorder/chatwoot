@@ -59,7 +59,7 @@ RSpec.describe Crm::VoiceAgent::UnresponsiveLeadsJob do
       expect(campaign.name).to eq("🤖 Leads não responsivos — #{now.strftime('%d/%m')}")
       expect(campaign).to be_processing
       expect(campaign.daily_cap).to eq(5)
-      expect(campaign.first_message).to eq(Crm::VoiceAgent::Script::UNRESPONSIVE_FIRST_MESSAGE)
+      expect(campaign.first_message).to be_nil # item 333: o discador usa a "1ª frase ao LIGAR" da Integração na hora
       expect(campaign.hours).to eq('start' => '08:00', 'end' => '19:00')
       rows = campaign.campaign_contacts
       expect(rows.count).to eq(1)

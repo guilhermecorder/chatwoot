@@ -52,7 +52,7 @@ class Crm::HandoffTask
 
   def create!(motivo, detalhes, urgent)
     @account.tasks.create!(
-      title: "#{urgent ? '🔴' : '🩺'} Pós-op · #{patient_name} — #{motivo}",
+      title: "#{urgent ? '🔴' : title_icon} #{title_label} · #{patient_name} — #{motivo}",
       description: entry(motivo, detalhes),
       task_type: TASK_TYPE, priority: urgent ? :urgent : :high, status: :todo,
       due_at: urgent ? TZ.now : TZ.now.end_of_day,
@@ -61,6 +61,10 @@ class Crm::HandoffTask
       assignee: assignee
     )
   end
+
+  # item 333: a tarefa aberta pelo Agente de Ligação diz que veio da ligação
+  def title_label = @agent_key == 'voice' ? 'Ligação' : 'Pós-op'
+  def title_icon = @agent_key == 'voice' ? '📞' : '🩺'
 
   def open_task
     return nil if @contact.blank?

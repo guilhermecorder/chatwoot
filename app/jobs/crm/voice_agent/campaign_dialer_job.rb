@@ -7,6 +7,15 @@
 # A ElevenLabs manda o modelo de permissão e liga quando o paciente aceita;
 # o pós-chamada fecha o contato. Uma trava Redis por conta evita duas
 # rodadas ao mesmo tempo (deploy no meio da rodada).
+#
+# Item 333 (08/10, achados da auditoria de 07/10): nada é discado sem a trava
+# geral dos robôs (CEVICO_RESPONDERS_LIVE); campanha só nos DIAS escolhidos
+# (Integrações → Limites); a campanha automática de leads parados só disca
+# enquanto o card do agente está AO VIVO e dentro da janela dele, e a fila que
+# sobrou de um dia anterior é descartada; e cada pessoa é reconferida NA HORA
+# de ligar: pediu para parar, virou paciente de parceiro, recusou a ligação
+# (30 dias), ou — nos leads parados — respondeu / marcou consulta depois de
+# entrar na fila. Cada ligação leva o roteiro de LIGAR (o do agente é o de atender).
 class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
   queue_as :low
 
@@ -16,6 +25,9 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
   # ligação da IA aberta pelas ferramentas (ou discada) sem pós-chamada há mais
   # que isso = a ElevenLabs não avisou o fim; fecha p/ não ficar "em chamada"
   STALE_CALL_AFTER = 2.hours
+  # recusou o pedido de permissão: fica sem ligação da assistente por este tempo
+  REFUSAL_COOLDOWN = 30.days
+  UNRESPONSIVE_KIND = 'unresponsive_leads'.freeze
 
   def perform(now = nil)
     @now = now ? now.in_time_zone(TZ) : TZ.now
@@ -43,7 +55,7 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
 
   def run_account(account, campaigns)
     settings = Crm::VoiceAgent::Settings.new(account)
-    return unless settings.enabled? && settings.configured?
+    return unless settings.enabled? && settings.configured? && Crm::ResponderAgentJob::LIVE_ENABLED
 
     lock_manager = Redis::LockManager.new
     lock_key = "CRM_VOICE_DIALER_LOCK::#{account.id}"
@@ -62,10 +74,12 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
     Rails.logger.error("[CEVICO voice] campanha #{campaign.id}: #{e.class}: #{e.message}")
   end
 
-  def run_campaign(campaign, settings)
+  def run_campaign(campaign, settings) # rubocop:disable Metrics/CyclomaticComplexity
     close_stale(campaign)
+    expire_old_queue(campaign) if unresponsive?(campaign)
     campaign.finish_if_done!
     return unless campaign.processing?
+    return unless may_dial_now?(campaign, settings)
     return unless settings.within_hours?(@now, campaign_hours(campaign, settings))
     if settings.permission_template['name'].blank?
       return campaign.update!(stats: campaign.stats.merge('error' => 'Modelo de permissão não configurado'))
@@ -79,6 +93,27 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
     end
     campaign.refresh_stats!
     campaign.finish_if_done!
+  end
+
+  def unresponsive?(campaign)
+    (campaign.audience || {})['kind'] == UNRESPONSIVE_KIND
+  end
+
+  # leads parados: só com o card do agente AO VIVO e dentro da janela dele
+  # (dias + horas); campanhas manuais: nos dias escolhidos em Integrações
+  def may_dial_now?(campaign, settings)
+    return settings.within_days?(@now) unless unresponsive?(campaign)
+
+    cfg = (CrmSetting.find_by(account_id: campaign.account_id)&.ai_config || {}).dig('agents', 'voice') || {}
+    Crm::VoiceAgent::UnresponsiveLeadsJob.live_now?(campaign.account, cfg, settings: settings, now: @now)
+  end
+
+  # a campanha do dia dos leads parados não liga no dia seguinte com motivo velho
+  def expire_old_queue(campaign)
+    return if campaign.created_at.in_time_zone(TZ).to_date >= @now.to_date
+
+    campaign.campaign_contacts.queued.find_each { |row| row.update!(status: 'skipped', error: 'Fila de um dia anterior') }
+    campaign.refresh_stats!
   end
 
   # horário da campanha; senão o da configuração
@@ -111,6 +146,9 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
     digits = contact&.phone_number.to_s.gsub(/\D/, '')
     return row.update!(status: 'skipped', error: 'Contato sem telefone') if digits.length < 8
 
+    reason = skip_reason(campaign, row, contact)
+    return row.update!(status: 'skipped', error: reason) if reason
+
     # a ElevenLabs manda o pedido de permissão da Meta quando falta: os limites
     # (1/24 h, 2/7 dias) valem aqui também (conformidade 20/09)
     return if permission_blocked?(row, contact)
@@ -122,6 +160,39 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
     row.update!(call_id: call.id)
   rescue StandardError => e
     row.update!(status: failure_status(e.message), error: e.message.to_s.truncate(500), attempts: row.attempts + 1)
+  end
+
+  # reconferido NA HORA de ligar (a pessoa pode ter mudado desde que entrou na fila)
+  def skip_reason(campaign, row, contact)
+    return 'Pediu para não ser incomodado' if opted_out?(campaign.account, contact)
+    return 'Paciente de clínica parceira' if Crm::PartnerGuard.partner_contact?(contact)
+    return 'Recusou ligações nos últimos 30 dias' if refused_recently?(contact)
+    return nil unless unresponsive?(campaign)
+    return 'Respondeu depois de entrar na fila' if replied_since?(contact, row.created_at)
+    return 'Já tem consulta marcada' if Crm::AppointmentRecorder.future_appointment(contact.account, contact.phone_number, nil, contact)
+
+    nil
+  end
+
+  def opted_out?(account, contact)
+    @quiet_titles ||= {}
+    titles = (@quiet_titles[account.id] ||= Crm::OptOut.quiet_titles(account))
+    contact.label_list.map(&:to_s).intersect?(titles)
+  end
+
+  def refused_recently?(contact)
+    answer = (contact.additional_attributes || {})['cevico_call_permission'] || {}
+    return false unless answer['status'] == 'reject'
+
+    replied = Time.zone.parse(answer['replied_at'].to_s) if answer['replied_at'].present?
+    replied.nil? || replied > @now - REFUSAL_COOLDOWN
+  rescue ArgumentError
+    true
+  end
+
+  def replied_since?(contact, since)
+    Message.joins(:conversation).where(conversations: { contact_id: contact.id, account_id: contact.account_id })
+           .where(message_type: :incoming).exists?(created_at: since..)
   end
 
   def permission_blocked?(row, contact)
@@ -157,7 +228,9 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
           campanha_objetivo: contact_objective(campaign, row), campanha_id: campaign.id.to_s, contato_id: row.contact_id.to_s,
           proxima_consulta: next_appointment_text(contact, digits)
         },
-        conversation_config_override: { agent: { first_message: first_message(campaign, settings, first_name) } }
+        # item 333: o roteiro de LIGAR (o do agente na ElevenLabs é o de atender)
+        conversation_config_override: { agent: { first_message: first_message(campaign, settings, first_name),
+                                                 prompt: { prompt: outbound_prompt(campaign.account, settings) } } }
       }
     }
   end
@@ -177,9 +250,15 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
     "#{Crm::VoiceAgent::Script.spoken_date(due.to_date)}, às #{Crm::VoiceAgent::Script.spoken_time(due.strftime('%H:%M'))}"
   end
 
-  # primeira frase da campanha (ou a padrão) com o nome do paciente
+  def outbound_prompt(account, settings)
+    @outbound_prompts ||= {}
+    @outbound_prompts[account.id] ||= Crm::VoiceAgent::Script.build(account, settings, direction: :outbound)
+  end
+
+  # primeira frase da campanha (ou a de LIGAR da Integração) com o nome do paciente
   def first_message(campaign, settings, first_name)
-    text = campaign.first_message.presence || settings.first_message
+    text = Crm::VoiceAgent::Script.persona_fill(campaign.first_message.presence || settings.outbound_first_message,
+                                                campaign.account, settings)
     return text if first_name.blank? || text.include?(first_name)
 
     text.sub(/\AOlá!?\s*/i, "Olá, #{first_name}! ")

@@ -8,7 +8,8 @@ module Crm::VoiceAgentSettings
   extend ActiveSupport::Concern
 
   VOICE_TEXT_FIELDS = %w[agent_name agent_id webhook_id whatsapp_phone_number_id whatsapp_number voice_id voice_name voice_public_owner_id
-                         tts_model first_message prompt transfer_condition].freeze
+                         first_message outbound_first_message partner_message persona_name prompt inbound_prompt
+                         transfer_condition].freeze
 
   def update_voice
     voice = voice_settings.raw.deep_dup
@@ -18,10 +19,13 @@ module Crm::VoiceAgentSettings
     apply_voice_choices(voice)
     apply_voice_targets(voice)
     apply_voice_limits(voice)
+    apply_voice_after_call(voice)
+    apply_voice_pronunciations(voice)
     # token das ferramentas nasce no 1º save e não muda (as ferramentas na ElevenLabs guardam ele)
     voice['tools_token'] ||= SecureRandom.hex(24)
     voice['updated_at'] = Time.current.iso8601
-    voice_settings.persist!(voice)
+    # item 333: o bloco state é do pós-chamada/sincronização (persist_state!) — a tela não o regrava
+    voice_settings.persist!(voice.except('state'))
     render json: { voice: voice_json(crm_settings.reload) }
   end
 
@@ -95,6 +99,8 @@ module Crm::VoiceAgentSettings
     voice['llm'] = params[:llm] if params.key?(:llm) && Crm::VoiceAgent::Settings::LLM_OPTIONS.include?(params[:llm])
     voice['language'] = params[:language] if params.key?(:language) && Crm::VoiceAgent::Settings::LANGUAGE_OPTIONS.include?(params[:language])
     voice['connection'] = params[:connection] if params.key?(:connection) && Crm::VoiceAgent::Settings::CONNECTIONS.include?(params[:connection])
+    voice['tts_model'] = params[:tts_model] if Crm::VoiceAgent::Settings::TTS_MODEL_OPTIONS.include?(params[:tts_model])
+    voice['persona_gender'] = params[:persona_gender] if Crm::VoiceAgent::Settings::GENDERS.include?(params[:persona_gender])
   end
 
   # caixa da clínica (só da conta), modelo de continuidade e modelo de permissão
@@ -114,6 +120,33 @@ module Crm::VoiceAgentSettings
     voice['max_duration_seconds'] = params[:max_duration_seconds].to_i.clamp(60, 3600) if params.key?(:max_duration_seconds)
     voice['daily_limit'] = params[:daily_limit].to_i.clamp(1, 5000) if params.key?(:daily_limit)
     voice['hours'] = sanitize_voice_hours(params[:hours]) if params.key?(:hours)
+    voice['call_days'] = Array(params[:call_days]).map(&:to_i).select { |d| d.between?(0, 6) }.uniq.sort if params.key?(:call_days)
+  end
+
+  # item 333: depois da ligação — coluna por resultado (só colunas da conta)
+  def apply_voice_after_call(voice)
+    return unless params.key?(:outcome_stages)
+
+    wanted = hash_param(params[:outcome_stages]).slice(*Crm::VoiceAgent::Settings::STAGE_OUTCOMES)
+    voice['outcome_stages'] = wanted.transform_values { |id| account_stage_id(id) }.compact
+  end
+
+  def account_stage_id(raw)
+    return nil if raw.to_i <= 0
+
+    Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: Current.account.id }).find_by(id: raw.to_i)&.id
+  end
+
+  # item 333: [{ from, to }] — como a voz deve falar nomes difíceis
+  def apply_voice_pronunciations(voice)
+    return unless params.key?(:pronunciations)
+
+    rows = Array(params[:pronunciations]).map { |row| hash_param(row) }
+    voice['pronunciations'] = rows.filter_map do |row|
+      from = row['from'].to_s.strip[0, 60]
+      to = row['to'].to_s.strip[0, 80]
+      { 'from' => from, 'to' => to } if from.present? && to.present?
+    end.first(Crm::VoiceAgent::Settings::MAX_PRONUNCIATIONS)
   end
 
   # "HH:MM" válidos e início < fim; senão volta ao padrão 08:00–19:00

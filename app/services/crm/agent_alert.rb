@@ -14,7 +14,7 @@ class Crm::AgentAlert
   TZ = Crm::AgendaSlots::TZ
   WEEKDAYS_SHORT = %w[dom seg ter qua qui sex sáb].freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
-                  'atendente_pos_op' => 'Atendente de Pós-operatório' }.freeze
+                  'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
 
   def self.push(account:, kind:, task:, conversation:, agent_key:)
     raise ArgumentError, "kind inválido: #{kind}" unless KINDS.include?(kind.to_s)
@@ -60,10 +60,10 @@ class Crm::AgentAlert
   private
 
   def build
-    contact = @task.contact || @conversation.contact
+    contact = @task.contact || @conversation&.contact
     {
       'kind' => @kind, 'task_id' => @task.id,
-      'conversation_id' => @conversation.display_id,
+      'conversation_id' => @conversation&.display_id,
       'contact_id' => contact&.id,
       'contact_name' => patient_name,
       # telefone da CONSULTA (pode ser de um familiar), não o do WhatsApp que pediu
@@ -106,7 +106,12 @@ class Crm::AgentAlert
     at = @task.due_at.in_time_zone(TZ)
     when_text = "#{WEEKDAYS_SHORT[at.wday]} #{at.strftime('%d/%m %H:%M')} · #{Crm::AgendaSlots::UNIT_LABELS[@task.unit] || @task.unit}"
     agent = AGENT_NAMES[@agent_key] || @agent_key
-    return "#{patient_name} respondeu NÃO ao lembrete da consulta de #{when_text} — ligar para remarcar ou cancelar" if @kind == 'nao_confirmou'
+    if @kind == 'nao_confirmou'
+      # item 333: o NÃO também pode vir da ligação com a assistente virtual
+      return "#{patient_name} disse na ligação que NÃO vai à consulta de #{when_text} — ligar para remarcar ou cancelar" if @agent_key == 'voice'
+
+      return "#{patient_name} respondeu NÃO ao lembrete da consulta de #{when_text} — ligar para remarcar ou cancelar"
+    end
 
     if @kind == 'agente_cancelou'
       "O #{agent} cancelou a consulta de #{patient_name} que era #{when_text}"

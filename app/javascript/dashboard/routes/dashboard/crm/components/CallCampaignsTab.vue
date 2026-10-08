@@ -647,8 +647,13 @@ const inputClass =
               v-model="form.first_message"
               rows="2"
               :class="inputClass"
-              placeholder="Vazio = ela se apresenta como assistente virtual da CEVICO, chama pelo nome e explica o motivo"
+              placeholder="Vazio = a “1ª frase ao LIGAR” de Integrações → Agente de Ligação"
             />
+            <p class="text-xs text-n-slate-9 mt-1">
+              Comece com “Olá!”: o sistema troca por “Olá, Maria!” na hora de
+              ligar. A campanha liga só nos dias e horários escolhidos em
+              Integrações → Agente de Ligação → Limites.
+            </p>
           </div>
 
           <!-- passo 2: o PÚBLICO -->
