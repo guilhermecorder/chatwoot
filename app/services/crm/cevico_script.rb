@@ -379,18 +379,36 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
     CrmSetting.find_by(account: account)&.ai_config&.dig(config_key(version)) || {}
   end
 
+  # 🏢 rodada 334: a empresa da conta decide qual roteiro padrão vale. Clínica
+  # (o padrão, sem configuração) = o Roteiro CEVICO de sempre, idêntico; ótica
+  # ou outro ramo = o roteiro genérico da empresa (Crm::CompanyScript).
+  # `account` é opcional de propósito: quem chama sem conta recebe o texto da
+  # clínica, como antes.
+  def company_for(account)
+    account.nil? ? nil : Cevico::Company.for(account)
+  end
+
+  def company_script?(account)
+    company = company_for(account)
+    company.present? && !company.clinic?
+  end
+
   # texto padrão de uma seção na versão (v2 cai no v1 se não tiver a seção)
-  def default_text(key, version = 'v1')
+  def default_text(key, version = 'v1', account: nil)
+    return Crm::CompanyScript.default_text(company_for(account), key) if company_script?(account)
+
     (v2?(version) ? Crm::CevicoScriptV2::DEFAULT[key] : nil) || DEFAULT[key]
   end
 
-  def default_stage_prompt(agent_key, version = 'v1')
+  def default_stage_prompt(agent_key, version = 'v1', account: nil)
+    return Crm::CompanyScript.stage_prompt(company_for(account), agent_key) if company_script?(account)
+
     (v2?(version) ? Crm::CevicoScriptV2::STAGE_PROMPTS[agent_key].presence : nil) || STAGE_PROMPTS[agent_key].to_s
   end
 
   # texto vigente de uma seção: o do admin ou o padrão
   def section_text(account, key, version = 'v1')
-    config(account, version)[key].to_s.strip.presence || default_text(key, version)
+    config(account, version)[key].to_s.strip.presence || default_text(key, version, account: account)
   end
 
   # para a tela: cada seção com o texto vigente, o padrão e se foi personalizada.
@@ -400,14 +418,14 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
     list = SECTIONS.map do |section|
       key = section['key']
       custom = cfg[key].to_s.strip
-      section.merge('text' => custom.presence || default_text(key, version), 'default' => default_text(key, version),
-                    'custom' => custom.present?)
+      default = default_text(key, version, account: account)
+      section.merge('text' => custom.presence || default, 'default' => default, 'custom' => custom.present?)
     end
     return list unless v2?(version)
 
     list + STAGE_SECTIONS.map do |section|
       custom = custom_stage_prompt(account, section['agent'], version)
-      default = default_stage_prompt(section['agent'], version)
+      default = default_stage_prompt(section['agent'], version, account: account)
       section.merge('text' => custom.presence || default, 'default' => default, 'custom' => custom.present?)
     end
   end
@@ -424,8 +442,15 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
     end.join("\n\n")
     body = body.gsub('{{TABELA_DE_PRECOS}}', Cevico::PriceList.prompt_block(account)) if body.include?('{{TABELA_DE_PRECOS}}')
     # item 295: a regra "lente fácica é por olho" vai SEMPRE, mesmo com o roteiro editado na tela
-    body = "#{body}\n\n== REGRA FIXA DE VALORES ==\n#{Cevico::PriceList::PER_EYE_RULE}" unless body.include?(Cevico::PriceList::PER_EYE_RULE)
-    title = v2?(version) ? 'ROTEIRO CEVICO 2 · Otimizado pela análise (em teste)' : 'ROTEIRO CEVICO 1 · Fiel ao N8N (fonte única dos atendentes)'
+    # (rodada 334: só na clínica — numa ótica não existe lente fácica)
+    if !company_script?(account) && body.exclude?(Cevico::PriceList::PER_EYE_RULE)
+      body = "#{body}\n\n== REGRA FIXA DE VALORES ==\n#{Cevico::PriceList::PER_EYE_RULE}"
+    end
+    title = if company_script?(account)
+              Crm::CompanyScript.title(company_for(account), normalize_version(version))
+            else
+              v2?(version) ? 'ROTEIRO CEVICO 2 · Otimizado pela análise (em teste)' : 'ROTEIRO CEVICO 1 · Fiel ao N8N (fonte única dos atendentes)'
+            end
     "#{title}\n\n#{body}"
   end
 
@@ -436,6 +461,6 @@ module Crm::CevicoScript # rubocop:disable Metrics/ModuleLength
 
   # bloco da etapa do agente: personalizado no card (campo prompt) ou padrão
   def stage_prompt(account, agent_key, version = 'v1')
-    custom_stage_prompt(account, agent_key, version).presence || default_stage_prompt(agent_key, version)
+    custom_stage_prompt(account, agent_key, version).presence || default_stage_prompt(agent_key, version, account: account)
   end
 end

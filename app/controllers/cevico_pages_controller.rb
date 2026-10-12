@@ -14,12 +14,15 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     @page = CevicoPage.published.find_by(slug: params[:slug])
     return render plain: 'Página não encontrada.', status: :not_found if @page.nil?
 
-    # endereço antigo (/p/slug ou host da VPS) → 301 pro oficial
-    if Cevico::PublicSite.configured? && request.path != "/#{@page.slug}"
-      official = Cevico::PublicSite.page_url(@page.slug)
+    # endereço antigo (/p/slug ou host da VPS) → 301 pro oficial (rodada 334:
+    # o oficial é o domínio da EMPRESA dona da página, quando ela tem um)
+    if Cevico::PublicSite.host_for(@page.account).present? && request.path != "/#{@page.slug}"
+      official = Cevico::PublicSite.page_url(@page.slug, account: @page.account)
       official += "?de=#{origin_slug}" if origin_slug.present?
       return redirect_to official, status: :moved_permanently, allow_other_host: true
     end
+
+    @cevico_tracking = Cevico::PublicSite.tracking_config_for(@page.account)
 
     # teste A/B: sorteia a variação (ou respeita ?v= de quem já entrou nela);
     # item 306: quem volta à página vê a MESMA variação
@@ -47,6 +50,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     return render plain: 'Prévia não encontrada.', status: :not_found if @page.nil?
 
     @preview = true
+    @cevico_tracking = Cevico::PublicSite.tracking_config_for(@page.account)
     @can_edit = @page.valid_edit_token?(params[:edit]) && !@page.published?
     @build_status = Crm::PageGenerateJob.page_status(@page.id)
     @building = @build_status&.dig('status') == 'running'
@@ -163,7 +167,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     @page.track_hit!('next', variant: requested_variant(@page))
     # a origem (utm/gclid/ref_host) viaja junto pro próximo passo do funil —
     # senão o Google Ads viraria "funil" na segunda página
-    redirect_to "#{Cevico::PublicSite.page_url(target.slug)}?de=#{@page.slug}#{tracking_query_suffix}",
+    redirect_to "#{Cevico::PublicSite.page_url(target.slug, account: target.account)}?de=#{@page.slug}#{tracking_query_suffix}",
                 allow_other_host: true
   end
 
@@ -183,20 +187,27 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # Raiz do domínio oficial: o HUB — porta de entrada do atendimento.
   # Três caminhos em destaque (Refrativa | Catarata | Lente Trifocal),
   # botão de WhatsApp com Protocolo e o índice das demais páginas.
+  # 🏢 rodada 334: no domínio de uma EMPRESA, o hub é dela — só as páginas
+  # publicadas daquela conta, o WhatsApp/frase/rastreio dela e o nome dela no
+  # lugar da marca. Sem host casado: tudo como sempre (todas as páginas, hub global).
   def home
-    @pages_by_category = CevicoPage.published
-                                   .order(:title)
-                                   .group_by(&:category)
-    @hub = Cevico::PublicSite.hub_config
-    @hub_whatsapp = Cevico::PublicSite.hub_whatsapp_url
-    @doors = hub_doors
+    account = host_account
+    scope = account ? CevicoPage.published.where(account: account) : CevicoPage.published
+    @pages_by_category = scope.order(:title).group_by(&:category)
+    @hub = Cevico::PublicSite.hub_config_for(account)
+    @hub_whatsapp = Cevico::PublicSite.hub_whatsapp_url(account)
+    @company = account && Cevico::Company.for(account)
+    @cevico_tracking = Cevico::PublicSite.tracking_config_for(account)
+    # as 3 portas da clínica só fazem sentido numa clínica
+    @doors = @company && !@company.clinic? ? [] : hub_doors(scope)
     render :home
   end
 
   # Protocolo do HUB: clique no WhatsApp da porta de entrada — liga o
-  # paciente da caixa à origem (Google Ads/SEO/Meta) mesmo sem página
+  # paciente da caixa à origem (Google Ads/SEO/Meta) mesmo sem página.
+  # Rodada 334: no domínio de uma empresa, o Protocolo nasce na conta dela.
   def hub_ref
-    account = CevicoPage.published.order(:id).first&.account || Account.first
+    account = host_account || CevicoPage.published.order(:id).first&.account || Account.first
     return head :not_found if account.nil?
 
     ref = CevicoPageRef.mint!(page: nil, account: account,
@@ -237,10 +248,18 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     Cevico::TrafficSource.snapshot(prm, page: page, cookies: request.cookies, ga4_id: send_measurement_id(page))
   end
 
-  # propriedade do Analytics que recebe as conversões do CRM (Integrações → Google)
+  # propriedade do Analytics que recebe as conversões do CRM (Integrações → Google).
+  # Sem página (hub): a conta do domínio da empresa; senão a primeira publicada
   def send_measurement_id(page)
-    account_id = page&.account_id || CevicoPage.published.order(:id).pick(:account_id)
+    account_id = page&.account_id || host_account&.id || CevicoPage.published.order(:id).pick(:account_id)
     CrmSetting.find_by(account_id: account_id)&.google_ads_config&.dig('measurement_id')
+  end
+
+  # 🏢 a conta cuja empresa tem o domínio desta requisição (nil = nenhuma)
+  def host_account
+    return @host_account if defined?(@host_account)
+
+    @host_account = Cevico::PublicSite.account_for_host(request.host)
   end
 
   # &utm_...&gclid=... presentes na URL atual, prontos pra viajar no funil
@@ -277,8 +296,8 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
       match: /trifocal|galaxy|premium/i, whats: 'Olá! Quero saber mais sobre a lente trifocal.' }
   ].freeze
 
-  def hub_doors
-    published = CevicoPage.published.to_a
+  def hub_doors(scope = CevicoPage.published)
+    published = scope.to_a
     HUB_DOORS.map do |door|
       page = published.find { |pg| pg.slug.match?(door[:match]) || pg.title.match?(door[:match]) }
       door.merge(page_slug: page&.slug)

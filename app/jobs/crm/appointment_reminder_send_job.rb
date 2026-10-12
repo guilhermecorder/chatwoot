@@ -412,9 +412,17 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     task.source_detail.to_s.presence || (task.contact&.additional_attributes || {})['parceiro'].to_s
   end
 
-  # o nome da unidade como vai NA MENSAGEM ({{unidade}})
+  # o nome da unidade como vai NA MENSAGEM ({{unidade}}) — 🏢 rodada 334: o
+  # nome que a EMPRESA deu à unidade (Identidade da empresa); clínica sem
+  # lista própria = os nomes da Agenda, como sempre
   def unit_name(task)
-    Crm::AgendaSlots::UNIT_LABELS[unit_key(task)] || unit_key(task)
+    key = unit_key(task)
+    company_for(task.account_id).units.find { |u| u['key'] == key.to_s }&.dig('label') || key
+  end
+
+  def company_for(account_id)
+    @companies ||= {}
+    @companies[account_id] ||= Cevico::Company.for(Account.find_by(id: account_id))
   end
 
   # o mesmo para as listas da rodada, avisando quando a unidade foi presumida

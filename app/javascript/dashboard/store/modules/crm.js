@@ -27,6 +27,10 @@ const getters = {
     s.contacts.filter(c => c.stage_id === stageId),
   getUIFlags: s => s.uiFlags,
   getSettings: s => s.settings,
+  // 🔐 rodada 334: { admin, me: { 'crm': 'edit', … }, units, role_id, catalog }
+  getAccess: s => s.settings.access || null,
+  // 🏢 identidade da empresa (ramo, vocabulário, unidades, módulos)
+  getCompany: s => s.settings.company || null,
   getN8nWorkflows: s => s.settings.n8n_workflows || [],
   // avisos ativos do Radar de Oportunidades (badge no "Meu Painel")
   getRadarAlertCount: s => s.settings.ai?.opportunity_alerts_count || 0,
@@ -322,6 +326,27 @@ const actions = {
   // acessos por atendente (admin): concessões + menu do dia a dia
   async updateAgentGrants({ dispatch }, payload) {
     const { data } = await CrmAPI.updateAgentGrants(payload);
+    await dispatch('fetchSettings');
+    return data;
+  },
+
+  // 🔐 rodada 334: acessos em árvore — gravar e recarregar as settings
+  // (o `access.me` de quem está logado vem junto)
+  async updateAgentAccess({ dispatch }, payload) {
+    const { data } = await CrmAPI.updateAgentAccess(payload);
+    await dispatch('fetchSettings');
+    return data;
+  },
+
+  async updateAccessRoles({ dispatch }, roles) {
+    const { data } = await CrmAPI.updateAccessRoles(roles);
+    await dispatch('fetchSettings');
+    return data;
+  },
+
+  // 🏢 Identidade da empresa
+  async updateCompany({ dispatch }, company) {
+    const { data } = await CrmAPI.updateCompany(company);
     await dispatch('fetchSettings');
     return data;
   },

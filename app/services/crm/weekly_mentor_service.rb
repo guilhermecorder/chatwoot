@@ -79,6 +79,11 @@ class Crm::WeeklyMentorService # rubocop:disable Metrics/ClassLength
       mesma escreveu.
   PROMPT
 
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :mentor)
+  end
+
   def initialize(account, week_start: nil, rolling: false, cadence: 'weekly')
     @account = account
     # semanal: semana fechada (segunda a domingo) no cron; últimos 7 dias no
@@ -181,7 +186,7 @@ class Crm::WeeklyMentorService # rubocop:disable Metrics/ClassLength
       model: model,
       max_tokens: 2048,
       system_: cached_system,
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      output_config: output_config_for({ type: 'json_schema', schema: company_schema(OUTPUT_SCHEMA) }),
       messages: [{ role: 'user', content: JSON.pretty_generate(payload) }]
     )
     record_usage(message)

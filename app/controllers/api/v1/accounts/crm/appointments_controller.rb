@@ -87,6 +87,9 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   # o trilho em SQL (a mesma regra do kindOf do cevicoAgenda.js)
   def track_scope(track)
     tasks = Current.account.tasks
+    # 🔐 rodada 334: pessoa presa a unidades só vê as consultas delas
+    allowed_units = cevico_access.units
+    tasks = tasks.where(unit: allowed_units + [nil]) if allowed_units.any?
     case track
     when 'cirurgias' then tasks.where(task_type: 'cirurgia')
     when 'teleconsultas' then tasks.where(task_type: 'consulta', modality: 'teleconsulta')

@@ -9,7 +9,6 @@ class Api::V1::Accounts::Crm::GoogleDashboardsController < Api::V1::Accounts::Ba
   include Crm::AccessControl
   include Crm::ResolvesPeriod
 
-  before_action -> { require_capability(:reports) }
 
   def show
     cfg = CrmSetting.find_by(account: Current.account)&.google_ads_config || {}

@@ -23,6 +23,8 @@ import ChannelIcon from 'next/icon/ChannelIcon.vue';
 import SidebarAccountSwitcher from './SidebarAccountSwitcher.vue';
 import Logo from 'next/icon/Logo.vue';
 import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import { menuNodeFor, routeNodesFor } from 'dashboard/helper/cevicoAccess';
 import {
   SIDEBAR_SORT_SECTIONS,
   getSidebarSortOptions,
@@ -362,49 +364,38 @@ const newReportRoutes = () => [
 
 const reportRoutes = computed(() => newReportRoutes());
 
-// ── CEVICO: acessos por agente (modelo de CONCESSÃO, decisão 17/07) ──
-// - Dia a dia: itens que o admin liga/desliga por pessoa (só menu; os
-//   endpoints continuam abertos ao time). Padrão = DAY_MENU_DEFAULT.
-// - Áreas administrativas: aparecem para o atendente SÓ com concessão em
-//   agent_permissions['grants'] (a tranca de verdade é o backend).
-const crmSettings = useMapGetter('crm/getSettings');
+// ── 🔐 CEVICO rodada 334: acessos em ÁRVORE (ver × editar) ──
+// O servidor devolve `access.me = { nó: 'none'|'view'|'edit' }` já resolvido
+// para quem está logado. Um item do menu aparece se o nó dele (MENU_NODES em
+// helper/cevicoAccess.js) for pelo menos VER. Item sem nó = core do Chatwoot
+// (segue como sempre: admin). Vale para admin também: depois de carregado,
+// nó que não está em `me` (ex.: cirurgias numa ótica) some para todo mundo.
+const { canAny, fill, company, loaded } = useCevicoAccess();
 
-// chave do dia a dia → name do item do menu
-const DAY_ITEM_BY_KEY = {
-  crm: 'CRM',
-  conversation: 'Conversation',
-  calls: 'Cevico Calls',
-  agenda: 'Agenda',
-  goals: 'Goals',
-  canned: 'Canned',
-  tasks: 'Tasks',
-  people: 'People',
-  academy: 'Academy',
+// itens cujo nó-pai pode estar em 'none' mas um filho liberado — abrem
+// se QUALQUER nó da rota liberar (mesma regra do guard de rota)
+const ITEM_ROUTE_ANY = {
+  Finance: 'cevico_finance',
+  'Automations Hub': 'cevico_automations',
 };
-// menu padrão do atendente (pedido do Guilherme 17/07):
-// Meu Painel | CRM | Conversas | Agenda | Metas | Respostas prontas
-const DAY_MENU_DEFAULT = [
-  'crm',
-  'conversation',
-  'calls',
-  'agenda',
-  'goals',
-  'canned',
-];
+// null = item sem nó (core); true/false = decidido pela árvore
+const itemVisible = name => {
+  const node = menuNodeFor(name);
+  if (!node) return null;
+  const extra = ITEM_ROUTE_ANY[name] ? routeNodesFor(ITEM_ROUTE_ANY[name]) : [];
+  return canAny([node, ...extra]);
+};
+// atalho para o catálogo de itens: CEVICO decide pela árvore, core pelo admin
+const show = name => itemVisible(name) ?? isAdmin.value;
 
-// name do item → capabilities que o liberam para atendente (qualquer uma)
-const GRANT_BY_ITEM_NAME = {
-  Reports: ['reports'],
-  'Campanha WhatsApp': ['campaigns'],
-  'Jornada do paciente': ['campaigns'],
-  'Automations Hub': ['automations', 'data_tools'],
-  'Integrations Hub': ['settings'],
-  Finance: ['finance'],
-  Strategy: ['strategy'],
-  // gaveta Marketing (20/09): a concessão 'pages' virou "Marketing"
-  Forms: ['pages'],
-  'Creatives Center': ['pages', 'reports'],
-};
+// 🏢 vocabulário da empresa nos rótulos (ótica: "Jornada do cliente")
+const jornadaLabel = computed(() => {
+  const label = fill('Jornada do {{paciente}}');
+  return label.includes('{{') ? 'Jornada do paciente' : label;
+});
+const academiaLabel = computed(
+  () => `Academia ${company.value?.name ?? 'CEVICO'}`
+);
 
 // chaves usadas pelo "Personalizar menu" (ocultar por conta própria)
 const FEATURE_BY_ITEM_NAME = {
@@ -427,34 +418,6 @@ const FEATURE_BY_ITEM_NAME = {
   People: 'people',
   Canned: 'canned',
 };
-
-const myGrants = computed(() => {
-  const perms = crmSettings.value?.agent_permissions ?? {};
-  return perms.grants?.[String(currentUserId.value)] ?? [];
-});
-
-// atendente COM a área concedida (admin sempre passa)
-const canSee = capability =>
-  isAdmin.value || myGrants.value.includes(capability);
-
-// item 62: relatórios ESPECÍFICOS concedidos (lista vazia = todos)
-const myReportKeys = computed(() => {
-  const perms = crmSettings.value?.agent_permissions ?? {};
-  return perms.report_keys?.[String(currentUserId.value)] ?? [];
-});
-const canSeeReport = key =>
-  isAdmin.value ||
-  myReportKeys.value.length === 0 ||
-  myReportKeys.value.includes(key);
-
-const myDayMenu = computed(() => {
-  const perms = crmSettings.value?.agent_permissions ?? {};
-  const configured = perms.menu?.[String(currentUserId.value)];
-  if (configured) return configured;
-  // legado (lista de bloqueio antiga): respeita subtraindo do padrão
-  const legacyBlocked = perms[String(currentUserId.value)] ?? [];
-  return DAY_MENU_DEFAULT.filter(key => !legacyBlocked.includes(key));
-});
 
 const hiddenFeatures = ref(
   JSON.parse(localStorage.getItem('cevico_hidden_menu') ?? '[]')
@@ -571,40 +534,50 @@ const gradientColorAt = ratio => {
   return `rgb(${mix[0]}, ${mix[1]}, ${mix[2]})`;
 };
 
-// Atendente vê: Meu Painel + itens do dia a dia configurados pelo admin
-// (padrão: CRM | Conversas | Agenda | Metas | Respostas prontas) +
-// Conteúdos (rascunhos do time) + áreas CONCEDIDAS + Configurações (perfil)
+// Atendente vê: todos os itens do catálogo cujo nó é pelo menos VER (a árvore
+// vem do servidor, já com papel/padrão aplicados). Item com filhos aparece se
+// sobrar algum filho. Configurações vira "Meu perfil" — e, se a pessoa tiver
+// algum filho CEVICO liberado (Integrações, Tabela de preços…), ele entra
+// junto na gaveta.
 const menuItemsForRole = computed(() => {
-  if (isAdmin.value) return menuItems.value;
-  const dayNames = myDayMenu.value
-    .map(key => DAY_ITEM_BY_KEY[key])
-    .filter(Boolean);
-  // 📅 Agendamentos (item 200): monitoramento do time inteiro, aparece para
-  // todo atendente como Conteúdos (dá para esconder no Personalizar menu)
-  const allow = [
-    'Inicio',
-    ...dayNames,
-    'Cevico Appointments',
-    'Cevico Oftalmofacil',
-    'Cevico Pages',
-    'Builder',
-  ];
-  const granted = Object.entries(GRANT_BY_ITEM_NAME)
-    .filter(([, capabilities]) =>
-      capabilities.some(capability => myGrants.value.includes(capability))
-    )
-    .map(([name]) => name);
-  return [
-    ...menuItems.value.filter(
-      i => allow.includes(i.name) || granted.includes(i.name)
-    ),
-    {
-      name: 'Settings',
-      label: 'Meu perfil',
-      icon: 'i-lucide-circle-user-round',
-      to: accountScopedRoute('profile_settings_index'),
-    },
-  ];
+  // admin vê tudo — menos o que o RAMO da empresa não tem (nó fora de
+  // `access.me`, ex.: Oftalmofácil e Agenda cirúrgica numa ótica)
+  if (isAdmin.value) {
+    if (!loaded.value) return menuItems.value;
+    const gone = name => itemVisible(name) === false;
+    return menuItems.value.flatMap(item => {
+      if (gone(item.name)) return [];
+      if (!item.children) return [item];
+      const kids = item.children.filter(c => !gone(c.name));
+      return kids.length ? [{ ...item, children: kids }] : [];
+    });
+  }
+  const visible = name => itemVisible(name) === true;
+  const meuPerfil = {
+    name: 'Settings',
+    label: 'Meu perfil',
+    icon: 'i-lucide-circle-user-round',
+    to: accountScopedRoute('profile_settings_index'),
+  };
+  const out = menuItems.value.flatMap(item => {
+    if (item.name === 'Settings') {
+      const kids = (item.children || []).filter(c => visible(c.name));
+      if (!kids.length) return [meuPerfil];
+      return [
+        {
+          ...item,
+          children: [...kids, { ...meuPerfil, name: 'Settings Profile' }],
+        },
+      ];
+    }
+    if (item.children) {
+      const kids = item.children.filter(c => visible(c.name));
+      return kids.length ? [{ ...item, children: kids }] : [];
+    }
+    return visible(item.name) ? [item] : [];
+  });
+  if (!out.some(i => i.name === 'Settings')) out.push(meuPerfil);
+  return out;
 });
 
 // ── 🗄️ GAVETAS DO MENU (pedido 20/09, "personal organizer"): cada gaveta
@@ -714,11 +687,13 @@ const MENU_LAYOUT = [
     items: [
       'Settings > Integrations Hub',
       'Settings > Settings Account Settings',
+      'Settings > Settings Company', // 🏢 rodada 334: identidade da empresa
       'Settings > Settings Domain',
       'Settings > Settings Panels',
       'Builder', // construtor dos painéis por pessoa, ao lado de Painéis
       'Settings > Settings Prices',
       'Settings > Settings Agents',
+      'Settings > Settings Access', // 🔐 rodada 334: acessos e papéis
       'Settings > Settings Teams',
       'Settings > Settings Custom Roles',
       'Settings > Settings Inboxes',
@@ -800,6 +775,9 @@ const TILE_COLORS = {
   'Chatwoot Reports': '#8e8e93',
   // Configurações (pedido 20/09: cada linha com a sua cor, nada de azulejo cinza)
   'Settings Account Settings': '#0a84ff',
+  'Settings Company': '#0a84ff', // 🏢 rodada 334
+  'Settings Access': '#ff3b30', // 🔐 rodada 334
+  'Settings Profile': '#8e8e93',
   'Settings Domain': '#30d158',
   'Settings Panels': '#af52de',
   'Settings Prices': '#34c759',
@@ -999,10 +977,73 @@ let radarBadgeTimer = null;
 onUnmounted(() => clearInterval(radarBadgeTimer));
 // ──────────────────────────────────────────────────────────────────────────
 
+// abas do ambiente Automações (uma por nó automacoes.*; rodada 334)
+const automationChildren = computed(() =>
+  [
+    {
+      name: 'Automations Robos',
+      label: 'Robôs de follow-up',
+      icon: 'i-lucide-bot',
+      tab: 'robos',
+    },
+    // 🗺️ item 170: fluxograma de cada agente/automação com o estado ao vivo
+    {
+      name: 'Automations Flows',
+      label: 'Fluxos',
+      icon: 'i-lucide-git-branch',
+      tab: 'fluxos',
+    },
+    {
+      name: 'Automations Rules',
+      label: 'Regras da caixa',
+      icon: 'i-lucide-repeat',
+      tab: 'regras',
+    },
+    {
+      name: 'Automations AI Agents',
+      label: 'Agentes de IA',
+      icon: 'i-lucide-sparkles',
+      tab: 'agentes',
+    },
+    // item 85: o que cada agente de IA está fazendo + custos
+    {
+      name: 'Automations AI Panel',
+      label: 'Painel dos agentes',
+      icon: 'i-lucide-activity',
+      tab: 'painel_ia',
+    },
+    {
+      name: 'Automations Programming',
+      label: 'Modo Programação',
+      icon: 'i-lucide-zap',
+      tab: 'programacao',
+    },
+    {
+      name: 'Automations Results',
+      label: 'Resultados',
+      icon: 'i-lucide-bar-chart-3',
+      tab: 'resultados',
+    },
+    {
+      name: 'Automations Treatment',
+      label: 'Tratamento de dados',
+      icon: 'i-lucide-database',
+      tab: 'tratamento',
+    },
+  ]
+    .filter(c => show(c.name))
+    .map(c => ({
+      name: c.name,
+      label: c.label,
+      icon: c.icon,
+      to: accountScopedRoute('cevico_automations', {}, { tab: c.tab }),
+    }))
+);
+
 const menuItems = computed(() => {
   return [
     // 👑 Painel do empresário (27/09): ambiente próprio acima do Meu Painel — só admin
-    ...(isAdmin.value
+    ...(show('Business')
       ? [
           {
             name: 'Business',
@@ -1167,9 +1208,8 @@ const menuItems = computed(() => {
         },
       ],
     },
-    // 🎬 Central de Criativos: 1º item da gaveta Marketing (pedido 20/09) —
-    // admin, concessão Marketing ('pages') ou Relatórios com a chave 'creatives'
-    ...(canSee('pages') || (canSee('reports') && canSeeReport('creatives'))
+    // 🎬 Central de Criativos: 1º item da gaveta Marketing (pedido 20/09)
+    ...(show('Creatives Center')
       ? [
           {
             name: 'Creatives Center',
@@ -1184,117 +1224,94 @@ const menuItems = computed(() => {
       label: t('SIDEBAR.REPORTS'),
       icon: 'i-lucide-chart-spline',
       children: [
-        // dashboards CEVICO — abrem para atendente com a concessão
-        // "Relatórios"; item 62: o admin pode conceder relatórios
-        // ESPECÍFICOS (report_keys — lista vazia = todos)
+        // dashboards CEVICO — cada um com o seu nó em relatorios.* (rodada
+        // 334): aparece para quem tem pelo menos VER naquele relatório
         ...[
           {
             name: 'CRM Dashboard',
             icon: 'i-lucide-kanban',
-            key: 'crm_dashboard',
             label: 'Dashboard CRM',
             route: 'crm_dashboard_reports',
           },
-          ...(canSee('campaigns')
-            ? [
-                {
-                  name: 'Campaigns Dashboard',
-                  icon: 'i-lucide-send',
-                  key: 'campaigns_dashboard',
-                  label: 'Dashboard Campanhas',
-                  route: 'crm_campaigns_dashboard',
-                },
-              ]
-            : []),
+          {
+            name: 'Campaigns Dashboard',
+            icon: 'i-lucide-send',
+            label: 'Dashboard Campanhas',
+            route: 'crm_campaigns_dashboard',
+          },
           {
             name: 'Traffic Funnel',
             icon: 'i-lucide-filter',
-            key: 'traffic_funnel',
             label: 'Funil de Tráfego',
             route: 'traffic_funnel_reports',
           },
           {
             name: 'Doctors Dashboard',
             icon: 'i-lucide-stethoscope',
-            key: 'doctors',
             label: 'Dashboard dos Médicos',
             route: 'doctors_reports',
           },
           {
             name: 'Agents Dashboard',
             icon: 'i-lucide-headset',
-            key: 'agents_dashboard',
             label: 'Dashboard dos Agentes',
             route: 'agents_dashboard_reports',
           },
           {
             name: 'Agenda Dashboard',
             icon: 'i-lucide-calendar-days',
-            key: 'agenda_dashboard',
             label: 'Dashboard da Agenda',
             route: 'agenda_dashboard_reports',
           },
           {
             name: 'Calls Dashboard',
             icon: 'i-lucide-phone',
-            key: 'calls_dashboard',
             label: 'Dashboard de Ligações',
             route: 'calls_dashboard_reports',
           },
           {
             name: 'Ads Report',
             icon: 'i-lucide-megaphone',
-            key: 'ads',
             label: 'Anúncios (Meta)',
             route: 'ads_reports',
           },
           {
             name: 'Google Dashboard',
             icon: 'i-lucide-search',
-            key: 'google',
             label: 'Google (Ads + GA4)',
             route: 'google_dashboard_reports',
           },
           {
             name: 'WhatsApp Health',
             icon: 'i-lucide-heart-pulse',
-            key: 'whatsapp_health',
             label: 'Saúde do WhatsApp',
             route: 'whatsapp_health_reports',
           },
           {
-            // 💸 item 303: dinheiro — só o admin vê
+            // 💸 item 303: dinheiro — nó só de admin
             name: 'WhatsApp Spend',
             icon: 'i-lucide-receipt',
-            key: 'whatsapp_spend',
             label: 'Gasto do WhatsApp',
             route: 'whatsapp_spend_reports',
-            adminOnly: true,
           },
           {
-            // 💰 item 318: CAC e retorno — mesma concessão do Financeiro
+            // 💰 item 318: CAC e retorno — nó financeiro.cac
             name: 'Acquisition Cost',
             icon: 'i-lucide-piggy-bank',
-            key: 'acquisition_cost',
             label: 'Financeiro & CAC',
             route: 'acquisition_cost_reports',
-            capability: 'finance',
           },
         ]
-          .filter(r =>
-            r.capability
-              ? canSee(r.capability)
-              : canSeeReport(r.key) && (!r.adminOnly || isAdmin.value)
-          )
+          .filter(r => show(r.name))
           .map(r => ({
             name: r.name,
             label: r.label,
             icon: r.icon,
             to: accountScopedRoute(r.route),
           })),
-        // relatórios do core do Chatwoot — a API deles só aceita admin,
-        // então nem aparecem para atendente concedido
-        ...(isAdmin.value
+        // relatórios do core do Chatwoot — a API deles só aceita admin
+        // (nó relatorios.core, marcado como admin no catálogo)
+        ...(show('Report Overview')
           ? [
               {
                 name: 'Label Dashboard',
@@ -1354,15 +1371,15 @@ const menuItems = computed(() => {
       icon: 'i-lucide-megaphone',
       to: accountScopedRoute('crm_campaigns'),
     },
-    // 🗺️ Mensagens da jornada (item 168)
+    // 🗺️ Mensagens da jornada (item 168) — rótulo no vocabulário da empresa
     {
       name: 'Jornada do paciente',
-      label: 'Jornada do paciente',
+      label: jornadaLabel.value,
       icon: 'i-lucide-route',
       to: accountScopedRoute('crm_journey'),
     },
-    // Formulários: gaveta Marketing — admin ou concessão Marketing ('pages')
-    ...(canSee('pages')
+    // Formulários: gaveta Marketing — nó crm.formularios
+    ...(show('Forms')
       ? [
           {
             name: 'Forms',
@@ -1372,8 +1389,8 @@ const menuItems = computed(() => {
           },
         ]
       : []),
-    // Painel Estratégico — admin ou concessão "Estratégia"
-    ...(canSee('strategy')
+    // Painel Estratégico — nó estrategia
+    ...(show('Strategy')
       ? [
           {
             name: 'Strategy',
@@ -1383,8 +1400,8 @@ const menuItems = computed(() => {
           },
         ]
       : []),
-    // Gestão Financeira — admin ou concessão "Financeiro"
-    ...(canSee('finance')
+    // Gestão Financeira — nó financeiro (ou qualquer filho)
+    ...(show('Finance')
       ? [
           {
             name: 'Finance',
@@ -1451,39 +1468,36 @@ const menuItems = computed(() => {
           icon: 'i-lucide-kanban',
           to: accountScopedRoute('cevico_content_board'),
         },
-        // Análise de funis + testes A/B (PÁGINAS PRO) — admin ou
-        // concessão "Páginas" (decisão 17/07: rascunhos p/ todo o time,
-        // análise por concessão)
-        ...(canSee('pages')
-          ? [
-              {
-                // 📈 origem (Google Ads/SEO/Meta) → leads → cirurgias
-                name: 'Pages Results',
-                label: 'Resultados de tráfego',
-                icon: 'i-lucide-trending-up',
-                to: accountScopedRoute('cevico_pages_results'),
-              },
-              {
-                name: 'Pages Analytics',
-                label: 'Análise de funis',
-                icon: 'i-lucide-chart-line',
-                to: accountScopedRoute('cevico_pages_analytics'),
-              },
-              {
-                // 🌪 item 60: fontes de captação → páginas → WhatsApp
-                name: 'Funnel Builder',
-                label: 'Montador de Funis',
-                icon: 'i-lucide-tornado',
-                to: accountScopedRoute('cevico_funnel_builder'),
-              },
-              {
-                name: 'AB Center',
-                label: 'Testes A/B',
-                icon: 'i-lucide-flask-conical',
-                to: accountScopedRoute('cevico_ab_center'),
-              },
-            ]
-          : []),
+        // Resultados (marketing.resultados) e funis/testes A/B
+        // (marketing.funis) — cada um pelo seu nó (rodada 334)
+        ...[
+          {
+            // 📈 origem (Google Ads/SEO/Meta) → leads → cirurgias
+            name: 'Pages Results',
+            label: 'Resultados de tráfego',
+            icon: 'i-lucide-trending-up',
+            to: accountScopedRoute('cevico_pages_results'),
+          },
+          {
+            name: 'Pages Analytics',
+            label: 'Análise de funis',
+            icon: 'i-lucide-chart-line',
+            to: accountScopedRoute('cevico_pages_analytics'),
+          },
+          {
+            // 🌪 item 60: fontes de captação → páginas → WhatsApp
+            name: 'Funnel Builder',
+            label: 'Montador de Funis',
+            icon: 'i-lucide-tornado',
+            to: accountScopedRoute('cevico_funnel_builder'),
+          },
+          {
+            name: 'AB Center',
+            label: 'Testes A/B',
+            icon: 'i-lucide-flask-conical',
+            to: accountScopedRoute('cevico_ab_center'),
+          },
+        ].filter(c => show(c.name)),
       ],
     },
     // Pessoas: DISC, desenvolvimento e feedbacks (cada um vê o seu)
@@ -1509,119 +1523,19 @@ const menuItems = computed(() => {
     },
     {
       name: 'Academy',
-      label: 'Academia CEVICO',
+      label: academiaLabel.value,
       icon: 'i-lucide-graduation-cap',
       to: accountScopedRoute('academy_home'),
     },
-    // Automações — admin ou concessões (cada aba pede a sua área:
-    // robôs/resultados = Automações; tratamento = Tratamento de dados;
-    // regras/agentes de IA/programação = só admin)
-    ...(canSee('automations') || canSee('data_tools')
+    // Automações — cada aba pelo seu nó em automacoes.* (rodada 334); o
+    // pai aparece se sobrar alguma aba
+    ...(automationChildren.value.length
       ? [
           {
             name: 'Automations Hub',
             label: 'Automações',
             icon: 'i-lucide-workflow',
-            children: [
-              ...(canSee('automations')
-                ? [
-                    {
-                      name: 'Automations Robos',
-                      label: 'Robôs de follow-up',
-                      icon: 'i-lucide-bot',
-                      to: accountScopedRoute(
-                        'cevico_automations',
-                        {},
-                        { tab: 'robos' }
-                      ),
-                    },
-                    // 🗺️ item 170: fluxograma de cada agente/automação com o estado ao vivo
-                    {
-                      name: 'Automations Flows',
-                      label: 'Fluxos',
-                      icon: 'i-lucide-git-branch',
-                      to: accountScopedRoute(
-                        'cevico_automations',
-                        {},
-                        { tab: 'fluxos' }
-                      ),
-                    },
-                  ]
-                : []),
-              ...(isAdmin.value
-                ? [
-                    {
-                      name: 'Automations Rules',
-                      label: 'Regras da caixa',
-                      icon: 'i-lucide-repeat',
-                      to: accountScopedRoute(
-                        'cevico_automations',
-                        {},
-                        { tab: 'regras' }
-                      ),
-                    },
-                    {
-                      name: 'Automations AI Agents',
-                      label: 'Agentes de IA',
-                      icon: 'i-lucide-sparkles',
-                      to: accountScopedRoute(
-                        'cevico_automations',
-                        {},
-                        { tab: 'agentes' }
-                      ),
-                    },
-                    // item 85: o que cada agente de IA está fazendo + custos
-                    {
-                      name: 'Automations AI Panel',
-                      label: 'Painel dos agentes',
-                      icon: 'i-lucide-activity',
-                      to: accountScopedRoute(
-                        'cevico_automations',
-                        {},
-                        { tab: 'painel_ia' }
-                      ),
-                    },
-                    {
-                      name: 'Automations Programming',
-                      label: 'Modo Programação',
-                      icon: 'i-lucide-zap',
-                      to: accountScopedRoute(
-                        'cevico_automations',
-                        {},
-                        { tab: 'programacao' }
-                      ),
-                    },
-                  ]
-                : []),
-              ...(canSee('automations')
-                ? [
-                    {
-                      name: 'Automations Results',
-                      label: 'Resultados',
-                      icon: 'i-lucide-bar-chart-3',
-                      to: accountScopedRoute(
-                        'cevico_automations',
-                        {},
-                        { tab: 'resultados' }
-                      ),
-                    },
-                  ]
-                : []),
-              ...(canSee('data_tools')
-                ? [
-                    {
-                      name: 'Automations Treatment',
-                      label: 'Tratamento de dados',
-                      icon: 'i-lucide-database',
-                      to: accountScopedRoute(
-                        'cevico_automations',
-                        {},
-                        { tab: 'tratamento' }
-                      ),
-                    },
-                  ]
-                : []),
-            ],
+            children: automationChildren.value,
           },
         ]
       : []),
@@ -1632,7 +1546,7 @@ const menuItems = computed(() => {
       children: [
         // Integrações UNIFICADAS dentro de Configurações (item 78):
         // central CEVICO (Meta/Google/Claude/Sheets/n8n) + aplicativos nativos
-        ...(canSee('settings')
+        ...(show('Integrations Hub')
           ? [
               {
                 name: 'Integrations Hub',
@@ -1648,31 +1562,49 @@ const menuItems = computed(() => {
           icon: 'i-lucide-briefcase',
           to: accountScopedRoute('general_settings_index'),
         },
-        // Domínio público das páginas/formulários (só admin)
-        ...(isAdmin.value
+        // 🏢 rodada 334: quem é a empresa (nome, ramo, vocabulário, unidades)
+        ...(show('Settings Company')
           ? [
               {
-                name: 'Settings Domain',
-                label: 'Domínio',
-                icon: 'i-lucide-globe',
-                to: accountScopedRoute('dominio_settings_index'),
-              },
-              // Responsável por painel do Meu Painel (pedido 20/08)
-              {
-                name: 'Settings Panels',
-                label: 'Painéis',
-                icon: 'i-lucide-layout-dashboard',
-                to: accountScopedRoute('paineis_settings_index'),
-              },
-              // Tabela de preços oficial (Espaço do Paciente + agentes IA)
-              {
-                name: 'Settings Prices',
-                label: 'Tabela de preços',
-                icon: 'i-lucide-badge-dollar-sign',
-                to: accountScopedRoute('precos_settings_index'),
+                name: 'Settings Company',
+                label: 'Identidade da empresa',
+                icon: 'i-lucide-building-2',
+                to: accountScopedRoute('empresa_settings_index'),
               },
             ]
           : []),
+        // Domínio, Painéis e Tabela de preços — cada um pelo seu nó em
+        // configuracoes.* (rodada 334)
+        ...[
+          {
+            // Domínio público das páginas/formulários
+            name: 'Settings Domain',
+            label: 'Domínio',
+            icon: 'i-lucide-globe',
+            route: 'dominio_settings_index',
+          },
+          {
+            // Responsável por painel do Meu Painel (pedido 20/08)
+            name: 'Settings Panels',
+            label: 'Painéis',
+            icon: 'i-lucide-layout-dashboard',
+            route: 'paineis_settings_index',
+          },
+          {
+            // Tabela de preços oficial (Espaço do Paciente + agentes IA)
+            name: 'Settings Prices',
+            label: 'Tabela de preços',
+            icon: 'i-lucide-badge-dollar-sign',
+            route: 'precos_settings_index',
+          },
+        ]
+          .filter(c => show(c.name))
+          .map(c => ({
+            name: c.name,
+            label: c.label,
+            icon: c.icon,
+            to: accountScopedRoute(c.route),
+          })),
         // {
         //   name: 'Settings Captain',
         //   label: t('SIDEBAR.CAPTAIN_AI'),
@@ -1685,6 +1617,17 @@ const menuItems = computed(() => {
           icon: 'i-lucide-square-user',
           to: accountScopedRoute('agent_list'),
         },
+        // 🔐 rodada 334: quem vê e quem edita cada área (árvore + papéis)
+        ...(show('Settings Access')
+          ? [
+              {
+                name: 'Settings Access',
+                label: 'Acessos e papéis',
+                icon: 'i-lucide-shield-check',
+                to: accountScopedRoute('acessos_settings_index'),
+              },
+            ]
+          : []),
         {
           name: 'Settings Teams',
           label: t('SIDEBAR.TEAMS'),

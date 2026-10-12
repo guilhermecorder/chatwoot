@@ -115,6 +115,11 @@ class Crm::ConversationInsightService
       pelo agendamento, (11) 98769-0286
   PROMPT
 
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :insight)
+  end
+
   def initialize(conversation:)
     @conversation = conversation
     @account = conversation.account
@@ -131,7 +136,7 @@ class Crm::ConversationInsightService
       model: model,
       max_tokens: 2048,
       system_: cached_system,
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      output_config: output_config_for({ type: 'json_schema', schema: company_schema(OUTPUT_SCHEMA) }),
       messages: [{ role: 'user', content: transcript }]
     )
     record_usage(message)

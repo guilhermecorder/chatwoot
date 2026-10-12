@@ -4,7 +4,6 @@
 # prontos na primeira visita.
 class Api::V1::Accounts::Crm::StrategyController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
   include Crm::AccessControl
-  before_action -> { require_capability(:strategy) }
 
   def show
     CevicoPillar.seed_defaults!(account)

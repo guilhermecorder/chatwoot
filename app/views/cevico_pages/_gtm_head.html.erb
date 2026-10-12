@@ -1,7 +1,7 @@
 <%# Google Tag Manager — parte do <head> (o mais alto possível, como o
     Google pede). O container vem do card 📊 de Configurações → Domínio
     (CEVICO_TRACKING.gtm_id) e entra sozinho em TODA página pública. %>
-<% gtm_id = Cevico::PublicSite.tracking_config['gtm_id'].presence %>
+<% gtm_id = (@cevico_tracking || Cevico::PublicSite.tracking_config)['gtm_id'].presence %>
 <% if gtm_id %>
 <!-- Google Tag Manager -->
 <script nonce="<%= content_security_policy_nonce %>">(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':

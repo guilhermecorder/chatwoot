@@ -191,6 +191,11 @@ namespace :crm do
     get :ai_usage
     # concessão de acessos por atendente (allow-list, admin)
     post :update_agent_grants
+    # 🔐 rodada 334: acessos em árvore (ver × editar), papéis, unidades, empresa
+    get :access_admin
+    post :update_agent_access
+    post :update_access_roles
+    post :update_company
     # tabela de preços oficial (Espaço do Paciente + prompts da IA)
     post :update_price_table
     # investimento mensal por caixa (ROI/CAC do Dashboard CRM)

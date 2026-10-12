@@ -8,7 +8,6 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
   include Crm::ResolvesPeriod
 
   # traz faturamento por médico → área de relatórios (padrão: só admin)
-  before_action -> { require_capability(:reports) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 

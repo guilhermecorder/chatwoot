@@ -13,6 +13,8 @@ import { useRoute, useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import {
@@ -42,6 +44,13 @@ import AgendaSettings from './AgendaSettings.vue';
 
 const store = useStore();
 const { isAdmin } = useAdmin();
+// 🔐 rodada 334: acessos em árvore — agenda (marcar/remarcar/cancelar), agenda.cirurgias,
+// agenda.exames, agenda.bloqueios (cadeado), agenda.lixeira, agenda.imprimir,
+// agenda.configuracao (engrenagem/janelas). unitAllowed esconde unidades que a pessoa não vê.
+const { canView, canEdit, unitAllowed } = useCevicoAccess();
+const canEditAgenda = computed(() => canEdit('agenda'));
+const TYPE_NODE = { cirurgia: 'agenda.cirurgias', exames: 'agenda.exames' };
+const visibleTypes = computed(() => TYPES.filter(t => !TYPE_NODE[t.key] || canView(TYPE_NODE[t.key])));
 const route = useRoute();
 const router = useRouter();
 
@@ -129,7 +138,7 @@ const surgeryLocationLabel = key =>
   surgeryLocations.value.find(l => l.key === key)?.label || key || 'Local a definir';
 
 // ── JANELA DE EXAMES (unidade + dia + horário + bloco) — 23/09 ──
-const examWindows = computed(() => resolveExamWindows(crmSettings.value));
+const examWindows = computed(() => resolveExamWindows(crmSettings.value).filter(w => unitAllowed(w.unit)));
 const examWindowsForDay = day =>
   examWindows.value
     .filter(w => w.dow === day.getDay())
@@ -307,7 +316,7 @@ const procedureLabel = computed(() => {
 // ── Médicos e janelas de avaliação da clínica ───────────────
 const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
 const doctorShort = name => DOCTORS.find(d => d.name === name)?.short || name;
-const windows = computed(() => resolveWindows(crmSettings.value));
+const windows = computed(() => resolveWindows(crmSettings.value).filter(w => unitAllowed(w.unit)));
 
 // horários fechados com o cadeado ({date, time, unit})
 const blockedList = computed(() => resolveBlocked(crmSettings.value));
@@ -545,7 +554,9 @@ const activeDoctor = computed(() => (view.value.startsWith('doctor:') ? view.val
 const isPersonalView = computed(() => view.value === 'me' || /^\d+$/.test(view.value));
 
 // tudo o que está no calendário (canceladas ficam fora; continuam no banco)
-const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at));
+const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at).filter(x => !UNITS[x.unit] || unitAllowed(x.unit)));
+// unidades que a pessoa pode ver (chips e seletor); vazio no servidor = todas
+const visibleUnits = computed(() => Object.fromEntries(Object.entries(UNITS).filter(([key]) => unitAllowed(key))));
 const inKind = t => layers.value.has(typeOf(t)); // item 234: camadas por tipo
 
 // 🏥 item 228: origem do agendamento — 'all' | 'cevico' (nasceu aqui) | 'oftalmofacil'
@@ -928,7 +939,7 @@ const kpiPlaces = computed(() => {
   if (isTele.value) return [{ key: ONLINE_UNIT, label: 'Online — no mês', color: ONLINE.color, n: inCursorMonth.length }];
   const places = isSurgeryMode.value
     ? surgeryLocations.value.slice(0, 2).map(l => ({ key: l.key, label: l.label, color: l.color }))
-    : Object.entries(UNITS).map(([key, u]) => ({ key, label: u.label, color: u.color }));
+    : Object.entries(visibleUnits.value).map(([key, u]) => ({ key, label: u.label, color: u.color }));
   return places.map(p => ({ ...p, label: `${p.label} — no mês`, n: inCursorMonth.filter(x => x.unit === p.key).length }));
 });
 
@@ -1731,12 +1742,12 @@ const taskMenu = (task, extra = []) => {
         disabled: busy,
         action: () => setIndication(task, 'not_indicated'),
       },
-      canIndicate && ['exames', 'teleconsulta'].includes(typeOf(task)) && {
+      canEditAgenda.value && canIndicate && ['exames', 'teleconsulta'].includes(typeOf(task)) && {
         label: 'Marcar retorno',
         icon: 'i-lucide-rotate-ccw',
         action: () => scheduleFollowUpFrom(task),
       },
-      !surgery && task.surgery_indication === 'indicated' && {
+      canEdit('agenda.cirurgias') && !surgery && task.surgery_indication === 'indicated' && {
         label: 'Agendar cirurgia',
         icon: 'i-lucide-slice',
         action: () => scheduleSurgeryFrom(task),
@@ -1771,7 +1782,7 @@ const taskMenu = (task, extra = []) => {
       },
       ...extra,
       { separator: true },
-      {
+      canEditAgenda.value && {
         palette: TASK_COLORS,
         value: taskColorOf(task),
         label: 'Cor do agendamento',
@@ -1779,13 +1790,13 @@ const taskMenu = (task, extra = []) => {
         onPick: color => setTaskColor(task, color),
       },
       { separator: true },
-      { label: 'Cancelar agendamento…', icon: 'i-lucide-ban', danger: true, action: () => openCancel(task) },
+      canEditAgenda.value && { label: 'Cancelar agendamento…', icon: 'i-lucide-ban', danger: true, action: () => openCancel(task) },
     ],
   };
 };
 
 // fechar / reabrir o dia: as MESMAS opções do cadeado (dia inteiro, unidade, médico)
-const blockDayItem = day => ({
+const blockDayItem = day => canEdit('agenda.bloqueios') && ({
   label: isDayBlocked(day) ? 'Reabrir o dia' : 'Fechar o dia',
   icon: isDayBlocked(day) ? 'i-lucide-lock-open' : 'i-lucide-lock',
   hint: dayBlockSummary(day) && !isDayBlocked(day) ? 'fechado em parte' : '',
@@ -1798,7 +1809,7 @@ const blockDayItem = day => ({
   })),
 });
 const printDayItem = day =>
-  dayTasks(day).length > 0 && {
+  canView('agenda.imprimir') && dayTasks(day).length > 0 && {
     label: 'Imprimir a lista do dia',
     icon: 'i-lucide-printer',
     action: () => {
@@ -1815,7 +1826,7 @@ const dayMenu = day => ({
   items: [
     !isDayOpenNow(day) && { label: 'Abrir o dia', icon: 'i-lucide-calendar-check', action: () => goToDay(day) },
     viewMode.value !== 'week' && { label: 'Abrir a semana', icon: 'i-lucide-calendar-range', action: () => goToWeek(day) },
-    !isDayOff(day) && { label: `${newLabel.value} neste dia`, icon: 'i-lucide-plus', action: () => openCreateOnDay(day) },
+    canEditAgenda.value && !isDayOff(day) && { label: `${newLabel.value} neste dia`, icon: 'i-lucide-plus', action: () => openCreateOnDay(day) },
     { separator: true },
     blockDayItem(day),
     printDayItem(day),
@@ -1829,7 +1840,7 @@ const bandResource = band => {
   return band.exam ? 'exam' : 'surgery';
 };
 const typeItems = (day, time, band) =>
-  TYPES.map(tt => ({
+  visibleTypes.value.map(tt => ({
     label: tt.label,
     icon: tt.icon,
     action: () => {
@@ -1843,7 +1854,7 @@ const typeItems = (day, time, band) =>
   }));
 // fechar/reabrir UM horário: o mesmo cadeado do bloco do médico (só admin)
 const blockSlotItem = (day, win, slot) =>
-  isAdmin.value && {
+  canEdit('agenda.bloqueios') && {
     label: isBlocked(day, win, slot) ? `Reabrir o horário das ${slot}` : `Fechar o horário das ${slot}`,
     icon: isBlocked(day, win, slot) ? 'i-lucide-lock-open' : 'i-lucide-lock',
     disabled: isSavingBlock.value,
@@ -1858,8 +1869,8 @@ const columnMenu = ({ day, minutes, band }) => {
     title: `${dayLabel(day)} · ${time}`,
     subtitle: band ? band.label : 'fora das janelas de atendimento',
     items: [
-      { label: `${newLabel.value} às ${time}`, icon: 'i-lucide-plus', action: () => onColumnCreate({ day, minutes, band }) },
-      { label: 'Agendar outro tipo', icon: 'i-lucide-layers', children: typeItems(day, time, band) },
+      canEditAgenda.value && { label: `${newLabel.value} às ${time}`, icon: 'i-lucide-plus', action: () => onColumnCreate({ day, minutes, band }) },
+      canEditAgenda.value && { label: 'Agendar outro tipo', icon: 'i-lucide-layers', children: typeItems(day, time, band) },
       { separator: true },
       band && blockSlotItem(day, band, time),
       blockDayItem(day),
@@ -1873,7 +1884,7 @@ const columnMenu = ({ day, minutes, band }) => {
 // blocos de horário do médico (visão Dia → Bloco do médico)
 const slotMenu = (day, win, slot) => {
   const list = tasksAtSlotAll(day, win, slot);
-  const encaixe = {
+  const encaixe = canEditAgenda.value && {
     label: 'Encaixar outro paciente neste horário',
     icon: 'i-lucide-plus',
     action: () => openCreateSlot(day, win, slot),
@@ -1897,8 +1908,8 @@ const slotMenu = (day, win, slot) => {
     subtitle: `${winTitle(win)} · ${winUnitLabel(win)}`,
     rgb: hexToRgbSpaced(winColor(win)),
     items: [
-      !locked && { label: `${newLabel.value} às ${slot}`, icon: 'i-lucide-plus', action: () => openCreateSlot(day, win, slot) },
-      !locked && { label: 'Agendar outro tipo', icon: 'i-lucide-layers', children: typeItems(day, slot, { unit: win.unit, doctor: win.doctor || '', exam: Boolean(win.exam) }) },
+      canEditAgenda.value && !locked && { label: `${newLabel.value} às ${slot}`, icon: 'i-lucide-plus', action: () => openCreateSlot(day, win, slot) },
+      canEditAgenda.value && !locked && { label: 'Agendar outro tipo', icon: 'i-lucide-layers', children: typeItems(day, slot, { unit: win.unit, doctor: win.doctor || '', exam: Boolean(win.exam) }) },
       { separator: true },
       blockSlotItem(day, win, slot),
     ],
@@ -1999,7 +2010,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <span :class="k.icon" class="text-lg" />
               </div>
               <div class="min-w-0 flex-1">
-                <p class="cv-ag-block-title">{{ cap(stepLabel) }}<span v-if="navSub" class="cv-ag-block-sub"> · {{ navSub }}</span></p>
+                <p class="cv-ag-block-title">{{ cap(stepLabel) }}<span v-if="navSub" class="cv-ag-block-sub"> · {{ navSub }}</span> <CevicoViewOnlyPill v-if="!canEditAgenda" /></p>
                 <!-- desktop: título grande; celular: o título abre o calendário -->
                 <h2 class="hidden lg:block text-2xl font-bold tracking-tight text-n-slate-12 truncate">{{ navLabel }}</h2>
                 <div class="lg:hidden">
@@ -2067,7 +2078,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <span class="hidden 2xl:inline">sáb/dom</span>
                   </button>
                   <button
-                    v-if="viewMode === 'day' && dayViewTasks.length"
+                    v-if="viewMode === 'day' && dayViewTasks.length && canView('agenda.imprimir')"
                     class="cv-btn cv-btn-ghost cv-btn-sm"
                     title="Abre a lista do dia pronta para imprimir ou salvar em PDF"
                     @click="showPrintModal = true"
@@ -2077,6 +2088,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   </button>
                   <!-- 🗑️ item 304: Lixeira — o que foi excluído/cancelado nos últimos 60 dias, com quem e quando -->
                   <button
+                    v-if="canView('agenda.lixeira')"
                     class="cv-btn cv-btn-ghost cv-btn-sm"
                     title="Agendamentos excluídos ou cancelados nos últimos 60 dias — quem apagou, quando, e o botão Restaurar"
                     @click="showTrash = true"
@@ -2086,7 +2098,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <span v-if="trashTasks.length" class="cv-chip">{{ trashTasks.length }}</span>
                   </button>
                   <button
-                    v-if="isExam"
+                    v-if="isExam && canView('agenda.configuracao')"
                     class="cv-btn cv-btn-ghost cv-btn-sm"
                     title="Dias e horários em que a clínica faz exames (padrão: segunda a sexta, 08h–17h, Av. Paulista)"
                     @click="openExamWindowsModal"
@@ -2095,7 +2107,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <span class="hidden 2xl:inline">Janela de exames</span>
                   </button>
                   <button
-                    v-else-if="isPhysical"
+                    v-else-if="isPhysical && canView('agenda.configuracao')"
                     class="cv-btn cv-btn-ghost cv-btn-sm"
                     title="Faixas de horário dos médicos: quando cada um atende e para que serve cada faixa"
                     @click="openSettings('faixas')"
@@ -2104,7 +2116,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <span class="hidden 2xl:inline">Faixas de horário</span>
                   </button>
                   <button
-                    v-else-if="isSurgeryMode"
+                    v-else-if="isSurgeryMode && canView('agenda.configuracao')"
                     class="cv-btn cv-btn-ghost cv-btn-sm"
                     title="Dias e horários em que a sala cirúrgica de cada clínica está disponível"
                     @click="openSurgeryWindowsModal"
@@ -2115,7 +2127,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
               <!-- 28/09 (pedido dele: "precisa ser mais simples e evidente esse botão de fechar dia"):
                    na visão Dia o botão fica aqui no bloco Período, em qualquer modo do painel -->
-              <div v-if="viewMode === 'day'" class="relative">
+              <div v-if="viewMode === 'day' && canEdit('agenda.bloqueios')" class="relative">
                 <button
                   class="cv-btn"
                   :class="isDayBlocked(cursor) || partialBlocksFor(cursor).length ? 'cv-ag-dayclosed' : 'cv-btn-ghost cv-btn-danger'"
@@ -2139,11 +2151,11 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
               <!-- 01/10 (item 307, pedido dele: "deixar mais fácil e evidente abrir e fechar agendas"):
                    um botão só para tudo que muda na agenda -->
-              <button class="cv-btn cv-btn-ghost" title="Abrir e fechar agendas, faixas de horário, regras para a IA e conferência do dia" @click="openSettings('abrir')">
+              <button v-if="canView('agenda.configuracao')" class="cv-btn cv-btn-ghost" title="Abrir e fechar agendas, faixas de horário, regras para a IA e conferência do dia" @click="openSettings('abrir')">
                 <span class="i-lucide-settings-2 text-sm" />
                 Configurações da agenda
               </button>
-              <button class="cv-btn" @click="openCreateOnDay(viewMode === 'month' ? new Date() : cursor)">
+              <button v-if="canEditAgenda" class="cv-btn" @click="openCreateOnDay(viewMode === 'month' ? new Date() : cursor)">
                 <span class="i-lucide-plus text-sm" />
                 <span class="hidden sm:inline">{{ newLabel }}</span>
                 <span class="sm:hidden">{{ cap(k.noun) }}</span>
@@ -2167,7 +2179,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <span class="hidden sm:inline">Geral</span>
                     </button>
                     <button
-                      v-for="tt in TYPES"
+                      v-for="tt in visibleTypes"
                       :key="tt.key"
                       class="cv-ag-kind"
                       :class="layerOn(tt.key) ? 'cv-ag-kind-on' : 'opacity-60'"
@@ -2211,7 +2223,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <template v-if="!isTele">
                         <span class="w-px h-4 bg-n-weak mx-0.5" />
                         <button
-                          v-for="(u, key) in UNITS"
+                          v-for="(u, key) in visibleUnits"
                           :key="'qu' + key"
                           class="cv-chip"
                           :class="view === `unit:${key}` ? 'cv-chip-on' : ''"
@@ -2235,7 +2247,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         <span class="w-2 h-2 rounded-full" :style="{ background: view === `unit:${loc.key}` ? '#fff' : loc.color }" />
                         {{ loc.label }}
                       </button>
-                      <button v-if="isAdmin" class="cv-chip" title="Gerenciar clínicas parceiras" @click="openLocationsModal">
+                      <button v-if="canEdit('agenda.cirurgias')" class="cv-chip" title="Gerenciar clínicas parceiras" @click="openLocationsModal">
                         <span class="i-lucide-map-pin text-[10px]" /> locais
                       </button>
                     </template>
@@ -2251,7 +2263,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <select v-model="view" class="cv-input !h-8 text-xs !w-auto max-w-[160px]" title="Ver a agenda de…">
                       <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}</option>
                       <optgroup v-if="!isSurgeryMode && !isTele" label="Unidades">
-                        <option v-for="(u, key) in UNITS" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
+                        <option v-for="(u, key) in visibleUnits" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
                       </optgroup>
                       <optgroup v-if="!isSurgeryMode" label="Médicos">
                         <option v-for="d in DOCTORS" :key="d.name" :value="`doctor:${d.name}`">{{ d.name }}</option>
@@ -2499,7 +2511,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <div v-else-if="isDayBlocked(cursor)" class="cv-block cv-strip cv-red flex items-center gap-2 px-4 py-3 mb-4 text-sm text-n-slate-11 flex-wrap">
             <span class="i-lucide-lock text-base text-red-500" />
             <b>Dia fechado</b> — sem agenda nesta data.
-            <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" @click="toggleBlockDay(cursor)">Reabrir dia</button>
+            <button v-if="canEdit('agenda.bloqueios')" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" @click="toggleBlockDay(cursor)">Reabrir dia</button>
           </div>
 
           <div ref="dayLayoutEl" class="flex flex-col lg:flex-row gap-4 items-start" :class="isSplitting ? 'select-none cursor-col-resize' : ''">
@@ -2596,7 +2608,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <span class="text-[10px] px-2 py-0.5 rounded-full font-bold text-white ml-auto" :style="{ backgroundColor: occColor(winOccupancy(cursor, win).pct) }" :title="`${winOccupancy(cursor, win).filled} de ${winOccupancy(cursor, win).total} blocos ocupados`">
                       {{ winOccupancy(cursor, win).pct }}%
                     </span>
-                    <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-btn-danger" title="Fechar o dia inteiro (feriado, congresso, folga...)" @click="toggleBlockDay(cursor)">
+                    <button v-if="canEdit('agenda.bloqueios')" class="cv-btn cv-btn-ghost cv-btn-sm cv-btn-danger" title="Fechar o dia inteiro (feriado, congresso, folga...)" @click="toggleBlockDay(cursor)">
                       <span class="i-lucide-lock text-[10px]" /> fechar dia
                     </button>
                   </div>
@@ -2613,12 +2625,12 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                           <button v-if="si === 0" class="cv-ag-corner" title="Encaixe: agendar OUTRO paciente neste mesmo horário" @click.stop="openCreateSlot(cursor, win, slot)"><span class="i-lucide-plus" /></button>
                         </span>
                       </template>
-                      <button v-else-if="isBlocked(cursor, win, slot)" v-cv-menu="() => slotMenu(cursor, win, slot)" class="cv-ag-slot cv-ag-slot-locked" :title="isAdmin ? 'Horário fechado — clique para reabrir' : 'Horário fechado'" @click="isAdmin && toggleBlock(cursor, win, slot)">
+                      <button v-else-if="isBlocked(cursor, win, slot)" v-cv-menu="() => slotMenu(cursor, win, slot)" class="cv-ag-slot cv-ag-slot-locked" :title="canEdit('agenda.bloqueios') ? 'Horário fechado — clique para reabrir' : 'Horário fechado'" @click="canEdit('agenda.bloqueios') && toggleBlock(cursor, win, slot)">
                         <span class="i-lucide-lock text-[10px]" /> {{ slot }}
                       </button>
                       <span v-else v-cv-menu="() => slotMenu(cursor, win, slot)" class="relative group">
                         <button class="cv-ag-slot cv-ag-slot-free tabular-nums" title="Bloco livre — clique para agendar" @click="openCreateSlot(cursor, win, slot)">{{ slot }}</button>
-                        <button v-if="isAdmin" class="cv-ag-corner" title="Fechar este horário 🔒" @click.stop="toggleBlock(cursor, win, slot)"><span class="i-lucide-lock" /></button>
+                        <button v-if="canEdit('agenda.bloqueios')" class="cv-ag-corner" title="Fechar este horário 🔒" @click.stop="toggleBlock(cursor, win, slot)"><span class="i-lucide-lock" /></button>
                       </span>
                     </template>
                     <!-- item 319: quem está marcado FORA da faixa (antes ou depois) também aparece -->
@@ -2866,7 +2878,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <div v-else>
                 <span class="cv-label mb-1 flex items-center justify-between">
                   Local da cirurgia
-                  <button v-if="isAdmin" type="button" class="normal-case tracking-normal font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">gerenciar</button>
+                  <button v-if="canEdit('agenda.cirurgias')" type="button" class="normal-case tracking-normal font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">gerenciar</button>
                 </span>
                 <select v-model="form.unit" class="cv-input w-full">
                   <option v-for="loc in surgeryLocations" :key="loc.key" :value="loc.key">{{ loc.label }}</option>
@@ -2977,7 +2989,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
 
         <!-- rodapé: excluir discreto à esquerda, ação principal no canto inferior DIREITO (área terminal da leitura) -->
         <div class="cv-modal-foot flex items-center gap-2 flex-wrap">
-          <div v-if="editingTask" class="mr-auto">
+          <div v-if="editingTask && canEditAgenda" class="mr-auto">
             <button v-if="!showDeleteConfirm" class="text-xs text-n-slate-11 hover:text-red-600 flex items-center gap-1" @click="showDeleteConfirm = true"><span class="i-lucide-trash-2 text-xs" /> Excluir</button>
             <!-- item 304: confirmação com NOME e HORÁRIO (a mesma consulta pode aparecer em mais de um lugar — não é duplicada) -->
             <div v-else class="flex items-center gap-2 flex-wrap">
@@ -2986,8 +2998,8 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="showDeleteConfirm = false">Não</button>
             </div>
           </div>
-          <button class="cv-btn cv-btn-ghost cv-btn-lg" :class="editingTask ? '' : 'ml-auto'" @click="showModal = false">Cancelar</button>
-          <button class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : ''" @click="save">
+          <button class="cv-btn cv-btn-ghost cv-btn-lg" :class="editingTask && canEditAgenda ? '' : 'ml-auto'" @click="showModal = false">{{ canEditAgenda ? 'Cancelar' : 'Fechar' }}</button>
+          <button v-if="canEditAgenda" class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : ''" @click="save">
             <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
             {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
           </button>
@@ -3015,7 +3027,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               <p class="text-sm font-bold text-n-slate-12 truncate">{{ displayName(t) }} <span class="text-xs font-normal text-n-slate-11">· {{ trashWhen(t) }}<template v-if="t.unit"> · {{ UNITS[t.unit]?.label || t.unit }}</template> · {{ TYPE_BY_KEY[typeOf(t)]?.label || 'Agendamento' }}</span></p>
               <p class="text-xs text-n-slate-11 truncate">{{ trashWho(t) }}<template v-if="t.phone"> · {{ t.phone }}</template></p>
             </div>
-            <button class="cv-btn cv-btn-sm" :disabled="trashBusyId === t.id" title="Volta para a Agenda no mesmo dia e horário" @click="restoreTask(t)"><span class="i-lucide-undo-2 text-xs" /> Restaurar</button>
+            <button v-if="canEdit('agenda.lixeira')" class="cv-btn cv-btn-sm" :disabled="trashBusyId === t.id" title="Volta para a Agenda no mesmo dia e horário" @click="restoreTask(t)"><span class="i-lucide-undo-2 text-xs" /> Restaurar</button>
             <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-red" :disabled="trashBusyId === t.id" title="Apaga de vez (só administrador)" @click="purgeTask(t)"><span class="i-lucide-x text-xs" /></button>
           </div>
         </div>
@@ -3076,27 +3088,27 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
         <div class="flex-1 overflow-y-auto p-5 space-y-3">
           <p class="text-xs text-n-slate-10">
             A ocupação e os blocos livres do trilho de cirurgias vêm daqui.
-            <button v-if="isAdmin" class="font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">Gerenciar clínicas →</button>
+            <button v-if="canEdit('agenda.cirurgias')" class="font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">Gerenciar clínicas →</button>
           </p>
           <div v-if="!editSurgeryWindows.length" class="cv-sub text-center py-6 text-n-slate-10 text-sm">Nenhuma janela ainda — adicione a primeira.</div>
           <div v-for="(w, i) in editSurgeryWindows" :key="i" class="cv-sub grid grid-cols-2 sm:grid-cols-6 gap-2 items-center p-2.5">
-            <select v-model="w.dow" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+            <select v-model="w.dow" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs">
               <option v-for="(d, di) in WEEKDAY_FULL" :key="di" :value="di">{{ d }}</option>
             </select>
-            <select v-model="w.location" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+            <select v-model="w.location" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs">
               <option v-for="loc in surgeryLocations" :key="loc.key" :value="loc.key">{{ loc.label }}</option>
             </select>
-            <input v-model="w.start" type="time" :disabled="!isAdmin" class="cv-input !h-8 text-xs" />
-            <input v-model="w.end" type="time" :disabled="!isAdmin" class="cv-input !h-8 text-xs" />
-            <select v-model="w.block" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+            <input v-model="w.start" type="time" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs" />
+            <input v-model="w.end" type="time" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs" />
+            <select v-model="w.block" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs">
               <option :value="10">10 min</option><option :value="15">15 min</option><option :value="20">20 min</option>
               <option :value="30">30 min</option><option :value="60">1 hora</option><option :value="90">1h30</option><option :value="120">2 horas</option>
             </select>
-            <button v-if="isAdmin" class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm justify-self-center" @click="removeSurgeryWindow(i)" />
+            <button v-if="canEdit('agenda.configuracao')" class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm justify-self-center" @click="removeSurgeryWindow(i)" />
           </div>
-          <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addSurgeryWindow"><span class="i-lucide-plus text-xs" /> Adicionar janela</button>
+          <button v-if="canEdit('agenda.configuracao')" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addSurgeryWindow"><span class="i-lucide-plus text-xs" /> Adicionar janela</button>
         </div>
-        <div v-if="isAdmin" class="cv-modal-foot flex gap-2">
+        <div v-if="canEdit('agenda.configuracao')" class="cv-modal-foot flex gap-2">
           <button class="cv-btn flex-1" :disabled="isSavingSurgeryWindows" @click="saveSurgeryWindows">{{ isSavingSurgeryWindows ? 'Salvando…' : 'Salvar janelas' }}</button>
           <button class="cv-btn cv-btn-ghost" @click="showSurgeryWindowsModal = false">Cancelar</button>
         </div>
@@ -3120,23 +3132,23 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           </p>
           <div v-if="!editExamWindows.length" class="cv-sub text-center py-6 text-n-slate-10 text-sm">Nenhuma janela — adicione a primeira.</div>
           <div v-for="(w, i) in editExamWindows" :key="i" class="cv-sub grid grid-cols-2 sm:grid-cols-6 gap-2 items-center p-2.5">
-            <select v-model="w.dow" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+            <select v-model="w.dow" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs">
               <option v-for="(d, di) in WEEKDAY_FULL" :key="di" :value="di">{{ d }}</option>
             </select>
-            <select v-model="w.unit" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+            <select v-model="w.unit" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs">
               <option v-for="(u, key) in UNITS" :key="key" :value="key">{{ u.label }}</option>
             </select>
-            <input v-model="w.start" type="time" :disabled="!isAdmin" class="cv-input !h-8 text-xs" />
-            <input v-model="w.end" type="time" :disabled="!isAdmin" class="cv-input !h-8 text-xs" />
-            <select v-model="w.block" :disabled="!isAdmin" class="cv-input !h-8 text-xs">
+            <input v-model="w.start" type="time" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs" />
+            <input v-model="w.end" type="time" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs" />
+            <select v-model="w.block" :disabled="!canEdit('agenda.configuracao')" class="cv-input !h-8 text-xs">
               <option :value="10">10 min</option><option :value="15">15 min</option><option :value="20">20 min</option>
               <option :value="30">30 min</option><option :value="45">45 min</option><option :value="60">1 hora</option>
             </select>
-            <button v-if="isAdmin" class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm justify-self-center" @click="removeExamWindow(i)" />
+            <button v-if="canEdit('agenda.configuracao')" class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm justify-self-center" @click="removeExamWindow(i)" />
           </div>
-          <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addExamWindow"><span class="i-lucide-plus text-xs" /> Adicionar janela</button>
+          <button v-if="canEdit('agenda.configuracao')" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addExamWindow"><span class="i-lucide-plus text-xs" /> Adicionar janela</button>
         </div>
-        <div v-if="isAdmin" class="cv-modal-foot flex gap-2">
+        <div v-if="canEdit('agenda.configuracao')" class="cv-modal-foot flex gap-2">
           <button class="cv-btn flex-1" :disabled="isSavingExamWindows" @click="saveExamWindows">{{ isSavingExamWindows ? 'Salvando…' : 'Salvar janela' }}</button>
           <button class="cv-btn cv-btn-ghost" @click="showExamWindowsModal = false">Cancelar</button>
         </div>
@@ -3178,7 +3190,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
     >
       <template #conferencia>
         <!-- Conferência do dia → colunas do CRM (admin) -->
-        <div v-if="isAdmin" class="cv-sub p-3.5 space-y-2.5 cv-gold">
+        <div v-if="canEdit('agenda.configuracao')" class="cv-sub p-3.5 space-y-2.5 cv-gold">
           <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
             <span class="i-lucide-list-checks text-sm" style="color: #B8860B" /> Conferência do dia → CRM
           </p>
@@ -3225,12 +3237,12 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           </div>
           <button class="cv-btn w-full" :disabled="isSavingAttendanceCfg" @click="saveAttendanceStages">{{ isSavingAttendanceCfg ? 'Salvando…' : 'Salvar conferência do dia' }}</button>
         </div>
-        <p v-if="!isAdmin" class="text-xs text-n-slate-9">Só o administrador ajusta a conferência do dia.</p>
+        <p v-if="!canEdit('agenda.configuracao')" class="text-xs text-n-slate-9">Só quem edita a configuração da agenda ajusta a conferência do dia.</p>
       </template>
     </AgendaSettings>
 
     <!-- botão + flutuante -->
-    <button class="cv-ag-fab" :title="newLabel" @click="openCreateFab">
+    <button v-if="canEditAgenda" class="cv-ag-fab" :title="newLabel" @click="openCreateFab">
       <span class="i-lucide-plus text-2xl" />
     </button>
   </div>

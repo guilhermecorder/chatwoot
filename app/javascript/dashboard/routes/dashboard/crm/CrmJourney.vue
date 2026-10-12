@@ -11,6 +11,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import CevicoJourneyAPI from 'dashboard/api/cevicoJourney';
 import JourneyWizard from './components/JourneyWizard.vue';
@@ -38,6 +40,13 @@ const STEP_BLOCKS = [
 ];
 const pal = useCevicoPalette({ scope: 'crm:jornada', blocks: STEP_BLOCKS });
 const { cvVars, blockVars, blockFamily } = pal;
+// 🔐 rodada 334: quem só VÊ a jornada não cria/liga/desliga/apaga mensagem
+const { canEdit, fill } = useCevicoAccess();
+const canEditJourney = computed(() => canEdit('crm.jornada'));
+const journeyTitle = computed(() => {
+  const label = fill('Jornada do {{paciente}}');
+  return label.includes('{{') ? 'Jornada do paciente' : label;
+});
 const stepColor = key => hexFromGrad(blockFamily(key)[1] || '') || '#0F766E';
 const STEP_META = {
   lead: { icon: 'i-lucide-sparkles', color: '#2563EB' },
@@ -605,11 +614,12 @@ const inputClass =
     <div class="max-w-[1600px] mx-auto w-full p-4 sm:p-6">
       <CevicoHero
         :pal="pal"
-        title="Jornada do paciente"
+        :title="journeyTitle"
         subtitle="Cada etapa com as mensagens da jornada e tudo o que já age nela: lembretes, follow-up, réguas, automações, campanhas e agentes. Uma tela só, sem rolar para o lado."
         icon="i-lucide-route"
       >
         <template #chips>
+          <CevicoViewOnlyPill v-if="!canEditJourney" />
           <span class="cevico-hero-chip"
             >{{ activeCount }} de {{ messages.length }} mensagem(ns)
             ligada(s)</span
@@ -621,7 +631,7 @@ const inputClass =
             >{{ pendingReview.length }} aguardando aprovação</span
           >
         </template>
-        <template #actions>
+        <template v-if="canEditJourney" #actions>
           <button
             class="cevico-hero-btn"
             :class="{ 'cevico-hero-btn-on': customize }"
@@ -965,7 +975,7 @@ const inputClass =
                           ? 'Ligada — clique para desligar'
                           : 'Desligada — clique para ligar'
                       "
-                      :disabled="busyMessage === m.id"
+                      :disabled="busyMessage === m.id || !canEditJourney"
                       @click="toggleActive(m)"
                     >
                       <span
@@ -1047,7 +1057,7 @@ const inputClass =
                       </button>
                     </template>
                     <button
-                      v-else
+                      v-else-if="canEditJourney"
                       class="cv-iconbtn ml-auto hover:text-red-600"
                       title="Excluir"
                       @click="deleteConfirmId = m.id"
@@ -1158,6 +1168,7 @@ const inputClass =
                 Nada nesta etapa ainda
               </p>
               <button
+                v-if="canEditJourney"
                 class="cv-btn cv-btn-sm cv-btn-ghost mt-auto self-start"
                 @click="openNewAt(col.key)"
               >

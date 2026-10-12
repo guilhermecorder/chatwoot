@@ -141,7 +141,7 @@ module Crm::AiAgentConfig
   # prompt do agente (custom ou padrão) SEMPRE com a trava certa no fim:
   # respondedor (fala com paciente) tem trava própria; os demais, a de leitura
   def system_prompt
-    base = agent_config['prompt'].presence || self.class::SYSTEM_PROMPT
+    base = agent_config['prompt'].presence || default_system_prompt
     # {{TABELA_DE_PRECOS}} vira a tabela de preços oficial na hora da chamada
     # (Configurações → Tabela de preços; sem tabela salva = valores padrão)
     if base.include?('{{TABELA_DE_PRECOS}}')
@@ -149,6 +149,23 @@ module Crm::AiAgentConfig
     end
     guard = RESPONDER_AGENTS.include?(agent_key) ? RESPONDER_GUARDRAIL : OPERATIONAL_GUARDRAIL
     base + guard
+  end
+
+  # 🏢 rodada 334: prompt PADRÃO do agente — o serviço pode trocar por um
+  # genérico quando a empresa da conta não é clínica (Crm::CompanyPrompts).
+  # Sem override, continua a constante de sempre.
+  def default_system_prompt
+    self.class::SYSTEM_PROMPT
+  end
+
+  # a empresa da conta (nome, ramo, vocabulário) para os prompts
+  def cevico_company
+    @cevico_company ||= Cevico::Company.for(@account)
+  end
+
+  # schema de saída com as marcas trocadas fora da clínica (clínica = o mesmo)
+  def company_schema(schema)
+    Crm::CompanyPrompts.rebrand_schema(cevico_company, schema)
   end
 
   # o prompt do agente como bloco marcado para cache (item 213) — passar em

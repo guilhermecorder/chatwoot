@@ -12,7 +12,6 @@
 class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
   include Crm::ResolvesPeriod
-  before_action -> { require_capability(:pages) }
 
   # GET /api/v1/accounts/:id/crm/pages_report?preset=month (régua padrão)
   # ou ?since=YYYY-MM-DD&until=YYYY-MM-DD (legado)

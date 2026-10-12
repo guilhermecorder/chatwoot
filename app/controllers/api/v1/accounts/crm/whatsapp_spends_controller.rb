@@ -4,7 +4,6 @@
 class Api::V1::Accounts::Crm::WhatsappSpendsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
   include Crm::ResolvesPeriod
-  before_action :require_administrator!
 
   def show
     since, until_at = standard_period_range || default_range

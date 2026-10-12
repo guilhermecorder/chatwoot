@@ -528,6 +528,31 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 🔐 rodada 334: acessos em árvore (ver × editar), papéis, unidades, empresa
+  getAccessAdmin() {
+    return axios.get(`${this.url}/settings/access_admin`);
+  }
+
+  // { userId, tree: { 'crm': 'edit' }, roleId, units: [], reset }
+  updateAgentAccess({ userId, tree, roleId, units, reset }) {
+    const body = { user_id: userId };
+    if (tree !== undefined) body.tree = tree;
+    if (roleId !== undefined) body.role_id = roleId;
+    if (units !== undefined) body.units = units;
+    if (reset) body.reset = true;
+    return axios.post(`${this.url}/settings/update_agent_access`, body);
+  }
+
+  // a lista inteira de papéis: [{ id?, name, hint, tree, units }]
+  updateAccessRoles(roles) {
+    return axios.post(`${this.url}/settings/update_access_roles`, { roles });
+  }
+
+  // 🏢 Identidade da empresa (só admin)
+  updateCompany(company) {
+    return axios.post(`${this.url}/settings/update_company`, { company });
+  }
+
   // tabela de preços oficial (Espaço do Paciente + prompts da IA) — admin
   updatePriceTable(items) {
     return axios.post(`${this.url}/settings/update_price_table`, { items });

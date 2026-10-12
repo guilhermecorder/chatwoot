@@ -74,6 +74,12 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
   DEFAULT_LINKS = { 'google_review_url' => 'https://g.page/r/CQBUrvu4enAHEBM/review',
                     'complaint_form_url' => 'https://forms.gle/VBiBAQXLPWA4DgE66' }.freeze
 
+  # 🏢 rodada 334: o agradecimento padrão fala o nome da empresa da conta
+  # (na clínica continua "na CEVICO", idêntico)
+  def self.default_thanks_text(account)
+    Crm::CompanyPrompts.rebrand(Cevico::Company.for(account), DEFAULT_THANKS_TEXT)
+  end
+
   def self.config(account)
     raw = CrmSetting.find_by(account: account)&.agenda_config&.dig(CONFIG_KEY) || {}
     rules = Array(raw['rules']).presence || DEFAULT_RULES
@@ -245,7 +251,7 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     return if pos_op_answers?(conversation)
     return if Crm::PartnerGuard.partner_conversation?(conversation)
 
-    text = cfg['thanks_text'].presence || DEFAULT_THANKS_TEXT
+    text = cfg['thanks_text'].presence || default_thanks_text(contact.account)
     text = text.gsub('{{link}}', cfg['google_review_url'].to_s).gsub('{{nome}}', contact.name.to_s.split.first.to_s)
     conversation.messages.create!(account_id: contact.account_id, inbox_id: conversation.inbox_id, message_type: :outgoing,
                                   content: text.strip, additional_attributes: { 'cevico_nps_thanks' => band })

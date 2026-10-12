@@ -2,7 +2,8 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
-import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { useAlert } from 'dashboard/composables';
 import draggable from 'vuedraggable';
 import KanbanColumn from './components/KanbanColumn.vue';
@@ -23,8 +24,12 @@ import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
 import { PERIOD_PRESETS, periodRangeFor } from 'dashboard/helper/cevicoPeriod';
 
 const store = useStore();
-const { isAdmin } = useAdmin();
 const { t } = useI18n();
+// 🔐 rodada 334: quem só VÊ o CRM não cria/arrasta/exclui card; funis e
+// colunas (modo edição, presets, programação) pedem EDITAR em crm.funis
+const { canEdit } = useCevicoAccess();
+const canEditCrm = computed(() => canEdit('crm'));
+const canEditFunis = computed(() => canEdit('crm.funis'));
 
 // 🍎 item 215 (23/09): o CRM veste o kit (.cv-page + pele .cv-crm) na cor
 // azul royal alegre — a cor de destaque de ação dele (22/09). Cada coluna
@@ -721,7 +726,7 @@ onMounted(async () => {
     await loadBoard(selectedPipelineId.value);
   }
   // ?programming=1 abre direto no Modo Programação (link do hub de Automações)
-  if (new URLSearchParams(window.location.search).get('programming') === '1' && isAdmin.value) {
+  if (new URLSearchParams(window.location.search).get('programming') === '1' && canEditFunis.value) {
     isProgrammingMode.value = true;
   }
   // ?focus_stage=<id> (item 145): o aviso "R$ parados em <coluna>" do
@@ -1066,6 +1071,7 @@ const createAndAddContact = async () => {
           <span class="i-lucide-rocket text-base" />
         </span>
         {{ $t('CRM.TITLE') }}
+        <CevicoViewOnlyPill v-if="!canEditCrm" />
       </h1>
 
       <!-- Funis: segmento de vidro (o ativo acende em azul royal) -->
@@ -1100,7 +1106,7 @@ const createAndAddContact = async () => {
       <div class="flex items-center gap-2 ml-auto justify-end flex-nowrap overflow-x-auto max-w-full md:flex-wrap md:overflow-visible">
         <!-- Renomear funil (excluir foi ocultado a pedido do Guilherme) -->
         <button
-          v-if="isAdmin && selectedPipeline && !isRenamingPipeline"
+          v-if="canEditFunis && selectedPipeline && !isRenamingPipeline"
           class="cv-crm-tool cv-iconbtn"
           :title="$t('CRM.RENAME_PIPELINE')"
           @click="startRenamePipeline"
@@ -1110,7 +1116,7 @@ const createAndAddContact = async () => {
 
         <!-- Ferramentas — pílulas de vidro, cada uma com o ícone na sua cor
              dopamine (19/07); a ligada acende inteira (só admin) -->
-        <template v-if="isAdmin">
+        <template v-if="canEditFunis">
           <button
             v-if="selectedPipeline && !isProgrammingMode"
             class="cv-crm-tool"
@@ -1390,7 +1396,7 @@ const createAndAddContact = async () => {
             {{ p.name }}
           </button>
           <button
-            v-if="isAdmin"
+            v-if="canEditFunis"
             class="cv-seg-item cv-seg-icon"
             :title="$t('CRM.PRESETS.MANAGE')"
             @click="showPresetsModal = true"
@@ -1794,6 +1800,7 @@ const createAndAddContact = async () => {
             :programming-mode="isProgrammingMode"
             :all-stages="selectedPipeline.stages"
             :card-menu="cardMenu"
+            :read-only="!canEditCrm"
             @card-click="selectedContact = $event"
             @stage-drop="onStageDrop"
             @add-contact="openAddContact"

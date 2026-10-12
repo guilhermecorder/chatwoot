@@ -8,7 +8,6 @@ class Api::V1::Accounts::Crm::CallCampaignsController < Api::V1::Accounts::BaseC
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   SCHEDULE_ERROR = 'Data de agendamento inválida ou no passado. Escolha um dia e horário à frente.'.freeze
 
-  before_action -> { require_capability(:campaigns) }, only: %i[create update destroy start pause resume preview_audience]
   before_action :campaign, only: %i[show update destroy start pause resume]
 
   def index

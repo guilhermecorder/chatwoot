@@ -4,7 +4,6 @@
 class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
   include Crm::ResolvesPeriod
-  before_action -> { require_capability(:finance) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   HISTORY_MONTHS = 12

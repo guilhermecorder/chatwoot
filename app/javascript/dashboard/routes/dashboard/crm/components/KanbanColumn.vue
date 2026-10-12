@@ -29,6 +29,8 @@ const props = defineProps({
   loadingMore:     { type: Boolean, default: false },
   // item 283: menu do botão direito do cartão (montado pelo quadro)
   cardMenu:        { type: Function, default: null },
+  // 🔐 rodada 334: quem só VÊ o CRM não arrasta card nem adiciona contato
+  readOnly:        { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat', 'loadMore']);
@@ -704,7 +706,7 @@ const delayLabel = (minutes) => {
         item-key="id"
         :animation="150"
         :empty-insert-threshold="120"
-        :disabled="isMobile"
+        :disabled="isMobile || readOnly"
         ghost-class="opacity-40"
         class="min-h-full"
       >
@@ -748,7 +750,7 @@ const delayLabel = (minutes) => {
 
       <!-- Modo normal: botão adicionar contato -->
       <button
-        v-else
+        v-else-if="!readOnly"
         class="cv-crm-ghost"
         @click="emit('addContact', stage.id)"
       >

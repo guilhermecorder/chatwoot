@@ -3,7 +3,6 @@ class Api::V1::Accounts::Crm::AutomationsController < Api::V1::Accounts::BaseCon
 
   # criar/editar automação de coluna (inclui webhook que sai com dados do
   # paciente) = área concedível. Ler a programação da coluna (index) fica livre.
-  before_action -> { require_capability(:automations) }, only: %i[create update destroy trigger]
   before_action :pipeline
   before_action :stage
   before_action :automation, only: [:update, :destroy, :trigger]

@@ -5,7 +5,6 @@
 class Api::V1::Accounts::Crm::JourneyMessagesController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
 
-  before_action -> { require_capability(:campaigns) }, only: %i[create update destroy test_send plan_now update_settings]
   before_action :message, only: %i[update destroy test_send plan_now]
 
   def index

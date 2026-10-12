@@ -2,7 +2,6 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
   include Crm::AccessControl
 
   # cirurgias feitas fora do sistema = área concedível (padrão: só admin)
-  before_action -> { require_capability(:data_tools) }
 
   MAX_LINES = 3000
 

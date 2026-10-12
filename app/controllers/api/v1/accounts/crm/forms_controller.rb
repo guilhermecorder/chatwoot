@@ -2,7 +2,6 @@
 # dashboard e geração de insights de marketing com IA.
 class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action :check_admin
   before_action :form, only: [:update, :destroy, :summary, :generate_insights, :preview_link]
 
   def index

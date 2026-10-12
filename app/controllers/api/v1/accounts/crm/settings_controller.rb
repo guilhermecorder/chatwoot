@@ -23,20 +23,23 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   ADMIN_SETTINGS_ACTIONS = %i[
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
-    update_google_ads test_google_ads update_sheets test_sheets update_agenda agenda_backfill agenda_ai_preview
+    update_google_ads test_google_ads update_sheets test_sheets
     update_oftalmofacil
     update_calls enable_calls_at_meta calls_meta_status
     update_voice test_voice sync_voice voice_whatsapp_accounts voice_voices voice_state
     update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
-    sales_insights radar_scan run_mentor copywriter_content update_price_table
+    sales_insights radar_scan run_mentor copywriter_content
     update_inbox_investments
     harvest_status harvest_preview harvest_approve harvest_pause harvest_resume
     harvest_skip_lead harvest_send_now run_manager run_auditor auditor_summary
     run_creative creative_state creative_review
   ].freeze
   before_action -> { require_capability(:settings) }, only: ADMIN_SETTINGS_ACTIONS
+  # 🔐 rodada 334: nós mais finos da árvore para o que não é "integração"
+  before_action -> { require_access('agenda.configuracao', :edit) }, only: %i[update_agenda agenda_backfill agenda_ai_preview]
+  before_action -> { require_access('configuracoes.precos', :edit) }, only: [:update_price_table]
   # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
-  before_action :require_administrator!, only: [:update_agent_grants]
+  before_action :require_administrator!, only: %i[update_agent_grants update_agent_access update_access_roles access_admin update_company]
 
   def show
     render json: settings_json(crm_settings)
@@ -84,6 +87,88 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     crm_settings.update!(agent_permissions: perms)
     render json: { grants: perms['grants'] || {}, menu: perms['menu'] || {},
                    report_keys: perms['report_keys'] || {} }
+  end
+
+  # ── 🔐 rodada 334: ACESSOS EM ÁRVORE (ver × editar, papéis, unidades) ──
+  # GET access_admin — tudo que a tela Acessos precisa (admin): catálogo,
+  # papéis, cada pessoa com marcação própria + nível efetivo + unidades.
+  def access_admin
+    render json: Cevico::Access.admin_payload(Current.account)
+  end
+
+  # POST update_agent_access — a marcação de UMA pessoa.
+  # body: { user_id:, tree: { 'crm' => 'edit', 'relatorios.medicos' => 'none' },
+  #         role_id: 'r_ab12' | nil, units: ['paulista'], reset: true }
+  # Só chaves do catálogo e níveis none|view|edit entram; o que não vier
+  # na marcação herda do pai/papel/padrão. `reset` apaga a marcação própria.
+  def update_agent_access # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+    user_id = params[:user_id].to_s
+    return render json: { error: 'Informe a pessoa.' }, status: :unprocessable_entity if user_id.blank?
+    unless Current.account.account_users.exists?(user_id: user_id)
+      return render json: { error: 'Essa pessoa não é desta empresa.' }, status: :unprocessable_entity
+    end
+
+    perms = (crm_settings.agent_permissions || {}).dup
+    tree_all = (perms['tree'] || {}).dup
+    if ActiveModel::Type::Boolean.new.cast(params[:reset])
+      tree_all.delete(user_id)
+    elsif params.key?(:tree)
+      tree_all[user_id] = sanitize_access_tree(params[:tree])
+    end
+    perms['tree'] = tree_all
+
+    if params.key?(:role_id)
+      by_user = (perms['role_by_user'] || {}).dup
+      role_id = params[:role_id].to_s
+      if role_id.present? && Array(perms['roles']).any? { |r| r['id'].to_s == role_id }
+        by_user[user_id] = role_id
+      else
+        by_user.delete(user_id)
+      end
+      perms['role_by_user'] = by_user
+    end
+
+    if params.key?(:units)
+      units_all = (perms['units'] || {}).dup
+      list = Array(params[:units]).map(&:to_s) & cevico_company.unit_keys
+      list.empty? ? units_all.delete(user_id) : units_all[user_id] = list
+      perms['units'] = units_all
+    end
+
+    crm_settings.update!(agent_permissions: perms)
+    render json: Cevico::Access.admin_payload(Current.account)
+  end
+
+  # POST update_access_roles — a lista inteira de papéis da empresa.
+  # body: { roles: [{ id?, name, hint, tree: {...}, units: [] }] }
+  # Papel apagado some das pessoas que o usavam (elas voltam ao padrão).
+  def update_access_roles # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    perms = (crm_settings.agent_permissions || {}).dup
+    roles = Array(params[:roles]).first(30).filter_map do |raw|
+      raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+      name = raw['name'].to_s.strip[0, 60]
+      next if name.blank?
+
+      {
+        'id' => raw['id'].to_s.match?(/\Ar_[a-z0-9]{4,12}\z/) ? raw['id'].to_s : "r_#{SecureRandom.alphanumeric(6).downcase}",
+        'name' => name,
+        'hint' => raw['hint'].to_s.strip[0, 200],
+        'tree' => sanitize_access_tree(raw['tree']),
+        'units' => Array(raw['units']).map(&:to_s) & cevico_company.unit_keys
+      }
+    end
+    ids = roles.pluck('id')
+    perms['roles'] = roles
+    perms['role_by_user'] = (perms['role_by_user'] || {}).select { |_uid, rid| ids.include?(rid.to_s) }
+    crm_settings.update!(agent_permissions: perms)
+    render json: Cevico::Access.admin_payload(Current.account)
+  end
+
+  # POST update_company — Identidade da empresa (nome, ramo, vocabulário,
+  # unidades, assistente, módulos, domínio/hub/rastreio próprios)
+  def update_company
+    company = Cevico::Company.save!(Current.account, params.fetch(:company, {}).permit!.to_h)
+    render json: { company: company.to_h, access: Cevico::Access.for(Current.account, Current.user, account_user: Current.account_user).to_h }
   end
 
   def update
@@ -1883,8 +1968,22 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     @crm_settings ||= CrmSetting.find_or_create_by!(account: Current.account)
   end
 
+  # { 'crm' => 'edit', … } só com nós do catálogo e níveis válidos (rodada 334)
+  def sanitize_access_tree(raw)
+    raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+    raw.each_with_object({}) do |(key, level), out|
+      key = key.to_s
+      level = level.to_s
+      next unless Cevico::AccessCatalog.exist?(key) && Cevico::AccessCatalog::LEVELS.include?(level)
+      next if Cevico::AccessCatalog.admin_only?(key)
+
+      out[key] = Cevico::AccessCatalog.clamp(key, level)
+    end
+  end
+
   def settings_params
-    params.permit(:n8n_base_url, :n8n_api_key, column_presets: [:name, { stage_ids: [] }], agent_permissions: {})
+    # rodada 334: agent_permissions NÃO entra mais por aqui (árvore/papéis têm endpoints próprios)
+    params.permit(:n8n_base_url, :n8n_api_key, column_presets: [:name, { stage_ids: [] }])
   end
 
   def oftalmofacil_json(s)
@@ -2010,6 +2109,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       n8n_workflows_fetched_at: s.n8n_workflows_fetched_at,
       column_presets: s.column_presets || [],
       agent_permissions: s.agent_permissions || {},
+      # 🔐 rodada 334: o nível de QUEM está logado em cada nó da árvore + catálogo
+      access: cevico_access.to_h,
+      # 🏢 identidade da empresa (ramo, vocabulário, unidades, assistente)
+      company: cevico_company.to_h,
       meta_ads: meta_ads_json(s),
       google_ads: google_ads_json(s),
       ai: ai_json(s),
@@ -2195,11 +2298,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'auditor' => Crm::ConversationAuditorService::SYSTEM_PROMPT,
       'creative' => Crm::CreativeService::SYSTEM_PROMPT,
       # 🎙️ rodada 195: o prompt do Agente de Ligação também é o BLOCO DA ETAPA (Roteiro + regras de voz vão à parte)
-      'voice' => Crm::CevicoScript::STAGE_PROMPTS['voice'],
+      'voice' => Crm::CevicoScript.default_stage_prompt('voice', 'v1', account: s.account),
       # 🗣️ rodada 188: o prompt do Atendente é o BLOCO DA ETAPA; o Roteiro vai à parte (script)
-      'atendente_agendamento' => Crm::CevicoScript::STAGE_PROMPTS['atendente_agendamento'],
-      'atendente_pos' => Crm::CevicoScript::STAGE_PROMPTS['atendente_pos'],
-      'atendente_pos_op' => Crm::CevicoScript::STAGE_PROMPTS['atendente_pos_op']
+      'atendente_agendamento' => Crm::CevicoScript.default_stage_prompt('atendente_agendamento', 'v1', account: s.account),
+      'atendente_pos' => Crm::CevicoScript.default_stage_prompt('atendente_pos', 'v1', account: s.account),
+      'atendente_pos_op' => Crm::CevicoScript.default_stage_prompt('atendente_pos_op', 'v1', account: s.account)
     }
     {
       api_key_set: cfg['api_key'].present?,

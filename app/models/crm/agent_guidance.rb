@@ -134,7 +134,7 @@ class Crm::AgentGuidance < ApplicationRecord
   def apply_to_script!(by)
     Crm::ScriptVersion.snapshot!(account, kind: 'script', note: "antes de aplicar a orientação ##{id}", by: by, guidance: self)
     script = Crm::ScriptVersion.current_content(account, 'script', nil)
-    base = script[target_section].to_s.strip.presence || Crm::CevicoScript::DEFAULT[target_section].to_s
+    base = script[target_section].to_s.strip.presence || Crm::CevicoScript.default_text(target_section, 'v1', account: account).to_s
     script[target_section] = "#{base}\n#{formatted_line}"
     Crm::ScriptVersion.write_script!(account, script)
     script[target_section]

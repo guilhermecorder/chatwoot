@@ -12,7 +12,9 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import { useAccount } from 'dashboard/composables/useAccount';
-import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
+import { AUTOMATION_TAB_NODES } from 'dashboard/helper/cevicoAccess';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import TemplatesPicker from 'dashboard/components/widgets/conversation/WhatsappTemplates/TemplatesPicker.vue';
 import WhatsAppTemplateParser from 'dashboard/components-next/whatsapp/WhatsAppTemplateParser.vue';
@@ -40,7 +42,6 @@ const store = useStore();
 const route = useRoute();
 const router = useRouter();
 const { accountId } = useAccount();
-const { isAdmin } = useAdmin();
 
 // 🍎 rodada 189: o hub inteiro no kit CEVICO (vidro cristalino + paleta por
 // escopo, como Relatórios e Central). Cada agente mantém a cor de identidade
@@ -83,7 +84,6 @@ const whatsappInboxes = computed(() =>
 const settings = useMapGetter('crm/getSettings');
 const accountLabels = useMapGetter('labels/getLabels');
 const teamAgents = useMapGetter('agents/getAgents');
-const currentUserId = useMapGetter('getCurrentUserID');
 
 const TABS = [
   'robos',
@@ -96,22 +96,14 @@ const TABS = [
   'tratamento',
 ];
 
-// atendente concedido só vê as abas da área dele: robôs/resultados =
-// Automações; tratamento = Tratamento de dados; o resto é de admin
-const myGrants = computed(() => {
-  const perms = settings.value?.agent_permissions ?? {};
-  return perms.grants?.[String(currentUserId.value)] ?? [];
-});
-const canSee = capability =>
-  isAdmin.value || myGrants.value.includes(capability);
+// 🔐 rodada 334: cada aba pelo seu nó em automacoes.* (ver abre a aba;
+// editar libera criar/editar robô e mexer nos agentes)
+const { canView, canEdit } = useCevicoAccess();
 const visibleTabs = computed(() =>
-  TABS.filter(tab => {
-    if (['robos', 'resultados', 'fluxos'].includes(tab))
-      return canSee('automations');
-    if (tab === 'tratamento') return canSee('data_tools');
-    return isAdmin.value; // regras, agentes de IA, programação
-  })
+  TABS.filter(tab => canView(AUTOMATION_TAB_NODES[tab]))
 );
+const canEditRobos = computed(() => canEdit('automacoes.robos'));
+const canEditAgents = computed(() => canEdit('automacoes.agentes_ia'));
 const activeTab = ref(
   TABS.includes(route.query.tab) ? route.query.tab : 'robos'
 );
@@ -3348,7 +3340,13 @@ onUnmounted(() => {
           title="Automações"
           subtitle="Tudo que trabalha sozinho no sistema: réguas, robôs, agentes de IA, automações de coluna e tratamento de dados."
           icon="i-lucide-workflow"
-        />
+        >
+          <template #chips>
+            <CevicoViewOnlyPill
+              v-if="!canEdit(AUTOMATION_TAB_NODES[activeTab])"
+            />
+          </template>
+        </CevicoHero>
       </div>
       <!-- Abas (atendente concedido só vê as abas da área dele) -->
       <div class="max-w-5xl mx-auto w-full">
@@ -3432,6 +3430,7 @@ onUnmounted(() => {
               sozinho se o paciente responder.
             </p>
             <button
+              v-if="canEditRobos"
               class="text-sm px-3 py-2 rounded-lg bg-n-brand text-white hover:bg-n-brand/90 flex items-center gap-1.5 flex-shrink-0"
               @click="openCreateBot"
             >
@@ -3443,7 +3442,7 @@ onUnmounted(() => {
           <!-- 🕐 Horário de envio (item 147): janela em que as cutucadas podem
              sair — o admin estende até 24h pra não empilhar pro dia seguinte -->
           <div
-            v-if="isAdmin"
+            v-if="canEditRobos"
             class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl"
           >
             <div class="flex items-center gap-2 flex-wrap">
@@ -3579,7 +3578,7 @@ onUnmounted(() => {
           <!-- 📅 item 253: lembretes e confirmação de consulta agora ficam em
                Agentes de IA → "Confirmação de consulta"; aqui só o atalho -->
           <div
-            v-if="isAdmin"
+            v-if="canEditRobos"
             class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl flex items-center gap-3 flex-wrap"
           >
             <span
@@ -3633,6 +3632,7 @@ onUnmounted(() => {
                     : bot.inbox_name || '🔁 Caixa automática'
                 }}</span>
                 <button
+                  v-if="canEditRobos"
                   class="text-xs px-2 py-1 rounded-lg border border-n-weak ml-1"
                   :class="bot.active ? 'text-yellow-600' : 'text-green-600'"
                   @click="toggleBot(bot)"
@@ -3640,16 +3640,17 @@ onUnmounted(() => {
                   {{ bot.active ? 'Pausar' : 'Ativar' }}
                 </button>
                 <button
+                  v-if="canEditRobos"
                   class="text-n-slate-9 hover:text-n-brand i-lucide-pencil text-sm"
                   @click="openEditBot(bot)"
                 />
                 <button
-                  v-if="deleteBotConfirmId !== bot.id"
+                  v-if="canEditRobos && deleteBotConfirmId !== bot.id"
                   class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm"
                   @click="deleteBotConfirmId = bot.id"
                 />
                 <button
-                  v-else
+                  v-else-if="canEditRobos"
                   class="text-xs text-red-500"
                   @click="deleteBot(bot)"
                 >
@@ -4391,7 +4392,7 @@ onUnmounted(() => {
                 :view="agentsView"
                 :open="!!expandedAgents.confirmacao"
                 :opening="openingAgent === 'confirmacao'"
-                :is-admin="isAdmin"
+                :is-admin="canEditAgents"
                 @toggle="toggleAgentExpand('confirmacao')"
               />
               <!-- 📊 item 256: Pesquisa de satisfação (NPS) pós-cirurgia -->
@@ -4400,7 +4401,7 @@ onUnmounted(() => {
                 :view="agentsView"
                 :open="!!expandedAgents.nps_survey"
                 :opening="openingAgent === 'nps_survey'"
-                :is-admin="isAdmin"
+                :is-admin="canEditAgents"
                 @toggle="toggleAgentExpand('nps_survey')"
                 @open-agent="focusAgent"
               />
@@ -8601,7 +8602,7 @@ onUnmounted(() => {
           <DataTreatmentTools />
 
           <!-- extras com IA que já moram no hub (só admin: mexem no Radar e na Agenda) -->
-          <div v-if="isAdmin" class="grid sm:grid-cols-2 gap-4 mt-2 mb-6">
+          <div v-if="canEditAgents" class="grid sm:grid-cols-2 gap-4 mt-2 mb-6">
             <button
               class="text-left rounded-2xl border border-n-weak bg-n-solid-2 p-4 hover:border-n-brand transition-colors flex items-start gap-3"
               @click="showSweepModal = true"

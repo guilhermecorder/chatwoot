@@ -5,7 +5,6 @@ class Api::V1::Accounts::Crm::AutomationsDashboardsController < Api::V1::Account
   include Crm::AccessControl
   include Crm::ResolvesPeriod
 
-  before_action -> { require_capability(:automations) }
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show

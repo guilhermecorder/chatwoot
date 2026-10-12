@@ -1,0 +1,352 @@
+/* 🔐 rodada 334 — pele do EDITOR DE ÁRVORE DE ACESSOS (AccessTreeEditor +
+   AccessTreeNode). Fica num .scss próprio, importado pelo editor, para os
+   specs rodarem sem o postcss do projeto; tudo dentro do .cv-page (tokens
+   --cv-* do kit). */
+
+.cv-page .cv-acc {
+  --acc-view: #2563eb;
+  --acc-view-rgb: 37 99 235;
+  --acc-view-grad: linear-gradient(135deg, #1d4ed8, #3b82f6);
+  --acc-edit: #059669;
+  --acc-edit-rgb: 5 150 105;
+  --acc-edit-grad: linear-gradient(135deg, #065f46, #10b981);
+  --acc-none: #64748b;
+  --acc-none-rgb: 100 116 139;
+  --acc-none-grad: linear-gradient(135deg, #475569, #94a3b8);
+  --acc-lock: #d97706;
+  min-width: 0;
+}
+.cv-page .cv-acc-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+.cv-page .cv-acc-summary {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cv-page .cv-acc-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 180px;
+  min-width: 150px;
+}
+.cv-page .cv-acc-search > span {
+  position: absolute;
+  left: 11px;
+  pointer-events: none;
+}
+.cv-page .cv-acc-search .cv-input {
+  width: 100%;
+  height: 32px;
+  padding-left: 32px;
+  margin-bottom: 0;
+}
+.cv-page .cv-acc-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+.cv-page .cv-acc-btn-view {
+  color: var(--acc-view);
+  border-color: rgb(var(--acc-view-rgb) / 0.4);
+}
+.cv-page .cv-acc-btn-edit {
+  color: var(--acc-edit);
+  border-color: rgb(var(--acc-edit-rgb) / 0.4);
+}
+.cv-page .cv-acc-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #64748b;
+  margin: 0 0 10px;
+}
+.cv-page .cv-acc-note > span {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.dark .cv-page .cv-acc-note {
+  color: #a1a1aa;
+}
+
+.cv-page .cv-acc-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cv-page .cv-acc-empty {
+  font-size: 12px;
+  color: #64748b;
+  padding: 16px 8px;
+  text-align: center;
+}
+
+/* ── pílula de nível (Ver azul · Editar verde · Nada cinza) ── */
+.cv-page .cv-acc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--acc-none-grad);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.cv-page .cv-acc-pill-sm {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+.cv-page .cv-acc-pill b {
+  font-weight: 800;
+}
+.cv-page .cv-acc-pill.cv-acc-view {
+  background: var(--acc-view-grad);
+}
+.cv-page .cv-acc-pill.cv-acc-edit {
+  background: var(--acc-edit-grad);
+}
+.cv-page .cv-acc-pill.cv-acc-none {
+  background: var(--acc-none-grad);
+}
+
+.cv-page .cv-acc-row {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 7px 10px 7px calc(8px + var(--acc-depth, 0) * 18px);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgb(var(--cv-rgb) / 0.14);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.cv-page .cv-acc-row:hover {
+  border-color: rgb(var(--cv-rgb) / 0.35);
+}
+.cv-page .cv-acc-row-parent {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgb(var(--cv-rgb) / 0.22);
+}
+.cv-page .cv-acc-row-locked {
+  opacity: 0.8;
+}
+.dark .cv-page .cv-acc-row {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.dark .cv-page .cv-acc-row-parent {
+  background: rgba(255, 255, 255, 0.05);
+}
+.cv-page .cv-acc-node-hit > .cv-acc-row {
+  box-shadow: 0 0 0 2px rgb(var(--cv-rgb) / 0.18);
+}
+
+.cv-page .cv-acc-caret {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--cv-deep);
+  margin-top: 1px;
+}
+.cv-page button.cv-acc-caret:hover {
+  background: rgb(var(--cv-rgb) / 0.12);
+}
+.dark .cv-page .cv-acc-caret {
+  color: #fff;
+}
+.cv-page .cv-acc-leafdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--acc-none);
+  opacity: 0.6;
+}
+.cv-page .cv-acc-leafdot-view {
+  background: var(--acc-view);
+  opacity: 1;
+}
+.cv-page .cv-acc-leafdot-edit {
+  background: var(--acc-edit);
+  opacity: 1;
+}
+
+.cv-page .cv-acc-main {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.cv-page .cv-acc-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 24px;
+}
+.cv-page .cv-acc-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.25;
+}
+.cv-page .cv-acc-row-parent .cv-acc-label {
+  font-size: 14px;
+  font-weight: 700;
+}
+.dark .cv-page .cv-acc-label {
+  color: #fff;
+}
+.cv-page .cv-acc-hint {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #64748b;
+  margin: 1px 0 0;
+}
+.dark .cv-page .cv-acc-hint {
+  color: #a1a1aa;
+}
+.cv-page .cv-acc-own {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--cv);
+  box-shadow: 0 0 0 2px rgb(var(--cv-rgb) / 0.25);
+  flex-shrink: 0;
+}
+.cv-page .cv-acc-count {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--cv-deep);
+  background: rgb(var(--cv-rgb) / 0.12);
+}
+.dark .cv-page .cv-acc-count {
+  color: #fff;
+}
+.cv-page .cv-acc-lock {
+  --lb: #d97706;
+  height: 18px;
+  font-size: 10px;
+}
+/* etiquetas das telas de acessos: unidade (verde-água) e admin (ouro) */
+.cv-page .cv-tag-unit {
+  --lb: #0d9488;
+}
+.cv-page .cv-tag-admin {
+  --lb: #d4a017;
+}
+
+.cv-page .cv-acc-ctrl {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.cv-page .cv-acc-seg {
+  padding: 2px;
+}
+.cv-page .cv-acc-seg .cv-seg-item {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+/* a cor do segmento ligado conta o nível: Ver azul, Editar verde, Nada cinza */
+.cv-page .cv-acc-seg .cv-acc-seg-view.cv-seg-on {
+  --cv-grad: var(--acc-view-grad);
+  --cv-deep-rgb: 30 64 175;
+}
+.cv-page .cv-acc-seg .cv-acc-seg-edit.cv-seg-on {
+  --cv-grad: var(--acc-edit-grad);
+  --cv-deep-rgb: 6 95 70;
+}
+.cv-page .cv-acc-seg .cv-acc-seg-none.cv-seg-on {
+  --cv-grad: var(--acc-none-grad);
+  --cv-deep-rgb: 51 65 85;
+}
+.cv-page .cv-acc-seg .cv-acc-seg-inherit {
+  font-style: italic;
+}
+.cv-page .cv-acc-seg .cv-acc-seg-inherit.cv-seg-on {
+  font-style: normal;
+}
+
+.cv-page .cv-acc-clearkids,
+.cv-page .cv-acc-kidsdot {
+  flex-shrink: 0;
+}
+.cv-page .cv-acc-clearkids {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--cv-deep);
+  border: 1px dashed rgb(var(--cv-rgb) / 0.45);
+  background: rgba(255, 255, 255, 0.5);
+}
+.cv-page .cv-acc-clearkids:hover {
+  background: rgb(var(--cv-rgb) / 0.12);
+}
+.dark .cv-page .cv-acc-clearkids {
+  color: #fff;
+  background: transparent;
+}
+.cv-page .cv-acc-kidsdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--cv);
+}
+
+.cv-page .cv-acc-kids {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 6px;
+  padding-left: 10px;
+  border-left: 2px solid rgb(var(--cv-rgb) / 0.18);
+  margin-left: 20px;
+}
+
+/* celular (390px): o controle desce para a linha de baixo, alinhado ao nome */
+@media (max-width: 640px) {
+  .cv-page .cv-acc-row {
+    padding-left: calc(6px + var(--acc-depth, 0) * 10px);
+  }
+  .cv-page .cv-acc-ctrl {
+    width: 100%;
+    margin-left: 0;
+    padding-left: 30px;
+  }
+  .cv-page .cv-acc-kids {
+    margin-left: 8px;
+    padding-left: 6px;
+  }
+}

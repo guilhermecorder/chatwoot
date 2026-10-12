@@ -130,9 +130,19 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
   # :outbound = ao LIGAR (o discador manda este no lugar, a cada ligação)
   def build(account, settings = nil, direction: :inbound)
     settings ||= Crm::VoiceAgent::Settings.new(account)
-    body = [Crm::CevicoScript.text(account), VOICE_RULES, VOICE_TOOLS, pronunciation_block(settings),
+    body = [Crm::CevicoScript.text(account), voice_rules(account), voice_tools(account), pronunciation_block(settings),
             stage_block(account, direction)].compact.join("\n\n")
     spoken_money(persona_fill(body, account, settings)) + persona_fill(GUARDRAIL, account, settings)
+  end
+
+  # 🏢 rodada 334: na clínica os blocos são os de sempre (idênticos); em outro
+  # ramo as regras de voz são as genéricas da empresa e as ferramentas trocam a marca
+  def voice_rules(account)
+    Crm::CompanyPrompts.pick(account, VOICE_RULES, :voice_rules)
+  end
+
+  def voice_tools(account)
+    Crm::CompanyPrompts.rebrand(Cevico::Company.for(account), VOICE_TOOLS)
   end
 
   # 🧪 prompt do simulador por texto (Crm::ResponderAgentService, agent 'voice'):
@@ -141,7 +151,7 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
   def simulator_prompt(account, contact:, objective:, next_appointment: '')
     settings = Crm::VoiceAgent::Settings.new(account)
     direction = objective.present? ? :outbound : :inbound
-    body = [Crm::CevicoScript.text(account), VOICE_RULES, SIMULATOR_TOOLS, pronunciation_block(settings),
+    body = [Crm::CevicoScript.text(account), voice_rules(account), SIMULATOR_TOOLS, pronunciation_block(settings),
             stage_block(account, direction)].compact.join("\n\n")
     name = contact&.name.to_s.strip
     body = fill_variables(body, 'paciente_nome' => name, 'primeiro_nome' => name.split(/\s+/).first.to_s,
@@ -156,15 +166,22 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
 
   # ── persona e valores (item 333) ─────────────────────────────────────────
   # "o Guilherme, assistente virtual da CEVICO" | "a assistente virtual da CEVICO"
+  # 🏢 rodada 334: persona da Integração vazia → vale o Assistente virtual da
+  # Identidade da empresa (nome e gênero); "da CEVICO" → "da <empresa>"
   def persona_intro(settings)
-    name = settings.persona_name
-    return "#{settings.masculine? ? 'o' : 'a'} #{name}, assistente virtual da CEVICO" if name.present?
+    company = Cevico::Company.for(settings.account)
+    name = settings.persona_name.presence || company.assistant_name
+    masculine = settings.persona_name.present? || company.assistant_name.blank? ? settings.masculine? : company.assistant_gender == 'm'
+    brand = Crm::CompanyPrompts.brand(company)
+    return "#{masculine ? 'o' : 'a'} #{name}, assistente virtual da #{brand}" if name.present?
 
-    settings.masculine? ? 'o assistente virtual da CEVICO' : 'a assistente virtual da CEVICO'
+    masculine ? "o assistente virtual da #{brand}" : "a assistente virtual da #{brand}"
   end
 
   def persona_kind(settings)
-    settings.masculine? ? 'um assistente virtual' : 'uma assistente virtual'
+    company = Cevico::Company.for(settings.account)
+    masculine = settings.persona_name.present? || company.assistant_name.blank? ? settings.masculine? : company.assistant_gender == 'm'
+    masculine ? 'um assistente virtual' : 'uma assistente virtual'
   end
 
   def persona_fill(text, account, settings)
@@ -179,7 +196,7 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
   end
 
   def default_partner_message(settings)
-    PARTNER_MESSAGE.gsub('{{EU_SOU}}', persona_intro(settings))
+    Crm::CompanyPrompts.rebrand(Cevico::Company.for(settings.account), PARTNER_MESSAGE).gsub('{{EU_SOU}}', persona_intro(settings))
   end
 
   # o valor da avaliação pré-configurado na Agenda (item 324), falado

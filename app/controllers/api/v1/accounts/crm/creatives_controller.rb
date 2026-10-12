@@ -4,7 +4,6 @@ class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseContr
   include Crm::AccessControl
   include Crm::ResolvesPeriod
   # gaveta Marketing (20/09): Relatórios OU Marketing ('pages') liberam
-  before_action -> { require_any_capability(:reports, :pages) }
 
   RUNNING_STALE = 30.minutes
 

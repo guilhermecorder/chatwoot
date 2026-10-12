@@ -4,7 +4,6 @@
 # fim da seção escolhida.
 class Api::V1::Accounts::Crm::AgentGuidancesController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action :require_administrator!
   before_action :guidance, only: %i[update destroy apply ignore reopen]
 
   LIMIT = 200

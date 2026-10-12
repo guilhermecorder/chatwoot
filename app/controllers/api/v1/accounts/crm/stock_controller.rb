@@ -8,7 +8,6 @@
 # dia a dia clínico — abertos ao time logado, SEM expor custo/preço.
 class Api::V1::Accounts::Crm::StockController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action -> { require_capability(:finance) }, except: [:lookup, :create_order]
 
   ORDERS_LIMIT = 200
 

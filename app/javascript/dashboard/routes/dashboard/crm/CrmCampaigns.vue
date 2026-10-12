@@ -4,6 +4,8 @@ import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue'
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import ChipPicker from './components/ChipPicker.vue';
 import CallCampaignsTab from './components/CallCampaignsTab.vue';
@@ -11,6 +13,9 @@ import CrmAPI from 'dashboard/api/crm';
 import { relativeTime } from './helpers';
 
 const store = useStore();
+// 🔐 rodada 334: quem só VÊ campanhas não cria, envia, pausa nem apaga
+const { canEdit } = useCevicoAccess();
+const canEditCampaigns = computed(() => canEdit('crm.campanhas'));
 const router = useRouter();
 
 // aba inicial pode vir da URL (?tab=automations | ?tab=calls) — usada pelo hub de Automações
@@ -507,6 +512,7 @@ const statsLine = c => {
           <span class="i-lucide-megaphone text-white text-base" />
         </span>
         Campanha WhatsApp
+        <CevicoViewOnlyPill v-if="!canEditCampaigns" />
       </h1>
 
       <!-- Abas (cada uma com sua cor dopamine) -->
@@ -550,7 +556,7 @@ const statsLine = c => {
 
       <div class="flex-1" />
       <button
-        v-if="activeTab === 'campaigns'"
+        v-if="canEditCampaigns && activeTab === 'campaigns'"
         class="flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-xl text-white hover:opacity-90 transition-opacity shadow-sm"
         style="background: linear-gradient(135deg, #047857, #34D399)"
         @click="openComposer"
@@ -559,7 +565,7 @@ const statsLine = c => {
         Nova campanha
       </button>
       <button
-        v-else-if="activeTab === 'automations'"
+        v-else-if="canEditCampaigns && activeTab === 'automations'"
         class="flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-xl text-white hover:opacity-90 transition-opacity shadow-sm"
         style="background: linear-gradient(135deg, #5B21B6, #7C3AED)"
         @click="openAutomationComposer"
@@ -614,13 +620,13 @@ const statsLine = c => {
                 <span class="i-lucide-trending-up" /> Ver resultados
               </span>
               <button
-                v-if="c.status === 'draft' || c.status === 'scheduled'"
+                v-if="canEditCampaigns && (c.status === 'draft' || c.status === 'scheduled')"
                 class="text-xs px-3 py-1.5 rounded-lg bg-n-brand text-white hover:opacity-90"
                 @click="sendDraft(c)"
               >Enviar agora</button>
 
               <div class="flex-1" />
-              <template v-if="c.status !== 'processing'">
+              <template v-if="canEditCampaigns && c.status !== 'processing'">
                 <button
                   v-if="deleteConfirmId !== c.id"
                   class="text-n-slate-10 hover:text-red-500 i-lucide-trash-2 text-sm"
@@ -699,7 +705,7 @@ const statsLine = c => {
               </p>
             </div>
 
-            <div class="flex items-center gap-2 flex-shrink-0">
+            <div v-if="canEditCampaigns" class="flex items-center gap-2 flex-shrink-0">
               <button
                 class="text-xs px-3 py-1.5 rounded-lg border transition-colors"
                 :class="a.active

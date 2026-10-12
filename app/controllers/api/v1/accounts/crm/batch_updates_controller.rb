@@ -2,7 +2,6 @@
 # em segundo plano (Crm::BatchUpdateJob). Admin-only — mexe na base inteira.
 class Api::V1::Accounts::Crm::BatchUpdatesController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action -> { require_capability(:data_tools) }
 
   # POST preview — quantos cards seriam afetados + amostra
   def preview

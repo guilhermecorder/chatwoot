@@ -14,7 +14,7 @@ class Api::V1::Accounts::Crm::ClosingToolsController < Api::V1::Accounts::BaseCo
   end
 
   def update_script
-    return forbidden unless Current.account_user.administrator?
+    return forbidden unless cevico_can?('metas.ferramentas', :edit)
 
     settings = CrmSetting.find_or_create_by!(account: Current.account)
     cfg = settings.agenda_config || {}
@@ -24,7 +24,7 @@ class Api::V1::Accounts::Crm::ClosingToolsController < Api::V1::Accounts::BaseCo
   end
 
   def generate_map
-    return forbidden unless Current.account_user.administrator?
+    return forbidden unless cevico_can?('metas.ferramentas', :edit)
 
     Crm::ObjectionMapJob.perform_later(Current.account.id)
     render json: { success: true, message: 'Mapa de objeções em produção! A IA está lendo as conversas que converteram — volte em alguns minutos.' }

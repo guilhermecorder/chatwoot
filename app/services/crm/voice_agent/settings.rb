@@ -239,8 +239,8 @@ class Crm::VoiceAgent::Settings
       partner_message: partner_message, partner_message_custom: raw['partner_message'].present?, pronunciations: pronunciations,
       partner_pipeline_id: Crm::PartnerGuard.partner_pipeline_id(account),
       # rodada 195: prompt = bloco da etapa ao LIGAR (mesmo do card do hub); item 333: inbound_prompt = ao ATENDER
-      prompt: prompt, default_prompt: Crm::CevicoScript::STAGE_PROMPTS['voice'],
-      inbound_prompt: inbound_prompt, default_inbound_prompt: Crm::CevicoScript::STAGE_PROMPTS[INBOUND_AGENT_KEY],
+      prompt: prompt, default_prompt: Crm::CevicoScript.default_stage_prompt('voice', 'v1', account: account),
+      inbound_prompt: inbound_prompt, default_inbound_prompt: Crm::CevicoScript.default_stage_prompt(INBOUND_AGENT_KEY, 'v1', account: account),
       full_prompt: Crm::VoiceAgent::Script.build(account, self),
       transfer_number: transfer_number, transfer_condition: transfer_condition,
       handoff_inbox_id: handoff_inbox_id, handoff_template_params: handoff_template_params, permission_template: permission_template,

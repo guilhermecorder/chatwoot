@@ -3,8 +3,6 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
 
   # disparar/criar campanha em massa = área concedível (padrão: só admin).
   # Leitura (index/show/results) e prévias ficam livres p/ acompanhar.
-  before_action -> { require_capability(:campaigns) },
-                only: %i[create destroy send_now schedule preview_audience]
   before_action :campaign, only: [:show, :destroy, :send_now, :schedule, :results]
 
   def index

@@ -3,6 +3,8 @@
 // os aplicativos nativos; "Configurar" abre a janela da integração.
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { useStore, useStoreGetters, useMapGetter } from 'dashboard/composables/store';
 import CrmIntegrationsModal from './components/CrmIntegrationsModal.vue';
 import IntegrationItem from 'dashboard/routes/dashboard/settings/integrations/IntegrationItem.vue';
@@ -11,6 +13,8 @@ const store = useStore();
 const getters = useStoreGetters();
 const settings = useMapGetter('crm/getSettings');
 const router = useRouter();
+// 🔐 rodada 334: quem só VÊ integrações não salva conexões (o servidor barra)
+const { canEdit } = useCevicoAccess();
 const accountId = useMapGetter('getCurrentAccountId');
 
 const configuring = ref(null); // 'n8n' | 'meta' | 'google' | 'ai' | 'sheets' | null
@@ -134,6 +138,7 @@ const closeConfig = () => {
             <span class="i-lucide-plug text-white text-base" />
           </span>
           Integrações
+          <CevicoViewOnlyPill v-if="!canEdit('configuracoes.integracoes')" />
         </h1>
         <p class="text-xs text-n-slate-10 mt-1.5">
           Central única de conexões do CEVICO S.I — rastreamento de conversões, IA e aplicativos

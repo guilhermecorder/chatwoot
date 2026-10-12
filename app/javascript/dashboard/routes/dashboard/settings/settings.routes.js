@@ -26,6 +26,8 @@ import customRoles from './customRoles/customRole.routes';
 import dominio from './dominio/dominio.routes';
 import paineis from './paineis/paineis.routes';
 import precos from './precos/precos.routes';
+import acessos from './acessos/acessos.routes';
+import empresa from './empresa/empresa.routes';
 import profile from './profile/profile.routes';
 import security from './security/security.routes';
 import conversationWorkflow from './conversationWorkflow/conversationWorkflow.routes';
@@ -73,6 +75,8 @@ export default {
     ...dominio.routes,
     ...paineis.routes,
     ...precos.routes,
+    ...acessos.routes,
+    ...empresa.routes,
     ...profile.routes,
     ...security.routes,
     ...conversationWorkflow.routes,

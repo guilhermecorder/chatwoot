@@ -6,7 +6,6 @@
 class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
   include Crm::ResolvesPeriod
-  before_action :require_administrator!
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   DAILY_DAYS = 14

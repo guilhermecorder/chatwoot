@@ -13,7 +13,7 @@
   <% end %>
   <%# canonical: com domínio oficial configurado, aponta SEMPRE pra ele —
       Google e Meta enxergam um endereço só %>
-  <% canonical_url = Cevico::PublicSite.configured? ? Cevico::PublicSite.page_url(@page.slug) : request.original_url.split('?').first %>
+  <% canonical_url = Cevico::PublicSite.host_for(@page.account).present? ? Cevico::PublicSite.page_url(@page.slug, account: @page.account) : request.original_url.split('?').first %>
   <link rel="canonical" href="<%= canonical_url %>">
   <meta property="og:url" content="<%= canonical_url %>">
   <meta property="og:type" content="article">

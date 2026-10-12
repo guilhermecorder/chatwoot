@@ -60,6 +60,11 @@ class Crm::ObjectionMapService
     argumento novo); nunca prometa resultado cirúrgico.
   PROMPT
 
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :objection_map)
+  end
+
   def initialize(account)
     @account = account
   end
@@ -107,8 +112,8 @@ class Crm::ObjectionMapService
     message = client.messages.create(
       model: model,
       max_tokens: 2048,
-      system_: cached_system(SYSTEM_PROMPT),
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      system_: cached_system(default_system_prompt),
+      output_config: output_config_for({ type: 'json_schema', schema: company_schema(OUTPUT_SCHEMA) }),
       messages: [{ role: 'user',
                    content: "Estágio: #{stage[:label]}. Extraia o mapa de objeções destas #{convs.size} conversas:\n\n#{corpus.truncate(90_000)}" }]
     )

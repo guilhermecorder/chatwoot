@@ -12,6 +12,8 @@ import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import StockTab from './StockTab.vue';
 import ProfitabilityTab from './ProfitabilityTab.vue';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import {
@@ -63,11 +65,30 @@ const TABS = [
   { key: 'profitability', label: 'Lucratividade', icon: 'i-lucide-trending-up' },
   { key: 'compare', label: 'Comparar meses', icon: 'i-lucide-columns-2' },
 ];
+// 🔐 rodada 334: cada aba pelo seu nó — Estoque = financeiro.estoque; as outras
+// (visão geral, lançamentos, lucratividade, comparar) = financeiro.lancamentos.
+// Quem só VÊ não lança, não edita e não apaga.
+const { canView, canEdit } = useCevicoAccess();
+const TAB_NODE = { stock: 'financeiro.estoque' };
+const visibleTabs = computed(() =>
+  TABS.filter(tb => canView(TAB_NODE[tb.key] || 'financeiro.lancamentos'))
+);
+const canEditEntries = computed(() => canEdit('financeiro.lancamentos'));
+watch(
+  visibleTabs,
+  tabs => {
+    if (tabs.length && !tabs.some(tb => tb.key === tab.value)) {
+      tab.value = tabs[0].key;
+    }
+  },
+  { immediate: true }
+);
 
 // ── período: régua PADRÃO CEVICO (06/08) — default 'month' ──
 const period = ref({ preset: 'month', from: '', to: '' });
 
 const load = async () => {
+  if (!canView('financeiro.lancamentos')) return; // só Estoque liberado
   isLoading.value = true;
   try {
     const params = {
@@ -384,7 +405,7 @@ const compareCosts = computed(() => {
         style="background: linear-gradient(135deg, #065f46, #10b981)"
       >
         <div class="relative z-10" style="color: #fff">
-          <h1 class="text-2xl sm:text-3xl font-bold leading-tight" style="color: #fff">Gestão Financeira</h1>
+          <h1 class="text-2xl sm:text-3xl font-bold leading-tight" style="color: #fff">Gestão Financeira <CevicoViewOnlyPill v-if="!canEditEntries" /></h1>
           <p class="text-sm mt-1.5" style="color: rgba(255,255,255,0.85)">
             Receitas, tributos, custos e investimentos — a saúde do caixa da CEVICO, com histórico e comparação de meses.
           </p>
@@ -395,7 +416,7 @@ const compareCosts = computed(() => {
       <!-- abas -->
       <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto mb-4">
         <button
-          v-for="tb in TABS"
+          v-for="tb in visibleTabs"
           :key="tb.key"
           class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5"
           :class="tab === tb.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
@@ -506,7 +527,7 @@ const compareCosts = computed(() => {
         <!-- ════════ LANÇAMENTOS ════════ -->
         <template v-else-if="tab === 'entries'">
           <!-- formulário de lançamento -->
-          <div class="rounded-2xl border border-n-weak bg-n-card p-4 sm:p-5 mb-4">
+          <div v-if="canEditEntries" class="rounded-2xl border border-n-weak bg-n-card p-4 sm:p-5 mb-4">
             <h2 class="text-sm font-bold text-n-slate-12 mb-3 flex items-center gap-2">
               <span class="i-lucide-plus-circle text-base" style="color: #0F766E" />
               {{ editingId ? 'Editar lançamento' : 'Novo lançamento' }}
@@ -621,6 +642,7 @@ const compareCosts = computed(() => {
                   {{ entry.kind === 'receita' ? '+' : '−' }} {{ fmtMoney(entry.amount, true) }}
                 </b>
                 <button
+                  v-if="canEditEntries"
                   class="w-7 h-7 rounded-lg hover:bg-n-alpha-2 flex items-center justify-center text-n-slate-10 flex-shrink-0"
                   title="Editar"
                   @click="startEdit(entry)"
@@ -628,6 +650,7 @@ const compareCosts = computed(() => {
                   <span class="i-lucide-pencil text-xs" />
                 </button>
                 <button
+                  v-if="canEditEntries"
                   class="w-7 h-7 rounded-lg hover:bg-red-500/10 flex items-center justify-center text-n-slate-10 hover:text-red-500 flex-shrink-0"
                   title="Excluir"
                   @click="removeEntry(entry)"

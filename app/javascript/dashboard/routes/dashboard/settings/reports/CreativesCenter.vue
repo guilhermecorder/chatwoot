@@ -11,7 +11,6 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import CevicoCreativesAPI from 'dashboard/api/cevicoCreatives';
 import CrmAPI from 'dashboard/api/crm';
-import { useMapGetter } from 'dashboard/composables/store';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
@@ -44,10 +43,13 @@ import {
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { hexFromGrad } from 'dashboard/helper/cevicoPalettes';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 
 const router = useRouter();
-const currentRole = useMapGetter('getCurrentRole');
-const isAdmin = computed(() => currentRole.value === 'administrator');
+// 🔐 rodada 334: quem só VÊ criativos lê; editar = atualizar/sincronizar, metas e transcrição
+const { canEdit } = useCevicoAccess();
+const canEditCreatives = computed(() => canEdit('marketing.criativos'));
 const { transcribe } = useTranscribe();
 
 const period = ref({ preset: 'month', from: '', to: '' });
@@ -708,6 +710,7 @@ const goToIntegrations = () => router.push({ name: 'crm_integrations' });
         icon="i-lucide-clapperboard"
       >
         <template #chips>
+          <CevicoViewOnlyPill v-if="!canEditCreatives" />
           <span v-if="dataSinceText" class="cevico-hero-chip">{{
             dataSinceText
           }}</span>
@@ -729,7 +732,7 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
             nosso histórico</span
           >
         </template>
-        <template #actions>
+        <template v-if="canEditCreatives" #actions>
           <button
             class="cevico-hero-btn"
             :disabled="isSyncing || !configured"
@@ -1365,6 +1368,7 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
                     {{ videoAssets.videos }} vídeo(s) transcrito(s)
                   </span>
                   <button
+                    v-if="canEditCreatives"
                     class="cv-btn cv-btn-sm ml-auto"
                     :disabled="isTranscribing"
                     title="Transcrever os vídeos que ainda não têm transcrição"
@@ -2129,7 +2133,7 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
                 <button
                   class="cv-seg-item"
                   :class="{ 'cv-seg-on': !isAuto }"
-                  :disabled="!isAdmin"
+                  :disabled="!canEditCreatives"
                   @click="targetMode = 'manual'"
                 >
                   <span class="i-lucide-pencil cv-seg-icon" />Manual
@@ -2137,7 +2141,7 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
                 <button
                   class="cv-seg-item"
                   :class="{ 'cv-seg-on': isAuto }"
-                  :disabled="!isAdmin"
+                  :disabled="!canEditCreatives"
                   @click="targetMode = 'auto'"
                 >
                   <span class="i-lucide-trending-up cv-seg-icon" />Automático
@@ -2154,13 +2158,13 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
                   type="text"
                   inputmode="decimal"
                   class="cv-input !w-16 !py-1 text-xs"
-                  :disabled="!isAdmin"
+                  :disabled="!canEditCreatives"
                 />
                 % além do nosso recorde
               </label>
               <span
                 v-if="
-                  isAdmin &&
+                  canEditCreatives &&
                   ((isAuto && targets.mode !== 'auto') ||
                     (!isAuto && targets.mode === 'auto'))
                 "
@@ -2211,7 +2215,7 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
                     </td>
                     <td class="py-2 pr-3 whitespace-nowrap">
                       <span
-                        v-if="isAdmin && targetForm[def.key] && !isAuto"
+                        v-if="canEditCreatives && targetForm[def.key] && !isAuto"
                         class="inline-flex items-center gap-1"
                       >
                         <span class="text-n-slate-9">{{
@@ -2242,7 +2246,7 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
                     </td>
                     <td class="py-2 pr-3 whitespace-nowrap">
                       <span
-                        v-if="isAdmin && targetForm[def.key] && !isAuto"
+                        v-if="canEditCreatives && targetForm[def.key] && !isAuto"
                         class="inline-flex items-center gap-1"
                       >
                         <span class="text-n-slate-9">{{
@@ -2295,7 +2299,7 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
                 </tbody>
               </table>
               <div
-                v-if="isAdmin"
+                v-if="canEditCreatives"
                 class="flex items-center gap-3 mt-3 flex-wrap"
               >
                 <button
@@ -2453,7 +2457,7 @@ v-if="targets.mode === 'auto'" class="cevico-hero-chip"
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <button
-                v-if="isAdmin"
+                v-if="canEditCreatives"
                 class="cv-btn cv-btn-sm"
                 :disabled="isSyncing || !configured"
                 @click="runHistory"

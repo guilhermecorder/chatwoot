@@ -9,11 +9,14 @@ import { useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 
-const currentRole = useMapGetter('getCurrentRole');
-const isAdmin = computed(() => currentRole.value === 'administrator');
+// 🔐 rodada 334: quem só VÊ páginas lê e comenta; editar = criar, salvar, publicar, apagar
+const { canEdit } = useCevicoAccess();
+const canEditPages = computed(() => canEdit('marketing.paginas'));
 const currentUserId = useMapGetter('getCurrentUserID');
 
 const isLoading = ref(true);
@@ -557,7 +560,9 @@ onMounted(() => {
           </span>
         </template>
         <template #actions>
+          <CevicoViewOnlyPill v-if="!canEditPages" />
           <button
+            v-if="canEditPages"
             class="cevico-hero-btn cevico-hero-btn-on !h-9 !px-4 !text-xs font-bold"
             title="Criar uma página nova (a etapa você escolhe no editor)"
             @click="openNew()"
@@ -629,6 +634,7 @@ onMounted(() => {
           >
             <!-- azulejo de criar: mesmo tamanho de um card, tracejado -->
             <button
+              v-if="canEditPages"
               class="cv-tile-add rounded-2xl p-5 min-h-[220px] flex flex-col items-center justify-center gap-2.5 text-center"
               :title="`Criar uma página nova em ${stageName(cat)}`"
               @click="openNew(cat)"
@@ -748,7 +754,7 @@ onMounted(() => {
                   Ver rascunho
                 </button>
                 <button
-                  v-if="isAdmin"
+                  v-if="canEditPages"
                   class="cv-btn cv-btn-ghost cv-iconbtn cv-btn-danger ml-auto flex-shrink-0"
                   title="Excluir página"
                   @click="deletePage(page)"
@@ -979,7 +985,7 @@ onMounted(() => {
 
           <!-- 📎 página HTML ANEXADA: arquivo pronto feito fora do Construtor -->
           <div
-            v-if="isAdmin"
+            v-if="canEditPages"
             class="rounded-xl p-3 mb-3 border border-n-weak"
             style="
               background: linear-gradient(
@@ -1534,7 +1540,7 @@ class="text-emerald-600"
                     fmtCommentAt(c.at)
                   }}</span>
                   <button
-                    v-if="isAdmin || c.user_id === currentUserId"
+                    v-if="canEditPages || c.user_id === currentUserId"
                     class="ml-auto i-lucide-x text-n-slate-10 hover:text-red-500 text-xs"
                     title="Apagar"
                     @click="removeComment(c)"
@@ -1566,7 +1572,7 @@ class="text-emerald-600"
             </div>
           </div>
 
-          <label v-if="editing && isAdmin" class="block mb-3">
+          <label v-if="editing && canEditPages" class="block mb-3">
             <span class="text-[11px] font-medium text-n-slate-11">Endereço da página (a parte final do link) — mudar quebra links
               já divulgados</span>
             <input
@@ -1577,7 +1583,7 @@ class="text-emerald-600"
           </label>
 
           <!-- etapa do projeto (gestão: ideia → produção → publicada) -->
-          <div v-if="isAdmin" class="flex items-center gap-2 mb-4 flex-wrap">
+          <div v-if="canEditPages" class="flex items-center gap-2 mb-4 flex-wrap">
             <span class="text-[11px] font-medium text-n-slate-11">Etapa do projeto:</span>
             <div
               class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5"
@@ -1622,14 +1628,15 @@ class="text-emerald-600"
               Cancelar
             </button>
             <button
+              v-if="canEditPages"
               class="px-3 h-9 rounded-lg text-[12px] font-semibold border border-n-weak text-n-slate-12 hover:bg-n-alpha-1 disabled:opacity-60"
               :disabled="saving"
-              @click="savePage(isAdmin ? null : false)"
+              @click="savePage(canEditPages ? null : false)"
             >
-              {{ isAdmin ? 'Salvar' : 'Salvar rascunho' }}
+              {{ canEditPages ? 'Salvar' : 'Salvar rascunho' }}
             </button>
             <button
-              v-if="isAdmin"
+              v-if="canEditPages"
               class="px-4 h-9 rounded-lg text-[12px] font-bold text-[#072A4C] disabled:opacity-60 shadow-sm"
               style="background: linear-gradient(135deg, #d4af37, #f4de8e)"
               :disabled="saving"

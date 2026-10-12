@@ -9,6 +9,8 @@ import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import CrmAPI from 'dashboard/api/crm';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 
 // paleta da página: um bloco por área da tela (admin escolhe no chip do hero)
 const FORM_BLOCKS = [
@@ -26,6 +28,9 @@ const FORM_BLOCKS = [
 ];
 const pal = useCevicoPalette({ scope: 'crm:formularios', blocks: FORM_BLOCKS });
 const { cvVars, blockVars } = pal;
+// 🔐 rodada 334: quem só VÊ formulários não cria, salva nem apaga
+const { canEdit } = useCevicoAccess();
+const canEditForms = computed(() => canEdit('crm.formularios'));
 
 const forms = ref([]);
 const isLoading = ref(false);
@@ -425,6 +430,7 @@ const retentionTone = p => {
         icon="i-lucide-clipboard-list"
       >
         <template #chips>
+          <CevicoViewOnlyPill v-if="!canEditForms" />
           <span class="cevico-hero-chip">{{
             plural(forms.length, 'formulário', 'formulários')
           }}</span>
@@ -432,7 +438,7 @@ const retentionTone = p => {
             plural(totalResponses, 'resposta', 'respostas')
           }}</span>
         </template>
-        <template #actions>
+        <template v-if="canEditForms" #actions>
           <button
             class="cevico-hero-btn cevico-hero-btn-on"
             @click="openBuilder(null)"
@@ -611,6 +617,7 @@ const retentionTone = p => {
                 teste
               </button>
               <button
+                v-if="canEditForms"
                 class="cv-btn cv-btn-sm cv-btn-ghost cv-btn-danger"
                 @click="removeForm(selectedForm)"
               >
@@ -1183,6 +1190,7 @@ const retentionTone = p => {
         </div>
 
         <button
+          v-if="canEditForms"
           class="w-full bg-n-brand text-white rounded-lg py-2.5 text-sm font-medium hover:bg-n-brand/90 disabled:opacity-50"
           :disabled="isSavingForm"
           @click="saveForm"

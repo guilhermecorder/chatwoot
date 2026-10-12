@@ -3,7 +3,6 @@
 # carimba o passado (prévia antes de gravar).
 class Api::V1::Accounts::Crm::SourcesController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action :require_administrator!
   before_action :set_source, only: [:update]
 
   def index

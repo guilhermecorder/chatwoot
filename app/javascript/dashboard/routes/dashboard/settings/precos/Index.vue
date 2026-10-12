@@ -6,10 +6,15 @@
 import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 
 const store = useStore();
+// 🔐 rodada 334: quem só VÊ a tabela lê os preços; editar = linhas e salvar
+const { canEdit } = useCevicoAccess();
+const canEditPrices = computed(() => canEdit('configuracoes.precos'));
 const crmSettings = useMapGetter('crm/getSettings');
 
 const rows = ref([]);
@@ -86,6 +91,7 @@ const fmtDate = iso =>
     <h1 class="text-lg font-semibold text-n-slate-12 flex items-center gap-2">
       <span class="i-lucide-badge-dollar-sign text-amber-500" />
       Tabela de preços
+      <CevicoViewOnlyPill v-if="!canEditPrices" />
     </h1>
     <p class="text-sm text-n-slate-10 mt-1 mb-5">
       Os preços oficiais da clínica, num lugar só. Valem no
@@ -153,6 +159,7 @@ const fmtDate = iso =>
             style="margin-bottom: 0"
           />
           <button
+            v-if="canEditPrices"
             class="i-lucide-trash-2 text-n-slate-9 hover:text-red-500 text-sm justify-self-center"
             title="Remover linha"
             @click="removeRow(i)"
@@ -163,7 +170,7 @@ const fmtDate = iso =>
         <option v-for="g in groups" :key="g" :value="g" />
       </datalist>
 
-      <div class="flex items-center gap-2 mt-4">
+      <div v-if="canEditPrices" class="flex items-center gap-2 mt-4">
         <button
           class="px-3 h-9 rounded-xl border border-n-weak text-xs font-medium text-n-slate-11 hover:bg-n-alpha-1"
           @click="addRow"

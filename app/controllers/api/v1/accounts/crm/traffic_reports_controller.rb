@@ -3,7 +3,6 @@ class Api::V1::Accounts::Crm::TrafficReportsController < Api::V1::Accounts::Base
   include Crm::ResolvesPeriod
 
   # traz investimento em anúncios (Meta) → área de relatórios (padrão: só admin)
-  before_action -> { require_capability(:reports) }
 
   HISTORY_WEEKS = 12
 

@@ -11,6 +11,8 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import PatientSpaceIcon from './PatientSpaceIcon.vue';
 import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsCard.vue';
@@ -32,6 +34,10 @@ const accountId = computed(() => route.params.accountId);
 const currentRole = useMapGetter('getCurrentRole');
 const currentUser = useMapGetter('getCurrentUser');
 const isAdmin = computed(() => currentRole.value === 'administrator');
+// 🔐 rodada 334: pacientes (dados/notas/orçamento) e pacientes.notas_clinicas —
+// a árvore entra POR CIMA do cadeado clínico que já existia (clinical_access)
+const { canEdit } = useCevicoAccess();
+const canEditPatient = computed(() => canEdit('pacientes'));
 
 // ── Dados do paciente ──────────────────────────────────────────────
 const fetchPatient = async () => {
@@ -763,6 +769,7 @@ const deleteNote = async note => {
 
 const canTouchNote = note =>
   canEditNotes.value &&
+  canEdit('pacientes.notas_clinicas') &&
   (isAdmin.value || note.author?.id === currentUser.value?.id);
 
 // consultas da linha do tempo (para ligar a anotação a uma consulta)
@@ -895,6 +902,7 @@ watch(contactId, () => {
                 <h1 class="text-xl font-bold leading-tight">
                   {{ identity.name || 'Paciente' }}
                 </h1>
+                <CevicoViewOnlyPill v-if="!canEditPatient" />
                 <span
                   v-if="identity.age"
                   class="px-2 py-0.5 rounded-full bg-white/20 text-[11px] font-semibold"
@@ -2460,6 +2468,7 @@ class="opacity-70"
             Cancelar
           </button>
           <button
+            v-if="canEdit('pacientes.notas_clinicas')"
             class="px-4 h-9 rounded-lg text-[12px] font-semibold text-white disabled:opacity-60 shadow-sm"
             :style="{ background: theme.accentGrad }"
             :disabled="noteSaving"

@@ -10,7 +10,6 @@ class Api::V1::Accounts::Crm::CallsController < Api::V1::Accounts::BaseControlle
   EXPORT_LIMIT = 5000
   LIST_INCLUDES = %i[contact user conversation inbox].freeze
 
-  before_action -> { require_capability(:reports) }, only: [:dashboard]
   before_action :set_call, only: [:show, :accept, :reject, :hangup, :recording, :transcribe, :returned]
   before_action :set_contact, only: [:initiate, :request_permission, :permission_status]
 

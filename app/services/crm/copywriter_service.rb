@@ -82,6 +82,12 @@ class Crm::CopywriterService
   PROMPT
 
   # opts: category / form / modality / structure
+
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :copywriter)
+  end
+
   def initialize(account:, briefing:, **opts)
     @account = account
     @briefing = briefing
@@ -95,7 +101,7 @@ class Crm::CopywriterService
     error = config_error
     return error if error
 
-    schema = @modality == 'pagina' ? OUTPUT_SCHEMA : CONTENT_SCHEMA
+    schema = company_schema(@modality == 'pagina' ? OUTPUT_SCHEMA : CONTENT_SCHEMA)
     message = client.messages.create(
       model: model,
       # esforço de raciocínio + página longa dividem o mesmo teto — 8192

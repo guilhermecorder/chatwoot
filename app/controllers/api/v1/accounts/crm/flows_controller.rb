@@ -3,7 +3,6 @@
 # concessão). index = lista inteira; show = um fluxo (refresh a cada 60 s).
 class Api::V1::Accounts::Crm::FlowsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action -> { require_capability(:automations) }
 
   def index
     render json: {

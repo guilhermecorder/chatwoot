@@ -9,6 +9,8 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import draggable from 'vuedraggable';
 import { Chart as ChartJS, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 import { Doughnut } from 'vue-chartjs';
@@ -29,6 +31,10 @@ const router = useRouter();
 const { t } = useI18n();
 const accountId = useMapGetter('getCurrentAccountId');
 const { isAdmin } = useAdmin();
+// 🔐 rodada 334: quem só VÊ tarefas não cria/edita/conclui/comenta/apaga;
+// unitAllowed esconde tarefas de unidades que a pessoa não pode ver
+const { canEdit, unitAllowed } = useCevicoAccess();
+const canEditTasks = computed(() => canEdit('tarefas'));
 
 const agents = useMapGetter('agents/getAgents');
 const currentUser = useMapGetter('getCurrentUser');
@@ -208,16 +214,22 @@ const fmtCommentAt = iso =>
     minute: '2-digit',
   });
 
+// tarefa sem unidade é de todo mundo; com unidade, só quem pode ver aquela unidade
+const allowedTasks = computed(() =>
+  tasks.value.filter(x => !x.unit || unitAllowed(x.unit))
+);
 const visibleTasks = computed(() => {
   if (filterAssignee.value === 'me') {
-    return tasks.value.filter(x => x.assignee?.id === currentUser.value.id);
+    return allowedTasks.value.filter(
+      x => x.assignee?.id === currentUser.value.id
+    );
   }
   if (filterAssignee.value) {
-    return tasks.value.filter(
+    return allowedTasks.value.filter(
       x => x.assignee?.id === Number(filterAssignee.value)
     );
   }
-  return tasks.value;
+  return allowedTasks.value;
 });
 
 // admin: seletor "por pessoa" — limpar volta para "Minhas tarefas"
@@ -769,6 +781,7 @@ const formatDue = iso => {
         icon="i-lucide-list-checks"
       >
         <template #chips>
+          <CevicoViewOnlyPill v-if="!canEditTasks" />
           <span class="cevico-hero-chip">
             {{ stats.todo + stats.doing }}
             {{ plural(stats.todo + stats.doing, 'aberta', 'abertas') }}
@@ -787,7 +800,7 @@ const formatDue = iso => {
             {{ stats.dueSoon }} perto do prazo
           </span>
         </template>
-        <template #actions>
+        <template v-if="canEditTasks" #actions>
           <button
             class="cevico-hero-btn"
             title="Escrever um recado sobre um paciente"
@@ -906,6 +919,7 @@ const formatDue = iso => {
             :animation="150"
             ghost-class="opacity-40"
             class="flex flex-col gap-2.5 flex-1 min-h-16"
+            :disabled="!canEditTasks"
             @change="onColumnChange(statusKey, $event)"
           >
             <template #item="{ element: task }">
@@ -1227,7 +1241,7 @@ const formatDue = iso => {
                 fmtNoteAt(note.created_at)
               }}</span>
               <button
-                v-if="note.mine || isAdmin"
+                v-if="canEditTasks && (note.mine || isAdmin)"
                 class="text-n-slate-9 hover:text-red-500"
                 title="Apagar a nota"
                 @click="deleteNote(note)"
@@ -1604,7 +1618,7 @@ const formatDue = iso => {
               Precisa de esclarecimento ou quer avisar algo? Escreva aqui — fica
               registrado na tarefa.
             </p>
-            <div class="flex gap-2">
+            <div v-if="canEditTasks" class="flex gap-2">
               <input
                 v-model="commentText"
                 class="cv-input flex-1 min-w-0 text-n-slate-12"
@@ -1633,6 +1647,7 @@ const formatDue = iso => {
         <div class="cv-modal-foot flex flex-col gap-2">
           <div class="flex gap-2">
             <button
+              v-if="canEditTasks"
               class="cv-btn cv-btn-lg flex-1"
               :disabled="!form.title.trim() || isSaving"
               @click="save"
@@ -1648,7 +1663,7 @@ const formatDue = iso => {
           </div>
 
           <!-- Delete (só na edição) -->
-          <div v-if="editingTask">
+          <div v-if="editingTask && canEditTasks">
             <button
               v-if="!showDeleteConfirm"
               class="cv-btn cv-btn-sm cv-btn-ghost cv-btn-danger w-full"

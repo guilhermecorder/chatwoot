@@ -9,13 +9,16 @@
 import { ref, computed, onMounted } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
-import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
 
 const store = useStore();
 const teamAgents = useMapGetter('agents/getAgents');
-const { isAdmin } = useAdmin();
+// 🔐 rodada 334: quem só VÊ metas acompanha; editar = definir plano, marcos e notas
+const { canEdit } = useCevicoAccess();
+const canEditGoals = computed(() => canEdit('metas'));
 
 const isLoading = ref(true);
 const data = ref(null);
@@ -213,7 +216,7 @@ const addMilestone = () => {
 };
 const toggleMilestone = async m => {
   m.done = !m.done;
-  if (isAdmin.value) await savePlan();
+  if (canEditGoals.value) await savePlan();
 };
 
 // ── notas de ajuste por pessoa ──
@@ -297,7 +300,7 @@ onMounted(async () => {
           <span class="i-lucide-target text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Painel de Metas</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">Painel de Metas <CevicoViewOnlyPill v-if="!canEditGoals" /></h1>
           <p class="text-xs text-n-slate-10">analise o histórico, defina metas por período — dia, semana, fim de semana, mês, trimestre e ano — e acompanhe o caminho</p>
         </div>
       </div>
@@ -374,7 +377,7 @@ onMounted(async () => {
                   v-model.number="form.targets[key]"
                   type="number"
                   min="0"
-                  :disabled="!isAdmin"
+                  :disabled="!canEditGoals"
                   class="h-7 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-xs font-bold text-n-slate-12 disabled:opacity-60"
                   style="width: 6rem; margin-bottom: 0"
                 />
@@ -411,7 +414,7 @@ onMounted(async () => {
               </div>
 
               <!-- responsável + o que é preciso para alcançar -->
-              <div v-if="isAdmin" class="mt-2 pt-2 border-t border-n-weak space-y-1.5">
+              <div v-if="canEditGoals" class="mt-2 pt-2 border-t border-n-weak space-y-1.5">
                 <div class="flex items-center gap-2">
                   <span class="text-[10px] text-n-slate-9 flex-shrink-0">responsável:</span>
                   <select
@@ -454,13 +457,13 @@ onMounted(async () => {
             <textarea
               v-model="form.guidance"
               rows="3"
-              :disabled="!isAdmin"
+              :disabled="!canEditGoals"
               placeholder="Ex.: foco em reativar os sem-resposta na 1ª quinzena; toda indicação de cirurgia recebe follow-up em 24h; usar o mapa de objeções no fechamento…"
               class="w-full rounded-xl border border-n-weak bg-n-solid-1 px-3 py-2 text-xs text-n-slate-12 resize-y disabled:opacity-70"
             />
           </div>
 
-          <div v-if="isAdmin" class="flex justify-end mt-2">
+          <div v-if="canEditGoals" class="flex justify-end mt-2">
             <button
               class="px-4 h-9 rounded-xl text-xs font-bold text-white shadow-sm disabled:opacity-60"
               style="background: linear-gradient(135deg, #B8860B, #D4A017)"
@@ -490,13 +493,13 @@ onMounted(async () => {
               <input
                 v-model="m.due_on"
                 type="date"
-                :disabled="!isAdmin"
+                :disabled="!canEditGoals"
                 class="h-7 rounded-lg border border-n-weak bg-n-solid-1 px-1 text-[10px] text-n-slate-11 disabled:opacity-50"
                 style="width: 8rem"
               />
-              <button v-if="isAdmin" class="i-lucide-x text-n-slate-9 hover:text-red-500 text-xs" @click="form.milestones.splice(mi, 1)" />
+              <button v-if="canEditGoals" class="i-lucide-x text-n-slate-9 hover:text-red-500 text-xs" @click="form.milestones.splice(mi, 1)" />
             </div>
-            <div v-if="isAdmin" class="flex items-center gap-1.5 mt-2">
+            <div v-if="canEditGoals" class="flex items-center gap-1.5 mt-2">
               <input
                 v-model="newMilestone"
                 type="text"
@@ -508,7 +511,7 @@ onMounted(async () => {
                 <span class="i-lucide-plus text-xs" />
               </button>
             </div>
-            <p v-if="isAdmin" class="text-[10px] text-n-slate-9 mt-1.5">marque/desmarque e clique em salvar — o Mentor usa os marcos pendentes nos feedbacks.</p>
+            <p v-if="canEditGoals" class="text-[10px] text-n-slate-9 mt-1.5">marque/desmarque e clique em salvar — o Mentor usa os marcos pendentes nos feedbacks.</p>
           </div>
 
           <!-- tarefas + notas -->
@@ -517,7 +520,7 @@ onMounted(async () => {
               <span class="i-lucide-list-checks text-base" style="color: #7C3AED" /> Atividades e ajustes do time
             </h2>
             <!-- criar tarefa -->
-            <div v-if="isAdmin" class="flex items-center gap-1.5 flex-wrap mb-3">
+            <div v-if="canEditGoals" class="flex items-center gap-1.5 flex-wrap mb-3">
               <input
                 v-model="taskDraft.title"
                 type="text"
@@ -544,12 +547,12 @@ onMounted(async () => {
                 <div class="flex items-center gap-2">
                   <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style="background: rgba(124,58,237,0.12); color: #6D28D9">{{ n.name }}</span>
                   <span class="text-[10px] text-n-slate-9">por {{ n.author }}</span>
-                  <button v-if="isAdmin" class="ml-auto i-lucide-x text-n-slate-9 hover:text-red-500 text-xs" @click="removeNote(n)" />
+                  <button v-if="canEditGoals" class="ml-auto i-lucide-x text-n-slate-9 hover:text-red-500 text-xs" @click="removeNote(n)" />
                 </div>
                 <p class="text-[11px] text-n-slate-11 mt-0.5">{{ n.text }}</p>
               </div>
             </div>
-            <div v-if="isAdmin" class="flex items-center gap-1.5 flex-wrap">
+            <div v-if="canEditGoals" class="flex items-center gap-1.5 flex-wrap">
               <select v-model="noteAbout" class="h-8 rounded-lg border border-n-weak bg-n-solid-1 px-1 text-[11px] text-n-slate-12" style="width: 8.5rem">
                 <option value="">Processo geral</option>
                 <option v-for="a in teamAgents" :key="a.id" :value="a.id">{{ a.available_name || a.name }}</option>
@@ -569,7 +572,7 @@ onMounted(async () => {
         </div>
 
         <!-- rotinas + ferramentas (vão pro Meu Painel do time; são globais, só no ambiente do mês) -->
-        <div v-if="isAdmin && period === 'month'" class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-6">
+        <div v-if="canEditGoals && period === 'month'" class="bg-n-solid-2 border border-n-weak rounded-2xl p-5 mb-6">
           <h2 class="text-sm font-bold text-n-slate-12 mb-1 flex items-center gap-2">
             <span class="i-lucide-repeat text-base" style="color: #0D9488" /> Rotinas e ferramentas do time
             <span class="text-[11px] font-normal text-n-slate-9">— aparecem no Meu Painel de todo mundo</span>

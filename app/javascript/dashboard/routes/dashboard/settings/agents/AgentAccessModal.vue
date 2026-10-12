@@ -1,204 +1,104 @@
 <script setup>
+// 🔐 rodada 334 — o escudo de Configurações → Equipe abre a ÁRVORE de
+// acessos da pessoa (ver × editar por tela). Mesma interface de antes
+// (prop `agent`, emit `close`); por dentro usa o AccessTreeEditor:
+//   • papel da pessoa (a árvore do papel vale por baixo);
+//   • marcação própria por cima (só o que for diferente do papel);
+//   • unidades (lojas) que ela pode ver — vazio = todas;
+//   • perfis rápidos = copiar a árvore de um papel como marcação própria;
+//   • Salvar / Voltar ao padrão (apaga a marcação própria).
+// O modal fica fora de qualquer .cv-page, então ele mesmo veste a pele do
+// kit (cv-page + cv-blue) para os tokens --cv-* existirem.
 import { ref, computed, onMounted } from 'vue';
-import { useStore, useMapGetter } from 'dashboard/composables/store';
+import { useStore } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
+import CrmAPI from 'dashboard/api/crm';
+import AccessTreeEditor from 'dashboard/components-next/cevico/access/AccessTreeEditor.vue';
+import {
+  summarize,
+  effectiveMap,
+  LEVEL_LABELS,
+} from 'dashboard/helper/cevicoAccessTree';
 
 const props = defineProps({
   agent: { type: Object, required: true },
 });
-
 const emit = defineEmits(['close']);
 
 const store = useStore();
-
-// ── Menu do dia a dia (só visual — o admin liga/desliga por pessoa) ──
-const DAY_ITEMS = [
-  { key: 'crm', label: 'CRM (funil de leads)' },
-  { key: 'conversation', label: 'Conversas' },
-  { key: 'calls', label: 'Chamadas (ligações de WhatsApp)' },
-  { key: 'agenda', label: 'Agenda' },
-  { key: 'goals', label: 'Metas (acompanhar o mês)' },
-  { key: 'canned', label: 'Respostas prontas' },
-  { key: 'tasks', label: 'Tarefas' },
-  { key: 'people', label: 'Pessoas (DISC e desenvolvimento)' },
-  { key: 'academy', label: 'Academia CEVICO' },
-];
-// padrão combinado 17/07: Meu Painel | CRM | Conversas | Agenda | Metas |
-// Respostas prontas (Meu Painel e Conteúdos aparecem sempre)
-const DAY_DEFAULT = [
-  'crm',
-  'conversation',
-  'calls',
-  'agenda',
-  'goals',
-  'canned',
-];
-
-// ── Áreas administrativas (CONCESSÃO — vale de verdade, na API também) ──
-const GRANT_ITEMS = [
-  {
-    key: 'reports',
-    label: 'Relatórios',
-    hint: 'dashboards CEVICO (CRM, Médicos, Agentes, Agenda, Anúncios…)',
-  },
-  {
-    key: 'campaigns',
-    label: 'Campanha WhatsApp',
-    hint: 'mensagens em massa e o painel de resultados',
-  },
-  {
-    key: 'automations',
-    label: 'Automações',
-    hint: 'robôs de follow-up e resultados das automações',
-  },
-  {
-    key: 'data_tools',
-    label: 'Tratamento de dados',
-    hint: 'etiquetas retroativas, mover em lote, unificar contatos',
-  },
-  {
-    key: 'settings',
-    label: 'Integrações & config.',
-    hint: 'integrações do CRM e configurações sensíveis',
-  },
-  {
-    key: 'finance',
-    label: 'Financeiro',
-    hint: 'livro caixa da clínica — receitas, custos, margem',
-  },
-  {
-    key: 'strategy',
-    label: 'Estratégia',
-    hint: 'painel estratégico por pilares',
-  },
-  {
-    key: 'pages',
-    label: 'Marketing',
-    hint: 'a gaveta inteira: Central de Criativos, páginas, formulários, funis, testes A/B e resultados de tráfego',
-  },
-];
-
-// ── Perfis rápidos (preenchem os checkboxes; dá para ajustar depois) ──
-const PRESETS = [
-  {
-    key: 'standard',
-    label: 'Atendimento (padrão)',
-    hint: 'responde mensagens, agenda, acompanha metas',
-    menu: [...DAY_DEFAULT],
-    grants: [],
-  },
-  {
-    key: 'agenda',
-    label: 'Agenda & Conferência',
-    hint: 'vive na agenda: conferência de consultas e cirurgias',
-    menu: ['agenda', 'conversation', 'calls', 'goals', 'canned', 'tasks'],
-    grants: [],
-  },
-  {
-    key: 'doctor',
-    label: 'Médico(a)',
-    hint: 'agenda própria, metas e dashboards',
-    menu: ['agenda', 'goals'],
-    grants: ['reports'],
-  },
-];
-
-// ── Relatórios ESPECÍFICOS (item 62): a seção "Relatórios" abre e o
-// admin escolhe QUAIS dashboards — lista vazia = todos os concedíveis ──
-const REPORT_ITEMS = [
-  { key: 'crm_dashboard', label: 'Dashboard CRM' },
-  { key: 'campaigns_dashboard', label: 'Dashboard Campanhas' },
-  { key: 'traffic_funnel', label: 'Funil de Tráfego' },
-  { key: 'doctors', label: 'Dashboard dos Médicos' },
-  { key: 'agents_dashboard', label: 'Dashboard dos Agentes' },
-  { key: 'agenda_dashboard', label: 'Dashboard da Agenda' },
-  { key: 'ads', label: 'Anúncios (Meta)' },
-  { key: 'creatives', label: 'Central de Criativos' },
-  { key: 'google', label: 'Google (Ads + GA4)' },
-  { key: 'whatsapp_health', label: 'Saúde do WhatsApp' },
-];
-
 const isTargetAdmin = computed(() => props.agent.role === 'administrator');
+const firstName = computed(() => String(props.agent.name || '').split(' ')[0]);
 
-const crmSettings = useMapGetter('crm/getSettings');
-
-const dayMenu = ref([...DAY_DEFAULT]);
-const grants = ref([]);
-const reportKeys = ref([]); // [] = todos os relatórios
+const isLoading = ref(true);
 const isSaving = ref(false);
+const data = ref(null); // payload do access_admin
+const record = ref(null); // o registro desta pessoa dentro do payload
+
+const roleId = ref('');
+const tree = ref({});
+const units = ref([]);
+
+const hydrate = payload => {
+  data.value = payload;
+  record.value =
+    (payload?.users || []).find(
+      u => String(u.user_id) === String(props.agent.id)
+    ) || null;
+  roleId.value = record.value?.role_id || '';
+  tree.value = { ...(record.value?.tree || {}) };
+  units.value = [...(record.value?.units || [])];
+};
 
 onMounted(async () => {
-  if (!Object.keys(crmSettings.value.agent_permissions ?? {}).length) {
-    await store.dispatch('crm/fetchSettings').catch(() => {});
-  }
-  const perms = crmSettings.value.agent_permissions ?? {};
-  const uid = String(props.agent.id);
-  grants.value = [...(perms.grants?.[uid] ?? [])];
-  reportKeys.value = [...(perms.report_keys?.[uid] ?? [])];
-  if (perms.menu?.[uid]) {
-    dayMenu.value = [...perms.menu[uid]];
-  } else {
-    // legado (lista de bloqueio antiga): padrão menos o que era bloqueado
-    const legacyBlocked = perms[uid] ?? [];
-    dayMenu.value = DAY_DEFAULT.filter(key => !legacyBlocked.includes(key));
+  try {
+    const { data: payload } = await CrmAPI.getAccessAdmin();
+    hydrate(payload);
+  } catch {
+    useAlert('Não consegui carregar os acessos.');
+  } finally {
+    isLoading.value = false;
   }
 });
 
-const toggle = (list, key) => {
-  const idx = list.indexOf(key);
-  if (idx === -1) list.push(key);
-  else list.splice(idx, 1);
-};
+const catalog = computed(() => data.value?.catalog || []);
+const roles = computed(() => data.value?.roles || []);
+const companyUnits = computed(() => data.value?.units || []);
+const roleTree = computed(
+  () => roles.value.find(r => String(r.id) === roleId.value)?.tree || {}
+);
+// resumo do que VAI valer com o que está na tela agora
+const preview = computed(() =>
+  summarize(
+    effectiveMap({
+      catalog: catalog.value,
+      explicit: tree.value,
+      roleTree: roleTree.value,
+      admin: isTargetAdmin.value,
+    })
+  )
+);
+const LEVEL_LIST = ['view', 'edit', 'none'];
 
-// relatório marcado? (lista vazia = todos marcados)
-const reportChecked = key =>
-  reportKeys.value.length === 0 || reportKeys.value.includes(key);
-const toggleReport = key => {
-  if (reportKeys.value.length === 0) {
-    // estava em "todos": materializa a lista completa sem este
-    reportKeys.value = REPORT_ITEMS.map(r => r.key).filter(k => k !== key);
-  } else {
-    toggle(reportKeys.value, key);
-    // marcou todos de volta → volta ao modo "todos" (lista vazia)
-    if (reportKeys.value.length === REPORT_ITEMS.length) reportKeys.value = [];
-  }
+const toggleUnit = key => {
+  const idx = units.value.indexOf(key);
+  if (idx === -1) units.value.push(key);
+  else units.value.splice(idx, 1);
 };
-const selectAllReports = () => {
-  reportKeys.value = []; // vazio = todos
+// perfil rápido: a árvore do papel vira marcação própria (ajustável)
+const applyRole = role => {
+  tree.value = { ...(role.tree || {}) };
 };
-// selecionar tudo (agilizar): menu completo + todas as áreas
-const selectAllMenu = () => {
-  dayMenu.value = DAY_ITEMS.map(i => i.key);
-};
-const selectAllGrants = () => {
-  grants.value = GRANT_ITEMS.map(i => i.key);
-};
-
-const applyPreset = preset => {
-  dayMenu.value = [...preset.menu];
-  grants.value = [...preset.grants];
-};
-
-const activePreset = computed(() => {
-  const same = (a, b) =>
-    a.length === b.length && [...a].sort().join() === [...b].sort().join();
-  return (
-    PRESETS.find(
-      p => same(p.menu, dayMenu.value) && same(p.grants, grants.value)
-    )?.key ?? null
-  );
-});
 
 const save = async () => {
   isSaving.value = true;
   try {
-    await store.dispatch('crm/updateAgentGrants', {
+    await store.dispatch('crm/updateAgentAccess', {
       userId: props.agent.id,
-      grants: grants.value,
-      menu: dayMenu.value,
-      reportKeys: grants.value.includes('reports') ? reportKeys.value : [],
+      tree: tree.value,
+      roleId: roleId.value || '',
+      units: units.value,
     });
-    useAlert('Acessos atualizados!');
+    useAlert(`Acessos de ${firstName.value} salvos!`);
     emit('close');
   } catch {
     useAlert('Não foi possível salvar os acessos.');
@@ -206,196 +106,154 @@ const save = async () => {
     isSaving.value = false;
   }
 };
+const reset = async () => {
+  isSaving.value = true;
+  try {
+    const payload = await store.dispatch('crm/updateAgentAccess', {
+      userId: props.agent.id,
+      reset: true,
+    });
+    hydrate(payload);
+    useAlert(
+      `${firstName.value} voltou ao padrão (o papel, se tiver, continua).`
+    );
+  } catch {
+    useAlert('Não foi possível voltar ao padrão.');
+  } finally {
+    isSaving.value = false;
+  }
+};
 </script>
 
 <template>
-  <div class="flex flex-col max-h-[85vh]">
-    <div class="px-8 pt-8 pb-4 flex-shrink-0">
-      <h2 class="text-base font-semibold text-n-slate-12">
-        Acessos de {{ agent.name }}
-      </h2>
-      <p v-if="isTargetAdmin" class="text-sm text-n-slate-10 mt-1">
-        {{ agent.name.split(' ')[0] }} é <strong>administrador(a)</strong> e tem
-        acesso a tudo — não há o que configurar aqui.
-      </p>
-      <p v-else class="text-sm text-n-slate-10 mt-1">
-        Marque o que {{ agent.name.split(' ')[0] }} <strong>pode</strong> ver e
-        acessar. Meu Painel e Conteúdos (rascunhos) aparecem para todo o time.
-      </p>
-    </div>
-
-    <div v-if="!isTargetAdmin" class="px-8 overflow-y-auto space-y-5">
-      <!-- perfis rápidos -->
-      <div>
-        <p
-          class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10 mb-2"
+  <div class="cv-page cv-overlay">
+    <div class="cv-blue flex flex-col max-h-[88vh]">
+      <!-- cabeçalho na cor do kit -->
+      <div class="cv-modal-head flex items-center gap-3 flex-wrap">
+        <span
+          class="cv-glass w-10 h-10 flex items-center justify-center flex-shrink-0"
         >
-          Perfis rápidos
-        </p>
-        <div class="flex flex-wrap gap-1.5">
-          <button
-            v-for="preset in PRESETS"
-            :key="preset.key"
-            class="px-3 py-1.5 rounded-full text-xs font-medium border transition-colors"
-            :class="
-              activePreset === preset.key
-                ? 'bg-n-brand text-white border-n-brand'
-                : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
-            "
-            :title="preset.hint"
-            @click="applyPreset(preset)"
-          >
-            {{ preset.label }}
-          </button>
+          <span class="i-lucide-shield-check text-base" />
+        </span>
+        <div class="flex-1 min-w-0">
+          <p class="text-[11px] opacity-85">Acessos de</p>
+          <h2 class="text-base font-bold leading-tight">{{ agent.name }}</h2>
         </div>
+        <span
+          v-for="lvl in LEVEL_LIST"
+          v-show="!isLoading"
+          :key="lvl"
+          class="cv-glass-chip"
+          :title="`${preview[lvl]} telas em ${LEVEL_LABELS[lvl]}`"
+        >
+          {{ LEVEL_LABELS[lvl] }} <b>{{ preview[lvl] }}</b>
+        </span>
       </div>
 
-      <!-- menu do dia a dia -->
-      <div class="bg-n-alpha-1 border border-n-weak rounded-2xl p-4">
-        <div class="flex items-center justify-between mb-1">
-          <p
-            class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10"
-          >
-            Menu do dia a dia
-          </p>
-          <button
-            class="text-[11px] font-medium text-n-slate-10 hover:text-n-slate-12 border border-n-weak rounded-full px-2 py-0.5 transition-colors"
-            @click="selectAllMenu"
-          >
-            marcar tudo
-          </button>
-        </div>
-        <p class="text-xs text-n-slate-9 mb-2">
-          o que aparece no menu lateral dela(e)
+      <div class="px-5 pt-4 pb-2 overflow-y-auto flex flex-col gap-4">
+        <p v-if="isTargetAdmin" class="text-sm text-n-slate-11">
+          {{ firstName }} é <strong>administrador(a)</strong> e tem acesso a
+          tudo — não há o que configurar aqui.
         </p>
-        <div class="space-y-0.5">
-          <label
-            v-for="item in DAY_ITEMS"
-            :key="item.key"
-            class="flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-n-alpha-1 cursor-pointer"
-          >
-            <input
-              type="checkbox"
-              class="rounded accent-n-brand"
-              :checked="dayMenu.includes(item.key)"
-              @change="toggle(dayMenu, item.key)"
-            />
-            <span class="text-sm text-n-slate-12">{{ item.label }}</span>
-          </label>
-        </div>
-      </div>
 
-      <!-- áreas administrativas -->
-      <div class="bg-n-alpha-1 border border-n-weak rounded-2xl p-4">
-        <div class="flex items-center justify-between mb-1">
-          <p
-            class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-10"
-          >
-            Áreas administrativas
+        <template v-else-if="!isLoading">
+          <p class="text-xs text-n-slate-10">
+            o papel vale por baixo; a marcação própria só onde {{ firstName }}
+            for diferente do papel. Marcar uma área vale para tudo dentro dela.
           </p>
-          <button
-            class="text-[11px] font-medium text-n-slate-10 hover:text-n-slate-12 border border-n-weak rounded-full px-2 py-0.5 transition-colors"
-            @click="selectAllGrants"
+          <p
+            v-if="record?.legacy"
+            class="cv-block cv-strip cv-amber px-4 py-2 text-xs text-n-slate-11"
           >
-            conceder tudo
-          </button>
-        </div>
-        <p class="text-xs text-n-slate-9 mb-2">
-          concessões de verdade: liberam a tela E os dados — use com critério
-        </p>
-        <div class="space-y-0.5">
-          <div v-for="item in GRANT_ITEMS" :key="item.key">
-            <label
-              class="flex items-start gap-3 px-3 py-1.5 rounded-lg hover:bg-n-alpha-2 cursor-pointer"
-            >
-              <input
-                type="checkbox"
-                class="rounded accent-n-brand mt-0.5"
-                :checked="grants.includes(item.key)"
-                @change="toggle(grants, item.key)"
-              />
-              <span class="flex flex-col">
-                <span class="text-sm text-n-slate-12 flex items-center gap-2">
-                  {{ item.label }}
-                  <span
-                    v-if="grants.includes(item.key)"
-                    class="text-[10px] font-medium text-green-600 bg-green-600/10 rounded-full px-2 py-0.5"
-                    >concedido</span
-                  >
-                </span>
-                <span class="text-[11px] text-n-slate-9">{{ item.hint }}</span>
-              </span>
+            <span class="i-lucide-history text-xs" /> ainda usa o modelo antigo
+            (convertido na hora). Ao salvar, passa para a árvore nova.
+          </p>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="flex flex-col gap-1">
+              <span class="cv-label">Papel</span>
+              <select v-model="roleId" class="cv-input !mb-0">
+                <option value="">sem papel (padrão do sistema)</option>
+                <option v-for="role in roles" :key="role.id" :value="role.id">
+                  {{ role.name }}
+                </option>
+              </select>
             </label>
-
-            <!-- item 62: Relatórios ABRE — escolher quais dashboards -->
-            <div
-              v-if="item.key === 'reports' && grants.includes('reports')"
-              class="ml-8 mt-1 mb-2 bg-n-solid-1 border border-n-weak rounded-xl p-3"
-            >
-              <div class="flex items-center justify-between mb-1.5">
-                <p
-                  class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-10"
-                >
-                  Quais relatórios?
-                </p>
-                <button
-                  class="text-[10px] font-medium border rounded-full px-2 py-0.5 transition-colors"
-                  :class="
-                    reportKeys.length === 0
-                      ? 'border-green-600/40 text-green-700 bg-green-600/10'
-                      : 'border-n-weak text-n-slate-10 hover:text-n-slate-12'
-                  "
-                  @click="selectAllReports"
-                >
-                  {{ reportKeys.length === 0 ? 'todos ✓' : 'selecionar todos' }}
-                </button>
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5">
+            <div v-if="companyUnits.length">
+              <p class="cv-label mb-1.5">Unidades (nenhuma = todas)</p>
+              <div class="flex flex-wrap gap-2">
                 <label
-                  v-for="r in REPORT_ITEMS"
-                  :key="r.key"
-                  class="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-n-alpha-1 cursor-pointer"
+                  v-for="u in companyUnits"
+                  :key="u.key"
+                  class="cv-chip cv-chip-lg cursor-pointer"
                 >
                   <input
                     type="checkbox"
-                    class="rounded accent-n-brand"
-                    :checked="reportChecked(r.key)"
-                    @change="toggleReport(r.key)"
+                    class="accent-current"
+                    :checked="units.includes(u.key)"
+                    @change="toggleUnit(u.key)"
                   />
-                  <span class="text-xs text-n-slate-12">{{ r.label }}</span>
+                  {{ u.label }}
                 </label>
               </div>
-              <p class="text-[10px] text-n-slate-9 mt-1.5">
-                desmarcados somem do menu dela(e); "todos" acompanha relatórios
-                novos automaticamente
-              </p>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
 
-    <div class="flex items-center gap-2 px-8 py-6 flex-shrink-0">
-      <button
-        v-if="!isTargetAdmin"
-        class="bg-n-brand text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50"
-        :disabled="isSaving"
-        @click="save"
-      >
-        {{ isSaving ? 'Salvando...' : 'Salvar acessos' }}
-      </button>
-      <button
-        class="border border-n-weak rounded-lg px-4 py-2 text-sm text-n-slate-11"
-        @click="emit('close')"
-      >
-        {{ isTargetAdmin ? 'Fechar' : 'Cancelar' }}
-      </button>
-      <span
-        v-if="!isTargetAdmin && grants.length"
-        class="text-xs text-n-slate-10 ml-auto"
-      >
-        {{ grants.length }} área(s) concedida(s)
-      </span>
+          <div v-if="roles.length" class="flex items-center gap-1.5 flex-wrap">
+            <span class="cv-label">Perfis rápidos:</span>
+            <button
+              v-for="role in roles"
+              :key="role.id"
+              type="button"
+              class="cv-chip"
+              :title="`copia a árvore de “${role.name}” como marcação própria (dá para ajustar depois)`"
+              @click="applyRole(role)"
+            >
+              <span class="i-lucide-wand-sparkles text-[10px]" />
+              {{ role.name }}
+            </button>
+          </div>
+
+          <AccessTreeEditor
+            v-model="tree"
+            :catalog="catalog"
+            :role-tree="roleTree"
+          />
+        </template>
+
+        <p v-else class="text-xs text-n-slate-10 py-6 text-center">
+          carregando…
+        </p>
+      </div>
+
+      <div class="cv-modal-foot flex items-center gap-2 flex-wrap">
+        <template v-if="!isTargetAdmin && !isLoading">
+          <button
+            class="cv-btn"
+            type="button"
+            :disabled="isSaving"
+            @click="save"
+          >
+            {{ isSaving ? 'Salvando…' : 'Salvar acessos' }}
+          </button>
+          <button
+            class="cv-btn cv-btn-ghost"
+            type="button"
+            :disabled="isSaving"
+            title="apaga a marcação própria; o papel continua"
+            @click="reset"
+          >
+            <span class="i-lucide-rotate-ccw text-xs" /> Voltar ao padrão
+          </button>
+        </template>
+        <button
+          class="cv-btn cv-btn-ghost ml-auto"
+          type="button"
+          @click="emit('close')"
+        >
+          {{ isTargetAdmin ? 'Fechar' : 'Cancelar' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

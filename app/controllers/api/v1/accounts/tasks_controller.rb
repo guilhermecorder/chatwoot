@@ -16,6 +16,11 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
       tasks = tasks.where('assignee_id = :uid OR creator_id = :uid OR unit IS NOT NULL OR source IS NOT NULL', uid: uid)
     end
 
+    # 🔐 rodada 334: pessoa presa a UNIDADES (lojas) só vê as consultas dessas
+    # unidades (tarefas sem unidade continuam aparecendo)
+    allowed_units = cevico_access.units
+    tasks = tasks.where(unit: allowed_units + [nil]) if allowed_units.any?
+
     tasks = tasks.where(assignee_id: params[:assignee_id]) if params[:assignee_id].present?
     tasks = tasks.where(unit: params[:unit]) if params[:unit].present?
     tasks = tasks.order(Arel.sql('priority DESC, due_at ASC NULLS LAST, created_at DESC'))
@@ -62,7 +67,9 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
     }
   end
 
-  def create
+  def create # rubocop:disable Metrics/AbcSize
+    return render_unit_denied if params[:unit].present? && !cevico_access.unit_allowed?(params[:unit])
+
     new_task = Current.account.tasks.new(
       task_params.merge(
         creator: Current.user,
@@ -78,6 +85,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   end
 
   def update
+    return render_unit_denied unless cevico_access.unit_allowed?(task.unit) && cevico_access.unit_allowed?(params[:unit])
+
     # consulta com dia/horário alterado = reagendamento (indicador do painel)
     if task.task_type == 'consulta' && params[:due_at].present? && task.due_at.present? &&
        Time.zone.parse(params[:due_at].to_s) != task.due_at
@@ -141,6 +150,40 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   end
 
   private
+
+  # 🔐 rodada 334: a mesma API serve Tarefas e a Agenda — consulta/cirurgia
+  # cobram o nó 'agenda' (ou 'agenda.cirurgias'); o resto cobra 'tarefas'.
+  # Ler a lista é livre para quem VÊ qualquer um dos dois.
+  def cevico_access_requirement # rubocop:disable Metrics/CyclomaticComplexity
+    case action_name
+    when 'index', 'agenda_details'
+      return nil if cevico_access.view?('agenda') || cevico_access.view?('tarefas')
+
+      %w[tarefas view]
+    when 'create'
+      [agenda_node_for(params[:task_type]) || 'tarefas', 'edit']
+    when 'update', 'destroy', 'comment'
+      [agenda_node_for(task_for_access&.task_type) || 'tarefas', 'edit']
+    when 'archive_done'
+      nil
+    else
+      %w[tarefas edit]
+    end
+  end
+
+  def render_unit_denied
+    render json: { error: 'Essa unidade não está liberada para você. Peça a um administrador.' }, status: :forbidden
+  end
+
+  def agenda_node_for(type)
+    return nil unless Task::APPOINTMENT_TYPES.include?(type.to_s)
+
+    type.to_s == 'cirurgia' ? 'agenda.cirurgias' : 'agenda'
+  end
+
+  def task_for_access
+    @task_for_access ||= Current.account.tasks.find_by(id: params[:id])
+  end
 
   def task
     @task ||= Current.account.tasks.find(params[:id])

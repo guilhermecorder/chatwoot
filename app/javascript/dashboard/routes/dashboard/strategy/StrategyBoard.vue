@@ -8,6 +8,8 @@ import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue'
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { useRouter } from 'vue-router';
@@ -15,6 +17,9 @@ import { useRouter } from 'vue-router';
 const store = useStore();
 const teamAgents = useMapGetter('agents/getAgents');
 const { isAdmin } = useAdmin();
+// 🔐 rodada 334: quem só VÊ a estratégia lê; editar = criar/salvar processos
+const { canEdit } = useCevicoAccess();
+const canEditStrategy = computed(() => canEdit('estrategia'));
 
 const isLoading = ref(true);
 const pillars = ref([]);
@@ -396,7 +401,7 @@ onMounted(() => {
           <span class="i-lucide-compass text-white text-xl" />
         </span>
         <div class="flex-1 min-w-[220px]">
-          <h1 class="text-lg font-bold text-n-slate-12">Painel Estratégico</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">Painel Estratégico <CevicoViewOnlyPill v-if="!canEditStrategy" /></h1>
           <p class="text-xs text-n-slate-10">
             A CEVICO estruturada pelos pilares do negócio — responsáveis, saúde
             e o que vamos fazer em cada um.
@@ -485,14 +490,14 @@ onMounted(() => {
             {{ p.emoji }} {{ p.name }}
           </button>
           <button
-            v-if="isAdmin"
+            v-if="canEditStrategy"
             class="px-3 h-8 rounded-full text-xs font-medium border border-dashed border-n-weak text-n-slate-10 hover:bg-n-alpha-1 flex items-center gap-1"
             @click="addProcess"
           >
             <span class="i-lucide-plus text-xs" /> Criar processo
           </button>
           <div class="flex-1" />
-          <template v-if="isAdmin && selectedProcess">
+          <template v-if="canEditStrategy && selectedProcess">
             <button
               class="px-3 h-8 rounded-xl text-xs font-bold transition-colors"
               :class="

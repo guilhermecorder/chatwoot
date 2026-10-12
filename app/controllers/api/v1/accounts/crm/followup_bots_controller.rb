@@ -3,7 +3,6 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
   # um robô que estiver se comportando mal (gerenciar continua admin-only)
   include Crm::AccessControl
 
-  before_action -> { require_capability(:automations) }, except: [:toggle]
   before_action :bot, only: [:update, :destroy, :toggle]
 
   def index

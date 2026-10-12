@@ -7,10 +7,14 @@ import { ref, computed, onMounted } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 
+// 🔐 rodada 334: os testes ligam/desligam no editor da página — aqui só se lê
+const { canEdit } = useCevicoAccess();
 const route = useRoute();
 const router = useRouter();
 const isLoading = ref(true);
@@ -68,7 +72,7 @@ onMounted(load);
           <span class="i-lucide-flask-conical text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Testes A/B</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">Testes A/B <CevicoViewOnlyPill v-if="!canEdit('marketing.funis')" /></h1>
           <p class="text-xs text-n-slate-10">todos os testes num lugar só — o placar decide, não o achismo · páginas hoje; formulários e campanhas em breve</p>
         </div>
       </div>

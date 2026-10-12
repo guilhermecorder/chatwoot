@@ -7,7 +7,6 @@ class Api::V1::Accounts::Crm::JourneySendsController < Api::V1::Accounts::BaseCo
   PER_PAGE = 50
   TZ = Crm::Journey::Settings::TZ
 
-  before_action -> { require_capability(:campaigns) }, only: %i[approve skip retry approve_all]
   before_action :send_record, only: %i[approve skip retry]
 
   def index

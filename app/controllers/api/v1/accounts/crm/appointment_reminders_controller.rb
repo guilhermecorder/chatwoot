@@ -4,7 +4,6 @@
 # os lembretes. A regra mora no Crm::AppointmentReminderSendJob#run_manual.
 class Api::V1::Accounts::Crm::AppointmentRemindersController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action -> { require_capability(:settings) }
 
   # POST /crm/appointment_reminders/run { regua: 'd2', task_id: (opcional) }
   def run

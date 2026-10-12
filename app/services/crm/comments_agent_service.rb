@@ -50,6 +50,11 @@ class Crm::CommentsAgentService
       humana continua no direct. Nunca finja ser uma pessoa específica.
   PROMPT
 
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :comments)
+  end
+
   def initialize(account)
     @account = account
   end
@@ -142,7 +147,7 @@ class Crm::CommentsAgentService
       model: model,
       max_tokens: 512,
       system_: cached_system,
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      output_config: output_config_for({ type: 'json_schema', schema: company_schema(OUTPUT_SCHEMA) }),
       messages: [{ role: 'user', content: "Post: #{comment[:post]}\nComentário de @#{comment[:author]} (#{comment[:platform]}): #{comment[:text]}" }]
     )
     record_usage(message)

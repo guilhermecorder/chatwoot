@@ -3,7 +3,6 @@
 # estado atual antes de escrever a antiga de volta).
 class Api::V1::Accounts::Crm::ScriptVersionsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action :require_administrator!
 
   LIMIT = 30
 

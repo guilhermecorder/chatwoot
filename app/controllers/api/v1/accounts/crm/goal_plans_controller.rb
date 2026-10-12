@@ -9,8 +9,6 @@
 # agendamento, comparecimento e conversão p/ cirurgia, derivadas dos
 # mesmos números (nunca digitadas à mão).
 class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseController
-  before_action :check_admin, except: [:show]
-
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show
@@ -83,7 +81,7 @@ class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseContr
   end
 
   def check_admin
-    render json: { error: 'Só administradores editam as metas.' }, status: :forbidden unless Current.account_user.administrator?
+    render json: { error: 'Só quem pode editar as Metas altera isso.' }, status: :forbidden unless cevico_can?('metas', :edit)
   end
 
   # ── período selecionado (day/week/weekend/month/quarter/year) ──

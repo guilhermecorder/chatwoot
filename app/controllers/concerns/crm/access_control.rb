@@ -1,37 +1,72 @@
-# Controle de acesso granular do CRM CEVICO (decisão 17/07).
+# 🔐 Controle de acesso CEVICO — rodada 334: ÁRVORE pai/filho com ver × editar.
 #
-# Regra: administrador SEMPRE passa. Atendente só passa numa área sensível se
-# o admin CONCEDEU aquela área a ele (allow-list). Sem concessão = negado —
-# "travar tudo no admin, admin concede acesso personalizado".
+# A fonte é o catálogo (config/cevico/access_catalog.yml) lido por
+# Cevico::AccessCatalog; o nível de cada pessoa vem de Cevico::Access
+# (admin → tudo; marcação própria → papel → herança do pai → padrão).
 #
-# As concessões ficam em crm_settings.agent_permissions['grants'] =
-#   { "<user_id>" => ["reports", "campaigns", ...] }
-# (o campo agent_permissions já existia guardando a lista de BLOQUEIO usada só
-# pelo menu do frontend; aqui usamos uma sub-chave 'grants' separada, sem mexer
-# no legado — assim o backend passa a valer de verdade, por API também.)
+# Três jeitos de travar um controller:
+#   1. AUTOMÁTICO: o mapa Cevico::AccessCatalog::CONTROLLER_NODES diz o nó de
+#      cada controller; ações de leitura pedem VER, as outras pedem EDITAR.
+#      Vale para todo controller de api/v1/accounts/* (incluído no Base).
+#   2. `require_access('crm.funis', :edit)` em before_action, quando a regra
+#      é mais fina que o mapa.
+#   3. `require_capability(:reports)` — o jeito antigo (17/07) continua
+#      funcionando: cada capability vira um nó da árvore (LEGACY_CAPABILITIES).
 #
-# IMPORTANTE: só endpoints SENSÍVEIS usam isto. As telas do dia a dia do
-# atendente (conversas, board do CRM, agenda) continuam abertas — ninguém é
-# trancado fora do próprio trabalho.
+# Regra que não muda: administrador SEMPRE passa; conceder acessos é só admin.
 module Crm::AccessControl
   extend ActiveSupport::Concern
 
-  # áreas concedíveis (o admin marca quais o atendente pode acessar).
-  # 'goals' saiu da lista (decisão 17/07): edição de Metas é SÓ ADMIN,
-  # o painel em si é aberto ao time (goal_plans#show).
-  CAPABILITIES = %w[reports campaigns automations data_tools settings finance strategy pages].freeze
+  # mantidos por compatibilidade (settings_controller e telas antigas)
+  CAPABILITIES = Cevico::AccessCatalog::LEGACY_CAPABILITIES.keys.freeze
+  DAY_MENU_ITEMS = Cevico::AccessCatalog::LEGACY_DAY_ITEMS.keys.freeze
+  DAY_MENU_DEFAULT = Cevico::AccessCatalog::LEGACY_DAY_DEFAULT
 
-  # itens do MENU do dia a dia que o admin liga/desliga por atendente
-  # (só visual — os endpoints dessas áreas continuam abertos ao time).
-  # Padrão de quem não tem configuração: DAY_MENU_DEFAULT.
-  # 'calls' (item 176): ambiente Chamadas — todo mundo vê por padrão
-  DAY_MENU_ITEMS = %w[crm conversation calls agenda goals canned tasks people academy].freeze
-  DAY_MENU_DEFAULT = %w[crm conversation calls agenda goals canned].freeze
+  included do
+    before_action :cevico_catalog_guard
+  end
 
   private
 
+  # a pessoa desta requisição, resolvida uma vez
+  def cevico_access
+    @cevico_access ||= Cevico::Access.for(Current.account, Current.user, account_user: Current.account_user)
+  end
+
+  def cevico_company
+    @cevico_company ||= cevico_access.company
+  end
+
+  # ── a trava automática pelo mapa controller → nó ───────────────────────
+  def cevico_catalog_guard
+    return if Current.account.nil?
+
+    requirement = cevico_access_requirement
+    return if requirement.nil?
+
+    node, level = requirement
+    return if cevico_access.can?(node, level)
+
+    render json: { error: cevico_denied_message(node, level) }, status: :forbidden
+  end
+
+  # controllers com regra que depende dos parâmetros (ex.: Tarefas × Agenda)
+  # sobrescrevem este método; o padrão é o mapa do catálogo
+  def cevico_access_requirement
+    path = controller_path.delete_prefix('api/v1/accounts/')
+    Cevico::AccessCatalog.requirement_for(path, action_name)
+  end
+
+  # ── travas explícitas ──────────────────────────────────────────────────
+  def require_access(node, level = :view)
+    return if cevico_access.can?(node, level)
+
+    render json: { error: cevico_denied_message(node, level) }, status: :forbidden
+  end
+
   def require_capability(capability)
-    return if crm_can?(capability)
+    node, level = Cevico::AccessCatalog::LEGACY_CAPABILITIES[capability.to_s]
+    return require_access(node, level) if node
 
     render json: { error: 'Você não tem acesso a esta área. Peça a um administrador.' }, status: :forbidden
   end
@@ -45,21 +80,29 @@ module Crm::AccessControl
 
   # admin estrito (não delegável) — para ações como conceder acessos
   def require_administrator!
-    return if Current.account_user.administrator?
+    return if Current.account_user&.administrator?
 
     render json: { error: 'Apenas administradores.' }, status: :forbidden
   end
 
   def crm_can?(capability)
-    return true if Current.account_user.administrator?
+    node, level = Cevico::AccessCatalog::LEGACY_CAPABILITIES[capability.to_s]
+    return false unless node
 
-    crm_granted_capabilities.include?(capability.to_s)
+    cevico_access.can?(node, level)
   end
 
-  def crm_granted_capabilities
-    @crm_granted_capabilities ||= begin
-      perms = CrmSetting.find_by(account: Current.account)&.agent_permissions || {}
-      Array(perms.dig('grants', Current.user.id.to_s)).map(&:to_s)
+  def cevico_can?(node, level = :view)
+    cevico_access.can?(node, level)
+  end
+
+  def cevico_denied_message(node, level)
+    label = Cevico::AccessCatalog.node(node)&.dig('label').to_s
+    label = cevico_company.fill(label).presence || 'esta área'
+    if level.to_s == 'edit' && cevico_access.view?(node)
+      "Você só pode ver #{label}. Peça a um administrador para liberar a edição."
+    else
+      "Você não tem acesso a #{label}. Peça a um administrador."
     end
   end
 end

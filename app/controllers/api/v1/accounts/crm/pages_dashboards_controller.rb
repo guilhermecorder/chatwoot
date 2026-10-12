@@ -4,7 +4,6 @@
 # (página → página → WhatsApp) com a conversão de cada elo.
 class Api::V1::Accounts::Crm::PagesDashboardsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action -> { require_capability(:pages) }
 
   SERIES_DAYS = 30
 
